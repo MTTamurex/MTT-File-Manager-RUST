@@ -1,14 +1,20 @@
-//! Background PDF page rendering worker.
+//! Background PDF page rendering and text extraction worker.
 //!
-//! Owns the [`PdfRenderer`] and processes render requests on a dedicated
-//! thread so the UI stays fluid.  Results are sent back via channel and
-//! the egui context is poked to trigger a repaint.
+//! Owns a persistent Pdfium document handle and processes both render
+//! and text-extraction requests on a dedicated thread so the UI stays
+//! fluid and never contends with the `thread_safe` pdfium mutex.
+//!
+//! Text segments are extracted eagerly alongside the first render of
+//! each page. Bounded-text requests (for clipboard copy) are handled
+//! via a separate high-priority channel.
 
 use crossbeam_channel::{Receiver, Sender};
 use eframe::egui;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
+
+use super::renderer::{PdfTextBounds, PdfTextSegment};
 
 pub(super) struct RenderRequest {
     pub page_idx: u32,
@@ -23,9 +29,27 @@ pub(super) struct RenderResult {
     pub height: u32,
 }
 
+pub(super) struct TextSegmentResult {
+    pub page_idx: u32,
+    pub segments: Vec<PdfTextSegment>,
+}
+
+pub(super) struct BoundedTextRequest {
+    pub page_idx: u32,
+    pub bounds: PdfTextBounds,
+}
+
+pub(super) struct BoundedTextResult {
+    pub page_idx: u32,
+    pub text: String,
+}
+
 pub(super) struct RenderWorker {
     tx: Sender<RenderRequest>,
     rx: Receiver<RenderResult>,
+    text_seg_rx: Receiver<TextSegmentResult>,
+    bounded_text_tx: Sender<BoundedTextRequest>,
+    bounded_text_rx: Receiver<BoundedTextResult>,
     /// Set by the worker thread if PDF initialisation fails.
     init_error: Arc<std::sync::Mutex<Option<String>>>,
 }
@@ -35,17 +59,34 @@ impl RenderWorker {
     pub fn spawn(path: PathBuf, repaint: egui::Context) -> Self {
         let (req_tx, req_rx) = crossbeam_channel::bounded(32);
         let (res_tx, res_rx) = crossbeam_channel::bounded(64);
+        let (text_seg_tx, text_seg_rx) = crossbeam_channel::bounded(64);
+        let (bt_req_tx, bt_req_rx) = crossbeam_channel::bounded(8);
+        let (bt_res_tx, bt_res_rx) = crossbeam_channel::bounded(8);
         let init_error = Arc::new(std::sync::Mutex::new(None));
         let init_error_w = Arc::clone(&init_error);
 
         std::thread::Builder::new()
             .name("pdf-render".into())
-            .spawn(move || worker_loop(path, req_rx, res_tx, repaint, init_error_w))
+            .spawn(move || {
+                worker_loop(
+                    path,
+                    req_rx,
+                    res_tx,
+                    text_seg_tx,
+                    bt_req_rx,
+                    bt_res_tx,
+                    repaint,
+                    init_error_w,
+                )
+            })
             .expect("spawn pdf-render thread");
 
         Self {
             tx: req_tx,
             rx: res_rx,
+            text_seg_rx,
+            bounded_text_tx: bt_req_tx,
+            bounded_text_rx: bt_res_rx,
             init_error,
         }
     }
@@ -55,10 +96,33 @@ impl RenderWorker {
         let _ = self.tx.send(req);
     }
 
-    /// Drain all completed results from the channel.
+    /// Submit a bounded-text extraction request (for copy).
+    pub fn request_bounded_text(&self, req: BoundedTextRequest) {
+        let _ = self.bounded_text_tx.send(req);
+    }
+
+    /// Drain all completed render results.
     pub fn drain_results(&self) -> Vec<RenderResult> {
         let mut out = Vec::new();
         while let Ok(r) = self.rx.try_recv() {
+            out.push(r);
+        }
+        out
+    }
+
+    /// Drain all completed text-segment results.
+    pub fn drain_text_segment_results(&self) -> Vec<TextSegmentResult> {
+        let mut out = Vec::new();
+        while let Ok(r) = self.text_seg_rx.try_recv() {
+            out.push(r);
+        }
+        out
+    }
+
+    /// Drain all completed bounded-text results.
+    pub fn drain_bounded_text_results(&self) -> Vec<BoundedTextResult> {
+        let mut out = Vec::new();
+        while let Ok(r) = self.bounded_text_rx.try_recv() {
             out.push(r);
         }
         out
@@ -72,8 +136,11 @@ impl RenderWorker {
 
 fn worker_loop(
     path: PathBuf,
-    rx: Receiver<RenderRequest>,
-    tx: Sender<RenderResult>,
+    render_rx: Receiver<RenderRequest>,
+    render_tx: Sender<RenderResult>,
+    text_seg_tx: Sender<TextSegmentResult>,
+    bt_rx: Receiver<BoundedTextRequest>,
+    bt_tx: Sender<BoundedTextResult>,
     repaint: egui::Context,
     init_error: Arc<std::sync::Mutex<Option<String>>>,
 ) {
@@ -102,57 +169,176 @@ fn worker_loop(
         }
     };
 
+    let mut text_extracted: HashSet<u32> = HashSet::new();
+
     loop {
-        // Block until first request
-        let first = match rx.recv() {
-            Ok(r) => r,
-            Err(_) => return, // channel closed — exit
-        };
+        // Drain high-priority bounded-text requests before blocking.
+        drain_bounded_text(&document, &bt_rx, &bt_tx, &repaint);
 
-        // Drain + dedup: keep only the latest request per page
-        let mut latest: HashMap<u32, RenderRequest> = HashMap::new();
-        latest.insert(first.page_idx, first);
-        while let Ok(r) = rx.try_recv() {
-            latest.insert(r.page_idx, r);
-        }
+        // Wait for either a render request or a bounded-text request.
+        crossbeam_channel::select! {
+            recv(render_rx) -> msg => {
+                let first = match msg {
+                    Ok(r) => r,
+                    Err(_) => return, // channel closed — exit
+                };
 
-        for (_, req) in latest {
-            // Use the cached document handle instead of reopening.
-            let render_result = (|| -> Result<super::renderer::RenderedPage, String> {
-                let page = document
-                    .pages()
-                    .get(req.page_idx as pdfium_render::prelude::PdfPageIndex)
-                    .map_err(|e| e.to_string())?;
-
-                let bitmap = page
-                    .render(
-                        req.width as pdfium_render::prelude::Pixels,
-                        req.height as pdfium_render::prelude::Pixels,
-                        None,
-                    )
-                    .map_err(|e| format!("RenderPage: {e}"))?;
-
-                Ok(super::renderer::RenderedPage {
-                    width: bitmap.width() as u32,
-                    height: bitmap.height() as u32,
-                    pixels: bitmap.as_rgba_bytes(),
-                })
-            })();
-
-            match render_result {
-                Ok(p) => {
-                    let _ = tx.send(RenderResult {
-                        page_idx: req.page_idx,
-                        pixels: p.pixels,
-                        width: p.width,
-                        height: p.height,
-                    });
-                    repaint.request_repaint();
+                // Drain + dedup: keep only the latest request per page
+                let mut latest: HashMap<u32, RenderRequest> = HashMap::new();
+                latest.insert(first.page_idx, first);
+                while let Ok(r) = render_rx.try_recv() {
+                    latest.insert(r.page_idx, r);
                 }
-                Err(e) => {
-                    log::error!("[PDF-RENDER] page {} failed: {e}", req.page_idx);
+
+                for (_, req) in latest {
+                    // Prioritise bounded-text between page renders.
+                    drain_bounded_text(&document, &bt_rx, &bt_tx, &repaint);
+
+                    let page_idx = req.page_idx;
+
+                    // Render page bitmap.
+                    let render_result = (|| -> Result<super::renderer::RenderedPage, String> {
+                        let page = document
+                            .pages()
+                            .get(page_idx as pdfium_render::prelude::PdfPageIndex)
+                            .map_err(|e| e.to_string())?;
+
+                        let bitmap = page
+                            .render(
+                                req.width as pdfium_render::prelude::Pixels,
+                                req.height as pdfium_render::prelude::Pixels,
+                                None,
+                            )
+                            .map_err(|e| format!("RenderPage: {e}"))?;
+
+                        Ok(super::renderer::RenderedPage {
+                            width: bitmap.width() as u32,
+                            height: bitmap.height() as u32,
+                            pixels: bitmap.as_rgba_bytes(),
+                        })
+                    })();
+
+                    match render_result {
+                        Ok(p) => {
+                            let _ = render_tx.send(RenderResult {
+                                page_idx,
+                                pixels: p.pixels,
+                                width: p.width,
+                                height: p.height,
+                            });
+                            repaint.request_repaint();
+                        }
+                        Err(e) => {
+                            log::error!("[PDF-RENDER] page {} failed: {e}", page_idx);
+                        }
+                    }
+
+                    // Eagerly extract text segments on first render of each page.
+                    if !text_extracted.contains(&page_idx) {
+                        text_extracted.insert(page_idx);
+                        match extract_text_segments(&document, page_idx) {
+                            Ok(segments) => {
+                                let _ = text_seg_tx.send(TextSegmentResult {
+                                    page_idx,
+                                    segments,
+                                });
+                                repaint.request_repaint();
+                            }
+                            Err(e) => {
+                                log::error!(
+                                    "[PDF-RENDER] text segment extraction for page {} failed: {e}",
+                                    page_idx
+                                );
+                            }
+                        }
+                    }
                 }
-            }
+            },
+            recv(bt_rx) -> msg => {
+                if let Ok(req) = msg {
+                    handle_bounded_text(&document, &req, &bt_tx, &repaint);
+                }
+            },
         }
     }
+}
+
+// ── Text extraction helpers ──────────────────────────────────────────────────
+
+fn drain_bounded_text(
+    document: &pdfium_render::prelude::PdfDocument<'_>,
+    rx: &Receiver<BoundedTextRequest>,
+    tx: &Sender<BoundedTextResult>,
+    repaint: &egui::Context,
+) {
+    while let Ok(req) = rx.try_recv() {
+        handle_bounded_text(document, &req, tx, repaint);
+    }
+}
+
+fn handle_bounded_text(
+    document: &pdfium_render::prelude::PdfDocument<'_>,
+    req: &BoundedTextRequest,
+    tx: &Sender<BoundedTextResult>,
+    repaint: &egui::Context,
+) {
+    let text = extract_bounded_text(document, req.page_idx, req.bounds).unwrap_or_else(|e| {
+        log::warn!(
+            "[PDF-RENDER] bounded text for page {} failed: {e}",
+            req.page_idx
+        );
+        String::new()
+    });
+    let _ = tx.send(BoundedTextResult {
+        page_idx: req.page_idx,
+        text,
+    });
+    repaint.request_repaint();
+}
+
+fn extract_text_segments(
+    document: &pdfium_render::prelude::PdfDocument<'_>,
+    page_idx: u32,
+) -> Result<Vec<PdfTextSegment>, String> {
+    let page = document
+        .pages()
+        .get(page_idx as pdfium_render::prelude::PdfPageIndex)
+        .map_err(|e| e.to_string())?;
+    let text = page.text().map_err(|e| format!("LoadText: {e}"))?;
+
+    let mut segments = Vec::new();
+    for character in text.chars().iter() {
+        let Some(content) = character.unicode_string() else {
+            continue;
+        };
+        if content.trim().is_empty() {
+            continue;
+        }
+        let bounds = character
+            .loose_bounds()
+            .or_else(|_| character.tight_bounds())
+            .map_err(|e| format!("GetCharBounds: {e}"))?;
+        segments.push(PdfTextSegment {
+            bounds: super::renderer::pdfium_rect_to_bounds(bounds),
+        });
+    }
+    Ok(segments)
+}
+
+fn extract_bounded_text(
+    document: &pdfium_render::prelude::PdfDocument<'_>,
+    page_idx: u32,
+    bounds: PdfTextBounds,
+) -> Result<String, String> {
+    let page = document
+        .pages()
+        .get(page_idx as pdfium_render::prelude::PdfPageIndex)
+        .map_err(|e| e.to_string())?;
+    let text = page.text().map_err(|e| format!("LoadText: {e}"))?;
+    Ok(text.inside_rect(pdfium_render::prelude::PdfRect::new_from_values(
+        bounds.bottom,
+        bounds.left,
+        bounds.top,
+        bounds.right,
+    )))
 }

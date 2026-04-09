@@ -2,6 +2,7 @@ use clipboard_win::{formats, Clipboard, Setter};
 use eframe::egui;
 use rust_i18n::t;
 
+use super::render_worker::BoundedTextRequest;
 use super::renderer::{PdfTextBounds, PdfTextSegment};
 use super::viewer_app::PdfViewerApp;
 
@@ -173,40 +174,38 @@ impl PdfViewerApp {
             return;
         }
 
-        let text = self
-            .text_renderer
-            .page_text_in_bounds(page_idx, bounds)
-            .map(|text| normalize_selected_text(&text))
-            .unwrap_or_else(|err| {
-                log::warn!("[PDF-VIEWER] bounded text extraction failed: {err}");
-                String::new()
-            });
-
-        if text.is_empty() {
-            self.selection = None;
-            return;
-        }
-
+        // Set selection with empty text immediately (visual feedback).
+        // The bounded text will arrive asynchronously from the worker.
         self.selection = Some(PageSelection {
             page_idx,
             bounds,
-            text,
+            text: String::new(),
         });
+
+        // Request bounded text extraction from the render worker.
+        if let Some(ref worker) = self.worker {
+            worker.request_bounded_text(BoundedTextRequest { page_idx, bounds });
+        }
     }
 
-    fn ensure_text_segments(&mut self, page_idx: u32) -> Option<&Vec<PdfTextSegment>> {
-        if !self.page_text.contains_key(&page_idx) {
-            match self.text_renderer.page_text_segments(page_idx) {
-                Ok(segments) => {
-                    self.page_text.insert(page_idx, segments);
-                }
-                Err(err) => {
-                    log::error!("[PDF-VIEWER] page {} text load failed: {err}", page_idx);
-                    return None;
+    /// Called from `poll_results` when bounded text arrives from the worker.
+    pub(super) fn receive_bounded_text(&mut self, page_idx: u32, text: String) {
+        let text = normalize_selected_text(&text);
+        if let Some(sel) = &mut self.selection {
+            if sel.page_idx == page_idx && sel.text.is_empty() {
+                if text.is_empty() {
+                    // Extraction returned nothing — clear the visual selection.
+                    self.selection = None;
+                } else {
+                    sel.text = text;
                 }
             }
         }
+    }
 
+    fn ensure_text_segments(&mut self, page_idx: u32) -> Option<&Vec<PdfTextSegment>> {
+        // Cache-only: segments are populated by the render worker.
+        // No pdfium calls from the UI thread — avoids thread_safe mutex contention.
         self.page_text.get(&page_idx)
     }
 
