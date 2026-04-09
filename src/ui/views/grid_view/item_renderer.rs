@@ -185,8 +185,8 @@ pub(super) fn render_grid_item(
         }
 
         if hover_duration >= TOOLTIP_DELAY_SECS {
+          if let Some(mouse_pos) = ui.input(|i| i.pointer.hover_pos()) {
             let is_recycle = ctx.is_recycle_bin_view;
-            let mouse_pos = ui.input(|i| i.pointer.hover_pos()).unwrap_or_default();
             let screen_right = ui.ctx().screen_rect().right();
             let tooltip_width = 320.0;
             let effective_right = if ctx.is_video_docked_visible {
@@ -253,6 +253,7 @@ pub(super) fn render_grid_item(
                     });
                 },
             );
+          } // if let Some(mouse_pos)
         }
     } else {
         let hover_id = egui::Id::new("grid_hover_start").with(&item.path);

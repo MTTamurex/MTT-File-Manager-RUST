@@ -4,6 +4,9 @@
 use crate::domain::file_entry::{archive_type_label, FileEntry};
 use rust_i18n::t;
 
+/// Delay (in seconds) before showing a tooltip on hover.
+pub const TOOLTIP_DELAY_SECS: f32 = 0.3;
+
 /// Gets file type string for display
 pub fn get_file_type_string(item: &FileEntry) -> String {
     if let Some(label) = archive_type_label(&item.name) {

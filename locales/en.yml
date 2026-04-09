@@ -161,6 +161,7 @@ context_menu:
   always_keep_on_device: "Always keep on this device"
   free_up_space: "Free up space"
   show_more: "Show more options"
+  shell_menu_error: "Could not load context menu for this item"
 search:
   title: "Global Search"
   placeholder: "Type to search across the entire computer..."

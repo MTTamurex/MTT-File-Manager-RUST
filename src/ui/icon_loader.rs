@@ -143,9 +143,13 @@ impl IconLoader {
                 let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
             }
             let data = if is_virtual {
-                windows::extract_shell_icon(&path_owned, IconSize::Jumbo).ok()
+                windows::extract_shell_icon(&path_owned, IconSize::Jumbo)
+                    .map_err(|e| log::trace!("[Icon] Shell icon extraction failed for {:?}: {}", path_owned, e))
+                    .ok()
             } else {
-                windows::extract_file_icon_by_path(&path_owned, IconSize::Jumbo).ok()
+                windows::extract_file_icon_by_path(&path_owned, IconSize::Jumbo)
+                    .map_err(|e| log::trace!("[Icon] File icon extraction failed for {:?}: {}", path_owned, e))
+                    .ok()
             };
             let _ = tx.send(AsyncIconResult { key: cache_key, data });
             unsafe { CoUninitialize(); }

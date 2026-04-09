@@ -158,6 +158,8 @@ impl eframe::App for ImageViewerApp {
                     } => {
                         if request_id == self.shell_menu_request_id {
                             log::debug!("[ShellMenu] Extraction error: {}", message);
+                            self.notifications
+                                .warning(rust_i18n::t!("context_menu.shell_menu_error").to_string());
                             self.shell_menu_loading = false;
                         }
                     }

@@ -13,9 +13,8 @@ mod prefetch;
 mod scroll;
 mod virtualization;
 
-// PERFORMANCE: Tooltip debounce to avoid creation/destruction during scroll
-const TOOLTIP_DELAY_SECS: f32 = 0.3; // Only show tooltip after 300ms hover
-                                     // STRICT LIMIT: Minimum zoom allowed to prevent performance degradation
+use super::common::TOOLTIP_DELAY_SECS;
+// STRICT LIMIT: Minimum zoom allowed to prevent performance degradation
 const MIN_THUMBNAIL_SIZE: f32 = crate::ui::theme::THUMBNAIL_MIN;
 
 #[derive(Clone, Copy)]

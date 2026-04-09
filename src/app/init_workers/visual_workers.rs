@@ -129,7 +129,7 @@ pub(in crate::app) fn spawn_icon_worker(
     preloaded_icons: &std::collections::HashMap<String, (Vec<u8>, u32, u32)>,
 ) -> (mpsc::Sender<IconRequest>, mpsc::Receiver<IconResponse>) {
     let (icon_req_tx, icon_req_rx_thread) = mpsc::channel::<IconRequest>();
-    let (fanout_tx, fanout_rx) = crossbeam_channel::unbounded::<IconRequest>();
+    let (fanout_tx, fanout_rx) = crossbeam_channel::bounded::<IconRequest>(256);
     let (icon_res_tx, icon_res_rx) = mpsc::channel::<IconResponse>();
 
     // Keep std::sync::mpsc sender API for the app state, but fan-out requests into

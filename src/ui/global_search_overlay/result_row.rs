@@ -8,7 +8,7 @@ use super::actions::{self, ResultAction};
 
 pub(super) const ROW_HEIGHT: f32 = 46.0;
 pub(super) const ICON_SIZE: f32 = 18.0;
-const TOOLTIP_DELAY_SECS: f32 = 0.3;
+use crate::ui::views::common::TOOLTIP_DELAY_SECS;
 const ACTION_BTN_WIDTH: f32 = 52.0;
 const ACTION_BTN_HEIGHT: f32 = 22.0;
 const ACTION_BTN_GAP: f32 = 4.0;
@@ -396,13 +396,14 @@ pub(super) fn render_result_row(
                 ts
             };
 
+          if let Some(mouse_pos) = ui.input(|i| i.pointer.hover_pos()) {
             let tooltip_layer =
                 egui::LayerId::new(egui::Order::Tooltip, row_resp.id.with("tooltip"));
             egui::show_tooltip_at(
                 ui.ctx(),
                 tooltip_layer,
                 row_resp.id,
-                ui.input(|i| i.pointer.hover_pos()).unwrap_or_default(),
+                mouse_pos,
                 |ui: &mut egui::Ui| {
                     ui.set_max_width(300.0);
                     ui.vertical(|ui| {
@@ -439,6 +440,7 @@ pub(super) fn render_result_row(
                     });
                 },
             );
+          } // if let Some(mouse_pos)
         }
     } else {
         let hover_id = egui::Id::new("global_search_hover_start").with(&full_path);

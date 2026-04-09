@@ -117,7 +117,9 @@ impl IconLoader {
         let tx = self.icon_result_tx.clone();
         let dc = self.disk_cache.clone();
         std::thread::spawn(move || {
-            let data = windows::extract_drive_icon(&key, IconSize::Jumbo).ok();
+            let data = windows::extract_drive_icon(&key, IconSize::Jumbo)
+                .map_err(|e| log::trace!("[Icon] Drive icon extraction failed for {}: {}", key, e))
+                .ok();
             // Persist to SQLite for next launch
             if let (Some(dc), Some((ref pixels, w, h))) = (&dc, &data) {
                 dc.put_shell_icon(&format!("drive:{}", key), pixels, *w, *h);
@@ -173,7 +175,9 @@ impl IconLoader {
         let path_owned = folder_path.to_string();
         let dc = self.disk_cache.clone();
         std::thread::spawn(move || {
-            let data = windows::extract_drive_icon(&path_owned, IconSize::Jumbo).ok();
+            let data = windows::extract_drive_icon(&path_owned, IconSize::Jumbo)
+                .map_err(|e| log::trace!("[Icon] Folder icon extraction failed for {}: {}", path_owned, e))
+                .ok();
             // Persist to SQLite for next launch
             if let (Some(dc), Some((ref pixels, w, h))) = (&dc, &data) {
                 dc.put_shell_icon(&format!("special:{}", path_owned), pixels, *w, *h);
@@ -260,7 +264,9 @@ impl IconLoader {
             let mut changed = 0usize;
 
             for path in &paths {
-                let fresh = windows::extract_drive_icon(path, IconSize::Jumbo).ok();
+                let fresh = windows::extract_drive_icon(path, IconSize::Jumbo)
+                    .map_err(|e| log::trace!("[Icon] Revalidation extraction failed for {}: {}", path, e))
+                    .ok();
 
                 let sql_key = format!("special:{}", path);
                 let was_cached = cached.contains_key(&sql_key);
