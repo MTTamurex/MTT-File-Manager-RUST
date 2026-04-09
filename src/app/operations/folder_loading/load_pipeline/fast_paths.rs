@@ -362,7 +362,7 @@ pub(super) fn try_handle_fast_paths(
         // DriveWatcher pre-invalidates cache — no mtime check needed
         let base_path_buf_owned = PathBuf::from(base_path);
         if !directory_dirty_registry.is_dirty(&base_path_buf_owned) {
-            if let Some((mut cached_entries, cached_at_ms)) =
+            if let Some((cached_entries_arc, cached_at_ms)) =
                 directory_cache.get_with_meta(&base_path_buf_owned)
             {
                 if !is_onedrive_base {
@@ -378,7 +378,7 @@ pub(super) fn try_handle_fast_paths(
                         }
                         return false;
                     }
-                    if any_subfolder_mtime_stale(&cached_entries) {
+                    if any_subfolder_mtime_stale(&cached_entries_arc) {
                         log::debug!(
                             "[FOLDER-LOADING] Secondary DirectoryCache stale for {:?} (subfolder mtime changed), invalidating",
                             base_path_buf_owned
@@ -395,6 +395,9 @@ pub(super) fn try_handle_fast_paths(
                     "[FOLDER-LOADING] Using secondary DirectoryCache for {:?}",
                     base_path
                 );
+                // Unwrap the Arc — clones only if the cache still holds a reference.
+                let mut cached_entries = Arc::try_unwrap(cached_entries_arc)
+                    .unwrap_or_else(|arc| (*arc).clone());
                 let mut changed = false;
                 for entry in cached_entries.iter_mut() {
                     if !entry.is_dir && is_archive_extension(&entry.name) {

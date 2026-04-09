@@ -26,8 +26,12 @@ pub(super) struct StartupPreferences {
 
 impl StartupPreferences {
     pub(super) fn load(disk_cache: &ThumbnailDiskCache) -> Self {
-        let sort_mode = disk_cache
-            .get_preference("sort_mode")
+        // PERF: Load all preferences in a single SQL query + lock acquisition
+        // instead of 18 individual get_preference() calls.
+        let prefs = disk_cache.get_all_preferences();
+
+        let sort_mode = prefs
+            .get("sort_mode")
             .map(|s| match s.as_str() {
                 "date" => SortMode::Date,
                 "size" => SortMode::Size,
@@ -38,8 +42,8 @@ impl StartupPreferences {
             })
             .unwrap_or(SortMode::Name);
 
-        let sort_mode_computer = disk_cache
-            .get_preference("sort_mode_computer")
+        let sort_mode_computer = prefs
+            .get("sort_mode_computer")
             .map(|s| match s.as_str() {
                 "drive_total" => SortMode::DriveTotalSpace,
                 "drive_free" => SortMode::DriveFreeSpace,
@@ -47,8 +51,8 @@ impl StartupPreferences {
             })
             .unwrap_or(SortMode::Name);
 
-        let sort_mode_normal = disk_cache
-            .get_preference("sort_mode_normal")
+        let sort_mode_normal = prefs
+            .get("sort_mode_normal")
             .map(|s| match s.as_str() {
                 "date" => SortMode::Date,
                 "size" => SortMode::Size,
@@ -57,13 +61,13 @@ impl StartupPreferences {
             })
             .unwrap_or(SortMode::Name);
 
-        let sort_descending = disk_cache
-            .get_preference("sort_descending")
+        let sort_descending = prefs
+            .get("sort_descending")
             .map(|s| s == "true")
             .unwrap_or(false);
 
-        let folders_position = disk_cache
-            .get_preference("folders_position")
+        let folders_position = prefs
+            .get("folders_position")
             .map(|s| match s.as_str() {
                 "last" => FoldersPosition::Last,
                 "mixed" => FoldersPosition::Mixed,
@@ -71,46 +75,46 @@ impl StartupPreferences {
             })
             .unwrap_or(FoldersPosition::First);
 
-        let thumbnail_size = disk_cache
-            .get_preference("thumbnail_size")
+        let thumbnail_size = prefs
+            .get("thumbnail_size")
             .and_then(|s| s.parse::<f32>().ok())
             .unwrap_or(theme::THUMBNAIL_DEFAULT)
             .clamp(theme::THUMBNAIL_MIN, theme::THUMBNAIL_MAX);
 
-        let view_mode = disk_cache
-            .get_preference("view_mode")
+        let view_mode = prefs
+            .get("view_mode")
             .map(|s| match s.as_str() {
                 "list" => ViewMode::List,
                 _ => ViewMode::Grid,
             })
             .unwrap_or(ViewMode::Grid);
 
-        let show_preview_panel = disk_cache
-            .get_preference("show_preview_panel")
+        let show_preview_panel = prefs
+            .get("show_preview_panel")
             .map(|s| s != "false")
             .unwrap_or(true);
 
-        let upload_budget_ms = disk_cache
-            .get_preference("upload_budget_ms")
+        let upload_budget_ms = prefs
+            .get("upload_budget_ms")
             .and_then(|s| s.parse::<f32>().ok())
             .unwrap_or(6.0)
             .clamp(2.0, 10.0);
 
-        let saved_window_width = disk_cache
-            .get_preference("window_width")
+        let saved_window_width = prefs
+            .get("window_width")
             .and_then(|s| s.parse::<f32>().ok())
             .unwrap_or(1280.0);
-        let saved_window_height = disk_cache
-            .get_preference("window_height")
+        let saved_window_height = prefs
+            .get("window_height")
             .and_then(|s| s.parse::<f32>().ok())
             .unwrap_or(720.0);
-        let saved_is_maximized = disk_cache
-            .get_preference("window_is_maximized")
+        let saved_is_maximized = prefs
+            .get("window_is_maximized")
             .map(|s| s == "true")
             .unwrap_or(true);
 
-        let sidebar_left_raw = disk_cache.get_preference("sidebar_left_width");
-        let sidebar_right_raw = disk_cache.get_preference("sidebar_right_width");
+        let sidebar_left_raw = prefs.get("sidebar_left_width");
+        let sidebar_right_raw = prefs.get("sidebar_right_width");
 
         log::debug!(
             "[INIT] Raw sidebar values from DB: L={:?}, R={:?}",
@@ -131,23 +135,24 @@ impl StartupPreferences {
             sidebar_right_width
         );
 
-        let session_volume = disk_cache
-            .get_preference("media_volume")
+        let session_volume = prefs
+            .get("media_volume")
             .and_then(|s| s.parse::<f32>().ok())
             .unwrap_or(1.0)
             .clamp(0.0, 1.0);
 
-        let show_hidden_files = disk_cache
-            .get_preference("show_hidden_files")
+        let show_hidden_files = prefs
+            .get("show_hidden_files")
             .map(|s| s == "true")
             .unwrap_or(false);
 
-        let language = disk_cache
-            .get_preference("language")
+        let language = prefs
+            .get("language")
+            .cloned()
             .unwrap_or_else(|| "pt-BR".to_string());
 
-        let theme_mode = disk_cache
-            .get_preference("theme_mode")
+        let theme_mode = prefs
+            .get("theme_mode")
             .map(|s| match s.as_str() {
                 "dark" => ThemeMode::Dark,
                 _ => ThemeMode::Light,

@@ -11,7 +11,7 @@ use crate::domain::file_entry::FileEntry;
 const CACHE_CAPACITY: usize = 200; // Bounded to avoid high long-session RAM growth
 
 struct CachedFolder {
-    entries: Vec<FileEntry>,
+    entries: Arc<Vec<FileEntry>>,
     cached_at_ms: u64,
 }
 
@@ -32,38 +32,31 @@ impl DirectoryCache {
     /// Cache is invalidated by: DriveWatcher (when enabled), per-folder
     /// notify-watcher, consistency probe, and mtime validation in fast_paths.
     ///
-    /// NOTE: `folder_cover` is stripped on read — it is resolved separately
-    /// via the cover pipeline (SQLite + existence check + cover worker) to
-    /// avoid returning stale covers from a previous visit.
-    pub fn get(&self, path: &PathBuf) -> Option<Vec<FileEntry>> {
+    /// NOTE: `folder_cover` is stripped at `put()` time — it is resolved
+    /// separately via the cover pipeline (SQLite + existence check + cover
+    /// worker) to avoid returning stale covers from a previous visit.
+    pub fn get(&self, path: &PathBuf) -> Option<Arc<Vec<FileEntry>>> {
         let mut cache = self.inner.lock().ok()?;
-        if let Some(cached) = cache.get_mut(path) {
-            let mut entries = cached.entries.clone();
-            for entry in &mut entries {
-                entry.folder_cover = None;
-            }
-            return Some(entries);
-        }
-        None
+        cache.get_mut(path).map(|cached| Arc::clone(&cached.entries))
     }
 
     /// Returns cached entries and the cache timestamp in Unix milliseconds.
-    pub fn get_with_meta(&self, path: &PathBuf) -> Option<(Vec<FileEntry>, u64)> {
+    pub fn get_with_meta(&self, path: &PathBuf) -> Option<(Arc<Vec<FileEntry>>, u64)> {
         let mut cache = self.inner.lock().ok()?;
-        if let Some(cached) = cache.get_mut(path) {
-            let mut entries = cached.entries.clone();
-            for entry in &mut entries {
-                entry.folder_cover = None;
-            }
-            return Some((entries, cached.cached_at_ms));
-        }
-        None
+        cache
+            .get_mut(path)
+            .map(|cached| (Arc::clone(&cached.entries), cached.cached_at_ms))
     }
 
     /// Store directory entries in cache.
+    /// `folder_cover` is stripped here (once at write time) instead of on
+    /// every read, since covers are resolved separately via the cover pipeline.
     /// No fs::metadata() syscall — DriveWatcher handles invalidation.
-    pub fn put(&self, path: PathBuf, entries: Vec<FileEntry>) {
+    pub fn put(&self, path: PathBuf, mut entries: Vec<FileEntry>) {
         if let Ok(mut cache) = self.inner.lock() {
+            for entry in &mut entries {
+                entry.folder_cover = None;
+            }
             let cached_at_ms = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
@@ -71,7 +64,7 @@ impl DirectoryCache {
             cache.put(
                 path,
                 CachedFolder {
-                    entries,
+                    entries: Arc::new(entries),
                     cached_at_ms,
                 },
             );

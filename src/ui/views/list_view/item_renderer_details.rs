@@ -86,7 +86,7 @@ fn render_drive_tooltip(ui: &mut Ui, item: &FileEntry) {
 }
 
 // PERFORMANCE: Tooltip debounce to avoid creation/destruction during scroll
-const TOOLTIP_DELAY_SECS: f32 = 0.3;
+use super::super::common::TOOLTIP_DELAY_SECS;
 
 /// Renders tooltip with debounce for a list item
 pub(super) fn render_item_tooltip(
@@ -120,8 +120,7 @@ pub(super) fn render_item_tooltip(
 
         // Only show tooltip if hover duration exceeds threshold
         if hover_duration >= TOOLTIP_DELAY_SECS {
-            let mouse_pos = ui.input(|i| i.pointer.hover_pos()).unwrap_or_default();
-
+          if let Some(mouse_pos) = ui.input(|i| i.pointer.hover_pos()) {
             // SMART TOOLTIP: Position to avoid video player overlay
             let screen_right = ui.ctx().screen_rect().right();
             let tooltip_width = 320.0;
@@ -189,6 +188,7 @@ pub(super) fn render_item_tooltip(
                     });
                 },
             );
+          } // if let Some(mouse_pos)
         }
     } else {
         // Clear hover time when not hovering

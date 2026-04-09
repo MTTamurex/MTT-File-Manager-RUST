@@ -69,4 +69,22 @@ impl ThumbnailDiskCache {
             None
         }
     }
+
+    /// Loads all user preferences in a single query.
+    /// [READER]
+    pub fn get_all_preferences(&self) -> std::collections::HashMap<String, String> {
+        let mut map = std::collections::HashMap::new();
+        if let Ok(db) = self.reader.lock() {
+            if let Ok(mut stmt) = db.prepare("SELECT key, value FROM user_preferences") {
+                if let Ok(rows) = stmt.query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                }) {
+                    for row in rows.flatten() {
+                        map.insert(row.0, row.1);
+                    }
+                }
+            }
+        }
+        map
+    }
 }
