@@ -49,6 +49,7 @@ fn stage_pdfium_runtime() {
     use std::path::{Path, PathBuf};
 
     println!("cargo:rerun-if-env-changed=PDFIUM_DYNAMIC_LIB_PATH");
+    println!("cargo:rerun-if-env-changed=PDFIUM_SKIP_HASH_CHECK");
 
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
     let target_dir = PathBuf::from(env::var("OUT_DIR").unwrap())
@@ -80,6 +81,13 @@ fn stage_pdfium_runtime() {
         return;
     };
 
+    // SEC: Verify pdfium.dll integrity before staging. Supply-chain attack
+    // via PDFIUM_DYNAMIC_LIB_PATH could replace the DLL with a malicious one.
+    // Set PDFIUM_SKIP_HASH_CHECK=1 only during intentional pdfium upgrades.
+    if env::var("PDFIUM_SKIP_HASH_CHECK").as_deref() != Ok("1") {
+        verify_pdfium_hash(&source);
+    }
+
     let destination = target_dir.join(dll_name);
 
     if let Err(err) = fs::copy(&source, &destination) {
@@ -91,5 +99,40 @@ fn stage_pdfium_runtime() {
         );
     } else {
         println!("cargo:rerun-if-changed={}", source.display());
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn verify_pdfium_hash(path: &std::path::Path) {
+    use sha2::{Digest, Sha256};
+
+    // Known good SHA-256 hash of the vendored pdfium.dll.
+    // Update this value when upgrading the pdfium binary.
+    const EXPECTED_SHA256: &str =
+        "7167AEE6BB3D2724EE62FD83BBEB8883EDC786A6E1999782857D4952536A0ED3";
+
+    let data = std::fs::read(path).unwrap_or_else(|e| {
+        panic!(
+            "Failed to read pdfium.dll at {} for hash verification: {}",
+            path.display(),
+            e,
+        );
+    });
+
+    let hash = Sha256::digest(&data);
+    let hex = format!("{:X}", hash);
+
+    if hex != EXPECTED_SHA256 {
+        panic!(
+            "\n\n*** PDFIUM INTEGRITY CHECK FAILED ***\n\
+             Source:   {}\n\
+             Expected: {}\n\
+             Actual:   {}\n\n\
+             If you are intentionally upgrading pdfium.dll, update EXPECTED_SHA256\n\
+             in build.rs to the new hash, or set PDFIUM_SKIP_HASH_CHECK=1 for this build.\n",
+            path.display(),
+            EXPECTED_SHA256,
+            hex,
+        );
     }
 }
