@@ -130,7 +130,11 @@ pub struct VolumeStatus {
 
 /// Encode a message with a 4-byte little-endian length prefix for Named Pipe transport.
 pub fn encode_message<T: Serialize>(msg: &T) -> Result<Vec<u8>, String> {
-    let payload = bincode::serialize(msg).map_err(|e| format!("serialization failed: {}", e))?;
+    use bincode::Options;
+    let payload = bincode::DefaultOptions::new()
+        .with_fixint_encoding()
+        .serialize(msg)
+        .map_err(|e| format!("serialization failed: {}", e))?;
     let len = (payload.len() as u32).to_le_bytes();
     let mut buf = Vec::with_capacity(4 + payload.len());
     buf.extend_from_slice(&len);
