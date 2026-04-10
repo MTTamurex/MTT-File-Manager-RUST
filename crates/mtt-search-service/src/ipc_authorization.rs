@@ -21,8 +21,15 @@ use mtt_search_protocol::SearchResultItem;
 
 const AUTHZ_RAW_BATCH_SIZE: usize = 512;
 const AUTHZ_MAX_BATCHES: usize = 64;
-const CLIENT_CONNECTION_CHECK_INTERVAL: usize = 64;
+const CLIENT_CONNECTION_CHECK_INTERVAL: usize = 16;
 const GENERIC_READ: u32 = 0x80000000;
+
+/// Maximum wall-clock time for the entire authorization loop.  Must be
+/// shorter than the client-side pipe I/O timeout (8 s) so the service
+/// always sends a response before the client gives up.  When the deadline
+/// is reached, the service returns whatever authorized results it has
+/// collected so far with `has_more: true`.
+const AUTHZ_RESPONSE_DEADLINE: std::time::Duration = std::time::Duration::from_secs(6);
 
 pub struct AuthorizedSearchPage {
     pub items: Vec<SearchResultItem>,
@@ -151,8 +158,10 @@ pub fn collect_authorized_search_page(
     // Cache authorization results by parent directory to avoid redundant
     // CreateFileW calls for files in the same folder (common in search results).
     let mut dir_auth_cache: HashMap<String, bool> = HashMap::with_capacity(64);
+    let response_deadline = std::time::Instant::now() + AUTHZ_RESPONSE_DEADLINE;
+    let mut deadline_exceeded = false;
 
-    while raw_has_more && batches < AUTHZ_MAX_BATCHES && !has_more_authorized {
+    while raw_has_more && batches < AUTHZ_MAX_BATCHES && !has_more_authorized && !deadline_exceeded {
         ensure_client_connected(pipe)?;
         batches += 1;
 
@@ -176,6 +185,16 @@ pub fn collect_authorized_search_page(
         for (result_index, result) in raw_page.items.into_iter().enumerate() {
             if result_index.is_multiple_of(CLIENT_CONNECTION_CHECK_INTERVAL) {
                 ensure_client_connected(pipe)?;
+                // Bail out early if we are approaching the client-side pipe
+                // timeout.  During heavy disk I/O (file copy, AV scan) each
+                // CreateFileW can take 50–200 ms and the cumulative time
+                // easily exceeds the 8 s client timeout, causing the search
+                // to return zero results.  Delivering partial results with
+                // has_more=true is always better than a timeout error.
+                if std::time::Instant::now() >= response_deadline {
+                    deadline_exceeded = true;
+                    break;
+                }
             }
 
             // Fast path: check parent directory authorization from cache.
@@ -218,7 +237,7 @@ pub fn collect_authorized_search_page(
     // authorized items were collected the caller's offset cannot advance and
     // returning has_more=true would cause an infinite retry with the same
     // offset (raw_offset always restarts from 0 on each call).
-    if batches >= AUTHZ_MAX_BATCHES && raw_has_more && !authorized_items.is_empty() {
+    if (batches >= AUTHZ_MAX_BATCHES || deadline_exceeded) && raw_has_more && !authorized_items.is_empty() {
         has_more_authorized = true;
     }
 
@@ -268,10 +287,12 @@ pub fn collect_authorized_fts_page(
     let mut has_more_authorized = false;
     let mut fts_offset = 0usize;
     let mut fts_has_more = true;
+    let response_deadline = std::time::Instant::now() + AUTHZ_RESPONSE_DEADLINE;
+    let mut deadline_exceeded = false;
 
     for _ in 0..AUTHZ_MAX_BATCHES {
         ensure_client_connected(pipe)?;
-        if !fts_has_more || has_more_authorized {
+        if !fts_has_more || has_more_authorized || deadline_exceeded {
             break;
         }
 
@@ -311,6 +332,10 @@ pub fn collect_authorized_fts_page(
         for (result_index, (name, full_path, is_dir)) in resolved.into_iter().enumerate() {
             if result_index.is_multiple_of(CLIENT_CONNECTION_CHECK_INTERVAL) {
                 ensure_client_connected(pipe)?;
+                if std::time::Instant::now() >= response_deadline {
+                    deadline_exceeded = true;
+                    break;
+                }
             }
 
             // Authorization check with parent-directory cache.
@@ -342,7 +367,9 @@ pub fn collect_authorized_fts_page(
         }
     }
 
-    if !has_more_authorized && fts_has_more && !authorized_items.is_empty() {
+    if (!has_more_authorized && fts_has_more && !authorized_items.is_empty())
+        || (deadline_exceeded && !authorized_items.is_empty())
+    {
         has_more_authorized = true;
     }
 
