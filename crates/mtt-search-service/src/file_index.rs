@@ -299,7 +299,11 @@ pub fn search_page(
     // Split into tokens; a single-word query produces one token (same behaviour as before).
     let tokens: Vec<&str> = query_lower.split_whitespace().collect();
     let mut items = Vec::with_capacity(limit.min(1000));
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    // Keep the deadline short to minimise read-lock hold time.  A long
+    // deadline (e.g. 3 s) starves index writers because parking_lot's
+    // write-preferring policy blocks new readers once a writer queues,
+    // causing search timeouts during heavy incremental updates (file copy).
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(1_500);
     let mut scanned: u64 = 0;
     let mut matched_after_filters: usize = 0;
     let mut timed_out = false;
