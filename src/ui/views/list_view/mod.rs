@@ -384,17 +384,6 @@ fn scale_column_widths(
         w_name + w_date + w_type + w_size
     };
 
-    let min_total_width = if ctx.is_computer_view {
-        260.0 // Name + Total + Free minimums
-    } else if ctx.is_onedrive_folder {
-        420.0 // Name + Date + Type + Size + Status minimums
-    } else {
-        340.0 // Name + Date + Type + Size minimums
-    };
-    if max_total_width <= min_total_width {
-        return;
-    }
-
     if current_total > max_total_width {
         // Proportionally reduce visible columns to fit
         let scale = max_total_width / current_total;
