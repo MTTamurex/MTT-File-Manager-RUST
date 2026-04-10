@@ -313,6 +313,27 @@ pub enum StatusBarAction {
     None,
 }
 
+fn get_status_bar_app_icon(ctx: &egui::Context) -> Option<egui::TextureHandle> {
+    let cache_id = egui::Id::new("status_bar_app_icon");
+
+    if let Some(texture) = ctx.data(|data| data.get_temp::<egui::TextureHandle>(cache_id)) {
+        return Some(texture);
+    }
+
+    let image = image::load_from_memory(crate::embedded_assets::APP_ICON_PNG).ok()?;
+    let rgba = image.to_rgba8();
+    let size = [rgba.width() as usize, rgba.height() as usize];
+    let color_image = egui::ColorImage::from_rgba_unmultiplied(size, rgba.as_raw());
+    let texture = ctx.load_texture(
+        "status_bar_app_icon",
+        color_image,
+        egui::TextureOptions::LINEAR,
+    );
+
+    ctx.data_mut(|data| data.insert_temp(cache_id, texture.clone()));
+    Some(texture)
+}
+
 /// Renders the application status bar.
 /// Returns an action that needs to be handled by the caller.
 #[allow(clippy::too_many_arguments)]
@@ -457,6 +478,15 @@ pub fn render_status_bar(
                 egui::Frame::NONE
                     .inner_margin(egui::Margin { left: 0, right: 0, top: 0, bottom: 2 })
                     .show(ui, |ui| {
+                        let icon_size = ui.text_style_height(&egui::TextStyle::Body).round().max(1.0);
+                        ui.spacing_mut().item_spacing.x = 4.0;
+                        if let Some(app_icon) = get_status_bar_app_icon(ui.ctx()) {
+                            ui.add(
+                                egui::Image::new(&app_icon)
+                                    .fit_to_exact_size(egui::vec2(icon_size, icon_size)),
+                            );
+                        }
+
                         ui.label("MTT File Manager");
                     });
             });
