@@ -23,6 +23,9 @@ pub(super) fn handle_delete(
                     "[FileOps] Delete cancelled or failed for {} paths",
                     valid_paths.len()
                 );
+                let _ = result_sender.send(FileOperationResult::OperationFailed {
+                    message: rust_i18n::t!("operations.error_cancelled").to_string(),
+                });
                 return;
             }
 
@@ -99,6 +102,9 @@ pub(super) fn handle_rename(
                     "[SECURITY] Rename blocked: invalid target name '{}'",
                     new_name
                 );
+                let _ = result_sender.send(FileOperationResult::OperationFailed {
+                    message: rust_i18n::t!("operations.error_invalid_name").to_string(),
+                });
                 return;
             }
 
@@ -111,6 +117,10 @@ pub(super) fn handle_rename(
                         parent_folder: parent,
                     });
                 }
+            } else {
+                let _ = result_sender.send(FileOperationResult::OperationFailed {
+                    message: rust_i18n::t!("operations.error_cancelled").to_string(),
+                });
             }
         }
         Err(err) => {
@@ -147,6 +157,10 @@ pub(super) fn handle_copy(
 
             if success {
                 let _ = result_sender.send(FileOperationResult::CopyCompleted { dest_folder });
+            } else {
+                let _ = result_sender.send(FileOperationResult::OperationFailed {
+                    message: rust_i18n::t!("operations.error_cancelled").to_string(),
+                });
             }
         }
         (Err(err), _) | (_, Err(err)) => {
@@ -191,6 +205,10 @@ pub(super) fn handle_move(
                         dest_folder,
                     });
                 }
+            } else {
+                let _ = result_sender.send(FileOperationResult::OperationFailed {
+                    message: rust_i18n::t!("operations.error_cancelled").to_string(),
+                });
             }
         }
         (Err(err), _) | (_, Err(err)) => {
@@ -232,6 +250,10 @@ pub(super) fn handle_copy_batch(
 
             if success {
                 let _ = result_sender.send(FileOperationResult::CopyCompleted { dest_folder });
+            } else {
+                let _ = result_sender.send(FileOperationResult::OperationFailed {
+                    message: rust_i18n::t!("operations.error_cancelled").to_string(),
+                });
             }
         }
         (Err(err), _) | (_, Err(err)) => {
@@ -281,6 +303,10 @@ pub(super) fn handle_move_batch(
                     source_folders: source_folders.into_iter().collect(),
                     dest_folder,
                     moved_files: paths,
+                });
+            } else if !success {
+                let _ = result_sender.send(FileOperationResult::OperationFailed {
+                    message: rust_i18n::t!("operations.error_cancelled").to_string(),
                 });
             }
         }
@@ -332,6 +358,9 @@ pub(super) fn handle_delete_permanently(
                 shell_operations::delete_items_permanently_with_shell(&valid_paths, hwnd.0);
             if !success {
                 log::warn!("[FILE-OP] Permanent delete cancelled or failed");
+                let _ = result_sender.send(FileOperationResult::OperationFailed {
+                    message: rust_i18n::t!("operations.error_cancelled").to_string(),
+                });
                 return;
             }
             let mut parents = std::collections::HashSet::new();

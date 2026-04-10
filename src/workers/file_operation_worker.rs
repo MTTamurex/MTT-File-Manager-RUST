@@ -54,6 +54,8 @@ pub enum FileOperationResult {
         error: String,
         cancelled: bool,
     },
+    /// A file operation failed or was cancelled by the user.
+    OperationFailed { message: String },
 }
 
 /// Transparent wrapper for HWND to make it Send.
