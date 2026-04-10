@@ -51,6 +51,9 @@ impl ImageViewerApp {
                             error,
                             cancelled,
                         } => self.handle_drive_rename_failed(drive_path, error, cancelled),
+                        FileOperationResult::OperationFailed { message } => {
+                            self.notifications.warning(message);
+                        }
                         FileOperationResult::RecycleBinChanged => self.handle_recycle_bin_changed(),
                         FileOperationResult::RestoreCompleted { parent_folders } => {
                             self.handle_parent_folder_updates(parent_folders, current_path_norm)

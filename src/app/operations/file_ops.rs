@@ -218,6 +218,10 @@ impl ImageViewerApp {
             }
             Err(e) => {
                 log::error!("Erro ao criar pasta: {}", e);
+                self.notifications.warning(
+                    rust_i18n::t!("operations.error_folder_create", error = e.to_string())
+                        .to_string(),
+                );
             }
         }
     }
