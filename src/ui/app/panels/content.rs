@@ -386,6 +386,11 @@ pub(super) fn render_central_panel_layout(app: &mut ImageViewerApp, ctx: &egui::
             egui::Color32::WHITE
         }))
         .show(ctx, |ui| {
+            // CLIP FIX: Ensure central panel content cannot overflow into sidebars.
+            // CentralPanel renders LAST (after both SidePanels), so unclipped
+            // content would paint ON TOP of sidebar content.
+            ui.set_clip_rect(ui.max_rect());
+
             if app.is_loading_folder && app.items.is_empty() {
                 ui.centered_and_justified(|ui| {
                     ui.label(rust_i18n::t!("panels.loading"));

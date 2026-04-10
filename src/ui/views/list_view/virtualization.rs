@@ -88,7 +88,9 @@ pub(super) fn render_virtualized_content(
     let bg_response = ui.interact(viewport_rect, ui.id().with("list_bg"), Sense::click());
 
     let mut child_ui = ui.new_child(egui::UiBuilder::new().max_rect(viewport_rect));
-    child_ui.set_clip_rect(viewport_rect);
+    // CLIP FIX: Intersect with parent clip rect to ensure content never
+    // extends beyond the central panel bounds into the right sidebar.
+    child_ui.set_clip_rect(viewport_rect.intersect(ui.clip_rect()));
 
     let content_min = viewport_rect.min;
 
