@@ -167,12 +167,30 @@ pub(super) fn handle_client(
                 ) {
                     Ok(page) => Ok(page),
                     Err(e) => {
-                        eprintln!(
-                            "[IPC] FTS query failed for '{}', falling back to linear scan: {}",
-                            text,
-                            e
-                        );
-                        collect_authorized_search_page(pipe, indices, &text, offset, limit)
+                        // Only fall back to linear scan for structural FTS errors
+                        // (corrupt index, schema mismatch).  Transient problems
+                        // like client disconnects or lock contention would hit the
+                        // linear path just as hard (or worse — it holds the read
+                        // lock much longer), so propagate those directly.
+                        let is_transient = e.contains("Client disconnected")
+                            || e.contains("busy")
+                            || e.contains("timeout")
+                            || e.contains("locked");
+                        if is_transient {
+                            eprintln!(
+                                "[IPC] FTS query transient error for '{}', skipping linear fallback: {}",
+                                text,
+                                e
+                            );
+                            Err(e)
+                        } else {
+                            eprintln!(
+                                "[IPC] FTS query failed for '{}', falling back to linear scan: {}",
+                                text,
+                                e
+                            );
+                            collect_authorized_search_page(pipe, indices, &text, offset, limit)
+                        }
                     }
                 }
             } else {

@@ -10,6 +10,10 @@ use super::upsert_volume_index;
 
 const INCREMENTAL_APPLY_RETRY_ATTEMPTS: usize = 3;
 const INCREMENTAL_APPLY_RETRY_SLEEP: std::time::Duration = std::time::Duration::from_millis(35);
+/// Bounded fallback timeout for the write lock after try_write retries are
+/// exhausted.  Prevents unbounded blocking that would starve concurrent
+/// readers (search queries) via parking_lot's write-preferring fairness.
+const INCREMENTAL_WRITE_FALLBACK_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(60);
 const INCREMENTAL_CONTENTION_LOG_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
 
 struct PendingPersistSnapshot {
@@ -280,25 +284,33 @@ pub(crate) fn index_volume(
                 }
 
                 if !applied {
-                    // Fallback: blocking write to avoid silently dropping USN updates.
-                    let mut indices_lock = indices.write();
-                    if let Some(vol_index) = indices_lock
-                        .iter_mut()
-                        .find(|v| v.drive_letter == drive_letter)
-                    {
-                        let mut dummy_count = 0;
-                        usn_journal::parse_usn_records(
-                            &buffer[8..bytes_returned as usize],
-                            vol_index,
-                            &mut dummy_count,
-                            true,
-                        );
-                        vol_index.last_usn = new_usn;
-                        current_usn = new_usn;
-                        applied = true;
-                    }
-                    if !applied {
-                        contention_skipped_cycles += 1;
+                    // Bounded fallback: try_write_for avoids unbounded
+                    // blocking that would starve search readers via
+                    // parking_lot's write-preferring fairness policy.
+                    // If the lock still can't be acquired, skip this
+                    // cycle — current_usn stays unchanged so the next
+                    // iteration re-reads from the same USN position
+                    // (no data loss, at most ~2 s extra staleness).
+                    match indices.try_write_for(INCREMENTAL_WRITE_FALLBACK_TIMEOUT) {
+                        Some(mut indices_lock) => {
+                            if let Some(vol_index) = indices_lock
+                                .iter_mut()
+                                .find(|v| v.drive_letter == drive_letter)
+                            {
+                                let mut dummy_count = 0;
+                                usn_journal::parse_usn_records(
+                                    &buffer[8..bytes_returned as usize],
+                                    vol_index,
+                                    &mut dummy_count,
+                                    true,
+                                );
+                                vol_index.last_usn = new_usn;
+                                current_usn = new_usn;
+                            }
+                        }
+                        None => {
+                            contention_skipped_cycles += 1;
+                        }
                     }
                 }
             }
