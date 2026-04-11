@@ -1,3 +1,20 @@
+use std::time::Instant;
+
+#[derive(Clone)]
+pub struct PendingSeekState {
+    pub target_time: f64,
+    pub requested_at: Instant,
+}
+
+impl PendingSeekState {
+    pub fn new(target_time: f64) -> Self {
+        Self {
+            target_time,
+            requested_at: Instant::now(),
+        }
+    }
+}
+
 /// Track information for audio/subtitles.
 #[derive(Clone, Debug, Default)]
 pub struct TrackInfo {

@@ -16,6 +16,7 @@ impl MpvPreview {
             self.event_thread_running.clone(),
             self.tracks_need_query.clone(),
             self.file_loading.clone(),
+            self.pending_seek.clone(),
             ctx,
         );
 
@@ -43,6 +44,10 @@ impl MpvPreview {
             self.event_thread_running.clone(),
             self.event_thread_handle.take(),
         );
+
+        if let Ok(mut pending_seek) = self.pending_seek.write() {
+            *pending_seek = None;
+        }
 
         self.surface.destroy();
 

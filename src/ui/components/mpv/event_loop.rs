@@ -1,9 +1,12 @@
-use super::state::MpvState;
+use super::state::{MpvState, PendingSeekState};
 use eframe::egui;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::{Duration, Instant};
+
+const SEEK_SETTLE_TOLERANCE_SECS: f64 = 0.35;
+const SEEK_PENDING_TIMEOUT: Duration = Duration::from_millis(1200);
 
 /// PERF FASE 2: Starts async polling thread for offloading FFI calls from main thread
 ///
@@ -15,6 +18,7 @@ pub fn start_event_loop(
     running: Arc<AtomicBool>,
     tracks_need_query: Arc<AtomicBool>,
     file_loading: Arc<AtomicBool>,
+    pending_seek: Arc<RwLock<Option<PendingSeekState>>>,
     ctx: egui::Context,
 ) -> thread::JoinHandle<()> {
     running.store(true, Ordering::Release);
@@ -46,9 +50,31 @@ pub fn start_event_loop(
             // stale values from the old file overwriting the reset.
             if !file_loading.load(Ordering::Acquire) {
                 if let Ok(pos) = mpv.get_property::<f64>("time-pos") {
-                    if let Ok(mut s) = state.write() {
-                        s.current_time = pos;
-                        state_updated = true;
+                    let mut allow_polled_position = true;
+
+                    if let Ok(mut pending) = pending_seek.write() {
+                        if let Some(pending_seek_state) = pending.as_ref() {
+                            let seek_has_settled =
+                                (pos - pending_seek_state.target_time).abs()
+                                    <= SEEK_SETTLE_TOLERANCE_SECS;
+                            let seek_wait_expired =
+                                pending_seek_state.requested_at.elapsed() >= SEEK_PENDING_TIMEOUT;
+
+                            if seek_has_settled || seek_wait_expired {
+                                *pending = None;
+                            } else {
+                                allow_polled_position = false;
+                            }
+                        }
+                    }
+
+                    if allow_polled_position {
+                        if let Ok(mut s) = state.write() {
+                            if (s.current_time - pos).abs() > 0.001 {
+                                s.current_time = pos;
+                                state_updated = true;
+                            }
+                        }
                     }
                 }
             }

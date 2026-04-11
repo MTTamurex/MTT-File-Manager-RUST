@@ -1,8 +1,37 @@
-use super::state::{MpvState, TrackInfo};
+use super::state::{MpvState, PendingSeekState, TrackInfo};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
 const EXTERNAL_SUBTITLE_EXTENSIONS: &[&str] = &["srt", "ass", "ssa", "vtt", "sub"];
+
+fn clamp_seek_target(state: &Arc<RwLock<MpvState>>, time: f64) -> Option<f64> {
+    if !time.is_finite() {
+        return None;
+    }
+
+    let mut target_time = time.max(0.0);
+    if let Ok(s) = state.read() {
+        if s.duration > 0.0 {
+            target_time = target_time.min(s.duration);
+        }
+    }
+
+    Some(target_time)
+}
+
+fn set_pending_seek(
+    state: &Arc<RwLock<MpvState>>,
+    pending_seek: &Arc<RwLock<Option<PendingSeekState>>>,
+    target_time: f64,
+) {
+    if let Ok(mut pending) = pending_seek.write() {
+        *pending = Some(PendingSeekState::new(target_time));
+    }
+
+    if let Ok(mut s) = state.write() {
+        s.current_time = target_time;
+    }
+}
 
 /// Play commands wrapper
 pub fn play(mpv: &Option<Arc<mpv::Mpv>>) {
@@ -19,22 +48,46 @@ pub fn pause(mpv: &Option<Arc<mpv::Mpv>>) {
 }
 
 /// Seek to absolute time
-pub fn seek(mpv: &Option<Arc<mpv::Mpv>>, time: f64) {
+pub fn seek(
+    mpv: &Option<Arc<mpv::Mpv>>,
+    state: &Arc<RwLock<MpvState>>,
+    pending_seek: &Arc<RwLock<Option<PendingSeekState>>>,
+    time: f64,
+) {
+    let Some(target_time) = clamp_seek_target(state, time) else {
+        return;
+    };
+
     if let Some(m) = mpv {
-        let _ = m.set_property("time-pos", time.max(0.0));
+        let _ = m.set_property("time-pos", target_time);
     }
+
+    set_pending_seek(state, pending_seek, target_time);
 }
 
 /// Seek relative to current position
-pub fn seek_relative(mpv: &Option<Arc<mpv::Mpv>>, delta_seconds: f64) {
-    if let Some(m) = mpv {
-        if let Ok(current) = m.get_property::<f64>("time-pos") {
-            if let Ok(duration) = m.get_property::<f64>("duration") {
-                let new_time = (current + delta_seconds).clamp(0.0, duration);
-                let _ = m.set_property("time-pos", new_time);
-            }
-        }
+pub fn seek_relative(
+    mpv: &Option<Arc<mpv::Mpv>>,
+    state: &Arc<RwLock<MpvState>>,
+    pending_seek: &Arc<RwLock<Option<PendingSeekState>>>,
+    delta_seconds: f64,
+) {
+    if !delta_seconds.is_finite() {
+        return;
     }
+
+    let (current_time, duration) = match state.read() {
+        Ok(s) => (s.current_time, s.duration),
+        Err(_) => (0.0, 0.0),
+    };
+
+    let new_time = if duration > 0.0 {
+        (current_time + delta_seconds).clamp(0.0, duration)
+    } else {
+        (current_time + delta_seconds).max(0.0)
+    };
+
+    seek(mpv, state, pending_seek, new_time);
 }
 
 /// Set volume (0.0 to 1.0)

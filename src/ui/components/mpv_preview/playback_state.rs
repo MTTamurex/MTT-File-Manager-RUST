@@ -60,11 +60,11 @@ impl MpvPreview {
     }
 
     pub fn seek(&self, time: f64) {
-        mpv_playback::seek(&self.mpv, time);
+        mpv_playback::seek(&self.mpv, &self.state, &self.pending_seek, time);
     }
 
     pub fn seek_relative(&self, delta_seconds: f64) {
-        mpv_playback::seek_relative(&self.mpv, delta_seconds);
+        mpv_playback::seek_relative(&self.mpv, &self.state, &self.pending_seek, delta_seconds);
     }
 
     pub fn set_volume(&self, volume: f32) {

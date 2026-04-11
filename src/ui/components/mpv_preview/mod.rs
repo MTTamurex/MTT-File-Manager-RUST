@@ -21,7 +21,7 @@ pub use window_embed::VideoSurface;
 use crate::ui::components::mpv::event_loop as mpv_event_loop;
 use crate::ui::components::mpv::filters as mpv_filters;
 use crate::ui::components::mpv::playback as mpv_playback;
-pub use crate::ui::components::mpv::state::{MpvState, TrackInfo};
+pub use crate::ui::components::mpv::state::{MpvState, PendingSeekState, TrackInfo};
 pub use crate::ui::components::mpv::utils::format_time;
 
 const MPV_DEFAULT_CACHE_SECS: f64 = 8.0;
@@ -113,6 +113,8 @@ pub struct MpvPreview {
     tracks_need_query: Arc<AtomicBool>,
     // PERF: Gate event loop writes during file transitions
     file_loading: Arc<AtomicBool>,
+    // Prevent stale time-pos polls from briefly reverting the seek slider.
+    pending_seek: Arc<RwLock<Option<PendingSeekState>>>,
     // PERF: Async sidecar subtitle search receiver
     sidecar_rx: Option<std::sync::mpsc::Receiver<Option<PathBuf>>>,
     // PERF: Track previous interlaced state for change detection
@@ -272,6 +274,7 @@ impl MpvPreview {
             pending_external_subtitle: None,
             tracks_need_query: Arc::new(AtomicBool::new(false)),
             file_loading: Arc::new(AtomicBool::new(false)),
+            pending_seek: Arc::new(RwLock::new(None)),
             sidecar_rx: None,
             last_interlaced: None,
             surface: VideoSurface::new(),
