@@ -1,0 +1,56 @@
+use eframe::egui;
+use rust_i18n::t;
+
+const BACKENDS: &[(&str, &str)] = &[
+    ("auto", "Auto"),
+    ("dx12", "DirectX 12"),
+    ("vulkan", "Vulkan"),
+    ("gl", "OpenGL"),
+];
+
+pub fn render_backend_settings_section(
+    ui: &mut egui::Ui,
+    active_backend: &str,
+    gpu_backend_preference: &mut String,
+) -> bool {
+    let mut changed = false;
+
+    ui.label(egui::RichText::new(t!("settings.backend_title").to_string()).strong());
+    ui.add_space(4.0);
+    ui.label(t!("settings.backend_description"));
+    ui.add_space(12.0);
+
+    // Show currently active backend
+    ui.horizontal(|ui| {
+        ui.label(t!("settings.backend_active"));
+        ui.label(
+            egui::RichText::new(active_backend)
+                .strong()
+                .color(ui.visuals().hyperlink_color),
+        );
+    });
+    ui.add_space(12.0);
+
+    // Backend selector
+    ui.label(t!("settings.backend_select"));
+    ui.add_space(4.0);
+
+    for &(value, display_name) in BACKENDS {
+        let is_selected = *gpu_backend_preference == value;
+        if ui.selectable_label(is_selected, display_name).clicked() && !is_selected {
+            *gpu_backend_preference = value.to_string();
+            changed = true;
+        }
+    }
+
+    ui.add_space(12.0);
+    ui.label(
+        egui::RichText::new(t!("settings.backend_restart_warning").to_string())
+            .small()
+            .color(ui.visuals().warn_fg_color),
+    );
+    ui.add_space(8.0);
+    ui.separator();
+
+    changed
+}

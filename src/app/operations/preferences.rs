@@ -165,6 +165,9 @@ impl ImageViewerApp {
         };
         prefs.push(("theme_mode", theme_str.to_string()));
 
+        // GPU backend preference
+        prefs.push(("gpu_backend", self.gpu_backend_preference.clone()));
+
         // Save list view column widths - Regular view
         prefs.push(("list_col_name_width", self.layout.list_col_name_width.to_string()));
         prefs.push(("list_col_date_width", self.layout.list_col_date_width.to_string()));

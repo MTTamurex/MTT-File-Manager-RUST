@@ -391,6 +391,11 @@ pub struct ImageViewerApp {
     pub session_volume: f32,
     // User-selected theme (Light / Dark)
     pub theme_mode: ThemeMode,
+
+    // GPU backend: active backend name (from adapter info, read-only) and user preference
+    pub active_gpu_backend: String,
+    pub gpu_backend_preference: String,
+
     // Per-folder locked view preferences
     pub folder_locks: std::collections::HashMap<String, crate::domain::folder_lock::FolderLock>,
     pub current_folder_locked: bool,

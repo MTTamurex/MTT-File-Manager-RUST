@@ -105,6 +105,9 @@ features = [
     "Storage_Streams",
 ]
 
+[target.'cfg(windows)'.dependencies]
+wgpu = { version = "24.0", default-features = false, features = ["dx12"] }
+
 [features]
 default = ["notify-watcher"]
 notify-watcher = ["notify"]

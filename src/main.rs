@@ -73,6 +73,39 @@ fn has_stderr_console() -> bool {
     h != 0 && h != usize::MAX
 }
 
+/// Read a single user preference from the SQLite database before full app init.
+/// Used to load the GPU backend preference early (before eframe starts).
+fn read_early_preference(key: &str) -> Option<String> {
+    let db_path = dirs::data_local_dir()?
+        .join("MTT-File-Manager")
+        .join("thumbnails")
+        .join("thumbnails.db");
+    if !db_path.exists() {
+        return None;
+    }
+    let conn = rusqlite::Connection::open_with_flags(
+        &db_path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .ok()?;
+    conn.query_row(
+        "SELECT value FROM user_preferences WHERE key = ?",
+        rusqlite::params![key],
+        |row| row.get(0),
+    )
+    .ok()
+}
+
+/// Convert a stored backend preference string into wgpu::Backends flags.
+fn parse_gpu_backend_preference(pref: Option<&str>) -> eframe::wgpu::Backends {
+    match pref {
+        Some("dx12") => eframe::wgpu::Backends::DX12,
+        Some("vulkan") => eframe::wgpu::Backends::VULKAN,
+        Some("gl") => eframe::wgpu::Backends::GL,
+        _ => eframe::wgpu::Backends::PRIMARY | eframe::wgpu::Backends::GL, // "auto"
+    }
+}
+
 fn main() -> eframe::Result<()> {
     // SEC: Remove the current working directory from the default DLL search order.
     // Prevents DLL planting attacks (e.g. malicious pdfium.dll or libmpv-2.dll in CWD).
@@ -100,9 +133,10 @@ fn main() -> eframe::Result<()> {
     #[cfg(not(target_os = "windows"))]
     let default_filter = "warn,mtt_file_manager=info";
 
-    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(default_filter))
-        .format_timestamp_millis()
-        .init();
+    let mut log_builder =
+        env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(default_filter));
+    log_builder.format_timestamp_millis();
+    log_builder.init();
 
     // Standalone dedicated image viewer mode (separate process).
     let mut args = std::env::args_os();
@@ -206,6 +240,15 @@ fn main() -> eframe::Result<()> {
         viewport = viewport.with_icon(icon);
     }
 
+    // Read user's preferred GPU backend from persisted preferences (before eframe init).
+    let gpu_backend_pref = read_early_preference("gpu_backend");
+    let selected_backends = parse_gpu_backend_preference(gpu_backend_pref.as_deref());
+    log::info!(
+        "[STARTUP] GPU backend preference: {:?} -> backends: {:?}",
+        gpu_backend_pref.as_deref().unwrap_or("auto"),
+        selected_backends
+    );
+
     let options = eframe::NativeOptions {
         viewport,
         persist_window: false, // Disable eframe persistence - we control manually
@@ -215,6 +258,10 @@ fn main() -> eframe::Result<()> {
             // to the integrated GPU, causing slower texture uploads and lower
             // throughput — especially noticeable after returning from idle.
             wgpu_setup: eframe::egui_wgpu::WgpuSetup::CreateNew(eframe::egui_wgpu::WgpuSetupCreateNew {
+                instance_descriptor: eframe::wgpu::InstanceDescriptor {
+                    backends: selected_backends,
+                    ..Default::default()
+                },
                 power_preference: eframe::wgpu::PowerPreference::HighPerformance,
                 ..Default::default()
             }),

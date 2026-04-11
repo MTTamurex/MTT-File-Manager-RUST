@@ -213,6 +213,11 @@ settings:
   theme_light: "Light"
   theme_dark: "Dark"
   theme_apply_immediately: "Theme changes are applied immediately."
+  backend_title: "Graphics Backend"
+  backend_description: "Select the graphics rendering backend used by the application."
+  backend_active: "Active backend:"
+  backend_select: "Preferred backend:"
+  backend_restart_warning: "⚠ Graphics backend changes require restarting the application to take effect."
 preview:
   select_item: "Select a single item to see details"
   items_selected: "%{count} items selected"
