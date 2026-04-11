@@ -184,6 +184,10 @@ impl MpvPreview {
             // Signal event loop to query tracks when file is ready
             self.tracks_need_query.store(true, Ordering::Release);
 
+            if let Ok(mut pending_seek) = self.pending_seek.write() {
+                *pending_seek = None;
+            }
+
             // Clear stale state for new file
             if let Ok(mut state) = self.state.write() {
                 state.current_time = 0.0;
