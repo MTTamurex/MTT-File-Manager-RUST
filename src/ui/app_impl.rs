@@ -217,6 +217,8 @@ impl eframe::App for ImageViewerApp {
                 self.navigation_state.show_settings_window,
                 &mut self.navigation_state.active_settings_section,
                 &mut self.theme_mode,
+                &self.active_gpu_backend,
+                &mut self.gpu_backend_preference,
             );
             self.navigation_state.show_settings_window = output.keep_open;
             if output.theme_changed {
@@ -229,6 +231,10 @@ impl eframe::App for ImageViewerApp {
                 self.force_save_preferences();
             }
             if output.language_changed {
+                self.save_preferences();
+                self.force_save_preferences();
+            }
+            if output.backend_changed {
                 self.save_preferences();
                 self.force_save_preferences();
             }

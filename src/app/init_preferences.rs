@@ -22,6 +22,7 @@ pub(super) struct StartupPreferences {
     pub(super) show_hidden_files: bool,
     pub(super) language: String,
     pub(super) theme_mode: ThemeMode,
+    pub(super) gpu_backend_preference: String,
 }
 
 impl StartupPreferences {
@@ -159,6 +160,11 @@ impl StartupPreferences {
             })
             .unwrap_or(ThemeMode::Light);
 
+        let gpu_backend_preference = prefs
+            .get("gpu_backend")
+            .cloned()
+            .unwrap_or_else(|| "auto".to_string());
+
         Self {
             sort_mode,
             sort_mode_computer,
@@ -178,6 +184,7 @@ impl StartupPreferences {
             show_hidden_files,
             language,
             theme_mode,
+            gpu_backend_preference,
         }
     }
 }

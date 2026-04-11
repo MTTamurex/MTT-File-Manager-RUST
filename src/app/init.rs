@@ -153,6 +153,7 @@ impl ImageViewerApp {
             show_hidden_files,
             language,
             theme_mode,
+            gpu_backend_preference,
         } = startup_preferences;
 
         // Apply saved language preference
@@ -509,6 +510,9 @@ impl ImageViewerApp {
 
             theme_mode,
 
+            active_gpu_backend: String::new(), // Set after construction from render_state
+            gpu_backend_preference,
+
             folder_locks,
             current_folder_locked: false,
 
@@ -587,6 +591,7 @@ impl ImageViewerApp {
         // Log GPU adapter info to file for diagnostics (works without console).
         if let Some(render_state) = &cc.wgpu_render_state {
             let info = render_state.adapter.get_info();
+            app.active_gpu_backend = format!("{:?}", info.backend);
             let has_console = {
                 #[cfg(target_os = "windows")]
                 {

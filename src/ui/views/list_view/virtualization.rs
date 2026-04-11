@@ -43,7 +43,7 @@ pub(super) fn render_virtualized_content(
             && ui
                 .ctx()
                 .layer_id_at(pos)
-                .is_none_or(|layer| layer.order != egui::Order::Foreground)
+                .is_none_or(|layer| layer.order == egui::Order::Background)
     });
     let consume_scroll = pointer_over_viewport && !ctx.global_search_active;
     scroll::apply_scroll_input(ui, ctx.mut_scroll_offset_y, max_scroll, consume_scroll);

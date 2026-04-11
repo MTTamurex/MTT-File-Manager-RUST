@@ -272,7 +272,7 @@ pub fn render_grid_view(
             && ui
                 .ctx()
                 .layer_id_at(pos)
-                .is_none_or(|layer| layer.order != egui::Order::Foreground)
+                .is_none_or(|layer| layer.order == egui::Order::Background)
     });
     let consume_scroll = pointer_over_viewport && !ctx.global_search_active;
 
