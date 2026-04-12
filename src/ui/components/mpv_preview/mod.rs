@@ -35,7 +35,7 @@ const MPV_DOCKED_DEMUXER_MAX_BYTES: i64 = 48_i64 * 1024 * 1024;
 const MPV_DOCKED_DEMUXER_MAX_BACK_BYTES: i64 = 12_i64 * 1024 * 1024;
 const MPV_OSC_POC_ENABLED: bool = true;
 const MPV_OSC_POC_DETACHED_ONLY: bool = true;
-const MPV_OSC_POC_SCRIPT_OPTS: &str = "osc-scalewindowed=1.8,osc-scalefullscreen=2.8,osc-scaleforcedwindow=1.8,osc-idlescreen=no,osc-showonpause=no";
+const MPV_OSC_POC_BASE_SCRIPT_OPTS: &str = "osc-scalewindowed=1.8,osc-scalefullscreen=2.8,osc-scaleforcedwindow=1.8,osc-idlescreen=no,osc-showonpause=no";
 
 /// Represents the current display mode of the video player.
 #[derive(Debug, Clone, PartialEq)]
@@ -164,6 +164,8 @@ impl MpvPreview {
     fn create_mpv_instance() -> Result<mpv::Mpv, mpv::Error> {
         if MPV_OSC_POC_ENABLED {
             let config_dir = Self::resolve_mpv_ui_config_dir();
+            let osc_script_opts =
+                crate::video_player::build_mpv_osc_script_opts(MPV_OSC_POC_BASE_SCRIPT_OPTS);
             if config_dir.is_none() {
                 log::warn!(
                     "[MpvPreview] MPV UI folder not found (expected mpv_ui/portable_config with scripts/modernH.lua)"
@@ -193,10 +195,10 @@ impl MpvPreview {
                 if let Err(e) = init.set_option("cursor-autohide", 1000_i64) {
                     log::warn!("[MpvPreview] Failed to set cursor-autohide=1000: {:?}", e);
                 }
-                if let Err(e) = init.set_option("script-opts", MPV_OSC_POC_SCRIPT_OPTS) {
+                if let Err(e) = init.set_option("script-opts", osc_script_opts.as_str()) {
                     log::warn!(
                         "[MpvPreview] Failed to set script-opts={} : {:?}",
-                        MPV_OSC_POC_SCRIPT_OPTS,
+                        osc_script_opts,
                         e
                     );
                 }

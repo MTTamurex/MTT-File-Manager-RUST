@@ -3,6 +3,8 @@ local msg = require 'mp.msg'
 local opt = require 'mp.options'
 local utils = require 'mp.utils'
 
+local default_chapter_fmt = 'Chapter: %s'
+
 --
 -- Parameters
 --
@@ -46,10 +48,10 @@ local user_opts = {
     visibility = 'auto',        -- only used at init to set visibility_mode(...)
     windowcontrols = 'auto',    -- whether to show window controls
     greenandgrumpy = false,     -- disable santa hat
-    language = 'eng',		-- eng=English, chs=Chinese
+    language = 'eng',		-- eng/en=English, pt-BR/ptbr=Brazilian Portuguese, chs=Chinese
     volumecontrol = true,       -- whether to show mute button and volume slider
     keyboardnavigation = false, -- enable directional keyboard navigation
-    chapter_fmt = "Chapter: %s", -- chapter print format for seekbar-hover. "no" to disable
+    chapter_fmt = default_chapter_fmt, -- chapter print format for seekbar-hover. "no" to disable
 }
 
 -- Icons for jump button depending on jumpamount 
@@ -82,12 +84,14 @@ local icons = {
 local language = {
 	['eng'] = {
 	    welcome = '{\\fs24\\1c&H0&\\1c&HFFFFFF&}Drop files or URLs to play here.',  -- this text appears when mpv starts
+        on = 'ON',
 		off = 'OFF',
 		na = 'n/a',
 		none = 'none',
 		video = 'Video',
 		audio = 'Audio',
 		subtitle = 'Subtitle',
+        chapters = 'Chapters',
 		available = 'Available ',
 		track = ' Tracks:',
 		playlist = 'Playlist',
@@ -96,15 +100,64 @@ local language = {
 		nochapter = 'No chapters.',
 		open_subtitle = 'Open subtitle file',
 		open_subtitle_short = 'SUB+',
+        no_audio_tracks = '(No audio tracks)',
+        no_subtitle_tracks = '(No subtitle tracks)',
+        no_chapters = '(No chapters)',
+        track_fallback = 'Track %d',
+        chapter_fallback = 'Chapter %d',
+        items_label = '%d items',
+        menu_playlist = 'PLAYLIST',
+        menu_audio_tracks = 'AUDIO TRACKS',
+        menu_subtitles = 'SUBTITLES',
+        menu_chapters = 'CHAPTERS',
+        rtx_vsr = 'RTX VSR',
+        rtx_hdr = 'RTX HDR',
+        normalizer = 'Normalizer',
+        chapter_title_fmt = 'Chapter: %s',
+    },
+    ['pt-BR'] = {
+        welcome = '{\\fs24\\1c&H0&\\1c&HFFFFFF&}Solte arquivos ou URLs aqui para reproduzir.',
+        on = 'Ligado',
+        off = 'Desligado',
+        na = 'n/d',
+        none = 'nenhuma',
+        video = 'Vídeo',
+        audio = 'Áudio',
+        subtitle = 'Legenda',
+        chapters = 'Capítulos',
+        available = 'Faixas de ',
+        track = ' disponíveis:',
+        playlist = 'Playlist',
+        nolist = 'Playlist vazia.',
+        chapter = 'Capítulo',
+        nochapter = 'Sem capítulos.',
+        open_subtitle = 'Abrir arquivo de legenda',
+        open_subtitle_short = 'LEG+',
+        no_audio_tracks = '(Sem faixas de áudio)',
+        no_subtitle_tracks = '(Sem faixas de legenda)',
+        no_chapters = '(Sem capítulos)',
+        track_fallback = 'Faixa %d',
+        chapter_fallback = 'Capítulo %d',
+        items_label = '%d itens',
+        menu_playlist = 'LISTA DE REPRODUÇÃO',
+        menu_audio_tracks = 'FAIXAS DE ÁUDIO',
+        menu_subtitles = 'LEGENDAS',
+        menu_chapters = 'CAPÍTULOS',
+        rtx_vsr = 'RTX VSR',
+        rtx_hdr = 'RTX HDR',
+        normalizer = 'Normalizador',
+        chapter_title_fmt = 'Capítulo: %s',
 	},
 	['chs'] = {
 		welcome = '{\\1c&H00\\bord0\\fs30\\fn微软雅黑 light\\fscx125}MPV{\\fscx100} 播放器',  -- this text appears when mpv starts
+        on = '开启',
 		off = '关闭',
 		na = 'n/a',
 		none = '无',
 		video = '视频',
 		audio = '音频',
 		subtitle = '字幕',
+        chapters = '章节',
 		available = '可选',
 		track = '：',
 		playlist = '播放列表',
@@ -113,15 +166,31 @@ local language = {
 		nochapter = '无章节信息',
 		open_subtitle = '打开字幕文件',
 		open_subtitle_short = '字+',
+        no_audio_tracks = '(无音轨)',
+        no_subtitle_tracks = '(无字幕轨)',
+        no_chapters = '(无章节)',
+        track_fallback = '轨道 %d',
+        chapter_fallback = '章节 %d',
+        items_label = '%d 项',
+        menu_playlist = '播放列表',
+        menu_audio_tracks = '音轨',
+        menu_subtitles = '字幕',
+        menu_chapters = '章节',
+        rtx_vsr = 'RTX VSR',
+        rtx_hdr = 'RTX HDR',
+        normalizer = '响度均衡',
+        chapter_title_fmt = '章节: %s',
 	},
 	['pl'] = {
 	    welcome = '{\\fs24\\1c&H0&\\1c&HFFFFFF&}Upuść plik lub łącze URL do odtworzenia.',  -- this text appears when mpv starts
+        on = 'WŁ.',
 		off = 'WYŁ.',
 		na = 'n/a',
 		none = 'nic',
 		video = 'Wideo',
 		audio = 'Ścieżka audio',
 		subtitle = 'Napisy',
+        chapters = 'Rozdziały',
 		available = 'Dostępne ',
 		track = ' Ścieżki:',
 		playlist = 'Lista odtwarzania',
@@ -130,12 +199,43 @@ local language = {
 		nochapter = 'Brak rozdziałów.',
 		open_subtitle = 'Otwórz plik napisów',
 		open_subtitle_short = 'NAP+',
+        no_audio_tracks = '(Brak ścieżek audio)',
+        no_subtitle_tracks = '(Brak napisów)',
+        no_chapters = '(Brak rozdziałów)',
+        track_fallback = 'Ścieżka %d',
+        chapter_fallback = 'Rozdział %d',
+        items_label = '%d pozycji',
+        menu_playlist = 'LISTA ODTWARZANIA',
+        menu_audio_tracks = 'ŚCIEŻKI AUDIO',
+        menu_subtitles = 'NAPISY',
+        menu_chapters = 'ROZDZIAŁY',
+        rtx_vsr = 'RTX VSR',
+        rtx_hdr = 'RTX HDR',
+        normalizer = 'Normalizator',
+        chapter_title_fmt = 'Rozdział: %s',
 	}
 }
+local language_alias = {
+    ['en'] = 'eng',
+    ['eng'] = 'eng',
+    ['pt'] = 'pt-BR',
+    ['pt-BR'] = 'pt-BR',
+    ['ptbr'] = 'pt-BR',
+    ['chs'] = 'chs',
+    ['zh-CN'] = 'chs',
+    ['pl'] = 'pl',
+}
+
+local function resolve_language(code)
+    return language[language_alias[code] or code] or language['eng']
+end
 -- read options from config and command-line
 opt.read_options(user_opts, 'osc', function(list) update_options(list) end)
 -- apply lang opts
-local texts = language[user_opts.language]
+local texts = resolve_language(user_opts.language)
+if user_opts.chapter_fmt == default_chapter_fmt then
+    user_opts.chapter_fmt = texts.chapter_title_fmt
+end
 local osc_param = { -- calculated by osc_init()
     playresy = 0,                           -- canvas size Y
     playresx = 0,                           -- canvas size X
@@ -1138,7 +1238,7 @@ function menu_get_items()
         end
     elseif state.menu_active == 'audio' then
         if #tracks_osc.audio == 0 then
-            items[1] = {label = '(No audio tracks)', current = false, index = 0}
+            items[1] = {label = texts.no_audio_tracks, current = false, index = 0}
         else
             for i, track in ipairs(tracks_osc.audio) do
                 local lang = track.lang or 'und'
@@ -1164,7 +1264,7 @@ function menu_get_items()
                     local extra = ''
                     if ch   then extra = extra .. '  ' .. ch .. 'ch' end
                     if rate then extra = extra .. '  ' .. math.floor(rate/1000) .. ' kHz' end
-                    label = string.format('[%s]  %s%s', lang, codec ~= '' and codec or ('Track '..i), extra)
+                    label = string.format('[%s]  %s%s', lang, codec ~= '' and codec or string.format(texts.track_fallback, i), extra)
                 end
                 local is_cur = (track.id == tonumber(mp.get_property('aid', '0')))
                 items[i] = {label = label, sublabel = sublabel, current = is_cur, index = i, track_id = track.id}
@@ -1174,14 +1274,14 @@ function menu_get_items()
         -- First item: Off
         local sid_val = mp.get_property('sid')
         local sub_off = (sid_val == 'no' or sid_val == nil)
-        items[1] = {label = 'Off', current = sub_off, index = 0, track_id = 'no'}
+        items[1] = {label = texts.off, current = sub_off, index = 0, track_id = 'no'}
         if #tracks_osc.sub == 0 then
-            items[2] = {label = '(No subtitle tracks)', current = false, index = 0}
+            items[2] = {label = texts.no_subtitle_tracks, current = false, index = 0}
         else
             for i, track in ipairs(tracks_osc.sub) do
                 local lang = track.lang or 'und'
                 local title = track.title or ''
-                local raw_sub_title = title ~= '' and title or 'Track ' .. i
+                local raw_sub_title = title ~= '' and title or string.format(texts.track_fallback, i)
                 local clean_sub_title = raw_sub_title:gsub('~', ''):gsub('%s*/+%s*', ' • ')
                 local label = string.format('[%s]  %s', lang, clean_sub_title)
                 local cur_sid = tonumber(sid_val)
@@ -1193,10 +1293,10 @@ function menu_get_items()
         local chapters = mp.get_property_native('chapter-list', {})
         local cur_ch = mp.get_property_number('chapter', -1)
         if #chapters == 0 then
-            items[1] = {label = '(No chapters)', current = false, index = 0}
+            items[1] = {label = texts.no_chapters, current = false, index = 0}
         else
             for i, ch in ipairs(chapters) do
-                local title = ch.title or ('Chapter ' .. i)
+                local title = ch.title or string.format(texts.chapter_fallback, i)
                 local time  = mp.format_time(ch.time)
                 local label = string.format('[%s]  %s', time, title)
                 items[i] = {label = label, current = (i - 1 == cur_ch), index = i - 1}
@@ -1362,7 +1462,12 @@ function render_overlay_menu(ass)
     ass:draw_stop()
 
     -- ── Header ────────────────────────────────────────────────────────────────
-    local titles = {playlist='PLAYLIST', audio='AUDIO TRACKS', sub='SUBTITLES', chapters='CHAPTERS'}
+    local titles = {
+        playlist = texts.menu_playlist,
+        audio = texts.menu_audio_tracks,
+        sub = texts.menu_subtitles,
+        chapters = texts.menu_chapters,
+    }
     ass:new_event()
     ass:pos(x0 + menu_w / 2, y0 + header_h / 2)
     ass:an(5)
@@ -1374,7 +1479,7 @@ function render_overlay_menu(ass)
     ass:pos(x0 + menu_w - 18, y0 + header_h / 2)
     ass:an(6)
     ass:append(string.format('{\\bord0\\blur0\\1c&H666666&\\1a&H00&\\fs12\\fn%s\\q2}', font))
-    ass:append(string.format('%d items', total))
+    ass:append(string.format(texts.items_label, total))
 
     -- header bottom separator
     ass:new_event() ass:pos(x0, y0 + header_h) ass:an(7)
@@ -2229,7 +2334,7 @@ function osc_init()
     ne.content = icons.playlist
     ne.visible = (osc_param.playresx >= 540)
     ne.tooltip_style = osc_styles.Tooltip
-    ne.tooltipF = 'Playlist'
+    ne.tooltipF = texts.playlist
     ne.eventresponder['mbtn_left_up'] =
         function ()
             if state.menu_active == 'playlist' then
@@ -2253,7 +2358,7 @@ function osc_init()
     ne.tooltip_style = osc_styles.Tooltip
     ne.tooltipF = function ()
         local on = mp.get_property_bool('user-data/vsr/vsr-enabled', false)
-        return 'RTX VSR: ' .. (on and 'ON' or 'OFF')
+        return texts.rtx_vsr .. ': ' .. (on and texts.on or texts.off)
     end
     ne.content = function ()
         local on = mp.get_property_bool('user-data/vsr/vsr-enabled', false)
@@ -2272,7 +2377,7 @@ function osc_init()
     ne.tooltip_style = osc_styles.Tooltip
     ne.tooltipF = function ()
         local on = mp.get_property_bool('user-data/vsr/hdr-enabled', false)
-        return 'RTX HDR: ' .. (on and 'ON' or 'OFF')
+        return texts.rtx_hdr .. ': ' .. (on and texts.on or texts.off)
     end
     ne.content = function ()
         local on = mp.get_property_bool('user-data/vsr/hdr-enabled', false)
@@ -2305,7 +2410,7 @@ function osc_init()
     ne.tooltipF = function ()
         local af = mp.get_property('af', '')
         local on = af:find('dynaudnorm') ~= nil
-        return 'Normalizer: ' .. (on and 'ON' or 'OFF')
+        return texts.normalizer .. ': ' .. (on and texts.on or texts.off)
     end
     ne.content = function ()
         local af = mp.get_property('af', '')
@@ -2324,7 +2429,7 @@ function osc_init()
     ne.content = icons.pip
     ne.visible = (osc_param.playresx >= 600)
     ne.tooltip_style = osc_styles.Tooltip
-    ne.tooltipF = 'Chapters'
+    ne.tooltipF = texts.chapters
     ne.eventresponder['mbtn_left_up'] =
         function ()
             if state.menu_active == 'chapters' then

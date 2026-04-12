@@ -12,12 +12,37 @@ use std::process::{Child, Command};
 
 use rfd::FileDialog;
 
-/// OSC script-opts for the standalone player.
-const STANDALONE_OSC_SCRIPT_OPTS: &str =
+/// Base OSC script-opts for the standalone player.
+const STANDALONE_OSC_BASE_SCRIPT_OPTS: &str =
     "osc-scalewindowed=1,osc-scalefullscreen=1,osc-scaleforcedwindow=1,osc-windowcontrols=yes";
 
 /// Maximum file size for the video player (50 GB).
 const MAX_VIDEO_FILE_SIZE: u64 = 50 * 1024 * 1024 * 1024;
+
+fn apply_saved_locale() {
+    let cache_dir = dirs::data_local_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("MTT-File-Manager")
+        .join("thumbnails");
+
+    if let Ok(cache) = crate::infrastructure::disk_cache::ThumbnailDiskCache::new(cache_dir) {
+        if let Some(language) = cache.get_preference("language") {
+            rust_i18n::set_locale(&language);
+        }
+    }
+}
+
+pub(crate) fn current_mpv_osc_language() -> &'static str {
+    match &*rust_i18n::locale() {
+        "pt-BR" | "pt" | "ptbr" => "pt-BR",
+        "en" | "eng" | "en-US" => "en",
+        _ => "en",
+    }
+}
+
+pub(crate) fn build_mpv_osc_script_opts(base_opts: &str) -> String {
+    format!("{base_opts},osc-language={}", current_mpv_osc_language())
+}
 
 /// SEC: Validate the video/audio path before opening. Blocks null bytes, path traversal,
 /// UNC/network paths, non-media extensions, and oversized files.
@@ -396,6 +421,8 @@ unsafe extern "system" fn enum_set_icon(
 /// Creates a native mpv window (borderless) with the custom OSC providing
 /// window controls (close, minimize, maximize). No eframe wrapper needed.
 pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Result<()> {
+    apply_saved_locale();
+
     // SEC: Validate again in child process (defense in depth).
     if let Err(e) = validate_video_path(&path) {
         log::error!("[VIDEO-PLAYER] path validation failed in standalone: {}", e);
@@ -418,6 +445,8 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
             "[VIDEO-PLAYER] mpv_ui/portable_config not found (with scripts/modernH.lua + scripts/vsr.lua); OSC/VSR may not load"
         );
     }
+
+    let osc_script_opts = build_mpv_osc_script_opts(STANDALONE_OSC_BASE_SCRIPT_OPTS);
 
     // Create mpv with initializer options (set before mpv_initialize).
     let mpv = mpv::Mpv::with_initializer(|init| {
@@ -453,7 +482,7 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
         if let Err(e) = init.set_option("cursor-autohide", 1000_i64) {
             log::warn!("[VIDEO-PLAYER] Failed to set cursor-autohide: {:?}", e);
         }
-        if let Err(e) = init.set_option("script-opts", STANDALONE_OSC_SCRIPT_OPTS) {
+        if let Err(e) = init.set_option("script-opts", osc_script_opts.as_str()) {
             log::warn!("[VIDEO-PLAYER] Failed to set script-opts: {:?}", e);
         }
 
