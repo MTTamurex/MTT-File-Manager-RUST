@@ -246,6 +246,13 @@ pub struct ListViewContext<'a> {
     pub live_file_size_loading: &'a mut FxHashSet<PathBuf>,
     pub live_file_size_req_sender:
         &'a std::sync::mpsc::Sender<crate::app::live_file_size::LiveFileSizeRequest>,
+    // ── Folder size for list-view directories ──
+    /// Read-only peek into the batch folder-size cache.
+    pub folder_size_cache: &'a lru::LruCache<PathBuf, u64>,
+    /// Paths already sent to the batch worker.
+    pub folder_size_batch_loading: &'a FxHashSet<PathBuf>,
+    /// Output: visible folder paths whose size is not yet cached.
+    pub folder_size_requests: &'a mut Vec<PathBuf>,
     // Resizable column widths
     pub col_name_width: &'a mut f32,
     pub col_date_width: &'a mut f32,

@@ -22,7 +22,8 @@ use super::init_preferences::StartupPreferences;
 use super::init_workers::{
     spawn_async_font_loader, spawn_consistency_probe_worker, spawn_cover_worker,
     spawn_disk_cache_invalidation_worker, spawn_file_operation_worker,
-    spawn_folder_preview_workers, spawn_folder_size_worker, spawn_global_search_worker,
+    spawn_folder_preview_workers, spawn_folder_size_worker, spawn_folder_size_batch_worker,
+    spawn_global_search_worker,
     spawn_icon_worker, spawn_live_file_size_worker, spawn_metadata_worker,
     spawn_prefetching_workers, PrefetchWorkerHandles,
 };
@@ -70,6 +71,9 @@ pub(in crate::app) struct AppBootstrap {
     pub(in crate::app) folder_size_req_tx: mpsc::Sender<PathBuf>,
     pub(in crate::app) folder_size_res_rx: mpsc::Receiver<FolderSizeMessage>,
     pub(in crate::app) folder_size_cancel: Arc<AtomicBool>,
+    pub(in crate::app) batch_size_tx: mpsc::Sender<PathBuf>,
+    pub(in crate::app) batch_size_rx: mpsc::Receiver<FolderSizeMessage>,
+    pub(in crate::app) batch_size_cancel: Arc<AtomicBool>,
 
     pub(in crate::app) prefetch_tx: mpsc::Sender<crate::workers::prefetch_worker::PrefetchMessage>,
     pub(in crate::app) idle_warmup_tx: mpsc::Sender<crate::workers::idle_warmup::IdleWarmupMessage>,
@@ -239,6 +243,7 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
         spawn_folder_preview_workers(ctx, disk_cache.clone(), folder_composer);
     let (folder_size_req_tx, folder_size_res_rx, folder_size_cancel) =
         spawn_folder_size_worker(ctx);
+    let (batch_size_tx, batch_size_rx, batch_size_cancel) = spawn_folder_size_batch_worker(ctx);
 
     let PrefetchWorkerHandles {
         prefetch_sender: prefetch_tx,
@@ -294,6 +299,9 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
         folder_size_req_tx,
         folder_size_res_rx,
         folder_size_cancel,
+        batch_size_tx,
+        batch_size_rx,
+        batch_size_cancel,
         prefetch_tx,
         idle_warmup_tx,
         file_op_tx,

@@ -2,7 +2,7 @@ use crate::app::folder_size_state::FolderSizeMessage;
 use crate::infrastructure::disk_cache::ThumbnailDiskCache;
 use eframe::egui;
 use std::path::PathBuf;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
 
 /// Payload for the disk-cache invalidation channel.
@@ -224,6 +224,95 @@ pub(in crate::app) fn spawn_folder_size_worker(
     });
 
     (folder_size_req_tx, folder_size_res_rx, folder_size_cancel)
+}
+
+/// Spawns a batch worker for list-view folder sizes.
+///
+/// Uses the NTFS IPC fast path when available (~0 ms), falling back to
+/// `FindFirstFileExW` for non-NTFS or when the search service is unavailable.
+/// The shared `cancel` flag is checked between items and passed through to
+/// `calculate_folder_size_parallel` so in-flight slow scans abort promptly
+/// on navigation.
+pub(in crate::app) fn spawn_folder_size_batch_worker(
+    ctx: &egui::Context,
+) -> (
+    mpsc::Sender<PathBuf>,
+    mpsc::Receiver<FolderSizeMessage>,
+    Arc<AtomicBool>,
+) {
+    let (batch_tx, batch_rx) = mpsc::channel::<PathBuf>();
+    let (res_tx, res_rx) = mpsc::channel::<FolderSizeMessage>();
+    let ctx = ctx.clone();
+    let cancel = Arc::new(AtomicBool::new(false));
+    let cancel_worker = Arc::clone(&cancel);
+
+    std::thread::Builder::new()
+        .name("folder-size-batch".into())
+        .spawn(move || {
+            while let Ok(path) = batch_rx.recv() {
+                // Skip stale requests after a navigation cancel.
+                if cancel_worker.load(Ordering::Acquire) {
+                    continue;
+                }
+
+                // Skip empty sentinel paths (sent during cancel drain).
+                if path.as_os_str().is_empty() {
+                    continue;
+                }
+
+                // Fast path: NTFS IPC (in-memory, instant).
+                if is_ntfs_volume(&path) {
+                    if let Ok((total_size, _file_count)) =
+                        crate::infrastructure::global_search::folder_size(&path)
+                    {
+                        let _ = res_tx.send(FolderSizeMessage::Complete {
+                            folder_path: path,
+                            total_size,
+                        });
+                        ctx.request_repaint();
+                        continue;
+                    }
+                    // IPC failed — fall through to filesystem scan.
+                }
+
+                // Re-check cancel before starting a potentially slow scan.
+                if cancel_worker.load(Ordering::Acquire) {
+                    continue;
+                }
+
+                // Slow path: FindFirstFileExW parallel scan.
+                let is_ssd = crate::infrastructure::io_priority::is_ssd(&path);
+                let priority = if is_ssd {
+                    crate::infrastructure::io_priority::IOPriority::Prefetch
+                } else {
+                    crate::infrastructure::io_priority::IOPriority::Background
+                };
+                crate::infrastructure::io_priority::set_thread_priority(priority);
+
+                let result =
+                    crate::infrastructure::windows::folder_size::calculate_folder_size_parallel(
+                        &path,
+                        &cancel_worker,
+                        |_partial| { /* no progress needed for list view */ },
+                    );
+
+                // Only send if scan completed (not cancelled).
+                if !cancel_worker.load(Ordering::Acquire) {
+                    if let Some(total_size) = result {
+                        let _ = res_tx.send(FolderSizeMessage::Complete {
+                            folder_path: path,
+                            total_size,
+                        });
+                        ctx.request_repaint();
+                    }
+                }
+
+                crate::infrastructure::io_priority::reset_thread_priority();
+            }
+        })
+        .expect("failed to spawn folder-size-batch worker");
+
+    (batch_tx, res_rx, cancel)
 }
 
 /// Check if a path resides on an NTFS filesystem.

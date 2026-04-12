@@ -258,6 +258,8 @@ impl ImageViewerApp {
                 )
             };
 
+        let mut folder_size_requests: Vec<PathBuf> = Vec::new();
+
         let mut ctx = ListViewContext {
             items: &items,
             selected_item,
@@ -301,6 +303,9 @@ impl ImageViewerApp {
             live_file_size_cache: &mut self.live_file_size_cache,
             live_file_size_loading: &mut self.live_file_size_loading,
             live_file_size_req_sender: &self.live_file_size_req_sender,
+            folder_size_cache: &self.folder_size_state.batch_cache,
+            folder_size_batch_loading: &self.folder_size_state.batch_loading,
+            folder_size_requests: &mut folder_size_requests,
             col_name_width,
             col_date_width,
             col_type_width,
@@ -321,12 +326,27 @@ impl ImageViewerApp {
 
         let t_after_core_render = Instant::now();
 
-        // Update state from context
-        self.sort_mode = ctx.sort_mode;
-        self.sort_descending = ctx.sort_descending;
-        self.renaming_state = ctx.renaming_state;
+        // Extract values from context before dropping it (releases borrows on self).
+        let sort_mode = ctx.sort_mode;
+        let sort_descending = ctx.sort_descending;
+        let renaming_state = ctx.renaming_state.take();
+        drop(ctx);
+
+        // Update state
+        self.sort_mode = sort_mode;
+        self.sort_descending = sort_descending;
+        self.renaming_state = renaming_state;
         // Always consume focus_rename after one frame (cursor selection applied once)
         self.focus_rename = false;
+
+        // ── Send batch folder-size requests (capped per frame) ──
+        {
+            const MAX_BATCH_REQUESTS_PER_FRAME: usize = 30;
+            for path in folder_size_requests.into_iter().take(MAX_BATCH_REQUESTS_PER_FRAME) {
+                self.folder_size_state.batch_loading.insert(path.clone());
+                let _ = self.folder_size_state.batch_req_sender.send(path);
+            }
+        }
 
         // Process actions (blocked during renaming)
         let is_renaming = self.renaming_state.is_some();
