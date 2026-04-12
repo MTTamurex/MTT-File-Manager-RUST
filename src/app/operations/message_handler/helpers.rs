@@ -313,6 +313,19 @@ impl ImageViewerApp {
         let folder_path = folder.to_path_buf();
         let was_loading = self.folder_size_state.loading.remove(&folder_path);
         self.folder_size_state.cache.pop(&folder_path);
+        // Also clear the batch (list-view) cache so the next render re-fetches.
+        self.folder_size_state.batch_cache.pop(&folder_path);
+        self.folder_size_state.batch_loading.remove(&folder_path);
+
+        // Schedule a deferred re-invalidation to handle the timing race with
+        // the search service's USN journal polling (2 s interval).  If the
+        // batch worker re-fetches before the service processes the deletion,
+        // it will permanently cache a stale value.  The re-invalidation
+        // clears it so the next render gets the updated size.
+        self.folder_size_state.pending_revalidation.insert(
+            folder_path,
+            std::time::Instant::now() + std::time::Duration::from_secs(3),
+        );
 
         if was_loading {
             self.folder_size_state.cancel.store(true, Ordering::Release);

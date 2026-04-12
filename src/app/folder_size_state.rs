@@ -1,9 +1,11 @@
 use crate::ui::cache::FxHashSet;
 use lru::LruCache;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
+use std::time::Instant;
 
 #[derive(Debug, Clone)]
 pub enum FolderSizeMessage {
@@ -40,6 +42,13 @@ pub struct FolderSizeState {
     pub batch_loading: FxHashSet<PathBuf>,
     /// Dedicated LRU cache for list-view folder sizes (larger capacity).
     pub batch_cache: LruCache<PathBuf, u64>,
+    /// Paths scheduled for deferred re-invalidation.
+    ///
+    /// Handles the race condition where the search service's 2 s USN journal
+    /// polling hasn't processed a file change before the client re-fetches
+    /// the folder size, causing stale data to be permanently re-cached.
+    /// Value = deadline after which the entry should be re-cleared.
+    pub pending_revalidation: HashMap<PathBuf, Instant>,
 }
 
 impl FolderSizeState {
@@ -62,7 +71,11 @@ impl FolderSizeState {
         //    aren't incorrectly blocked.
         self.batch_loading.clear();
 
-        // 5. Re-enable the worker for the next folder.
+        // 5. Drop pending revalidations from the previous folder so they
+        //    don't fire and clear batch_cache entries in the new folder.
+        self.pending_revalidation.clear();
+
+        // 6. Re-enable the worker for the next folder.
         self.batch_cancel.store(false, Ordering::Release);
     }
 }
