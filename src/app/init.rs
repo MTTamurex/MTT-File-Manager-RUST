@@ -117,6 +117,7 @@ impl ImageViewerApp {
             batch_size_tx,
             batch_size_rx,
             batch_size_cancel,
+            batch_size_generation,
             prefetch_tx,
             idle_warmup_tx,
             file_op_tx,
@@ -470,6 +471,7 @@ impl ImageViewerApp {
                 batch_size_tx,
                 batch_size_rx,
                 batch_size_cancel,
+                batch_size_generation,
             ),
 
             // RECYCLE BIN CACHE

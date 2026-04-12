@@ -83,9 +83,9 @@ pub fn drive_supports_volume_label_rename(drive_type: DriveType) -> bool {
 }
 
 pub fn is_valid_volume_label(new_label: &str) -> bool {
-    // SEC: NTFS allows up to 32 characters; FAT32 up to 11.
+    // SEC: NTFS allows up to 32 UTF-16 code units; FAT32 up to 11.
     // Cap at 32 (the more permissive limit) for defense-in-depth.
-    new_label.len() <= 32
+    new_label.encode_utf16().count() <= 32
         && !new_label.contains('\0')
         && !new_label.contains('\\')
         && !new_label.contains('/')

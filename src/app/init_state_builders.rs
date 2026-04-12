@@ -4,7 +4,7 @@ use crate::ui::cache::FxHashSet;
 use lru::LruCache;
 use std::num::NonZeroUsize;
 use std::path::PathBuf;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{mpsc, Arc};
 
 use super::drive_state::DriveState;
@@ -106,9 +106,10 @@ pub(in crate::app) fn build_folder_size_state(
     req_sender: mpsc::Sender<PathBuf>,
     res_receiver: mpsc::Receiver<FolderSizeMessage>,
     cancel: Arc<AtomicBool>,
-    batch_req_sender: mpsc::Sender<PathBuf>,
+    batch_req_sender: mpsc::Sender<(PathBuf, u64)>,
     batch_res_receiver: mpsc::Receiver<FolderSizeMessage>,
     batch_cancel: Arc<AtomicBool>,
+    batch_generation: Arc<AtomicU64>,
 ) -> FolderSizeState {
     FolderSizeState {
         req_sender,
@@ -121,6 +122,7 @@ pub(in crate::app) fn build_folder_size_state(
         batch_req_sender,
         batch_res_receiver,
         batch_cancel,
+        batch_generation,
         batch_loading: FxHashSet::default(),
         batch_cache: LruCache::new(
             NonZeroUsize::new(2000).expect("folder_size_batch cache size must be non-zero"),

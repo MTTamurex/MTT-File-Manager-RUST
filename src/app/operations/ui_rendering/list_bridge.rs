@@ -342,9 +342,10 @@ impl ImageViewerApp {
         // ── Send batch folder-size requests (capped per frame) ──
         {
             const MAX_BATCH_REQUESTS_PER_FRAME: usize = 30;
+            let gen = self.folder_size_state.batch_generation.load(std::sync::atomic::Ordering::Acquire);
             for path in folder_size_requests.into_iter().take(MAX_BATCH_REQUESTS_PER_FRAME) {
                 self.folder_size_state.batch_loading.insert(path.clone());
-                let _ = self.folder_size_state.batch_req_sender.send(path);
+                let _ = self.folder_size_state.batch_req_sender.send((path, gen));
             }
         }
 

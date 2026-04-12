@@ -2,7 +2,7 @@ use crate::app::folder_size_state::FolderSizeMessage;
 use crate::infrastructure::disk_cache::ThumbnailDiskCache;
 use eframe::egui;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc};
 
 /// Payload for the disk-cache invalidation channel.
@@ -232,24 +232,33 @@ pub(in crate::app) fn spawn_folder_size_worker(
 /// `FindFirstFileExW` for non-NTFS or when the search service is unavailable.
 /// The shared `cancel` flag is checked between items and passed through to
 /// `calculate_folder_size_parallel` so in-flight slow scans abort promptly
-/// on navigation.
+/// on navigation. A generation counter invalidates queued requests from
+/// previous folders.
 pub(in crate::app) fn spawn_folder_size_batch_worker(
     ctx: &egui::Context,
 ) -> (
-    mpsc::Sender<PathBuf>,
+    mpsc::Sender<(PathBuf, u64)>,
     mpsc::Receiver<FolderSizeMessage>,
     Arc<AtomicBool>,
+    Arc<AtomicU64>,
 ) {
-    let (batch_tx, batch_rx) = mpsc::channel::<PathBuf>();
+    let (batch_tx, batch_rx) = mpsc::channel::<(PathBuf, u64)>();
     let (res_tx, res_rx) = mpsc::channel::<FolderSizeMessage>();
     let ctx = ctx.clone();
     let cancel = Arc::new(AtomicBool::new(false));
     let cancel_worker = Arc::clone(&cancel);
+    let generation = Arc::new(AtomicU64::new(0));
+    let generation_worker = Arc::clone(&generation);
 
     std::thread::Builder::new()
         .name("folder-size-batch".into())
         .spawn(move || {
-            while let Ok(path) = batch_rx.recv() {
+            while let Ok((path, req_gen)) = batch_rx.recv() {
+                // Skip stale requests from a previous generation (previous folder).
+                if req_gen != generation_worker.load(Ordering::Acquire) {
+                    continue;
+                }
+
                 // Skip stale requests after a navigation cancel.
                 if cancel_worker.load(Ordering::Acquire) {
                     continue;
@@ -275,8 +284,10 @@ pub(in crate::app) fn spawn_folder_size_batch_worker(
                     // IPC failed — fall through to filesystem scan.
                 }
 
-                // Re-check cancel before starting a potentially slow scan.
-                if cancel_worker.load(Ordering::Acquire) {
+                // Re-check cancel/generation before starting a potentially slow scan.
+                if cancel_worker.load(Ordering::Acquire)
+                    || req_gen != generation_worker.load(Ordering::Acquire)
+                {
                     continue;
                 }
 
@@ -312,7 +323,7 @@ pub(in crate::app) fn spawn_folder_size_batch_worker(
         })
         .expect("failed to spawn folder-size-batch worker");
 
-    (batch_tx, res_rx, cancel)
+    (batch_tx, res_rx, cancel, generation)
 }
 
 /// Check if a path resides on an NTFS filesystem.
