@@ -189,9 +189,14 @@ fn create_pipe() -> Result<HANDLE, String> {
             bInheritHandle: false.into(),
         };
 
+        // SEC: FILE_FLAG_FIRST_PIPE_INSTANCE (0x00080000) prevents pipe squatting
+        // by failing if a pipe with this name already exists from a rogue process.
+        // PIPE_ACCESS_DUPLEX = 0x00000003.
+        const PIPE_OPEN_MODE: u32 = 0x00000003 | 0x00080000;
+
         let pipe = CreateNamedPipeW(
             PCWSTR(pipe_name_wide.as_ptr()),
-            windows::Win32::Storage::FileSystem::FILE_FLAGS_AND_ATTRIBUTES(0x00000003),
+            windows::Win32::Storage::FileSystem::FILE_FLAGS_AND_ATTRIBUTES(PIPE_OPEN_MODE),
             PIPE_TYPE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
             MAX_PIPE_INSTANCES,
             PIPE_BUFFER_SIZE,
