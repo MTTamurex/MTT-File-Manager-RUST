@@ -196,37 +196,27 @@ fn worker_loop(
 
                     let page_idx = req.page_idx;
 
-                    // Render page bitmap with timeout protection.
-                    // Spawns an isolated thread with its own pdfium document
-                    // handle so a pathological page can never hang this worker
-                    // (the persistent handle is kept for fast text extraction).
-                    let path_clone = path.clone();
-                    let render_result = super::renderer::with_timeout(
-                        std::time::Duration::from_secs(15),
-                        move || {
-                            let pdfium = super::renderer::pdfium()
-                                .map_err(|e| format!("PdfiumInit: {e}"))?;
-                            let doc = pdfium
-                                .load_pdf_from_file(&path_clone, None)
-                                .map_err(|e| format!("LoadPdf: {e}"))?;
-                            let page = doc
-                                .pages()
-                                .get(page_idx as pdfium_render::prelude::PdfPageIndex)
-                                .map_err(|e| e.to_string())?;
-                            let bitmap = page
-                                .render(
-                                    req.width as pdfium_render::prelude::Pixels,
-                                    req.height as pdfium_render::prelude::Pixels,
-                                    None,
-                                )
-                                .map_err(|e| format!("RenderPage: {e}"))?;
-                            Ok(super::renderer::RenderedPage {
-                                width: bitmap.width() as u32,
-                                height: bitmap.height() as u32,
-                                pixels: bitmap.as_rgba_bytes(),
-                            })
-                        },
-                    );
+                    // Render page bitmap.
+                    let render_result = (|| -> Result<super::renderer::RenderedPage, String> {
+                        let page = document
+                            .pages()
+                            .get(page_idx as pdfium_render::prelude::PdfPageIndex)
+                            .map_err(|e| e.to_string())?;
+
+                        let bitmap = page
+                            .render(
+                                req.width as pdfium_render::prelude::Pixels,
+                                req.height as pdfium_render::prelude::Pixels,
+                                None,
+                            )
+                            .map_err(|e| format!("RenderPage: {e}"))?;
+
+                        Ok(super::renderer::RenderedPage {
+                            width: bitmap.width() as u32,
+                            height: bitmap.height() as u32,
+                            pixels: bitmap.as_rgba_bytes(),
+                        })
+                    })();
 
                     match render_result {
                         Ok(p) => {
