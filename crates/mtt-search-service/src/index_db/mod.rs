@@ -72,28 +72,32 @@ fn harden_directory_acl(dir: &Path) -> Result<(), String> {
     use windows::core::PCWSTR;
 
     // Build well-known SIDs inline (same pattern as pipe_io.rs).
+    // Use align(4) wrapper to satisfy SID alignment requirements.
+    #[repr(C, align(4))]
+    struct AlignedSid<const N: usize>([u8; N]);
+
     // SYSTEM: S-1-5-18 (revision=1, count=1, authority=5, sub=18)
-    let mut sid_system = [0u8; 12];
-    sid_system[0] = 1; // Revision
-    sid_system[1] = 1; // SubAuthorityCount
-    sid_system[7] = 5; // Identifier authority
-    sid_system[8..12].copy_from_slice(&18u32.to_le_bytes()); // sub-authority: 18
+    let mut sid_system = AlignedSid([0u8; 12]);
+    sid_system.0[0] = 1; // Revision
+    sid_system.0[1] = 1; // SubAuthorityCount
+    sid_system.0[7] = 5; // Identifier authority
+    sid_system.0[8..12].copy_from_slice(&18u32.to_le_bytes()); // sub-authority: 18
 
     // Administrators: S-1-5-32-544 (revision=1, count=2, authority=5, sub=[32, 544])
-    let mut sid_admins = [0u8; 16];
-    sid_admins[0] = 1;
-    sid_admins[1] = 2;
-    sid_admins[7] = 5;
-    sid_admins[8..12].copy_from_slice(&32u32.to_le_bytes());
-    sid_admins[12..16].copy_from_slice(&544u32.to_le_bytes());
+    let mut sid_admins = AlignedSid([0u8; 16]);
+    sid_admins.0[0] = 1;
+    sid_admins.0[1] = 2;
+    sid_admins.0[7] = 5;
+    sid_admins.0[8..12].copy_from_slice(&32u32.to_le_bytes());
+    sid_admins.0[12..16].copy_from_slice(&544u32.to_le_bytes());
 
     // Users: S-1-5-32-545 (revision=1, count=2, authority=5, sub=[32, 545])
-    let mut sid_users = [0u8; 16];
-    sid_users[0] = 1;
-    sid_users[1] = 2;
-    sid_users[7] = 5;
-    sid_users[8..12].copy_from_slice(&32u32.to_le_bytes());
-    sid_users[12..16].copy_from_slice(&545u32.to_le_bytes());
+    let mut sid_users = AlignedSid([0u8; 16]);
+    sid_users.0[0] = 1;
+    sid_users.0[1] = 2;
+    sid_users.0[7] = 5;
+    sid_users.0[8..12].copy_from_slice(&32u32.to_le_bytes());
+    sid_users.0[12..16].copy_from_slice(&545u32.to_le_bytes());
 
     // FILE_ALL_ACCESS for SYSTEM and Administrators
     const FILE_ALL_ACCESS: u32 = 0x001F01FF;
@@ -111,7 +115,7 @@ fn harden_directory_acl(dir: &Path) -> Result<(), String> {
             Trustee: TRUSTEE_W {
                 TrusteeForm: TRUSTEE_IS_SID,
                 TrusteeType: TRUSTEE_IS_WELL_KNOWN_GROUP,
-                ptstrName: windows::core::PWSTR(sid_system.as_mut_ptr() as *mut u16),
+                ptstrName: windows::core::PWSTR(sid_system.0.as_mut_ptr() as *mut u16),
                 ..Default::default()
             },
         },
@@ -122,7 +126,7 @@ fn harden_directory_acl(dir: &Path) -> Result<(), String> {
             Trustee: TRUSTEE_W {
                 TrusteeForm: TRUSTEE_IS_SID,
                 TrusteeType: TRUSTEE_IS_WELL_KNOWN_GROUP,
-                ptstrName: windows::core::PWSTR(sid_admins.as_mut_ptr() as *mut u16),
+                ptstrName: windows::core::PWSTR(sid_admins.0.as_mut_ptr() as *mut u16),
                 ..Default::default()
             },
         },
@@ -133,7 +137,7 @@ fn harden_directory_acl(dir: &Path) -> Result<(), String> {
             Trustee: TRUSTEE_W {
                 TrusteeForm: TRUSTEE_IS_SID,
                 TrusteeType: TRUSTEE_IS_WELL_KNOWN_GROUP,
-                ptstrName: windows::core::PWSTR(sid_users.as_mut_ptr() as *mut u16),
+                ptstrName: windows::core::PWSTR(sid_users.0.as_mut_ptr() as *mut u16),
                 ..Default::default()
             },
         },

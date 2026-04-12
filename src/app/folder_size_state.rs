@@ -1,7 +1,7 @@
 use crate::ui::cache::FxHashSet;
 use lru::LruCache;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
 
@@ -28,12 +28,14 @@ pub struct FolderSizeState {
     pub loading: FxHashSet<PathBuf>,
 
     // ── Batch worker for list-view folder sizes ──
-    /// Sender for background batch requests.
-    pub batch_req_sender: Sender<PathBuf>,
+    /// Sender for background batch requests (path + generation).
+    pub batch_req_sender: Sender<(PathBuf, u64)>,
     /// Receiver for batch results.
     pub batch_res_receiver: Receiver<FolderSizeMessage>,
     /// Shared cancel flag — set on navigation to abort in-flight scans.
     pub batch_cancel: Arc<AtomicBool>,
+    /// Monotonic generation counter — incremented on cancel to invalidate queued requests.
+    pub batch_generation: Arc<AtomicU64>,
     /// Paths already sent to batch worker, awaiting response.
     pub batch_loading: FxHashSet<PathBuf>,
     /// Dedicated LRU cache for list-view folder sizes (larger capacity).
@@ -46,18 +48,21 @@ impl FolderSizeState {
     /// Call on every navigation or List→Grid switch to stop orphan
     /// slow-path scans from the previous folder.
     pub fn cancel_batch(&mut self) {
-        // 1. Signal the worker to skip queued items and abort in-flight
-        //    FindFirstFileExW scans (checked by calculate_folder_size_parallel).
+        // 1. Bump generation so the worker discards all queued requests
+        //    from the previous folder (they carry the old generation).
+        self.batch_generation.fetch_add(1, Ordering::Release);
+
+        // 2. Signal the worker to abort any in-flight FindFirstFileExW scan.
         self.batch_cancel.store(true, Ordering::Release);
 
-        // 2. Drain stale results so they don't leak into the new folder.
+        // 3. Drain stale results so they don't leak into the new folder.
         while self.batch_res_receiver.try_recv().is_ok() {}
 
-        // 3. Clear the dedup set so new requests for the same paths
+        // 4. Clear the dedup set so new requests for the same paths
         //    aren't incorrectly blocked.
         self.batch_loading.clear();
 
-        // 4. Re-enable the worker for the next folder.
+        // 5. Re-enable the worker for the next folder.
         self.batch_cancel.store(false, Ordering::Release);
     }
 }

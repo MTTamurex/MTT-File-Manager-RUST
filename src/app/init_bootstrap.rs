@@ -14,7 +14,7 @@ use crate::workers::thumbnail::{
 use eframe::egui;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicUsize};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize};
 use std::sync::{mpsc, Arc};
 
 use super::folder_size_state::FolderSizeMessage;
@@ -71,9 +71,10 @@ pub(in crate::app) struct AppBootstrap {
     pub(in crate::app) folder_size_req_tx: mpsc::Sender<PathBuf>,
     pub(in crate::app) folder_size_res_rx: mpsc::Receiver<FolderSizeMessage>,
     pub(in crate::app) folder_size_cancel: Arc<AtomicBool>,
-    pub(in crate::app) batch_size_tx: mpsc::Sender<PathBuf>,
+    pub(in crate::app) batch_size_tx: mpsc::Sender<(PathBuf, u64)>,
     pub(in crate::app) batch_size_rx: mpsc::Receiver<FolderSizeMessage>,
     pub(in crate::app) batch_size_cancel: Arc<AtomicBool>,
+    pub(in crate::app) batch_size_generation: Arc<AtomicU64>,
 
     pub(in crate::app) prefetch_tx: mpsc::Sender<crate::workers::prefetch_worker::PrefetchMessage>,
     pub(in crate::app) idle_warmup_tx: mpsc::Sender<crate::workers::idle_warmup::IdleWarmupMessage>,
@@ -243,7 +244,7 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
         spawn_folder_preview_workers(ctx, disk_cache.clone(), folder_composer);
     let (folder_size_req_tx, folder_size_res_rx, folder_size_cancel) =
         spawn_folder_size_worker(ctx);
-    let (batch_size_tx, batch_size_rx, batch_size_cancel) = spawn_folder_size_batch_worker(ctx);
+    let (batch_size_tx, batch_size_rx, batch_size_cancel, batch_size_generation) = spawn_folder_size_batch_worker(ctx);
 
     let PrefetchWorkerHandles {
         prefetch_sender: prefetch_tx,
@@ -302,6 +303,7 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
         batch_size_tx,
         batch_size_rx,
         batch_size_cancel,
+        batch_size_generation,
         prefetch_tx,
         idle_warmup_tx,
         file_op_tx,
