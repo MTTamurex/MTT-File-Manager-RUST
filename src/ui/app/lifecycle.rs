@@ -273,24 +273,48 @@ pub fn handle_exit(app: &mut ImageViewerApp) {
     app.force_save_preferences();
     log::info!("[EXIT] Preferences saved.");
 
-    // ── Phase 2: bounded wait ────────────────────────────────────────────
-    // Give workers a short grace period to finish cleanup. Most will exit
-    // almost instantly once their channel is disconnected.
-    std::thread::sleep(std::time::Duration::from_millis(150));
-    log::info!("[EXIT] Grace period elapsed. Exiting process.");
-
-    // ── Phase 3: hard-kill as last resort ────────────────────────────────
-    // Only force-kill if normal exit doesn't complete. The io-cancel
-    // thread may still be blocked in CancelSynchronousIo — that's fine,
-    // TerminateProcess will tear down the whole process.
-    unsafe {
-        windows::Win32::System::Threading::TerminateProcess(
-            windows::Win32::System::Threading::GetCurrentProcess(),
-            0,
-        )
-        .ok();
+    // ── Phase 2: bounded wait for workers to drain ───────────────────────
+    // Poll the OS thread count every 50 ms for up to 3 s.  Most workers
+    // exit within a few milliseconds once their channel is disconnected.
+    // A low baseline (≤ 6 threads: main + io-cancel + eframe + GPU + a
+    // couple of OS pool threads) means all application workers are gone.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    const THREAD_BASELINE: u32 = 6;
+    loop {
+        let count = crate::ui::status_bar::count_process_threads();
+        if count <= THREAD_BASELINE {
+            log::info!("[EXIT] All workers exited ({count} threads remain). Clean exit.");
+            break;
+        }
+        if std::time::Instant::now() >= deadline {
+            log::warn!(
+                "[EXIT] Timeout waiting for workers ({count} threads still alive). Forcing exit."
+            );
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
     }
-    std::process::abort();
+
+    // ── Phase 3: exit process ────────────────────────────────────────────
+    // std::process::exit runs libc atexit handlers (including SQLite's) and
+    // is sufficient for clean teardown when workers have already stopped.
+    // TerminateProcess is kept as a failsafe on a background thread in case
+    // std::process::exit somehow hangs (e.g. a stuck atexit handler).
+    let _ = std::thread::Builder::new()
+        .name("exit-watchdog".into())
+        .spawn(|| {
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            log::error!("[EXIT] Clean exit hung — forcing TerminateProcess.");
+            unsafe {
+                windows::Win32::System::Threading::TerminateProcess(
+                    windows::Win32::System::Threading::GetCurrentProcess(),
+                    0,
+                )
+                .ok();
+            }
+        });
+
+    std::process::exit(0);
 }
 
 /// Cancel all pending synchronous I/O on every thread in this process.

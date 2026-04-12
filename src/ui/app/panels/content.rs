@@ -152,7 +152,7 @@ pub(super) fn render_preview_panel_layout(
                                             app.cache_manager.finish_folder_preview_loading(&path);
                                             log::debug!("[REFRESH FOLDER PREVIEW] Loading state cleared");
                                             // Re-request folder preview
-                                            let _ = app.folder_preview_sender.send(path.clone());
+                                            let _ = app.folder_preview_sender.try_send(path.clone());
                                             log::debug!(
                                                 "[REFRESH FOLDER PREVIEW] Request sent for: {:?}",
                                                 path

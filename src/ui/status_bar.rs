@@ -247,7 +247,7 @@ fn get_kernel_resources() -> KernelResourceMetrics {
 /// Counts live OS threads for the current process using Toolhelp32Snapshot.
 /// This is the only reliable way to detect detached/leaked threads that are
 /// invisible to Rust's `JoinHandle` tracking and `GetProcessHandleCount`.
-fn count_process_threads() -> u32 {
+pub fn count_process_threads() -> u32 {
     // The `Win32_System_Diagnostics` feature is not enabled in our windows crate,
     // so we link directly against kernel32 for the Toolhelp32 API.
     #[repr(C)]

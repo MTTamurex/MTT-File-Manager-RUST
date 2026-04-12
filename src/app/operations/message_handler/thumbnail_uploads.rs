@@ -267,7 +267,7 @@ impl ImageViewerApp {
                         // SQLite hit  ⇒ preview already composed with real media — skip.
                         if self.disk_cache.get_folder_preview_cache(&item.path).is_none() {
                             if self.cache_manager.start_folder_preview_loading(item.path.clone()) {
-                                let _ = self.folder_preview_sender.send(item.path.clone());
+                                let _ = self.folder_preview_sender.try_send(item.path.clone());
                             }
                             log::debug!(
                                 "[FOLDER PREVIEW] Re-composing {:?} (cover {:?} now available)",

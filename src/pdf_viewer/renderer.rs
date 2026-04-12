@@ -89,7 +89,6 @@ impl PdfRenderer {
 
 /// Execute an operation with a timeout. Spawns a worker thread and waits
 /// up to `timeout` for the result. Returns an error on timeout.
-#[allow(dead_code)]
 pub fn with_timeout<T: Send + 'static>(
     timeout: std::time::Duration,
     op: impl FnOnce() -> Result<T, String> + Send + 'static,
