@@ -286,13 +286,13 @@ fn main() -> eframe::Result<()> {
     );
 
     // Belt-and-suspenders: if eframe returned (window closed) but the process
-    // is still alive (background threads stuck in kernel), allow a short grace
-    // period before force-killing.  handle_exit() normally calls
-    // std::process::exit(0), so this path is only reached if something bypassed it.
+    // is still alive (background threads stuck in kernel), force-kill immediately.
+    // handle_exit() normally calls std::process::exit(0), so this path is only
+    // reached if something bypassed it.
     #[cfg(target_os = "windows")]
     {
         let _ = std::thread::spawn(mtt_file_manager::ui::app::cancel_all_pending_io);
-        std::thread::sleep(std::time::Duration::from_millis(500));
+        std::thread::sleep(std::time::Duration::from_millis(100));
         unsafe {
             windows::Win32::System::Threading::TerminateProcess(
                 windows::Win32::System::Threading::GetCurrentProcess(),
