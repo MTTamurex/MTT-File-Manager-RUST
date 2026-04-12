@@ -531,16 +531,23 @@ pub fn render_sidebar_drives(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Opt
                         new_label: buf,
                     });
                 }
-            } else if response.clicked() && !ctx.is_renaming && !ctx.is_item_dragging {
-                // Detect if click was on the expand arrow area
+            } else if (response.double_clicked() || response.clicked())
+                && !ctx.is_renaming
+                && !ctx.is_item_dragging
+            {
                 let click_pos = ui.input(|inp| inp.pointer.interact_pos());
                 let clicked_arrow = click_pos
                     .map(|p| arrow_zone.contains(p))
                     .unwrap_or(false);
-                if clicked_arrow {
+
+                if response.double_clicked() && !clicked_arrow {
                     action = Some(SidebarAction::TreeToggleExpand(root_path.to_path_buf()));
-                } else {
-                    action = Some(SidebarAction::NavigateTo(disk_path.to_string()));
+                } else if response.clicked() {
+                    if clicked_arrow {
+                        action = Some(SidebarAction::TreeToggleExpand(root_path.to_path_buf()));
+                    } else {
+                        action = Some(SidebarAction::NavigateTo(disk_path.to_string()));
+                    }
                 }
             } else if response.secondary_clicked() && !ctx.is_renaming {
                 action = Some(SidebarAction::OpenDriveContextMenu(disk_path.to_string()));
