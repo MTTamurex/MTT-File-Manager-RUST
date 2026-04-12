@@ -192,7 +192,11 @@ fn render_tree_node(
     }
 
     // ── Handle clicks ──
-    if response.clicked() && action.is_none() && !ctx.is_renaming && !ctx.is_item_dragging {
+    if (response.double_clicked() || response.clicked())
+        && action.is_none()
+        && !ctx.is_renaming
+        && !ctx.is_item_dragging
+    {
         // Determine if click was on the arrow area
         let click_pos = ui.input(|inp| inp.pointer.interact_pos());
         let arrow_end_x = rect.min.x + indent + ARROW_WIDTH;
@@ -200,8 +204,17 @@ fn render_tree_node(
         let clicked_arrow = click_pos
             .map(|p| p.x < arrow_end_x && p.x >= rect.min.x + indent)
             .unwrap_or(false);
+        let can_toggle = has_children || is_loading;
 
-        if clicked_arrow && (has_children || is_loading) {
+        if response.double_clicked() {
+            if can_toggle {
+                *action = Some(SidebarTreeAction::ToggleExpand(node.path.clone()));
+            } else {
+                *action = Some(SidebarTreeAction::NavigateTo(
+                    node.path.to_string_lossy().into_owned(),
+                ));
+            }
+        } else if clicked_arrow && can_toggle {
             *action = Some(SidebarTreeAction::ToggleExpand(node.path.clone()));
         } else {
             *action = Some(SidebarTreeAction::NavigateTo(
