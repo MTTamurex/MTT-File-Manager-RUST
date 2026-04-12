@@ -43,6 +43,9 @@ pub(super) fn render_view_and_zoom_controls(ui: &mut egui::Ui, app: &mut ImageVi
             if !locked {
                 app.view_mode_normal = ViewMode::Grid;
             }
+            // Cancel batch folder-size work — Grid mode only
+            // calculates size on selection, not for all items.
+            app.folder_size_state.cancel_batch();
         }
     });
 

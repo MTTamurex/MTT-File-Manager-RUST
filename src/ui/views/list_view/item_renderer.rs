@@ -305,7 +305,7 @@ fn render_computer_view_columns(
 fn render_regular_columns(
     ui: &mut Ui,
     item: &FileEntry,
-    ctx: &ListViewContext,
+    ctx: &mut ListViewContext,
     rect: Rect,
     w_name: f32,
     w_date: f32,
@@ -353,7 +353,16 @@ fn render_regular_columns(
 
     // 4. Size
     let size_str = if item.is_dir && !item.is_archive() {
-        "".to_string()
+        // Folder: look up cached size from the batch worker.
+        if let Some(&size) = ctx.folder_size_cache.peek(&item.path) {
+            format_size(size)
+        } else {
+            // Request size if not already loading (collected by caller after render).
+            if !ctx.folder_size_batch_loading.contains(&item.path) {
+                ctx.folder_size_requests.push(item.path.clone());
+            }
+            String::new()
+        }
     } else {
         format_size(item.size)
     };

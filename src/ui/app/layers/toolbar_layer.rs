@@ -76,6 +76,9 @@ pub(crate) fn render_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context
                     ToolbarAction::ToggleViewMode => {
                         if app.view_mode == ViewMode::List {
                             app.view_mode = ViewMode::Grid;
+                            // Cancel batch folder-size work — Grid mode only
+                            // calculates size on selection, not for all items.
+                            app.folder_size_state.cancel_batch();
                         } else {
                             app.view_mode = ViewMode::List;
                         }

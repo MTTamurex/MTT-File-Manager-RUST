@@ -9,6 +9,7 @@ pub(crate) use background_jobs::stop_gc_worker;
 pub(super) use consistency_probe_worker::spawn_consistency_probe_worker;
 pub(super) use filesystem_workers::{
     spawn_disk_cache_invalidation_worker, spawn_folder_preview_workers, spawn_folder_size_worker,
+    spawn_folder_size_batch_worker,
 };
 pub(crate) use filesystem_workers::CacheInvalidationEntry;
 pub(super) use pipeline_workers::{

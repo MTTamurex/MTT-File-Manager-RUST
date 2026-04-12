@@ -119,6 +119,9 @@ impl ImageViewerApp {
         self.items = std::sync::Arc::new(Vec::new());
         self.all_items.clear();
 
+        // Cancel pending batch folder-size calculations for the old folder.
+        self.folder_size_state.cancel_batch();
+
         // Discard pending mtime rechecks for the old folder's subfolders.
         self.pending_folder_mtime_recheck.clear();
 
@@ -131,6 +134,9 @@ impl ImageViewerApp {
     pub fn go_back(&mut self) {
         if let Some(path) = self.navigation_state.navigation.go_back().cloned() {
             self.remember_current_folder_modified_hint();
+
+            // Cancel pending batch folder-size calculations for the old folder.
+            self.folder_size_state.cancel_batch();
 
             // Save current path before going back (to invalidate the preview)
             let previous_path = std::path::PathBuf::from(&self.navigation_state.current_path);
@@ -190,6 +196,9 @@ impl ImageViewerApp {
     pub fn go_forward(&mut self) {
         if let Some(path) = self.navigation_state.navigation.go_forward().cloned() {
             self.remember_current_folder_modified_hint();
+
+            // Cancel pending batch folder-size calculations for the old folder.
+            self.folder_size_state.cancel_batch();
 
             // Save current path before going forward (to invalidate the preview)
             let previous_path = std::path::PathBuf::from(&self.navigation_state.current_path);
@@ -251,6 +260,9 @@ impl ImageViewerApp {
             return;
         }
 
+        // Cancel pending batch folder-size calculations.
+        self.folder_size_state.cancel_batch();
+
         self.navigation_state
             .navigation
             .navigate_to(COMPUTER_VIEW_ID.to_string());
@@ -266,6 +278,9 @@ impl ImageViewerApp {
         if self.navigation_state.is_recycle_bin_view {
             return;
         }
+
+        // Cancel pending batch folder-size calculations.
+        self.folder_size_state.cancel_batch();
 
         self.navigation_state
             .navigation

@@ -477,6 +477,28 @@ impl ImageViewerApp {
             has_more = true;
         }
 
+        // ── Drain batch worker results (list-view folder sizes) ──
+        {
+            const MAX_BATCH_PER_FRAME: usize = 120;
+            let mut batch_count = 0usize;
+            while batch_count < MAX_BATCH_PER_FRAME {
+                let msg = match self.folder_size_state.batch_res_receiver.try_recv() {
+                    Ok(m) => m,
+                    Err(_) => break,
+                };
+                batch_count += 1;
+                if let crate::app::folder_size_state::FolderSizeMessage::Complete {
+                    folder_path,
+                    total_size,
+                } = msg
+                {
+                    self.folder_size_state.batch_loading.remove(&folder_path);
+                    self.folder_size_state.batch_cache.put(folder_path, total_size);
+                    received_any = true;
+                }
+            }
+        }
+
         received_any || has_more
     }
 }
