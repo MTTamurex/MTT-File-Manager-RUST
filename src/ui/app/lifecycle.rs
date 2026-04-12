@@ -273,27 +273,14 @@ pub fn handle_exit(app: &mut ImageViewerApp) {
     app.force_save_preferences();
     log::info!("[EXIT] Preferences saved.");
 
-    // ── Phase 2: bounded wait for workers to drain ───────────────────────
-    // Poll the OS thread count every 50 ms for up to 3 s.  Most workers
-    // exit within a few milliseconds once their channel is disconnected.
-    // A low baseline (≤ 6 threads: main + io-cancel + eframe + GPU + a
-    // couple of OS pool threads) means all application workers are gone.
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
-    const THREAD_BASELINE: u32 = 6;
-    loop {
-        let count = crate::ui::status_bar::count_process_threads();
-        if count <= THREAD_BASELINE {
-            log::info!("[EXIT] All workers exited ({count} threads remain). Clean exit.");
-            break;
-        }
-        if std::time::Instant::now() >= deadline {
-            log::warn!(
-                "[EXIT] Timeout waiting for workers ({count} threads still alive). Forcing exit."
-            );
-            break;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(50));
-    }
+    // ── Phase 2: brief grace period for workers to drain ───────────────
+    // Give workers a short window to react to the channel disconnect.
+    // Most exit in under 10 ms; anything still alive after 150 ms is stuck
+    // in a kernel call and won't benefit from more waiting.  Keeping this
+    // short avoids a visible "hung window" effect on close.
+    std::thread::sleep(std::time::Duration::from_millis(150));
+    let remaining = crate::ui::status_bar::count_process_threads();
+    log::info!("[EXIT] Grace period elapsed ({remaining} threads remain). Exiting.");
 
     // ── Phase 3: exit process ────────────────────────────────────────────
     // std::process::exit runs libc atexit handlers (including SQLite's) and
@@ -303,7 +290,7 @@ pub fn handle_exit(app: &mut ImageViewerApp) {
     let _ = std::thread::Builder::new()
         .name("exit-watchdog".into())
         .spawn(|| {
-            std::thread::sleep(std::time::Duration::from_secs(2));
+            std::thread::sleep(std::time::Duration::from_secs(1));
             log::error!("[EXIT] Clean exit hung — forcing TerminateProcess.");
             unsafe {
                 windows::Win32::System::Threading::TerminateProcess(
