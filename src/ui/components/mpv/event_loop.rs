@@ -216,12 +216,13 @@ pub fn stop_event_loop(running: Arc<AtomicBool>, handle: Option<thread::JoinHand
         // Signal thread to stop
         running.store(false, Ordering::Release);
 
-        // Wait for thread to exit (with timeout to prevent hanging)
+        // Wait briefly for the thread to exit.  The event loop polls
+        // `running` every ~100 ms, so 200 ms is enough for one iteration.
+        // Don't wait longer — process::exit will clean up regardless.
         if let Some(handle) = handle {
-            // Give thread up to 2 seconds to exit gracefully
             let start = std::time::Instant::now();
-            while !handle.is_finished() && start.elapsed() < Duration::from_secs(2) {
-                std::thread::sleep(Duration::from_millis(50));
+            while !handle.is_finished() && start.elapsed() < Duration::from_millis(200) {
+                std::thread::sleep(Duration::from_millis(10));
             }
 
             if handle.is_finished() {
@@ -230,9 +231,8 @@ pub fn stop_event_loop(running: Arc<AtomicBool>, handle: Option<thread::JoinHand
                     Err(_) => log::warn!("[MpvPreview] Event loop thread panicked"),
                 }
             } else {
-                // Intentionally avoid unconditional join here to preserve timeout semantics.
-                log::warn!(
-                    "[MpvPreview] Event loop thread did not finish within timeout; skipping blocking join"
+                log::info!(
+                    "[MpvPreview] Event loop thread still running; process::exit will clean up"
                 );
             }
         }

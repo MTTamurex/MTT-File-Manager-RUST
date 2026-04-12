@@ -273,14 +273,12 @@ pub fn handle_exit(app: &mut ImageViewerApp) {
     app.force_save_preferences();
     log::info!("[EXIT] Preferences saved.");
 
-    // ── Phase 2: brief grace period for workers to drain ───────────────
-    // Give workers a short window to react to the channel disconnect.
-    // Most exit in under 10 ms; anything still alive after 150 ms is stuck
-    // in a kernel call and won't benefit from more waiting.  Keeping this
-    // short avoids a visible "hung window" effect on close.
-    std::thread::sleep(std::time::Duration::from_millis(150));
-    let remaining = crate::ui::status_bar::count_process_threads();
-    log::info!("[EXIT] Grace period elapsed ({remaining} threads remain). Exiting.");
+    // ── Phase 2: minimal grace for channel-drop propagation ───────────
+    // Workers break on RecvError within microseconds.  A short yield is
+    // sufficient; anything still alive is stuck in a kernel call and
+    // process::exit will tear it down.
+    std::thread::sleep(std::time::Duration::from_millis(30));
+    log::info!("[EXIT] Grace period elapsed. Exiting.");
 
     // ── Phase 3: exit process ────────────────────────────────────────────
     // std::process::exit runs libc atexit handlers (including SQLite's) and

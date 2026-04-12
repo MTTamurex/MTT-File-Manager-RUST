@@ -52,7 +52,8 @@ impl ImageViewerApp {
         if let Some(mut child) = self.video_player_process.take() {
             log::debug!("[VIDEO-PLAYER] Killing standalone video player process");
             let _ = child.kill();
-            let _ = child.wait();
+            // Don't block on child.wait() — TerminateProcess is immediate on
+            // Windows and process::exit will reap any zombies.
         }
     }
 
