@@ -95,6 +95,21 @@ pub fn render_context_menu(
         menu_pos.x = (menu_state.right_bound - expected_width).max(0.0);
     }
 
+    // VERTICAL CLAMPING: Prevent menu from extending below the screen
+    let screen_rect = ctx.screen_rect();
+    let separator_count = if !primary_items.is_empty() { 1 } else { 0 }
+        + if !overflow_items.is_empty() { 1 } else { 0 };
+    let expected_height = (HEADER_BUTTON_SIZE + 8.0)
+        * (!primary_items.is_empty() as u32 as f32)
+        + (secondary_items.len() as f32 * (ITEM_HEIGHT + 1.0))
+        + (overflow_items.len().min(1) as f32 * (ITEM_HEIGHT + 1.0))
+        + (separator_count as f32 * 6.0)
+        + 8.0; // inner_margin * 2
+
+    if menu_pos.y + expected_height > screen_rect.bottom() {
+        menu_pos.y = (screen_rect.bottom() - expected_height).max(0.0);
+    }
+
     // Render the menu popup
     let response = egui::Area::new(egui::Id::new("context_menu"))
         .fixed_pos(menu_pos)
@@ -401,6 +416,17 @@ fn render_single_item(
             egui::pos2(rect.left() - menu_width - SUBMENU_X_OFFSET, rect.top())
         } else {
             egui::pos2(rect.right() + SUBMENU_X_OFFSET, rect.top())
+        };
+
+        // VERTICAL CLAMPING: Prevent submenu from extending below the screen
+        let submenu_height = item.sub_items.len() as f32 * (ITEM_HEIGHT + 1.0) + 8.0;
+        let submenu_pos = if submenu_pos.y + submenu_height > screen_rect.bottom() {
+            egui::pos2(
+                submenu_pos.x,
+                (screen_rect.bottom() - submenu_height).max(0.0),
+            )
+        } else {
+            submenu_pos
         };
 
         // Create an EXPANDED rect that includes the submenu direction area

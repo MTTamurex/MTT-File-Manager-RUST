@@ -172,7 +172,7 @@ impl ImageViewerApp {
             .cache_manager
             .start_folder_preview_loading(path.clone())
         {
-            let _ = self.folder_preview_sender.send(path);
+            let _ = self.folder_preview_sender.try_send(path);
         }
     }
 
