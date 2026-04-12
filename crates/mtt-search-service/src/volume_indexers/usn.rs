@@ -23,7 +23,7 @@ struct PendingPersistSnapshot {
     files_indexed: usize,
     additions: HashSet<u64>,
     removals: HashSet<u64>,
-    addition_rows: Vec<(u64, String, u64, bool)>,
+    addition_rows: Vec<(u64, String, u64, bool, bool, Vec<u64>)>,
 }
 
 fn restore_pending_snapshot(
@@ -89,7 +89,10 @@ pub(crate) fn index_volume(
                 drive_letter, state.drive_letter
             );
         }
-        if state.journal_id == journal_info.journal_id {
+        if state.journal_id == journal_info.journal_id
+            && state.has_hardlink_parent_data
+            && state.has_reparse_point_data
+        {
             // Stream records from DB directly into arena (no intermediate Vec<String>).
             if let Some(count) = db.load_into_index(&mut index) {
                 index.names.shrink_to_fit();
@@ -106,6 +109,8 @@ pub(crate) fn index_volume(
                 );
                 index.journal_id = state.journal_id;
                 index.last_usn = state.last_usn;
+                index.hardlink_data_complete = state.has_hardlink_parent_data;
+                index.reparse_data_complete = state.has_reparse_point_data;
 
                 // DB-loaded rows are already persisted. Keep only real USN catch-up
                 // changes as pending for the next incremental sync.
@@ -126,6 +131,35 @@ pub(crate) fn index_volume(
                             new_usn,
                             index.records.len()
                         );
+
+                        // Rebuild reverse children index after DB load.
+                        index.rebuild_children();
+                        if !index.hardlink_parents.is_empty() {
+                            eprintln!(
+                                "[USN] {}:\\ {} hardlinked files with {} extra parent entries",
+                                drive_letter,
+                                index.hardlink_parents.len(),
+                                index.hardlink_parents.values().map(|v| v.len()).sum::<usize>()
+                            );
+                        }
+
+                        // Extract file sizes from MFT (second pass).
+                        match crate::mft_reader::read_file_sizes(volume_handle, &mut index) {
+                            Ok(count) => {
+                                eprintln!(
+                                    "[MFT-SIZE] {}:\\ Populated {} file sizes after DB load",
+                                    drive_letter, count
+                                );
+                            }
+                            Err(e) => {
+                                eprintln!(
+                                    "[MFT-SIZE] {}:\\ Size extraction failed (non-fatal): {}",
+                                    drive_letter,
+                                    crate::redact_paths(&e)
+                                );
+                            }
+                        }
+
                         need_full_scan = false;
                     }
                     Err(e) => {
@@ -145,6 +179,12 @@ pub(crate) fn index_volume(
                 );
                 need_full_scan = true;
             }
+        } else if state.journal_id == journal_info.journal_id {
+            eprintln!(
+                "[USN] {}:\\ Cached index predates hardlink/reparse persistence; forcing one full MFT re-scan",
+                drive_letter
+            );
+            need_full_scan = true;
         } else {
             eprintln!(
                 "[USN] {}:\\ Journal ID changed ({} -> {}), full re-scan needed",
@@ -177,6 +217,8 @@ pub(crate) fn index_volume(
                 // Compact arena: eliminate dead space from duplicate MFT names.
                 let arena_before = index.names.len();
                 index.compact_arena();
+                index.hardlink_data_complete = true;
+                index.reparse_data_complete = true;
                 let (arena_used, arena_cap, map_est) = index.memory_usage();
                 eprintln!(
                     "[USN] {}:\\ Arena compacted: {:.1} MB -> {:.1} MB, map ~{:.1} MB, total ~{:.1} MB",
@@ -186,6 +228,31 @@ pub(crate) fn index_volume(
                     map_est as f64 / 1_048_576.0,
                     (arena_cap + map_est) as f64 / 1_048_576.0
                 );
+                if !index.hardlink_parents.is_empty() {
+                    eprintln!(
+                        "[USN] {}:\\ {} hardlinked files with {} extra parent entries",
+                        drive_letter,
+                        index.hardlink_parents.len(),
+                        index.hardlink_parents.values().map(|v| v.len()).sum::<usize>()
+                    );
+                }
+
+                // Extract file sizes from MFT (second pass after enumeration).
+                match crate::mft_reader::read_file_sizes(volume_handle, &mut index) {
+                    Ok(count) => {
+                        eprintln!(
+                            "[MFT-SIZE] {}:\\ Populated {} file sizes after full scan",
+                            drive_letter, count
+                        );
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "[MFT-SIZE] {}:\\ Size extraction failed (non-fatal): {}",
+                            drive_letter,
+                            crate::redact_paths(&e)
+                        );
+                    }
+                }
             }
             Err(e) => {
                 eprintln!(
@@ -324,6 +391,61 @@ pub(crate) fn index_volume(
             }
         }
 
+        // 2b) Refresh file sizes for FRNs that had data changes.
+        // Drain pending_size_refresh under a short lock, then read MFT records
+        // without holding the lock, and finally apply sizes under a second lock.
+        {
+            let pending_frns: Vec<u64> = {
+                match indices.try_write() {
+                    Some(mut lock) => {
+                        if let Some(vol) = lock.iter_mut().find(|v| v.drive_letter == drive_letter) {
+                            if vol.sizes_loaded && !vol.pending_size_refresh.is_empty() {
+                                std::mem::take(&mut vol.pending_size_refresh)
+                                    .into_iter()
+                                    .collect()
+                            } else {
+                                Vec::new()
+                            }
+                        } else {
+                            Vec::new()
+                        }
+                    }
+                    None => Vec::new(),
+                }
+            };
+
+            if !pending_frns.is_empty() {
+                // Read sizes without holding any lock (I/O phase).
+                let geometry = crate::mft_reader::query_mft_geometry_pub(volume_handle);
+                if let Ok(record_size) = geometry {
+                    let mut size_updates: Vec<(u64, u64)> =
+                        Vec::with_capacity(pending_frns.len());
+                    for &frn in &pending_frns {
+                        if let Some(size) =
+                            crate::mft_reader::read_single_file_size(volume_handle, frn, record_size)
+                        {
+                            size_updates.push((frn, size));
+                        }
+                    }
+
+                    // Apply sizes under lock.
+                    if !size_updates.is_empty() {
+                        if let Some(mut lock) = indices.try_write_for(INCREMENTAL_WRITE_FALLBACK_TIMEOUT) {
+                            if let Some(vol) =
+                                lock.iter_mut().find(|v| v.drive_letter == drive_letter)
+                            {
+                                for (frn, size) in &size_updates {
+                                    if let Some(rec) = vol.records.get_mut(frn) {
+                                        rec.size = *size;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         if last_contention_log.elapsed() >= INCREMENTAL_CONTENTION_LOG_INTERVAL {
             if contention_retries > 0
                 || contention_applied_after_retry > 0
@@ -362,6 +484,12 @@ pub(crate) fn index_volume(
                                     vol_index.names.get(record.name_ref()).to_string(),
                                     record.parent_ref,
                                     record.is_dir,
+                                    vol_index.reparse_points.contains(frn),
+                                    vol_index
+                                        .hardlink_parents
+                                        .get(frn)
+                                        .cloned()
+                                        .unwrap_or_default(),
                                 ))
                             })
                             .collect();
@@ -384,6 +512,8 @@ pub(crate) fn index_volume(
                     snapshot.journal_id,
                     snapshot.last_usn,
                     snapshot.files_indexed,
+                    true,
+                    true,
                 ) {
                     eprintln!(
                         "[USN] {}:\\ Volume state persist error: {}",

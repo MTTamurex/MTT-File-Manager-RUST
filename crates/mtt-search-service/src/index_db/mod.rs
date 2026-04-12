@@ -16,6 +16,8 @@ pub struct PersistedVolumeState {
     pub journal_id: u64,
     pub last_usn: i64,
     pub files_indexed: u64,
+    pub has_hardlink_parent_data: bool,
+    pub has_reparse_point_data: bool,
 }
 
 /// SQLite-based persistence for the file index.
@@ -39,6 +41,16 @@ pub fn get_db_path() -> Result<PathBuf, String> {
     // and also has a TOCTOU window between directory creation and ACL application.
     harden_directory_acl(&dir)?;
 
+    Ok(dir.join("search_index.db"))
+}
+
+/// Get a console-friendly database path that does not require ProgramData ACL
+/// hardening. This is for local `run-console` diagnostics only; the Windows
+/// service path remains fixed under `C:\ProgramData`.
+pub fn get_console_db_path() -> Result<PathBuf, String> {
+    let dir = std::env::temp_dir().join("MTT-File-Manager-Console");
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| format!("Failed to create console DB directory {:?}: {}", dir, e))?;
     Ok(dir.join("search_index.db"))
 }
 
@@ -190,7 +202,9 @@ impl IndexDb {
                 journal_id INTEGER NOT NULL,
                 last_usn INTEGER NOT NULL,
                 files_indexed INTEGER NOT NULL,
-                last_full_scan_epoch INTEGER NOT NULL
+                last_full_scan_epoch INTEGER NOT NULL,
+                has_hardlink_parent_data INTEGER NOT NULL DEFAULT 0,
+                has_reparse_point_data INTEGER NOT NULL DEFAULT 0
             );
             CREATE TABLE IF NOT EXISTS file_records (
                 frn INTEGER NOT NULL,
@@ -198,7 +212,14 @@ impl IndexDb {
                 name TEXT NOT NULL,
                 parent_frn INTEGER NOT NULL,
                 is_dir INTEGER NOT NULL,
+                is_reparse INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY (drive_letter, frn)
+            );
+            CREATE TABLE IF NOT EXISTS hardlink_parents (
+                drive_letter TEXT NOT NULL,
+                frn INTEGER NOT NULL,
+                parent_frn INTEGER NOT NULL,
+                PRIMARY KEY (drive_letter, frn, parent_frn)
             );",
         )
         .map_err(|e| format!("Table creation error: {}", e))?;
@@ -259,12 +280,77 @@ impl IndexDb {
                      name TEXT NOT NULL,
                      parent_frn INTEGER NOT NULL,
                      is_dir INTEGER NOT NULL,
+                     is_reparse INTEGER NOT NULL DEFAULT 0,
                      PRIMARY KEY (drive_letter, frn)
                  );",
             )
             .map_err(|e| format!("Schema migration error: {}", e))?;
             eprintln!("[DB] Migration complete. Index will be rebuilt on next scan.");
         }
+
+        let has_hardlink_flag: u32 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('volume_state')
+                 WHERE name = 'has_hardlink_parent_data'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+        if has_hardlink_flag == 0 {
+            eprintln!("[DB] Migrating volume_state to track hardlink parent completeness...");
+            conn.execute(
+                "ALTER TABLE volume_state
+                 ADD COLUMN has_hardlink_parent_data INTEGER NOT NULL DEFAULT 0",
+                [],
+            )
+            .map_err(|e| format!("Volume_state migration error: {}", e))?;
+        }
+
+        let has_reparse_flag: u32 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('volume_state')
+                 WHERE name = 'has_reparse_point_data'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+        if has_reparse_flag == 0 {
+            eprintln!("[DB] Migrating volume_state to track reparse point completeness...");
+            conn.execute(
+                "ALTER TABLE volume_state
+                 ADD COLUMN has_reparse_point_data INTEGER NOT NULL DEFAULT 0",
+                [],
+            )
+            .map_err(|e| format!("Volume_state reparse migration error: {}", e))?;
+        }
+
+        let has_is_reparse_col: u32 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('file_records')
+                 WHERE name = 'is_reparse'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+        if has_is_reparse_col == 0 {
+            eprintln!("[DB] Migrating file_records to track reparse points...");
+            conn.execute(
+                "ALTER TABLE file_records
+                 ADD COLUMN is_reparse INTEGER NOT NULL DEFAULT 0",
+                [],
+            )
+            .map_err(|e| format!("File_records reparse migration error: {}", e))?;
+        }
+
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS hardlink_parents (
+                drive_letter TEXT NOT NULL,
+                frn INTEGER NOT NULL,
+                parent_frn INTEGER NOT NULL,
+                PRIMARY KEY (drive_letter, frn, parent_frn)
+            );",
+        )
+        .map_err(|e| format!("Hardlink table creation error: {}", e))?;
 
         Ok(())
     }
@@ -274,7 +360,8 @@ impl IndexDb {
         let conn = self.conn.lock();
         let mut stmt = conn
             .prepare(
-                "SELECT journal_id, last_usn, files_indexed FROM volume_state WHERE drive_letter = ?1",
+                "SELECT journal_id, last_usn, files_indexed, has_hardlink_parent_data, has_reparse_point_data
+                 FROM volume_state WHERE drive_letter = ?1",
             )
             .ok()?;
 
@@ -284,6 +371,8 @@ impl IndexDb {
                 journal_id: row.get::<_, i64>(0)? as u64,
                 last_usn: row.get(1)?,
                 files_indexed: row.get::<_, i64>(2)? as u64,
+                has_hardlink_parent_data: row.get::<_, i64>(3)? != 0,
+                has_reparse_point_data: row.get::<_, i64>(4)? != 0,
             })
         })
         .ok()
@@ -298,7 +387,7 @@ impl IndexDb {
         let conn = self.conn.lock();
         let mut stmt = conn
             .prepare(
-                "SELECT frn, name, parent_frn, is_dir
+                "SELECT frn, name, parent_frn, is_dir, is_reparse
                  FROM file_records WHERE drive_letter = ?1",
             )
             .ok()?;
@@ -310,16 +399,39 @@ impl IndexDb {
                 let name: String = row.get(1)?;
                 let parent_frn: i64 = row.get(2)?;
                 let is_dir: bool = row.get(3)?;
-                Ok((frn as u64, name, parent_frn as u64, is_dir))
+                let is_reparse: bool = row.get(4)?;
+                Ok((frn as u64, name, parent_frn as u64, is_dir, is_reparse))
             })
             .ok()?;
 
-        for (frn, name, parent_ref, is_dir) in rows.flatten() {
-            if !index.insert_record(frn, &name, parent_ref, is_dir) {
+        for (frn, name, parent_ref, is_dir, is_reparse) in rows.flatten() {
+            if !index.insert_record(frn, &name, parent_ref, is_dir, is_reparse) {
                 eprintln!("[INDEX-DB] Name arena full — stopping load for volume");
                 break;
             }
             count += 1;
+        }
+
+        let mut hardlink_stmt = conn
+            .prepare(
+                "SELECT frn, parent_frn
+                 FROM hardlink_parents WHERE drive_letter = ?1",
+            )
+            .ok()?;
+
+        let hardlink_rows = hardlink_stmt
+            .query_map(params![index.drive_letter.to_string()], |row| {
+                let frn: i64 = row.get(0)?;
+                let parent_frn: i64 = row.get(1)?;
+                Ok((frn as u64, parent_frn as u64))
+            })
+            .ok()?;
+
+        for (frn, parent_ref) in hardlink_rows.flatten() {
+            let parents = index.hardlink_parents.entry(frn).or_default();
+            if !parents.contains(&parent_ref) {
+                parents.push(parent_ref);
+            }
         }
 
         if count == 0 { None } else { Some(count) }

@@ -25,10 +25,18 @@ const FSCTL_READ_USN_JOURNAL: u32 = 0x000900BB;
 const USN_REASON_FILE_CREATE: u32 = 0x00000100;
 const USN_REASON_FILE_DELETE: u32 = 0x00000200;
 const USN_REASON_RENAME_NEW_NAME: u32 = 0x00002000;
+const USN_REASON_DATA_EXTEND: u32 = 0x00000002;
+const USN_REASON_DATA_TRUNCATION: u32 = 0x00000004;
+const USN_REASON_DATA_OVERWRITE: u32 = 0x00000001;
 const USN_REASON_CLOSE: u32 = 0x80000000;
+
+/// Combined mask for reasons that indicate a file's data size may have changed.
+const USN_REASON_SIZE_CHANGED: u32 =
+    USN_REASON_DATA_EXTEND | USN_REASON_DATA_TRUNCATION | USN_REASON_DATA_OVERWRITE;
 
 // File attributes
 const FILE_ATTRIBUTE_DIRECTORY: u32 = 0x10;
+const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
 
 /// Information about a USN Journal.
 pub struct UsnJournalInfo {
@@ -276,6 +284,9 @@ pub fn read_usn_buffer(
         reason_mask: USN_REASON_FILE_CREATE
             | USN_REASON_FILE_DELETE
             | USN_REASON_RENAME_NEW_NAME
+            | USN_REASON_DATA_EXTEND
+            | USN_REASON_DATA_TRUNCATION
+            | USN_REASON_DATA_OVERWRITE
             | USN_REASON_CLOSE,
         return_only_on_close: 0,
         timeout: 0,
@@ -392,10 +403,22 @@ pub fn parse_usn_records(
                 // Incremental update: process reason flags
                 if reason & USN_REASON_FILE_DELETE != 0 {
                     index.remove_record(frn);
-                } else {
-                    // Create or update
+                } else if reason & USN_REASON_RENAME_NEW_NAME != 0 {
+                    // Rename/move: remove from old parent, add to new parent.
                     let is_dir = (file_attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
-                    index.insert_record(frn, &name, parent_frn, is_dir);
+                    let is_reparse = (file_attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
+                    index.move_record(frn, &name, parent_frn, is_dir, is_reparse);
+                } else {
+                    // Create or update (preserves hardlink children entries).
+                    let is_dir = (file_attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
+                    let is_reparse = (file_attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
+                    index.insert_record(frn, &name, parent_frn, is_dir, is_reparse);
+
+                    // Track files whose data size may have changed for
+                    // incremental MFT size refresh.
+                    if !is_dir && (reason & USN_REASON_SIZE_CHANGED != 0) {
+                        index.pending_size_refresh.insert(frn);
+                    }
                 }
                 // Track that the parent directory's contents changed.
                 // This enables CheckPathsModified to detect external changes
@@ -404,7 +427,8 @@ pub fn parse_usn_records(
             } else {
                 // Initial enumeration: just insert
                 let is_dir = (file_attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
-                if !index.insert_record(frn, &name, parent_frn, is_dir) {
+                let is_reparse = (file_attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
+                if !index.insert_record(frn, &name, parent_frn, is_dir, is_reparse) {
                     eprintln!("[USN] Name arena full — stopping enumeration");
                     return;
                 }

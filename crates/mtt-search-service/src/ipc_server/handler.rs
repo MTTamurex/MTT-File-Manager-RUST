@@ -285,12 +285,138 @@ pub(super) fn handle_client(
 
             let _ = send_response(pipe, &SearchResponse::PathsModified { modified });
         }
+        SearchRequest::FolderSize { path } => {
+            // SEC: Impersonate the connecting client before checking any paths.
+            let _guard = match PipeImpersonationGuard::new(pipe) {
+                Ok(g) => g,
+                Err(e) => {
+                    eprintln!("[IPC] FolderSize impersonation failed: {}", e);
+                    let _ = send_response(
+                        pipe,
+                        &SearchResponse::Error("Authorization failed".to_string()),
+                    );
+                    return;
+                }
+            };
+
+            // Verify client can read the target path.
+            if !current_client_can_read_path(&path) {
+                let _ = send_response(
+                    pipe,
+                    &SearchResponse::Error("Access denied".to_string()),
+                );
+                return;
+            }
+
+            let drive_letter = match path.chars().next() {
+                Some(c) if c.is_ascii_alphabetic() => c.to_ascii_uppercase(),
+                _ => {
+                    let _ = send_response(
+                        pipe,
+                        &SearchResponse::Error("Invalid path".to_string()),
+                    );
+                    return;
+                }
+            };
+
+            // Compute folder size from in-memory index.
+            let result = {
+                let indices_lock = indices.read();
+                let vol = match indices_lock.iter().find(|v| v.drive_letter == drive_letter) {
+                    Some(v) => v,
+                    None => {
+                        drop(indices_lock);
+                        let _ = send_response(
+                            pipe,
+                            &SearchResponse::Error("Volume not indexed".to_string()),
+                        );
+                        return;
+                    }
+                };
+                if !matches!(vol.state, IndexState::Ready) {
+                    drop(indices_lock);
+                    let _ = send_response(
+                        pipe,
+                        &SearchResponse::Error("Volume not ready".to_string()),
+                    );
+                    return;
+                }
+                if !vol.sizes_loaded {
+                    drop(indices_lock);
+                    let _ = send_response(
+                        pipe,
+                        &SearchResponse::Error("Sizes not loaded".to_string()),
+                    );
+                    return;
+                }
+                match vol.resolve_path_to_frn(&path) {
+                    Some(frn) => {
+                        // ACL-aware size: starts from raw folder_size_sum
+                        // (no FRN dedup, hardlinks counted per appearance)
+                        // and subtracts only subtrees where the impersonated
+                        // client gets explicit ACCESS_DENIED.
+                        let (acl_size, acl_count, skipped_dirs) =
+                            crate::mft_reader::folder_size_for_user(vol, frn);
+
+                        // Diagnostics: unique count for comparison.
+                        let (unique_size, unique_count, duplicate_hits) =
+                            vol.folder_size_sum_unique_files(frn);
+
+                        eprintln!(
+                            "[FOLDER-SIZE] {} acl={:.2}GB ({} files) unique={:.2}GB ({} files) dup={} skipped_dirs={}",
+                            crate::redact_paths(&path),
+                            acl_size as f64 / 1_073_741_824.0,
+                            acl_count,
+                            unique_size as f64 / 1_073_741_824.0,
+                            unique_count,
+                            duplicate_hits,
+                            skipped_dirs,
+                        );
+                        Ok((acl_size, acl_count))
+                    }
+                    None => Err("Path not found in index"),
+                }
+            };
+
+            match result {
+                Ok((total_size, file_count)) => {
+                    eprintln!(
+                        "[FOLDER-SIZE] responding path={} total_gb={:.2} files={}",
+                        crate::redact_paths(&path),
+                        total_size as f64 / 1_073_741_824.0,
+                        file_count,
+                    );
+                    let _ = send_response(
+                        pipe,
+                        &SearchResponse::FolderSize {
+                            path,
+                            total_size,
+                            file_count,
+                        },
+                    );
+                }
+                Err(e) => {
+                    eprintln!(
+                        "[FOLDER-SIZE] error path={} reason={}",
+                        crate::redact_paths(&path),
+                        e,
+                    );
+                    let _ = send_response(
+                        pipe,
+                        &SearchResponse::Error(e.to_string()),
+                    );
+                }
+            }
+        }
     }
 }
 
 fn build_status_response(indices: &[VolumeIndex], security_policy: &IpcSecurityPolicy) -> IndexStatusInfo {
     let mut total_indexed = 0u64;
     let mut volumes = Vec::with_capacity(indices.len());
+    let service_executable_path = std::env::current_exe()
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|_| "<unknown>".to_string());
 
     if security_policy.redact_status_metrics {
         for vol in indices {
@@ -326,6 +452,7 @@ fn build_status_response(indices: &[VolumeIndex], security_policy: &IpcSecurityP
     IndexStatusInfo {
         volumes,
         total_files_indexed: total_indexed,
+        service_executable_path,
     }
 }
 
@@ -338,7 +465,7 @@ mod tests {
         let mut index = VolumeIndex::new(drive_letter);
         index.state = state;
         for i in 0..records_len {
-            index.insert_record(i as u64 + 1, "sample.txt", 0, false);
+            index.insert_record(i as u64 + 1, "sample.txt", 0, false, false);
         }
         index
     }

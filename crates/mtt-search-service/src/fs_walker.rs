@@ -73,22 +73,6 @@ pub fn scan_volume(
                 }
             };
 
-            let entry_ref = next_ref;
-            next_ref = next_ref
-                .checked_add(1)
-                .ok_or_else(|| "synthetic reference counter overflowed".to_string())?;
-
-            let name = entry.file_name().to_string_lossy().into_owned();
-            let is_dir = file_type.is_dir();
-            if !index.insert_record(entry_ref, &name, parent_ref, is_dir) {
-                eprintln!("[FS-WALKER] Name arena full — stopping scan");
-                break;
-            }
-
-            if !is_dir || file_type.is_symlink() {
-                continue;
-            }
-
             let metadata = match entry.metadata() {
                 Ok(metadata) => metadata,
                 Err(_) => {
@@ -97,7 +81,21 @@ pub fn scan_volume(
                 }
             };
 
-            if (metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT) != 0 {
+            let entry_ref = next_ref;
+            next_ref = next_ref
+                .checked_add(1)
+                .ok_or_else(|| "synthetic reference counter overflowed".to_string())?;
+
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let is_dir = file_type.is_dir();
+            let is_reparse = file_type.is_symlink()
+                || (metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
+            if !index.insert_record(entry_ref, &name, parent_ref, is_dir, is_reparse) {
+                eprintln!("[FS-WALKER] Name arena full — stopping scan");
+                break;
+            }
+
+            if !is_dir || is_reparse {
                 continue;
             }
 
