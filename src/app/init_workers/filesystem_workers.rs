@@ -141,6 +141,37 @@ pub(in crate::app) fn spawn_folder_size_worker(
             let folder_path = latest_path;
             folder_size_cancel_worker.store(false, Ordering::Release);
 
+            // Fast path: try the search service for NTFS volumes (in-memory, zero I/O).
+            if is_ntfs_volume(&folder_path) {
+                match crate::infrastructure::global_search::folder_size(&folder_path) {
+                    Ok((total_size, file_count)) => {
+                        log::info!(
+                            "[FOLDER-SIZE] IPC complete path={} total_gb={:.2} files={}",
+                            folder_path.display(),
+                            total_size as f64 / 1_073_741_824.0,
+                            file_count,
+                        );
+                        let _ = folder_size_res_tx.send(FolderSizeMessage::Complete {
+                            folder_path: folder_path.clone(),
+                            total_size,
+                        });
+                        folder_size_ctx.request_repaint();
+                        continue;
+                    }
+                    Err(e) => {
+                        // Service not available or sizes not loaded — fall through
+                        // to classic FindFirstFileExW scan.
+                        log::info!(
+                            "[FOLDER-SIZE] IPC failed path={} falling_back=true reason={}",
+                            folder_path.display(),
+                            e
+                        );
+                    }
+                }
+            }
+
+            // Fallback: classic FindFirstFileExW parallel scan (for non-NTFS
+            // or when the search service is unavailable).
             let is_ssd = crate::infrastructure::io_priority::is_ssd(&folder_path);
             let priority = if is_ssd {
                 crate::infrastructure::io_priority::IOPriority::Prefetch
@@ -169,12 +200,21 @@ pub(in crate::app) fn spawn_folder_size_worker(
 
             match result {
                 Some(total_size) => {
+                    log::info!(
+                        "[FOLDER-SIZE] Fallback complete path={} total_gb={:.2}",
+                        folder_path.display(),
+                        total_size as f64 / 1_073_741_824.0,
+                    );
                     let _ = folder_size_res_tx.send(FolderSizeMessage::Complete {
                         folder_path,
                         total_size,
                     });
                 }
                 None => {
+                    log::info!(
+                        "[FOLDER-SIZE] Fallback cancelled path={}",
+                        folder_path.display(),
+                    );
                     let _ = folder_size_res_tx.send(FolderSizeMessage::Cancelled { folder_path });
                 }
             }
@@ -184,4 +224,48 @@ pub(in crate::app) fn spawn_folder_size_worker(
     });
 
     (folder_size_req_tx, folder_size_res_rx, folder_size_cancel)
+}
+
+/// Check if a path resides on an NTFS filesystem.
+/// Uses `GetVolumeInformationW` with the drive root.
+/// Returns `false` on any error (safe default — triggers fallback to FindFirstFileExW).
+fn is_ntfs_volume(path: &std::path::Path) -> bool {
+    use windows::core::PCWSTR;
+    use windows::Win32::Storage::FileSystem::GetVolumeInformationW;
+
+    // Extract drive root: "C:\"
+    let root = match path.components().next() {
+        Some(std::path::Component::Prefix(prefix)) => {
+            let s = prefix.as_os_str().to_string_lossy();
+            if s.len() >= 2 && s.as_bytes()[1] == b':' {
+                format!("{}\\", &s[..2])
+            } else {
+                return false;
+            }
+        }
+        _ => return false,
+    };
+
+    let root_wide: Vec<u16> = root.encode_utf16().chain(std::iter::once(0)).collect();
+    let mut fs_name = [0u16; 16];
+
+    let ok = unsafe {
+        GetVolumeInformationW(
+            PCWSTR(root_wide.as_ptr()),
+            None,
+            None,
+            None,
+            None,
+            Some(&mut fs_name),
+        )
+    };
+
+    if ok.is_err() {
+        return false;
+    }
+
+    let fs = String::from_utf16_lossy(&fs_name)
+        .trim_end_matches('\0')
+        .to_ascii_uppercase();
+    fs == "NTFS"
 }

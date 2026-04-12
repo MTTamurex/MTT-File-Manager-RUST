@@ -36,6 +36,12 @@ pub enum SearchRequest {
         paths: Vec<String>,
         threshold_secs: u32,
     },
+    /// Request the total size of a folder on an NTFS volume.
+    /// The service computes the sum in-memory from its MFT-based index
+    /// (zero disk I/O). Returns an error for non-NTFS or unindexed volumes.
+    FolderSize {
+        path: String,
+    },
 }
 
 impl SearchRequest {
@@ -65,6 +71,18 @@ impl SearchRequest {
                 ));
             }
         }
+        if let SearchRequest::FolderSize { path } = self {
+            if path.is_empty() {
+                return Err("folder size path is empty".to_string());
+            }
+            if path.len() > MAX_QUERY_TEXT_LEN {
+                return Err(format!(
+                    "folder size path too long ({} bytes, max {})",
+                    path.len(),
+                    MAX_QUERY_TEXT_LEN
+                ));
+            }
+        }
         Ok(())
     }
 }
@@ -86,6 +104,12 @@ pub enum SearchResponse {
     WarmStarted,
     /// Directories from the request that have been modified within the threshold.
     PathsModified { modified: Vec<String> },
+    /// Folder size result computed from the in-memory MFT index.
+    FolderSize {
+        path: String,
+        total_size: u64,
+        file_count: u64,
+    },
     /// Error message.
     Error(String),
 }
@@ -118,6 +142,7 @@ pub struct SearchResultItem {
 pub struct IndexStatusInfo {
     pub volumes: Vec<VolumeStatus>,
     pub total_files_indexed: u64,
+    pub service_executable_path: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

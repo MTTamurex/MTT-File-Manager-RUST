@@ -153,6 +153,9 @@ pub fn get_status() -> Result<IndexStatusInfo, String> {
 /// Timeout for the lightweight CheckPathsModified request.
 const CHECK_PATHS_TIMEOUT_MS: u64 = 2_000;
 
+/// Timeout for the lightweight FolderSize request (in-memory computation).
+const FOLDER_SIZE_TIMEOUT_MS: u64 = 3_000;
+
 /// Ask the search service which of the given directory paths have been
 /// modified (via USN journal) within the last `threshold_secs` seconds.
 /// Returns the subset of paths that changed. Useful for tab-switch staleness
@@ -174,6 +177,36 @@ pub fn check_paths_modified(paths: &[String], threshold_secs: u32) -> Result<Vec
 
         match response {
             SearchResponse::PathsModified { modified } => Ok(modified),
+            SearchResponse::Error(e) => Err(e),
+            _ => Err("Unexpected response type".into()),
+        }
+    })();
+
+    unsafe {
+        let _ = CloseHandle(pipe);
+    }
+
+    result
+}
+
+/// Request the total size of a folder from the search service's in-memory
+/// MFT-based index. Only works for NTFS volumes with sizes loaded.
+/// Returns `(total_size, file_count)` on success.
+pub fn folder_size(path: &std::path::Path) -> Result<(u64, u64), String> {
+    let path_str = path.to_string_lossy().to_string();
+    let pipe = open_pipe()?;
+
+    let result = (|| {
+        let request = SearchRequest::FolderSize { path: path_str };
+        write_message(pipe, &request)?;
+        let response = read_validated_response(pipe, FOLDER_SIZE_TIMEOUT_MS)?;
+
+        match response {
+            SearchResponse::FolderSize {
+                total_size,
+                file_count,
+                ..
+            } => Ok((total_size, file_count)),
             SearchResponse::Error(e) => Err(e),
             _ => Err("Unexpected response type".into()),
         }

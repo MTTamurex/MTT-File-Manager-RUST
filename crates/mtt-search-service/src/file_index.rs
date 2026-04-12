@@ -5,20 +5,23 @@ use crate::path_resolver;
 
 /// Compact file record stored in the in-memory index.
 ///
-/// Layout: exactly 16 bytes (down from 72 + heap).
+/// Layout: exactly 24 bytes.
 ///   parent_ref  : u64  — 8 bytes (offset 0)
-///   name_offset : u32  — 4 bytes (offset 8)  — byte offset into NameArena
-///   name_len    : u16  — 2 bytes (offset 12) — UTF-8 byte count
-///   is_dir      : bool — 1 byte  (offset 14)
-///   _pad        : u8   — 1 byte  (offset 15)
+///   size        : u64  — 8 bytes (offset 8)  — file size in bytes (0 for dirs, populated by MFT reader)
+///   name_offset : u32  — 4 bytes (offset 16) — byte offset into NameArena
+///   name_len    : u16  — 2 bytes (offset 20) — UTF-8 byte count
+///   is_dir      : bool — 1 byte  (offset 22)
+///   _pad        : u8   — 1 byte  (offset 23)
 ///
 /// Fields are inlined rather than wrapped in NameRef to avoid internal
-/// struct padding that would inflate the record to 24 bytes.
+/// struct padding that would inflate the record further.
 #[derive(Clone, Copy, Debug)]
 #[repr(C)]
 pub struct FileRecord {
     /// Parent File Reference Number (for path reconstruction).
     pub parent_ref: u64,
+    /// File size in bytes. 0 for directories. Populated by MFT size reader.
+    pub size: u64,
     /// Byte offset of the file name in VolumeIndex's NameArena.
     pub name_offset: u32,
     /// UTF-8 byte length of the file name.
@@ -29,8 +32,8 @@ pub struct FileRecord {
     pub _pad: u8,
 }
 
-// Compile-time assertion: FileRecord MUST be exactly 16 bytes.
-const _: () = assert!(std::mem::size_of::<FileRecord>() == 16);
+// Compile-time assertion: FileRecord MUST be exactly 24 bytes.
+const _: () = assert!(std::mem::size_of::<FileRecord>() == 24);
 
 impl FileRecord {
     /// Construct a [`NameRef`] for use with [`NameArena::get`].
@@ -58,6 +61,9 @@ pub struct VolumeIndex {
     pub drive_letter: char,
     /// File Reference Number -> FileRecord.
     pub records: HashMap<u64, FileRecord>,
+    /// Reverse index: parent FRN -> child FRNs.
+    /// Enables O(subtree) descent for folder size calculation.
+    pub children: HashMap<u64, Vec<u64>>,
     /// Contiguous arena storing all file name strings.
     pub names: NameArena,
     /// Last USN processed (for incremental updates).
@@ -66,6 +72,8 @@ pub struct VolumeIndex {
     pub journal_id: u64,
     /// Indexing state.
     pub state: IndexState,
+    /// Whether file sizes have been populated from the MFT.
+    pub sizes_loaded: bool,
     /// FRNs added or modified since the last DB persist.
     pub pending_additions: HashSet<u64>,
     /// FRNs removed since the last DB persist.
@@ -74,6 +82,25 @@ pub struct VolumeIndex {
     /// Used by CheckPathsModified to detect external changes without disk I/O.
     /// Key: parent directory FRN, Value: monotonic instant of last modification.
     pub dir_modified_at: HashMap<u64, std::time::Instant>,
+    /// FRNs of files whose size may have changed (detected via USN journal).
+    /// The volume indexer drains this set periodically and refreshes sizes
+    /// via `FSCTL_GET_NTFS_FILE_RECORD`.
+    pub pending_size_refresh: HashSet<u64>,
+    /// Extra parent FRNs for hardlinked files.  Key: child FRN, Value:
+    /// additional parent FRNs beyond the primary one in `FileRecord.parent_ref`.
+    /// Populated during MFT enumeration, consumed by `rebuild_children()`.
+    pub hardlink_parents: HashMap<u64, Vec<u64>>,
+    /// FRNs that are reparse points (junctions/symlinks/mount points).
+    /// Directory traversal must not descend into these, matching the recursive
+    /// fallback scan and Explorer's folder size behaviour.
+    pub reparse_points: HashSet<u64>,
+    /// Whether this volume's hardlink parent relationships are complete.
+    /// Old DB caches only persisted a single parent per FRN, so NTFS volumes
+    /// loaded from those caches must force one full scan before folder sizes
+    /// can match Explorer reliably.
+    pub hardlink_data_complete: bool,
+    /// Whether reparse-point data was captured and loaded completely.
+    pub reparse_data_complete: bool,
 }
 
 impl VolumeIndex {
@@ -81,34 +108,159 @@ impl VolumeIndex {
         Self {
             drive_letter,
             records: HashMap::with_capacity(500_000),
+            children: HashMap::with_capacity(200_000),
             // Pre-allocate ~12.5 MB for names (500K files × ~25 bytes avg).
             names: NameArena::with_capacity(500_000 * 25),
             last_usn: 0,
             journal_id: 0,
             state: IndexState::NotStarted,
+            sizes_loaded: false,
             pending_additions: HashSet::new(),
             pending_removals: HashSet::new(),
             dir_modified_at: HashMap::new(),
+            pending_size_refresh: HashSet::new(),
+            hardlink_parents: HashMap::new(),
+            reparse_points: HashSet::new(),
+            hardlink_data_complete: false,
+            reparse_data_complete: false,
+        }
+    }
+
+    /// The NTFS root directory's File Reference Number.
+    const ROOT_FRN: u64 = 5;
+
+    #[inline]
+    fn normalized_parent_bucket(frn: u64, parent_ref: u64) -> u64 {
+        if parent_ref == 0 || parent_ref == frn {
+            Self::ROOT_FRN
+        } else {
+            parent_ref
+        }
+    }
+
+    #[inline]
+    fn add_child_edge(&mut self, parent_ref: u64, child_frn: u64) {
+        let bucket = Self::normalized_parent_bucket(child_frn, parent_ref);
+        let children = self.children.entry(bucket).or_default();
+        if !children.contains(&child_frn) {
+            children.push(child_frn);
+        }
+    }
+
+    #[inline]
+    fn remove_child_edge(&mut self, parent_ref: u64, child_frn: u64) {
+        let bucket = Self::normalized_parent_bucket(child_frn, parent_ref);
+        if let Some(siblings) = self.children.get_mut(&bucket) {
+            siblings.retain(|&c| c != child_frn);
+        }
+    }
+
+    fn sanitize_hardlink_entry(&mut self, frn: u64) {
+        let Some(record) = self.records.get(&frn).copied() else {
+            self.hardlink_parents.remove(&frn);
+            return;
+        };
+
+        let mut remove_entry = false;
+        if let Some(parents) = self.hardlink_parents.get_mut(&frn) {
+            if record.is_dir {
+                remove_entry = true;
+            } else {
+                parents.retain(|&parent| {
+                    parent != 0 && parent != frn && parent != record.parent_ref
+                });
+                parents.sort_unstable();
+                parents.dedup();
+                remove_entry = parents.is_empty();
+            }
+        }
+
+        if remove_entry {
+            self.hardlink_parents.remove(&frn);
+        }
+    }
+
+    fn sanitize_hardlink_parents(&mut self) {
+        let frns: Vec<u64> = self.hardlink_parents.keys().copied().collect();
+        for frn in frns {
+            self.sanitize_hardlink_entry(frn);
+        }
+    }
+
+    #[inline]
+    fn set_reparse_state(&mut self, frn: u64, is_reparse: bool) {
+        if is_reparse {
+            self.reparse_points.insert(frn);
+        } else {
+            self.reparse_points.remove(&frn);
         }
     }
 
     /// Insert a file record into the index, storing its name in the arena.
     /// Returns `false` if the arena is full and the record was not inserted.
-    pub fn insert_record(&mut self, frn: u64, name: &str, parent_ref: u64, is_dir: bool) -> bool {
+    ///
+    /// **Hardlink handling**: when the same FRN is inserted with a *different*
+    /// parent, the old parent's children entry is kept (the file appears under
+    /// both parents).  This matches Explorer's behaviour of counting hardlinked
+    /// files in every directory that references them.
+    pub fn insert_record(
+        &mut self,
+        frn: u64,
+        name: &str,
+        parent_ref: u64,
+        is_dir: bool,
+        is_reparse: bool,
+    ) -> bool {
         let nr = match self.names.insert(name) {
             Some(nr) => nr,
             None => return false,
         };
+
+        // Determine what to do with the children map based on existing record.
+        let old = self.records.get(&frn).map(|r| (r.parent_ref, r.size));
+
+        let preserved_size = old.map_or(0, |(_, s)| s);
+
         self.records.insert(
             frn,
             FileRecord {
                 parent_ref,
+                size: preserved_size,
                 name_offset: nr.offset,
                 name_len: nr.len,
                 is_dir,
                 _pad: 0,
             },
         );
+        self.set_reparse_state(frn, is_reparse);
+
+        match old {
+            Some((old_parent, _)) if old_parent == parent_ref => {
+                // Same parent re-insert (e.g. long name + 8.3 short name).
+                // FRN is already in this parent's children — skip to avoid duplicates.
+            }
+            Some((old_parent, _)) => {
+                // Different parent — this is a hardlink.  Save the OLD parent
+                // as an extra so `rebuild_children` can restore both entries.
+                let extras = self.hardlink_parents.entry(frn).or_default();
+                if !extras.contains(&old_parent) {
+                    extras.push(old_parent);
+                }
+                // Invariant: extras must never contain the current primary
+                // parent_ref, otherwise rebuild_children would duplicate the
+                // child under that parent.  This can happen when interleaved
+                // MFT filename attributes (long + 8.3) ping-pong between
+                // two hardlink targets.
+                extras.retain(|&p| p != parent_ref);
+                self.sanitize_hardlink_entry(frn);
+                self.add_child_edge(parent_ref, frn);
+            }
+            None => {
+                // Brand-new record.
+                self.add_child_edge(parent_ref, frn);
+            }
+        }
+
         // Track for incremental FTS sync.
         self.pending_removals.remove(&frn);
         self.pending_additions.insert(frn);
@@ -118,7 +270,18 @@ impl VolumeIndex {
     /// Remove a file record from the index.
     /// The name bytes remain in the arena as dead space (reclaimed on persist+reload).
     pub fn remove_record(&mut self, frn: u64) {
-        self.records.remove(&frn);
+        if let Some(record) = self.records.remove(&frn) {
+            // Remove from primary parent's children list.
+            self.remove_child_edge(record.parent_ref, frn);
+        }
+        self.reparse_points.remove(&frn);
+        // Remove from all hardlink extra parents' children lists.
+        if let Some(extra_parents) = self.hardlink_parents.remove(&frn) {
+            for parent in extra_parents {
+                self.remove_child_edge(parent, frn);
+            }
+        }
+
         // If it was added since last persist, just undo the add (never reached DB).
         // Otherwise mark for removal from DB.
         if !self.pending_additions.remove(&frn) {
@@ -126,13 +289,68 @@ impl VolumeIndex {
         }
     }
 
+    /// Move/rename a file: remove from old parent's children and re-insert
+    /// under the new parent.  Used by incremental USN updates when the reason
+    /// includes `USN_REASON_RENAME_NEW_NAME`.
+    pub fn move_record(
+        &mut self,
+        frn: u64,
+        name: &str,
+        new_parent: u64,
+        is_dir: bool,
+        is_reparse: bool,
+    ) -> bool {
+        let nr = match self.names.insert(name) {
+            Some(nr) => nr,
+            None => return false,
+        };
+
+        let preserved_size = self.records.get(&frn).map_or(0, |r| r.size);
+
+        // Remove from old primary parent's children (true move, not hardlink).
+        if let Some(old_record) = self.records.get(&frn) {
+            let old_parent = old_record.parent_ref;
+            if old_parent != new_parent {
+                self.remove_child_edge(old_parent, frn);
+            }
+        }
+
+        self.records.insert(
+            frn,
+            FileRecord {
+                parent_ref: new_parent,
+                size: preserved_size,
+                name_offset: nr.offset,
+                name_len: nr.len,
+                is_dir,
+                _pad: 0,
+            },
+        );
+        self.set_reparse_state(frn, is_reparse);
+
+        // Add to new parent's children if not already there.
+        self.sanitize_hardlink_entry(frn);
+        self.add_child_edge(new_parent, frn);
+
+        self.pending_removals.remove(&frn);
+        self.pending_additions.insert(frn);
+        true
+    }
+
     /// Clear all records and arena data (for full re-scan).
     pub fn clear(&mut self) {
         self.records.clear();
+        self.children.clear();
         self.names.clear();
+        self.sizes_loaded = false;
         self.pending_additions.clear();
         self.pending_removals.clear();
         self.dir_modified_at.clear();
+        self.pending_size_refresh.clear();
+        self.hardlink_parents.clear();
+        self.reparse_points.clear();
+        self.hardlink_data_complete = false;
+        self.reparse_data_complete = false;
     }
 
     /// Reset change tracking (call after a full `save_volume` persist).
@@ -169,6 +387,111 @@ impl VolumeIndex {
         }
         self.names = new_arena;
         self.names.shrink_to_fit();
+
+        // Rebuild reverse children index after compaction.
+        self.rebuild_children();
+    }
+
+    /// Rebuild the `children` reverse index from `records` and `hardlink_parents`.
+    /// Call after bulk operations (load from DB, compaction) to ensure consistency.
+    pub fn rebuild_children(&mut self) {
+        self.sanitize_hardlink_parents();
+        self.children.clear();
+        self.children.reserve(self.records.len() / 3);
+        // Primary parent from each record.
+        for (&frn, record) in &self.records {
+            self.children
+                .entry(Self::normalized_parent_bucket(frn, record.parent_ref))
+                .or_default()
+                .push(frn);
+        }
+        // Extra parents from hardlinks — the file appears in these
+        // directories too, matching Explorer's recursive size counting.
+        // Skip entries that match the primary parent_ref (invariant should
+        // already prevent this, but guard against stale DB data).
+        for (&frn, extra_parents) in &self.hardlink_parents {
+            let primary = self
+                .records
+                .get(&frn)
+                .map(|r| Self::normalized_parent_bucket(frn, r.parent_ref));
+            for &parent in extra_parents {
+                let bucket = Self::normalized_parent_bucket(frn, parent);
+                if Some(bucket) != primary {
+                    self.children.entry(bucket).or_default().push(frn);
+                }
+            }
+        }
+        for child_frns in self.children.values_mut() {
+            child_frns.sort_unstable();
+            child_frns.dedup();
+        }
+    }
+
+    /// Compute the total size of all files under a directory (recursive).
+    /// Uses the `children` reverse index for O(subtree) traversal.
+    /// Returns `(total_size, file_count)`.
+    pub fn folder_size_sum(&self, dir_frn: u64) -> (u64, u64) {
+        let mut total_size: u64 = 0;
+        let mut file_count: u64 = 0;
+        let mut stack = vec![dir_frn];
+        let mut visited_dirs = HashSet::with_capacity(256);
+        while let Some(frn) = stack.pop() {
+            if !visited_dirs.insert(frn) {
+                continue;
+            }
+            if let Some(child_frns) = self.children.get(&frn) {
+                for &child_frn in child_frns {
+                    if let Some(record) = self.records.get(&child_frn) {
+                        if record.is_dir {
+                            if !self.reparse_points.contains(&child_frn) {
+                                stack.push(child_frn);
+                            }
+                        } else {
+                            total_size = total_size.saturating_add(record.size);
+                            file_count += 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        (total_size, file_count)
+    }
+
+    /// Diagnostic variant of `folder_size_sum` that also computes a unique-by-FRN
+    /// total for files. This helps distinguish true tree duplication from mere
+    /// multiple child edges to the same file within one queried subtree.
+    pub fn folder_size_sum_unique_files(&self, dir_frn: u64) -> (u64, u64, u64) {
+        let mut total_size: u64 = 0;
+        let mut file_count: u64 = 0;
+        let mut duplicate_hits: u64 = 0;
+        let mut stack = vec![dir_frn];
+        let mut visited_dirs = HashSet::with_capacity(256);
+        let mut seen_files = HashSet::with_capacity(1024);
+
+        while let Some(frn) = stack.pop() {
+            if !visited_dirs.insert(frn) {
+                continue;
+            }
+            if let Some(child_frns) = self.children.get(&frn) {
+                for &child_frn in child_frns {
+                    if let Some(record) = self.records.get(&child_frn) {
+                        if record.is_dir {
+                            if !self.reparse_points.contains(&child_frn) {
+                                stack.push(child_frn);
+                            }
+                        } else if seen_files.insert(child_frn) {
+                            total_size = total_size.saturating_add(record.size);
+                            file_count += 1;
+                        } else {
+                            duplicate_hits += 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        (total_size, file_count, duplicate_hits)
     }
 
     /// Report estimated memory usage: (arena_used, arena_capacity, hashmap_estimate).
@@ -179,9 +502,6 @@ impl VolumeIndex {
         let map_est = self.records.capacity() * slot_size;
         (arena_used, arena_cap, map_est)
     }
-
-    /// The NTFS root directory's File Reference Number.
-    const ROOT_FRN: u64 = 5;
 
     /// Resolve a filesystem path (e.g., `C:\Users\foo`) to the FRN of the
     /// directory, walking path components through the index.
@@ -201,16 +521,16 @@ impl VolumeIndex {
             if component.is_empty() {
                 continue;
             }
-            // Find a child record whose parent is current_frn and whose name
-            // matches the component (case-insensitive, like NTFS).
-            let child_frn = self.records.iter().find_map(|(&frn, record)| {
-                if record.parent_ref == current_frn {
-                    let name = self.names.get(record.name_ref());
-                    if name.eq_ignore_ascii_case(component) {
-                        return Some(frn);
-                    }
-                }
-                None
+            // Use the reverse children index instead of scanning the entire
+            // volume. This keeps path resolution proportional to the current
+            // directory fanout, not to the total file count on the drive.
+            let child_frn = self.children.get(&current_frn).and_then(|child_frns| {
+                child_frns.iter().copied().find(|child_frn| {
+                    self.records
+                        .get(child_frn)
+                        .map(|record| self.names.get(record.name_ref()).eq_ignore_ascii_case(component))
+                        .unwrap_or(false)
+                })
             });
             current_frn = child_frn?;
         }
@@ -368,5 +688,33 @@ pub fn search_page(
         } else {
             Some(matched_after_filters)
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::VolumeIndex;
+
+    #[test]
+    fn folder_size_skips_reparse_subtrees() {
+        let mut index = VolumeIndex::new('C');
+        let root = 5u64;
+
+        assert!(index.insert_record(10, "real", root, true, false));
+        assert!(index.insert_record(11, "junction", root, true, true));
+        assert!(index.insert_record(12, "root-file.bin", root, false, false));
+        assert!(index.insert_record(20, "real-file.bin", 10, false, false));
+        assert!(index.insert_record(21, "junction-file.bin", 11, false, false));
+
+        index.records.get_mut(&12).unwrap().size = 1;
+        index.records.get_mut(&20).unwrap().size = 10;
+        index.records.get_mut(&21).unwrap().size = 100;
+
+        let (raw_total, raw_count) = index.folder_size_sum(root);
+        assert_eq!((raw_total, raw_count), (11, 2));
+
+        let (unique_total, unique_count, duplicate_hits) =
+            index.folder_size_sum_unique_files(root);
+        assert_eq!((unique_total, unique_count, duplicate_hits), (11, 2, 0));
     }
 }

@@ -124,6 +124,7 @@ fn refresh_and_send_status(
     last_known_available: &mut bool,
     last_known_total_indexed: &mut u64,
     last_known_service_volumes: &mut HashSet<char>,
+    last_known_service_executable_path: &mut String,
     consecutive_failures: &mut u8,
 ) {
     let ping_ok = crate::infrastructure::global_search::ping();
@@ -149,6 +150,13 @@ fn refresh_and_send_status(
         }
 
         if let Some(status) = status_ok {
+            if *last_known_service_executable_path != status.service_executable_path {
+                log::info!(
+                    "[GLOBAL-SEARCH] Connected to service binary: {}",
+                    status.service_executable_path
+                );
+                *last_known_service_executable_path = status.service_executable_path.clone();
+            }
             *last_known_available = true;
             *last_known_total_indexed = status.total_files_indexed;
             *last_known_service_volumes = status.volumes.iter().map(|v| v.drive_letter).collect();
@@ -190,6 +198,7 @@ pub fn start_global_search_worker(
         let mut last_known_available = false;
         let mut last_known_total_indexed = 0u64;
         let mut last_known_service_volumes = HashSet::<char>::new();
+        let mut last_known_service_executable_path = String::new();
         let mut consecutive_failures = 0u8;
         let mut session_index =
             crate::infrastructure::user_session_search::UserSessionSearchIndex::new();
@@ -205,6 +214,7 @@ pub fn start_global_search_worker(
             &mut last_known_available,
             &mut last_known_total_indexed,
             &mut last_known_service_volumes,
+            &mut last_known_service_executable_path,
             &mut consecutive_failures,
         );
         ctx.request_repaint();
@@ -330,6 +340,7 @@ pub fn start_global_search_worker(
                                 &mut last_known_available,
                                 &mut last_known_total_indexed,
                                 &mut last_known_service_volumes,
+                                &mut last_known_service_executable_path,
                                 &mut consecutive_failures,
                             );
                         }
@@ -367,6 +378,7 @@ pub fn start_global_search_worker(
                     &mut last_known_available,
                     &mut last_known_total_indexed,
                     &mut last_known_service_volumes,
+                    &mut last_known_service_executable_path,
                     &mut consecutive_failures,
                 );
             }

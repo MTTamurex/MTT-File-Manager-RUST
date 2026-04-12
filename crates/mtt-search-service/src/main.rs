@@ -3,6 +3,7 @@ mod fs_walker;
 mod index_db;
 mod ipc_authorization;
 mod ipc_server;
+mod mft_reader;
 mod name_arena;
 mod path_resolver;
 mod security_policy;
@@ -60,7 +61,7 @@ fn main() {
 
             let _ = ctrlc_handler(shutdown_clone);
 
-            run_indexer(shutdown);
+            run_indexer(shutdown, true);
         }
         _ => {
             // Normal service dispatch (called by Windows SCM)
@@ -107,7 +108,7 @@ fn ctrlc_handler(shutdown: Arc<AtomicBool>) -> Result<(), String> {
 }
 
 /// Main indexer loop. Shared between console mode and service mode.
-pub fn run_indexer(shutdown: Arc<AtomicBool>) {
+pub fn run_indexer(shutdown: Arc<AtomicBool>, console_mode: bool) {
     eprintln!("[SERVICE] mtt-search-service v2 (compact-arena index)");
     eprintln!(
         "[SERVICE] FileRecord size: {} bytes",
@@ -139,7 +140,11 @@ pub fn run_indexer(shutdown: Arc<AtomicBool>) {
     let tracked_volumes = Arc::new(Mutex::new(HashSet::<char>::new()));
 
     // Open persistence
-    let db_path = match index_db::get_db_path() {
+    let db_path = match if console_mode {
+        index_db::get_console_db_path()
+    } else {
+        index_db::get_db_path()
+    } {
         Ok(path) => path,
         Err(e) => {
             eprintln!(
@@ -149,7 +154,7 @@ pub fn run_indexer(shutdown: Arc<AtomicBool>) {
             return;
         }
     };
-    eprintln!("[SERVICE] Index database ready");
+    eprintln!("[SERVICE] Index database ready: {}", db_path.display());
     let db = match index_db::IndexDb::open(&db_path) {
         Ok(db) => Arc::new(db),
         Err(e) => {
