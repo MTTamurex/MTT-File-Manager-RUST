@@ -582,9 +582,6 @@ pub fn folder_size_for_user(
                 if !record.is_dir {
                     continue;
                 }
-                if index.reparse_points.contains(&child_frn) {
-                    continue; // already excluded by folder_size_sum
-                }
 
                 // Resolve path and check for explicit ACCESS_DENIED.
                 let denied = crate::path_resolver::resolve_path_cached(

@@ -430,6 +430,12 @@ impl VolumeIndex {
     /// Compute the total size of all files under a directory (recursive).
     /// Uses the `children` reverse index for O(subtree) traversal.
     /// Returns `(total_size, file_count)`.
+    ///
+    /// Reparse-point directories (junctions, symlinks, OneDrive cloud folders)
+    /// are traversed normally.  In the MFT, junction/symlink FRNs have zero
+    /// children (their content lives under the *target* FRN), so they add
+    /// nothing.  Cloud-reparse folders (OneDrive) DO have real children and
+    /// must be counted to match Explorer.  `visited_dirs` prevents cycles.
     pub fn folder_size_sum(&self, dir_frn: u64) -> (u64, u64) {
         let mut total_size: u64 = 0;
         let mut file_count: u64 = 0;
@@ -443,9 +449,7 @@ impl VolumeIndex {
                 for &child_frn in child_frns {
                     if let Some(record) = self.records.get(&child_frn) {
                         if record.is_dir {
-                            if !self.reparse_points.contains(&child_frn) {
-                                stack.push(child_frn);
-                            }
+                            stack.push(child_frn);
                         } else {
                             total_size = total_size.saturating_add(record.size);
                             file_count += 1;
@@ -477,9 +481,7 @@ impl VolumeIndex {
                 for &child_frn in child_frns {
                     if let Some(record) = self.records.get(&child_frn) {
                         if record.is_dir {
-                            if !self.reparse_points.contains(&child_frn) {
-                                stack.push(child_frn);
-                            }
+                            stack.push(child_frn);
                         } else if seen_files.insert(child_frn) {
                             total_size = total_size.saturating_add(record.size);
                             file_count += 1;
@@ -696,11 +698,15 @@ mod tests {
     use super::VolumeIndex;
 
     #[test]
-    fn folder_size_skips_reparse_subtrees() {
+    fn folder_size_includes_reparse_children() {
         let mut index = VolumeIndex::new('C');
         let root = 5u64;
 
+        // "real" dir (non-reparse) with a file
         assert!(index.insert_record(10, "real", root, true, false));
+        // "junction" dir (reparse) — in real NTFS, junction FRNs have
+        // no children in the MFT, but this test verifies that even if
+        // children exist (as with OneDrive cloud folders), they are counted.
         assert!(index.insert_record(11, "junction", root, true, true));
         assert!(index.insert_record(12, "root-file.bin", root, false, false));
         assert!(index.insert_record(20, "real-file.bin", 10, false, false));
@@ -710,11 +716,27 @@ mod tests {
         index.records.get_mut(&20).unwrap().size = 10;
         index.records.get_mut(&21).unwrap().size = 100;
 
+        // Reparse children are now included (needed for OneDrive cloud folders).
         let (raw_total, raw_count) = index.folder_size_sum(root);
-        assert_eq!((raw_total, raw_count), (11, 2));
+        assert_eq!((raw_total, raw_count), (111, 3));
 
         let (unique_total, unique_count, duplicate_hits) =
             index.folder_size_sum_unique_files(root);
-        assert_eq!((unique_total, unique_count, duplicate_hits), (11, 2, 0));
+        assert_eq!((unique_total, unique_count, duplicate_hits), (111, 3, 0));
+    }
+
+    #[test]
+    fn folder_size_visited_dirs_prevents_cycles() {
+        let mut index = VolumeIndex::new('C');
+        let root = 5u64;
+
+        // Create a dir structure where the same FRN could appear twice
+        // (e.g., hardlink-like scenario). visited_dirs prevents re-counting.
+        assert!(index.insert_record(10, "dir_a", root, true, false));
+        assert!(index.insert_record(20, "file.bin", 10, false, false));
+        index.records.get_mut(&20).unwrap().size = 42;
+
+        let (total, count) = index.folder_size_sum(root);
+        assert_eq!((total, count), (42, 1));
     }
 }
