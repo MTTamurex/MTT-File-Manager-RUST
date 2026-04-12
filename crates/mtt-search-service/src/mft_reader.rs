@@ -201,7 +201,9 @@ fn extract_hardlink_parents(record: &[u8], record_size: usize) -> Vec<u64> {
         return Vec::new();
     }
 
-    let mut parents: Vec<u64> = Vec::with_capacity(link_count as usize);
+    // SEC: Cap pre-allocation to avoid excessive memory from corrupted MFT records
+    // claiming a very high link_count. The real count is bounded by record_size.
+    let mut parents: Vec<u64> = Vec::with_capacity(link_count.min(64) as usize);
     let mut offset = first_attr;
     while offset + 16 <= record_size {
         let attr_type = u32::from_le_bytes(record[offset..offset + 4].try_into().unwrap());

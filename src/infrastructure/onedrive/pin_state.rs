@@ -12,7 +12,15 @@ pub enum PinCommand {
 }
 
 fn run_attrib(args: &[String], path: &Path) -> io::Result<()> {
-    let mut cmd = Command::new("attrib");
+    // SEC: Use absolute path for attrib.exe to prevent PATH hijacking.
+    let attrib_exe = {
+        let system_root = std::env::var("SYSTEMROOT")
+            .unwrap_or_else(|_| r"C:\Windows".to_string());
+        std::path::Path::new(&system_root)
+            .join("System32")
+            .join("attrib.exe")
+    };
+    let mut cmd = Command::new(attrib_exe);
     cmd.args(args);
     #[cfg(target_os = "windows")]
     cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW

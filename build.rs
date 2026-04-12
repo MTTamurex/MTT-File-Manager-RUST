@@ -83,8 +83,11 @@ fn stage_pdfium_runtime() {
 
     // SEC: Verify pdfium.dll integrity before staging. Supply-chain attack
     // via PDFIUM_DYNAMIC_LIB_PATH could replace the DLL with a malicious one.
-    // Set PDFIUM_SKIP_HASH_CHECK=1 only during intentional pdfium upgrades.
-    if env::var("PDFIUM_SKIP_HASH_CHECK").as_deref() != Ok("1") {
+    // Set PDFIUM_SKIP_HASH_CHECK=1 only during intentional pdfium upgrades
+    // (ignored in release builds — always verify).
+    let is_release = env::var("PROFILE").as_deref() == Ok("release");
+    let skip_requested = env::var("PDFIUM_SKIP_HASH_CHECK").as_deref() == Ok("1");
+    if is_release || !skip_requested {
         verify_pdfium_hash(&source);
     }
 
