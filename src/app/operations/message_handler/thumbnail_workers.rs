@@ -493,9 +493,39 @@ impl ImageViewerApp {
                 } = msg
                 {
                     self.folder_size_state.batch_loading.remove(&folder_path);
-                    self.folder_size_state.batch_cache.put(folder_path, total_size);
+                    self.folder_size_state.batch_cache.put(folder_path.clone(), total_size);
+                    // Keep the preview-panel cache in sync so selecting the folder
+                    // in the details panel shows the same (fresh) value.
+                    self.folder_size_state.cache.put(folder_path, total_size);
                     received_any = true;
                 }
+            }
+        }
+
+        // ── Process deferred re-invalidations ──
+        // Handles the timing race between client cache invalidation and
+        // the search service's 2 s USN journal polling.  If a stale value
+        // was re-cached before the service updated its index, this deferred
+        // clear forces the list view to re-fetch fresh data.
+        //
+        // Only batch_cache (list view) is cleared — NOT the preview-panel
+        // cache.  The batch worker result already updates both caches, so
+        // the preview panel gets the corrected value silently without
+        // flashing "calculating…" on every revalidation cycle.
+        {
+            let now = std::time::Instant::now();
+            let expired: Vec<std::path::PathBuf> = self
+                .folder_size_state
+                .pending_revalidation
+                .iter()
+                .filter(|(_, deadline)| now >= **deadline)
+                .map(|(path, _)| path.clone())
+                .collect();
+            for path in expired {
+                self.folder_size_state.pending_revalidation.remove(&path);
+                self.folder_size_state.batch_cache.pop(&path);
+                self.folder_size_state.batch_loading.remove(&path);
+                received_any = true;
             }
         }
 
