@@ -3,6 +3,7 @@ use crate::infrastructure::adaptive_batch::AdaptiveBatchTracker;
 use crate::infrastructure::directory_cache::DirectoryCache;
 use crate::infrastructure::directory_dirty_registry::DirectoryDirtyRegistry;
 use crate::infrastructure::directory_index::DirectoryIndex;
+use crate::infrastructure::app_state_db::AppStateDb;
 use crate::infrastructure::disk_cache::ThumbnailDiskCache;
 use crate::infrastructure::windows::{is_shell_navigation_path, list_shell_folder};
 use eframe::egui;
@@ -27,7 +28,8 @@ pub(super) fn try_handle_fast_paths(
     batch_start: &mut Instant,
     file_entry_sender: &Sender<(usize, Vec<FileEntry>)>,
     ctx: &egui::Context,
-    disk_cache: &Arc<ThumbnailDiskCache>,
+    _disk_cache: &Arc<ThumbnailDiskCache>,
+    app_state_db: &Arc<AppStateDb>,
     directory_cache: &Arc<DirectoryCache>,
     directory_dirty_registry: &Arc<DirectoryDirtyRegistry>,
     directory_index_opt: &Option<Arc<DirectoryIndex>>,
@@ -317,7 +319,7 @@ pub(super) fn try_handle_fast_paths(
                         .map(|e| e.path.clone())
                         .collect();
                     if !folders.is_empty() {
-                        let covers = disk_cache.get_folder_covers(&folders);
+                        let covers = app_state_db.get_folder_covers(&folders);
                         for entry in entries.iter_mut() {
                             if entry.is_dir {
                                 if let Some(cover) = covers.get(&entry.path) {

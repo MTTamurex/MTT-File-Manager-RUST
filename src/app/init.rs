@@ -16,7 +16,7 @@ use std::sync::atomic::AtomicBool;
 use std::time::Instant;
 
 use crate::application::ClipboardManager;
-use crate::infrastructure::disk_cache::ThumbnailDiskCache;
+use crate::infrastructure::app_state_db::AppStateDb;
 use crate::infrastructure::onedrive;
 // use crate::ui::cache::CacheManager;
 use crate::ui::context_menu::ContextMenuState;
@@ -36,9 +36,9 @@ use super::state::{ImageViewerApp, LastInput};
 
 /// Determines the initial path based on the last saved folder
 /// Returns (path, is_computer_view) - if the folder is unavailable, returns "This PC"
-fn determine_initial_path(disk_cache: &ThumbnailDiskCache) -> (String, bool) {
+fn determine_initial_path(app_state_db: &AppStateDb) -> (String, bool) {
     // Try to load last folder from database
-    if let Some(last_folder) = disk_cache.get_preference("last_folder") {
+    if let Some(last_folder) = app_state_db.get_preference("last_folder") {
         if !last_folder.is_empty() {
             // Restore "This PC" directly — no filesystem check needed.
             if last_folder == COMPUTER_VIEW_ID {
@@ -84,6 +84,7 @@ impl ImageViewerApp {
             items_rebuild_sender,
             items_rebuild_receiver,
             disk_cache,
+            app_state_db,
             directory_index,
             directory_cache,
             startup_preferences,
@@ -171,13 +172,13 @@ impl ImageViewerApp {
         crate::ui::theme::apply_scroll_style(&ctx);
 
         // Load folder locks from database
-        let folder_locks = disk_cache.get_all_folder_locks();
+        let folder_locks = app_state_db.get_all_folder_locks();
 
         // Load Quick Access pinned folders from database
-        let pinned_folders = disk_cache.get_all_pinned_folders();
+        let pinned_folders = app_state_db.get_all_pinned_folders();
 
         // Determine initial path based on last saved folder
-        let (initial_path, is_computer_view_initial) = determine_initial_path(&disk_cache);
+        let (initial_path, is_computer_view_initial) = determine_initial_path(&app_state_db);
 
         // Start the dedicated shell menu worker (STA COM thread for async extraction).
         let (shell_menu_req_tx, shell_menu_res_rx) =
@@ -236,6 +237,7 @@ impl ImageViewerApp {
             show_hidden_files,
             view_mode_normal: view_mode,
             disk_cache: disk_cache.clone(),
+            app_state_db: app_state_db.clone(),
             directory_cache: directory_cache.clone(),
             directory_dirty_registry: Arc::new(
                 crate::infrastructure::directory_dirty_registry::DirectoryDirtyRegistry::new(),
@@ -429,7 +431,7 @@ impl ImageViewerApp {
 
             // Window/layout persistence
             layout: build_layout_state(
-                &disk_cache,
+                &app_state_db,
                 saved_window_width,
                 saved_window_height,
                 saved_is_maximized,

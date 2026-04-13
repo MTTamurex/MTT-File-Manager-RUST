@@ -20,21 +20,21 @@ impl ImageViewerApp {
         let position = self.pinned_folders.len() as i64;
         let pinned = PinnedFolder { path: path.to_string(), display_name: display_name.clone(), position };
 
-        self.disk_cache.save_pinned_folder(path, &display_name, position);
+        self.app_state_db.save_pinned_folder(path, &display_name, position);
         self.pinned_folders.push(pinned);
     }
 
     /// Remove a folder from Quick Access.
     pub fn unpin_folder(&mut self, path: &str) {
         self.pinned_folders.retain(|pf| pf.path != path);
-        self.disk_cache.remove_pinned_folder(path);
+        self.app_state_db.remove_pinned_folder(path);
 
         // Reassign positions sequentially after removal
         let ordered: Vec<String> = self.pinned_folders.iter().map(|pf| pf.path.clone()).collect();
         for (i, pf) in self.pinned_folders.iter_mut().enumerate() {
             pf.position = i as i64;
         }
-        self.disk_cache.update_pinned_positions(&ordered);
+        self.app_state_db.update_pinned_positions(&ordered);
     }
 
     /// Remove pinned folders whose paths no longer exist on disk.
@@ -92,6 +92,6 @@ impl ImageViewerApp {
         for (i, pf) in self.pinned_folders.iter_mut().enumerate() {
             pf.position = i as i64;
         }
-        self.disk_cache.update_pinned_positions(&ordered);
+        self.app_state_db.update_pinned_positions(&ordered);
     }
 }

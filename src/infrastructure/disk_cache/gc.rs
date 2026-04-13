@@ -85,7 +85,6 @@ impl ThumbnailDiskCache {
         let limit = max_candidates.max(1) as i64;
 
         let sampled_entries: Vec<(String, String)>;
-        let sampled_folders: Vec<String>;
         let sampled_folder_previews: Vec<String>;
 
         {
@@ -116,18 +115,6 @@ impl ThumbnailDiskCache {
                 })
                 .unwrap_or_default();
 
-            sampled_folders = db
-                .prepare(
-                    "SELECT folder_path FROM folder_covers \
-                     WHERE rowid >= (ABS(RANDOM()) % MAX((SELECT COALESCE(MAX(rowid),0)+1 FROM folder_covers),1)) \
-                     LIMIT ?1",
-                )
-                .and_then(|mut stmt| {
-                    stmt.query_map(params![limit], |row| row.get::<_, String>(0))
-                        .map(|rows| rows.flatten().collect())
-                })
-                .unwrap_or_default();
-
             sampled_folder_previews = db
                 .prepare(
                     "SELECT folder_path FROM folder_previews \
@@ -142,7 +129,6 @@ impl ThumbnailDiskCache {
         }
 
         if sampled_entries.is_empty()
-            && sampled_folders.is_empty()
             && sampled_folder_previews.is_empty()
         {
             return 0;
@@ -154,7 +140,6 @@ impl ThumbnailDiskCache {
         let all_paths = sampled_entries
             .iter()
             .map(|(_, p)| p.as_str())
-            .chain(sampled_folders.iter().map(|p| p.as_str()))
             .chain(sampled_folder_previews.iter().map(|p| p.as_str()));
         let accessible = Self::accessible_drives(all_paths);
 
@@ -166,13 +151,6 @@ impl ThumbnailDiskCache {
             .map(|(id, _)| id)
             .collect();
 
-        let orphan_folders: Vec<String> = sampled_folders
-            .into_iter()
-            .filter(|path| {
-                Self::is_on_accessible_drive(path, &accessible) && !Self::path_exists_fast(path)
-            })
-            .collect();
-
         let orphan_folder_previews: Vec<String> = sampled_folder_previews
             .into_iter()
             .filter(|path| {
@@ -181,7 +159,6 @@ impl ThumbnailDiskCache {
             .collect();
 
         if orphan_thumbs.is_empty()
-            && orphan_folders.is_empty()
             && orphan_folder_previews.is_empty()
         {
             return 0;
@@ -194,13 +171,6 @@ impl ThumbnailDiskCache {
                 if !orphan_thumbs.is_empty() {
                     removed +=
                         Self::execute_batch_delete(&tx, CacheTable::Thumbnails, &orphan_thumbs);
-                }
-                if !orphan_folders.is_empty() {
-                    removed += Self::execute_batch_delete(
-                        &tx,
-                        CacheTable::FolderCovers,
-                        &orphan_folders,
-                    );
                 }
                 if !orphan_folder_previews.is_empty() {
                     removed += Self::execute_batch_delete(
@@ -234,7 +204,6 @@ impl ThumbnailDiskCache {
         log::info!("[GC] Starting full garbage collection...");
 
         let all_entries: Vec<(String, String)>;
-        let all_folders: Vec<String>;
         let all_folder_previews: Vec<String>;
 
         {
@@ -257,14 +226,6 @@ impl ThumbnailDiskCache {
                 })
                 .unwrap_or_default();
 
-            all_folders = db
-                .prepare("SELECT folder_path FROM folder_covers")
-                .and_then(|mut stmt| {
-                    stmt.query_map([], |row| row.get::<_, String>(0))
-                        .map(|rows| rows.flatten().collect())
-                })
-                .unwrap_or_default();
-
             all_folder_previews = db
                 .prepare("SELECT folder_path FROM folder_previews")
                 .and_then(|mut stmt| {
@@ -279,7 +240,6 @@ impl ThumbnailDiskCache {
         let all_paths = all_entries
             .iter()
             .map(|(_, p)| p.as_str())
-            .chain(all_folders.iter().map(|p| p.as_str()))
             .chain(all_folder_previews.iter().map(|p| p.as_str()));
         let accessible = Self::accessible_drives(all_paths);
 
@@ -291,13 +251,6 @@ impl ThumbnailDiskCache {
             .map(|(id, _)| id)
             .collect();
 
-        let orphan_folders: Vec<String> = all_folders
-            .into_iter()
-            .filter(|path| {
-                Self::is_on_accessible_drive(path, &accessible) && !Self::path_exists_fast(path)
-            })
-            .collect();
-
         let orphan_folder_previews: Vec<String> = all_folder_previews
             .into_iter()
             .filter(|path| {
@@ -306,7 +259,6 @@ impl ThumbnailDiskCache {
             .collect();
 
         if orphan_thumbs.is_empty()
-            && orphan_folders.is_empty()
             && orphan_folder_previews.is_empty()
         {
             log::debug!("[GC] No orphans found, skipping cleanup");
@@ -320,13 +272,6 @@ impl ThumbnailDiskCache {
                 if !orphan_thumbs.is_empty() {
                     removed +=
                         Self::execute_batch_delete(&tx, CacheTable::Thumbnails, &orphan_thumbs);
-                }
-                if !orphan_folders.is_empty() {
-                    removed += Self::execute_batch_delete(
-                        &tx,
-                        CacheTable::FolderCovers,
-                        &orphan_folders,
-                    );
                 }
                 if !orphan_folder_previews.is_empty() {
                     removed += Self::execute_batch_delete(

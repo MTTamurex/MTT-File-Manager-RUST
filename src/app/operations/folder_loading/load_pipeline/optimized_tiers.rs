@@ -3,6 +3,7 @@ use crate::infrastructure::adaptive_batch::AdaptiveBatchTracker;
 use crate::infrastructure::directory_cache::DirectoryCache;
 use crate::infrastructure::directory_dirty_registry::DirectoryDirtyRegistry;
 use crate::infrastructure::directory_index::{DirectoryIndex, IndexedFile};
+use crate::infrastructure::app_state_db::AppStateDb;
 use crate::infrastructure::disk_cache::ThumbnailDiskCache;
 use crate::infrastructure::ntfs_reader;
 use crate::infrastructure::onedrive;
@@ -29,7 +30,8 @@ pub(super) fn try_handle_optimized_tiers(
     all_entries_disk: &mut Vec<FileEntry>,
     file_entry_sender: &Sender<(usize, Vec<FileEntry>)>,
     ctx: &egui::Context,
-    disk_cache: &Arc<ThumbnailDiskCache>,
+    _disk_cache: &Arc<ThumbnailDiskCache>,
+    app_state_db: &Arc<AppStateDb>,
     directory_cache: &Arc<DirectoryCache>,
     directory_dirty_registry: &Arc<DirectoryDirtyRegistry>,
     directory_index_opt: &Option<Arc<DirectoryIndex>>,
@@ -103,7 +105,7 @@ pub(super) fn try_handle_optimized_tiers(
                             .map(|e| e.path.clone())
                             .collect();
                         if !folders.is_empty() {
-                            let covers = disk_cache.get_folder_covers(&folders);
+                            let covers = app_state_db.get_folder_covers(&folders);
                             for item in batch.iter_mut() {
                                 if item.is_dir {
                                     if let Some(cover) = covers.get(&item.path) {
@@ -129,7 +131,7 @@ pub(super) fn try_handle_optimized_tiers(
                     .map(|e| e.path.clone())
                     .collect();
                 if !folders.is_empty() {
-                    let covers = disk_cache.get_folder_covers(&folders);
+                    let covers = app_state_db.get_folder_covers(&folders);
                     for item in batch.iter_mut() {
                         if item.is_dir {
                             if let Some(cover) = covers.get(&item.path) {
@@ -216,7 +218,7 @@ pub(super) fn try_handle_optimized_tiers(
 
                     let mut processed_batch = batch_entries;
                     if !folders.is_empty() {
-                        let covers = disk_cache.get_folder_covers(&folders);
+                        let covers = app_state_db.get_folder_covers(&folders);
                         for item in processed_batch.iter_mut() {
                             if item.is_dir {
                                 if let Some(cover) = covers.get(&item.path) {

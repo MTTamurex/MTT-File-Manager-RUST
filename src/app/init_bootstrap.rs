@@ -2,6 +2,7 @@ use crate::domain::file_entry::DriveInfo;
 use crate::domain::file_entry::FileEntry;
 use crate::infrastructure::directory_cache::DirectoryCache;
 use crate::infrastructure::directory_index::DirectoryIndex;
+use crate::infrastructure::app_state_db::AppStateDb;
 use crate::infrastructure::disk_cache::ThumbnailDiskCache;
 use crate::infrastructure::folder_compose::FolderComposer;
 use crate::infrastructure::icon_disk_cache::IconDiskCache;
@@ -12,8 +13,9 @@ use crate::workers::thumbnail::{
     SharedBulkThumbnailProgress,
 };
 use eframe::egui;
+use rusqlite::Connection;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize};
 use std::sync::{mpsc, Arc};
 
@@ -36,6 +38,7 @@ pub(in crate::app) struct AppBootstrap {
     pub(in crate::app) items_rebuild_receiver: mpsc::Receiver<ItemsRebuildResult>,
 
     pub(in crate::app) disk_cache: Arc<ThumbnailDiskCache>,
+    pub(in crate::app) app_state_db: Arc<AppStateDb>,
     pub(in crate::app) directory_index: Option<Arc<DirectoryIndex>>,
     pub(in crate::app) directory_cache: Arc<DirectoryCache>,
     pub(in crate::app) startup_preferences: StartupPreferences,
@@ -147,7 +150,37 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
                 })
         }
     });
-    let directory_index = match DirectoryIndex::open(&cache_dir.join("thumbnails.db")) {
+    let base_dir = cache_dir
+        .parent()
+        .unwrap_or(&cache_dir)
+        .to_path_buf();
+
+    let state_dir = base_dir.join("state");
+    let app_state_db = Arc::new(match AppStateDb::new(state_dir.clone()) {
+        Ok(db) => db,
+        Err(e) => {
+            log::error!(
+                "[State] Failed to initialize app state DB at {:?}: {:?}. Retrying in-memory.",
+                state_dir,
+                e
+            );
+            AppStateDb::new(std::env::temp_dir().join("mtt-state-fallback"))
+                .unwrap_or_else(|e2| {
+                    log::error!("[State] In-memory fallback also failed: {:?}. Exiting.", e2);
+                    std::process::exit(1);
+                })
+        }
+    });
+
+    // One-time migration: move legacy tables from thumbnails.db → app_state.db
+    migrate_legacy_tables(
+        &cache_dir.join("thumbnails.db"),
+        &state_dir.join("app_state.db"),
+    );
+
+    let dir_cache_dir = base_dir.join("cache");
+    let _ = std::fs::create_dir_all(&dir_cache_dir);
+    let directory_index = match DirectoryIndex::open(&dir_cache_dir.join("directory_cache.db")) {
         Ok(index) => Some(Arc::new(index)),
         Err(e) => {
             log::warn!("[Cache] Failed to open directory index: {:?}", e);
@@ -155,7 +188,7 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
         }
     };
 
-    let (cover_req_tx, cover_res_rx) = spawn_cover_worker(disk_cache.clone());
+    let (cover_req_tx, cover_res_rx) = spawn_cover_worker(app_state_db.clone());
     #[cfg(feature = "notify-watcher")]
     let (fs_tx, fs_rx) = mpsc::channel();
     let (device_event_sender, device_event_receiver) = mpsc::channel();
@@ -171,7 +204,7 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
 
     onedrive::init_onedrive_paths();
     let directory_cache = Arc::new(DirectoryCache::new());
-    let startup_preferences = StartupPreferences::load(&disk_cache);
+    let startup_preferences = StartupPreferences::load(&app_state_db);
     let font_rx = spawn_async_font_loader();
 
     let pending_deletions: Arc<dashmap::DashMap<PathBuf, ()>> = Arc::new(dashmap::DashMap::new());
@@ -187,11 +220,7 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
     );
 
     // --- Icon disk cache: persist extension icons across app launches ---
-    let app_data_dir = cache_dir
-        .parent()
-        .unwrap_or(&cache_dir)
-        .to_path_buf();
-    let icon_disk_cache = Arc::new(IconDiskCache::new(&app_data_dir));
+    let icon_disk_cache = Arc::new(IconDiskCache::new(&base_dir));
     let preloaded_extension_icons = icon_disk_cache.load_all();
 
     let (icon_req_tx, icon_res_rx) =
@@ -257,7 +286,7 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
 
     let (file_op_tx, file_op_res_rx, extraction_progress, extraction_cancel) = spawn_file_operation_worker();
     let (global_search_tx, global_search_res_rx) = spawn_global_search_worker(ctx);
-    let disk_cache_invalidation_tx = spawn_disk_cache_invalidation_worker(disk_cache.clone());
+    let disk_cache_invalidation_tx = spawn_disk_cache_invalidation_worker(disk_cache.clone(), app_state_db.clone());
     let (consistency_probe_tx, consistency_probe_rx) = spawn_consistency_probe_worker(ctx.clone());
 
     let disks = windows_infra::get_all_drives();
@@ -270,6 +299,7 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
         items_rebuild_sender,
         items_rebuild_receiver,
         disk_cache,
+        app_state_db,
         directory_index,
         directory_cache,
         startup_preferences,
@@ -323,4 +353,161 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
         preloaded_extension_icons,
         custom_folder_icon,
     }
+}
+
+/// One-time migration: copy user_preferences, folder_locks, pinned_folders,
+/// folder_covers from old `thumbnails.db` into the new `app_state.db`, then
+/// drop the migrated tables (plus orphaned directory_index / file_index)
+/// and VACUUM the old database.
+///
+/// Uses `ATTACH DATABASE` so all copying happens in a single SQLite session.
+/// `INSERT OR IGNORE` ensures no data is overwritten if the new DB already
+/// has rows (e.g. from a previous successful migration).
+fn migrate_legacy_tables(thumbnails_db_path: &Path, app_state_db_path: &Path) {
+    let conn = match Connection::open(thumbnails_db_path) {
+        Ok(c) => c,
+        Err(e) => {
+            log::debug!(
+                "[Migration] Could not open old thumbnails.db at {:?}: {:?} — skipping.",
+                thumbnails_db_path,
+                e
+            );
+            return;
+        }
+    };
+
+    // Check whether any legacy table still exists in thumbnails.db.
+    let has_legacy: bool = conn
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN \
+             ('user_preferences','folder_locks','pinned_folders','folder_covers')",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap_or(0)
+        > 0;
+
+    if !has_legacy {
+        return; // Already migrated or fresh install — nothing to do.
+    }
+
+    log::info!(
+        "[Migration] Legacy tables detected in {:?} — migrating to {:?}",
+        thumbnails_db_path,
+        app_state_db_path
+    );
+
+    // ATTACH the new app_state.db.
+    let attach_path = app_state_db_path.to_string_lossy().replace('\'', "''");
+    if let Err(e) =
+        conn.execute_batch(&format!("ATTACH DATABASE '{}' AS new_state", attach_path))
+    {
+        log::error!("[Migration] Failed to ATTACH app_state.db: {:?}", e);
+        return;
+    }
+
+    // Helper: check if a table exists in the old DB.
+    let table_exists = |name: &str| -> bool {
+        conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
+            [name],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap_or(0)
+            > 0
+    };
+
+    let mut total_migrated: usize = 0;
+
+    // --- user_preferences ---
+    if table_exists("user_preferences") {
+        match conn.execute(
+            "INSERT OR IGNORE INTO new_state.user_preferences (key, value) \
+             SELECT key, value FROM user_preferences",
+            [],
+        ) {
+            Ok(n) => {
+                log::info!("[Migration] user_preferences: {} rows copied", n);
+                total_migrated += n;
+            }
+            Err(e) => log::warn!("[Migration] user_preferences copy failed: {:?}", e),
+        }
+    }
+
+    // --- folder_covers ---
+    if table_exists("folder_covers") {
+        match conn.execute(
+            "INSERT OR IGNORE INTO new_state.folder_covers (folder_path, cover_path) \
+             SELECT folder_path, cover_path FROM folder_covers",
+            [],
+        ) {
+            Ok(n) => {
+                log::info!("[Migration] folder_covers: {} rows copied", n);
+                total_migrated += n;
+            }
+            Err(e) => log::warn!("[Migration] folder_covers copy failed: {:?}", e),
+        }
+    }
+
+    // --- folder_locks (handles both old schema with search_query and new schema) ---
+    if table_exists("folder_locks") {
+        match conn.execute(
+            "INSERT OR IGNORE INTO new_state.folder_locks \
+             (path, view_mode, sort_mode, sort_descending, folders_position) \
+             SELECT path, view_mode, sort_mode, sort_descending, folders_position \
+             FROM folder_locks",
+            [],
+        ) {
+            Ok(n) => {
+                log::info!("[Migration] folder_locks: {} rows copied", n);
+                total_migrated += n;
+            }
+            Err(e) => log::warn!("[Migration] folder_locks copy failed: {:?}", e),
+        }
+    }
+
+    // --- pinned_folders ---
+    if table_exists("pinned_folders") {
+        match conn.execute(
+            "INSERT OR IGNORE INTO new_state.pinned_folders (path, display_name, position) \
+             SELECT path, display_name, position FROM pinned_folders",
+            [],
+        ) {
+            Ok(n) => {
+                log::info!("[Migration] pinned_folders: {} rows copied", n);
+                total_migrated += n;
+            }
+            Err(e) => log::warn!("[Migration] pinned_folders copy failed: {:?}", e),
+        }
+    }
+
+    // Detach before modifying the old database.
+    let _ = conn.execute_batch("DETACH DATABASE new_state");
+
+    // Drop migrated tables from old DB.
+    for table in &[
+        "user_preferences",
+        "folder_locks",
+        "pinned_folders",
+        "folder_covers",
+    ] {
+        if let Err(e) = conn.execute(&format!("DROP TABLE IF EXISTS {}", table), []) {
+            log::warn!("[Migration] Failed to drop old table {}: {:?}", table, e);
+        }
+    }
+
+    // Drop orphaned cache-index tables (DirectoryIndex now uses its own DB file).
+    for table in &["directory_index", "file_index"] {
+        let _ = conn.execute(&format!("DROP TABLE IF EXISTS {}", table), []);
+    }
+
+    // Reclaim space.
+    if let Err(e) = conn.execute_batch("VACUUM") {
+        log::debug!("[Migration] VACUUM failed (non-critical): {:?}", e);
+    }
+
+    log::info!(
+        "[Migration] Complete — {} total rows migrated from thumbnails.db → app_state.db",
+        total_migrated
+    );
 }

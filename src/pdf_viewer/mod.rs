@@ -21,26 +21,26 @@ mod toolbar;
 mod viewer_app;
 
 fn apply_saved_locale() {
-    let cache_dir = dirs::data_local_dir()
+    let state_dir = dirs::data_local_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("MTT-File-Manager")
-        .join("thumbnails");
+        .join("state");
 
-    if let Ok(cache) = crate::infrastructure::disk_cache::ThumbnailDiskCache::new(cache_dir) {
-        if let Some(language) = cache.get_preference("language") {
+    if let Ok(db) = crate::infrastructure::app_state_db::AppStateDb::new(state_dir) {
+        if let Some(language) = db.get_preference("language") {
             rust_i18n::set_locale(&language);
         }
     }
 }
 
 fn is_saved_theme_dark() -> bool {
-    let cache_dir = dirs::data_local_dir()
+    let state_dir = dirs::data_local_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("MTT-File-Manager")
-        .join("thumbnails");
-    crate::infrastructure::disk_cache::ThumbnailDiskCache::new(cache_dir)
+        .join("state");
+    crate::infrastructure::app_state_db::AppStateDb::new(state_dir)
         .ok()
-        .and_then(|c| c.get_preference("theme_mode"))
+        .and_then(|db| db.get_preference("theme_mode"))
         .map(|s| s == "dark")
         .unwrap_or(false)
 }

@@ -1,5 +1,5 @@
 use crate::domain::file_entry::DriveInfo;
-use crate::infrastructure::disk_cache::ThumbnailDiskCache;
+use crate::infrastructure::app_state_db::AppStateDb;
 use crate::ui::cache::FxHashSet;
 use lru::LruCache;
 use std::num::NonZeroUsize;
@@ -12,15 +12,15 @@ use super::file_operation_state::FileOperationState;
 use super::folder_size_state::{FolderSizeMessage, FolderSizeState};
 use super::layout_state::LayoutState;
 
-fn load_width_pref(disk_cache: &ThumbnailDiskCache, key: &str, default: f32) -> f32 {
-    disk_cache
+fn load_width_pref(app_state_db: &AppStateDb, key: &str, default: f32) -> f32 {
+    app_state_db
         .get_preference(key)
         .and_then(|s| s.parse::<f32>().ok())
         .unwrap_or(default)
 }
 
 pub(in crate::app) fn build_layout_state(
-    disk_cache: &ThumbnailDiskCache,
+    app_state_db: &AppStateDb,
     saved_window_width: f32,
     saved_window_height: f32,
     saved_is_maximized: bool,
@@ -35,47 +35,39 @@ pub(in crate::app) fn build_layout_state(
         saved_is_fullscreen: false,
         sidebar_left_width,
         sidebar_right_width,
-        list_col_name_width: load_width_pref(disk_cache, "list_col_name_width", 300.0),
-        list_col_date_width: load_width_pref(disk_cache, "list_col_date_width", 170.0),
-        list_col_type_width: load_width_pref(disk_cache, "list_col_type_width", 120.0),
-        list_col_size_width: load_width_pref(disk_cache, "list_col_size_width", 100.0),
-        list_col_onedrive_name_width: load_width_pref(
-            disk_cache,
+        list_col_name_width: load_width_pref(app_state_db, "list_col_name_width", 300.0),
+        list_col_date_width: load_width_pref(app_state_db, "list_col_date_width", 170.0),
+        list_col_type_width: load_width_pref(app_state_db, "list_col_type_width", 120.0),
+        list_col_size_width: load_width_pref(app_state_db, "list_col_size_width", 100.0),
+        list_col_onedrive_name_width: load_width_pref(app_state_db,
             "list_col_onedrive_name_width",
             300.0,
         ),
-        list_col_onedrive_date_width: load_width_pref(
-            disk_cache,
+        list_col_onedrive_date_width: load_width_pref(app_state_db,
             "list_col_onedrive_date_width",
             170.0,
         ),
-        list_col_onedrive_type_width: load_width_pref(
-            disk_cache,
+        list_col_onedrive_type_width: load_width_pref(app_state_db,
             "list_col_onedrive_type_width",
             120.0,
         ),
-        list_col_onedrive_size_width: load_width_pref(
-            disk_cache,
+        list_col_onedrive_size_width: load_width_pref(app_state_db,
             "list_col_onedrive_size_width",
             100.0,
         ),
-        list_col_onedrive_status_width: load_width_pref(
-            disk_cache,
+        list_col_onedrive_status_width: load_width_pref(app_state_db,
             "list_col_onedrive_status_width",
             120.0,
         ),
-        list_col_computer_name_width: load_width_pref(
-            disk_cache,
+        list_col_computer_name_width: load_width_pref(app_state_db,
             "list_col_computer_name_width",
             300.0,
         ),
-        list_col_computer_total_width: load_width_pref(
-            disk_cache,
+        list_col_computer_total_width: load_width_pref(app_state_db,
             "list_col_computer_total_width",
             120.0,
         ),
-        list_col_computer_free_width: load_width_pref(
-            disk_cache,
+        list_col_computer_free_width: load_width_pref(app_state_db,
             "list_col_computer_free_width",
             120.0,
         ),

@@ -14,32 +14,12 @@ impl ThumbnailDiskCache {
         if let Ok(mut db) = self.writer.lock() {
             let pattern = format!("{}\\%", path_str.trim_end_matches('\\'));
 
-            // M-16: wrap all DELETEs in a single transaction — one fsync instead of 8
+            // M-16: wrap all DELETEs in a single transaction — one fsync instead of multiple
             if let Ok(tx) = db.transaction() {
                 let _ = tx.execute("DELETE FROM thumbnails WHERE path = ?", [&path_str]);
                 let deleted = tx
                     .execute("DELETE FROM thumbnails WHERE path LIKE ?", [&pattern])
                     .unwrap_or(0);
-
-                // Remove folder cover entries
-                let _ = tx.execute(
-                    "DELETE FROM folder_covers WHERE folder_path = ?",
-                    [&path_str],
-                );
-                let _ = tx.execute(
-                    "DELETE FROM folder_covers WHERE folder_path LIKE ?",
-                    [&pattern],
-                );
-                // Exact match: this file IS a folder cover
-                let _ = tx.execute(
-                    "DELETE FROM folder_covers WHERE cover_path = ?",
-                    [&path_str],
-                );
-                // Children match: covers inside a deleted folder
-                let _ = tx.execute(
-                    "DELETE FROM folder_covers WHERE cover_path LIKE ?",
-                    [&pattern],
-                );
 
                 // Remove folder preview cache entries
                 let _ = tx.execute(

@@ -1,7 +1,7 @@
-use super::ThumbnailDiskCache;
+use super::AppStateDb;
 use rusqlite::params;
 
-impl ThumbnailDiskCache {
+impl AppStateDb {
     /// Sets a user preference
     /// [WRITER]
     pub fn set_preference(&self, key: &str, value: &str) {

@@ -62,6 +62,7 @@ impl ImageViewerApp {
         self.metadata_cache.pop(&cleaned);
         self.live_file_size_cache.pop(&cleaned);
         self.disk_cache.remove_cache_for_path(&cleaned);
+        self.app_state_db.remove_covers_for_path(&cleaned);
         crate::workers::thumbnail::clear_failure_cache(&cleaned);
 
         // Drain any stale thumbnail data from the GPU upload queue so it

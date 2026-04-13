@@ -1,6 +1,6 @@
 use crate::app::navigation_state::ThemeMode;
 use crate::domain::file_entry::{FoldersPosition, SortMode, ViewMode};
-use crate::infrastructure::disk_cache::ThumbnailDiskCache;
+use crate::infrastructure::app_state_db::AppStateDb;
 use crate::ui::theme;
 
 pub(super) struct StartupPreferences {
@@ -26,10 +26,10 @@ pub(super) struct StartupPreferences {
 }
 
 impl StartupPreferences {
-    pub(super) fn load(disk_cache: &ThumbnailDiskCache) -> Self {
+    pub(super) fn load(app_state_db: &AppStateDb) -> Self {
         // PERF: Load all preferences in a single SQL query + lock acquisition
         // instead of 18 individual get_preference() calls.
-        let prefs = disk_cache.get_all_preferences();
+        let prefs = app_state_db.get_all_preferences();
 
         let sort_mode = prefs
             .get("sort_mode")

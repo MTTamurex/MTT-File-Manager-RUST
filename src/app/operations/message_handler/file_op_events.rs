@@ -365,11 +365,11 @@ impl ImageViewerApp {
         // If any moved file was a folder cover, force re-discovery.
         for source_folder in &source_folders {
             let covers = self
-                .disk_cache
+                .app_state_db
                 .get_folder_covers(std::slice::from_ref(source_folder));
             if let Some(current_cover) = covers.get(source_folder) {
                 if moved_files.iter().any(|f| f == current_cover) {
-                    self.disk_cache.remove_folder_cover(source_folder);
+                    self.app_state_db.remove_folder_cover(source_folder);
                     self.cache_manager.folder_preview_cache.pop(source_folder);
                     let _ = self.cover_worker_sender.send(source_folder.clone());
                     #[cfg(debug_assertions)]

@@ -94,11 +94,11 @@ impl ImageViewerApp {
                     // Uses SQLite lookup (minimal I/O) and requests recalculation.
                     let current_folder = std::path::PathBuf::from(&active.path);
                     let covers = self
-                        .disk_cache
+                        .app_state_db
                         .get_folder_covers(std::slice::from_ref(&current_folder));
                     if let Some(current_cover) = covers.get(&current_folder) {
                         if current_cover == &removed_path {
-                            self.disk_cache.remove_folder_cover(&current_folder);
+                            self.app_state_db.remove_folder_cover(&current_folder);
                             self.cache_manager.folder_preview_cache.pop(&current_folder);
                             let _ = self.cover_worker_sender.send(current_folder);
                         }
