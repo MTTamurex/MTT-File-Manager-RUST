@@ -7,6 +7,7 @@ use crate::file_index;
 use crate::indexing_progress::IndexingProgress;
 use crate::index_db;
 use crate::usn_journal;
+use crate::FtsState;
 use super::upsert_volume_index;
 
 const INCREMENTAL_APPLY_RETRY_ATTEMPTS: usize = 3;
@@ -47,6 +48,7 @@ pub(crate) fn index_volume(
     indexing_progress: Arc<IndexingProgress>,
     db: Arc<index_db::IndexDb>,
     shutdown: Arc<AtomicBool>,
+    fts_state: Arc<FtsState>,
 ) {
     eprintln!("[USN] Starting indexing for volume {}:\\", drive_letter);
 
@@ -360,7 +362,8 @@ pub(crate) fn index_volume(
             }
         }
 
-        // Persist to database (full save — initial scan).
+        // Persist to database (records only — FTS rebuilt in background).
+        fts_state.invalidate();
         let persist_total = index.records.len() as u64;
         indexing_progress.update(
             drive_letter,
@@ -399,6 +402,23 @@ pub(crate) fn index_volume(
         upsert_volume_index(&mut indices_lock, index);
     }
     indexing_progress.clear(drive_letter);
+
+    // Rebuild FTS5 in a background thread so the user can search immediately
+    // via the in-memory linear scan.
+    {
+        let db = db.clone();
+        let fts_state = fts_state.clone();
+        let gen = fts_state.generation();
+        std::thread::spawn(move || {
+            match db.rebuild_fts_full() {
+                Ok(_) => fts_state.try_mark_ready(gen),
+                Err(e) => eprintln!(
+                    "[USN] {}:\\ Background FTS rebuild failed: {}",
+                    drive_letter, e
+                ),
+            }
+        });
+    }
 
     eprintln!(
         "[USN] {}:\\ Index ready, starting incremental updates",

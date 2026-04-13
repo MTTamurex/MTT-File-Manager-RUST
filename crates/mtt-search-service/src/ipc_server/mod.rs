@@ -16,6 +16,7 @@ use crate::file_index::VolumeIndex;
 use crate::indexing_progress::IndexingProgress;
 use crate::index_db;
 use crate::security_policy::IpcSecurityPolicy;
+use crate::FtsState;
 
 const PIPE_BUFFER_SIZE: u32 = 64 * 1024;
 const PIPE_MAX_INSTANCES: u32 = 32;
@@ -39,6 +40,7 @@ pub fn run_ipc_server(
     indexing_progress: Arc<IndexingProgress>,
     shutdown: Arc<AtomicBool>,
     db_path: std::path::PathBuf,
+    fts_state: Arc<FtsState>,
 ) {
     let is_warming = Arc::new(AtomicBool::new(false));
     let last_warm_epoch_secs = Arc::new(AtomicU64::new(0));
@@ -141,6 +143,7 @@ pub fn run_ipc_server(
         let active_for_client = active_clients.clone();
         let policy_for_client = security_policy.clone();
         let fts_for_client = fts_searcher.clone();
+        let fts_state_for_client = fts_state.clone();
         let pipe_raw = pipe.0 as usize;
         std::thread::spawn(move || {
             let pipe = HANDLE(pipe_raw as *mut core::ffi::c_void);
@@ -190,6 +193,7 @@ pub fn run_ipc_server(
                     &warm_epoch_for_client,
                     &policy_for_client,
                     &fts_for_client,
+                    &fts_state_for_client,
                 )
             })) {
                 eprintln!("[IPC] Client handler panic: {:?}", e);
