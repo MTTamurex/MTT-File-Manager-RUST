@@ -6,6 +6,7 @@ const DEFAULT_GLOBAL_SEARCH_PAGE_LIMIT: u32 = 200;
 impl ImageViewerApp {
     pub(crate) fn open_global_search(&mut self) {
         self.global_search.active = true;
+        self.global_search.opened_at = std::time::Instant::now();
         self.global_search.selected_index = None;
         self.global_search.focus_request = true;
         self.global_search.query.clear();

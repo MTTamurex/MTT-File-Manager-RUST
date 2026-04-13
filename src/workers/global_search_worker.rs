@@ -86,13 +86,14 @@ fn volume_is_actively_scanning(volume: &VolumeStatus) -> bool {
 
 fn status_poll_interval(
     tracking_active: bool,
+    service_available: bool,
     volumes: &[VolumeStatus],
 ) -> Option<std::time::Duration> {
     if !tracking_active {
         return None;
     }
 
-    Some(if volumes.iter().any(volume_is_actively_scanning) {
+    Some(if !service_available || volumes.is_empty() || volumes.iter().any(volume_is_actively_scanning) {
         std::time::Duration::from_millis(ACTIVE_STATUS_POLL_MS)
     } else {
         std::time::Duration::from_millis(IDLE_STATUS_POLL_MS)
@@ -332,6 +333,7 @@ pub fn start_global_search_worker(
         loop {
             let initial_request = match status_poll_interval(
                 status_tracking_active,
+                last_known_available,
                 &last_known_status_volumes,
             ) {
                 Some(timeout) => match receiver.recv_timeout(timeout) {

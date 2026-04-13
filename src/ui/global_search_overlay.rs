@@ -19,6 +19,8 @@ const INITIAL_PAGE_LIMIT: u32 = 200;
 const BACKDROP_ALPHA: u8 = 72;
 const SEARCH_INPUT_DEBOUNCE_MS: u64 = 180;
 const SEARCH_LOADING_TIMEOUT_MS: u64 = 12_000;
+const SERVICE_STARTUP_GRACE_SECS: u64 = 8;
+const NO_PROGRESS_WARNING_SECS: u64 = 10;
 
 /// Render the global search overlay. Returns true if the overlay should remain open.
 pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Context) {
@@ -179,10 +181,26 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                         ui.add_space(10.0);
 
                         if !app.global_search.available {
+                            let service_starting = app.global_search.opened_at.elapsed()
+                                < Duration::from_secs(SERVICE_STARTUP_GRACE_SECS);
                             ui.label(
-                                egui::RichText::new(&*t!("search.service_offline"))
+                                egui::RichText::new(if service_starting {
+                                    t!("search.service_starting")
+                                } else {
+                                    t!("search.service_offline")
+                                })
                                     .size(11.0)
-                                    .color(egui::Color32::from_rgb(200, 80, 80)),
+                                    .color(if service_starting {
+                                        egui::Color32::from_gray(120)
+                                    } else {
+                                        egui::Color32::from_rgb(200, 80, 80)
+                                    }),
+                            );
+                        } else if app.global_search.total_indexed == 0 {
+                            ui.label(
+                                egui::RichText::new(&*t!("search.index_preparing"))
+                                    .size(11.0)
+                                    .color(egui::Color32::from_gray(120)),
                             );
                         } else {
                             let headline = if app.global_search.indexing_in_progress {
@@ -362,7 +380,7 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
 fn render_indexing_activity(ui: &mut egui::Ui, app: &ImageViewerApp, dark_mode: bool) {
     let idle_for = app.global_search.last_progress_advance_at.elapsed();
     let status_age = app.global_search.last_status_received_at.elapsed();
-    let freshness_color = if idle_for >= Duration::from_secs(3) {
+    let freshness_color = if idle_for >= Duration::from_secs(NO_PROGRESS_WARNING_SECS) {
         egui::Color32::from_rgb(196, 141, 56)
     } else {
         egui::Color32::from_gray(135)
@@ -372,7 +390,7 @@ fn render_indexing_activity(ui: &mut egui::Ui, app: &ImageViewerApp, dark_mode: 
     } else {
         egui::Color32::from_rgba_unmultiplied(0, 0, 0, 10)
     };
-    let stroke = if idle_for >= Duration::from_secs(3) {
+    let stroke = if idle_for >= Duration::from_secs(NO_PROGRESS_WARNING_SECS) {
         egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(196, 141, 56, 120))
     } else {
         egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(120, 120, 120, 60))
@@ -382,8 +400,15 @@ fn render_indexing_activity(ui: &mut egui::Ui, app: &ImageViewerApp, dark_mode: 
     } else {
         egui::Color32::from_gray(135)
     };
-    let freshness_text = if idle_for < Duration::from_secs(2) {
+    let freshness_text = if app.global_search.total_indexed == 0 {
+        t!("search.indexing_waiting_first_batch")
+    } else if idle_for < Duration::from_secs(2) {
         t!("search.indexing_recent_update")
+    } else if idle_for < Duration::from_secs(NO_PROGRESS_WARNING_SECS) {
+        t!(
+            "search.indexing_waiting_next_update",
+            seconds = idle_for.as_secs().max(1)
+        )
     } else {
         t!(
             "search.indexing_waiting_progress",
@@ -398,6 +423,14 @@ fn render_indexing_activity(ui: &mut egui::Ui, app: &ImageViewerApp, dark_mode: 
             seconds = status_age.as_secs().max(1)
         )
     };
+    let activity_title = if app.global_search.total_indexed == 0 {
+        t!("search.index_preparing")
+    } else {
+        t!(
+            "search.indexing_files",
+            count = format_exact_number(app.global_search.total_indexed)
+        )
+    };
     let summary = build_scanning_volume_summary(&app.global_search.status_volumes);
 
     egui::Frame::new()
@@ -408,10 +441,7 @@ fn render_indexing_activity(ui: &mut egui::Ui, app: &ImageViewerApp, dark_mode: 
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.label(
-                    egui::RichText::new(t!(
-                        "search.indexing_files",
-                        count = format_exact_number(app.global_search.total_indexed)
-                    ))
+                    egui::RichText::new(activity_title)
                     .size(11.0)
                     .strong(),
                 );
