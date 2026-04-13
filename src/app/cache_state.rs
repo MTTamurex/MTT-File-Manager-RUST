@@ -1,3 +1,4 @@
+use crate::infrastructure::app_state_db::AppStateDb;
 use crate::infrastructure::directory_cache::DirectoryCache;
 use crate::infrastructure::disk_cache::ThumbnailDiskCache;
 use crate::ui::cache::CacheManager;
@@ -11,6 +12,7 @@ use std::time::Instant;
 pub struct CacheState {
     pub cache_manager: Arc<Mutex<CacheManager>>,
     pub disk_cache: Arc<ThumbnailDiskCache>,
+    pub app_state_db: Arc<AppStateDb>,
     pub directory_cache: Arc<DirectoryCache>,
     pub directory_index: Option<Arc<crate::infrastructure::directory_index::DirectoryIndex>>,
     pub metadata_cache: LruCache<PathBuf, (u64, crate::infrastructure::windows::MediaMetadata)>,
@@ -34,9 +36,23 @@ impl CacheState {
             }
         };
 
+        let state_dir = std::env::temp_dir().join("mtt-state-cache");
+        let app_state_db = match AppStateDb::new(state_dir.clone()) {
+            Ok(db) => Arc::new(db),
+            Err(e) => {
+                log::error!(
+                    "[State] Fatal: failed to initialize state DB at {:?}: {:?}",
+                    state_dir,
+                    e
+                );
+                std::process::exit(1);
+            }
+        };
+
         Self {
             cache_manager: Arc::new(Mutex::new(CacheManager::new())),
             disk_cache,
+            app_state_db,
             directory_cache: Arc::new(DirectoryCache::new()),
             directory_index: None,
             metadata_cache: LruCache::new(

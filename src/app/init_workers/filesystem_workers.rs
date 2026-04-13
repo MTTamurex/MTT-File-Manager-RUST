@@ -1,4 +1,5 @@
 use crate::app::folder_size_state::FolderSizeMessage;
+use crate::infrastructure::app_state_db::AppStateDb;
 use crate::infrastructure::disk_cache::ThumbnailDiskCache;
 use eframe::egui;
 use std::path::PathBuf;
@@ -20,10 +21,12 @@ fn should_skip_exists_guard(path: &std::path::Path) -> bool {
 
 pub(in crate::app) fn spawn_disk_cache_invalidation_worker(
     disk_cache: Arc<ThumbnailDiskCache>,
+    app_state_db: Arc<AppStateDb>,
 ) -> mpsc::Sender<Vec<CacheInvalidationEntry>> {
     let (disk_cache_invalidation_tx, disk_cache_invalidation_rx) =
         mpsc::channel::<Vec<CacheInvalidationEntry>>();
     let disk_cache_for_invalidation = disk_cache.clone();
+    let app_state_for_invalidation = app_state_db.clone();
     std::thread::Builder::new()
         .name("disk-cache-invalidation".into())
         .spawn(move || {
@@ -36,6 +39,7 @@ pub(in crate::app) fn spawn_disk_cache_invalidation_worker(
                         // all cache rows. The Shell may not have finished yet,
                         // so `fast_path_exists` would give a false positive.
                         disk_cache_for_invalidation.remove_cache_for_path(&entry.path);
+                        app_state_for_invalidation.remove_covers_for_path(&entry.path);
                     } else if should_skip_exists_guard(entry.path.as_path()) {
                         // BUG FIX: On virtual/network drives we cannot probe
                         // existence safely (GetFileAttributesW can block
@@ -50,7 +54,7 @@ pub(in crate::app) fn spawn_disk_cache_invalidation_worker(
                         // Individual file thumbnails are preserved.  True orphans
                         // will be cleaned up by the incremental GC.
                         disk_cache_for_invalidation.remove_folder_preview_cache(&entry.path);
-                        disk_cache_for_invalidation.remove_folder_cover(&entry.path);
+                        app_state_for_invalidation.remove_folder_cover(&entry.path);
                         log::debug!(
                             "[CACHE-INVALIDATION] Virtual/network path, cleared folder visual cache only (thumbnails preserved): {:?}",
                             entry.path.file_name().unwrap_or_default()
@@ -63,13 +67,14 @@ pub(in crate::app) fn spawn_disk_cache_invalidation_worker(
                         // permanent thumbnail loss, but still clear folder visual
                         // caches (cover/preview) so stale UI can refresh.
                         disk_cache_for_invalidation.remove_folder_preview_cache(&entry.path);
-                        disk_cache_for_invalidation.remove_folder_cover(&entry.path);
+                        app_state_for_invalidation.remove_folder_cover(&entry.path);
                         log::debug!(
                             "[CACHE-INVALIDATION] Path exists, invalidated folder visual cache only: {:?}",
                             entry.path.file_name().unwrap_or_default()
                         );
                     } else {
                         disk_cache_for_invalidation.remove_cache_for_path(&entry.path);
+                        app_state_for_invalidation.remove_covers_for_path(&entry.path);
                     }
                 }
             }

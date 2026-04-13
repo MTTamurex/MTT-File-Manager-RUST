@@ -1,3 +1,4 @@
+use crate::infrastructure::app_state_db::AppStateDb;
 use crate::infrastructure::disk_cache::ThumbnailDiskCache;
 use eframe::egui;
 use std::sync::{mpsc, Arc};
@@ -35,7 +36,10 @@ pub(in crate::app) fn spawn_startup_drive_info_preload(
     });
 }
 
-pub(in crate::app) fn spawn_incremental_gc_worker(disk_cache: Arc<ThumbnailDiskCache>) {
+pub(in crate::app) fn spawn_incremental_gc_worker(
+    disk_cache: Arc<ThumbnailDiskCache>,
+    app_state_db: Arc<AppStateDb>,
+) {
     std::thread::spawn(move || {
         const GC_INITIAL_DELAY_SECS: u64 = 20;
         const GC_ACTIVE_INTERVAL_SECS: u64 = 180;
@@ -68,8 +72,10 @@ pub(in crate::app) fn spawn_incremental_gc_worker(disk_cache: Arc<ThumbnailDiskC
             };
 
             let removed = disk_cache.garbage_collect_incremental(batch);
-            if removed > 0 {
-                removed_since_vacuum = removed_since_vacuum.saturating_add(removed);
+            let removed_covers = app_state_db.garbage_collect_covers_incremental(batch);
+            let total_removed = removed + removed_covers;
+            if total_removed > 0 {
+                removed_since_vacuum = removed_since_vacuum.saturating_add(total_removed);
             }
 
             if is_idle_window

@@ -1,10 +1,10 @@
-use super::ThumbnailDiskCache;
+use super::AppStateDb;
 use crate::domain::file_entry::{FoldersPosition, SortMode, ViewMode};
 use crate::domain::folder_lock::FolderLock;
 use rusqlite::params;
 use std::collections::HashMap;
 
-impl ThumbnailDiskCache {
+impl AppStateDb {
     /// Save a folder lock to the database. [WRITER]
     pub fn save_folder_lock(&self, path: &str, lock: &FolderLock) {
         let view_mode_str = match lock.view_mode {

@@ -411,7 +411,7 @@ impl ImageViewerApp {
             if (self.upload_budget_ms - target_budget_ms).abs() >= 0.5 {
                 self.upload_budget_ms = target_budget_ms.clamp(2.0, 10.0);
                 let entries = [("upload_budget_ms", self.upload_budget_ms.to_string())];
-                if !self.disk_cache.try_set_preferences_batch(&entries) {
+                if !self.app_state_db.try_set_preferences_batch(&entries) {
                     log::debug!(
                         "[PERF-THUMB-UPLOAD] Skipped upload_budget_ms persist this frame (writer busy)"
                     );
@@ -632,7 +632,7 @@ impl ImageViewerApp {
             {
                 let folder_path = item.path.clone();
                 item.folder_cover = None;
-                self.disk_cache.remove_folder_cover(&folder_path);
+                self.app_state_db.remove_folder_cover(&folder_path);
                 folders_to_refresh.insert(folder_path);
                 updated_any = true;
                 remaining_master = remaining_master.saturating_sub(1);

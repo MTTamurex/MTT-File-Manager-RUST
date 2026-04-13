@@ -17,6 +17,7 @@ impl ImageViewerApp {
         let file_entry_sender = self.file_entry_sender.clone();
         let ctx = self.ui_ctx.clone();
         let disk_cache = self.disk_cache.clone();
+        let app_state_db = self.app_state_db.clone();
         let directory_cache = self.directory_cache.clone();
         let directory_dirty_registry = self.directory_dirty_registry.clone();
         // Use existing directory_cache for cache-first strategy
@@ -84,6 +85,7 @@ impl ImageViewerApp {
                 &file_entry_sender,
                 &ctx,
                 &disk_cache,
+                &app_state_db,
                 &directory_cache,
                 &directory_dirty_registry,
                 &directory_index_opt,
@@ -108,6 +110,7 @@ impl ImageViewerApp {
                 &file_entry_sender,
                 &ctx,
                 &disk_cache,
+                &app_state_db,
                 &directory_cache,
                 &directory_dirty_registry,
                 &directory_index_opt,
@@ -131,6 +134,7 @@ impl ImageViewerApp {
                 &file_entry_sender,
                 &ctx,
                 &disk_cache,
+                &app_state_db,
                 &directory_cache,
                 &directory_dirty_registry,
                 &directory_index_opt,

@@ -1,4 +1,4 @@
-use crate::infrastructure::disk_cache::ThumbnailDiskCache;
+use crate::infrastructure::app_state_db::AppStateDb;
 use crate::infrastructure::icon_disk_cache::IconDiskCache;
 use crate::infrastructure::windows as windows_infra;
 use crate::infrastructure::windows::is_mpeg_ts_file;
@@ -13,7 +13,7 @@ type MetadataRequest = (PathBuf, u64);
 type MetadataResponse = (PathBuf, u64, windows_infra::MediaMetadata);
 
 pub(in crate::app) fn spawn_cover_worker(
-    disk_cache: Arc<ThumbnailDiskCache>,
+    app_state_db: Arc<AppStateDb>,
 ) -> (
     mpsc::Sender<PathBuf>,
     mpsc::Receiver<(PathBuf, Option<PathBuf>)>,
@@ -21,7 +21,7 @@ pub(in crate::app) fn spawn_cover_worker(
     let (cover_req_tx, cover_req_rx) = mpsc::channel::<PathBuf>();
     let (cover_res_tx, cover_res_rx) = mpsc::channel();
 
-    let cover_worker_cache = disk_cache.clone();
+    let cover_worker_db = app_state_db.clone();
     std::thread::spawn(move || {
         crate::infrastructure::io_priority::set_thread_priority(
             crate::infrastructure::io_priority::IOPriority::Background,
@@ -42,7 +42,7 @@ pub(in crate::app) fn spawn_cover_worker(
                 });
 
             if let Some(c) = &cover {
-                cover_worker_cache.set_folder_cover(&folder_path, c);
+                cover_worker_db.set_folder_cover(&folder_path, c);
             }
 
             let _ = cover_res_tx.send((folder_path, cover));

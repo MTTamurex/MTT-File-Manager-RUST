@@ -35,6 +35,7 @@ use crate::domain::file_entry::{FileEntry, FoldersPosition, SortMode, ViewMode};
 use crate::domain::thumbnail::ThumbnailData;
 use crate::infrastructure::directory_cache::DirectoryCache;
 use crate::infrastructure::directory_index::DirectoryIndex;
+use crate::infrastructure::app_state_db::AppStateDb;
 use crate::infrastructure::disk_cache::ThumbnailDiskCache;
 use crate::infrastructure::windows as windows_infra;
 // use crate::ui::cache::CacheManager;
@@ -127,6 +128,7 @@ pub struct ImageViewerApp {
 
     // Persistence Layer
     pub disk_cache: Arc<ThumbnailDiskCache>,
+    pub app_state_db: Arc<AppStateDb>,
     pub directory_cache: Arc<DirectoryCache>,
     pub directory_dirty_registry:
         Arc<crate::infrastructure::directory_dirty_registry::DirectoryDirtyRegistry>,

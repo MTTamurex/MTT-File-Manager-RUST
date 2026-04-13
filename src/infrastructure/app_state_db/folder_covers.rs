@@ -1,7 +1,7 @@
-use super::ThumbnailDiskCache;
+use super::AppStateDb;
 use std::path::{Path, PathBuf};
 
-impl ThumbnailDiskCache {
+impl AppStateDb {
     /// Gets covers (thumbnails) for multiple folders at once
     /// [READER]
     /// PERFORMANCE: Uses chunking to stay within SQLite's parameter limit (999)

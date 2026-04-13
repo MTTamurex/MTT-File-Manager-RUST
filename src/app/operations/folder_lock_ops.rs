@@ -17,7 +17,7 @@ impl ImageViewerApp {
         if self.current_folder_locked {
             // Unlock
             self.folder_locks.remove(&path);
-            self.disk_cache.remove_folder_lock(&path);
+            self.app_state_db.remove_folder_lock(&path);
             self.current_folder_locked = false;
         } else {
             // Lock: capture current view settings
@@ -27,7 +27,7 @@ impl ImageViewerApp {
                 sort_descending: self.sort_descending,
                 folders_position: self.folders_position,
             };
-            self.disk_cache.save_folder_lock(&path, &lock);
+            self.app_state_db.save_folder_lock(&path, &lock);
             self.folder_locks.insert(path, lock);
             self.current_folder_locked = true;
         }

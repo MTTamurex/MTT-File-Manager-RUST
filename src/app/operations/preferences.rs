@@ -214,12 +214,12 @@ impl ImageViewerApp {
     /// Non-blocking write attempt used by frame loop flush.
     fn do_save_preferences_nonblocking(&self) -> bool {
         let prefs = self.collect_preferences();
-        self.disk_cache.try_set_preferences_batch(&prefs)
+        self.app_state_db.try_set_preferences_batch(&prefs)
     }
 
     /// Blocking write used on exit to maximize persistence reliability.
     fn do_save_preferences_blocking(&self) {
         let prefs = self.collect_preferences();
-        self.disk_cache.set_preferences_batch(&prefs);
+        self.app_state_db.set_preferences_batch(&prefs);
     }
 }

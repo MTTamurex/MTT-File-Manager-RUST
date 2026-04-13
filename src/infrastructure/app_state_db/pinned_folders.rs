@@ -1,8 +1,8 @@
-use super::ThumbnailDiskCache;
+use super::AppStateDb;
 use crate::domain::pinned_folder::PinnedFolder;
 use rusqlite::params;
 
-impl ThumbnailDiskCache {
+impl AppStateDb {
     /// Load all pinned folders ordered by position. [READER]
     pub fn get_all_pinned_folders(&self) -> Vec<PinnedFolder> {
         let mut results = Vec::new();

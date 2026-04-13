@@ -127,7 +127,7 @@ impl ImageViewerApp {
 
         // 1. Single batched SQLite query for all folder covers
         let db_start = Instant::now();
-        let db_covers = self.disk_cache.get_folder_covers(&unique_paths);
+        let db_covers = self.app_state_db.get_folder_covers(&unique_paths);
         let db_ms = db_start.elapsed().as_millis();
 
         // 2. Resolve covers: DB hit → DirectoryIndex fallback → worker fallback
@@ -162,14 +162,14 @@ impl ImageViewerApp {
 
             let cover_opt = if let Some(cover) = db_covers.get(&folder_path) {
                 if is_invalid_cached_cover_path(cover) {
-                    self.disk_cache.remove_folder_cover(&folder_path);
+                    self.app_state_db.remove_folder_cover(&folder_path);
                     None
                 } else if can_validate_cover_exists
                     && !crate::infrastructure::onedrive::fast_path_exists(cover)
                 {
                     // Cover file was deleted externally — evict stale entry
                     // and let the cover worker re-discover.
-                    self.disk_cache.remove_folder_cover(&folder_path);
+                    self.app_state_db.remove_folder_cover(&folder_path);
                     self.cache_manager.texture_cache.pop(cover);
                     self.cache_manager.loading_set.remove(cover);
                     self.cache_manager.invalidate_folder_preview(&folder_path);
@@ -244,7 +244,7 @@ impl ImageViewerApp {
             // Covers that fail to persist will be re-discovered on next visit
             // or saved by the background cover worker.
             for (folder_path, cover) in &resolved {
-                self.disk_cache.try_set_folder_cover(folder_path, cover);
+                self.app_state_db.try_set_folder_cover(folder_path, cover);
             }
         }
         let apply_ms = apply_start.elapsed().as_millis();
