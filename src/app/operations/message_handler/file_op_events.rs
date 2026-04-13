@@ -111,7 +111,6 @@ impl ImageViewerApp {
 
     fn invalidate_folder_and_tab_caches(&mut self, folder: &Path) {
         self.invalidate_directory_caches(folder);
-        self.invalidate_folder_size_cache(folder);
         // Keep sidebar folder tree in sync with file operations (delete/rename/move)
         self.sidebar_tree.clear_children(folder);
         let folder_norm = Self::normalize_for_match(folder);

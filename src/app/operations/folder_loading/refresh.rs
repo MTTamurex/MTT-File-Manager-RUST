@@ -9,15 +9,18 @@ impl ImageViewerApp {
         } else if self.navigation_state.is_recycle_bin_view {
             self.setup_recycle_bin_view();
         } else {
-            // Force regeneration of visible folder previews on manual refresh.
-            // This avoids reusing stale SQLite previews for folders whose content changed
-            // while the app was offline or when watcher invalidation was missed.
-            for folder_path in self
+            // Force regeneration of visible folder previews and folder sizes on
+            // manual refresh. This avoids reusing stale in-memory values for
+            // folders whose contents changed while the app was offline or when
+            // watcher invalidation was missed.
+            let visible_folder_paths: Vec<_> = self
                 .all_items
                 .iter()
                 .filter(|item| item.is_dir)
                 .map(|item| item.path.clone())
-            {
+                .collect();
+            for folder_path in visible_folder_paths {
+                self.invalidate_folder_size_cache(&folder_path);
                 self.cache_manager.invalidate_folder_preview(&folder_path);
                 self.disk_cache.remove_folder_preview_cache(&folder_path);
             }

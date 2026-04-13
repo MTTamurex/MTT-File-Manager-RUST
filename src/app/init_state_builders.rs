@@ -106,8 +106,8 @@ pub(in crate::app) fn build_folder_size_state(
     req_sender: mpsc::Sender<PathBuf>,
     res_receiver: mpsc::Receiver<FolderSizeMessage>,
     cancel: Arc<AtomicBool>,
-    batch_req_sender: mpsc::Sender<(PathBuf, u64)>,
-    batch_res_receiver: mpsc::Receiver<FolderSizeMessage>,
+    batch_req_sender: mpsc::Sender<crate::app::folder_size_state::BatchSizeRequest>,
+    batch_res_receiver: mpsc::Receiver<crate::app::folder_size_state::BatchSizeResult>,
     batch_cancel: Arc<AtomicBool>,
     batch_generation: Arc<AtomicU64>,
 ) -> FolderSizeState {
@@ -128,6 +128,7 @@ pub(in crate::app) fn build_folder_size_state(
             NonZeroUsize::new(2000).expect("folder_size_batch cache size must be non-zero"),
         ),
         pending_revalidation: std::collections::HashMap::new(),
+        batch_invalidation_epoch: std::collections::HashMap::new(),
     }
 }
 

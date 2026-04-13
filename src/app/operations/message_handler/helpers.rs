@@ -152,6 +152,10 @@ impl ImageViewerApp {
         if let Some(di) = &self.directory_index {
             let _ = di.invalidate(path);
         }
+        // A directory cache invalidation means the folder's contents may have
+        // changed. Invalidate folder-size caches here too so callers do not
+        // need to remember to clear size separately from cover/listing state.
+        self.invalidate_folder_size_cache(path);
         self.invalidate_folder_cover_state(path);
     }
 
@@ -309,13 +313,22 @@ impl ImageViewerApp {
         self.pending_auto_reload = true;
     }
 
-    pub(super) fn invalidate_folder_size_cache(&mut self, folder: &Path) {
+    pub(in crate::app) fn invalidate_folder_size_cache(&mut self, folder: &Path) {
         let folder_path = folder.to_path_buf();
         let was_loading = self.folder_size_state.loading.remove(&folder_path);
         self.folder_size_state.cache.pop(&folder_path);
         // Also clear the batch (list-view) cache so the next render re-fetches.
         self.folder_size_state.batch_cache.pop(&folder_path);
         self.folder_size_state.batch_loading.remove(&folder_path);
+
+        // Bump per-path invalidation epoch so that any in-flight batch
+        // worker result (carrying its request_epoch) is detected as stale
+        // and discarded in process_folder_size_results.
+        *self
+            .folder_size_state
+            .batch_invalidation_epoch
+            .entry(folder_path.clone())
+            .or_insert(0) += 1;
 
         // Schedule a deferred re-invalidation to handle the timing race with
         // the search service's USN journal polling (2 s interval).  If the
