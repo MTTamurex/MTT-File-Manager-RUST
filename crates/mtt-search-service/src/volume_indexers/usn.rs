@@ -102,8 +102,8 @@ pub(crate) fn index_volume(
                 "scanning",
                 0,
                 "loading_cache",
-                None,
-                None,
+                Some(0),
+                Some(state.files_indexed),
             );
             // Stream records from DB directly into arena (no intermediate Vec<String>).
             if let Some(count) = db.load_into_index(&mut index, |loaded_count| {
