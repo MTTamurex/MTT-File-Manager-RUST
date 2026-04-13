@@ -193,6 +193,7 @@ search:
   phase_catching_up: "Aplicando mudanças"
   phase_scanning_mft: "Lendo MFT"
   phase_loading_sizes: "Lendo tamanhos"
+  phase_persisting: "Salvando índice"
   phase_filesystem_scan: "Varrendo arquivos"
   open_file: "Abrir"
   open_folder: "Pasta"

@@ -361,7 +361,25 @@ pub(crate) fn index_volume(
         }
 
         // Persist to database (full save — initial scan).
-        if let Err(e) = db.save_volume(&index) {
+        let persist_total = index.records.len() as u64;
+        indexing_progress.update(
+            drive_letter,
+            "scanning",
+            persist_total,
+            "persisting",
+            Some(0),
+            Some(persist_total),
+        );
+        if let Err(e) = db.save_volume(&index, |inserted, total| {
+            indexing_progress.update(
+                drive_letter,
+                "scanning",
+                total,
+                "persisting",
+                Some(inserted),
+                Some(total),
+            )
+        }) {
             eprintln!(
                 "[USN] {}:\\ Failed to save index: {}",
                 drive_letter,

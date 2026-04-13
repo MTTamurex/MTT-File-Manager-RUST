@@ -193,6 +193,7 @@ search:
   phase_catching_up: "Applying changes"
   phase_scanning_mft: "Reading MFT"
   phase_loading_sizes: "Reading sizes"
+  phase_persisting: "Saving index"
   phase_filesystem_scan: "Scanning files"
   open_file: "Open"
   open_folder: "Folder"

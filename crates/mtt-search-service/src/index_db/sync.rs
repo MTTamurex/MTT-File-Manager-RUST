@@ -6,10 +6,25 @@ use crate::file_index::VolumeIndex;
 impl IndexDb {
     /// Save the complete volume index to the database.
     ///
-    /// This is expensive for large volumes (DELETE ALL + INSERT ALL + FTS5 rebuild).
-    /// Use only for initial scan or service shutdown.  For periodic persist, prefer
-    /// `save_volume_state` + `sync_fts_incremental`.
-    pub fn save_volume(&self, index: &VolumeIndex) -> Result<(), String> {
+    /// Replaces all `file_records` for this volume and keeps the FTS5 index
+    /// in sync **inline** (no full `rebuild`).  The work is split into two
+    /// committed phases so the WAL stays bounded and auto-checkpoint can run
+    /// between them:
+    ///
+    /// 1. **Cleanup** – delete old FTS entries + old `file_records` rows.
+    /// 2. **Insert**  – insert new rows + inline FTS entries, committed in
+    ///    batches of `COMMIT_BATCH` rows to avoid WAL bloat.
+    ///
+    /// `on_progress(current, total)` is called throughout both phases so the
+    /// UI always shows forward movement.
+    pub fn save_volume<F>(
+        &self,
+        index: &VolumeIndex,
+        mut on_progress: F,
+    ) -> Result<(), String>
+    where
+        F: FnMut(u64, u64),
+    {
         let conn = self.conn.lock();
 
         let drive = index.drive_letter.to_string();
@@ -34,84 +49,177 @@ impl IndexDb {
         )
         .map_err(|e| format!("Save volume_state error: {}", e))?;
 
-        let tx = conn
-            .unchecked_transaction()
-            .map_err(|e| format!("Transaction begin error: {}", e))?;
+        // ── Collect old (rowid, name) for FTS cleanup ───────────────────
+        let old_fts_entries: Vec<(i64, String)> = {
+            let mut stmt = conn
+                .prepare("SELECT rowid, name FROM file_records WHERE drive_letter = ?1")
+                .map_err(|e| format!("Prepare old FTS entries error: {}", e))?;
+            let rows = stmt
+                .query_map(params![drive], |row| {
+                    Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+                })
+                .map_err(|e| format!("Query old FTS entries error: {}", e))?;
+            rows.filter_map(|r| r.ok()).collect()
+        };
 
-        tx.execute(
-            "DELETE FROM file_records WHERE drive_letter = ?1",
-            params![drive],
-        )
-        .map_err(|e| format!("Delete old records error: {}", e))?;
+        let old_count = old_fts_entries.len() as u64;
+        let new_count = index.records.len() as u64;
+        let total_work = old_count + new_count;
+        on_progress(0, total_work);
 
-        tx.execute(
-            "DELETE FROM hardlink_parents WHERE drive_letter = ?1",
-            params![drive],
-        )
-        .map_err(|e| format!("Delete old hardlink parents error: {}", e))?;
-
+        // ── Phase 1: delete old FTS entries + old records ───────────────
         {
-            let mut insert_stmt = tx
-                .prepare(
-                    "INSERT INTO file_records (frn, drive_letter, name, parent_frn, is_dir, is_reparse)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                )
-                .map_err(|e| format!("Prepare insert error: {}", e))?;
+            let tx = conn
+                .unchecked_transaction()
+                .map_err(|e| format!("Transaction begin (cleanup) error: {}", e))?;
+            {
+                let mut fts_del = tx
+                    .prepare(
+                        "INSERT INTO search_fts(search_fts, rowid, name) VALUES('delete', ?1, ?2)",
+                    )
+                    .map_err(|e| format!("Prepare FTS delete error: {}", e))?;
 
-            for (&frn, record) in &index.records {
-                let name = index.names.get(record.name_ref());
-                insert_stmt
-                    .execute(params![
-                        frn as i64,
-                        drive,
-                        name,
-                        record.parent_ref as i64,
-                        record.is_dir,
-                        index.reparse_points.contains(&frn)
-                    ])
-                    .map_err(|e| format!("Insert record error: {}", e))?;
-            }
-        }
+                let mut deleted = 0u64;
+                let mut last_reported = 0u64;
+                let mut last_report_at = std::time::Instant::now();
 
-        {
-            let mut hardlink_stmt = tx
-                .prepare(
-                    "INSERT INTO hardlink_parents (frn, drive_letter, parent_frn)
-                     VALUES (?1, ?2, ?3)",
-                )
-                .map_err(|e| format!("Prepare hardlink insert error: {}", e))?;
+                for (rowid, name) in &old_fts_entries {
+                    let _ = fts_del.execute(params![rowid, name]);
+                    deleted += 1;
 
-            for (&frn, parents) in &index.hardlink_parents {
-                let primary_parent = index.records.get(&frn).map(|record| record.parent_ref);
-                let mut unique_parents = parents.clone();
-                unique_parents.sort_unstable();
-                unique_parents.dedup();
-                for parent_ref in unique_parents {
-                    if Some(parent_ref) == primary_parent || parent_ref == 0 || parent_ref == frn {
-                        continue;
+                    if deleted.saturating_sub(last_reported) >= 8_192
+                        || last_report_at.elapsed() >= std::time::Duration::from_millis(200)
+                    {
+                        on_progress(deleted, total_work);
+                        last_reported = deleted;
+                        last_report_at = std::time::Instant::now();
                     }
-                    hardlink_stmt
-                        .execute(params![frn as i64, drive, parent_ref as i64])
-                        .map_err(|e| format!("Insert hardlink parent error: {}", e))?;
                 }
             }
+
+            tx.execute(
+                "DELETE FROM file_records WHERE drive_letter = ?1",
+                params![drive],
+            )
+            .map_err(|e| format!("Delete old records error: {}", e))?;
+
+            tx.execute(
+                "DELETE FROM hardlink_parents WHERE drive_letter = ?1",
+                params![drive],
+            )
+            .map_err(|e| format!("Delete old hardlink parents error: {}", e))?;
+
+            tx.commit()
+                .map_err(|e| format!("Cleanup commit error: {}", e))?;
+        }
+        drop(old_fts_entries); // free memory
+        on_progress(old_count, total_work);
+
+        // ── Phase 2: insert new records + inline FTS, batched commits ───
+        const COMMIT_BATCH: u64 = 32_768;
+        let mut inserted = 0u64;
+        let mut last_reported = old_count;
+        let mut last_report_at = std::time::Instant::now();
+
+        let mut records_iter = index.records.iter().peekable();
+
+        while records_iter.peek().is_some() {
+            let tx = conn
+                .unchecked_transaction()
+                .map_err(|e| format!("Transaction begin (insert batch) error: {}", e))?;
+            {
+                let mut insert_stmt = tx
+                    .prepare(
+                        "INSERT INTO file_records (frn, drive_letter, name, parent_frn, is_dir, is_reparse)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                    )
+                    .map_err(|e| format!("Prepare insert error: {}", e))?;
+                let mut fts_stmt = tx
+                    .prepare("INSERT INTO search_fts(rowid, name) VALUES(?1, ?2)")
+                    .map_err(|e| format!("Prepare FTS insert error: {}", e))?;
+
+                let mut batch_count = 0u64;
+                while batch_count < COMMIT_BATCH {
+                    let (&frn, record) = match records_iter.next() {
+                        Some(entry) => entry,
+                        None => break,
+                    };
+
+                    let name = index.names.get(record.name_ref());
+                    insert_stmt
+                        .execute(params![
+                            frn as i64,
+                            drive,
+                            name,
+                            record.parent_ref as i64,
+                            record.is_dir,
+                            index.reparse_points.contains(&frn)
+                        ])
+                        .map_err(|e| format!("Insert record error: {}", e))?;
+
+                    let new_rowid = tx.last_insert_rowid();
+                    let _ = fts_stmt.execute(params![new_rowid, name]);
+
+                    inserted += 1;
+                    batch_count += 1;
+
+                    let current = old_count + inserted;
+                    if current.saturating_sub(last_reported) >= 8_192
+                        || last_report_at.elapsed() >= std::time::Duration::from_millis(200)
+                    {
+                        on_progress(current, total_work);
+                        last_reported = current;
+                        last_report_at = std::time::Instant::now();
+                    }
+                }
+            } // drop statements before commit
+            tx.commit()
+                .map_err(|e| format!("Insert batch commit error: {}", e))?;
         }
 
-        tx.commit()
-            .map_err(|e| format!("Transaction commit error: {}", e))?;
+        if old_count + inserted != last_reported {
+            on_progress(old_count + inserted, total_work);
+        }
 
-        let fts_start = std::time::Instant::now();
-        conn.execute(
-            "INSERT INTO search_fts(search_fts) VALUES('rebuild')",
-            [],
-        )
-        .map_err(|e| format!("FTS5 rebuild error after save: {}", e))?;
+        // ── Hardlink parents (single transaction) ───────────────────────
+        if !index.hardlink_parents.is_empty() {
+            let tx = conn
+                .unchecked_transaction()
+                .map_err(|e| format!("Transaction begin (hardlinks) error: {}", e))?;
+            {
+                let mut hardlink_stmt = tx
+                    .prepare(
+                        "INSERT INTO hardlink_parents (frn, drive_letter, parent_frn)
+                         VALUES (?1, ?2, ?3)",
+                    )
+                    .map_err(|e| format!("Prepare hardlink insert error: {}", e))?;
+
+                for (&frn, parents) in &index.hardlink_parents {
+                    let primary_parent = index.records.get(&frn).map(|record| record.parent_ref);
+                    let mut unique_parents = parents.clone();
+                    unique_parents.sort_unstable();
+                    unique_parents.dedup();
+                    for parent_ref in unique_parents {
+                        if Some(parent_ref) == primary_parent
+                            || parent_ref == 0
+                            || parent_ref == frn
+                        {
+                            continue;
+                        }
+                        hardlink_stmt
+                            .execute(params![frn as i64, drive, parent_ref as i64])
+                            .map_err(|e| format!("Insert hardlink parent error: {}", e))?;
+                    }
+                }
+            }
+            tx.commit()
+                .map_err(|e| format!("Hardlink commit error: {}", e))?;
+        }
 
         eprintln!(
-            "[DB] Saved {} records for volume {}:\\ (FTS5 rebuilt in {:.2}s)",
+            "[DB] Saved {} records for volume {}:\\ (inline FTS sync, no rebuild)",
             index.records.len(),
             index.drive_letter,
-            fts_start.elapsed().as_secs_f64()
         );
         Ok(())
     }

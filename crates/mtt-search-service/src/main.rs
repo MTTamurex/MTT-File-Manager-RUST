@@ -222,6 +222,7 @@ pub fn run_indexer(shutdown: Arc<AtomicBool>, console_mode: bool) {
         db_path,
     );
 
+    db.mark_clean_shutdown();
     eprintln!("[SERVICE] Shutting down...");
 }
 
