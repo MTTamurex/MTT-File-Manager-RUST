@@ -8,6 +8,7 @@
 //! even on HDDs (one contiguous read instead of per-file stat calls).
 
 use std::collections::HashMap;
+use std::time::{Duration, Instant};
 
 use windows::Win32::Foundation::{HANDLE, GetLastError};
 use windows::Win32::System::IO::DeviceIoControl;
@@ -708,7 +709,14 @@ fn size_by_file_id(volume: HANDLE, frn: u64) -> Option<u64> {
 /// `OpenFileById` only for records that still can't be resolved.
 ///
 /// Returns the number of file records whose sizes were successfully extracted.
-pub fn read_file_sizes(volume: HANDLE, index: &mut VolumeIndex) -> Result<usize, String> {
+pub fn read_file_sizes<F>(
+    volume: HANDLE,
+    index: &mut VolumeIndex,
+    mut on_progress: F,
+) -> Result<usize, String>
+where
+    F: FnMut(u64, u64),
+{
     let geometry = query_mft_geometry(volume)?;
 
     eprintln!(
@@ -734,6 +742,7 @@ pub fn read_file_sizes(volume: HANDLE, index: &mut VolumeIndex) -> Result<usize,
     if target_frns.is_empty() {
         eprintln!("[MFT-SIZE] {}:\\ No file records to size", index.drive_letter);
         index.sizes_loaded = true;
+        on_progress(0, 0);
         return Ok(0);
     }
 
@@ -755,6 +764,12 @@ pub fn read_file_sizes(volume: HANDLE, index: &mut VolumeIndex) -> Result<usize,
     let mut new_hardlink_edges: usize = 0;
     let mut dir_cache: HashMap<u64, String> = HashMap::with_capacity(4096);
     let mut output_buffer = vec![0u8; OUTPUT_HEADER + record_size];
+    let total_targets = target_frns.len() as u64;
+    let mut processed_count = 0u64;
+    let mut last_reported_count = 0u64;
+    let mut last_report_at = Instant::now();
+
+    on_progress(0, total_targets);
 
     for &frn in &target_frns {
         // Tier 1: MFT parsing (with $ATTRIBUTE_LIST follow).
@@ -820,6 +835,20 @@ pub fn read_file_sizes(volume: HANDLE, index: &mut VolumeIndex) -> Result<usize,
                 }
             }
         }
+
+        processed_count += 1;
+        if processed_count != last_reported_count
+            && (processed_count.saturating_sub(last_reported_count) >= 1_024
+                || last_report_at.elapsed() >= Duration::from_millis(120))
+        {
+            on_progress(processed_count, total_targets);
+            last_reported_count = processed_count;
+            last_report_at = Instant::now();
+        }
+    }
+
+    if processed_count != last_reported_count {
+        on_progress(processed_count, total_targets);
     }
 
     let elapsed = start.elapsed();

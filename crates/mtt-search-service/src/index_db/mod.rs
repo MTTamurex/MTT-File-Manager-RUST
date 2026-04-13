@@ -6,7 +6,7 @@ use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use parking_lot::Mutex;
 
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OpenFlags};
 
 pub use fts::FtsSearcher;
 
@@ -23,6 +23,7 @@ pub struct PersistedVolumeState {
 /// SQLite-based persistence for the file index.
 /// Wrapped in Mutex because rusqlite::Connection is not Sync.
 pub struct IndexDb {
+    db_path: PathBuf,
     conn: Mutex<Connection>,
 }
 
@@ -261,8 +262,22 @@ impl IndexDb {
         }
 
         Ok(Self {
+            db_path: path.to_path_buf(),
             conn: Mutex::new(conn),
         })
+    }
+
+    fn open_read_connection(&self) -> Result<Connection, String> {
+        let conn = Connection::open_with_flags(
+            &self.db_path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .map_err(|e| format!("SQLite read-open error: {}", e))?;
+
+        conn.execute_batch("PRAGMA busy_timeout=10000;")
+            .map_err(|e| format!("SQLite read PRAGMA error: {}", e))?;
+
+        Ok(conn)
     }
 
     fn migrate_schema(conn: &Connection) -> Result<(), String> {
@@ -361,7 +376,7 @@ impl IndexDb {
 
     /// Load persisted volume state.
     pub fn load_volume_state(&self, drive_letter: char) -> Option<PersistedVolumeState> {
-        let conn = self.conn.lock();
+        let conn = self.open_read_connection().ok()?;
         let mut stmt = conn
             .prepare(
                 "SELECT journal_id, last_usn, files_indexed, has_hardlink_parent_data, has_reparse_point_data
@@ -384,11 +399,15 @@ impl IndexDb {
 
     /// Stream file records from DB directly into the VolumeIndex's arena.
     /// Returns the number of records loaded, or None if no records found.
-    pub fn load_into_index(
+    pub fn load_into_index<F>(
         &self,
         index: &mut crate::file_index::VolumeIndex,
-    ) -> Option<usize> {
-        let conn = self.conn.lock();
+        mut on_progress: F,
+    ) -> Option<usize>
+    where
+        F: FnMut(usize),
+    {
+        let conn = self.open_read_connection().ok()?;
         let mut stmt = conn
             .prepare(
                 "SELECT frn, name, parent_frn, is_dir, is_reparse
@@ -414,6 +433,9 @@ impl IndexDb {
                 break;
             }
             count += 1;
+            if count == 1 || count % 128 == 0 {
+                on_progress(count);
+            }
         }
 
         let mut hardlink_stmt = conn
@@ -438,6 +460,11 @@ impl IndexDb {
             }
         }
 
-        if count == 0 { None } else { Some(count) }
+        if count > 0 {
+            on_progress(count);
+            Some(count)
+        } else {
+            None
+        }
     }
 }

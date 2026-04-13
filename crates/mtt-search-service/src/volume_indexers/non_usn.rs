@@ -12,6 +12,7 @@ use windows::Win32::System::Threading::WaitForSingleObject;
 
 use crate::file_index;
 use crate::fs_walker;
+use crate::indexing_progress::IndexingProgress;
 use crate::index_db;
 use super::{upsert_volume_index, wait_for_shutdown_or_timeout};
 
@@ -34,6 +35,7 @@ pub(crate) fn index_non_ntfs_volume(
     drive_letter: char,
     file_system: String,
     indices: Arc<RwLock<Vec<file_index::VolumeIndex>>>,
+    indexing_progress: Arc<IndexingProgress>,
     db: Arc<index_db::IndexDb>,
     shutdown: Arc<AtomicBool>,
 ) {
@@ -60,7 +62,7 @@ pub(crate) fn index_non_ntfs_volume(
 
     // Fast startup path: reuse persisted snapshot while a fresh scan runs.
     let mut cached_index = file_index::VolumeIndex::new(drive_letter);
-    if let Some(cached_count) = db.load_into_index(&mut cached_index) {
+    if let Some(cached_count) = db.load_into_index(&mut cached_index, |_| {}) {
         cached_index.names.shrink_to_fit();
         cached_index.journal_id = 0;
         cached_index.last_usn = 0;
@@ -92,8 +94,23 @@ pub(crate) fn index_non_ntfs_volume(
 
         let mut scanned_index = file_index::VolumeIndex::new(drive_letter);
         scanned_index.state = file_index::IndexState::Scanning;
+        indexing_progress.set_scanning(drive_letter, 0, "filesystem_scan");
 
-        match fs_walker::scan_volume(drive_letter, &mut scanned_index, &shutdown) {
+        match fs_walker::scan_volume(
+            drive_letter,
+            &mut scanned_index,
+            &shutdown,
+            |count| {
+                indexing_progress.update(
+                    drive_letter,
+                    "scanning",
+                    count,
+                    "filesystem_scan",
+                    Some(count),
+                    None,
+                )
+            },
+        ) {
             Ok(stats) => {
                 scanned_index.names.shrink_to_fit();
                 scanned_index.journal_id = 0;
@@ -116,6 +133,7 @@ pub(crate) fn index_non_ntfs_volume(
                     let mut indices_lock = indices.write();
                     upsert_volume_index(&mut indices_lock, scanned_index);
                 }
+                indexing_progress.clear(drive_letter);
 
                 // Adaptive backoff based on whether record count changed.
                 let changed = prev_record_count.map_or(true, |prev| prev != records);
@@ -139,6 +157,11 @@ pub(crate) fn index_non_ntfs_volume(
                 );
             }
             Err(e) => {
+                indexing_progress.set_error(
+                    drive_letter,
+                    scanned_index.records.len() as u64,
+                    "filesystem_scan",
+                );
                 eprintln!(
                     "[SCAN] {}:\\ Full scan failed: {}",
                     drive_letter,

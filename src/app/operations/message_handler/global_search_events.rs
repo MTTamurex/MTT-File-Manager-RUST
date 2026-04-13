@@ -78,9 +78,24 @@ impl ImageViewerApp {
                 GlobalSearchResponse::Status {
                     available,
                     total_indexed,
+                    session_total_indexed,
+                    indexing_in_progress,
+                    volumes,
                 } => {
+                    let now = Instant::now();
+                    let progress_changed = total_indexed != self.global_search.total_indexed
+                        || indexing_in_progress != self.global_search.indexing_in_progress
+                        || status_volumes_changed(&self.global_search.status_volumes, &volumes);
+
                     self.global_search.available = available;
                     self.global_search.total_indexed = total_indexed;
+                    self.global_search.session_total_indexed = session_total_indexed;
+                    self.global_search.indexing_in_progress = indexing_in_progress;
+                    self.global_search.status_volumes = volumes;
+                    self.global_search.last_status_received_at = now;
+                    if progress_changed {
+                        self.global_search.last_progress_advance_at = now;
+                    }
                 }
                 GlobalSearchResponse::Error { query, message } => {
                     if query == self.global_search.query {
@@ -115,12 +130,19 @@ impl ImageViewerApp {
             self.ui_ctx.request_repaint();
         }
 
+        if self.global_search.active {
+            self.ui_ctx.request_repaint_after(if self.global_search.indexing_in_progress {
+                Duration::from_millis(200)
+            } else {
+                Duration::from_millis(500)
+            });
+            return;
+        }
+
         // Check availability at a moderate interval. Avoid aggressive polling
         // that can starve the single-threaded worker when it should be processing
         // search requests.
-        let interval = if self.global_search.active {
-            Duration::from_secs(5)
-        } else if self.global_search.available {
+        let interval = if self.global_search.available {
             Duration::from_secs(30)
         } else {
             Duration::from_secs(5)
@@ -134,6 +156,24 @@ impl ImageViewerApp {
                 .send(crate::workers::global_search_worker::GlobalSearchRequest::CheckStatus);
         }
     }
+}
+
+fn status_volumes_changed(
+    current: &[mtt_search_protocol::VolumeStatus],
+    next: &[mtt_search_protocol::VolumeStatus],
+) -> bool {
+    if current.len() != next.len() {
+        return true;
+    }
+
+    current.iter().zip(next.iter()).any(|(left, right)| {
+        left.drive_letter != right.drive_letter
+            || left.state != right.state
+            || left.files_indexed != right.files_indexed
+            || left.phase != right.phase
+            || left.phase_progress != right.phase_progress
+            || left.phase_total != right.phase_total
+    })
 }
 
 fn is_connectivity_error(message: &str) -> bool {

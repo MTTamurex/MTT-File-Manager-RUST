@@ -1,5 +1,6 @@
 mod file_index;
 mod fs_walker;
+mod indexing_progress;
 mod index_db;
 mod ipc_authorization;
 mod ipc_server;
@@ -137,6 +138,7 @@ pub fn run_indexer(shutdown: Arc<AtomicBool>, console_mode: bool) {
 
     // Create shared index
     let indices = Arc::new(RwLock::new(Vec::new()));
+    let indexing_progress = Arc::new(indexing_progress::IndexingProgress::new());
     let tracked_volumes = Arc::new(Mutex::new(HashSet::<char>::new()));
 
     // Open persistence
@@ -167,12 +169,20 @@ pub fn run_indexer(shutdown: Arc<AtomicBool>, console_mode: bool) {
     };
 
     // Start indexers for currently mounted volumes.
-    spawn_indexers_for_discovered_volumes(discovered, &tracked_volumes, &indices, &db, &shutdown);
+    spawn_indexers_for_discovered_volumes(
+        discovered,
+        &tracked_volumes,
+        &indices,
+        &indexing_progress,
+        &db,
+        &shutdown,
+    );
 
     // Keep discovering newly mounted drives (e.g., Cryptomator mounts).
     {
         let tracked_volumes = tracked_volumes.clone();
         let indices = indices.clone();
+        let indexing_progress = indexing_progress.clone();
         let db = db.clone();
         let shutdown = shutdown.clone();
 
@@ -189,6 +199,7 @@ pub fn run_indexer(shutdown: Arc<AtomicBool>, console_mode: bool) {
                     discovered,
                     &tracked_volumes,
                     &indices,
+                    &indexing_progress,
                     &db,
                     &shutdown,
                 );
@@ -201,7 +212,12 @@ pub fn run_indexer(shutdown: Arc<AtomicBool>, console_mode: bool) {
         "[SERVICE] Starting IPC server on {}...",
         mtt_search_protocol::PIPE_NAME
     );
-    ipc_server::run_ipc_server(indices.clone(), shutdown.clone(), db_path);
+    ipc_server::run_ipc_server(
+        indices.clone(),
+        indexing_progress.clone(),
+        shutdown.clone(),
+        db_path,
+    );
 
     eprintln!("[SERVICE] Shutting down...");
 }
@@ -210,6 +226,7 @@ fn spawn_indexers_for_discovered_volumes(
     discovered: Vec<usn_journal::DiscoveredVolume>,
     tracked_volumes: &Arc<Mutex<HashSet<char>>>,
     indices: &Arc<RwLock<Vec<file_index::VolumeIndex>>>,
+    indexing_progress: &Arc<indexing_progress::IndexingProgress>,
     db: &Arc<index_db::IndexDb>,
     shutdown: &Arc<AtomicBool>,
 ) {
@@ -228,6 +245,7 @@ fn spawn_indexers_for_discovered_volumes(
             volume,
             tracked_volumes.clone(),
             indices.clone(),
+            indexing_progress.clone(),
             db.clone(),
             shutdown.clone(),
         );
@@ -238,6 +256,7 @@ fn spawn_volume_indexer(
     volume: usn_journal::DiscoveredVolume,
     tracked_volumes: Arc<Mutex<HashSet<char>>>,
     indices: Arc<RwLock<Vec<file_index::VolumeIndex>>>,
+    indexing_progress: Arc<indexing_progress::IndexingProgress>,
     db: Arc<index_db::IndexDb>,
     shutdown: Arc<AtomicBool>,
 ) {
@@ -262,12 +281,13 @@ fn spawn_volume_indexer(
 
     std::thread::spawn(move || {
         if volume.usn_supported {
-            volume_indexers::index_volume(drive_letter, indices, db, shutdown);
+            volume_indexers::index_volume(drive_letter, indices, indexing_progress, db, shutdown);
         } else {
             volume_indexers::index_non_ntfs_volume(
                 drive_letter,
                 volume.file_system,
                 indices,
+                indexing_progress,
                 db,
                 shutdown,
             );

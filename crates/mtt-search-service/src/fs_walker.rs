@@ -24,11 +24,15 @@ pub struct ScanStats {
 /// Full-tree scan for filesystems without USN support (FAT/exFAT/FUSE/CryptoFS).
 ///
 /// The scan is iterative (no recursion) and skips reparse points to avoid cycles.
-pub fn scan_volume(
+pub fn scan_volume<F>(
     drive_letter: char,
     index: &mut VolumeIndex,
     shutdown: &AtomicBool,
-) -> Result<ScanStats, String> {
+    mut on_progress: F,
+) -> Result<ScanStats, String>
+where
+    F: FnMut(u64),
+{
     let root = PathBuf::from(format!("{}:\\", drive_letter));
     if !root.exists() {
         return Err(format!("volume root {}:\\ is not accessible", drive_letter));
@@ -39,7 +43,11 @@ pub fn scan_volume(
     let mut queue = VecDeque::new();
     let mut directories_scanned = 0usize;
     let mut errors = 0usize;
+    let mut last_reported_count = 0u64;
+    let mut last_report_at = Instant::now();
     queue.push_back((root, ROOT_REF));
+
+    on_progress(0);
 
     while let Some((dir_path, parent_ref)) = queue.pop_front() {
         // Check shutdown every 100 directories to allow graceful stop.
@@ -95,12 +103,27 @@ pub fn scan_volume(
                 break;
             }
 
+            let current_count = index.records.len() as u64;
+            if current_count != last_reported_count
+                && (current_count.saturating_sub(last_reported_count) >= 128
+                    || last_report_at.elapsed() >= Duration::from_millis(120))
+            {
+                on_progress(current_count);
+                last_reported_count = current_count;
+                last_report_at = Instant::now();
+            }
+
             if !is_dir || is_reparse {
                 continue;
             }
 
             queue.push_back((entry.path(), entry_ref));
         }
+    }
+
+    let final_count = index.records.len() as u64;
+    if final_count != last_reported_count {
+        on_progress(final_count);
     }
 
     Ok(ScanStats {

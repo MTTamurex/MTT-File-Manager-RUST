@@ -17,10 +17,21 @@ impl ImageViewerApp {
         self.global_search.in_flight_started_at = None;
         self.global_search.has_more_results = false;
         self.global_search.total_matches = None;
+        self.global_search.last_status_received_at = std::time::Instant::now();
+        self.global_search.last_progress_advance_at = std::time::Instant::now();
         self.global_search.requested_offset = 0;
         self.global_search.requested_limit = DEFAULT_GLOBAL_SEARCH_PAGE_LIMIT;
         self.global_search.scroll_offset_y = 0.0;
         self.global_search.last_scroll_offset_y = 0.0;
+        self.global_search.session_total_indexed = 0;
+
+        if let Err(error) = self
+            .global_search
+            .sender
+            .send(GlobalSearchRequest::SetStatusTracking { active: true })
+        {
+            log::error!("[GLOBAL-SEARCH] Failed to enable status tracking: {}", error);
+        }
 
         if let Err(error) = self
             .global_search
@@ -45,9 +56,18 @@ impl ImageViewerApp {
         self.global_search.requested_limit = DEFAULT_GLOBAL_SEARCH_PAGE_LIMIT;
         self.global_search.scroll_offset_y = 0.0;
         self.global_search.last_scroll_offset_y = 0.0;
+        self.global_search.session_total_indexed = 0;
         self.global_search.size_cache.clear();
         self.global_search.tooltip_texture_cache.clear();
         self.global_search.metadata_cache.clear();
+
+        if let Err(error) = self
+            .global_search
+            .sender
+            .send(GlobalSearchRequest::SetStatusTracking { active: false })
+        {
+            log::error!("[GLOBAL-SEARCH] Failed to disable status tracking: {}", error);
+        }
     }
 
     pub(crate) fn toggle_global_search(&mut self) {

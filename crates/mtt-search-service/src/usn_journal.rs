@@ -5,6 +5,7 @@ use windows::Win32::Storage::FileSystem::{
     FILE_SHARE_WRITE, OPEN_EXISTING,
 };
 use windows::Win32::System::IO::DeviceIoControl;
+use std::time::{Duration, Instant};
 
 /// ERROR_HANDLE_EOF (38) - returned by FSCTL_READ_USN_JOURNAL when no new records exist.
 const ERROR_HANDLE_EOF: WIN32_ERROR = WIN32_ERROR(38);
@@ -191,11 +192,15 @@ pub fn query_usn_journal(volume: HANDLE) -> Result<UsnJournalInfo, String> {
 
 /// Enumerate all files on the volume using FSCTL_ENUM_USN_DATA.
 /// This walks the entire MFT and is the fastest way to index all files.
-pub fn enumerate_all_files(
+pub fn enumerate_all_files<F>(
     volume: HANDLE,
     journal_info: &UsnJournalInfo,
     index: &mut VolumeIndex,
-) -> Result<(), String> {
+    mut on_progress: F,
+) -> Result<(), String>
+where
+    F: FnMut(u64),
+{
     let mut enum_data = MftEnumDataV0 {
         starting_file_reference_number: 0,
         low_usn: 0,
@@ -205,6 +210,10 @@ pub fn enumerate_all_files(
     let mut buffer = vec![0u8; BUFFER_SIZE];
     let mut bytes_returned: u32 = 0;
     let mut total_records: usize = 0;
+    let mut last_reported_count = 0u64;
+    let mut last_report_at = Instant::now();
+
+    on_progress(0);
 
     loop {
         let result = unsafe {
@@ -235,8 +244,23 @@ pub fn enumerate_all_files(
             false,
         );
 
+        let current_count = index.records.len() as u64;
+        if current_count != last_reported_count
+            && (current_count.saturating_sub(last_reported_count) >= 256
+                || last_report_at.elapsed() >= Duration::from_millis(120))
+        {
+            on_progress(current_count);
+            last_reported_count = current_count;
+            last_report_at = Instant::now();
+        }
+
         // Advance to next batch
         enum_data.starting_file_reference_number = next_frn;
+    }
+
+    let final_count = index.records.len() as u64;
+    if final_count != last_reported_count {
+        on_progress(final_count);
     }
 
     eprintln!(
