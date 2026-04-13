@@ -14,6 +14,7 @@ use crate::ipc_authorization::{
 };
 use crate::index_db;
 use crate::security_policy::IpcSecurityPolicy;
+use crate::FtsState;
 use mtt_search_protocol::*;
 
 use super::pipe_io::{read_message, send_response};
@@ -30,6 +31,7 @@ pub(super) fn handle_client(
     last_warm_epoch_secs: &Arc<AtomicU64>,
     security_policy: &IpcSecurityPolicy,
     fts_searcher: &Option<Arc<index_db::FtsSearcher>>,
+    fts_state: &Arc<FtsState>,
 ) {
     let request_data = match read_message(pipe) {
         Some(data) => data,
@@ -152,7 +154,7 @@ pub(super) fn handle_client(
                 .map(|t| t.len())
                 .min()
                 .unwrap_or(0);
-            let use_fts = min_token_len >= 3 && fts_searcher.is_some();
+            let use_fts = min_token_len >= 3 && fts_searcher.is_some() && fts_state.is_ready();
 
             // ── Snapshot candidates under lock, then release before authorization ──
             // Authorization calls CreateFileW which can be slow (AV, cloud, FUSE).

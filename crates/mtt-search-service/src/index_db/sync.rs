@@ -4,19 +4,15 @@ use super::IndexDb;
 use crate::file_index::VolumeIndex;
 
 impl IndexDb {
-    /// Save the complete volume index to the database.
+    /// Save the complete volume index to the database (records only, no FTS).
     ///
-    /// Replaces all `file_records` for this volume and keeps the FTS5 index
-    /// in sync **inline** (no full `rebuild`).  The work is split into two
-    /// committed phases so the WAL stays bounded and auto-checkpoint can run
-    /// between them:
+    /// Replaces all `file_records` and `hardlink_parents` for this volume.
+    /// FTS5 is **not** touched here — call `rebuild_fts_full()` separately
+    /// (typically from a background thread) so the user can search via the
+    /// in-memory linear scan while the FTS index is being rebuilt.
     ///
-    /// 1. **Cleanup** – delete old FTS entries + old `file_records` rows.
-    /// 2. **Insert**  – insert new rows + inline FTS entries, committed in
-    ///    batches of `COMMIT_BATCH` rows to avoid WAL bloat.
-    ///
-    /// `on_progress(current, total)` is called throughout both phases so the
-    /// UI always shows forward movement.
+    /// The work is split into batched commits so the WAL stays bounded.
+    /// `on_progress(current, total)` reports insert progress.
     pub fn save_volume<F>(
         &self,
         index: &VolumeIndex,
@@ -49,53 +45,14 @@ impl IndexDb {
         )
         .map_err(|e| format!("Save volume_state error: {}", e))?;
 
-        // ── Collect old (rowid, name) for FTS cleanup ───────────────────
-        let old_fts_entries: Vec<(i64, String)> = {
-            let mut stmt = conn
-                .prepare("SELECT rowid, name FROM file_records WHERE drive_letter = ?1")
-                .map_err(|e| format!("Prepare old FTS entries error: {}", e))?;
-            let rows = stmt
-                .query_map(params![drive], |row| {
-                    Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
-                })
-                .map_err(|e| format!("Query old FTS entries error: {}", e))?;
-            rows.filter_map(|r| r.ok()).collect()
-        };
+        let total = index.records.len() as u64;
+        on_progress(0, total);
 
-        let old_count = old_fts_entries.len() as u64;
-        let new_count = index.records.len() as u64;
-        let total_work = old_count + new_count;
-        on_progress(0, total_work);
-
-        // ── Phase 1: delete old FTS entries + old records ───────────────
+        // ── Phase 1: delete old records ─────────────────────────────────
         {
             let tx = conn
                 .unchecked_transaction()
                 .map_err(|e| format!("Transaction begin (cleanup) error: {}", e))?;
-            {
-                let mut fts_del = tx
-                    .prepare(
-                        "INSERT INTO search_fts(search_fts, rowid, name) VALUES('delete', ?1, ?2)",
-                    )
-                    .map_err(|e| format!("Prepare FTS delete error: {}", e))?;
-
-                let mut deleted = 0u64;
-                let mut last_reported = 0u64;
-                let mut last_report_at = std::time::Instant::now();
-
-                for (rowid, name) in &old_fts_entries {
-                    let _ = fts_del.execute(params![rowid, name]);
-                    deleted += 1;
-
-                    if deleted.saturating_sub(last_reported) >= 8_192
-                        || last_report_at.elapsed() >= std::time::Duration::from_millis(200)
-                    {
-                        on_progress(deleted, total_work);
-                        last_reported = deleted;
-                        last_report_at = std::time::Instant::now();
-                    }
-                }
-            }
 
             tx.execute(
                 "DELETE FROM file_records WHERE drive_letter = ?1",
@@ -112,13 +69,11 @@ impl IndexDb {
             tx.commit()
                 .map_err(|e| format!("Cleanup commit error: {}", e))?;
         }
-        drop(old_fts_entries); // free memory
-        on_progress(old_count, total_work);
 
-        // ── Phase 2: insert new records + inline FTS, batched commits ───
+        // ── Phase 2: insert new records, batched commits ────────────────
         const COMMIT_BATCH: u64 = 32_768;
         let mut inserted = 0u64;
-        let mut last_reported = old_count;
+        let mut last_reported = 0u64;
         let mut last_report_at = std::time::Instant::now();
 
         let mut records_iter = index.records.iter().peekable();
@@ -134,9 +89,6 @@ impl IndexDb {
                          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                     )
                     .map_err(|e| format!("Prepare insert error: {}", e))?;
-                let mut fts_stmt = tx
-                    .prepare("INSERT INTO search_fts(rowid, name) VALUES(?1, ?2)")
-                    .map_err(|e| format!("Prepare FTS insert error: {}", e))?;
 
                 let mut batch_count = 0u64;
                 while batch_count < COMMIT_BATCH {
@@ -157,18 +109,14 @@ impl IndexDb {
                         ])
                         .map_err(|e| format!("Insert record error: {}", e))?;
 
-                    let new_rowid = tx.last_insert_rowid();
-                    let _ = fts_stmt.execute(params![new_rowid, name]);
-
                     inserted += 1;
                     batch_count += 1;
 
-                    let current = old_count + inserted;
-                    if current.saturating_sub(last_reported) >= 8_192
+                    if inserted.saturating_sub(last_reported) >= 8_192
                         || last_report_at.elapsed() >= std::time::Duration::from_millis(200)
                     {
-                        on_progress(current, total_work);
-                        last_reported = current;
+                        on_progress(inserted, total);
+                        last_reported = inserted;
                         last_report_at = std::time::Instant::now();
                     }
                 }
@@ -177,8 +125,8 @@ impl IndexDb {
                 .map_err(|e| format!("Insert batch commit error: {}", e))?;
         }
 
-        if old_count + inserted != last_reported {
-            on_progress(old_count + inserted, total_work);
+        if inserted != last_reported {
+            on_progress(inserted, total);
         }
 
         // ── Hardlink parents (single transaction) ───────────────────────
@@ -217,11 +165,29 @@ impl IndexDb {
         }
 
         eprintln!(
-            "[DB] Saved {} records for volume {}:\\ (inline FTS sync, no rebuild)",
+            "[DB] Saved {} records for volume {}:\\ (records only, FTS deferred)",
             index.records.len(),
             index.drive_letter,
         );
         Ok(())
+    }
+
+    /// Rebuild the FTS5 index from the current `file_records` table.
+    ///
+    /// This is expensive (~25-60 s for ~1.7 M records with the trigram
+    /// tokenizer) so it should be called from a **background thread** after
+    /// the volume has already been marked `Ready`.
+    pub fn rebuild_fts_full(&self) -> Result<std::time::Duration, String> {
+        let conn = self.conn.lock();
+        let start = std::time::Instant::now();
+        conn.execute(
+            "INSERT INTO search_fts(search_fts) VALUES('rebuild')",
+            [],
+        )
+        .map_err(|e| format!("FTS5 rebuild error: {}", e))?;
+        let elapsed = start.elapsed();
+        eprintln!("[DB] FTS5 background rebuild completed in {:.2}s", elapsed.as_secs_f64());
+        Ok(elapsed)
     }
 
     pub fn save_volume_state_snapshot(

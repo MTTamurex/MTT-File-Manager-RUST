@@ -14,6 +14,7 @@ use crate::file_index;
 use crate::fs_walker;
 use crate::indexing_progress::IndexingProgress;
 use crate::index_db;
+use crate::FtsState;
 use super::{upsert_volume_index, wait_for_shutdown_or_timeout};
 
 const NON_USN_WAIT_STEP: std::time::Duration = std::time::Duration::from_millis(500);
@@ -38,6 +39,7 @@ pub(crate) fn index_non_ntfs_volume(
     indexing_progress: Arc<IndexingProgress>,
     db: Arc<index_db::IndexDb>,
     shutdown: Arc<AtomicBool>,
+    fts_state: Arc<FtsState>,
 ) {
     let cadence = non_usn_scan_cadence(&file_system);
     let fs_lower = file_system.to_ascii_lowercase();
@@ -117,6 +119,7 @@ pub(crate) fn index_non_ntfs_volume(
                 scanned_index.last_usn = 0;
                 scanned_index.state = file_index::IndexState::Ready;
 
+                fts_state.invalidate();
                 let persist_total = scanned_index.records.len() as u64;
                 indexing_progress.update(
                     drive_letter,
@@ -152,6 +155,22 @@ pub(crate) fn index_non_ntfs_volume(
                     upsert_volume_index(&mut indices_lock, scanned_index);
                 }
                 indexing_progress.clear(drive_letter);
+
+                // Rebuild FTS5 in a background thread.
+                {
+                    let db = db.clone();
+                    let fts_state = fts_state.clone();
+                    let gen = fts_state.generation();
+                    std::thread::spawn(move || {
+                        match db.rebuild_fts_full() {
+                            Ok(_) => fts_state.try_mark_ready(gen),
+                            Err(e) => eprintln!(
+                                "[SCAN] {}:\\ Background FTS rebuild failed: {}",
+                                drive_letter, e
+                            ),
+                        }
+                    });
+                }
 
                 // Adaptive backoff based on whether record count changed.
                 let changed = prev_record_count.map_or(true, |prev| prev != records);
