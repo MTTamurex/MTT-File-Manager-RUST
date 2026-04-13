@@ -117,31 +117,12 @@ pub fn run_indexer(shutdown: Arc<AtomicBool>, console_mode: bool) {
     );
     eprintln!("[SERVICE] Starting indexer...");
 
-    let discovered = usn_journal::discover_volumes();
-    if discovered.is_empty() {
-        eprintln!("[SERVICE] No accessible volumes found at startup.");
-    } else {
-        for volume in &discovered {
-            if volume.usn_supported {
-                eprintln!(
-                    "[SERVICE] Found USN-capable volume: {}:\\ ({}, {})",
-                    volume.drive_letter, volume.label, volume.file_system
-                );
-            } else {
-                eprintln!(
-                    "[SERVICE] Found fallback volume: {}:\\ ({}, {})",
-                    volume.drive_letter, volume.label, volume.file_system
-                );
-            }
-        }
-    }
-
-    // Create shared index
+    // Create shared state before anything else so the IPC server can start
+    // accepting connections immediately — even before volumes are discovered.
     let indices = Arc::new(RwLock::new(Vec::new()));
     let indexing_progress = Arc::new(indexing_progress::IndexingProgress::new());
-    let tracked_volumes = Arc::new(Mutex::new(HashSet::<char>::new()));
 
-    // Open persistence
+    // Open persistence (needed by both IPC and indexers)
     let db_path = match if console_mode {
         index_db::get_console_db_path()
     } else {
@@ -168,27 +149,49 @@ pub fn run_indexer(shutdown: Arc<AtomicBool>, console_mode: bool) {
         }
     };
 
-    // Start indexers for currently mounted volumes.
-    spawn_indexers_for_discovered_volumes(
-        discovered,
-        &tracked_volumes,
-        &indices,
-        &indexing_progress,
-        &db,
-        &shutdown,
-    );
-
-    // Keep discovering newly mounted drives (e.g., Cryptomator mounts).
+    // Spawn volume discovery + indexing in a background thread.
+    // This allows the IPC server to start listening immediately instead of
+    // blocking on discover_volumes() which can take seconds if network or
+    // optical drives are mounted.
     {
-        let tracked_volumes = tracked_volumes.clone();
         let indices = indices.clone();
         let indexing_progress = indexing_progress.clone();
         let db = db.clone();
         let shutdown = shutdown.clone();
 
         std::thread::spawn(move || {
-            const DISCOVERY_INTERVAL: std::time::Duration = std::time::Duration::from_secs(20);
+            let tracked_volumes = Arc::new(Mutex::new(HashSet::<char>::new()));
 
+            let discovered = usn_journal::discover_volumes();
+            if discovered.is_empty() {
+                eprintln!("[SERVICE] No accessible volumes found at startup.");
+            } else {
+                for volume in &discovered {
+                    if volume.usn_supported {
+                        eprintln!(
+                            "[SERVICE] Found USN-capable volume: {}:\\ ({}, {})",
+                            volume.drive_letter, volume.label, volume.file_system
+                        );
+                    } else {
+                        eprintln!(
+                            "[SERVICE] Found fallback volume: {}:\\ ({}, {})",
+                            volume.drive_letter, volume.label, volume.file_system
+                        );
+                    }
+                }
+            }
+
+            spawn_indexers_for_discovered_volumes(
+                discovered,
+                &tracked_volumes,
+                &indices,
+                &indexing_progress,
+                &db,
+                &shutdown,
+            );
+
+            // Keep discovering newly mounted drives (e.g., Cryptomator mounts).
+            const DISCOVERY_INTERVAL: std::time::Duration = std::time::Duration::from_secs(20);
             loop {
                 if volume_indexers::wait_for_shutdown_or_timeout(&shutdown, DISCOVERY_INTERVAL) {
                     break;
@@ -207,7 +210,7 @@ pub fn run_indexer(shutdown: Arc<AtomicBool>, console_mode: bool) {
         });
     }
 
-    // Start IPC server (blocks until shutdown)
+    // Start IPC server immediately (blocks until shutdown)
     eprintln!(
         "[SERVICE] Starting IPC server on {}...",
         mtt_search_protocol::PIPE_NAME
