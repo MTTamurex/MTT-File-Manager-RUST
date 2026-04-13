@@ -295,7 +295,9 @@ impl SidebarTreeState {
 fn entries_to_folder_nodes(entries: &[crate::domain::file_entry::FileEntry], show_hidden: bool) -> Vec<FolderNode> {
     let mut folders: Vec<FolderNode> = entries
         .iter()
-        .filter(|e| e.is_dir)
+        // The content panel treats archive files as navigable entries, but the
+        // sidebar tree should only ever show real filesystem directories.
+        .filter(|e| e.is_dir && !e.is_archive())
         .filter(|e| !is_system(&e.path))
         .filter(|e| show_hidden || !is_hidden(&e.path))
         .map(|e| FolderNode {
@@ -392,4 +394,43 @@ fn is_hidden(path: &Path) -> bool {
 #[cfg(not(windows))]
 fn is_system(_path: &Path) -> bool {
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::entries_to_folder_nodes;
+    use crate::domain::file_entry::FileEntry;
+    use std::fs::{self, File};
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn entries_to_folder_nodes_excludes_archive_entries_from_cache_projection() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let base = std::env::temp_dir().join(format!("mtt-sidebar-tree-test-{unique}"));
+        fs::create_dir_all(&base).expect("create temp base dir");
+
+        let real_dir = base.join("Folder");
+        fs::create_dir_all(&real_dir).expect("create real subdir");
+
+        let archive = base.join("archive.zip");
+        File::create(&archive).expect("create archive file");
+
+        let entries = vec![
+            FileEntry::from_path(real_dir.clone(), true),
+            FileEntry::from_path(archive.clone(), true),
+        ];
+
+        let nodes = entries_to_folder_nodes(&entries, true);
+        let node_paths: Vec<PathBuf> = nodes.into_iter().map(|node| node.path).collect();
+
+        assert!(node_paths.contains(&real_dir));
+        assert!(!node_paths.contains(&archive));
+
+        let _ = fs::remove_file(&archive);
+        let _ = fs::remove_dir_all(&base);
+    }
 }
