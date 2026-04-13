@@ -506,6 +506,7 @@ fn phase_label(phase: &str) -> String {
         "catching_up" => t!("search.phase_catching_up").to_string(),
         "scanning_mft" => t!("search.phase_scanning_mft").to_string(),
         "loading_sizes" => t!("search.phase_loading_sizes").to_string(),
+        "persisting" => t!("search.phase_persisting").to_string(),
         "filesystem_scan" => t!("search.phase_filesystem_scan").to_string(),
         "open_volume" | "query_journal" => t!("search.phase_starting").to_string(),
         _ => t!("search.phase_indexing").to_string(),

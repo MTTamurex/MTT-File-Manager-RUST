@@ -117,7 +117,25 @@ pub(crate) fn index_non_ntfs_volume(
                 scanned_index.last_usn = 0;
                 scanned_index.state = file_index::IndexState::Ready;
 
-                if let Err(e) = db.save_volume(&scanned_index) {
+                let persist_total = scanned_index.records.len() as u64;
+                indexing_progress.update(
+                    drive_letter,
+                    "scanning",
+                    persist_total,
+                    "persisting",
+                    Some(0),
+                    Some(persist_total),
+                );
+                if let Err(e) = db.save_volume(&scanned_index, |inserted, total| {
+                    indexing_progress.update(
+                        drive_letter,
+                        "scanning",
+                        total,
+                        "persisting",
+                        Some(inserted),
+                        Some(total),
+                    )
+                }) {
                     eprintln!(
                         "[SCAN] {}:\\ Failed to save fallback index: {}",
                         drive_letter,
