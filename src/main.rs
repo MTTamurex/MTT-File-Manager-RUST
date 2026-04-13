@@ -78,8 +78,8 @@ fn has_stderr_console() -> bool {
 fn read_early_preference(key: &str) -> Option<String> {
     let db_path = dirs::data_local_dir()?
         .join("MTT-File-Manager")
-        .join("thumbnails")
-        .join("thumbnails.db");
+        .join("state")
+        .join("app_state.db");
     if !db_path.exists() {
         return None;
     }
