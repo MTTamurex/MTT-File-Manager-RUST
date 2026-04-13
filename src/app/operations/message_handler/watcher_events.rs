@@ -189,8 +189,13 @@ impl ImageViewerApp {
                 );
                 let changed_set: HashSet<PathBuf> =
                     result.changed_folder_covers.into_iter().collect();
-                for folder_path in changed_set {
-                    self.invalidate_folder_cover_state(&folder_path);
+                for folder_path in &changed_set {
+                    // On non-NTFS fallback paths, cover changes can be the only
+                    // signal that a subfolder's contents changed. Invalidate the
+                    // folder-size caches alongside the cover so list rows and the
+                    // details panel both re-read the updated size.
+                    self.invalidate_folder_size_cache(folder_path);
+                    self.invalidate_folder_cover_state(folder_path);
                 }
                 self.pending_items_rebuild = true;
             }
@@ -220,6 +225,20 @@ impl ImageViewerApp {
                 result.path,
                 self.watcher_fallback_fs
             );
+
+            // The consistency probe only tells us that the visible listing on
+            // disk no longer matches the UI snapshot. Before reloading, evict
+            // folder-size caches for currently visible directories so stale
+            // totals are not reused after the fresh listing arrives.
+            let visible_folder_paths: Vec<PathBuf> = self
+                .all_items
+                .iter()
+                .filter(|item| item.is_dir)
+                .map(|item| item.path.clone())
+                .collect();
+            for folder_path in visible_folder_paths {
+                self.invalidate_folder_size_cache(&folder_path);
+            }
 
             self.directory_dirty_registry.mark_dirty(&result.path);
             self.directory_cache.invalidate(&result.path);

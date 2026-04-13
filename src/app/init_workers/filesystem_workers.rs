@@ -239,13 +239,15 @@ pub(in crate::app) fn spawn_folder_size_worker(
 pub(in crate::app) fn spawn_folder_size_batch_worker(
     ctx: &egui::Context,
 ) -> (
-    mpsc::Sender<(PathBuf, u64)>,
-    mpsc::Receiver<FolderSizeMessage>,
+    mpsc::Sender<crate::app::folder_size_state::BatchSizeRequest>,
+    mpsc::Receiver<crate::app::folder_size_state::BatchSizeResult>,
     Arc<AtomicBool>,
     Arc<AtomicU64>,
 ) {
-    let (batch_tx, batch_rx) = mpsc::channel::<(PathBuf, u64)>();
-    let (res_tx, res_rx) = mpsc::channel::<FolderSizeMessage>();
+    use crate::app::folder_size_state::{BatchSizeRequest, BatchSizeResult};
+
+    let (batch_tx, batch_rx) = mpsc::channel::<BatchSizeRequest>();
+    let (res_tx, res_rx) = mpsc::channel::<BatchSizeResult>();
     let ctx = ctx.clone();
     let cancel = Arc::new(AtomicBool::new(false));
     let cancel_worker = Arc::clone(&cancel);
@@ -255,7 +257,7 @@ pub(in crate::app) fn spawn_folder_size_batch_worker(
     std::thread::Builder::new()
         .name("folder-size-batch".into())
         .spawn(move || {
-            while let Ok((path, req_gen)) = batch_rx.recv() {
+            while let Ok((path, req_gen, req_epoch)) = batch_rx.recv() {
                 // Skip stale requests from a previous generation (previous folder).
                 if req_gen != generation_worker.load(Ordering::Acquire) {
                     continue;
@@ -276,9 +278,10 @@ pub(in crate::app) fn spawn_folder_size_batch_worker(
                     if let Ok((total_size, _file_count)) =
                         crate::infrastructure::global_search::folder_size(&path)
                     {
-                        let _ = res_tx.send(FolderSizeMessage::Complete {
+                        let _ = res_tx.send(BatchSizeResult {
                             folder_path: path,
                             total_size,
+                            request_epoch: req_epoch,
                         });
                         ctx.request_repaint();
                         continue;
@@ -312,9 +315,10 @@ pub(in crate::app) fn spawn_folder_size_batch_worker(
                 // Only send if scan completed (not cancelled).
                 if !cancel_worker.load(Ordering::Acquire) {
                     if let Some(total_size) = result {
-                        let _ = res_tx.send(FolderSizeMessage::Complete {
+                        let _ = res_tx.send(BatchSizeResult {
                             folder_path: path,
                             total_size,
+                            request_epoch: req_epoch,
                         });
                         ctx.request_repaint();
                     }

@@ -22,6 +22,22 @@ pub enum FolderSizeMessage {
     },
 }
 
+/// Result from the batch folder-size worker.
+///
+/// Carries the `request_epoch` that was active when the request was sent,
+/// allowing the consumer to detect stale results from scans that started
+/// before a cache invalidation.
+pub struct BatchSizeResult {
+    pub folder_path: PathBuf,
+    pub total_size: u64,
+    /// Invalidation epoch copied from the request — compared against the
+    /// current `batch_invalidation_epoch` to detect staleness.
+    pub request_epoch: u64,
+}
+
+/// Batch request payload: (path, generation, invalidation_epoch).
+pub type BatchSizeRequest = (PathBuf, u64, u64);
+
 pub struct FolderSizeState {
     pub req_sender: Sender<PathBuf>,
     pub res_receiver: Receiver<FolderSizeMessage>,
@@ -30,10 +46,10 @@ pub struct FolderSizeState {
     pub loading: FxHashSet<PathBuf>,
 
     // ── Batch worker for list-view folder sizes ──
-    /// Sender for background batch requests (path + generation).
-    pub batch_req_sender: Sender<(PathBuf, u64)>,
-    /// Receiver for batch results.
-    pub batch_res_receiver: Receiver<FolderSizeMessage>,
+    /// Sender for background batch requests.
+    pub batch_req_sender: Sender<BatchSizeRequest>,
+    /// Receiver for batch results (carries per-request epoch).
+    pub batch_res_receiver: Receiver<BatchSizeResult>,
     /// Shared cancel flag — set on navigation to abort in-flight scans.
     pub batch_cancel: Arc<AtomicBool>,
     /// Monotonic generation counter — incremented on cancel to invalidate queued requests.
@@ -49,6 +65,10 @@ pub struct FolderSizeState {
     /// the folder size, causing stale data to be permanently re-cached.
     /// Value = deadline after which the entry should be re-cleared.
     pub pending_revalidation: HashMap<PathBuf, Instant>,
+
+    /// Per-path invalidation counter.  Incremented each time
+    /// `invalidate_folder_size_cache(path)` is called.
+    pub batch_invalidation_epoch: HashMap<PathBuf, u64>,
 }
 
 impl FolderSizeState {
@@ -71,11 +91,12 @@ impl FolderSizeState {
         //    aren't incorrectly blocked.
         self.batch_loading.clear();
 
-        // 5. Drop pending revalidations from the previous folder so they
-        //    don't fire and clear batch_cache entries in the new folder.
-        self.pending_revalidation.clear();
-
-        // 6. Re-enable the worker for the next folder.
+        // 5. Re-enable the worker for the next folder.
+        //
+        // NOTE: pending_revalidation is intentionally NOT cleared here.
+        // Revalidations are per-path and must survive navigation so they
+        // can purge stale values that were re-cached from IPC or in-flight
+        // scans that completed before the service updated its index.
         self.batch_cancel.store(false, Ordering::Release);
     }
 }

@@ -482,23 +482,42 @@ impl ImageViewerApp {
             const MAX_BATCH_PER_FRAME: usize = 120;
             let mut batch_count = 0usize;
             while batch_count < MAX_BATCH_PER_FRAME {
-                let msg = match self.folder_size_state.batch_res_receiver.try_recv() {
-                    Ok(m) => m,
+                let result = match self.folder_size_state.batch_res_receiver.try_recv() {
+                    Ok(r) => r,
                     Err(_) => break,
                 };
                 batch_count += 1;
-                if let crate::app::folder_size_state::FolderSizeMessage::Complete {
+
+                let crate::app::folder_size_state::BatchSizeResult {
                     folder_path,
                     total_size,
-                } = msg
-                {
-                    self.folder_size_state.batch_loading.remove(&folder_path);
-                    self.folder_size_state.batch_cache.put(folder_path.clone(), total_size);
-                    // Keep the preview-panel cache in sync so selecting the folder
-                    // in the details panel shows the same (fresh) value.
-                    self.folder_size_state.cache.put(folder_path, total_size);
+                    request_epoch,
+                } = result;
+
+                self.folder_size_state.batch_loading.remove(&folder_path);
+
+                // Epoch-based staleness check: the result carries the epoch
+                // that was active when its request was sent.  If a cache
+                // invalidation bumped the epoch AFTER the request was sent,
+                // the scan started with stale data — discard it.  The next
+                // render will re-request a fresh scan.
+                let current_epoch = self
+                    .folder_size_state
+                    .batch_invalidation_epoch
+                    .get(&folder_path)
+                    .copied()
+                    .unwrap_or(0);
+                if request_epoch < current_epoch {
+                    // Stale result — discard.
                     received_any = true;
+                    continue;
                 }
+
+                self.folder_size_state.batch_cache.put(folder_path.clone(), total_size);
+                // Keep the preview-panel cache in sync so selecting the folder
+                // in the details panel shows the same (fresh) value.
+                self.folder_size_state.cache.put(folder_path, total_size);
+                received_any = true;
             }
         }
 
@@ -506,12 +525,10 @@ impl ImageViewerApp {
         // Handles the timing race between client cache invalidation and
         // the search service's 2 s USN journal polling.  If a stale value
         // was re-cached before the service updated its index, this deferred
-        // clear forces the list view to re-fetch fresh data.
+        // clear forces BOTH caches to re-fetch fresh data.
         //
-        // Only batch_cache (list view) is cleared — NOT the preview-panel
-        // cache.  The batch worker result already updates both caches, so
-        // the preview panel gets the corrected value silently without
-        // flashing "calculating…" on every revalidation cycle.
+        // Also bumps the invalidation epoch so any in-flight result that
+        // was sent before the revalidation is discarded as stale.
         {
             let now = std::time::Instant::now();
             let expired: Vec<std::path::PathBuf> = self
@@ -525,6 +542,14 @@ impl ImageViewerApp {
                 self.folder_size_state.pending_revalidation.remove(&path);
                 self.folder_size_state.batch_cache.pop(&path);
                 self.folder_size_state.batch_loading.remove(&path);
+                self.folder_size_state.cache.pop(&path);
+                self.folder_size_state.loading.remove(&path);
+                // Bump epoch so in-flight results from before are rejected.
+                *self
+                    .folder_size_state
+                    .batch_invalidation_epoch
+                    .entry(path)
+                    .or_insert(0) += 1;
                 received_any = true;
             }
         }
