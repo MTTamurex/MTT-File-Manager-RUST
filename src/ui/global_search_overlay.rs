@@ -5,8 +5,9 @@ use crate::app::global_search_state::GlobalSearchCategory;
 use crate::app::state::ImageViewerApp;
 use crate::ui::theme;
 use eframe::egui;
-use filters::{category_label, format_number};
+use filters::{category_label, format_exact_number};
 use rust_i18n::t;
+use std::time::Duration;
 
 mod actions;
 pub(crate) mod filters;
@@ -173,23 +174,34 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                     ui.set_min_height(modal_max_height - 32.0);
 
                     // Header
-                    ui.horizontal(|ui| {
+                    ui.horizontal_wrapped(|ui| {
                         ui.label(egui::RichText::new(&*t!("search.title")).size(16.0).strong());
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if !app.global_search.available {
-                                ui.label(
-                                    egui::RichText::new(&*t!("search.service_offline"))
-                                        .size(11.0)
-                                        .color(egui::Color32::from_rgb(200, 80, 80)),
-                                );
+                        ui.add_space(10.0);
+
+                        if !app.global_search.available {
+                            ui.label(
+                                egui::RichText::new(&*t!("search.service_offline"))
+                                    .size(11.0)
+                                    .color(egui::Color32::from_rgb(200, 80, 80)),
+                            );
+                        } else {
+                            let headline = if app.global_search.indexing_in_progress {
+                                t!(
+                                    "search.indexing_files",
+                                    count = format_exact_number(app.global_search.total_indexed)
+                                )
                             } else {
-                                ui.label(
-                                    egui::RichText::new(t!("search.indexed_files", count = format_number(app.global_search.total_indexed)))
+                                t!(
+                                    "search.indexed_files",
+                                    count = format_exact_number(app.global_search.total_indexed)
+                                )
+                            };
+                            ui.label(
+                                egui::RichText::new(headline)
                                     .size(11.0)
                                     .color(egui::Color32::from_gray(120)),
-                                );
-                            }
-                        });
+                            );
+                        }
                     });
 
                     ui.add_space(8.0);
@@ -327,6 +339,11 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                         app.global_search.metadata_cache.clear();
                     }
 
+                    if app.global_search.available && app.global_search.indexing_in_progress {
+                        ui.add_space(8.0);
+                        render_indexing_activity(ui, app, dark_mode);
+                    }
+
                     ui.add_space(8.0);
                     render_filter_controls(ui, app);
                     ui.add_space(8.0);
@@ -341,6 +358,130 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                 });
         });
 }
+
+fn render_indexing_activity(ui: &mut egui::Ui, app: &ImageViewerApp, dark_mode: bool) {
+    let idle_for = app.global_search.last_progress_advance_at.elapsed();
+    let status_age = app.global_search.last_status_received_at.elapsed();
+    let freshness_color = if idle_for >= Duration::from_secs(3) {
+        egui::Color32::from_rgb(196, 141, 56)
+    } else {
+        egui::Color32::from_gray(135)
+    };
+    let fill = if dark_mode {
+        egui::Color32::from_rgba_unmultiplied(255, 255, 255, 14)
+    } else {
+        egui::Color32::from_rgba_unmultiplied(0, 0, 0, 10)
+    };
+    let stroke = if idle_for >= Duration::from_secs(3) {
+        egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(196, 141, 56, 120))
+    } else {
+        egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(120, 120, 120, 60))
+    };
+    let status_color = if status_age >= Duration::from_secs(2) {
+        egui::Color32::from_rgb(196, 141, 56)
+    } else {
+        egui::Color32::from_gray(135)
+    };
+    let freshness_text = if idle_for < Duration::from_secs(2) {
+        t!("search.indexing_recent_update")
+    } else {
+        t!(
+            "search.indexing_waiting_progress",
+            seconds = idle_for.as_secs().max(1)
+        )
+    };
+    let status_text = if status_age < Duration::from_secs(2) {
+        t!("search.indexing_status_recent")
+    } else {
+        t!(
+            "search.indexing_status_age",
+            seconds = status_age.as_secs().max(1)
+        )
+    };
+    let summary = build_scanning_volume_summary(&app.global_search.status_volumes);
+
+    egui::Frame::new()
+        .fill(fill)
+        .stroke(stroke)
+        .corner_radius(6.0)
+        .inner_margin(egui::Margin::symmetric(10, 8))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(
+                    egui::RichText::new(t!(
+                        "search.indexing_files",
+                        count = format_exact_number(app.global_search.total_indexed)
+                    ))
+                    .size(11.0)
+                    .strong(),
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(
+                        egui::RichText::new(freshness_text)
+                            .size(10.0)
+                            .color(freshness_color),
+                    );
+                });
+            });
+
+            ui.add_space(4.0);
+            ui.label(
+                egui::RichText::new(status_text)
+                    .size(10.0)
+                    .color(status_color),
+            );
+
+            if !summary.is_empty() {
+                ui.add_space(4.0);
+                ui.label(
+                    egui::RichText::new(t!("search.indexing_drives", volumes = summary))
+                        .size(10.0)
+                        .color(egui::Color32::from_gray(145)),
+                );
+            }
+        });
+}
+
+fn build_scanning_volume_summary(volumes: &[mtt_search_protocol::VolumeStatus]) -> String {
+    volumes
+        .iter()
+        .filter(|volume| volume.state == "scanning")
+        .map(format_scanning_volume)
+        .collect::<Vec<_>>()
+        .join(" • ")
+}
+
+fn format_scanning_volume(volume: &mtt_search_protocol::VolumeStatus) -> String {
+    let phase = phase_label(&volume.phase);
+    match volume.phase_total {
+        Some(total) => format!(
+            "{}: {} {}/{}",
+            volume.drive_letter,
+            phase,
+            format_exact_number(volume.phase_progress.unwrap_or(0)),
+            format_exact_number(total),
+        ),
+        None => format!(
+            "{}: {} {}",
+            volume.drive_letter,
+            phase,
+            format_exact_number(volume.phase_progress.unwrap_or(volume.files_indexed)),
+        ),
+    }
+}
+
+fn phase_label(phase: &str) -> String {
+    match phase {
+        "loading_cache" => t!("search.phase_loading_cache").to_string(),
+        "catching_up" => t!("search.phase_catching_up").to_string(),
+        "scanning_mft" => t!("search.phase_scanning_mft").to_string(),
+        "loading_sizes" => t!("search.phase_loading_sizes").to_string(),
+        "filesystem_scan" => t!("search.phase_filesystem_scan").to_string(),
+        "open_volume" | "query_journal" => t!("search.phase_starting").to_string(),
+        _ => t!("search.phase_indexing").to_string(),
+    }
+}
+
 fn render_filter_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
     let categories = [
         GlobalSearchCategory::All,

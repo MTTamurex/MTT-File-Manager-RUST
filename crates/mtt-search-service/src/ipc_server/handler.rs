@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::hint::black_box;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -6,6 +7,7 @@ use parking_lot::RwLock;
 use windows::Win32::Foundation::HANDLE;
 
 use crate::file_index::{IndexState, VolumeIndex};
+use crate::indexing_progress::IndexingProgress;
 use crate::ipc_authorization::{
     collect_authorized_fts_page, collect_authorized_search_page,
     current_client_can_read_path, PipeImpersonationGuard,
@@ -23,6 +25,7 @@ const WARM_COOLDOWN_SECS: u64 = 60;
 pub(super) fn handle_client(
     pipe: HANDLE,
     indices: &Arc<RwLock<Vec<VolumeIndex>>>,
+    indexing_progress: &Arc<IndexingProgress>,
     is_warming: &Arc<AtomicBool>,
     last_warm_epoch_secs: &Arc<AtomicU64>,
     security_policy: &IpcSecurityPolicy,
@@ -107,7 +110,7 @@ pub(super) fn handle_client(
         }
         SearchRequest::GetStatus => {
             let indices_lock = indices.read();
-            let status = build_status_response(&indices_lock, security_policy);
+            let status = build_status_response(&indices_lock, indexing_progress, security_policy);
 
             let _ = send_response(
                 pipe,
@@ -411,26 +414,51 @@ pub(super) fn handle_client(
     }
 }
 
-fn build_status_response(indices: &[VolumeIndex], security_policy: &IpcSecurityPolicy) -> IndexStatusInfo {
-    let mut total_indexed = 0u64;
-    let mut volumes = Vec::with_capacity(indices.len());
+fn build_status_response(
+    indices: &[VolumeIndex],
+    indexing_progress: &IndexingProgress,
+    security_policy: &IpcSecurityPolicy,
+) -> IndexStatusInfo {
+    let mut volume_map = BTreeMap::<char, VolumeStatus>::new();
     let service_executable_path = std::env::current_exe()
         .map(|path| path.display().to_string())
         .unwrap_or_else(|_| "<unknown>".to_string());
+    let progress_snapshot = indexing_progress.snapshot();
 
     if security_policy.redact_status_metrics {
+        for progress in progress_snapshot {
+            volume_map.insert(
+                progress.drive_letter,
+                VolumeStatus {
+                    drive_letter: progress.drive_letter,
+                    state: "redacted".to_string(),
+                    files_indexed: 0,
+                    phase: "redacted".to_string(),
+                    phase_progress: None,
+                    phase_total: None,
+                },
+            );
+        }
         for vol in indices {
-            volumes.push(VolumeStatus {
-                drive_letter: vol.drive_letter,
-                state: "redacted".to_string(),
-                files_indexed: 0,
-            });
+            volume_map.insert(
+                vol.drive_letter,
+                VolumeStatus {
+                    drive_letter: vol.drive_letter,
+                    state: "redacted".to_string(),
+                    files_indexed: 0,
+                    phase: "redacted".to_string(),
+                    phase_progress: None,
+                    phase_total: None,
+                },
+            );
         }
     } else {
+        for progress in progress_snapshot {
+            volume_map.insert(progress.drive_letter, progress);
+        }
         for vol in indices {
             let count = vol.records.len() as u64;
-            total_indexed += count;
-            volumes.push(VolumeStatus {
+            let next_status = VolumeStatus {
                 drive_letter: vol.drive_letter,
                 state: match &vol.state {
                     IndexState::NotStarted => "not_started".to_string(),
@@ -445,9 +473,32 @@ fn build_status_response(indices: &[VolumeIndex], security_policy: &IpcSecurityP
                     }
                 },
                 files_indexed: count,
-            });
+                phase: match &vol.state {
+                    IndexState::NotStarted => "not_started".to_string(),
+                    IndexState::Scanning => "scanning".to_string(),
+                    IndexState::Ready => "ready".to_string(),
+                    IndexState::Error(_) => "error".to_string(),
+                },
+                phase_progress: None,
+                phase_total: None,
+            };
+
+            match volume_map.get_mut(&vol.drive_letter) {
+                Some(existing)
+                    if existing.state == "scanning"
+                        && next_status.state == "ready" =>
+                {
+                    existing.files_indexed = existing.files_indexed.max(next_status.files_indexed);
+                }
+                _ => {
+                    volume_map.insert(vol.drive_letter, next_status);
+                }
+            }
         }
     }
+
+    let volumes = volume_map.into_values().collect::<Vec<_>>();
+    let total_indexed = volumes.iter().map(|volume| volume.files_indexed).sum();
 
     IndexStatusInfo {
         volumes,
@@ -476,11 +527,12 @@ mod tests {
             make_volume('C', 2, IndexState::Ready),
             make_volume('D', 1, IndexState::Scanning),
         ];
+        let progress = IndexingProgress::new();
         let policy = IpcSecurityPolicy {
             redact_status_metrics: false,
         };
 
-        let status = build_status_response(&indices, &policy);
+        let status = build_status_response(&indices, &progress, &policy);
         assert_eq!(status.total_files_indexed, 3);
         assert_eq!(status.volumes.len(), 2);
         assert_eq!(status.volumes[0].files_indexed, 2);
@@ -493,15 +545,35 @@ mod tests {
             make_volume('C', 2, IndexState::Ready),
             make_volume('D', 1, IndexState::Error("io".to_string())),
         ];
+        let progress = IndexingProgress::new();
         let policy = IpcSecurityPolicy {
             redact_status_metrics: true,
         };
 
-        let status = build_status_response(&indices, &policy);
+        let status = build_status_response(&indices, &progress, &policy);
         assert_eq!(status.total_files_indexed, 0);
         assert_eq!(status.volumes.len(), 2);
         assert_eq!(status.volumes[0].state, "redacted");
         assert_eq!(status.volumes[0].files_indexed, 0);
         assert_eq!(status.volumes[1].state, "redacted");
+    }
+
+    #[test]
+    fn status_response_includes_inflight_volume_progress() {
+        let indices = vec![make_volume('C', 2, IndexState::Ready)];
+        let progress = IndexingProgress::new();
+        let policy = IpcSecurityPolicy {
+            redact_status_metrics: false,
+        };
+
+        progress.set_scanning('D', 7);
+
+        let status = build_status_response(&indices, &progress, &policy);
+        assert_eq!(status.total_files_indexed, 9);
+        assert_eq!(status.volumes.len(), 2);
+        assert!(status
+            .volumes
+            .iter()
+            .any(|volume| volume.drive_letter == 'D' && volume.state == "scanning" && volume.files_indexed == 7));
     }
 }

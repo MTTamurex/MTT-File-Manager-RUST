@@ -13,6 +13,7 @@ use windows::Win32::System::Threading::{CreateEventW, WaitForSingleObject};
 use windows::Win32::System::IO::OVERLAPPED;
 
 use crate::file_index::VolumeIndex;
+use crate::indexing_progress::IndexingProgress;
 use crate::index_db;
 use crate::security_policy::IpcSecurityPolicy;
 
@@ -35,6 +36,7 @@ const IO_TIMEOUT_SECS: u64 = 30;
 /// Start the IPC server loop.
 pub fn run_ipc_server(
     indices: Arc<RwLock<Vec<VolumeIndex>>>,
+    indexing_progress: Arc<IndexingProgress>,
     shutdown: Arc<AtomicBool>,
     db_path: std::path::PathBuf,
 ) {
@@ -133,6 +135,7 @@ pub fn run_ipc_server(
 
         // Handle each client concurrently so one slow query doesn't block all connections.
         let indices_for_client = indices.clone();
+        let progress_for_client = indexing_progress.clone();
         let warming_for_client = is_warming.clone();
         let warm_epoch_for_client = last_warm_epoch_secs.clone();
         let active_for_client = active_clients.clone();
@@ -179,7 +182,15 @@ pub fn run_ipc_server(
             });
 
             if let Err(e) = catch_unwind(AssertUnwindSafe(|| {
-                handler::handle_client(pipe, &indices_for_client, &warming_for_client, &warm_epoch_for_client, &policy_for_client, &fts_for_client)
+                handler::handle_client(
+                    pipe,
+                    &indices_for_client,
+                    &progress_for_client,
+                    &warming_for_client,
+                    &warm_epoch_for_client,
+                    &policy_for_client,
+                    &fts_for_client,
+                )
             })) {
                 eprintln!("[IPC] Client handler panic: {:?}", e);
             }

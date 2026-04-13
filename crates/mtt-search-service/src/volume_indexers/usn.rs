@@ -4,6 +4,7 @@ use std::sync::Arc;
 use parking_lot::RwLock;
 
 use crate::file_index;
+use crate::indexing_progress::IndexingProgress;
 use crate::index_db;
 use crate::usn_journal;
 use super::upsert_volume_index;
@@ -43,6 +44,7 @@ fn restore_pending_snapshot(
 pub(crate) fn index_volume(
     drive_letter: char,
     indices: Arc<RwLock<Vec<file_index::VolumeIndex>>>,
+    indexing_progress: Arc<IndexingProgress>,
     db: Arc<index_db::IndexDb>,
     shutdown: Arc<AtomicBool>,
 ) {
@@ -55,6 +57,7 @@ pub(crate) fn index_volume(
     let volume_handle = match usn_journal::open_volume(drive_letter) {
         Ok(h) => h,
         Err(e) => {
+            indexing_progress.set_error(drive_letter, 0, "open_volume");
             eprintln!("[USN] Failed to open volume {}:\\: {}", drive_letter, e);
             return;
         }
@@ -64,6 +67,7 @@ pub(crate) fn index_volume(
     let journal_info = match usn_journal::query_usn_journal(volume_handle) {
         Ok(info) => info,
         Err(e) => {
+            indexing_progress.set_error(drive_letter, 0, "query_journal");
             eprintln!(
                 "[USN] Failed to query USN journal for {}:\\: {}",
                 drive_letter, e
@@ -93,8 +97,25 @@ pub(crate) fn index_volume(
             && state.has_hardlink_parent_data
             && state.has_reparse_point_data
         {
+            indexing_progress.update(
+                drive_letter,
+                "scanning",
+                0,
+                "loading_cache",
+                None,
+                None,
+            );
             // Stream records from DB directly into arena (no intermediate Vec<String>).
-            if let Some(count) = db.load_into_index(&mut index) {
+            if let Some(count) = db.load_into_index(&mut index, |loaded_count| {
+                indexing_progress.update(
+                    drive_letter,
+                    "scanning",
+                    loaded_count as u64,
+                    "loading_cache",
+                    Some(loaded_count as u64),
+                    Some(state.files_indexed),
+                )
+            }) {
                 index.names.shrink_to_fit();
                 let (arena_used, _arena_cap, map_est) = index.memory_usage();
                 eprintln!(
@@ -115,6 +136,14 @@ pub(crate) fn index_volume(
                 // DB-loaded rows are already persisted. Keep only real USN catch-up
                 // changes as pending for the next incremental sync.
                 index.clear_pending();
+                indexing_progress.update(
+                    drive_letter,
+                    "scanning",
+                    index.records.len() as u64,
+                    "catching_up",
+                    Some(index.records.len() as u64),
+                    None,
+                );
 
                 // Catch up from last USN.
                 match usn_journal::read_usn_changes(
@@ -144,7 +173,29 @@ pub(crate) fn index_volume(
                         }
 
                         // Extract file sizes from MFT (second pass).
-                        match crate::mft_reader::read_file_sizes(volume_handle, &mut index) {
+                        let indexed_files = index.records.len() as u64;
+                        indexing_progress.update(
+                            drive_letter,
+                            "scanning",
+                            indexed_files,
+                            "loading_sizes",
+                            Some(0),
+                            Some(indexed_files),
+                        );
+                        match crate::mft_reader::read_file_sizes(
+                            volume_handle,
+                            &mut index,
+                            |processed, total| {
+                                indexing_progress.update(
+                                    drive_letter,
+                                    "scanning",
+                                    indexed_files,
+                                    "loading_sizes",
+                                    Some(processed),
+                                    Some(total),
+                                )
+                            },
+                        ) {
                             Ok(count) => {
                                 eprintln!(
                                     "[MFT-SIZE] {}:\\ Populated {} file sizes after DB load",
@@ -163,6 +214,11 @@ pub(crate) fn index_volume(
                         need_full_scan = false;
                     }
                     Err(e) => {
+                        indexing_progress.set_error(
+                            drive_letter,
+                            index.records.len() as u64,
+                            "catching_up",
+                        );
                         eprintln!(
                             "[USN] {}:\\ Catch-up failed ({}), doing full scan",
                             drive_letter,
@@ -199,10 +255,25 @@ pub(crate) fn index_volume(
     // Full MFT enumeration if needed.
     if need_full_scan {
         index.state = file_index::IndexState::Scanning;
+        indexing_progress.set_scanning(drive_letter, index.records.len() as u64, "scanning_mft");
         eprintln!("[USN] {}:\\ Starting full MFT enumeration...", drive_letter);
         let start = std::time::Instant::now();
 
-        match usn_journal::enumerate_all_files(volume_handle, &journal_info, &mut index) {
+        match usn_journal::enumerate_all_files(
+            volume_handle,
+            &journal_info,
+            &mut index,
+            |count| {
+                indexing_progress.update(
+                    drive_letter,
+                    "scanning",
+                    count,
+                    "scanning_mft",
+                    Some(count),
+                    None,
+                )
+            },
+        ) {
             Ok(()) => {
                 let elapsed = start.elapsed();
                 index.journal_id = journal_info.journal_id;
@@ -238,7 +309,29 @@ pub(crate) fn index_volume(
                 }
 
                 // Extract file sizes from MFT (second pass after enumeration).
-                match crate::mft_reader::read_file_sizes(volume_handle, &mut index) {
+                let indexed_files = index.records.len() as u64;
+                indexing_progress.update(
+                    drive_letter,
+                    "scanning",
+                    indexed_files,
+                    "loading_sizes",
+                    Some(0),
+                    Some(indexed_files),
+                );
+                match crate::mft_reader::read_file_sizes(
+                    volume_handle,
+                    &mut index,
+                    |processed, total| {
+                        indexing_progress.update(
+                            drive_letter,
+                            "scanning",
+                            indexed_files,
+                            "loading_sizes",
+                            Some(processed),
+                            Some(total),
+                        )
+                    },
+                ) {
                     Ok(count) => {
                         eprintln!(
                             "[MFT-SIZE] {}:\\ Populated {} file sizes after full scan",
@@ -255,6 +348,7 @@ pub(crate) fn index_volume(
                 }
             }
             Err(e) => {
+                indexing_progress.set_error(drive_letter, index.records.len() as u64, "scanning_mft");
                 eprintln!(
                     "[USN] {}:\\ Enumeration failed: {}",
                     drive_letter,
@@ -286,6 +380,7 @@ pub(crate) fn index_volume(
         let mut indices_lock = indices.write();
         upsert_volume_index(&mut indices_lock, index);
     }
+    indexing_progress.clear(drive_letter);
 
     eprintln!(
         "[USN] {}:\\ Index ready, starting incremental updates",

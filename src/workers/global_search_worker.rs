@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
 
-use mtt_search_protocol::{IndexStatusInfo, SearchResultItem};
+use mtt_search_protocol::{IndexStatusInfo, SearchResultItem, VolumeStatus};
 
 /// Requests sent from the UI to the global search worker.
 pub enum GlobalSearchRequest {
@@ -18,6 +18,8 @@ pub enum GlobalSearchRequest {
     },
     /// Check if the search service is available.
     CheckStatus,
+    /// Enable or disable proactive status polling while the overlay is open.
+    SetStatusTracking { active: bool },
 }
 
 /// Responses sent from the global search worker to the UI.
@@ -33,7 +35,13 @@ pub enum GlobalSearchResponse {
     },
     TotalCount { query: String, total_matches: u32 },
     /// Service availability status.
-    Status { available: bool, total_indexed: u64 },
+    Status {
+        available: bool,
+        total_indexed: u64,
+        session_total_indexed: u64,
+        indexing_in_progress: bool,
+        volumes: Vec<VolumeStatus>,
+    },
     /// Error message.
     Error { query: String, message: String },
 }
@@ -43,6 +51,8 @@ const STATUS_RETRY_COUNT: usize = 1;
 const SEARCH_RETRY_COUNT: usize = 2;
 const MIN_QUERY_LEN_FOR_SERVICE_SEARCH: usize = 2;
 const TOTAL_COUNT_PAGE_LIMIT: u32 = 1_000;
+const ACTIVE_STATUS_POLL_MS: u64 = 250;
+const IDLE_STATUS_POLL_MS: u64 = 1_000;
 
 fn is_transient_ipc_error(message: &str) -> bool {
     let m = message.to_ascii_lowercase();
@@ -64,6 +74,29 @@ fn normalize_result_path(path: &str) -> String {
     } else {
         stripped.to_string()
     }
+}
+
+fn service_volume_letters(volumes: &[VolumeStatus]) -> HashSet<char> {
+    volumes.iter().map(|volume| volume.drive_letter).collect()
+}
+
+fn volume_is_actively_scanning(volume: &VolumeStatus) -> bool {
+    volume.state == "scanning"
+}
+
+fn status_poll_interval(
+    tracking_active: bool,
+    volumes: &[VolumeStatus],
+) -> Option<std::time::Duration> {
+    if !tracking_active {
+        return None;
+    }
+
+    Some(if volumes.iter().any(volume_is_actively_scanning) {
+        std::time::Duration::from_millis(ACTIVE_STATUS_POLL_MS)
+    } else {
+        std::time::Duration::from_millis(IDLE_STATUS_POLL_MS)
+    })
 }
 
 fn append_unique_items(
@@ -191,7 +224,7 @@ fn refresh_and_send_status(
     session_index: &mut crate::infrastructure::user_session_search::UserSessionSearchIndex,
     last_known_available: &mut bool,
     last_known_total_indexed: &mut u64,
-    last_known_service_volumes: &mut HashSet<char>,
+    last_known_status_volumes: &mut Vec<VolumeStatus>,
     last_known_service_executable_path: &mut String,
     consecutive_failures: &mut u8,
 ) {
@@ -227,7 +260,7 @@ fn refresh_and_send_status(
             }
             *last_known_available = true;
             *last_known_total_indexed = status.total_files_indexed;
-            *last_known_service_volumes = status.volumes.iter().map(|v| v.drive_letter).collect();
+            *last_known_status_volumes = status.volumes.clone();
             *consecutive_failures = 0;
         } else {
             *consecutive_failures = (*consecutive_failures).saturating_add(1);
@@ -245,14 +278,21 @@ fn refresh_and_send_status(
         }
     }
 
-    session_index.refresh(last_known_service_volumes, *last_known_available, false);
+    let service_volume_letters = service_volume_letters(last_known_status_volumes);
+    session_index.refresh(&service_volume_letters, *last_known_available, false);
     let local_total = session_index.total_indexed();
     let available = *last_known_available || session_index.has_indexed_items();
-    let total_indexed = (*last_known_total_indexed).saturating_add(local_total);
+    let total_indexed = *last_known_total_indexed;
+    let indexing_in_progress = last_known_status_volumes
+        .iter()
+        .any(volume_is_actively_scanning);
 
     let _ = sender.send(GlobalSearchResponse::Status {
         available,
         total_indexed,
+        session_total_indexed: local_total,
+        indexing_in_progress,
+        volumes: last_known_status_volumes.clone(),
     });
 }
 
@@ -266,9 +306,10 @@ pub fn start_global_search_worker(
         let total_count_generation = Arc::new(AtomicU64::new(0));
         let mut last_known_available = false;
         let mut last_known_total_indexed = 0u64;
-        let mut last_known_service_volumes = HashSet::<char>::new();
+        let mut last_known_status_volumes = Vec::<VolumeStatus>::new();
         let mut last_known_service_executable_path = String::new();
         let mut consecutive_failures = 0u8;
+        let mut status_tracking_active = false;
         let mut session_index =
             crate::infrastructure::user_session_search::UserSessionSearchIndex::new();
 
@@ -282,28 +323,49 @@ pub fn start_global_search_worker(
             &mut session_index,
             &mut last_known_available,
             &mut last_known_total_indexed,
-            &mut last_known_service_volumes,
+            &mut last_known_status_volumes,
             &mut last_known_service_executable_path,
             &mut consecutive_failures,
         );
         ctx.request_repaint();
 
-        while let Ok(request) = receiver.recv() {
+        loop {
+            let initial_request = match status_poll_interval(
+                status_tracking_active,
+                &last_known_status_volumes,
+            ) {
+                Some(timeout) => match receiver.recv_timeout(timeout) {
+                    Ok(request) => Some(request),
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => None,
+                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                },
+                None => match receiver.recv() {
+                    Ok(request) => Some(request),
+                    Err(_) => break,
+                },
+            };
+
             // ── Coalesce: drain the channel, keeping only the latest Search
             //    and noting whether any CheckStatus was enqueued. ──────────
             let mut latest_search: Option<(String, u32, u32)> = None;
-            let mut pending_status_check = false;
+            let mut pending_status_check = initial_request.is_none();
+            let mut next_tracking_state: Option<bool> = None;
 
-            match request {
-                GlobalSearchRequest::Search {
-                    query,
-                    offset,
-                    limit,
-                } => {
-                    latest_search = Some((query, offset, limit));
-                }
-                GlobalSearchRequest::CheckStatus => {
-                    pending_status_check = true;
+            if let Some(request) = initial_request {
+                match request {
+                    GlobalSearchRequest::Search {
+                        query,
+                        offset,
+                        limit,
+                    } => {
+                        latest_search = Some((query, offset, limit));
+                    }
+                    GlobalSearchRequest::CheckStatus => {
+                        pending_status_check = true;
+                    }
+                    GlobalSearchRequest::SetStatusTracking { active } => {
+                        next_tracking_state = Some(active);
+                    }
                 }
             }
 
@@ -319,6 +381,16 @@ pub fn start_global_search_worker(
                     GlobalSearchRequest::CheckStatus => {
                         pending_status_check = true;
                     }
+                    GlobalSearchRequest::SetStatusTracking { active } => {
+                        next_tracking_state = Some(active);
+                    }
+                }
+            }
+
+            if let Some(active) = next_tracking_state {
+                status_tracking_active = active;
+                if active {
+                    pending_status_check = true;
                 }
             }
 
@@ -438,7 +510,7 @@ pub fn start_global_search_worker(
                                 &mut session_index,
                                 &mut last_known_available,
                                 &mut last_known_total_indexed,
-                                &mut last_known_service_volumes,
+                                &mut last_known_status_volumes,
                                 &mut last_known_service_executable_path,
                                 &mut consecutive_failures,
                             );
@@ -478,7 +550,7 @@ pub fn start_global_search_worker(
                     &mut session_index,
                     &mut last_known_available,
                     &mut last_known_total_indexed,
-                    &mut last_known_service_volumes,
+                    &mut last_known_status_volumes,
                     &mut last_known_service_executable_path,
                     &mut consecutive_failures,
                 );

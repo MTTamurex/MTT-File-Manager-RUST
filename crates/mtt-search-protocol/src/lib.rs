@@ -151,6 +151,9 @@ pub struct VolumeStatus {
     /// "scanning", "ready", "error"
     pub state: String,
     pub files_indexed: u64,
+    pub phase: String,
+    pub phase_progress: Option<u64>,
+    pub phase_total: Option<u64>,
 }
 
 /// Encode a message with a 4-byte little-endian length prefix for Named Pipe transport.
