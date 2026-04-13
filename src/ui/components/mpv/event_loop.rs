@@ -217,11 +217,11 @@ pub fn stop_event_loop(running: Arc<AtomicBool>, handle: Option<thread::JoinHand
         running.store(false, Ordering::Release);
 
         // Wait briefly for the thread to exit.  The event loop polls
-        // `running` every ~100 ms, so 200 ms is enough for one iteration.
+        // `running` every ~250 ms, so 300 ms is enough for one iteration.
         // Don't wait longer — process::exit will clean up regardless.
         if let Some(handle) = handle {
             let start = std::time::Instant::now();
-            while !handle.is_finished() && start.elapsed() < Duration::from_millis(200) {
+            while !handle.is_finished() && start.elapsed() < Duration::from_millis(300) {
                 std::thread::sleep(Duration::from_millis(10));
             }
 
