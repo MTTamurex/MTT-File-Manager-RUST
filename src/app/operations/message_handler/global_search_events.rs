@@ -39,6 +39,7 @@ impl ImageViewerApp {
                     offset,
                     limit,
                     has_more,
+                    total_matches,
                 } => {
                     // Only apply if the query still matches (user may have typed more)
                     if query == self.global_search.query {
@@ -46,9 +47,13 @@ impl ImageViewerApp {
                             self.global_search.results = items;
                             self.global_search.selected_index = None;
                             self.global_search.results_generation += 1;
+                            self.global_search.total_matches = total_matches.map(u64::from);
                         } else if offset == self.global_search.results.len() as u32 {
                             append_unique_results(&mut self.global_search.results, items);
                             self.global_search.results_generation += 1;
+                            if let Some(total_matches) = total_matches {
+                                self.global_search.total_matches = Some(u64::from(total_matches));
+                            }
                         } else {
                             // Stale page response (offset mismatch), ignore.
                             continue;
@@ -60,6 +65,14 @@ impl ImageViewerApp {
                         self.global_search.requested_offset = offset;
                         self.global_search.requested_limit = limit;
                         self.global_search.has_more_results = has_more;
+                    }
+                }
+                GlobalSearchResponse::TotalCount {
+                    query,
+                    total_matches,
+                } => {
+                    if query == self.global_search.query {
+                        self.global_search.total_matches = Some(u64::from(total_matches));
                     }
                 }
                 GlobalSearchResponse::Status {
@@ -75,6 +88,7 @@ impl ImageViewerApp {
                         self.global_search.in_flight_query = None;
                         self.global_search.in_flight_started_at = None;
                         self.global_search.has_more_results = false;
+                        self.global_search.total_matches = None;
                     }
                     log::error!("[GLOBAL-SEARCH] Error for '{}': {}", query, message);
 

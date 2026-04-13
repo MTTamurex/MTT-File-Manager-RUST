@@ -118,8 +118,14 @@ pub(super) fn render_results_panel(
 
     // Header with count.
     ui.horizontal(|ui| {
+        let shown_count = filtered_indices.len() as u64;
+        let header_text = if let Some(total_matches) = app.global_search.total_matches {
+            t!("search.results_count", shown = shown_count, total = total_matches).to_string()
+        } else {
+            t!("search.results_count_partial", shown = shown_count).to_string()
+        };
         ui.label(
-            egui::RichText::new(t!("search.results_count", shown = filtered_indices.len(), total = app.global_search.results.len()).to_string())
+            egui::RichText::new(header_text)
                 .size(11.0)
                 .color(egui::Color32::from_gray(120)),
         );

@@ -170,6 +170,7 @@ search:
   no_results_filtered: "Nenhum resultado com os filtros atuais"
   esc_to_close: "ESC para fechar"
   results_count: "%{shown} resultados (de %{total})"
+  results_count_partial: "%{shown} resultados exibidos"
   results_loaded: "%{count} resultados carregados"
   load_more: "Carregar mais (+%{count})"
   load_more_hint: "Busca a próxima página de resultados"

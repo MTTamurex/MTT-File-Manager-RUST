@@ -40,6 +40,7 @@ pub struct GlobalSearchState {
     pub available: bool,
     pub last_check: Instant,
     pub total_indexed: u64,
+    pub total_matches: Option<u64>,
     /// Manual scroll offset for virtualized results list.
     pub scroll_offset_y: f32,
     /// Previous target scroll offset used to detect active scroll updates.
@@ -93,6 +94,7 @@ impl GlobalSearchState {
             available: false,
             last_check: Instant::now(),
             total_indexed: 0,
+            total_matches: None,
             scroll_offset_y: 0.0,
             last_scroll_offset_y: 0.0,
             last_scroll_time: Instant::now(),
