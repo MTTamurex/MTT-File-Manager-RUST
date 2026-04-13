@@ -1,8 +1,8 @@
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{CloseHandle, GetLastError, HANDLE, WIN32_ERROR};
 use windows::Win32::Storage::FileSystem::{
-    CreateFileW, GetVolumeInformationW, FILE_FLAG_BACKUP_SEMANTICS, FILE_SHARE_READ,
-    FILE_SHARE_WRITE, OPEN_EXISTING,
+    CreateFileW, GetDriveTypeW, GetVolumeInformationW, FILE_FLAG_BACKUP_SEMANTICS,
+    FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
 };
 use windows::Win32::System::IO::DeviceIoControl;
 use std::time::{Duration, Instant};
@@ -76,11 +76,23 @@ struct ReadUsnJournalDataV0 {
 
 /// Discover all mounted logical volumes that expose filesystem information.
 pub fn discover_volumes() -> Vec<DiscoveredVolume> {
+    // Drive type constants (from winbase.h)
+    const DRIVE_REMOTE: u32 = 4;
+    const DRIVE_CDROM: u32 = 5;
+
     let mut volumes = Vec::new();
 
     for letter in 'A'..='Z' {
         let root = format!("{}:\\", letter);
         let root_wide: Vec<u16> = root.encode_utf16().chain(std::iter::once(0)).collect();
+
+        // Quick pre-filter: GetDriveTypeW is fast and cached (< 1ms).
+        // Skip network and optical drives to avoid multi-second timeouts
+        // from GetVolumeInformationW on unresponsive/disconnected shares.
+        let drive_type = unsafe { GetDriveTypeW(PCWSTR(root_wide.as_ptr())) };
+        if drive_type == DRIVE_REMOTE || drive_type == DRIVE_CDROM {
+            continue;
+        }
 
         let mut fs_name = [0u16; 64];
         let mut vol_name = [0u16; 256];
