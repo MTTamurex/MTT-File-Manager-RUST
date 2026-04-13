@@ -198,6 +198,26 @@ impl UserSessionSearchIndex {
         self.search_page(query, 0, limit).0
     }
 
+    pub fn count_matches(&self, query: &str) -> u32 {
+        if query.is_empty() {
+            return 0;
+        }
+
+        let query_lower = query.to_lowercase();
+        let tokens: Vec<&str> = query_lower.split_whitespace().collect();
+        let mut matched = 0usize;
+
+        for volume in self.volumes.values() {
+            for item in &volume.items {
+                if item_matches_query(volume, item, &tokens) {
+                    matched = matched.saturating_add(1);
+                }
+            }
+        }
+
+        matched.min(u32::MAX as usize) as u32
+    }
+
     pub fn search_page(
         &self,
         query: &str,
@@ -215,11 +235,7 @@ impl UserSessionSearchIndex {
 
         for volume in self.volumes.values() {
             for item in &volume.items {
-                if !volume.live_paths.contains(&item.path_key) {
-                    continue;
-                }
-
-                if !tokens.iter().all(|token| item.name_lower.contains(token)) {
+                if !item_matches_query(volume, item, &tokens) {
                     continue;
                 }
 
@@ -280,6 +296,13 @@ impl UserSessionSearchIndex {
             }
         }
     }
+}
+
+fn item_matches_query(volume: &IndexedVolume, item: &IndexedItem, tokens: &[&str]) -> bool {
+    volume.live_paths.contains(&item.path_key)
+        && tokens
+            .iter()
+            .all(|token| item.name_lower.contains(token))
 }
 
 impl Default for UserSessionSearchIndex {

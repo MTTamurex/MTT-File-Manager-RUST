@@ -16,6 +16,7 @@ impl ImageViewerApp {
         self.global_search.in_flight_query = None;
         self.global_search.in_flight_started_at = None;
         self.global_search.has_more_results = false;
+        self.global_search.total_matches = None;
         self.global_search.requested_offset = 0;
         self.global_search.requested_limit = DEFAULT_GLOBAL_SEARCH_PAGE_LIMIT;
         self.global_search.scroll_offset_y = 0.0;
@@ -39,6 +40,7 @@ impl ImageViewerApp {
         self.global_search.in_flight_query = None;
         self.global_search.in_flight_started_at = None;
         self.global_search.has_more_results = false;
+        self.global_search.total_matches = None;
         self.global_search.requested_offset = 0;
         self.global_search.requested_limit = DEFAULT_GLOBAL_SEARCH_PAGE_LIMIT;
         self.global_search.scroll_offset_y = 0.0;

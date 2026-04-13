@@ -21,7 +21,7 @@ Investigate to find the truth before confirming assumptions.
 
 Always use the Context7 MCP when you need library/API documentation, code generation, installation, or setup instructions.
 
-2. Direct Communication
+1. Direct Communication
 Keep responses concise, direct, and strictly focused on the solution.
 
 Strip out unnecessary superlatives, apologies, and conversational filler.
@@ -29,7 +29,7 @@ Strip out unnecessary superlatives, apologies, and conversational filler.
 Use Markdown extensively for structure and readability.
 
 3. Minimalism & No Over-Engineering
-Implement only what was explicitly requested. Keep solutions simple.
+Implement only what was explicitly requested.
 
 Do not add unrequested features.
 
@@ -53,3 +53,10 @@ Never centralize large changes in a single monolithic file.
 If a file approaches 400-500 lines or takes on multiple responsibilities, YOU MUST SPLIT IT into smaller modules with clear boundaries.
 
 Stop and propose an architectural division before proceeding if complexity or file size spikes.
+
+7. Code Quality
+Prefer correct, complete implementations over minimal ones.
+
+Use appropriate data structures and algorithms — don't brute-force what has a known better solution.
+
+When fixing a bug, fix the root cause, not the symptom.

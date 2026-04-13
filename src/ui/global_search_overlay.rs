@@ -97,6 +97,7 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
         app.global_search.in_flight_query = None;
         app.global_search.in_flight_started_at = None;
         app.global_search.has_more_results = false;
+        app.global_search.total_matches = None;
         let _ = app
             .global_search
             .sender
@@ -111,6 +112,7 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
         app.global_search.results.clear();
         app.global_search.results_generation += 1;
         app.global_search.has_more_results = false;
+        app.global_search.total_matches = None;
         app.global_search.requested_offset = 0;
         app.global_search.requested_limit = INITIAL_PAGE_LIMIT;
         app.global_search.scroll_offset_y = 0.0;
@@ -261,6 +263,7 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                             app.global_search.results_generation += 1;
                             app.global_search.selected_index = None;
                             app.global_search.has_more_results = false;
+                            app.global_search.total_matches = None;
                             app.global_search.loading = false;
                             app.global_search.scroll_offset_y = 0.0;
                             app.global_search.last_scroll_offset_y = 0.0;
@@ -290,6 +293,7 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                         app.global_search.results_generation += 1;
                         app.global_search.loading = true;
                         app.global_search.has_more_results = false;
+                        app.global_search.total_matches = None;
                         app.global_search.requested_offset = 0;
                         app.global_search.requested_limit = INITIAL_PAGE_LIMIT;
                         app.global_search.scroll_offset_y = 0.0;
@@ -311,6 +315,7 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                         app.global_search.results_generation += 1;
                         app.global_search.loading = false;
                         app.global_search.has_more_results = false;
+                        app.global_search.total_matches = None;
                         app.global_search.requested_offset = 0;
                         app.global_search.requested_limit = INITIAL_PAGE_LIMIT;
                         app.global_search.pending_query_dispatch_at = None;

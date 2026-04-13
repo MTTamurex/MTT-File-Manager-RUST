@@ -2,7 +2,9 @@
 //! Follows the same Request/Response pattern as file_operation_worker.rs.
 
 use std::collections::HashSet;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
+use std::sync::Arc;
 
 use mtt_search_protocol::{IndexStatusInfo, SearchResultItem};
 
@@ -27,7 +29,9 @@ pub enum GlobalSearchResponse {
         offset: u32,
         limit: u32,
         has_more: bool,
+        total_matches: Option<u32>,
     },
+    TotalCount { query: String, total_matches: u32 },
     /// Service availability status.
     Status { available: bool, total_indexed: u64 },
     /// Error message.
@@ -38,6 +42,7 @@ const OFFLINE_FAILURE_THRESHOLD: u8 = 3;
 const STATUS_RETRY_COUNT: usize = 1;
 const SEARCH_RETRY_COUNT: usize = 2;
 const MIN_QUERY_LEN_FOR_SERVICE_SEARCH: usize = 2;
+const TOTAL_COUNT_PAGE_LIMIT: u32 = 1_000;
 
 fn is_transient_ipc_error(message: &str) -> bool {
     let m = message.to_ascii_lowercase();
@@ -118,6 +123,69 @@ fn should_skip_service_query(query: &str, _offset: u32) -> bool {
     query.chars().count() < MIN_QUERY_LEN_FOR_SERVICE_SEARCH
 }
 
+fn load_exact_service_total_matches(
+    query: &str,
+    generation: u64,
+    active_generation: &AtomicU64,
+) -> Result<Option<u32>, String> {
+    let mut offset = 0u32;
+
+    loop {
+        if active_generation.load(Ordering::Relaxed) != generation {
+            return Ok(None);
+        }
+
+        let page = query_service_with_retry(query, offset, TOTAL_COUNT_PAGE_LIMIT)?;
+        let page_len = page.items.len() as u32;
+
+        if !page.has_more {
+            return Ok(Some(
+                page.total_matches
+                    .unwrap_or(offset.saturating_add(page_len)),
+            ));
+        }
+
+        if page_len == 0 {
+            return Ok(Some(offset));
+        }
+
+        offset = offset.saturating_add(page_len);
+    }
+}
+
+fn spawn_total_count_task(
+    sender: Sender<GlobalSearchResponse>,
+    ctx: eframe::egui::Context,
+    query: String,
+    local_total_matches: u32,
+    generation: u64,
+    active_generation: Arc<AtomicU64>,
+) {
+    std::thread::spawn(move || match load_exact_service_total_matches(&query, generation, &active_generation) {
+        Ok(Some(service_total_matches)) => {
+            if active_generation.load(Ordering::Relaxed) != generation {
+                return;
+            }
+
+            let _ = sender.send(GlobalSearchResponse::TotalCount {
+                query,
+                total_matches: service_total_matches.saturating_add(local_total_matches),
+            });
+            ctx.request_repaint();
+        }
+        Ok(None) => {}
+        Err(error) => {
+            if active_generation.load(Ordering::Relaxed) == generation {
+                log::debug!(
+                    "[GLOBAL-SEARCH] Exact total count unavailable for '{}': {}",
+                    query,
+                    error
+                );
+            }
+        }
+    });
+}
+
 fn refresh_and_send_status(
     sender: &Sender<GlobalSearchResponse>,
     session_index: &mut crate::infrastructure::user_session_search::UserSessionSearchIndex,
@@ -195,6 +263,7 @@ pub fn start_global_search_worker(
     ctx: eframe::egui::Context,
 ) {
     std::thread::spawn(move || {
+        let total_count_generation = Arc::new(AtomicU64::new(0));
         let mut last_known_available = false;
         let mut last_known_total_indexed = 0u64;
         let mut last_known_service_volumes = HashSet::<char>::new();
@@ -255,6 +324,11 @@ pub fn start_global_search_worker(
 
             // ── Search always takes priority over status checks ──────────
             if let Some((query, offset, limit)) = latest_search {
+                let total_count_token = if offset == 0 {
+                    total_count_generation.fetch_add(1, Ordering::Relaxed) + 1
+                } else {
+                    total_count_generation.load(Ordering::Relaxed)
+                };
                 let max_limit = limit as usize;
                 if query.is_empty() || max_limit == 0 {
                     let _ = sender.send(GlobalSearchResponse::Results {
@@ -263,6 +337,7 @@ pub fn start_global_search_worker(
                         offset,
                         limit,
                         has_more: false,
+                        total_matches: Some(0),
                     });
                     // Don't cascade into a status check — let the periodic timer handle it.
                     ctx.request_repaint();
@@ -270,6 +345,7 @@ pub fn start_global_search_worker(
                 }
 
                 if should_skip_service_query(&query, offset) {
+                    let local_total_matches = session_index.count_matches(&query);
                     let (local_items, local_has_more) =
                         session_index.search_page(&query, offset as usize, max_limit);
                     let _ = sender.send(GlobalSearchResponse::Results {
@@ -278,6 +354,7 @@ pub fn start_global_search_worker(
                         offset,
                         limit,
                         has_more: local_has_more,
+                        total_matches: Some(local_total_matches),
                     });
                     ctx.request_repaint();
                     continue;
@@ -288,8 +365,18 @@ pub fn start_global_search_worker(
 
                 match query_service_with_retry(&query, offset, limit) {
                     Ok(service_page) => {
+                        let local_total_matches = if offset == 0 || service_page.total_matches.is_some() {
+                            Some(session_index.count_matches(&query))
+                        } else {
+                            None
+                        };
                         let mut merged = service_page.items;
                         let mut has_more = service_page.has_more;
+                        let total_matches = service_page
+                            .total_matches
+                            .map(|service_total| {
+                                service_total.saturating_add(local_total_matches.unwrap_or(0))
+                            });
 
                         if !service_page.has_more && merged.len() < max_limit {
                             let service_total = service_page
@@ -323,12 +410,24 @@ pub fn start_global_search_worker(
                         }
 
                         let _ = sender.send(GlobalSearchResponse::Results {
-                            query,
+                            query: query.clone(),
                             items: merged,
                             offset,
                             limit,
                             has_more,
+                            total_matches,
                         });
+
+                        if offset == 0 && total_matches.is_none() {
+                            spawn_total_count_task(
+                                sender.clone(),
+                                ctx.clone(),
+                                query,
+                                local_total_matches.unwrap_or(0),
+                                total_count_token,
+                                Arc::clone(&total_count_generation),
+                            );
+                        }
                     }
                     Err(e) => {
                         let transient = is_transient_ipc_error(&e);
@@ -345,6 +444,7 @@ pub fn start_global_search_worker(
                             );
                         }
 
+                        let local_total_matches = session_index.count_matches(&query);
                         let (local_items, local_has_more) =
                             session_index.search_page(&query, offset as usize, max_limit);
                         let can_use_local_only = !last_known_available
@@ -362,6 +462,7 @@ pub fn start_global_search_worker(
                                 offset,
                                 limit,
                                 has_more: local_has_more,
+                                total_matches: Some(local_total_matches),
                             });
                         } else {
                             let _ =
