@@ -1,4 +1,5 @@
 use crate::app::navigation_state::ThemeMode;
+use crate::app::shortcuts::ShortcutBindings;
 use crate::domain::file_entry::{FoldersPosition, SortMode, ViewMode};
 use crate::infrastructure::app_state_db::AppStateDb;
 use crate::ui::theme;
@@ -23,6 +24,7 @@ pub(super) struct StartupPreferences {
     pub(super) language: String,
     pub(super) theme_mode: ThemeMode,
     pub(super) gpu_backend_preference: String,
+    pub(super) shortcuts: ShortcutBindings,
 }
 
 impl StartupPreferences {
@@ -165,6 +167,8 @@ impl StartupPreferences {
             .cloned()
             .unwrap_or_else(|| "auto".to_string());
 
+        let shortcuts = ShortcutBindings::from_preferences(&prefs);
+
         Self {
             sort_mode,
             sort_mode_computer,
@@ -185,6 +189,7 @@ impl StartupPreferences {
             language,
             theme_mode,
             gpu_backend_preference,
+            shortcuts,
         }
     }
 }

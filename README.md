@@ -105,10 +105,14 @@ cargo build --release --workspace
 ## Usage
 
 ### Keyboard Shortcuts
+Some app-level shortcuts are configurable in Settings > Keyboard Shortcuts. Standard file and folder shortcuts remain fixed.
+
 | Shortcut | Action |
 |----------|--------|
 | Ctrl+T | New tab |
 | Ctrl+W | Close tab |
+| Ctrl+Tab | Next tab |
+| Ctrl+Shift+Tab | Previous tab |
 | Ctrl+C / Ctrl+V | Copy / Paste |
 | Ctrl+X | Cut |
 | Delete | Move to Recycle Bin |
@@ -117,6 +121,7 @@ cargo build --release --workspace
 | F5 | Reload folder |
 | Ctrl+Shift+F | Global search |
 | Ctrl+L | Focus address bar |
+| Ctrl+Shift+N | New folder |
 | Ctrl+Mouse Wheel | Adjust thumbnail size |
 | Alt+Enter | Properties |
 | Space | Open file with internal viewer |

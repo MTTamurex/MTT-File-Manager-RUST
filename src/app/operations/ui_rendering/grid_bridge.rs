@@ -145,6 +145,7 @@ impl ImageViewerApp {
                 cols,
                 cell_h,
                 ui.available_height(),
+                Some(self.shortcuts.get(crate::app::shortcuts::ShortcutAction::Properties)),
             );
 
             let shift = ui.input(|i| i.modifiers.shift);

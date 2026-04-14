@@ -80,7 +80,7 @@ impl ImageViewerApp {
             items.push(
                 ContextMenuItem::new(-28, t!("context_menu.properties"))
                     .with_command("properties")
-                    .with_shortcut("Alt+Enter"),
+                    .with_shortcut(self.shortcuts.label(crate::app::shortcuts::ShortcutAction::Properties)),
             );
 
             self.context_menu.items = items;
@@ -121,13 +121,13 @@ impl ImageViewerApp {
         items.push(
             ContextMenuItem::primary(-3, t!("context_menu.cut"))
                 .with_command("cut")
-                .with_shortcut("Ctrl+X")
+                .with_shortcut(self.shortcuts.label(crate::app::shortcuts::ShortcutAction::Cut))
                 .enabled(!is_drive),
         );
         items.push(
             ContextMenuItem::primary(-2, t!("context_menu.copy"))
                 .with_command("copy")
-                .with_shortcut("Ctrl+C")
+                .with_shortcut(self.shortcuts.label(crate::app::shortcuts::ShortcutAction::Copy))
                 .enabled(can_copy_target),
         );
 
@@ -135,7 +135,7 @@ impl ImageViewerApp {
         items.push(
             ContextMenuItem::primary(-4, t!("context_menu.paste"))
                 .with_command("paste")
-                .with_shortcut("Ctrl+V")
+                .with_shortcut(self.shortcuts.label(crate::app::shortcuts::ShortcutAction::Paste))
                 .enabled(can_paste && !is_drive),
         );
 
@@ -143,13 +143,13 @@ impl ImageViewerApp {
             items.push(
                 ContextMenuItem::primary(-5, t!("context_menu.rename"))
                     .with_command("rename")
-                    .with_shortcut("F2")
+                    .with_shortcut(self.shortcuts.label(crate::app::shortcuts::ShortcutAction::Rename))
                     .enabled(can_rename_target),
             );
             items.push(
                 ContextMenuItem::primary(-6, t!("context_menu.delete"))
                     .with_command("delete")
-                    .with_shortcut("Del")
+                    .with_shortcut(self.shortcuts.label(crate::app::shortcuts::ShortcutAction::Delete))
                     .enabled(!is_drive),
             );
         }
@@ -161,12 +161,12 @@ impl ImageViewerApp {
             items.push(
                 ContextMenuItem::new(-32, t!("context_menu.paste"))
                     .with_command("paste")
-                    .with_shortcut("Ctrl+V")
+                    .with_shortcut(self.shortcuts.label(crate::app::shortcuts::ShortcutAction::Paste))
                     .enabled(can_paste),
             );
             items.push(
                 ContextMenuItem::new(-1, t!("context_menu.create_folder"))
-                    .with_shortcut("Ctrl+Shift+N")
+                    .with_shortcut(self.shortcuts.label(crate::app::shortcuts::ShortcutAction::CreateFolder))
                     .enabled(can_create_folder),
             );
         } else {
@@ -177,31 +177,31 @@ impl ImageViewerApp {
             items.push(
                 ContextMenuItem::new(-30, t!("context_menu.cut"))
                     .with_command("cut")
-                    .with_shortcut("Ctrl+X")
+                    .with_shortcut(self.shortcuts.label(crate::app::shortcuts::ShortcutAction::Cut))
                     .enabled(!is_drive),
             );
             items.push(
                 ContextMenuItem::new(-31, t!("context_menu.copy"))
                     .with_command("copy")
-                    .with_shortcut("Ctrl+C")
+                    .with_shortcut(self.shortcuts.label(crate::app::shortcuts::ShortcutAction::Copy))
                     .enabled(can_copy_target),
             );
             items.push(
                 ContextMenuItem::new(-32, t!("context_menu.paste"))
                     .with_command("paste")
-                    .with_shortcut("Ctrl+V")
+                    .with_shortcut(self.shortcuts.label(crate::app::shortcuts::ShortcutAction::Paste))
                     .enabled(can_paste && !is_drive),
             );
             items.push(
                 ContextMenuItem::new(-33, t!("context_menu.rename"))
                     .with_command("rename")
-                    .with_shortcut("F2")
+                    .with_shortcut(self.shortcuts.label(crate::app::shortcuts::ShortcutAction::Rename))
                     .enabled(can_rename_target),
             );
             items.push(
                 ContextMenuItem::new(-34, t!("context_menu.delete"))
                     .with_command("delete")
-                    .with_shortcut("Del")
+                    .with_shortcut(self.shortcuts.label(crate::app::shortcuts::ShortcutAction::Delete))
                     .enabled(!is_drive),
             );
             items.push(ContextMenuItem::separator());
@@ -284,7 +284,7 @@ impl ImageViewerApp {
             items.push(
                 ContextMenuItem::new(-28, t!("context_menu.properties"))
                     .with_command("properties")
-                    .with_shortcut("Alt+Enter"),
+                    .with_shortcut(self.shortcuts.label(crate::app::shortcuts::ShortcutAction::Properties)),
             );
         }
 

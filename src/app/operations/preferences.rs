@@ -45,7 +45,7 @@ impl ImageViewerApp {
     }
 
     fn collect_preferences(&self) -> Vec<(&'static str, String)> {
-        let mut prefs: Vec<(&'static str, String)> = Vec::with_capacity(32);
+        let mut prefs: Vec<(&'static str, String)> = Vec::with_capacity(48);
 
         // Always save the "normal" (unlocked) values so that locked-folder
         // overrides don't corrupt the persisted global preferences.
@@ -167,6 +167,9 @@ impl ImageViewerApp {
 
         // GPU backend preference
         prefs.push(("gpu_backend", self.gpu_backend_preference.clone()));
+
+        // Configurable keyboard shortcuts
+        self.shortcuts.append_preferences(&mut prefs);
 
         // Save list view column widths - Regular view
         prefs.push(("list_col_name_width", self.layout.list_col_name_width.to_string()));

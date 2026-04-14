@@ -37,11 +37,6 @@ impl ImageViewerApp {
     pub fn process_incoming_messages(&mut self, ctx: &egui::Context) {
         let _t_msg_start = Instant::now();
 
-        // 1. CHECK DE REFRESH MANUAL (F5)
-        if ctx.input(|i| i.key_pressed(egui::Key::F5)) {
-            self.trigger_manual_refresh();
-        }
-
         let mut saw_device_event = false;
         while self.device_event_receiver.try_recv().is_ok() {
             saw_device_event = true;

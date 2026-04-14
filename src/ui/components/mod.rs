@@ -6,6 +6,7 @@ pub mod language_settings;
 pub mod media_preview;
 pub mod mpv;
 pub mod mpv_preview;
+pub mod shortcut_settings;
 pub mod settings_window;
 pub mod video_controls_state;
 pub mod virtual_drive_settings;
