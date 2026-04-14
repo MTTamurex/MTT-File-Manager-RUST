@@ -306,13 +306,19 @@ pub(super) fn process_thumbnail_request(
                     mark_as_temporarily_blocked(path.clone());
                 }
                 ThumbnailExtractionOutcome::Failed => {
-                    // Real extraction pipeline failure (decoder/COM/MF/etc.).
-                    mark_as_transient_failure(path.clone());
+                    // All 5 extraction stages failed — the system likely lacks
+                    // the required codec (e.g., HEVC/MKV without K-Lite).
+                    // Mark as permanent failure immediately so neither the
+                    // worker nor the UI waste cycles retrying on every folder
+                    // visit.  The user can press F5 to retry after installing
+                    // a codec pack.
+                    mark_as_failed(path.clone());
                 }
             }
         }
     }
 
+    let permanently_failed = final_result.is_none() && is_permanent_failure(path);
     let (data, w, h) = final_result.unwrap_or_else(|| (Vec::new(), 0, 0));
 
     send_thumbnail_result(tx, req_priority, ThumbnailData {
@@ -321,7 +327,7 @@ pub(super) fn process_thumbnail_request(
         width: w,
         height: h,
         generation: req_gen,
-        not_found: false,
+        not_found: permanently_failed,
     });
     throttle_repaint_with_priority(ctx, last_repaint, req_priority);
 }
