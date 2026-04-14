@@ -2,19 +2,6 @@
 
 **Native Windows file manager** built in Rust with a modern UI, advanced media preview, and deep Windows integration.
 
-## Table of Contents
-
-- [About](#about)
-- [Key Features](#key-features)
-- [Technologies](#technologies)
-- [Requirements](#requirements)
-- [Installation](#installation)
-- [Usage](#usage)
-- [Documentation](#documentation)
-- [Development](#development)
-- [Troubleshooting](#troubleshooting)
-- [Contributing](#contributing)
-
 ## About
 
 MTT File Manager is a desktop file manager that combines Rust's performance and safety with a modern interface and native Windows integration. It offers tabbed navigation, integrated file preview, and advanced management features.
@@ -76,24 +63,6 @@ MTT File Manager is a desktop file manager that combines Rust's performance and 
 | **IPC** | Named Pipes + bincode | 1.3 | App ↔ search service communication |
 | **Service** | windows-service | 0.7 | Background indexing service |
 | **i18n** | rust-i18n | 3 | Multi-language support (en, pt-BR) |
-
-## Requirements
-
-### Minimum
-- **OS**: Windows 10 (Build 1903+) or Windows 11
-- **CPU**: x64, 2+ cores
-- **RAM**: 4 GB
-- **Disk**: 100 MB + cache storage
-- **GPU**: Windows graphics stack supported by wgpu; primary native backends are preferred, with GL/ANGLE compatibility fallback available
-
-### Recommended
-- **OS**: Windows 11 (latest update)
-- **CPU**: x64, 4+ cores
-- **RAM**: 8 GB or more
-- **Storage**: SSD for cache performance
-- **GPU**: Dedicated GPU for video preview
-
-HighPerformance GPU selection is a preference only. On hybrid systems the app will prefer the discrete adapter when one is available, but integrated GPUs can still be used if they expose a compatible wgpu backend.
 
 ### Runtime Dependencies
 - **libmpv-2.dll** — Required for video playback
@@ -162,22 +131,6 @@ cargo build --release --workspace
 - **GIFs**: Animated playback with play/pause controls
 
 Additional formats may also work when Windows or installed codec handlers classify them as audio/video via `AssocGetPerceivedType`, but the list above reflects the explicit formats handled by the app's fast-path media routing and metadata code.
-
-## Documentation
-
-Access the [`docs/`](docs/) folder for complete technical documentation:
-
-- **[Overview](docs/01_overview.md)** — Introduction and high-level architecture
-- **[Build & Debug](docs/02_build_run_debug.md)** — Build, run, and debug instructions
-- **[Architecture](docs/03_architecture.md)** — Detailed architecture and layers
-- **[Module Map](docs/04_module_map.md)** — File structure and module responsibilities
-- **[Dependencies](docs/05_dependencies_stack.md)** — Full technology stack
-- **[Key Flows](docs/06_key_flows.md)** — How major features work
-- **[Storage & Config](docs/07_storage_config.md)** — Data storage and configuration
-- **[Logging & Errors](docs/08_logging_errors_telemetry.md)** — Logging and debugging
-- **[Performance](docs/09_performance_optimizations.md)** — Performance optimizations
-
-**Documentation index**: [docs/INDEX.md](docs/INDEX.md)
 
 ## Development
 
@@ -279,29 +232,6 @@ Installer behavior:
 - The installer automatically installs and starts the `MTTFileManagerSearch` Windows service
 - The installer warns if Microsoft Visual C++ Redistributable 2015-2022 (x64) is not detected
 
-### Project Structure
-```
-MTT-File-Manager-RUST/
-├── Cargo.toml                        # Workspace root
-├── src/                              # Main application
-│   ├── app/                          # State and core logic
-│   ├── application/                  # Business services
-│   ├── domain/                       # Data models
-│   ├── infrastructure/               # System integration
-│   ├── ui/                           # User interface
-│   ├── workers/                      # Background processing
-│   ├── image_viewer/                 # Dedicated image viewer
-│   ├── video_player/                 # Standalone video player
-│   ├── pdf_viewer/                   # Native PDF viewer
-│   └── tabs/                         # Tab management
-├── crates/
-│   ├── mtt-search-protocol/          # Shared IPC types (bincode)
-│   └── mtt-search-service/           # Windows Service for file indexing
-├── locales/                          # i18n (en.yml, pt-BR.yml)
-├── docs/                             # Technical documentation
-└── benches/                          # Benchmarks
-```
-
 ## Video Thumbnail Codecs
 
 The thumbnail pipeline uses 3 Windows APIs for video files: **Shell API** (Stage 3), **IThumbnailCache** (Stage 4), and **Media Foundation** (Stage 5). All three require video codecs to be registered on the system.
@@ -326,26 +256,4 @@ The thumbnail pipeline uses 3 Windows APIs for video files: **Shell API** (Stage
 - **Media Foundation decoders** (enables Stage 5)
 - Support for **HEVC/H.265**, **VP9**, **AV1**, **MKV**, **WEBM**, **FLV**, and more
 
-### Alternative: HEVC only
-
-If you only need H.265/HEVC support without a full codec pack:
-- **[HEVC Video Extensions](https://apps.microsoft.com/detail/9nmzlz57r3t7)** from the Microsoft Store (paid, ~$0.99)
-- **HEVC Video Extensions from Device Manufacturer** (free, bundled with some hardware)
-
 > **Note**: Without the appropriate codecs installed, all video thumbnail stages will fail silently and the file will display a generic icon instead.
-
-## Troubleshooting
-
-### App does not start on a specific GPU/driver
-If `wgpu` fails to initialize on a given machine, test the OpenGL/ANGLE compatibility path from PowerShell:
-
-```powershell
-$env:WGPU_BACKEND = "opengl"
-.\target\release\mtt-file-manager.exe 2>&1 | Tee-Object "gpu-debug.log"
-```
-
-If that works, the machine likely cannot initialize the preferred native backend reliably. The override only affects the current shell. Remove it with:
-
-```powershell
-Remove-Item Env:WGPU_BACKEND
-```
