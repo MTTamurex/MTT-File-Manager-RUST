@@ -160,9 +160,11 @@ Core data models and business rules.
 System access, Windows integration, and data persistence.
 
 **Cache & Storage**:
-- `disk_cache.rs` + `disk_cache/` — SQLite-backed cache (thumbnails_repo, preferences, folder_locks, pinned_folders, folder_covers, folder_previews, shell_icons, cleanup, gc)
+- `db_utils.rs` — Shared SQLite helpers (ACL hardening, temp fallback, PRAGMA setup)
+- `disk_cache.rs` + `disk_cache/` — SQLite-backed thumbnail cache (`thumbnails`, `folder_previews`, `shell_icons`)
+- `app_state_db/` — SQLite-backed app state (`user_preferences`, `folder_locks`, `pinned_folders`, `folder_covers`)
 - `directory_cache.rs` — In-memory directory cache
-- `directory_index.rs` — Directory index for fast lookup
+- `directory_index.rs` — Persisted directory metadata cache (`cache/directory_cache.db`)
 - `icon_disk_cache.rs` — Icon disk cache layer
 - `adaptive_batch.rs` — Adaptive batch configuration for folder loading
 
@@ -198,7 +200,7 @@ System access, Windows integration, and data persistence.
 - `window_subclass.rs` — Window subclassing for customization
 
 **Other Infrastructure**:
-- `global_search.rs` — Named Pipe client for search service IPC
+- `global_search.rs` — Named Pipe client for search service IPC (search, status, warm-up, folder-size fast path, path freshness checks)
 - `shell_menu_worker.rs` — Shell context menu extraction worker
 - `user_session_search/` — User session search index (split module: orchestration, db persistence, discovery, scanner)
 - `security.rs` + `security/` — Security validation (components, drive, shell_namespace, symlink, unc)
@@ -227,14 +229,14 @@ Background threads for asynchronous processing.
 ### 6. Search Service (External Process)
 **Location**: `crates/mtt-search-service/`
 
-Separate Windows Service that indexes all files with a hybrid per-volume strategy and serves searches via Named Pipes. Runs as `LocalSystem`.
+Separate Windows Service that indexes all files with a hybrid per-volume strategy, persists snapshots in SQLite, and serves searches via Named Pipes. Runs as `LocalSystem`.
 
 **Modules**:
 - `usn_journal.rs` — Volume discovery (`discover_volumes`) and USN API (NTFS/ReFS)
 - `fs_walker.rs` — Full-tree scanner for non-USN volumes
 - `file_index.rs` — In-memory index: `HashMap<u64, FileRecord>` (FRN → record)
 - `path_resolver.rs` — Full path reconstruction via parent FRN chain
-- `index_db/` — SQLite persistence (split module: core queries, FTS5 search, index-to-DB sync)
+- `index_db/` — SQLite persistence (split module: schema/core queries, FTS5 search, record sync, deferred FTS rebuild)
 - `ipc_server/` — Named Pipe server (split module: server loop, pipe I/O with DACL security, request handler)
 - `ipc_authorization.rs` — IPC authorization handling
 - `security_policy.rs` — Security policy configuration
@@ -245,14 +247,14 @@ Separate Windows Service that indexes all files with a hybrid per-volume strateg
 **IPC Protocol** (`crates/mtt-search-protocol/`):
 - Serialization via **bincode** with 4-byte length-prefix framing (LE)
 - Pipe: `\\.\pipe\MTTFileManagerSearch`
-- Requests: `Query`, `GetStatus`, `Ping`, `WarmIndex`
-- Responses: `Results`, `Status`, `Pong`, `WarmStarted`, `Error`
+- Requests: `Query`, `GetStatus`, `Ping`, `WarmIndex`, `CheckPathsModified`, `FolderSize`
+- Responses: `Results`, `Status`, `Pong`, `WarmStarted`, `PathsModified`, `FolderSize`, `Error`
 
 **Indexing flow**:
 1. Detect mounted volumes via `GetVolumeInformationW` and mark `usn_supported` for NTFS/ReFS
 2. Spawn 1 indexer thread per discovered volume
-3. USN volumes (NTFS/ReFS): load SQLite cache → validate journal_id → incremental catch-up; if cache invalid, full MFT scan via `FSCTL_ENUM_USN_DATA`; then incremental loop (2s) persisting every 5 min
-4. Non-USN volumes: reuse SQLite snapshot on startup → full scan → persist; periodic re-scan (30s virtual, 120s physical)
+3. USN volumes (NTFS/ReFS): load persisted snapshot from `search_index.db` → validate `journal_id` → incremental catch-up; if cache invalid, full MFT scan via `FSCTL_ENUM_USN_DATA`; persist `file_records`/`hardlink_parents`, mark volume `Ready`, rebuild `search_fts` in background, then incremental loop (2s) with SQLite snapshot persist every 5 min
+4. Non-USN volumes: reuse SQLite snapshot on startup → full scan → persist `file_records`, mark volume `Ready`, rebuild `search_fts` in background; periodic re-scan (30s virtual, 120s physical)
 5. Discovery loop runs every 20s to detect newly mounted volumes
 
 ### 7. Image Viewer (Separate Process)
@@ -342,7 +344,7 @@ Process Input → Update State → Render UI       │ (60 FPS loop)
 4. In `ImageViewerApp::new()`:
    - Create communication channels (multiple workers)
    - Initialize worker threads (thumbnails, files, icons, metadata, covers, folder previews)
-   - Load preferences from SQLite (including theme mode)
+    - Load preferences from `app_state.db` (including theme mode)
    - Apply saved theme visuals (`Visuals::dark()` / `Visuals::light()`) on first frame
    - Configure caches and indices
    - Initialize filesystem watcher (`notify` per-folder by default; drive-wide `ReadDirectoryChangesW` opt-in via `MTT_ENABLE_DRIVE_WATCHER=1`)

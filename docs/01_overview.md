@@ -12,12 +12,12 @@ MTT File Manager is a native Windows file manager built in Rust with a modern bo
 
 ### Navigation & Interface
 - **Custom borderless window** — No traditional title bar; native resize/move support
-- **Dark / Light theme** — Toggle between dark and light mode in Settings > Appearance; setting is persisted in SQLite and applied immediately across the main window, image viewer, and PDF viewer (including native Windows title bar via `DwmSetWindowAttribute`)
+- **Dark / Light theme** — Toggle between dark and light mode in Settings > Appearance; setting is persisted in SQLite app state (`app_state.db`) and applied immediately across the main window, image viewer, and PDF viewer (including native Windows title bar via `DwmSetWindowAttribute`)
 - **Tabbed navigation** — Multiple tabs with independent history per tab
 - **Grid and List views** — Adjustable thumbnail sizes (64–512px)
 - **Editable address bar** — Direct path input with breadcrumb navigation
 - **Sidebar** — Quick access to drives, libraries, OneDrive, and Recycle Bin with auto-scroll on overflow
-- **Quick Access (pinned folders)** — Pin folders via right-click or drag-and-drop; reorder via drag; persistent in SQLite
+- **Quick Access (pinned folders)** — Pin folders via right-click or drag-and-drop; reorder via drag; persisted in SQLite app state (`app_state.db`)
 - **Keyboard navigation** — Full keyboard shortcuts for mouse-free operation
 - **Live search** — Type-to-filter files in the current folder
 - **Internationalization** — English and Brazilian Portuguese via `rust-i18n`
@@ -43,13 +43,13 @@ MTT File Manager is a native Windows file manager built in Rust with a modern bo
 
 ### Global Search
 - **Dedicated overlay** — Activated via Ctrl+Shift+F
-- **External service** — `mtt-search-service` communicating over Named Pipes (bincode serialization)
+- **External service** — `mtt-search-service` communicating over Named Pipes (bincode serialization) with SQLite-backed volume snapshots and background FTS rebuilds
 - **Hybrid volume indexing** — NTFS/ReFS via USN Journal; non-USN volumes (exFAT/FAT32/FUSE/CryptoFS) via full-tree scan
 - **Adaptive update cadence** — USN incremental loop (2s); non-USN re-scan (30s for virtual filesystems, 120s for physical)
 - **Paginated results** — Offset/limit pagination with incremental loading
 
 ### Cache & Performance
-- **SQLite disk cache** — Persistent thumbnail and metadata storage
+- **Split SQLite persistence** — Thumbnail cache, app state, directory metadata cache, and search-service index stored in dedicated databases
 - **In-memory LRU cache** — Fast access via DashMap and LRU eviction
 - **Async workers** — Background threads for thumbnails, icons, metadata, folder previews, file operations, and prefetch
 - **Directory caching** — In-memory cache of directory structures for fast navigation
@@ -100,7 +100,7 @@ MTT File Manager is a native Windows file manager built in Rust with a modern bo
 | Language | Rust | 2021 Edition | Core language |
 | GUI Framework | eframe/egui | 0.31 | Immediate-mode GUI (features: `persistence`, `wgpu`) |
 | Windows API | windows-rs | 0.61.0 | Native Windows integration |
-| Database | SQLite (rusqlite) | 0.32 | Thumbnail/preference persistence |
+| Database | SQLite (rusqlite) | 0.32 | Thumbnail cache, app state, directory metadata, and search persistence |
 | Video | libmpv2 | 5.0.3 | Video playback |
 | PDF | pdfium (pdfium-render) | 0.8.37 | Native PDF rendering |
 | GPU Backend | wgpu (via eframe) | 24.0.5 | D3D12/Vulkan rendering with HighPerformance GPU preference |

@@ -53,6 +53,8 @@ When enabled, the app monitors entire drive roots instead of individual folders:
 
 A background worker periodically computes a directory listing signature and compares it against the disk. This catches events that any watcher might miss (common on non-NTFS/non-USN filesystems). Unreliable drives are escalated to active polling mode.
 
+When the probe detects a visible folder-cover change on a non-NTFS drive, the UI now invalidates the corresponding folder-size caches together with the cover/preview state. This keeps the list-view `Size` column and the details panel aligned with preview changes instead of letting stale folder-size values survive until app restart.
+
 ### UNC/Network Paths
 
 UNC and network paths always use the `notify` crate since drive-root monitoring doesn't apply to network shares.
@@ -72,6 +74,20 @@ UI updates immediately — no folder reload needed
 ```
 
 This eliminates unnecessary I/O and keeps the UI responsive during batch deletes.
+
+## 3.5 Folder Size Fast Path and Cancellation
+
+**Locations**: `src/app/folder_size_state.rs`, `src/app/init_workers/filesystem_workers.rs`, `src/infrastructure/global_search.rs`
+
+Folder-size reads use a dual-path strategy:
+- **NTFS fast path**: `SearchRequest::FolderSize` goes over Named Pipe IPC to `mtt-search-service`, which computes folder totals from its in-memory MFT/USN index with zero disk I/O in the app process.
+- **Fallback path**: non-NTFS volumes, or NTFS when IPC is unavailable, use `calculate_folder_size_parallel()` (`FindFirstFileExW` + rayon).
+
+List-view folder sizes are handled by a dedicated batch worker with:
+- `batch_cancel` to abort slow scans on navigation or List→Grid transitions
+- `batch_generation` to discard queued requests from the previous folder
+- per-request invalidation epochs (`BatchSizeRequest` / `BatchSizeResult`) so stale in-flight results are rejected instead of re-populating caches after a folder changed
+- deferred revalidation for NTFS because the search service applies USN changes on a 2-second incremental loop, so an immediate IPC request can still observe the old total briefly
 
 ## 4. Thumbnail Pipeline Optimization
 

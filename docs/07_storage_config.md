@@ -6,7 +6,11 @@
 ```
 %LOCALAPPDATA%\MTT-File-Manager\
 ├── thumbnails/
-│   └── thumbnails.db          # Main SQLite database (all caches + preferences)
+│   └── thumbnails.db          # Thumbnail / folder preview / shell icon cache
+├── state/
+│   └── app_state.db           # Preferences, folder locks, pinned folders, folder covers
+├── cache/
+│   └── directory_cache.db     # Persisted directory metadata cache
 └── virtual_drive_config.json  # Virtual drive configuration (created on first app launch)
 ```
 
@@ -16,7 +20,7 @@
 └── search_index.db            # File index database (USN + full scan data)
 ```
 
-## SQLite Schema: Application Database
+## SQLite Schema: Thumbnail Cache Database
 
 Located at `%LOCALAPPDATA%\MTT-File-Manager\thumbnails\thumbnails.db`.
 
@@ -33,6 +37,37 @@ Stores cached thumbnails as WebP-encoded BLOBs.
 | `width` | INTEGER | Thumbnail width |
 | `height` | INTEGER | Thumbnail height |
 | `requested_size` | INTEGER | Requested thumbnail size at generation time |
+
+### Table: `folder_previews`
+Cached composed folder preview images (Shell sandwich icons).
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `folder_path` | TEXT (PK) | Folder path |
+| `data` | BLOB | WebP-encoded preview image data |
+| `width` | INTEGER | Image width |
+| `height` | INTEGER | Image height |
+| `created_at` | INTEGER | Cache timestamp |
+
+### Table: `shell_icons`
+Cached Windows Shell icons (special folders, drives, "This PC", Recycle Bin). Stored as raw RGBA pixel data (not WebP).
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `key` | TEXT (PK) | Icon identifier (e.g. drive letter, CLSID) |
+| `data` | BLOB | Raw RGBA pixel data |
+| `width` | INTEGER | Image width |
+| `height` | INTEGER | Image height |
+| `created_at` | INTEGER | Cache timestamp |
+
+## SQLite Schema: App State Database
+
+Located at `%LOCALAPPDATA%\MTT-File-Manager\state\app_state.db`.
+
+On upgrade, `app/init_bootstrap.rs` runs a one-time migration that copies the legacy
+`user_preferences`, `folder_covers`, `folder_locks`, and `pinned_folders` tables out of
+the old monolithic `thumbnails.db` into `app_state.db`, then drops the legacy copies from
+`thumbnails.db`.
 
 ### Table: `user_preferences`
 Stores user preferences as key-value pairs.
@@ -52,16 +87,29 @@ Stores user-selected cover image for folders (which image to use as folder thumb
 | `folder_path` | TEXT (PK) | Folder path |
 | `cover_path` | TEXT | Path to the image file used as cover |
 
-### Table: `folder_previews`
-Cached composed folder preview images (Shell sandwich icons).
+### Table: `folder_locks`
+Per-folder view preference overrides.
 
 | Column | Type | Description |
 |--------|------|-------------|
-| `folder_path` | TEXT (PK) | Folder path |
-| `data` | BLOB | WebP-encoded preview image data |
-| `width` | INTEGER | Image width |
-| `height` | INTEGER | Image height |
-| `created_at` | INTEGER | Cache timestamp |
+| `path` | TEXT (PK) | Folder path |
+| `view_mode` | TEXT | Locked view mode (Grid/List) |
+| `sort_mode` | TEXT | Locked sort mode (Name/Date/Size/Type) |
+| `sort_descending` | TEXT | Locked sort direction ("true"/"false") |
+| `folders_position` | TEXT | Locked folder position (First/Last/Mixed) |
+
+### Table: `pinned_folders`
+Quick Access pinned folder entries.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `path` | TEXT (PK) | Folder path |
+| `display_name` | TEXT | Display name in sidebar |
+| `position` | INTEGER | Sort position for display order |
+
+## SQLite Schema: Directory Cache Database
+
+Located at `%LOCALAPPDATA%\MTT-File-Manager\cache\directory_cache.db`.
 
 ### Table: `directory_index`
 Cached directory metadata for fast folder size/count lookup.
@@ -88,37 +136,6 @@ File-level index for cached directory contents.
 
 Unique constraint on `(dir_path, file_name)`.
 
-### Table: `folder_locks`
-Per-folder view preference overrides.
-
-| Column | Type | Description |
-|--------|------|-------------|
-| `path` | TEXT (PK) | Folder path |
-| `view_mode` | TEXT | Locked view mode (Grid/List) |
-| `sort_mode` | TEXT | Locked sort mode (Name/Date/Size/Type) |
-| `sort_descending` | TEXT | Locked sort direction ("true"/"false") |
-| `folders_position` | TEXT | Locked folder position (First/Last/Mixed) |
-
-### Table: `pinned_folders`
-Quick Access pinned folder entries.
-
-| Column | Type | Description |
-|--------|------|-------------|
-| `path` | TEXT (PK) | Folder path |
-| `display_name` | TEXT | Display name in sidebar |
-| `position` | INTEGER | Sort position for display order |
-
-### Table: `shell_icons`
-Cached Windows Shell icons (special folders, drives, "This PC", Recycle Bin). Stored as raw RGBA pixel data (not WebP).
-
-| Column | Type | Description |
-|--------|------|-------------|
-| `key` | TEXT (PK) | Icon identifier (e.g. drive letter, CLSID) |
-| `data` | BLOB | Raw RGBA pixel data |
-| `width` | INTEGER | Image width |
-| `height` | INTEGER | Image height |
-| `created_at` | INTEGER | Cache timestamp |
-
 ## In-Memory Caches (not persisted)
 
 ### Directory Cache
@@ -138,6 +155,8 @@ Tracks indexing state per volume.
 | `last_usn` | INTEGER | Last processed USN |
 | `files_indexed` | INTEGER | Number of indexed files |
 | `last_full_scan_epoch` | INTEGER | Timestamp of last full scan |
+| `has_hardlink_parent_data` | INTEGER | Whether `hardlink_parents` is populated for this volume |
+| `has_reparse_point_data` | INTEGER | Whether reparse point metadata was captured |
 
 ### Table: `file_records`
 File index entries for search.
@@ -149,8 +168,40 @@ File index entries for search.
 | `name` | TEXT | File/folder name |
 | `parent_frn` | INTEGER | Parent directory FRN |
 | `is_dir` | INTEGER | Whether entry is a directory |
+| `is_reparse` | INTEGER | Whether the entry is a reparse point |
 
 Primary key: `(drive_letter, frn)`.
+
+### Table: `hardlink_parents`
+Stores additional parent directories for hardlinked files.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `drive_letter` | TEXT | Drive letter |
+| `frn` | INTEGER | File Reference Number |
+| `parent_frn` | INTEGER | Additional parent directory FRN |
+
+Primary key: `(drive_letter, frn, parent_frn)`.
+
+### Virtual table: `search_fts`
+FTS5 trigram index over `file_records.name`, using external content mode (`content='file_records'`).
+
+### Table: `service_meta`
+Stores service-wide metadata.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `key` | TEXT (PK) | Metadata key |
+| `value` | INTEGER | Metadata value |
+
+Currently used key:
+- `dirty` — set to `1` on startup and cleared to `0` on clean shutdown; if startup sees `dirty=1`, the service rebuilds `search_fts` before serving FTS queries.
+
+### Runtime behavior
+- Full volume saves write `file_records` and `hardlink_parents` first, without inline FTS maintenance.
+- After a volume reaches `Ready`, the service rebuilds `search_fts` in a background thread.
+- While `search_fts` is rebuilding, the IPC handler falls back to the in-memory linear scan so search remains usable.
+- Periodic USN snapshot persists continue to update SQLite incrementally between full saves.
 
 ## Virtual Drive Configuration
 
@@ -179,8 +230,11 @@ Behavior:
 ## Thumbnail Disk Cache
 
 ### Cache Structure
-- Thumbnails are encoded as WebP (lossy, quality 85) and stored as BLOBs in the SQLite database (`thumbnails.db`)
-- No individual image files are written to disk — everything lives inside SQLite
+- `thumbnails.db` stores only `thumbnails`, `folder_previews`, and `shell_icons`
+- App preferences and per-folder UI state live in `state/app_state.db`
+- Persisted directory metadata lives in `cache/directory_cache.db`
+- Thumbnails are encoded as WebP (lossy, quality 85) and stored as BLOBs in `thumbnails.db`
+- No individual thumbnail or folder-preview image files are written to disk — everything lives inside SQLite
 - Primary key is a BLAKE3 hash (128-bit / 32 hex chars) of the original file path
 - Images larger than 1024x1024 are resized down before storage; alpha channel is preserved when present
 
@@ -190,11 +244,17 @@ Behavior:
 
 ### Cache Cleaning
 ```powershell
-# Remove entire cache (thumbnails, preferences, everything)
+# Remove all per-user data (thumbnail cache + app state + directory cache + config)
 Remove-Item "$env:LOCALAPPDATA\MTT-File-Manager" -Recurse -Force
 
-# Remove only the SQLite database (clears thumbnails + folder previews)
+# Remove only the thumbnail / folder preview SQLite cache
 Remove-Item "$env:LOCALAPPDATA\MTT-File-Manager\thumbnails\thumbnails.db"
+
+# Remove only app preferences and per-folder state
+Remove-Item "$env:LOCALAPPDATA\MTT-File-Manager\state\app_state.db"
+
+# Remove only the persisted directory metadata cache
+Remove-Item "$env:LOCALAPPDATA\MTT-File-Manager\cache\directory_cache.db"
 ```
 
 ## Icon Caching
@@ -203,7 +263,7 @@ Shell icons (special folders, drives, "This PC", Recycle Bin) are cached as raw 
 
 ## Preferences Persistence
 
-User preferences are loaded during app initialization (`app/init_preferences.rs`) and saved to the SQLite `user_preferences` table on changes. Writes are debounced (dirty flag + 1-second flush interval) to avoid blocking the UI thread. On exit, a blocking flush ensures all pending changes are persisted.
+User preferences are loaded during app initialization (`app/init_preferences.rs`) and saved to the `user_preferences` table in `%LOCALAPPDATA%\MTT-File-Manager\state\app_state.db`. Writes are debounced (dirty flag + 1-second flush interval) to avoid blocking the UI thread. On exit, a blocking flush ensures all pending changes are persisted.
 
 **Saved preferences include**:
 - Sort mode (global, computer view, normal view) and direction
@@ -226,5 +286,5 @@ Locale files are stored in the `locales/` directory:
 - `locales/en.yml` — English
 - `locales/pt-BR.yml` — Brazilian Portuguese (fallback and default)
 
-The `rust-i18n` crate loads translations at compile time with `fallback = "pt-BR"`. Language preference is persisted in the SQLite `user_preferences` table and applied on startup. Default language when no preference is saved: `pt-BR`.
+The `rust-i18n` crate loads translations at compile time with `fallback = "pt-BR"`. Language preference is persisted in the `user_preferences` table inside `%LOCALAPPDATA%\MTT-File-Manager\state\app_state.db` and applied on startup. Default language when no preference is saved: `pt-BR`.
 

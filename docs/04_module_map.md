@@ -16,7 +16,7 @@ src/
 │   ├── cache_state.rs               # Cache state management
 │   ├── drive_state.rs               # Drive information state
 │   ├── file_operation_state.rs      # File operation tracking
-│   ├── folder_size_state.rs         # Folder size computation state
+│   ├── folder_size_state.rs         # Folder size caches, batch invalidation, stale-result guards
 │   ├── global_search_state.rs       # Global search session state
 │   ├── layout_state.rs              # Layout preferences
 │   ├── navigation_state.rs          # Navigation state, history & ThemeMode enum
@@ -25,13 +25,13 @@ src/
 │   ├── init.rs                      # ImageViewerApp::new() initialization
 │   ├── init_bootstrap.rs            # Bootstrap sequence
 │   ├── init_post_startup.rs         # Post-startup initialization
-│   ├── init_preferences.rs          # Preference loading from SQLite
+│   ├── init_preferences.rs          # Preference loading from app_state.db
 │   ├── init_state_builders.rs       # State builder utilities
 │   ├── init_workers/                # Worker initialization
 │   │   ├── mod.rs
 │   │   ├── background_jobs.rs       # Background task schedulers
 │   │   ├── consistency_probe_worker.rs  # FS consistency checking
-│   │   ├── filesystem_workers.rs    # Folder size, folder preview, cache invalidation
+│   │   ├── filesystem_workers.rs    # Folder size workers (NTFS IPC + FS fallback), folder preview, cache invalidation
 │   │   ├── pipeline_workers.rs      # File ops, global search, prefetch workers
 │   │   └── visual_workers.rs        # Font loading, cover, icon, metadata workers
 │   └── operations/                  # Business logic operations
@@ -90,18 +90,23 @@ src/
 ├── infrastructure/                  # System integration
 │   ├── mod.rs
 │   ├── adaptive_batch.rs            # Adaptive batch sizing
-│   ├── directory_cache.rs           # In-memory directory cache
-│   ├── directory_index.rs           # Directory index for fast lookup
-│   ├── disk_cache.rs                # SQLite disk cache entry point
-│   ├── disk_cache/                  # Disk cache submodules
-│   │   ├── cleanup.rs               # Cache cleanup
-│   │   ├── folder_covers.rs         # Folder cover cache
+│   ├── app_state_db/                # App state SQLite store
+│   │   ├── mod.rs                   # AppStateDb entry point
+│   │   ├── cleanup.rs               # State cleanup helpers
+│   │   ├── folder_covers.rs         # Folder cover persistence
 │   │   ├── folder_locks.rs          # Folder lock persistence
+│   │   ├── gc.rs                    # State garbage collection
+│   │   ├── pinned_folders.rs        # Pinned folder persistence
+│   │   └── preferences.rs           # Preference persistence
+│   ├── db_utils.rs                  # Shared SQLite ACL/PRAGMA/fallback helpers
+│   ├── directory_cache.rs           # In-memory directory cache
+│   ├── directory_index.rs           # Persisted directory metadata cache (directory_cache.db)
+│   ├── disk_cache.rs                # Thumbnail / preview / shell icon SQLite entry point
+│   ├── disk_cache/                  # Thumbnail cache submodules
+│   │   ├── cleanup.rs               # Cache cleanup
 │   │   ├── folder_previews.rs       # Folder preview cache
 │   │   ├── gc.rs                    # Garbage collection
-│   │   ├── pinned_folders.rs        # Pinned folder persistence
-│   │   ├── preferences.rs           # Preference persistence
-│   │   ├── shell_icons.rs           # Icon cache
+│   │   ├── shell_icons.rs           # Shell icon cache
 │   │   └── thumbnails_repo.rs       # Thumbnail repository
 │   ├── drive_watcher.rs             # Drive-wide watcher (ReadDirectoryChangesW)
 │   ├── drive_watcher/               # Watcher submodules
@@ -295,9 +300,9 @@ crates/
         ├── file_index.rs             # In-memory HashMap index
         ├── path_resolver.rs          # Path reconstruction via FRN chain
         ├── index_db/                 # SQLite persistence (split module)
-        │   ├── mod.rs               # DB initialization & core queries
-        │   ├── fts.rs               # FTS5 full-text search integration
-        │   └── sync.rs              # Index-to-DB synchronization
+        │   ├── mod.rs               # DB initialization, schema, dirty-shutdown handling
+        │   ├── fts.rs               # Read-only FTS5 searcher
+        │   └── sync.rs              # Record persistence, incremental sync, deferred FTS rebuild
         ├── ipc_server/               # Named Pipe server (split module)
         │   ├── mod.rs               # Server loop, client accept, wait_for_client
         │   ├── pipe_io.rs           # Pipe creation (DACL/ACL security), read/write I/O

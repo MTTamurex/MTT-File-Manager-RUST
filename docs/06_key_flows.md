@@ -159,16 +159,16 @@ User action: Restore or Permanent Delete → Shell API
 ```
 Pin action (right-click "Pin to Quick Access" or drag-and-drop to sidebar)
     ↓
-Add to pinned_folders table in SQLite [infrastructure/disk_cache/pinned_folders.rs]
+Add to `pinned_folders` table in `app_state.db` [infrastructure/app_state_db/pinned_folders.rs]
     ↓
 Sidebar renders pinned folders section [ui/sidebar.rs]
     ↓
-Reorder via drag-and-drop → update position in SQLite
+Reorder via drag-and-drop → update position in `app_state.db`
     ↓
-Unpin via 📌 icon → remove from SQLite
+Unpin via 📌 icon → remove from `app_state.db`
 ```
 
-**Key files**: `app/operations/pinned_folder_ops.rs`, `infrastructure/disk_cache/pinned_folders.rs`, `ui/sidebar.rs`
+**Key files**: `app/operations/pinned_folder_ops.rs`, `infrastructure/app_state_db/pinned_folders.rs`, `ui/sidebar.rs`
 
 ## 9. Filesystem Monitoring
 
@@ -234,7 +234,7 @@ Query sent to global_search_worker [workers/global_search_worker.rs]
     ↓
 Worker connects via Named Pipe to mtt-search-service
     ↓
-Service searches in-memory index (substring match, 3s deadline)
+Service uses SQLite FTS5 for 3+ char queries when `search_fts` is ready; otherwise falls back to the in-memory substring scan
     ↓
 Results returned: FRN → path_resolver → full paths
     ↓
@@ -248,17 +248,58 @@ User clicks result → navigates to file's parent folder
 - Encoding: bincode with 4-byte length-prefix (LE)
 - Fail-fast on `FILE_NOT_FOUND` (service not running)
 - Retry only on `PIPE_BUSY` (service overloaded)
+- The same IPC client is also reused outside the search overlay for `CheckPathsModified` and NTFS `FolderSize` requests
 
 **Key files**: `ui/global_search_overlay/`, `workers/global_search_worker.rs`, `infrastructure/global_search.rs`
 
-## 11. Folder Cover Composition
+## 11. Folder Size Resolution
+
+**Triggers**:
+- Folder row visible in list view and its size is not present in `batch_cache`
+- Folder selected in details panel and its size is not present in `cache`
+
+```
+Folder needs size in list view or details panel
+    ↓
+Check in-memory folder-size cache(s) in `folder_size_state`
+    ↓
+Cache miss
+    ↓
+Worker selection:
+  - Details panel → single-request worker (`req_sender` / `res_receiver`)
+  - List view → batch worker (`batch_req_sender` / `batch_res_receiver`)
+    ↓
+Filesystem check via `is_ntfs_volume()`
+    ↓
+If NTFS:
+  Send `SearchRequest::FolderSize { path }` through `infrastructure/global_search.rs`
+  → service resolves the path in its in-memory volume index and computes the sum
+    ↓
+If non-NTFS or IPC fails:
+  Fall back to `calculate_folder_size_parallel()` (`FindFirstFileExW` + rayon)
+    ↓
+Result arrives in `thumbnail_workers.rs`
+    ↓
+Update `batch_cache` (list view) and `cache` (details panel) so both UIs converge on the same value
+```
+
+**Stale-result protection**:
+- Navigation and List→Grid transitions call `cancel_batch()` to abort orphan list-view scans
+- `BatchSizeRequest = (path, generation, invalidation_epoch)` and `BatchSizeResult { request_epoch, .. }` reject stale batch results that started before an invalidation
+- NTFS fast-path requests additionally use deferred revalidation because the search service applies USN updates on a 2-second loop
+- Directory-content invalidation is centralized in `invalidate_directory_caches()`, which now clears folder-size caches together with listing/cover state
+- Non-NTFS consistency-probe cover changes also invalidate folder-size caches so preview changes and size changes stay in sync
+
+**Key files**: `app/folder_size_state.rs`, `app/init_workers/filesystem_workers.rs`, `app/operations/message_handler/thumbnail_workers.rs`, `app/operations/message_handler/helpers.rs`, `infrastructure/global_search.rs`, `infrastructure/windows/folder_size.rs`
+
+## 12. Folder Cover Composition
 
 **Trigger**: Folder is visible and needs a cover image.
 
 ```
 Folder visible in grid view
     ↓
-Check folder_previews cache in SQLite [infrastructure/disk_cache/folder_previews.rs]
+Check `folder_previews` cache in `thumbnails.db` [infrastructure/disk_cache/folder_previews.rs]
     ↓
 Cache miss or stale? → Send to cover_worker [workers/folder_preview_worker.rs]
     ↓
@@ -269,14 +310,14 @@ Compose 3-layer PNG via image crate [infrastructure/folder_compose.rs]:
   2. Thumbnail of content (extracted by thumbnail pipeline)
   3. folder_front_512.png (folder tab overlay — embedded via include_bytes!)
     ↓
-Store composed image in SQLite → send to UI
+Store composed image in `thumbnails.db` → send to UI
 ```
 
 **Performance**: ~1-2ms per composition (embedded PNGs decoded once at startup).
 
 **Key files**: `infrastructure/folder_compose.rs`, `workers/folder_preview_worker.rs`, `infrastructure/disk_cache/folder_previews.rs`
 
-## 12. Dedicated Image Viewer
+## 13. Dedicated Image Viewer
 
 **Trigger**: Double-click on an image file.
 
@@ -304,7 +345,7 @@ Previous image stays visible until new one is ready
 
 **Key files**: `image_viewer/mod.rs`, `image_viewer/app/` (mod, filmstrip, rendering, gif_export), `image_viewer/cache.rs`, `image_viewer/indexer.rs`, `image_viewer/loader.rs`
 
-## 13. Video Player
+## 14. Video Player
 
 **Trigger**: Double-click on a video file.
 
@@ -324,7 +365,7 @@ Subtitle loading via rfd file dialog
 
 **Key files**: `video_player/mod.rs`
 
-## 14. PDF Viewer
+## 15. PDF Viewer
 
 **Trigger**: Double-click on a PDF file.
 
@@ -365,12 +406,12 @@ Dark-mode-aware helper functions adjust all UI colors [ui/theme.rs]
     ↓
 SVG icons swap dark pixels for light equivalents (preserving accent colors) [ui/svg_icons.rs]
     ↓
-Preference persisted to SQLite (key: "theme_mode", value: "dark"/"light") [app/operations/preferences.rs]
+Preference persisted to `app_state.db` (`user_preferences`.`theme_mode`) [app/operations/preferences.rs]
 ```
 
 **Startup restoration** (main app):
 ```
-Load "theme_mode" from SQLite [app/init_preferences.rs]
+Load "theme_mode" from `app_state.db` [app/init_preferences.rs]
     ↓
 On first frame: ctx.set_visuals() in lifecycle.rs (deferred because eframe
     can override visuals set during the creator callback)
@@ -380,7 +421,7 @@ On first frame: ctx.set_visuals() in lifecycle.rs (deferred because eframe
 ```
 Viewer process starts (--image-viewer / --pdf-viewer flag)
     ↓
-is_saved_theme_dark() reads "theme_mode" from SQLite [image_viewer/mod.rs, pdf_viewer/mod.rs]
+is_saved_theme_dark() reads "theme_mode" from `app_state.db` [image_viewer/mod.rs, pdf_viewer/mod.rs]
     ↓
 dark_mode bool passed to viewer app struct
     ↓

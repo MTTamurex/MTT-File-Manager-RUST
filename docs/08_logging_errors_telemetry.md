@@ -37,9 +37,11 @@ The main application uses the `log` crate (`log::info!`, `log::warn!`, `log::err
 | `[PinnedFolders]` | Pinned folders | Pinned folder operations |
 | `[Cache]` | Cache | Cache initialization and disk cache events |
 | `[DISK-CACHE]` | Disk cache | SQLite disk cache operations |
+| `[APP-STATE]` | App state | SQLite app-state operations and fallback handling |
 | `[GC]` | Garbage collection | Cache garbage collection |
 | `[IconDiskCache]` | Icon cache | Icon disk cache operations |
 | `[Config]` | Configuration | Virtual drive and settings events |
+| `[Migration]` | SQLite migration | Legacy table migration from `thumbnails.db` to `app_state.db` |
 | `[DEBUG]` | Debug | Miscellaneous debug information |
 | `[COVER]` | Folder covers | Folder cover composition events |
 | `[DRIVE-REFRESH]` | Drive refresh | Drive list refresh events |
