@@ -119,18 +119,7 @@ cargo build --release --workspace
 | Ctrl+L | Focus address bar |
 | Ctrl+Mouse Wheel | Adjust thumbnail size |
 | Alt+Enter | Properties |
-
-### Supported Formats
-- **Images**: JPG, PNG, GIF, WebP, BMP, TIFF, SVG — double-click opens the dedicated viewer
-- **Videos**: MP4, MKV, AVI, MOV, WebM (requires libmpv)
-- **Audio file detection / routing**: MP3, WAV, OGG, WMA, AAC, M4A, APE, MID, FLAC, ALAC, Opus, AIFF, WEBA
-- **Audio playback**: Audio-only files open in the mpv-based player with a real-time waveform visualization
-- **Audio metadata pipeline**: duration, codec, bitrate, channels, sample rate, artist, album, track title, genre, and year
-- **Audio codec fallback detection**: AAC, MP3, FLAC, Opus, Vorbis, AC-3, E-AC-3, ALAC, PCM, WMA, DTS
-- **PDFs**: Native viewer via pdfium (requires pdfium.dll)
-- **GIFs**: Animated playback with play/pause controls
-
-Additional formats may also work when Windows or installed codec handlers classify them as audio/video via `AssocGetPerceivedType`, but the list above reflects the explicit formats handled by the app's fast-path media routing and metadata code.
+| Space | Open file with internal viewer |
 
 ## Development
 
