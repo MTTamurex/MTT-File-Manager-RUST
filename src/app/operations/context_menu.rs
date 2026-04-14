@@ -36,6 +36,10 @@ impl ImageViewerApp {
         std::borrow::Cow::Owned(vec![std::path::PathBuf::from(&self.navigation_state.current_path)])
     }
 
+    pub fn can_open_empty_area_context_menu(&self) -> bool {
+        !self.navigation_state.is_computer_view
+    }
+
     pub fn populate_context_menu(
         &mut self,
         _ctx: &egui::Context,
@@ -44,6 +48,12 @@ impl ImageViewerApp {
         _item_index: Option<usize>,
     ) {
         use crate::application::context_menu::ContextMenuItem;
+
+        if is_empty_area && !self.can_open_empty_area_context_menu() {
+            self.context_menu.close();
+            self.shell_menu_loading = false;
+            return;
+        }
 
         let drive_target_path = if !is_empty_area && paths.len() == 1 {
             let target = &paths[0];
