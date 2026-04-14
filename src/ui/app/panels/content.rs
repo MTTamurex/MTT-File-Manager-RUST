@@ -487,14 +487,6 @@ pub(super) fn render_central_panel_layout(app: &mut ImageViewerApp, ctx: &egui::
                     );
                 }
 
-                if !ui.ctx().wants_keyboard_input()
-                    && ui.input(|i| i.key_pressed(egui::Key::F2))
-                {
-                    if let Some(idx) = app.selected_item {
-                        app.begin_rename_item(idx);
-                    }
-                }
-
                 if app.is_loading_folder {
                     let rect = ui.max_rect();
                     let status_rect = egui::Rect::from_min_size(

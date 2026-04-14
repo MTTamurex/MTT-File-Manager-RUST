@@ -30,6 +30,7 @@ use crate::app::folder_size_state::FolderSizeState;
 use crate::app::global_search_state::GlobalSearchState;
 use crate::app::layout_state::LayoutState;
 use crate::app::navigation_state::{NavigationState, ThemeMode};
+use crate::app::shortcuts::{ShortcutBindings, ShortcutEditorState};
 use crate::application::ClipboardManager;
 use crate::domain::file_entry::{FileEntry, FoldersPosition, SortMode, ViewMode};
 use crate::domain::thumbnail::ThumbnailData;
@@ -397,6 +398,10 @@ pub struct ImageViewerApp {
     // GPU backend: active backend name (from adapter info, read-only) and user preference
     pub active_gpu_backend: String,
     pub gpu_backend_preference: String,
+
+    // Configurable keyboard shortcuts
+    pub shortcuts: ShortcutBindings,
+    pub shortcut_editor: ShortcutEditorState,
 
     // Per-folder locked view preferences
     pub folder_locks: std::collections::HashMap<String, crate::domain::folder_lock::FolderLock>,

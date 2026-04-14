@@ -1,4 +1,5 @@
 use crate::app::navigation_state::{SettingsSection, ThemeMode};
+use crate::app::shortcuts::{ShortcutBindings, ShortcutEditorState};
 use eframe::egui;
 use rust_i18n::t;
 
@@ -7,6 +8,7 @@ pub struct SettingsWindowOutput {
     pub language_changed: bool,
     pub theme_changed: bool,
     pub backend_changed: bool,
+    pub shortcuts_changed: bool,
 }
 
 pub fn render_settings_window(
@@ -16,11 +18,14 @@ pub fn render_settings_window(
     theme_mode: &mut ThemeMode,
     active_gpu_backend: &str,
     gpu_backend_preference: &mut String,
+    shortcuts: &mut ShortcutBindings,
+    shortcut_editor: &mut ShortcutEditorState,
 ) -> SettingsWindowOutput {
     let mut keep_open = show_window;
     let mut language_changed = false;
     let mut theme_changed = false;
     let mut backend_changed = false;
+    let mut shortcuts_changed = false;
 
     egui::Window::new(t!("settings.window_title"))
         .open(&mut keep_open)
@@ -42,6 +47,10 @@ pub fn render_settings_window(
                     |ui| render_settings_sidebar(ui, active_section),
                 );
 
+                if *active_section != SettingsSection::Shortcuts && shortcut_editor.is_capturing() {
+                    shortcut_editor.clear();
+                }
+
                 ui.separator();
 
                 let content_size = egui::vec2(ui.available_width(), panel_height);
@@ -60,6 +69,13 @@ pub fn render_settings_window(
                                     ui.add_space(16.0);
                                     backend_changed |= crate::ui::components::backend_settings::render_backend_settings_section(ui, active_gpu_backend, gpu_backend_preference);
                                 }
+                                SettingsSection::Shortcuts => {
+                                    shortcuts_changed |= crate::ui::components::shortcut_settings::render_shortcut_settings_section(
+                                        ui,
+                                        shortcuts,
+                                        shortcut_editor,
+                                    );
+                                }
                                 SettingsSection::VirtualDrives => {
                                     crate::ui::components::virtual_drive_settings::render_virtual_drive_settings_section(ui);
                                 }
@@ -74,6 +90,7 @@ pub fn render_settings_window(
         language_changed,
         theme_changed,
         backend_changed,
+        shortcuts_changed,
     }
 }
 
@@ -86,6 +103,11 @@ fn render_settings_sidebar(ui: &mut egui::Ui, active_section: &mut SettingsSecti
         active_section,
         SettingsSection::General,
         &*t!("settings.general"),
+    );
+    ui.selectable_value(
+        active_section,
+        SettingsSection::Shortcuts,
+        &*t!("settings.shortcuts"),
     );
     ui.selectable_value(
         active_section,

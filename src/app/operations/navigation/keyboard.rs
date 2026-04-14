@@ -3,6 +3,7 @@
 //! This module handles keyboard navigation (Arrow keys, Page Up/Down, Enter)
 //! in a way that can be reused by both list_view and grid_view.
 
+use crate::app::shortcuts::ShortcutBinding;
 use eframe::egui;
 
 /// View type for keyboard navigation
@@ -56,6 +57,7 @@ pub fn process_list_keyboard_input(
     item_count: usize,
     row_height: f32,
     viewport_h: f32,
+    reserved_enter_binding: Option<ShortcutBinding>,
 ) -> KeyboardNavResult {
     // Do not capture keys when a text field (address, search) has focus
     if ui.ctx().wants_keyboard_input() {
@@ -107,8 +109,14 @@ pub fn process_list_keyboard_input(
         );
     }
 
-    // Alt+Enter is reserved for Properties - do not trigger "open"
-    let enter_pressed = ui.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.alt);
+    let enter_pressed = ui.input(|i| {
+        if !i.key_pressed(egui::Key::Enter) {
+            return false;
+        }
+
+        let current_binding = ShortcutBinding::from_modifiers(egui::Key::Enter, i.modifiers);
+        Some(current_binding) != reserved_enter_binding
+    });
 
     KeyboardNavResult {
         new_index,
@@ -127,6 +135,7 @@ pub fn process_grid_keyboard_input(
     cols: usize,
     cell_h: f32,
     viewport_h: f32,
+    reserved_enter_binding: Option<ShortcutBinding>,
 ) -> KeyboardNavResult {
     // Do not capture keys when a text field (address, search) has focus
     if ui.ctx().wants_keyboard_input() {
@@ -184,8 +193,14 @@ pub fn process_grid_keyboard_input(
         );
     }
 
-    // Alt+Enter is reserved for Properties - do not trigger "open"
-    let enter_pressed = ui.input(|i| i.key_pressed(egui::Key::Enter) && !i.modifiers.alt);
+    let enter_pressed = ui.input(|i| {
+        if !i.key_pressed(egui::Key::Enter) {
+            return false;
+        }
+
+        let current_binding = ShortcutBinding::from_modifiers(egui::Key::Enter, i.modifiers);
+        Some(current_binding) != reserved_enter_binding
+    });
 
     KeyboardNavResult {
         new_index,

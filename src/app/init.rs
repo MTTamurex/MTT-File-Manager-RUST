@@ -159,6 +159,7 @@ impl ImageViewerApp {
             language,
             theme_mode,
             gpu_backend_preference,
+            shortcuts,
         } = startup_preferences;
 
         // Apply saved language preference
@@ -522,6 +523,8 @@ impl ImageViewerApp {
 
             active_gpu_backend: String::new(), // Set after construction from render_state
             gpu_backend_preference,
+            shortcuts,
+            shortcut_editor: crate::app::shortcuts::ShortcutEditorState::default(),
 
             folder_locks,
             current_folder_locked: false,

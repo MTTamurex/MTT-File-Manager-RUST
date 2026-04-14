@@ -1,10 +1,11 @@
 use crate::app::ImageViewerApp;
+use crate::app::shortcuts::{ShortcutAction, ShortcutBinding};
 use crate::domain::file_entry::ViewMode;
 use crate::workers::idle_warmup::IdleWarmupMessage;
 use eframe::egui;
 use windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
 
-fn handle_space_preview_action(app: &mut ImageViewerApp, ctx: &egui::Context) -> bool {
+fn handle_preview_shortcut_action(app: &mut ImageViewerApp, ctx: &egui::Context) -> bool {
     // Ignore while typing/editing any text input context
     if app.renaming_state.is_some()
         || app.sidebar_renaming.is_some()
@@ -15,16 +16,7 @@ fn handle_space_preview_action(app: &mut ImageViewerApp, ctx: &egui::Context) ->
         return false;
     }
 
-    let space_pressed = ctx.input(|i| {
-        i.key_pressed(egui::Key::Space)
-            && !i.modifiers.ctrl
-            && !i.modifiers.alt
-            && !i.modifiers.shift
-            && !i.modifiers.mac_cmd
-            && !i.modifiers.command
-    });
-
-    if !space_pressed {
+    if !app.shortcuts.is_triggered(ShortcutAction::PreviewSelected, ctx) {
         return false;
     }
 
@@ -36,9 +28,126 @@ fn handle_space_preview_action(app: &mut ImageViewerApp, ctx: &egui::Context) ->
     true
 }
 
+fn create_new_tab(app: &mut ImageViewerApp) {
+    let prev_view_mode = app.view_mode;
+    let prev_sort_mode = app.sort_mode;
+    let prev_sort_descending = app.sort_descending;
+    let prev_folders_position = app.folders_position;
+    app.sync_to_tab();
+    app.tab_manager.new_tab();
+    let active = app.tab_manager.active_mut();
+    active.view_mode = prev_view_mode;
+    active.sort_mode = prev_sort_mode;
+    active.sort_descending = prev_sort_descending;
+    active.folders_position = prev_folders_position;
+    app.sync_from_tab();
+    app.setup_computer_view();
+    app.sync_to_tab();
+    app.update_video_visibility();
+}
+
+fn close_current_tab(app: &mut ImageViewerApp, ctx: &egui::Context) {
+    if app.tab_manager.close_active_tab() {
+        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+    } else {
+        app.sync_from_tab();
+        app.update_video_visibility();
+    }
+}
+
+fn switch_tab(app: &mut ImageViewerApp, previous: bool) {
+    app.sync_to_tab();
+    if previous {
+        app.tab_manager.prev_tab();
+    } else {
+        app.tab_manager.next_tab();
+    }
+    app.sync_from_tab();
+    app.update_video_visibility();
+}
+
+fn handle_paste_shortcut(
+    app: &mut ImageViewerApp,
+    ctx: &egui::Context,
+    text_input_active: bool,
+    app_has_focus: bool,
+) -> bool {
+    let binding = app.shortcuts.get(ShortcutAction::Paste);
+    if binding == ShortcutBinding::ctrl(egui::Key::V) {
+        if !app_has_focus {
+            app.paste_key_debounce = false;
+            return false;
+        }
+
+        let ctrl_down = unsafe { GetAsyncKeyState(0x11) < 0 };
+        let v_down = unsafe { GetAsyncKeyState(0x56) < 0 };
+
+        if ctrl_down && v_down && !app.paste_key_debounce && !text_input_active {
+            app.paste_key_debounce = true;
+            return true;
+        }
+
+        if !v_down {
+            app.paste_key_debounce = false;
+        }
+        return false;
+    }
+
+    app.paste_key_debounce = false;
+    !text_input_active && app.shortcuts.is_triggered(ShortcutAction::Paste, ctx)
+}
+
+fn handle_delete_permanently_shortcut(
+    app: &mut ImageViewerApp,
+    ctx: &egui::Context,
+    text_input_active: bool,
+    app_has_focus: bool,
+) -> bool {
+    let binding = app.shortcuts.get(ShortcutAction::DeletePermanently);
+    if binding == ShortcutBinding::shift(egui::Key::Delete) {
+        if !app_has_focus {
+            app.delete_key_debounce = false;
+            return false;
+        }
+
+        let shift_down = unsafe { GetAsyncKeyState(0x10) < 0 };
+        let del_down = unsafe { GetAsyncKeyState(0x2E) < 0 };
+
+        if shift_down && del_down && !app.delete_key_debounce && !text_input_active {
+            app.delete_key_debounce = true;
+            return true;
+        }
+
+        if !del_down {
+            app.delete_key_debounce = false;
+        }
+        return false;
+    }
+
+    app.delete_key_debounce = false;
+    !text_input_active && app.shortcuts.is_triggered(ShortcutAction::DeletePermanently, ctx)
+}
+
 pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
     let mut user_active = false;
     if app.renaming_state.is_none() && app.sidebar_renaming.is_none() && !app.is_address_editing {
+        if app.shortcut_editor.is_capturing() {
+            user_active = ctx.input(|i| {
+                i.pointer.any_pressed()
+                    || i.pointer.any_click()
+                    || i.raw_scroll_delta != egui::Vec2::ZERO
+                    || !i.events.is_empty()
+            });
+
+            if user_active {
+                let _ = app
+                    .file_operation_state
+                    .idle_warmup_sender
+                    .send(IdleWarmupMessage::UserActive);
+            }
+            return;
+        }
+
         // Handle media hardware input first (overrides normal navigation when player focused)
         if handle_media_hardware_input(app, ctx) {
             return;
@@ -47,7 +156,7 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
         // While the global search modal is open, keep focus/input inside it.
         // Prevent routing shortcuts/quick-search to the main file views.
         if app.global_search.active {
-            if ctx.input(|i| i.modifiers.ctrl && i.modifiers.shift && i.key_pressed(egui::Key::F)) {
+            if app.shortcuts.is_triggered(ShortcutAction::GlobalSearch, ctx) {
                 app.close_global_search();
                 user_active = true;
             }
@@ -69,10 +178,6 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
             }
             return;
         }
-        // Detect key events
-        let mut do_copy = false;
-        let mut do_cut = false;
-        let mut do_paste = false;
         let text_input_active = ctx.wants_keyboard_input();
 
         ctx.input(|i| {
@@ -92,7 +197,6 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
                     egui::Event::Key {
                         key,
                         pressed,
-                        modifiers,
                         ..
                     } => {
                         // 2. Keyboard detection (Navigation keys)
@@ -112,134 +216,77 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
                                 _ => {}
                             }
                         }
-
-                        if *pressed && modifiers.ctrl {
-                            match key {
-                                egui::Key::C if !text_input_active => do_copy = true,
-                                egui::Key::X if !text_input_active => do_cut = true,
-                                egui::Key::V if !text_input_active => do_paste = true,
-                                // TAB MANAGEMENT SHORTCUTS
-                                egui::Key::T => {
-                                    let prev_view_mode = app.view_mode;
-                                    let prev_sort_mode = app.sort_mode;
-                                    let prev_sort_descending = app.sort_descending;
-                                    let prev_folders_position = app.folders_position;
-                                    app.sync_to_tab();
-                                    app.tab_manager.new_tab();
-                                    let active = app.tab_manager.active_mut();
-                                    active.view_mode = prev_view_mode;
-                                    active.sort_mode = prev_sort_mode;
-                                    active.sort_descending = prev_sort_descending;
-                                    active.folders_position = prev_folders_position;
-                                    app.sync_from_tab();
-                                    app.setup_computer_view();
-                                    app.sync_to_tab();
-                                    app.update_video_visibility();
-                                }
-                                egui::Key::W => {
-                                    if app.tab_manager.close_active_tab() {
-                                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                                    } else {
-                                        app.sync_from_tab();
-                                        app.update_video_visibility();
-                                    }
-                                }
-                                egui::Key::Tab => {
-                                    app.sync_to_tab();
-                                    if modifiers.shift {
-                                        app.tab_manager.prev_tab();
-                                    } else {
-                                        app.tab_manager.next_tab();
-                                    }
-                                    app.sync_from_tab();
-                                    app.update_video_visibility();
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
-                    egui::Event::Copy if !text_input_active => {
-                        do_copy = true;
-                        user_active = true;
-                    }
-                    egui::Event::Cut if !text_input_active => {
-                        do_cut = true;
-                        user_active = true;
-                    }
-                    egui::Event::Paste(_) if !text_input_active => {
-                        do_paste = true;
-                        user_active = true;
                     }
                     _ => {}
                 }
             }
         });
 
-        // Fallback: use Windows GetAsyncKeyState for hardware-level detection.
-        // CRITICAL: Only process when our window has OS focus — GetAsyncKeyState
-        // reads global hardware state and would capture keystrokes from other apps.
         let app_has_focus = ctx.input(|i| i.viewport().focused.unwrap_or(false));
-        if app_has_focus {
-            let ctrl_down = unsafe { GetAsyncKeyState(0x11) < 0 };
-            let v_down = unsafe { GetAsyncKeyState(0x56) < 0 };
-            let shift_down = unsafe { GetAsyncKeyState(0x10) < 0 };
-            let del_down = unsafe { GetAsyncKeyState(0x2E) < 0 };
 
-            // Debounced paste detection
-            if ctrl_down && v_down && !app.paste_key_debounce && !text_input_active {
-                do_paste = true;
-                app.paste_key_debounce = true;
-            } else if !v_down {
-                app.paste_key_debounce = false;
-            }
-
-            // Debounced Shift+Delete detection (permanente)
-            if shift_down && del_down && !app.delete_key_debounce && !text_input_active {
-                app.delete_permanently_for_idx(None);
-                app.delete_key_debounce = true;
-                user_active = true;
-            } else if !del_down {
-                app.delete_key_debounce = false;
-            }
-        } else {
-            // Reset debounce state when unfocused to avoid stale triggers on refocus.
-            app.paste_key_debounce = false;
-            app.delete_key_debounce = false;
+        if app.shortcuts.is_triggered(ShortcutAction::NewTab, ctx) {
+            create_new_tab(app);
+            user_active = true;
         }
 
-        // Execute clipboard actions
-        if do_copy {
+        if app.shortcuts.is_triggered(ShortcutAction::CloseTab, ctx) {
+            close_current_tab(app, ctx);
+            user_active = true;
+        }
+
+        if app.shortcuts.is_triggered(ShortcutAction::NextTab, ctx) {
+            switch_tab(app, false);
+            user_active = true;
+        }
+
+        if app.shortcuts.is_triggered(ShortcutAction::PreviousTab, ctx) {
+            switch_tab(app, true);
+            user_active = true;
+        }
+
+        if !text_input_active && app.shortcuts.is_triggered(ShortcutAction::Copy, ctx) {
             app.command_copy(None);
-        }
-        if do_cut {
-            app.command_cut(None);
-        }
-        if do_paste {
-            app.command_paste(None);
+            user_active = true;
         }
 
-        // Delete: move to recycle bin (only without Shift)
-        // Skip when a text input (search bar, address bar) has keyboard focus.
-        if !text_input_active
-            && ctx.input(|i| !i.modifiers.shift && i.key_pressed(egui::Key::Delete))
-        {
+        if !text_input_active && app.shortcuts.is_triggered(ShortcutAction::Cut, ctx) {
+            app.command_cut(None);
+            user_active = true;
+        }
+
+        if handle_paste_shortcut(app, ctx, text_input_active, app_has_focus) {
+            app.command_paste(None);
+            user_active = true;
+        }
+
+        if !text_input_active && app.shortcuts.is_triggered(ShortcutAction::Rename, ctx) {
+            if let Some(idx) = app.selected_item {
+                app.begin_rename_item(idx);
+                user_active = true;
+            }
+        }
+
+        if !text_input_active && app.shortcuts.is_triggered(ShortcutAction::Delete, ctx) {
             app.delete_with_shell_for_idx(None);
             user_active = true;
         }
 
-        // Shift+Delete: handled via GetAsyncKeyState below (egui does not report it reliably)
+        if handle_delete_permanently_shortcut(app, ctx, text_input_active, app_has_focus) {
+            app.delete_permanently_for_idx(None);
+            user_active = true;
+        }
 
-        // Alt+Enter: Properties
-        // Skip when a text input has keyboard focus.
-        if !text_input_active
-            && ctx.input(|i| i.modifiers.alt && i.key_pressed(egui::Key::Enter))
-        {
+        if !text_input_active && app.shortcuts.is_triggered(ShortcutAction::Properties, ctx) {
             app.show_properties_for_idx(None);
             user_active = true;
         }
 
-        // Ctrl+L: focus address bar
-        if ctx.input(|i| i.modifiers.ctrl && i.key_pressed(egui::Key::L)) {
+        if app.shortcuts.is_triggered(ShortcutAction::Refresh, ctx) {
+            app.trigger_manual_refresh();
+            user_active = true;
+        }
+
+        if app.shortcuts.is_triggered(ShortcutAction::FocusAddressBar, ctx) {
             app.navigation_state.path_input = app.navigation_state.current_path.clone();
             app.is_address_editing = true;
             app.show_address_history_menu = false;
@@ -263,8 +310,7 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
             user_active = true;
         }
 
-        // Ctrl + Shift + N: New Folder
-        if ctx.input(|i| i.modifiers.ctrl && i.modifiers.shift && i.key_pressed(egui::Key::N))
+        if app.shortcuts.is_triggered(ShortcutAction::CreateFolder, ctx)
             && !app.navigation_state.is_computer_view
             && !app.navigation_state.is_recycle_bin_view
         {
@@ -272,20 +318,17 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
             user_active = true;
         }
 
-        // Ctrl + Shift + F: Global Search
-        if ctx.input(|i| i.modifiers.ctrl && i.modifiers.shift && i.key_pressed(egui::Key::F)) {
+        if app.shortcuts.is_triggered(ShortcutAction::GlobalSearch, ctx) {
             app.toggle_global_search();
             user_active = true;
         }
 
-        // Space: same behavior as preview overlay action for selected media/image/pdf
-        let consumed_space_preview_action = handle_space_preview_action(app, ctx);
-        if consumed_space_preview_action {
+        let consumed_preview_shortcut_action = handle_preview_shortcut_action(app, ctx);
+        if consumed_preview_shortcut_action {
             user_active = true;
         }
 
-        // QUICK SEARCH: Type-to-search like Explorer
-        if !consumed_space_preview_action {
+        if !consumed_preview_shortcut_action {
             handle_quick_search(app, ctx);
         }
     } else {

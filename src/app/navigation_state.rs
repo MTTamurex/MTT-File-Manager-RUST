@@ -9,6 +9,7 @@ pub enum ThemeMode {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SettingsSection {
     General,
+    Shortcuts,
     VirtualDrives,
 }
 

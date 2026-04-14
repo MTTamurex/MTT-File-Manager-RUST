@@ -219,8 +219,13 @@ impl eframe::App for ImageViewerApp {
                 &mut self.theme_mode,
                 &self.active_gpu_backend,
                 &mut self.gpu_backend_preference,
+                &mut self.shortcuts,
+                &mut self.shortcut_editor,
             );
             self.navigation_state.show_settings_window = output.keep_open;
+            if !output.keep_open {
+                self.shortcut_editor.clear();
+            }
             if output.theme_changed {
                 match self.theme_mode {
                     crate::app::navigation_state::ThemeMode::Dark => ctx.set_visuals(egui::Visuals::dark()),
@@ -235,6 +240,10 @@ impl eframe::App for ImageViewerApp {
                 self.force_save_preferences();
             }
             if output.backend_changed {
+                self.save_preferences();
+                self.force_save_preferences();
+            }
+            if output.shortcuts_changed {
                 self.save_preferences();
                 self.force_save_preferences();
             }
