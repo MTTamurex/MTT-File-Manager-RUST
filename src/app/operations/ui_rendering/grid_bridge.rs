@@ -426,7 +426,9 @@ impl ImageViewerApp {
                     );
                 }
             }
-            Some(grid_view::GridViewAction::EmptyAreaSecondaryClick) if !is_renaming => {
+            Some(grid_view::GridViewAction::EmptyAreaSecondaryClick)
+                if !is_renaming && self.can_open_empty_area_context_menu() =>
+            {
                 let path = PathBuf::from(&self.navigation_state.current_path);
                 let pointer_pos = ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO);
                 let right_bound = ui.available_rect_before_wrap().right();

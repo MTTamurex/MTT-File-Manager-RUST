@@ -444,7 +444,7 @@ pub(super) fn render_central_panel_layout(app: &mut ImageViewerApp, ctx: &egui::
                     )
                     .on_hover_cursor(egui::CursorIcon::Default); // Force cursor on the interaction rect
 
-                if interact_response.secondary_clicked() {
+                if interact_response.secondary_clicked() && app.can_open_empty_area_context_menu() {
                     app.context_menu.target_paths.clear();
 
                     // Use current path for shell menu

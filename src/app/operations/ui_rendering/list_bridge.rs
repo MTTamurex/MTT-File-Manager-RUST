@@ -482,7 +482,9 @@ impl ImageViewerApp {
                 self.sort_items();
                 self.save_preferences();
             }
-            Some(list_view::ListViewAction::EmptyAreaSecondaryClick) if !is_renaming => {
+            Some(list_view::ListViewAction::EmptyAreaSecondaryClick)
+                if !is_renaming && self.can_open_empty_area_context_menu() =>
+            {
                 let path = PathBuf::from(&self.navigation_state.current_path);
                 let pointer_pos = ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO);
                 let right_bound = ui.available_rect_before_wrap().right();
