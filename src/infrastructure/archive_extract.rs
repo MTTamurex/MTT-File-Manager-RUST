@@ -111,7 +111,19 @@ fn derive_output_path(
         }
         MatchKind::FolderChild { rel_start } => {
             let relative = &entry_name[*rel_start..];
-            let dest_path = dest_folder.join(sanitize_relative_path(relative));
+            let sanitized = sanitize_relative_path(relative);
+            let dest_path = dest_folder.join(&sanitized);
+
+            // SEC: Defence-in-depth boundary check. sanitize_relative_path already
+            // strips `.` and `..`, so this should always pass. If it doesn't,
+            // something unexpected slipped through and we must abort.
+            if !dest_path.starts_with(dest_folder) {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("path traversal blocked: '{}' escapes destination", entry_name),
+                ));
+            }
+
             if let Some(parent) = dest_path.parent() {
                 fs::create_dir_all(parent)?;
             }
@@ -122,11 +134,12 @@ fn derive_output_path(
 }
 
 /// Sanitizes each component of a relative path (preserving directory structure).
+/// SEC: Strips `.` and `..` components to prevent Zip Slip path traversal.
 fn sanitize_relative_path(rel_path: &str) -> PathBuf {
     let components = rel_path.replace('\\', "/");
     let mut result = PathBuf::new();
     for component in components.split('/') {
-        if !component.is_empty() {
+        if !component.is_empty() && component != "." && component != ".." {
             result.push(sanitize_filename(component));
         }
     }
