@@ -154,6 +154,11 @@ pub struct VolumeStatus {
     pub phase: String,
     pub phase_progress: Option<u64>,
     pub phase_total: Option<u64>,
+    /// Whether file sizes are still being loaded in the background.
+    /// When true, search results are available but FolderSize requests
+    /// will return "Sizes not loaded".
+    #[serde(default)]
+    pub sizes_loading: bool,
 }
 
 /// Encode a message with a 4-byte little-endian length prefix for Named Pipe transport.

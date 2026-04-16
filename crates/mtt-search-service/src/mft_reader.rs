@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use windows::Win32::Foundation::{HANDLE, GetLastError};
+use windows::Win32::Storage::FileSystem::{ReadFile, SetFilePointerEx, FILE_BEGIN};
 use windows::Win32::System::IO::DeviceIoControl;
 
 use crate::file_index::VolumeIndex;
@@ -33,6 +34,9 @@ const FILE_SIGNATURE: [u8; 4] = [b'F', b'I', b'L', b'E'];
 
 /// $DATA attribute type identifier.
 const ATTR_TYPE_DATA: u32 = 0x80;
+
+/// $STANDARD_INFORMATION attribute type identifier.
+const ATTR_TYPE_STANDARD_INFORMATION: u32 = 0x10;
 
 /// $FILE_NAME attribute type identifier — contains parent FRN + name.
 const ATTR_TYPE_FILE_NAME: u32 = 0x30;
@@ -72,6 +76,7 @@ const ATTR_LIST_ENTRY_MIN_SIZE: usize = 26; // type(4)+len(2)+name_len(1)+name_o
 
 /// Geometry of the MFT on an NTFS volume.
 struct MftGeometry {
+    bytes_per_sector: u32,
     bytes_per_cluster: u32,
     bytes_per_file_record: u32,
     mft_start_lcn: i64,
@@ -111,6 +116,7 @@ fn query_mft_geometry(volume: HANDLE) -> Result<MftGeometry, String> {
         ));
     }
 
+    let bytes_per_sector = u32::from_le_bytes(buffer[40..44].try_into().unwrap());
     let bytes_per_cluster = u32::from_le_bytes(buffer[44..48].try_into().unwrap());
     let bytes_per_file_record = u32::from_le_bytes(buffer[48..52].try_into().unwrap());
     let mft_valid_data_length = i64::from_le_bytes(buffer[56..64].try_into().unwrap());
@@ -128,6 +134,7 @@ fn query_mft_geometry(volume: HANDLE) -> Result<MftGeometry, String> {
     }
 
     Ok(MftGeometry {
+        bytes_per_sector,
         bytes_per_cluster,
         bytes_per_file_record,
         mft_start_lcn,
@@ -994,4 +1001,550 @@ pub fn read_single_file_size(volume: HANDLE, frn: u64, record_size: u32) -> Opti
 /// Returns `bytes_per_file_record` on success.
 pub fn query_mft_geometry_pub(volume: HANDLE) -> Result<u32, String> {
     query_mft_geometry(volume).map(|g| g.bytes_per_file_record)
+}
+
+// ── Bulk MFT reader ─────────────────────────────────────────────────────
+//
+// Reads the raw $MFT from disk sectors and extracts names, parent FRNs,
+// file sizes, hardlinks, and reparse flags in a single sequential pass.
+// This replaces the combination of FSCTL_ENUM_USN_DATA + per-file
+// FSCTL_GET_NTFS_FILE_RECORD, matching the approach used by "Everything".
+
+/// Parse NTFS data-run encoding from a non-resident $DATA attribute.
+/// Returns a list of (absolute_LCN, cluster_count) pairs.
+fn parse_data_runs_bytes(run_data: &[u8]) -> Vec<(i64, u64)> {
+    let mut runs = Vec::new();
+    let mut pos = 0;
+    let mut prev_lcn: i64 = 0;
+
+    while pos < run_data.len() {
+        let header = run_data[pos];
+        if header == 0 {
+            break;
+        }
+        pos += 1;
+
+        let count_bytes = (header & 0x0F) as usize;
+        let offset_bytes = ((header >> 4) & 0x0F) as usize;
+
+        if count_bytes == 0 || pos + count_bytes + offset_bytes > run_data.len() {
+            break;
+        }
+
+        // Cluster count (unsigned, little-endian).
+        let mut cluster_count: u64 = 0;
+        for i in 0..count_bytes {
+            cluster_count |= (run_data[pos + i] as u64) << (i * 8);
+        }
+        pos += count_bytes;
+
+        if offset_bytes == 0 {
+            // Sparse run — no physical clusters.
+            continue;
+        }
+
+        // LCN offset (signed, relative to previous LCN).
+        let mut lcn_offset: i64 = 0;
+        for i in 0..offset_bytes {
+            lcn_offset |= (run_data[pos + i] as i64) << (i * 8);
+        }
+        // Sign-extend.
+        if run_data[pos + offset_bytes - 1] & 0x80 != 0 {
+            lcn_offset |= !0i64 << (offset_bytes * 8);
+        }
+        pos += offset_bytes;
+
+        prev_lcn += lcn_offset;
+        runs.push((prev_lcn, cluster_count));
+    }
+
+    runs
+}
+
+/// Read MFT record 0 and extract the $DATA attribute's data runs.
+fn get_mft_data_runs(volume: HANDLE, geo: &MftGeometry) -> Result<Vec<(i64, u64)>, String> {
+    let record_size = geo.bytes_per_file_record as usize;
+    let mut output_buffer = vec![0u8; OUTPUT_HEADER + record_size];
+
+    let parse_len = fetch_mft_record(volume, 0, record_size, &mut output_buffer)
+        .ok_or("Failed to read MFT record 0")?;
+    let record = &output_buffer[OUTPUT_HEADER..OUTPUT_HEADER + parse_len];
+
+    if record.len() < 4 || record[0..4] != FILE_SIGNATURE {
+        return Err("MFT record 0 has invalid FILE signature".to_string());
+    }
+    if parse_len < 0x16 {
+        return Err("MFT record 0 too small".to_string());
+    }
+
+    let first_attr = u16::from_le_bytes(record[0x14..0x16].try_into().unwrap()) as usize;
+    if first_attr >= parse_len || first_attr < 0x30 {
+        return Err("MFT record 0 has invalid first attribute offset".to_string());
+    }
+
+    let mut offset = first_attr;
+    while offset + 16 <= parse_len {
+        let attr_type = u32::from_le_bytes(record[offset..offset + 4].try_into().unwrap());
+        if attr_type == ATTR_TYPE_END {
+            break;
+        }
+        let attr_len =
+            u32::from_le_bytes(record[offset + 4..offset + 8].try_into().unwrap()) as usize;
+        if attr_len == 0 || offset + attr_len > parse_len {
+            break;
+        }
+
+        if attr_type == ATTR_TYPE_DATA {
+            let non_resident = record[offset + 8];
+            if non_resident != 0 && offset + 0x22 <= parse_len {
+                // Non-resident $DATA — data-runs offset at +0x20.
+                let run_offset_rel = u16::from_le_bytes(
+                    record[offset + 0x20..offset + 0x22].try_into().unwrap(),
+                ) as usize;
+                let run_start = offset + run_offset_rel;
+                let run_end = offset + attr_len;
+                if run_start < run_end && run_start < parse_len {
+                    let run_data = &record[run_start..run_end.min(parse_len)];
+                    let runs = parse_data_runs_bytes(run_data);
+                    if !runs.is_empty() {
+                        return Ok(runs);
+                    }
+                }
+            }
+        }
+
+        offset += attr_len;
+    }
+
+    Err("No $DATA data runs found in MFT record 0".to_string())
+}
+
+/// Apply the NTFS update-sequence (fixup) array to a raw MFT record.
+/// Returns `true` if fixups were applied successfully.
+fn apply_fixup(record: &mut [u8]) -> bool {
+    if record.len() < 0x08 {
+        return false;
+    }
+
+    let usa_offset = u16::from_le_bytes(record[0x04..0x06].try_into().unwrap()) as usize;
+    let usa_count = u16::from_le_bytes(record[0x06..0x08].try_into().unwrap()) as usize;
+
+    if usa_count < 2 || usa_offset + usa_count * 2 > record.len() {
+        return false;
+    }
+
+    // NTFS always uses a 512-byte stride for the update sequence.
+    const STRIDE: usize = 512;
+
+    let check_lo = record[usa_offset];
+    let check_hi = record[usa_offset + 1];
+
+    for i in 1..usa_count {
+        let pos = i * STRIDE - 2;
+        if pos + 2 > record.len() {
+            break;
+        }
+
+        // Verify the check value was written at the sector boundary.
+        if record[pos] != check_lo || record[pos + 1] != check_hi {
+            return false;
+        }
+
+        // Restore original values from the update sequence.
+        let orig_offset = usa_offset + i * 2;
+        if orig_offset + 2 > record.len() {
+            break;
+        }
+        record[pos] = record[orig_offset];
+        record[pos + 1] = record[orig_offset + 1];
+    }
+
+    true
+}
+
+/// Parse a single raw MFT record and populate the index.
+///
+/// For base records (base_record_ref == 0): extracts name, parent FRN, size,
+/// is_dir, is_reparse, and inserts into the index.
+///
+/// For extension records (base_record_ref != 0): only looks for $DATA
+/// attributes and stores the size in `extension_sizes` for later application.
+fn parse_mft_record_bulk(
+    record: &[u8],
+    record_size: usize,
+    frn: u64,
+    index: &mut VolumeIndex,
+    extension_sizes: &mut HashMap<u64, u64>,
+) {
+    if record.len() < record_size || record_size < 0x30 {
+        return;
+    }
+    if record[0..4] != FILE_SIGNATURE {
+        return;
+    }
+
+    let flags = u16::from_le_bytes(record[0x16..0x18].try_into().unwrap());
+    if flags & MFT_RECORD_IN_USE == 0 {
+        return;
+    }
+
+    let base_ref =
+        u64::from_le_bytes(record[0x20..0x28].try_into().unwrap()) & 0x0000_FFFF_FFFF_FFFF;
+    let is_dir = flags & MFT_RECORD_IS_DIRECTORY != 0;
+
+    let first_attr = u16::from_le_bytes(record[0x14..0x16].try_into().unwrap()) as usize;
+    if first_attr >= record_size || first_attr < 0x30 {
+        return;
+    }
+
+    // ── Extension record: only look for $DATA ──
+    if base_ref != 0 {
+        let mut offset = first_attr;
+        while offset + 16 <= record_size {
+            let attr_type = u32::from_le_bytes(record[offset..offset + 4].try_into().unwrap());
+            if attr_type == ATTR_TYPE_END {
+                break;
+            }
+            let attr_len = u32::from_le_bytes(record[offset + 4..offset + 8].try_into().unwrap())
+                as usize;
+            if attr_len == 0 || offset + attr_len > record_size {
+                break;
+            }
+            if attr_type == ATTR_TYPE_DATA {
+                if let Some(size) = extract_data_size_at(record, offset, record_size) {
+                    extension_sizes
+                        .entry(base_ref)
+                        .and_modify(|existing| *existing = (*existing).max(size))
+                        .or_insert(size);
+                }
+            }
+            offset += attr_len;
+        }
+        return;
+    }
+
+    // ── Base record: extract name, parent, size, flags ──
+    let mut best_name: Option<(String, u64, u8)> = None; // (name, parent_frn, namespace)
+    let mut file_size: u64 = 0;
+    let mut is_reparse = false;
+    let mut all_parents: Vec<u64> = Vec::new();
+
+    let mut offset = first_attr;
+    while offset + 16 <= record_size {
+        let attr_type = u32::from_le_bytes(record[offset..offset + 4].try_into().unwrap());
+        if attr_type == ATTR_TYPE_END {
+            break;
+        }
+        let attr_len =
+            u32::from_le_bytes(record[offset + 4..offset + 8].try_into().unwrap()) as usize;
+        if attr_len == 0 || offset + attr_len > record_size {
+            break;
+        }
+
+        match attr_type {
+            ATTR_TYPE_STANDARD_INFORMATION => {
+                // Resident — file attributes at content_start + 0x20.
+                let non_resident = record[offset + 8];
+                if non_resident == 0 && offset + 0x16 <= record_size {
+                    let value_offset = u16::from_le_bytes(
+                        record[offset + 0x14..offset + 0x16].try_into().unwrap(),
+                    ) as usize;
+                    let cs = offset + value_offset;
+                    if cs + 0x24 <= record_size {
+                        let file_attrs = u32::from_le_bytes(
+                            record[cs + 0x20..cs + 0x24].try_into().unwrap(),
+                        );
+                        if file_attrs & 0x400 != 0 {
+                            // FILE_ATTRIBUTE_REPARSE_POINT
+                            is_reparse = true;
+                        }
+                    }
+                }
+            }
+            ATTR_TYPE_FILE_NAME => {
+                let non_resident = record[offset + 8];
+                if non_resident == 0 && offset + 0x16 <= record_size {
+                    let value_offset = u16::from_le_bytes(
+                        record[offset + 0x14..offset + 0x16].try_into().unwrap(),
+                    ) as usize;
+                    let value_length = u32::from_le_bytes(
+                        record[offset + 0x10..offset + 0x14].try_into().unwrap(),
+                    ) as usize;
+                    let cs = offset + value_offset;
+
+                    if cs + 66 <= record_size && value_length >= 66 {
+                        let parent_frn = u64::from_le_bytes(
+                            record[cs..cs + 8].try_into().unwrap(),
+                        ) & 0x0000_FFFF_FFFF_FFFF;
+
+                        let name_chars = record[cs + 64] as usize;
+                        let namespace = record[cs + 65];
+                        let ns = cs + 66;
+                        let nb = name_chars * 2;
+
+                        if ns + nb <= record_size && name_chars > 0 {
+                            let name_u16: Vec<u16> = record[ns..ns + nb]
+                                .chunks_exact(2)
+                                .map(|c| u16::from_le_bytes([c[0], c[1]]))
+                                .collect();
+                            let name = String::from_utf16_lossy(&name_u16);
+
+                            if !all_parents.contains(&parent_frn) {
+                                all_parents.push(parent_frn);
+                            }
+
+                            // Namespace priority: Win32+DOS (3) > Win32 (1) > POSIX (0) > DOS (2).
+                            let priority = |ns: u8| -> u8 {
+                                match ns {
+                                    3 => 4,
+                                    1 => 3,
+                                    0 => 2,
+                                    2 => 1,
+                                    _ => 0,
+                                }
+                            };
+                            let should_replace = match &best_name {
+                                None => true,
+                                Some((_, _, prev_ns)) => priority(namespace) > priority(*prev_ns),
+                            };
+                            if should_replace {
+                                best_name = Some((name, parent_frn, namespace));
+                            }
+                        }
+                    }
+                }
+            }
+            ATTR_TYPE_DATA => {
+                if let Some(size) = extract_data_size_at(record, offset, record_size) {
+                    file_size = size;
+                }
+            }
+            _ => {}
+        }
+
+        offset += attr_len;
+    }
+
+    // Insert if we found a valid name.
+    if let Some((name, parent_frn, _)) = best_name {
+        if !index.insert_record(frn, &name, parent_frn, is_dir, is_reparse) {
+            return; // Arena full.
+        }
+        if file_size > 0 {
+            if let Some(rec) = index.records.get_mut(&frn) {
+                rec.size = file_size;
+            }
+        }
+        // Register extra hardlink parents.
+        if all_parents.len() > 1 {
+            for &parent in &all_parents {
+                if parent != parent_frn {
+                    let extras = index.hardlink_parents.entry(frn).or_default();
+                    if !extras.contains(&parent) {
+                        extras.push(parent);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Read the entire MFT from raw volume sectors and build a complete
+/// [`VolumeIndex`] with names, parent relationships, file sizes, hardlinks,
+/// and reparse-point flags — all in a single sequential I/O pass.
+///
+/// This replaces both `FSCTL_ENUM_USN_DATA` enumeration and per-file
+/// `FSCTL_GET_NTFS_FILE_RECORD` size extraction, matching the approach
+/// used by tools like *Everything*.
+pub fn read_mft_bulk<F>(
+    volume: HANDLE,
+    drive_letter: char,
+    mut on_progress: F,
+) -> Result<VolumeIndex, String>
+where
+    F: FnMut(u64, u64),
+{
+    let geo = query_mft_geometry(volume)?;
+    let record_size = geo.bytes_per_file_record as usize;
+    let cluster_size = geo.bytes_per_cluster as usize;
+    let total_mft_bytes = geo.mft_valid_data_length as u64;
+    let total_records = total_mft_bytes / record_size as u64;
+
+    eprintln!(
+        "[MFT-BULK] {}:\\ MFT geometry: record={}B, sector={}B, cluster={}B, \
+         mft_start_lcn={}, valid_data={:.1}MB, ~{} records",
+        drive_letter,
+        record_size,
+        geo.bytes_per_sector,
+        cluster_size,
+        geo.mft_start_lcn,
+        total_mft_bytes as f64 / 1_048_576.0,
+        total_records
+    );
+
+    // Get the MFT's own data runs from record 0.
+    let data_runs = get_mft_data_runs(volume, &geo)?;
+
+    let total_clusters: u64 = data_runs.iter().map(|(_, c)| *c).sum();
+    eprintln!(
+        "[MFT-BULK] {}:\\ MFT has {} data runs, {} total clusters ({:.1} MB)",
+        drive_letter,
+        data_runs.len(),
+        total_clusters,
+        total_clusters as f64 * cluster_size as f64 / 1_048_576.0
+    );
+
+    // Open a dedicated handle for raw sequential reads (avoids moving the
+    // file pointer on the handle used for IOCTL-based incremental updates).
+    let read_handle = crate::usn_journal::open_volume(drive_letter)?;
+
+    let result =
+        read_mft_data(read_handle, drive_letter, &geo, &data_runs, total_records, &mut on_progress);
+
+    crate::usn_journal::close_volume(read_handle);
+
+    result
+}
+
+/// Inner function that performs the sequential MFT read and record parsing.
+fn read_mft_data<F>(
+    handle: HANDLE,
+    drive_letter: char,
+    geo: &MftGeometry,
+    data_runs: &[(i64, u64)],
+    total_records: u64,
+    on_progress: &mut F,
+) -> Result<VolumeIndex, String>
+where
+    F: FnMut(u64, u64),
+{
+    let record_size = geo.bytes_per_file_record as usize;
+    let cluster_size = geo.bytes_per_cluster as usize;
+
+    let mut index = VolumeIndex::new(drive_letter);
+    let mut extension_sizes: HashMap<u64, u64> = HashMap::new();
+
+    // Read buffer: ~16 MB, aligned to both record and cluster boundaries.
+    let chunk_records = (16 * 1024 * 1024) / record_size;
+    let chunk_bytes = chunk_records * record_size;
+    // Round down to cluster boundary for sector-aligned reads.
+    let chunk_bytes = (chunk_bytes / cluster_size) * cluster_size;
+    let mut read_buf = vec![0u8; chunk_bytes];
+
+    let mut frn: u64 = 0;
+    let start = std::time::Instant::now();
+    let mut last_progress = std::time::Instant::now();
+
+    on_progress(0, total_records);
+
+    for &(lcn, cluster_count) in data_runs {
+        let run_byte_offset = lcn as u64 * cluster_size as u64;
+        let run_bytes = cluster_count * cluster_size as u64;
+
+        // Seek to the start of this data run.
+        let seek_result = unsafe {
+            SetFilePointerEx(handle, run_byte_offset as i64, None, FILE_BEGIN)
+        };
+        if seek_result.is_err() {
+            eprintln!(
+                "[MFT-BULK] {}:\\ Seek to LCN {} (offset {}) failed, skipping run",
+                drive_letter, lcn, run_byte_offset
+            );
+            // We still need to advance frn by the number of records in this run.
+            let run_records = run_bytes / record_size as u64;
+            frn += run_records;
+            continue;
+        }
+
+        let mut bytes_remaining = run_bytes;
+        while bytes_remaining > 0 && frn < total_records {
+            let to_read = (bytes_remaining as usize).min(chunk_bytes);
+            // Align down to cluster boundary.
+            let to_read = (to_read / cluster_size) * cluster_size;
+            if to_read == 0 {
+                break;
+            }
+
+            let mut bytes_read_out: u32 = 0;
+            let read_result = unsafe {
+                ReadFile(
+                    handle,
+                    Some(&mut read_buf[..to_read]),
+                    Some(&mut bytes_read_out),
+                    None,
+                )
+            };
+
+            if read_result.is_err() || bytes_read_out == 0 {
+                let skip_records = bytes_remaining / record_size as u64;
+                frn += skip_records;
+                eprintln!(
+                    "[MFT-BULK] {}:\\ ReadFile failed at FRN {}, skipping {} records",
+                    drive_letter, frn, skip_records
+                );
+                break;
+            }
+
+            let bytes_read = bytes_read_out as usize;
+            let usable_bytes = (bytes_read / record_size) * record_size;
+
+            let mut buf_offset = 0;
+            while buf_offset + record_size <= usable_bytes && frn < total_records {
+                let record_data = &mut read_buf[buf_offset..buf_offset + record_size];
+
+                // Apply NTFS fixup array before parsing.
+                if apply_fixup(record_data) {
+                    parse_mft_record_bulk(
+                        record_data,
+                        record_size,
+                        frn,
+                        &mut index,
+                        &mut extension_sizes,
+                    );
+                }
+
+                frn += 1;
+                buf_offset += record_size;
+            }
+
+            bytes_remaining -= bytes_read as u64;
+
+            if last_progress.elapsed() >= std::time::Duration::from_millis(200) {
+                on_progress(frn, total_records);
+                last_progress = std::time::Instant::now();
+            }
+        }
+    }
+
+    // Apply sizes from extension records to their base records.
+    let mut ext_applied = 0u64;
+    for (base_frn, size) in &extension_sizes {
+        if let Some(rec) = index.records.get_mut(base_frn) {
+            if rec.size == 0 {
+                rec.size = *size;
+                ext_applied += 1;
+            }
+        }
+    }
+
+    on_progress(frn, total_records);
+
+    let elapsed = start.elapsed();
+    let (arena_used, _arena_cap, map_est) = index.memory_usage();
+    eprintln!(
+        "[MFT-BULK] {}:\\ Read {} MFT records in {:.2}s: {} files/dirs indexed, {} ext sizes applied",
+        drive_letter,
+        frn,
+        elapsed.as_secs_f64(),
+        index.records.len(),
+        ext_applied,
+    );
+    eprintln!(
+        "[MFT-BULK] {}:\\ Memory: arena {:.1} MB, map ~{:.1} MB",
+        drive_letter,
+        arena_used as f64 / 1_048_576.0,
+        map_est as f64 / 1_048_576.0,
+    );
+
+    Ok(index)
 }

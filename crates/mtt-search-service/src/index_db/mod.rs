@@ -1,3 +1,4 @@
+pub mod binary;
 mod fts;
 mod sync;
 

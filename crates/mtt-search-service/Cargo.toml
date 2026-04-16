@@ -13,6 +13,7 @@ rusqlite = { workspace = true }
 serde = { workspace = true }
 bincode = { workspace = true }
 parking_lot = "0.12"
+memchr = "2"
 
 [dependencies.windows]
 version = "0.61.0"

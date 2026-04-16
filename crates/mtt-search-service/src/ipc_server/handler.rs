@@ -9,7 +9,7 @@ use windows::Win32::Foundation::HANDLE;
 use crate::file_index::{IndexState, VolumeIndex};
 use crate::indexing_progress::IndexingProgress;
 use crate::ipc_authorization::{
-    collect_authorized_fts_page, collect_authorized_search_page,
+    collect_authorized_search_page,
     current_client_can_read_path, PipeImpersonationGuard,
 };
 use crate::index_db;
@@ -30,8 +30,8 @@ pub(super) fn handle_client(
     is_warming: &Arc<AtomicBool>,
     last_warm_epoch_secs: &Arc<AtomicU64>,
     security_policy: &IpcSecurityPolicy,
-    fts_searcher: &Option<Arc<index_db::FtsSearcher>>,
-    fts_state: &Arc<FtsState>,
+    _fts_searcher: &Option<Arc<index_db::FtsSearcher>>,
+    _fts_state: &Arc<FtsState>,
 ) {
     let request_data = match read_message(pipe) {
         Some(data) => data,
@@ -146,61 +146,10 @@ pub(super) fn handle_client(
                 return;
             }
 
-            // FTS5 path: use trigram-indexed search when all tokens are ≥3 chars.
-            // Shorter tokens would cause FTS5 to fall back to a full table scan
-            // (slower than the in-memory linear scan), so we keep the old path.
-            let min_token_len = text
-                .split_whitespace()
-                .map(|t| t.len())
-                .min()
-                .unwrap_or(0);
-            let use_fts = min_token_len >= 3 && fts_searcher.is_some() && fts_state.is_ready();
-
-            // ── Snapshot candidates under lock, then release before authorization ──
-            // Authorization calls CreateFileW which can be slow (AV, cloud, FUSE).
-            // Holding the RwLock during those calls would block index writers.
-            let result = if use_fts {
-                // FTS path: query SQLite (no lock needed), then resolve paths
-                // from the in-memory index under a short lock.
-                match collect_authorized_fts_page(
-                    pipe,
-                    fts_searcher.as_ref().unwrap(),
-                    indices,
-                    &text,
-                    offset,
-                    limit,
-                ) {
-                    Ok(page) => Ok(page),
-                    Err(e) => {
-                        // Only fall back to linear scan for structural FTS errors
-                        // (corrupt index, schema mismatch).  Transient problems
-                        // like client disconnects or lock contention would hit the
-                        // linear path just as hard (or worse — it holds the read
-                        // lock much longer), so propagate those directly.
-                        let is_transient = e.contains("Client disconnected")
-                            || e.contains("busy")
-                            || e.contains("timeout")
-                            || e.contains("locked");
-                        if is_transient {
-                            eprintln!(
-                                "[IPC] FTS query transient error for '{}', skipping linear fallback: {}",
-                                text,
-                                e
-                            );
-                            Err(e)
-                        } else {
-                            eprintln!(
-                                "[IPC] FTS query failed for '{}', falling back to linear scan: {}",
-                                text,
-                                e
-                            );
-                            collect_authorized_search_page(pipe, indices, &text, offset, limit)
-                        }
-                    }
-                }
-            } else {
-                collect_authorized_search_page(pipe, indices, &text, offset, limit)
-            };
+            // Always use in-memory SIMD search (Phase 3). The lowered NameArena
+            // + memchr::memmem is faster than FTS5 for all query lengths, and
+            // has zero index build overhead.
+            let result = collect_authorized_search_page(pipe, indices, &text, offset, limit);
 
             match result {
                 Ok(page) => {
@@ -438,6 +387,7 @@ fn build_status_response(
                     phase: "redacted".to_string(),
                     phase_progress: None,
                     phase_total: None,
+                    sizes_loading: false,
                 },
             );
         }
@@ -451,6 +401,7 @@ fn build_status_response(
                     phase: "redacted".to_string(),
                     phase_progress: None,
                     phase_total: None,
+                    sizes_loading: false,
                 },
             );
         }
@@ -483,6 +434,7 @@ fn build_status_response(
                 },
                 phase_progress: None,
                 phase_total: None,
+                sizes_loading: matches!(vol.state, crate::file_index::IndexState::Ready) && !vol.sizes_loaded,
             };
 
             match volume_map.get_mut(&vol.drive_letter) {

@@ -3111,6 +3111,7 @@ name = "mtt-search-service"
 version = "0.1.0"
 dependencies = [
  "bincode",
+ "memchr",
  "mtt-search-protocol",
  "parking_lot",
  "rusqlite",
