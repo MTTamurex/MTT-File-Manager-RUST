@@ -35,6 +35,7 @@ impl IndexingProgress {
                 phase: phase.to_string(),
                 phase_progress,
                 phase_total,
+                sizes_loading: false,
             },
         );
     }

@@ -25,6 +25,9 @@ pub struct NameRef {
 /// Contiguous arena holding all file name strings as raw UTF-8 bytes.
 pub struct NameArena {
     buf: Vec<u8>,
+    /// Lowercased copy of `buf` for case-insensitive SIMD substring search.
+    /// Built lazily by `build_lowered()` after the scan is complete.
+    lowered: Vec<u8>,
 }
 
 impl NameArena {
@@ -32,6 +35,17 @@ impl NameArena {
     pub fn with_capacity(estimated_bytes: usize) -> Self {
         Self {
             buf: Vec::with_capacity(estimated_bytes),
+            lowered: Vec::new(),
+        }
+    }
+
+    /// Reconstruct an arena from raw bytes (loaded from binary index).
+    /// The caller is responsible for ensuring the bytes are valid UTF-8
+    /// (e.g. verified by CRC integrity check on the containing file).
+    pub fn from_raw(bytes: &[u8]) -> Self {
+        Self {
+            buf: bytes.to_vec(),
+            lowered: Vec::new(),
         }
     }
 
@@ -68,11 +82,45 @@ impl NameArena {
     /// Clear all names (for re-scan).
     pub fn clear(&mut self) {
         self.buf.clear();
+        self.lowered.clear();
     }
 
     /// Release excess capacity after the initial scan is complete.
     pub fn shrink_to_fit(&mut self) {
         self.buf.shrink_to_fit();
+    }
+
+    /// Build the lowercased copy of the arena for case-insensitive search.
+    /// Call this after loading/scanning is complete and before serving queries.
+    /// Cost: one allocation + one pass (~30 MB for ~1.5M files).
+    pub fn build_lowered(&mut self) {
+        // File names are typically ASCII, so lowercasing is byte-level for speed.
+        // For non-ASCII, `make_ascii_lowercase` leaves non-ASCII bytes untouched,
+        // which is acceptable — NTFS file names are almost always within the
+        // ASCII/Latin-1 range, and the rare miss is corrected by the final
+        // per-record confirmation step in the caller.
+        self.lowered = self.buf.clone();
+        self.lowered.make_ascii_lowercase();
+    }
+
+    /// Get the lowercased byte at a given offset (for verification).
+    /// Returns the lowered slice for a NameRef.
+    #[inline]
+    pub fn get_lowered(&self, r: NameRef) -> &[u8] {
+        let start = r.offset as usize;
+        let end = start + r.len as usize;
+        if end <= self.lowered.len() {
+            &self.lowered[start..end]
+        } else {
+            // Lowered not built or offset out of range — fall back to empty.
+            b""
+        }
+    }
+
+    /// Whether the lowered arena has been built.
+    #[inline]
+    pub fn has_lowered(&self) -> bool {
+        !self.lowered.is_empty()
     }
 
     /// Total bytes used by name data.
