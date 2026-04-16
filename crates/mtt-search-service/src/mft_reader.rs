@@ -44,8 +44,23 @@ const ATTR_TYPE_FILE_NAME: u32 = 0x30;
 /// $ATTRIBUTE_LIST type identifier — points to attributes stored in external records.
 const ATTR_TYPE_ATTRIBUTE_LIST: u32 = 0x20;
 
+/// $REPARSE_POINT attribute type identifier — contains the reparse tag.
+const ATTR_TYPE_REPARSE_POINT: u32 = 0xC0;
+
 /// End-of-attributes marker.
 const ATTR_TYPE_END: u32 = 0xFFFF_FFFF;
+
+/// Returns `true` if the reparse tag identifies a cloud/OneDrive folder.
+/// These are the ONLY reparse-point directories that Explorer counts when
+/// computing folder size via right-click → Properties.  All other reparse
+/// directories (junctions, symlinks, mount points, etc.) are skipped.
+#[inline]
+fn is_cloud_reparse_tag(tag: u32) -> bool {
+    // IO_REPARSE_TAG_CLOUD variants: 0x9000_X01A where X = 0..F
+    (tag & 0xFFFF_0FFF == 0x9000_001A)
+    // IO_REPARSE_TAG_ONEDRIVE
+    || tag == 0x8000_0021
+}
 
 /// MFT record header flag: record is in use.
 const MFT_RECORD_IN_USE: u16 = 0x01;
@@ -526,32 +541,28 @@ fn resolve_file_size(
 // ── ACL-aware folder size ──────────────────────────────────────────────
 
 /// Check whether the *current thread* token is explicitly **denied** access
-/// to enumerate a directory.  Returns `true` only when `CreateFileW` fails
-/// with `ERROR_ACCESS_DENIED` (5).  Any other failure (path not found,
-/// sharing violation, etc.) is **not** treated as access-denied.
+/// to enumerate a directory.  Uses `FindFirstFileW` (the same API that
+/// Explorer Properties uses) so the result matches what Explorer would skip.
+///
+/// Returns `true` only when `FindFirstFileW` fails with an access-denied
+/// HRESULT.  Any other failure (path not found, sharing violation, etc.)
+/// is **not** treated as access-denied.
 fn is_directory_access_denied(path: &str) -> bool {
     use windows::core::PCWSTR;
-    use windows::Win32::Foundation::CloseHandle;
     use windows::Win32::Storage::FileSystem::{
-        CreateFileW, FILE_FLAG_BACKUP_SEMANTICS, FILE_SHARE_DELETE,
-        FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
+        FindClose, FindFirstFileW, WIN32_FIND_DATAW,
     };
 
-    let wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
-    let result = unsafe {
-        CreateFileW(
-            PCWSTR(wide.as_ptr()),
-            0x0001, // FILE_LIST_DIRECTORY
-            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-            None,
-            OPEN_EXISTING,
-            FILE_FLAG_BACKUP_SEMANTICS,
-            None,
-        )
+    let pattern = if path.ends_with('\\') {
+        format!("{}*", path)
+    } else {
+        format!("{}\\*", path)
     };
-    match result {
+    let wide: Vec<u16> = pattern.encode_utf16().chain(std::iter::once(0)).collect();
+    let mut find_data = WIN32_FIND_DATAW::default();
+    match unsafe { FindFirstFileW(PCWSTR(wide.as_ptr()), &mut find_data) } {
         Ok(h) => {
-            let _ = unsafe { CloseHandle(h) };
+            let _ = unsafe { FindClose(h) };
             false // accessible
         }
         Err(e) => {
@@ -566,7 +577,7 @@ fn is_directory_access_denied(path: &str) -> bool {
 /// Uses `VolumeIndex::folder_size_sum` (fast in-memory BFS, no FRN dedup,
 /// hardlinks counted per appearance — matching Explorer) as the base total,
 /// then **subtracts** only the subtrees of immediate child directories for
-/// which `CreateFileW` returns explicit `ERROR_ACCESS_DENIED`.
+/// which `FindFirstFileW` returns explicit `ERROR_ACCESS_DENIED`.
 ///
 /// This is a **fail-open** approach: if path resolution fails or `CreateFileW`
 /// fails for any reason other than ACCESS_DENIED, the subtree is kept.  Only
@@ -579,6 +590,21 @@ pub fn folder_size_for_user(
 ) -> (u64, u64, u64) {
     // Start with the full in-memory total (no dedup, includes hardlinks).
     let (raw_total, raw_count) = index.folder_size_sum(dir_frn);
+
+    // Diagnostic: compute unique-file total to detect hardlink impact.
+    let (uniq_total, uniq_count, dup_hits) = index.folder_size_sum_unique_files(dir_frn);
+    if dup_hits > 0 || raw_total != uniq_total {
+        eprintln!(
+            "[FOLDER-SIZE-DIAG] frn={} raw={:.2}GB({} files) unique={:.2}GB({} files) dup_hits={} delta={:.2}MB",
+            dir_frn,
+            raw_total as f64 / 1_073_741_824.0,
+            raw_count,
+            uniq_total as f64 / 1_073_741_824.0,
+            uniq_count,
+            dup_hits,
+            (raw_total as i128 - uniq_total as i128) as f64 / 1_048_576.0,
+        );
+    }
 
     let mut denied_size: u64 = 0;
     let mut denied_count: u64 = 0;
@@ -602,6 +628,14 @@ pub fn folder_size_for_user(
                 if denied {
                     // Subtract this subtree's contribution.
                     let (sub_size, sub_count) = index.folder_size_sum(child_frn);
+                    let name = index.names.get(record.name_ref());
+                    eprintln!(
+                        "[FOLDER-SIZE-ACL] blocked child frn={} name={:?} size={:.2}GB files={}",
+                        child_frn,
+                        name,
+                        sub_size as f64 / 1_073_741_824.0,
+                        sub_count,
+                    );
                     denied_size = denied_size.saturating_add(sub_size);
                     denied_count = denied_count.saturating_add(sub_count);
                     skipped_dirs += 1;
@@ -1175,6 +1209,7 @@ fn parse_mft_record_bulk(
     frn: u64,
     index: &mut VolumeIndex,
     extension_sizes: &mut HashMap<u64, u64>,
+    size_recheck_candidates: &mut Vec<u64>,
 ) {
     if record.len() < record_size || record_size < 0x30 {
         return;
@@ -1226,7 +1261,10 @@ fn parse_mft_record_bulk(
     // ── Base record: extract name, parent, size, flags ──
     let mut best_name: Option<(String, u64, u8)> = None; // (name, parent_frn, namespace)
     let mut file_size: u64 = 0;
-    let mut is_reparse = false;
+    let mut saw_default_data_attr = false;
+    let mut has_attr_list = false;
+    let mut has_reparse_attr = false;
+    let mut reparse_tag: u32 = 0;
     let mut all_parents: Vec<u64> = Vec::new();
 
     let mut offset = first_attr;
@@ -1256,8 +1294,24 @@ fn parse_mft_record_bulk(
                         );
                         if file_attrs & 0x400 != 0 {
                             // FILE_ATTRIBUTE_REPARSE_POINT
-                            is_reparse = true;
+                            has_reparse_attr = true;
                         }
+                    }
+                }
+            }
+            ATTR_TYPE_REPARSE_POINT => {
+                // $REPARSE_POINT is always resident. First 4 bytes of the
+                // value are the reparse tag (IO_REPARSE_TAG_*).
+                let non_resident = record[offset + 8];
+                if non_resident == 0 && offset + 0x16 <= record_size {
+                    let value_offset = u16::from_le_bytes(
+                        record[offset + 0x14..offset + 0x16].try_into().unwrap(),
+                    ) as usize;
+                    let cs = offset + value_offset;
+                    if cs + 4 <= record_size {
+                        reparse_tag = u32::from_le_bytes(
+                            record[cs..cs + 4].try_into().unwrap(),
+                        );
                     }
                 }
             }
@@ -1314,8 +1368,12 @@ fn parse_mft_record_bulk(
                     }
                 }
             }
+            ATTR_TYPE_ATTRIBUTE_LIST => {
+                has_attr_list = true;
+            }
             ATTR_TYPE_DATA => {
                 if let Some(size) = extract_data_size_at(record, offset, record_size) {
+                    saw_default_data_attr = true;
                     file_size = size;
                 }
             }
@@ -1325,9 +1383,14 @@ fn parse_mft_record_bulk(
         offset += attr_len;
     }
 
+    // Track reparse-point directories for DB serialization and metadata.
+    // folder_size_sum no longer skips these (junctions have zero MFT children
+    // anyway, so traversing them is harmless), but we still record them.
+    let is_skip_reparse = has_reparse_attr && !is_cloud_reparse_tag(reparse_tag);
+
     // Insert if we found a valid name.
     if let Some((name, parent_frn, _)) = best_name {
-        if !index.insert_record(frn, &name, parent_frn, is_dir, is_reparse) {
+        if !index.insert_record(frn, &name, parent_frn, is_dir, is_skip_reparse) {
             return; // Arena full.
         }
         if file_size > 0 {
@@ -1345,6 +1408,13 @@ fn parse_mft_record_bulk(
                     }
                 }
             }
+        }
+
+        // Recheck only files whose size could not be resolved confidently
+        // during the bulk pass. Legitimate zero-byte files still have a
+        // default $DATA attribute, so they are not queued.
+        if !is_dir && file_size == 0 && (has_attr_list || !saw_default_data_attr) {
+            size_recheck_candidates.push(frn);
         }
     }
 }
@@ -1423,6 +1493,7 @@ where
 
     let mut index = VolumeIndex::new(drive_letter);
     let mut extension_sizes: HashMap<u64, u64> = HashMap::new();
+    let mut size_recheck_candidates: Vec<u64> = Vec::new();
 
     // Read buffer: ~16 MB, aligned to both record and cluster boundaries.
     let chunk_records = (16 * 1024 * 1024) / record_size;
@@ -1500,6 +1571,7 @@ where
                         frn,
                         &mut index,
                         &mut extension_sizes,
+                        &mut size_recheck_candidates,
                     );
                 }
 
@@ -1520,9 +1592,64 @@ where
     let mut ext_applied = 0u64;
     for (base_frn, size) in &extension_sizes {
         if let Some(rec) = index.records.get_mut(base_frn) {
-            if rec.size == 0 {
+            if rec.size < *size {
                 rec.size = *size;
                 ext_applied += 1;
+            }
+        }
+    }
+
+    // Recover exact sizes only for suspicious records the bulk pass could not
+    // resolve. This keeps startup fast while restoring correctness for
+    // $ATTRIBUTE_LIST and similar edge cases.
+    let mut precise_fixed = 0u64;
+    let mut precise_direct = 0u64;
+    let mut precise_attr_list = 0u64;
+    let mut precise_metadata = 0u64;
+    let mut precise_file_id = 0u64;
+    let mut precise_unresolved = 0u64;
+    if !size_recheck_candidates.is_empty() {
+        let mut dir_cache: HashMap<u64, String> = HashMap::with_capacity(1024);
+        let mut output_buffer = vec![0u8; OUTPUT_HEADER + record_size];
+
+        for frn in size_recheck_candidates {
+            let needs_recheck = index
+                .records
+                .get(&frn)
+                .map(|rec| !rec.is_dir && rec.size == 0)
+                .unwrap_or(false);
+            if !needs_recheck {
+                continue;
+            }
+
+            let resolved = match resolve_file_size(handle, frn, record_size, &mut output_buffer) {
+                SizeResolution::Direct(size) => {
+                    precise_direct += 1;
+                    Some(size)
+                }
+                SizeResolution::ViaAttrList(size) => {
+                    precise_attr_list += 1;
+                    Some(size)
+                }
+                SizeResolution::None => {
+                    if let Some(size) = stat_file_size_fallback(&index, frn, &mut dir_cache) {
+                        precise_metadata += 1;
+                        Some(size)
+                    } else if let Some(size) = size_by_file_id(handle, frn) {
+                        precise_file_id += 1;
+                        Some(size)
+                    } else {
+                        precise_unresolved += 1;
+                        None
+                    }
+                }
+            };
+
+            if let Some(size) = resolved {
+                if let Some(rec) = index.records.get_mut(&frn) {
+                    rec.size = size;
+                    precise_fixed += 1;
+                }
             }
         }
     }
@@ -1532,12 +1659,18 @@ where
     let elapsed = start.elapsed();
     let (arena_used, _arena_cap, map_est) = index.memory_usage();
     eprintln!(
-        "[MFT-BULK] {}:\\ Read {} MFT records in {:.2}s: {} files/dirs indexed, {} ext sizes applied",
+        "[MFT-BULK] {}:\\ Read {} MFT records in {:.2}s: {} files/dirs indexed, {} ext sizes applied, {} precise rechecks (direct={}, attr_list={}, metadata={}, file_id={}, unresolved={})",
         drive_letter,
         frn,
         elapsed.as_secs_f64(),
         index.records.len(),
         ext_applied,
+        precise_fixed,
+        precise_direct,
+        precise_attr_list,
+        precise_metadata,
+        precise_file_id,
+        precise_unresolved,
     );
     eprintln!(
         "[MFT-BULK] {}:\\ Memory: arena {:.1} MB, map ~{:.1} MB",

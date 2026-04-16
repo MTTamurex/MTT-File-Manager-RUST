@@ -139,7 +139,7 @@ fn handle_service_main(_args: Vec<OsString>) {
     });
 
     // Run the indexer (blocks until shutdown)
-    crate::run_indexer(shutdown, false);
+    crate::run_indexer(shutdown);
 
     // Report "Stopped"
     let _ = status_handle.set_service_status(ServiceStatus {
