@@ -1120,6 +1120,7 @@ fn parse_mft_record_bulk(
     frn: u64,
     index: &mut VolumeIndex,
     extension_sizes: &mut HashMap<u64, u64>,
+    extension_parents: &mut HashMap<u64, Vec<u64>>,
     size_recheck_candidates: &mut Vec<u64>,
 ) {
     if record.len() < record_size || record_size < 0x30 {
@@ -1156,13 +1157,38 @@ fn parse_mft_record_bulk(
             if attr_len == 0 || offset + attr_len > record_size {
                 break;
             }
-            if attr_type == ATTR_TYPE_DATA {
-                if let Some(size) = extract_data_size_at(record, offset, record_size) {
-                    extension_sizes
-                        .entry(base_ref)
-                        .and_modify(|existing| *existing = (*existing).max(size))
-                        .or_insert(size);
+            match attr_type {
+                ATTR_TYPE_DATA => {
+                    if let Some(size) = extract_data_size_at(record, offset, record_size) {
+                        extension_sizes
+                            .entry(base_ref)
+                            .and_modify(|existing| *existing = (*existing).max(size))
+                            .or_insert(size);
+                    }
                 }
+                ATTR_TYPE_FILE_NAME if !is_dir => {
+                    let non_resident = record[offset + 8];
+                    if non_resident == 0 && offset + 0x16 <= record_size {
+                        let value_offset = u16::from_le_bytes(
+                            record[offset + 0x14..offset + 0x16].try_into().unwrap(),
+                        ) as usize;
+                        let value_length = u32::from_le_bytes(
+                            record[offset + 0x10..offset + 0x14].try_into().unwrap(),
+                        ) as usize;
+                        let content_start = offset + value_offset;
+
+                        if content_start + 8 <= record_size && value_length >= 66 {
+                            let parent_frn = u64::from_le_bytes(
+                                record[content_start..content_start + 8].try_into().unwrap(),
+                            ) & 0x0000_FFFF_FFFF_FFFF;
+                            let parents = extension_parents.entry(base_ref).or_default();
+                            if !parents.contains(&parent_frn) {
+                                parents.push(parent_frn);
+                            }
+                        }
+                    }
+                }
+                _ => {}
             }
             offset += attr_len;
         }
@@ -1404,6 +1430,7 @@ where
 
     let mut index = VolumeIndex::new(drive_letter);
     let mut extension_sizes: HashMap<u64, u64> = HashMap::new();
+    let mut extension_parents: HashMap<u64, Vec<u64>> = HashMap::new();
     let mut size_recheck_candidates: Vec<u64> = Vec::new();
 
     // Read buffer: ~16 MB, aligned to both record and cluster boundaries.
@@ -1482,6 +1509,7 @@ where
                         frn,
                         &mut index,
                         &mut extension_sizes,
+                        &mut extension_parents,
                         &mut size_recheck_candidates,
                     );
                 }
@@ -1508,6 +1536,25 @@ where
                 ext_applied += 1;
             }
         }
+    }
+
+    let mut ext_parent_edges_applied = 0u64;
+    for (base_frn, parents) in extension_parents {
+        let Some(primary_parent) = index.records.get(&base_frn).map(|rec| rec.parent_ref) else {
+            continue;
+        };
+
+        let extras = index.hardlink_parents.entry(base_frn).or_default();
+        for parent in parents {
+            if parent != primary_parent && !extras.contains(&parent) {
+                extras.push(parent);
+                ext_parent_edges_applied += 1;
+            }
+        }
+    }
+
+    if !index.hardlink_parents.is_empty() {
+        index.rebuild_children();
     }
 
     // Recover exact sizes only for suspicious records the bulk pass could not
@@ -1570,12 +1617,13 @@ where
     let elapsed = start.elapsed();
     let (arena_used, _arena_cap, map_est) = index.memory_usage();
     eprintln!(
-        "[MFT-BULK] {}:\\ Read {} MFT records in {:.2}s: {} files/dirs indexed, {} ext sizes applied, {} precise rechecks (direct={}, attr_list={}, metadata={}, file_id={}, unresolved={})",
+        "[MFT-BULK] {}:\\ Read {} MFT records in {:.2}s: {} files/dirs indexed, {} ext sizes applied, {} ext hardlink edges, {} precise rechecks (direct={}, attr_list={}, metadata={}, file_id={}, unresolved={})",
         drive_letter,
         frn,
         elapsed.as_secs_f64(),
         index.records.len(),
         ext_applied,
+        ext_parent_edges_applied,
         precise_fixed,
         precise_direct,
         precise_attr_list,
