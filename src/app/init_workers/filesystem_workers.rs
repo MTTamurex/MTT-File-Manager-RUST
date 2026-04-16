@@ -6,6 +6,9 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc};
 
+const NTFS_FOLDER_SIZE_SERVICE_RETRY_ATTEMPTS: usize = 20;
+const NTFS_FOLDER_SIZE_SERVICE_RETRY_MS: u64 = 250;
+
 /// Payload for the disk-cache invalidation channel.
 /// When `force` is `true` the existence guard is skipped — used for
 /// app-initiated deletes where the Shell hasn't finished yet.
@@ -17,6 +20,50 @@ pub struct CacheInvalidationEntry {
 fn should_skip_exists_guard(path: &std::path::Path) -> bool {
     crate::infrastructure::onedrive::is_onedrive_path(path)
         || crate::infrastructure::io_priority::is_network_or_virtual(path)
+}
+
+fn is_retryable_folder_size_service_error(message: &str) -> bool {
+    let lower = message.to_ascii_lowercase();
+    lower.contains("sizes not loaded")
+        || lower.contains("volume not ready")
+        || lower.contains("volume not indexed")
+        || lower.contains("all pipe instances are busy")
+        || lower.contains("no process is on the other end of the pipe")
+        || lower.contains("pipe closed during read")
+        || lower.contains("search service timeout")
+        || lower.contains("peeknamedpipe failed")
+        || lower.contains("readfile failed")
+        || lower.contains("writefile failed")
+}
+
+fn query_ntfs_folder_size_with_retry(
+    folder_path: &std::path::Path,
+    cancel: &Arc<AtomicBool>,
+) -> Result<(u64, u64), String> {
+    let mut last_error = String::from("Search service not available");
+
+    for attempt in 0..NTFS_FOLDER_SIZE_SERVICE_RETRY_ATTEMPTS {
+        if cancel.load(Ordering::Acquire) {
+            return Err("cancelled".to_string());
+        }
+
+        match crate::infrastructure::global_search::folder_size(folder_path) {
+            Ok(result) => return Ok(result),
+            Err(error) => {
+                let retryable = is_retryable_folder_size_service_error(&error);
+                last_error = error;
+                if !retryable || attempt + 1 >= NTFS_FOLDER_SIZE_SERVICE_RETRY_ATTEMPTS {
+                    break;
+                }
+
+                std::thread::sleep(std::time::Duration::from_millis(
+                    NTFS_FOLDER_SIZE_SERVICE_RETRY_MS,
+                ));
+            }
+        }
+    }
+
+    Err(last_error)
 }
 
 pub(in crate::app) fn spawn_disk_cache_invalidation_worker(
@@ -148,9 +195,9 @@ pub(in crate::app) fn spawn_folder_size_worker(
             let folder_path = latest_path;
             folder_size_cancel_worker.store(false, Ordering::Release);
 
-            // Fast path: try the search service for NTFS volumes (in-memory, zero I/O).
+            // NTFS fast path: use the service's indexed subtree total.
             if is_ntfs_volume(&folder_path) {
-                match crate::infrastructure::global_search::folder_size(&folder_path) {
+                match query_ntfs_folder_size_with_retry(&folder_path, &folder_size_cancel_worker) {
                     Ok((total_size, file_count)) => {
                         log::info!(
                             "[FOLDER-SIZE] IPC complete path={} total_gb={:.2} files={}",
@@ -166,19 +213,31 @@ pub(in crate::app) fn spawn_folder_size_worker(
                         continue;
                     }
                     Err(e) => {
-                        // Service not available or sizes not loaded — fall through
-                        // to classic FindFirstFileExW scan.
-                        log::info!(
-                            "[FOLDER-SIZE] IPC failed path={} falling_back=true reason={}",
+                        if e == "cancelled" {
+                            let _ = folder_size_res_tx.send(FolderSizeMessage::Cancelled {
+                                folder_path,
+                            });
+                            folder_size_ctx.request_repaint();
+                            continue;
+                        }
+
+                        // NTFS should be served by the indexed path. Avoid
+                        // regressing to a recursive local scan here.
+                        log::warn!(
+                            "[FOLDER-SIZE] IPC failed path={} giving_up=true reason={}",
                             folder_path.display(),
-                            e
+                            e,
                         );
+                        let _ = folder_size_res_tx.send(FolderSizeMessage::Cancelled {
+                            folder_path,
+                        });
+                        folder_size_ctx.request_repaint();
+                        continue;
                     }
                 }
             }
 
-            // Fallback: classic FindFirstFileExW parallel scan (for non-NTFS
-            // or when the search service is unavailable).
+            // Non-NTFS fallback: local recursive scan.
             let is_ssd = crate::infrastructure::io_priority::is_ssd(&folder_path);
             let priority = if is_ssd {
                 crate::infrastructure::io_priority::IOPriority::Prefetch
@@ -235,12 +294,11 @@ pub(in crate::app) fn spawn_folder_size_worker(
 
 /// Spawns a batch worker for list-view folder sizes.
 ///
-/// Uses the NTFS IPC fast path when available (~0 ms), falling back to
-/// `FindFirstFileExW` for non-NTFS or when the search service is unavailable.
-/// The shared `cancel` flag is checked between items and passed through to
-/// `calculate_folder_size_parallel` so in-flight slow scans abort promptly
-/// on navigation. A generation counter invalidates queued requests from
-/// previous folders.
+/// Uses the NTFS service fast path when available, falling back to
+/// `FindFirstFileExW` only for non-NTFS volumes. The shared `cancel` flag is
+/// checked between items and passed through to `calculate_folder_size_parallel`
+/// so in-flight slow scans abort promptly on navigation. A generation counter
+/// invalidates queued requests from previous folders.
 pub(in crate::app) fn spawn_folder_size_batch_worker(
     ctx: &egui::Context,
 ) -> (
@@ -278,20 +336,36 @@ pub(in crate::app) fn spawn_folder_size_batch_worker(
                     continue;
                 }
 
-                // Fast path: NTFS IPC (in-memory, instant).
+                // NTFS fast path: use the service index instead of local recursion.
                 if is_ntfs_volume(&path) {
-                    if let Ok((total_size, _file_count)) =
-                        crate::infrastructure::global_search::folder_size(&path)
-                    {
-                        let _ = res_tx.send(BatchSizeResult {
-                            folder_path: path,
-                            total_size,
-                            request_epoch: req_epoch,
-                        });
-                        ctx.request_repaint();
-                        continue;
+                    match query_ntfs_folder_size_with_retry(&path, &cancel_worker) {
+                        Ok((total_size, _file_count)) => {
+                            let _ = res_tx.send(BatchSizeResult {
+                                folder_path: path,
+                                total_size: Some(total_size),
+                                request_epoch: req_epoch,
+                            });
+                            ctx.request_repaint();
+                            continue;
+                        }
+                        Err(error) if error == "cancelled" => {
+                            continue;
+                        }
+                        Err(error) => {
+                            log::warn!(
+                                "[FOLDER-SIZE] Batch IPC failed path={} giving_up=true reason={}",
+                                path.display(),
+                                error,
+                            );
+                            let _ = res_tx.send(BatchSizeResult {
+                                folder_path: path,
+                                total_size: None,
+                                request_epoch: req_epoch,
+                            });
+                            ctx.request_repaint();
+                            continue;
+                        }
                     }
-                    // IPC failed — fall through to filesystem scan.
                 }
 
                 // Re-check cancel/generation before starting a potentially slow scan.
@@ -322,7 +396,7 @@ pub(in crate::app) fn spawn_folder_size_batch_worker(
                     if let Some(total_size) = result {
                         let _ = res_tx.send(BatchSizeResult {
                             folder_path: path,
-                            total_size,
+                            total_size: Some(total_size),
                             request_epoch: req_epoch,
                         });
                         ctx.request_repaint();
@@ -339,12 +413,10 @@ pub(in crate::app) fn spawn_folder_size_batch_worker(
 
 /// Check if a path resides on an NTFS filesystem.
 /// Uses `GetVolumeInformationW` with the drive root.
-/// Returns `false` on any error (safe default — triggers fallback to FindFirstFileExW).
 fn is_ntfs_volume(path: &std::path::Path) -> bool {
     use windows::core::PCWSTR;
     use windows::Win32::Storage::FileSystem::GetVolumeInformationW;
 
-    // Extract drive root: "C:\"
     let root = match path.components().next() {
         Some(std::path::Component::Prefix(prefix)) => {
             let s = prefix.as_os_str().to_string_lossy();
@@ -375,8 +447,7 @@ fn is_ntfs_volume(path: &std::path::Path) -> bool {
         return false;
     }
 
-    let fs = String::from_utf16_lossy(&fs_name)
+    String::from_utf16_lossy(&fs_name)
         .trim_end_matches('\0')
-        .to_ascii_uppercase();
-    fs == "NTFS"
+        .eq_ignore_ascii_case("NTFS")
 }

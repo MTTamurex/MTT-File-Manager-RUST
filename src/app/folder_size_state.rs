@@ -29,7 +29,7 @@ pub enum FolderSizeMessage {
 /// before a cache invalidation.
 pub struct BatchSizeResult {
     pub folder_path: PathBuf,
-    pub total_size: u64,
+    pub total_size: Option<u64>,
     /// Invalidation epoch copied from the request — compared against the
     /// current `batch_invalidation_epoch` to detect staleness.
     pub request_epoch: u64,
