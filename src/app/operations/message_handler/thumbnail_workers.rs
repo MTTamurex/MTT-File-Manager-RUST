@@ -513,6 +513,11 @@ impl ImageViewerApp {
                     continue;
                 }
 
+                let Some(total_size) = total_size else {
+                    received_any = true;
+                    continue;
+                };
+
                 self.folder_size_state.batch_cache.put(folder_path.clone(), total_size);
                 // Keep the preview-panel cache in sync so selecting the folder
                 // in the details panel shows the same (fresh) value.

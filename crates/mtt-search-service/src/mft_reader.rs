@@ -538,60 +538,13 @@ fn resolve_file_size(
 /// Fallback path-based size query for files whose MFT record did not yield a
 /// usable `$DATA` size. This is slower than raw MFT parsing, so it is only
 /// used for misses.
-// ── ACL-aware folder size ──────────────────────────────────────────────
 
-/// Check whether the *current thread* token is explicitly **denied** access
-/// to enumerate a directory.  Uses `FindFirstFileW` (the same API that
-/// Explorer Properties uses) so the result matches what Explorer would skip.
-///
-/// Returns `true` only when `FindFirstFileW` fails with an access-denied
-/// HRESULT.  Any other failure (path not found, sharing violation, etc.)
-/// is **not** treated as access-denied.
-fn is_directory_access_denied(path: &str) -> bool {
-    use windows::core::PCWSTR;
-    use windows::Win32::Storage::FileSystem::{
-        FindClose, FindFirstFileW, WIN32_FIND_DATAW,
-    };
-
-    let pattern = if path.ends_with('\\') {
-        format!("{}*", path)
-    } else {
-        format!("{}\\*", path)
-    };
-    let wide: Vec<u16> = pattern.encode_utf16().chain(std::iter::once(0)).collect();
-    let mut find_data = WIN32_FIND_DATAW::default();
-    match unsafe { FindFirstFileW(PCWSTR(wide.as_ptr()), &mut find_data) } {
-        Ok(h) => {
-            let _ = unsafe { FindClose(h) };
-            false // accessible
-        }
-        Err(e) => {
-            // Only treat ERROR_ACCESS_DENIED (5) as denied.
-            e.code().0 as u32 == 0x80070005 // HRESULT for Win32 ERROR_ACCESS_DENIED
-        }
-    }
-}
-
-/// Compute folder size respecting the current thread's security context.
-///
-/// Uses `VolumeIndex::folder_size_sum` (fast in-memory BFS, no FRN dedup,
-/// hardlinks counted per appearance — matching Explorer) as the base total,
-/// then **subtracts** only the subtrees of immediate child directories for
-/// which `FindFirstFileW` returns explicit `ERROR_ACCESS_DENIED`.
-///
-/// This is a **fail-open** approach: if path resolution fails or `CreateFileW`
-/// fails for any reason other than ACCESS_DENIED, the subtree is kept.  Only
-/// an explicit ACL denial (like `C:\Program Files\WindowsApps`) is subtracted.
-///
-/// Returns `(total_size, file_count, skipped_dirs)`.
-pub fn folder_size_for_user(
-    index: &VolumeIndex,
-    dir_frn: u64,
-) -> (u64, u64, u64) {
-    // Start with the full in-memory total (no dedup, includes hardlinks).
+/// Compute folder size from the in-memory index using the service's indexed
+/// view of the volume. This is the fast NTFS path used by the app so folder
+/// sizes are stable and do not depend on the caller's elevation token.
+pub fn folder_size_for_service(index: &VolumeIndex, dir_frn: u64) -> (u64, u64) {
     let (raw_total, raw_count) = index.folder_size_sum(dir_frn);
 
-    // Diagnostic: compute unique-file total to detect hardlink impact.
     let (uniq_total, uniq_count, dup_hits) = index.folder_size_sum_unique_files(dir_frn);
     if dup_hits > 0 || raw_total != uniq_total {
         eprintln!(
@@ -606,49 +559,7 @@ pub fn folder_size_for_user(
         );
     }
 
-    let mut denied_size: u64 = 0;
-    let mut denied_count: u64 = 0;
-    let mut skipped_dirs: u64 = 0;
-    let mut dir_cache: HashMap<u64, String> = HashMap::with_capacity(64);
-
-    // ACL-check only the immediate child directories.
-    if let Some(child_frns) = index.children.get(&dir_frn) {
-        for &child_frn in child_frns {
-            if let Some(record) = index.records.get(&child_frn) {
-                if !record.is_dir {
-                    continue;
-                }
-
-                // Resolve path and check for explicit ACCESS_DENIED.
-                let denied = crate::path_resolver::resolve_path_cached(
-                    child_frn, index, &mut dir_cache,
-                )
-                .map_or(false, |p| is_directory_access_denied(&p));
-
-                if denied {
-                    // Subtract this subtree's contribution.
-                    let (sub_size, sub_count) = index.folder_size_sum(child_frn);
-                    let name = index.names.get(record.name_ref());
-                    eprintln!(
-                        "[FOLDER-SIZE-ACL] blocked child frn={} name={:?} size={:.2}GB files={}",
-                        child_frn,
-                        name,
-                        sub_size as f64 / 1_073_741_824.0,
-                        sub_count,
-                    );
-                    denied_size = denied_size.saturating_add(sub_size);
-                    denied_count = denied_count.saturating_add(sub_count);
-                    skipped_dirs += 1;
-                }
-            }
-        }
-    }
-
-    (
-        raw_total.saturating_sub(denied_size),
-        raw_count.saturating_sub(denied_count),
-        skipped_dirs,
-    )
+    (raw_total, raw_count)
 }
 
 fn stat_file_size_fallback(

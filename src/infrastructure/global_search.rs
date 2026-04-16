@@ -153,8 +153,10 @@ pub fn get_status() -> Result<IndexStatusInfo, String> {
 /// Timeout for the lightweight CheckPathsModified request.
 const CHECK_PATHS_TIMEOUT_MS: u64 = 2_000;
 
-/// Timeout for the lightweight FolderSize request (in-memory computation).
-const FOLDER_SIZE_TIMEOUT_MS: u64 = 3_000;
+/// Timeout for the FolderSize request. NTFS folder sizes come from the
+/// service's indexed subtree totals, but startup can still race with size
+/// loading on the service side.
+const FOLDER_SIZE_TIMEOUT_MS: u64 = 8_000;
 
 /// Ask the search service which of the given directory paths have been
 /// modified (via USN journal) within the last `threshold_secs` seconds.

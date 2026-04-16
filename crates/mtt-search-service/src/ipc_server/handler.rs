@@ -240,28 +240,6 @@ pub(super) fn handle_client(
             let _ = send_response(pipe, &SearchResponse::PathsModified { modified });
         }
         SearchRequest::FolderSize { path } => {
-            // SEC: Impersonate the connecting client before checking any paths.
-            let _guard = match PipeImpersonationGuard::new(pipe) {
-                Ok(g) => g,
-                Err(e) => {
-                    eprintln!("[IPC] FolderSize impersonation failed: {}", e);
-                    let _ = send_response(
-                        pipe,
-                        &SearchResponse::Error("Authorization failed".to_string()),
-                    );
-                    return;
-                }
-            };
-
-            // Verify client can read the target path.
-            if !current_client_can_read_path(&path) {
-                let _ = send_response(
-                    pipe,
-                    &SearchResponse::Error("Access denied".to_string()),
-                );
-                return;
-            }
-
             let drive_letter = match path.chars().next() {
                 Some(c) if c.is_ascii_alphabetic() => c.to_ascii_uppercase(),
                 _ => {
@@ -304,22 +282,7 @@ pub(super) fn handle_client(
                     return;
                 }
                 match vol.resolve_path_to_frn(&path) {
-                    Some(frn) => {
-                        let (acl_size, acl_count, skipped_dirs) =
-                            crate::mft_reader::folder_size_for_user(vol, frn);
-
-                        if skipped_dirs > 0 {
-                            eprintln!(
-                                "[FOLDER-SIZE] {} {:.2}GB ({} files) skipped_dirs={}",
-                                crate::redact_paths(&path),
-                                acl_size as f64 / 1_073_741_824.0,
-                                acl_count,
-                                skipped_dirs,
-                            );
-                        }
-
-                        Ok((acl_size, acl_count))
-                    }
+                    Some(frn) => Ok(crate::mft_reader::folder_size_for_service(vol, frn)),
                     None => Err("Path not found in index"),
                 }
             };
