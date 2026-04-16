@@ -107,7 +107,7 @@ fn main() {
 
             let _ = ctrlc_handler(shutdown_clone);
 
-            run_indexer(shutdown, true);
+            run_indexer(shutdown);
         }
         _ => {
             // Normal service dispatch (called by Windows SCM)
@@ -154,7 +154,7 @@ fn ctrlc_handler(shutdown: Arc<AtomicBool>) -> Result<(), String> {
 }
 
 /// Main indexer loop. Shared between console mode and service mode.
-pub fn run_indexer(shutdown: Arc<AtomicBool>, console_mode: bool) {
+pub fn run_indexer(shutdown: Arc<AtomicBool>) {
     eprintln!("[SERVICE] mtt-search-service v2 (compact-arena index)");
     eprintln!(
         "[SERVICE] FileRecord size: {} bytes",
@@ -168,11 +168,7 @@ pub fn run_indexer(shutdown: Arc<AtomicBool>, console_mode: bool) {
     let indexing_progress = Arc::new(indexing_progress::IndexingProgress::new());
 
     // Open persistence (needed by both IPC and indexers)
-    let db_path = match if console_mode {
-        index_db::get_console_db_path()
-    } else {
-        index_db::get_db_path()
-    } {
+    let db_path = match index_db::get_db_path() {
         Ok(path) => path,
         Err(e) => {
             eprintln!(

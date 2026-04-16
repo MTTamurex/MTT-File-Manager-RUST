@@ -390,127 +390,80 @@ pub(crate) fn index_volume(
                 }
             };
 
-            // Take a snapshot of FRNs that need sizing (non-directory files).
-            let target_frns: Vec<u64> = {
-                let lock = indices.read();
-                match lock.iter().find(|v| v.drive_letter == drive_letter) {
-                    Some(vol) => vol
-                        .records
-                        .iter()
-                        .filter(|(_, rec)| !rec.is_dir)
-                        .map(|(&frn, _)| frn)
-                        .collect(),
-                    None => Vec::new(),
-                }
-            };
-
-            if target_frns.is_empty() {
-                usn_journal::close_volume(bg_volume);
-                // Mark sizes as loaded even if empty.
-                if let Some(mut lock) = indices.try_write_for(std::time::Duration::from_secs(5)) {
-                    if let Some(vol) = lock.iter_mut().find(|v| v.drive_letter == drive_letter) {
-                        vol.sizes_loaded = true;
-                    }
-                }
-                return;
-            }
-
-            let total = target_frns.len() as u64;
             eprintln!(
-                "[MFT-SIZE] {}:\\ Background size extraction starting for {} files...",
-                drive_letter, total
-            );
-            indexing_progress.update(
+                "[MFT-SIZE] {}:\\ Background size extraction via bulk MFT read...",
                 drive_letter,
-                "scanning",
-                total,
-                "loading_sizes",
-                Some(0),
-                Some(total),
             );
-
-            let geometry = match crate::mft_reader::query_mft_geometry_pub(bg_volume) {
-                Ok(rs) => rs,
-                Err(e) => {
-                    eprintln!(
-                        "[MFT-SIZE] {}:\\ Background size extraction: geometry query failed: {}",
-                        drive_letter, e
-                    );
-                    usn_journal::close_volume(bg_volume);
-                    return;
-                }
-            };
-
             let start = std::time::Instant::now();
-            let mut sized_count = 0u64;
-            let mut last_reported = 0u64;
-            let mut last_report_at = std::time::Instant::now();
 
-            // Process in batches — read sizes without lock, then apply under a short lock.
-            const SIZE_BATCH: usize = 4096;
-            for chunk in target_frns.chunks(SIZE_BATCH) {
-                // I/O phase: read MFT records without holding any lock.
-                let mut size_updates: Vec<(u64, u64)> = Vec::with_capacity(chunk.len());
-                for &frn in chunk {
-                    if let Some(size) =
-                        crate::mft_reader::read_single_file_size(bg_volume, frn, geometry)
-                    {
-                        size_updates.push((frn, size));
-                    }
-                }
-
-                // Apply phase: short lock to update sizes.
-                if !size_updates.is_empty() {
-                    if let Some(mut lock) =
-                        indices.try_write_for(std::time::Duration::from_millis(200))
-                    {
-                        if let Some(vol) =
-                            lock.iter_mut().find(|v| v.drive_letter == drive_letter)
-                        {
-                            for &(frn, size) in &size_updates {
-                                if let Some(rec) = vol.records.get_mut(&frn) {
-                                    rec.size = size;
-                                }
-                            }
-                        }
-                    }
-                }
-
-                sized_count += size_updates.len() as u64;
-
-                // Progress reporting.
-                let processed = sized_count;
-                if processed.saturating_sub(last_reported) >= 4096
-                    || last_report_at.elapsed() >= std::time::Duration::from_millis(200)
-                {
+            // Use the bulk MFT reader to extract ALL sizes in a single
+            // sequential I/O pass — much faster and more complete than the
+            // old per-file FSCTL_GET_NTFS_FILE_RECORD approach.
+            let bulk_result = crate::mft_reader::read_mft_bulk(
+                bg_volume,
+                drive_letter,
+                |done, total| {
                     indexing_progress.update(
                         drive_letter,
                         "scanning",
                         total,
                         "loading_sizes",
-                        Some(processed),
+                        Some(done),
                         Some(total),
                     );
-                    last_reported = processed;
-                    last_report_at = std::time::Instant::now();
-                }
-            }
+                },
+            );
 
-            // Mark sizes as loaded.
-            if let Some(mut lock) = indices.try_write_for(std::time::Duration::from_secs(5)) {
-                if let Some(vol) = lock.iter_mut().find(|v| v.drive_letter == drive_letter) {
-                    vol.sizes_loaded = true;
+            usn_journal::close_volume(bg_volume);
+
+            match bulk_result {
+                Ok(bulk_index) => {
+                    // Apply sizes from the bulk index to the live index.
+                    let mut applied = 0u64;
+                    if let Some(mut lock) =
+                        indices.try_write_for(std::time::Duration::from_secs(10))
+                    {
+                        if let Some(vol) =
+                            lock.iter_mut().find(|v| v.drive_letter == drive_letter)
+                        {
+                            for (&frn, bulk_rec) in &bulk_index.records {
+                                if bulk_rec.size > 0 {
+                                    if let Some(rec) = vol.records.get_mut(&frn) {
+                                        if rec.size != bulk_rec.size {
+                                            rec.size = bulk_rec.size;
+                                            applied += 1;
+                                        }
+                                    }
+                                }
+                            }
+                            vol.sizes_loaded = true;
+                        }
+                    }
+                    let elapsed = start.elapsed();
+                    eprintln!(
+                        "[MFT-SIZE] {}:\\ Bulk size extraction complete: {} sizes updated in {:.2}s",
+                        drive_letter, applied, elapsed.as_secs_f64()
+                    );
+                }
+                Err(e) => {
+                    eprintln!(
+                        "[MFT-SIZE] {}:\\ Bulk size extraction failed: {}, marking sizes loaded anyway",
+                        drive_letter, e
+                    );
+                    // Still mark as loaded to avoid blocking the UI forever.
+                    if let Some(mut lock) =
+                        indices.try_write_for(std::time::Duration::from_secs(5))
+                    {
+                        if let Some(vol) =
+                            lock.iter_mut().find(|v| v.drive_letter == drive_letter)
+                        {
+                            vol.sizes_loaded = true;
+                        }
+                    }
                 }
             }
 
             indexing_progress.clear(drive_letter);
-            usn_journal::close_volume(bg_volume);
-
-            let elapsed = start.elapsed();
-            eprintln!(
-                "[MFT-SIZE] {}:\\ Background size extraction complete: {} files sized in {:.2}s",
-                drive_letter, sized_count, elapsed.as_secs_f64()
-            );
         });
     }
 

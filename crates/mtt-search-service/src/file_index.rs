@@ -431,11 +431,11 @@ impl VolumeIndex {
     /// Uses the `children` reverse index for O(subtree) traversal.
     /// Returns `(total_size, file_count)`.
     ///
-    /// Reparse-point directories (junctions, symlinks, OneDrive cloud folders)
-    /// are traversed normally.  In the MFT, junction/symlink FRNs have zero
-    /// children (their content lives under the *target* FRN), so they add
-    /// nothing.  Cloud-reparse folders (OneDrive) DO have real children and
-    /// must be counted to match Explorer.  `visited_dirs` prevents cycles.
+    /// All directories are traversed, including reparse-point directories.
+    /// Junction/symlink FRNs have zero children in the MFT (their content
+    /// lives under the *target* FRN) so they add nothing.  Cloud-reparse
+    /// folders (OneDrive) DO have real children and must be counted to
+    /// match Explorer.  `visited_dirs` prevents cycles.
     pub fn folder_size_sum(&self, dir_frn: u64) -> (u64, u64) {
         let mut total_size: u64 = 0;
         let mut file_count: u64 = 0;

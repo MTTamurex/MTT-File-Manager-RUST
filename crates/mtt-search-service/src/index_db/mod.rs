@@ -5,11 +5,25 @@ mod sync;
 use std::ffi::OsStr;
 use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use parking_lot::Mutex;
 
 use rusqlite::{params, Connection, OpenFlags};
 
 pub use fts::FtsSearcher;
+
+/// Resolved data directory — set once at startup by `get_db_path` or
+/// `get_console_db_path`.  Both the SQLite database *and* binary index
+/// files live under this directory so deleting it clears all caches.
+static DATA_DIR: OnceLock<PathBuf> = OnceLock::new();
+
+/// Returns the active data directory. Panics if called before
+/// `get_db_path` or `get_console_db_path`.
+pub fn data_dir() -> &'static Path {
+    DATA_DIR
+        .get()
+        .expect("data_dir() called before get_db_path/get_console_db_path")
+}
 
 /// Persisted volume state for fast restart.
 pub struct PersistedVolumeState {
@@ -33,6 +47,7 @@ pub struct IndexDb {
 /// SEC: Hardcode `C:\ProgramData` instead of reading `%PROGRAMDATA%` env var.
 /// A LocalSystem service always uses this path, and an attacker could redirect
 /// the env var to an attacker-controlled directory to inject a malicious database.
+/// Console mode also uses this path (requires admin for USN journal access).
 pub fn get_db_path() -> Result<PathBuf, String> {
     let dir = Path::new(r"C:\ProgramData").join("MTT-File-Manager");
     std::fs::create_dir_all(&dir)
@@ -43,17 +58,8 @@ pub fn get_db_path() -> Result<PathBuf, String> {
     // and also has a TOCTOU window between directory creation and ACL application.
     harden_directory_acl(&dir)?;
 
-    Ok(dir.join("search_index.db"))
-}
-
-/// Get a console-friendly database path that does not require ProgramData ACL
-/// hardening. This is for local `run-console` diagnostics only; the Windows
-/// service path remains fixed under `C:\ProgramData`.
-pub fn get_console_db_path() -> Result<PathBuf, String> {
-    let dir = std::env::temp_dir().join("MTT-File-Manager-Console");
-    std::fs::create_dir_all(&dir)
-        .map_err(|e| format!("Failed to create console DB directory {:?}: {}", dir, e))?;
-    Ok(dir.join("search_index.db"))
+    let _ = DATA_DIR.set(dir);
+    Ok(data_dir().join("search_index.db"))
 }
 
 /// Apply explicit DACL to the database directory using Win32 API.

@@ -305,27 +305,19 @@ pub(super) fn handle_client(
                 }
                 match vol.resolve_path_to_frn(&path) {
                     Some(frn) => {
-                        // ACL-aware size: starts from raw folder_size_sum
-                        // (no FRN dedup, hardlinks counted per appearance)
-                        // and subtracts only subtrees where the impersonated
-                        // client gets explicit ACCESS_DENIED.
                         let (acl_size, acl_count, skipped_dirs) =
                             crate::mft_reader::folder_size_for_user(vol, frn);
 
-                        // Diagnostics: unique count for comparison.
-                        let (unique_size, unique_count, duplicate_hits) =
-                            vol.folder_size_sum_unique_files(frn);
+                        if skipped_dirs > 0 {
+                            eprintln!(
+                                "[FOLDER-SIZE] {} {:.2}GB ({} files) skipped_dirs={}",
+                                crate::redact_paths(&path),
+                                acl_size as f64 / 1_073_741_824.0,
+                                acl_count,
+                                skipped_dirs,
+                            );
+                        }
 
-                        eprintln!(
-                            "[FOLDER-SIZE] {} acl={:.2}GB ({} files) unique={:.2}GB ({} files) dup={} skipped_dirs={}",
-                            crate::redact_paths(&path),
-                            acl_size as f64 / 1_073_741_824.0,
-                            acl_count,
-                            unique_size as f64 / 1_073_741_824.0,
-                            unique_count,
-                            duplicate_hits,
-                            skipped_dirs,
-                        );
                         Ok((acl_size, acl_count))
                     }
                     None => Err("Path not found in index"),

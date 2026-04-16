@@ -9,7 +9,7 @@
 //!   [CRC32]                      — 4 bytes (covers everything above)
 
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::file_index::{FileRecord, VolumeIndex};
 
@@ -36,11 +36,10 @@ const HEADER_SIZE: usize = std::mem::size_of::<Header>();
 const _: () = assert!(HEADER_SIZE == 72);
 
 /// Returns the path for the binary index file for a given drive letter.
+/// Uses the shared data directory set at startup by `get_db_path` or
+/// `get_console_db_path`, so binary and SQLite caches always live together.
 pub fn index_path(drive_letter: char) -> PathBuf {
-    let data_dir = std::env::var("PROGRAMDATA")
-        .unwrap_or_else(|_| r"C:\ProgramData".to_string());
-    Path::new(&data_dir)
-        .join("MTT-File-Manager")
+    super::data_dir()
         .join(format!("index_{}.bin", drive_letter))
 }
 
