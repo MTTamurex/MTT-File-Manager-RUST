@@ -406,7 +406,7 @@ pub(crate) fn index_volume(
                     indexing_progress.update(
                         drive_letter,
                         "scanning",
-                        total,
+                        done,
                         "loading_sizes",
                         Some(done),
                         Some(total),
@@ -420,6 +420,7 @@ pub(crate) fn index_volume(
                 Ok(bulk_index) => {
                     // Apply sizes from the bulk index to the live index.
                     let mut applied = 0u64;
+                    let mut sizes_marked = false;
                     if let Some(mut lock) =
                         indices.try_write_for(std::time::Duration::from_secs(10))
                     {
@@ -437,6 +438,18 @@ pub(crate) fn index_volume(
                                 }
                             }
                             vol.sizes_loaded = true;
+                            sizes_marked = true;
+                        }
+                    }
+                    // Ensure sizes_loaded is set even if the bulk update
+                    // lock timed out — avoids leaving the UI stuck on
+                    // "sizes not loaded" indefinitely.
+                    if !sizes_marked {
+                        let mut lock = indices.write();
+                        if let Some(vol) =
+                            lock.iter_mut().find(|v| v.drive_letter == drive_letter)
+                        {
+                            vol.sizes_loaded = true;
                         }
                     }
                     let elapsed = start.elapsed();
@@ -451,9 +464,8 @@ pub(crate) fn index_volume(
                         drive_letter, e
                     );
                     // Still mark as loaded to avoid blocking the UI forever.
-                    if let Some(mut lock) =
-                        indices.try_write_for(std::time::Duration::from_secs(5))
                     {
+                        let mut lock = indices.write();
                         if let Some(vol) =
                             lock.iter_mut().find(|v| v.drive_letter == drive_letter)
                         {

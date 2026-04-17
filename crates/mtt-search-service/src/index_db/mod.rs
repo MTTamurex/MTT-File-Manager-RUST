@@ -12,17 +12,16 @@ use rusqlite::{params, Connection, OpenFlags};
 
 pub use fts::FtsSearcher;
 
-/// Resolved data directory — set once at startup by `get_db_path` or
-/// `get_console_db_path`.  Both the SQLite database *and* binary index
-/// files live under this directory so deleting it clears all caches.
+/// Resolved data directory — set once at startup by `get_db_path`.
+/// Both the SQLite database *and* binary index files live under this
+/// directory so deleting it clears all caches.
 static DATA_DIR: OnceLock<PathBuf> = OnceLock::new();
 
-/// Returns the active data directory. Panics if called before
-/// `get_db_path` or `get_console_db_path`.
+/// Returns the active data directory. Panics if called before `get_db_path`.
 pub fn data_dir() -> &'static Path {
     DATA_DIR
         .get()
-        .expect("data_dir() called before get_db_path/get_console_db_path")
+        .expect("data_dir() called before get_db_path")
 }
 
 /// Persisted volume state for fast restart.
