@@ -1,7 +1,7 @@
 //! Binary index format for fast save/load of the in-memory VolumeIndex.
 //!
 //! Layout:
-//!   [Header]                     — 88 bytes
+//!   [Header]                     — 72 bytes
 //!   [NameArena]                  — arena_size bytes
 //!   [Records]                    — record_count × 32 bytes (8-byte FRN + 24-byte FileRecord)
 //!   [Hardlinks]                  — hardlink_entry_count × 16 bytes (8-byte child FRN + 8-byte parent FRN)
@@ -36,8 +36,8 @@ const HEADER_SIZE: usize = std::mem::size_of::<Header>();
 const _: () = assert!(HEADER_SIZE == 72);
 
 /// Returns the path for the binary index file for a given drive letter.
-/// Uses the shared data directory set at startup by `get_db_path` or
-/// `get_console_db_path`, so binary and SQLite caches always live together.
+/// Uses the shared data directory set at startup by `get_db_path`,
+/// so binary and SQLite caches always live together.
 pub fn index_path(drive_letter: char) -> PathBuf {
     super::data_dir()
         .join(format!("index_{}.bin", drive_letter))
@@ -279,7 +279,6 @@ pub fn load(drive_letter: char) -> Result<Option<(VolumeIndex, PersistedBinarySt
     let mut offset = HEADER_SIZE;
 
     // Load NameArena.
-    let mut names = crate::name_arena::NameArena::with_capacity(arena_size);
     // Reconstruct by bulk-inserting the raw arena bytes.
     // NameArena::insert() validates UTF-8 per-entry, but we already CRC-verified
     // the whole file. Use a direct reconstruction approach instead.

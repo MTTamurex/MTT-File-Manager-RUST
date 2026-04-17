@@ -514,6 +514,12 @@ impl ImageViewerApp {
                 }
 
                 let Some(total_size) = total_size else {
+                    // Service unavailable — keep in batch_loading and schedule
+                    // a deferred retry to prevent per-frame re-requests.
+                    self.folder_size_state.batch_loading.insert(folder_path.clone());
+                    self.folder_size_state.pending_revalidation
+                        .entry(folder_path)
+                        .or_insert_with(|| std::time::Instant::now() + std::time::Duration::from_secs(5));
                     received_any = true;
                     continue;
                 };
