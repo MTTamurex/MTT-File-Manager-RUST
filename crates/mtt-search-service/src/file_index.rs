@@ -427,18 +427,21 @@ impl VolumeIndex {
         }
     }
 
-    /// Compute the total size of all files under a directory (recursive).
-    /// Uses the `children` reverse index for O(subtree) traversal.
-    /// Returns `(total_size, file_count)`.
+    /// Compute recursive subtree totals for a directory using the `children`
+    /// reverse index for O(subtree) traversal.
+    ///
+    /// Returns `(total_size, file_count, folder_count)` where `folder_count`
+    /// excludes the queried root directory itself.
     ///
     /// All directories are traversed, including reparse-point directories.
     /// Junction/symlink FRNs have zero children in the MFT (their content
     /// lives under the *target* FRN) so they add nothing.  Cloud-reparse
     /// folders (OneDrive) DO have real children and must be counted to
     /// match Explorer.  `visited_dirs` prevents cycles.
-    pub fn folder_size_sum(&self, dir_frn: u64) -> (u64, u64) {
+    pub fn folder_tree_summary(&self, dir_frn: u64) -> (u64, u64, u64) {
         let mut total_size: u64 = 0;
         let mut file_count: u64 = 0;
+        let mut folder_count: u64 = 0;
         let mut stack = vec![dir_frn];
         let mut visited_dirs = HashSet::with_capacity(256);
         while let Some(frn) = stack.pop() {
@@ -449,6 +452,7 @@ impl VolumeIndex {
                 for &child_frn in child_frns {
                     if let Some(record) = self.records.get(&child_frn) {
                         if record.is_dir {
+                            folder_count += 1;
                             stack.push(child_frn);
                         } else {
                             total_size = total_size.saturating_add(record.size);
@@ -459,7 +463,7 @@ impl VolumeIndex {
             }
         }
 
-        (total_size, file_count)
+        (total_size, file_count, folder_count)
     }
 
     /// Diagnostic variant of `folder_size_sum` that also computes a unique-by-FRN
@@ -737,8 +741,8 @@ mod tests {
         index.records.get_mut(&21).unwrap().size = 100;
 
         // Reparse children are now included (needed for OneDrive cloud folders).
-        let (raw_total, raw_count) = index.folder_size_sum(root);
-        assert_eq!((raw_total, raw_count), (111, 3));
+        let (raw_total, raw_count, raw_folders) = index.folder_tree_summary(root);
+        assert_eq!((raw_total, raw_count, raw_folders), (111, 3, 2));
 
         let (unique_total, unique_count, duplicate_hits) =
             index.folder_size_sum_unique_files(root);
@@ -756,7 +760,7 @@ mod tests {
         assert!(index.insert_record(20, "file.bin", 10, false, false));
         index.records.get_mut(&20).unwrap().size = 42;
 
-        let (total, count) = index.folder_size_sum(root);
-        assert_eq!((total, count), (42, 1));
+        let (total, count, folder_count) = index.folder_tree_summary(root);
+        assert_eq!((total, count, folder_count), (42, 1, 1));
     }
 }

@@ -1,4 +1,4 @@
-use crate::app::folder_size_state::FolderSizeMessage;
+use crate::app::folder_size_state::{FolderContentSummary, FolderSizeMessage};
 use crate::infrastructure::app_state_db::AppStateDb;
 use crate::infrastructure::disk_cache::ThumbnailDiskCache;
 use eframe::egui;
@@ -42,7 +42,7 @@ fn is_retryable_folder_size_service_error(message: &str) -> bool {
 fn query_ntfs_folder_size_with_retry(
     folder_path: &std::path::Path,
     cancel: &Arc<AtomicBool>,
-) -> Result<(u64, u64), String> {
+) -> Result<(u64, u64, u64), String> {
     let mut last_error = String::from("Search service not available");
     let deadline = std::time::Instant::now()
         + std::time::Duration::from_secs(NTFS_FOLDER_SIZE_SERVICE_DEADLINE_SECS);
@@ -95,12 +95,12 @@ fn is_onedrive_folder_size_service_lookup_error(
 fn query_onedrive_folder_size_with_timeout(
     folder_path: &std::path::Path,
     cancel: &Arc<AtomicBool>,
-) -> Result<u64, String> {
+) -> Result<crate::infrastructure::windows::folder_size::FolderScanResult, String> {
     fn walk_directory(
         path: &std::path::Path,
         cancel: &Arc<AtomicBool>,
         depth: usize,
-    ) -> Result<u64, String> {
+    ) -> Result<crate::infrastructure::windows::folder_size::FolderScanResult, String> {
         if cancel.load(Ordering::Acquire) {
             return Err("cancelled".to_string());
         }
@@ -110,7 +110,8 @@ fn query_onedrive_folder_size_with_timeout(
 
         match crate::infrastructure::onedrive::onedrive_read_directory(path) {
             crate::infrastructure::onedrive::IoTimeoutResult::Ok(entries) => {
-                let mut total_size = 0u64;
+                let mut totals =
+                    crate::infrastructure::windows::folder_size::FolderScanResult::default();
                 for (name, attrs, size, _modified) in entries {
                     if cancel.load(Ordering::Acquire) {
                         return Err("cancelled".to_string());
@@ -119,16 +120,20 @@ fn query_onedrive_folder_size_with_timeout(
                     let child_path = path.join(name);
                     let is_dir = (attrs & 0x10) != 0;
                     if is_dir {
-                        total_size = total_size.saturating_add(walk_directory(
-                            &child_path,
-                            cancel,
-                            depth + 1,
-                        )?);
+                        totals.folder_count = totals.folder_count.saturating_add(1);
+                        let child_totals = walk_directory(&child_path, cancel, depth + 1)?;
+                        totals.total_size =
+                            totals.total_size.saturating_add(child_totals.total_size);
+                        totals.file_count =
+                            totals.file_count.saturating_add(child_totals.file_count);
+                        totals.folder_count =
+                            totals.folder_count.saturating_add(child_totals.folder_count);
                     } else {
-                        total_size = total_size.saturating_add(size);
+                        totals.total_size = totals.total_size.saturating_add(size);
+                        totals.file_count = totals.file_count.saturating_add(1);
                     }
                 }
-                Ok(total_size)
+                Ok(totals)
             }
             crate::infrastructure::onedrive::IoTimeoutResult::Timeout => {
                 Err("onedrive directory enumeration timeout".to_string())
@@ -275,16 +280,21 @@ pub(in crate::app) fn spawn_folder_size_worker(
             // NTFS fast path: use the service's indexed subtree total.
             if is_ntfs_volume(&folder_path) {
                 match query_ntfs_folder_size_with_retry(&folder_path, &folder_size_cancel_worker) {
-                    Ok((total_size, file_count)) => {
+                    Ok((total_size, file_count, folder_count)) => {
                         log::info!(
-                            "[FOLDER-SIZE] IPC complete path={} total_gb={:.2} files={}",
+                            "[FOLDER-SIZE] IPC complete path={} total_gb={:.2} files={} folders={}",
                             folder_path.display(),
                             total_size as f64 / 1_073_741_824.0,
                             file_count,
+                            folder_count,
                         );
                         let _ = folder_size_res_tx.send(FolderSizeMessage::Complete {
                             folder_path: folder_path.clone(),
-                            total_size,
+                            summary: FolderContentSummary::complete(
+                                total_size,
+                                file_count,
+                                folder_count,
+                            ),
                         });
                         folder_size_ctx.request_repaint();
                         continue;
@@ -303,15 +313,21 @@ pub(in crate::app) fn spawn_folder_size_worker(
                                 &folder_path,
                                 &folder_size_cancel_worker,
                             ) {
-                                Ok(total_size) => {
+                                Ok(result) => {
                                     log::info!(
-                                        "[FOLDER-SIZE] OneDrive fallback complete path={} total_gb={:.2}",
+                                        "[FOLDER-SIZE] OneDrive fallback complete path={} total_gb={:.2} files={} folders={}",
                                         folder_path.display(),
-                                        total_size as f64 / 1_073_741_824.0,
+                                        result.total_size as f64 / 1_073_741_824.0,
+                                        result.file_count,
+                                        result.folder_count,
                                     );
                                     let _ = folder_size_res_tx.send(FolderSizeMessage::Complete {
                                         folder_path: folder_path.clone(),
-                                        total_size,
+                                        summary: FolderContentSummary::complete(
+                                            result.total_size,
+                                            result.file_count,
+                                            result.folder_count,
+                                        ),
                                     });
                                     folder_size_ctx.request_repaint();
                                     continue;
@@ -370,22 +386,28 @@ pub(in crate::app) fn spawn_folder_size_worker(
                     move |partial_size| {
                         let _ = res_tx.send(FolderSizeMessage::Progress {
                             folder_path: path_clone.clone(),
-                            total_size: partial_size,
+                            summary: FolderContentSummary::size_only(partial_size),
                         });
                         ctx_clone.request_repaint();
                     },
                 );
 
             match result {
-                Some(total_size) => {
+                Some(result) => {
                     log::info!(
-                        "[FOLDER-SIZE] Fallback complete path={} total_gb={:.2}",
+                        "[FOLDER-SIZE] Fallback complete path={} total_gb={:.2} files={} folders={}",
                         folder_path.display(),
-                        total_size as f64 / 1_073_741_824.0,
+                        result.total_size as f64 / 1_073_741_824.0,
+                        result.file_count,
+                        result.folder_count,
                     );
                     let _ = folder_size_res_tx.send(FolderSizeMessage::Complete {
                         folder_path,
-                        total_size,
+                        summary: FolderContentSummary::complete(
+                            result.total_size,
+                            result.file_count,
+                            result.folder_count,
+                        ),
                     });
                 }
                 None => {
@@ -451,7 +473,7 @@ pub(in crate::app) fn spawn_folder_size_batch_worker(
                 // NTFS fast path: use the service index instead of local recursion.
                 if is_ntfs_volume(&path) {
                     match query_ntfs_folder_size_with_retry(&path, &cancel_worker) {
-                        Ok((total_size, _file_count)) => {
+                        Ok((total_size, _file_count, _folder_count)) => {
                             let _ = res_tx.send(BatchSizeResult {
                                 folder_path: path,
                                 total_size: Some(total_size),
@@ -467,10 +489,10 @@ pub(in crate::app) fn spawn_folder_size_batch_worker(
                             if is_onedrive_folder_size_service_lookup_error(&path, &error) {
                                 match query_onedrive_folder_size_with_timeout(&path, &cancel_worker)
                                 {
-                                    Ok(total_size) => {
+                                    Ok(result) => {
                                         let _ = res_tx.send(BatchSizeResult {
                                             folder_path: path,
-                                            total_size: Some(total_size),
+                                            total_size: Some(result.total_size),
                                             request_epoch: req_epoch,
                                         });
                                         ctx.request_repaint();
@@ -530,10 +552,10 @@ pub(in crate::app) fn spawn_folder_size_batch_worker(
 
                 // Only send if scan completed (not cancelled).
                 if !cancel_worker.load(Ordering::Acquire) {
-                    if let Some(total_size) = result {
+                    if let Some(result) = result {
                         let _ = res_tx.send(BatchSizeResult {
                             folder_path: path,
-                            total_size: Some(total_size),
+                            total_size: Some(result.total_size),
                             request_epoch: req_epoch,
                         });
                         ctx.request_repaint();

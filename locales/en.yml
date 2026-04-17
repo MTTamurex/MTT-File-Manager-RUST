@@ -68,6 +68,8 @@ file_info:
   date_deleted: "Date deleted:"
   date_modified: "Date modified:"
   size: "Size:"
+  subfolders: "Subfolders:"
+  files: "Files:"
   calculating: "Calculating..."
   metadata: "Metadata:"
   metadata_loading: "Loading..."

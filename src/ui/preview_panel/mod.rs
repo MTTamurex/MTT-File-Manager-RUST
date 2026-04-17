@@ -31,7 +31,7 @@ pub fn render_preview_panel(
     folder_preview_peek: Option<egui::TextureHandle>, // Output of folder preview cache
     is_folder_preview_loading: bool,
     is_metadata_loading: bool,
-    folder_size: Option<u64>,
+    folder_summary: Option<crate::app::folder_size_state::FolderContentSummary>,
     is_folder_size_loading: bool,
     live_file_size_cache: &mut lru::LruCache<std::path::PathBuf, (u64, u64)>,
     live_file_size_loading: &mut crate::ui::cache::FxHashSet<std::path::PathBuf>,
@@ -165,7 +165,7 @@ pub fn render_preview_panel(
         ui,
         file,
         metadata,
-        folder_size,
+        folder_summary,
         is_folder_size_loading,
         is_metadata_loading,
         live_file_size_cache,

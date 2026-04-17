@@ -1,7 +1,24 @@
+use crate::app::folder_size_state::FolderContentSummary;
 use crate::app::state::ImageViewerApp;
 use eframe::egui;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
+
+fn upsert_folder_content_summary(
+    cache: &mut lru::LruCache<PathBuf, FolderContentSummary>,
+    folder_path: PathBuf,
+    summary: FolderContentSummary,
+) {
+    if let Some(existing) = cache.get_mut(&folder_path) {
+        *existing = if summary.has_counts() {
+            summary
+        } else {
+            existing.with_total_size(summary.total_size)
+        };
+    } else {
+        cache.put(folder_path, summary);
+    }
+}
 
 impl ImageViewerApp {
     pub(super) fn process_cover_worker_results(&mut self, ctx: &egui::Context) {
@@ -426,7 +443,7 @@ impl ImageViewerApp {
         let mut received_any = false;
         let mut processed_messages = 0usize;
         let mut has_more = false;
-        let mut progress_updates: std::collections::HashMap<std::path::PathBuf, u64> =
+        let mut progress_updates: std::collections::HashMap<std::path::PathBuf, FolderContentSummary> =
             std::collections::HashMap::new();
 
         while processed_messages < MAX_FOLDER_SIZE_MSGS_PER_FRAME {
@@ -445,19 +462,19 @@ impl ImageViewerApp {
             match msg {
                 crate::app::folder_size_state::FolderSizeMessage::Progress {
                     folder_path,
-                    total_size,
+                    summary,
                 } => {
                     // Coalesce multiple progress updates for the same folder into one cache write.
-                    progress_updates.insert(folder_path, total_size);
+                    progress_updates.insert(folder_path, summary);
                     received_any = true;
                 }
                 crate::app::folder_size_state::FolderSizeMessage::Complete {
                     folder_path,
-                    total_size,
+                    summary,
                 } => {
                     progress_updates.remove(&folder_path);
                     self.folder_size_state.loading.remove(&folder_path);
-                    self.folder_size_state.cache.put(folder_path, total_size);
+                    self.folder_size_state.cache.put(folder_path, summary);
                     received_any = true;
                 }
                 crate::app::folder_size_state::FolderSizeMessage::Cancelled { folder_path } => {
@@ -469,8 +486,8 @@ impl ImageViewerApp {
             }
         }
 
-        for (folder_path, total_size) in progress_updates {
-            self.folder_size_state.cache.put(folder_path, total_size);
+        for (folder_path, summary) in progress_updates {
+            upsert_folder_content_summary(&mut self.folder_size_state.cache, folder_path, summary);
         }
 
         if processed_messages >= MAX_FOLDER_SIZE_MSGS_PER_FRAME {
@@ -527,7 +544,11 @@ impl ImageViewerApp {
                 self.folder_size_state.batch_cache.put(folder_path.clone(), total_size);
                 // Keep the preview-panel cache in sync so selecting the folder
                 // in the details panel shows the same (fresh) value.
-                self.folder_size_state.cache.put(folder_path, total_size);
+                upsert_folder_content_summary(
+                    &mut self.folder_size_state.cache,
+                    folder_path,
+                    FolderContentSummary::size_only(total_size),
+                );
                 received_any = true;
             }
         }

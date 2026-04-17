@@ -41,15 +41,70 @@ fn get_folder_size_pool() -> &'static rayon::ThreadPool {
 const IO_REPARSE_TAG_MOUNT_POINT: u32 = 0xA0000003;
 const IO_REPARSE_TAG_SYMLINK: u32 = 0xA000000C;
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct FolderScanResult {
+    pub total_size: u64,
+    pub file_count: u64,
+    pub folder_count: u64,
+}
+
+impl FolderScanResult {
+    fn merge(&mut self, other: Self) {
+        self.total_size = self.total_size.saturating_add(other.total_size);
+        self.file_count = self.file_count.saturating_add(other.file_count);
+        self.folder_count = self.folder_count.saturating_add(other.folder_count);
+    }
+
+    fn is_empty(&self) -> bool {
+        self.total_size == 0 && self.file_count == 0 && self.folder_count == 0
+    }
+}
+
+struct SharedFolderScanTotals {
+    total_size: AtomicU64,
+    file_count: AtomicU64,
+    folder_count: AtomicU64,
+}
+
+impl SharedFolderScanTotals {
+    fn new() -> Self {
+        Self {
+            total_size: AtomicU64::new(0),
+            file_count: AtomicU64::new(0),
+            folder_count: AtomicU64::new(0),
+        }
+    }
+
+    fn add(&self, result: FolderScanResult) {
+        if result.total_size > 0 {
+            self.total_size.fetch_add(result.total_size, Ordering::Relaxed);
+        }
+        if result.file_count > 0 {
+            self.file_count.fetch_add(result.file_count, Ordering::Relaxed);
+        }
+        if result.folder_count > 0 {
+            self.folder_count.fetch_add(result.folder_count, Ordering::Relaxed);
+        }
+    }
+
+    fn snapshot(&self) -> FolderScanResult {
+        FolderScanResult {
+            total_size: self.total_size.load(Ordering::Relaxed),
+            file_count: self.file_count.load(Ordering::Relaxed),
+            folder_count: self.folder_count.load(Ordering::Relaxed),
+        }
+    }
+}
+
 /// Calculate a folder's total size using parallel Win32 directory enumeration.
 ///
-/// Returns `None` if cancelled, `Some(total_bytes)` otherwise.
+/// Returns `None` if cancelled, `Some(FolderScanResult)` otherwise.
 pub fn calculate_folder_size_parallel(
     root: &Path,
     cancel: &Arc<AtomicBool>,
     progress_callback: impl Fn(u64) + Send + Sync,
-) -> Option<u64> {
-    let total = Arc::new(AtomicU64::new(0));
+) -> Option<FolderScanResult> {
+    let totals = Arc::new(SharedFolderScanTotals::new());
     let progress_cb = Arc::new(progress_callback);
 
     // Convert root to wide string once
@@ -61,8 +116,8 @@ pub fn calculate_folder_size_parallel(
 
     // Phase 1: Breadth-first collection of first 2 levels to build a good work queue
     let mut level1_dirs: Vec<Vec<u16>> = Vec::new();
-    scan_dir_wide(&root_wide, &total, &mut level1_dirs);
-    (progress_cb)(total.load(Ordering::Relaxed));
+    totals.add(scan_dir_wide_local(&root_wide, &mut level1_dirs));
+    (progress_cb)(totals.snapshot().total_size);
 
     if cancel.load(Ordering::Relaxed) {
         return None;
@@ -75,14 +130,14 @@ pub fn calculate_folder_size_parallel(
             return None;
         }
         let mut sub_dirs: Vec<Vec<u16>> = Vec::new();
-        scan_dir_wide(dir, &total, &mut sub_dirs);
+        totals.add(scan_dir_wide_local(dir, &mut sub_dirs));
         if sub_dirs.is_empty() {
             // Leaf directory — already counted
         } else {
             work_queue.extend(sub_dirs);
         }
     }
-    (progress_cb)(total.load(Ordering::Relaxed));
+    (progress_cb)(totals.snapshot().total_size);
 
     if cancel.load(Ordering::Relaxed) {
         return None;
@@ -92,14 +147,14 @@ pub fn calculate_folder_size_parallel(
     let pool = get_folder_size_pool();
 
     pool.install(|| {
-        parallel_scan_recursive(work_queue, &total, cancel, &progress_cb);
+        parallel_scan_recursive(work_queue, &totals, cancel, &progress_cb);
     });
 
     if cancel.load(Ordering::Relaxed) {
         return None;
     }
 
-    Some(total.load(Ordering::Relaxed))
+    Some(totals.snapshot())
 }
 
 /// Recursively scan directories in parallel using rayon.
@@ -107,7 +162,7 @@ pub fn calculate_folder_size_parallel(
 /// - Multi-child branches → yield to rayon work-stealing pool for parallelism
 fn parallel_scan_recursive(
     dirs: Vec<Vec<u16>>,
-    total: &Arc<AtomicU64>,
+    totals: &Arc<SharedFolderScanTotals>,
     cancel: &Arc<AtomicBool>,
     progress_cb: &Arc<impl Fn(u64) + Send + Sync>,
 ) {
@@ -120,7 +175,7 @@ fn parallel_scan_recursive(
 
         // Process this dir and follow single-child chains inline
         let mut current = dir;
-        let mut local_total: u64 = 0;
+        let mut local_totals = FolderScanResult::default();
         let mut dirs_inline: u32 = 0;
 
         loop {
@@ -129,14 +184,14 @@ fn parallel_scan_recursive(
             }
 
             let mut sub_dirs: Vec<Vec<u16>> = Vec::new();
-            local_total += scan_dir_wide_local(&current, &mut sub_dirs);
+            local_totals.merge(scan_dir_wide_local(&current, &mut sub_dirs));
             dirs_inline += 1;
 
-            // Flush accumulated size periodically
-            if dirs_inline.is_multiple_of(64) && local_total > 0 {
-                total.fetch_add(local_total, Ordering::Relaxed);
-                local_total = 0;
-                (progress_cb)(total.load(Ordering::Relaxed));
+            // Flush accumulated totals periodically.
+            if dirs_inline.is_multiple_of(64) && !local_totals.is_empty() {
+                totals.add(local_totals);
+                local_totals = FolderScanResult::default();
+                (progress_cb)(totals.snapshot().total_size);
             }
 
             match sub_dirs.len() {
@@ -151,32 +206,32 @@ fn parallel_scan_recursive(
                 }
                 _ => {
                     // Multiple children → flush and yield to rayon for parallelism
-                    if local_total > 0 {
-                        total.fetch_add(local_total, Ordering::Relaxed);
-                        local_total = 0;
+                    if !local_totals.is_empty() {
+                        totals.add(local_totals);
+                        local_totals = FolderScanResult::default();
                     }
-                    (progress_cb)(total.load(Ordering::Relaxed));
-                    parallel_scan_recursive(sub_dirs, total, cancel, progress_cb);
+                    (progress_cb)(totals.snapshot().total_size);
+                    parallel_scan_recursive(sub_dirs, totals, cancel, progress_cb);
                     break;
                 }
             }
         }
 
         // Flush remaining
-        if local_total > 0 {
-            total.fetch_add(local_total, Ordering::Relaxed);
+        if !local_totals.is_empty() {
+            totals.add(local_totals);
         }
     });
 }
 
-/// Scan a single directory. Returns the total file size found.
+/// Scan a single directory. Returns aggregated file/folder totals.
 /// Pushes subdirectory wide-paths onto `sub_dirs`.
 /// Uses wide-string paths throughout — zero UTF conversions.
-fn scan_dir_wide_local(dir_wide: &[u16], sub_dirs: &mut Vec<Vec<u16>>) -> u64 {
+fn scan_dir_wide_local(dir_wide: &[u16], sub_dirs: &mut Vec<Vec<u16>>) -> FolderScanResult {
     // Build search pattern: dir\* (wide string, null-terminated)
     let search = build_search_pattern(dir_wide);
     let mut find_data = WIN32_FIND_DATAW::default();
-    let mut local_size: u64 = 0;
+    let mut totals = FolderScanResult::default();
 
     unsafe {
         let handle = FindFirstFileExW(
@@ -190,7 +245,7 @@ fn scan_dir_wide_local(dir_wide: &[u16], sub_dirs: &mut Vec<Vec<u16>>) -> u64 {
 
         let handle = match handle {
             Ok(h) => h,
-            Err(_) => return 0,
+            Err(_) => return totals,
         };
 
         loop {
@@ -201,11 +256,15 @@ fn scan_dir_wide_local(dir_wide: &[u16], sub_dirs: &mut Vec<Vec<u16>>) -> u64 {
                 if !is_dot_or_dotdot(&find_data.cFileName)
                     && !is_junction_or_symlink(attrs, find_data.dwReserved0)
                 {
+                    totals.folder_count = totals.folder_count.saturating_add(1);
                     sub_dirs.push(build_child_wide(dir_wide, &find_data.cFileName));
                 }
             } else {
-                local_size +=
-                    ((find_data.nFileSizeHigh as u64) << 32) | (find_data.nFileSizeLow as u64);
+                totals.file_count = totals.file_count.saturating_add(1);
+                totals.total_size = totals.total_size.saturating_add(
+                    ((find_data.nFileSizeHigh as u64) << 32)
+                        | (find_data.nFileSizeLow as u64),
+                );
             }
 
             if FindNextFileW(handle, &mut find_data).is_err() {
@@ -216,15 +275,7 @@ fn scan_dir_wide_local(dir_wide: &[u16], sub_dirs: &mut Vec<Vec<u16>>) -> u64 {
         let _ = FindClose(handle);
     }
 
-    local_size
-}
-
-/// Scan a single directory — variant that uses Arc<AtomicU64> (for top-level scans).
-fn scan_dir_wide(dir_wide: &[u16], total: &Arc<AtomicU64>, sub_dirs: &mut Vec<Vec<u16>>) {
-    let size = scan_dir_wide_local(dir_wide, sub_dirs);
-    if size > 0 {
-        total.fetch_add(size, Ordering::Relaxed);
-    }
+    totals
 }
 
 // ── Helper functions ────────────────────────────────────────────────────────

@@ -1,3 +1,4 @@
+use crate::app::folder_size_state::FolderContentSummary;
 use crate::domain::file_entry::FileEntry;
 use crate::domain::special_paths::COMPUTER_VIEW_ID;
 use crate::infrastructure::windows::MediaMetadata;
@@ -63,7 +64,7 @@ pub fn render_file_info_table(
     ui: &mut egui::Ui,
     file: &FileEntry,
     metadata: Option<&MediaMetadata>,
-    folder_size: Option<u64>,
+    folder_summary: Option<FolderContentSummary>,
     is_folder_size_loading: bool,
     is_metadata_loading: bool,
     live_file_size_cache: &mut LruCache<std::path::PathBuf, (u64, u64)>,
@@ -207,10 +208,13 @@ pub fn render_file_info_table(
                 };
                 add_detail(ui, &date_label, date_value);
 
+                let folder_counts_complete = folder_summary
+                    .map(|summary| summary.has_counts())
+                    .unwrap_or(false);
                 let size_str = if file.is_dir && !file.is_archive() {
-                    if let Some(size) = folder_size {
-                        let formatted = crate::infrastructure::windows::format_size(size);
-                        if is_folder_size_loading {
+                    if let Some(summary) = folder_summary {
+                        let formatted = crate::infrastructure::windows::format_size(summary.total_size);
+                        if is_folder_size_loading || !summary.has_counts() {
                             format!("{formatted} ({})", t!("file_info.calculating"))
                         } else {
                             formatted
@@ -232,9 +236,23 @@ pub fn render_file_info_table(
 
                 add_detail(ui, &t!("file_info.size"), size_str);
 
+                if file.is_dir && !file.is_archive() {
+                    let subfolders = folder_summary
+                        .and_then(|summary| summary.folder_count)
+                        .map(|count| count.to_string())
+                        .unwrap_or_else(|| t!("file_info.calculating").to_string());
+                    add_detail(ui, &t!("file_info.subfolders"), subfolders);
+
+                    let files = folder_summary
+                        .and_then(|summary| summary.file_count)
+                        .map(|count| count.to_string())
+                        .unwrap_or_else(|| t!("file_info.calculating").to_string());
+                    add_detail(ui, &t!("file_info.files"), files);
+                }
+
                 if file.is_dir
                     && !file.is_archive()
-                    && folder_size.is_none()
+                    && (folder_summary.is_none() || !folder_counts_complete)
                     && !is_folder_size_loading
                 {
                     action = Some(PreviewPanelAction::CalculateFolderSize(file.path.clone()));

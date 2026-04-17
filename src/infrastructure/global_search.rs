@@ -193,8 +193,8 @@ pub fn check_paths_modified(paths: &[String], threshold_secs: u32) -> Result<Vec
 
 /// Request the total size of a folder from the search service's in-memory
 /// MFT-based index. Only works for NTFS volumes with sizes loaded.
-/// Returns `(total_size, file_count)` on success.
-pub fn folder_size(path: &std::path::Path) -> Result<(u64, u64), String> {
+/// Returns `(total_size, file_count, folder_count)` on success.
+pub fn folder_size(path: &std::path::Path) -> Result<(u64, u64, u64), String> {
     let path_str = path.to_string_lossy().to_string();
     let pipe = open_pipe()?;
 
@@ -207,8 +207,9 @@ pub fn folder_size(path: &std::path::Path) -> Result<(u64, u64), String> {
             SearchResponse::FolderSize {
                 total_size,
                 file_count,
+                folder_count,
                 ..
-            } => Ok((total_size, file_count)),
+            } => Ok((total_size, file_count, folder_count)),
             SearchResponse::Error(e) => Err(e),
             _ => Err("Unexpected response type".into()),
         }
