@@ -66,6 +66,69 @@ fn query_ntfs_folder_size_with_retry(
     Err(last_error)
 }
 
+fn is_onedrive_folder_size_service_lookup_error(
+    folder_path: &std::path::Path,
+    message: &str,
+) -> bool {
+    if !crate::infrastructure::onedrive::is_onedrive_path(folder_path) {
+        return false;
+    }
+
+    let lower = message.to_ascii_lowercase();
+    lower.contains("path not found in index") || lower.contains("invalid path")
+}
+
+fn query_onedrive_folder_size_with_timeout(
+    folder_path: &std::path::Path,
+    cancel: &Arc<AtomicBool>,
+) -> Result<u64, String> {
+    fn walk_directory(
+        path: &std::path::Path,
+        cancel: &Arc<AtomicBool>,
+        depth: usize,
+    ) -> Result<u64, String> {
+        if cancel.load(Ordering::Acquire) {
+            return Err("cancelled".to_string());
+        }
+        if depth > 256 {
+            return Err("onedrive folder-size recursion depth exceeded".to_string());
+        }
+
+        match crate::infrastructure::onedrive::onedrive_read_directory(path) {
+            crate::infrastructure::onedrive::IoTimeoutResult::Ok(entries) => {
+                let mut total_size = 0u64;
+                for (name, attrs, size, _modified) in entries {
+                    if cancel.load(Ordering::Acquire) {
+                        return Err("cancelled".to_string());
+                    }
+
+                    let child_path = path.join(name);
+                    let is_dir = (attrs & 0x10) != 0;
+                    if is_dir {
+                        total_size = total_size.saturating_add(walk_directory(
+                            &child_path,
+                            cancel,
+                            depth + 1,
+                        )?);
+                    } else {
+                        total_size = total_size.saturating_add(size);
+                    }
+                }
+                Ok(total_size)
+            }
+            crate::infrastructure::onedrive::IoTimeoutResult::Timeout => {
+                Err("onedrive directory enumeration timeout".to_string())
+            }
+            crate::infrastructure::onedrive::IoTimeoutResult::Err(kind) => Err(format!(
+                "onedrive directory enumeration failed: {:?}",
+                kind
+            )),
+        }
+    }
+
+    walk_directory(folder_path, cancel, 0)
+}
+
 pub(in crate::app) fn spawn_disk_cache_invalidation_worker(
     disk_cache: Arc<ThumbnailDiskCache>,
     app_state_db: Arc<AppStateDb>,
@@ -221,6 +284,41 @@ pub(in crate::app) fn spawn_folder_size_worker(
                             continue;
                         }
 
+                        if is_onedrive_folder_size_service_lookup_error(&folder_path, &e) {
+                            match query_onedrive_folder_size_with_timeout(
+                                &folder_path,
+                                &folder_size_cancel_worker,
+                            ) {
+                                Ok(total_size) => {
+                                    log::info!(
+                                        "[FOLDER-SIZE] OneDrive fallback complete path={} total_gb={:.2}",
+                                        folder_path.display(),
+                                        total_size as f64 / 1_073_741_824.0,
+                                    );
+                                    let _ = folder_size_res_tx.send(FolderSizeMessage::Complete {
+                                        folder_path: folder_path.clone(),
+                                        total_size,
+                                    });
+                                    folder_size_ctx.request_repaint();
+                                    continue;
+                                }
+                                Err(fallback_error) if fallback_error == "cancelled" => {
+                                    let _ = folder_size_res_tx.send(FolderSizeMessage::Cancelled {
+                                        folder_path,
+                                    });
+                                    folder_size_ctx.request_repaint();
+                                    continue;
+                                }
+                                Err(fallback_error) => {
+                                    log::warn!(
+                                        "[FOLDER-SIZE] OneDrive fallback failed path={} reason={}",
+                                        folder_path.display(),
+                                        fallback_error,
+                                    );
+                                }
+                            }
+                        }
+
                         // NTFS should be served by the indexed path. Avoid
                         // regressing to a recursive local scan here.
                         log::warn!(
@@ -352,6 +450,31 @@ pub(in crate::app) fn spawn_folder_size_batch_worker(
                             continue;
                         }
                         Err(error) => {
+                            if is_onedrive_folder_size_service_lookup_error(&path, &error) {
+                                match query_onedrive_folder_size_with_timeout(&path, &cancel_worker)
+                                {
+                                    Ok(total_size) => {
+                                        let _ = res_tx.send(BatchSizeResult {
+                                            folder_path: path,
+                                            total_size: Some(total_size),
+                                            request_epoch: req_epoch,
+                                        });
+                                        ctx.request_repaint();
+                                        continue;
+                                    }
+                                    Err(fallback_error) if fallback_error == "cancelled" => {
+                                        continue;
+                                    }
+                                    Err(fallback_error) => {
+                                        log::warn!(
+                                            "[FOLDER-SIZE] Batch OneDrive fallback failed path={} reason={}",
+                                            path.display(),
+                                            fallback_error,
+                                        );
+                                    }
+                                }
+                            }
+
                             log::warn!(
                                 "[FOLDER-SIZE] Batch IPC failed path={} giving_up=true reason={}",
                                 path.display(),
