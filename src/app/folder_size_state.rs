@@ -7,15 +7,48 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
 use std::time::Instant;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FolderContentSummary {
+    pub total_size: u64,
+    pub file_count: Option<u64>,
+    pub folder_count: Option<u64>,
+}
+
+impl FolderContentSummary {
+    pub fn size_only(total_size: u64) -> Self {
+        Self {
+            total_size,
+            file_count: None,
+            folder_count: None,
+        }
+    }
+
+    pub fn complete(total_size: u64, file_count: u64, folder_count: u64) -> Self {
+        Self {
+            total_size,
+            file_count: Some(file_count),
+            folder_count: Some(folder_count),
+        }
+    }
+
+    pub fn has_counts(&self) -> bool {
+        self.file_count.is_some() && self.folder_count.is_some()
+    }
+
+    pub fn with_total_size(self, total_size: u64) -> Self {
+        Self { total_size, ..self }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum FolderSizeMessage {
     Progress {
         folder_path: PathBuf,
-        total_size: u64,
+        summary: FolderContentSummary,
     },
     Complete {
         folder_path: PathBuf,
-        total_size: u64,
+        summary: FolderContentSummary,
     },
     Cancelled {
         folder_path: PathBuf,
@@ -42,7 +75,7 @@ pub struct FolderSizeState {
     pub req_sender: Sender<PathBuf>,
     pub res_receiver: Receiver<FolderSizeMessage>,
     pub cancel: Arc<AtomicBool>,
-    pub cache: LruCache<PathBuf, u64>,
+    pub cache: LruCache<PathBuf, FolderContentSummary>,
     pub loading: FxHashSet<PathBuf>,
 
     // ── Batch worker for list-view folder sizes ──

@@ -284,12 +284,13 @@ pub(super) fn handle_client(
             };
 
             match result {
-                Ok((total_size, file_count)) => {
+                Ok((total_size, file_count, folder_count)) => {
                     eprintln!(
-                        "[FOLDER-SIZE] responding path={} total_gb={:.2} files={}",
+                        "[FOLDER-SIZE] responding path={} total_gb={:.2} files={} folders={}",
                         crate::redact_paths(&path),
                         total_size as f64 / 1_073_741_824.0,
                         file_count,
+                        folder_count,
                     );
                     let _ = send_response(
                         pipe,
@@ -297,6 +298,7 @@ pub(super) fn handle_client(
                             path,
                             total_size,
                             file_count,
+                            folder_count,
                         },
                     );
                 }
@@ -471,7 +473,7 @@ mod tests {
             redact_status_metrics: false,
         };
 
-        progress.set_scanning('D', 7);
+        progress.set_scanning('D', 7, "filesystem_scan");
 
         let status = build_status_response(&indices, &progress, &policy);
         assert_eq!(status.total_files_indexed, 9);

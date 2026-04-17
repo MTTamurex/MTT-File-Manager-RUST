@@ -109,6 +109,7 @@ pub enum SearchResponse {
         path: String,
         total_size: u64,
         file_count: u64,
+        folder_count: u64,
     },
     /// Error message.
     Error(String),
@@ -257,5 +258,32 @@ mod tests {
         let encoded = encode_message(&resp).unwrap();
         let decoded: SearchResponse = decode_message(&encoded[4..]).unwrap();
         assert!(matches!(decoded, SearchResponse::Pong));
+    }
+
+    #[test]
+    fn test_roundtrip_folder_size_response() {
+        let resp = SearchResponse::FolderSize {
+            path: r"C:\projects".to_string(),
+            total_size: 4_096,
+            file_count: 12,
+            folder_count: 3,
+        };
+        let encoded = encode_message(&resp).unwrap();
+        let decoded: SearchResponse = decode_message(&encoded[4..]).unwrap();
+
+        let SearchResponse::FolderSize {
+            path,
+            total_size,
+            file_count,
+            folder_count,
+        } = decoded
+        else {
+            panic!("unexpected variant");
+        };
+
+        assert_eq!(path, r"C:\projects");
+        assert_eq!(total_size, 4_096);
+        assert_eq!(file_count, 12);
+        assert_eq!(folder_count, 3);
     }
 }

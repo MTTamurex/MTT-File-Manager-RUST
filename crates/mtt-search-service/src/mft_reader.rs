@@ -467,16 +467,17 @@ fn resolve_file_size(
 /// Compute folder size from the in-memory index using the service's indexed
 /// view of the volume. This is the fast NTFS path used by the app so folder
 /// sizes are stable and do not depend on the caller's elevation token.
-pub fn folder_size_for_service(index: &VolumeIndex, dir_frn: u64) -> (u64, u64) {
-    let (raw_total, raw_count) = index.folder_size_sum(dir_frn);
+pub fn folder_size_for_service(index: &VolumeIndex, dir_frn: u64) -> (u64, u64, u64) {
+    let (raw_total, raw_count, raw_folder_count) = index.folder_tree_summary(dir_frn);
 
     let (uniq_total, uniq_count, dup_hits) = index.folder_size_sum_unique_files(dir_frn);
     if dup_hits > 0 || raw_total != uniq_total {
         eprintln!(
-            "[FOLDER-SIZE-DIAG] frn={} raw={:.2}GB({} files) unique={:.2}GB({} files) dup_hits={} delta={:.2}MB",
+            "[FOLDER-SIZE-DIAG] frn={} raw={:.2}GB({} files, {} folders) unique={:.2}GB({} files) dup_hits={} delta={:.2}MB",
             dir_frn,
             raw_total as f64 / 1_073_741_824.0,
             raw_count,
+            raw_folder_count,
             uniq_total as f64 / 1_073_741_824.0,
             uniq_count,
             dup_hits,
@@ -484,7 +485,7 @@ pub fn folder_size_for_service(index: &VolumeIndex, dir_frn: u64) -> (u64, u64) 
         );
     }
 
-    (raw_total, raw_count)
+    (raw_total, raw_count, raw_folder_count)
 }
 
 fn stat_file_size_fallback(

@@ -77,7 +77,7 @@ pub(super) fn render_preview_panel_layout(
                                     }
                                 });
 
-                            let folder_size = if file.is_dir {
+                            let folder_summary = if file.is_dir {
                                 app.folder_size_state.cache.peek(&file.path).copied()
                             } else {
                                 None
@@ -104,7 +104,7 @@ pub(super) fn render_preview_panel_layout(
                                     .folder_preview_loading
                                     .contains(&file.path),
                                 app.metadata_loading.contains(&file.path),
-                                folder_size,
+                                folder_summary,
                                 is_folder_size_loading,
                                 &mut app.live_file_size_cache,
                                 &mut app.live_file_size_loading,

@@ -68,6 +68,8 @@ file_info:
   date_deleted: "Data de exclusão:"
   date_modified: "Data modificada:"
   size: "Tamanho:"
+  subfolders: "Subpastas:"
+  files: "Arquivos:"
   calculating: "Calculando..."
   metadata: "Metadados:"
   metadata_loading: "Carregando..."
