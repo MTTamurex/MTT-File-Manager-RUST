@@ -43,7 +43,7 @@ MTT File Manager is a native Windows file manager built in Rust with a modern bo
 
 ### Global Search
 - **Dedicated overlay** — Activated via Ctrl+Shift+F
-- **External service** — `mtt-search-service` communicating over Named Pipes (bincode serialization) with SQLite-backed volume snapshots and background FTS rebuilds
+- **External service** — `mtt-search-service` communicating over Named Pipes (bincode serialization) with per-volume binary/SQLite snapshots, bulk-MFT indexing on USN volumes, and in-memory SIMD search
 - **Hybrid volume indexing** — NTFS/ReFS via USN Journal; non-USN volumes (exFAT/FAT32/FUSE/CryptoFS) via full-tree scan
 - **Adaptive update cadence** — USN incremental loop (2s); non-USN re-scan (30s for virtual filesystems, 120s for physical)
 - **Paginated results** — Offset/limit pagination with incremental loading

@@ -349,12 +349,6 @@ pub fn load(drive_letter: char) -> Result<Option<(VolumeIndex, PersistedBinarySt
     Ok(Some((index, state)))
 }
 
-/// Delete the binary index file for a given drive letter.
-pub fn delete(drive_letter: char) {
-    let path = index_path(drive_letter);
-    let _ = std::fs::remove_file(path);
-}
-
 /// Metadata from a loaded binary index (mirrors PersistedVolumeState).
 pub struct PersistedBinaryState {
     pub journal_id: u64,

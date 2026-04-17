@@ -234,9 +234,9 @@ Query sent to global_search_worker [workers/global_search_worker.rs]
     ↓
 Worker connects via Named Pipe to mtt-search-service
     ↓
-Service uses SQLite FTS5 for 3+ char queries when `search_fts` is ready; otherwise falls back to the in-memory substring scan
+Service runs a case-insensitive substring search against the lowered in-memory `NameArena` and live `VolumeIndex` (SIMD fast path)
     ↓
-Results returned: FRN → path_resolver → full paths
+Results returned with full paths resolved from FRN parent chains inside the service
     ↓
 Paginated results (offset/limit) rendered in overlay
     ↓

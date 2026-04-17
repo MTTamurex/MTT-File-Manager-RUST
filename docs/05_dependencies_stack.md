@@ -148,10 +148,12 @@
 |-------|---------|---------|
 | mtt-search-protocol | local path | Shared IPC types |
 | windows-service | 0.7 | Windows Service Control Manager integration |
-| rusqlite | workspace (bundled) | SQLite persistence for file index |
+| rusqlite | workspace (bundled) | SQLite persistence for snapshot rows, metadata, and legacy FTS schema |
 | serde | workspace | Serialization |
 | bincode | workspace | Binary IPC encoding |
-| windows | 0.61.0 | Windows API (8 features: Foundation, FileSystem, Console, Ioctl, IO, Pipes, Security, Threading) |
+| parking_lot | 0.12 | Low-overhead Mutex/RwLock for shared service state |
+| memchr | 2 | SIMD-accelerated substring search over the lowered in-memory name arena |
+| windows | 0.61.0 | Windows API (10 features: Foundation, FileSystem, Console, Ioctl, IO, LibraryLoader, Pipes, Security, Security_Authorization, Threading) |
 
 ## Build Dependencies
 

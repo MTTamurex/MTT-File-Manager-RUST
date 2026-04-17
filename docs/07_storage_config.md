@@ -183,8 +183,23 @@ Stores additional parent directories for hardlinked files.
 
 Primary key: `(drive_letter, frn, parent_frn)`.
 
-### Virtual table: `search_fts`
-FTS5 trigram index over `file_records.name`, using external content mode (`content='file_records'`).
+### Binary snapshot: `index_<drive>.bin`
+Per-volume binary cache stored alongside `search_index.db` under `C:\ProgramData\MTT-File-Manager`.
+
+Used as the primary fast-start cache for USN volumes. The service loads this file before falling back to SQLite rows.
+
+Layout:
+- Header (72 bytes): magic, version, drive letter, journal metadata, entry counts, flags
+- NameArena bytes
+- Packed records (`FRN + FileRecord`)
+- Hardlink parent pairs
+- Reparse-point FRNs
+- CRC32 trailer
+
+### Virtual table: `search_fts` (legacy schema)
+Legacy FTS5 trigram index over `file_records.name`, still present in the SQLite schema for compatibility with older persistence/rebuild code paths.
+
+Current live search queries no longer depend on this table; they run against the in-memory lowered `NameArena` instead.
 
 ### Table: `service_meta`
 Stores service-wide metadata.
@@ -195,13 +210,14 @@ Stores service-wide metadata.
 | `value` | INTEGER | Metadata value |
 
 Currently used key:
-- `dirty` — set to `1` on startup and cleared to `0` on clean shutdown; if startup sees `dirty=1`, the service rebuilds `search_fts` before serving FTS queries.
+- `dirty` — set to `1` on startup and cleared to `0` on clean shutdown; if startup sees `dirty=1`, the service rebuilds the legacy `search_fts` table before continuing SQLite maintenance.
 
 ### Runtime behavior
-- Full volume saves write `file_records` and `hardlink_parents` first, without inline FTS maintenance.
-- After a volume reaches `Ready`, the service rebuilds `search_fts` in a background thread.
-- While `search_fts` is rebuilding, the IPC handler falls back to the in-memory linear scan so search remains usable.
-- Periodic USN snapshot persists continue to update SQLite incrementally between full saves.
+- USN volumes prefer `index_<drive>.bin` for startup and fall back to SQLite only when the binary cache is missing, stale, or invalid.
+- Full USN scans write a new binary snapshot after `read_mft_bulk()` completes; periodic USN catch-up persists `volume_state` in SQLite while keeping the in-memory index authoritative.
+- Non-USN volumes persist `file_records` and `hardlink_parents` to SQLite after full-tree scans; those rows also serve as their fast-start cache.
+- Search IPC requests are served from the in-memory index using the lowered `NameArena`; SQLite is not on the hot query path.
+- The SQLite `search_fts` table remains a legacy persisted artifact. Some persistence paths still rebuild or update it, but live query correctness and performance no longer depend on it.
 
 ## Virtual Drive Configuration
 

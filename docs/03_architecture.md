@@ -17,7 +17,7 @@ MTT-File-Manager-RUST/
 |-------|------|-------------|
 | `mtt-file-manager` | bin (GUI) | Main application with eframe/egui |
 | `mtt-search-protocol` | lib | IPC types and bincode serialization |
-| `mtt-search-service` | bin (service) | Windows Service with hybrid per-volume indexing (USN + full scan fallback) and Named Pipe IPC |
+| `mtt-search-service` | bin (service) | Windows Service with hybrid per-volume indexing, binary/SQLite startup caches, and in-memory SIMD search over Named Pipe IPC |
 
 ## Architecture Overview
 
@@ -229,14 +229,14 @@ Background threads for asynchronous processing.
 ### 6. Search Service (External Process)
 **Location**: `crates/mtt-search-service/`
 
-Separate Windows Service that indexes all files with a hybrid per-volume strategy, persists snapshots in SQLite, and serves searches via Named Pipes. Runs as `LocalSystem`.
+Separate Windows Service that indexes all files with a hybrid per-volume strategy, persists restart snapshots under `C:\ProgramData\MTT-File-Manager` in SQLite plus per-volume binary caches, and serves searches via Named Pipes from an in-memory SIMD matcher. Runs as `LocalSystem`.
 
 **Modules**:
 - `usn_journal.rs` — Volume discovery (`discover_volumes`) and USN API (NTFS/ReFS)
 - `fs_walker.rs` — Full-tree scanner for non-USN volumes
 - `file_index.rs` — In-memory index: `HashMap<u64, FileRecord>` (FRN → record)
 - `path_resolver.rs` — Full path reconstruction via parent FRN chain
-- `index_db/` — SQLite persistence (split module: schema/core queries, FTS5 search, record sync, deferred FTS rebuild)
+- `index_db/` — Persistence layer (shared data dir, SQLite schema/metadata, binary snapshot save/load, record sync, legacy FTS maintenance helpers)
 - `ipc_server/` — Named Pipe server (split module: server loop, pipe I/O with DACL security, request handler)
 - `ipc_authorization.rs` — IPC authorization handling
 - `security_policy.rs` — Security policy configuration
@@ -253,9 +253,11 @@ Separate Windows Service that indexes all files with a hybrid per-volume strateg
 **Indexing flow**:
 1. Detect mounted volumes via `GetVolumeInformationW` and mark `usn_supported` for NTFS/ReFS
 2. Spawn 1 indexer thread per discovered volume
-3. USN volumes (NTFS/ReFS): load persisted snapshot from `search_index.db` → validate `journal_id` → incremental catch-up; if cache invalid, full MFT scan via `FSCTL_ENUM_USN_DATA`; persist `file_records`/`hardlink_parents`, mark volume `Ready`, rebuild `search_fts` in background, then incremental loop (2s) with SQLite snapshot persist every 5 min
-4. Non-USN volumes: reuse SQLite snapshot on startup → full scan → persist `file_records`, mark volume `Ready`, rebuild `search_fts` in background; periodic re-scan (30s virtual, 120s physical)
-5. Discovery loop runs every 20s to detect newly mounted volumes
+3. USN volumes (NTFS/ReFS): try per-volume binary snapshot `index_<drive>.bin` first, fall back to SQLite rows in `search_index.db`, validate `journal_id`, then catch up via USN; if caches are missing or stale, run `read_mft_bulk()` over raw `$MFT` data runs to extract names, sizes, parents, hardlinks, and reparse metadata in one sequential pass; write a fresh binary snapshot, keep SQLite volume metadata in sync, and enter the 2 s incremental loop
+4. Legacy USN caches that do not contain sizes can mark the volume `Ready` quickly, then finish size extraction in a background bulk-MFT pass while `sizes_loading` remains visible to the client
+5. Non-USN volumes: optionally reuse cached SQLite rows for fast startup, then run `fs_walker` full scans, persist `file_records`/`hardlink_parents` back to SQLite, and rescan periodically (30 s on virtual filesystems, 120 s on physical filesystems) with change notifications where supported
+6. Search requests run against the live in-memory `VolumeIndex` using the lowered `NameArena`; binary/SQLite persistence accelerates startup and recovery but is not on the hot query path
+7. Discovery loop runs every 20 s to detect newly mounted volumes
 
 ### 7. Image Viewer (Separate Process)
 **Location**: `src/image_viewer/`

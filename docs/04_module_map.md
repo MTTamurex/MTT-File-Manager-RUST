@@ -300,9 +300,9 @@ crates/
         ├── file_index.rs             # In-memory HashMap index
         ├── path_resolver.rs          # Path reconstruction via FRN chain
         ├── index_db/                 # SQLite persistence (split module)
-        │   ├── mod.rs               # DB initialization, schema, dirty-shutdown handling
-        │   ├── fts.rs               # Read-only FTS5 searcher
-        │   └── sync.rs              # Record persistence, incremental sync, deferred FTS rebuild
+        │   ├── mod.rs               # DB initialization, schema, dirty-shutdown handling, shared data dir
+        │   ├── binary.rs            # Per-volume binary snapshot save/load with CRC
+        │   └── sync.rs              # Record persistence, incremental sync, legacy FTS maintenance helpers
         ├── ipc_server/               # Named Pipe server (split module)
         │   ├── mod.rs               # Server loop, client accept, wait_for_client
         │   ├── pipe_io.rs           # Pipe creation (DACL/ACL security), read/write I/O
