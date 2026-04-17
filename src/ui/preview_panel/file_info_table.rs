@@ -23,7 +23,7 @@ fn resolve_live_file_size(
     live_file_size_loading: &mut FxHashSet<std::path::PathBuf>,
     live_file_size_req_sender: &std::sync::mpsc::Sender<crate::app::live_file_size::LiveFileSizeRequest>,
 ) -> u64 {
-    if file.is_dir {
+    if file.is_dir && !file.is_archive() {
         return file.size;
     }
 
@@ -191,6 +191,15 @@ pub fn render_file_info_table(
             if file.drive_info.is_none() && file.name != COMPUTER_VIEW_ID {
                 let is_recycle_item =
                     file.recycle_original_path.is_some() || file.deletion_date.is_some();
+                // Virtual folders inside archives are not real filesystem directories,
+                // so subtree metrics are not meaningful there. Archive files themselves
+                // should still show their own file size like any other file.
+                let is_virtual_archive_folder = file.is_dir
+                    && !file.is_archive()
+                    && crate::domain::file_entry::is_path_inside_archive(file.path());
+                let show_folder_aggregate_details = file.is_dir
+                    && !file.is_archive()
+                    && !is_virtual_archive_folder;
                 let (date_label, date_value) = if is_recycle_item {
                     let value = if file.modified > 0 {
                         crate::infrastructure::windows::format_date(file.modified)
@@ -208,54 +217,55 @@ pub fn render_file_info_table(
                 };
                 add_detail(ui, &date_label, date_value);
 
-                let folder_counts_complete = folder_summary
-                    .map(|summary| summary.has_counts())
-                    .unwrap_or(false);
-                let size_str = if file.is_dir && !file.is_archive() {
-                    if let Some(summary) = folder_summary {
-                        let formatted = crate::infrastructure::windows::format_size(summary.total_size);
-                        if is_folder_size_loading || !summary.has_counts() {
-                            format!("{formatted} ({})", t!("file_info.calculating"))
+                if !is_virtual_archive_folder {
+                    let folder_counts_complete = folder_summary
+                        .map(|summary| summary.has_counts())
+                        .unwrap_or(false);
+                    let size_str = if show_folder_aggregate_details {
+                        if let Some(summary) = folder_summary {
+                            let formatted = crate::infrastructure::windows::format_size(summary.total_size);
+                            if is_folder_size_loading || !summary.has_counts() {
+                                format!("{formatted} ({})", t!("file_info.calculating"))
+                            } else {
+                                formatted
+                            }
                         } else {
-                            formatted
+                            t!("file_info.calculating").to_string()
                         }
                     } else {
-                        t!("file_info.calculating").to_string()
+                        let live_size = resolve_live_file_size(
+                            ui,
+                            file,
+                            is_metadata_loading,
+                            live_file_size_cache,
+                            live_file_size_loading,
+                            live_file_size_req_sender,
+                        );
+                        crate::infrastructure::windows::format_size(live_size)
+                    };
+
+                    add_detail(ui, &t!("file_info.size"), size_str);
+
+                    if show_folder_aggregate_details {
+                        let subfolders = folder_summary
+                            .and_then(|summary| summary.folder_count)
+                            .map(|count| count.to_string())
+                            .unwrap_or_else(|| t!("file_info.calculating").to_string());
+                        add_detail(ui, &t!("file_info.subfolders"), subfolders);
+
+                        let files = folder_summary
+                            .and_then(|summary| summary.file_count)
+                            .map(|count| count.to_string())
+                            .unwrap_or_else(|| t!("file_info.calculating").to_string());
+                        add_detail(ui, &t!("file_info.files"), files);
                     }
-                } else {
-                    let live_size = resolve_live_file_size(
-                        ui,
-                        file,
-                        is_metadata_loading,
-                        live_file_size_cache,
-                        live_file_size_loading,
-                        live_file_size_req_sender,
-                    );
-                    crate::infrastructure::windows::format_size(live_size)
-                };
 
-                add_detail(ui, &t!("file_info.size"), size_str);
-
-                if file.is_dir && !file.is_archive() {
-                    let subfolders = folder_summary
-                        .and_then(|summary| summary.folder_count)
-                        .map(|count| count.to_string())
-                        .unwrap_or_else(|| t!("file_info.calculating").to_string());
-                    add_detail(ui, &t!("file_info.subfolders"), subfolders);
-
-                    let files = folder_summary
-                        .and_then(|summary| summary.file_count)
-                        .map(|count| count.to_string())
-                        .unwrap_or_else(|| t!("file_info.calculating").to_string());
-                    add_detail(ui, &t!("file_info.files"), files);
-                }
-
-                if file.is_dir
-                    && !file.is_archive()
-                    && (folder_summary.is_none() || !folder_counts_complete)
-                    && !is_folder_size_loading
-                {
-                    action = Some(PreviewPanelAction::CalculateFolderSize(file.path.clone()));
+                    if show_folder_aggregate_details
+                        && (folder_summary.is_none() || !folder_counts_complete)
+                        && !is_folder_size_loading
+                    {
+                        action = Some(PreviewPanelAction::CalculateFolderSize(file.path.clone()));
+                    }
                 }
             }
 
