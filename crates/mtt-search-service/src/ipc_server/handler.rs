@@ -12,9 +12,7 @@ use crate::ipc_authorization::{
     collect_authorized_search_page,
     current_client_can_read_path, PipeImpersonationGuard,
 };
-use crate::index_db;
 use crate::security_policy::IpcSecurityPolicy;
-use crate::FtsState;
 use mtt_search_protocol::*;
 
 use super::pipe_io::{read_message, send_response};
@@ -30,8 +28,6 @@ pub(super) fn handle_client(
     is_warming: &Arc<AtomicBool>,
     last_warm_epoch_secs: &Arc<AtomicU64>,
     security_policy: &IpcSecurityPolicy,
-    _fts_searcher: &Option<Arc<index_db::FtsSearcher>>,
-    _fts_state: &Arc<FtsState>,
 ) {
     let request_data = match read_message(pipe) {
         Some(data) => data,

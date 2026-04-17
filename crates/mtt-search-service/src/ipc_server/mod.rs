@@ -14,9 +14,7 @@ use windows::Win32::System::IO::OVERLAPPED;
 
 use crate::file_index::VolumeIndex;
 use crate::indexing_progress::IndexingProgress;
-use crate::index_db;
 use crate::security_policy::IpcSecurityPolicy;
-use crate::FtsState;
 
 const PIPE_BUFFER_SIZE: u32 = 64 * 1024;
 const PIPE_MAX_INSTANCES: u32 = 32;
@@ -39,26 +37,12 @@ pub fn run_ipc_server(
     indices: Arc<RwLock<Vec<VolumeIndex>>>,
     indexing_progress: Arc<IndexingProgress>,
     shutdown: Arc<AtomicBool>,
-    db_path: std::path::PathBuf,
-    fts_state: Arc<FtsState>,
+    _fts_state: Arc<crate::FtsState>,
 ) {
     let is_warming = Arc::new(AtomicBool::new(false));
     let last_warm_epoch_secs = Arc::new(AtomicU64::new(0));
     let active_clients = Arc::new(AtomicU32::new(0));
     let security_policy = Arc::new(IpcSecurityPolicy::from_env());
-
-    // FTS5 searcher: separate read-only SQLite connection for fast queries.
-    let fts_searcher: Option<Arc<index_db::FtsSearcher>> =
-        match index_db::FtsSearcher::open(&db_path) {
-            Ok(s) => {
-                eprintln!("[IPC] FTS5 searcher ready");
-                Some(Arc::new(s))
-            }
-            Err(e) => {
-                eprintln!("[IPC] FTS5 searcher unavailable, falling back to linear scan: {}", e);
-                None
-            }
-        };
 
     if security_policy.redact_status_metrics {
         eprintln!("[IPC] Security policy: status metrics redaction is enabled");
@@ -142,8 +126,6 @@ pub fn run_ipc_server(
         let warm_epoch_for_client = last_warm_epoch_secs.clone();
         let active_for_client = active_clients.clone();
         let policy_for_client = security_policy.clone();
-        let fts_for_client = fts_searcher.clone();
-        let fts_state_for_client = fts_state.clone();
         let pipe_raw = pipe.0 as usize;
         std::thread::spawn(move || {
             let pipe = HANDLE(pipe_raw as *mut core::ffi::c_void);
@@ -192,8 +174,6 @@ pub fn run_ipc_server(
                     &warming_for_client,
                     &warm_epoch_for_client,
                     &policy_for_client,
-                    &fts_for_client,
-                    &fts_state_for_client,
                 )
             })) {
                 eprintln!("[IPC] Client handler panic: {:?}", e);

@@ -1,5 +1,4 @@
 pub mod binary;
-mod fts;
 mod sync;
 
 use std::ffi::OsStr;
@@ -9,8 +8,6 @@ use std::sync::OnceLock;
 use parking_lot::Mutex;
 
 use rusqlite::{params, Connection, OpenFlags};
-
-pub use fts::FtsSearcher;
 
 /// Resolved data directory — set once at startup by `get_db_path`.
 /// Both the SQLite database *and* binary index files live under this

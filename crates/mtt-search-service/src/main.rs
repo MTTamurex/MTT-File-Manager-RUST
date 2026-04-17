@@ -56,10 +56,6 @@ impl FtsState {
             self.ready.store(true, Ordering::Release);
         }
     }
-
-    pub fn is_ready(&self) -> bool {
-        self.ready.load(Ordering::Acquire)
-    }
 }
 
 /// Redact filesystem paths from error messages to prevent information leakage.
@@ -266,7 +262,6 @@ pub fn run_indexer(shutdown: Arc<AtomicBool>) {
         indices.clone(),
         indexing_progress.clone(),
         shutdown.clone(),
-        db_path,
         fts_state,
     );
 
