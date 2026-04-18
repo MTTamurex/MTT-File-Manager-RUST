@@ -79,6 +79,9 @@ pub fn render_settings_window(
                                 SettingsSection::VirtualDrives => {
                                     crate::ui::components::virtual_drive_settings::render_virtual_drive_settings_section(ui);
                                 }
+                                SettingsSection::About => {
+                                    crate::ui::components::about_settings::render_about_settings_section(ui);
+                                }
                             });
                     },
                 );
@@ -113,5 +116,10 @@ fn render_settings_sidebar(ui: &mut egui::Ui, active_section: &mut SettingsSecti
         active_section,
         SettingsSection::VirtualDrives,
         &*t!("settings.virtual_drives"),
+    );
+    ui.selectable_value(
+        active_section,
+        SettingsSection::About,
+        &*t!("settings.about"),
     );
 }
