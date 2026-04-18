@@ -20,19 +20,10 @@
 
 ## 2. Problemas Críticos
 
-### ~~CRIT-01~~ → BAIXO-01: Use-after-free — I/O overlapped não drenada antes de drop do buffer
+### ~~CRIT-01~~ → ~~BAIXO-01: Use-after-free — I/O overlapped não drenada antes de drop do buffer~~ ✅ CORRIGIDO
 - **Arquivo:** `src/infrastructure/drive_watcher/thread_loop.rs`
 - **Impacto:** ~~Crítico~~ → **Baixo** — a integração app-level do DriveWatcher foi **removida completamente**. O módulo `drive_watcher.rs` (+ submodules) permanece apenas como dependência interna do `user_session_search` para monitorar volumes FUSE/virtuais. O código afetado não é atingido pelo fluxo principal da aplicação.
-- **Cenário:** Shutdown do watcher enquanto `ReadDirectoryChangesW` está pendente. `CancelIoEx` agenda cancelamento mas **não espera** conclusão. `buffer` (heap) e `overlapped` (stack) são liberados enquanto Windows ainda pode estar escrevendo neles. Requer: (1) opt-in explícito, (2) shutdown no exato momento com I/O pendente.
-- **Correção (ainda recomendada para quando o feature for reabilitado):**
-```rust
-if waiting_for_io {
-    let _ = CancelIoEx(handle, Some(&overlapped));
-    let mut dummy = 0u32;
-    let _ = GetOverlappedResult(handle, &overlapped, &mut dummy, true); // espera conclusão
-}
-let _ = CloseHandle(handle);
-```
+- **Correção aplicada:** `GetOverlappedResult(handle, &overlapped, &mut dummy, true)` no shutdown para drenar I/O pendente antes de liberar o buffer.
 
 ### CRIT-02: ComGuard ignora falha de CoInitializeEx
 - **Arquivo:** `src/workers/folder_preview_worker.rs`
@@ -88,10 +79,11 @@ if width > 16384 || height > 16384 || width == 0 || height == 0 {
 - **Causa:** Indexação de slice sem bounds check. `get_lowered` já tem o guard, `get` não.
 - **Correção:** `if end > self.buf.len() { return ""; }`
 
-### SEC-05: NV12→RGBA panic com dimensões ímpares
+### ~~SEC-05: NV12→RGBA panic com dimensões ímpares~~ ✅ CORRIGIDO
 - **Arquivo:** `src/workers/thumbnail/processing/format_conversion.rs` (~L15)
 - **Impacto:** Médio — panic na thread de thumbnail worker
 - **Causa:** Cálculo de stride UV assume dimensões pares; dimensões ímpares produzem index out of bounds.
+- **Correção aplicada:** Clamp UV coords para dimensões pares com `& !1` + `.min()` safety.
 
 ### SEC-06: `GlobalAlloc` memory leak no clipboard
 - **Arquivo:** `src/infrastructure/windows_clipboard.rs` (~L137-L148)
@@ -150,10 +142,11 @@ if width > 16384 || height > 16384 || width == 0 || height == 0 {
 - **Impacto:** Médio — milhares de eventos/segundo em burst (OneDrive sync, copy)
 - **Correção:** Pré-normalizar prefix uma vez; comparação case-insensitive sem alocação.
 
-### PERF-09: `adaptive_batch` cálculo de `avg_time_per_item` incorreto
+### ~~PERF-09: `adaptive_batch` cálculo de `avg_time_per_item` incorreto~~ ✅ CORRIGIDO
 - **Arquivo:** `src/infrastructure/adaptive_batch.rs` (~L60)
 - **Impacto:** Baixo-Médio — batch sizing oscila incorretamente
 - **Causa:** Denominador usa `items_processed` do batch atual × `batch_count` total, deveria ser total cumulativo. `Vec::remove(0)` é O(n), deveria ser `VecDeque`.
+- **Correção aplicada:** `BatchSample` struct com (duration, items); cálculo correto `total_time/total_items`; `VecDeque` em vez de `Vec::remove(0)`.
 
 ---
 
@@ -165,10 +158,10 @@ if width > 16384 || height > 16384 || width == 0 || height == 0 {
 - **Causa:** `GetDiskFreeSpaceW` retorna contadores de cluster 32-bit; wrap em >16TB com clusters 4K.
 - **Correção:** Substituir por `GetDiskFreeSpaceExW` (retorna bytes 64-bit).
 
-### WIN-02: `WaitForSingleObject(process, INFINITE)` no elevated helper
+### ~~WIN-02: `WaitForSingleObject(process, INFINITE)` no elevated helper~~ ✅ CORRIGIDO
 - **Arquivo:** `src/infrastructure/windows/drives.rs` (~L231)
 - **Impacto:** Médio — thread bloqueada infinitamente se processo elevado trava/é morto pelo AV
-- **Correção:** Timeout finito (30s) + retorno de erro se excedido.
+- **Correção aplicada:** Timeout finito de 30s com mensagem específica para timeout vs erro genérico.
 
 ### WIN-03: `to_string_lossy()` corrompe paths não-UTF-8
 - **Arquivos:** `src/infrastructure/ntfs_reader.rs` (~L90), `src/infrastructure/drive_watcher/buffer_parser.rs` (~L18)
@@ -193,11 +186,11 @@ if width > 16384 || height > 16384 || width == 0 || height == 0 {
 
 ## 6. Problemas de Concorrência
 
-### CONC-01: `ThumbnailDiskCache` reader = writer.clone() — armadilha de deadlock
+### ~~CONC-01: `ThumbnailDiskCache` reader = writer.clone() — armadilha de deadlock~~ ✅ CORRIGIDO
 - **Arquivo:** `src/infrastructure/disk_cache.rs` (~L136)
 - **Impacto:** Crítico (latente) — se reader fallback para `writer.clone()`, qualquer path que segure writer e chame reader causa deadlock
 - **Causa:** `Mutex` do Rust não é reentrante. Nenhum path atual causa o deadlock, mas uma edição descuidada pode.
-- **Correção:** Debug assertion + documentação do invariante; ou usar `parking_lot::ReentrantMutex`.
+- **Correção aplicada:** Comentário SAFETY INVARIANT + `log::warn` no fallback path documentando o risco de deadlock.
 
 ### CONC-02: Lock poisoning silencia falha permanente dos caches
 - **Arquivos:** `src/infrastructure/directory_cache.rs`, `src/infrastructure/directory_dirty_registry.rs`
@@ -210,10 +203,10 @@ if width > 16384 || height > 16384 || width == 0 || height == 0 {
 - **Impacto:** Alto — digitação rápida + erros IPC = dezenas de threads bloqueadas acumulando
 - **Correção:** Semáforo ou pool boundado; generation check já limita trabalho útil mas não previne thread accumulation.
 
-### CONC-04: `.expect()` em thread spawn = crash da aplicação
+### ~~CONC-04: `.expect()` em thread spawn = crash da aplicação~~ ✅ CORRIGIDO
 - **Arquivos:** `src/app/init_workers/filesystem_workers.rs`, `src/app/init_workers/consistency_probe_worker.rs`
 - **Impacto:** Alto — resource exhaustion faz spawn falhar → panic → crash
-- **Correção:** Log + degradação graceful (desabilita o worker).
+- **Correção aplicada:** `if let Err(e) = .spawn()` com log::error + degradação graceful (worker desabilitado, sends falham silenciosamente).
 
 ### CONC-05: Shared extension icon cache — 16 workers contendem em Mutex
 - **Arquivo:** `src/app/init_workers/visual_workers.rs` (~L152)
@@ -275,14 +268,14 @@ if width > 16384 || height > 16384 || width == 0 || height == 0 {
 | 1 | Extrair sub-structs de `ImageViewerApp` (WatcherState, MediaState, DragDropState) | Alto | Médio |
 | ~~2~~ | ~~RAII consistente para COM em todos workers (`ComGuard` com tracker booleano)~~ | ~~Alto~~ | ✅ CORRIGIDO |
 | 3 | `Arc<Vec<FileEntry>>` para transferências cache→pipeline→UI sem clone | Alto | Médio |
-| 4 | `GetOverlappedResult` no shutdown do drive watcher | Alto | Baixo |
+| ~~4~~ | ~~`GetOverlappedResult` no shutdown do drive watcher~~ | ~~Alto~~ | ✅ CORRIGIDO |
 | ~~5~~ | ~~Buffers alinhados para parsers de `NtQueryDirectoryFile` e `ReadDirectoryChangesW`~~ | ~~Alto~~ | ✅ CORRIGIDO |
 | ~~6~~ | ~~Substituir `.lock().ok()?` por recover-from-poison com logging~~ | ~~Médio~~ | ✅ CORRIGIDO |
 | ~~7~~ | ~~Bounds check em `NameArena::get`~~ | ~~Médio~~ | ✅ CORRIGIDO |
 | ~~8~~ | ~~Dimension cap em `hbitmap_to_rgba`~~ | ~~Médio~~ | ✅ CORRIGIDO |
 | ~~9~~ | ~~`GetDiskFreeSpaceExW` em vez de `GetDiskFreeSpaceW`~~ | ~~Médio~~ | ✅ CORRIGIDO |
 | 10 | Streaming real no HDD directory reader | Médio | Médio |
-| 11 | Timeout finito no `WaitForSingleObject` do elevated helper | Médio | Baixo |
+| ~~11~~ | ~~Timeout finito no `WaitForSingleObject` do elevated helper~~ | ~~Médio~~ | ✅ CORRIGIDO |
 | 12 | Remover/integrar `UIState` vestigial | Médio | Baixo |
 
 ---
@@ -291,7 +284,7 @@ if width > 16384 || height > 16384 || width == 0 || height == 0 {
 
 | # | Fix | Linhas de código | Impacto |
 |---|-----|-----------------|---------|
-| 1 | `GetOverlappedResult(handle, &overlapped, &mut dummy, true)` no shutdown do drive watcher (opt-in, desabilitado por padrão) | ~5 linhas | Elimina use-after-free (baixa prioridade — código inativo) |
+| ~~1~~ | ~~`GetOverlappedResult(handle, &overlapped, &mut dummy, true)` no shutdown do drive watcher (opt-in, desabilitado por padrão)~~ | ✅ CORRIGIDO | ~~Elimina use-after-free (baixa prioridade — código inativo)~~ |
 | ~~2~~ | ~~`#[repr(C, align(8))]` no buffer do ntfs_reader e buffer_parser~~ | ✅ CORRIGIDO | ~~Elimina UB de alinhamento~~ |
 | ~~3~~ | ~~`ComGuard { initialized: bool }` no folder_preview e icon workers~~ | ✅ CORRIGIDO | ~~Elimina UB de COM~~ |
 | ~~4~~ | ~~`if end > self.buf.len() { return ""; }` em `NameArena::get`~~ | ✅ CORRIGIDO | ~~Previne crash do search service~~ |

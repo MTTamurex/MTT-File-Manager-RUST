@@ -38,7 +38,7 @@ pub fn spawn_consistency_probe_worker(
     let (req_tx, req_rx) = mpsc::channel::<ConsistencyProbeRequest>();
     let (res_tx, res_rx) = mpsc::channel::<ConsistencyProbeResult>();
 
-    std::thread::Builder::new()
+    if let Err(e) = std::thread::Builder::new()
         .name("consistency-probe".into())
         .spawn(move || {
             crate::infrastructure::io_priority::set_thread_priority(
@@ -117,7 +117,9 @@ pub fn spawn_consistency_probe_worker(
                 }
             }
         })
-        .expect("failed to spawn consistency-probe worker");
+    {
+        log::error!("[CONSISTENCY-PROBE] Failed to spawn worker thread: {e}. Consistency probing disabled.");
+    }
 
     (req_tx, res_rx)
 }

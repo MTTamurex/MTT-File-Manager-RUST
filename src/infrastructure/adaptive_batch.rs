@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::time::Duration;
 
 const MIN_BATCH_SIZE: usize = 25;
@@ -24,9 +25,15 @@ impl AdaptiveBatchConfig {
     }
 }
 
+/// Per-item timing sample: how long a batch took and how many items it contained.
+struct BatchSample {
+    duration: Duration,
+    items: usize,
+}
+
 pub struct AdaptiveBatchTracker {
     is_ssd: bool,
-    batch_times: Vec<Duration>,
+    samples: VecDeque<BatchSample>,
     current_batch_size: usize,
 }
 
@@ -34,7 +41,7 @@ impl AdaptiveBatchTracker {
     pub fn new(config: AdaptiveBatchConfig) -> Self {
         Self {
             is_ssd: config.is_ssd,
-            batch_times: Vec::with_capacity(10),
+            samples: VecDeque::with_capacity(6),
             current_batch_size: config.initial_batch_size(),
         }
     }
@@ -43,22 +50,21 @@ impl AdaptiveBatchTracker {
         if items_processed == 0 {
             return;
         }
-        self.batch_times.push(duration);
+        self.samples.push_back(BatchSample { duration, items: items_processed });
 
-        if self.batch_times.len() > 5 {
-            self.batch_times.remove(0);
+        if self.samples.len() > 5 {
+            self.samples.pop_front();
         }
 
         if self.is_ssd {
             return;
         }
 
-        let avg_time_per_item = self
-            .batch_times
-            .iter()
-            .map(|d| d.as_micros() as f64)
-            .sum::<f64>()
-            / (items_processed as f64 * self.batch_times.len() as f64);
+        // Compute weighted average: total_time / total_items across recent samples.
+        let total_micros: f64 = self.samples.iter().map(|s| s.duration.as_micros() as f64).sum();
+        let total_items: f64 = self.samples.iter().map(|s| s.items as f64).sum();
+
+        let avg_time_per_item = total_micros / total_items;
 
         if avg_time_per_item <= 0.0 {
             return;

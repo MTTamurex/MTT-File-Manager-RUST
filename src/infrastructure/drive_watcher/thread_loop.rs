@@ -181,8 +181,17 @@ pub(super) fn watcher_thread_main(
             let _ = event_tx.send(batch);
         }
 
-        // Cleanup.
-        let _ = CancelIoEx(handle, None);
+        // Cleanup: cancel pending I/O and wait for it to complete before
+        // dropping the buffer.  Without this, CancelIoEx merely *schedules*
+        // cancellation while Windows may still be writing into `buffer` /
+        // `overlapped` — a use-after-free if they are dropped immediately.
+        if waiting_for_io {
+            let _ = CancelIoEx(handle, Some(&overlapped));
+            let mut dummy = 0u32;
+            let _ = GetOverlappedResult(handle, &overlapped, &mut dummy, true);
+        } else {
+            let _ = CancelIoEx(handle, None);
+        }
         let _ = CloseHandle(handle);
         let _ = CloseHandle(h_event);
         log::info!("[DRIVE-WATCHER] Thread shutdown complete");

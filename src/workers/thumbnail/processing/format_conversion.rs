@@ -10,6 +10,12 @@
 pub fn convert_nv12_to_rgba(nv12_data: &[u8], width: u32, height: u32) -> Vec<u8> {
     let width = width as usize;
     let height = height as usize;
+
+    // NV12 UV plane requires even dimensions for correct chroma subsampling.
+    // Round down to nearest even number to prevent index out-of-bounds on odd sizes.
+    let uv_width = width & !1;
+    let uv_height = height & !1;
+
     let y_size = width * height;
 
     let y_plane = &nv12_data[0..y_size];
@@ -20,7 +26,11 @@ pub fn convert_nv12_to_rgba(nv12_data: &[u8], width: u32, height: u32) -> Vec<u8
     for y in 0..height {
         for x in 0..width {
             let y_index = y * width + x;
-            let uv_index = (y / 2) * (width / 2) * 2 + (x / 2) * 2;
+
+            // Clamp to valid UV range for odd-dimension safety
+            let uv_x = x.min(uv_width.saturating_sub(1));
+            let uv_y = y.min(uv_height.saturating_sub(1));
+            let uv_index = (uv_y / 2) * (uv_width / 2) * 2 + (uv_x / 2) * 2;
 
             let y_val = y_plane[y_index] as i32;
             let u_val = uv_plane[uv_index] as i32 - 128;
