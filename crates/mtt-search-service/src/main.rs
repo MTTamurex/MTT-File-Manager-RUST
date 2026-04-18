@@ -84,7 +84,12 @@ fn main() {
     unsafe {
         use windows::Win32::System::LibraryLoader::SetDefaultDllDirectories;
         use windows::Win32::System::LibraryLoader::LOAD_LIBRARY_SEARCH_DEFAULT_DIRS;
-        let _ = SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+        if let Err(error) = SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS) {
+            eprintln!(
+                "[SERVICE] DLL search hardening failed: {} (service continues with reduced hardening)",
+                error
+            );
+        }
     }
 
     let args: Vec<String> = std::env::args().collect();

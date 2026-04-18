@@ -15,3 +15,4 @@ pub mod workers;
 
 // Re-export main app struct for easy access
 pub use app::state::ImageViewerApp;
+pub use infrastructure::threading::spawn_named;

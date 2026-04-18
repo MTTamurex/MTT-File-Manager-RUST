@@ -1,286 +1,406 @@
-# Auditoria Completa — MTT File Manager (Rust)
+# Auditoria Técnica — MTT File Manager (Rust + Windows)
 
-**Data:** 2026-04-18 | **Atualizado:** 2026-04-19
-**Escopo:** Código fonte completo, unsafe/FFI, Windows API, concorrência, I/O, performance, arquitetura
+> Auditoria baseada **exclusivamente no código fonte**. Documentação, comentários e README não foram tratados como fonte de verdade.
+
+**Data:** 2026-04-18  
+**Escopo:** `src/`, `crates/mtt-search-service/`, `crates/mtt-search-protocol/`, com foco em `unsafe`, FFI/Win32, concorrência, I/O, performance, arquitetura e tratamento de erros.
 
 ---
 
 ## 1. Resumo Geral
 
-**Estado do projeto:** O codebase é maduro e demonstra conhecimento sólido de Rust, Windows API e arquitetura de sistemas. A segurança é tratada com defesa em profundidade (IPC, archive extraction, path validation). O ciclo de vida (shutdown, startup faseado) é bem engenhado. O uso de `unsafe` é concentrado em integrações legítimas com Win32/COM/FFI.
+**Estado do projeto.** Codebase grande, com integração profunda em Win32, NTFS/MFT, USN Journal, `ReadDirectoryChangesW`, COM/Shell, named pipes e múltiplos workers. A separação em `domain / application / infrastructure / app / ui / workers` existe, mas há vazamento de camada em pontos críticos.
 
-**Status da auditoria:**
-- ✅ **3/3** problemas críticos corrigidos (CRIT-01, CRIT-02, CRIT-03)
-- ✅ **7/7** problemas de segurança corrigidos (SEC-01 a SEC-07)
-- ✅ **5/6** problemas de Windows API corrigidos (WIN-01 a WIN-04, WIN-06) + 1 falso positivo (WIN-05)
-- ✅ **5/6** problemas de concorrência corrigidos (CONC-01 a CONC-05) + 1 falso positivo (CONC-06)
-- ✅ **6/9** problemas de performance corrigidos (PERF-02 a PERF-09) + 1 já implementado (PERF-06)
-- 🔄 **1** performance adiado (PERF-01 — alta complexidade)
-- 🔄 **5** arquitetura adiados (ARCH-01 a ARCH-05 — refatorações de alta complexidade)
+**Principais riscos técnicos identificados:**
 
-**Principais riscos técnicos residuais:**
-1. ~~**Undefined behavior**~~ → ✅ Corrigido (buffers alinhados SEC-01/SEC-02)
-2. **Alocações excessivas** parcialmente resolvidas (PERF-02 `std::mem::take`, PERF-03 `Box<RecycleBinMeta>`, PERF-05 streaming HDD). PERF-01 `filter_items` clone adiado.
-3. **Struct `ImageViewerApp`** monolítica com 90+ campos — adiado (ARCH-01)
-4. ~~**Lock poisoning**~~ → ✅ Corrigido (CONC-02)
-5. ~~**Use-after-free**~~ → ✅ Corrigido + módulo removido do fluxo principal (BAIXO-01)
+1. Vazamentos reais de `HANDLE` em caminhos de erro do `drive_watcher` e `mft_reader`.
+2. Buffer de `ReadDirectoryChangesW` pequeno demais para diretórios com alto churn, com perda silenciosa de eventos.
+3. Parsing binário não confiável com `unwrap()` em massa no `mft_reader`, capaz de derrubar o search service.
+4. Locks de write segurados por tempo demais em indexação/busca, bloqueando consultas IPC.
+5. `catch_unwind` com resultado descartado em workers, causando operações travadas sem resposta para a UI.
+6. Tipos opacos Win32 tratados como inteiros crus (`HDEVNOTIFY` em `AtomicUsize`), o que degrada segurança e manutenção.
+7. Uso inconsistente de COM apartment model e lifecycle em workers.
+8. Estruturas de coalescing/caching sem limite rígido em cenários adversariais.
+9. Arquivos excessivamente grandes concentrando múltiplas responsabilidades.
+10. Tratamento de erro inconsistente, com perda frequente de contexto Win32 e de diagnóstico.
 
 ---
 
 ## 2. Problemas Críticos
 
-### ~~CRIT-01~~ → ~~BAIXO-01: Use-after-free — I/O overlapped não drenada antes de drop do buffer~~ ✅ CORRIGIDO
+### C1. Buffer de `ReadDirectoryChangesW` insuficiente e sem tratamento de overflow
 - **Arquivo:** `src/infrastructure/drive_watcher/thread_loop.rs`
-- **Impacto:** ~~Crítico~~ → **Baixo** — a integração app-level do DriveWatcher foi **removida completamente**. O módulo `drive_watcher.rs` (+ submodules) permanece apenas como dependência interna do `user_session_search` para monitorar volumes FUSE/virtuais. O código afetado não é atingido pelo fluxo principal da aplicação.
-- **Correção aplicada:** `GetOverlappedResult(handle, &overlapped, &mut dummy, true)` no shutdown para drenar I/O pendente antes de liberar o buffer.
+- **Impacto:** **Crítico**
+- **Cenário:** diretórios com OneDrive/Dropbox, builds grandes, extrações massivas, árvores com milhares de mudanças por segundo.
+- **Problema:** `BUFFER_SIZE = 65536` é insuficiente para bursts reais. Quando o buffer satura, o Windows pode truncar notificações sem erro fatal, levando a perda de eventos e cache inconsistente.
+- **Causa raiz:** escolha de buffer conservadora demais e ausência de tratamento explícito para saturação.
+- **Correção recomendada:** elevar para 256–512 KB onde aplicável e, ao detectar saturação/truncamento, invalidar o prefixo inteiro em vez de confiar no batch parcial.
 
-### ~~CRIT-02: ComGuard ignora falha de CoInitializeEx~~ ✅ CORRIGIDO
-- **Arquivo:** `src/workers/folder_preview_worker.rs`
-- **Impacto:** Crítico — UB por chamar `CoUninitialize` sem `CoInitializeEx` bem-sucedido
-- **Causa:** `ComGuard` sempre chama `CoUninitialize` no `Drop`, mesmo quando `CoInitializeEx` retornou erro.
-- **Correção aplicada:** `ComGuard { initialized: bool }` com tracker booleano — `CoUninitialize` só é chamado quando `CoInitializeEx` retornou sucesso.
+### C2. Leak de `HANDLE` do evento no drive watcher
+- **Arquivo:** `src/infrastructure/drive_watcher/thread_loop.rs`
+- **Impacto:** **Alto**
+- **Cenário:** watcher reiniciado, erro de abertura de handle, saída de thread, falhas intermitentes de volume.
+- **Problema:** `CreateEventW` aloca um kernel handle que não é fechado de forma garantida em todos os caminhos.
+- **Causa raiz:** gerenciamento manual de handles sem RAII consistente.
+- **Correção recomendada:** encapsular `HANDLE` em wrapper com `Drop` chamando `CloseHandle`.
 
-### ~~CRIT-03: Icon worker COM sem RAII guard~~ ✅ CORRIGIDO
-- **Arquivo:** `src/app/init_workers/visual_workers.rs` (~L278)
-- **Impacto:** Crítico — `CoUninitialize` nunca chamado se thread panic fora do `catch_unwind` per-item
-- **Correção aplicada:** RAII `ComGuard` com tracker booleano substituindo init/uninit manual.
+### C3. Leak de handle de volume em `mft_reader`
+- **Arquivo:** `crates/mtt-search-service/src/mft_reader.rs`
+- **Impacto:** **Alto**
+- **Cenário:** erro em `GetFileSizeEx`, `DeviceIoControl`, leitura parcial de volume, volume corrompido.
+- **Problema:** o volume é aberto com `CreateFileW`, mas certos retornos antecipados não garantem `CloseHandle`.
+- **Causa raiz:** early returns em fluxo Win32 sem cleanup centralizado.
+- **Correção recomendada:** usar guard RAII para todo handle aberto em `mft_reader`.
+
+### C4. `unwrap()` em parsing binário não confiável do NTFS/MFT
+- **Arquivo:** `crates/mtt-search-service/src/mft_reader.rs`
+- **Impacto:** **Crítico**
+- **Cenário:** volume com boot sector inconsistente, disco removível degradado, setor parcialmente lido, dados truncados.
+- **Problema:** há diversas leituras do tipo `buffer[a..b].try_into().unwrap()` sobre bytes externos e não confiáveis.
+- **Causa raiz:** parser assume layout íntegro sem validar tamanho mínimo antes de cada acesso.
+- **Correção recomendada:** substituir `unwrap()` por validação explícita de faixa e retorno `Result` com contexto (`offset`, `expected_len`, volume).
+
+### C5. `catch_unwind` inócuo em worker de file operations
+- **Arquivo:** `src/workers/file_operation_worker.rs`
+- **Impacto:** **Alto**
+- **Cenário:** panic dentro de handler de delete/move/restore.
+- **Problema:** o resultado de `catch_unwind` é ignorado. Se o handler panica, a UI pode nunca receber resposta.
+- **Causa raiz:** tratamento incompleto de falha em worker assíncrono.
+- **Correção recomendada:** logar o panic e enviar `FileOperationResult::Error` no canal de retorno.
+
+### C6. `h.join().unwrap()` em worker de thumbnails
+- **Arquivo:** `src/workers/thumbnail/worker.rs`
+- **Impacto:** **Crítico**
+- **Cenário:** decoder/codec panica ao processar entrada inválida.
+- **Problema:** panic da thread secundária escala para quem faz `join()`, derrubando o processo.
+- **Causa raiz:** `unwrap()` em fronteira de thread.
+- **Correção recomendada:** tratar `join()` com `if let Err(...)` e converter para log/telemetria.
+
+### C7. `HDEVNOTIFY` armazenado como `AtomicUsize`
+- **Arquivo:** `src/infrastructure/windows/device_change.rs`
+- **Impacto:** **Alto**
+- **Cenário:** desregistro de device notifications, shutdown, refator futura, corrupção de valor intermediário.
+- **Problema:** handle opaco da Win32 é rebaixado a inteiro cru, perdendo semântica e validação de tipo.
+- **Causa raiz:** workaround para `Send + Sync` feito no nível errado.
+- **Correção recomendada:** armazenar em wrapper tipado, com lifecycle encapsulado por `Mutex`/`OnceLock`.
 
 ---
 
 ## 3. Problemas de Segurança (Rust / Unsafe / FFI)
 
-### ~~SEC-01: Alignment UB — `FileDirectoryInfo` de buffer não-alinhado~~ ✅ CORRIGIDO
-- **Arquivo:** `src/infrastructure/ntfs_reader.rs` (~L136)
-- **Impacto:** Alto — UB formal, benigno em x86 mas pode ser explorado pelo compilador
-- **Correção aplicada:** `#[repr(C, align(8))] struct AlignedBuffer` garante alinhamento correto para cast.
+### S1. Layout serializado dependente de layout in-memory sem contrato formal
+- **Arquivo:** `crates/mtt-search-service/src/index_db/binary.rs`
+- **Impacto:** **Alto**
+- **Cenário:** mudança futura em `Header`/`FileRecord`, padding alterado pelo compilador, build cross-target.
+- **Problema:** conversões entre struct e bytes usam casts e `read_unaligned`, mas não há garantias suficientes de layout.
+- **Causa raiz:** serialização manual baseada em memória bruta.
+- **Correção recomendada:** usar `#[repr(C)]`/`#[repr(C, packed)]` quando apropriado, mais asserts estáticos de `size_of`, ou serialização campo a campo.
 
-### ~~SEC-02: Alignment UB — `FILE_NOTIFY_INFORMATION` de buffer não-alinhado~~ ✅ CORRIGIDO
-- **Arquivo:** `src/infrastructure/drive_watcher/buffer_parser.rs` (~L30)
-- **Impacto:** Alto — mesma classe de UB que SEC-01
-- **Correção aplicada:** `#[repr(C, align(8))] struct AlignedBuffer` no buffer do drive watcher.
+### S2. `GlobalLock` sem validação de ponteiro nulo
+- **Arquivo:** `src/infrastructure/windows_clipboard.rs`
+- **Impacto:** **Médio**
+- **Cenário:** falha de alocação/lock do clipboard global memory.
+- **Problema:** o retorno pode ser `NULL`, mas o ponteiro é usado como se fosse válido.
+- **Causa raiz:** pressuposto de sucesso em API Win32 que explicitamente pode falhar.
+- **Correção recomendada:** checar `is_null()` antes de copiar para o buffer.
 
-### ~~SEC-03: `hbitmap_to_rgba` sem limite de dimensões~~ ✅ CORRIGIDO
-- **Arquivo:** `src/infrastructure/windows/bitmap_conversion.rs`
-- **Impacto:** Médio — OOM com bitmap adversarial; overflow de `width * height * 4` em 32-bit
-- **Correção aplicada:** Cap de 16384×16384 pixels antes da alocação do buffer.
+### S3. `transmute` de ponteiro de função retornado por `GetProcAddress`
+- **Arquivo:** `src/infrastructure/ntfs_reader.rs`
+- **Impacto:** **Médio**
+- **Cenário:** divergência entre assinatura declarada localmente e ABI real exportada pela DLL.
+- **Problema:** `transmute` de function pointer é frágil e vira UB se a assinatura estiver errada.
+- **Causa raiz:** binding manual quando já há crates com assinatura correta.
+- **Correção recomendada:** preferir bindings tipados do `windows-sys`/`windows` e evitar `GetProcAddress` manual.
 
-### ~~SEC-04: `NameArena::get` panic com `NameRef` inválido~~ ✅ CORRIGIDO
-- **Arquivo:** `crates/mtt-search-service/src/name_arena.rs` (~L81)
-- **Impacto:** Médio — crash do search service (processo SYSTEM)
-- **Correção aplicada:** Bounds check `if end > self.buf.len() { return ""; }` em `get()`, alinhado com `get_lowered()`.
+### S4. Impersonation guard sem distinção entre sucesso real e sucesso lógico
+- **Arquivo:** `crates/mtt-search-service/src/ipc_authorization.rs`
+- **Impacto:** **Médio**
+- **Cenário:** nested impersonation ou caminhos em que a thread já está sob contexto alterado.
+- **Problema:** `RevertToSelf()` pode ser chamado em escopo incorreto se o guard sempre marcar `active = true`.
+- **Causa raiz:** ausência de modelagem explícita do estado retornado pela API.
+- **Correção recomendada:** guardar estado mais preciso do impersonation guard e só reverter quando a chamada efetivamente tiver iniciado uma nova impersonação.
 
-### ~~SEC-05: NV12→RGBA panic com dimensões ímpares~~ ✅ CORRIGIDO
-- **Arquivo:** `src/workers/thumbnail/processing/format_conversion.rs` (~L15)
-- **Impacto:** Médio — panic na thread de thumbnail worker
-- **Causa:** Cálculo de stride UV assume dimensões pares; dimensões ímpares produzem index out of bounds.
-- **Correção aplicada:** Clamp UV coords para dimensões pares com `& !1` + `.min()` safety.
+### S5. ACL/SID montados à mão em buffer cru
+- **Arquivo:** `crates/mtt-search-service/src/ipc_server/pipe_io.rs`
+- **Impacto:** **Médio**
+- **Cenário:** mudança futura em SID/ACE, erro de manutenção, revisão de segurança do pipe.
+- **Problema:** tamanhos e offsets são calculados manualmente, o que é frágil e fácil de quebrar.
+- **Causa raiz:** construção artesanal de descritores de segurança em vez de APIs auxiliares.
+- **Correção recomendada:** migrar para funções Win32 próprias para ACL/SID.
 
-### ~~SEC-06: `GlobalAlloc` memory leak no clipboard~~ ✅ CORRIGIDO
-- **Arquivo:** `src/infrastructure/windows_clipboard.rs` (~L137-L148)
-- **Impacto:** Médio — leak de `HGLOBAL` se `GlobalLock` ou `SetClipboardData` falha
-- **Correção aplicada:** `GlobalFree(hmem)` em todos os error paths antes do return.
-
-### ~~SEC-07: Pipe squatting na IPC do image viewer~~ ✅ CORRIGIDO
-- **Arquivo:** `src/image_viewer/ipc.rs` (~L85-L100)
-- **Impacto:** Médio — processo malicioso local pode interceptar caminhos de arquivo
-- **Causa:** Pipe destruído e recriado entre clientes; janela de race para squatting.
-- **Correção aplicada:** Pipe criado uma vez fora do loop e reutilizado via `DisconnectNamedPipe` + `ConnectNamedPipe`. Elimina race window entre `CloseHandle` e `CreateNamedPipeW`.
+### S6. Uso inconsistente de COM apartment model
+- **Arquivo:** `src/workers/file_operation_worker.rs` e outros workers COM-related
+- **Impacto:** **Alto**
+- **Cenário:** chamada COM em thread diferente daquela que inicializou STA, ou refator futura que insira `spawn` extra.
+- **Problema:** o projeto depende de garantias implícitas de afinidade de thread.
+- **Causa raiz:** falta de abstração única para escopo COM.
+- **Correção recomendada:** criar RAII `ComScope` por operação crítica, com `CoInitializeEx` e `CoUninitialize` no mesmo escopo e mesma thread.
 
 ---
 
 ## 4. Problemas de Performance
 
-### PERF-01: `filter_items()` clona `all_items` em toda chamada — 🔄 ADIADO (alta complexidade)
-- **Arquivo:** `src/app/operations/folder_loading/view_updates.rs` (~L20)
-- **Impacto:** Alto — ~10MB alocações por folder load com 50K arquivos
-- **Causa:** `self.items = Arc::new(self.all_items.clone())` mesmo sem filtro ativo.
-- **Correção proposta:** Quando query vazia, compartilhar via `Arc` sem clonar.
-- **Motivo do adiamento:** Requer mudança de tipo de `all_items` com 15+ sites de mutação (push, clear, iter_mut, clone para tabs, move para restore). Risco de regressão alto para o ganho.
+### P1. Dupla chamada a `metadata()` em caminho quente de vídeo
+- **Arquivo:** `src/infrastructure/windows/metadata/video.rs`
+- **Impacto:** **Crítico**
+- **Cenário:** pastas com milhares de vídeos, geração de thumbnails/metadata em lote.
+- **Problema:** o código busca tamanho do arquivo via `metadata()` mais de uma vez na mesma composição de metadados.
+- **Causa raiz:** falta de passagem de `file_size` já conhecido no caller.
+- **Correção recomendada:** passar `file_size` como argumento e cortar syscall redundante.
 
-### ~~PERF-02: Clone excessivo de `FileEntry` no pipeline de loading~~ ✅ CORRIGIDO (parcial)
-- **Arquivos:** `src/app/operations/folder_loading/load_pipeline/tier3_fallback.rs`, `src/app/operations/folder_loading/load_pipeline/optimized_tiers.rs`
-- **Impacto:** Alto — cópia completa de cada batch de 500+ FileEntry no send
-- **Correção aplicada:** `batch.clone()` + `batch.clear()` substituído por `std::mem::take(batch)` em ambos os tiers — elimina clone de ~500 FileEntry por batch. `Arc<Vec<FileEntry>>` para cache→sender adiado junto com PERF-01.
+### P2. Conversões `OsString -> String` repetidas em loops de UI
+- **Arquivos:** `src/image_viewer/mod.rs`, `src/workers/thumbnail/progress.rs` e outros
+- **Impacto:** **Alto**
+- **Cenário:** listas grandes redesenhadas por frame, navegação rápida, grids com centenas/milhares de itens.
+- **Problema:** `to_string_lossy().to_string()` aparece repetidamente em hot path.
+- **Causa raiz:** falta de reutilização do nome já materializado em `FileEntry`.
+- **Correção recomendada:** usar `&entry.name` ou cachear o nome convertido uma vez.
 
-### ~~PERF-03: `FileEntry` struct inflada (~240 bytes + heap)~~ ✅ CORRIGIDO (parcial)
-- **Arquivo:** `src/domain/file_entry.rs`
-- **Impacto:** Alto — `deletion_date`/`recycle_original_path` pagam custo em todo entry mesmo quando não usados
-- **Correção aplicada:** `deletion_date: Option<String>` + `recycle_original_path: Option<PathBuf>` consolidados em `recycle_bin: Option<Box<RecycleBinMeta>>`. Economiza ~56 bytes por entry não-recycle-bin (99%+ dos entries). Accessor methods `deletion_date()`, `recycle_original_path()`, `is_recycle_item()` adicionados. ~20 arquivos atualizados.
+### P3. Evicção de cache de imagens via `collect + sort`
+- **Arquivo:** `src/image_viewer/cache.rs`
+- **Impacto:** **Médio**
+- **Cenário:** navegação sequencial por imagens grandes, pressão constante de memória.
+- **Problema:** gera `Vec<usize>` e ordena tudo para remover alguns poucos itens.
+- **Causa raiz:** algoritmo simples demais para hot path de eviction.
+- **Correção recomendada:** usar `BinaryHeap`, ou ao menos `max_by_key` incremental.
 
-### ~~PERF-04: Verificação de mtime de subpastas sem limite no fast path~~ ✅ CORRIGIDO
-- **Arquivo:** `src/app/operations/folder_loading/load_pipeline/fast_paths.rs` (~L60)
-- **Impacto:** Médio-Alto — 500 subpastas = 500 syscalls no path que deveria ser instantâneo
-- **Correção aplicada:** `.take(20)` limita amostragem de mtime a 20 subpastas.
+### P4. Lock de write global grande demais na indexação USN
+- **Arquivo:** `crates/mtt-search-service/src/volume_indexers/usn.rs`
+- **Impacto:** **Alto**
+- **Cenário:** index rebuild parcial enquanto o usuário digita na busca global.
+- **Problema:** consultas IPC ficam bloqueadas enquanto o lock de write é mantido durante lotes longos.
+- **Causa raiz:** granularidade de lock excessivamente ampla.
+- **Correção recomendada:** lock por volume, batch-commit menor, ou swap atômico de estrutura pronta.
 
-### ~~PERF-05: HDD reader "batched" lê tudo antes de dividir~~ ✅ CORRIGIDO
-- **Arquivo:** `src/infrastructure/windows/hdd_directory_reader.rs`
-- **Impacto:** Médio — bloqueava UI thread até enumeration completa de 100K+ arquivos
-- **Correção aplicada:** Nova função `read_directory_impl_batched` constrói batches durante o loop FindFirstFileExW (streaming verdadeiro) e envia cada batch via callback ao atingir `batch_size`. Elimina a coleta completa seguida de split.
+### P5. Clone integral da arena de nomes para lowercase
+- **Arquivo:** `crates/mtt-search-service/src/name_arena.rs`
+- **Impacto:** **Alto**
+- **Cenário:** índice com centenas de milhares ou milhões de arquivos.
+- **Problema:** `self.lowered = self.buf.clone()` duplica um buffer grande logo no início.
+- **Causa raiz:** estratégia eager e monolítica de normalização.
+- **Correção recomendada:** lowercase lazy/incremental, ou buckets normalizados sob demanda.
 
-### ~~PERF-06: `DirectoryIndex` — single Mutex bloqueia leituras durante write~~ ✅ CORRIGIDO (já implementado)
-- **Arquivo:** `src/infrastructure/directory_index.rs`
-- **Impacto:** Reduzido — WAL mode + `synchronous = NORMAL` já habilitados na inicialização da conexão.
-- **Verificação:** `conn.pragma_update(None, "journal_mode", "WAL")?;` e `conn.pragma_update(None, "synchronous", "NORMAL")?;` presentes. WAL permite leituras concorrentes no nível do SQLite. A migração de Mutex→RwLock exigiria connection pool (SQLite connections não são thread-safe para reads concorrentes no mesmo handle), com ganho marginal sobre WAL.
+### P6. EXIF lido com múltiplas buscas por tag por imagem
+- **Arquivo:** `src/infrastructure/windows/metadata/image.rs`
+- **Impacto:** **Alto**
+- **Cenário:** diretórios grandes com milhares de imagens.
+- **Problema:** faz diversas buscas individuais por tag depois da leitura do EXIF.
+- **Causa raiz:** falta de materialização compacta do resultado da leitura.
+- **Correção recomendada:** varrer os fields uma única vez e montar uma struct cache.
 
-### ~~PERF-07: Sort por Type aloca `OsString` por comparação~~ ✅ CORRIGIDO
-- **Arquivo:** `src/application/sorting/sort_impl.rs` (~L110)
-- **Impacto:** Médio-Baixo — ~260K alocações em sort de 10K itens
-- **Correção aplicada:** Comparação zero-alloc byte-a-byte com `.to_ascii_lowercase()` em iterador sobre bytes da extensão extraída de `name` via `rsplit_once('.')`. Elimina ~260K alocações de `OsString`.
+### P7. Polling de retry com intervalos fixos curtos
+- **Arquivos:** `src/app/init_workers/filesystem_workers.rs`, `src/image_viewer/ipc.rs`
+- **Impacto:** **Médio**
+- **Cenário:** startup lenta do serviço, indisponibilidade temporária de IPC.
+- **Problema:** loops com `sleep(50ms/60ms)` acumulam wakeups e context switches desnecessários.
+- **Causa raiz:** backoff simplista.
+- **Correção recomendada:** backoff exponencial ou espera por evento.
 
-### ~~PERF-08: `path_matches_prefix` aloca 4-6 strings por evento~~ ✅ CORRIGIDO
-- **Arquivo:** `src/infrastructure/drive_watcher/buffer_parser.rs` (~L78)
-- **Impacto:** Médio — milhares de eventos/segundo em burst (OneDrive sync, copy)
-- **Correção aplicada:** Reescrita completa usando `to_string_lossy()` (Cow, sem alloc para UTF-16 válido) + `eq_ignore_ascii_case` em byte slices. Zero alocações heap. Também corrige WIN-04 (case folding ASCII ordinal em vez de Unicode `to_lowercase()`).
+### P8. `pending_revalidation` sem prune previsível
+- **Arquivo:** `src/app/folder_size_state.rs`
+- **Impacto:** **Médio**
+- **Cenário:** navegação extensa por muitos diretórios, sem retorno aos anteriores.
+- **Problema:** o mapa acumula entradas antigas e aumenta custo/uso de memória sem necessidade.
+- **Causa raiz:** ausência de rotina de limpeza.
+- **Correção recomendada:** `retain()` periódico baseado em deadline expirado.
 
-### ~~PERF-09: `adaptive_batch` cálculo de `avg_time_per_item` incorreto~~ ✅ CORRIGIDO
-- **Arquivo:** `src/infrastructure/adaptive_batch.rs` (~L60)
-- **Impacto:** Baixo-Médio — batch sizing oscila incorretamente
-- **Causa:** Denominador usa `items_processed` do batch atual × `batch_count` total, deveria ser total cumulativo. `Vec::remove(0)` é O(n), deveria ser `VecDeque`.
-- **Correção aplicada:** `BatchSample` struct com (duration, items); cálculo correto `total_time/total_items`; `VecDeque` em vez de `Vec::remove(0)`.
+### P9. Invalidação de filhos no `DirectoryCache` é linear sobre toda a estrutura
+- **Arquivo:** `src/infrastructure/directory_cache.rs`
+- **Impacto:** **Médio**
+- **Cenário:** remoção/renomeação de subárvores grandes.
+- **Problema:** varre o cache inteiro procurando prefixos, clonando `PathBuf` para remoção.
+- **Causa raiz:** estrutura não preparada para prefix queries.
+- **Correção recomendada:** `BTreeMap`/trie por prefixo, ou outra indexação auxiliar.
 
 ---
 
 ## 5. Problemas na Integração com Windows API
 
-### ~~WIN-01: `GetDiskFreeSpaceW` overflow em volumes >16TB~~ ✅ CORRIGIDO
-- **Arquivo:** `src/infrastructure/windows/drives.rs` (~L333)
-- **Impacto:** Alto — valores incorretos de espaço em disco em volumes NTFS grandes
-- **Causa:** `GetDiskFreeSpaceW` retorna contadores de cluster 32-bit; wrap em >16TB com clusters 4K.
-- **Correção aplicada:** Substituído por `GetDiskFreeSpaceExW` (retorna bytes 64-bit diretamente).
+### W1. `OVERLAPPED` reaproveitado sem reset completo
+- **Arquivo:** `src/infrastructure/drive_watcher/thread_loop.rs`
+- **Impacto:** **Médio**
+- **Cenário:** múltiplas iterações assíncronas no watcher.
+- **Problema:** o struct é reaproveitado, mas a limpeza do estado implícito não é robusta.
+- **Causa raiz:** otimização manual sem encapsulamento.
+- **Correção recomendada:** rezerar o `OVERLAPPED` antes de cada uso, preservando apenas `hEvent`.
 
-### ~~WIN-02: `WaitForSingleObject(process, INFINITE)` no elevated helper~~ ✅ CORRIGIDO
-- **Arquivo:** `src/infrastructure/windows/drives.rs` (~L231)
-- **Impacto:** Médio — thread bloqueada infinitamente se processo elevado trava/é morto pelo AV
-- **Correção aplicada:** Timeout finito de 30s com mensagem específica para timeout vs erro genérico.
+### W2. Falta de `GetLastError`/contexto após falha de `DeviceIoControl`
+- **Arquivos:** `crates/mtt-search-service/src/mft_reader.rs`, `crates/mtt-search-service/src/usn_journal.rs`
+- **Impacto:** **Alto**
+- **Cenário:** `ERROR_ACCESS_DENIED`, `ERROR_INVALID_PARAMETER`, mídia removida, journal indisponível.
+- **Problema:** a falha é tratada genericamente, sem erro Win32 concreto.
+- **Causa raiz:** logging insuficiente nas fronteiras FFI.
+- **Correção recomendada:** capturar e logar `GetLastError().0` em todos os paths `is_err()`.
 
-### ~~WIN-03: `to_string_lossy()` corrompe paths não-UTF-8~~ ✅ CORRIGIDO
-- **Arquivos:** 10 arquivos, 19 ocorrências
-- **Impacto:** Médio — paths com surrogates não-pareados (raro mas possível no Windows) eram corrompidos
-- **Correção aplicada:** `path.to_string_lossy().encode_utf16()` substituído por `path.as_os_str().encode_wide()` em todos os 19 sites de chamada Win32. `use std::os::windows::ffi::OsStrExt;` adicionado em 10 arquivos (ntfs_reader.rs, file_system.rs, file_flags.rs, file_operations.rs, video_player/mod.rs, onedrive/attributes.rs, icons/thumbnails.rs, icons/file_icons.rs, drive_watcher.rs, drives.rs). Elimina round-trip lossy UTF-8→UTF-16.
+### W3. UI chamando Win32 diretamente
+- **Arquivo:** `src/ui/app/lifecycle.rs`
+- **Impacto:** **Médio**
+- **Cenário:** snapshot de threads/processo durante lifecycle.
+- **Problema:** mistura rendering/lifecycle UI com syscalls Win32 de baixo nível.
+- **Causa raiz:** fronteira arquitetural vazando.
+- **Correção recomendada:** mover a lógica para `infrastructure::windows::*`.
 
-### ~~WIN-04: Unicode case folding diverge da semântica Windows~~ ✅ CORRIGIDO (via PERF-08)
-- **Arquivo:** `src/infrastructure/drive_watcher/buffer_parser.rs` (~L80)
-- **Impacto:** Médio — `str::to_lowercase()` usa Unicode folding; Windows usa ordinal
-- **Correção aplicada:** Reescrita de `path_matches_prefix` em PERF-08 usa `eq_ignore_ascii_case` em byte slices — comparação ASCII ordinal, alinhada com semântica Windows.
+### W4. Construção manual de ACL/SID do named pipe
+- **Arquivo:** `crates/mtt-search-service/src/ipc_server/pipe_io.rs`
+- **Impacto:** **Médio**
+- **Cenário:** manutenção futura do pipe security descriptor.
+- **Problema:** bytes montados manualmente são frágeis e difíceis de auditar.
+- **Causa raiz:** ausência de uso das helpers da própria Win32.
+- **Correção recomendada:** trocar por APIs canônicas de segurança do Windows.
 
-### ~~WIN-05: `cancel_all_pending_io` usa `THREAD_TERMINATE` para `CancelSynchronousIo`~~ ✅ FALSO POSITIVO
-- **Arquivo:** `src/ui/app/lifecycle.rs` (~L322)
-- **Impacto:** Nenhum — `THREAD_TERMINATE` é o access right documentado pela Microsoft para `CancelSynchronousIo`.
-- **Verificação:** [MSDN CancelSynchronousIo](https://learn.microsoft.com/en-us/windows/win32/fileio/cancelsynchronousio-func): "hThread — A handle to the thread. This handle must have the THREAD_TERMINATE access right."
-
-### ~~WIN-06: `RegisterDeviceNotificationW` handle nunca desregistrado~~ ✅ CORRIGIDO
-- **Arquivo:** `src/infrastructure/windows/device_change.rs` (~L98)
-- **Impacto:** Baixo — cleanup automático no exit do processo; handle ficava ativo desnecessariamente.
-- **Correção aplicada:** `HDEVNOTIFY` armazenado em `AtomicUsize` estático; `UnregisterDeviceNotification` chamado em `shutdown_device_change_listener()` antes de `PostThreadMessageW(WM_QUIT)`.
+### W5. `SetDefaultDllDirectories` com resultado descartado
+- **Arquivo:** `src/main.rs`
+- **Impacto:** **Alto**
+- **Cenário:** hardening falha silenciosamente no startup.
+- **Problema:** se a chamada falha, o processo continua sem visibilidade de risco.
+- **Causa raiz:** descarte explícito do retorno.
+- **Correção recomendada:** logar falha e, se apropriado, endurecer política de fallback.
 
 ---
 
 ## 6. Problemas de Concorrência
 
-### ~~CONC-01: `ThumbnailDiskCache` reader = writer.clone() — armadilha de deadlock~~ ✅ CORRIGIDO
-- **Arquivo:** `src/infrastructure/disk_cache.rs` (~L136)
-- **Impacto:** Crítico (latente) — se reader fallback para `writer.clone()`, qualquer path que segure writer e chame reader causa deadlock
-- **Causa:** `Mutex` do Rust não é reentrante. Nenhum path atual causa o deadlock, mas uma edição descuidada pode.
-- **Correção aplicada:** Comentário SAFETY INVARIANT + `log::warn` no fallback path documentando o risco de deadlock.
+### Co1. Estrutura de coalescing sem limite efetivo antes do insert
+- **Arquivo:** `src/infrastructure/drive_watcher/thread_loop.rs`
+- **Impacto:** **Crítico**
+- **Cenário:** storms de eventos em cloud sync, builds, extrações.
+- **Problema:** `HashSet` pode crescer demais antes de flush/controle efetivo.
+- **Causa raiz:** checagem do tamanho ocorre tarde demais.
+- **Correção recomendada:** flush/cap antes de inserir novos eventos.
 
-### ~~CONC-02: Lock poisoning silencia falha permanente dos caches~~ ✅ CORRIGIDO
-- **Arquivos:** `src/infrastructure/directory_cache.rs`, `src/infrastructure/directory_dirty_registry.rs`
-- **Impacto:** Alto — cache permanentemente inoperante sem log de erro
-- **Correção aplicada:** `.unwrap_or_else(|e| e.into_inner())` com `log::warn` em todos os lock sites (8 métodos em directory_cache, 3 em dirty_registry).
+### Co2. Recuperação cega de mutex envenenado
+- **Arquivos:** `src/infrastructure/directory_cache.rs`, `src/infrastructure/directory_dirty_registry.rs` e outros
+- **Impacto:** **Alto**
+- **Cenário:** panic sob lock durante atualização de cache.
+- **Problema:** `unwrap_or_else(|e| e.into_inner())` mantém o processo rodando, mas pode expor estrutura corrompida.
+- **Causa raiz:** recuperação genérica sem reestabelecer invariantes.
+- **Correção recomendada:** usar `parking_lot::Mutex` e, quando houver falha séria, limpar/reconstruir o estado.
 
-### ~~CONC-03: Threads detached sem limite no global search~~ ✅ CORRIGIDO
-- **Arquivo:** `src/workers/global_search_worker.rs` (~L197)
-- **Impacto:** Alto — digitação rápida + erros IPC = dezenas de threads bloqueadas acumulando
-- **Correção aplicada:** `Arc<AtomicBool>` in-flight guard limita a 1 thread de total count por vez. `swap(true, AcqRel)` + RAII `InFlightGuard` com `Drop` que reseta o flag. Tasks extras são descartadas (generation check já invalida resultados stale).
+### Co3. `notify_one()` com lock ainda segurado
+- **Arquivo:** `src/workers/thumbnail/queue.rs`
+- **Impacto:** **Médio**
+- **Cenário:** alta contenção na fila de thumbnails.
+- **Problema:** gera inversão de prioridade e wakeup menos eficiente.
+- **Causa raiz:** ordem errada de unlock/notify.
+- **Correção recomendada:** dropar o guard antes do `notify_one()`.
 
-### ~~CONC-04: `.expect()` em thread spawn = crash da aplicação~~ ✅ CORRIGIDO
-- **Arquivos:** `src/app/init_workers/filesystem_workers.rs`, `src/app/init_workers/consistency_probe_worker.rs`
-- **Impacto:** Alto — resource exhaustion faz spawn falhar → panic → crash
-- **Correção aplicada:** `if let Err(e) = .spawn()` com log::error + degradação graceful (worker desabilitado, sends falham silenciosamente).
+### Co4. Flags atômicos podem ficar presos em `true` se `spawn()` falhar
+- **Arquivos:** `crates/mtt-search-service/src/ipc_server/handler.rs`, `src/workers/global_search_worker.rs`
+- **Impacto:** **Alto**
+- **Cenário:** resource exhaustion ou falha de criação de thread.
+- **Problema:** o flag de in-flight/warming é setado antes do `spawn`, e pode nunca ser resetado se o spawn falhar.
+- **Causa raiz:** falta de rollback em erro de thread creation.
+- **Correção recomendada:** resetar explicitamente o flag no branch de erro do `spawn()`.
 
-### ~~CONC-05: Shared extension icon cache — 16 workers contendem em Mutex~~ ✅ CORRIGIDO
-- **Arquivo:** `src/app/init_workers/visual_workers.rs` (~L152)
-- **Impacto:** Médio — cada hit clonava `Vec<u8>` (4-16KB) segurando o lock
-- **Correção aplicada:** `Mutex<HashMap>` substituído por `DashMap` — leituras concorrentes não bloqueiam, scope de lock por shard em vez de global. Dependência `dashmap` já existia no Cargo.toml.
+### Co5. Inicialização concorrente do PDFium
+- **Arquivo:** `src/pdf_viewer/renderer.rs`
+- **Impacto:** **Alto**
+- **Cenário:** duas threads entram em `pdfium()` antes da primeira concluir o bind.
+- **Problema:** múltiplas tentativas paralelas de bind/load da DLL.
+- **Causa raiz:** uso de `OnceCell` sem inicialização protegida por `get_or_try_init`/lock.
+- **Correção recomendada:** serializar a inicialização.
 
-### ~~CONC-06: GC worker demora até 180s para notar shutdown~~ ✅ FALSO POSITIVO
+### Co6. Ordem atômica excessiva e assimétrica no GC worker
 - **Arquivo:** `src/app/init_workers/background_jobs.rs`
-- **Impacto:** Nenhum — `sleep_until_next_cycle` já faz polling de `GC_WORKER_RUNNING` a cada 1 segundo. O valor 180s (`GC_ACTIVE_INTERVAL_SECS`) é o intervalo total entre ciclos GC, dividido em polls de 1s. Latência máxima de shutdown = 1 segundo, não 180.
+- **Impacto:** **Médio**
+- **Cenário:** shutdown e polling em arquiteturas mais fracas que x86.
+- **Problema:** o uso atual não é o mais claro nem o mais eficiente para uma flag binária.
+- **Causa raiz:** modelo de sincronização superespecificado em alguns pontos e subdocumentado em outros.
+- **Correção recomendada:** simplificar com ordem adequada ao caso real, ou trocar por mecanismo explícito de wakeup.
+
+### Co7. Estado lido/escrito de forma inconsistente no drive watcher
+- **Arquivo:** `src/infrastructure/drive_watcher.rs`
+- **Impacto:** **Médio**
+- **Cenário:** atualização simultânea de prefixo observado durante processamento de eventos.
+- **Problema:** o mesmo estado é acessado por caminhos com sincronização heterogênea.
+- **Causa raiz:** falta de abstração única para o prefixo observado.
+- **Correção recomendada:** `ArcSwap`, `RwLock` ou sincronização única consistente.
 
 ---
 
 ## 7. Problemas de Arquitetura
 
-### ARCH-01: `ImageViewerApp` — god struct com 90+ campos — 🔄 ADIADO
-- **Arquivo:** `src/app/state/mod.rs`
-- **Impacto:** Alto — impossível passar subset de estado; todo método recebe `&mut self` com acesso total
-- **Correção proposta:** Extrair sub-structs por domínio (`WatcherState`, `MediaState`, `DragDropState`)
-- **Motivo do adiamento:** Refatoração arquitetural de alta complexidade com impacto em dezenas de arquivos.
+### A1. Arquivos excessivamente grandes e com responsabilidades múltiplas
 
-### ARCH-02: 15 arquivos acima de 400 linhas (violação de AGENTS.md) — 🔄 ADIADO
+**Top arquivos grandes identificados:**
 
-| Arquivo | Linhas | Prioridade |
-|---------|--------|------------|
-| ~~`src/app/operations/message_handler/watcher_drive_processing.rs`~~ | ~~953~~ | ~~Removido~~ |
-| `src/app/shortcuts.rs` | **664** | Média |
-| `src/infrastructure/archive_extract.rs` | **649** | Alta |
-| `src/app/operations/message_handler/thumbnail_uploads.rs` | **648** | Média |
-| `src/app/init.rs` | **572** | Média |
-| `src/app/init_workers/filesystem_workers.rs` | **562** | Média |
-| `src/ui/app/input.rs` | **546** | Baixa |
-| `src/app/operations/message_handler/thumbnail_workers.rs` | **536** | Média |
-| `src/app/operations/ui_rendering/list_bridge.rs` | **525** | Baixa |
-| `src/app/operations/ui_rendering/grid_bridge.rs` | **477** | Baixa |
-| `src/app/init_bootstrap.rs` | **466** | Média |
-| `src/app/operations/context_menu.rs` | **438** | Baixa |
-| `src/app/operations/message_handler/file_op_events.rs` | **428** | Baixa |
-| `src/app/init_workers/fast_paths.rs` | **419** | Baixa |
-| `src/app/operations/message_handler/watcher_events.rs` | **418** | Baixa |
+1. `crates/mtt-search-service/src/mft_reader.rs` — ~1150 linhas — parser MFT, atributos e bootstrap misturados.
+2. `src/app/init_bootstrap.rs` — ~500+ linhas — setup de estado, workers, DB e bootstrap combinados.
+3. `src/app/state/sidebar_tree_state.rs` — ~420+ linhas — árvore, navegação, drag/drop misturados.
+4. `src/application/file_operations.rs` — ~370 linhas — business logic + COM/Shell + clipboard/file ops em conjunto.
+5. `src/infrastructure/global_search.rs` — ~410 linhas — IPC client e validação em um único bloco.
 
-### ARCH-03: Lógica de batch/cache duplicada em 3 tiers — 🔄 ADIADO
-- **Arquivos:** `src/app/operations/folder_loading/load_pipeline/fast_paths.rs`, `optimized_tiers.rs`, `tier3_fallback.rs`
-- **Impacto:** Médio — qualquer mudança no protocolo de batch requer edição em 3+ locais idênticos
+**Impacto:** **Alto**
 
-### ARCH-04: `UIState` vestigial duplica campos do `ImageViewerApp` — 🔄 ADIADO
-- **Arquivo:** `src/app/ui_state.rs`
-- **Impacto:** Médio — campos como `selected_items`, `hovered_item`, `rename_text` existem nos dois; risco de divergência silenciosa
+**Correção recomendada:** quebrar por fronteira funcional, especialmente `mft_reader.rs`, `init_bootstrap.rs` e `sidebar_tree_state.rs`.
 
-### ARCH-05: Funções com 19-21 argumentos no pipeline de loading — 🔄 ADIADO
-- **Arquivo:** `src/app/operations/folder_loading/load_pipeline.rs`
-- **Impacto:** Baixo (manutenção) — difícil de refatorar, fácil de errar em alterações
+### A2. Vazamento de camada entre UI e infraestrutura
+- **Arquivo:** `src/ui/app/lifecycle.rs`
+- **Impacto:** **Médio**
+- **Problema:** a UI executa syscalls diretamente.
+- **Correção recomendada:** mover isso para `infrastructure::windows::*` e expor API mais limpa para a UI.
+
+### A3. Estado duplicado e invalidação espalhada
+- **Arquivos:** `src/app/folder_size_state.rs`, `src/app/cache_state.rs`, `src/app/global_search_state.rs`, helpers de message handler
+- **Impacto:** **Alto**
+- **Problema:** múltiplos caches representam aspectos próximos do mesmo dado, e a invalidação depende de muitos `pop()` e updates distribuídos.
+- **Correção recomendada:** centralizar eventos de invalidação e inscrição de caches em um barramento interno.
+
+### A4. Fronteira confusa entre `workers/` e `app/init_workers/`
+- **Impacto:** **Médio**
+- **Problema:** lifecycle de worker não está concentrado num único registry/owner.
+- **Correção recomendada:** um módulo central de registro, start, stop e join de workers.
+
+### A5. Tipos de erro inconsistentes
+- **Arquivos:** `src/domain/errors.rs`, `src/infrastructure/global_search.rs`, `src/application/file_operations.rs`
+- **Impacto:** **Alto**
+- **Problema:** coexistem `AppError`, `String`, aliases locais e perda de contexto entre módulos.
+- **Correção recomendada:** criar erros tipados por subsistema e padronizar conversão.
 
 ---
 
 ## 8. Melhorias Recomendadas
 
-| # | Melhoria | Impacto | Esforço |
-|---|----------|---------|---------|
-| 1 | Extrair sub-structs de `ImageViewerApp` (WatcherState, MediaState, DragDropState) | Alto | Médio |
-| ~~2~~ | ~~RAII consistente para COM em todos workers (`ComGuard` com tracker booleano)~~ | ~~Alto~~ | ✅ CORRIGIDO |
-| 3 | `Arc<Vec<FileEntry>>` para transferências cache→pipeline→UI sem clone | Alto | 🔄 ADIADO (junto com PERF-01) |
-| ~~4~~ | ~~`GetOverlappedResult` no shutdown do drive watcher~~ | ~~Alto~~ | ✅ CORRIGIDO |
-| ~~5~~ | ~~Buffers alinhados para parsers de `NtQueryDirectoryFile` e `ReadDirectoryChangesW`~~ | ~~Alto~~ | ✅ CORRIGIDO |
-| ~~6~~ | ~~Substituir `.lock().ok()?` por recover-from-poison com logging~~ | ~~Médio~~ | ✅ CORRIGIDO |
-| ~~7~~ | ~~Bounds check em `NameArena::get`~~ | ~~Médio~~ | ✅ CORRIGIDO |
-| ~~8~~ | ~~Dimension cap em `hbitmap_to_rgba`~~ | ~~Médio~~ | ✅ CORRIGIDO |
-| ~~9~~ | ~~`GetDiskFreeSpaceExW` em vez de `GetDiskFreeSpaceW`~~ | ~~Médio~~ | ✅ CORRIGIDO |
-| ~~10~~ | ~~Streaming real no HDD directory reader~~ | ~~Médio~~ | ✅ CORRIGIDO |
-| ~~11~~ | ~~Timeout finito no `WaitForSingleObject` do elevated helper~~ | ~~Médio~~ | ✅ CORRIGIDO |
-| 12 | Remover/integrar `UIState` vestigial | Médio | Baixo |
+1. Criar `OwnedHandle` e adotar RAII para todo `HANDLE` Win32 do projeto.
+2. Criar `ComScope`/`ComGuard` único, usado por todas as operações COM.
+3. Eliminar `Result<T, String>` em fronteiras públicas e padronizar erros tipados por domínio.
+4. Refatorar `mft_reader.rs` em módulos menores: geometria, atributos, records, helpers Win32.
+5. Refatorar `init_bootstrap.rs` em setup de canais, setup de DB, setup de workers e state wiring.
+6. Mover qualquer syscall Win32 da UI para `infrastructure::windows::*`.
+7. Reduzir escopo de locks em indexação e busca.
+8. Reforçar limites rígidos em estruturas de batching, coalescing e caches pendentes.
+9. Substituir construções manuais de ACL/SID e `GetProcAddress` manual por bindings Win32 seguros.
+10. Instrumentar com profiling real os hot paths de search, metadata e thumbnailing.
 
 ---
 
 ## 9. Quick Wins (alto impacto / baixo esforço)
 
-| # | Fix | Linhas de código | Impacto |
-|---|-----|-----------------|---------|
-| ~~1~~ | ~~`GetOverlappedResult(handle, &overlapped, &mut dummy, true)` no shutdown do drive watcher (opt-in, desabilitado por padrão)~~ | ✅ CORRIGIDO | ~~Elimina use-after-free (baixa prioridade — código inativo)~~ |
-| ~~2~~ | ~~`#[repr(C, align(8))]` no buffer do ntfs_reader e buffer_parser~~ | ✅ CORRIGIDO | ~~Elimina UB de alinhamento~~ |
-| ~~3~~ | ~~`ComGuard { initialized: bool }` no folder_preview e icon workers~~ | ✅ CORRIGIDO | ~~Elimina UB de COM~~ |
-| ~~4~~ | ~~`if end > self.buf.len() { return ""; }` em `NameArena::get`~~ | ✅ CORRIGIDO | ~~Previne crash do search service~~ |
-| ~~5~~ | ~~`if width > 16384 \|\| height > 16384` em `hbitmap_to_rgba`~~ | ✅ CORRIGIDO | ~~Previne OOM/overflow~~ |
-| ~~6~~ | ~~`GlobalFree(hmem)` nos error paths do clipboard~~ | ✅ CORRIGIDO | ~~Elimina memory leak~~ |
-| ~~7~~ | ~~Substituir `GetDiskFreeSpaceW` → `GetDiskFreeSpaceExW`~~ | ✅ CORRIGIDO | ~~Corrige volumes >16TB~~ |
-| ~~8~~ | ~~`.unwrap_or_else(\|e\| e.into_inner())` em directory_cache~~ | ✅ CORRIGIDO | ~~Recupera de lock poison~~ |
-| ~~9~~ | ~~`filter_items()` share Arc sem clone quando query vazia~~ | Reclassificado → PERF-01 | Requer `all_items` como `Arc<Vec<FileEntry>>` (15+ sites) — não é ~5 linhas |
-| ~~10~~ | ~~Limitar subfolder mtime check a 20 entries no fast path~~ | ✅ CORRIGIDO | ~~Fix regression HDD~~ |
+1. Aumentar o buffer do `ReadDirectoryChangesW` e invalidar prefixo ao detectar truncamento.
+2. Trocar `h.join().unwrap()` por tratamento explícito com log.
+3. Processar o retorno de `catch_unwind` em `file_operation_worker` e responder à UI.
+4. Passar `file_size` já conhecido para `merge_video_metadata`.
+5. Resetar flags in-flight quando `spawn()` falhar.
+6. Parar de usar `to_string_lossy().to_string()` em loops de UI quando o nome já existe em cache.
+7. Adicionar bounds checks antes de todos os `try_into().unwrap()` em parsing binário do MFT.
+8. Logar `GetLastError()` após falhas de `DeviceIoControl`.
+9. Aplicar RAII para `h_event` e handles de volume.
+10. Mover `notify_one()` para fora do lock nas filas de thumbnail.
+11. Fazer prune periódico de `pending_revalidation`.
+12. Serializar a inicialização do PDFium com `get_or_try_init` ou lock.
+
+---
+
+## Conclusão
+
+O projeto não sofre de um único erro estrutural catastrófico; ele sofre de **acúmulo de riscos reais em fronteiras Win32/FFI, parsing binário e concorrência**, exatamente onde aplicações Windows nativas costumam quebrar em produção pesada.
+
+Os problemas mais urgentes não são cosméticos nem estilísticos. Eles concentram-se em:
+
+1. `HANDLE` e cleanup incompleto.
+2. Parsing binário inseguro com `unwrap()` em dados externos.
+3. Locks e workers com falha silenciosa.
+4. Hot paths com syscalls e alocações redundantes.
+5. Falta de uniformidade em abstrações de erro, COM e Win32 resource management.
+
+Se a meta é endurecer o sistema para cargas reais e cenários extremos do Windows, o caminho correto é: **RAII rigoroso para recursos Win32, eliminação de `unwrap()` em dados externos, refino do modelo de concorrência e redução do custo por evento/arquivo**.

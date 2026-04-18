@@ -1,6 +1,7 @@
 //! Windows API modules
 //! Follows .cursorrules: separation of concerns, < 300 lines per file
 
+pub mod com_scope;
 pub mod bitmap_conversion;
 pub mod codec_registry;
 pub mod device_change;
@@ -16,6 +17,7 @@ pub mod iso_mount;
 pub mod media_foundation;
 pub mod metadata;
 pub mod native_menu;
+pub mod owned_handle;
 pub mod recycle_bin;
 pub mod shell_folder;
 pub mod shell_operations;
@@ -24,6 +26,7 @@ pub mod window_corners;
 pub mod window_subclass;
 
 // Re-export for convenience
+pub use com_scope::*;
 pub use bitmap_conversion::*;
 pub use codec_registry::*;
 pub use device_change::*;
@@ -41,6 +44,7 @@ pub use iso_mount::*;
 pub use media_foundation::*;
 pub use metadata::*;
 pub use native_menu::*;
+pub use owned_handle::*;
 pub use recycle_bin::*;
 pub use shell_folder::{is_shell_navigation_path, list_shell_folder};
 pub use shell_operations::*;

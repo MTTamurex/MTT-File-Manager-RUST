@@ -4,7 +4,6 @@
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::Receiver;
 use windows::Win32::Foundation::HWND;
-use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED};
 
 mod handlers;
 
@@ -12,6 +11,7 @@ use crate::infrastructure::security::{
     classify_shell_namespace_path, sanitize_path_with_local_drive_fallback, sanitize_unc_path,
     SecurityConfig,
 };
+use crate::infrastructure::windows::ComScope;
 
 /// Results sent back from the worker to the UI.
 pub enum FileOperationResult {
@@ -220,29 +220,6 @@ fn sanitize_operation_paths(paths: &[PathBuf]) -> Result<Vec<PathBuf>, String> {
     paths.iter().map(|p| sanitize_operation_path(p)).collect()
 }
 
-/// RAII guard for COM apartment initialization.
-/// Ensures `CoUninitialize` is called even if the thread panics.
-struct ComGuard {
-    initialized: bool,
-}
-
-impl ComGuard {
-    fn init_sta() -> Self {
-        let initialized = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED).is_ok() };
-        Self { initialized }
-    }
-}
-
-impl Drop for ComGuard {
-    fn drop(&mut self) {
-        if self.initialized {
-            unsafe {
-                CoUninitialize();
-            }
-        }
-    }
-}
-
 use crate::infrastructure::archive_extract::{ExtractionCancelFlag, SharedExtractionProgress};
 
 /// Starts the file operation worker thread.
@@ -252,10 +229,10 @@ pub(crate) fn start_file_operation_worker(
     extraction_progress: SharedExtractionProgress,
     extraction_cancel: ExtractionCancelFlag,
 ) {
-    std::thread::spawn(move || {
+    let spawn_result = crate::spawn_named("file-op-worker", move || {
         // Initialize COM as Single-Threaded Apartment (STA)
         // RAII guard ensures CoUninitialize even on panic.
-        let _com = ComGuard::init_sta();
+        let _com = ComScope::sta();
 
         while let Ok(request) = receiver.recv() {
             // Reset cancel flag at the start of each operation
@@ -335,12 +312,19 @@ pub(crate) fn start_file_operation_worker(
                         "unknown".to_string()
                     };
                     log::error!("[FileOpWorker] panic: {}", msg);
+                    let _ = result_sender.send(FileOperationResult::OperationFailed {
+                        message: msg,
+                    });
                     let _ = result_sender.send(FileOperationResult::Finished);
                 }
             }
         }
         // COM cleanup handled by _com (ComGuard) RAII Drop
     });
+
+    if let Err(error) = spawn_result {
+        log::error!("[FileOpWorker] failed to spawn worker thread: {}", error);
+    }
 }
 
 #[cfg(test)]
