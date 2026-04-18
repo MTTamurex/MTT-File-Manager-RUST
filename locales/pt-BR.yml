@@ -20,7 +20,7 @@ toolbar:
   up: "Subir um nível"
   reload: "Recarregar"
   home: "Este Computador"
-  search_placeholder: "Buscar..."
+  search_placeholder: "Buscar na pasta atual..."
   clear_search: "Limpar busca"
   path_placeholder: "Caminho..."
   close_history: "Fechar histórico recente"

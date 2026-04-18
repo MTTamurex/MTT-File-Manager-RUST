@@ -20,7 +20,7 @@ toolbar:
   up: "Go up one level"
   reload: "Reload"
   home: "This PC"
-  search_placeholder: "Search..."
+  search_placeholder: "Search in current folder..."
   clear_search: "Clear search"
   path_placeholder: "Path..."
   close_history: "Close recent history"
