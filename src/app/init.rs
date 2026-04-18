@@ -193,7 +193,12 @@ impl ImageViewerApp {
             crate::tabs::TabManager::new_at_path(&initial_path)
         };
         // Set the initial tab's view mode from saved preference
-        tab_manager.active_mut().view_mode = view_mode;
+        {
+            let active = tab_manager.active_mut();
+            active.view_mode = view_mode;
+            active.show_left_sidebar = show_left_sidebar;
+            active.show_preview_panel = show_preview_panel;
+        }
 
         let mut app = Self {
             navigation_state: NavigationState::new(initial_path.clone(), is_computer_view_initial),
