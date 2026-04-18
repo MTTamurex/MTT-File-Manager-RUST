@@ -24,7 +24,6 @@ const MAX_PIPE_INSTANCES: u32 = 4;
 const MAX_MESSAGE_BYTES: usize = 32 * 1024;
 const CLIENT_RETRY_COUNT: usize = 8;
 const CLIENT_RETRY_DELAY: Duration = Duration::from_millis(60);
-const SERVER_RETRY_DELAY: Duration = Duration::from_millis(250);
 const ERROR_PIPE_CONNECTED_CODE: u32 = 535;
 
 pub fn send_open_request(path: &Path) -> Result<bool, String> {
@@ -84,16 +83,15 @@ pub fn start_open_request_server() -> Receiver<PathBuf> {
     std::thread::Builder::new()
         .name("image-viewer-ipc".into())
         .spawn(move || {
-            loop {
-                let pipe = match create_pipe() {
-                    Ok(pipe) => pipe,
-                    Err(err) => {
-                        log::warn!("[IMAGE-VIEWER] failed to create IPC pipe: {}", err);
-                        std::thread::sleep(SERVER_RETRY_DELAY);
-                        continue;
-                    }
-                };
+            let pipe = match create_pipe() {
+                Ok(p) => p,
+                Err(err) => {
+                    log::error!("[IMAGE-VIEWER] failed to create initial IPC pipe: {}", err);
+                    return;
+                }
+            };
 
+            loop {
                 let connected = unsafe {
                     ConnectNamedPipe(pipe, None).is_ok()
                         || GetLastError().0 == ERROR_PIPE_CONNECTED_CODE
@@ -114,8 +112,10 @@ pub fn start_open_request_server() -> Receiver<PathBuf> {
                     }
                 }
 
+                // Reuse the same pipe instance to avoid a race window between
+                // CloseHandle and CreateNamedPipeW where a rogue process could
+                // squat the pipe name.
                 let _ = unsafe { DisconnectNamedPipe(pipe) };
-                let _ = unsafe { CloseHandle(pipe) };
             }
         })
         .ok();

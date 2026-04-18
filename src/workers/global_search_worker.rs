@@ -2,7 +2,7 @@
 //! Follows the same Request/Response pattern as file_operation_worker.rs.
 
 use std::collections::HashSet;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
 
@@ -194,27 +194,43 @@ fn spawn_total_count_task(
     local_total_matches: u32,
     generation: u64,
     active_generation: Arc<AtomicU64>,
+    in_flight: Arc<AtomicBool>,
 ) {
-    std::thread::spawn(move || match load_exact_service_total_matches(&query, generation, &active_generation) {
-        Ok(Some(service_total_matches)) => {
-            if active_generation.load(Ordering::Relaxed) != generation {
-                return;
-            }
+    // Limit to one in-flight total count task at a time to prevent unbounded
+    // thread accumulation during rapid typing.
+    if in_flight.swap(true, Ordering::AcqRel) {
+        return; // Another task is already running — skip this one.
+    }
 
-            let _ = sender.send(GlobalSearchResponse::TotalCount {
-                query,
-                total_matches: service_total_matches.saturating_add(local_total_matches),
-            });
-            ctx.request_repaint();
+    std::thread::spawn(move || {
+        // RAII guard to reset in_flight on any exit path (including panic).
+        struct InFlightGuard(Arc<AtomicBool>);
+        impl Drop for InFlightGuard {
+            fn drop(&mut self) { self.0.store(false, Ordering::Release); }
         }
-        Ok(None) => {}
-        Err(error) => {
-            if active_generation.load(Ordering::Relaxed) == generation {
-                log::debug!(
-                    "[GLOBAL-SEARCH] Exact total count unavailable for '{}': {}",
+        let _guard = InFlightGuard(Arc::clone(&in_flight));
+
+        match load_exact_service_total_matches(&query, generation, &active_generation) {
+            Ok(Some(service_total_matches)) => {
+                if active_generation.load(Ordering::Relaxed) != generation {
+                    return;
+                }
+
+                let _ = sender.send(GlobalSearchResponse::TotalCount {
                     query,
-                    error
-                );
+                    total_matches: service_total_matches.saturating_add(local_total_matches),
+                });
+                ctx.request_repaint();
+            }
+            Ok(None) => {}
+            Err(error) => {
+                if active_generation.load(Ordering::Relaxed) == generation {
+                    log::debug!(
+                        "[GLOBAL-SEARCH] Exact total count unavailable for '{}': {}",
+                        query,
+                        error
+                    );
+                }
             }
         }
     });
@@ -305,6 +321,7 @@ pub fn start_global_search_worker(
 ) {
     std::thread::spawn(move || {
         let total_count_generation = Arc::new(AtomicU64::new(0));
+        let total_count_in_flight = Arc::new(AtomicBool::new(false));
         let mut last_known_available = false;
         let mut last_known_total_indexed = 0u64;
         let mut last_known_status_volumes = Vec::<VolumeStatus>::new();
@@ -500,6 +517,7 @@ pub fn start_global_search_worker(
                                 local_total_matches.unwrap_or(0),
                                 total_count_token,
                                 Arc::clone(&total_count_generation),
+                                Arc::clone(&total_count_in_flight),
                             );
                         }
                     }

@@ -96,45 +96,62 @@ pub(super) fn parse_notify_buffer(buffer: &[u8], drive_root: &Path) -> Vec<Drive
 }
 
 fn path_matches_prefix(path: &Path, prefix: &Path) -> bool {
-    // Normalize both paths for comparison.
-    let path_str_raw = path.to_string_lossy().to_lowercase();
-    let prefix_str_raw = prefix.to_string_lossy().to_lowercase();
+    // Zero-allocation case-insensitive path prefix comparison.
+    // Windows paths are always valid Unicode (UTF-16) so `to_string_lossy` is lossless
+    // for paths produced by ReadDirectoryChangesW.
+    let path_raw = path.to_string_lossy();
+    let prefix_raw = prefix.to_string_lossy();
 
-    if prefix_str_raw.is_empty() {
+    if prefix_raw.is_empty() {
         return true;
     }
 
-    let path_str = path_str_raw.strip_prefix(r"\\?\").unwrap_or(&path_str_raw);
-    let prefix_str = prefix_str_raw.strip_prefix(r"\\?\").unwrap_or(&prefix_str_raw);
+    // Strip \\?\ prefix if present
+    let path_str = path_raw.strip_prefix(r"\\?\").unwrap_or(&path_raw);
+    let prefix_str = prefix_raw.strip_prefix(r"\\?\").unwrap_or(&prefix_raw);
 
-    // Ensure prefix ends with backslash for proper prefix matching.
-    let prefix_normalized = if prefix_str.ends_with('\\') {
-        prefix_str.to_string()
+    let path_bytes = path_str.as_bytes();
+    let prefix_bytes = prefix_str.as_bytes();
+
+    // Ensure we compare prefix with trailing backslash semantics.
+    let prefix_has_trailing = prefix_bytes.last() == Some(&b'\\');
+    let prefix_len_no_trail = if prefix_has_trailing {
+        prefix_bytes.len() - 1
     } else {
-        format!("{}\\", prefix_str)
+        prefix_bytes.len()
     };
 
-    // Match children of the prefix (e.g. path="c:\teste\file.txt", prefix="c:\teste\\")
-    if path_str.starts_with(&prefix_normalized) {
+    // Match children: path starts with "prefix\"
+    if path_bytes.len() > prefix_len_no_trail
+        && path_bytes.get(prefix_len_no_trail) == Some(&b'\\')
+        && path_bytes[..prefix_len_no_trail].eq_ignore_ascii_case(&prefix_bytes[..prefix_len_no_trail])
+    {
         return true;
     }
 
     // Match the prefix itself (e.g. path="c:\teste", prefix="c:\teste")
-    // This is critical for detecting when the watched folder itself is
-    // deleted or renamed by another application.
-    if path_str == prefix_str {
+    // Critical for detecting when the watched folder itself is deleted or renamed.
+    if path_bytes.len() == prefix_len_no_trail
+        && path_bytes.eq_ignore_ascii_case(&prefix_bytes[..prefix_len_no_trail])
+    {
         return true;
     }
 
-    // Match ancestors of the prefix (e.g. path="c:\parent", prefix starts with "c:\parent\\")
+    // Match ancestors: path is a parent of prefix (e.g. path="c:\parent", prefix="c:\parent\sub")
     // Needed when a parent folder of the watched path is deleted.
-    let path_as_prefix = format!("{}\\" , path_str);
-    if prefix_normalized.starts_with(&path_as_prefix) {
+    let path_len = path_bytes.len();
+    if prefix_len_no_trail > path_len
+        && prefix_bytes.get(path_len) == Some(&b'\\')
+        && prefix_bytes[..path_len].eq_ignore_ascii_case(path_bytes)
+    {
         return true;
     }
 
-    // Special case: if prefix is drive root (e.g., "d:\\"), any path on that drive matches.
-    prefix_normalized.len() == 3 && path_str.starts_with(&prefix_normalized[..2])
+    // Special case: if prefix is drive root (e.g., "d:\"), any path on that drive matches.
+    prefix_len_no_trail <= 2
+        && path_bytes.len() >= 2
+        && path_bytes[0..1].eq_ignore_ascii_case(&prefix_bytes[0..1])
+        && path_bytes[1] == b':'
 }
 
 /// Check if an event matches the current prefix.
