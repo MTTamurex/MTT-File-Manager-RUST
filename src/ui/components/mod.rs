@@ -1,3 +1,4 @@
+pub mod about_settings;
 pub mod appearance_settings;
 pub mod backend_settings;
 pub mod gif_manager;

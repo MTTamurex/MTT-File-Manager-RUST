@@ -11,6 +11,7 @@ pub enum SettingsSection {
     General,
     Shortcuts,
     VirtualDrives,
+    About,
 }
 
 /// Navigation state
