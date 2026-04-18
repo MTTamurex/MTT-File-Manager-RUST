@@ -100,6 +100,10 @@ pub(super) fn watcher_thread_main(
             // Start async read if not already pending.
             if !waiting_for_io {
                 buffer.0.fill(0);
+                bytes_returned = 0;
+                let h_event = overlapped.hEvent;
+                overlapped = std::mem::zeroed::<OVERLAPPED>();
+                overlapped.hEvent = h_event;
                 let result = ReadDirectoryChangesW(
                     handle,
                     buffer.0.as_mut_ptr() as *mut _,
@@ -153,6 +157,11 @@ pub(super) fn watcher_thread_main(
                     // and filter by the currently watched prefix.
                     for event in events {
                         if event_matches_prefix(&event, &current_prefix) {
+                            if coalesced.len() >= MAX_COALESCED_EVENTS {
+                                let batch: Vec<DriveWatcherEvent> = coalesced.drain().collect();
+                                let _ = event_tx.send(batch);
+                                last_flush = std::time::Instant::now();
+                            }
                             coalesced.insert(event);
                         }
                     }

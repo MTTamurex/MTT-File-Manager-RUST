@@ -113,7 +113,12 @@ fn main() -> eframe::Result<()> {
     unsafe {
         use windows::Win32::System::LibraryLoader::SetDefaultDllDirectories;
         use windows::Win32::System::LibraryLoader::LOAD_LIBRARY_SEARCH_DEFAULT_DIRS;
-        let _ = SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+        if let Err(error) = SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS) {
+            log::warn!(
+                "DLL search hardening failed: {} (process continues with reduced hardening)",
+                error
+            );
+        }
     }
 
     // When running without a console (installed binary launched from shortcut),
