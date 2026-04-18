@@ -1,7 +1,11 @@
 use eframe::egui;
 use std::{
     ffi::c_void,
-    sync::{mpsc::Sender, OnceLock},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        mpsc::Sender,
+        OnceLock,
+    },
 };
 use windows::{
     core::{Result, PCWSTR},
@@ -11,10 +15,10 @@ use windows::{
     Win32::System::Threading::GetCurrentThreadId,
     Win32::UI::WindowsAndMessaging::{
         CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, PostThreadMessageW,
-        RegisterClassW, RegisterDeviceNotificationW, TranslateMessage, DBT_DEVICEARRIVAL,
-        DBT_DEVICEREMOVECOMPLETE, DBT_DEVTYP_DEVICEINTERFACE, DEVICE_NOTIFY_WINDOW_HANDLE,
-        DEV_BROADCAST_DEVICEINTERFACE_W, HDEVNOTIFY, HWND_MESSAGE, MSG, WINDOW_EX_STYLE,
-        WINDOW_STYLE, WM_DEVICECHANGE, WM_QUIT, WNDCLASSW,
+        RegisterClassW, RegisterDeviceNotificationW, TranslateMessage, UnregisterDeviceNotification,
+        DBT_DEVICEARRIVAL, DBT_DEVICEREMOVECOMPLETE, DBT_DEVTYP_DEVICEINTERFACE,
+        DEVICE_NOTIFY_WINDOW_HANDLE, DEV_BROADCAST_DEVICEINTERFACE_W, HDEVNOTIFY, HWND_MESSAGE,
+        MSG, WINDOW_EX_STYLE, WINDOW_STYLE, WM_DEVICECHANGE, WM_QUIT, WNDCLASSW,
     },
 };
 
@@ -26,6 +30,9 @@ const CLASS_NAME_WIDE: [u16; 22] = [
 static DEVICE_EVENT_SENDER: OnceLock<Sender<()>> = OnceLock::new();
 static EGUI_CONTEXT: OnceLock<egui::Context> = OnceLock::new();
 static DEVICE_LISTENER_THREAD_ID: OnceLock<u32> = OnceLock::new();
+/// Stored as usize because HDEVNOTIFY (*mut c_void) is not Send+Sync.
+/// Only accessed from register/unregister which are both single-call paths.
+static DEVICE_NOTIFICATION_HANDLE: AtomicUsize = AtomicUsize::new(0);
 
 /// Starts a background thread that listens for WM_DEVICECHANGE events and notifies the UI
 /// whenever a volume (drive) is mounted or unmounted.
@@ -91,6 +98,16 @@ fn run_device_listener(sender: Sender<()>, ctx: egui::Context) -> Result<()> {
 }
 
 pub fn shutdown_device_change_listener() {
+    // Unregister device notification handle before stopping the message loop.
+    let raw = DEVICE_NOTIFICATION_HANDLE.swap(0, Ordering::AcqRel);
+    if raw != 0 {
+        unsafe {
+            if let Err(e) = UnregisterDeviceNotification(HDEVNOTIFY(raw as *mut c_void)) {
+                log::debug!("[device_change] UnregisterDeviceNotification failed: {:?}", e);
+            }
+        }
+    }
+
     if let Some(thread_id) = DEVICE_LISTENER_THREAD_ID.get().copied() {
         unsafe {
             let _ = PostThreadMessageW(thread_id, WM_QUIT, WPARAM(0), LPARAM(0));
@@ -106,11 +123,12 @@ unsafe fn register_volume_notifications(hwnd: HWND) -> Result<()> {
         ..Default::default()
     };
 
-    let _notification_handle: HDEVNOTIFY = RegisterDeviceNotificationW(
+    let notification_handle: HDEVNOTIFY = RegisterDeviceNotificationW(
         HANDLE(hwnd.0),
         &mut filter as *mut _ as *mut c_void,
         DEVICE_NOTIFY_WINDOW_HANDLE,
     )?;
+    DEVICE_NOTIFICATION_HANDLE.store(notification_handle.0 as usize, Ordering::Release);
     Ok(())
 }
 
