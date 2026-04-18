@@ -21,19 +21,12 @@ impl ImageViewerApp {
     #[cfg(feature = "notify-watcher")]
     pub(super) fn process_legacy_notify_events(
         &mut self,
-        drive_watcher_active: bool,
         current_path_norm: &str,
         internal_cache_root_norm: Option<&str>,
         internal_cache_root_prefix: Option<&str>,
         max_events_individual: usize,
         pending_disk_cache_invalidations: &mut Vec<PathBuf>,
     ) {
-        // On USN filesystems, DriveWatcher is authoritative and we can skip notify.
-        // On non-USN filesystems, keep notify processing as resilience backup.
-        if drive_watcher_active && !self.watcher_fallback_polling {
-            return;
-        }
-
         let budget = if self.layout.saved_is_minimized {
             Duration::from_millis(1)
         } else if self.frame_time_peak_ms > 33.33 {
@@ -261,7 +254,7 @@ impl ImageViewerApp {
                         self.cache_manager.failed_thumbnails.pop(&cleaned);
 
                         // DON'T clear failure cache for files still being written
-                        // (active downloads). See watcher_drive_processing.rs for details.
+                        // (active downloads).
                         // Uses _fast variant to avoid blocking UI thread.
                         if !crate::infrastructure::windows::file_flags::is_file_unsafe_to_read_fast(&cleaned) {
                             crate::workers::thumbnail::clear_failure_cache(&cleaned);

@@ -355,4 +355,343 @@ impl ImageViewerApp {
             }
         }
     }
+
+    pub(super) fn should_ignore_watcher_path(
+        &self,
+        path: &Path,
+        internal_cache_root_norm: Option<&str>,
+        internal_cache_root_prefix: Option<&str>,
+    ) -> bool {
+        let cleaned = Self::clean_path(path);
+        let cleaned_norm = Self::normalize_for_match(&cleaned);
+        let is_internal_cache_event = match (internal_cache_root_norm, internal_cache_root_prefix) {
+            (Some(root), Some(prefix)) => cleaned_norm == root || cleaned_norm.starts_with(prefix),
+            _ => false,
+        };
+
+        let name = path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_lowercase();
+        is_internal_cache_event
+            || name.starts_with("dumpstack.log")
+            || name.starts_with("hiberfil.sys")
+            || name.starts_with("pagefile.sys")
+            || name.starts_with("swapfile.sys")
+            || name == "desktop.ini"
+            || name == "thumbs.db"
+    }
+
+    pub(super) fn apply_folder_content_change_invalidations(
+        &mut self,
+        folders_with_changed_contents: std::collections::HashSet<PathBuf>,
+        pending_disk_cache_invalidations: &mut Vec<PathBuf>,
+    ) {
+        if folders_with_changed_contents.is_empty() {
+            return;
+        }
+
+        log::debug!(
+            "[MTIME-SCHED] apply_folder_content_change_invalidations: {} folders changed, current_path={}",
+            folders_with_changed_contents.len(),
+            self.navigation_state.current_path
+        );
+        for fp in &folders_with_changed_contents {
+            log::debug!("[MTIME-SCHED]   changed folder: {:?}", fp);
+        }
+
+        let current_path_norm =
+            Self::normalize_for_match(Path::new(&self.navigation_state.current_path));
+        for folder_path in &folders_with_changed_contents {
+            self.invalidate_folder_size_cache(folder_path);
+            self.cache_manager.invalidate_folder_preview(folder_path);
+            self.scanned_folders.pop(folder_path);
+            let folder_norm = Self::normalize_for_match(folder_path);
+            if folder_norm != current_path_norm {
+                self.directory_cache.invalidate(folder_path);
+                self.clear_tab_cache_for_normalized_path(&folder_norm);
+            }
+            pending_disk_cache_invalidations.push(folder_path.clone());
+            let _ = self.cover_worker_sender.send(folder_path.clone());
+
+            if let Some(parent) = folder_path.parent() {
+                let parent_buf = parent.to_path_buf();
+                if !folders_with_changed_contents.contains(&parent_buf) {
+                    let parent_norm = Self::normalize_for_match(parent);
+                    self.directory_cache.invalidate(&parent_buf);
+                    self.clear_tab_cache_for_normalized_path(&parent_norm);
+                }
+            }
+        }
+
+        let covers_to_evict: Vec<PathBuf> = self
+            .all_items
+            .iter()
+            .filter(|item| {
+                item.is_dir
+                    && item.folder_cover.is_some()
+                    && folders_with_changed_contents.contains(&item.path)
+            })
+            .filter_map(|item| item.folder_cover.clone())
+            .collect();
+
+        for cover in &covers_to_evict {
+            self.cache_manager.texture_cache.pop(cover);
+            self.cache_manager.loading_set.remove(cover);
+        }
+
+        let mut cleared_any = false;
+        for item in &mut self.all_items {
+            if item.is_dir
+                && item.folder_cover.is_some()
+                && folders_with_changed_contents.contains(&item.path)
+            {
+                item.folder_cover = None;
+                cleared_any = true;
+            }
+        }
+        if cleared_any {
+            let items = Arc::make_mut(&mut self.items);
+            for item in items.iter_mut() {
+                if item.is_dir
+                    && item.folder_cover.is_some()
+                    && folders_with_changed_contents.contains(&item.path)
+                {
+                    item.folder_cover = None;
+                }
+            }
+        }
+
+        let mut scheduled_any = false;
+        for folder_path in &folders_with_changed_contents {
+            if crate::infrastructure::onedrive::is_onedrive_path(folder_path) {
+                log::debug!(
+                    "[MTIME-SCHED] Skipping OneDrive folder: {:?}",
+                    folder_path
+                );
+                continue;
+            }
+            if crate::infrastructure::io_priority::is_network_or_virtual(folder_path) {
+                log::debug!(
+                    "[MTIME-SCHED] Skipping network/virtual folder: {:?}",
+                    folder_path
+                );
+                continue;
+            }
+
+            let folder_norm = Self::normalize_for_match(folder_path);
+            let is_visible = self.all_items.iter().any(|item| {
+                item.is_dir
+                    && (item.path == *folder_path
+                        || Self::normalize_for_match(&item.path) == folder_norm)
+            });
+            if !is_visible {
+                log::debug!(
+                    "[MTIME-SCHED] Folder NOT visible in listing, skipping: {:?} (norm={:?})",
+                    folder_path,
+                    folder_norm
+                );
+                continue;
+            }
+
+            let recheck_at = Instant::now() + Duration::from_secs(2);
+            if let Some(existing) = self
+                .pending_folder_mtime_recheck
+                .iter_mut()
+                .find(|(p, _)| p == folder_path)
+            {
+                existing.1 = recheck_at;
+                log::debug!(
+                    "[MTIME-SCHED] Debounce push for folder: {:?}",
+                    folder_path.file_name().unwrap_or_default()
+                );
+            } else {
+                if self.pending_folder_mtime_recheck.len() >= 500 {
+                    log::warn!(
+                        "[MTIME-SCHED] Pending mtime recheck list full (500), dropping: {:?}",
+                        folder_path.file_name().unwrap_or_default()
+                    );
+                    continue;
+                }
+                log::debug!(
+                    "[MTIME-SCHED] Scheduled mtime recheck for folder: {:?} (due in 2s)",
+                    folder_path.file_name().unwrap_or_default()
+                );
+                self.pending_folder_mtime_recheck
+                    .push((folder_path.clone(), recheck_at));
+            }
+            scheduled_any = true;
+        }
+
+        if scheduled_any {
+            self.ui_ctx
+                .request_repaint_after(Duration::from_millis(2500));
+        }
+    }
+
+    pub(super) fn process_pending_folder_mtime_rechecks(&mut self) {
+        if self.pending_folder_mtime_recheck.is_empty() {
+            return;
+        }
+
+        let now = Instant::now();
+
+        const MTIME_SORT_COOLDOWN: Duration = Duration::from_secs(3);
+        let cooldown_remaining = MTIME_SORT_COOLDOWN
+            .checked_sub(now.duration_since(self.last_folder_mtime_sort))
+            .unwrap_or(Duration::ZERO);
+        if cooldown_remaining > Duration::ZERO {
+            self.ui_ctx
+                .request_repaint_after(cooldown_remaining + Duration::from_millis(50));
+            return;
+        }
+
+        let due_entries: Vec<PathBuf> = self
+            .pending_folder_mtime_recheck
+            .iter()
+            .filter(|(_, recheck_at)| now >= *recheck_at)
+            .map(|(p, _)| p.clone())
+            .collect();
+
+        if due_entries.is_empty() {
+            if let Some(earliest) = self
+                .pending_folder_mtime_recheck
+                .iter()
+                .map(|(_, t)| *t)
+                .min()
+            {
+                if let Some(wait) = earliest.checked_duration_since(now) {
+                    self.ui_ctx
+                        .request_repaint_after(wait + Duration::from_millis(50));
+                }
+            }
+            return;
+        }
+
+        log::info!(
+            "[MTIME-CHECK] Processing {} due folder mtime rechecks (pending={}, cooldown_ok)",
+            due_entries.len(),
+            self.pending_folder_mtime_recheck.len()
+        );
+
+        self.pending_folder_mtime_recheck
+            .retain(|(_, recheck_at)| now < *recheck_at);
+
+        let mut folder_mtime_updated = false;
+
+        for folder_path in &due_entries {
+            let new_modified = match std::fs::metadata(folder_path) {
+                Ok(meta) if meta.is_dir() => meta
+                    .modified()
+                    .ok()
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0),
+                Ok(_) => {
+                    log::info!(
+                        "[MTIME-CHECK] Path is not a directory, skipping: {:?}",
+                        folder_path
+                    );
+                    continue;
+                }
+                Err(e) => {
+                    log::info!(
+                        "[MTIME-CHECK] metadata() failed for {:?}: {}",
+                        folder_path,
+                        e
+                    );
+                    continue;
+                }
+            };
+
+            if new_modified == 0 {
+                log::info!(
+                    "[MTIME-CHECK] mtime=0 for {:?}, skipping",
+                    folder_path.file_name().unwrap_or_default()
+                );
+                continue;
+            }
+
+            let folder_norm = Self::normalize_for_match(folder_path);
+            let mut this_updated = false;
+
+            let old_modified = self
+                .all_items
+                .iter()
+                .find(|item| {
+                    item.is_dir
+                        && (item.path == *folder_path
+                            || Self::normalize_for_match(&item.path) == folder_norm)
+                })
+                .map(|item| item.modified)
+                .unwrap_or(0);
+
+            if old_modified == new_modified {
+                log::info!(
+                    "[MTIME-CHECK] mtime unchanged for {:?}: {} == {}",
+                    folder_path.file_name().unwrap_or_default(),
+                    old_modified,
+                    new_modified
+                );
+                continue;
+            }
+
+            for item in self.all_items.iter_mut() {
+                if item.is_dir
+                    && (item.path == *folder_path
+                        || Self::normalize_for_match(&item.path) == folder_norm)
+                {
+                    item.modified = new_modified;
+                    this_updated = true;
+                    break;
+                }
+            }
+
+            if this_updated {
+                let items = Arc::make_mut(&mut self.items);
+                for item in items.iter_mut() {
+                    if item.is_dir
+                        && (item.path == *folder_path
+                            || Self::normalize_for_match(&item.path) == folder_norm)
+                    {
+                        item.modified = new_modified;
+                        break;
+                    }
+                }
+                folder_mtime_updated = true;
+                log::info!(
+                    "[MTIME-CHECK] Updated folder mtime: {:?} {} → {}",
+                    folder_path.file_name().unwrap_or_default(),
+                    old_modified,
+                    new_modified
+                );
+            }
+        }
+
+        if folder_mtime_updated {
+            self.sort_items();
+            self.ui_ctx.request_repaint();
+            self.last_folder_mtime_sort = now;
+            log::info!("[MTIME-CHECK] Re-sorted items after folder mtime update");
+
+            let current_path_buf =
+                PathBuf::from(&self.navigation_state.current_path);
+            self.directory_cache.invalidate(&current_path_buf);
+        }
+
+        if !self.pending_folder_mtime_recheck.is_empty() {
+            if let Some(earliest) = self
+                .pending_folder_mtime_recheck
+                .iter()
+                .map(|(_, t)| *t)
+                .min()
+            {
+                if let Some(wait) = earliest.checked_duration_since(now) {
+                    self.ui_ctx
+                        .request_repaint_after(wait + Duration::from_millis(50));
+                }
+            }
+        }
+    }
 }

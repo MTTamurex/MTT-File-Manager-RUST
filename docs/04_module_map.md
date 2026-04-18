@@ -112,7 +112,6 @@ src/
 │   ├── drive_watcher/               # Watcher submodules
 │   │   ├── buffer_parser.rs         # Change buffer parsing
 │   │   └── thread_loop.rs           # Watcher thread loop
-│   ├── drive_watcher_integration.rs # Multi-drive watcher manager
 │   ├── folder_compose.rs            # Folder cover composition (3-layer PNG)
 │   ├── global_search.rs             # Named Pipe client for search IPC
 │   ├── icon_disk_cache.rs           # Icon disk cache

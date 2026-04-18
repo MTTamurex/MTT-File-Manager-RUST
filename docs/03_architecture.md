@@ -170,8 +170,7 @@ System access, Windows integration, and data persistence.
 
 **Filesystem**:
 - `ntfs_reader.rs` — NTFS raw directory reading (NtQueryDirectoryFile)
-- `drive_watcher.rs` + `drive_watcher/` — Drive-wide filesystem watcher (ReadDirectoryChangesW, buffer_parser, thread_loop) — **disabled by default** due to UI degradation on machines with OneDrive/Cloud Files minifilters; opt-in via `MTT_ENABLE_DRIVE_WATCHER=1`
-- `drive_watcher_integration.rs` — Multi-drive watcher manager; when drive watcher is enabled, adapts drive events into notify-compatible format
+- `drive_watcher.rs` + `drive_watcher/` — Low-level ReadDirectoryChangesW watcher (buffer_parser, thread_loop) — used internally by the search index (`user_session_search`) to monitor virtual/FUSE volumes; not used by the main app watcher system
 - `folder_compose.rs` — Custom folder cover composition (3-layer PNG)
 - `virtual_drive_config.rs` — Virtual drive and disk type configuration
 - `io_priority.rs` + `io_priority/` — I/O priority management (detection, grouped_queue, threading)
@@ -349,7 +348,7 @@ Process Input → Update State → Render UI       │ (60 FPS loop)
     - Load preferences from `app_state.db` (including theme mode)
    - Apply saved theme visuals (`Visuals::dark()` / `Visuals::light()`) on first frame
    - Configure caches and indices
-   - Initialize filesystem watcher (`notify` per-folder by default; drive-wide `ReadDirectoryChangesW` opt-in via `MTT_ENABLE_DRIVE_WATCHER=1`)
+   - Initialize filesystem watcher (`notify` per-folder watcher + consistency probe)
    - Load initial state
    - Configure custom fonts
 

@@ -283,158 +283,15 @@ impl ImageViewerApp {
             .map(|root| format!("{root}\\"));
 
         let watcher_start = Instant::now();
-        self.drive_watcher.check_pending_activation();
-
-        let (max_batches, max_events) = if self.layout.saved_is_minimized {
-            (1usize, 32usize)
-        } else if self.frame_time_peak_ms > 33.33 {
-            (2usize, 128usize)
-        } else if self.frame_time_peak_ms > 25.0 {
-            (3usize, 192usize)
-        } else {
-            (4usize, 320usize)
-        };
-
-        // While a shell file operation is in progress (copy/move/delete), drain
-        // watcher events without processing them individually.  This avoids
-        // synchronous filesystem syscalls (is_dir, GetFileAttributesW) on the UI
-        // thread while the disk is under heavy I/O.  A full folder reload is
-        // triggered in handle_file_operation_finished() once all ops complete.
-        if self.file_operation_state.file_ops_in_progress > 0 {
-            log::debug!(
-                "[MTIME-SCHED] file_ops_in_progress={}, draining watcher events",
-                self.file_operation_state.file_ops_in_progress
-            );
-            let (_drained, _dropped) = self
-                .drive_watcher
-                .poll_events_limited(max_batches, max_events);
-            if !self.navigation_state.is_computer_view
-                && !self.navigation_state.is_recycle_bin_view
-            {
-                self.request_watcher_auto_reload();
-            }
-            let now = Instant::now();
-            return WatcherPerfMarks {
-                watcher_start,
-                drive_events_done: now,
-                auto_reload_done: now,
-            };
-        }
-
-        let (drive_events, dropped_drive_events) = self
-            .drive_watcher
-            .poll_events_limited(max_batches, max_events);
-        let t_poll_done = Instant::now();
-        let drive_event_count = drive_events.len();
-
-        if dropped_drive_events > 0 {
-            if dropped_drive_events >= max_events.saturating_mul(4) {
-                log::warn!(
-                    "[FS-WATCH] Dropped {} queued drive events (event burst overflow, kept={} batches<= {}, events<= {}{}). Scheduling safety reload.",
-                    dropped_drive_events,
-                    drive_event_count,
-                    max_batches,
-                    max_events,
-                    if self.layout.saved_is_minimized { ", minimized" } else { "" }
-                );
-            } else {
-                log::debug!(
-                    "[FS-WATCH] Dropped {} queued drive events (kept={} batches<= {}, events<= {}{})",
-                    dropped_drive_events,
-                    drive_event_count,
-                    max_batches,
-                    max_events,
-                    if self.layout.saved_is_minimized { ", minimized" } else { "" }
-                );
-            }
-            if !self.navigation_state.is_computer_view && !self.navigation_state.is_recycle_bin_view
-            {
-                let current_path = PathBuf::from(&self.navigation_state.current_path);
-                self.directory_dirty_registry.mark_dirty(&current_path);
-                self.directory_cache.invalidate(&current_path);
-                self.request_watcher_auto_reload();
-            }
-        }
-
-        #[cfg(feature = "notify-watcher")]
-        let drive_watcher_active = !drive_events.is_empty();
-
-        for event in &drive_events {
-            if let crate::infrastructure::drive_watcher::DriveWatcherEvent::DriveLost(drive_root) =
-                event
-            {
-                log::warn!("[FS-WATCH] DriveLost signal received for: {:?}", drive_root);
-                self.drive_state.last_drive_refresh = Instant::now();
-                self.reload_drive_list_async();
-                // Clear sidebar tree state for the lost drive
-                self.sidebar_tree.clear_drive(drive_root);
-
-                let drive_prefix = drive_root.to_string_lossy().to_string();
-                if !self.navigation_state.is_computer_view
-                    && !self.navigation_state.is_recycle_bin_view
-                    && self.navigation_state.current_path.starts_with(&drive_prefix)
-                {
-                    log::warn!(
-                        "[FS-WATCH] Current path '{}' is on lost drive, redirecting to Este Computador",
-                        self.navigation_state.current_path
-                    );
-                    self.directory_cache.clear();
-                    self.drive_watcher.cleanup_unused_watchers(None);
-                    self.navigate_to_computer();
-                    return WatcherPerfMarks {
-                        watcher_start,
-                        drive_events_done: Instant::now(),
-                        auto_reload_done: Instant::now(),
-                    };
-                }
-            }
-        }
 
         const MAX_EVENTS_INDIVIDUAL: usize = 50;
-        const FLOOD_RELOAD_COOLDOWN_MS: u64 = 5000;
 
         let mut pending_disk_cache_invalidations: Vec<PathBuf> = Vec::new();
-        let mut folders_with_changed_contents: HashSet<PathBuf> = HashSet::new();
-
-        self.process_drive_events_batch(
-            &drive_events,
-            current_path_norm,
-            internal_cache_root_norm.as_deref(),
-            internal_cache_root_prefix.as_deref(),
-            MAX_EVENTS_INDIVIDUAL,
-            FLOOD_RELOAD_COOLDOWN_MS,
-            &mut pending_disk_cache_invalidations,
-            &mut folders_with_changed_contents,
-        );
-
-        // Invalidate sidebar folder tree for any changed directories.
-        // This ensures the tree re-loads children for expanded nodes that
-        // received file system events (create/delete/rename of subfolders).
-        for folder in &folders_with_changed_contents {
-            self.sidebar_tree.clear_children(folder);
-        }
-
-        self.apply_folder_content_change_invalidations(
-            folders_with_changed_contents,
-            &mut pending_disk_cache_invalidations,
-        );
 
         let drive_events_done = Instant::now();
-        let drive_poll_ms = t_poll_done.duration_since(watcher_start).as_millis();
-        let drive_process_ms = drive_events_done.duration_since(t_poll_done).as_millis();
-        if drive_events_done.duration_since(watcher_start).as_millis() > 50 {
-            log::warn!(
-                "[PERF-MSG] DriveWatcher: poll={}ms process={}ms events={} dropped={}",
-                drive_poll_ms,
-                drive_process_ms,
-                drive_event_count,
-                dropped_drive_events
-            );
-        }
 
         #[cfg(feature = "notify-watcher")]
         self.process_legacy_notify_events(
-            drive_watcher_active,
             current_path_norm,
             internal_cache_root_norm.as_deref(),
             internal_cache_root_prefix.as_deref(),

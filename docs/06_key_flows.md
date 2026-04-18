@@ -194,34 +194,15 @@ process_legacy_notify_events() [app/operations/message_handler/watcher_legacy.rs
 └─────────────────┴──────────────────────────┘
 ```
 
-### Opt-In: Drive-Wide Watcher (ReadDirectoryChangesW)
-
-**Activation**: Set `MTT_ENABLE_DRIVE_WATCHER=1` environment variable. Disabled by default because recursive `ReadDirectoryChangesW` on drive roots causes systemic UI degradation on machines with OneDrive/Cloud Files minifilters over prolonged use.
-
-```
-App init: start DriveWatcherManager (if MTT_ENABLE_DRIVE_WATCHER=1)
-    ↓
-Spawn one DriveWatcher per drive (ReadDirectoryChangesW on drive root)
-    ↓
-Async I/O with OVERLAPPED [infrastructure/drive_watcher/thread_loop.rs]
-    ↓
-Event received → parse buffer [infrastructure/drive_watcher/buffer_parser.rs]
-    ↓
-Filter events by current folder prefix
-    ↓
-On NTFS/ReFS: drop notify watcher entirely (drive watcher is sufficient)
-On non-USN (exFAT/FAT): keep both watchers as resilience backup
-```
-
 ### Resilience: Consistency Probe
 
 A background worker (`app/init_workers/consistency_probe_worker.rs`) periodically computes a signature of the current directory listing and compares it against disk reality. This catches events that either watcher might miss (common on non-NTFS filesystems). Drives detected as unreliable are escalated to active polling mode.
 
 ### Special Case: User Session Search
 
-The `user_session_search/` module uses `DriveWatcher` independently (not gated by `MTT_ENABLE_DRIVE_WATCHER`) to monitor virtual/FUSE volumes (e.g., Cryptomator/WinFsp mounts) for the in-app search index.
+The `user_session_search/` module uses the low-level `DriveWatcher` independently to monitor virtual/FUSE volumes (e.g., Cryptomator/WinFsp mounts) for the in-app search index.
 
-**Key files**: `app/operations/watcher.rs`, `app/operations/message_handler/watcher_legacy.rs`, `app/operations/message_handler/watcher_events.rs`, `infrastructure/drive_watcher.rs`, `infrastructure/drive_watcher_integration.rs`
+**Key files**: `app/operations/watcher.rs`, `app/operations/message_handler/watcher_legacy.rs`, `app/operations/message_handler/watcher_events.rs`, `infrastructure/drive_watcher.rs`
 
 ## 10. Global Search
 

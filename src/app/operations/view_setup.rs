@@ -304,7 +304,6 @@ impl ImageViewerApp {
                                 current
                             );
                             self.directory_cache.clear();
-                            self.drive_watcher.cleanup_unused_watchers(None);
                             self.navigate_to_computer();
                             return;
                         }

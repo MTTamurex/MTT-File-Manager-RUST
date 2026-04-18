@@ -27,26 +27,6 @@ The app uses `NtQueryDirectoryFile` to read directory entries in bulk (64KB per 
 
 By default, the app uses the `notify` crate (`RecommendedWatcher`) to monitor the **current folder only** (non-recursive). When the user navigates to a different folder, the previous watcher is dropped and a new one is created.
 
-**Why this is the default**: The drive-wide `ReadDirectoryChangesW` watcher (see below) was disabled by default because recursive monitoring of drive roots causes systemic UI degradation on machines with OneDrive/Cloud Files minifilters over prolonged use.
-
-### Opt-In: Drive-Wide Watcher (ReadDirectoryChangesW)
-
-**Location**: `src/infrastructure/drive_watcher.rs`, `src/infrastructure/drive_watcher/`
-
-**Activation**: Set `MTT_ENABLE_DRIVE_WATCHER=1` environment variable.
-
-When enabled, the app monitors entire drive roots instead of individual folders:
-- `DriveWatcher`: monitors a single drive root (e.g., `C:\`) using `ReadDirectoryChangesW`
-- `DriveWatcherManager` (`drive_watcher_integration.rs`): manages one watcher per drive
-- Async I/O with `OVERLAPPED` structure — non-blocking
-- Events are filtered by the current folder prefix — only relevant changes are processed
-- On NTFS/ReFS drives, the `notify` watcher is dropped entirely when the drive watcher is active
-
-**Benefits when enabled**:
-- Zero overhead when navigating between folders on the same drive (no watcher recreation)
-- Instant change detection for the current folder
-- Single watcher per drive regardless of navigation depth
-
 ### Resilience: Consistency Probe
 
 **Location**: `src/app/init_workers/consistency_probe_worker.rs`
@@ -57,7 +37,7 @@ When the probe detects a visible folder-cover change on a non-NTFS drive, the UI
 
 ### UNC/Network Paths
 
-UNC and network paths always use the `notify` crate since drive-root monitoring doesn't apply to network shares.
+UNC and network paths use the `notify` crate with the consistency probe as a resilience backup.
 
 ## 3. Smart DELETE Handling
 
