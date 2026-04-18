@@ -22,6 +22,10 @@ pub fn hbitmap_to_rgba(
         let width = bm.bmWidth as usize;
         let height = bm.bmHeight.unsigned_abs() as usize;
 
+        if width == 0 || height == 0 || width > 16384 || height > 16384 {
+            return Err("Invalid bitmap dimensions".into());
+        }
+
         let mut buffer = vec![0u8; width * height * 4];
 
         let mut bi = BITMAPINFO {

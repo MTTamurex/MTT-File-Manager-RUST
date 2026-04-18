@@ -15,28 +15,33 @@ impl DirectoryDirtyRegistry {
     pub fn is_dirty(&self, path: &Path) -> bool {
         self.inner
             .lock()
-            .map(|entries| entries.contains_key(path))
-            .unwrap_or(true)
+            .unwrap_or_else(|e| {
+                log::warn!("[DIRTY-REGISTRY] Mutex poisoned in is_dirty(), recovering");
+                e.into_inner()
+            })
+            .contains_key(path)
     }
 
     pub fn mark_dirty(&self, path: &Path) -> u64 {
         let path_buf = path.to_path_buf();
-        if let Ok(mut entries) = self.inner.lock() {
-            let next_version = entries
-                .get(&path_buf)
-                .copied()
-                .unwrap_or(0)
-                .saturating_add(1);
-            entries.insert(path_buf, next_version);
-            next_version
-        } else {
-            0
-        }
+        let mut entries = self.inner.lock().unwrap_or_else(|e| {
+            log::warn!("[DIRTY-REGISTRY] Mutex poisoned in mark_dirty(), recovering");
+            e.into_inner()
+        });
+        let next_version = entries
+            .get(&path_buf)
+            .copied()
+            .unwrap_or(0)
+            .saturating_add(1);
+        entries.insert(path_buf, next_version);
+        next_version
     }
 
     pub fn clear_dirty(&self, path: &Path) {
-        if let Ok(mut entries) = self.inner.lock() {
-            let _ = entries.remove(path);
-        }
+        let mut entries = self.inner.lock().unwrap_or_else(|e| {
+            log::warn!("[DIRTY-REGISTRY] Mutex poisoned in clear_dirty(), recovering");
+            e.into_inner()
+        });
+        let _ = entries.remove(path);
     }
 }

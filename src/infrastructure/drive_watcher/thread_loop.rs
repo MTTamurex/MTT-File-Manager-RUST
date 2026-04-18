@@ -17,6 +17,11 @@ use super::{DriveWatcherEvent, WatcherCommand};
 /// Buffer size for directory change notifications (64KB is the typical max).
 const BUFFER_SIZE: usize = 65536;
 
+/// Wrapper to ensure the I/O buffer has alignment required by
+/// `FILE_NOTIFY_INFORMATION` (4 bytes).  A plain `Vec<u8>` has alignment=1.
+#[repr(C, align(8))]
+struct AlignedBuffer([u8; BUFFER_SIZE]);
+
 /// Maximum events to keep in the dedup buffer before flushing.
 /// When exceeded, events are coalesced into a bulk invalidation.
 const MAX_COALESCED_EVENTS: usize = 500;
@@ -55,7 +60,7 @@ pub(super) fn watcher_thread_main(
         };
 
         // Buffer for directory change notifications.
-        let mut buffer: Vec<u8> = vec![0; BUFFER_SIZE];
+        let mut buffer = AlignedBuffer([0u8; BUFFER_SIZE]);
         let mut overlapped = std::mem::zeroed::<OVERLAPPED>();
         overlapped.hEvent = h_event;
 
@@ -94,11 +99,11 @@ pub(super) fn watcher_thread_main(
 
             // Start async read if not already pending.
             if !waiting_for_io {
-                buffer.fill(0);
+                buffer.0.fill(0);
                 let result = ReadDirectoryChangesW(
                     handle,
-                    buffer.as_mut_ptr() as *mut _,
-                    buffer.len() as u32,
+                    buffer.0.as_mut_ptr() as *mut _,
+                    buffer.0.len() as u32,
                     true, // Watch subtree (entire drive)
                     FILE_NOTIFY_CHANGE_FILE_NAME
                         | FILE_NOTIFY_CHANGE_DIR_NAME
@@ -142,7 +147,7 @@ pub(super) fn watcher_thread_main(
 
                 if bytes_returned > 0 {
                     // Parse the notification buffer.
-                    let events = parse_notify_buffer(&buffer[..bytes_returned as usize], &drive_root);
+                    let events = parse_notify_buffer(&buffer.0[..bytes_returned as usize], &drive_root);
 
                     // Insert into coalescing set (deduplicates automatically)
                     // and filter by the currently watched prefix.

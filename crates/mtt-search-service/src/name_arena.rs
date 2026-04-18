@@ -78,6 +78,9 @@ impl NameArena {
     pub fn get(&self, r: NameRef) -> &str {
         let start = r.offset as usize;
         let end = start + r.len as usize;
+        if end > self.buf.len() {
+            return "";
+        }
         let bytes = &self.buf[start..end];
         // All data is inserted via `insert` which only accepts &str (valid UTF-8).
         // Use safe validation as defense-in-depth for a SYSTEM-level service.

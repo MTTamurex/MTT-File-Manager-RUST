@@ -52,9 +52,11 @@ pub(super) fn try_handle_fast_paths(
     //
     // Only directory entries are sampled (files' mtimes don't affect the parent
     // listing's sort when the issue is subfolder ordering).  The cost is one
-    // metadata() call per subfolder — cheap on SSDs, and bounded.
+    // metadata() call per subfolder — cheap on SSDs, and bounded to 20 entries
+    // to avoid penalizing the fast path on folders with hundreds of subdirectories.
+    const MAX_SUBFOLDER_MTIME_CHECKS: usize = 20;
     let any_subfolder_mtime_stale = |entries: &[FileEntry]| -> bool {
-        for entry in entries.iter().filter(|e| e.is_dir) {
+        for entry in entries.iter().filter(|e| e.is_dir).take(MAX_SUBFOLDER_MTIME_CHECKS) {
             let disk_mtime = std::fs::metadata(&entry.path)
                 .ok()
                 .and_then(|m| m.modified().ok())

@@ -28,10 +28,14 @@ pub struct FolderPreviewData {
 }
 
 /// M-19: RAII guard — ensures `CoUninitialize` runs even if the worker panics.
-struct ComGuard;
+/// Tracks whether `CoInitializeEx` succeeded to avoid calling `CoUninitialize`
+/// on a failed init (which is UB per COM contract).
+struct ComGuard { initialized: bool }
 impl Drop for ComGuard {
     fn drop(&mut self) {
-        unsafe { CoUninitialize(); }
+        if self.initialized {
+            unsafe { CoUninitialize(); }
+        }
     }
 }
 
@@ -53,8 +57,8 @@ pub fn spawn_folder_preview_worker(
     std::thread::spawn(move || {
         // M-19: RAII guard — CoUninitialize guaranteed on normal exit AND panic
         let _com = unsafe {
-            let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
-            ComGuard
+            let hr = CoInitializeEx(None, COINIT_MULTITHREADED);
+            ComGuard { initialized: hr.is_ok() }
         };
 
         // Empty DashMap — content thumbnail extraction doesn't need deletion tracking

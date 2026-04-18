@@ -437,17 +437,18 @@ pub fn get_volume_info(drive_path: &str) -> VolumeInfo {
             .chain(std::iter::once(0))
             .collect();
 
-        let mut sectors_per_cluster = 0u32;
-        let mut bytes_per_sector = 0u32;
-        let mut free_clusters = 0u32;
-        let mut total_clusters = 0u32;
+        // Use GetDiskFreeSpaceExW for correct 64-bit values on volumes >16TB.
+        // GetDiskFreeSpaceW returns 32-bit cluster counts that overflow with
+        // 4K sectors on large NTFS volumes.
+        let mut free_bytes_available: u64 = 0;
+        let mut total_bytes: u64 = 0;
+        let mut total_free_bytes: u64 = 0;
 
-        let result = GetDiskFreeSpaceW(
+        let result = GetDiskFreeSpaceExW(
             PCWSTR(path_wide.as_ptr()),
-            Some(&mut sectors_per_cluster),
-            Some(&mut bytes_per_sector),
-            Some(&mut free_clusters),
-            Some(&mut total_clusters),
+            Some(&mut free_bytes_available),
+            Some(&mut total_bytes),
+            Some(&mut total_free_bytes),
         );
 
         let mut file_system = "NTFS".to_string(); // Fallback seguro
@@ -476,15 +477,11 @@ pub fn get_volume_info(drive_path: &str) -> VolumeInfo {
             }
         }
 
-        if result.is_ok() && sectors_per_cluster > 0 && bytes_per_sector > 0 {
-            let bytes_per_cluster = sectors_per_cluster as u64 * bytes_per_sector as u64;
-            let total_space = total_clusters as u64 * bytes_per_cluster;
-            let free_space = free_clusters as u64 * bytes_per_cluster;
-
+        if result.is_ok() {
             VolumeInfo {
                 file_system,
-                total_space,
-                free_space,
+                total_space: total_bytes,
+                free_space: total_free_bytes,
             }
         } else {
             VolumeInfo {
