@@ -5,7 +5,7 @@ use crate::infrastructure::windows::is_mpeg_ts_file;
 use eframe::egui;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{mpsc, Arc};
 
 type IconRequest = (PathBuf, usize);
 type IconResponse = (PathBuf, usize, Vec<u8>, u32, u32);
@@ -145,13 +145,15 @@ pub(in crate::app) fn spawn_icon_worker(
     // Shared extension icon cache across all workers.
     // Pre-populated with disk-cached data so workers never call SHGetFileInfoW
     // for already-known extensions.
-    let shared_ext_cache: Arc<Mutex<std::collections::HashMap<String, (Vec<u8>, u32, u32)>>> = {
-        let mut initial = std::collections::HashMap::with_capacity(128);
+    // DashMap allows concurrent reads without blocking, eliminating contention
+    // across 16 icon workers.
+    let shared_ext_cache: Arc<dashmap::DashMap<String, (Vec<u8>, u32, u32)>> = {
+        let initial = dashmap::DashMap::with_capacity(128);
         for (ext, data) in preloaded_icons {
             let dot_ext = format!(".{}", ext);
             initial.insert(dot_ext, data.clone());
         }
-        Arc::new(Mutex::new(initial))
+        Arc::new(initial)
     };
 
     let cpu = std::thread::available_parallelism()
@@ -245,9 +247,8 @@ pub(in crate::app) fn spawn_icon_worker(
                         // Check shared cache first — another worker may have
                         // already extracted this extension's icon.
                         if let Some(cached) = ext_cache
-                            .lock()
-                            .ok()
-                            .and_then(|c| c.get(&dot_ext).cloned())
+                            .get(&dot_ext)
+                            .map(|entry| entry.value().clone())
                         {
                             Ok(cached)
                         } else {
@@ -257,9 +258,7 @@ pub(in crate::app) fn spawn_icon_worker(
                             // on worker threads.
                             let r = get_file_type_icon(false, ext_str, IconSize::Large);
                             if let Ok(ref data) = r {
-                                if let Ok(mut cache) = ext_cache.lock() {
-                                    cache.insert(dot_ext, data.clone());
-                                }
+                                ext_cache.insert(dot_ext, data.clone());
                                 // Persist to disk for instant loading on next app launch.
                                 disk_cache.save(ext_str, &data.0, data.1, data.2);
                             }

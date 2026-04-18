@@ -25,59 +25,40 @@
 - **Impacto:** ~~Crítico~~ → **Baixo** — a integração app-level do DriveWatcher foi **removida completamente**. O módulo `drive_watcher.rs` (+ submodules) permanece apenas como dependência interna do `user_session_search` para monitorar volumes FUSE/virtuais. O código afetado não é atingido pelo fluxo principal da aplicação.
 - **Correção aplicada:** `GetOverlappedResult(handle, &overlapped, &mut dummy, true)` no shutdown para drenar I/O pendente antes de liberar o buffer.
 
-### CRIT-02: ComGuard ignora falha de CoInitializeEx
+### ~~CRIT-02: ComGuard ignora falha de CoInitializeEx~~ ✅ CORRIGIDO
 - **Arquivo:** `src/workers/folder_preview_worker.rs`
 - **Impacto:** Crítico — UB por chamar `CoUninitialize` sem `CoInitializeEx` bem-sucedido
-- **Causa:** `ComGuard` sempre chama `CoUninitialize` no `Drop`, mesmo quando `CoInitializeEx` retornou erro. Violar o contrato COM causa UB.
-- **Correção:** Tracker booleano como em `file_operation_worker.rs`:
-```rust
-struct ComGuard { initialized: bool }
-impl Drop for ComGuard {
-    fn drop(&mut self) {
-        if self.initialized { unsafe { CoUninitialize(); } }
-    }
-}
-```
+- **Causa:** `ComGuard` sempre chama `CoUninitialize` no `Drop`, mesmo quando `CoInitializeEx` retornou erro.
+- **Correção aplicada:** `ComGuard { initialized: bool }` com tracker booleano — `CoUninitialize` só é chamado quando `CoInitializeEx` retornou sucesso.
 
-### CRIT-03: Icon worker COM sem RAII guard
+### ~~CRIT-03: Icon worker COM sem RAII guard~~ ✅ CORRIGIDO
 - **Arquivo:** `src/app/init_workers/visual_workers.rs` (~L278)
 - **Impacto:** Crítico — `CoUninitialize` nunca chamado se thread panic fora do `catch_unwind` per-item
-- **Causa:** COM init/uninit manual sem guard RAII, diferente dos outros workers que usam `ComGuard`.
+- **Correção aplicada:** RAII `ComGuard` com tracker booleano substituindo init/uninit manual.
 
 ---
 
 ## 3. Problemas de Segurança (Rust / Unsafe / FFI)
 
-### SEC-01: Alignment UB — `FileDirectoryInfo` de buffer não-alinhado
+### ~~SEC-01: Alignment UB — `FileDirectoryInfo` de buffer não-alinhado~~ ✅ CORRIGIDO
 - **Arquivo:** `src/infrastructure/ntfs_reader.rs` (~L136)
 - **Impacto:** Alto — UB formal, benigno em x86 mas pode ser explorado pelo compilador
-- **Causa:** `Vec<u8>` (alinhamento=1) castado para `*const FileDirectoryInfo` (requer alinhamento=8).
-- **Correção:** Buffer com alinhamento garantido:
-```rust
-#[repr(C, align(8))]
-struct AlignedBuffer([u8; BUFFER_SIZE]);
-```
+- **Correção aplicada:** `#[repr(C, align(8))] struct AlignedBuffer` garante alinhamento correto para cast.
 
-### SEC-02: Alignment UB — `FILE_NOTIFY_INFORMATION` de buffer não-alinhado
+### ~~SEC-02: Alignment UB — `FILE_NOTIFY_INFORMATION` de buffer não-alinhado~~ ✅ CORRIGIDO
 - **Arquivo:** `src/infrastructure/drive_watcher/buffer_parser.rs` (~L30)
 - **Impacto:** Alto — mesma classe de UB que SEC-01
-- **Correção:** Mesma abordagem — buffer alinhado ou `read_unaligned`.
+- **Correção aplicada:** `#[repr(C, align(8))] struct AlignedBuffer` no buffer do drive watcher.
 
-### SEC-03: `hbitmap_to_rgba` sem limite de dimensões
+### ~~SEC-03: `hbitmap_to_rgba` sem limite de dimensões~~ ✅ CORRIGIDO
 - **Arquivo:** `src/infrastructure/windows/bitmap_conversion.rs`
 - **Impacto:** Médio — OOM com bitmap adversarial; overflow de `width * height * 4` em 32-bit
-- **Correção:**
-```rust
-if width > 16384 || height > 16384 || width == 0 || height == 0 {
-    return Err("Invalid bitmap dimensions".into());
-}
-```
+- **Correção aplicada:** Cap de 16384×16384 pixels antes da alocação do buffer.
 
-### SEC-04: `NameArena::get` panic com `NameRef` inválido
+### ~~SEC-04: `NameArena::get` panic com `NameRef` inválido~~ ✅ CORRIGIDO
 - **Arquivo:** `crates/mtt-search-service/src/name_arena.rs` (~L81)
 - **Impacto:** Médio — crash do search service (processo SYSTEM)
-- **Causa:** Indexação de slice sem bounds check. `get_lowered` já tem o guard, `get` não.
-- **Correção:** `if end > self.buf.len() { return ""; }`
+- **Correção aplicada:** Bounds check `if end > self.buf.len() { return ""; }` em `get()`, alinhado com `get_lowered()`.
 
 ### ~~SEC-05: NV12→RGBA panic com dimensões ímpares~~ ✅ CORRIGIDO
 - **Arquivo:** `src/workers/thumbnail/processing/format_conversion.rs` (~L15)
@@ -85,10 +66,10 @@ if width > 16384 || height > 16384 || width == 0 || height == 0 {
 - **Causa:** Cálculo de stride UV assume dimensões pares; dimensões ímpares produzem index out of bounds.
 - **Correção aplicada:** Clamp UV coords para dimensões pares com `& !1` + `.min()` safety.
 
-### SEC-06: `GlobalAlloc` memory leak no clipboard
+### ~~SEC-06: `GlobalAlloc` memory leak no clipboard~~ ✅ CORRIGIDO
 - **Arquivo:** `src/infrastructure/windows_clipboard.rs` (~L137-L148)
 - **Impacto:** Médio — leak de `HGLOBAL` se `GlobalLock` ou `SetClipboardData` falha
-- **Causa:** Sem `GlobalFree` nos error paths.
+- **Correção aplicada:** `GlobalFree(hmem)` em todos os error paths antes do return.
 
 ### ~~SEC-07: Pipe squatting na IPC do image viewer~~ ✅ CORRIGIDO
 - **Arquivo:** `src/image_viewer/ipc.rs` (~L85-L100)
@@ -117,10 +98,10 @@ if width > 16384 || height > 16384 || width == 0 || height == 0 {
 - **Impacto:** Alto — `name` duplica `path`; `drive_info`/`deletion_date`/`recycle_original_path` pagam custo em todo entry mesmo quando não usados
 - **Correção:** `Box<RecycleBinMeta>` para campos do recycle bin; accessor computado para `name`.
 
-### PERF-04: Verificação de mtime de subpastas sem limite no fast path
+### ~~PERF-04: Verificação de mtime de subpastas sem limite no fast path~~ ✅ CORRIGIDO
 - **Arquivo:** `src/app/operations/folder_loading/load_pipeline/fast_paths.rs` (~L60)
 - **Impacto:** Médio-Alto — 500 subpastas = 500 syscalls no path que deveria ser instantâneo
-- **Correção:** Limitar a amostragem (primeiras 10-20 subpastas) ou pular em HDD.
+- **Correção aplicada:** `.take(20)` limita amostragem de mtime a 20 subpastas.
 
 ### PERF-05: HDD reader "batched" lê tudo antes de dividir
 - **Arquivo:** `src/infrastructure/windows/hdd_directory_reader.rs`
@@ -152,11 +133,11 @@ if width > 16384 || height > 16384 || width == 0 || height == 0 {
 
 ## 5. Problemas na Integração com Windows API
 
-### WIN-01: `GetDiskFreeSpaceW` overflow em volumes >16TB
+### ~~WIN-01: `GetDiskFreeSpaceW` overflow em volumes >16TB~~ ✅ CORRIGIDO
 - **Arquivo:** `src/infrastructure/windows/drives.rs` (~L333)
 - **Impacto:** Alto — valores incorretos de espaço em disco em volumes NTFS grandes
 - **Causa:** `GetDiskFreeSpaceW` retorna contadores de cluster 32-bit; wrap em >16TB com clusters 4K.
-- **Correção:** Substituir por `GetDiskFreeSpaceExW` (retorna bytes 64-bit).
+- **Correção aplicada:** Substituído por `GetDiskFreeSpaceExW` (retorna bytes 64-bit diretamente).
 
 ### ~~WIN-02: `WaitForSingleObject(process, INFINITE)` no elevated helper~~ ✅ CORRIGIDO
 - **Arquivo:** `src/infrastructure/windows/drives.rs` (~L231)
@@ -178,9 +159,10 @@ if width > 16384 || height > 16384 || width == 0 || height == 0 {
 - **Impacto:** Nenhum — `THREAD_TERMINATE` é o access right documentado pela Microsoft para `CancelSynchronousIo`.
 - **Verificação:** [MSDN CancelSynchronousIo](https://learn.microsoft.com/en-us/windows/win32/fileio/cancelsynchronousio-func): "hThread — A handle to the thread. This handle must have the THREAD_TERMINATE access right."
 
-### WIN-06: `RegisterDeviceNotificationW` handle nunca desregistrado
+### ~~WIN-06: `RegisterDeviceNotificationW` handle nunca desregistrado~~ ✅ CORRIGIDO
 - **Arquivo:** `src/infrastructure/windows/device_change.rs` (~L98)
-- **Impacto:** Baixo — cleanup automático no exit do processo; handle fica ativo desnecessariamente.
+- **Impacto:** Baixo — cleanup automático no exit do processo; handle ficava ativo desnecessariamente.
+- **Correção aplicada:** `HDEVNOTIFY` armazenado em `AtomicUsize` estático; `UnregisterDeviceNotification` chamado em `shutdown_device_change_listener()` antes de `PostThreadMessageW(WM_QUIT)`.
 
 ---
 
@@ -192,11 +174,10 @@ if width > 16384 || height > 16384 || width == 0 || height == 0 {
 - **Causa:** `Mutex` do Rust não é reentrante. Nenhum path atual causa o deadlock, mas uma edição descuidada pode.
 - **Correção aplicada:** Comentário SAFETY INVARIANT + `log::warn` no fallback path documentando o risco de deadlock.
 
-### CONC-02: Lock poisoning silencia falha permanente dos caches
+### ~~CONC-02: Lock poisoning silencia falha permanente dos caches~~ ✅ CORRIGIDO
 - **Arquivos:** `src/infrastructure/directory_cache.rs`, `src/infrastructure/directory_dirty_registry.rs`
 - **Impacto:** Alto — cache permanentemente inoperante sem log de erro
-- **Causa:** `.lock().ok()?` retorna `None` silenciosamente em lock poisoned.
-- **Correção:** `.unwrap_or_else(|e| e.into_inner())` (como thumbnail system usa) ou log de warning.
+- **Correção aplicada:** `.unwrap_or_else(|e| e.into_inner())` com `log::warn` em todos os lock sites (8 métodos em directory_cache, 3 em dirty_registry).
 
 ### ~~CONC-03: Threads detached sem limite no global search~~ ✅ CORRIGIDO
 - **Arquivo:** `src/workers/global_search_worker.rs` (~L197)
@@ -208,10 +189,10 @@ if width > 16384 || height > 16384 || width == 0 || height == 0 {
 - **Impacto:** Alto — resource exhaustion faz spawn falhar → panic → crash
 - **Correção aplicada:** `if let Err(e) = .spawn()` com log::error + degradação graceful (worker desabilitado, sends falham silenciosamente).
 
-### CONC-05: Shared extension icon cache — 16 workers contendem em Mutex
+### ~~CONC-05: Shared extension icon cache — 16 workers contendem em Mutex~~ ✅ CORRIGIDO
 - **Arquivo:** `src/app/init_workers/visual_workers.rs` (~L152)
-- **Impacto:** Médio — cada hit clona `Vec<u8>` (4-16KB) segurando o lock
-- **Correção:** `DashMap` ou caches per-worker com sync periódico.
+- **Impacto:** Médio — cada hit clonava `Vec<u8>` (4-16KB) segurando o lock
+- **Correção aplicada:** `Mutex<HashMap>` substituído por `DashMap` — leituras concorrentes não bloqueiam, scope de lock por shard em vez de global. Dependência `dashmap` já existia no Cargo.toml.
 
 ### ~~CONC-06: GC worker demora até 180s para notar shutdown~~ ✅ FALSO POSITIVO
 - **Arquivo:** `src/app/init_workers/background_jobs.rs`
@@ -291,5 +272,5 @@ if width > 16384 || height > 16384 || width == 0 || height == 0 {
 | ~~6~~ | ~~`GlobalFree(hmem)` nos error paths do clipboard~~ | ✅ CORRIGIDO | ~~Elimina memory leak~~ |
 | ~~7~~ | ~~Substituir `GetDiskFreeSpaceW` → `GetDiskFreeSpaceExW`~~ | ✅ CORRIGIDO | ~~Corrige volumes >16TB~~ |
 | ~~8~~ | ~~`.unwrap_or_else(\|e\| e.into_inner())` em directory_cache~~ | ✅ CORRIGIDO | ~~Recupera de lock poison~~ |
-| 9 | `filter_items()` share Arc sem clone quando query vazia | ~5 linhas | Elimina ~10MB allocs/folder |
+| ~~9~~ | ~~`filter_items()` share Arc sem clone quando query vazia~~ | Reclassificado → PERF-01 | Requer `all_items` como `Arc<Vec<FileEntry>>` (15+ sites) — não é ~5 linhas |
 | ~~10~~ | ~~Limitar subfolder mtime check a 20 entries no fast path~~ | ✅ CORRIGIDO | ~~Fix regression HDD~~ |
