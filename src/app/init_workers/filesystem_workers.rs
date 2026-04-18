@@ -156,7 +156,7 @@ pub(in crate::app) fn spawn_disk_cache_invalidation_worker(
         mpsc::channel::<Vec<CacheInvalidationEntry>>();
     let disk_cache_for_invalidation = disk_cache.clone();
     let app_state_for_invalidation = app_state_db.clone();
-    std::thread::Builder::new()
+    if let Err(e) = std::thread::Builder::new()
         .name("disk-cache-invalidation".into())
         .spawn(move || {
         while let Ok(entries) = disk_cache_invalidation_rx.recv() {
@@ -209,7 +209,9 @@ pub(in crate::app) fn spawn_disk_cache_invalidation_worker(
             }
         }
         })
-        .expect("failed to spawn disk-cache-invalidation worker");
+    {
+        log::error!("[CACHE-INVALIDATION] Failed to spawn worker thread: {e}. Cache invalidation disabled.");
+    }
     disk_cache_invalidation_tx
 }
 
@@ -451,7 +453,7 @@ pub(in crate::app) fn spawn_folder_size_batch_worker(
     let generation = Arc::new(AtomicU64::new(0));
     let generation_worker = Arc::clone(&generation);
 
-    std::thread::Builder::new()
+    if let Err(e) = std::thread::Builder::new()
         .name("folder-size-batch".into())
         .spawn(move || {
             while let Ok((path, req_gen, req_epoch)) = batch_rx.recv() {
@@ -565,7 +567,9 @@ pub(in crate::app) fn spawn_folder_size_batch_worker(
                 crate::infrastructure::io_priority::reset_thread_priority();
             }
         })
-        .expect("failed to spawn folder-size-batch worker");
+    {
+        log::error!("[FOLDER-SIZE] Failed to spawn batch worker thread: {e}. Folder size calculation disabled.");
+    }
 
     (batch_tx, res_rx, cancel, generation)
 }

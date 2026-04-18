@@ -11,7 +11,7 @@ use windows::{
             WAIT_OBJECT_0,
         },
         Storage::FileSystem::*,
-        System::Threading::{GetExitCodeProcess, WaitForSingleObject, INFINITE},
+        System::Threading::{GetExitCodeProcess, WaitForSingleObject},
         UI::{
             Shell::*,
             WindowsAndMessaging::{
@@ -241,11 +241,16 @@ fn launch_elevated_volume_rename_helper(
             ));
         }
 
-        let wait = WaitForSingleObject(process, INFINITE);
+        // 30-second timeout to avoid indefinite hang if elevated helper crashes.
+        let wait = WaitForSingleObject(process, 30_000);
         if wait != WAIT_OBJECT_0 {
             let _ = CloseHandle(process);
             return Err(VolumeLabelRenameError::OsError(
-                windows::core::Error::from_win32().to_string(),
+                if wait.0 == 258 { // WAIT_TIMEOUT
+                    "Elevated helper timed out after 30 seconds".to_string()
+                } else {
+                    windows::core::Error::from_win32().to_string()
+                },
             ));
         }
 

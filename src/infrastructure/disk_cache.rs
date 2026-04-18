@@ -159,6 +159,12 @@ impl ThumbnailDiskCache {
             db_utils::apply_default_pragmas(&reader_conn);
             Arc::new(Mutex::new(reader_conn))
         } else {
+            // SAFETY INVARIANT: when reader == writer (same Arc), no code path
+            // may hold the writer lock and then call a method that acquires the
+            // reader lock (or vice-versa), because std::sync::Mutex is NOT
+            // reentrant and will deadlock.  This fallback only activates for
+            // in-memory databases where opening a second connection is impossible.
+            log::warn!("[Cache] Reader shares writer connection — nested lock calls will deadlock.");
             writer.clone()
         };
 
