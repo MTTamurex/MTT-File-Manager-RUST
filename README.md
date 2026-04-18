@@ -191,7 +191,7 @@ Notes:
 - `cargo build --release --workspace` is the simplest way to produce both `mtt-file-manager.exe` and `mtt-search-service.exe` for local testing or packaging.
 
 ### Installer Build
-The installer is generated with Inno Setup 6 and bundles the main app, search service, `libmpv-2.dll`, `pdfium.dll`, and the portable mpv configuration.
+The installer is generated with Inno Setup 6 and bundles the main app, search service, `libmpv-2.dll`, `pdfium.dll`, the portable mpv configuration, and the repository license / notice files used for redistribution.
 
 ```powershell
 # Install Inno Setup 6
@@ -212,6 +212,9 @@ Artifacts explicitly prevalidated by `installer\build_installer.ps1`:
 - `target\release\mtt-search-service.exe`
 - `target\release\libmpv-2.dll`
 - `target\release\pdfium.dll`
+- `LICENSE`
+- `NOTICE`
+- `THIRD_PARTY_NOTICES.md`
 - `appicon.ico`
 - `mpv_ui\portable_config\mpv.conf`
 - `mpv_ui\portable_config\scripts\`
@@ -251,3 +254,27 @@ The thumbnail pipeline uses 3 Windows APIs for video files: **Shell API** (Stage
 - Support for **HEVC/H.265**, **VP9**, **AV1**, **MKV**, **WEBM**, **FLV**, and more
 
 > **Note**: Without the appropriate codecs installed, all video thumbnail stages will fail silently and the file will display a generic icon instead.
+
+## Credits
+
+This project includes and builds upon work from the following projects:
+
+- [ModernH](https://github.com/HarkeshBhatia/ModernH), by Harkesh Bhatia. Our OSC file originated from this project and is used here with small modifications.
+- [RTX HDR / RTX VSR toggle gist](https://gist.github.com/anthonybaldwin/1e49b28b49babf64f159cb793c506333), by anthonybaldwin. This gist served as an early development reference while experimenting with RTX HDR / RTX VSR behavior in mpv; the current repository implementation has since been reworked independently.
+
+## License
+
+Except where otherwise noted, the original code and documentation authored for this repository are licensed under the **Apache License, Version 2.0**. See the top-level `LICENSE` and `NOTICE` files.
+
+Apache-2.0 was chosen because it fits the current Rust stack well and gives a clear attribution baseline: anyone redistributing the Apache-licensed portions of this project must preserve the copyright notice, the license text, and any applicable `NOTICE` entries. In practice, this lets the project require retention of legal attribution, but it does **not** force public branding, UI credits, or endorsement for every downstream project.
+
+This repository also contains or redistributes third-party components that remain under their own licenses and are not relicensed under Apache-2.0. Key examples include:
+
+- `mpv_ui/portable_config/scripts/modernH.lua` and `mpv_ui/portable_config/script-opts/osc.conf`, derived from ModernH and kept under LGPL-2.1.
+- `mpv_ui/portable_config/scripts/autoload.lua`, copied from upstream mpv tooling and governed by upstream mpv licensing.
+- `target\release\libmpv-2.dll`, whose redistribution terms depend on the exact binary build shipped.
+- `target\release\pdfium.dll`, which carries upstream PDFium licensing and notice obligations independent of the Rust bindings.
+- `mpv_ui/portable_config/fonts/Material-Design-Iconic-Font.ttf`, which has its own upstream asset license.
+- `unrar`, whose Rust wrapper is permissive but whose embedded UnRAR sources retain the upstream UnRAR license.
+
+See `THIRD_PARTY_NOTICES.md` for the copied, bundled, or otherwise redistribution-sensitive components that most directly affect packaging and release distribution.

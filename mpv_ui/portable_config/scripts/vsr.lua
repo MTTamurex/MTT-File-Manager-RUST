@@ -1,242 +1,270 @@
-local mp = require 'mp'
+local mp = require("mp")
 
--- Configuration
-local autovsr_enabled = false
-local autohdr_enabled = false
-local rtx_filter_active = false
+local FILTER_TAG = "@mtt-rtx"
+local FORMAT_TAG = "@mtt-rtx-format"
 
-local function publish_button_states()
-    mp.set_property_bool("user-data/vsr/vsr-enabled", autovsr_enabled)
-    mp.set_property_bool("user-data/vsr/hdr-enabled", autohdr_enabled)
+local state = {
+    vsr_enabled = false,
+    hdr_enabled = false,
+    chain_active = false,
+    physical_display = { width = nil, height = nil },
+    restore_timer = nil,
+}
+
+local function sync_ui_flags()
+    mp.set_property_bool("user-data/vsr/vsr-enabled", state.vsr_enabled)
+    mp.set_property_bool("user-data/vsr/hdr-enabled", state.hdr_enabled)
 end
 
-publish_button_states()
+local function floor_to_tenth(value)
+    return math.floor(value * 10) / 10
+end
 
--- Physical monitor resolution detected asynchronously at startup via WMI.
--- This bypasses any DPI virtualisation that affects mpv's display-width/height.
-local monitor_res = { w = nil, h = nil }
-
-mp.command_native_async({
-    name = "subprocess",
-    args = {
-        "powershell.exe", "-NoProfile", "-NonInteractive",
-        "-ExecutionPolicy", "Bypass", "-Command",
-        "$v = Get-CimInstance Win32_VideoController | Where-Object {$_.CurrentHorizontalResolution -gt 0} | Sort-Object CurrentHorizontalResolution -Descending | Select-Object -First 1; Write-Output ('' + $v.CurrentHorizontalResolution + 'x' + $v.CurrentVerticalResolution)"
-    },
-    capture_stdout = true,
-    playback_only = false,
-}, function(success, result)
-    if success and result and result.status == 0 and result.stdout then
-        local w, h = result.stdout:match("(%d+)%s*x%s*(%d+)")
-        if w and h then
-            monitor_res.w = tonumber(w)
-            monitor_res.h = tonumber(h)
-            mp.msg.info("VSR: physical monitor detected: " .. monitor_res.w .. "x" .. monitor_res.h)
-        else
-            mp.msg.warn("VSR: WMI returned unexpected output: " .. result.stdout)
+local function probe_physical_display_async()
+    mp.command_native_async({
+        name = "subprocess",
+        args = {
+            "powershell.exe", "-NoProfile", "-NonInteractive",
+            "-ExecutionPolicy", "Bypass", "-Command",
+            "$adapter = Get-CimInstance Win32_VideoController | Where-Object {$_.CurrentHorizontalResolution -gt 0} | Sort-Object CurrentHorizontalResolution -Descending | Select-Object -First 1; if ($adapter) { Write-Output ($adapter.CurrentHorizontalResolution.ToString() + 'x' + $adapter.CurrentVerticalResolution.ToString()) }"
+        },
+        capture_stdout = true,
+        playback_only = false,
+    }, function(success, result)
+        if not success or not result or result.status ~= 0 or not result.stdout then
+            mp.msg.warn("RTX filters: unable to query physical monitor size, using mpv display metrics")
+            return
         end
-    else
-        mp.msg.warn("VSR: WMI monitor detection failed, will use mpv fallback")
-    end
-end)
 
-local function get_display_resolution()
-    if monitor_res.w and monitor_res.h then
-        return monitor_res.w, monitor_res.h
+        local width, height = result.stdout:match("(%d+)%s*x%s*(%d+)")
+        if not width or not height then
+            mp.msg.warn("RTX filters: unexpected monitor probe output: " .. tostring(result.stdout))
+            return
+        end
+
+        state.physical_display.width = tonumber(width)
+        state.physical_display.height = tonumber(height)
+        mp.msg.info("RTX filters: physical display " .. state.physical_display.width .. "x" .. state.physical_display.height)
+    end)
+end
+
+local function current_display_size()
+    if state.physical_display.width and state.physical_display.height then
+        return state.physical_display.width, state.physical_display.height
     end
 
-    -- Fallback: mpv display properties with HiDPI correction
-    local dw = mp.get_property_number("display-width")
-    local dh = mp.get_property_number("display-height")
-    if not (dw and dh) or dw <= 0 or dh <= 0 then
+    local width = mp.get_property_number("display-width")
+    local height = mp.get_property_number("display-height")
+    if not width or not height or width <= 0 or height <= 0 then
         return nil, nil
     end
 
-    local hidpi = mp.get_property_number("display-hidpi-scale")
-    if hidpi and hidpi > 1.0 then
-        dw = math.floor(dw * hidpi + 0.5)
-        dh = math.floor(dh * hidpi + 0.5)
+    local hidpi_scale = mp.get_property_number("display-hidpi-scale")
+    if hidpi_scale and hidpi_scale > 1.0 then
+        width = math.floor(width * hidpi_scale + 0.5)
+        height = math.floor(height * hidpi_scale + 0.5)
     end
 
-    return math.floor(dw), math.floor(dh)
+    return math.floor(width), math.floor(height)
 end
 
-local function needs_format_conversion(codec, pixelformat)
-    if codec:lower():match("hevc") or codec:lower():match("h%.265") then
-        if pixelformat:match("p10le$") or pixelformat == "p010" then
-            return true
-        end
+local function source_dimensions()
+    local width = mp.get_property_number("width")
+    local height = mp.get_property_number("height")
+    if not width or not height or width <= 0 or height <= 0 then
+        return nil, nil
     end
-    return false
+    return width, height
 end
 
--- Compute the upscale factor from display vs video dimensions.
-local function compute_vsr_scale()
-    local vw = mp.get_property_number("width")
-    local vh = mp.get_property_number("height")
-    local dw, dh = get_display_resolution()
-    if not (vw and vh and dw and dh) then return nil end
-    if vw <= 0 or vh <= 0 or dw <= 0 or dh <= 0 then return nil end
+local function source_is_hdr()
+    local primaries = mp.get_property("video-params/primaries", "")
+    local transfer = mp.get_property("video-params/gamma", "")
+    return primaries == "bt.2020" or transfer == "pq" or transfer == "hlg"
+end
 
-    -- Fit the source into the physical monitor resolution while preserving
-    -- aspect ratio, so 1080p->4K becomes 2.0, 720p->4K becomes 3.0, and
-    -- 1440p->4K becomes 1.5 instead of being limited by logical desktop DPI.
-    local s = math.min(dw / vw, dh / vh)
-    if s <= 1.0 then
+local function hevc_main10_requires_bridge(codec, pixel_format)
+    if codec == nil or pixel_format == nil then
+        return false
+    end
+
+    local lowered = codec:lower()
+    if not lowered:match("hevc") and not lowered:match("h%.265") then
+        return false
+    end
+
+    return pixel_format:match("p10le$") ~= nil or pixel_format == "p010"
+end
+
+local function requested_scale()
+    local video_width, video_height = source_dimensions()
+    local display_width, display_height = current_display_size()
+    if not video_width or not video_height or not display_width or not display_height then
         return nil
     end
 
-    s = math.floor(s * 10) / 10
-    return s
-end
-
-local function remove_vsr()
-    pcall(mp.commandv, "vf", "remove", "@rtx-video")
-    pcall(mp.commandv, "vf", "remove", "@format-nv12")
-    rtx_filter_active = false
-end
-
-local function build_rtx_filter()
-    if not autovsr_enabled and not autohdr_enabled then
+    local fit_ratio = math.min(display_width / video_width, display_height / video_height)
+    if fit_ratio <= 1.0 then
         return nil
     end
 
-    local options = {}
-
-    if autovsr_enabled then
-        local scale = compute_vsr_scale()
-        if not scale then
-            return nil
-        end
-        table.insert(options, "scaling-mode=nvidia")
-        table.insert(options, "scale=" .. scale)
-    end
-
-    if autohdr_enabled then
-        table.insert(options, "nvidia-true-hdr")
-    end
-
-    return "@rtx-video:d3d11vpp=" .. table.concat(options, ":")
+    return floor_to_tenth(fit_ratio)
 end
 
--- Add the VSR filter chain. Returns true if successful.
-local function add_vsr()
+local function remove_filter_chain()
+    pcall(mp.commandv, "vf", "remove", FILTER_TAG)
+    pcall(mp.commandv, "vf", "remove", FORMAT_TAG)
+    state.chain_active = false
+end
+
+local function build_filter_chain()
+    local segments = {}
+
+    if state.vsr_enabled then
+        local scale = requested_scale()
+        if scale then
+            segments[#segments + 1] = "scaling-mode=nvidia"
+            segments[#segments + 1] = "scale=" .. scale
+        end
+    end
+
+    if state.hdr_enabled and not source_is_hdr() then
+        segments[#segments + 1] = "nvidia-true-hdr"
+    end
+
+    if #segments == 0 then
+        return nil
+    end
+
+    return FILTER_TAG .. ":d3d11vpp=" .. table.concat(segments, ":")
+end
+
+local function video_context_ready()
+    local video_width, video_height = source_dimensions()
+    local display_width, display_height = current_display_size()
     local codec = mp.get_property("video-codec", "")
-    local pixelformat = mp.get_property("video-params/pixelformat", "")
+
+    return video_width ~= nil and video_height ~= nil
+        and display_width ~= nil and display_height ~= nil
+        and codec ~= nil and codec ~= ""
+end
+
+local function apply_filter_chain()
+    remove_filter_chain()
+
+    if not state.vsr_enabled and not state.hdr_enabled then
+        return false
+    end
+
+    local codec = mp.get_property("video-codec", "")
+    local pixel_format = mp.get_property("video-params/pixelformat", "")
     if codec == "" then
         return false
     end
 
-    local filter_str = build_rtx_filter()
-    if not filter_str then
+    local chain = build_filter_chain()
+    if not chain then
         return false
     end
 
-    if needs_format_conversion(codec, pixelformat) then
-        pcall(mp.commandv, "vf", "append", "@format-nv12:format=nv12")
+    if hevc_main10_requires_bridge(codec, pixel_format) then
+        pcall(mp.commandv, "vf", "append", FORMAT_TAG .. ":format=nv12")
     end
 
-    local ok = pcall(mp.commandv, "vf", "append", filter_str)
-    if ok then
-        rtx_filter_active = true
-        return true
+    local ok = pcall(mp.commandv, "vf", "append", chain)
+    if not ok then
+        pcall(mp.commandv, "vf", "remove", FORMAT_TAG)
+        return false
     end
-    pcall(mp.commandv, "vf", "remove", "@format-nv12")
-    return false
-end
 
-local function refresh_rtx_filters()
-    remove_vsr()
-    if autovsr_enabled or autohdr_enabled then
-        return add_vsr()
-    end
+    state.chain_active = true
     return true
 end
 
-local function show_toggle_message(label, enabled, active)
-    if enabled then
-        mp.osd_message(active and (label .. ": ON") or (label .. ": ON (not active)"), 2)
-    else
+local function show_toggle_result(label, enabled, applied)
+    if not enabled then
         mp.osd_message(label .. ": OFF", 2)
+        return
+    end
+
+    if applied then
+        mp.osd_message(label .. ": ON", 2)
+    else
+        mp.osd_message(label .. ": ON (not active)", 2)
     end
 end
 
 local function toggle_vsr()
-    autovsr_enabled = not autovsr_enabled
-    publish_button_states()
-
-    -- Debug: log all resolution values so we can diagnose scale issues
-    local vw = mp.get_property_number("width")
-    local vh = mp.get_property_number("height")
-    local dw, dh = get_display_resolution()
-    local mpv_dw = mp.get_property_number("display-width")
-    local mpv_dh = mp.get_property_number("display-height")
-    local hidpi = mp.get_property_number("display-hidpi-scale")
-    mp.msg.info(string.format(
-        "VSR toggle: video=%sx%s  target=%sx%s  mpv_display=%sx%s  hidpi=%s  wmi=%sx%s",
-        tostring(vw), tostring(vh),
-        tostring(dw), tostring(dh),
-        tostring(mpv_dw), tostring(mpv_dh),
-        tostring(hidpi),
-        tostring(monitor_res.w), tostring(monitor_res.h)))
-
-    local ok = refresh_rtx_filters()
-    show_toggle_message("RTX VSR", autovsr_enabled, ok)
+    state.vsr_enabled = not state.vsr_enabled
+    sync_ui_flags()
+    local applied = apply_filter_chain()
+    show_toggle_result("RTX VSR", state.vsr_enabled, applied)
 end
 
 local function toggle_hdr()
-    autohdr_enabled = not autohdr_enabled
-    publish_button_states()
-
-    local ok = refresh_rtx_filters()
-    show_toggle_message("RTX HDR", autohdr_enabled, ok)
+    state.hdr_enabled = not state.hdr_enabled
+    sync_ui_flags()
+    local applied = apply_filter_chain()
+    show_toggle_result("RTX HDR", state.hdr_enabled, applied)
 end
 
--- FULLSCREEN TRANSITION FIX
--- The d3d11vpp filter changes video-out dimensions (upscales to display res).
--- When mpv exits fullscreen it recalculates the window size based on those
--- inflated dimensions, resulting in a near-zero or wrong-sized window.
--- Fix: temporarily remove the filter before the window is resized, then
--- re-add it once the window has settled at the correct geometry.
-mp.observe_property("fullscreen", "bool", function(name, is_fs)
-    if not is_fs and autovsr_enabled and rtx_filter_active then
-        remove_vsr()
-        mp.add_timeout(0.3, function()
-            if autovsr_enabled and not mp.get_property_bool("fullscreen") then
-                add_vsr()
-            end
-        end)
+local function schedule_restore(delay_seconds)
+    if state.restore_timer then
+        state.restore_timer:kill()
+        state.restore_timer = nil
     end
-end)
 
--- Apply filters on file load if VSR was already enabled.
-mp.register_event("file-loaded", function()
-    if autovsr_enabled or autohdr_enabled then
-        local retries = 0
-        local max_retries = 15
-        local function try_apply()
-            local dw = mp.get_property_number("display-width")
-            local dh = mp.get_property_number("display-height")
-            local vw = mp.get_property_number("width")
-            local vh = mp.get_property_number("height")
-            local hw = mp.get_property("hwdec-current", "")
-            if dw and dh and vw and vh and dw > 0 and dh > 0 and vw > 0 and vh > 0
-                and hw ~= nil and hw ~= "" then
-                add_vsr()
-            else
-                retries = retries + 1
-                if retries <= max_retries then
-                    mp.add_timeout(0.2, try_apply)
-                else
-                    mp.msg.warn("RTX filters: hwdec-current not populated after retries, applying anyway")
-                    add_vsr()
-                end
-            end
+    state.restore_timer = mp.add_timeout(delay_seconds, function()
+        state.restore_timer = nil
+        if (state.vsr_enabled or state.hdr_enabled) and not mp.get_property_bool("fullscreen", false) then
+            apply_filter_chain()
         end
-        mp.add_timeout(0.1, try_apply)
+    end)
+end
+
+mp.observe_property("fullscreen", "bool", function(_, is_fullscreen)
+    if is_fullscreen or not state.chain_active then
+        return
     end
+
+    remove_filter_chain()
+    schedule_restore(0.30)
 end)
 
-mp.add_key_binding("ctrl+shift+r", "autovsr", toggle_vsr)
+mp.register_event("file-loaded", function()
+    if not state.vsr_enabled and not state.hdr_enabled then
+        return
+    end
+
+    local attempts = 0
+    local max_attempts = 15
+
+    local function retry_apply()
+        if video_context_ready() then
+            apply_filter_chain()
+            return
+        end
+
+        attempts = attempts + 1
+        if attempts >= max_attempts then
+            mp.msg.warn("RTX filters: applying with incomplete video context after retries")
+            apply_filter_chain()
+            return
+        end
+
+        mp.add_timeout(0.20, retry_apply)
+    end
+
+    mp.add_timeout(0.10, retry_apply)
+end)
+
+mp.register_event("end-file", function()
+    remove_filter_chain()
+end)
+
+sync_ui_flags()
+probe_physical_display_async()
+
+mp.add_key_binding("ctrl+shift+r", "toggle-mtt-rtx-vsr", toggle_vsr)
 mp.register_script_message("toggle-vsr", toggle_vsr)
 mp.register_script_message("toggle-hdr", toggle_hdr)
