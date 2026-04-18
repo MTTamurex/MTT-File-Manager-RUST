@@ -190,7 +190,7 @@ pub fn toggle_icon_button_sized(
         egui::pos2(rect.center().x, rect.center().y + icon_offset_y),
         egui::Align2::CENTER_CENTER,
         icon,
-        egui::FontId::proportional(theme::ICON_SIZE_MD),
+        egui::FontId::proportional(size),
         text_color,
     );
 

@@ -147,6 +147,7 @@ impl ImageViewerApp {
             folders_position,
             thumbnail_size,
             view_mode,
+            show_left_sidebar,
             show_preview_panel,
             upload_budget_ms,
             saved_window_width,
@@ -254,6 +255,7 @@ impl ImageViewerApp {
             media_preview_owner_tab_id: None,
             video_player_process: None,
             selected_metadata: None,
+            show_left_sidebar, // Loaded from SQLite
             show_preview_panel, // Loaded from SQLite
             drive_state: build_drive_state(
                 disks,

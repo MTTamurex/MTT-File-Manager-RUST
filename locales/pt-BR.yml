@@ -309,6 +309,8 @@ vdrive_settings:
   close: "Fechar"
   default_label: "(padrão)"
 secondary_toolbar:
+  show_sidebar: "Mostrar sidebar"
+  hide_sidebar: "Esconder sidebar"
   lock_unavailable: "Bloqueio indisponível nesta vista"
   locked: "Vista bloqueada — clique para desbloquear"
   lock_folder: "Bloquear vista desta pasta"

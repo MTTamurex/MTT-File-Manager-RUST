@@ -309,6 +309,8 @@ vdrive_settings:
   close: "Close"
   default_label: "(default)"
 secondary_toolbar:
+  show_sidebar: "Show sidebar"
+  hide_sidebar: "Hide sidebar"
   lock_unavailable: "Lock unavailable in this view"
   locked: "View locked — click to unlock"
   lock_folder: "Lock view to this folder"

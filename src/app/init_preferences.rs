@@ -12,6 +12,7 @@ pub(super) struct StartupPreferences {
     pub(super) folders_position: FoldersPosition,
     pub(super) thumbnail_size: f32,
     pub(super) view_mode: ViewMode,
+    pub(super) show_left_sidebar: bool,
     pub(super) show_preview_panel: bool,
     pub(super) upload_budget_ms: f32,
     pub(super) saved_window_width: f32,
@@ -91,6 +92,11 @@ impl StartupPreferences {
                 _ => ViewMode::Grid,
             })
             .unwrap_or(ViewMode::Grid);
+
+        let show_left_sidebar = prefs
+            .get("show_left_sidebar")
+            .map(|s| s != "false")
+            .unwrap_or(true);
 
         let show_preview_panel = prefs
             .get("show_preview_panel")
@@ -177,6 +183,7 @@ impl StartupPreferences {
             folders_position,
             thumbnail_size,
             view_mode,
+            show_left_sidebar,
             show_preview_panel,
             upload_budget_ms,
             saved_window_width,
