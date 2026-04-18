@@ -109,9 +109,21 @@ pub(super) fn sort_items(
             SortMode::Date => get_sort_date_for_comparison(a, b),
             SortMode::Size => a.size.cmp(&b.size),
             SortMode::Type => {
-                let ext_a = a.path.extension().map(|e| e.to_ascii_lowercase());
-                let ext_b = b.path.extension().map(|e| e.to_ascii_lowercase());
-                match ext_a.cmp(&ext_b) {
+                // Extract extension from the cached `name` field (a &str) to avoid
+                // OsString allocation from path.extension().to_ascii_lowercase().
+                let ext_a = a.name.rsplit_once('.').map(|(_, e)| e);
+                let ext_b = b.name.rsplit_once('.').map(|(_, e)| e);
+                let ext_ord = match (ext_a, ext_b) {
+                    (Some(ea), Some(eb)) => {
+                        // Case-insensitive byte-by-byte comparison, zero allocations.
+                        ea.as_bytes().iter().map(|b| b.to_ascii_lowercase())
+                            .cmp(eb.as_bytes().iter().map(|b| b.to_ascii_lowercase()))
+                    }
+                    (Some(_), None) => Ordering::Greater,
+                    (None, Some(_)) => Ordering::Less,
+                    (None, None) => Ordering::Equal,
+                };
+                match ext_ord {
                     Ordering::Equal => natord::compare_ignore_case(&a.name, &b.name),
                     other => other,
                 }

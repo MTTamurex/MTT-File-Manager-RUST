@@ -90,11 +90,11 @@ if width > 16384 || height > 16384 || width == 0 || height == 0 {
 - **Impacto:** Médio — leak de `HGLOBAL` se `GlobalLock` ou `SetClipboardData` falha
 - **Causa:** Sem `GlobalFree` nos error paths.
 
-### SEC-07: Pipe squatting na IPC do image viewer
+### ~~SEC-07: Pipe squatting na IPC do image viewer~~ ✅ CORRIGIDO
 - **Arquivo:** `src/image_viewer/ipc.rs` (~L85-L100)
 - **Impacto:** Médio — processo malicioso local pode interceptar caminhos de arquivo
 - **Causa:** Pipe destruído e recriado entre clientes; janela de race para squatting.
-- **Correção:** Reutilizar pipe com `DisconnectNamedPipe` + `ConnectNamedPipe`.
+- **Correção aplicada:** Pipe criado uma vez fora do loop e reutilizado via `DisconnectNamedPipe` + `ConnectNamedPipe`. Elimina race window entre `CloseHandle` e `CreateNamedPipeW`.
 
 ---
 
@@ -132,15 +132,15 @@ if width > 16384 || height > 16384 || width == 0 || height == 0 {
 - **Impacto:** Médio — `DELETE FROM` + 10K `INSERT` segura Mutex durante toda transação
 - **Correção:** WAL mode SQLite + connection pool; ou `RwLock` com writer separado.
 
-### PERF-07: Sort por Type aloca `OsString` por comparação
+### ~~PERF-07: Sort por Type aloca `OsString` por comparação~~ ✅ CORRIGIDO
 - **Arquivo:** `src/application/sorting/sort_impl.rs` (~L110)
 - **Impacto:** Médio-Baixo — ~260K alocações em sort de 10K itens
-- **Correção:** Pré-computar extensões lowercase antes do sort.
+- **Correção aplicada:** Comparação zero-alloc byte-a-byte com `.to_ascii_lowercase()` em iterador sobre bytes da extensão extraída de `name` via `rsplit_once('.')`. Elimina ~260K alocações de `OsString`.
 
-### PERF-08: `path_matches_prefix` aloca 4-6 strings por evento
+### ~~PERF-08: `path_matches_prefix` aloca 4-6 strings por evento~~ ✅ CORRIGIDO
 - **Arquivo:** `src/infrastructure/drive_watcher/buffer_parser.rs` (~L78)
 - **Impacto:** Médio — milhares de eventos/segundo em burst (OneDrive sync, copy)
-- **Correção:** Pré-normalizar prefix uma vez; comparação case-insensitive sem alocação.
+- **Correção aplicada:** Reescrita completa usando `to_string_lossy()` (Cow, sem alloc para UTF-16 válido) + `eq_ignore_ascii_case` em byte slices. Zero alocações heap. Também corrige WIN-04 (case folding ASCII ordinal em vez de Unicode `to_lowercase()`).
 
 ### ~~PERF-09: `adaptive_batch` cálculo de `avg_time_per_item` incorreto~~ ✅ CORRIGIDO
 - **Arquivo:** `src/infrastructure/adaptive_batch.rs` (~L60)
@@ -168,15 +168,15 @@ if width > 16384 || height > 16384 || width == 0 || height == 0 {
 - **Impacto:** Médio — paths com surrogates não-pareados (raro mas possível no Windows) são corrompidos
 - **Correção:** `OsStr::encode_wide()` direto, sem round-trip por `&str`.
 
-### WIN-04: Unicode case folding diverge da semântica Windows
+### ~~WIN-04: Unicode case folding diverge da semântica Windows~~ ✅ CORRIGIDO (via PERF-08)
 - **Arquivo:** `src/infrastructure/drive_watcher/buffer_parser.rs` (~L80)
 - **Impacto:** Médio — `str::to_lowercase()` usa Unicode folding; Windows usa ordinal
-- **Correção:** `CompareStringOrdinal` ou `eq_ignore_ascii_case` se paths são ASCII-only.
+- **Correção aplicada:** Reescrita de `path_matches_prefix` em PERF-08 usa `eq_ignore_ascii_case` em byte slices — comparação ASCII ordinal, alinhada com semântica Windows.
 
-### WIN-05: `cancel_all_pending_io` usa `THREAD_TERMINATE` para `CancelSynchronousIo`
+### ~~WIN-05: `cancel_all_pending_io` usa `THREAD_TERMINATE` para `CancelSynchronousIo`~~ ✅ FALSO POSITIVO
 - **Arquivo:** `src/ui/app/lifecycle.rs` (~L322)
-- **Impacto:** Baixo — funciona porque Windows permite acesso amplo a threads do mesmo processo
-- **Correção:** Usar `THREAD_ALL_ACCESS` ou acesso mais preciso.
+- **Impacto:** Nenhum — `THREAD_TERMINATE` é o access right documentado pela Microsoft para `CancelSynchronousIo`.
+- **Verificação:** [MSDN CancelSynchronousIo](https://learn.microsoft.com/en-us/windows/win32/fileio/cancelsynchronousio-func): "hThread — A handle to the thread. This handle must have the THREAD_TERMINATE access right."
 
 ### WIN-06: `RegisterDeviceNotificationW` handle nunca desregistrado
 - **Arquivo:** `src/infrastructure/windows/device_change.rs` (~L98)
@@ -198,10 +198,10 @@ if width > 16384 || height > 16384 || width == 0 || height == 0 {
 - **Causa:** `.lock().ok()?` retorna `None` silenciosamente em lock poisoned.
 - **Correção:** `.unwrap_or_else(|e| e.into_inner())` (como thumbnail system usa) ou log de warning.
 
-### CONC-03: Threads detached sem limite no global search
+### ~~CONC-03: Threads detached sem limite no global search~~ ✅ CORRIGIDO
 - **Arquivo:** `src/workers/global_search_worker.rs` (~L197)
 - **Impacto:** Alto — digitação rápida + erros IPC = dezenas de threads bloqueadas acumulando
-- **Correção:** Semáforo ou pool boundado; generation check já limita trabalho útil mas não previne thread accumulation.
+- **Correção aplicada:** `Arc<AtomicBool>` in-flight guard limita a 1 thread de total count por vez. `swap(true, AcqRel)` + RAII `InFlightGuard` com `Drop` que reseta o flag. Tasks extras são descartadas (generation check já invalida resultados stale).
 
 ### ~~CONC-04: `.expect()` em thread spawn = crash da aplicação~~ ✅ CORRIGIDO
 - **Arquivos:** `src/app/init_workers/filesystem_workers.rs`, `src/app/init_workers/consistency_probe_worker.rs`
@@ -213,10 +213,9 @@ if width > 16384 || height > 16384 || width == 0 || height == 0 {
 - **Impacto:** Médio — cada hit clona `Vec<u8>` (4-16KB) segurando o lock
 - **Correção:** `DashMap` ou caches per-worker com sync periódico.
 
-### CONC-06: GC worker demora até 180s para notar shutdown
+### ~~CONC-06: GC worker demora até 180s para notar shutdown~~ ✅ FALSO POSITIVO
 - **Arquivo:** `src/app/init_workers/background_jobs.rs`
-- **Impacto:** Médio — thread pode persistir muito após pedido de shutdown
-- **Correção:** Condvar para wake imediato, ou polling com intervalo menor.
+- **Impacto:** Nenhum — `sleep_until_next_cycle` já faz polling de `GC_WORKER_RUNNING` a cada 1 segundo. O valor 180s (`GC_ACTIVE_INTERVAL_SECS`) é o intervalo total entre ciclos GC, dividido em polls de 1s. Latência máxima de shutdown = 1 segundo, não 180.
 
 ---
 
