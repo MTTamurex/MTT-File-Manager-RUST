@@ -1,5 +1,5 @@
 use crate::app::ImageViewerApp;
-use crate::ui::widgets;
+use crate::ui::{theme, widgets};
 use eframe::egui;
 
 mod actions;
@@ -39,6 +39,34 @@ pub(crate) fn render_secondary_toolbar_layer(app: &mut ImageViewerApp, ctx: &egu
             );
 
             ui.horizontal(|ui| {
+                let toggle_icon_size = theme::ICON_SIZE_SM - 2.0;
+                let toggle_padding = 1.0;
+                let toggle_button_width = toggle_icon_size + toggle_padding * 2.0;
+                let toggle_gap = 12.0;
+                let sidebar_tooltip = if app.show_left_sidebar {
+                    rust_i18n::t!("secondary_toolbar.hide_sidebar")
+                } else {
+                    rust_i18n::t!("secondary_toolbar.show_sidebar")
+                };
+
+                if widgets::toggle_icon_button_sized(
+                    ui,
+                    &mut app.svg_icon_manager,
+                    "sidebar_left_panel",
+                    !app.show_left_sidebar,
+                    &sidebar_tooltip,
+                    toggle_icon_size,
+                    toggle_padding,
+                    1.0,
+                )
+                .clicked()
+                {
+                    app.show_left_sidebar = !app.show_left_sidebar;
+                    app.save_preferences();
+                }
+
+                ui.add_space(toggle_gap);
+
                 let action_button_count = if app.navigation_state.is_recycle_bin_view {
                     7.0
                 } else {
@@ -60,8 +88,10 @@ pub(crate) fn render_secondary_toolbar_layer(app: &mut ImageViewerApp, ctx: &egu
                     + 80.0
                     + separator_count * 8.0
                     + gap_count * 12.0;
-                let available = ui.available_width();
-                let left_pad = ((available - content_width) / 2.0).max(0.0);
+                let reserved_left_width = toggle_button_width + toggle_gap;
+                let total_available = ui.available_width() + reserved_left_width;
+                let left_pad = ((total_available - content_width) / 2.0 - reserved_left_width)
+                    .max(0.0);
                 ui.add_space(left_pad);
 
                 ui.spacing_mut().item_spacing = egui::vec2(12.0, 0.0);

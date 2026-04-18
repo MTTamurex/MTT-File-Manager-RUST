@@ -103,6 +103,16 @@ impl ImageViewerApp {
         prefs.push(("view_mode", view_mode_str.to_string()));
 
         prefs.push((
+            "show_left_sidebar",
+            (if self.show_left_sidebar {
+                "true"
+            } else {
+                "false"
+            })
+            .to_string(),
+        ));
+
+        prefs.push((
             "show_preview_panel",
             (if self.show_preview_panel {
                 "true"

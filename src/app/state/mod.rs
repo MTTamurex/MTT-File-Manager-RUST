@@ -170,6 +170,7 @@ pub struct ImageViewerApp {
     pub live_file_size_loading: FxHashSet<PathBuf>,
     pub last_metadata_refresh: Instant,
     pub last_metadata_path: Option<PathBuf>,
+    pub show_left_sidebar: bool,
     pub show_preview_panel: bool,
 
     pub total_items: usize,

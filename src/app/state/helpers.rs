@@ -170,7 +170,11 @@ impl ImageViewerApp {
 
         let screen = self.ui_ctx.screen_rect();
         let mut central_width = screen.width()
-            - self.layout.sidebar_left_width.clamp(150.0, 500.0)
+            - if self.show_left_sidebar {
+                self.layout.sidebar_left_width.clamp(150.0, 500.0)
+            } else {
+                0.0
+            }
             - if self.show_preview_panel {
                 self.layout.sidebar_right_width.clamp(250.0, 500.0)
             } else {

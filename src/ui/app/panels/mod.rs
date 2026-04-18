@@ -79,6 +79,10 @@ pub fn render_panels(app: &mut ImageViewerApp, ctx: &egui::Context, _frame: &mut
 
 fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) -> Option<SidebarAction> {
     let t_sidebar_fn = std::time::Instant::now();
+    if !app.show_left_sidebar {
+        return None;
+    }
+
     // Clamp width to valid range BEFORE using it
     let target_width = app
         .layout
@@ -321,34 +325,36 @@ fn render_resize_handles(app: &mut ImageViewerApp, ctx: &egui::Context) {
     let screen = ctx.screen_rect();
     let tab_bar_height = 35.0; // Approximate tab bar height
 
-    // Left sidebar resize handle (right edge of left sidebar)
-    let left_width = app
-        .layout
-        .sidebar_left_width
-        .clamp(LEFT_SIDEBAR_MIN, LEFT_SIDEBAR_MAX);
-    let left_handle_rect = egui::Rect::from_min_size(
-        egui::pos2(left_width - RESIZE_HANDLE_WIDTH / 2.0, tab_bar_height),
-        egui::vec2(RESIZE_HANDLE_WIDTH, screen.height() - tab_bar_height),
-    );
+    if app.show_left_sidebar {
+        // Left sidebar resize handle (right edge of left sidebar)
+        let left_width = app
+            .layout
+            .sidebar_left_width
+            .clamp(LEFT_SIDEBAR_MIN, LEFT_SIDEBAR_MAX);
+        let left_handle_rect = egui::Rect::from_min_size(
+            egui::pos2(left_width - RESIZE_HANDLE_WIDTH / 2.0, tab_bar_height),
+            egui::vec2(RESIZE_HANDLE_WIDTH, screen.height() - tab_bar_height),
+        );
 
-    egui::Area::new(egui::Id::new("left_sidebar_resize"))
-        .fixed_pos(left_handle_rect.min)
-        .order(egui::Order::Foreground)
-        .show(ctx, |ui| {
-            let response = ui.allocate_rect(left_handle_rect, egui::Sense::drag());
+        egui::Area::new(egui::Id::new("left_sidebar_resize"))
+            .fixed_pos(left_handle_rect.min)
+            .order(egui::Order::Foreground)
+            .show(ctx, |ui| {
+                let response = ui.allocate_rect(left_handle_rect, egui::Sense::drag());
 
-            // Set cursor on hover/drag
-            if response.hovered() || response.dragged() {
-                ctx.set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
-            }
+                // Set cursor on hover/drag
+                if response.hovered() || response.dragged() {
+                    ctx.set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+                }
 
-            // Update width on drag
-            if response.dragged() {
-                let delta = response.drag_delta().x;
-                app.layout.sidebar_left_width = (app.layout.sidebar_left_width + delta)
-                    .clamp(LEFT_SIDEBAR_MIN, LEFT_SIDEBAR_MAX);
-            }
-        });
+                // Update width on drag
+                if response.dragged() {
+                    let delta = response.drag_delta().x;
+                    app.layout.sidebar_left_width = (app.layout.sidebar_left_width + delta)
+                        .clamp(LEFT_SIDEBAR_MIN, LEFT_SIDEBAR_MAX);
+                }
+            });
+    }
 
     // Right sidebar resize handle (left edge of right sidebar) - only if panel is visible
     if app.show_preview_panel {
