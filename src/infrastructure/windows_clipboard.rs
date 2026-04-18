@@ -139,6 +139,7 @@ fn set_preferred_drop_effect(effect: u32) -> Result<(), String> {
     use windows::Win32::System::DataExchange::RegisterClipboardFormatW;
     use windows::Win32::System::DataExchange::SetClipboardData;
     use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
+    use windows::Win32::Foundation::GlobalFree;
 
     unsafe {
         // Register the "Preferred DropEffect" format
@@ -153,6 +154,7 @@ fn set_preferred_drop_effect(effect: u32) -> Result<(), String> {
 
         let ptr = GlobalLock(hmem);
         if ptr.is_null() {
+            let _ = GlobalFree(Some(hmem));
             return Err("GlobalLock failed".to_string());
         }
 
@@ -162,8 +164,10 @@ fn set_preferred_drop_effect(effect: u32) -> Result<(), String> {
         let _ = GlobalUnlock(hmem);
 
         // Set the clipboard data
-        SetClipboardData(format, Some(windows::Win32::Foundation::HANDLE(hmem.0)))
-            .map_err(|e| format!("SetClipboardData failed: {:?}", e))?;
+        if let Err(e) = SetClipboardData(format, Some(windows::Win32::Foundation::HANDLE(hmem.0))) {
+            let _ = GlobalFree(Some(hmem));
+            return Err(format!("SetClipboardData failed: {:?}", e));
+        }
     }
 
     Ok(())

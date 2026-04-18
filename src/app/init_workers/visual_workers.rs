@@ -186,9 +186,19 @@ pub(in crate::app) fn spawn_icon_worker(
                 // STA (COINIT_APARTMENTTHREADED) is required for SHGetFileInfoW to
                 // correctly resolve ProgID-based icons (e.g. dllfile, sysfile, batfile).
                 // Using MTA causes generic icons for those types.
-                unsafe {
-                    let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+                // RAII guard ensures CoUninitialize on normal exit AND panic.
+                struct ComGuard { initialized: bool }
+                impl Drop for ComGuard {
+                    fn drop(&mut self) {
+                        if self.initialized {
+                            unsafe { CoUninitialize(); }
+                        }
+                    }
                 }
+                let _com = unsafe {
+                    let hr = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+                    ComGuard { initialized: hr.is_ok() }
+                };
 
                 crate::infrastructure::io_priority::set_thread_priority(
                     crate::infrastructure::io_priority::IOPriority::Interactive,
@@ -281,9 +291,7 @@ pub(in crate::app) fn spawn_icon_worker(
                     }
                 }
 
-                unsafe {
-                    CoUninitialize();
-                }
+                // ComGuard RAII handles CoUninitialize on drop
             });
     }
 

@@ -273,14 +273,14 @@ if width > 16384 || height > 16384 || width == 0 || height == 0 {
 | # | Melhoria | Impacto | Esforço |
 |---|----------|---------|---------|
 | 1 | Extrair sub-structs de `ImageViewerApp` (WatcherState, MediaState, DragDropState) | Alto | Médio |
-| 2 | RAII consistente para COM em todos workers (`ComGuard` com tracker booleano) | Alto | Baixo |
+| ~~2~~ | ~~RAII consistente para COM em todos workers (`ComGuard` com tracker booleano)~~ | ~~Alto~~ | ✅ CORRIGIDO |
 | 3 | `Arc<Vec<FileEntry>>` para transferências cache→pipeline→UI sem clone | Alto | Médio |
 | 4 | `GetOverlappedResult` no shutdown do drive watcher | Alto | Baixo |
-| 5 | Buffers alinhados para parsers de `NtQueryDirectoryFile` e `ReadDirectoryChangesW` | Alto | Baixo |
-| 6 | Substituir `.lock().ok()?` por recover-from-poison com logging | Médio | Baixo |
-| 7 | Bounds check em `NameArena::get` | Médio | Baixo |
-| 8 | Dimension cap em `hbitmap_to_rgba` | Médio | Baixo |
-| 9 | `GetDiskFreeSpaceExW` em vez de `GetDiskFreeSpaceW` | Médio | Baixo |
+| ~~5~~ | ~~Buffers alinhados para parsers de `NtQueryDirectoryFile` e `ReadDirectoryChangesW`~~ | ~~Alto~~ | ✅ CORRIGIDO |
+| ~~6~~ | ~~Substituir `.lock().ok()?` por recover-from-poison com logging~~ | ~~Médio~~ | ✅ CORRIGIDO |
+| ~~7~~ | ~~Bounds check em `NameArena::get`~~ | ~~Médio~~ | ✅ CORRIGIDO |
+| ~~8~~ | ~~Dimension cap em `hbitmap_to_rgba`~~ | ~~Médio~~ | ✅ CORRIGIDO |
+| ~~9~~ | ~~`GetDiskFreeSpaceExW` em vez de `GetDiskFreeSpaceW`~~ | ~~Médio~~ | ✅ CORRIGIDO |
 | 10 | Streaming real no HDD directory reader | Médio | Médio |
 | 11 | Timeout finito no `WaitForSingleObject` do elevated helper | Médio | Baixo |
 | 12 | Remover/integrar `UIState` vestigial | Médio | Baixo |
@@ -292,12 +292,12 @@ if width > 16384 || height > 16384 || width == 0 || height == 0 {
 | # | Fix | Linhas de código | Impacto |
 |---|-----|-----------------|---------|
 | 1 | `GetOverlappedResult(handle, &overlapped, &mut dummy, true)` no shutdown do drive watcher (opt-in, desabilitado por padrão) | ~5 linhas | Elimina use-after-free (baixa prioridade — código inativo) |
-| 2 | `#[repr(C, align(8))]` no buffer do ntfs_reader e buffer_parser | ~6 linhas | Elimina UB de alinhamento |
-| 3 | `ComGuard { initialized: bool }` no folder_preview e icon workers | ~15 linhas | Elimina UB de COM |
-| 4 | `if end > self.buf.len() { return ""; }` em `NameArena::get` | 1 linha | Previne crash do search service |
-| 5 | `if width > 16384 \|\| height > 16384` em `hbitmap_to_rgba` | 3 linhas | Previne OOM/overflow |
-| 6 | `GlobalFree(hmem)` nos error paths do clipboard | 2 linhas | Elimina memory leak |
-| 7 | Substituir `GetDiskFreeSpaceW` → `GetDiskFreeSpaceExW` | ~10 linhas | Corrige volumes >16TB |
-| 8 | `.unwrap_or_else(\|e\| e.into_inner())` em directory_cache | ~4 linhas | Recupera de lock poison |
+| ~~2~~ | ~~`#[repr(C, align(8))]` no buffer do ntfs_reader e buffer_parser~~ | ✅ CORRIGIDO | ~~Elimina UB de alinhamento~~ |
+| ~~3~~ | ~~`ComGuard { initialized: bool }` no folder_preview e icon workers~~ | ✅ CORRIGIDO | ~~Elimina UB de COM~~ |
+| ~~4~~ | ~~`if end > self.buf.len() { return ""; }` em `NameArena::get`~~ | ✅ CORRIGIDO | ~~Previne crash do search service~~ |
+| ~~5~~ | ~~`if width > 16384 \|\| height > 16384` em `hbitmap_to_rgba`~~ | ✅ CORRIGIDO | ~~Previne OOM/overflow~~ |
+| ~~6~~ | ~~`GlobalFree(hmem)` nos error paths do clipboard~~ | ✅ CORRIGIDO | ~~Elimina memory leak~~ |
+| ~~7~~ | ~~Substituir `GetDiskFreeSpaceW` → `GetDiskFreeSpaceExW`~~ | ✅ CORRIGIDO | ~~Corrige volumes >16TB~~ |
+| ~~8~~ | ~~`.unwrap_or_else(\|e\| e.into_inner())` em directory_cache~~ | ✅ CORRIGIDO | ~~Recupera de lock poison~~ |
 | 9 | `filter_items()` share Arc sem clone quando query vazia | ~5 linhas | Elimina ~10MB allocs/folder |
-| 10 | Limitar subfolder mtime check a 20 entries no fast path | 3 linhas | Fix regression HDD |
+| ~~10~~ | ~~Limitar subfolder mtime check a 20 entries no fast path~~ | ✅ CORRIGIDO | ~~Fix regression HDD~~ |

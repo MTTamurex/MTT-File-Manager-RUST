@@ -13,6 +13,12 @@ use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
 const BUFFER_SIZE: usize = 65536;
 const FILE_DIRECTORY_INFORMATION: u32 = 1;
 
+/// Wrapper to ensure the I/O buffer has the alignment required by
+/// `FileDirectoryInfo` (8 bytes on x86-64).  A plain `Vec<u8>` has
+/// alignment=1, which is formally UB when cast to `*const FileDirectoryInfo`.
+#[repr(C, align(8))]
+struct AlignedBuffer([u8; BUFFER_SIZE]);
+
 #[repr(C)]
 struct FileDirectoryInfo {
     next_entry_offset: u32,
@@ -100,7 +106,7 @@ pub fn read_directory_fast(dir_path: &Path) -> Option<Vec<DirectoryEntry>> {
     });
 
     let mut entries = Vec::with_capacity(1000);
-    let mut buffer = vec![0u8; BUFFER_SIZE];
+    let mut buffer = AlignedBuffer([0u8; BUFFER_SIZE]);
     let mut restart_scan = 1u8;
 
     loop {
@@ -116,7 +122,7 @@ pub fn read_directory_fast(dir_path: &Path) -> Option<Vec<DirectoryEntry>> {
                 std::ptr::null_mut(),
                 std::ptr::null_mut(),
                 &mut io_status,
-                buffer.as_mut_ptr() as *mut _,
+                buffer.0.as_mut_ptr() as *mut _,
                 BUFFER_SIZE as u32,
                 FILE_DIRECTORY_INFORMATION,
                 0,
@@ -147,7 +153,7 @@ pub fn read_directory_fast(dir_path: &Path) -> Option<Vec<DirectoryEntry>> {
                 break;
             }
 
-            let entry_ptr = unsafe { buffer.as_ptr().add(offset) as *const FileDirectoryInfo };
+            let entry_ptr = unsafe { buffer.0.as_ptr().add(offset) as *const FileDirectoryInfo };
             let entry = unsafe { &*entry_ptr };
 
             // Bounds check: ensure the variable-length filename fits in the buffer
