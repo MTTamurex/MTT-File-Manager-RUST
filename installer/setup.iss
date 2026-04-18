@@ -52,6 +52,11 @@ Name: "desktopicon";  Description: "{cm:CreateDesktopIcon}"; GroupDescription: "
 ; Main executable
 Source: "{#SrcRoot}\target\release\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
 
+; License and notice files
+Source: "{#SrcRoot}\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SrcRoot}\NOTICE"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SrcRoot}\THIRD_PARTY_NOTICES.md"; DestDir: "{app}"; Flags: ignoreversion
+
 ; libmpv runtime
 Source: "{#SrcRoot}\target\release\libmpv-2.dll"; DestDir: "{app}"; Flags: ignoreversion
 
@@ -63,7 +68,9 @@ Source: "{#SrcRoot}\target\release\{#MySearchSvc}"; DestDir: "{app}"; Flags: ign
 
 ; mpv portable config (scripts, settings)
 Source: "{#SrcRoot}\mpv_ui\portable_config\mpv.conf";            DestDir: "{app}\mpv_ui\portable_config"; Flags: ignoreversion
-Source: "{#SrcRoot}\mpv_ui\portable_config\scripts\*";           DestDir: "{app}\mpv_ui\portable_config\scripts"; Flags: ignoreversion recursesubdirs
+Source: "{#SrcRoot}\mpv_ui\portable_config\scripts\autoload.lua"; DestDir: "{app}\mpv_ui\portable_config\scripts"; Flags: ignoreversion
+Source: "{#SrcRoot}\mpv_ui\portable_config\scripts\modernH.lua";  DestDir: "{app}\mpv_ui\portable_config\scripts"; Flags: ignoreversion
+Source: "{#SrcRoot}\mpv_ui\portable_config\scripts\vsr.lua";      DestDir: "{app}\mpv_ui\portable_config\scripts"; Flags: ignoreversion
 Source: "{#SrcRoot}\mpv_ui\portable_config\script-opts\*";       DestDir: "{app}\mpv_ui\portable_config\script-opts"; Flags: ignoreversion recursesubdirs
 
 [Icons]
