@@ -11,6 +11,14 @@ pub struct DriveInfo {
     pub drive_type: DriveType, // Drive type (local, network, removable, etc.)
 }
 
+/// Recycle Bin metadata — boxed to avoid inflating FileEntry for the 99%+ of
+/// entries that are NOT recycle-bin items. Saves ~56 bytes per regular entry.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RecycleBinMeta {
+    pub deletion_date: String,
+    pub original_path: PathBuf,
+}
+
 /// File/folder entry with cached metadata for sorting
 #[derive(Clone, Debug)]
 pub struct FileEntry {
@@ -23,8 +31,7 @@ pub struct FileEntry {
     pub drive_info: Option<DriveInfo>, // Drive metadata (optional)
     pub sync_status: SyncStatus,       // OneDrive sync status
     pub is_hidden: bool,               // Windows FILE_ATTRIBUTE_HIDDEN
-    pub deletion_date: Option<String>, // Deletion date (Recycle Bin only)
-    pub recycle_original_path: Option<PathBuf>, // Original path for restoration (Recycle Bin only)
+    pub recycle_bin: Option<Box<RecycleBinMeta>>, // Recycle Bin metadata (boxed, only set for recycle items)
 }
 
 impl FileEntry {
@@ -65,9 +72,26 @@ impl FileEntry {
             drive_info,
             sync_status: SyncStatus::None,
             is_hidden: false,
-            deletion_date: None,
-            recycle_original_path: None,
+            recycle_bin: None,
         }
+    }
+
+    /// Returns the deletion date string if this is a recycle-bin item.
+    #[inline]
+    pub fn deletion_date(&self) -> Option<&str> {
+        self.recycle_bin.as_ref().map(|r| r.deletion_date.as_str())
+    }
+
+    /// Returns the original path before deletion if this is a recycle-bin item.
+    #[inline]
+    pub fn recycle_original_path(&self) -> Option<&Path> {
+        self.recycle_bin.as_ref().map(|r| r.original_path.as_path())
+    }
+
+    /// Returns true if this entry comes from the Recycle Bin.
+    #[inline]
+    pub fn is_recycle_item(&self) -> bool {
+        self.recycle_bin.is_some()
     }
 
     /// PERFORMANCE: Check if this file is a media file (video, audio, or image)

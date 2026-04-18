@@ -7,6 +7,7 @@
 //! mpv creates its own native window (no `wid` embedding), so all native features
 //! work: keyboard shortcuts, OSC, window management via OSC buttons.
 
+use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 
@@ -257,8 +258,8 @@ fn load_app_icons() -> Option<(isize, isize)> {
 
     let exe_path = std::env::current_exe().ok()?;
     let wide: Vec<u16> = exe_path
-        .to_string_lossy()
-        .encode_utf16()
+        .as_os_str()
+        .encode_wide()
         .chain(std::iter::once(0))
         .collect();
 

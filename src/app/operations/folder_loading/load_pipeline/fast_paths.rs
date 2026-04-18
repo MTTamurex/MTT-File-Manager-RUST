@@ -295,8 +295,7 @@ pub(super) fn try_handle_fast_paths(
                                 drive_info: None,
                                 sync_status: SyncStatus::None,
                                 is_hidden: false,
-                                deletion_date: None,
-                                recycle_original_path: None,
+                                recycle_bin: None,
                             }
                         })
                         .collect();

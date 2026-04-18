@@ -1,3 +1,4 @@
+use std::os::windows::ffi::OsStrExt;
 use std::path::Path;
 use windows::{
     core::*, Win32::Foundation::*, Win32::Graphics::Gdi::*, Win32::System::Com::*,
@@ -46,8 +47,8 @@ pub fn get_folder_preview(
     unsafe {
         // SAFETY: path_wide is valid for the duration of this call
         let path_wide: Vec<u16> = folder_path
-            .to_string_lossy()
-            .encode_utf16()
+            .as_os_str()
+            .encode_wide()
             .chain(std::iter::once(0))
             .collect();
 
@@ -96,8 +97,8 @@ pub fn force_extract_folder_preview(
     unsafe {
         // SAFETY: path_wide is valid for the duration of this call
         let path_wide: Vec<u16> = folder_path
-            .to_string_lossy()
-            .encode_utf16()
+            .as_os_str()
+            .encode_wide()
             .chain(std::iter::once(0))
             .collect();
 
@@ -161,8 +162,8 @@ pub fn force_extract_thumbnail(
     unsafe {
         // SAFETY: path_wide is valid for the duration of this call
         let path_wide: Vec<u16> = path
-            .to_string_lossy()
-            .encode_utf16()
+            .as_os_str()
+            .encode_wide()
             .chain(std::iter::once(0))
             .collect();
 

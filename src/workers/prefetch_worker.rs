@@ -53,8 +53,7 @@ pub fn spawn_prefetch_worker(
                                     drive_info: None,
                                     sync_status: SyncStatus::None,
                                     is_hidden: false,
-                                    deletion_date: None,
-                                    recycle_original_path: None,
+                                    recycle_bin: None,
                                 })
                                 .collect();
 

@@ -251,8 +251,7 @@ fn calculate_effective_file(app: &ImageViewerApp) -> Option<FileEntry> {
             drive_info: None,
             sync_status: SyncStatus::None,
             is_hidden: false,
-            deletion_date: None,
-            recycle_original_path: None,
+            recycle_bin: None,
         })
     } else if app.navigation_state.is_computer_view {
         // "Este Computador" - show drive count info
@@ -266,8 +265,7 @@ fn calculate_effective_file(app: &ImageViewerApp) -> Option<FileEntry> {
             drive_info: None,
             sync_status: SyncStatus::None,
             is_hidden: false,
-            deletion_date: None,
-            recycle_original_path: None,
+            recycle_bin: None,
         })
     } else {
         // M-12: Check cache before rebuilding the folder entry every frame.
@@ -317,8 +315,7 @@ fn calculate_effective_file(app: &ImageViewerApp) -> Option<FileEntry> {
             drive_info: None,
             sync_status: SyncStatus::None,
             is_hidden: false,
-            deletion_date: None,
-            recycle_original_path: None,
+            recycle_bin: None,
         };
         if path.to_string_lossy().len() <= 3 && path.to_string_lossy().contains(':') {
             // PERFORMANCE FIX: Use cached drive_info from items instead of calling

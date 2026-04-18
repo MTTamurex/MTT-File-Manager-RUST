@@ -234,8 +234,8 @@ pub(super) fn render_grid_item(
                                 if item.modified > 0 {
                                     crate::infrastructure::windows::format_date(item.modified)
                                 } else {
-                                    item.deletion_date
-                                        .clone()
+                                    item.deletion_date()
+                                        .map(|s| s.to_string())
                                         .unwrap_or_else(|| "-".to_string())
                                 },
                             )

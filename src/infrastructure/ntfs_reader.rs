@@ -1,5 +1,5 @@
 use std::ffi::OsString;
-use std::os::windows::ffi::OsStringExt;
+use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::path::Path;
 use std::sync::OnceLock;
 use windows::core::{s, w, PCWSTR};
@@ -87,8 +87,8 @@ pub fn read_directory_fast(dir_path: &Path) -> Option<Vec<DirectoryEntry>> {
     }
 
     let dir_wide: Vec<u16> = dir_path
-        .to_string_lossy()
-        .encode_utf16()
+        .as_os_str()
+        .encode_wide()
         .chain(std::iter::once(0))
         .collect();
 

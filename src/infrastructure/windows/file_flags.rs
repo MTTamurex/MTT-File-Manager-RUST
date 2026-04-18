@@ -1,4 +1,5 @@
 use std::fs::File;
+use std::os::windows::ffi::OsStrExt;
 use std::os::windows::io::{AsRawHandle, FromRawHandle};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
@@ -13,8 +14,8 @@ use windows::Win32::Storage::FileSystem::{
 
 pub fn open_sequential(path: &Path) -> std::io::Result<File> {
     let wide_path: Vec<u16> = path
-        .to_string_lossy()
-        .encode_utf16()
+        .as_os_str()
+        .encode_wide()
         .chain(std::iter::once(0))
         .collect();
 
@@ -43,8 +44,8 @@ pub fn open_sequential(path: &Path) -> std::io::Result<File> {
 
 pub fn open_random_access(path: &Path) -> std::io::Result<File> {
     let wide_path: Vec<u16> = path
-        .to_string_lossy()
-        .encode_utf16()
+        .as_os_str()
+        .encode_wide()
         .chain(std::iter::once(0))
         .collect();
 
@@ -226,8 +227,8 @@ pub fn is_file_locked_for_write(path: &Path) -> bool {
     use windows::Win32::Foundation::CloseHandle;
 
     let wide_path: Vec<u16> = path
-        .to_string_lossy()
-        .encode_utf16()
+        .as_os_str()
+        .encode_wide()
         .chain(std::iter::once(0))
         .collect();
 

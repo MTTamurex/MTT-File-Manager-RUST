@@ -50,10 +50,9 @@ fn parse_recycle_date_sort_key(date: &str) -> Option<(u32, u32, u32, u32, u32, u
 /// For recycle bin items, attempts semantic parsing of date string first, and
 /// falls back to lexicographic comparison only when parsing fails.
 fn get_sort_date_for_comparison(a: &FileEntry, b: &FileEntry) -> Ordering {
-    match (&a.deletion_date, &b.deletion_date) {
+    match (a.deletion_date(), b.deletion_date()) {
         (Some(a_date), Some(b_date)) => {
-            let has_recycle_metadata =
-                a.recycle_original_path.is_some() && b.recycle_original_path.is_some();
+            let has_recycle_metadata = a.is_recycle_item() && b.is_recycle_item();
             if has_recycle_metadata && a.modified > 0 && b.modified > 0 {
                 return a.modified.cmp(&b.modified);
             }

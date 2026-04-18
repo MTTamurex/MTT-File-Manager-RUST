@@ -1,4 +1,5 @@
 use crate::domain::file_entry::IconSize;
+use std::os::windows::ffi::OsStrExt;
 use std::path::Path;
 use windows::{
     core::*, Win32::Foundation::*, Win32::Graphics::Gdi::*, Win32::Storage::FileSystem::*,
@@ -139,8 +140,8 @@ pub fn extract_file_icon_by_path(
 ) -> std::result::Result<(Vec<u8>, u32, u32), Box<dyn std::error::Error>> {
     unsafe {
         let path_wide: Vec<u16> = path
-            .to_string_lossy()
-            .encode_utf16()
+            .as_os_str()
+            .encode_wide()
             .chain(std::iter::once(0))
             .collect();
 

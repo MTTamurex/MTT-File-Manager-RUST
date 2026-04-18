@@ -31,8 +31,8 @@ impl ImageViewerApp {
             });
 
             if let Some(item) = entry {
-                let original = match item.recycle_original_path.clone() {
-                    Some(p) => p,
+                let original = match item.recycle_original_path() {
+                    Some(p) => p.to_path_buf(),
                     None => {
                         // Skip items with unknown original path rather than guessing
                         // a destination that could expose files to a public directory.

@@ -1,6 +1,7 @@
 //! Windows file system operations
 //! Follows .cursorrules: single responsibility, < 300 lines
 
+use std::os::windows::ffi::OsStrExt;
 use std::path::Path;
 use windows::{core::*, Win32::Storage::FileSystem::*};
 
@@ -8,8 +9,8 @@ use windows::{core::*, Win32::Storage::FileSystem::*};
 pub fn get_file_attributes(path: &Path) -> u32 {
     unsafe {
         let path_wide: Vec<u16> = path
-            .to_string_lossy()
-            .encode_utf16()
+            .as_os_str()
+            .encode_wide()
             .chain(std::iter::once(0))
             .collect();
 

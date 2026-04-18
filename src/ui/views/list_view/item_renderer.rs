@@ -319,8 +319,8 @@ fn render_regular_columns(
         if item.modified > 0 {
             format_date(item.modified)
         } else {
-            item.deletion_date
-                .clone()
+            item.deletion_date()
+                .map(|s| s.to_string())
                 .unwrap_or_else(|| "-".to_string())
         }
     } else {

@@ -91,8 +91,10 @@ impl ImageViewerApp {
                             drive_info: None,
                             sync_status: crate::domain::file_entry::SyncStatus::None,
                             is_hidden: false,
-                            deletion_date: Some(item.date_deleted),
-                            recycle_original_path: Some(item.original_path),
+                            recycle_bin: Some(Box::new(crate::domain::file_entry::RecycleBinMeta {
+                                deletion_date: item.date_deleted,
+                                original_path: item.original_path,
+                            })),
                         };
                         batch.push(entry);
 
@@ -178,8 +180,7 @@ impl ImageViewerApp {
                 }),
                 sync_status: crate::domain::file_entry::SyncStatus::None,
                 is_hidden: false,
-                deletion_date: None,
-                recycle_original_path: None,
+                recycle_bin: None,
             };
             computer_items.push(entry);
         }

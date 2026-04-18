@@ -283,7 +283,6 @@ unsafe fn process_shell_child(
         drive_info: None,
         sync_status: SyncStatus::None,
         is_hidden: false,
-        deletion_date: None,
-        recycle_original_path: None,
+        recycle_bin: None,
     })
 }
