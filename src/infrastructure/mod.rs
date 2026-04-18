@@ -11,7 +11,6 @@ pub mod disk_cache;
 pub mod icon_disk_cache;
 pub mod drive_watcher;
 pub mod folder_compose;
-pub mod drive_watcher_integration;
 pub mod global_search;
 pub mod io_priority;
 pub mod media;

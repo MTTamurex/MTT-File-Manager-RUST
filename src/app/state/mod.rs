@@ -201,13 +201,7 @@ pub struct ImageViewerApp {
     pub sidebar_rename_focus: bool,
 
     // WATCHER SYSTEM (AUTO-REFRESH)
-    /// Experimental runtime switch: when false, skip the drive-wide recursive
-    /// watcher and use only per-folder watcher strategies.
-    pub drive_watcher_enabled: bool,
-    // Drive-wide watcher (new - monitors entire drive)
-    pub drive_watcher: crate::infrastructure::drive_watcher_integration::DriveWatcherManager,
-
-    // Legacy notify-based watcher (fallback)
+    // Per-folder notify-based watcher
     #[cfg(feature = "notify-watcher")]
     pub watcher: Option<RecommendedWatcher>,
     #[cfg(feature = "notify-watcher")]

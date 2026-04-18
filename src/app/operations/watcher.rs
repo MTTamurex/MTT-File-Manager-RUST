@@ -101,14 +101,10 @@ impl ImageViewerApp {
         (fs_probe_ms, fs_probe_cache_hit, drive_letter)
     }
 
-    /// Sets up monitoring for the current folder
+    /// Sets up monitoring for the current folder using per-folder notify-watcher.
     ///
-    /// DUAL USE:
-    /// 1. New: Drive-wide watcher (monitors entire drive, filters by prefix)
-    /// 2. Legacy: notify-watcher (monitors specific folder)
-    ///
-    /// The drive watcher is more efficient for fast navigation since it doesn't need
-    /// to recreate the watcher on every folder change within the same drive.
+    /// The consistency probe (background worker) provides additional drift detection
+    /// for non-USN filesystems and cross-process changes missed by RDCW.
     pub fn watch_current_folder(&mut self) {
         let watch_start = Instant::now();
         let current_path = self.navigation_state.current_path.clone();
@@ -121,77 +117,23 @@ impl ImageViewerApp {
 
         log::debug!("[WATCHER] Setting up for: {}", current_path);
 
-        // Try using drive-wide watcher first
         let path_buf = PathBuf::from(&current_path);
         let (fs_probe_ms, fs_probe_cache_hit, fs_probe_drive) =
             self.configure_watcher_fallback_mode(path_buf.as_path());
 
-        // Drive watcher only works for local drives (C:\, D:\, etc.)
-        // Does NOT work for UNC paths (\\server\share) or network drives
-        let is_local_drive = path_buf.to_string_lossy().chars().nth(1) == Some(':');
-
-        if self.drive_watcher_enabled && is_local_drive {
-            log::debug!(
-                "[WATCHER] Using DRIVE-WATCHER for local drive: {:?}",
-                path_buf
-            );
-            self.drive_watcher.watch_path(path_buf);
-
-            // If drive watcher is active on USN filesystems (NTFS/ReFS), avoid duplicates.
-            // On non-USN filesystems (exFAT/FAT), keep notify as backup for resilience.
-            if self.drive_watcher.is_active() {
-                if !self.watcher_fallback_polling {
-                    log::debug!("[WATCHER] Drive watcher is active - skipping notify-watcher");
-                    // Drop notify watcher if it exists to save resources
-                    #[cfg(feature = "notify-watcher")]
-                    if self.watcher.is_some() {
-                        log::debug!("[WATCHER] Dropping notify-watcher to save resources");
-                        self.watcher = None;
-                    }
-
-                    let total_ms = watch_start.elapsed().as_millis();
-                    if total_ms > 20 {
-                        log::warn!(
-                            "[PERF-WATCHER] watch_current_folder total={}ms fs_probe={}ms fs_cache_hit={} fs_cache_drive={:?} path={} local_drive={} drive_active={} fallback_polling={}",
-                            total_ms,
-                            fs_probe_ms,
-                            fs_probe_cache_hit,
-                            fs_probe_drive,
-                            current_path,
-                            is_local_drive,
-                            self.drive_watcher.is_active(),
-                            self.watcher_fallback_polling,
-                        );
-                    }
-                    return;
-                }
-                log::debug!(
-                    "[WATCHER] Drive watcher active + non-USN fallback enabled - keeping notify backup"
-                );
-            }
-        } else if !self.drive_watcher_enabled {
-            log::debug!(
-                "[WATCHER] Drive-wide watcher disabled (default), using per-folder watcher strategy"
-            );
-        } else {
-            log::debug!("[WATCHER] UNC/Network path detected - using notify-watcher only");
-        }
-
-        // FALLBACK: Use notify-watcher for UNC paths or if drive watcher failed
+        // Use per-folder notify-watcher
         #[cfg(feature = "notify-watcher")]
         self.setup_notify_watcher();
 
         let total_ms = watch_start.elapsed().as_millis();
         if total_ms > 20 {
             log::warn!(
-                "[PERF-WATCHER] watch_current_folder total={}ms fs_probe={}ms fs_cache_hit={} fs_cache_drive={:?} path={} local_drive={} drive_active={} fallback_polling={}",
+                "[PERF-WATCHER] watch_current_folder total={}ms fs_probe={}ms fs_cache_hit={} fs_cache_drive={:?} path={} fallback_polling={}",
                 total_ms,
                 fs_probe_ms,
                 fs_probe_cache_hit,
                 fs_probe_drive,
                 current_path,
-                is_local_drive,
-                self.drive_watcher.is_active(),
                 self.watcher_fallback_polling,
             );
         }

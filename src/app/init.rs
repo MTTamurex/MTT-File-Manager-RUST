@@ -296,22 +296,6 @@ impl ImageViewerApp {
             sidebar_renaming: None,
             sidebar_rename_focus: false,
 
-            // Drive-wide file system watcher (disabled by default — recursive RDCW
-            // on drive root can cause systemic UI degradation on machines with
-            // OneDrive/Cloud Files minifilters over prolonged use).
-            // Set MTT_ENABLE_DRIVE_WATCHER=1 to opt in.
-            drive_watcher_enabled: std::env::var("MTT_ENABLE_DRIVE_WATCHER")
-                .map(|value| {
-                    let normalized = value.trim().to_ascii_lowercase();
-                    normalized == "1"
-                        || normalized == "true"
-                        || normalized == "yes"
-                        || normalized == "on"
-                })
-                .unwrap_or(false),
-            drive_watcher:
-                crate::infrastructure::drive_watcher_integration::DriveWatcherManager::new(),
-
             #[cfg(feature = "notify-watcher")]
             watcher: None,
             #[cfg(feature = "notify-watcher")]

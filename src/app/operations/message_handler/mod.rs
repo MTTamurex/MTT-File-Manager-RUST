@@ -28,7 +28,6 @@ mod thumbnail_events;
 mod thumbnail_rebuild;
 mod thumbnail_uploads;
 mod thumbnail_workers;
-mod watcher_drive_processing;
 mod watcher_events;
 mod watcher_legacy;
 mod watcher_reload;
