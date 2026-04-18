@@ -2,6 +2,7 @@
 //! Follows .cursorrules: single responsibility, < 300 lines
 
 use crate::infrastructure::windows::DriveType;
+use std::os::windows::ffi::OsStrExt;
 use std::path::Path;
 use windows::{
     core::*,
@@ -198,8 +199,7 @@ fn launch_elevated_volume_rename_helper(
         .map_err(|err| VolumeLabelRenameError::OsError(err.to_string()))?;
     let exe_wide: Vec<u16> = exe
         .as_os_str()
-        .to_string_lossy()
-        .encode_utf16()
+        .encode_wide()
         .chain(std::iter::once(0))
         .collect();
     let verb_wide: Vec<u16> = "runas".encode_utf16().chain(std::iter::once(0)).collect();

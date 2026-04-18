@@ -1,3 +1,4 @@
+use std::os::windows::ffi::OsStrExt;
 use std::path::Path;
 
 use crate::domain::file_entry::SyncStatus;
@@ -18,8 +19,8 @@ pub(super) fn fast_path_exists(path: &Path) -> bool {
     use windows::Win32::Storage::FileSystem::{GetFileAttributesW, INVALID_FILE_ATTRIBUTES};
 
     let path_wide: Vec<u16> = path
-        .to_string_lossy()
-        .encode_utf16()
+        .as_os_str()
+        .encode_wide()
         .chain(std::iter::once(0))
         .collect();
 
@@ -31,8 +32,8 @@ pub(super) fn fast_is_dir(path: &Path) -> bool {
     use windows::Win32::Storage::FileSystem::{GetFileAttributesW, INVALID_FILE_ATTRIBUTES};
 
     let path_wide: Vec<u16> = path
-        .to_string_lossy()
-        .encode_utf16()
+        .as_os_str()
+        .encode_wide()
         .chain(std::iter::once(0))
         .collect();
 
@@ -95,8 +96,8 @@ pub(super) fn is_locally_available(path: &Path) -> bool {
     use windows::Win32::Storage::FileSystem::{GetFileAttributesW, INVALID_FILE_ATTRIBUTES};
 
     let path_wide: Vec<u16> = path
-        .to_string_lossy()
-        .encode_utf16()
+        .as_os_str()
+        .encode_wide()
         .chain(std::iter::once(0))
         .collect();
 
@@ -116,8 +117,8 @@ fn check_cloud_attributes_uncached(path: &Path) -> bool {
     use windows::Win32::Storage::FileSystem::{GetFileAttributesW, INVALID_FILE_ATTRIBUTES};
 
     let path_wide: Vec<u16> = path
-        .to_string_lossy()
-        .encode_utf16()
+        .as_os_str()
+        .encode_wide()
         .chain(std::iter::once(0))
         .collect();
 

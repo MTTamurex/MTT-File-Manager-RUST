@@ -1,5 +1,6 @@
 use clipboard_win::{formats, Clipboard, Setter};
 use rust_i18n::t;
+use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use windows::core::{Interface, PCWSTR};
 use windows::Win32::Foundation::HWND;
@@ -265,13 +266,13 @@ pub fn create_shortcut(target: &Path, current_path: &str) -> OpResult<PathBuf> {
                 .map_err(|e| format!("CoCreateInstance ShellLink failed: {e}"))?;
 
             let wide_target: Vec<u16> = valid_target
-                .to_string_lossy()
-                .encode_utf16()
+                .as_os_str()
+                .encode_wide()
                 .chain(std::iter::once(0))
                 .collect();
             let wide_workdir: Vec<u16> = dest_dir
-                .to_string_lossy()
-                .encode_utf16()
+                .as_os_str()
+                .encode_wide()
                 .chain(std::iter::once(0))
                 .collect();
 
@@ -285,8 +286,8 @@ pub fn create_shortcut(target: &Path, current_path: &str) -> OpResult<PathBuf> {
                 .map_err(|e| format!("IPersistFile cast failed: {e}"))?;
 
             let wide_dest: Vec<u16> = candidate
-                .to_string_lossy()
-                .encode_utf16()
+                .as_os_str()
+                .encode_wide()
                 .chain(std::iter::once(0))
                 .collect();
             persist

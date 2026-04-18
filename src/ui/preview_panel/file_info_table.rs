@@ -189,8 +189,7 @@ pub fn render_file_info_table(
 
             // 3. File Metadata (Date/Size)
             if file.drive_info.is_none() && file.name != COMPUTER_VIEW_ID {
-                let is_recycle_item =
-                    file.recycle_original_path.is_some() || file.deletion_date.is_some();
+                let is_recycle_item = file.is_recycle_item();
                 // Virtual folders inside archives are not real filesystem directories,
                 // so subtree metrics are not meaningful there. Archive files themselves
                 // should still show their own file size like any other file.
@@ -204,8 +203,8 @@ pub fn render_file_info_table(
                     let value = if file.modified > 0 {
                         crate::infrastructure::windows::format_date(file.modified)
                     } else {
-                        file.deletion_date
-                            .clone()
+                        file.deletion_date()
+                            .map(|s| s.to_string())
                             .unwrap_or_else(|| "-".to_string())
                     };
                     (t!("file_info.date_deleted").to_string(), value)

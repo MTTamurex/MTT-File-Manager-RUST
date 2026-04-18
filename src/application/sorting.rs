@@ -49,8 +49,7 @@ mod tests {
             drive_info: None,
             sync_status: crate::domain::file_entry::SyncStatus::None,
             is_hidden: false,
-            deletion_date: None,
-            recycle_original_path: None,
+            recycle_bin: None,
         }
     }
 
@@ -65,8 +64,7 @@ mod tests {
             drive_info: None,
             sync_status: crate::domain::file_entry::SyncStatus::None,
             is_hidden: false,
-            deletion_date: None,
-            recycle_original_path: None,
+            recycle_bin: None,
         }
     }
 
@@ -157,54 +155,61 @@ mod tests {
 
     #[test]
     fn test_sort_by_date_recycle_bin() {
-        // Test sorting by date in recycle bin (uses deletion_date)
+        // Test sorting by date in recycle bin — with full recycle metadata,
+        // the sort uses the numeric `modified` field (date_deleted_unix)
+        // which is more reliable than parsing the localized date string.
         let mut items = vec![
             FileEntry {
                 path: PathBuf::from("file1.txt"),
                 name: "file1.txt".to_string(),
                 is_dir: false,
                 size: 100,
-                modified: 1000, // old date
+                modified: 1706781600, // 2024-02-01 10:00 UTC
                 folder_cover: None,
                 drive_info: None,
                 sync_status: crate::domain::file_entry::SyncStatus::None,
                 is_hidden: false,
-                deletion_date: Some("02/01/2024 10:00".to_string()),
-                recycle_original_path: None,
+                recycle_bin: Some(Box::new(crate::domain::file_entry::RecycleBinMeta {
+                    deletion_date: "02/01/2024 10:00".to_string(),
+                    original_path: PathBuf::from(r"C:\orig\file1.txt"),
+                })),
             },
             FileEntry {
                 path: PathBuf::from("file2.txt"),
                 name: "file2.txt".to_string(),
                 is_dir: false,
                 size: 200,
-                modified: 2000, // more recent date
+                modified: 1704106200, // 2024-01-01 15:30 UTC
                 folder_cover: None,
                 drive_info: None,
                 sync_status: crate::domain::file_entry::SyncStatus::None,
                 is_hidden: false,
-                deletion_date: Some("01/01/2024 15:30".to_string()),
-                recycle_original_path: None,
+                recycle_bin: Some(Box::new(crate::domain::file_entry::RecycleBinMeta {
+                    deletion_date: "01/01/2024 15:30".to_string(),
+                    original_path: PathBuf::from(r"C:\orig\file2.txt"),
+                })),
             },
             FileEntry {
                 path: PathBuf::from("file3.txt"),
                 name: "file3.txt".to_string(),
                 is_dir: false,
                 size: 300,
-                modified: 3000, // even more recent date
+                modified: 1709283900, // 2024-03-01 08:15 UTC
                 folder_cover: None,
                 drive_info: None,
                 sync_status: crate::domain::file_entry::SyncStatus::None,
                 is_hidden: false,
-                deletion_date: Some("03/01/2024 08:15".to_string()),
-                recycle_original_path: None,
+                recycle_bin: Some(Box::new(crate::domain::file_entry::RecycleBinMeta {
+                    deletion_date: "03/01/2024 08:15".to_string(),
+                    original_path: PathBuf::from(r"C:\orig\file3.txt"),
+                })),
             },
         ];
 
-        // Sort by date (ascending)
+        // Sort by date (ascending) — uses numeric modified (date_deleted_unix)
         sort_items(&mut items, SortMode::Date, false, FoldersPosition::Mixed);
 
-        // Verify sorted by deletion dates (not by modified)
-        // file2 was deleted first (01/01), then file1 (02/01), then file3 (03/01)
+        // file2 deleted first (Jan), then file1 (Feb), then file3 (Mar)
         assert_eq!(items[0].name, "file2.txt");
         assert_eq!(items[1].name, "file1.txt");
         assert_eq!(items[2].name, "file3.txt");
@@ -241,8 +246,10 @@ mod tests {
                 drive_info: None,
                 sync_status: crate::domain::file_entry::SyncStatus::None,
                 is_hidden: false,
-                deletion_date: Some("12/01/2024 10:00".to_string()),
-                recycle_original_path: None,
+                recycle_bin: Some(Box::new(crate::domain::file_entry::RecycleBinMeta {
+                    deletion_date: "12/01/2024 10:00".to_string(),
+                    original_path: PathBuf::from(r"C:\orig\jan.txt"),
+                })),
             },
             FileEntry {
                 path: PathBuf::from("fev.txt"),
@@ -254,8 +261,10 @@ mod tests {
                 drive_info: None,
                 sync_status: crate::domain::file_entry::SyncStatus::None,
                 is_hidden: false,
-                deletion_date: Some("02/02/2024 10:00".to_string()),
-                recycle_original_path: None,
+                recycle_bin: Some(Box::new(crate::domain::file_entry::RecycleBinMeta {
+                    deletion_date: "02/02/2024 10:00".to_string(),
+                    original_path: PathBuf::from(r"C:\orig\fev.txt"),
+                })),
             },
         ];
 
@@ -277,8 +286,10 @@ mod tests {
                 drive_info: None,
                 sync_status: crate::domain::file_entry::SyncStatus::None,
                 is_hidden: false,
-                deletion_date: Some("10/12/2029 10:00".to_string()),
-                recycle_original_path: Some(PathBuf::from(r"C:\orig\older.txt")),
+                recycle_bin: Some(Box::new(crate::domain::file_entry::RecycleBinMeta {
+                    deletion_date: "10/12/2029 10:00".to_string(),
+                    original_path: PathBuf::from(r"C:\orig\older.txt"),
+                })),
             },
             FileEntry {
                 path: PathBuf::from("newer.txt"),
@@ -290,8 +301,10 @@ mod tests {
                 drive_info: None,
                 sync_status: crate::domain::file_entry::SyncStatus::None,
                 is_hidden: false,
-                deletion_date: Some("01/01/2000 00:00".to_string()),
-                recycle_original_path: Some(PathBuf::from(r"C:\orig\newer.txt")),
+                recycle_bin: Some(Box::new(crate::domain::file_entry::RecycleBinMeta {
+                    deletion_date: "01/01/2000 00:00".to_string(),
+                    original_path: PathBuf::from(r"C:\orig\newer.txt"),
+                })),
             },
         ];
 

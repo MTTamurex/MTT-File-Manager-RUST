@@ -9,6 +9,7 @@
 //!
 //! Uses ReadDirectoryChangesW on the entire drive instead of per folder.
 
+use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -210,8 +211,8 @@ impl DriveWatcher {
     /// Open a handle to the drive for directory change monitoring
     fn open_drive_handle(drive_root: &Path) -> Option<HANDLE> {
         let wide_path: Vec<u16> = drive_root
-            .to_string_lossy()
-            .encode_utf16()
+            .as_os_str()
+            .encode_wide()
             .chain(std::iter::once(0))
             .collect();
 

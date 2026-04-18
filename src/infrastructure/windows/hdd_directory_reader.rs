@@ -63,28 +63,104 @@ pub fn read_directory_hdd_optimized(
 
 /// Get batches of directory entries for HDD optimization
 ///
-/// Returns entries in chunks of BATCH_SIZE to minimize channel contention
-/// and allow for streaming processing.
+/// Builds batches during enumeration (true streaming) instead of
+/// collecting all entries first and splitting afterwards.
+/// Returns entries in chunks of BATCH_SIZE to minimize channel contention.
 pub fn read_directory_hdd_batched(
     path: &Path,
     is_onedrive: bool,
     show_hidden: bool,
 ) -> Result<Vec<Vec<FileEntry>>, String> {
-    let entries = read_directory_hdd_optimized(path, is_onedrive, show_hidden)?;
+    // Set thread priority to normal for HDD operations
+    unsafe {
+        let thread = GetCurrentThread();
+        let _ = SetThreadPriority(thread, THREAD_PRIORITY_NORMAL);
+    }
 
-    // Split into batches
+    let result = read_directory_impl_batched(path, is_onedrive, show_hidden);
+
+    // Reset thread priority after operation
+    unsafe {
+        let thread = GetCurrentThread();
+        let _ = SetThreadPriority(thread, THREAD_PRIORITY_NORMAL);
+    }
+
+    result
+}
+
+/// Internal batched implementation — builds Vec<Vec<FileEntry>> during
+/// the FindFirstFileExW loop, avoiding the double-pass of collect-then-split.
+fn read_directory_impl_batched(path: &Path, is_onedrive: bool, show_hidden: bool) -> Result<Vec<Vec<FileEntry>>, String> {
+    let search_path = if path.to_string_lossy().ends_with('\\') {
+        format!("{}*", path.display())
+    } else {
+        format!("{}\\*", path.display())
+    };
+
+    let wide_path: Vec<u16> = search_path
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+
+    let mut find_data = WIN32_FIND_DATAW::default();
     let mut batches = Vec::new();
     let mut current_batch = Vec::with_capacity(BATCH_SIZE);
 
-    for entry in entries {
-        current_batch.push(entry);
-        if current_batch.len() >= BATCH_SIZE {
-            batches.push(current_batch);
-            current_batch = Vec::with_capacity(BATCH_SIZE);
+    unsafe {
+        let handle = FindFirstFileExW(
+            PCWSTR(wide_path.as_ptr()),
+            FindExInfoBasic,
+            &mut find_data as *mut _ as *mut std::ffi::c_void,
+            FindExSearchNameMatch,
+            Some(std::ptr::null_mut()),
+            FIND_FIRST_EX_LARGE_FETCH,
+        );
+
+        let handle = match handle {
+            Ok(handle) => handle,
+            Err(_) => {
+                return Err(format!("Failed to open directory: {}", path.display()));
+            }
+        };
+
+        loop {
+            let filename = extract_filename(&find_data.cFileName)?;
+
+            if filename == "." || filename == ".." {
+                if FindNextFileW(handle, &mut find_data).is_err() {
+                    break;
+                }
+                continue;
+            }
+
+            let attrs = find_data.dwFileAttributes;
+            let is_hidden = (attrs & FILE_ATTRIBUTE_HIDDEN.0) != 0;
+            let is_system = (attrs & FILE_ATTRIBUTE_SYSTEM.0) != 0;
+            if is_system || (!show_hidden && is_hidden) {
+                if FindNextFileW(handle, &mut find_data).is_err() {
+                    break;
+                }
+                continue;
+            }
+
+            let entry = create_file_entry(&find_data, path, &filename, is_onedrive)?;
+
+            if should_include_entry(&entry) {
+                current_batch.push(entry);
+                if current_batch.len() >= BATCH_SIZE {
+                    batches.push(current_batch);
+                    current_batch = Vec::with_capacity(BATCH_SIZE);
+                }
+            }
+
+            if FindNextFileW(handle, &mut find_data).is_err() {
+                break;
+            }
         }
+
+        let _ = FindClose(handle);
     }
 
-    // Add remaining entries
     if !current_batch.is_empty() {
         batches.push(current_batch);
     }
@@ -236,8 +312,7 @@ fn create_file_entry(
         drive_info: None,
         sync_status,
         is_hidden,
-        deletion_date: None,
-        recycle_original_path: None,
+        recycle_bin: None,
     })
 }
 
@@ -274,8 +349,7 @@ mod tests {
                 drive_info: None,
                 sync_status: SyncStatus::None,
                 is_hidden: false,
-                deletion_date: None,
-                recycle_original_path: None,
+                recycle_bin: None,
             }
         };
 

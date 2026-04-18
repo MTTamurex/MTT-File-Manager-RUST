@@ -95,8 +95,7 @@ pub(super) fn run_tier3_fallback(
                             drive_info: None,
                             sync_status,
                             is_hidden,
-                            deletion_date: None,
-                            recycle_original_path: None,
+                            recycle_bin: None,
                         };
 
                         all_entries_disk.push(entry.clone());
@@ -259,8 +258,7 @@ pub(super) fn run_tier3_fallback(
                             drive_info: None,
                             sync_status,
                             is_hidden,
-                            deletion_date: None,
-                            recycle_original_path: None,
+                            recycle_bin: None,
                         };
 
                         all_entries_disk.push(entry.clone());
@@ -286,11 +284,10 @@ pub(super) fn run_tier3_fallback(
                             }
 
                             let batch_len = batch.len();
-                            let _ = file_entry_sender.send((my_gen, batch.clone()));
+                            let _ = file_entry_sender.send((my_gen, std::mem::take(batch)));
                             batch_tracker.record_batch(batch_start.elapsed(), batch_len);
                             *batch_size = batch_tracker.batch_size();
                             *batch_start = std::time::Instant::now();
-                            batch.clear();
                             ctx.request_repaint();
                         }
                     }
