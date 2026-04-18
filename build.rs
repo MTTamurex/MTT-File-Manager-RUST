@@ -1,4 +1,6 @@
 fn main() {
+    register_locale_rebuild_inputs();
+
     #[cfg(target_os = "windows")]
     stage_pdfium_runtime();
 
@@ -40,6 +42,36 @@ fn main() {
             eprintln!("Using default Windows icon.");
         }
     }
+}
+
+fn register_locale_rebuild_inputs() {
+    use std::env;
+    use std::fs;
+    use std::path::{Path, PathBuf};
+
+    fn visit_locale_files(dir: &Path) {
+        let Ok(entries) = fs::read_dir(dir) else {
+            return;
+        };
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                visit_locale_files(&path);
+                continue;
+            }
+
+            let extension = path.extension().and_then(|ext| ext.to_str());
+            if matches!(extension, Some("yml" | "yaml" | "json" | "toml")) {
+                println!("cargo:rerun-if-changed={}", path.display());
+            }
+        }
+    }
+
+    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
+    let locales_dir = manifest_dir.join("locales");
+    println!("cargo:rerun-if-changed={}", locales_dir.display());
+    visit_locale_files(&locales_dir);
 }
 
 #[cfg(target_os = "windows")]
