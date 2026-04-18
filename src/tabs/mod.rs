@@ -63,6 +63,10 @@ pub struct TabState {
     pub sort_descending: bool,
     /// Folders position for this tab
     pub folders_position: FoldersPosition,
+    /// Whether the left sidebar is visible in this tab
+    pub show_left_sidebar: bool,
+    /// Whether the right preview/details panel is visible in this tab
+    pub show_preview_panel: bool,
     /// Quick search buffer (type-to-search like Explorer)
     pub quick_search_buffer: String,
     /// Last keystroke time for quick search timeout
@@ -100,6 +104,8 @@ impl TabState {
             sort_mode: SortMode::Name,
             sort_descending: false,
             folders_position: FoldersPosition::First,
+            show_left_sidebar: true,
+            show_preview_panel: true,
             quick_search_buffer: String::new(),
             quick_search_last_input: std::time::Instant::now(),
             sidebar_expanded: HashSet::new(),
@@ -138,6 +144,8 @@ impl TabState {
             sort_mode: SortMode::Name,
             sort_descending: false,
             folders_position: FoldersPosition::First,
+            show_left_sidebar: true,
+            show_preview_panel: true,
             quick_search_buffer: String::new(),
             quick_search_last_input: std::time::Instant::now(),
             sidebar_expanded: HashSet::new(),
@@ -292,7 +300,10 @@ impl TabManager {
 
     /// Add a new tab at "Este Computador" and switch to it
     pub fn new_tab(&mut self) {
-        let tab = TabState::new_at_computer(self.next_id);
+        let mut tab = TabState::new_at_computer(self.next_id);
+        let current = self.active();
+        tab.show_left_sidebar = current.show_left_sidebar;
+        tab.show_preview_panel = current.show_preview_panel;
         self.next_id += 1;
         self.tabs.push(tab);
         self.active_tab = self.tabs.len() - 1;
@@ -300,7 +311,10 @@ impl TabManager {
 
     /// Add a new tab at a specific path and switch to it
     pub fn new_tab_at(&mut self, path: &str) {
-        let tab = TabState::new_at_path(self.next_id, path);
+        let mut tab = TabState::new_at_path(self.next_id, path);
+        let current = self.active();
+        tab.show_left_sidebar = current.show_left_sidebar;
+        tab.show_preview_panel = current.show_preview_panel;
         self.next_id += 1;
         self.tabs.push(tab);
         self.active_tab = self.tabs.len() - 1;
@@ -326,6 +340,8 @@ impl TabManager {
         new_tab.sort_mode = current.sort_mode;
         new_tab.sort_descending = current.sort_descending;
         new_tab.folders_position = current.folders_position;
+        new_tab.show_left_sidebar = current.show_left_sidebar;
+        new_tab.show_preview_panel = current.show_preview_panel;
         new_tab.sidebar_expanded = current.sidebar_expanded.clone();
         new_tab.sidebar_scroll_y = current.sidebar_scroll_y;
 
@@ -410,6 +426,8 @@ impl TabManager {
             reopened.sort_mode = tab.sort_mode;
             reopened.sort_descending = tab.sort_descending;
             reopened.folders_position = tab.folders_position;
+            reopened.show_left_sidebar = tab.show_left_sidebar;
+            reopened.show_preview_panel = tab.show_preview_panel;
             reopened.sidebar_expanded = tab.sidebar_expanded;
             reopened.sidebar_scroll_y = tab.sidebar_scroll_y;
 

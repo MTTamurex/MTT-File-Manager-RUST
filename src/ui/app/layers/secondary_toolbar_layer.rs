@@ -62,6 +62,7 @@ pub(crate) fn render_secondary_toolbar_layer(app: &mut ImageViewerApp, ctx: &egu
                 .clicked()
                 {
                     app.show_left_sidebar = !app.show_left_sidebar;
+                    app.tab_manager.active_mut().show_left_sidebar = app.show_left_sidebar;
                     app.save_preferences();
                 }
 

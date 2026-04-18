@@ -93,6 +93,7 @@ pub(crate) fn render_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context
                     }
                     ToolbarAction::TogglePreviewPanel => {
                         app.show_preview_panel = !app.show_preview_panel;
+                        app.tab_manager.active_mut().show_preview_panel = app.show_preview_panel;
                         app.update_video_visibility();
                     }
                     ToolbarAction::ChangeSortMode(mode) => {

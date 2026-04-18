@@ -33,6 +33,8 @@ impl ImageViewerApp {
         active.sort_mode = self.sort_mode;
         active.sort_descending = self.sort_descending;
         active.folders_position = self.folders_position;
+        active.show_left_sidebar = self.show_left_sidebar;
+        active.show_preview_panel = self.show_preview_panel;
 
         // Save per-tab sidebar state (expanded nodes + scroll position)
         active.sidebar_expanded = self.sidebar_tree.snapshot_expanded();
@@ -118,6 +120,8 @@ impl ImageViewerApp {
             self.sort_mode = active.sort_mode;
             self.sort_descending = active.sort_descending;
             self.folders_position = active.folders_position;
+            self.show_left_sidebar = active.show_left_sidebar;
+            self.show_preview_panel = active.show_preview_panel;
         }
 
         // Restore per-tab sidebar state (expanded nodes + scroll position)
