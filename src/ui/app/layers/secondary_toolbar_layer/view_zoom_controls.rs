@@ -62,4 +62,20 @@ pub(super) fn render_view_and_zoom_controls(ui: &mut egui::Ui, app: &mut ImageVi
     {
         app.toggle_global_search();
     }
+
+    if app.should_show_secondary_toolbar_media_play_button() {
+        ui.separator();
+
+        if widgets::icon_button(
+            ui,
+            &mut app.svg_icon_manager,
+            "play",
+            &t!("secondary_toolbar.open_selected_media_window"),
+            None,
+        )
+        .clicked()
+        {
+            let _ = app.open_selected_media_in_standalone_player();
+        }
+    }
 }

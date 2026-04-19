@@ -343,6 +343,7 @@ secondary_toolbar:
   list: "List"
   grid: "Grid"
   global_search: "Global search on this computer (Ctrl+Shift+F)"
+  open_selected_media_window: "Open selected media in player window"
 drag_drop:
   copy: "Copy"
   move: "Move"
