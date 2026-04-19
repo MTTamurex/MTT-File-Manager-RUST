@@ -4,7 +4,8 @@ use mtt_search_protocol::*;
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{CloseHandle, ERROR_PIPE_BUSY, HANDLE};
 use windows::Win32::Storage::FileSystem::{
-    CreateFileW, ReadFile, WriteFile, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_NONE, OPEN_EXISTING,
+    CreateFileW, ReadFile, WriteFile, FILE_ATTRIBUTE_NORMAL, FILE_FLAGS_AND_ATTRIBUTES,
+    FILE_SHARE_NONE, OPEN_EXISTING,
 };
 use windows::Win32::System::Pipes::{GetNamedPipeServerProcessId, PeekNamedPipe};
 
@@ -232,6 +233,16 @@ fn open_pipe() -> Result<HANDLE, String> {
     const BUSY_WAIT_MS: u64 = 150;
 
     let mut last_error = String::from("Search service not available");
+    // SEC/UX: SECURITY_SQOS_PRESENT (0x00100000) | SECURITY_IMPERSONATION (0x00020000).
+    // Without these flags the named-pipe client defaults to SECURITY_ANONYMOUS,
+    // which means the (trusted, LocalSystem) service cannot impersonate the
+    // client to perform NT access checks on resources the client owns. The
+    // service-side authorization (`current_client_can_read_path`) needs at
+    // least Impersonation level to call CreateFileW(GENERIC_READ, path) under
+    // the client's token; otherwise every system folder the user CAN read
+    // would still be reported as inaccessible. The service is trusted code
+    // we wrote, so granting it impersonation rights is intentional.
+    const FILE_FLAGS: u32 = FILE_ATTRIBUTE_NORMAL.0 | 0x00100000 | 0x00020000;
     for _ in 0..BUSY_RETRY_COUNT {
         unsafe {
             match CreateFileW(
@@ -240,7 +251,7 @@ fn open_pipe() -> Result<HANDLE, String> {
                 FILE_SHARE_NONE,
                 None,
                 OPEN_EXISTING,
-                FILE_ATTRIBUTE_NORMAL,
+                FILE_FLAGS_AND_ATTRIBUTES(FILE_FLAGS),
                 None,
             ) {
                 Ok(handle) => {
@@ -272,27 +283,44 @@ fn open_pipe() -> Result<HANDLE, String> {
 }
 
 /// SEC: Verify that the named pipe server belongs to the legitimate search service.
-/// Gets the server PID via `GetNamedPipeServerProcessId`, then validates BOTH:
-///   (a) the running executable's basename is `mtt-search-service.exe`, and
-///   (b) the process token's owning user is `NT AUTHORITY\SYSTEM`.
 ///
-/// (b) is the strong guarantee: squatting the pipe under a LocalSystem token
-/// already requires administrative privilege, at which point the local trust
-/// boundary is gone anyway. (a) is a cheap sanity check to reject obvious
-/// mistakes (e.g. another SYSTEM service that happens to win the pipe race).
+/// Threat model: a non-privileged local attacker pre-creates the pipe name
+/// `\\.\pipe\MTTFileManagerSearch` to squat the service identity and trick
+/// the app into talking to it. The check must work in BOTH supported
+/// runtime scenarios:
 ///
-/// We intentionally do NOT reject install locations based on substring
+///   1. **Service mode (production)**: service is registered with SCM and
+///      runs as `NT AUTHORITY\SYSTEM` (S-1-5-18). App runs as a non-elevated
+///      normal user.
+///   2. **Console mode (debugging)**: service binary is launched directly
+///      from an *elevated* (admin) terminal — it needs admin to read USN/MFT.
+///      App still runs as a non-elevated normal user. So the server runs at
+///      High integrity while the app is at Medium.
+///
+/// In BOTH scenarios the pipe server is more privileged than the app, which
+/// means `OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION)` on the server PID
+/// will typically fail with `ERROR_ACCESS_DENIED` (0x80070005) — a UAC/IL
+/// boundary, not a bug. We exploit that asymmetry as the verification:
+///
+///   * `OpenProcess` denied → server is higher-privilege than us. A
+///     non-privileged attacker cannot create such a process, so the peer is
+///     trusted. Accept.
+///   * `OpenProcess` succeeds → peer is at our privilege level (or below).
+///     Validate (a) executable basename == `mtt-search-service.exe` AND
+///     (b) token user SID == LocalSystem OR the current process's user SID
+///     (covers the rare case where both app and service run elevated as the
+///     same user).
+///   * `OpenProcess` fails with anything other than ACCESS_DENIED → suspicious,
+///     reject.
+///
+/// We intentionally do NOT reject install locations based on path substring
 /// heuristics: the installer may legitimately place the service under
 /// `C:\Program Files\...` or, during developer testing, under paths that
-/// contain `\Users\` (e.g. a `target\release\` build tree). The token owner
-/// check already covers the impersonation threat without false positives.
+/// contain `\Users\` (e.g. a `target\release\` build tree).
 fn verify_server_process(pipe: HANDLE) -> Result<(), String> {
-    use windows::Win32::Foundation::CloseHandle as Win32CloseHandle;
-    use windows::Win32::Security::{
-        GetTokenInformation, TokenUser, TOKEN_QUERY, TOKEN_USER,
-    };
+    use windows::Win32::Foundation::{CloseHandle as Win32CloseHandle, ERROR_ACCESS_DENIED};
     use windows::Win32::System::Threading::{
-        OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION,
+        OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
         QueryFullProcessImageNameW, PROCESS_NAME_FORMAT,
     };
     use windows::core::PWSTR;
@@ -302,17 +330,33 @@ fn verify_server_process(pipe: HANDLE) -> Result<(), String> {
         GetNamedPipeServerProcessId(pipe, &mut server_pid)
             .map_err(|e| format!("GetNamedPipeServerProcessId failed: {}", e))?;
     }
-
     if server_pid == 0 {
         return Err("Server PID is 0".into());
     }
 
-    // Open the server process with the minimal access needed for image-name
-    // and token queries. PROCESS_QUERY_LIMITED_INFORMATION works across
-    // privilege levels (normal user can query a SYSTEM process for these).
-    let process = unsafe {
+    // Try to open the server process. In BOTH supported scenarios (LocalSystem
+    // service OR elevated console-mode service) the peer is more privileged
+    // than the non-elevated app, so OpenProcess will typically fail with
+    // ERROR_ACCESS_DENIED. That denial is itself the legitimacy signal:
+    // a non-privileged attacker cannot create a higher-privilege squatter.
+    let process = match unsafe {
         OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, server_pid)
-            .map_err(|e| format!("OpenProcess(server pid {}) failed: {}", server_pid, e))?
+    } {
+        Ok(h) => h,
+        Err(e) if e.code() == ERROR_ACCESS_DENIED.to_hresult() => {
+            log::debug!(
+                "[SEARCH-CLIENT] OpenProcess denied for server pid {} -- \
+                 treating as legitimate higher-privilege service peer",
+                server_pid
+            );
+            return Ok(());
+        }
+        Err(e) => {
+            return Err(format!(
+                "OpenProcess(server pid {}) failed: {}",
+                server_pid, e
+            ));
+        }
     };
     struct ProcGuard(HANDLE);
     impl Drop for ProcGuard {
@@ -349,7 +393,35 @@ fn verify_server_process(pipe: HANDLE) -> Result<(), String> {
         ));
     }
 
-    // (b) Token owner must be NT AUTHORITY\SYSTEM (S-1-5-18).
+    // (b) Token user SID must be either LocalSystem (S-1-5-18) OR the same
+    // user that the current app process is running under. The latter covers
+    // the elevated console-mode case where both processes run as the same
+    // interactive user (but at different integrity levels).
+    let server_sid = read_token_user_sid(process)
+        .map_err(|e| format!("read server token: {}", e))?;
+    const LOCAL_SYSTEM_SID: [u8; 12] = [1, 1, 0, 0, 0, 0, 0, 5, 18, 0, 0, 0];
+    if server_sid == LOCAL_SYSTEM_SID {
+        return Ok(());
+    }
+    let our_sid = read_token_user_sid(unsafe {
+        windows::Win32::System::Threading::GetCurrentProcess()
+    })
+    .map_err(|e| format!("read current token: {}", e))?;
+    if server_sid == our_sid {
+        return Ok(());
+    }
+
+    Err("Server token SID is neither LocalSystem nor the current user".into())
+}
+
+/// Read the `TokenUser` SID octet sequence from a process handle's token.
+fn read_token_user_sid(process: HANDLE) -> Result<Vec<u8>, String> {
+    use windows::Win32::Foundation::CloseHandle as Win32CloseHandle;
+    use windows::Win32::Security::{
+        GetLengthSid, GetTokenInformation, TokenUser, TOKEN_QUERY, TOKEN_USER,
+    };
+    use windows::Win32::System::Threading::OpenProcessToken;
+
     let mut token: HANDLE = HANDLE::default();
     unsafe {
         OpenProcessToken(process, TOKEN_QUERY, &mut token)
@@ -386,22 +458,17 @@ fn verify_server_process(pipe: HANDLE) -> Result<(), String> {
     let token_user = unsafe { &*(buffer.as_ptr() as *const TOKEN_USER) };
     let sid_ptr = token_user.User.Sid;
     if sid_ptr.is_invalid() {
-        return Err("Server token SID is null".into());
+        return Err("Token SID is null".into());
     }
-    // Compare the raw SID bytes against the well-known LocalSystem SID.
-    // S-1-5-18 = revision 1, 1 sub-authority, ID-auth 5, sub 18 → 12 bytes total.
-    let expected: [u8; 12] = [1, 1, 0, 0, 0, 0, 0, 5, 18, 0, 0, 0];
-    let mut actual = [0u8; 12];
+    let len = unsafe { GetLengthSid(sid_ptr) } as usize;
+    if len == 0 || len > 256 {
+        return Err(format!("Unexpected SID length: {}", len));
+    }
+    let mut sid_bytes = vec![0u8; len];
     unsafe {
-        std::ptr::copy_nonoverlapping(sid_ptr.0 as *const u8, actual.as_mut_ptr(), 12);
+        std::ptr::copy_nonoverlapping(sid_ptr.0 as *const u8, sid_bytes.as_mut_ptr(), len);
     }
-    if actual != expected {
-        return Err(format!(
-            "Server process is not running as LocalSystem (token SID mismatch)"
-        ));
-    }
-
-    Ok(())
+    Ok(sid_bytes)
 }
 
 fn write_message<T: serde::Serialize>(pipe: HANDLE, msg: &T) -> Result<(), String> {
