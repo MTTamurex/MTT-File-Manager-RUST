@@ -598,6 +598,28 @@ pub fn folder_size_for_service(index: &VolumeIndex, dir_frn: u64) -> (u64, u64, 
     (raw_total, raw_count, raw_folder_count)
 }
 
+fn resolve_file_size_with_fallbacks(
+    volume: HANDLE,
+    index: Option<&VolumeIndex>,
+    frn: u64,
+    record_size: usize,
+    output_buffer: &mut Vec<u8>,
+    dir_cache: &mut HashMap<u64, String>,
+) -> Option<u64> {
+    match resolve_file_size(volume, frn, record_size, output_buffer) {
+        SizeResolution::Direct(size) | SizeResolution::ViaAttrList(size) => Some(size),
+        SizeResolution::None => {
+            if let Some(index) = index {
+                if let Some(size) = stat_file_size_fallback(index, frn, dir_cache) {
+                    return Some(size);
+                }
+            }
+
+            size_by_file_id(volume, frn)
+        }
+    }
+}
+
 fn stat_file_size_fallback(
     index: &VolumeIndex,
     frn: u64,
@@ -692,10 +714,68 @@ fn size_by_file_id(volume: HANDLE, frn: u64) -> Option<u64> {
 pub fn read_single_file_size(volume: HANDLE, frn: u64, record_size: u32) -> Option<u64> {
     let rs = record_size as usize;
     let mut output_buffer = vec![0u8; OUTPUT_HEADER + rs];
-    match resolve_file_size(volume, frn, rs, &mut output_buffer) {
-        SizeResolution::Direct(s) | SizeResolution::ViaAttrList(s) => Some(s),
-        SizeResolution::None => None,
+    let mut dir_cache = HashMap::new();
+    resolve_file_size_with_fallbacks(
+        volume,
+        None,
+        frn,
+        rs,
+        &mut output_buffer,
+        &mut dir_cache,
+    )
+}
+
+/// Repair known zero-size file entries already present in the in-memory index.
+/// This is a targeted healing path for stale cache entries where subtree
+/// traversal finds files but their recorded sizes are still zero.
+pub fn repair_zero_size_file_frns(
+    volume: HANDLE,
+    index: &mut VolumeIndex,
+    frns: &[u64],
+    record_size: u32,
+) -> usize {
+    let rs = record_size as usize;
+    let mut repaired = 0usize;
+    let mut output_buffer = vec![0u8; OUTPUT_HEADER + rs];
+    let mut dir_cache = HashMap::with_capacity(256);
+
+    for &frn in frns {
+        let needs_repair = index
+            .records
+            .get(&frn)
+            .map(|record| !record.is_dir && record.size == 0)
+            .unwrap_or(false);
+        if !needs_repair {
+            continue;
+        }
+
+        let resolved_size = {
+            let index_ref: &VolumeIndex = &*index;
+            resolve_file_size_with_fallbacks(
+                volume,
+                Some(index_ref),
+                frn,
+                rs,
+                &mut output_buffer,
+                &mut dir_cache,
+            )
+        };
+
+        let Some(size) = resolved_size else {
+            continue;
+        };
+
+        if size > 0 {
+            if let Some(record) = index.records.get_mut(&frn) {
+                if record.size != size {
+                    record.size = size;
+                    repaired += 1;
+                }
+            }
+        }
     }
+
+    repaired
 }
 
 /// Public wrapper to query the MFT record size for a volume.
