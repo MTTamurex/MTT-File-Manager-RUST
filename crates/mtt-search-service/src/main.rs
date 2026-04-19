@@ -62,20 +62,49 @@ impl FtsState {
 }
 
 /// Redact filesystem paths from error messages to prevent information leakage.
-/// Replaces tokens that look like paths (containing `\` or starting with a drive letter)
-/// with `<path>`.
+/// SEC: Detects path-like substrings using multiple signals so we redact even
+/// when paths are quoted, embedded in parentheses, or split by colons:
+///   * any token containing `\` (Windows separators)
+///   * any token containing `/` (POSIX-style separators) that is not a URL
+///   * any token starting with a Windows drive letter (`X:`)
+///   * any token starting with the verbatim/UNC prefix (`\\?\` or `\\.\`)
+///   * any token containing `\\` (UNC root)
+/// The redaction is conservative: when in doubt, replace with `<path>`.
 pub(crate) fn redact_paths(msg: &str) -> String {
+    fn looks_like_path(token: &str) -> bool {
+        if token.len() < 2 {
+            return false;
+        }
+        // Strip surrounding quotes/brackets/punctuation that commonly wrap paths
+        // in human-readable error strings.
+        let stripped = token.trim_matches(|c: char| {
+            matches!(c, '\'' | '"' | '`' | '(' | ')' | '[' | ']' | '{' | '}' | ',' | ';' | '.')
+        });
+        if stripped.starts_with("http://") || stripped.starts_with("https://") {
+            return false;
+        }
+        if stripped.starts_with(r"\\?\") || stripped.starts_with(r"\\.\") {
+            return true;
+        }
+        if stripped.contains('\\') {
+            return true;
+        }
+        if stripped.contains('/') && stripped.len() > 2 {
+            return true;
+        }
+        // Drive letter form: `C:` or `C:\foo` or `C:/foo`.
+        let bytes = stripped.as_bytes();
+        if bytes.len() >= 2
+            && bytes[0].is_ascii_alphabetic()
+            && bytes[1] == b':'
+        {
+            return true;
+        }
+        false
+    }
+
     msg.split_whitespace()
-        .map(|word| {
-            let trimmed = word.trim_matches(|c: char| c == '\'' || c == '"' || c == ':');
-            if trimmed.contains('\\')
-                || trimmed.contains('/') && trimmed.len() > 1 && !trimmed.starts_with("http")
-            {
-                "<path>"
-            } else {
-                word
-            }
-        })
+        .map(|word| if looks_like_path(word) { "<path>" } else { word })
         .collect::<Vec<&str>>()
         .join(" ")
 }

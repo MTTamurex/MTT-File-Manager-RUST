@@ -34,8 +34,14 @@ const SECURITY_NT_AUTHORITY: SID_IDENTIFIER_AUTHORITY = SID_IDENTIFIER_AUTHORITY
 struct SidGuard(PSID);
 
 impl SidGuard {
-    fn builtin_users() -> Result<Self, String> {
-        Self::allocate(2, 32, 545)
+    /// SEC: We grant pipe access to `Authenticated Users` (S-1-5-11) instead
+    /// of the broader `BUILTIN\Users` (S-1-5-32-545). Authenticated Users
+    /// excludes the built-in Guest account and anonymous logons, reducing
+    /// the surface for unauthenticated/low-trust local processes to probe
+    /// the IPC parser, while still permitting any normal interactive user
+    /// (the file manager's intended caller) to connect.
+    fn authenticated_users() -> Result<Self, String> {
+        Self::allocate(1, 11, 0)
     }
 
     fn local_system() -> Result<Self, String> {
@@ -108,7 +114,7 @@ impl Drop for AclGuard {
 
 pub(super) fn create_pipe(first_instance: bool) -> Result<HANDLE, String> {
     unsafe {
-        let users_sid = SidGuard::builtin_users()?;
+        let users_sid = SidGuard::authenticated_users()?;
         let system_sid = SidGuard::local_system()?;
 
         let entries = [

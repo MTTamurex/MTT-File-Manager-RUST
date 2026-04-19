@@ -261,6 +261,33 @@ pub(super) fn handle_client(
                 }
             };
 
+            // SEC: Impersonate the connecting client and verify it has read
+            // access to the requested folder before returning size/file/folder
+            // counts. Without this check, any local user could enumerate the
+            // structure and aggregate sizes of folders they cannot read
+            // (e.g. other users' profiles, ACL-protected directories) by
+            // querying the indexed metadata that the LocalSystem service holds.
+            let _impersonation = match PipeImpersonationGuard::new(pipe) {
+                Ok(g) => g,
+                Err(e) => {
+                    eprintln!("[IPC] FolderSize impersonation failed: {}", e);
+                    let _ = send_response(
+                        pipe,
+                        &SearchResponse::Error("Authorization failed".to_string()),
+                    );
+                    return;
+                }
+            };
+            if !current_client_can_read_path(&path) {
+                // Same response shape as "not in index" to avoid leaking
+                // an existence oracle for paths the caller cannot read.
+                let _ = send_response(
+                    pipe,
+                    &SearchResponse::Error("Path not found in index".to_string()),
+                );
+                return;
+            }
+
             // Compute folder size from in-memory index.
             let result = {
                 let handle = match volume_indices::find_handle(indices, drive_letter) {
@@ -337,9 +364,13 @@ fn build_status_response(
     security_policy: &IpcSecurityPolicy,
 ) -> IndexStatusInfo {
     let mut volume_map = BTreeMap::<char, VolumeStatus>::new();
+    // SEC: Return only the executable basename, never the full path. Exposing
+    // the install directory to any pipe client leaks layout details that aid
+    // PATH/DLL hijacking and reconnaissance.
     let service_executable_path = std::env::current_exe()
-        .map(|path| path.display().to_string())
-        .unwrap_or_else(|_| "<unknown>".to_string());
+        .ok()
+        .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+        .unwrap_or_else(|| "<unknown>".to_string());
     let progress_snapshot = indexing_progress.snapshot();
 
     if security_policy.redact_status_metrics {

@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::process::Command;
 use std::sync::OnceLock;
 
@@ -84,7 +85,11 @@ fn detect_capabilities() -> HardwareCapabilities {
 }
 
 fn get_ffmpeg_encoders() -> String {
-    let mut cmd = Command::new("ffmpeg");
+    let Some(ffmpeg) = resolve_ffmpeg_executable() else {
+        log::warn!("[HardwareDetection] ffmpeg executable not found in trusted locations");
+        return String::new();
+    };
+    let mut cmd = Command::new(ffmpeg);
     cmd.args(["-hide_banner", "-encoders"]);
 
     #[cfg(target_os = "windows")]
@@ -105,7 +110,10 @@ fn get_ffmpeg_encoders() -> String {
 
 /// Runs a real dummy encode to see if the hardware path actually works.
 fn smoke_test_backend(backend: TranscodeBackend) -> bool {
-    let mut cmd = Command::new("ffmpeg");
+    let Some(ffmpeg) = resolve_ffmpeg_executable() else {
+        return false;
+    };
+    let mut cmd = Command::new(ffmpeg);
 
     // Common quiet flags
     cmd.args(["-v", "error", "-hide_banner"]);
@@ -197,6 +205,46 @@ fn smoke_test_backend(backend: TranscodeBackend) -> bool {
             false
         }
     }
+}
+
+/// SEC: Resolve ffmpeg.exe to an absolute path from trusted locations only,
+/// to defeat PATH/CWD hijacking attacks. `Command::new("ffmpeg")` would
+/// otherwise let any `ffmpeg.exe` in the current working directory or PATH
+/// be executed in the user context, which is trivially weaponised: a malicious
+/// download placed alongside legitimate media triggers RCE the moment hardware
+/// detection runs.
+///
+/// Trusted lookup order:
+///   1. The directory of the currently running executable (bundled ffmpeg).
+///   2. The `MTT_FFMPEG_PATH` environment variable (must be an absolute path
+///      to an existing file).
+/// PATH and CWD are NEVER consulted. Returns `None` if ffmpeg is not found,
+/// in which case hardware acceleration falls back to CPU transparently.
+fn resolve_ffmpeg_executable() -> Option<PathBuf> {
+    static CACHED: OnceLock<Option<PathBuf>> = OnceLock::new();
+    CACHED
+        .get_or_init(|| {
+            // 1) Same directory as the running app/service binary.
+            if let Ok(exe) = std::env::current_exe() {
+                if let Some(dir) = exe.parent() {
+                    let candidate = dir.join("ffmpeg.exe");
+                    if candidate.is_file() {
+                        return Some(candidate);
+                    }
+                }
+            }
+
+            // 2) Dedicated env var (NOT the generic PATH). Must be absolute.
+            if let Ok(value) = std::env::var("MTT_FFMPEG_PATH") {
+                let candidate = PathBuf::from(value);
+                if candidate.is_absolute() && candidate.is_file() {
+                    return Some(candidate);
+                }
+            }
+
+            None
+        })
+        .clone()
 }
 
 #[derive(Debug, Clone)]

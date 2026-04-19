@@ -272,13 +272,27 @@ fn open_pipe() -> Result<HANDLE, String> {
 }
 
 /// SEC: Verify that the named pipe server belongs to the legitimate search service.
-/// Gets the server PID via `GetNamedPipeServerProcessId`, then uses
-/// `CreateToolhelp32Snapshot` to look up the executable name for that PID.
+/// Gets the server PID via `GetNamedPipeServerProcessId`, then validates BOTH:
+///   (a) the running executable's full path resolves to a file whose basename
+///       matches `mtt-search-service.exe` AND that resides outside user-writable
+///       locations (e.g. not under any `\Users\` profile directory), and
+///   (b) the process token's owning user is `NT AUTHORITY\SYSTEM`.
 ///
-/// Unlike `OpenProcess` + `QueryFullProcessImageNameW`, the ToolHelp snapshot
-/// approach works across privilege boundaries (normal user → LocalSystem process)
-/// because it reads from a kernel-level process table snapshot.
+/// (a) defeats a basename-only spoof where a low-priv user runs a binary
+/// named `mtt-search-service.exe` from their profile and squats the pipe;
+/// (b) confirms the listener is actually a LocalSystem service rather than
+/// a user-context impostor that managed to win the pipe creation race.
 fn verify_server_process(pipe: HANDLE) -> Result<(), String> {
+    use windows::Win32::Foundation::CloseHandle as Win32CloseHandle;
+    use windows::Win32::Security::{
+        GetTokenInformation, TokenUser, TOKEN_QUERY, TOKEN_USER,
+    };
+    use windows::Win32::System::Threading::{
+        OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION,
+        QueryFullProcessImageNameW, PROCESS_NAME_FORMAT,
+    };
+    use windows::core::PWSTR;
+
     let mut server_pid: u32 = 0;
     unsafe {
         GetNamedPipeServerProcessId(pipe, &mut server_pid)
@@ -289,60 +303,106 @@ fn verify_server_process(pipe: HANDLE) -> Result<(), String> {
         return Err("Server PID is 0".into());
     }
 
-    use windows::Win32::System::Diagnostics::ToolHelp::{
-        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW,
-        PROCESSENTRY32W, TH32CS_SNAPPROCESS,
+    // Open the server process with the minimal access needed for image-name
+    // and token queries. PROCESS_QUERY_LIMITED_INFORMATION works across
+    // privilege levels (normal user can query a SYSTEM process for these).
+    let process = unsafe {
+        OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, server_pid)
+            .map_err(|e| format!("OpenProcess(server pid {}) failed: {}", server_pid, e))?
     };
-
-    let snapshot = unsafe {
-        CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)
-            .map_err(|e| format!("CreateToolhelp32Snapshot failed: {}", e))?
-    };
-
-    let mut entry = PROCESSENTRY32W {
-        dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
-        ..Default::default()
-    };
-
-    let result = unsafe {
-        let mut found = false;
-        if Process32FirstW(snapshot, &mut entry).is_ok() {
-            loop {
-                if entry.th32ProcessID == server_pid {
-                    let nul_pos = entry
-                        .szExeFile
-                        .iter()
-                        .position(|&c| c == 0)
-                        .unwrap_or(entry.szExeFile.len());
-                    let exe_name =
-                        String::from_utf16_lossy(&entry.szExeFile[..nul_pos]).to_lowercase();
-
-                    found = true;
-                    if exe_name != "mtt-search-service.exe" {
-                        let _ = CloseHandle(snapshot);
-                        return Err(format!(
-                            "Server process is '{}', expected 'mtt-search-service.exe'",
-                            exe_name
-                        ));
-                    }
-                    break;
-                }
-                if Process32NextW(snapshot, &mut entry).is_err() {
-                    break;
-                }
+    struct ProcGuard(HANDLE);
+    impl Drop for ProcGuard {
+        fn drop(&mut self) {
+            unsafe {
+                let _ = Win32CloseHandle(self.0);
             }
         }
-        found
-    };
+    }
+    let _proc_guard = ProcGuard(process);
 
+    // (a) Full image path lookup.
+    let mut path_buf = [0u16; 1024];
+    let mut path_len = path_buf.len() as u32;
     unsafe {
-        let _ = CloseHandle(snapshot);
+        QueryFullProcessImageNameW(
+            process,
+            PROCESS_NAME_FORMAT(0),
+            PWSTR(path_buf.as_mut_ptr()),
+            &mut path_len,
+        )
+        .map_err(|e| format!("QueryFullProcessImageNameW failed: {}", e))?;
+    }
+    let exe_path = String::from_utf16_lossy(&path_buf[..path_len as usize]);
+    let exe_path_lc = exe_path.to_lowercase();
+
+    let basename = std::path::Path::new(&exe_path_lc)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("");
+    if basename != "mtt-search-service.exe" {
+        return Err(format!(
+            "Server image basename is '{}', expected 'mtt-search-service.exe'",
+            basename
+        ));
+    }
+    // Reject obvious user-writable install locations to block a low-priv
+    // user from squatting the pipe with a binary in their own profile.
+    if exe_path_lc.contains(r"\users\") || exe_path_lc.contains(r"\appdata\") {
+        return Err(format!(
+            "Server image '{}' lives in a user-writable directory; refusing",
+            exe_path
+        ));
     }
 
-    if !result {
+    // (b) Token owner must be NT AUTHORITY\SYSTEM (S-1-5-18).
+    let mut token: HANDLE = HANDLE::default();
+    unsafe {
+        OpenProcessToken(process, TOKEN_QUERY, &mut token)
+            .map_err(|e| format!("OpenProcessToken failed: {}", e))?;
+    }
+    struct TokenGuard(HANDLE);
+    impl Drop for TokenGuard {
+        fn drop(&mut self) {
+            unsafe {
+                let _ = Win32CloseHandle(self.0);
+            }
+        }
+    }
+    let _tg = TokenGuard(token);
+
+    let mut needed: u32 = 0;
+    unsafe {
+        let _ = GetTokenInformation(token, TokenUser, None, 0, &mut needed);
+    }
+    if needed == 0 || needed as usize > 4096 {
+        return Err(format!("unexpected TokenUser size: {}", needed));
+    }
+    let mut buffer = vec![0u8; needed as usize];
+    unsafe {
+        GetTokenInformation(
+            token,
+            TokenUser,
+            Some(buffer.as_mut_ptr() as *mut _),
+            needed,
+            &mut needed,
+        )
+        .map_err(|e| format!("GetTokenInformation failed: {}", e))?;
+    }
+    let token_user = unsafe { &*(buffer.as_ptr() as *const TOKEN_USER) };
+    let sid_ptr = token_user.User.Sid;
+    if sid_ptr.is_invalid() {
+        return Err("Server token SID is null".into());
+    }
+    // Compare the raw SID bytes against the well-known LocalSystem SID.
+    // S-1-5-18 = revision 1, 1 sub-authority, ID-auth 5, sub 18 → 12 bytes total.
+    let expected: [u8; 12] = [1, 1, 0, 0, 0, 0, 0, 5, 18, 0, 0, 0];
+    let mut actual = [0u8; 12];
+    unsafe {
+        std::ptr::copy_nonoverlapping(sid_ptr.0 as *const u8, actual.as_mut_ptr(), 12);
+    }
+    if actual != expected {
         return Err(format!(
-            "Could not find process with PID {} in snapshot",
-            server_pid
+            "Server process is not running as LocalSystem (token SID mismatch)"
         ));
     }
 

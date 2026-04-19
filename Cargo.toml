@@ -98,6 +98,7 @@ features = [
     "Win32_System_Pipes",
     "Win32_System_WindowsProgramming",
     "Win32_System_Time",
+    "Win32_System_SystemInformation",
     "Win32_NetworkManagement_WNet",
     "Win32_Globalization",
     "Wdk_Storage_FileSystem",

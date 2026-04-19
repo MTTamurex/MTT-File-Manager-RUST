@@ -12,14 +12,11 @@ pub enum PinCommand {
 }
 
 fn run_attrib(args: &[String], path: &Path) -> io::Result<()> {
-    // SEC: Use absolute path for attrib.exe to prevent PATH hijacking.
-    let attrib_exe = {
-        let system_root = std::env::var("SYSTEMROOT")
-            .unwrap_or_else(|_| r"C:\Windows".to_string());
-        std::path::Path::new(&system_root)
-            .join("System32")
-            .join("attrib.exe")
-    };
+    // SEC: Resolve attrib.exe via the GetSystemDirectoryW Win32 API rather
+    // than trusting the SYSTEMROOT environment variable, which can be
+    // overridden in the process environment by a parent process.
+    // GetSystemDirectoryW returns the kernel-tracked system directory.
+    let attrib_exe = system32_path("attrib.exe");
     let mut cmd = Command::new(attrib_exe);
     cmd.args(args);
     #[cfg(target_os = "windows")]
@@ -75,3 +72,20 @@ pub fn set_pin_state(path: &Path, command: PinCommand) -> io::Result<()> {
     Ok(())
 }
 
+/// SEC: Resolves the absolute path of an executable inside the Windows system
+/// directory using the kernel-tracked location, ignoring the (mutable)
+/// SYSTEMROOT environment variable.
+fn system32_path(exe: &str) -> std::path::PathBuf {
+    use windows::Win32::System::SystemInformation::GetSystemDirectoryW;
+
+    let mut buf = [0u16; 260];
+    let len = unsafe { GetSystemDirectoryW(Some(&mut buf)) } as usize;
+    let dir = if len == 0 || len > buf.len() {
+        // Fallback: hardcoded — only reached if GetSystemDirectoryW fails,
+        // which should not happen in normal Windows installs.
+        std::path::PathBuf::from(r"C:\Windows\System32")
+    } else {
+        std::path::PathBuf::from(String::from_utf16_lossy(&buf[..len]))
+    };
+    dir.join(exe)
+}

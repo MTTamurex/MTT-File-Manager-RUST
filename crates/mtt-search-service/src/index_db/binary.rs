@@ -286,13 +286,38 @@ pub fn load(drive_letter: char) -> Result<Option<(VolumeIndex, PersistedBinarySt
     let hardlink_count = h_hardlink_count as usize;
     let reparse_count = h_reparse_count as usize;
 
-    // Validate expected size.
+    // SEC: Sanity caps to prevent OOM via huge HashMap pre-allocation and to
+    // make the size-equality check below meaningful even on attacker-crafted
+    // headers. NTFS supports up to ~2^48 file records per volume but no
+    // realistic deployment exceeds 100M files; arenas above 2 GB would
+    // already be rejected by the u32 NameRef offset domain.
+    const MAX_RECORDS: usize = 100_000_000;
+    const MAX_ARENA_BYTES: usize = u32::MAX as usize; // 4 GB hard cap from NameRef
+    const MAX_HARDLINK_PAIRS: usize = 200_000_000;
+    const MAX_REPARSE: usize = 10_000_000;
+    if record_count > MAX_RECORDS {
+        return Err(format!("record_count too large: {}", record_count));
+    }
+    if arena_size > MAX_ARENA_BYTES {
+        return Err(format!("arena_size too large: {}", arena_size));
+    }
+    if hardlink_count > MAX_HARDLINK_PAIRS {
+        return Err(format!("hardlink_entry_count too large: {}", hardlink_count));
+    }
+    if reparse_count > MAX_REPARSE {
+        return Err(format!("reparse_count too large: {}", reparse_count));
+    }
+
+    // SEC: Use checked arithmetic so a crafted header cannot wrap `expected`
+    // back to `data.len()` and bypass the size validation. Any overflow at
+    // this stage means the header is hostile or corrupt.
     let expected = HEADER_SIZE
-        + arena_size
-        + record_count * RECORD_SIZE
-        + hardlink_count * HARDLINK_ENTRY_SIZE
-        + reparse_count * REPARSE_ENTRY_SIZE
-        + 4; // CRC
+        .checked_add(arena_size)
+        .and_then(|s| s.checked_add(record_count.checked_mul(RECORD_SIZE)?))
+        .and_then(|s| s.checked_add(hardlink_count.checked_mul(HARDLINK_ENTRY_SIZE)?))
+        .and_then(|s| s.checked_add(reparse_count.checked_mul(REPARSE_ENTRY_SIZE)?))
+        .and_then(|s| s.checked_add(4)) // CRC
+        .ok_or_else(|| "Size overflow in header arithmetic".to_string())?;
     if data.len() != expected {
         return Err(format!(
             "Size mismatch: expected {} got {}",

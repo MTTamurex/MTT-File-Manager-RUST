@@ -722,6 +722,12 @@ fn extract_from_tar(
 }
 
 /// Sanitizes a filename by replacing characters that are invalid on Windows.
+/// SEC: Also rewrites Windows reserved device names (CON, PRN, AUX, NUL,
+/// COM0-COM9, LPT0-LPT9) so that an attacker cannot smuggle a file named
+/// e.g. `CON` into an extraction destination — opening such a path on
+/// Windows redirects to a device, not a regular file, and can trigger
+/// unexpected behaviour or DoS in downstream consumers (preview generators,
+/// thumbnailers, indexers).
 fn sanitize_filename(name: &str) -> String {
     let cleaned: String = name
         .chars()
@@ -735,8 +741,30 @@ fn sanitize_filename(name: &str) -> String {
     // Remove trailing dots and spaces (invalid on Windows).
     let trimmed = cleaned.trim_end_matches(|c| c == '.' || c == ' ');
     if trimmed.is_empty() {
-        "_extracted".to_string()
-    } else {
-        trimmed.to_string()
+        return "_extracted".to_string();
     }
+
+    // Reserved-name check operates on the stem (before the first dot), as
+    // Windows refuses both `CON` and `CON.txt`.
+    let stem = trimmed.split('.').next().unwrap_or("");
+    if is_windows_reserved_name(stem) {
+        return format!("_{}", trimmed);
+    }
+    trimmed.to_string()
+}
+
+/// SEC: Returns true if `stem` matches a Windows reserved device name
+/// (case-insensitive). Used by archive extraction to rewrite hostile entries.
+fn is_windows_reserved_name(stem: &str) -> bool {
+    if stem.is_empty() {
+        return false;
+    }
+    let upper: String = stem.to_ascii_uppercase();
+    matches!(upper.as_str(),
+        "CON" | "PRN" | "AUX" | "NUL"
+        | "COM0" | "COM1" | "COM2" | "COM3" | "COM4"
+        | "COM5" | "COM6" | "COM7" | "COM8" | "COM9"
+        | "LPT0" | "LPT1" | "LPT2" | "LPT3" | "LPT4"
+        | "LPT5" | "LPT6" | "LPT7" | "LPT8" | "LPT9"
+    )
 }
