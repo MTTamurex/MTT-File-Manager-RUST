@@ -183,7 +183,8 @@ impl ImageViewerApp {
                 } else if let Some(selected) = self.selected_file.as_ref() {
                     let selected_path = selected.path.clone();
                     if selected.is_dir {
-                        self.navigate_to(&selected_path.to_string_lossy());
+                        let target = selected_path.to_string_lossy();
+                        self.navigate_to(target.as_ref());
                         return; // Exit early after navigation
                     } else {
                         open_with_shell(self, &selected_path);

@@ -563,14 +563,8 @@ impl ImageViewerApp {
         // was sent before the revalidation is discarded as stale.
         {
             let now = std::time::Instant::now();
-            let expired: Vec<std::path::PathBuf> = self
-                .folder_size_state
-                .pending_revalidation
-                .iter()
-                .filter(|(_, deadline)| now >= **deadline)
-                .map(|(path, _)| path.clone())
-                .collect();
-            for path in expired {
+            if self.folder_size_state.should_prune_pending_revalidations(now) {
+                for path in self.folder_size_state.take_expired_revalidations(now) {
                 self.folder_size_state.pending_revalidation.remove(&path);
                 self.folder_size_state.batch_cache.pop(&path);
                 self.folder_size_state.batch_loading.remove(&path);
@@ -583,6 +577,7 @@ impl ImageViewerApp {
                     .entry(path)
                     .or_insert(0) += 1;
                 received_any = true;
+                }
             }
         }
 

@@ -7,6 +7,89 @@ use super::property_keys::*;
 use super::utils::*;
 use super::MediaMetadata;
 
+#[derive(Default)]
+struct ExifSummary {
+    camera_maker: Option<String>,
+    camera_model: Option<String>,
+    f_stop: Option<String>,
+    exposure_time: Option<String>,
+    iso_speed: Option<u32>,
+    focal_length: Option<String>,
+    max_aperture: Option<String>,
+    metering_mode: Option<String>,
+    flash_mode: Option<String>,
+    date_taken: Option<String>,
+    subject: Option<String>,
+}
+
+impl ExifSummary {
+    fn into_media_metadata(self) -> MediaMetadata {
+        MediaMetadata {
+            camera_maker: self.camera_maker,
+            camera_model: self.camera_model,
+            f_stop: self.f_stop,
+            exposure_time: self.exposure_time,
+            iso_speed: self.iso_speed,
+            focal_length: self.focal_length,
+            max_aperture: self.max_aperture,
+            metering_mode: self.metering_mode,
+            flash_mode: self.flash_mode,
+            date_taken: self.date_taken,
+            subject: self.subject,
+            ..Default::default()
+        }
+    }
+}
+
+fn read_exif_summary(exifreader: &exif::Exif) -> ExifSummary {
+    let mut summary = ExifSummary::default();
+
+    for field in exifreader.fields() {
+        match field.tag {
+            Tag::Make if summary.camera_maker.is_none() => {
+                summary.camera_maker = Some(field.display_value().to_string());
+            }
+            Tag::Model if summary.camera_model.is_none() => {
+                summary.camera_model = Some(field.display_value().to_string());
+            }
+            Tag::FNumber if summary.f_stop.is_none() => {
+                summary.f_stop = Some(format!("f/{}", field.display_value()));
+            }
+            Tag::ExposureTime if summary.exposure_time.is_none() => {
+                summary.exposure_time = Some(format!("{} sec.", field.display_value()));
+            }
+            Tag::PhotographicSensitivity if summary.iso_speed.is_none() => {
+                if let exif::Value::Short(ref v) = field.value {
+                    if let Some(value) = v.first() {
+                        summary.iso_speed = Some(*value as u32);
+                    }
+                }
+            }
+            Tag::FocalLength if summary.focal_length.is_none() => {
+                summary.focal_length = Some(format!("{} mm", field.display_value()));
+            }
+            Tag::MaxApertureValue if summary.max_aperture.is_none() => {
+                summary.max_aperture = Some(field.display_value().to_string());
+            }
+            Tag::MeteringMode if summary.metering_mode.is_none() => {
+                summary.metering_mode = Some(field.display_value().to_string());
+            }
+            Tag::Flash if summary.flash_mode.is_none() => {
+                summary.flash_mode = Some(field.display_value().to_string());
+            }
+            Tag::DateTime if summary.date_taken.is_none() => {
+                summary.date_taken = Some(field.display_value().to_string());
+            }
+            Tag::ImageDescription if summary.subject.is_none() => {
+                summary.subject = Some(field.display_value().to_string());
+            }
+            _ => {}
+        }
+    }
+
+    summary
+}
+
 pub fn is_image_extension(ext: &str) -> bool {
     // Use Windows Perceived Type API for dynamic detection
     crate::infrastructure::windows::file_type::is_image_extension(ext)
@@ -44,104 +127,34 @@ pub fn read_image_metadata(path: &Path) -> Result<MediaMetadata, image::ImageErr
 pub fn read_image_exif_metadata(path: &Path) -> Result<MediaMetadata, windows::core::Error> {
     log::trace!("[EXIF DEBUG] Reading EXIF for: {:?}", path.file_name());
 
-    let mut camera_maker = None;
-    let mut camera_model = None;
-    let mut f_stop = None;
-    let mut exposure_time = None;
-    let mut iso_speed = None;
-    let mut focal_length = None;
-    let mut max_aperture = None;
-    let mut metering_mode = None;
-    let mut flash_mode = None;
-    let mut date_taken = None;
-    let mut subject = None;
+    let mut exif_summary = ExifSummary::default();
 
     if let Ok(file) = std::fs::File::open(path) {
         let mut bufreader = std::io::BufReader::new(&file);
         if let Ok(exifreader) = ExifReader::new().read_from_container(&mut bufreader) {
             log::trace!("  [EXIF] Successfully parsed EXIF data");
-
-            if let Some(field) = exifreader.get_field(Tag::Make, In::PRIMARY) {
-                camera_maker = Some(field.display_value().to_string());
-            }
-
-            if let Some(field) = exifreader.get_field(Tag::Model, In::PRIMARY) {
-                camera_model = Some(field.display_value().to_string());
-            }
-
-            if let Some(field) = exifreader.get_field(Tag::FNumber, In::PRIMARY) {
-                f_stop = Some(format!("f/{}", field.display_value()));
-            }
-
-            if let Some(field) = exifreader.get_field(Tag::ExposureTime, In::PRIMARY) {
-                exposure_time = Some(format!("{} sec.", field.display_value()));
-            }
-
-            if let Some(field) = exifreader.get_field(Tag::PhotographicSensitivity, In::PRIMARY) {
-                if let exif::Value::Short(ref v) = field.value {
-                    if !v.is_empty() {
-                        iso_speed = Some(v[0] as u32);
-                    }
-                }
-            }
-
-            if let Some(field) = exifreader.get_field(Tag::FocalLength, In::PRIMARY) {
-                focal_length = Some(format!("{} mm", field.display_value()));
-            }
-
-            if let Some(field) = exifreader.get_field(Tag::MaxApertureValue, In::PRIMARY) {
-                max_aperture = Some(field.display_value().to_string());
-            }
-
-            if let Some(field) = exifreader.get_field(Tag::MeteringMode, In::PRIMARY) {
-                metering_mode = Some(field.display_value().to_string());
-            }
-
-            if let Some(field) = exifreader.get_field(Tag::Flash, In::PRIMARY) {
-                flash_mode = Some(field.display_value().to_string());
-            }
-
-            if let Some(field) = exifreader.get_field(Tag::DateTime, In::PRIMARY) {
-                date_taken = Some(field.display_value().to_string());
-            }
-
-            if let Some(field) = exifreader.get_field(Tag::ImageDescription, In::PRIMARY) {
-                subject = Some(field.display_value().to_string());
-            }
+            exif_summary = read_exif_summary(&exifreader);
         } else {
             log::debug!("  [EXIF] Failed to parse EXIF data, trying Property Store fallback");
 
             let _com_guard = ComGuard::new();
             if let Ok(store) = unsafe { open_property_store(path) } {
-                camera_maker = unsafe { read_string(&store, &PKEY_IMAGE_CAMERAMAKER) };
-                camera_model = unsafe { read_string(&store, &PKEY_IMAGE_CAMERAMODEL) };
-                f_stop = unsafe { read_f_number(&store, &PKEY_IMAGE_FNUMBER) };
-                exposure_time = unsafe { read_exposure_time(&store, &PKEY_IMAGE_EXPOSURETIME) };
-                iso_speed = unsafe { read_u32(&store, &PKEY_IMAGE_ISOSPEED) };
-                focal_length = unsafe { read_focal_length(&store, &PKEY_IMAGE_FOCALLENGTH) };
-                max_aperture = unsafe { read_aperture(&store, &PKEY_IMAGE_MAXAPERTURE) };
-                metering_mode = unsafe { read_metering_mode(&store, &PKEY_IMAGE_METERINGMODE) };
-                flash_mode = unsafe { read_flash_mode(&store, &PKEY_IMAGE_FLASH) };
-                date_taken = unsafe { read_string(&store, &PKEY_IMAGE_DATETAKEN) };
-                subject = unsafe { read_string(&store, &PKEY_IMAGE_SUBJECT) };
+                exif_summary.camera_maker = unsafe { read_string(&store, &PKEY_IMAGE_CAMERAMAKER) };
+                exif_summary.camera_model = unsafe { read_string(&store, &PKEY_IMAGE_CAMERAMODEL) };
+                exif_summary.f_stop = unsafe { read_f_number(&store, &PKEY_IMAGE_FNUMBER) };
+                exif_summary.exposure_time = unsafe { read_exposure_time(&store, &PKEY_IMAGE_EXPOSURETIME) };
+                exif_summary.iso_speed = unsafe { read_u32(&store, &PKEY_IMAGE_ISOSPEED) };
+                exif_summary.focal_length = unsafe { read_focal_length(&store, &PKEY_IMAGE_FOCALLENGTH) };
+                exif_summary.max_aperture = unsafe { read_aperture(&store, &PKEY_IMAGE_MAXAPERTURE) };
+                exif_summary.metering_mode = unsafe { read_metering_mode(&store, &PKEY_IMAGE_METERINGMODE) };
+                exif_summary.flash_mode = unsafe { read_flash_mode(&store, &PKEY_IMAGE_FLASH) };
+                exif_summary.date_taken = unsafe { read_string(&store, &PKEY_IMAGE_DATETAKEN) };
+                exif_summary.subject = unsafe { read_string(&store, &PKEY_IMAGE_SUBJECT) };
             }
         }
     }
 
-    Ok(MediaMetadata {
-        camera_maker,
-        camera_model,
-        f_stop,
-        exposure_time,
-        iso_speed,
-        focal_length,
-        max_aperture,
-        metering_mode,
-        flash_mode,
-        date_taken,
-        subject,
-        ..Default::default()
-    })
+    Ok(exif_summary.into_media_metadata())
 }
 
 // EXIF helper: Convert raw F-number value to f-stop string

@@ -5,7 +5,10 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
+
+const PENDING_REVALIDATION_PRUNE_INTERVAL: Duration = Duration::from_millis(250);
+const PENDING_REVALIDATION_PRUNE_THRESHOLD: usize = 500;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FolderContentSummary {
@@ -98,6 +101,7 @@ pub struct FolderSizeState {
     /// the folder size, causing stale data to be permanently re-cached.
     /// Value = deadline after which the entry should be re-cleared.
     pub pending_revalidation: HashMap<PathBuf, Instant>,
+    pub pending_revalidation_last_prune: Instant,
 
     /// Per-path invalidation counter.  Incremented each time
     /// `invalidate_folder_size_cache(path)` is called.
@@ -131,5 +135,27 @@ impl FolderSizeState {
         // can purge stale values that were re-cached from IPC or in-flight
         // scans that completed before the service updated its index.
         self.batch_cancel.store(false, Ordering::Release);
+    }
+
+    pub fn should_prune_pending_revalidations(&self, now: Instant) -> bool {
+        !self.pending_revalidation.is_empty()
+            && (self.pending_revalidation.len() > PENDING_REVALIDATION_PRUNE_THRESHOLD
+                || now.duration_since(self.pending_revalidation_last_prune)
+                    >= PENDING_REVALIDATION_PRUNE_INTERVAL)
+    }
+
+    pub fn take_expired_revalidations(&mut self, now: Instant) -> Vec<PathBuf> {
+        self.pending_revalidation_last_prune = now;
+
+        let mut expired = Vec::new();
+        self.pending_revalidation.retain(|path, deadline| {
+            let keep = *deadline > now;
+            if !keep {
+                expired.push(path.clone());
+            }
+            keep
+        });
+
+        expired
     }
 }

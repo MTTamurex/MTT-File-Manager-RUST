@@ -3,6 +3,7 @@ use crate::image_viewer::indexer::{self, ImageSequence};
 use crate::image_viewer::loader;
 use eframe::egui;
 use std::collections::HashSet;
+use std::borrow::Cow;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -243,11 +244,11 @@ impl DedicatedImageViewerApp {
         self.sequence.entries.get(self.current_index)
     }
 
-    pub(super) fn current_filename(&self) -> String {
+    pub(super) fn current_filename(&self) -> Cow<'_, str> {
         self.current_path()
             .and_then(|p| p.file_name())
-            .map(|v| v.to_string_lossy().to_string())
-            .unwrap_or_else(|| "<unknown>".to_string())
+            .map(|v| v.to_string_lossy())
+            .unwrap_or_else(|| Cow::Borrowed("<unknown>"))
     }
 
     fn request_job_if_needed(&mut self, index: usize, priority: LoadPriority) {

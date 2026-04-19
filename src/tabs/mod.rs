@@ -11,8 +11,15 @@ use crate::domain::file_entry::{FileEntry, FoldersPosition, SortMode, ViewMode};
 use crate::domain::special_paths::{COMPUTER_VIEW_ID, RECYCLE_BIN_VIEW_ID};
 use rustc_hash::FxHashSet;
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+
+fn tab_title_for_path(path: &str) -> String {
+    Path::new(path)
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.to_string())
+}
 
 /// Represents a single browser tab
 #[derive(Clone)]
@@ -115,10 +122,7 @@ impl TabState {
 
     /// Create a new tab at a specific path
     pub fn new_at_path(id: usize, path: &str) -> Self {
-        let title = PathBuf::from(path)
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| path.to_string());
+        let title = tab_title_for_path(path);
 
         Self {
             id,
@@ -173,10 +177,7 @@ impl TabState {
         if self.is_computer_view {
             self.title = COMPUTER_VIEW_ID.to_string();
         } else {
-            self.title = PathBuf::from(new_path)
-                .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_else(|| new_path.to_string());
+            self.title = tab_title_for_path(new_path);
         }
     }
 
@@ -212,10 +213,7 @@ impl TabState {
             if self.is_computer_view {
                 self.title = COMPUTER_VIEW_ID.to_string();
             } else {
-                self.title = PathBuf::from(path)
-                    .file_name()
-                    .map(|n| n.to_string_lossy().to_string())
-                    .unwrap_or_else(|| path.clone());
+                self.title = tab_title_for_path(path);
             }
         }
     }

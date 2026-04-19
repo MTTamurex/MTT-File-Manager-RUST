@@ -300,7 +300,9 @@ impl ImageViewerApp {
         }
 
         // If we're at the root of a drive (C:\, D:\), going up navigates to "This PC"
-        let parent = std::path::Path::new(&self.navigation_state.current_path).parent();
+        let parent = std::path::Path::new(&self.navigation_state.current_path)
+            .parent()
+            .map(std::path::Path::to_path_buf);
         if parent.is_none() {
             self.navigate_to_computer();
             return;
@@ -310,7 +312,8 @@ impl ImageViewerApp {
             if parent_path.as_os_str().is_empty() {
                 self.navigate_to_computer();
             } else {
-                self.navigate_to(parent_path.to_string_lossy().to_string().as_str());
+                let target = parent_path.to_string_lossy();
+                self.navigate_to(target.as_ref());
             }
         } else {
             self.navigate_to_computer();
@@ -348,8 +351,8 @@ impl ImageViewerApp {
         if let Some(parent) = current.as_path().parent() {
             if !parent.as_os_str().is_empty() {
                 log::info!("[NAV] Navigating to parent: {:?} (no blocking I/O check)", parent);
-                let target = parent.to_string_lossy().to_string();
-                self.navigate_to(&target);
+                let target = parent.to_string_lossy();
+                self.navigate_to(target.as_ref());
                 return;
             }
         }

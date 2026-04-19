@@ -120,6 +120,7 @@ pub(in crate::app) fn build_folder_size_state(
             NonZeroUsize::new(2000).expect("folder_size_batch cache size must be non-zero"),
         ),
         pending_revalidation: std::collections::HashMap::new(),
+        pending_revalidation_last_prune: std::time::Instant::now(),
         batch_invalidation_epoch: std::collections::HashMap::new(),
     }
 }

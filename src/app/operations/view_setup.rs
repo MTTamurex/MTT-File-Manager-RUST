@@ -389,8 +389,8 @@ impl ImageViewerApp {
 
             // Update all_items with the received drive info
             for item in self.all_items.iter_mut() {
-                let item_path = item.path.to_string_lossy().to_string();
-                if let Some((_, info)) = results.iter().find(|(p, _)| *p == item_path) {
+                let item_path = item.path.to_string_lossy();
+                if let Some((_, info)) = results.iter().find(|(p, _)| p == item_path.as_ref()) {
                     item.drive_info = Some(info.clone());
                 }
             }

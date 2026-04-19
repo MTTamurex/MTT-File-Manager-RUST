@@ -5,9 +5,11 @@ use eframe::egui;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc};
+use std::time::{Duration, Instant};
 
 const NTFS_FOLDER_SIZE_SERVICE_RETRY_ATTEMPTS: usize = 20;
-const NTFS_FOLDER_SIZE_SERVICE_RETRY_MS: u64 = 250;
+const NTFS_FOLDER_SIZE_SERVICE_INITIAL_RETRY_DELAY: Duration = Duration::from_millis(50);
+const NTFS_FOLDER_SIZE_SERVICE_MAX_RETRY_DELAY: Duration = Duration::from_secs(2);
 /// Overall deadline for the retry loop to prevent blocking for minutes
 /// on persistent transient failures (20 attempts × 8s timeout = ~160s worst case).
 const NTFS_FOLDER_SIZE_SERVICE_DEADLINE_SECS: u64 = 30;
@@ -44,14 +46,14 @@ fn query_ntfs_folder_size_with_retry(
     cancel: &Arc<AtomicBool>,
 ) -> Result<(u64, u64, u64), String> {
     let mut last_error = String::from("Search service not available");
-    let deadline = std::time::Instant::now()
-        + std::time::Duration::from_secs(NTFS_FOLDER_SIZE_SERVICE_DEADLINE_SECS);
+    let deadline = Instant::now() + Duration::from_secs(NTFS_FOLDER_SIZE_SERVICE_DEADLINE_SECS);
+    let mut retry_delay = NTFS_FOLDER_SIZE_SERVICE_INITIAL_RETRY_DELAY;
 
     for attempt in 0..NTFS_FOLDER_SIZE_SERVICE_RETRY_ATTEMPTS {
         if cancel.load(Ordering::Acquire) {
             return Err("cancelled".to_string());
         }
-        if std::time::Instant::now() >= deadline {
+        if Instant::now() >= deadline {
             break;
         }
 
@@ -65,14 +67,18 @@ fn query_ntfs_folder_size_with_retry(
                 }
 
                 // Sleep in small steps to remain responsive to cancel.
-                let sleep_end = std::time::Instant::now()
-                    + std::time::Duration::from_millis(NTFS_FOLDER_SIZE_SERVICE_RETRY_MS);
-                while std::time::Instant::now() < sleep_end {
+                let sleep_end = Instant::now() + retry_delay;
+                while Instant::now() < sleep_end {
                     if cancel.load(Ordering::Acquire) {
                         return Err("cancelled".to_string());
                     }
-                    std::thread::sleep(std::time::Duration::from_millis(50));
+                    let remaining = sleep_end.saturating_duration_since(Instant::now());
+                    std::thread::sleep(remaining.min(Duration::from_millis(50)));
                 }
+                retry_delay = retry_delay
+                    .checked_mul(2)
+                    .unwrap_or(NTFS_FOLDER_SIZE_SERVICE_MAX_RETRY_DELAY)
+                    .min(NTFS_FOLDER_SIZE_SERVICE_MAX_RETRY_DELAY);
             }
         }
     }

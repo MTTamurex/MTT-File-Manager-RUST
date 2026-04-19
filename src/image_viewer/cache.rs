@@ -88,20 +88,15 @@ impl WindowCache {
 
     /// Evicts entries from the furthest indices until under budget.
     pub fn evict_over_budget(&mut self, center: usize) {
-        if self.total_bytes <= MAX_CACHE_BYTES {
-            return;
-        }
-
-        let mut indices: Vec<usize> = self.items.keys().copied().collect();
-        indices.sort_by(|a, b| b.abs_diff(center).cmp(&a.abs_diff(center)));
-
-        for idx in indices {
-            if self.total_bytes <= MAX_CACHE_BYTES {
+        while self.total_bytes > MAX_CACHE_BYTES {
+            let Some(&idx) = self.items.keys().max_by_key(|&&k| k.abs_diff(center)) else {
                 break;
-            }
+            };
 
             if let Some(frame) = self.items.remove(&idx) {
                 self.total_bytes = self.total_bytes.saturating_sub(frame.rgba.len());
+            } else {
+                break;
             }
         }
     }

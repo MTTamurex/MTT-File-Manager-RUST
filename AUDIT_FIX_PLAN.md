@@ -16,10 +16,10 @@
 
 ## Status Atual
 
-- **Implementado neste ciclo:** `F0.1`, `F0.2`, `F0.3`, `F1.1`, `F1.2`, `F1.3`, `F1.4`, `F1.6`, `F2.2`, `F2.3`, `F2.4`, `F2.5`, `F2.6`, `F3.1`, `F3.2`, `F3.3`, `F4.1`, `F4.2`, `F4.3`, `F4.4`, `F4.5`, `F4.6`, `F4.7`.
+- **Implementado neste ciclo:** `F0.1`, `F0.2`, `F0.3`, `F1.1`, `F1.2`, `F1.3`, `F1.4`, `F1.6`, `F2.2`, `F2.3`, `F2.4`, `F2.5`, `F2.6`, `F3.1`, `F3.2`, `F3.3`, `F4.1`, `F4.2`, `F4.3`, `F4.4`, `F4.5`, `F4.6`, `F4.7`, `F5.1`, `F5.3`, `F5.6`, `F5.7`, `F5.8`, `F5.9`.
 - **Ja estava implementado no codigo:** `F2.1`.
 - **Reclassificado:** `F1.5` (a ocorrencia auditada esta em codigo de teste, nao no fluxo de runtime da aplicacao).
-- **Proximo lote recomendado:** `F5.1`, `F5.8`, `F5.7`.
+- **Proximo lote recomendado:** `F5.2`, `F5.5`, `F5.4`.
 
 ---
 
@@ -622,7 +622,7 @@ match std::thread::Builder::new().name("...".into()).spawn(move || {
 
 ## Fase 5 — Performance
 
-### F5.1 — P1: Passar `file_size` para `merge_video_metadata`
+### F5.1 — P1: Passar `file_size` para `merge_video_metadata` [IMPLEMENTADO]
 **Arquivo:** `src/infrastructure/windows/metadata/video.rs` (linhas ~209-280)
 **Passos:**
 1. Adicionar parâmetro:
@@ -659,7 +659,7 @@ match std::thread::Builder::new().name("...".into()).spawn(move || {
 
 ---
 
-### F5.3 — P3: Evicção O(log n) no cache de imagens
+### F5.3 — P3: Evicção O(log n) no cache de imagens [IMPLEMENTADO]
 **Arquivo:** `src/image_viewer/cache.rs` (linhas ~57-73)
 **Passos:**
 1. Substituir `collect + sort` por:
@@ -700,7 +700,7 @@ match std::thread::Builder::new().name("...".into()).spawn(move || {
 
 ---
 
-### F5.6 — P6: EXIF parsing em um único pass
+### F5.6 — P6: EXIF parsing em um único pass [IMPLEMENTADO]
 **Arquivo:** `src/infrastructure/windows/metadata/image.rs` (linhas ~32-68)
 **Passos:**
 1. Criar struct `ExifSummary { make, model, datetime, gps, ... }`.
@@ -711,7 +711,7 @@ match std::thread::Builder::new().name("...".into()).spawn(move || {
 
 ---
 
-### F5.7 — P7: Backoff exponencial nos retries
+### F5.7 — P7: Backoff exponencial nos retries [IMPLEMENTADO]
 **Arquivos:**
 - `src/app/init_workers/filesystem_workers.rs` (linha ~74)
 - `src/image_viewer/ipc.rs` (linhas ~26, ~65)
@@ -732,7 +732,7 @@ match std::thread::Builder::new().name("...".into()).spawn(move || {
 
 ---
 
-### F5.8 — P8: Prune de `pending_revalidation`
+### F5.8 — P8: Prune de `pending_revalidation` [IMPLEMENTADO]
 **Arquivo:** `src/app/folder_size_state.rs` (linhas ~96-107)
 **Passos:**
 1. Adicionar método:
@@ -748,7 +748,7 @@ match std::thread::Builder::new().name("...".into()).spawn(move || {
 
 ---
 
-### F5.9 — P9: Invalidação de prefixo no `DirectoryCache`
+### F5.9 — P9: Invalidação de prefixo no `DirectoryCache` [IMPLEMENTADO]
 **Arquivo:** `src/infrastructure/directory_cache.rs` (linhas ~87-99)
 **Passos:**
 1. Substituir estrutura por `BTreeMap<PathBuf, CachedFolder>` OU manter LRU mas acrescentar índice auxiliar ordenado.
@@ -893,7 +893,7 @@ rg -n "Result<.*, String>" src/infrastructure/ src/application/
 | 3 | 2 | F2.4, F2.2, F2.5, F2.3 | Concluida (`F2.1` ja implementado, `F2.6` concluido) |
 | 4 | 3 | F3.2, F3.3 | Concluida (`F3.1` concluido) |
 | 5 | 4 | F4.5, F4.6, F4.7 | Concluida (`F4.1`, `F4.2`, `F4.3` e `F4.4` concluidos anteriormente) |
-| 6 | 5 | F5.1, F5.8, F5.7, F5.3, F5.6, F5.2, F5.9, F5.5, F5.4 | Performance, alto ROI primeiro |
+| 6 | 5 | F5.2, F5.5, F5.4 | Performance restante, alto ROI primeiro (`F5.1`, `F5.3`, `F5.6`, `F5.7`, `F5.8` e `F5.9` concluidos) |
 | 7 | 6 | F6.1, F6.6, F6.5, F6.2, F6.3, F6.4 | Arquitetura por último |
 | 8 | 7 | F7.1–F7.3 | Verificação |
 
