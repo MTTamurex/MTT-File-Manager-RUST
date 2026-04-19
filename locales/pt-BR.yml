@@ -50,6 +50,7 @@ status_bar:
   hidden_hide: "Esconder itens ocultos"
   hidden_show: "Exibir itens ocultos"
   settings: "Abrir configurações do aplicativo"
+  thumbnail_size: "Tamanho da miniatura"
   vdrive_settings: "Configurar otimização de drives virtuais"
   bulk_thumbnails: "Gerar thumbnails para todas as subpastas"
   bulk_thumbnails_extracting: "Extraindo thumbnails"
@@ -342,7 +343,6 @@ secondary_toolbar:
   list: "Lista"
   grid: "Grade"
   global_search: "Busca global no computador (Ctrl+Shift+F)"
-  zoom: "Zoom"
 drag_drop:
   copy: "Copiar"
   move: "Mover"

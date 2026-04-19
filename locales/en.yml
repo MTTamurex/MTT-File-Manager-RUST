@@ -50,6 +50,7 @@ status_bar:
   hidden_hide: "Hide hidden items"
   hidden_show: "Show hidden items"
   settings: "Open application settings"
+  thumbnail_size: "Thumbnail size"
   vdrive_settings: "Configure virtual drive optimization"
   bulk_thumbnails: "Generate thumbnails for all subfolders"
   bulk_thumbnails_extracting: "Extracting thumbnails"
@@ -342,7 +343,6 @@ secondary_toolbar:
   list: "List"
   grid: "Grid"
   global_search: "Global search on this computer (Ctrl+Shift+F)"
-  zoom: "Zoom"
 drag_drop:
   copy: "Copy"
   move: "Move"

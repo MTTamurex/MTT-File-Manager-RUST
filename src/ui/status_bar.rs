@@ -4,6 +4,7 @@
 //! Low-level thread/resource monitoring stays in the background, but those
 //! process metrics are intentionally not exposed in the UI.
 
+use crate::domain::file_entry::ViewMode;
 use crate::ui::svg_icons::SvgIconManager;
 use crate::ui::theme;
 use crate::ui::widgets;
@@ -227,27 +228,6 @@ pub enum StatusBarAction {
     None,
 }
 
-fn get_status_bar_app_icon(ctx: &egui::Context) -> Option<egui::TextureHandle> {
-    let cache_id = egui::Id::new("status_bar_app_icon");
-
-    if let Some(texture) = ctx.data(|data| data.get_temp::<egui::TextureHandle>(cache_id)) {
-        return Some(texture);
-    }
-
-    let image = image::load_from_memory(crate::embedded_assets::APP_ICON_PNG).ok()?;
-    let rgba = image.to_rgba8();
-    let size = [rgba.width() as usize, rgba.height() as usize];
-    let color_image = egui::ColorImage::from_rgba_unmultiplied(size, rgba.as_raw());
-    let texture = ctx.load_texture(
-        "status_bar_app_icon",
-        color_image,
-        egui::TextureOptions::LINEAR,
-    );
-
-    ctx.data_mut(|data| data.insert_temp(cache_id, texture.clone()));
-    Some(texture)
-}
-
 /// Renders the application status bar.
 /// Returns an action that needs to be handled by the caller.
 #[allow(clippy::too_many_arguments)]
@@ -260,6 +240,8 @@ pub fn render_status_bar(
     is_recycle_bin_view: bool,
     bulk_scan_active: bool,
     show_hidden_files: &mut bool,
+    view_mode: ViewMode,
+    thumbnail_size: &mut f32,
     video_preview_active: bool,
 ) -> StatusBarAction {
     let mut action = StatusBarAction::None;
@@ -392,16 +374,74 @@ pub fn render_status_bar(
                 egui::Frame::NONE
                     .inner_margin(egui::Margin { left: 0, right: 0, top: 0, bottom: 2 })
                     .show(ui, |ui| {
-                        let icon_size = ui.text_style_height(&egui::TextStyle::Body).round().max(1.0);
                         ui.spacing_mut().item_spacing.x = 4.0;
-                        if let Some(app_icon) = get_status_bar_app_icon(ui.ctx()) {
-                            ui.add(
-                                egui::Image::new(&app_icon)
-                                    .fit_to_exact_size(egui::vec2(icon_size, icon_size)),
-                            );
-                        }
+                        ui.scope(|ui| {
+                            let is_dark = ui.visuals().dark_mode;
+                            let slider_track = if is_dark {
+                                egui::Color32::from_gray(78)
+                            } else {
+                                egui::Color32::from_gray(228)
+                            };
+                            let slider_track_stroke = if is_dark {
+                                egui::Stroke::new(1.0, egui::Color32::from_gray(98))
+                            } else {
+                                egui::Stroke::new(1.0, egui::Color32::from_gray(214))
+                            };
+                            let slider_fill = if is_dark {
+                                egui::Color32::from_rgb(36, 170, 231)
+                            } else {
+                                egui::Color32::from_rgb(33, 176, 236)
+                            };
+                            let slider_knob = if is_dark {
+                                egui::Color32::from_gray(220)
+                            } else {
+                                egui::Color32::from_gray(224)
+                            };
+                            let slider_knob_stroke = if is_dark {
+                                egui::Stroke::new(1.0, egui::Color32::from_gray(150))
+                            } else {
+                                egui::Stroke::new(1.0, egui::Color32::from_gray(190))
+                            };
+                            let slider_knob_hover = if is_dark {
+                                egui::Color32::from_gray(232)
+                            } else {
+                                egui::Color32::from_gray(234)
+                            };
 
-                        ui.label("MTT File Manager");
+                            ui.visuals_mut().selection.bg_fill = slider_fill;
+
+                            ui.visuals_mut().widgets.noninteractive.bg_fill = slider_track;
+                            ui.visuals_mut().widgets.noninteractive.weak_bg_fill = slider_track;
+                            ui.visuals_mut().widgets.noninteractive.fg_stroke = slider_knob_stroke;
+                            ui.visuals_mut().widgets.noninteractive.bg_stroke = slider_track_stroke;
+
+                            ui.visuals_mut().widgets.inactive.bg_fill = slider_track;
+                            ui.visuals_mut().widgets.inactive.weak_bg_fill = slider_track;
+                            ui.visuals_mut().widgets.inactive.fg_stroke = slider_knob_stroke;
+                            ui.visuals_mut().widgets.inactive.bg_stroke = slider_track_stroke;
+
+                            ui.visuals_mut().widgets.hovered.bg_fill = slider_knob_hover;
+                            ui.visuals_mut().widgets.hovered.weak_bg_fill = slider_track;
+                            ui.visuals_mut().widgets.hovered.fg_stroke = slider_knob_stroke;
+                            ui.visuals_mut().widgets.hovered.bg_stroke = slider_track_stroke;
+
+                            ui.visuals_mut().widgets.active.bg_fill = slider_knob;
+                            ui.visuals_mut().widgets.active.weak_bg_fill = slider_track;
+                            ui.visuals_mut().widgets.active.fg_stroke = slider_knob_stroke;
+                            ui.visuals_mut().widgets.active.bg_stroke = slider_track_stroke;
+
+                            if matches!(view_mode, ViewMode::List) {
+                                ui.disable();
+                            }
+
+                            ui.label(t!("status_bar.thumbnail_size").to_string());
+                            ui.spacing_mut().slider_width = 56.0;
+                            ui.spacing_mut().interact_size.y = 14.0;
+                            ui.add(
+                                egui::Slider::new(thumbnail_size, theme::THUMBNAIL_MIN..=256.0)
+                                    .show_value(false),
+                            );
+                        });
                     });
             });
         });
