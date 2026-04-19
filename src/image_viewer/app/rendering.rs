@@ -46,7 +46,8 @@ impl super::DedicatedImageViewerApp {
                     ui.label(format!("{} / {}", self.current_index + 1, total));
                 }
                 ui.separator();
-                ui.label(self.current_filename());
+                let current_filename = self.current_filename();
+                ui.label(current_filename.as_ref());
                 if let Some(path) = self.current_path() {
                     ui.small(path.to_string_lossy());
                 }
@@ -62,7 +63,8 @@ impl super::DedicatedImageViewerApp {
         let title = if self.sequence.entries.is_empty() {
             t!("imageviewer.title").to_string()
         } else {
-            t!("imageviewer.title_with_file", name = self.current_filename()).to_string()
+            let current_filename = self.current_filename();
+            t!("imageviewer.title_with_file", name = current_filename.as_ref()).to_string()
         };
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
     }

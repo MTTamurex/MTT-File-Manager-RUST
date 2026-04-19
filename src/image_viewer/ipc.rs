@@ -23,7 +23,8 @@ const PIPE_BUFFER_SIZE: u32 = 32 * 1024;
 const MAX_PIPE_INSTANCES: u32 = 4;
 const MAX_MESSAGE_BYTES: usize = 32 * 1024;
 const CLIENT_RETRY_COUNT: usize = 8;
-const CLIENT_RETRY_DELAY: Duration = Duration::from_millis(60);
+const CLIENT_INITIAL_RETRY_DELAY: Duration = Duration::from_millis(20);
+const CLIENT_MAX_RETRY_DELAY: Duration = Duration::from_millis(500);
 const ERROR_PIPE_CONNECTED_CODE: u32 = 535;
 
 pub fn send_open_request(path: &Path) -> Result<bool, String> {
@@ -39,6 +40,7 @@ pub fn send_open_request(path: &Path) -> Result<bool, String> {
         .encode_utf16()
         .chain(std::iter::once(0))
         .collect();
+    let mut retry_delay = CLIENT_INITIAL_RETRY_DELAY;
 
     for attempt in 0..CLIENT_RETRY_COUNT {
         unsafe {
@@ -62,7 +64,11 @@ pub fn send_open_request(path: &Path) -> Result<bool, String> {
                         || code == ERROR_PIPE_BUSY.to_hresult()
                     {
                         if attempt + 1 < CLIENT_RETRY_COUNT {
-                            std::thread::sleep(CLIENT_RETRY_DELAY);
+                            std::thread::sleep(retry_delay);
+                            retry_delay = retry_delay
+                                .checked_mul(2)
+                                .unwrap_or(CLIENT_MAX_RETRY_DELAY)
+                                .min(CLIENT_MAX_RETRY_DELAY);
                             continue;
                         }
                         return Ok(false);

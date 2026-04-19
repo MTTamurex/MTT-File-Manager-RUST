@@ -48,12 +48,12 @@ pub(super) fn activate_search_result(app: &mut ImageViewerApp, full_path: &str, 
         app.navigate_to(full_path);
         return;
     };
-    let parent_path = parent.to_string_lossy().to_string();
+    let parent_path = parent.to_string_lossy();
 
     app.pending_select_path = Some(full_path_buf.clone());
 
     let current_norm = normalize_path_for_compare(&app.navigation_state.current_path);
-    let destination_norm = normalize_path_for_compare(&parent_path);
+    let destination_norm = normalize_path_for_compare(parent_path.as_ref());
 
     if current_norm == destination_norm {
         if app.select_item_by_path(&full_path_buf) {
@@ -63,7 +63,7 @@ pub(super) fn activate_search_result(app: &mut ImageViewerApp, full_path: &str, 
             app.load_folder(false);
         }
     } else {
-        app.navigate_to(&parent_path);
+        app.navigate_to(parent_path.as_ref());
     }
 }
 

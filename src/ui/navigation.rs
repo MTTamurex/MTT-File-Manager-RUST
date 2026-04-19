@@ -144,9 +144,9 @@ pub mod helpers {
     /// Goes up one level (adds to history)
     pub fn go_up_one_level_impl(current_path: &str, navigate_to: &mut dyn FnMut(&str)) -> bool {
         if let Some(parent) = Path::new(current_path).parent() {
-            let parent_str = parent.to_string_lossy().to_string();
+            let parent_str = parent.to_string_lossy();
             if !parent_str.is_empty() {
-                navigate_to(&parent_str);
+                navigate_to(parent_str.as_ref());
                 return true;
             }
         }

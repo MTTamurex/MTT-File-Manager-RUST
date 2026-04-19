@@ -153,10 +153,10 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                     if let Some(path) = context_menu.target_paths.first().cloned() {
                         if crate::infrastructure::windows::is_drive_root_path(&path) {
                             // Inline rename in sidebar — don't navigate to Este Computador
-                            let drive_path_str = path.to_string_lossy().to_string();
-                            let current_label = crate::infrastructure::windows::get_volume_label_raw(&drive_path_str)
+                            let drive_path_str = path.to_string_lossy();
+                            let current_label = crate::infrastructure::windows::get_volume_label_raw(drive_path_str.as_ref())
                                 .unwrap_or_default();
-                            app.sidebar_renaming = Some((drive_path_str, current_label));
+                            app.sidebar_renaming = Some((drive_path_str.into_owned(), current_label));
                             app.sidebar_rename_focus = true;
                         } else {
                             app.begin_rename_path(&path);
@@ -173,7 +173,8 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 -20 => {
                     if let Some(path) = app.context_target_paths(item_idx).first().cloned() {
                         if app.context_target_is_directory(item_idx, &path) {
-                            app.navigate_to(&path.to_string_lossy());
+                            let target = path.to_string_lossy();
+                            app.navigate_to(target.as_ref());
                         } else {
                             app.open_with_shell_guarded(&path);
                         }
@@ -194,7 +195,8 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                         let prev_sort_descending = app.sort_descending;
                         let prev_folders_position = app.folders_position;
                         app.sync_to_tab();
-                        app.tab_manager.new_tab_at(&target.to_string_lossy());
+                        let target_str = target.to_string_lossy();
+                        app.tab_manager.new_tab_at(target_str.as_ref());
                         let active = app.tab_manager.active_mut();
                         active.view_mode = prev_view_mode;
                         active.sort_mode = prev_sort_mode;
