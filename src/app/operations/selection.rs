@@ -118,6 +118,58 @@ impl ImageViewerApp {
         self.update_video_visibility();
     }
 
+    fn selected_standalone_media_path(&self) -> Option<std::path::PathBuf> {
+        let selected = self.selected_file.as_ref()?;
+        if selected.is_dir {
+            return None;
+        }
+
+        let ext = selected
+            .path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_owned();
+
+        let is_video = crate::infrastructure::windows::is_video_extension(&ext);
+        let is_audio = crate::infrastructure::windows::is_audio_extension(&ext);
+        if !is_video && !is_audio {
+            return None;
+        }
+
+        let path = selected.path.clone();
+        if crate::domain::file_entry::is_path_inside_archive(&path) {
+            return None;
+        }
+
+        Some(path)
+    }
+
+    pub(crate) fn should_show_secondary_toolbar_media_play_button(&self) -> bool {
+        self.selected_standalone_media_path().is_some()
+    }
+
+    pub fn open_selected_media_in_standalone_player(&mut self) -> bool {
+        use crate::ui::components::media_preview::MediaPreview;
+
+        let Some(path) = self.selected_standalone_media_path() else {
+            return false;
+        };
+
+        self.kill_video_player_process();
+
+        if matches!(self.media_preview.as_ref(), Some(MediaPreview::Video(_))) {
+            self.destroy_media_preview();
+        }
+
+        if let Some(child) = crate::video_player::open_video_player(path, 0.0, self.session_volume) {
+            self.video_player_process = Some(child);
+            true
+        } else {
+            false
+        }
+    }
+
     fn selected_preview_overlay_action(&self) -> SelectedPreviewOverlayAction {
         let Some(selected) = self.selected_file.as_ref() else {
             return SelectedPreviewOverlayAction::None;

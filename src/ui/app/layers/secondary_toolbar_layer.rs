@@ -73,11 +73,14 @@ pub(crate) fn render_secondary_toolbar_layer(app: &mut ImageViewerApp, ctx: &egu
                 } else {
                     6.0
                 };
-                let separator_count = 4.0;
-                let total_item_count = action_button_count + 11.0;
+                let show_media_play_button = app.should_show_secondary_toolbar_media_play_button();
+                let separator_count = if show_media_play_button { 5.0 } else { 4.0 };
+                let total_item_count = action_button_count
+                    + if show_media_play_button { 13.0 } else { 11.0 };
                 let gap_count = total_item_count - 1.0;
                 // Includes action buttons, sort controls, folder-position toggle,
-                // lock, view buttons, and the global-search button.
+                // lock, view buttons, the global-search button, and an optional
+                // standalone media-player button for selected audio/video files.
                 let content_width = action_button_count * 28.0
                     + 30.0
                     + 110.0
@@ -85,6 +88,7 @@ pub(crate) fn render_secondary_toolbar_layer(app: &mut ImageViewerApp, ctx: &egu
                     + 28.0
                     + 2.0 * 28.0
                     + 28.0
+                    + if show_media_play_button { 28.0 } else { 0.0 }
                     + separator_count * 8.0
                     + gap_count * 12.0;
                 let reserved_left_width = toggle_button_width + toggle_gap;

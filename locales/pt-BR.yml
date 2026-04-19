@@ -343,6 +343,7 @@ secondary_toolbar:
   list: "Lista"
   grid: "Grade"
   global_search: "Busca global no computador (Ctrl+Shift+F)"
+  open_selected_media_window: "Abrir a mídia selecionada no player em janela"
 drag_drop:
   copy: "Copiar"
   move: "Mover"
