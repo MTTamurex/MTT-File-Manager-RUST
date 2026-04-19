@@ -1,9 +1,9 @@
 use crate::app::ImageViewerApp;
 use crate::app::shortcuts::{ShortcutAction, ShortcutBinding};
 use crate::domain::file_entry::ViewMode;
+use crate::infrastructure::windows::is_virtual_key_down;
 use crate::workers::idle_warmup::IdleWarmupMessage;
 use eframe::egui;
-use windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
 
 fn handle_preview_shortcut_action(app: &mut ImageViewerApp, ctx: &egui::Context) -> bool {
     // Ignore while typing/editing any text input context
@@ -79,8 +79,8 @@ fn handle_paste_shortcut(
             return false;
         }
 
-        let ctrl_down = unsafe { GetAsyncKeyState(0x11) < 0 };
-        let v_down = unsafe { GetAsyncKeyState(0x56) < 0 };
+        let ctrl_down = is_virtual_key_down(0x11);
+        let v_down = is_virtual_key_down(0x56);
 
         if ctrl_down && v_down && !app.paste_key_debounce && !text_input_active {
             app.paste_key_debounce = true;
@@ -110,8 +110,8 @@ fn handle_delete_permanently_shortcut(
             return false;
         }
 
-        let shift_down = unsafe { GetAsyncKeyState(0x10) < 0 };
-        let del_down = unsafe { GetAsyncKeyState(0x2E) < 0 };
+        let shift_down = is_virtual_key_down(0x10);
+        let del_down = is_virtual_key_down(0x2E);
 
         if shift_down && del_down && !app.delete_key_debounce && !text_input_active {
             app.delete_key_debounce = true;
@@ -373,98 +373,96 @@ fn handle_media_hardware_input(app: &mut ImageViewerApp, ctx: &egui::Context) ->
 
     let mut consumed = false;
     let mut new_session_vol: Option<f32> = None;
-    unsafe {
-        // VK_SPACE = 0x20, VK_UP = 0x26, VK_DOWN = 0x28, VK_RIGHT = 0x27, VK_LEFT = 0x25
-        // VK_CTRL = 0x11, VK_SHIFT = 0x10, VK_U = 0x55, VK_A = 0x41
-        let ctrl_down = (GetAsyncKeyState(0x11) as u16 & 0x8000) != 0;
-        let shift_down = (GetAsyncKeyState(0x10) as u16 & 0x8000) != 0;
-        let u_down = (GetAsyncKeyState(0x55) as u16 & 0x8000) != 0;
-        let a_down = (GetAsyncKeyState(0x41) as u16 & 0x8000) != 0;
+    // VK_SPACE = 0x20, VK_UP = 0x26, VK_DOWN = 0x28, VK_RIGHT = 0x27, VK_LEFT = 0x25
+    // VK_CTRL = 0x11, VK_SHIFT = 0x10, VK_U = 0x55, VK_A = 0x41
+    let ctrl_down = is_virtual_key_down(0x11);
+    let shift_down = is_virtual_key_down(0x10);
+    let u_down = is_virtual_key_down(0x55);
+    let a_down = is_virtual_key_down(0x41);
 
-        if ctrl_down && shift_down && u_down {
-            match preview.toggle_vsr() {
-                Ok(_) => {
-                    let vsr_on = preview.is_vsr_enabled();
-                    let msg = if vsr_on {
-                        "NVIDIA VSR: ON"
-                    } else {
-                        "NVIDIA VSR: OFF"
-                    };
-                    preview.show_osd(msg, 2000);
-                    consumed = true;
-                }
-                Err(e) => {
-                    log::error!("toggling VSR (Ctrl+Shift+U): {}", e);
-                }
+    if ctrl_down && shift_down && u_down {
+        match preview.toggle_vsr() {
+            Ok(_) => {
+                let vsr_on = preview.is_vsr_enabled();
+                let msg = if vsr_on {
+                    "NVIDIA VSR: ON"
+                } else {
+                    "NVIDIA VSR: OFF"
+                };
+                preview.show_osd(msg, 2000);
+                consumed = true;
             }
-        } else if ctrl_down && shift_down && a_down {
-            preview.toggle_audio_normalizer();
-            let normalizer_on = preview.is_audio_normalizer_enabled();
-            let msg = if normalizer_on {
-                "Audio Normalizer: ON"
-            } else {
-                "Audio Normalizer: OFF"
-            };
-            preview.show_osd(msg, 2000);
-            consumed = true;
-        } else if (GetAsyncKeyState(0x20) as u16 & 0x8000) != 0 {
-            preview.toggle_play();
-            consumed = true;
-        } else if (GetAsyncKeyState(0x26) as u16 & 0x8000) != 0 {
-            let vol = preview.get_video_state().map(|s| s.volume).unwrap_or(1.0);
-            let new_vol = (vol + 0.05).min(1.0);
-            preview.set_volume(new_vol);
-            new_session_vol = Some(new_vol);
-            let msg = format!("Volume: {}%", (new_vol * 100.0).round() as i32);
-            preview.show_osd(&msg, 2000);
-            consumed = true;
-        } else if (GetAsyncKeyState(0x28) as u16 & 0x8000) != 0 {
-            let vol = preview.get_video_state().map(|s| s.volume).unwrap_or(1.0);
-            let new_vol = (vol - 0.05).max(0.0);
-            preview.set_volume(new_vol);
-            new_session_vol = Some(new_vol);
-            let msg = format!("Volume: {}%", (new_vol * 100.0).round() as i32);
-            preview.show_osd(&msg, 2000);
-            consumed = true;
-        } else if (GetAsyncKeyState(0x27) as u16 & 0x8000) != 0 {
-            let state = preview.get_video_state();
-            let current = state.as_ref().map(|s| s.current_time).unwrap_or(0.0);
-            let duration = state.as_ref().map(|s| s.duration).unwrap_or(0.0);
-            preview.seek_relative(5.0);
-            let new_time = if duration > 0.0 {
-                (current + 5.0).min(duration)
-            } else {
-                current + 5.0
-            };
-            let msg = if duration > 0.0 {
-                format!(
-                    "{} / {}",
-                    crate::ui::components::media_preview::format_time(new_time),
-                    crate::ui::components::media_preview::format_time(duration)
-                )
-            } else {
-                crate::ui::components::media_preview::format_time(new_time)
-            };
-            preview.show_osd(&msg, 2000);
-            consumed = true;
-        } else if (GetAsyncKeyState(0x25) as u16 & 0x8000) != 0 {
-            let state = preview.get_video_state();
-            let current = state.as_ref().map(|s| s.current_time).unwrap_or(0.0);
-            let duration = state.as_ref().map(|s| s.duration).unwrap_or(0.0);
-            preview.seek_relative(-5.0);
-            let new_time = (current - 5.0).max(0.0);
-            let msg = if duration > 0.0 {
-                format!(
-                    "{} / {}",
-                    crate::ui::components::media_preview::format_time(new_time),
-                    crate::ui::components::media_preview::format_time(duration)
-                )
-            } else {
-                crate::ui::components::media_preview::format_time(new_time)
-            };
-            preview.show_osd(&msg, 2000);
-            consumed = true;
+            Err(e) => {
+                log::error!("toggling VSR (Ctrl+Shift+U): {}", e);
+            }
         }
+    } else if ctrl_down && shift_down && a_down {
+        preview.toggle_audio_normalizer();
+        let normalizer_on = preview.is_audio_normalizer_enabled();
+        let msg = if normalizer_on {
+            "Audio Normalizer: ON"
+        } else {
+            "Audio Normalizer: OFF"
+        };
+        preview.show_osd(msg, 2000);
+        consumed = true;
+    } else if is_virtual_key_down(0x20) {
+        preview.toggle_play();
+        consumed = true;
+    } else if is_virtual_key_down(0x26) {
+        let vol = preview.get_video_state().map(|s| s.volume).unwrap_or(1.0);
+        let new_vol = (vol + 0.05).min(1.0);
+        preview.set_volume(new_vol);
+        new_session_vol = Some(new_vol);
+        let msg = format!("Volume: {}%", (new_vol * 100.0).round() as i32);
+        preview.show_osd(&msg, 2000);
+        consumed = true;
+    } else if is_virtual_key_down(0x28) {
+        let vol = preview.get_video_state().map(|s| s.volume).unwrap_or(1.0);
+        let new_vol = (vol - 0.05).max(0.0);
+        preview.set_volume(new_vol);
+        new_session_vol = Some(new_vol);
+        let msg = format!("Volume: {}%", (new_vol * 100.0).round() as i32);
+        preview.show_osd(&msg, 2000);
+        consumed = true;
+    } else if is_virtual_key_down(0x27) {
+        let state = preview.get_video_state();
+        let current = state.as_ref().map(|s| s.current_time).unwrap_or(0.0);
+        let duration = state.as_ref().map(|s| s.duration).unwrap_or(0.0);
+        preview.seek_relative(5.0);
+        let new_time = if duration > 0.0 {
+            (current + 5.0).min(duration)
+        } else {
+            current + 5.0
+        };
+        let msg = if duration > 0.0 {
+            format!(
+                "{} / {}",
+                crate::ui::components::media_preview::format_time(new_time),
+                crate::ui::components::media_preview::format_time(duration)
+            )
+        } else {
+            crate::ui::components::media_preview::format_time(new_time)
+        };
+        preview.show_osd(&msg, 2000);
+        consumed = true;
+    } else if is_virtual_key_down(0x25) {
+        let state = preview.get_video_state();
+        let current = state.as_ref().map(|s| s.current_time).unwrap_or(0.0);
+        let duration = state.as_ref().map(|s| s.duration).unwrap_or(0.0);
+        preview.seek_relative(-5.0);
+        let new_time = (current - 5.0).max(0.0);
+        let msg = if duration > 0.0 {
+            format!(
+                "{} / {}",
+                crate::ui::components::media_preview::format_time(new_time),
+                crate::ui::components::media_preview::format_time(duration)
+            )
+        } else {
+            crate::ui::components::media_preview::format_time(new_time)
+        };
+        preview.show_osd(&msg, 2000);
+        consumed = true;
     }
 
     if let Some(vol) = new_session_vol {

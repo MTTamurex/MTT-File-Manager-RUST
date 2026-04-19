@@ -16,6 +16,19 @@ use crate::file_index::VolumeIndex;
 
 const BUFFER_SIZE: usize = 64 * 1024; // 64KB buffer
 
+fn log_device_io_control_failure(
+    operation: &str,
+    volume: HANDLE,
+    control_code: u32,
+    error: WIN32_ERROR,
+) {
+    eprintln!(
+        "[USN] DeviceIoControl({control_code:#x}, {operation}) on volume handle {:?} failed: win32 error {}",
+        volume,
+        error.0,
+    );
+}
+
 // IOCTL codes
 const FSCTL_QUERY_USN_JOURNAL: u32 = 0x000900F4;
 const FSCTL_READ_USN_JOURNAL: u32 = 0x000900BB;
@@ -174,7 +187,17 @@ pub fn query_usn_journal(volume: HANDLE) -> Result<UsnJournalInfo, String> {
     };
 
     if result.is_err() {
-        return Err("FSCTL_QUERY_USN_JOURNAL failed. Is the USN Journal enabled?".to_string());
+        let err_code = unsafe { GetLastError() };
+        log_device_io_control_failure(
+            "FSCTL_QUERY_USN_JOURNAL",
+            volume,
+            FSCTL_QUERY_USN_JOURNAL,
+            err_code,
+        );
+        return Err(format!(
+            "FSCTL_QUERY_USN_JOURNAL failed (Win32 error {}). Is the USN Journal enabled?",
+            err_code.0
+        ));
     }
 
     // Parse USN_JOURNAL_DATA_V0/V1/V2:
@@ -262,8 +285,20 @@ pub fn read_usn_buffer(
             return Ok(None);
         }
         if err_code == ERROR_JOURNAL_ENTRY_DELETED {
+            log_device_io_control_failure(
+                "FSCTL_READ_USN_JOURNAL",
+                volume,
+                FSCTL_READ_USN_JOURNAL,
+                err_code,
+            );
             return Err("journal entries expired (USN too old, full re-scan needed)".to_string());
         }
+        log_device_io_control_failure(
+            "FSCTL_READ_USN_JOURNAL",
+            volume,
+            FSCTL_READ_USN_JOURNAL,
+            err_code,
+        );
         return Err(format!(
             "FSCTL_READ_USN_JOURNAL failed (Win32 error {})",
             err_code.0

@@ -16,10 +16,10 @@
 
 ## Status Atual
 
-- **Implementado neste ciclo:** `F0.1`, `F0.2`, `F0.3`, `F1.1`, `F1.2`, `F1.3`, `F1.4`, `F1.6`, `F2.2`, `F2.3`, `F2.4`, `F2.5`, `F2.6`, `F3.1`, `F4.1`.
+- **Implementado neste ciclo:** `F0.1`, `F0.2`, `F0.3`, `F1.1`, `F1.2`, `F1.3`, `F1.4`, `F1.6`, `F2.2`, `F2.3`, `F2.4`, `F2.5`, `F2.6`, `F3.1`, `F3.2`, `F3.3`, `F4.1`.
 - **Ja estava implementado no codigo:** `F2.1`.
 - **Reclassificado:** `F1.5` (a ocorrencia auditada esta em codigo de teste, nao no fluxo de runtime da aplicacao).
-- **Proximo lote recomendado:** `F3.2`, `F3.3`.
+- **Proximo lote recomendado:** `F4.2`, `F4.3`, `F4.4`.
 
 ---
 
@@ -443,10 +443,12 @@ Estas abstrações desbloqueiam vários itens subsequentes. **Faça primeiro.**
 
 ---
 
-### F3.2 — W2: Logar `GetLastError` após `DeviceIoControl` [PENDENTE]
+### F3.2 — W2: Logar `GetLastError` após `DeviceIoControl` [IMPLEMENTADO]
 **Arquivos:**
 - `crates/mtt-search-service/src/mft_reader.rs`
 - `crates/mtt-search-service/src/usn_journal.rs`
+
+**Status:** implementado. As falhas de `DeviceIoControl` agora registram o `control_code`, o handle do volume e o `Win32 error` correspondente. No caminho de `FSCTL_GET_NTFS_FILE_RECORD`, `fetch_mft_record()` passou a usar `Result<Option<usize>, String>`, preservando retorno tipado para falha real do IOCTL e `None` apenas para casos nao resolvidos/records incompativeis.
 
 **Passos:**
 1. Em cada falha (`result.is_err()` ou equivalente):
@@ -464,8 +466,9 @@ Estas abstrações desbloqueiam vários itens subsequentes. **Faça primeiro.**
 
 ---
 
-### F3.3 — W3: Retirar syscalls Win32 da UI [PENDENTE]
+### F3.3 — W3: Retirar syscalls Win32 da UI [IMPLEMENTADO]
 **Arquivo:** `src/ui/app/lifecycle.rs` (linhas ~322-325)
+**Status:** implementado com extracao para a camada `src/infrastructure/windows/`. Foi criado `process_snapshot.rs` para encapsular ToolHelp/`CancelSynchronousIo` e metricas de processo, e a UI passou a consumir helpers (`process_snapshot`, `key_state`, `window_focus`) em vez de chamar Win32 diretamente nos pontos auditados (`lifecycle`, `input`, `status_bar`, `video_preview/detached`). O fallback final em `main.rs` tambem foi alinhado para reutilizar os mesmos helpers.
 **Passos:**
 1. Criar `src/infrastructure/windows/process_snapshot.rs` contendo uma função `cancel_pending_io_on_current_process_threads()` que encapsula `CreateToolhelp32Snapshot`/`Thread32First`/`CancelSynchronousIo`.
 2. No lifecycle da UI, chamar apenas essa função.
@@ -883,7 +886,7 @@ rg -n "Result<.*, String>" src/infrastructure/ src/application/
 | 1 | 0 | F0.1, F0.2, F0.3 | Concluida |
 | 2 | 1 | F1.1, F1.2, F1.3, F1.6 | Concluida (`F1.4` concluido, `F1.5` reclassificado) |
 | 3 | 2 | F2.4, F2.2, F2.5, F2.3 | Concluida (`F2.1` ja implementado, `F2.6` concluido) |
-| 4 | 3 | F3.2, F3.3 | Integracao Win32 restante (`F3.1` concluido) |
+| 4 | 3 | F3.2, F3.3 | Concluida (`F3.1` concluido) |
 | 5 | 4 | F4.3, F4.4, F4.2, F4.5, F4.6, F4.7 | Concorrencia restante (`F4.1` concluido) |
 | 6 | 5 | F5.1, F5.8, F5.7, F5.3, F5.6, F5.2, F5.9, F5.5, F5.4 | Performance, alto ROI primeiro |
 | 7 | 6 | F6.1, F6.6, F6.5, F6.2, F6.3, F6.4 | Arquitetura por último |

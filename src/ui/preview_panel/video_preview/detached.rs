@@ -336,9 +336,10 @@ pub fn render_detached_video(
 
         #[cfg(target_os = "windows")]
         let player_focused = {
-            use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
-            let foreground = unsafe { GetForegroundWindow() };
-            !foreground.is_invalid() && preview.get_hwnd() == Some(foreground)
+            preview
+                .get_hwnd()
+                .map(crate::infrastructure::windows::is_foreground_window)
+                .unwrap_or(false)
         };
 
         #[cfg(not(target_os = "windows"))]

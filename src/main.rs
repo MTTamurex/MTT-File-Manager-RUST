@@ -296,14 +296,11 @@ fn main() -> eframe::Result<()> {
     // reached if something bypassed it.
     #[cfg(target_os = "windows")]
     {
-        let _ = std::thread::spawn(mtt_file_manager::ui::app::cancel_all_pending_io);
+        let _ = std::thread::spawn(
+            mtt_file_manager::infrastructure::windows::cancel_pending_io_on_current_process_threads,
+        );
         std::thread::sleep(std::time::Duration::from_millis(100));
-        unsafe {
-            windows::Win32::System::Threading::TerminateProcess(
-                windows::Win32::System::Threading::GetCurrentProcess(),
-                0,
-            ).ok();
-        }
+        mtt_file_manager::infrastructure::windows::terminate_current_process(0);
     }
 
     result
