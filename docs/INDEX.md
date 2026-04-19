@@ -61,8 +61,10 @@ MTT-File-Manager-RUST/
 │   ├── infrastructure/     # System integration & Windows APIs
 │   ├── ui/                 # User interface (eframe/egui)
 │   ├── workers/            # Background worker threads
+│   ├── viewer_runtime.rs   # Shared runtime helpers for image/PDF/text viewers
 │   ├── image_viewer/       # Dedicated image viewer (separate process)
 │   ├── video_player/       # Standalone video player (separate process)
+│   ├── text_viewer/        # Native text viewer (separate process)
 │   ├── pdf_viewer/         # Native PDF viewer (separate process)
 │   └── tabs/               # Tab management
 ├── crates/
@@ -81,6 +83,7 @@ MTT-File-Manager-RUST/
 | `mtt-file-manager --image-viewer <path>` | `src/image_viewer/` | Dedicated image viewer |
 | `mtt-file-manager --video-player <path>` | `src/video_player/` | Standalone video player |
 | `mtt-file-manager --pdf-viewer <path>` | `src/pdf_viewer/` | Native PDF viewer |
+| `mtt-file-manager --text-viewer <path>` | `src/text_viewer/` | Native text viewer |
 | `mtt-file-manager --set-volume-label <drive> <label>` | `src/main.rs` | Elevated helper for renaming drive volume labels |
 | `mtt-search-service` | `crates/mtt-search-service/src/main.rs` | File indexing Windows Service |
 

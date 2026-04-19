@@ -113,11 +113,29 @@ Uses `ThreadPriorityGuard` for RAII-based priority restoration.
 **Location**: `src/image_viewer/cache.rs`
 
 The dedicated image viewer uses a sliding-window cache strategy:
-- Window radius = 6 (up to 13 images cached simultaneously)
-- 512MB memory budget with eviction by distance from current position
+- Window radius = 1 (current image + immediate neighbors)
+- Cache stores GPU `TextureHandle`s instead of CPU-side decoded RGBA frames
+- Large images are capped to `DISPLAY_CACHE_MAX_SIDE = 4096` before entering the viewer cache
 - Workers check an `AtomicUsize` center before decoding — obsolete jobs are skipped
 - Navigation requests only the new edge image (tail-only), not the full window
 - Bounded channels prevent infinite job accumulation
+
+The viewer startup path was also simplified:
+- The image viewer no longer seeds its first frame from the file-manager thumbnail cache, avoiding wrong-zoom startup artifacts and a second full-frame decode being skipped accidentally.
+- The root viewport starts hidden and is revealed after the first viewer frame is ready, which keeps startup transitions cleaner.
+
+## 7.5 Standalone Viewer Runtime Baseline
+
+**Location**: `src/viewer_runtime.rs`
+
+Image, PDF, and text viewers are launched as separate processes from the same executable (`--image-viewer`, `--pdf-viewer`, `--text-viewer`). Their shared runtime is intentionally lighter than the main app:
+
+- Locale and theme are read via a tiny read-only SQLite query instead of the full `AppStateDb` initialization path.
+- `eframe::Renderer::Glow` is used for viewers instead of `Wgpu`.
+- `persist_window` is disabled.
+- `multisampling`, `depth_buffer`, and `stencil_buffer` are all disabled for viewer windows.
+
+This lowered the common baseline RSS for text, PDF, and image viewers significantly compared with reusing the main app's Wgpu-heavy startup profile.
 
 ## 8. Adaptive Batch Loading
 
@@ -141,10 +159,11 @@ Grid and list views only render items that are currently visible in the viewport
 
 ### GPU Preference
 
-On hybrid GPU laptops (Intel + NVIDIA/AMD), Windows may route GUI-subsystem apps to the integrated GPU. The app forces discrete GPU selection via:
-- **NVIDIA**: `NvOptimusEnablement = 1` (exported static)
-- **AMD**: `AmdPowerXpressRequestHighPerformance = 1` (exported static)
-- **wgpu**: `PowerPreference::HighPerformance` in `WgpuConfiguration`
+The main window uses `Wgpu` with `PowerPreference::HighPerformance` and honors the saved backend preference (`dx12`, `vulkan`, `gl`, `auto`).
+
+The process deliberately does **not** export the legacy `NvOptimusEnablement` / `AmdPowerXpressRequestHighPerformance` symbols anymore. Because the same executable is reused for the standalone viewers, forcing the discrete GPU at process start would inflate baseline RAM/VRAM even for simple text/PDF/image viewing.
+
+Standalone viewers therefore use the lighter `Glow` path from `viewer_runtime.rs`, while the main file-manager window keeps the higher-throughput `Wgpu` path.
 
 ### DPI Awareness
 

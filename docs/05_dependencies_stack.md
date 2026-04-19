@@ -6,8 +6,9 @@
 
 | Crate | Version | Purpose |
 |-------|---------|---------|
-| eframe | 0.31 | egui framework with windowing (features: `persistence`, `wgpu`) |
-| wgpu | 24.0.5 (via eframe) | GPU rendering backend (D3D12/Vulkan) with HighPerformance preference |
+| eframe | 0.31 | egui framework with windowing (features: `persistence`, `wgpu`, `glow`) |
+| wgpu | 24.x (via eframe + direct Windows dependency) | GPU rendering backend used by the main window (`Wgpu`, `HighPerformance` preference) |
+| glow | via eframe | Lightweight renderer used by the standalone image/PDF/text viewers |
 
 ### Concurrency & Channels
 
@@ -174,6 +175,12 @@
 | libmpv-2.dll | For video playback | mpv shared library |
 | pdfium.dll | For PDF viewer | Google's PDF rendering library |
 | Windows 10+ | Always | Native Windows API integration |
+
+## Viewer Runtime Notes
+
+- The main file-manager window uses `eframe` + `Wgpu` and honors the saved GPU backend preference from `app_state.db`.
+- The standalone image/PDF/text viewers still run as separate processes from the **same executable** via `--image-viewer`, `--pdf-viewer`, and `--text-viewer`.
+- Those viewers share `src/viewer_runtime.rs`, which reads locale/theme through a lightweight read-only SQLite connection and configures `eframe::Renderer::Glow` with `persist_window = false`, `multisampling = 0`, `depth_buffer = 0`, and `stencil_buffer = 0` to keep baseline memory lower than the main app.
 
 ## Feature Flags
 

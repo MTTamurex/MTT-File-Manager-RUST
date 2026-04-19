@@ -307,19 +307,23 @@ Double-click image
     ↓
 Spawn separate process: mtt-file-manager.exe --image-viewer <path>
     ↓
+Validate path + try IPC forward to existing instance [image_viewer/mod.rs, image_viewer/ipc.rs]
+    ↓
 build_sequence(): read directory, filter images, natural sort [image_viewer/indexer.rs]
     ↓
-Load first image synchronously (no spinner on open) [image_viewer/loader.rs]
+Viewport starts hidden (`with_visible(false)`) [image_viewer/mod.rs]
     ↓
 Start PrefetchEngine with worker pool [image_viewer/cache.rs]
     ↓
-Sliding-window cache (radius=6, up to 13 images, 512MB budget)
+Current image requested urgently; neighbors kept in a radius=1 GPU texture cache
     ↓
 Navigate: Left/Right arrows
     ↓
 Load new edge image only (tail-only fetch)
     ↓
 Workers check AtomicUsize center before decoding (skip obsolete jobs)
+    ↓
+First frame applies theme + reveals the window [image_viewer/app/mod.rs]
     ↓
 Previous image stays visible until new one is ready
 ```
@@ -357,13 +361,15 @@ Spawn separate process: mtt-file-manager.exe --pdf-viewer <path>
     ↓
 Path validation (no UNC, no traversal, .pdf extension, ≤512MB) [pdf_viewer/mod.rs]
     ↓
+Viewport starts hidden (`with_visible(false)`) [pdf_viewer/mod.rs]
+    ↓
 Load pdfium.dll dynamically (search next to exe, then system-wide) [pdf_viewer/renderer.rs]
     ↓
-Render pages via pdfium-render crate [pdf_viewer/renderer.rs]
+Create persistent Pdfium render worker [pdf_viewer/render_worker.rs]
     ↓
-Texture cache with memory budget and LRU eviction [pdf_viewer/viewer_app.rs]
+Texture cache bounded to 128MB with distant-page eviction [pdf_viewer/viewer_app.rs]
     ↓
-Async render worker for background page rendering [pdf_viewer/render_worker.rs]
+First frame applies theme + reveals the window [pdf_viewer/viewer_app.rs]
     ↓
 Text selection support [pdf_viewer/selection.rs]
     ↓
@@ -372,7 +378,29 @@ Toolbar for navigation [pdf_viewer/toolbar.rs]
 
 **Key files**: `pdf_viewer/mod.rs`, `pdf_viewer/viewer_app.rs`, `pdf_viewer/renderer.rs`, `pdf_viewer/render_worker.rs`, `pdf_viewer/selection.rs`
 
-## 15. Theme Switching (Dark / Light Mode)
+## 16. Text Viewer
+
+**Trigger**: Double-click on a plain text / code / markup file.
+
+```
+Double-click text file
+    ↓
+Spawn separate process: mtt-file-manager.exe --text-viewer <path>
+    ↓
+Path validation (no UNC, no traversal, known text extension, ≤25MB) [text_viewer/mod.rs]
+    ↓
+Viewport starts hidden (`with_visible(false)`) [text_viewer/mod.rs]
+    ↓
+Load file into `content: String + line_offsets: Vec<u32>` [text_viewer/viewer_app.rs]
+    ↓
+First frame applies theme + reveals the window [text_viewer/viewer_app.rs]
+    ↓
+Render text with monospace layout and line slicing from offsets
+```
+
+**Key files**: `text_viewer/mod.rs`, `text_viewer/viewer_app.rs`
+
+## 17. Theme Switching (Dark / Light Mode)
 
 **Trigger**: User selects a theme in Settings > Appearance.
 
@@ -398,17 +426,17 @@ On first frame: ctx.set_visuals() in lifecycle.rs (deferred because eframe
     can override visuals set during the creator callback)
 ```
 
-**Viewer processes** (image viewer & PDF viewer):
+**Viewer processes** (image viewer, PDF viewer, text viewer):
 ```
-Viewer process starts (--image-viewer / --pdf-viewer flag)
+Viewer process starts (--image-viewer / --pdf-viewer / --text-viewer flag)
     ↓
-is_saved_theme_dark() reads "theme_mode" from `app_state.db` [image_viewer/mod.rs, pdf_viewer/mod.rs]
+`viewer_runtime::is_saved_theme_dark()` reads "theme_mode" from `app_state.db` [viewer_runtime.rs]
     ↓
 dark_mode bool passed to viewer app struct
     ↓
 First frame: ctx.set_visuals() + DwmSetWindowAttribute(DWMWA_USE_IMMERSIVE_DARK_MODE)
     to set both egui visuals AND native Windows title bar color
-    [image_viewer/app/mod.rs, pdf_viewer/viewer_app.rs, infrastructure/windows/window_corners.rs]
+    [image_viewer/app/mod.rs, pdf_viewer/viewer_app.rs, text_viewer/viewer_app.rs, infrastructure/windows/window_corners.rs]
 ```
 
 **Key details**:
@@ -417,5 +445,5 @@ First frame: ctx.set_visuals() + DwmSetWindowAttribute(DWMWA_USE_IMMERSIVE_DARK_
 - Native title bar darkening uses `DwmSetWindowAttribute` with attribute 20 (`DWMWA_USE_IMMERSIVE_DARK_MODE`) on Windows 10 build 18985+
 - Duotone SVG icons replace only dark/black pixels (rgb_sum < alpha/2) with the theme color, preserving blue accent pixels (#7AB8FF)
 
-**Key files**: `app/navigation_state.rs`, `ui/components/appearance_settings.rs`, `ui/theme.rs`, `ui/svg_icons.rs`, `ui/app_impl.rs`, `ui/app/lifecycle.rs`, `app/operations/preferences.rs`, `image_viewer/mod.rs`, `image_viewer/app/mod.rs`, `pdf_viewer/mod.rs`, `pdf_viewer/viewer_app.rs`, `infrastructure/windows/window_corners.rs`
+**Key files**: `app/navigation_state.rs`, `ui/components/appearance_settings.rs`, `ui/theme.rs`, `ui/svg_icons.rs`, `ui/app_impl.rs`, `ui/app/lifecycle.rs`, `app/operations/preferences.rs`, `viewer_runtime.rs`, `image_viewer/mod.rs`, `image_viewer/app/mod.rs`, `pdf_viewer/mod.rs`, `pdf_viewer/viewer_app.rs`, `text_viewer/mod.rs`, `text_viewer/viewer_app.rs`, `infrastructure/windows/window_corners.rs`
 

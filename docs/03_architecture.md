@@ -15,7 +15,7 @@ MTT-File-Manager-RUST/
 
 | Crate | Type | Description |
 |-------|------|-------------|
-| `mtt-file-manager` | bin (GUI) | Main application with eframe/egui |
+| `mtt-file-manager` | bin (GUI) | Main application with eframe/egui; also hosts the `--image-viewer`, `--pdf-viewer`, `--text-viewer` and `--video-player` standalone entry points |
 | `mtt-search-protocol` | lib | IPC types and bincode serialization |
 | `mtt-search-service` | bin (service) | Windows Service with hybrid per-volume indexing, binary/SQLite startup caches, and in-memory SIMD search over Named Pipe IPC |
 
@@ -91,11 +91,11 @@ The application follows a layered architecture with clear separation of responsi
 └─────────────────────────────────────────────────────────────────────────────┘
                                 │
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│              External: Image Viewer (separate process, same binary)         │
+│   External: Standalone Viewers (image / PDF / text, separate process)      │
 │  ┌────────────┬────────────┬────────────┬────────────┬──────────────────┐  │
-│  │ Dedicated  │ Window     │ Prefetch   │ Image      │ Directory        │  │
-│  │ ViewerApp  │ Cache      │ Engine     │ Loader     │ Indexer          │  │
-│  │ (eframe)   │ (512MB)    │ (workers)  │ (mmap+WIC) │ (sort)           │  │
+│  │ Viewer     │ Shared     │ Bounded    │ Per-format │ Optional IPC /   │  │
+│  │ Window     │ Runtime    │ Caches     │ Loader /   │ Worker Threads   │  │
+│  │ (eframe)   │ (Glow)     │            │ Renderer   │                  │  │
 │  └────────────┴────────────┴────────────┴────────────┴──────────────────┘  │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -204,6 +204,7 @@ System access, Windows integration, and data persistence.
 - `user_session_search/` — User session search index (split module: orchestration, db persistence, discovery, scanner)
 - `security.rs` + `security/` — Security validation (components, drive, shell_namespace, symlink, unc)
 - `windows_clipboard.rs` — Windows clipboard (CF_HDROP)
+- `viewer_runtime.rs` — Shared low-baseline runtime helpers for image/PDF/text viewer subprocesses (read-only prefs, Glow renderer config)
 - `onedrive/` — OneDrive integration (path_detection, attributes, timeout_ops, directory_enum, pin_state)
 - `media/` — Media infrastructure (hardware_acceleration)
 
@@ -264,21 +265,23 @@ Separate Windows Service that indexes all files with a hybrid per-volume strateg
 Dedicated image viewer running as a **separate process** (same binary, `--image-viewer` flag). Memory and GPU textures are released by the OS when the process closes.
 
 **Modules**:
-- `mod.rs` — `open_image_viewer()` spawns the process, `run_standalone()` initializes eframe
+- `mod.rs` — `open_image_viewer()` offloads validation/spawn to a background thread, forwards to an existing instance via IPC when possible, and `run_standalone()` initializes the viewer window
 - `app/` — `DedicatedImageViewerApp` (split module: struct & navigation in `mod.rs`, filmstrip in `filmstrip.rs`, UI rendering in `rendering.rs`, GIF/export in `gif_export.rs`)
-- `cache.rs` — `WindowCache` (HashMap sliding-window, 512MB budget, eviction by distance) + `PrefetchEngine` (crossbeam bounded channel workers, atomic center tracking)
+- `cache.rs` — `WindowCache` (GPU `TextureHandle` sliding-window cache) + `PrefetchEngine` (crossbeam bounded channel workers, atomic center tracking)
 - `indexer.rs` — `build_sequence()`: reads directory, filters images, natural sort
 - `loader.rs` — Decoding: memory-mapped files for >1MB, EXIF orientation, WIC fallback
 - `metrics.rs` — Performance metrics
 - `ipc.rs` — Inter-process communication
 
 **Cache architecture**:
-- Sliding-window with radius=6 (up to 13 images in cache)
+- Sliding-window with radius=1 (current image + immediate neighbors)
+- Cache stores GPU `TextureHandle`s instead of CPU-side RGBA buffers
 - Workers check `AtomicUsize` center before decoding — obsolete jobs are skipped
 - Bounded channels sized at `2*radius+1` to prevent infinite job accumulation
 - Navigation requests only the new edge image (tail-only), not the full window
 - Previous image remains visible until the new one is ready (no spinner during fast navigation)
-- First image loaded synchronously on startup (no spinner on open)
+- Startup does not seed from the file-manager thumbnail cache; the viewer decodes its own full-frame image path
+- The viewport starts hidden (`with_visible(false)`) and is revealed on the first viewer frame
 
 ### 8. Video Player (Separate Process)
 **Location**: `src/video_player/`
@@ -299,10 +302,20 @@ Native PDF viewer using **pdfium** (Google's PDF rendering library via `pdfium-r
 - Dynamic loading of `pdfium.dll` (searches next to executable, then system-wide)
 - Path validation: blocks UNC paths, null bytes, path traversal, and non-`.pdf` extensions
 - File size limit: 512 MB
-- Texture cache with memory budget and LRU eviction
-- Render worker for asynchronous page rendering
+- Texture cache bounded by `TEXTURE_MEMORY_BUDGET = 128 MB`
+- Render worker keeps a persistent Pdfium document handle and uses bounded channels for asynchronous page rendering
 - Text selection support
 - Toolbar for navigation controls
+
+### 10. Text Viewer (Separate Process)
+**Location**: `src/text_viewer/`
+
+Native text viewer launched as a separate process from the same executable (`--text-viewer` flag).
+
+- Path validation: blocks UNC paths, null bytes, path traversal, and non-text extensions
+- File size limit: 25 MB
+- Stores text as `content: String + line_offsets: Vec<u32>` instead of `Vec<String>` to reduce memory overhead on large files
+- Uses the shared `viewer_runtime.rs` lightweight setup (read-only prefs + `Glow` renderer)
 
 ## Key Boundaries
 
@@ -321,6 +334,10 @@ Native PDF viewer using **pdfium** (Google's PDF rendering library via `pdfium-r
 ### App ↔ Image Viewer
 - Separate process via `Command::new(exe).arg("--image-viewer").arg(path)`
 - Full memory isolation; OS reclaims everything on close
+
+### App ↔ PDF/Text Viewers
+- Separate process via `Command::new(exe).arg("--pdf-viewer").arg(path)` / `Command::new(exe).arg("--text-viewer").arg(path)`
+- Shared lightweight `viewer_runtime.rs` keeps startup and baseline memory lower than the main window
 
 ## Application Lifecycle
 

@@ -7,6 +7,7 @@ src/
 ├── main.rs                          # Entry point, viewport config, CLI dispatch
 ├── lib.rs                           # Crate root, i18n macro, module declarations
 ├── embedded_assets.rs               # Embedded resources for portable executable
+├── viewer_runtime.rs                # Shared runtime config for image/PDF/text viewers
 │
 ├── app/                             # Application state & initialization
 │   ├── mod.rs                       # Module declarations
@@ -270,6 +271,10 @@ src/
 │   ├── ipc.rs                       # Inter-process communication
 │   ├── loader.rs                    # Image decoding (mmap, EXIF, WIC)
 │   └── metrics.rs                   # Performance metrics
+
+├── text_viewer/                     # Native text viewer (separate process)
+│   ├── mod.rs                       # Process spawn, path validation, standalone runner
+│   └── viewer_app.rs                # Text viewer state & rendering
 │
 ├── video_player/                    # Standalone video player (separate process)
 │   └── mod.rs                       # mpv-based player with D3D11 pipeline

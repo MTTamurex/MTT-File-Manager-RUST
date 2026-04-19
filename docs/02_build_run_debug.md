@@ -20,11 +20,12 @@ winget install Rustlang.Rustup
 - **pdfium.dll** — Required for PDF viewer
 
 ### GPU Backend Notes
-- The desktop app uses `eframe` with the `wgpu` renderer.
-- Current startup configuration prefers the native primary `wgpu` backends on Windows and requests `HighPerformance` adapter selection.
+- The main desktop window uses `eframe` with the `wgpu` renderer.
+- Current startup configuration prefers the native primary `wgpu` backends on Windows and requests `HighPerformance` adapter selection for the main app.
 - A dedicated GPU is not mandatory. On hybrid systems, the discrete adapter is preferred when available, but compatible integrated GPUs can still be selected.
-- The renderer configuration also allows the `GL` backend, which gives Windows an OpenGL/ANGLE compatibility path when the preferred native backend is not available.
-- There is no separate `glow` renderer fallback in this project. If `wgpu` cannot initialize any compatible backend or adapter, startup fails.
+- The main-window renderer configuration also allows the `GL` backend, which gives Windows an OpenGL/ANGLE compatibility path when the preferred native backend is not available.
+- The standalone image/PDF/text viewers do use a separate `glow` renderer path via `src/viewer_runtime.rs`; this keeps their baseline memory lower than the main app.
+- If `wgpu` cannot initialize any compatible backend or adapter, the **main file-manager window** still fails to start even though the standalone viewers use `glow`.
 
 ### Optional Dependencies
 ```powershell
@@ -68,6 +69,11 @@ cargo build -p mtt-file-manager
 
 # Run in debug mode
 cargo run
+
+# Run standalone viewer modes from the same executable
+cargo run -- --image-viewer "C:\path\to\image.jpg"
+cargo run -- --pdf-viewer "C:\path\to\file.pdf"
+cargo run -- --text-viewer "C:\path\to\file.txt"
 ```
 
 ### Release Build
@@ -332,7 +338,7 @@ Copy-Item "C:\Path\To\pdfium.dll" -Destination ".\target\release\"
 ```
 
 ### Renderer initialization or blank startup window
-If the default `wgpu` backend selection fails on a specific machine, force the OpenGL/ANGLE compatibility path for a diagnostic run:
+If the default `wgpu` backend selection fails on a specific machine, force the OpenGL/ANGLE compatibility path for a diagnostic run of the **main file-manager window**:
 
 ```powershell
 $env:WGPU_BACKEND = "opengl"
@@ -343,6 +349,7 @@ Notes:
 - This override only affects the current PowerShell session.
 - If the app starts with `opengl`, the machine likely cannot initialize the preferred native backend reliably.
 - Startup logs include the selected adapter and backend, which helps confirm what `wgpu` actually used.
+- The standalone image/PDF/text viewers use `glow`, so this diagnostic is only relevant for the main window.
 
 Clear the override after testing:
 

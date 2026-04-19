@@ -12,7 +12,7 @@ MTT File Manager is a native Windows file manager built in Rust with a modern bo
 
 ### Navigation & Interface
 - **Custom borderless window** — No traditional title bar; native resize/move support
-- **Dark / Light theme** — Toggle between dark and light mode in Settings > Appearance; setting is persisted in SQLite app state (`app_state.db`) and applied immediately across the main window, image viewer, and PDF viewer (including native Windows title bar via `DwmSetWindowAttribute`)
+- **Dark / Light theme** — Toggle between dark and light mode in Settings > Appearance; setting is persisted in SQLite app state (`app_state.db`) and applied immediately across the main window and standalone image/PDF/text viewers (including native Windows title bar via `DwmSetWindowAttribute` where applicable)
 - **Tabbed navigation** — Multiple tabs with independent history per tab
 - **Grid and List views** — Adjustable thumbnail sizes (64–512px)
 - **Editable address bar** — Direct path input with breadcrumb navigation
@@ -24,9 +24,10 @@ MTT File Manager is a native Windows file manager built in Rust with a modern bo
 
 ### Preview & Media
 - **Integrated preview panel** — View images, videos, GIFs, and PDFs without leaving the app
-- **Dedicated image viewer** — Separate process with sliding-window cache, multi-threaded decoding, and instant navigation between images
+- **Dedicated image viewer** — Separate process with a bounded GPU texture cache, multi-threaded decoding, and instant navigation between images
+- **Text viewer** — Separate process for plain text, code, logs, and markup with a lightweight viewer runtime
 - **Video player** — Standalone mpv-based player with D3D11 GPU pipeline, borderless window, and subtitle support
-- **PDF viewer** — Native viewer using pdfium (Google's PDF rendering library via `pdfium-render` crate), with texture memory budgeting and page caching
+- **PDF viewer** — Native viewer using pdfium (Google's PDF rendering library via `pdfium-render` crate), with bounded texture memory, an async render worker, and separate process isolation
 - **Smart thumbnails** — Multi-stage generation pipeline: image crate → WIC → Shell API → force extract → Media Foundation
 - **Custom folder covers** — Folder previews composed from 3 PNG layers (back/thumbnail/front) via `image` crate, replacing Shell API
 - **Animated GIF playback** — Optimized GIF rendering with play/pause controls
@@ -98,12 +99,12 @@ MTT File Manager is a native Windows file manager built in Rust with a modern bo
 | Category | Technology | Version | Purpose |
 |----------|-----------|---------|---------|
 | Language | Rust | 2021 Edition | Core language |
-| GUI Framework | eframe/egui | 0.31 | Immediate-mode GUI (features: `persistence`, `wgpu`) |
+| GUI Framework | eframe/egui | 0.31 | Immediate-mode GUI (features: `persistence`, `wgpu`, `glow`) |
 | Windows API | windows-rs | 0.61.0 | Native Windows integration |
 | Database | SQLite (rusqlite) | 0.32 | Thumbnail cache, app state, directory metadata, and search persistence |
 | Video | libmpv2 | 5.0.3 | Video playback |
 | PDF | pdfium (pdfium-render) | 0.8.37 | Native PDF rendering |
-| GPU Backend | wgpu (via eframe) | 24.0.5 | D3D12/Vulkan rendering with HighPerformance GPU preference |
+| GPU Backend | wgpu + glow (via eframe) | 24.x / via eframe | Main window uses `wgpu` with HighPerformance preference; image/PDF/text viewers use the lighter `glow` renderer |
 | Images | image crate | 0.25 | Image processing (WebP, GIF) |
 | SVG | resvg/usvg | 0.44 | SVG icon rendering |
 | Parallelism | rayon | 1.10 | Parallel processing |
@@ -138,7 +139,7 @@ MTT File Manager is a native Windows file manager built in Rust with a modern bo
 - x64 processor, 2+ cores
 - 4 GB RAM
 - 100 MB disk space + cache storage
-- DirectX 12 or Vulkan capable GPU (via wgpu)
+- GPU/driver capable of initializing the main window's `wgpu` backend (native backend preferred; OpenGL compatibility path available for diagnostics)
 
 ### Recommended
 - Windows 11 (latest update)
