@@ -315,6 +315,21 @@ impl ImageViewerApp {
     }
 
     pub(in crate::app) fn invalidate_folder_size_cache(&mut self, folder: &Path) {
+        self.invalidate_folder_size_cache_with_options(folder, true);
+    }
+
+    pub(in crate::app) fn invalidate_folder_size_cache_without_revalidation(
+        &mut self,
+        folder: &Path,
+    ) {
+        self.invalidate_folder_size_cache_with_options(folder, false);
+    }
+
+    fn invalidate_folder_size_cache_with_options(
+        &mut self,
+        folder: &Path,
+        schedule_revalidation: bool,
+    ) {
         let folder_path = folder.to_path_buf();
         let was_loading = self.folder_size_state.loading.remove(&folder_path);
         self.folder_size_state.cache.pop(&folder_path);
@@ -331,15 +346,17 @@ impl ImageViewerApp {
             .entry(folder_path.clone())
             .or_insert(0) += 1;
 
-        // Schedule a deferred re-invalidation to handle the timing race with
-        // the search service's USN journal polling (2 s interval).  If the
-        // batch worker re-fetches before the service processes the deletion,
-        // it will permanently cache a stale value.  The re-invalidation
-        // clears it so the next render gets the updated size.
-        self.folder_size_state.pending_revalidation.insert(
-            folder_path,
-            std::time::Instant::now() + std::time::Duration::from_secs(3),
-        );
+        if schedule_revalidation {
+            // Schedule a deferred re-invalidation to handle the timing race with
+            // the search service's USN journal polling (2 s interval).  If the
+            // batch worker re-fetches before the service processes the deletion,
+            // it will permanently cache a stale value.  The re-invalidation
+            // clears it so the next render gets the updated size.
+            self.folder_size_state.pending_revalidation.insert(
+                folder_path,
+                std::time::Instant::now() + std::time::Duration::from_secs(3),
+            );
+        }
 
         if was_loading {
             self.folder_size_state.cancel.store(true, Ordering::Release);

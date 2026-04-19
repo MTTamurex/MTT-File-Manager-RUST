@@ -20,7 +20,7 @@ impl ImageViewerApp {
                 .map(|item| item.path.clone())
                 .collect();
             for folder_path in visible_folder_paths {
-                self.invalidate_folder_size_cache(&folder_path);
+                self.invalidate_folder_size_cache_without_revalidation(&folder_path);
                 self.cache_manager.invalidate_folder_preview(&folder_path);
                 self.disk_cache.remove_folder_preview_cache(&folder_path);
             }
