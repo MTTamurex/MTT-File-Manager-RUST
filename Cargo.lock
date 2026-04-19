@@ -3070,6 +3070,7 @@ dependencies = [
  "natord",
  "notify",
  "once_cell",
+ "parking_lot",
  "pdfium-render",
  "raw-window-handle",
  "rayon",

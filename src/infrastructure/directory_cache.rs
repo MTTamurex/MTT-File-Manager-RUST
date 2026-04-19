@@ -1,10 +1,10 @@
 use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use lru::LruCache;
+use parking_lot::Mutex;
 
 use crate::domain::file_entry::FileEntry;
 
@@ -36,19 +36,13 @@ impl DirectoryCache {
     /// separately via the cover pipeline (SQLite + existence check + cover
     /// worker) to avoid returning stale covers from a previous visit.
     pub fn get(&self, path: &PathBuf) -> Option<Arc<Vec<FileEntry>>> {
-        let mut cache = self.inner.lock().unwrap_or_else(|e| {
-            log::warn!("[DIR-CACHE] Mutex poisoned in get(), recovering");
-            e.into_inner()
-        });
+        let mut cache = self.inner.lock();
         cache.get_mut(path).map(|cached| Arc::clone(&cached.entries))
     }
 
     /// Returns cached entries and the cache timestamp in Unix milliseconds.
     pub fn get_with_meta(&self, path: &PathBuf) -> Option<(Arc<Vec<FileEntry>>, u64)> {
-        let mut cache = self.inner.lock().unwrap_or_else(|e| {
-            log::warn!("[DIR-CACHE] Mutex poisoned in get_with_meta(), recovering");
-            e.into_inner()
-        });
+        let mut cache = self.inner.lock();
         cache
             .get_mut(path)
             .map(|cached| (Arc::clone(&cached.entries), cached.cached_at_ms))
@@ -59,10 +53,7 @@ impl DirectoryCache {
     /// every read, since covers are resolved separately via the cover pipeline.
     /// No fs::metadata() syscall — DriveWatcher handles invalidation.
     pub fn put(&self, path: PathBuf, mut entries: Vec<FileEntry>) {
-        let mut cache = self.inner.lock().unwrap_or_else(|e| {
-            log::warn!("[DIR-CACHE] Mutex poisoned in put(), recovering");
-            e.into_inner()
-        });
+        let mut cache = self.inner.lock();
         for entry in &mut entries {
             entry.folder_cover = None;
         }
@@ -80,18 +71,12 @@ impl DirectoryCache {
     }
 
     pub fn invalidate(&self, path: &PathBuf) {
-        let mut cache = self.inner.lock().unwrap_or_else(|e| {
-            log::warn!("[DIR-CACHE] Mutex poisoned in invalidate(), recovering");
-            e.into_inner()
-        });
+        let mut cache = self.inner.lock();
         let _ = cache.pop(path);
     }
 
     pub fn invalidate_children(&self, parent: &PathBuf) {
-        let mut cache = self.inner.lock().unwrap_or_else(|e| {
-            log::warn!("[DIR-CACHE] Mutex poisoned in invalidate_children(), recovering");
-            e.into_inner()
-        });
+        let mut cache = self.inner.lock();
         let keys_to_remove: Vec<PathBuf> = cache
             .iter()
             .filter(|(k, _)| k.starts_with(parent))
@@ -104,28 +89,19 @@ impl DirectoryCache {
     }
 
     pub fn clear(&self) {
-        let mut cache = self.inner.lock().unwrap_or_else(|e| {
-            log::warn!("[DIR-CACHE] Mutex poisoned in clear(), recovering");
-            e.into_inner()
-        });
+        let mut cache = self.inner.lock();
         cache.clear();
     }
 
     /// Returns the cache timestamp (Unix milliseconds) for a path without cloning entries.
     /// Useful for lightweight staleness checks (e.g., tab switch mtime validation).
     pub fn cached_at_ms(&self, path: &PathBuf) -> Option<u64> {
-        let cache = self.inner.lock().unwrap_or_else(|e| {
-            log::warn!("[DIR-CACHE] Mutex poisoned in cached_at_ms(), recovering");
-            e.into_inner()
-        });
+        let cache = self.inner.lock();
         cache.peek(path).map(|cached| cached.cached_at_ms)
     }
 
     pub fn stats(&self) -> (usize, usize) {
-        let cache = self.inner.lock().unwrap_or_else(|e| {
-            log::warn!("[DIR-CACHE] Mutex poisoned in stats(), recovering");
-            e.into_inner()
-        });
+        let cache = self.inner.lock();
         let total_items: usize = cache.iter().map(|(_, v)| v.entries.len()).sum();
         (cache.len(), total_items)
     }

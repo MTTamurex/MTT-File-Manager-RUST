@@ -4,9 +4,9 @@
 
 use crate::infrastructure::io_priority::{self, IOPriority};
 use crate::workers::thumbnail::types::{ThumbnailRequest, ThumbnailRequestSource};
+use parking_lot::{Condvar, Mutex};
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::{Path, PathBuf};
-use std::sync::{Condvar, Mutex};
 
 /// Queue state with directory-grouped requests for HDD optimization
 struct QueueState {
@@ -52,18 +52,16 @@ impl PriorityThumbnailQueue {
     }
 
     pub fn shutdown(&self) {
-        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        state.shutdown = true;
+        {
+            let mut state = self.state.lock();
+            state.shutdown = true;
+        }
         self.condvar.notify_all();
     }
 
     /// Returns the number of pending requests in the queue
     pub fn pending_count(&self) -> usize {
-        self.state
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .pending
-            .len()
+        self.state.lock().pending.len()
     }
 
     /// Push a thumbnail request with the new IOPriority system
@@ -127,49 +125,52 @@ impl PriorityThumbnailQueue {
         modified: u64,
         source: ThumbnailRequestSource,
     ) {
-        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        {
+            let mut state = self.state.lock();
 
-        // Group by parent directory (for HDD seek optimization)
-        let parent = path.parent().unwrap_or(&path).to_path_buf();
-        let is_ssd = Self::detect_drive_class(&mut state, &path);
-        let request = ThumbnailRequest {
-            path: path.clone(),
-            generation: gen,
-            size: request_size,
-            priority,
-            directory_index,
-            modified,
-            source,
-            track_bulk_progress: matches!(source, ThumbnailRequestSource::BulkScan),
-        };
+            // Group by parent directory (for HDD seek optimization)
+            let parent = path.parent().unwrap_or(&path).to_path_buf();
+            let is_ssd = Self::detect_drive_class(&mut state, &path);
+            let request = ThumbnailRequest {
+                path: path.clone(),
+                generation: gen,
+                size: request_size,
+                priority,
+                directory_index,
+                modified,
+                source,
+                track_bulk_progress: matches!(source, ThumbnailRequestSource::BulkScan),
+            };
 
-        // Deduplication with merge: upgrade existing request instead of dropping.
-        if state.pending.contains(&path) {
-            if Self::merge_pending_request(&mut state, &parent, &request, is_ssd) {
-                self.condvar.notify_one();
-                return;
+            let mut needs_enqueue = true;
+            if state.pending.contains(&path) {
+                if Self::merge_pending_request(&mut state, &parent, &request, is_ssd) {
+                    needs_enqueue = false;
+                } else {
+                    log::warn!(
+                        "[THUMB-QUEUE] pending/bucket mismatch for {:?}; requeueing request",
+                        path
+                    );
+                }
             }
 
-            log::warn!(
-                "[THUMB-QUEUE] pending/bucket mismatch for {:?}; requeueing request",
-                path
-            );
-        }
+            if needs_enqueue {
+                state.pending.insert(path.clone());
 
-        state.pending.insert(path.clone());
+                state
+                    .by_directory
+                    .entry(parent.clone())
+                    .or_default()
+                    .push(request);
 
-        state
-            .by_directory
-            .entry(parent.clone())
-            .or_default()
-            .push(request);
-
-        if !is_ssd {
-            if let Some(items) = state.by_directory.get_mut(&parent) {
-                items.sort_by(|a, b| match a.priority.cmp(&b.priority) {
-                    std::cmp::Ordering::Equal => a.directory_index.cmp(&b.directory_index),
-                    other => other,
-                });
+                if !is_ssd {
+                    if let Some(items) = state.by_directory.get_mut(&parent) {
+                        items.sort_by(|a, b| match a.priority.cmp(&b.priority) {
+                            std::cmp::Ordering::Equal => a.directory_index.cmp(&b.directory_index),
+                            other => other,
+                        });
+                    }
+                }
             }
         }
 
@@ -289,7 +290,7 @@ impl PriorityThumbnailQueue {
 
     /// Remove specific paths from the queue (e.g., files being deleted)
     pub fn remove_paths(&self, paths: &[PathBuf]) {
-        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let mut state = self.state.lock();
         for path in paths {
             if state.pending.remove(path) {
                 // Remove from the directory-grouped map
@@ -308,7 +309,7 @@ impl PriorityThumbnailQueue {
 
     /// Pop the next request, optimizing for disk locality on HDDs
     pub fn pop(&self) -> Option<(PathBuf, usize, u32, IOPriority, u64, ThumbnailRequestSource, bool)> {
-        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        let mut state = self.state.lock();
 
         loop {
             if state.shutdown {
@@ -334,7 +335,7 @@ impl PriorityThumbnailQueue {
             }
 
             // Wait for new work
-            state = self.condvar.wait(state).unwrap_or_else(|e| e.into_inner());
+            self.condvar.wait(&mut state);
         }
     }
 

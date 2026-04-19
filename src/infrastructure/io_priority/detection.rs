@@ -1,13 +1,14 @@
 use std::path::Path;
 use std::sync::OnceLock;
 
+use parking_lot::Mutex;
 use rustc_hash::FxHashMap;
 
 /// Cache of disk type detection results (drive letter -> is_ssd).
-static DISK_TYPE_CACHE: OnceLock<std::sync::Mutex<FxHashMap<char, bool>>> = OnceLock::new();
+static DISK_TYPE_CACHE: OnceLock<Mutex<FxHashMap<char, bool>>> = OnceLock::new();
 
-fn get_disk_cache() -> &'static std::sync::Mutex<FxHashMap<char, bool>> {
-    DISK_TYPE_CACHE.get_or_init(|| std::sync::Mutex::new(FxHashMap::default()))
+fn get_disk_cache() -> &'static Mutex<FxHashMap<char, bool>> {
+    DISK_TYPE_CACHE.get_or_init(|| Mutex::new(FxHashMap::default()))
 }
 
 /// Detects if a drive is a virtual Cryptomator drive.
@@ -54,7 +55,8 @@ pub(super) fn is_ssd(path: &Path) -> bool {
         return true; // Assume SSD for network paths, etc.
     };
 
-    if let Ok(cache) = get_disk_cache().lock() {
+    {
+        let cache = get_disk_cache().lock();
         if let Some(&is_ssd) = cache.get(&drive_letter) {
             return is_ssd;
         }
@@ -62,9 +64,7 @@ pub(super) fn is_ssd(path: &Path) -> bool {
 
     let result = determine_disk_type(drive_letter);
 
-    if let Ok(mut cache) = get_disk_cache().lock() {
-        cache.insert(drive_letter, result);
-    }
+    get_disk_cache().lock().insert(drive_letter, result);
 
     result
 }
@@ -75,7 +75,7 @@ pub(super) fn is_ssd(path: &Path) -> bool {
 /// - None when drive is unknown (caller may choose a safe fallback without probing)
 pub(super) fn try_is_ssd_cached(path: &Path) -> Option<bool> {
     let drive_letter = extract_drive_letter(path)?;
-    let cache = get_disk_cache().lock().ok()?;
+    let cache = get_disk_cache().lock();
     cache.get(&drive_letter).copied()
 }
 
@@ -100,9 +100,9 @@ fn determine_disk_type(drive_letter: char) -> bool {
 
 /// Invalidate cache for a specific drive (useful after configuration changes).
 pub(super) fn invalidate_drive_cache(drive_letter: char) {
-    if let Ok(mut cache) = get_disk_cache().lock() {
-        cache.remove(&drive_letter.to_ascii_uppercase());
-    }
+    get_disk_cache()
+        .lock()
+        .remove(&drive_letter.to_ascii_uppercase());
 }
 
 /// Query Windows for whether a disk has seek penalty (HDD) or not (SSD).

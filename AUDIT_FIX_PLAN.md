@@ -16,10 +16,10 @@
 
 ## Status Atual
 
-- **Implementado neste ciclo:** `F0.1`, `F0.2`, `F0.3`, `F1.1`, `F1.2`, `F1.3`, `F1.4`, `F1.6`, `F2.2`, `F2.3`, `F2.4`, `F2.5`, `F2.6`, `F3.1`, `F3.2`, `F3.3`, `F4.1`.
+- **Implementado neste ciclo:** `F0.1`, `F0.2`, `F0.3`, `F1.1`, `F1.2`, `F1.3`, `F1.4`, `F1.6`, `F2.2`, `F2.3`, `F2.4`, `F2.5`, `F2.6`, `F3.1`, `F3.2`, `F3.3`, `F4.1`, `F4.2`, `F4.3`, `F4.4`, `F4.5`, `F4.6`, `F4.7`.
 - **Ja estava implementado no codigo:** `F2.1`.
 - **Reclassificado:** `F1.5` (a ocorrencia auditada esta em codigo de teste, nao no fluxo de runtime da aplicacao).
-- **Proximo lote recomendado:** `F4.2`, `F4.3`, `F4.4`.
+- **Proximo lote recomendado:** `F5.1`, `F5.8`, `F5.7`.
 
 ---
 
@@ -498,11 +498,13 @@ Estas abstrações desbloqueiam vários itens subsequentes. **Faça primeiro.**
 
 ---
 
-### F4.2 — Co2: Migrar `Mutex` dos caches para `parking_lot::Mutex` [PENDENTE]
+### F4.2 — Co2: Migrar `Mutex` dos caches para `parking_lot::Mutex` [IMPLEMENTADO]
 **Arquivos:**
 - `src/infrastructure/directory_cache.rs`
 - `src/infrastructure/directory_dirty_registry.rs`
 - Qualquer outro cache com `.unwrap_or_else(|e| e.into_inner())`.
+
+**Status:** implementado. O crate principal agora depende de `parking_lot`, e os caches/estruturas que ainda dependiam de poison recovery foram migrados para `parking_lot::Mutex`, incluindo `directory_cache`, `directory_dirty_registry`, caches auxiliares de `io_priority`, `file_type`, `codec_registry`, `file_flags`, `sidebar`, falhas de thumbnail, fila/semaforo de thumbnails e cache de GIF. O grep por `unwrap_or_else(|e| e.into_inner())` em `src/` agora retorna zero.
 
 **Passos:**
 1. Adicionar `parking_lot = "0.12"` em `Cargo.toml` se ainda não estiver.
@@ -516,8 +518,9 @@ Estas abstrações desbloqueiam vários itens subsequentes. **Faça primeiro.**
 
 ---
 
-### F4.3 — Co3: `notify_one()` fora do lock [PENDENTE]
+### F4.3 — Co3: `notify_one()` fora do lock [IMPLEMENTADO]
 **Arquivo:** `src/workers/thumbnail/queue.rs` (linhas ~330-340)
+**Status:** implementado. A fila de thumbnails agora libera o `MutexGuard` antes de chamar `notify_one()`/`notify_all()`, evitando acordar a thread consumidora enquanto ainda segura o lock da fila.
 **Passos:**
 1. Antes:
    ```rust
@@ -538,10 +541,12 @@ Estas abstrações desbloqueiam vários itens subsequentes. **Faça primeiro.**
 
 ---
 
-### F4.4 — Co4: Rollback de flags in-flight em `spawn()` falho [PENDENTE]
+### F4.4 — Co4: Rollback de flags in-flight em `spawn()` falho [IMPLEMENTADO]
 **Arquivos:**
 - `crates/mtt-search-service/src/ipc_server/handler.rs` (linhas ~60-110)
 - `src/workers/global_search_worker.rs` (linhas ~201-215)
+
+**Status:** implementado. `global_search_worker` agora usa `spawn_named("global-search-total-count", ...)` com rollback explícito de `in_flight` quando o spawn falha, e o `WarmIndex` do search service passou a usar `std::thread::Builder::spawn(...)` com nome de thread, guard RAII para reset da flag e rollback imediato do `is_warming` no caminho de erro.
 
 **Passos (padrão):**
 ```rust
@@ -566,7 +571,7 @@ match std::thread::Builder::new().name("...".into()).spawn(move || {
 
 ---
 
-### F4.5 — Co5: Inicialização serializada do PDFium [PENDENTE]
+### F4.5 — Co5: Inicialização serializada do PDFium [IMPLEMENTADO]
 **Arquivo:** `src/pdf_viewer/renderer.rs` (linhas ~100-120)
 **Passos:**
 1. Trocar `OnceCell<()>` por `OnceLock<Result<Pdfium, String>>` **ou** proteger com `std::sync::Once`.
@@ -589,7 +594,7 @@ match std::thread::Builder::new().name("...".into()).spawn(move || {
 
 ---
 
-### F4.6 — Co6: Simplificar ordering no GC worker [PENDENTE]
+### F4.6 — Co6: Simplificar ordering no GC worker [IMPLEMENTADO]
 **Arquivo:** `src/app/init_workers/background_jobs.rs`
 **Passos:**
 1. Se a flag é binária (start/stop) sem outros stores dependentes: usar `Relaxed` em ambos os lados:
@@ -603,7 +608,7 @@ match std::thread::Builder::new().name("...".into()).spawn(move || {
 
 ---
 
-### F4.7 — Co7: Acesso uniforme ao `current_prefix` do drive watcher [PENDENTE]
+### F4.7 — Co7: Acesso uniforme ao `current_prefix` do drive watcher [IMPLEMENTADO]
 **Arquivo:** `src/infrastructure/drive_watcher.rs` (linhas ~70-100)
 **Passos:**
 1. Decidir por **um** mecanismo:
@@ -887,7 +892,7 @@ rg -n "Result<.*, String>" src/infrastructure/ src/application/
 | 2 | 1 | F1.1, F1.2, F1.3, F1.6 | Concluida (`F1.4` concluido, `F1.5` reclassificado) |
 | 3 | 2 | F2.4, F2.2, F2.5, F2.3 | Concluida (`F2.1` ja implementado, `F2.6` concluido) |
 | 4 | 3 | F3.2, F3.3 | Concluida (`F3.1` concluido) |
-| 5 | 4 | F4.3, F4.4, F4.2, F4.5, F4.6, F4.7 | Concorrencia restante (`F4.1` concluido) |
+| 5 | 4 | F4.5, F4.6, F4.7 | Concluida (`F4.1`, `F4.2`, `F4.3` e `F4.4` concluidos anteriormente) |
 | 6 | 5 | F5.1, F5.8, F5.7, F5.3, F5.6, F5.2, F5.9, F5.5, F5.4 | Performance, alto ROI primeiro |
 | 7 | 6 | F6.1, F6.6, F6.5, F6.2, F6.3, F6.4 | Arquitetura por último |
 | 8 | 7 | F7.1–F7.3 | Verificação |

@@ -202,13 +202,16 @@ fn spawn_total_count_task(
         return; // Another task is already running — skip this one.
     }
 
-    std::thread::spawn(move || {
+    let in_flight_for_task = Arc::clone(&in_flight);
+    let spawn_result = crate::spawn_named("global-search-total-count", move || {
         // RAII guard to reset in_flight on any exit path (including panic).
         struct InFlightGuard(Arc<AtomicBool>);
         impl Drop for InFlightGuard {
-            fn drop(&mut self) { self.0.store(false, Ordering::Release); }
+            fn drop(&mut self) {
+                self.0.store(false, Ordering::Release);
+            }
         }
-        let _guard = InFlightGuard(Arc::clone(&in_flight));
+        let _guard = InFlightGuard(in_flight_for_task);
 
         match load_exact_service_total_matches(&query, generation, &active_generation) {
             Ok(Some(service_total_matches)) => {
@@ -234,6 +237,14 @@ fn spawn_total_count_task(
             }
         }
     });
+
+    if let Err(error) = spawn_result {
+        in_flight.store(false, Ordering::Release);
+        log::error!(
+            "[GLOBAL-SEARCH] Failed to spawn total count task: {}",
+            error
+        );
+    }
 }
 
 fn refresh_and_send_status(

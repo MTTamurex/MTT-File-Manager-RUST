@@ -13,8 +13,8 @@
 //! - https://docs.microsoft.com/en-us/windows/win32/api/mfidl/nn-mfidl-imftransform
 
 use lru::LruCache;
+use parking_lot::Mutex;
 use std::num::NonZeroUsize;
-use std::sync::Mutex;
 use windows::core::GUID;
 
 mod known_codecs;
@@ -26,7 +26,7 @@ static CODEC_NAME_CACHE: Mutex<Option<LruCache<String, String>>> = Mutex::new(No
 
 /// Initialize the codec name cache (call once at startup)
 pub fn init_codec_cache() {
-    let mut cache = CODEC_NAME_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    let mut cache = CODEC_NAME_CACHE.lock();
     if cache.is_none() {
         *cache = Some(LruCache::new(
             NonZeroUsize::new(128).expect("codec cache size must be non-zero"),
@@ -57,7 +57,7 @@ fn check_known_codec(guid: &windows::core::GUID) -> Option<String> {
 pub fn resolve_codec_guid(guid_str: &str) -> String {
     // Fast path: Check cache first
     {
-        let mut cache = CODEC_NAME_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+        let mut cache = CODEC_NAME_CACHE.lock();
         if let Some(ref mut cache) = *cache {
             if let Some(cached_name) = cache.get(guid_str) {
                 return cached_name.clone();
@@ -86,7 +86,7 @@ pub fn resolve_codec_guid(guid_str: &str) -> String {
 
     // Strategy 1: Check known codecs first (fixes DIV3 → "DivX 3" issue)
     if let Some(name) = check_known_codec(&guid) {
-        let mut cache = CODEC_NAME_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+        let mut cache = CODEC_NAME_CACHE.lock();
         if let Some(ref mut cache) = *cache {
             cache.put(guid_str.to_string(), name.clone());
         }
@@ -95,7 +95,7 @@ pub fn resolve_codec_guid(guid_str: &str) -> String {
 
     // Strategy 2: Query Media Foundation Transform Registry
     if let Some(name) = query_mf_codec_name(&guid) {
-        let mut cache = CODEC_NAME_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+        let mut cache = CODEC_NAME_CACHE.lock();
         if let Some(ref mut cache) = *cache {
             cache.put(guid_str.to_string(), name.clone());
         }
@@ -104,7 +104,7 @@ pub fn resolve_codec_guid(guid_str: &str) -> String {
 
     // Strategy 2: Query Windows Registry for CLSID friendly name
     if let Some(name) = query_registry_friendly_name(&guid) {
-        let mut cache = CODEC_NAME_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+        let mut cache = CODEC_NAME_CACHE.lock();
         if let Some(ref mut cache) = *cache {
             cache.put(guid_str.to_string(), name.clone());
         }
@@ -114,7 +114,7 @@ pub fn resolve_codec_guid(guid_str: &str) -> String {
     // Strategy 2.5: Try WAVEFORMATEX tag lookup (for partial hex like "E06D802C")
     // Search Registry by WaveFormat tag (first 4 bytes)
     if let Some(name) = query_waveformat_tag(guid.data1) {
-        let mut cache = CODEC_NAME_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+        let mut cache = CODEC_NAME_CACHE.lock();
         if let Some(ref mut cache) = *cache {
             cache.put(guid_str.to_string(), name.clone());
         }
@@ -158,7 +158,7 @@ pub fn resolve_codec_guid(guid_str: &str) -> String {
     let result = fallback_name.to_string();
 
     // Cache even fallback results to avoid repeated parsing
-    let mut cache = CODEC_NAME_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    let mut cache = CODEC_NAME_CACHE.lock();
     if let Some(ref mut cache) = *cache {
         cache.put(guid_str.to_string(), result.clone());
     }

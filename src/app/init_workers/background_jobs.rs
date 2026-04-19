@@ -2,11 +2,12 @@ use crate::infrastructure::app_state_db::AppStateDb;
 use crate::infrastructure::disk_cache::ThumbnailDiskCache;
 use eframe::egui;
 use std::sync::{mpsc, Arc};
+use std::sync::atomic::Ordering;
 
 static GC_WORKER_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 
 pub(crate) fn stop_gc_worker() {
-    GC_WORKER_RUNNING.store(false, std::sync::atomic::Ordering::Release);
+    GC_WORKER_RUNNING.store(false, Ordering::Relaxed);
 }
 
 pub(in crate::app) fn spawn_startup_drive_info_preload(
@@ -50,12 +51,12 @@ pub(in crate::app) fn spawn_incremental_gc_worker(
 
         fn sleep_until_next_cycle(total_secs: u64) -> bool {
             for _ in 0..total_secs {
-                if !GC_WORKER_RUNNING.load(std::sync::atomic::Ordering::Acquire) {
+                if !GC_WORKER_RUNNING.load(Ordering::Relaxed) {
                     return false;
                 }
                 std::thread::sleep(std::time::Duration::from_secs(1));
             }
-            GC_WORKER_RUNNING.load(std::sync::atomic::Ordering::Acquire)
+            GC_WORKER_RUNNING.load(Ordering::Relaxed)
         }
 
         if !sleep_until_next_cycle(GC_INITIAL_DELAY_SECS) {
@@ -63,7 +64,7 @@ pub(in crate::app) fn spawn_incremental_gc_worker(
         }
 
         let mut removed_since_vacuum = 0usize;
-        while GC_WORKER_RUNNING.load(std::sync::atomic::Ordering::Acquire) {
+        while GC_WORKER_RUNNING.load(Ordering::Relaxed) {
             let is_idle_window = crate::infrastructure::onedrive::is_app_minimized();
             let batch = if is_idle_window {
                 GC_IDLE_BATCH

@@ -2,8 +2,9 @@ use std::fs::File;
 use std::os::windows::ffi::OsStrExt;
 use std::os::windows::io::{AsRawHandle, FromRawHandle};
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
+use std::sync::OnceLock;
 use std::time::{Duration, Instant, SystemTime};
+use parking_lot::Mutex;
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{HANDLE, INVALID_HANDLE_VALUE};
 use windows::Win32::Storage::FileSystem::{
@@ -190,9 +191,7 @@ pub fn mark_recent_write_activity(path: &Path) {
     }
 
     let now = Instant::now();
-    let Ok(mut cache) = get_file_write_activity_cache().lock() else {
-        return;
-    };
+    let mut cache = get_file_write_activity_cache().lock();
 
     if cache.len() > WRITE_ACTIVITY_STATE_CAP {
         cache.retain(|_, seen_at| now.duration_since(*seen_at) <= WRITE_ACTIVITY_STATE_TTL);
@@ -295,23 +294,21 @@ fn recent_write_activity_baseline(path: &Path) -> Option<Instant> {
     }
 
     let now = Instant::now();
-    let event_baseline = get_file_write_activity_cache()
-        .lock()
-        .ok()
-        .and_then(|mut cache| {
-            if cache.len() > WRITE_ACTIVITY_STATE_CAP {
-                cache.retain(|_, seen_at| now.duration_since(*seen_at) <= WRITE_ACTIVITY_STATE_TTL);
-            }
+    let event_baseline = {
+        let mut cache = get_file_write_activity_cache().lock();
+        if cache.len() > WRITE_ACTIVITY_STATE_CAP {
+            cache.retain(|_, seen_at| now.duration_since(*seen_at) <= WRITE_ACTIVITY_STATE_TTL);
+        }
 
-            match cache.get(path).copied() {
-                Some(seen_at) if now.duration_since(seen_at) <= WRITE_ACTIVITY_STATE_TTL => Some(seen_at),
-                Some(_) => {
-                    cache.remove(path);
-                    None
-                }
-                None => None,
+        match cache.get(path).copied() {
+            Some(seen_at) if now.duration_since(seen_at) <= WRITE_ACTIVITY_STATE_TTL => Some(seen_at),
+            Some(_) => {
+                cache.remove(path);
+                None
             }
-        });
+            None => None,
+        }
+    };
 
     // Only fall back to filesystem metadata when the watcher-event cache
     // has no entry.  Calling std::fs::metadata here would otherwise hit
@@ -344,9 +341,7 @@ fn is_stable_enough_across_attempts(
 ) -> bool {
     let now = Instant::now();
 
-    let Ok(mut cache) = get_file_stability_cache().lock() else {
-        return false;
-    };
+    let mut cache = get_file_stability_cache().lock();
 
     if cache.len() > STABILITY_STATE_CAP {
         cache.retain(|_, state| now.duration_since(state.last_seen) <= STABILITY_STATE_TTL);

@@ -77,33 +77,48 @@ pub(super) fn handle_client(
                 let indices_clone = indices.clone();
                 let warming_flag = is_warming.clone();
                 let warm_epoch = last_warm_epoch_secs.clone();
-                std::thread::spawn(move || {
-                    eprintln!("[IPC] WarmIndex: warming in-memory index...");
-                    let start = std::time::Instant::now();
-                    {
-                        let lock = indices_clone.read();
-                        let mut touched = 0u64;
-                        for vol in lock.iter() {
-                            let arena_bytes = vol.names.as_bytes();
-                            for chunk in arena_bytes.chunks(4096) {
-                                black_box(&chunk[0]);
+                let spawn_result = std::thread::Builder::new()
+                    .name("warm-index".into())
+                    .spawn(move || {
+                        struct WarmGuard(Arc<AtomicBool>);
+                        impl Drop for WarmGuard {
+                            fn drop(&mut self) {
+                                self.0.store(false, Ordering::SeqCst);
                             }
-                            touched += vol.records.len() as u64;
                         }
-                        eprintln!(
-                            "[IPC] WarmIndex: touched {} records in {:.2}s",
-                            touched,
-                            start.elapsed().as_secs_f64()
-                        );
-                    }
-                    // Record completion timestamp for cooldown.
-                    let done_epoch = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_secs();
-                    warm_epoch.store(done_epoch, Ordering::Relaxed);
-                    warming_flag.store(false, Ordering::SeqCst);
-                });
+
+                        let _guard = WarmGuard(Arc::clone(&warming_flag));
+
+                        eprintln!("[IPC] WarmIndex: warming in-memory index...");
+                        let start = std::time::Instant::now();
+                        {
+                            let lock = indices_clone.read();
+                            let mut touched = 0u64;
+                            for vol in lock.iter() {
+                                let arena_bytes = vol.names.as_bytes();
+                                for chunk in arena_bytes.chunks(4096) {
+                                    black_box(&chunk[0]);
+                                }
+                                touched += vol.records.len() as u64;
+                            }
+                            eprintln!(
+                                "[IPC] WarmIndex: touched {} records in {:.2}s",
+                                touched,
+                                start.elapsed().as_secs_f64()
+                            );
+                        }
+                        // Record completion timestamp for cooldown.
+                        let done_epoch = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs();
+                        warm_epoch.store(done_epoch, Ordering::Relaxed);
+                    });
+
+                if let Err(error) = spawn_result {
+                    is_warming.store(false, Ordering::SeqCst);
+                    eprintln!("[IPC] WarmIndex spawn failed: {}", error);
+                }
             }
         }
         SearchRequest::GetStatus => {

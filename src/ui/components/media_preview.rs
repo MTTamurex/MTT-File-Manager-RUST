@@ -1,7 +1,8 @@
 use crate::ui::components::gif_manager::GifData;
 use eframe::egui;
+use parking_lot::Mutex;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use super::mpv_preview::{
@@ -43,17 +44,10 @@ impl GifPlayer {
         // A blocking .lock() here causes priority inversion: the UI thread
         // (high priority) waits on the decode thread (low priority, possibly
         // blocked on cloud filter driver), stalling the Windows message pump.
-        let data = match self.data.try_lock() {
-            Ok(d) => d,
-            Err(std::sync::TryLockError::WouldBlock) => {
-                // Decode worker holds the lock — skip this frame, retry next paint.
-                ctx.request_repaint_after(Duration::from_millis(16));
-                return;
-            }
-            Err(std::sync::TryLockError::Poisoned(e)) => {
-                log::error!("[GifPlayer] Erro ao lock dados - Mutex poisonado");
-                e.into_inner()
-            }
+        let Some(data) = self.data.try_lock() else {
+            // Decode worker holds the lock — skip this frame, retry next paint.
+            ctx.request_repaint_after(Duration::from_millis(16));
+            return;
         };
 
         if data.frames.is_empty() {
