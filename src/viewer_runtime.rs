@@ -94,6 +94,7 @@ pub fn build_viewer_native_options(viewport: egui::ViewportBuilder) -> eframe::N
                 wgpu::Limits::default()
             };
 
+            const MB: u64 = 1024 * 1024;
             wgpu::DeviceDescriptor {
                 label: Some("mtt-viewer wgpu device"),
                 required_features: wgpu::Features::empty(),
@@ -104,7 +105,14 @@ pub fn build_viewer_native_options(viewport: egui::ViewportBuilder) -> eframe::N
                     max_texture_dimension_2d: 4096,
                     ..base_limits
                 },
-                memory_hints: wgpu::MemoryHints::MemoryUsage,
+                // Explicit gpu_allocator block sizes (32-64 MB). The wgpu
+                // `MemoryUsage` preset still allocates fairly large blocks;
+                // explicit Manual hints (as in viewskater-egui) drop GPU
+                // resident memory significantly. 32 MB device blocks fit a
+                // single 4K RGBA texture (≈33 MB) snugly via sub-allocation.
+                memory_hints: wgpu::MemoryHints::Manual {
+                    suballocated_device_memory_block_size: (32 * MB)..(64 * MB),
+                },
             }
         });
 
@@ -135,9 +143,6 @@ pub fn build_viewer_native_options(viewport: egui::ViewportBuilder) -> eframe::N
 
     eframe::NativeOptions {
         viewport,
-        // No persisted egui state — viewers are ephemeral and we already
-        // call cleanup_eframe_storage() in the file-manager entrypoint.
-        persist_window: false,
         // Disable optional buffers the viewers never use; this keeps the
         // surface allocation as small as possible (mostly relevant for the
         // glow renderer, harmless under wgpu).

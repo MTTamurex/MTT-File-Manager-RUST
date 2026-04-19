@@ -121,7 +121,8 @@ impl super::DedicatedImageViewerApp {
                 let tex_size = tex.size_vec2() / pixels_per_point;
                 let viewport_size = ui.available_size();
 
-                // Fit-to-window only downscales; never upscales small images.
+                // Fit-to-window only downscales; 100% remains the native image
+                // size, which keeps the reported zoom intuitive.
                 let fit_scale = if tex_size.x <= 0.0 || tex_size.y <= 0.0 {
                     1.0
                 } else {

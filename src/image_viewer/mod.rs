@@ -186,8 +186,11 @@ pub fn run_standalone(path: PathBuf) -> eframe::Result<()> {
         .map(|v| v.to_string_lossy().to_string())
         .unwrap_or_else(|| rust_i18n::t!("imageviewer.title").to_string());
 
-    let startup_preview = loader::decode_cached_preview_frame(&path, 2048)
-        .map(|frame| (path.clone(), frame));
+    // Do not start the viewer from the thumbnail cache. That path can return
+    // a reduced preview image, which makes the first frame open with the wrong
+    // apparent zoom and, because it occupied `current_index` in the cache,
+    // could block the real full-frame decode from ever being requested.
+    let startup_preview = None;
 
     let (startup_sequence_rx, initial_sequence) = {
         let (tx, rx) = std::sync::mpsc::channel();

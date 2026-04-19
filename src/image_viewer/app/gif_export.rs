@@ -2,13 +2,12 @@ use crate::image_viewer::loader;
 use eframe::egui;
 use rfd::FileDialog;
 use rust_i18n::t;
-use std::sync::Arc;
 use std::time::Duration;
 
 /// Holds pre-uploaded textures for each frame of an animated GIF along with
-/// display timing information.
+/// display timing information. The CPU-side RGBA buffers are dropped after
+/// upload — if the user exports the GIF, frames are re-decoded from disk.
 pub(in crate::image_viewer) struct GifAnimation {
-    pub(super) frames: Vec<Arc<loader::DecodedFrame>>,
     pub(super) textures: Vec<egui::TextureHandle>,
     pub(super) delays_ms: Vec<u32>,
     pub(super) current_frame: usize,
@@ -64,16 +63,9 @@ impl super::DedicatedImageViewerApp {
     }
 
     fn current_export_frame(&self) -> Result<loader::DecodedFrame, String> {
-        if let Some(anim) = &self.gif_animation {
-            if let Some(frame) = anim.frames.get(anim.current_frame) {
-                return Ok((**frame).clone());
-            }
-        }
-
-        if let Some(frame) = self.cache.get(self.current_index) {
-            return Ok(frame.as_ref().clone());
-        }
-
+        // The cache no longer holds CPU-side RGBA buffers (they are dropped
+        // immediately after GPU upload to keep RAM low), so the only way to
+        // get the full pixel data for encoding is to re-decode from disk.
         let path = self
             .current_path()
             .ok_or_else(|| t!("imageviewer.convert_no_image").to_string())?;
@@ -230,28 +222,29 @@ impl super::DedicatedImageViewerApp {
         match rx.try_recv() {
             Ok(Ok(frames)) if frames.len() > 1 => {
                 let (w, h) = (frames[0].frame.width, frames[0].frame.height);
-                let mut raw_frames = Vec::with_capacity(frames.len());
                 let mut textures = Vec::with_capacity(frames.len());
                 let mut delays = Vec::with_capacity(frames.len());
 
                 for (i, gif_frame) in frames.into_iter().enumerate() {
-                    let raw_frame = Arc::new(gif_frame.frame);
+                    let frame = gif_frame.frame;
                     let color_image = egui::ColorImage::from_rgba_unmultiplied(
-                        [raw_frame.width as usize, raw_frame.height as usize],
-                        &raw_frame.rgba,
+                        [frame.width as usize, frame.height as usize],
+                        &frame.rgba,
                     );
+                    // Drop the CPU RGBA buffer immediately after upload to
+                    // egui — a multi-frame 4K GIF would otherwise pin
+                    // hundreds of MB of pixel data on the CPU heap.
+                    drop(frame);
                     let tex = ctx.load_texture(
                         format!("iv-gif-{}-{}", decode_index, i),
                         color_image,
                         egui::TextureOptions::LINEAR,
                     );
-                    raw_frames.push(raw_frame);
                     textures.push(tex);
                     delays.push(gif_frame.delay_ms);
                 }
 
                 self.gif_animation = Some(GifAnimation {
-                    frames: raw_frames,
                     textures,
                     delays_ms: delays,
                     current_frame: 0,

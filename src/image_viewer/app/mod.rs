@@ -4,7 +4,6 @@ use crate::image_viewer::loader;
 use eframe::egui;
 use std::collections::HashSet;
 use std::borrow::Cow;
-use std::sync::Arc;
 use std::time::Duration;
 
 mod filmstrip;
@@ -32,8 +31,8 @@ pub struct DedicatedImageViewerApp {
     pub(super) startup_sequence_rx: Option<std::sync::mpsc::Receiver<ImageSequence>>,
     pub(super) startup_preview: Option<(std::path::PathBuf, loader::DecodedFrame)>,
     pub(super) requested_jobs: HashSet<usize>,
-    pub(super) texture_serial: u64,
     pub(super) texture: Option<egui::TextureHandle>,
+    pub(super) texture_index: Option<usize>,
     pub(super) last_error: Option<String>,
     pub(super) zoom_factor: f32,
     pub(super) zoom_percent_display: f32,
@@ -85,8 +84,8 @@ impl DedicatedImageViewerApp {
             startup_sequence_rx,
             startup_preview,
             requested_jobs: HashSet::new(),
-            texture_serial: 0,
             texture: None,
+            texture_index: None,
             last_error: None,
             zoom_factor: 1.0,
             zoom_percent_display: 100.0,
@@ -163,6 +162,7 @@ impl DedicatedImageViewerApp {
         self.startup_preview = None;
         self.requested_jobs.clear();
         self.texture = None;
+        self.texture_index = None;
         self.last_error = None;
         self.zoom_factor = 1.0;
         self.zoom_percent_display = 100.0;
@@ -236,6 +236,8 @@ impl DedicatedImageViewerApp {
         }
         self.prefetch.set_center(new_index);
         self.requested_jobs.clear();
+        self.texture = None;
+        self.texture_index = None;
         self.filmstrip.reset();
         ctx.request_repaint();
     }
@@ -252,10 +254,14 @@ impl DedicatedImageViewerApp {
     }
 
     fn request_job_if_needed(&mut self, index: usize, priority: LoadPriority) {
+        // Already cached as GPU texture — skip.
         if self.cache.has(index) {
             return;
         }
-
+        // Currently displayed (texture survived cache eviction via Arc ref).
+        if self.texture_index == Some(index) {
+            return;
+        }
         if priority != LoadPriority::Urgent && self.requested_jobs.contains(&index) {
             return;
         }
@@ -307,14 +313,24 @@ impl DedicatedImageViewerApp {
         }
     }
 
-    fn upload_frame(
+    /// Convert a decoded frame to a GPU texture and store it in the cache.
+    /// If the frame belongs to the current image, also update the display.
+    ///
+    /// This is the core of the viewskater architecture: decoded RGBA bytes
+    /// are uploaded to the GPU immediately and the CPU buffer is dropped.
+    /// The cache holds only lightweight `TextureHandle` references (Arc to
+    /// GPU resource), so neighbour images cost ~0 bytes of process RSS
+    /// instead of ~33 MB each.
+    fn upload_to_cache(
         &mut self,
         ctx: &egui::Context,
         index: usize,
-        frame: Arc<loader::DecodedFrame>,
+        frame: &loader::DecodedFrame,
     ) {
         if frame.width == 0 || frame.height == 0 || frame.rgba.is_empty() {
-            self.last_error = Some("decoded frame is empty".to_string());
+            if index == self.current_index {
+                self.last_error = Some("decoded frame is empty".to_string());
+            }
             return;
         }
 
@@ -323,29 +339,35 @@ impl DedicatedImageViewerApp {
             &frame.rgba,
         );
 
-        let texture_name = format!(
-            "iv-{}-{}",
-            index, self.texture_serial
+        let texture = ctx.load_texture(
+            format!("iv-{}", index),
+            color_image,
+            egui::TextureOptions::LINEAR,
         );
-        self.texture_serial = self.texture_serial.wrapping_add(1);
 
-        let texture = ctx.load_texture(texture_name, color_image, egui::TextureOptions::LINEAR);
+        self.cache.put(index, texture, frame.original_width, frame.original_height);
 
-        self.texture = Some(texture);
-        // Report the *original* image resolution in the UI even when the
-        // cached frame was downscaled, so the user still sees the true size.
-        self.image_resolution = Some((frame.original_width, frame.original_height));
-        self.last_error = None;
+        // Update display immediately if this is the current image.
+        if index == self.current_index {
+            self.show_from_cache();
+        }
     }
 
-    fn try_show_cached_current(&mut self, ctx: &egui::Context) {
-        let Some(frame) = self.cache.get(self.current_index) else {
-            // Do NOT clear texture here — keep showing the previous image
-            // until the new one arrives (matches viewskater behavior).
-            return;
-        };
+    /// Clone the current image's TextureHandle from the cache to `self.texture`.
+    /// Cheap operation (Arc increment only, no GPU upload).
+    fn show_from_cache(&mut self) {
+        if let Some((tex, ow, oh)) = self.cache.get(self.current_index) {
+            self.texture = Some(tex);
+            self.texture_index = Some(self.current_index);
+            self.image_resolution = Some((ow, oh));
+            self.last_error = None;
+        }
+    }
 
-        self.upload_frame(ctx, self.current_index, frame);
+    fn try_show_cached_current(&mut self, _ctx: &egui::Context) {
+        // Keep showing the previous image until the new one arrives
+        // (matches viewskater behavior: no blank flash during navigation).
+        self.show_from_cache();
     }
 
     fn try_show_startup_preview(&mut self, ctx: &egui::Context) {
@@ -361,7 +383,7 @@ impl DedicatedImageViewerApp {
             return;
         }
 
-        self.upload_frame(ctx, self.current_index, Arc::new(frame));
+        self.upload_to_cache(ctx, self.current_index, &frame);
     }
 
     fn handle_prefetch_results(&mut self, ctx: &egui::Context) {
@@ -370,12 +392,10 @@ impl DedicatedImageViewerApp {
 
             match output.frame {
                 Ok(frame) => {
-                    let frame = Arc::new(frame);
-                    self.cache.put(output.index, Arc::clone(&frame));
-
-                    if output.index == self.current_index {
-                        self.upload_frame(ctx, output.index, frame);
-                    }
+                    // Upload to GPU and drop CPU buffer immediately.
+                    // Both current AND neighbour images go through the same
+                    // path — the cache stores TextureHandles, not CPU frames.
+                    self.upload_to_cache(ctx, output.index, &frame);
                 }
                 Err(err) => {
                     // Interrupted = job was skipped by worker (too far from center).
@@ -495,6 +515,18 @@ impl DedicatedImageViewerApp {
 
 impl eframe::App for DedicatedImageViewerApp {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        // Synchronise with the GPU before building the next frame (skipped on
+        // the very first frame to avoid a visible flash while the GPU
+        // initialises). Prevents wgpu from keeping several frames' worth of
+        // texture uploads alive at once during fast navigation.
+        if self.repaint_ctx_set {
+            if let Some(render_state) = frame.wgpu_render_state() {
+                render_state
+                    .device
+                    .poll(eframe::wgpu::Maintain::Wait);
+            }
+        }
+
         if !self.repaint_ctx_set {
             self.prefetch.set_repaint_ctx(ctx.clone());
             self.repaint_ctx_set = true;
@@ -526,7 +558,6 @@ impl eframe::App for DedicatedImageViewerApp {
         self.sync_window_title(ctx);
 
         self.handle_prefetch_results(ctx);
-        self.cache.evict_over_budget(self.current_index);
 
         if self.sequence.entries.is_empty() {
             self.render_top_bar(ctx);
@@ -567,7 +598,7 @@ impl eframe::App for DedicatedImageViewerApp {
         // Low-frequency fallback poll — workers trigger immediate repaints via
         // ctx.request_repaint(), but this ensures progress even if the signal
         // is missed (e.g. during the first frame before ctx is propagated).
-        if !self.cache.has(self.current_index) {
+        if self.texture_index != Some(self.current_index) && !self.cache.has(self.current_index) {
             ctx.request_repaint_after(Duration::from_millis(200));
         }
     }

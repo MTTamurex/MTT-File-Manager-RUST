@@ -247,10 +247,6 @@ pub fn decode_preview_frame_with_priority(
     Ok(frame_from_dynamic(resized))
 }
 
-pub fn decode_cached_preview_frame(path: &Path, max_side: u32) -> Option<DecodedFrame> {
-    decode_preview_from_thumbnail_cache(path, max_side)
-}
-
 pub fn normalize_export_path(path: &Path, format: ExportImageFormat) -> PathBuf {
     if path
         .extension()
