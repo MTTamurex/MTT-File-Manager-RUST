@@ -60,9 +60,16 @@ pub fn send_open_request(path: &Path) -> Result<bool, String> {
                 }
                 Err(err) => {
                     let code = err.code();
-                    if code == ERROR_FILE_NOT_FOUND.to_hresult()
-                        || code == ERROR_PIPE_BUSY.to_hresult()
-                    {
+                    if code == ERROR_FILE_NOT_FOUND.to_hresult() {
+                        // Pipe does not exist — no viewer instance is running.
+                        // Return immediately instead of retrying; there is
+                        // nothing to connect to and waiting just delays the
+                        // process spawn.
+                        return Ok(false);
+                    }
+                    if code == ERROR_PIPE_BUSY.to_hresult() {
+                        // Pipe exists but all instances are busy — the viewer
+                        // is running, so retry with backoff.
                         if attempt + 1 < CLIENT_RETRY_COUNT {
                             std::thread::sleep(retry_delay);
                             retry_delay = retry_delay

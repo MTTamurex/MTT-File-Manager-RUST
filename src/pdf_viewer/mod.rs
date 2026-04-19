@@ -158,6 +158,7 @@ pub fn run_standalone(path: PathBuf) -> eframe::Result<()> {
     let mut viewport = eframe::egui::ViewportBuilder::default()
         .with_title(rust_i18n::t!("pdfviewer.title_with_file", name = file_name).to_string())
         .with_inner_size([1024.0, 768.0])
+        .with_visible(false)
         .with_resizable(true)
         .with_decorations(true)
         .with_app_id("mtt-file-manager-pdf-viewer");

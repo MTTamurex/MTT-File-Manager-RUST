@@ -23,8 +23,8 @@ use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::{
     GetClientRect, IsZoomed, HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT, HTCAPTION, HTCLIENT, HTLEFT,
-    HTRIGHT, HTTOP, HTTOPLEFT, HTTOPRIGHT, WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE, WM_NCHITTEST,
-    WM_SIZE,
+    HTRIGHT, HTTOP, HTTOPLEFT, HTTOPRIGHT, WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE, WM_NCACTIVATE,
+    WM_NCHITTEST, WM_SIZE,
 };
 
 /// SIZE_MINIMIZED constant (wParam for WM_SIZE when window is minimized)
@@ -310,6 +310,19 @@ extern "system" fn borderless_subclass_proc(
 
     if msg == WM_NCHITTEST {
         return handle_nchittest(hwnd, lparam);
+    }
+
+    // Suppress default non-client repaint on focus change.  The borderless
+    // window has WS_CAPTION|WS_THICKFRAME for DWM compositing, but the
+    // non-client area is zero-sized (WM_NCCALCSIZE returns 0 via winit).
+    // Without this intercept, DefWindowProc repaints the entire window
+    // surface with the default background colour for one frame, causing a
+    // visible black/white flash every time focus changes (e.g. when a child
+    // viewer process steals foreground).
+    if msg == WM_NCACTIVATE {
+        // Return TRUE to accept the activation change without letting
+        // DefWindowProc repaint the non-client frame.
+        return LRESULT(1);
     }
 
     // Pass all other messages to default handler

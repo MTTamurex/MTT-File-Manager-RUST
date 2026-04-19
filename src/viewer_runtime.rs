@@ -26,7 +26,6 @@
 
 use eframe::egui;
 use std::path::PathBuf;
-use std::sync::Arc;
 
 fn state_db_path() -> Option<PathBuf> {
     Some(
@@ -82,78 +81,15 @@ pub fn is_saved_theme_dark() -> bool {
 /// subprocess. See the module-level docs for the rationale of each knob.
 pub fn build_viewer_native_options(viewport: egui::ViewportBuilder) -> eframe::NativeOptions {
     use eframe::egui_wgpu::{WgpuSetup, WgpuSetupCreateNew};
-    use eframe::wgpu;
-
-    // Custom device descriptor: ask the driver to minimise pool allocations
-    // and cap the surface texture size to 4 K.
-    let device_descriptor: Arc<dyn Fn(&wgpu::Adapter) -> wgpu::DeviceDescriptor<'static> + Send + Sync> =
-        Arc::new(|adapter| {
-            let base_limits = if adapter.get_info().backend == wgpu::Backend::Gl {
-                wgpu::Limits::downlevel_webgl2_defaults()
-            } else {
-                wgpu::Limits::default()
-            };
-
-            const MB: u64 = 1024 * 1024;
-            wgpu::DeviceDescriptor {
-                label: Some("mtt-viewer wgpu device"),
-                required_features: wgpu::Features::empty(),
-                required_limits: wgpu::Limits {
-                    // 4096 covers a maximised window on a single 4K monitor
-                    // while letting the driver allocate smaller texture
-                    // pools than the 8192 default would force.
-                    max_texture_dimension_2d: 4096,
-                    ..base_limits
-                },
-                // Explicit gpu_allocator block sizes (32-64 MB). The wgpu
-                // `MemoryUsage` preset still allocates fairly large blocks;
-                // explicit Manual hints (as in viewskater-egui) drop GPU
-                // resident memory significantly. 32 MB device blocks fit a
-                // single 4K RGBA texture (≈33 MB) snugly via sub-allocation.
-                memory_hints: wgpu::MemoryHints::Manual {
-                    suballocated_device_memory_block_size: (32 * MB)..(64 * MB),
-                },
-            }
-        });
-
-    // Restrict the wgpu Instance to a single backend so we don't pay for
-    // loading Vulkan / OpenGL drivers on Windows just to render egui.
-    #[cfg(target_os = "windows")]
-    let instance_backends = wgpu::Backends::DX12;
-    #[cfg(not(target_os = "windows"))]
-    let instance_backends = wgpu::Backends::PRIMARY;
-
-    let setup = WgpuSetupCreateNew {
-        instance_descriptor: wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::from_env().unwrap_or(instance_backends),
-            flags: wgpu::InstanceFlags::from_build_config().with_env(),
-            backend_options: wgpu::BackendOptions::from_env_or_default(),
-        },
-        // LowPower hints the driver to use the integrated GPU on hybrid
-        // systems. Viewers don't need the dGPU's throughput and the iGPU
-        // keeps the resident set far smaller (no separate VRAM mirror).
-        power_preference: wgpu::PowerPreference::from_env()
-            .unwrap_or(wgpu::PowerPreference::LowPower),
-        native_adapter_selector: None,
-        device_descriptor,
-        trace_path: std::env::var("WGPU_TRACE")
-            .ok()
-            .map(std::path::PathBuf::from),
-    };
 
     eframe::NativeOptions {
         viewport,
-        // Disable optional buffers the viewers never use; this keeps the
-        // surface allocation as small as possible (mostly relevant for the
-        // glow renderer, harmless under wgpu).
-        multisampling: 0,
-        depth_buffer: 0,
-        stencil_buffer: 0,
+        persist_window: false,
         wgpu_options: eframe::egui_wgpu::WgpuConfiguration {
-            wgpu_setup: WgpuSetup::CreateNew(setup),
-            // 1 frame in flight is enough for a viewer (no animation
-            // pipelines beyond GIF playback) and avoids the driver
-            // double-/triple-buffering large frame resources.
+            wgpu_setup: WgpuSetup::CreateNew(WgpuSetupCreateNew {
+                power_preference: eframe::wgpu::PowerPreference::HighPerformance,
+                ..Default::default()
+            }),
             desired_maximum_frame_latency: Some(1),
             ..Default::default()
         },
