@@ -167,7 +167,8 @@ impl DirectoryIndex {
             )
         })?;
 
-        let dir_str = dir_path.to_string_lossy().to_string();
+        let dir_str_cow = dir_path.to_string_lossy();
+        let dir_str: &str = &dir_str_cow;
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()

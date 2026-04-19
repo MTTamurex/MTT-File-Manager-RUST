@@ -611,8 +611,12 @@ fn matches_all_tokens(haystack: &str, tokens: &[&str]) -> bool {
 /// When the lowered NameArena is available (Phase 3), uses SIMD-accelerated
 /// `memchr::memmem` on the pre-lowered arena bytes — zero allocations per
 /// record, ~10-50 ms for ~1.7 M files.
+///
+/// Each volume's read lock is acquired independently for the duration of
+/// scanning that single volume only — see `volume_indices` (F5.4). A USN
+/// writer on volume D no longer blocks a search reading volume C.
 pub fn search_page(
-    indices: &[VolumeIndex],
+    handles: &[crate::volume_indices::VolumeIndexHandle],
     query: &str,
     offset: usize,
     limit: usize,
@@ -647,7 +651,9 @@ pub fn search_page(
     let mut matched_after_filters: usize = 0;
     let mut timed_out = false;
 
-    for index in indices {
+    for handle in handles {
+        let index = handle.read();
+        let index = &*index;
         if !matches!(index.state, IndexState::Ready) {
             continue;
         }

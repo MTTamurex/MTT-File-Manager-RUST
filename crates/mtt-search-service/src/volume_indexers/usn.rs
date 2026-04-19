@@ -1,14 +1,13 @@
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use parking_lot::RwLock;
 
 use crate::file_index;
 use crate::indexing_progress::IndexingProgress;
 use crate::index_db;
 use crate::usn_journal;
+use crate::volume_indices::{self, SharedVolumeIndices, VolumeIndexHandle};
 use crate::FtsState;
-use super::upsert_volume_index;
 
 const INCREMENTAL_APPLY_RETRY_ATTEMPTS: usize = 3;
 const INCREMENTAL_APPLY_RETRY_SLEEP: std::time::Duration = std::time::Duration::from_millis(35);
@@ -29,22 +28,17 @@ struct PendingPersistSnapshot {
 }
 
 fn restore_pending_snapshot(
-    indices: &Arc<RwLock<Vec<file_index::VolumeIndex>>>,
+    handle: &VolumeIndexHandle,
     snapshot: PendingPersistSnapshot,
 ) {
-    let mut indices_lock = indices.write();
-    if let Some(vol_index) = indices_lock
-        .iter_mut()
-        .find(|v| v.drive_letter == snapshot.drive_letter)
-    {
-        vol_index.pending_additions.extend(snapshot.additions);
-        vol_index.pending_removals.extend(snapshot.removals);
-    }
+    let mut vol_index = handle.write();
+    vol_index.pending_additions.extend(snapshot.additions);
+    vol_index.pending_removals.extend(snapshot.removals);
 }
 
 pub(crate) fn index_volume(
     drive_letter: char,
-    indices: Arc<RwLock<Vec<file_index::VolumeIndex>>>,
+    indices: SharedVolumeIndices,
     indexing_progress: Arc<IndexingProgress>,
     db: Arc<index_db::IndexDb>,
     shutdown: Arc<AtomicBool>,
@@ -359,11 +353,11 @@ pub(crate) fn index_volume(
     let mut current_usn = index.last_usn;
     let sizes_already_loaded = index.sizes_loaded;
 
-    // Add to shared indices.
-    {
-        let mut indices_lock = indices.write();
-        upsert_volume_index(&mut indices_lock, index);
-    }
+    // Register / update this volume's handle. From here on, all per-volume
+    // mutations happen through `handle` directly — the outer registry lock is
+    // not taken again, so concurrent writers/readers on *other* volumes are
+    // never blocked by this thread.
+    let handle: VolumeIndexHandle = volume_indices::upsert(&indices, index);
     indexing_progress.clear(drive_letter);
 
     // FTS5 rebuild is no longer needed — in-memory SIMD search (Phase 3)
@@ -375,7 +369,7 @@ pub(crate) fn index_volume(
     // that doesn't have sizes (old binary format or SQLite fallback).
     // After a bulk MFT read, sizes_loaded is already true.
     if !sizes_already_loaded {
-        let indices = indices.clone();
+        let bg_handle = handle.clone();
         let indexing_progress = indexing_progress.clone();
         std::thread::spawn(move || {
             // Open a dedicated volume handle for this background thread.
@@ -421,36 +415,28 @@ pub(crate) fn index_volume(
                     // Apply sizes from the bulk index to the live index.
                     let mut applied = 0u64;
                     let mut sizes_marked = false;
-                    if let Some(mut lock) =
-                        indices.try_write_for(std::time::Duration::from_secs(10))
+                    if let Some(mut vol) =
+                        bg_handle.try_write_for(std::time::Duration::from_secs(10))
                     {
-                        if let Some(vol) =
-                            lock.iter_mut().find(|v| v.drive_letter == drive_letter)
-                        {
-                            for (&frn, bulk_rec) in &bulk_index.records {
-                                if bulk_rec.size > 0 {
-                                    if let Some(rec) = vol.records.get_mut(&frn) {
-                                        if rec.size != bulk_rec.size {
-                                            rec.size = bulk_rec.size;
-                                            applied += 1;
-                                        }
+                        for (&frn, bulk_rec) in &bulk_index.records {
+                            if bulk_rec.size > 0 {
+                                if let Some(rec) = vol.records.get_mut(&frn) {
+                                    if rec.size != bulk_rec.size {
+                                        rec.size = bulk_rec.size;
+                                        applied += 1;
                                     }
                                 }
                             }
-                            vol.sizes_loaded = true;
-                            sizes_marked = true;
                         }
+                        vol.sizes_loaded = true;
+                        sizes_marked = true;
                     }
                     // Ensure sizes_loaded is set even if the bulk update
                     // lock timed out — avoids leaving the UI stuck on
                     // "sizes not loaded" indefinitely.
                     if !sizes_marked {
-                        let mut lock = indices.write();
-                        if let Some(vol) =
-                            lock.iter_mut().find(|v| v.drive_letter == drive_letter)
-                        {
-                            vol.sizes_loaded = true;
-                        }
+                        let mut vol = bg_handle.write();
+                        vol.sizes_loaded = true;
                     }
                     let elapsed = start.elapsed();
                     eprintln!(
@@ -465,12 +451,8 @@ pub(crate) fn index_volume(
                     );
                     // Still mark as loaded to avoid blocking the UI forever.
                     {
-                        let mut lock = indices.write();
-                        if let Some(vol) =
-                            lock.iter_mut().find(|v| v.drive_letter == drive_letter)
-                        {
-                            vol.sizes_loaded = true;
-                        }
+                        let mut vol = bg_handle.write();
+                        vol.sizes_loaded = true;
                     }
                 }
             }
@@ -510,25 +492,20 @@ pub(crate) fn index_volume(
                 let mut applied = false;
                 let mut attempt = 0usize;
                 while attempt < INCREMENTAL_APPLY_RETRY_ATTEMPTS {
-                    match indices.try_write() {
-                        Some(mut indices_lock) => {
-                            if let Some(vol_index) = indices_lock
-                                .iter_mut()
-                                .find(|v| v.drive_letter == drive_letter)
-                            {
-                                let mut dummy_count = 0;
-                                usn_journal::parse_usn_records(
-                                    &buffer[8..bytes_returned as usize],
-                                    vol_index,
-                                    &mut dummy_count,
-                                    true,
-                                );
-                                vol_index.last_usn = new_usn;
-                                current_usn = new_usn;
-                                applied = true;
-                                if attempt > 0 {
-                                    contention_applied_after_retry += 1;
-                                }
+                    match handle.try_write() {
+                        Some(mut vol_index) => {
+                            let mut dummy_count = 0;
+                            usn_journal::parse_usn_records(
+                                &buffer[8..bytes_returned as usize],
+                                &mut vol_index,
+                                &mut dummy_count,
+                                true,
+                            );
+                            vol_index.last_usn = new_usn;
+                            current_usn = new_usn;
+                            applied = true;
+                            if attempt > 0 {
+                                contention_applied_after_retry += 1;
                             }
                             break;
                         }
@@ -550,22 +527,17 @@ pub(crate) fn index_volume(
                     // cycle — current_usn stays unchanged so the next
                     // iteration re-reads from the same USN position
                     // (no data loss, at most ~2 s extra staleness).
-                    match indices.try_write_for(INCREMENTAL_WRITE_FALLBACK_TIMEOUT) {
-                        Some(mut indices_lock) => {
-                            if let Some(vol_index) = indices_lock
-                                .iter_mut()
-                                .find(|v| v.drive_letter == drive_letter)
-                            {
-                                let mut dummy_count = 0;
-                                usn_journal::parse_usn_records(
-                                    &buffer[8..bytes_returned as usize],
-                                    vol_index,
-                                    &mut dummy_count,
-                                    true,
-                                );
-                                vol_index.last_usn = new_usn;
-                                current_usn = new_usn;
-                            }
+                    match handle.try_write_for(INCREMENTAL_WRITE_FALLBACK_TIMEOUT) {
+                        Some(mut vol_index) => {
+                            let mut dummy_count = 0;
+                            usn_journal::parse_usn_records(
+                                &buffer[8..bytes_returned as usize],
+                                &mut vol_index,
+                                &mut dummy_count,
+                                true,
+                            );
+                            vol_index.last_usn = new_usn;
+                            current_usn = new_usn;
                         }
                         None => {
                             contention_skipped_cycles += 1;
@@ -587,23 +559,17 @@ pub(crate) fn index_volume(
         // Drain pending_size_refresh under a short lock, then read MFT records
         // without holding the lock, and finally apply sizes under a second lock.
         {
-            let pending_frns: Vec<u64> = {
-                match indices.try_write() {
-                    Some(mut lock) => {
-                        if let Some(vol) = lock.iter_mut().find(|v| v.drive_letter == drive_letter) {
-                            if vol.sizes_loaded && !vol.pending_size_refresh.is_empty() {
-                                std::mem::take(&mut vol.pending_size_refresh)
-                                    .into_iter()
-                                    .collect()
-                            } else {
-                                Vec::new()
-                            }
-                        } else {
-                            Vec::new()
-                        }
+            let pending_frns: Vec<u64> = match handle.try_write() {
+                Some(mut vol) => {
+                    if vol.sizes_loaded && !vol.pending_size_refresh.is_empty() {
+                        std::mem::take(&mut vol.pending_size_refresh)
+                            .into_iter()
+                            .collect()
+                    } else {
+                        Vec::new()
                     }
-                    None => Vec::new(),
                 }
+                None => Vec::new(),
             };
 
             if !pending_frns.is_empty() {
@@ -622,14 +588,10 @@ pub(crate) fn index_volume(
 
                     // Apply sizes under lock.
                     if !size_updates.is_empty() {
-                        if let Some(mut lock) = indices.try_write_for(INCREMENTAL_WRITE_FALLBACK_TIMEOUT) {
-                            if let Some(vol) =
-                                lock.iter_mut().find(|v| v.drive_letter == drive_letter)
-                            {
-                                for (frn, size) in &size_updates {
-                                    if let Some(rec) = vol.records.get_mut(frn) {
-                                        rec.size = *size;
-                                    }
+                        if let Some(mut vol) = handle.try_write_for(INCREMENTAL_WRITE_FALLBACK_TIMEOUT) {
+                            for (frn, size) in &size_updates {
+                                if let Some(rec) = vol.records.get_mut(frn) {
+                                    rec.size = *size;
                                 }
                             }
                         }
@@ -660,42 +622,37 @@ pub(crate) fn index_volume(
         // 3) Persist every 5 minutes — incremental sync only (not full rebuild).
         if last_persist.elapsed() > std::time::Duration::from_secs(300) {
             let pending_snapshot = {
-                let mut indices_lock = indices.write();
-                indices_lock
-                    .iter_mut()
-                    .find(|v| v.drive_letter == drive_letter)
-                    .map(|vol_index| {
-                        let additions = std::mem::take(&mut vol_index.pending_additions);
-                        let removals = std::mem::take(&mut vol_index.pending_removals);
-                        let addition_rows = additions
-                            .iter()
-                            .filter_map(|frn| {
-                                let record = vol_index.records.get(frn)?;
-                                Some((
-                                    *frn,
-                                    vol_index.names.get(record.name_ref()).to_string(),
-                                    record.parent_ref,
-                                    record.is_dir,
-                                    vol_index.reparse_points.contains(frn),
-                                    vol_index
-                                        .hardlink_parents
-                                        .get(frn)
-                                        .cloned()
-                                        .unwrap_or_default(),
-                                ))
-                            })
-                            .collect();
-
-                        PendingPersistSnapshot {
-                            drive_letter: vol_index.drive_letter,
-                            journal_id: vol_index.journal_id,
-                            last_usn: vol_index.last_usn,
-                            files_indexed: vol_index.records.len(),
-                            additions,
-                            removals,
-                            addition_rows,
-                        }
+                let mut vol_index = handle.write();
+                let additions = std::mem::take(&mut vol_index.pending_additions);
+                let removals = std::mem::take(&mut vol_index.pending_removals);
+                let addition_rows = additions
+                    .iter()
+                    .filter_map(|frn| {
+                        let record = vol_index.records.get(frn)?;
+                        Some((
+                            *frn,
+                            vol_index.names.get(record.name_ref()).to_string(),
+                            record.parent_ref,
+                            record.is_dir,
+                            vol_index.reparse_points.contains(frn),
+                            vol_index
+                                .hardlink_parents
+                                .get(frn)
+                                .cloned()
+                                .unwrap_or_default(),
+                        ))
                     })
+                    .collect();
+
+                Some(PendingPersistSnapshot {
+                    drive_letter: vol_index.drive_letter,
+                    journal_id: vol_index.journal_id,
+                    last_usn: vol_index.last_usn,
+                    files_indexed: vol_index.records.len(),
+                    additions,
+                    removals,
+                    addition_rows,
+                })
             };
 
             if let Some(snapshot) = pending_snapshot {
@@ -725,7 +682,7 @@ pub(crate) fn index_volume(
                             drive_letter,
                             crate::redact_paths(&e.to_string())
                         );
-                        restore_pending_snapshot(&indices, snapshot);
+                        restore_pending_snapshot(&handle, snapshot);
                     }
                 }
             }
@@ -734,10 +691,8 @@ pub(crate) fn index_volume(
             // SEC: Prune stale dir_modified_at entries to prevent unbounded memory growth.
             // 10 minutes is generous enough to cover any realistic CheckPathsModified threshold.
             {
-                let mut indices_lock = indices.write();
-                if let Some(vol) = indices_lock.iter_mut().find(|v| v.drive_letter == drive_letter) {
-                    vol.prune_old_modifications(std::time::Duration::from_secs(600));
-                }
+                let mut vol = handle.write();
+                vol.prune_old_modifications(std::time::Duration::from_secs(600));
             }
         }
     }

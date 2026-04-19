@@ -4,7 +4,6 @@ mod pipe_io;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
-use parking_lot::RwLock;
 
 use windows::Win32::Foundation::{CloseHandle, HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT};
 use windows::Win32::Storage::FileSystem::FlushFileBuffers;
@@ -12,9 +11,9 @@ use windows::Win32::System::Pipes::{ConnectNamedPipe, DisconnectNamedPipe};
 use windows::Win32::System::Threading::{CreateEventW, WaitForSingleObject};
 use windows::Win32::System::IO::OVERLAPPED;
 
-use crate::file_index::VolumeIndex;
 use crate::indexing_progress::IndexingProgress;
 use crate::security_policy::IpcSecurityPolicy;
+use crate::volume_indices::SharedVolumeIndices;
 
 const PIPE_BUFFER_SIZE: u32 = 64 * 1024;
 const PIPE_MAX_INSTANCES: u32 = 32;
@@ -34,7 +33,7 @@ const IO_TIMEOUT_SECS: u64 = 30;
 
 /// Start the IPC server loop.
 pub fn run_ipc_server(
-    indices: Arc<RwLock<Vec<VolumeIndex>>>,
+    indices: SharedVolumeIndices,
     indexing_progress: Arc<IndexingProgress>,
     shutdown: Arc<AtomicBool>,
     _fts_state: Arc<crate::FtsState>,

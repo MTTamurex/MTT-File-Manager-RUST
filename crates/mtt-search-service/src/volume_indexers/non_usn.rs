@@ -1,6 +1,5 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use parking_lot::RwLock;
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{HANDLE, INVALID_HANDLE_VALUE, WAIT_OBJECT_0, WAIT_TIMEOUT};
 use windows::Win32::Storage::FileSystem::{
@@ -14,8 +13,9 @@ use crate::file_index;
 use crate::fs_walker;
 use crate::indexing_progress::IndexingProgress;
 use crate::index_db;
+use crate::volume_indices::{self, SharedVolumeIndices, VolumeIndexHandle};
 use crate::FtsState;
-use super::{upsert_volume_index, wait_for_shutdown_or_timeout};
+use super::wait_for_shutdown_or_timeout;
 
 const NON_USN_WAIT_STEP: std::time::Duration = std::time::Duration::from_millis(500);
 
@@ -35,7 +35,7 @@ enum NonUsnWaitResult {
 pub(crate) fn index_non_ntfs_volume(
     drive_letter: char,
     file_system: String,
-    indices: Arc<RwLock<Vec<file_index::VolumeIndex>>>,
+    indices: SharedVolumeIndices,
     indexing_progress: Arc<IndexingProgress>,
     db: Arc<index_db::IndexDb>,
     shutdown: Arc<AtomicBool>,
@@ -63,6 +63,7 @@ pub(crate) fn index_non_ntfs_volume(
     );
 
     // Fast startup path: reuse persisted snapshot while a fresh scan runs.
+    let mut handle: Option<VolumeIndexHandle> = None;
     let mut cached_index = file_index::VolumeIndex::new(drive_letter);
     if let Some(cached_count) = db.load_into_index(&mut cached_index, |_| {}) {
         cached_index.names.shrink_to_fit();
@@ -70,8 +71,7 @@ pub(crate) fn index_non_ntfs_volume(
         cached_index.last_usn = 0;
         cached_index.state = file_index::IndexState::Ready;
 
-        let mut indices_lock = indices.write();
-        upsert_volume_index(&mut indices_lock, cached_index);
+        handle = Some(volume_indices::upsert(&indices, cached_index));
         eprintln!(
             "[SCAN] {}:\\ Loaded {} cached records for fallback index",
             drive_letter, cached_count
@@ -150,10 +150,7 @@ pub(crate) fn index_non_ntfs_volume(
                 scanned_index.prune_old_modifications(std::time::Duration::from_secs(600));
 
                 let records = stats.records_indexed;
-                {
-                    let mut indices_lock = indices.write();
-                    upsert_volume_index(&mut indices_lock, scanned_index);
-                }
+                handle = Some(volume_indices::upsert(&indices, scanned_index));
                 indexing_progress.clear(drive_letter);
 
                 // Rebuild FTS5 in a background thread.
@@ -205,11 +202,8 @@ pub(crate) fn index_non_ntfs_volume(
                     crate::redact_paths(&e)
                 );
 
-                let mut indices_lock = indices.write();
-                if let Some(existing) = indices_lock
-                    .iter_mut()
-                    .find(|v| v.drive_letter == drive_letter)
-                {
+                if let Some(h) = handle.as_ref() {
+                    let mut existing = h.write();
                     if existing.records.is_empty() {
                         existing.state = file_index::IndexState::Error(e.clone());
                     }
