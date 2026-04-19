@@ -1,4 +1,5 @@
 pub mod binary;
+pub mod integrity;
 mod sync;
 
 use std::ffi::OsStr;

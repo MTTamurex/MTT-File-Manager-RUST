@@ -1,20 +1,29 @@
 //! Binary index format for fast save/load of the in-memory VolumeIndex.
 //!
-//! Layout:
+//! Layout (`MTTIDX02`):
 //!   [Header]                     — 72 bytes
 //!   [NameArena]                  — arena_size bytes
 //!   [Records]                    — record_count × 32 bytes (8-byte FRN + 24-byte FileRecord)
 //!   [Hardlinks]                  — hardlink_entry_count × 16 bytes (8-byte child FRN + 8-byte parent FRN)
 //!   [Reparse Points]             — reparse_count × 8 bytes (8-byte FRN)
-//!   [CRC32]                      — 4 bytes (covers everything above)
+//!   [HMAC-SHA256]                — 32 bytes (covers everything above; key is per-machine, DPAPI-sealed)
+//!
+//! SEC: The trailer was upgraded from CRC32 → HMAC-SHA256 with a per-machine
+//! key sealed by DPAPI. CRC32 only protects against accidental corruption; an
+//! attacker who can write to the index file can trivially recompute it. HMAC
+//! requires the per-machine key (see [`super::integrity`]). Files written by
+//! the legacy `MTTIDX01` format are treated as missing on load and rebuilt.
 
 use std::io::Write;
 use std::path::PathBuf;
 
+use super::integrity::{self, HMAC_OUTPUT_SIZE};
 use crate::file_index::{FileRecord, VolumeIndex};
 
-const MAGIC: &[u8; 8] = b"MTTIDX01";
-const VERSION: u32 = 1;
+const MAGIC: &[u8; 8] = b"MTTIDX02";
+const LEGACY_MAGIC: &[u8; 8] = b"MTTIDX01";
+const VERSION: u32 = 2;
+const TRAILER_SIZE: usize = HMAC_OUTPUT_SIZE;
 
 #[repr(C, packed)]
 struct Header {
@@ -82,10 +91,23 @@ pub fn save(index: &VolumeIndex) -> Result<(), String> {
 
     let start = std::time::Instant::now();
 
+    // SEC: Resolve the per-machine HMAC key BEFORE opening the temp file so a
+    // missing/unreadable key never produces a half-written index on disk.
+    let key = integrity::machine_key()
+        .map_err(|e| format!("HMAC key unavailable: {}", e))?;
+
     let mut file = std::fs::File::create(&tmp_path)
         .map_err(|e| format!("Failed to create temp index file: {}", e))?;
 
-    let mut crc = Crc32::new();
+    // Buffer the entire payload in memory so we can MAC it in one pass.
+    // The format already requires us to know record/arena sizes up front,
+    // so this does not change the memory profile materially.
+    let mut payload: Vec<u8> = Vec::with_capacity(
+        HEADER_SIZE
+            + index.names.len()
+            + index.records.len() * RECORD_SIZE
+            + index.reparse_points.len() * REPARSE_ENTRY_SIZE,
+    );
 
     // Flatten hardlink_parents into (child_frn, parent_frn) pairs.
     let hardlink_pairs: Vec<(u64, u64)> = index
@@ -123,79 +145,44 @@ pub fn save(index: &VolumeIndex) -> Result<(), String> {
     // Write header.
     let header_bytes: &[u8] =
         unsafe { std::slice::from_raw_parts(&header as *const Header as *const u8, HEADER_SIZE) };
-    file.write_all(header_bytes)
-        .map_err(|e| format!("Write header: {}", e))?;
-    crc.update(header_bytes);
+    payload.extend_from_slice(header_bytes);
 
     // Write NameArena.
-    let arena_bytes = index.names.as_bytes();
-    file.write_all(arena_bytes)
-        .map_err(|e| format!("Write arena: {}", e))?;
-    crc.update(arena_bytes);
+    payload.extend_from_slice(index.names.as_bytes());
 
     // Write Records (sorted by FRN for deterministic output).
     let mut sorted_frns: Vec<u64> = index.records.keys().copied().collect();
     sorted_frns.sort_unstable();
-
-    // Write in a buffer to reduce syscalls.
-    let mut buf = Vec::with_capacity(RECORD_SIZE * 8192.min(sorted_frns.len()));
-    for (i, &frn) in sorted_frns.iter().enumerate() {
+    for &frn in &sorted_frns {
         let rec = &index.records[&frn];
-        buf.extend_from_slice(&frn.to_le_bytes());
+        payload.extend_from_slice(&frn.to_le_bytes());
         let rec_bytes: &[u8] = unsafe {
             std::slice::from_raw_parts(rec as *const FileRecord as *const u8, FILE_RECORD_SIZE)
         };
-        buf.extend_from_slice(rec_bytes);
-
-        if buf.len() >= RECORD_SIZE * 8192 || i == sorted_frns.len() - 1 {
-            file.write_all(&buf)
-                .map_err(|e| format!("Write records: {}", e))?;
-            crc.update(&buf);
-            buf.clear();
-        }
+        payload.extend_from_slice(rec_bytes);
     }
 
     // Write Hardlink pairs.
     for &(child, parent) in &hardlink_pairs {
-        buf.extend_from_slice(&child.to_le_bytes());
-        buf.extend_from_slice(&parent.to_le_bytes());
-        if buf.len() >= HARDLINK_ENTRY_SIZE * 8192 {
-            file.write_all(&buf)
-                .map_err(|e| format!("Write hardlinks: {}", e))?;
-            crc.update(&buf);
-            buf.clear();
-        }
-    }
-    if !buf.is_empty() {
-        file.write_all(&buf)
-            .map_err(|e| format!("Write hardlinks tail: {}", e))?;
-        crc.update(&buf);
-        buf.clear();
+        payload.extend_from_slice(&child.to_le_bytes());
+        payload.extend_from_slice(&parent.to_le_bytes());
     }
 
     // Write Reparse points.
     let mut sorted_reparse: Vec<u64> = index.reparse_points.iter().copied().collect();
     sorted_reparse.sort_unstable();
     for &frn in &sorted_reparse {
-        buf.extend_from_slice(&frn.to_le_bytes());
-        if buf.len() >= REPARSE_ENTRY_SIZE * 8192 {
-            file.write_all(&buf)
-                .map_err(|e| format!("Write reparse: {}", e))?;
-            crc.update(&buf);
-            buf.clear();
-        }
-    }
-    if !buf.is_empty() {
-        file.write_all(&buf)
-            .map_err(|e| format!("Write reparse tail: {}", e))?;
-        crc.update(&buf);
-        buf.clear();
+        payload.extend_from_slice(&frn.to_le_bytes());
     }
 
-    // Write CRC32.
-    let checksum = crc.finalize();
-    file.write_all(&checksum.to_le_bytes())
-        .map_err(|e| format!("Write checksum: {}", e))?;
+    // SEC: Compute HMAC-SHA256 over the entire payload and append as trailer.
+    let tag = integrity::hmac_sha256(&key, &payload)
+        .map_err(|e| format!("HMAC compute: {}", e))?;
+
+    file.write_all(&payload)
+        .map_err(|e| format!("Write payload: {}", e))?;
+    file.write_all(&tag)
+        .map_err(|e| format!("Write HMAC trailer: {}", e))?;
 
     file.flush()
         .map_err(|e| format!("Flush: {}", e))?;
@@ -229,28 +216,38 @@ pub fn load(drive_letter: char) -> Result<Option<(VolumeIndex, PersistedBinarySt
     let data = std::fs::read(&path)
         .map_err(|e| format!("Read binary index: {}", e))?;
 
-    if data.len() < HEADER_SIZE + 4 {
+    if data.len() < HEADER_SIZE + TRAILER_SIZE {
         return Err("Binary index too small".into());
     }
 
-    // Verify CRC over everything except the last 4 bytes.
-    let payload = &data[..data.len() - 4];
-    let stored_crc = u32::from_le_bytes([
-        data[data.len() - 4],
-        data[data.len() - 3],
-        data[data.len() - 2],
-        data[data.len() - 1],
-    ]);
-    let mut crc = Crc32::new();
-    crc.update(payload);
-    let computed_crc = crc.finalize();
-    if stored_crc != computed_crc {
-        // Delete corrupted file so next startup does a full scan.
+    // SEC: Magic check FIRST so we can recognize legacy files and silently
+    // request a rebuild instead of erroring out.
+    if data[..8] == *LEGACY_MAGIC {
+        eprintln!(
+            "[BINARY-IDX] {}:\\ Legacy MTTIDX01 (CRC32) format detected; \
+             discarding and rebuilding under MTTIDX02 (HMAC-SHA256).",
+            drive_letter
+        );
         let _ = std::fs::remove_file(&path);
-        return Err(format!(
-            "CRC mismatch: stored={:#010x} computed={:#010x}",
-            stored_crc, computed_crc
-        ));
+        return Ok(None);
+    }
+    if data[..8] != *MAGIC {
+        let _ = std::fs::remove_file(&path);
+        return Err("Bad magic".into());
+    }
+
+    // Verify HMAC-SHA256 over everything except the trailer.
+    let payload = &data[..data.len() - TRAILER_SIZE];
+    let stored_tag = &data[data.len() - TRAILER_SIZE..];
+
+    let key = integrity::machine_key()
+        .map_err(|e| format!("HMAC key unavailable: {}", e))?;
+    let computed_tag = integrity::hmac_sha256(&key, payload)
+        .map_err(|e| format!("HMAC compute: {}", e))?;
+    if !integrity::ct_eq(stored_tag, &computed_tag) {
+        // Treat HMAC mismatch as tampering/corruption: delete and force rescan.
+        let _ = std::fs::remove_file(&path);
+        return Err("HMAC mismatch (tampering or corruption)".into());
     }
 
     // Parse header.
@@ -316,7 +313,7 @@ pub fn load(drive_letter: char) -> Result<Option<(VolumeIndex, PersistedBinarySt
         .and_then(|s| s.checked_add(record_count.checked_mul(RECORD_SIZE)?))
         .and_then(|s| s.checked_add(hardlink_count.checked_mul(HARDLINK_ENTRY_SIZE)?))
         .and_then(|s| s.checked_add(reparse_count.checked_mul(REPARSE_ENTRY_SIZE)?))
-        .and_then(|s| s.checked_add(4)) // CRC
+        .and_then(|s| s.checked_add(TRAILER_SIZE)) // HMAC-SHA256
         .ok_or_else(|| "Size overflow in header arithmetic".to_string())?;
     if data.len() != expected {
         return Err(format!(
@@ -407,46 +404,3 @@ pub struct PersistedBinaryState {
     pub has_hardlink_parent_data: bool,
     pub has_reparse_point_data: bool,
 }
-
-// ──────────────────────── Minimal CRC32 (IEEE) ─────────────────────────
-
-struct Crc32 {
-    state: u32,
-}
-
-impl Crc32 {
-    fn new() -> Self {
-        Self { state: 0xFFFF_FFFF }
-    }
-
-    fn update(&mut self, data: &[u8]) {
-        for &byte in data {
-            let index = ((self.state ^ byte as u32) & 0xFF) as usize;
-            self.state = CRC32_TABLE[index] ^ (self.state >> 8);
-        }
-    }
-
-    fn finalize(self) -> u32 {
-        self.state ^ 0xFFFF_FFFF
-    }
-}
-
-const CRC32_TABLE: [u32; 256] = {
-    let mut table = [0u32; 256];
-    let mut i = 0u32;
-    while i < 256 {
-        let mut crc = i;
-        let mut j = 0;
-        while j < 8 {
-            if crc & 1 != 0 {
-                crc = 0xEDB8_8320 ^ (crc >> 1);
-            } else {
-                crc >>= 1;
-            }
-            j += 1;
-        }
-        table[i as usize] = crc;
-        i += 1;
-    }
-    table
-};
