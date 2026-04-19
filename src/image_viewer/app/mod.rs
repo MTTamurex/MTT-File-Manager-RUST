@@ -13,7 +13,7 @@ mod rendering;
 use filmstrip::FilmstripState;
 use gif_export::{GifAnimation, ViewerStatusMessage};
 
-const DEFAULT_CACHE_RADIUS: usize = 3;
+const DEFAULT_CACHE_RADIUS: usize = 1;
 const MIN_ZOOM_FACTOR: f32 = 0.10;
 const MAX_ZOOM_FACTOR: f32 = 8.0;
 /// Minimum interval between navigation actions to prevent flooding workers
@@ -515,18 +515,6 @@ impl DedicatedImageViewerApp {
 
 impl eframe::App for DedicatedImageViewerApp {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
-        // Synchronise with the GPU before building the next frame (skipped on
-        // the very first frame to avoid a visible flash while the GPU
-        // initialises). Prevents wgpu from keeping several frames' worth of
-        // texture uploads alive at once during fast navigation.
-        if self.repaint_ctx_set {
-            if let Some(render_state) = frame.wgpu_render_state() {
-                render_state
-                    .device
-                    .poll(eframe::wgpu::Maintain::Wait);
-            }
-        }
-
         if !self.repaint_ctx_set {
             self.prefetch.set_repaint_ctx(ctx.clone());
             self.repaint_ctx_set = true;
