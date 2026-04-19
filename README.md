@@ -10,7 +10,7 @@ MTT File Manager is a native Windows file manager built in Rust that combines fa
 
 ### Interface & Navigation
 - **Custom borderless window** — Modern frameless UI with native resize support
-- **Dark / Light theme** — Toggle between dark and light mode in Settings > Appearance; persisted in SQLite, applied to all windows including image and PDF viewers with native title bar support via DWM
+- **Dark / Light theme** — Toggle between dark and light mode in Settings > Appearance; persisted in SQLite, applied to all windows including image, PDF, and text viewers with native title bar support via DWM
 - **Tabbed navigation** — Multiple tabs with independent history
 - **Grid and List views** — Adjustable thumbnail sizes
 - **Smart address bar** — Direct path input with breadcrumbs
@@ -19,10 +19,11 @@ MTT File Manager is a native Windows file manager built in Rust that combines fa
 
 ### Media Preview
 - **Integrated preview** — View files without leaving the app
-- **Dedicated image viewer** — Separate process with sliding-window cache, instant navigation, and multi-threaded decoding
+- **Dedicated image viewer** — Separate process with a bounded sliding-window GPU texture cache, hidden-first startup, and multi-threaded decoding
+- **Text viewer** — Separate process for plain text, code, logs, and markup files using the same lightweight viewer runtime as the image/PDF viewers
 - **Video player** — Standalone mpv-based player with D3D11 GPU pipeline
 - **Audio playback & metadata** — Audio-only files open in the standalone mpv player with real-time waveform visualization; the preview panel extracts codec, bitrate, channels, sample rate, and music tags
-- **PDF viewer** — Native viewer using pdfium (Google's PDF rendering library via `pdfium-render` crate)
+- **PDF viewer** — Native pdfium-based viewer with bounded texture caching and asynchronous rendering in a separate process
 - **Smart thumbnails** — Multi-stage generation: image crate → WIC → Shell API → Media Foundation
 - **Animated GIF playback** — Optimized rendering with play/pause controls
 
@@ -52,8 +53,8 @@ MTT File Manager is a native Windows file manager built in Rust that combines fa
 | Category | Technology | Version | Purpose |
 |----------|-----------|---------|---------|
 | **Language** | Rust | Edition 2021 | Performance and safety |
-| **GUI** | eframe/egui | 0.31 | Modern immediate-mode GUI (features: `persistence`, `wgpu`) |
-| **GPU Backend** | wgpu (via eframe) | 24.0.5 | Prefers native primary backends on Windows, with GL/ANGLE compatibility fallback and HighPerformance adapter preference |
+| **GUI** | eframe/egui | 0.31 | Modern immediate-mode GUI (features: `persistence`, `wgpu`, `glow`) |
+| **GPU Backend** | wgpu + glow (via eframe) | 24.x / via eframe | Main window uses `wgpu` with HighPerformance preference; image/PDF/text viewers use the lighter `glow` path |
 | **Windows API** | windows-rs | 0.61.0 | Native Windows integration |
 | **Video** | libmpv2 | 5.0.3 | High-performance video playback |
 | **PDF** | pdfium (pdfium-render) | 0.8.37 | Native PDF rendering (requires pdfium.dll) |
@@ -144,6 +145,11 @@ cargo --version
 # Development (entire workspace)
 cargo build --workspace
 cargo run
+
+# Standalone viewer entry points (same executable, alternate mode flags)
+cargo run -- --image-viewer "C:\path\to\image.jpg"
+cargo run -- --pdf-viewer "C:\path\to\file.pdf"
+cargo run -- --text-viewer "C:\path\to\file.txt"
 
 # Release build
 cargo build --release --workspace
