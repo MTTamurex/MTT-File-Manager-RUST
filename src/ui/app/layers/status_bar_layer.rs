@@ -49,6 +49,8 @@ pub(crate) fn render_status_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Cont
                 app.navigation_state.is_recycle_bin_view,
                 bulk_active || is_scanning,
                 &mut app.show_hidden_files,
+                app.view_mode,
+                &mut app.thumbnail_size,
                 video_preview_active,
             );
             match action {
