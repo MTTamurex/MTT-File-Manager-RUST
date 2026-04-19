@@ -273,15 +273,19 @@ fn open_pipe() -> Result<HANDLE, String> {
 
 /// SEC: Verify that the named pipe server belongs to the legitimate search service.
 /// Gets the server PID via `GetNamedPipeServerProcessId`, then validates BOTH:
-///   (a) the running executable's full path resolves to a file whose basename
-///       matches `mtt-search-service.exe` AND that resides outside user-writable
-///       locations (e.g. not under any `\Users\` profile directory), and
+///   (a) the running executable's basename is `mtt-search-service.exe`, and
 ///   (b) the process token's owning user is `NT AUTHORITY\SYSTEM`.
 ///
-/// (a) defeats a basename-only spoof where a low-priv user runs a binary
-/// named `mtt-search-service.exe` from their profile and squats the pipe;
-/// (b) confirms the listener is actually a LocalSystem service rather than
-/// a user-context impostor that managed to win the pipe creation race.
+/// (b) is the strong guarantee: squatting the pipe under a LocalSystem token
+/// already requires administrative privilege, at which point the local trust
+/// boundary is gone anyway. (a) is a cheap sanity check to reject obvious
+/// mistakes (e.g. another SYSTEM service that happens to win the pipe race).
+///
+/// We intentionally do NOT reject install locations based on substring
+/// heuristics: the installer may legitimately place the service under
+/// `C:\Program Files\...` or, during developer testing, under paths that
+/// contain `\Users\` (e.g. a `target\release\` build tree). The token owner
+/// check already covers the impersonation threat without false positives.
 fn verify_server_process(pipe: HANDLE) -> Result<(), String> {
     use windows::Win32::Foundation::CloseHandle as Win32CloseHandle;
     use windows::Win32::Security::{
@@ -333,24 +337,15 @@ fn verify_server_process(pipe: HANDLE) -> Result<(), String> {
         .map_err(|e| format!("QueryFullProcessImageNameW failed: {}", e))?;
     }
     let exe_path = String::from_utf16_lossy(&path_buf[..path_len as usize]);
-    let exe_path_lc = exe_path.to_lowercase();
-
-    let basename = std::path::Path::new(&exe_path_lc)
+    let basename = std::path::Path::new(&exe_path)
         .file_name()
         .and_then(|n| n.to_str())
-        .unwrap_or("");
+        .map(|s| s.to_ascii_lowercase())
+        .unwrap_or_default();
     if basename != "mtt-search-service.exe" {
         return Err(format!(
             "Server image basename is '{}', expected 'mtt-search-service.exe'",
             basename
-        ));
-    }
-    // Reject obvious user-writable install locations to block a low-priv
-    // user from squatting the pipe with a binary in their own profile.
-    if exe_path_lc.contains(r"\users\") || exe_path_lc.contains(r"\appdata\") {
-        return Err(format!(
-            "Server image '{}' lives in a user-writable directory; refusing",
-            exe_path
         ));
     }
 
