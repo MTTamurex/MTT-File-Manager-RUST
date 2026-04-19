@@ -1,4 +1,4 @@
-use exif::{In, Reader as ExifReader, Tag};
+use exif::{Reader as ExifReader, Tag};
 use image::ImageReader;
 use std::path::Path;
 use windows::Win32::UI::Shell::PropertiesSystem::IPropertyStore;
