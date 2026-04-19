@@ -73,6 +73,16 @@ pub fn sanitize_path(path: &Path, config: &SecurityConfig) -> Result<PathBuf, Se
     // `..\` are blocked even when canonicalization would normalize them away.
     components::validate_path_components(path, config)?;
 
+    // SEC: Check for reparse points (junctions/symlinks/mount points) on the
+    // ORIGINAL path BEFORE canonicalization. `Path::canonicalize` resolves
+    // junctions silently via GetFinalPathNameByHandle, which would otherwise
+    // let an attacker hide a junction inside e.g. `D:\public\link → C:\Windows\System32`
+    // and trick the post-canonicalization check (the canonical target itself
+    // is not a reparse point, so the old order accepted it).
+    if !config.allow_symlinks {
+        symlink::check_symlink(path)?;
+    }
+
     let canonical = match path.canonicalize() {
         Ok(p) => p,
         Err(e) => {

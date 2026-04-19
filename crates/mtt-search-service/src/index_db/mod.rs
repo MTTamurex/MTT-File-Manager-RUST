@@ -44,14 +44,31 @@ pub struct IndexDb {
 /// A LocalSystem service always uses this path, and an attacker could redirect
 /// the env var to an attacker-controlled directory to inject a malicious database.
 /// Console mode also uses this path (requires admin for USN journal access).
+///
+/// SEC (TOCTOU): The directory is created (or opened if it already exists) and
+/// then validated to NOT be a reparse point BEFORE the DACL is applied to its
+/// kernel handle. This blocks a junction-planting attack where a non-admin
+/// user pre-creates `C:\ProgramData\MTT-File-Manager` as a junction pointing
+/// to e.g. `C:\Windows\System32`, which would otherwise cause `harden_directory_acl`
+/// to overwrite the ACL of the junction *target*.
 pub fn get_db_path() -> Result<PathBuf, String> {
     let dir = Path::new(r"C:\ProgramData").join("MTT-File-Manager");
-    std::fs::create_dir_all(&dir)
-        .map_err(|e| format!("Failed to create ProgramData directory {:?}: {}", dir, e))?;
 
-    // SEC: Apply ACLs via Win32 API directly, not via icacls subprocess.
-    // Shelling out to icacls from a LocalSystem service is a DLL hijacking vector
-    // and also has a TOCTOU window between directory creation and ACL application.
+    // Try to create the directory. If it already exists, that's OK — but the
+    // reparse-point validation below ensures we never operate on a junction.
+    match std::fs::create_dir(&dir) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(e) => {
+            return Err(format!(
+                "Failed to create ProgramData directory {:?}: {}",
+                dir, e
+            ));
+        }
+    }
+
+    // SEC: Validate + apply ACLs on the directory KERNEL HANDLE (not by path),
+    // refusing to proceed if the directory is a reparse point.
     harden_directory_acl(&dir)?;
 
     let _ = DATA_DIR.set(dir);
@@ -61,9 +78,14 @@ pub fn get_db_path() -> Result<PathBuf, String> {
 /// Apply explicit DACL to the database directory using Win32 API.
 /// Grants: SYSTEM (Full), Administrators (Full), Users (Read+Execute).
 /// Removes inherited permissions.
+///
+/// SEC: Opens the directory with `FILE_FLAG_OPEN_REPARSE_POINT` so junctions
+/// are NOT followed, validates the result is not a reparse point, then applies
+/// the ACL to the resulting handle via `SetSecurityInfo` (kernel object) so
+/// the DACL is bound to the inode rather than the path.
 fn harden_directory_acl(dir: &Path) -> Result<(), String> {
     use windows::Win32::Security::Authorization::{
-        SetNamedSecurityInfoW, SE_FILE_OBJECT,
+        SetSecurityInfo, SE_KERNEL_OBJECT,
         SET_ACCESS,
         SetEntriesInAclW, EXPLICIT_ACCESS_W, TRUSTEE_W,
         TRUSTEE_IS_SID, TRUSTEE_IS_WELL_KNOWN_GROUP,
@@ -72,8 +94,69 @@ fn harden_directory_acl(dir: &Path) -> Result<(), String> {
         ACL as WIN_ACL, ACE_FLAGS,
         DACL_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION,
     };
-    use windows::Win32::Foundation::LocalFree;
+    use windows::Win32::Foundation::{CloseHandle, LocalFree, HANDLE};
+    use windows::Win32::Storage::FileSystem::{
+        CreateFileW, GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION,
+        FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS,
+        FILE_FLAG_OPEN_REPARSE_POINT, FILE_FLAGS_AND_ATTRIBUTES,
+        FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_SHARE_DELETE,
+        OPEN_EXISTING,
+    };
     use windows::core::PCWSTR;
+
+    // READ_CONTROL | WRITE_DAC | FILE_READ_ATTRIBUTES — minimum required to
+    // read attributes (reparse-point check) and replace the DACL.
+    const REQUIRED_ACCESS: u32 = 0x00020000 /* READ_CONTROL */
+        | 0x00040000 /* WRITE_DAC */
+        | 0x0080 /* FILE_READ_ATTRIBUTES */;
+
+    let dir_wide: Vec<u16> = OsStr::new(dir.as_os_str())
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+
+    // Open the directory WITHOUT following reparse points.
+    let handle: HANDLE = unsafe {
+        CreateFileW(
+            PCWSTR(dir_wide.as_ptr()),
+            REQUIRED_ACCESS,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            None,
+            OPEN_EXISTING,
+            FILE_FLAGS_AND_ATTRIBUTES(
+                FILE_FLAG_BACKUP_SEMANTICS.0 | FILE_FLAG_OPEN_REPARSE_POINT.0,
+            ),
+            None,
+        )
+    }
+    .map_err(|e| format!("CreateFileW({:?}) failed: {}", dir, e))?;
+
+    // RAII guard for the directory handle.
+    struct DirHandle(HANDLE);
+    impl Drop for DirHandle {
+        fn drop(&mut self) {
+            unsafe {
+                let _ = CloseHandle(self.0);
+            }
+        }
+    }
+    let dir_handle = DirHandle(handle);
+
+    // Validate the directory is NOT a reparse point. If it is, refuse to
+    // apply the DACL (which would otherwise modify the inode pointed at by
+    // the reparse point in some downstream Win32 APIs).
+    let mut info = BY_HANDLE_FILE_INFORMATION::default();
+    unsafe {
+        GetFileInformationByHandle(dir_handle.0, &mut info)
+            .map_err(|e| format!("GetFileInformationByHandle failed: {}", e))?;
+    }
+    if info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0 {
+        return Err(format!(
+            "ProgramData directory {:?} is a reparse point — refusing to harden ACL \
+             (potential junction-planting attack)",
+            dir
+        ));
+    }
 
     // Build well-known SIDs inline (same pattern as pipe_io.rs).
     // Use align(4) wrapper to satisfy SID alignment requirements.
@@ -159,17 +242,15 @@ fn harden_directory_acl(dir: &Path) -> Result<(), String> {
         ));
     }
 
-    // Apply the ACL to the directory. PROTECTED_DACL_SECURITY_INFORMATION removes
-    // inherited ACEs (equivalent to `icacls /inheritance:r`).
-    let dir_wide: Vec<u16> = OsStr::new(dir.as_os_str())
-        .encode_wide()
-        .chain(std::iter::once(0))
-        .collect();
-
+    // Apply the ACL to the directory's KERNEL HANDLE (SE_KERNEL_OBJECT).
+    // This binds the DACL to the inode reached by the validated handle,
+    // not by re-resolving the path (which could follow a reparse point if
+    // one were swapped in between validation and ACL apply).
+    // PROTECTED_DACL_SECURITY_INFORMATION removes inherited ACEs.
     let set_result = unsafe {
-        SetNamedSecurityInfoW(
-            PCWSTR(dir_wide.as_ptr()),
-            SE_FILE_OBJECT,
+        SetSecurityInfo(
+            dir_handle.0,
+            SE_KERNEL_OBJECT,
             DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
             None,
             None,
@@ -189,7 +270,7 @@ fn harden_directory_acl(dir: &Path) -> Result<(), String> {
 
     if set_result.0 != 0 {
         return Err(format!(
-            "SetNamedSecurityInfoW failed with error code {}",
+            "SetSecurityInfo failed with error code {}",
             set_result.0
         ));
     }

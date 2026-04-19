@@ -136,17 +136,15 @@ fn create_pipe() -> Result<HANDLE, String> {
         .collect();
 
     unsafe {
-        // Build an explicit DACL granting access to BUILTIN\Users and SYSTEM only.
-        // Without this, the pipe inherits the process default descriptor which may
-        // be overly permissive and allow local DoS via repeated open_request spam.
-
-        // BUILTIN\Users SID: S-1-5-32-545
-        let mut sid_users = [0u8; 16];
-        sid_users[0] = 1; // Revision
-        sid_users[1] = 2; // SubAuthorityCount
-        sid_users[7] = 5; // NT Authority
-        sid_users[8..12].copy_from_slice(&32u32.to_le_bytes());
-        sid_users[12..16].copy_from_slice(&545u32.to_le_bytes());
+        // SEC: Restrict the pipe DACL to the CURRENT USER's SID only (plus SYSTEM
+        // for service-mode interop). The file manager and image viewer always run
+        // as the same interactive user, so no other local account ever needs
+        // access. Granting BUILTIN\Users (S-1-5-32-545) on a shared/RDP host
+        // would otherwise let any other logged-on user inject crafted paths to
+        // probe the viewer's parser or trigger UI actions in another session.
+        let user_sid_bytes = current_process_user_sid()
+            .map_err(|e| format!("failed to get current user SID: {}", e))?;
+        let user_sid_len = user_sid_bytes.len();
 
         // NT AUTHORITY\SYSTEM SID: S-1-5-18
         let mut sid_system = [0u8; 12];
@@ -155,7 +153,7 @@ fn create_pipe() -> Result<HANDLE, String> {
         sid_system[7] = 5;
         sid_system[8..12].copy_from_slice(&18u32.to_le_bytes());
 
-        let ace1_size = 8 + sid_users.len();   // 24
+        let ace1_size = 8 + user_sid_len;
         let ace2_size = 8 + sid_system.len();   // 20
         let acl_size = 8 + ace1_size + ace2_size;
 
@@ -164,15 +162,15 @@ fn create_pipe() -> Result<HANDLE, String> {
         acl_buffer[2..4].copy_from_slice(&(acl_size as u16).to_le_bytes());
         acl_buffer[4..6].copy_from_slice(&2u16.to_le_bytes()); // AceCount
 
-        // Users: read+write access for pipe clients
-        let access_mask_users: u32 = 0x0012019F;
+        // Current user: read+write access for pipe clients
+        let access_mask_user: u32 = 0x0012019F;
         let access_mask_system: u32 = 0x001F01FF;
 
         let ace1_off = 8;
         acl_buffer[ace1_off] = 0; // ACCESS_ALLOWED_ACE_TYPE
         acl_buffer[ace1_off + 2..ace1_off + 4].copy_from_slice(&(ace1_size as u16).to_le_bytes());
-        acl_buffer[ace1_off + 4..ace1_off + 8].copy_from_slice(&access_mask_users.to_le_bytes());
-        acl_buffer[ace1_off + 8..ace1_off + 8 + sid_users.len()].copy_from_slice(&sid_users);
+        acl_buffer[ace1_off + 4..ace1_off + 8].copy_from_slice(&access_mask_user.to_le_bytes());
+        acl_buffer[ace1_off + 8..ace1_off + 8 + user_sid_len].copy_from_slice(&user_sid_bytes);
 
         let ace2_off = ace1_off + ace1_size;
         acl_buffer[ace2_off] = 0;
@@ -235,6 +233,12 @@ fn read_message(pipe: HANDLE) -> Result<PathBuf, String> {
 
     let mut payload = vec![0u8; len];
     read_exact(pipe, &mut payload)?;
+    // SEC: Reject NUL bytes (can desync downstream Win32 string parsers) and
+    // any non-UTF-8 sequence. The image viewer pipe carries only filesystem
+    // paths; embedded NULs are always malicious here.
+    if payload.contains(&0) {
+        return Err("IPC payload contains NUL byte".to_string());
+    }
     let path = String::from_utf8(payload).map_err(|e| format!("invalid UTF-8 path: {}", e))?;
     Ok(PathBuf::from(path))
 }
@@ -274,4 +278,62 @@ fn read_exact(pipe: HANDLE, mut out: &mut [u8]) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+/// SEC: Returns the raw bytes of the current process's user SID, suitable for
+/// embedding directly into an ACE. Used to lock the image-viewer pipe DACL
+/// down to the same user that owns the file-manager process.
+fn current_process_user_sid() -> Result<Vec<u8>, String> {
+    use windows::Win32::Foundation::HANDLE;
+    use windows::Win32::Security::{
+        GetLengthSid, GetTokenInformation, TokenUser, TOKEN_QUERY, TOKEN_USER,
+    };
+    use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+
+    unsafe {
+        let mut token: HANDLE = HANDLE::default();
+        OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token)
+            .map_err(|e| format!("OpenProcessToken: {}", e))?;
+
+        struct TokenGuard(HANDLE);
+        impl Drop for TokenGuard {
+            fn drop(&mut self) {
+                unsafe {
+                    let _ = CloseHandle(self.0);
+                }
+            }
+        }
+        let _guard = TokenGuard(token);
+
+        // First call: get required size.
+        let mut needed: u32 = 0;
+        let _ = GetTokenInformation(token, TokenUser, None, 0, &mut needed);
+        if needed == 0 {
+            return Err("GetTokenInformation returned size 0".to_string());
+        }
+
+        let mut buffer = vec![0u8; needed as usize];
+        GetTokenInformation(
+            token,
+            TokenUser,
+            Some(buffer.as_mut_ptr() as *mut _),
+            needed,
+            &mut needed,
+        )
+        .map_err(|e| format!("GetTokenInformation: {}", e))?;
+
+        let token_user = &*(buffer.as_ptr() as *const TOKEN_USER);
+        let sid_ptr = token_user.User.Sid;
+        if sid_ptr.is_invalid() {
+            return Err("token SID was null".to_string());
+        }
+        let sid_len = GetLengthSid(sid_ptr) as usize;
+        if sid_len == 0 || sid_len > 256 {
+            return Err(format!("unexpected SID length: {}", sid_len));
+        }
+
+        let mut sid_bytes = vec![0u8; sid_len];
+        std::ptr::copy_nonoverlapping(sid_ptr.0 as *const u8, sid_bytes.as_mut_ptr(), sid_len);
+        Ok(sid_bytes)
+    }
 }
