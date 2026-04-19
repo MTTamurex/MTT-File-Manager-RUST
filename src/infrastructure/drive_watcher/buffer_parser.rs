@@ -158,6 +158,7 @@ fn path_matches_prefix(path: &Path, prefix: &Path) -> bool {
 pub(super) fn event_matches_prefix(event: &DriveWatcherEvent, prefix: &Path) -> bool {
     match event {
         DriveWatcherEvent::DriveLost(_) => true, // Always propagate.
+        DriveWatcherEvent::PrefixInvalidated(p) => path_matches_prefix(p, prefix),
         DriveWatcherEvent::Created(p)
         | DriveWatcherEvent::Deleted(p)
         | DriveWatcherEvent::Modified(p)

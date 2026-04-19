@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use windows::Win32::Foundation::{CloseHandle, HANDLE};
+use windows::Win32::Foundation::HANDLE;
 use windows::Win32::Storage::FileSystem::{
     ReadDirectoryChangesW, FILE_NOTIFY_CHANGE_ATTRIBUTES, FILE_NOTIFY_CHANGE_CREATION,
     FILE_NOTIFY_CHANGE_DIR_NAME, FILE_NOTIFY_CHANGE_FILE_NAME, FILE_NOTIFY_CHANGE_LAST_WRITE,
@@ -11,11 +11,14 @@ use windows::Win32::Storage::FileSystem::{
 use windows::Win32::System::IO::{CancelIoEx, GetOverlappedResult, OVERLAPPED};
 use windows::Win32::System::Threading::{CreateEventW, ResetEvent, WaitForSingleObject};
 
+use crate::infrastructure::windows::OwnedHandle;
+
 use super::buffer_parser::{event_matches_prefix, parse_notify_buffer};
 use super::{DriveWatcherEvent, WatcherCommand};
 
-/// Buffer size for directory change notifications (64KB is the typical max).
-const BUFFER_SIZE: usize = 65536;
+/// Buffer size for directory change notifications.
+/// We watch local drive roots, so a larger buffer is safe and reduces overflow risk.
+const BUFFER_SIZE: usize = 256 * 1024;
 
 /// Wrapper to ensure the I/O buffer has alignment required by
 /// `FILE_NOTIFY_INFORMATION` (4 bytes).  A plain `Vec<u8>` has alignment=1.
@@ -49,12 +52,22 @@ pub(super) fn watcher_thread_main(
     log::info!("[DRIVE-WATCHER] Thread started for drive: {:?}", drive_root);
 
     unsafe {
+        let Some(handle) = OwnedHandle::new(handle) else {
+            log::error!("[DRIVE-WATCHER] Received invalid drive handle for {:?}", drive_root);
+            return;
+        };
+
         // Create events for overlapped I/O.
         let h_event = match CreateEventW(None, true, false, None) {
-            Ok(event) => event,
+            Ok(event) => match OwnedHandle::new(event) {
+                Some(handle) => handle,
+                None => {
+                    log::error!("[DRIVE-WATCHER] CreateEventW returned invalid handle");
+                    return;
+                }
+            },
             Err(e) => {
                 log::error!("[DRIVE-WATCHER] Failed to create event: {}", e);
-                let _ = CloseHandle(handle);
                 return;
             }
         };
@@ -62,7 +75,7 @@ pub(super) fn watcher_thread_main(
         // Buffer for directory change notifications.
         let mut buffer = AlignedBuffer([0u8; BUFFER_SIZE]);
         let mut overlapped = std::mem::zeroed::<OVERLAPPED>();
-        overlapped.hEvent = h_event;
+        overlapped.hEvent = h_event.as_raw();
 
         // Coalescing state: events are deduplicated here before sending.
         let mut coalesced: HashSet<DriveWatcherEvent> = HashSet::new();
@@ -105,7 +118,7 @@ pub(super) fn watcher_thread_main(
                 overlapped = std::mem::zeroed::<OVERLAPPED>();
                 overlapped.hEvent = h_event;
                 let result = ReadDirectoryChangesW(
-                    handle,
+                    handle.as_raw(),
                     buffer.0.as_mut_ptr() as *mut _,
                     buffer.0.len() as u32,
                     true, // Watch subtree (entire drive)
@@ -133,11 +146,12 @@ pub(super) fn watcher_thread_main(
             }
 
             // Wait for I/O completion with timeout (100ms).
-            let wait_result = WaitForSingleObject(h_event, 100);
+            let wait_result = WaitForSingleObject(h_event.as_raw(), 100);
 
             if wait_result.0 == 0 {
                 // Event signaled - I/O completed.
-                let result = GetOverlappedResult(handle, &overlapped, &mut bytes_returned, false);
+                let result =
+                    GetOverlappedResult(handle.as_raw(), &overlapped, &mut bytes_returned, false);
 
                 if let Err(e) = &result {
                     // Handle became invalid - drive was likely unmounted.
@@ -149,7 +163,17 @@ pub(super) fn watcher_thread_main(
                     break;
                 }
 
-                if bytes_returned > 0 {
+                if bytes_returned == 0 || bytes_returned as usize >= buffer.0.len() {
+                    log::warn!(
+                        "[DRIVE-WATCHER] Notification overflow on {:?}; invalidating {:?}",
+                        drive_root,
+                        current_prefix
+                    );
+                    coalesced.clear();
+                    let _ = event_tx.send(vec![DriveWatcherEvent::PrefixInvalidated(
+                        current_prefix.clone(),
+                    )]);
+                } else {
                     // Parse the notification buffer.
                     let events = parse_notify_buffer(&buffer.0[..bytes_returned as usize], &drive_root);
 
@@ -168,7 +192,7 @@ pub(super) fn watcher_thread_main(
                 }
 
                 // Reset event and mark I/O as complete.
-                let _ = ResetEvent(h_event);
+                let _ = ResetEvent(h_event.as_raw());
                 waiting_for_io = false;
             }
 
@@ -195,14 +219,12 @@ pub(super) fn watcher_thread_main(
         // cancellation while Windows may still be writing into `buffer` /
         // `overlapped` — a use-after-free if they are dropped immediately.
         if waiting_for_io {
-            let _ = CancelIoEx(handle, Some(&overlapped));
+            let _ = CancelIoEx(handle.as_raw(), Some(&overlapped));
             let mut dummy = 0u32;
-            let _ = GetOverlappedResult(handle, &overlapped, &mut dummy, true);
+            let _ = GetOverlappedResult(handle.as_raw(), &overlapped, &mut dummy, true);
         } else {
-            let _ = CancelIoEx(handle, None);
+            let _ = CancelIoEx(handle.as_raw(), None);
         }
-        let _ = CloseHandle(handle);
-        let _ = CloseHandle(h_event);
         log::info!("[DRIVE-WATCHER] Thread shutdown complete");
     }
 }

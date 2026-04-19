@@ -35,6 +35,8 @@ pub enum DriveWatcherEvent {
     Modified(PathBuf),
     /// File or folder was renamed (old path, new path)
     Renamed(PathBuf, PathBuf),
+    /// Watcher buffer overflowed and the prefix must be refreshed from disk
+    PrefixInvalidated(PathBuf),
     /// Unknown/unsupported event
     Unknown(PathBuf),
     /// Drive became inaccessible (unmounted, disconnected)
@@ -290,5 +292,11 @@ mod tests {
         assert!(event_matches_prefix(&event, Path::new("C:\\Users\\Test")));
         assert!(!event_matches_prefix(&event, Path::new("C:\\Users\\Other")));
         assert!(!event_matches_prefix(&event, Path::new("D:\\Users\\Test")));
+
+        let invalidated = DriveWatcherEvent::PrefixInvalidated(PathBuf::from("C:\\Users\\Test"));
+        assert!(event_matches_prefix(
+            &invalidated,
+            Path::new("C:\\Users\\Test\\Nested")
+        ));
     }
 }
