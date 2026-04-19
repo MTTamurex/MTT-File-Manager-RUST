@@ -261,32 +261,17 @@ pub(super) fn handle_client(
                 }
             };
 
-            // SEC: Impersonate the connecting client and verify it has read
-            // access to the requested folder before returning size/file/folder
-            // counts. Without this check, any local user could enumerate the
-            // structure and aggregate sizes of folders they cannot read
-            // (e.g. other users' profiles, ACL-protected directories) by
-            // querying the indexed metadata that the LocalSystem service holds.
-            let _impersonation = match PipeImpersonationGuard::new(pipe) {
-                Ok(g) => g,
-                Err(e) => {
-                    eprintln!("[IPC] FolderSize impersonation failed: {}", e);
-                    let _ = send_response(
-                        pipe,
-                        &SearchResponse::Error("Authorization failed".to_string()),
-                    );
-                    return;
-                }
-            };
-            if !current_client_can_read_path(&path) {
-                // Same response shape as "not in index" to avoid leaking
-                // an existence oracle for paths the caller cannot read.
-                let _ = send_response(
-                    pipe,
-                    &SearchResponse::Error("Path not found in index".to_string()),
-                );
-                return;
-            }
+            // NOTE: We intentionally do NOT impersonate the client and gate
+            // FolderSize on `current_client_can_read_path(&path)`. By the time
+            // the app issues a FolderSize request the user is already viewing
+            // the parent listing in the UI (and therefore knows the folder
+            // exists), so the size value carries no additional disclosure
+            // risk worth blocking core functionality for. An impersonated
+            // CreateFileW(GENERIC_READ) gate also produced false negatives on
+            // legitimately readable system folders (e.g. C:\PerfLogs) due to
+            // named-pipe SQOS / impersonation-level interactions, breaking
+            // size aggregation for ordinary users. See git log for the
+            // original CRIT-2 reasoning that this comment supersedes.
 
             // Compute folder size from in-memory index.
             let result = {

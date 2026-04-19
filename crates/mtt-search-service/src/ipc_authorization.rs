@@ -83,7 +83,17 @@ pub(crate) fn current_client_can_read_path(full_path: &str) -> bool {
                 let _ = CloseHandle(handle);
                 true
             }
-            Err(_) => false,
+            Err(e) => {
+                // Diagnostic — surfaces the real reason the impersonated open
+                // failed (typically ACCESS_DENIED if SQOS was anonymous on the
+                // pipe client side, or an unexpected Win32 error).
+                eprintln!(
+                    "[IPC-AUTHZ] CreateFileW(GENERIC_READ) denied for {}: {}",
+                    crate::redact_paths(full_path),
+                    e
+                );
+                false
+            }
         }
     }
 }
