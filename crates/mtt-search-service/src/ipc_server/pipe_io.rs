@@ -1,8 +1,13 @@
-use windows::core::PCWSTR;
-use windows::Win32::Foundation::HANDLE;
+use windows::core::{PCWSTR, PWSTR};
+use windows::Win32::Foundation::{GetLastError, HANDLE, HLOCAL, LocalFree};
+use windows::Win32::Security::Authorization::{
+    EXPLICIT_ACCESS_W, SET_ACCESS, SetEntriesInAclW, TRUSTEE_IS_SID, TRUSTEE_IS_USER,
+    TRUSTEE_IS_WELL_KNOWN_GROUP, TRUSTEE_W,
+};
 use windows::Win32::Security::{
-    InitializeSecurityDescriptor, SetSecurityDescriptorDacl, PSECURITY_DESCRIPTOR,
-    SECURITY_ATTRIBUTES,
+    AllocateAndInitializeSid, FreeSid, InitializeSecurityDescriptor,
+    SetSecurityDescriptorDacl, ACL, PSECURITY_DESCRIPTOR, PSID, SECURITY_ATTRIBUTES,
+    SID_IDENTIFIER_AUTHORITY,
 };
 use windows::Win32::Storage::FileSystem::{ReadFile, WriteFile};
 use windows::Win32::System::Pipes::{
@@ -19,114 +24,125 @@ use super::{MAX_REQUEST_PAYLOAD, PIPE_BUFFER_SIZE, PIPE_MAX_INSTANCES, PIPE_OPEN
 /// if a pipe with this name already exists. Prevents pre-emptive pipe squatting
 /// where an attacker creates the pipe before the service starts.
 const FILE_FLAG_FIRST_PIPE_INSTANCE: u32 = 0x00080000;
+const ACCESS_MASK_USERS: u32 = 0x0012019F;
+const ACCESS_MASK_SYSTEM: u32 = 0x001F01FF;
+const SECURITY_DESCRIPTOR_REVISION: u32 = 1;
+const SECURITY_NT_AUTHORITY: SID_IDENTIFIER_AUTHORITY = SID_IDENTIFIER_AUTHORITY {
+    Value: [0, 0, 0, 0, 0, 5],
+};
+
+struct SidGuard(PSID);
+
+impl SidGuard {
+    fn builtin_users() -> Result<Self, String> {
+        Self::allocate(2, 32, 545)
+    }
+
+    fn local_system() -> Result<Self, String> {
+        Self::allocate(1, 18, 0)
+    }
+
+    fn allocate(sub_authority_count: u8, sub0: u32, sub1: u32) -> Result<Self, String> {
+        let mut sid = PSID::default();
+        unsafe {
+            AllocateAndInitializeSid(
+                &SECURITY_NT_AUTHORITY,
+                sub_authority_count,
+                sub0,
+                sub1,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                &mut sid,
+            )
+            .map_err(|e| format!("AllocateAndInitializeSid failed: {}", e))?;
+        }
+        Ok(Self(sid))
+    }
+
+    fn as_trustee_name(&self) -> PWSTR {
+        PWSTR(self.0.0.cast())
+    }
+}
+
+impl Drop for SidGuard {
+    fn drop(&mut self) {
+        if !self.0.0.is_null() {
+            unsafe {
+                let _ = FreeSid(self.0);
+            }
+        }
+    }
+}
+
+struct AclGuard(*mut ACL);
+
+impl AclGuard {
+    fn from_entries(entries: &[EXPLICIT_ACCESS_W]) -> Result<Self, String> {
+        let mut acl = std::ptr::null_mut::<ACL>();
+        let result = unsafe { SetEntriesInAclW(Some(entries), None, &mut acl) };
+        if result.0 != 0 {
+            return Err(format!("SetEntriesInAclW failed with error code {}", result.0));
+        }
+
+        Ok(Self(acl))
+    }
+
+    fn as_ptr(&self) -> *const ACL {
+        self.0 as *const _
+    }
+}
+
+impl Drop for AclGuard {
+    fn drop(&mut self) {
+        if !self.0.is_null() {
+            unsafe {
+                LocalFree(Some(HLOCAL(self.0.cast())));
+            }
+        }
+    }
+}
 
 pub(super) fn create_pipe(first_instance: bool) -> Result<HANDLE, String> {
     unsafe {
-        // Build an explicit DACL that grants access only to BUILTIN\Users and SYSTEM.
-        // This replaces the previous NULL DACL (which allowed ALL access, including
-        // guest accounts, network service, and any local malware).
-        //
-        // ACL layout:
-        //   ACL header (8 bytes)
-        //   ACE 1: BUILTIN\Users  (SID S-1-5-32-545) — 12-byte SID → ACE size = 20
-        //   ACE 2: NT AUTHORITY\SYSTEM (SID S-1-5-18) — 12-byte SID → ACE size = 20
-        //
-        // Total ACL size = 8 + 20 + 20 = 48 bytes (we allocate 256 for safety).
+        let users_sid = SidGuard::builtin_users()?;
+        let system_sid = SidGuard::local_system()?;
 
-        // --- Build SIDs ---
-        // BUILTIN\Users: S-1-5-32-545
-        // SID structure: revision(1) + sub-authority-count(1) + identifier-authority(6) + sub-authorities(4*count)
-        // S-1-5-32-545 → revision=1, count=2, authority=[0,0,0,0,0,5], sub-auths=[32, 545]
-        let mut sid_users = [0u8; 16]; // 8 + 4*2 = 16 bytes
-        sid_users[0] = 1; // Revision
-        sid_users[1] = 2; // SubAuthorityCount
-        sid_users[7] = 5; // IdentifierAuthority (last byte = 5 for NT Authority)
-                          // SubAuthority[0] = 32 (SECURITY_BUILTIN_DOMAIN_RID)
-        sid_users[8..12].copy_from_slice(&32u32.to_le_bytes());
-        // SubAuthority[1] = 545 (DOMAIN_ALIAS_RID_USERS)
-        sid_users[12..16].copy_from_slice(&545u32.to_le_bytes());
+        let entries = [
+            EXPLICIT_ACCESS_W {
+                grfAccessPermissions: ACCESS_MASK_USERS,
+                grfAccessMode: SET_ACCESS,
+                Trustee: TRUSTEE_W {
+                    TrusteeForm: TRUSTEE_IS_SID,
+                    TrusteeType: TRUSTEE_IS_WELL_KNOWN_GROUP,
+                    ptstrName: users_sid.as_trustee_name(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            EXPLICIT_ACCESS_W {
+                grfAccessPermissions: ACCESS_MASK_SYSTEM,
+                grfAccessMode: SET_ACCESS,
+                Trustee: TRUSTEE_W {
+                    TrusteeForm: TRUSTEE_IS_SID,
+                    TrusteeType: TRUSTEE_IS_USER,
+                    ptstrName: system_sid.as_trustee_name(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+        ];
+        let acl = AclGuard::from_entries(&entries)?;
 
-        // NT AUTHORITY\SYSTEM: S-1-5-18
-        // S-1-5-18 → revision=1, count=1, authority=[0,0,0,0,0,5], sub-auths=[18]
-        let mut sid_system = [0u8; 12]; // 8 + 4*1 = 12 bytes
-        sid_system[0] = 1; // Revision
-        sid_system[1] = 1; // SubAuthorityCount
-        sid_system[7] = 5; // IdentifierAuthority
-                           // SubAuthority[0] = 18 (SECURITY_LOCAL_SYSTEM_RID)
-        sid_system[8..12].copy_from_slice(&18u32.to_le_bytes());
-
-        // --- Build ACL with two ACCESS_ALLOWED_ACEs ---
-        // ACCESS_ALLOWED_ACE layout:
-        //   ACE_HEADER: AceType(1) + AceFlags(1) + AceSize(2) = 4 bytes
-        //   Mask: u32 = 4 bytes
-        //   SidStart: variable (rest of SID)
-        // Total ACE size = sizeof(ACCESS_ALLOWED_ACE) - sizeof(DWORD) + GetLengthSid(pSid)
-        //         = 12 - 4 + sid_len = 8 + sid_len
-        let sid_users_len = sid_users.len(); // 16
-        let sid_system_len = sid_system.len(); // 12
-
-        let ace1_size = 8 + sid_users_len; // 24
-        let ace2_size = 8 + sid_system_len; // 20
-        let acl_size = 8 + ace1_size + ace2_size; // 8 + 24 + 20 = 52
-
-        let mut acl_buffer = vec![0u8; acl_size];
-
-        // ACL header (8 bytes):
-        //   AclRevision: u8 = 2 (ACL_REVISION)
-        //   Sbz1: u8 = 0
-        //   AclSize: u16 LE
-        //   AceCount: u16 LE
-        //   Sbz2: u16 = 0
-        acl_buffer[0] = 2; // ACL_REVISION
-        acl_buffer[2..4].copy_from_slice(&(acl_size as u16).to_le_bytes());
-        acl_buffer[4..6].copy_from_slice(&2u16.to_le_bytes()); // AceCount = 2
-
-        // Separate access masks per principal:
-        //
-        // Users: FILE_GENERIC_READ | FILE_GENERIC_WRITE minus DELETE, WRITE_DAC,
-        //   WRITE_OWNER, FILE_EXECUTE, FILE_DELETE_CHILD.  This is the minimum set
-        //   required for GENERIC_READ | GENERIC_WRITE pipe clients.
-        //   NOTE: FILE_APPEND_DATA (0x0004) shares the same bit as
-        //   FILE_CREATE_PIPE_INSTANCE and is included in Windows' GENERIC_WRITE
-        //   mapping, so it cannot be removed without breaking client connections.
-        //   Pipe squatting is mitigated by PIPE_MAX_INSTANCES and the restricted DACL
-        //   (only BUILTIN\Users + SYSTEM, no guest/network).
-        //
-        // SYSTEM: FILE_ALL_ACCESS — the service creates and owns pipe instances.
-        let access_mask_users: u32 = 0x0012019F;
-        let access_mask_system: u32 = 0x001F01FF;
-
-        // ACE 1: BUILTIN\Users
-        let ace1_offset = 8;
-        acl_buffer[ace1_offset] = 0; // ACCESS_ALLOWED_ACE_TYPE
-        acl_buffer[ace1_offset + 1] = 0; // AceFlags
-        acl_buffer[ace1_offset + 2..ace1_offset + 4]
-            .copy_from_slice(&(ace1_size as u16).to_le_bytes());
-        acl_buffer[ace1_offset + 4..ace1_offset + 8]
-            .copy_from_slice(&access_mask_users.to_le_bytes());
-        acl_buffer[ace1_offset + 8..ace1_offset + 8 + sid_users_len].copy_from_slice(&sid_users);
-
-        // ACE 2: SYSTEM
-        let ace2_offset = ace1_offset + ace1_size;
-        acl_buffer[ace2_offset] = 0; // ACCESS_ALLOWED_ACE_TYPE
-        acl_buffer[ace2_offset + 1] = 0; // AceFlags
-        acl_buffer[ace2_offset + 2..ace2_offset + 4]
-            .copy_from_slice(&(ace2_size as u16).to_le_bytes());
-        acl_buffer[ace2_offset + 4..ace2_offset + 8]
-            .copy_from_slice(&access_mask_system.to_le_bytes());
-        acl_buffer[ace2_offset + 8..ace2_offset + 8 + sid_system_len].copy_from_slice(&sid_system);
-
-        // --- Build Security Descriptor ---
-        let mut sd_buffer = vec![0u8; 256];
-        let sd_ptr = PSECURITY_DESCRIPTOR(sd_buffer.as_mut_ptr() as *mut _);
-
-        // SECURITY_DESCRIPTOR_REVISION = 1
-        InitializeSecurityDescriptor(sd_ptr, 1)
+        let mut security_descriptor = [0u8; 256];
+        let sd_ptr = PSECURITY_DESCRIPTOR(security_descriptor.as_mut_ptr().cast());
+        InitializeSecurityDescriptor(sd_ptr, SECURITY_DESCRIPTOR_REVISION)
             .map_err(|e| format!("InitializeSecurityDescriptor: {}", e))?;
 
-        // Set our explicit DACL (not a NULL DACL)
-        let acl_ptr = acl_buffer.as_ptr() as *const windows::Win32::Security::ACL;
-        SetSecurityDescriptorDacl(sd_ptr, true, Some(acl_ptr), false)
+        SetSecurityDescriptorDacl(sd_ptr, true, Some(acl.as_ptr()), false)
             .map_err(|e| format!("SetSecurityDescriptorDacl: {}", e))?;
 
         let sa = SECURITY_ATTRIBUTES {
@@ -157,10 +173,7 @@ pub(super) fn create_pipe(first_instance: bool) -> Result<HANDLE, String> {
         );
 
         if pipe.is_invalid() {
-            return Err(format!(
-                "CreateNamedPipeW failed: {:?}",
-                windows::Win32::Foundation::GetLastError()
-            ));
+            return Err(format!("CreateNamedPipeW failed: {:?}", GetLastError()));
         }
 
         Ok(pipe)
