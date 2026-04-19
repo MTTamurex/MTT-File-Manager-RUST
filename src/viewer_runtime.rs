@@ -11,20 +11,14 @@
 //!   instead of the full [`crate::infrastructure::app_state_db::AppStateDb`]
 //!   pipeline (which runs migrations and pragmas on every open).
 //! * Build [`eframe::NativeOptions`] that
-//!   - prefer the **integrated GPU** (`PowerPreference::LowPower`) — viewers
-//!     do not need the discrete GPU's compute throughput, and the iGPU keeps
-//!     the working set drastically smaller on hybrid laptops;
-//!   - keep the default eframe/wgpu backend selection to avoid extra
-//!     platform-specific initialization behavior while still using a lighter
-//!     viewer-specific device profile;
-//!   - request `MemoryHints::Manual` from wgpu when creating the device,
-//!     keeping allocator block sizes bounded to reduce viewer-process RSS;
+//!   - use the lighter `Glow` renderer instead of `Wgpu`; for the standalone
+//!     viewers this avoids the large DX12 / wgpu baseline that dominates RSS
+//!     even for tiny text files;
 //!   - disable optional GL-only buffers (`depth_buffer`, `stencil_buffer`,
 //!     `multisampling`) which the viewers never use.
 
 use eframe::egui;
 use std::path::PathBuf;
-use std::sync::Arc;
 
 fn state_db_path() -> Option<PathBuf> {
     Some(
@@ -79,44 +73,13 @@ pub fn is_saved_theme_dark() -> bool {
 /// Build [`eframe::NativeOptions`] tuned for a low-baseline-RAM viewer
 /// subprocess. See the module-level docs for the rationale of each knob.
 pub fn build_viewer_native_options(viewport: egui::ViewportBuilder) -> eframe::NativeOptions {
-    use eframe::egui_wgpu::{WgpuSetup, WgpuSetupCreateNew};
-    use eframe::wgpu;
-
-    let device_descriptor: Arc<
-        dyn Fn(&wgpu::Adapter) -> wgpu::DeviceDescriptor<'static> + Send + Sync,
-    > = Arc::new(|adapter| {
-        let required_limits = if adapter.get_info().backend == wgpu::Backend::Gl {
-            wgpu::Limits::downlevel_webgl2_defaults()
-        } else {
-            wgpu::Limits::default()
-        };
-
-        const MB: u64 = 1024 * 1024;
-        wgpu::DeviceDescriptor {
-            label: Some("mtt-viewer wgpu device"),
-            required_features: wgpu::Features::empty(),
-            required_limits,
-            memory_hints: wgpu::MemoryHints::Manual {
-                suballocated_device_memory_block_size: (32 * MB)..(64 * MB),
-            },
-        }
-    });
-
     eframe::NativeOptions {
         viewport,
+        renderer: eframe::Renderer::Glow,
         persist_window: false,
         multisampling: 0,
         depth_buffer: 0,
         stencil_buffer: 0,
-        wgpu_options: eframe::egui_wgpu::WgpuConfiguration {
-            wgpu_setup: WgpuSetup::CreateNew(WgpuSetupCreateNew {
-                power_preference: wgpu::PowerPreference::LowPower,
-                device_descriptor,
-                ..Default::default()
-            }),
-            desired_maximum_frame_latency: Some(1),
-            ..Default::default()
-        },
         ..Default::default()
     }
 }
