@@ -41,20 +41,23 @@ pub(crate) struct PipeImpersonationGuard {
 
 impl PipeImpersonationGuard {
     pub(crate) fn new(pipe: HANDLE) -> Result<Self, String> {
-        unsafe {
-            ImpersonateNamedPipeClient(pipe)
-                .map_err(|e| format!("ImpersonateNamedPipeClient failed: {}", e))?;
+        match unsafe { ImpersonateNamedPipeClient(pipe) } {
+            Ok(()) => Ok(Self { active: true }),
+            Err(e) => Err(format!("ImpersonateNamedPipeClient failed: {}", e)),
         }
-        Ok(Self { active: true })
     }
 }
 
 impl Drop for PipeImpersonationGuard {
     fn drop(&mut self) {
         if self.active {
-            unsafe {
-                let _ = RevertToSelf();
+            if let Err(err) = unsafe { RevertToSelf() } {
+                eprintln!(
+                    "[IPC] RevertToSelf failed after pipe impersonation: {}",
+                    err
+                );
             }
+            self.active = false;
         }
     }
 }

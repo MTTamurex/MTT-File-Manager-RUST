@@ -1,17 +1,16 @@
 use std::ffi::OsString;
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::path::Path;
-use std::sync::OnceLock;
-use windows::core::{s, w, PCWSTR};
-use windows::Win32::Foundation::{CloseHandle, HANDLE, NTSTATUS};
+use windows::core::PCWSTR;
+use windows::Wdk::Storage::FileSystem::{FileDirectoryInformation, NtQueryDirectoryFile};
+use windows::Win32::Foundation::{CloseHandle, HANDLE};
 use windows::Win32::Storage::FileSystem::{
     CreateFileW, FILE_FLAG_BACKUP_SEMANTICS, FILE_LIST_DIRECTORY, FILE_SHARE_DELETE,
     FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
 };
-use windows::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
+use windows::Win32::System::IO::IO_STATUS_BLOCK;
 
 const BUFFER_SIZE: usize = 65536;
-const FILE_DIRECTORY_INFORMATION: u32 = 1;
 
 /// Wrapper to ensure the I/O buffer has the alignment required by
 /// `FileDirectoryInfo` (8 bytes on x86-64).  A plain `Vec<u8>` has
@@ -42,42 +41,7 @@ pub struct DirectoryEntry {
     pub attributes: u32,
 }
 
-type NtQueryDirectoryFileFn = unsafe extern "system" fn(
-    file_handle: HANDLE,
-    event: HANDLE,
-    apc_routine: *mut std::ffi::c_void,
-    apc_context: *mut std::ffi::c_void,
-    io_status_block: *mut IoStatusBlock,
-    file_information: *mut std::ffi::c_void,
-    length: u32,
-    file_information_class: u32,
-    return_single_entry: u8,
-    file_name: *const std::ffi::c_void,
-    restart_scan: u8,
-) -> NTSTATUS;
-
-#[repr(C)]
-struct IoStatusBlock {
-    status: NTSTATUS,
-    information: usize,
-}
-
-static NT_QUERY_DIR: OnceLock<Option<NtQueryDirectoryFileFn>> = OnceLock::new();
-
-fn get_nt_query_directory_file() -> Option<NtQueryDirectoryFileFn> {
-    *NT_QUERY_DIR.get_or_init(|| unsafe {
-        let ntdll = GetModuleHandleW(w!("ntdll.dll")).ok()?;
-        let proc = GetProcAddress(ntdll, s!("NtQueryDirectoryFile"))?;
-        Some(std::mem::transmute::<
-            unsafe extern "system" fn() -> isize,
-            NtQueryDirectoryFileFn,
-        >(proc))
-    })
-}
-
 pub fn read_directory_fast(dir_path: &Path) -> Option<Vec<DirectoryEntry>> {
-    let nt_query = get_nt_query_directory_file()?;
-
     // H-4: RAII wrapper — CloseHandle guaranteed on return AND panic
     struct HandleGuard(HANDLE);
     impl Drop for HandleGuard {
@@ -107,31 +71,28 @@ pub fn read_directory_fast(dir_path: &Path) -> Option<Vec<DirectoryEntry>> {
 
     let mut entries = Vec::with_capacity(1000);
     let mut buffer = AlignedBuffer([0u8; BUFFER_SIZE]);
-    let mut restart_scan = 1u8;
+    let mut restart_scan = true;
 
     loop {
-        let mut io_status = IoStatusBlock {
-            status: NTSTATUS(0),
-            information: 0,
-        };
+        let mut io_status = IO_STATUS_BLOCK::default();
 
         let status = unsafe {
-            nt_query(
+            NtQueryDirectoryFile(
                 handle.0,
-                HANDLE::default(),
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
+                None,
+                None,
+                None,
                 &mut io_status,
                 buffer.0.as_mut_ptr() as *mut _,
                 BUFFER_SIZE as u32,
-                FILE_DIRECTORY_INFORMATION,
-                0,
-                std::ptr::null(),
+                FileDirectoryInformation,
+                false,
+                None,
                 restart_scan,
             )
         };
 
-        restart_scan = 0;
+        restart_scan = false;
 
         if status.0 as u32 == 0x80000006 {
             break;
@@ -143,13 +104,13 @@ pub fn read_directory_fast(dir_path: &Path) -> Option<Vec<DirectoryEntry>> {
 
         let mut offset = 0usize;
         loop {
-            if offset >= io_status.information {
+            if offset >= io_status.Information {
                 break;
             }
 
             // Bounds check: ensure the fixed-size entry header fits in the buffer
             let entry_end = offset + std::mem::size_of::<FileDirectoryInfo>();
-            if entry_end > io_status.information {
+            if entry_end > io_status.Information {
                 break;
             }
 
@@ -158,7 +119,7 @@ pub fn read_directory_fast(dir_path: &Path) -> Option<Vec<DirectoryEntry>> {
 
             // Bounds check: ensure the variable-length filename fits in the buffer
             let name_end = entry_end + entry.file_name_length as usize;
-            if name_end > io_status.information {
+            if name_end > io_status.Information {
                 break;
             }
 
@@ -201,7 +162,7 @@ pub fn read_directory_fast(dir_path: &Path) -> Option<Vec<DirectoryEntry>> {
 }
 
 pub fn is_available() -> bool {
-    get_nt_query_directory_file().is_some()
+    true
 }
 
 #[cfg(test)]

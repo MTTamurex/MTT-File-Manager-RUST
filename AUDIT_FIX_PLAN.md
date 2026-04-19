@@ -16,10 +16,10 @@
 
 ## Status Atual
 
-- **Implementado neste ciclo:** `F0.1`, `F0.2`, `F0.3`, `F1.1`, `F1.2`, `F1.3`, `F1.4`, `F1.6`, `F2.6`, `F3.1`, `F4.1`.
+- **Implementado neste ciclo:** `F0.1`, `F0.2`, `F0.3`, `F1.1`, `F1.2`, `F1.3`, `F1.4`, `F1.6`, `F2.2`, `F2.3`, `F2.4`, `F2.5`, `F2.6`, `F3.1`, `F4.1`.
 - **Ja estava implementado no codigo:** `F2.1`.
 - **Reclassificado:** `F1.5` (a ocorrencia auditada esta em codigo de teste, nao no fluxo de runtime da aplicacao).
-- **Proximo lote recomendado:** `F2.4`, `F2.2`, `F2.5`, `F2.3`.
+- **Proximo lote recomendado:** `F3.2`, `F3.3`.
 
 ---
 
@@ -344,29 +344,27 @@ Estas abstrações desbloqueiam vários itens subsequentes. **Faça primeiro.**
 
 ---
 
-### F2.2 — S4: `ImpersonateNamedPipeClient` tratamento preciso [PENDENTE]
+### F2.2 — S4: `ImpersonateNamedPipeClient` tratamento preciso [IMPLEMENTADO]
 **Arquivo:** `crates/mtt-search-service/src/ipc_authorization.rs` (linhas ~44-75)
+**Status:** implementado com base no comportamento real da API. A documentacao oficial confirma que `ImpersonateNamedPipeClient` e uma API `BOOL`, nao `HRESULT`; no binding atual da crate `windows`, isso chega como `Result<()>` sem caminho `S_FALSE`. O guard agora marca `active` apenas no `Ok(())` e registra falha de `RevertToSelf()` no `Drop`.
 **Passos:**
-1. Distinguir `S_OK` vs `S_FALSE`:
+1. Ajustar o guard ao contrato real do binding:
    ```rust
-   let hr = unsafe { ImpersonateNamedPipeClient(pipe) };
-   let active = match hr {
-       Ok(_) => true,       // S_OK genuíno
-       Err(e) if e.code().0 as u32 == 0x00000001 /* S_FALSE mapeia aqui em alguns casos */ => false,
-       Err(e) => return Err(format!("ImpersonateNamedPipeClient failed: {e}")),
-   };
-   Ok(Self { active })
+   match unsafe { ImpersonateNamedPipeClient(pipe) } {
+       Ok(()) => Ok(Self { active: true }),
+       Err(e) => Err(format!("ImpersonateNamedPipeClient failed: {e}")),
+   }
    ```
-   (verificar o binding real da crate `windows`; pode já retornar `HRESULT` e `S_FALSE` não ser tratado como erro — ajustar conforme).
-2. `Drop` só chama `RevertToSelf()` se `self.active`.
+2. `Drop` só chama `RevertToSelf()` se `self.active`, e agora registra erro se o revert falhar.
 
 **Pronto quando:** compila; teste manual de duas buscas simultâneas não quebra autorização.
 **Risco:** **médio** — envolve segurança; revisar com cuidado.
 
 ---
 
-### F2.3 — S5 + W4: ACL/SID do named pipe via APIs Win32 [PENDENTE]
+### F2.3 — S5 + W4: ACL/SID do named pipe via APIs Win32 [IMPLEMENTADO]
 **Arquivo:** `crates/mtt-search-service/src/ipc_server/pipe_io.rs` (linhas ~24-115)
+**Status:** implementado. A montagem manual de bytes da ACL foi substituida por `AllocateAndInitializeSid` + `SetEntriesInAclW` + `InitializeSecurityDescriptor` + `SetSecurityDescriptorDacl`, com limpeza via RAII (`FreeSid` e `LocalFree`).
 **Passos:**
 1. Substituir montagem manual por `AllocateAndInitializeSid` + `SetEntriesInAclW` + `InitializeSecurityDescriptor` + `SetSecurityDescriptorDacl`.
 2. Liberar com `FreeSid` e `LocalFree` nos caminhos de erro (usar guards RAII para isso).
@@ -377,8 +375,9 @@ Estas abstrações desbloqueiam vários itens subsequentes. **Faça primeiro.**
 
 ---
 
-### F2.4 — S1: Asserts estáticos de layout [PENDENTE]
+### F2.4 — S1: Asserts estáticos de layout [IMPLEMENTADO]
 **Arquivo:** `crates/mtt-search-service/src/index_db/binary.rs` (linhas ~99, ~232, ~293)
+**Status:** implementado. O modulo agora tem asserts de tamanho e `offset_of!` para `Header` e `FileRecord`, e os tamanhos do formato binario passaram a ser centralizados em constantes compartilhadas com os loops de serializacao/desserializacao.
 **Passos:**
 1. Marcar structs serializáveis com `#[repr(C)]` (ou `packed` se já for o caso).
 2. Adicionar, logo após cada definição:
@@ -394,11 +393,12 @@ Estas abstrações desbloqueiam vários itens subsequentes. **Faça primeiro.**
 
 ---
 
-### F2.5 — S3: Trocar `GetProcAddress(NtQueryDirectoryFile)` por bindings [PENDENTE]
+### F2.5 — S3: Trocar `GetProcAddress(NtQueryDirectoryFile)` por bindings [IMPLEMENTADO]
 **Arquivo:** `src/infrastructure/ntfs_reader.rs` (linhas ~70-75)
+**Status:** implementado. O codigo agora usa `windows::Wdk::Storage::FileSystem::NtQueryDirectoryFile` diretamente, com `IO_STATUS_BLOCK` oficial da crate `windows`. A feature `Wdk_Storage_FileSystem` foi habilitada no `Cargo.toml` do app principal, sem precisar introduzir `windows-sys` como dependencia separada.
 **Passos:**
-1. Verificar se `windows-sys::Wdk::Storage::FileSystem::NtQueryDirectoryFile` está disponível (é). Se não estiver no `Cargo.toml`, ativar feature `Wdk_Storage_FileSystem`.
-2. Substituir `GetProcAddress + transmute` por `use windows_sys::Wdk::Storage::FileSystem::NtQueryDirectoryFile;`.
+1. Habilitar a feature `Wdk_Storage_FileSystem` na dependencia `windows`.
+2. Substituir `GetProcAddress + transmute` por `use windows::Wdk::Storage::FileSystem::NtQueryDirectoryFile;`.
 3. Chamar diretamente.
 **Pronto quando:** compila e `cargo test` passa; listagem de diretórios continua funcional.
 **Risco:** **médio** — ABI precisa bater; se `windows-sys` não exportar, manter transmute mas adicionar assert de tamanho por enquanto.
@@ -882,7 +882,7 @@ rg -n "Result<.*, String>" src/infrastructure/ src/application/
 |------:|------|-------|---------------|
 | 1 | 0 | F0.1, F0.2, F0.3 | Concluida |
 | 2 | 1 | F1.1, F1.2, F1.3, F1.6 | Concluida (`F1.4` concluido, `F1.5` reclassificado) |
-| 3 | 2 | F2.4, F2.2, F2.5, F2.3 | Seguranca restante (`F2.1` ja implementado, `F2.6` concluido) |
+| 3 | 2 | F2.4, F2.2, F2.5, F2.3 | Concluida (`F2.1` ja implementado, `F2.6` concluido) |
 | 4 | 3 | F3.2, F3.3 | Integracao Win32 restante (`F3.1` concluido) |
 | 5 | 4 | F4.3, F4.4, F4.2, F4.5, F4.6, F4.7 | Concorrencia restante (`F4.1` concluido) |
 | 6 | 5 | F5.1, F5.8, F5.7, F5.3, F5.6, F5.2, F5.9, F5.5, F5.4 | Performance, alto ROI primeiro |

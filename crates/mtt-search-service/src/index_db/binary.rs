@@ -33,7 +33,33 @@ struct Header {
 }
 
 const HEADER_SIZE: usize = std::mem::size_of::<Header>();
-const _: () = assert!(HEADER_SIZE == 72);
+const FRN_SIZE: usize = std::mem::size_of::<u64>();
+const FILE_RECORD_SIZE: usize = std::mem::size_of::<FileRecord>();
+const RECORD_SIZE: usize = FRN_SIZE + FILE_RECORD_SIZE;
+const HARDLINK_ENTRY_SIZE: usize = FRN_SIZE * 2;
+const REPARSE_ENTRY_SIZE: usize = FRN_SIZE;
+const _: () = {
+    assert!(HEADER_SIZE == 72);
+    assert!(std::mem::offset_of!(Header, magic) == 0);
+    assert!(std::mem::offset_of!(Header, version) == 8);
+    assert!(std::mem::offset_of!(Header, drive_letter) == 12);
+    assert!(std::mem::offset_of!(Header, _pad) == 13);
+    assert!(std::mem::offset_of!(Header, journal_id) == 16);
+    assert!(std::mem::offset_of!(Header, last_usn) == 24);
+    assert!(std::mem::offset_of!(Header, record_count) == 32);
+    assert!(std::mem::offset_of!(Header, arena_size) == 40);
+    assert!(std::mem::offset_of!(Header, hardlink_entry_count) == 48);
+    assert!(std::mem::offset_of!(Header, reparse_count) == 56);
+    assert!(std::mem::offset_of!(Header, flags) == 64);
+
+    assert!(FILE_RECORD_SIZE == 24);
+    assert!(std::mem::offset_of!(FileRecord, parent_ref) == 0);
+    assert!(std::mem::offset_of!(FileRecord, size) == 8);
+    assert!(std::mem::offset_of!(FileRecord, name_offset) == 16);
+    assert!(std::mem::offset_of!(FileRecord, name_len) == 20);
+    assert!(std::mem::offset_of!(FileRecord, is_dir) == 22);
+    assert!(std::mem::offset_of!(FileRecord, _pad) == 23);
+};
 
 /// Returns the path for the binary index file for a given drive letter.
 /// Uses the shared data directory set at startup by `get_db_path`,
@@ -112,13 +138,12 @@ pub fn save(index: &VolumeIndex) -> Result<(), String> {
     sorted_frns.sort_unstable();
 
     // Write in a buffer to reduce syscalls.
-    const RECORD_SIZE: usize = 8 + 24; // FRN + FileRecord
     let mut buf = Vec::with_capacity(RECORD_SIZE * 8192.min(sorted_frns.len()));
     for (i, &frn) in sorted_frns.iter().enumerate() {
         let rec = &index.records[&frn];
         buf.extend_from_slice(&frn.to_le_bytes());
         let rec_bytes: &[u8] = unsafe {
-            std::slice::from_raw_parts(rec as *const FileRecord as *const u8, 24)
+            std::slice::from_raw_parts(rec as *const FileRecord as *const u8, FILE_RECORD_SIZE)
         };
         buf.extend_from_slice(rec_bytes);
 
@@ -134,7 +159,7 @@ pub fn save(index: &VolumeIndex) -> Result<(), String> {
     for &(child, parent) in &hardlink_pairs {
         buf.extend_from_slice(&child.to_le_bytes());
         buf.extend_from_slice(&parent.to_le_bytes());
-        if buf.len() >= 16 * 8192 {
+        if buf.len() >= HARDLINK_ENTRY_SIZE * 8192 {
             file.write_all(&buf)
                 .map_err(|e| format!("Write hardlinks: {}", e))?;
             crc.update(&buf);
@@ -153,7 +178,7 @@ pub fn save(index: &VolumeIndex) -> Result<(), String> {
     sorted_reparse.sort_unstable();
     for &frn in &sorted_reparse {
         buf.extend_from_slice(&frn.to_le_bytes());
-        if buf.len() >= 8 * 8192 {
+        if buf.len() >= REPARSE_ENTRY_SIZE * 8192 {
             file.write_all(&buf)
                 .map_err(|e| format!("Write reparse: {}", e))?;
             crc.update(&buf);
@@ -264,9 +289,9 @@ pub fn load(drive_letter: char) -> Result<Option<(VolumeIndex, PersistedBinarySt
     // Validate expected size.
     let expected = HEADER_SIZE
         + arena_size
-        + record_count * 32
-        + hardlink_count * 16
-        + reparse_count * 8
+        + record_count * RECORD_SIZE
+        + hardlink_count * HARDLINK_ENTRY_SIZE
+        + reparse_count * REPARSE_ENTRY_SIZE
         + 4; // CRC
     if data.len() != expected {
         return Err(format!(
@@ -293,7 +318,7 @@ pub fn load(drive_letter: char) -> Result<Option<(VolumeIndex, PersistedBinarySt
         let rec: FileRecord = unsafe {
             std::ptr::read_unaligned(data[offset..].as_ptr() as *const FileRecord)
         };
-        offset += 24;
+        offset += FILE_RECORD_SIZE;
         records.insert(frn, rec);
     }
 
