@@ -16,10 +16,10 @@
 
 ## Status Atual
 
-- **Implementado neste ciclo:** `F0.1`, `F0.2`, `F0.3`, `F1.4`, `F2.6`, `F3.1`, `F4.1`.
+- **Implementado neste ciclo:** `F0.1`, `F0.2`, `F0.3`, `F1.1`, `F1.2`, `F1.3`, `F1.4`, `F1.6`, `F2.6`, `F3.1`, `F4.1`.
 - **Ja estava implementado no codigo:** `F2.1`.
 - **Reclassificado:** `F1.5` (a ocorrencia auditada esta em codigo de teste, nao no fluxo de runtime da aplicacao).
-- **Proximo lote recomendado:** `F1.2`, `F1.3`, `F1.6`, `F3.2`.
+- **Proximo lote recomendado:** `F2.4`, `F2.2`, `F2.5`, `F2.3`.
 
 ---
 
@@ -155,8 +155,9 @@ Estas abstrações desbloqueiam vários itens subsequentes. **Faça primeiro.**
 
 ## Fase 1 — Críticos (bloqueantes)
 
-### F1.1 — C1: Buffer pequeno do `ReadDirectoryChangesW` e overflow silencioso [PENDENTE]
+### F1.1 — C1: Buffer pequeno do `ReadDirectoryChangesW` e overflow silencioso [IMPLEMENTADO]
 **Arquivo:** `src/infrastructure/drive_watcher/thread_loop.rs` (linha ~18)
+**Status:** implementado com aumento do buffer para `256 * 1024`, deteccao de overflow/truncamento, emissao de `DriveWatcherEvent::PrefixInvalidated` e invalidacao do prefixo no consumidor de `user_session_search`.
 **Passos:**
 1. Alterar constante:
    ```rust
@@ -180,10 +181,12 @@ Estas abstrações desbloqueiam vários itens subsequentes. **Faça primeiro.**
 
 ---
 
-### F1.2 — C2 + C3: Handle leaks no `drive_watcher` e `mft_reader` [PENDENTE]
+### F1.2 — C2 + C3: Handle leaks no `drive_watcher` e `mft_reader` [IMPLEMENTADO]
 **Arquivos:**
 - `src/infrastructure/drive_watcher/thread_loop.rs`
 - `crates/mtt-search-service/src/mft_reader.rs`
+
+**Status:** implementado. O `drive_watcher` passou a encapsular o handle do diretorio e o evento overlapped com RAII (`OwnedHandle`), e o fallback `OpenFileById` do `mft_reader` passou a fechar o handle via guard local (`HandleGuard`) sem depender de `CloseHandle` manual em caminhos com retorno antecipado.
 
 **Passos:**
 1. Em `thread_loop.rs`:
@@ -208,8 +211,9 @@ Estas abstrações desbloqueiam vários itens subsequentes. **Faça primeiro.**
 
 ---
 
-### F1.3 — C4: Eliminar `unwrap()` em parsing binário do MFT [PENDENTE]
+### F1.3 — C4: Eliminar `unwrap()` em parsing binário do MFT [IMPLEMENTADO]
 **Arquivo:** `crates/mtt-search-service/src/mft_reader.rs`
+**Status:** implementado. O arquivo agora usa helpers de leitura segura (`read_u16_le`, `read_u32_le`, `read_u64_le`, `read_i64_le`, `read_frn_le`, `read_attr_header`, `resident_attr_value_bounds`) e o `grep` por `unwrap()`/`try_into().unwrap()` no parser retorna zero.
 **Passos:**
 1. Criar helper local:
    ```rust
@@ -283,8 +287,9 @@ Estas abstrações desbloqueiam vários itens subsequentes. **Faça primeiro.**
 
 ---
 
-### F1.6 — C7: `HDEVNOTIFY` em `AtomicUsize` [PENDENTE]
+### F1.6 — C7: `HDEVNOTIFY` em `AtomicUsize` [IMPLEMENTADO]
 **Arquivo:** `src/infrastructure/windows/device_change.rs` (linhas ~20-30)
+**Status:** implementado. O handle de notificacao agora fica em `Mutex<Option<DeviceNotificationHandle>>`, com unregister automatico em `Drop` e limpeza centralizada no shutdown/encerramento do loop.
 **Passos:**
 1. Substituir:
    ```rust
@@ -876,7 +881,7 @@ rg -n "Result<.*, String>" src/infrastructure/ src/application/
 | Ordem | Fase | Itens | Justificativa |
 |------:|------|-------|---------------|
 | 1 | 0 | F0.1, F0.2, F0.3 | Concluida |
-| 2 | 1 | F1.1, F1.2, F1.3, F1.6 | Criticos bloqueantes restantes (`F1.4` concluido, `F1.5` reclassificado) |
+| 2 | 1 | F1.1, F1.2, F1.3, F1.6 | Concluida (`F1.4` concluido, `F1.5` reclassificado) |
 | 3 | 2 | F2.4, F2.2, F2.5, F2.3 | Seguranca restante (`F2.1` ja implementado, `F2.6` concluido) |
 | 4 | 3 | F3.2, F3.3 | Integracao Win32 restante (`F3.1` concluido) |
 | 5 | 4 | F4.3, F4.4, F4.2, F4.5, F4.6, F4.7 | Concorrencia restante (`F4.1` concluido) |

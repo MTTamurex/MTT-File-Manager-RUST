@@ -9,7 +9,7 @@
 
 use std::collections::HashMap;
 
-use windows::Win32::Foundation::{HANDLE, GetLastError};
+use windows::Win32::Foundation::{CloseHandle, GetLastError, HANDLE};
 use windows::Win32::Storage::FileSystem::{ReadFile, SetFilePointerEx, FILE_BEGIN};
 use windows::Win32::System::IO::DeviceIoControl;
 
@@ -97,6 +97,79 @@ struct MftGeometry {
     mft_valid_data_length: i64,
 }
 
+struct HandleGuard(HANDLE);
+
+impl HandleGuard {
+    fn new(handle: HANDLE) -> Option<Self> {
+        if handle.is_invalid() {
+            None
+        } else {
+            Some(Self(handle))
+        }
+    }
+
+    fn as_raw(&self) -> HANDLE {
+        self.0
+    }
+}
+
+impl Drop for HandleGuard {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = CloseHandle(self.0);
+        }
+    }
+}
+
+fn read_exact<const N: usize>(buffer: &[u8], offset: usize) -> Option<[u8; N]> {
+    let end = offset.checked_add(N)?;
+    buffer.get(offset..end)?.try_into().ok()
+}
+
+fn read_u16_le(buffer: &[u8], offset: usize) -> Option<u16> {
+    Some(u16::from_le_bytes(read_exact(buffer, offset)?))
+}
+
+fn read_u32_le(buffer: &[u8], offset: usize) -> Option<u32> {
+    Some(u32::from_le_bytes(read_exact(buffer, offset)?))
+}
+
+fn read_u64_le(buffer: &[u8], offset: usize) -> Option<u64> {
+    Some(u64::from_le_bytes(read_exact(buffer, offset)?))
+}
+
+fn read_i64_le(buffer: &[u8], offset: usize) -> Option<i64> {
+    Some(i64::from_le_bytes(read_exact(buffer, offset)?))
+}
+
+fn read_frn_le(buffer: &[u8], offset: usize) -> Option<u64> {
+    read_u64_le(buffer, offset).map(|value| value & 0x0000_FFFF_FFFF_FFFF)
+}
+
+fn read_attr_header(buffer: &[u8], offset: usize) -> Option<(u32, usize)> {
+    Some((read_u32_le(buffer, offset)?, read_u32_le(buffer, offset + 4)? as usize))
+}
+
+fn resident_attr_value_bounds(
+    buffer: &[u8],
+    offset: usize,
+    record_size: usize,
+) -> Option<(usize, usize)> {
+    if offset + 0x16 > record_size {
+        return None;
+    }
+
+    let value_length = read_u32_le(buffer, offset + 0x10)? as usize;
+    let value_offset = read_u16_le(buffer, offset + 0x14)? as usize;
+    let content_start = offset.checked_add(value_offset)?;
+    let content_end = content_start.checked_add(value_length)?;
+    if content_end > record_size {
+        return None;
+    }
+
+    Some((content_start, value_length))
+}
+
 /// Query NTFS volume data to get MFT location and record size.
 fn query_mft_geometry(volume: HANDLE) -> Result<MftGeometry, String> {
     let mut buffer = [0u8; 96];
@@ -130,11 +203,16 @@ fn query_mft_geometry(volume: HANDLE) -> Result<MftGeometry, String> {
         ));
     }
 
-    let bytes_per_sector = u32::from_le_bytes(buffer[40..44].try_into().unwrap());
-    let bytes_per_cluster = u32::from_le_bytes(buffer[44..48].try_into().unwrap());
-    let bytes_per_file_record = u32::from_le_bytes(buffer[48..52].try_into().unwrap());
-    let mft_valid_data_length = i64::from_le_bytes(buffer[56..64].try_into().unwrap());
-    let mft_start_lcn = i64::from_le_bytes(buffer[64..72].try_into().unwrap());
+    let bytes_per_sector = read_u32_le(&buffer, 40)
+        .ok_or_else(|| "NTFS volume data truncated at bytes_per_sector".to_string())?;
+    let bytes_per_cluster = read_u32_le(&buffer, 44)
+        .ok_or_else(|| "NTFS volume data truncated at bytes_per_cluster".to_string())?;
+    let bytes_per_file_record = read_u32_le(&buffer, 48)
+        .ok_or_else(|| "NTFS volume data truncated at bytes_per_file_record".to_string())?;
+    let mft_valid_data_length = read_i64_le(&buffer, 56)
+        .ok_or_else(|| "NTFS volume data truncated at mft_valid_data_length".to_string())?;
+    let mft_start_lcn = read_i64_le(&buffer, 64)
+        .ok_or_else(|| "NTFS volume data truncated at mft_start_lcn".to_string())?;
 
     // Sanity checks
     if bytes_per_file_record == 0 || bytes_per_cluster == 0 {
@@ -163,7 +241,7 @@ fn extract_data_size_at(record: &[u8], offset: usize, record_size: usize) -> Opt
     if offset + 16 > record_size {
         return None;
     }
-    let attr_type = u32::from_le_bytes(record[offset..offset + 4].try_into().unwrap());
+    let attr_type = read_u32_le(record, offset)?;
     if attr_type != ATTR_TYPE_DATA {
         return None;
     }
@@ -177,8 +255,7 @@ fn extract_data_size_at(record: &[u8], offset: usize, record_size: usize) -> Opt
     if non_resident_flag == 0 {
         // Resident attribute: value_length at attr_offset+0x10.
         if offset + 0x14 <= record_size {
-            let value_length =
-                u32::from_le_bytes(record[offset + 0x10..offset + 0x14].try_into().unwrap());
+            let value_length = read_u32_le(record, offset + 0x10)?;
             return Some(value_length as u64);
         }
     } else {
@@ -187,8 +264,7 @@ fn extract_data_size_at(record: &[u8], offset: usize, record_size: usize) -> Opt
         // non-resident attribute header (base and continuation records),
         // so we read it regardless of lowest_vcn.
         if offset + 0x38 <= record_size {
-            let real_size =
-                u64::from_le_bytes(record[offset + 0x30..offset + 0x38].try_into().unwrap());
+            let real_size = read_u64_le(record, offset + 0x30)?;
             return Some(real_size);
         }
     }
@@ -223,7 +299,9 @@ fn parse_mft_record(record: &[u8], record_size: usize) -> MftSizeResult {
     }
 
     // Flags at offset 0x16 (22).
-    let flags = u16::from_le_bytes(record[0x16..0x18].try_into().unwrap());
+    let Some(flags) = read_u16_le(record, 0x16) else {
+        return MftSizeResult::None;
+    };
     if flags & MFT_RECORD_IN_USE == 0 {
         return MftSizeResult::None;
     }
@@ -232,7 +310,9 @@ fn parse_mft_record(record: &[u8], record_size: usize) -> MftSizeResult {
     }
 
     // First attribute offset at offset 0x14 (20).
-    let first_attr_offset = u16::from_le_bytes(record[0x14..0x16].try_into().unwrap()) as usize;
+    let Some(first_attr_offset) = read_u16_le(record, 0x14).map(|value| value as usize) else {
+        return MftSizeResult::None;
+    };
     if first_attr_offset >= record_size || first_attr_offset < 0x30 {
         return MftSizeResult::None;
     }
@@ -242,13 +322,13 @@ fn parse_mft_record(record: &[u8], record_size: usize) -> MftSizeResult {
     // Walk attribute list.
     let mut offset = first_attr_offset;
     while offset + 16 <= record_size {
-        let attr_type = u32::from_le_bytes(record[offset..offset + 4].try_into().unwrap());
+        let Some((attr_type, attr_length)) = read_attr_header(record, offset) else {
+            break;
+        };
         if attr_type == ATTR_TYPE_END {
             break;
         }
 
-        let attr_length =
-            u32::from_le_bytes(record[offset + 4..offset + 8].try_into().unwrap()) as usize;
         if attr_length == 0 || offset + attr_length > record_size {
             break;
         }
@@ -265,14 +345,9 @@ fn parse_mft_record(record: &[u8], record_size: usize) -> MftSizeResult {
             let is_non_resident = record[offset + 8];
             if is_non_resident == 0 {
                 // Resident $ATTRIBUTE_LIST: value is inline.
-                if offset + 0x14 <= record_size {
-                    let value_length = u32::from_le_bytes(
-                        record[offset + 0x10..offset + 0x14].try_into().unwrap(),
-                    ) as usize;
-                    let value_offset = u16::from_le_bytes(
-                        record[offset + 0x14..offset + 0x16].try_into().unwrap(),
-                    ) as usize;
-                    let abs_start = offset + value_offset;
+                if let Some((abs_start, value_length)) =
+                    resident_attr_value_bounds(record, offset, record_size)
+                {
                     let abs_end = abs_start.saturating_add(value_length).min(record_size);
 
                     parse_attribute_list_for_data(
@@ -309,10 +384,9 @@ fn parse_attribute_list_for_data(list_data: &[u8], out: &mut Vec<u64>) {
         //   8..16:  starting VCN (u64)
         //  16..24:  base file reference (u64) — low 48 bits = FRN
         //  24..26:  attribute ID (u16)
-        let entry_type =
-            u32::from_le_bytes(list_data[pos..pos + 4].try_into().unwrap());
-        let entry_length =
-            u16::from_le_bytes(list_data[pos + 4..pos + 6].try_into().unwrap()) as usize;
+        let Some((entry_type, entry_length)) = read_attr_header(list_data, pos) else {
+            break;
+        };
 
         if entry_length < ATTR_LIST_ENTRY_MIN_SIZE || pos + entry_length > list_data.len() {
             break;
@@ -325,13 +399,13 @@ fn parse_attribute_list_for_data(list_data: &[u8], out: &mut Vec<u64>) {
                 // Only follow the first extent (starting_vcn == 0). Other
                 // extents hold data-run continuations whose real_size field
                 // is unreliable per NTFS spec.
-                let starting_vcn = u64::from_le_bytes(
-                    list_data[pos + 8..pos + 16].try_into().unwrap(),
-                );
+                let Some(starting_vcn) = read_u64_le(list_data, pos + 8) else {
+                    break;
+                };
                 if starting_vcn == 0 {
-                    let base_ref = u64::from_le_bytes(
-                        list_data[pos + 16..pos + 24].try_into().unwrap(),
-                    ) & 0x0000_FFFF_FFFF_FFFF;
+                    let Some(base_ref) = read_frn_le(list_data, pos + 16) else {
+                        break;
+                    };
                     out.push(base_ref);
                 }
             }
@@ -376,14 +450,12 @@ fn fetch_mft_record(
         return None;
     }
 
-    let actual_frn =
-        u64::from_le_bytes(output_buffer[0..8].try_into().unwrap()) & 0x0000_FFFF_FFFF_FFFF;
+    let actual_frn = read_frn_le(output_buffer, 0)?;
     if actual_frn != frn {
         return None; // IOCTL returned nearest valid record, not ours.
     }
 
-    let returned_record_length =
-        u32::from_le_bytes(output_buffer[8..12].try_into().unwrap()) as usize;
+    let returned_record_length = read_u32_le(output_buffer, 8)? as usize;
     let available = (bytes_returned as usize).saturating_sub(OUTPUT_HEADER);
     let parse_len = returned_record_length.min(available).min(record_size);
     if parse_len < 48 {
@@ -429,21 +501,20 @@ fn resolve_file_size(
                     let ext_data = &ext_buf[OUTPUT_HEADER..OUTPUT_HEADER + ext_len];
                     // Walk attributes of the external record looking for $DATA.
                     if ext_data.len() >= 48 && ext_data[0..4] == FILE_SIGNATURE {
-                        let first_attr = u16::from_le_bytes(
-                            ext_data[0x14..0x16].try_into().unwrap(),
-                        ) as usize;
+                        let Some(first_attr) =
+                            read_u16_le(ext_data, 0x14).map(|value| value as usize)
+                        else {
+                            continue;
+                        };
                         if first_attr >= 0x30 && first_attr < ext_len {
                             let mut off = first_attr;
                             while off + 16 <= ext_len {
-                                let atype = u32::from_le_bytes(
-                                    ext_data[off..off + 4].try_into().unwrap(),
-                                );
+                                let Some((atype, alen)) = read_attr_header(ext_data, off) else {
+                                    break;
+                                };
                                 if atype == ATTR_TYPE_END {
                                     break;
                                 }
-                                let alen = u32::from_le_bytes(
-                                    ext_data[off + 4..off + 8].try_into().unwrap(),
-                                ) as usize;
                                 if alen == 0 || off + alen > ext_len {
                                     break;
                                 }
@@ -512,8 +583,6 @@ fn stat_file_size_fallback(
 /// Uses `OpenFileById` from kernel32 — no path resolution needed. This is
 /// the last-resort fallback for files whose parent chain can't be resolved.
 fn size_by_file_id(volume: HANDLE, frn: u64) -> Option<u64> {
-    use windows::Win32::Foundation::CloseHandle;
-
     // FILE_ID_DESCRIPTOR layout for FileIdType (8-byte NTFS FRN):
     //   Offset 0:  dwSize (u32) = 24
     //   Offset 4:  Type   (u32) = 0 (FileIdType)
@@ -567,10 +636,9 @@ fn size_by_file_id(volume: HANDLE, frn: u64) -> Option<u64> {
         return None;
     }
 
-    let handle = HANDLE(raw_handle);
+    let handle = HandleGuard::new(HANDLE(raw_handle))?;
     let mut size: i64 = 0;
-    let ok = unsafe { GetFileSizeEx(raw_handle, &mut size) };
-    let _ = unsafe { CloseHandle(handle) };
+    let ok = unsafe { GetFileSizeEx(handle.as_raw().0, &mut size) };
 
     if ok != 0 && size >= 0 {
         Some(size as u64)
@@ -671,19 +739,21 @@ fn get_mft_data_runs(volume: HANDLE, geo: &MftGeometry) -> Result<Vec<(i64, u64)
         return Err("MFT record 0 too small".to_string());
     }
 
-    let first_attr = u16::from_le_bytes(record[0x14..0x16].try_into().unwrap()) as usize;
+    let first_attr = read_u16_le(record, 0x14)
+        .map(|value| value as usize)
+        .ok_or_else(|| "MFT record 0 is truncated before first attribute offset".to_string())?;
     if first_attr >= parse_len || first_attr < 0x30 {
         return Err("MFT record 0 has invalid first attribute offset".to_string());
     }
 
     let mut offset = first_attr;
     while offset + 16 <= parse_len {
-        let attr_type = u32::from_le_bytes(record[offset..offset + 4].try_into().unwrap());
+        let Some((attr_type, attr_len)) = read_attr_header(record, offset) else {
+            break;
+        };
         if attr_type == ATTR_TYPE_END {
             break;
         }
-        let attr_len =
-            u32::from_le_bytes(record[offset + 4..offset + 8].try_into().unwrap()) as usize;
         if attr_len == 0 || offset + attr_len > parse_len {
             break;
         }
@@ -692,9 +762,11 @@ fn get_mft_data_runs(volume: HANDLE, geo: &MftGeometry) -> Result<Vec<(i64, u64)
             let non_resident = record[offset + 8];
             if non_resident != 0 && offset + 0x22 <= parse_len {
                 // Non-resident $DATA — data-runs offset at +0x20.
-                let run_offset_rel = u16::from_le_bytes(
-                    record[offset + 0x20..offset + 0x22].try_into().unwrap(),
-                ) as usize;
+                let Some(run_offset_rel) =
+                    read_u16_le(record, offset + 0x20).map(|value| value as usize)
+                else {
+                    break;
+                };
                 let run_start = offset + run_offset_rel;
                 let run_end = offset + attr_len;
                 if run_start < run_end && run_start < parse_len {
@@ -720,8 +792,12 @@ fn apply_fixup(record: &mut [u8]) -> bool {
         return false;
     }
 
-    let usa_offset = u16::from_le_bytes(record[0x04..0x06].try_into().unwrap()) as usize;
-    let usa_count = u16::from_le_bytes(record[0x06..0x08].try_into().unwrap()) as usize;
+    let Some(usa_offset) = read_u16_le(record, 0x04).map(|value| value as usize) else {
+        return false;
+    };
+    let Some(usa_count) = read_u16_le(record, 0x06).map(|value| value as usize) else {
+        return false;
+    };
 
     if usa_count < 2 || usa_offset + usa_count * 2 > record.len() {
         return false;
@@ -779,16 +855,21 @@ fn parse_mft_record_bulk(
         return;
     }
 
-    let flags = u16::from_le_bytes(record[0x16..0x18].try_into().unwrap());
+    let Some(flags) = read_u16_le(record, 0x16) else {
+        return;
+    };
     if flags & MFT_RECORD_IN_USE == 0 {
         return;
     }
 
-    let base_ref =
-        u64::from_le_bytes(record[0x20..0x28].try_into().unwrap()) & 0x0000_FFFF_FFFF_FFFF;
+    let Some(base_ref) = read_frn_le(record, 0x20) else {
+        return;
+    };
     let is_dir = flags & MFT_RECORD_IS_DIRECTORY != 0;
 
-    let first_attr = u16::from_le_bytes(record[0x14..0x16].try_into().unwrap()) as usize;
+    let Some(first_attr) = read_u16_le(record, 0x14).map(|value| value as usize) else {
+        return;
+    };
     if first_attr >= record_size || first_attr < 0x30 {
         return;
     }
@@ -797,12 +878,12 @@ fn parse_mft_record_bulk(
     if base_ref != 0 {
         let mut offset = first_attr;
         while offset + 16 <= record_size {
-            let attr_type = u32::from_le_bytes(record[offset..offset + 4].try_into().unwrap());
+            let Some((attr_type, attr_len)) = read_attr_header(record, offset) else {
+                break;
+            };
             if attr_type == ATTR_TYPE_END {
                 break;
             }
-            let attr_len = u32::from_le_bytes(record[offset + 4..offset + 8].try_into().unwrap())
-                as usize;
             if attr_len == 0 || offset + attr_len > record_size {
                 break;
             }
@@ -817,22 +898,20 @@ fn parse_mft_record_bulk(
                 }
                 ATTR_TYPE_FILE_NAME if !is_dir => {
                     let non_resident = record[offset + 8];
-                    if non_resident == 0 && offset + 0x16 <= record_size {
-                        let value_offset = u16::from_le_bytes(
-                            record[offset + 0x14..offset + 0x16].try_into().unwrap(),
-                        ) as usize;
-                        let value_length = u32::from_le_bytes(
-                            record[offset + 0x10..offset + 0x14].try_into().unwrap(),
-                        ) as usize;
-                        let content_start = offset + value_offset;
+                    if non_resident == 0 {
+                        if let Some((content_start, value_length)) =
+                            resident_attr_value_bounds(record, offset, record_size)
+                        {
+                            if content_start + 8 <= record_size && value_length >= 66 {
+                                let Some(parent_frn) = read_frn_le(record, content_start) else {
+                                    offset += attr_len;
+                                    continue;
+                                };
 
-                        if content_start + 8 <= record_size && value_length >= 66 {
-                            let parent_frn = u64::from_le_bytes(
-                                record[content_start..content_start + 8].try_into().unwrap(),
-                            ) & 0x0000_FFFF_FFFF_FFFF;
-                            let parents = extension_parents.entry(base_ref).or_default();
-                            if !parents.contains(&parent_frn) {
-                                parents.push(parent_frn);
+                                let parents = extension_parents.entry(base_ref).or_default();
+                                if !parents.contains(&parent_frn) {
+                                    parents.push(parent_frn);
+                                }
                             }
                         }
                     }
@@ -855,12 +934,12 @@ fn parse_mft_record_bulk(
 
     let mut offset = first_attr;
     while offset + 16 <= record_size {
-        let attr_type = u32::from_le_bytes(record[offset..offset + 4].try_into().unwrap());
+        let Some((attr_type, attr_len)) = read_attr_header(record, offset) else {
+            break;
+        };
         if attr_type == ATTR_TYPE_END {
             break;
         }
-        let attr_len =
-            u32::from_le_bytes(record[offset + 4..offset + 8].try_into().unwrap()) as usize;
         if attr_len == 0 || offset + attr_len > record_size {
             break;
         }
@@ -869,18 +948,19 @@ fn parse_mft_record_bulk(
             ATTR_TYPE_STANDARD_INFORMATION => {
                 // Resident — file attributes at content_start + 0x20.
                 let non_resident = record[offset + 8];
-                if non_resident == 0 && offset + 0x16 <= record_size {
-                    let value_offset = u16::from_le_bytes(
-                        record[offset + 0x14..offset + 0x16].try_into().unwrap(),
-                    ) as usize;
-                    let cs = offset + value_offset;
-                    if cs + 0x24 <= record_size {
-                        let file_attrs = u32::from_le_bytes(
-                            record[cs + 0x20..cs + 0x24].try_into().unwrap(),
-                        );
-                        if file_attrs & 0x400 != 0 {
-                            // FILE_ATTRIBUTE_REPARSE_POINT
-                            has_reparse_attr = true;
+                if non_resident == 0 {
+                    if let Some((cs, _)) = resident_attr_value_bounds(record, offset, record_size)
+                    {
+                        if cs + 0x24 <= record_size {
+                            let Some(file_attrs) = read_u32_le(record, cs + 0x20) else {
+                                offset += attr_len;
+                                continue;
+                            };
+
+                            if file_attrs & 0x400 != 0 {
+                                // FILE_ATTRIBUTE_REPARSE_POINT
+                                has_reparse_attr = true;
+                            }
                         }
                     }
                 }
@@ -889,66 +969,66 @@ fn parse_mft_record_bulk(
                 // $REPARSE_POINT is always resident. First 4 bytes of the
                 // value are the reparse tag (IO_REPARSE_TAG_*).
                 let non_resident = record[offset + 8];
-                if non_resident == 0 && offset + 0x16 <= record_size {
-                    let value_offset = u16::from_le_bytes(
-                        record[offset + 0x14..offset + 0x16].try_into().unwrap(),
-                    ) as usize;
-                    let cs = offset + value_offset;
-                    if cs + 4 <= record_size {
-                        reparse_tag = u32::from_le_bytes(
-                            record[cs..cs + 4].try_into().unwrap(),
-                        );
+                if non_resident == 0 {
+                    if let Some((cs, _)) = resident_attr_value_bounds(record, offset, record_size)
+                    {
+                        if cs + 4 <= record_size {
+                            let Some(tag) = read_u32_le(record, cs) else {
+                                offset += attr_len;
+                                continue;
+                            };
+                            reparse_tag = tag;
+                        }
                     }
                 }
             }
             ATTR_TYPE_FILE_NAME => {
                 let non_resident = record[offset + 8];
-                if non_resident == 0 && offset + 0x16 <= record_size {
-                    let value_offset = u16::from_le_bytes(
-                        record[offset + 0x14..offset + 0x16].try_into().unwrap(),
-                    ) as usize;
-                    let value_length = u32::from_le_bytes(
-                        record[offset + 0x10..offset + 0x14].try_into().unwrap(),
-                    ) as usize;
-                    let cs = offset + value_offset;
+                if non_resident == 0 {
+                    if let Some((cs, value_length)) =
+                        resident_attr_value_bounds(record, offset, record_size)
+                    {
+                        if cs + 66 <= record_size && value_length >= 66 {
+                            let Some(parent_frn) = read_frn_le(record, cs) else {
+                                offset += attr_len;
+                                continue;
+                            };
 
-                    if cs + 66 <= record_size && value_length >= 66 {
-                        let parent_frn = u64::from_le_bytes(
-                            record[cs..cs + 8].try_into().unwrap(),
-                        ) & 0x0000_FFFF_FFFF_FFFF;
+                            let name_chars = record[cs + 64] as usize;
+                            let namespace = record[cs + 65];
+                            let ns = cs + 66;
+                            let nb = name_chars * 2;
 
-                        let name_chars = record[cs + 64] as usize;
-                        let namespace = record[cs + 65];
-                        let ns = cs + 66;
-                        let nb = name_chars * 2;
+                            if ns + nb <= record_size && name_chars > 0 {
+                                let name_u16: Vec<u16> = record[ns..ns + nb]
+                                    .chunks_exact(2)
+                                    .map(|c| u16::from_le_bytes([c[0], c[1]]))
+                                    .collect();
+                                let name = String::from_utf16_lossy(&name_u16);
 
-                        if ns + nb <= record_size && name_chars > 0 {
-                            let name_u16: Vec<u16> = record[ns..ns + nb]
-                                .chunks_exact(2)
-                                .map(|c| u16::from_le_bytes([c[0], c[1]]))
-                                .collect();
-                            let name = String::from_utf16_lossy(&name_u16);
-
-                            if !all_parents.contains(&parent_frn) {
-                                all_parents.push(parent_frn);
-                            }
-
-                            // Namespace priority: Win32+DOS (3) > Win32 (1) > POSIX (0) > DOS (2).
-                            let priority = |ns: u8| -> u8 {
-                                match ns {
-                                    3 => 4,
-                                    1 => 3,
-                                    0 => 2,
-                                    2 => 1,
-                                    _ => 0,
+                                if !all_parents.contains(&parent_frn) {
+                                    all_parents.push(parent_frn);
                                 }
-                            };
-                            let should_replace = match &best_name {
-                                None => true,
-                                Some((_, _, prev_ns)) => priority(namespace) > priority(*prev_ns),
-                            };
-                            if should_replace {
-                                best_name = Some((name, parent_frn, namespace));
+
+                                // Namespace priority: Win32+DOS (3) > Win32 (1) > POSIX (0) > DOS (2).
+                                let priority = |ns: u8| -> u8 {
+                                    match ns {
+                                        3 => 4,
+                                        1 => 3,
+                                        0 => 2,
+                                        2 => 1,
+                                        _ => 0,
+                                    }
+                                };
+                                let should_replace = match &best_name {
+                                    None => true,
+                                    Some((_, _, prev_ns)) => {
+                                        priority(namespace) > priority(*prev_ns)
+                                    }
+                                };
+                                if should_replace {
+                                    best_name = Some((name, parent_frn, namespace));
+                                }
                             }
                         }
                     }

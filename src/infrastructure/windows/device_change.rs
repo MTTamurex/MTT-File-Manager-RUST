@@ -2,7 +2,7 @@ use eframe::egui;
 use std::{
     ffi::c_void,
     sync::{
-        atomic::{AtomicUsize, Ordering},
+        Mutex,
         mpsc::Sender,
         OnceLock,
     },
@@ -30,9 +30,24 @@ const CLASS_NAME_WIDE: [u16; 22] = [
 static DEVICE_EVENT_SENDER: OnceLock<Sender<()>> = OnceLock::new();
 static EGUI_CONTEXT: OnceLock<egui::Context> = OnceLock::new();
 static DEVICE_LISTENER_THREAD_ID: OnceLock<u32> = OnceLock::new();
-/// Stored as usize because HDEVNOTIFY (*mut c_void) is not Send+Sync.
-/// Only accessed from register/unregister which are both single-call paths.
-static DEVICE_NOTIFICATION_HANDLE: AtomicUsize = AtomicUsize::new(0);
+static DEVICE_NOTIFICATION_HANDLE: Mutex<Option<DeviceNotificationHandle>> = Mutex::new(None);
+
+struct DeviceNotificationHandle(HDEVNOTIFY);
+
+impl Drop for DeviceNotificationHandle {
+    fn drop(&mut self) {
+        unsafe {
+            if let Err(err) = UnregisterDeviceNotification(self.0) {
+                log::debug!(
+                    "[device_change] UnregisterDeviceNotification failed: {:?}",
+                    err
+                );
+            }
+        }
+    }
+}
+
+unsafe impl Send for DeviceNotificationHandle {}
 
 /// Starts a background thread that listens for WM_DEVICECHANGE events and notifies the UI
 /// whenever a volume (drive) is mounted or unmounted.
@@ -92,6 +107,8 @@ fn run_device_listener(sender: Sender<()>, ctx: egui::Context) -> Result<()> {
             let _ = TranslateMessage(&msg);
             DispatchMessageW(&msg);
         }
+
+        clear_notification_handle();
     }
 
     Ok(())
@@ -99,14 +116,7 @@ fn run_device_listener(sender: Sender<()>, ctx: egui::Context) -> Result<()> {
 
 pub fn shutdown_device_change_listener() {
     // Unregister device notification handle before stopping the message loop.
-    let raw = DEVICE_NOTIFICATION_HANDLE.swap(0, Ordering::AcqRel);
-    if raw != 0 {
-        unsafe {
-            if let Err(e) = UnregisterDeviceNotification(HDEVNOTIFY(raw as *mut c_void)) {
-                log::debug!("[device_change] UnregisterDeviceNotification failed: {:?}", e);
-            }
-        }
-    }
+    clear_notification_handle();
 
     if let Some(thread_id) = DEVICE_LISTENER_THREAD_ID.get().copied() {
         unsafe {
@@ -128,8 +138,19 @@ unsafe fn register_volume_notifications(hwnd: HWND) -> Result<()> {
         &mut filter as *mut _ as *mut c_void,
         DEVICE_NOTIFY_WINDOW_HANDLE,
     )?;
-    DEVICE_NOTIFICATION_HANDLE.store(notification_handle.0 as usize, Ordering::Release);
+
+    let mut slot = DEVICE_NOTIFICATION_HANDLE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    *slot = Some(DeviceNotificationHandle(notification_handle));
     Ok(())
+}
+
+fn clear_notification_handle() {
+    let mut slot = DEVICE_NOTIFICATION_HANDLE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    slot.take();
 }
 
 unsafe extern "system" fn device_wnd_proc(

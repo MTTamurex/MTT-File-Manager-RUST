@@ -122,11 +122,29 @@ pub(super) fn apply_event_to_volume(volume: &mut IndexedVolume, event: &DriveWat
             volume.live_paths.remove(&normalize_path_key(old_path));
             upsert_path(volume, new_path);
         }
+        DriveWatcherEvent::PrefixInvalidated(prefix) => {
+            invalidate_prefix(volume, prefix);
+        }
         DriveWatcherEvent::Unknown(_) => {}
         DriveWatcherEvent::DriveLost(_) => {
             volume.live_paths.clear();
         }
     }
+}
+
+fn invalidate_prefix(volume: &mut IndexedVolume, prefix: &Path) {
+    let prefix_key = normalize_path_key(prefix);
+    if prefix_key.len() <= 3 {
+        volume.live_paths.clear();
+        return;
+    }
+
+    volume.live_paths.retain(|path_key| {
+        path_key != &prefix_key
+            && !path_key
+                .strip_prefix(&prefix_key)
+                .is_some_and(|suffix| suffix.starts_with('\\'))
+    });
 }
 
 fn upsert_path(volume: &mut IndexedVolume, path: &Path) {
