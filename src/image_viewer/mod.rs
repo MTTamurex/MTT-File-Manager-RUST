@@ -1,5 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{CloseHandle, GetLastError, HANDLE, ERROR_ALREADY_EXISTS};
 use windows::Win32::System::Threading::{CreateMutexW, ReleaseMutex};
@@ -103,13 +105,25 @@ fn validate_image_path(path: &Path) -> Result<(), String> {
 }
 
 pub fn open_image_viewer(path: PathBuf) {
+    // Spawn a thread so blocking I/O (validation, IPC retry) does not stall the UI.
+    if let Err(err) = std::thread::Builder::new()
+        .name("open-image-viewer".into())
+        .spawn(move || {
+            open_image_viewer_blocking(&path);
+        })
+    {
+        log::error!("[IMAGE-VIEWER] failed to spawn open-image-viewer thread: {}", err);
+    }
+}
+
+fn open_image_viewer_blocking(path: &Path) {
     // SEC: Validate path before spawning child process.
-    if let Err(e) = validate_image_path(&path) {
+    if let Err(e) = validate_image_path(path) {
         log::error!("[IMAGE-VIEWER] path validation failed for '{}': {}", path.display(), e);
         return;
     }
 
-    match ipc::send_open_request(&path) {
+    match ipc::send_open_request(path) {
         Ok(true) => return,
         Ok(false) => {}
         Err(err) => {
@@ -131,9 +145,13 @@ pub fn open_image_viewer(path: PathBuf) {
         }
     };
 
+    // CREATE_NO_WINDOW prevents a transient console-window flash on Windows
+    // (especially in debug builds where windows_subsystem is not set).
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
     let spawn_result = Command::new(exe)
         .arg("--image-viewer")
-        .arg(&path)
+        .arg(path)
+        .creation_flags(CREATE_NO_WINDOW)
         .spawn();
 
     if let Err(err) = spawn_result {
@@ -230,6 +248,7 @@ pub fn run_standalone(path: PathBuf) -> eframe::Result<()> {
     let mut viewport = eframe::egui::ViewportBuilder::default()
         .with_title(rust_i18n::t!("imageviewer.title_with_file", name = title_name).to_string())
         .with_inner_size([1200.0, 850.0])
+        .with_visible(false)
         .with_resizable(true)
         .with_decorations(true)
         .with_app_id("mtt-file-manager-image-viewer");

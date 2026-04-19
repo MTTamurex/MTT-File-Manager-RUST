@@ -539,6 +539,11 @@ impl eframe::App for PdfViewerApp {
                     );
                 }
             }
+
+            // Reveal window now that wgpu is initialised and the first frame
+            // is ready.  Prevents transient wgpu/DX12 windows from flashing.
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
         }
 
         self.ensure_worker(ctx);
@@ -591,6 +596,9 @@ pub(super) struct ErrorApp {
 
 impl eframe::App for ErrorApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Reveal window (started hidden to avoid wgpu init flicker).
+        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.centered_and_justified(|ui| {
                 ui.label(
