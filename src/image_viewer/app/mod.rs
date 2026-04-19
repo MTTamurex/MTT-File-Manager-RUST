@@ -539,10 +539,10 @@ impl eframe::App for DedicatedImageViewerApp {
                 }
             }
 
-            // Reveal window now that wgpu is initialised and the first frame
-            // is ready.  The viewport starts hidden (.with_visible(false)) to
-            // prevent the transient windows that wgpu/DX12 creates during
-            // adapter enumeration from flashing on screen.
+            // Reveal the window once the first frame is ready. The viewport
+            // starts hidden (.with_visible(false)) to avoid startup flashing
+            // from native window creation/platform integration before the
+            // viewer is ready to present its initial frame.
             ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
             ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
         }
