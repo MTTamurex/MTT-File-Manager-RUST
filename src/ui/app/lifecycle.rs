@@ -257,7 +257,14 @@ pub fn handle_exit(app: &mut ImageViewerApp) {
     let _ = std::thread::Builder::new()
         .name("io-cancel".into())
         .spawn(|| {
-            cancel_all_pending_io();
+            let cancelled =
+                crate::infrastructure::windows::cancel_pending_io_on_current_process_threads();
+            if cancelled > 0 {
+                log::info!(
+                    "[EXIT] Cancelled synchronous I/O on {} thread(s)",
+                    cancelled
+                );
+            }
         });
 
     // Shut down libmpv to release GPU/decoder resources.
@@ -290,74 +297,8 @@ pub fn handle_exit(app: &mut ImageViewerApp) {
         .spawn(|| {
             std::thread::sleep(std::time::Duration::from_secs(1));
             log::error!("[EXIT] Clean exit hung — forcing TerminateProcess.");
-            unsafe {
-                windows::Win32::System::Threading::TerminateProcess(
-                    windows::Win32::System::Threading::GetCurrentProcess(),
-                    0,
-                )
-                .ok();
-            }
+            crate::infrastructure::windows::terminate_current_process(0);
         });
 
     std::process::exit(0);
-}
-
-/// Cancel all pending synchronous I/O on every thread in this process.
-///
-/// Enumerates threads via `CreateToolhelp32Snapshot`, opens each one, and
-/// calls `CancelSynchronousIo`. This unblocks threads stuck in kernel‑mode
-/// filesystem calls (e.g. `NtQueryAttributesFile` waiting on a minifilter
-/// driver like OneDrive's `cldflt.sys`).
-pub fn cancel_all_pending_io() {
-    use windows::Win32::Foundation::CloseHandle;
-    use windows::Win32::System::Diagnostics::ToolHelp::{
-        CreateToolhelp32Snapshot, Thread32First, Thread32Next, TH32CS_SNAPTHREAD,
-        THREADENTRY32,
-    };
-    use windows::Win32::System::Threading::{
-        GetCurrentProcessId, GetCurrentThreadId, OpenThread, THREAD_TERMINATE,
-    };
-    use windows::Win32::System::IO::CancelSynchronousIo;
-
-    let current_pid = unsafe { GetCurrentProcessId() };
-    let current_tid = unsafe { GetCurrentThreadId() };
-
-    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) };
-    let snapshot = match snapshot {
-        Ok(h) => h,
-        Err(_) => return,
-    };
-
-    let mut entry = THREADENTRY32 {
-        dwSize: std::mem::size_of::<THREADENTRY32>() as u32,
-        ..Default::default()
-    };
-
-    let mut cancelled = 0u32;
-    unsafe {
-        if Thread32First(snapshot, &mut entry).is_ok() {
-            loop {
-                if entry.th32OwnerProcessID == current_pid
-                    && entry.th32ThreadID != current_tid
-                {
-                    if let Ok(thread_handle) =
-                        OpenThread(THREAD_TERMINATE, false, entry.th32ThreadID)
-                    {
-                        if CancelSynchronousIo(thread_handle).is_ok() {
-                            cancelled += 1;
-                        }
-                        let _ = CloseHandle(thread_handle);
-                    }
-                }
-                if Thread32Next(snapshot, &mut entry).is_err() {
-                    break;
-                }
-            }
-        }
-        let _ = CloseHandle(snapshot);
-    }
-
-    if cancelled > 0 {
-        log::info!("[EXIT] Cancelled synchronous I/O on {} thread(s)", cancelled);
-    }
 }

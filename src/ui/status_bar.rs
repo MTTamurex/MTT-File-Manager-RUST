@@ -204,99 +204,13 @@ fn is_video_preview_thread_spike_expected(video_preview_active: bool, stalled_on
 
 /// Queries GDI Objects, USER Objects, and Handle Count for the current process.
 fn get_kernel_resources() -> KernelResourceMetrics {
-    use windows::Win32::Foundation::HANDLE;
-    use windows::Win32::System::Threading::GetCurrentProcess;
+    let metrics = crate::infrastructure::windows::get_current_process_kernel_resources();
 
-    // GetGuiResources is not exposed in windows 0.61 via WindowsAndMessaging,
-    // so we link directly against user32.dll.
-    const GR_GDIOBJECTS: u32 = 0;
-    const GR_USEROBJECTS: u32 = 1;
-
-    extern "system" {
-        fn GetGuiResources(hprocess: *mut core::ffi::c_void, uiflags: u32) -> u32;
-    }
-
-    unsafe {
-        let process = GetCurrentProcess();
-        let handle_ptr = process.0 as *mut core::ffi::c_void;
-        let gdi = GetGuiResources(handle_ptr, GR_GDIOBJECTS);
-        let user = GetGuiResources(handle_ptr, GR_USEROBJECTS);
-
-        let mut handles: u32 = 0;
-        let process_handle = HANDLE(process.0);
-        let _ = windows::Win32::System::Threading::GetProcessHandleCount(
-            process_handle,
-            &mut handles,
-        );
-
-        // Thread count via CreateToolhelp32Snapshot — the only reliable way
-        // to count OS threads, since detached Rust threads (JoinHandle dropped)
-        // are invisible to GetProcessHandleCount but still consume kernel
-        // thread objects and can block the cloud filter driver.
-        let thread_count = count_process_threads();
-
-        KernelResourceMetrics {
-            gdi_objects: gdi,
-            user_objects: user,
-            handle_count: handles,
-            thread_count,
-        }
-    }
-}
-
-/// Counts live OS threads for the current process using Toolhelp32Snapshot.
-/// This is the only reliable way to detect detached/leaked threads that are
-/// invisible to Rust's `JoinHandle` tracking and `GetProcessHandleCount`.
-pub fn count_process_threads() -> u32 {
-    // The `Win32_System_Diagnostics` feature is not enabled in our windows crate,
-    // so we link directly against kernel32 for the Toolhelp32 API.
-    #[repr(C)]
-    #[allow(non_snake_case)]
-    struct THREADENTRY32 {
-        dwSize: u32,
-        cntUsage: u32,
-        th32ThreadID: u32,
-        th32OwnerProcessID: u32,
-        tpBasePri: i32,
-        tpDeltaPri: i32,
-        dwFlags: u32,
-    }
-
-    const TH32CS_SNAPTHREAD: u32 = 0x00000004;
-
-    extern "system" {
-        fn CreateToolhelp32Snapshot(dwflags: u32, th32processid: u32) -> isize;
-        fn Thread32First(hsnapshot: isize, lpte: *mut THREADENTRY32) -> i32;
-        fn Thread32Next(hsnapshot: isize, lpte: *mut THREADENTRY32) -> i32;
-    }
-
-    unsafe {
-        let pid = std::process::id();
-        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
-        if snapshot == -1 {
-            return 0;
-        }
-
-        let mut entry = std::mem::zeroed::<THREADENTRY32>();
-        entry.dwSize = std::mem::size_of::<THREADENTRY32>() as u32;
-
-        let mut count: u32 = 0;
-        if Thread32First(snapshot, &mut entry) != 0 {
-            loop {
-                if entry.th32OwnerProcessID == pid {
-                    count += 1;
-                }
-                entry.dwSize = std::mem::size_of::<THREADENTRY32>() as u32;
-                if Thread32Next(snapshot, &mut entry) == 0 {
-                    break;
-                }
-            }
-        }
-
-        windows::Win32::Foundation::CloseHandle(
-            windows::Win32::Foundation::HANDLE(snapshot as *mut core::ffi::c_void),
-        ).ok();
-        count
+    KernelResourceMetrics {
+        gdi_objects: metrics.gdi_objects,
+        user_objects: metrics.user_objects,
+        handle_count: metrics.handle_count,
+        thread_count: metrics.thread_count,
     }
 }
 

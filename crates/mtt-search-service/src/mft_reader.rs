@@ -9,7 +9,7 @@
 
 use std::collections::HashMap;
 
-use windows::Win32::Foundation::{CloseHandle, GetLastError, HANDLE};
+use windows::Win32::Foundation::{CloseHandle, GetLastError, HANDLE, WIN32_ERROR};
 use windows::Win32::Storage::FileSystem::{ReadFile, SetFilePointerEx, FILE_BEGIN};
 use windows::Win32::System::IO::DeviceIoControl;
 
@@ -121,6 +121,19 @@ impl Drop for HandleGuard {
     }
 }
 
+fn log_device_io_control_failure(
+    operation: &str,
+    volume: HANDLE,
+    control_code: u32,
+    error: WIN32_ERROR,
+) {
+    eprintln!(
+        "[MFT] DeviceIoControl({control_code:#x}, {operation}) on volume handle {:?} failed: win32 error {}",
+        volume,
+        error.0,
+    );
+}
+
 fn read_exact<const N: usize>(buffer: &[u8], offset: usize) -> Option<[u8; N]> {
     let end = offset.checked_add(N)?;
     buffer.get(offset..end)?.try_into().ok()
@@ -190,6 +203,12 @@ fn query_mft_geometry(volume: HANDLE) -> Result<MftGeometry, String> {
 
     if result.is_err() {
         let err = unsafe { GetLastError() };
+        log_device_io_control_failure(
+            "FSCTL_GET_NTFS_VOLUME_DATA",
+            volume,
+            FSCTL_GET_NTFS_VOLUME_DATA,
+            err,
+        );
         return Err(format!(
             "FSCTL_GET_NTFS_VOLUME_DATA failed (Win32 error {})",
             err.0
@@ -425,7 +444,7 @@ fn fetch_mft_record(
     frn: u64,
     record_size: usize,
     output_buffer: &mut Vec<u8>,
-) -> Option<usize> {
+) -> Result<Option<usize>, String> {
     let input = (frn as i64).to_le_bytes();
     let mut bytes_returned: u32 = 0;
     let output_size = OUTPUT_HEADER + record_size;
@@ -446,23 +465,43 @@ fn fetch_mft_record(
         )
     };
 
-    if result.is_err() || (bytes_returned as usize) < OUTPUT_HEADER + 48 {
-        return None;
+    if result.is_err() {
+        let err = unsafe { GetLastError() };
+        log_device_io_control_failure(
+            "FSCTL_GET_NTFS_FILE_RECORD",
+            volume,
+            FSCTL_GET_NTFS_FILE_RECORD,
+            err,
+        );
+        return Err(format!(
+            "FSCTL_GET_NTFS_FILE_RECORD failed for FRN {} (Win32 error {})",
+            frn,
+            err.0
+        ));
     }
 
-    let actual_frn = read_frn_le(output_buffer, 0)?;
+    if (bytes_returned as usize) < OUTPUT_HEADER + 48 {
+        return Ok(None);
+    }
+
+    let Some(actual_frn) = read_frn_le(output_buffer, 0) else {
+        return Ok(None);
+    };
     if actual_frn != frn {
-        return None; // IOCTL returned nearest valid record, not ours.
+        return Ok(None); // IOCTL returned nearest valid record, not ours.
     }
 
-    let returned_record_length = read_u32_le(output_buffer, 8)? as usize;
+    let Some(returned_record_length) = read_u32_le(output_buffer, 8).map(|value| value as usize)
+    else {
+        return Ok(None);
+    };
     let available = (bytes_returned as usize).saturating_sub(OUTPUT_HEADER);
     let parse_len = returned_record_length.min(available).min(record_size);
     if parse_len < 48 {
-        return None;
+        return Ok(None);
     }
 
-    Some(parse_len)
+    Ok(Some(parse_len))
 }
 
 /// How a file size was resolved.
@@ -484,8 +523,8 @@ fn resolve_file_size(
     output_buffer: &mut Vec<u8>,
 ) -> SizeResolution {
     let parse_len = match fetch_mft_record(volume, frn, record_size, output_buffer) {
-        Some(len) => len,
-        None => return SizeResolution::None,
+        Ok(Some(len)) => len,
+        Ok(None) | Err(_) => return SizeResolution::None,
     };
     let record_data = &output_buffer[OUTPUT_HEADER..OUTPUT_HEADER + parse_len];
 
@@ -495,7 +534,7 @@ fn resolve_file_size(
             // Follow $ATTRIBUTE_LIST: fetch each external record and look for $DATA.
             let mut ext_buf = vec![0u8; OUTPUT_HEADER + record_size];
             for ext_frn in ext_frns.iter().take(4) {
-                if let Some(ext_len) =
+                if let Ok(Some(ext_len)) =
                     fetch_mft_record(volume, *ext_frn, record_size, &mut ext_buf)
                 {
                     let ext_data = &ext_buf[OUTPUT_HEADER..OUTPUT_HEADER + ext_len];
@@ -728,7 +767,7 @@ fn get_mft_data_runs(volume: HANDLE, geo: &MftGeometry) -> Result<Vec<(i64, u64)
     let record_size = geo.bytes_per_file_record as usize;
     let mut output_buffer = vec![0u8; OUTPUT_HEADER + record_size];
 
-    let parse_len = fetch_mft_record(volume, 0, record_size, &mut output_buffer)
+    let parse_len = fetch_mft_record(volume, 0, record_size, &mut output_buffer)?
         .ok_or("Failed to read MFT record 0")?;
     let record = &output_buffer[OUTPUT_HEADER..OUTPUT_HEADER + parse_len];
 
