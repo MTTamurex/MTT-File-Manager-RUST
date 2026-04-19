@@ -27,5 +27,6 @@ features = [
     "Win32_System_Pipes",
     "Win32_Security",
     "Win32_Security_Authorization",
+    "Win32_Security_Cryptography",
     "Win32_System_Threading",
 ]
