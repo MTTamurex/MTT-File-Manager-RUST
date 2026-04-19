@@ -86,7 +86,7 @@ impl ImageViewerApp {
     }
 
     pub(super) fn normalize_for_match(p: &Path) -> String {
-        let s = p.to_string_lossy().to_string().to_lowercase();
+        let s = p.to_string_lossy().to_lowercase();
         if let Some(stripped) = s.strip_prefix(r"\\?\") {
             stripped.to_string()
         } else {
@@ -95,7 +95,7 @@ impl ImageViewerApp {
     }
 
     pub(super) fn clean_path(p: &Path) -> PathBuf {
-        let s = p.to_string_lossy().to_string();
+        let s = p.to_string_lossy();
         if let Some(stripped) = s.strip_prefix(r"\\?\") {
             PathBuf::from(stripped)
         } else {

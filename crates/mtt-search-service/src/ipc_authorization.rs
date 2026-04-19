@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::os::windows::ffi::OsStrExt;
-use std::sync::Arc;
-use parking_lot::RwLock;
 
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{CloseHandle, HANDLE};
@@ -14,7 +12,8 @@ use windows::Win32::Storage::FileSystem::{
 use windows::Win32::System::Pipes::ImpersonateNamedPipeClient;
 use windows::Win32::System::Pipes::PeekNamedPipe;
 
-use crate::file_index::{self, VolumeIndex};
+use crate::file_index;
+use crate::volume_indices::{self, SharedVolumeIndices};
 use mtt_search_protocol::SearchResultItem;
 
 const AUTHZ_RAW_BATCH_SIZE: usize = 512;
@@ -133,7 +132,7 @@ fn ensure_client_connected(pipe: HANDLE) -> Result<(), String> {
 
 pub fn collect_authorized_search_page(
     pipe: HANDLE,
-    indices: &Arc<RwLock<Vec<VolumeIndex>>>,
+    indices: &SharedVolumeIndices,
     query: &str,
     offset: usize,
     limit: usize,
@@ -166,11 +165,13 @@ pub fn collect_authorized_search_page(
         ensure_client_connected(pipe)?;
         batches += 1;
 
-        // Snapshot: hold the read lock only for the search_page call, then drop
-        // it before doing filesystem authorization checks (CreateFileW).
+        // Snapshot the per-volume handles (cheap Arc clones); search_page
+        // takes each volume's read lock independently for the duration of
+        // that volume's scan only — concurrent USN writers on *other* volumes
+        // are not blocked.
         let raw_page = {
-            let indices_lock = indices.read();
-            file_index::search_page(&indices_lock, query, raw_offset, AUTHZ_RAW_BATCH_SIZE)
+            let handles = volume_indices::snapshot_handles(indices);
+            file_index::search_page(&handles, query, raw_offset, AUTHZ_RAW_BATCH_SIZE)
         };
         if raw_page.items.is_empty() {
             raw_has_more = false;
@@ -264,7 +265,7 @@ mod tests {
 
     #[test]
     fn returns_empty_for_zero_limit_or_empty_query() {
-        let empty_indices = Arc::new(RwLock::new(Vec::<VolumeIndex>::new()));
+        let empty_indices = volume_indices::new_shared();
         let res_zero = collect_authorized_search_page(HANDLE(std::ptr::null_mut()), &empty_indices, "abc", 0, 0)
             .expect("zero-limit should succeed");
         assert!(res_zero.items.is_empty());

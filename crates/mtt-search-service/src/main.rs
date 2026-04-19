@@ -11,11 +11,14 @@ mod security_policy;
 mod service_control;
 mod usn_journal;
 mod volume_indexers;
+mod volume_indices;
 
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
-use parking_lot::{Mutex, RwLock};
+use parking_lot::Mutex;
+
+use crate::volume_indices::SharedVolumeIndices;
 
 /// Tracks whether the FTS5 index is in sync with `file_records`.
 ///
@@ -165,7 +168,7 @@ pub fn run_indexer(shutdown: Arc<AtomicBool>) {
 
     // Create shared state before anything else so the IPC server can start
     // accepting connections immediately — even before volumes are discovered.
-    let indices = Arc::new(RwLock::new(Vec::new()));
+    let indices: SharedVolumeIndices = volume_indices::new_shared();
     let indexing_progress = Arc::new(indexing_progress::IndexingProgress::new());
 
     // Open persistence (needed by both IPC and indexers)
@@ -277,7 +280,7 @@ pub fn run_indexer(shutdown: Arc<AtomicBool>) {
 fn spawn_indexers_for_discovered_volumes(
     discovered: Vec<usn_journal::DiscoveredVolume>,
     tracked_volumes: &Arc<Mutex<HashSet<char>>>,
-    indices: &Arc<RwLock<Vec<file_index::VolumeIndex>>>,
+    indices: &SharedVolumeIndices,
     indexing_progress: &Arc<indexing_progress::IndexingProgress>,
     db: &Arc<index_db::IndexDb>,
     shutdown: &Arc<AtomicBool>,
@@ -309,7 +312,7 @@ fn spawn_indexers_for_discovered_volumes(
 fn spawn_volume_indexer(
     volume: usn_journal::DiscoveredVolume,
     tracked_volumes: Arc<Mutex<HashSet<char>>>,
-    indices: Arc<RwLock<Vec<file_index::VolumeIndex>>>,
+    indices: SharedVolumeIndices,
     indexing_progress: Arc<indexing_progress::IndexingProgress>,
     db: Arc<index_db::IndexDb>,
     shutdown: Arc<AtomicBool>,

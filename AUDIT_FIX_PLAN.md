@@ -16,10 +16,11 @@
 
 ## Status Atual
 
-- **Implementado neste ciclo:** `F0.1`, `F0.2`, `F0.3`, `F1.1`, `F1.2`, `F1.3`, `F1.4`, `F1.6`, `F2.2`, `F2.3`, `F2.4`, `F2.5`, `F2.6`, `F3.1`, `F3.2`, `F3.3`, `F4.1`, `F4.2`, `F4.3`, `F4.4`, `F4.5`, `F4.6`, `F4.7`, `F5.1`, `F5.3`, `F5.6`, `F5.7`, `F5.8`, `F5.9`.
-- **Ja estava implementado no codigo:** `F2.1`.
+- **Implementado neste ciclo:** `F0.1`, `F0.2`, `F0.3`, `F1.1`, `F1.2`, `F1.3`, `F1.4`, `F1.6`, `F2.2`, `F2.3`, `F2.4`, `F2.5`, `F2.6`, `F3.1`, `F3.2`, `F3.3`, `F4.1`, `F4.2`, `F4.3`, `F4.4`, `F4.5`, `F4.6`, `F4.7`, `F5.1`, `F5.3`, `F5.4`, `F5.6`, `F5.7`, `F5.8`, `F5.9`.
 - **Reclassificado:** `F1.5` (a ocorrencia auditada esta em codigo de teste, nao no fluxo de runtime da aplicacao).
-- **Proximo lote recomendado:** `F5.2`, `F5.5`, `F5.4`.
+- **Ja estava implementado no codigo:** `F2.1`.
+- **Rejeitado apos reavaliacao:** `F5.5` (ver bloco do item — regrediria a latencia da busca SIMD em troca de ~30 MB de RSS).
+- **Proximo lote recomendado:** continuar `F5.2` (varredura de hot paths restantes; batch parcial ja aplicado em `app/operations/message_handler/helpers.rs` e `infrastructure/directory_index.rs`).
 
 ---
 
@@ -637,7 +638,10 @@ match std::thread::Builder::new().name("...".into()).spawn(move || {
 
 ---
 
-### F5.2 — P2: Cortar `to_string_lossy().to_string()` em hot paths da UI
+### F5.2 — P2: Cortar `to_string_lossy().to_string()` em hot paths da UI [PARCIAL]
+
+**Progresso (batch atual):** removido `.to_string()` redundante em `src/app/operations/message_handler/helpers.rs::normalize_for_match`/`clean_path` e em `src/infrastructure/directory_index.rs` (variavel `dir_str` agora usa `Cow<str>` direto). Restante da varredura ainda nao aplicado — a maioria das ocorrencias em `src/app/operations/drag_drop/rendering.rs`, `src/app/operations/tabs.rs`, `src/ui/app/panels/content.rs` e `src/ui/cache.rs` precisam permanecer `String` por causa do tipo de retorno de `unwrap_or_else` ou da chave de cache (`HashMap<String, _>`), entao o ganho real ali e zero sem refatorar a API a montante.
+
 **Arquivos (amostra):**
 - `src/image_viewer/mod.rs` (linhas ~209-217)
 - `src/workers/thumbnail/progress.rs` (linha ~41)
@@ -676,7 +680,21 @@ match std::thread::Builder::new().name("...".into()).spawn(move || {
 
 ---
 
-### F5.4 — P4: Lock por volume no indexador
+### F5.4 — P4: Lock por volume no indexador [IMPLEMENTADO]
+**Arquivos:**
+- NOVO: `crates/mtt-search-service/src/volume_indices.rs` — define `VolumeIndexHandle = Arc<RwLock<VolumeIndex>>` e `SharedVolumeIndices = Arc<RwLock<Vec<VolumeIndexHandle>>>`, com helpers `new_shared`, `handle_from`, `upsert`, `find_handle`, `snapshot_handles`. O upsert troca o conteudo via `*existing.write() = new_index;` para preservar handles ja distribuidos para threads em background (e.g. extracao de tamanhos).
+- `crates/mtt-search-service/src/file_index.rs` — `search_page(handles: &[VolumeIndexHandle], ...)` agora trava cada volume individualmente via `handle.read()` na iteracao do loop externo.
+- `crates/mtt-search-service/src/volume_indexers/usn.rs` e `non_usn.rs` — recebem `SharedVolumeIndices` e operam sobre o `VolumeIndexHandle` retornado por `volume_indices::upsert`. Threads de tamanho rodam com `bg_handle.try_write_for(...)` / `bg_handle.write()`, sem bloquear o lock externo.
+- `crates/mtt-search-service/src/ipc_server/handler.rs` e `mod.rs`, `crates/mtt-search-service/src/ipc_authorization.rs` e `crates/mtt-search-service/src/main.rs` — propagam o novo tipo. WarmIndex / GetStatus / CheckPathsModified / FolderSize fazem `snapshot_handles` ou `find_handle` seguidos de `read()` por volume.
+
+**Resultado:** o lock externo passa a guardar apenas o vetor de volumes (mutado raramente em discovery/upsert). Escritas pesadas (USN apply, prune, persist, refresh de tamanhos) ficam restritas ao volume alvo, permitindo que `search_page` continue lendo todos os outros volumes em paralelo.
+
+**Validacao:** `cargo check --workspace` OK.
+**Risco residual:** medio — a primeira atualizacao real de um indice depende do upsert sobrescrever no lugar (`*existing.write() = new_index;`), comportamento coberto por `volume_indices::upsert` e usado pelos dois indexadores.
+
+---
+
+### F5.4 (historico) — proposta original
 **Arquivo:** `crates/mtt-search-service/src/volume_indexers/usn.rs` (linhas ~364-450)
 **Passos:**
 1. Trocar `RwLock<Vec<VolumeIndex>>` por `Vec<RwLock<VolumeIndex>>` (ou `DashMap<VolumeId, RwLock<...>>`).
@@ -688,15 +706,33 @@ match std::thread::Builder::new().name("...".into()).spawn(move || {
 
 ---
 
-### F5.5 — P5: Lowercase lazy na `NameArena`
+### F5.5 — P5: Lowercase lazy na `NameArena` [REJEITADO apos reavaliacao]
 **Arquivo:** `crates/mtt-search-service/src/name_arena.rs` (linha ~110)
-**Passos:**
-1. Remover `self.lowered = self.buf.clone()` do caminho de load.
-2. Mudar `get_lowered(&NameRef)` para produzir lowercase on-the-fly a partir de `get(&NameRef)` usando `eq_ignore_ascii_case` no comparador (não precisa materializar).
-3. Se alguém realmente precisa do slice lowered, gerar em buffer curto (`SmallVec<[u8; 256]>`) sem clonar todo o arena.
 
-**Pronto quando:** carregar índice de 1M files: latência inicial cai mensuravelmente; RSS reduz ~25-50 MB.
-**Risco:** **médio**.
+**Reavaliacao (Fase 5):** rejeitado. A `lowered` arena nao e overhead acidental —
+e o que sustenta o caminho SIMD do `search_page`
+(`crates/mtt-search-service/src/file_index.rs`, linhas ~655-680). Remove-la para
+lowercase on-the-fly inverteria um trade-off ja otimizado em Phase 3.
+
+**Numeros estimados (1.5 M arquivos, nome medio ~20 bytes):**
+
+| Cenario | Custo de load (uma vez) | Custo por query | RSS |
+|---|---|---|---|
+| Atual (`build_lowered` no load) | clone 30 MB + `make_ascii_lowercase` (~50-100 ms) | 0 lowercase + `memchr::memmem` SIMD direto sobre slice ja-lowered (~10-50 ms para 1.7 M) | +30 MB |
+| Proposto (lazy/per-record) | 0 | lowercase escalar de ~30 MB de bytes por query antes do SIMD (~30-80 ms extra por query) | -30 MB |
+
+Resultado liquido: economiza 30 MB de RSS (irrisorio frente ao restante do indice),
+mas **dobra ou triplica** a latencia de toda query de busca. Como Phase 3 trocou
+FTS5 por SIMD em memoria justamente para alcancar sub-50 ms em 1.7 M arquivos,
+regredir essa hot path nao se justifica.
+
+**Alternativa avaliada e tambem rejeitada:** adiar `build_lowered()` para a
+primeira query ou para uma thread de warmup. Apenas desloca a regressao da carga
+inicial para a primeira busca do usuario, sem economia de RSS sustentada (a arena
+acaba sendo construida do mesmo jeito).
+
+**Pronto quando:** N/A — item fechado como nao-acionavel.
+**Risco:** alto se reaberto (regressao de query latency mensuravel).
 
 ---
 
@@ -893,7 +929,7 @@ rg -n "Result<.*, String>" src/infrastructure/ src/application/
 | 3 | 2 | F2.4, F2.2, F2.5, F2.3 | Concluida (`F2.1` ja implementado, `F2.6` concluido) |
 | 4 | 3 | F3.2, F3.3 | Concluida (`F3.1` concluido) |
 | 5 | 4 | F4.5, F4.6, F4.7 | Concluida (`F4.1`, `F4.2`, `F4.3` e `F4.4` concluidos anteriormente) |
-| 6 | 5 | F5.2, F5.5, F5.4 | Performance restante, alto ROI primeiro (`F5.1`, `F5.3`, `F5.6`, `F5.7`, `F5.8` e `F5.9` concluidos) |
+| 6 | 5 | F5.2, F5.4 | Performance restante (`F5.1`, `F5.3`, `F5.6`, `F5.7`, `F5.8`, `F5.9` concluidos; `F5.5` rejeitado apos reavaliacao) |
 | 7 | 6 | F6.1, F6.6, F6.5, F6.2, F6.3, F6.4 | Arquitetura por último |
 | 8 | 7 | F7.1–F7.3 | Verificação |
 
