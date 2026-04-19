@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use parking_lot::Mutex;
 use windows::Win32::Foundation::HANDLE;
 use windows::Win32::Storage::FileSystem::{
     ReadDirectoryChangesW, FILE_NOTIFY_CHANGE_ATTRIBUTES, FILE_NOTIFY_CHANGE_CREATION,
@@ -47,7 +48,7 @@ pub(super) fn watcher_thread_main(
     command_rx: std::sync::mpsc::Receiver<WatcherCommand>,
     event_tx: std::sync::mpsc::Sender<Vec<DriveWatcherEvent>>,
     shutdown: Arc<AtomicBool>,
-    mut current_prefix: PathBuf,
+    current_prefix: Arc<Mutex<PathBuf>>,
 ) {
     log::info!("[DRIVE-WATCHER] Thread started for drive: {:?}", drive_root);
 
@@ -93,7 +94,7 @@ pub(super) fn watcher_thread_main(
             loop {
                 match command_rx.try_recv() {
                     Ok(WatcherCommand::UpdatePrefix(new_prefix)) => {
-                        current_prefix = new_prefix;
+                        *current_prefix.lock() = new_prefix;
                     }
                     Ok(WatcherCommand::Shutdown) => {
                         should_exit = true;
@@ -164,23 +165,25 @@ pub(super) fn watcher_thread_main(
                 }
 
                 if bytes_returned == 0 || bytes_returned as usize >= buffer.0.len() {
+                    let prefix_snapshot = current_prefix.lock().clone();
                     log::warn!(
                         "[DRIVE-WATCHER] Notification overflow on {:?}; invalidating {:?}",
                         drive_root,
-                        current_prefix
+                        prefix_snapshot
                     );
                     coalesced.clear();
                     let _ = event_tx.send(vec![DriveWatcherEvent::PrefixInvalidated(
-                        current_prefix.clone(),
+                        prefix_snapshot,
                     )]);
                 } else {
                     // Parse the notification buffer.
                     let events = parse_notify_buffer(&buffer.0[..bytes_returned as usize], &drive_root);
+                    let prefix_snapshot = current_prefix.lock().clone();
 
                     // Insert into coalescing set (deduplicates automatically)
                     // and filter by the currently watched prefix.
                     for event in events {
-                        if event_matches_prefix(&event, &current_prefix) {
+                        if event_matches_prefix(&event, &prefix_snapshot) {
                             if coalesced.len() >= MAX_COALESCED_EVENTS {
                                 let batch: Vec<DriveWatcherEvent> = coalesced.drain().collect();
                                 let _ = event_tx.send(batch);

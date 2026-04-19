@@ -12,8 +12,9 @@
 use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::thread::{self, JoinHandle};
+use parking_lot::Mutex;
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{HANDLE, INVALID_HANDLE_VALUE};
 use windows::Win32::Storage::FileSystem::{
@@ -90,7 +91,7 @@ impl DriveWatcher {
         let shutdown = Arc::new(AtomicBool::new(false));
 
         let shutdown_clone = Arc::clone(&shutdown);
-        let initial_prefix_for_thread = initial_prefix.clone();
+        let prefix_for_thread = Arc::clone(&prefix);
 
         // Open the drive handle in the main thread to validate early
         // We pass the path to the thread and open it there to avoid Send issues with HANDLE
@@ -112,7 +113,7 @@ impl DriveWatcher {
                 cmd_rx,
                 event_tx,
                 shutdown_clone,
-                initial_prefix_for_thread,
+                prefix_for_thread,
             );
         });
 
@@ -132,9 +133,7 @@ impl DriveWatcher {
     /// events within the new prefix path.
     pub fn update_prefix(&self, new_prefix: PathBuf) {
         // Update the shared prefix first
-        if let Ok(mut prefix) = self.current_prefix.lock() {
-            *prefix = new_prefix.clone();
-        }
+        *self.current_prefix.lock() = new_prefix.clone();
         // Notify the watcher thread
         let _ = self
             .command_sender
@@ -204,10 +203,7 @@ impl DriveWatcher {
 
     /// Get the current prefix being watched
     pub fn current_prefix(&self) -> PathBuf {
-        self.current_prefix
-            .lock()
-            .map(|p| p.clone())
-            .unwrap_or_default()
+        self.current_prefix.lock().clone()
     }
 
     /// Open a handle to the drive for directory change monitoring

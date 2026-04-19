@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+
+use parking_lot::Mutex;
 
 #[derive(Clone, Default)]
 pub struct DirectoryDirtyRegistry {
@@ -13,21 +15,12 @@ impl DirectoryDirtyRegistry {
     }
 
     pub fn is_dirty(&self, path: &Path) -> bool {
-        self.inner
-            .lock()
-            .unwrap_or_else(|e| {
-                log::warn!("[DIRTY-REGISTRY] Mutex poisoned in is_dirty(), recovering");
-                e.into_inner()
-            })
-            .contains_key(path)
+        self.inner.lock().contains_key(path)
     }
 
     pub fn mark_dirty(&self, path: &Path) -> u64 {
         let path_buf = path.to_path_buf();
-        let mut entries = self.inner.lock().unwrap_or_else(|e| {
-            log::warn!("[DIRTY-REGISTRY] Mutex poisoned in mark_dirty(), recovering");
-            e.into_inner()
-        });
+        let mut entries = self.inner.lock();
         let next_version = entries
             .get(&path_buf)
             .copied()
@@ -38,10 +31,7 @@ impl DirectoryDirtyRegistry {
     }
 
     pub fn clear_dirty(&self, path: &Path) {
-        let mut entries = self.inner.lock().unwrap_or_else(|e| {
-            log::warn!("[DIRTY-REGISTRY] Mutex poisoned in clear_dirty(), recovering");
-            e.into_inner()
-        });
+        let mut entries = self.inner.lock();
         let _ = entries.remove(path);
     }
 }

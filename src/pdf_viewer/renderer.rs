@@ -1,11 +1,11 @@
 //! PDF page rendering and text extraction using Pdfium.
 
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 
-use once_cell::sync::OnceCell;
 use pdfium_render::prelude::*;
 
-static PDFIUM_READY: OnceCell<()> = OnceCell::new();
+static PDFIUM_BIND_STATUS: OnceLock<Result<(), String>> = OnceLock::new();
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PdfTextBounds {
@@ -107,11 +107,10 @@ pub fn with_timeout<T: Send + 'static>(
 }
 
 pub(super) fn pdfium() -> Result<Pdfium, String> {
-    if PDFIUM_READY.get().is_some() {
-        return Ok(Pdfium::default());
+    match PDFIUM_BIND_STATUS.get_or_init(|| bind_pdfium().map(|_| ())) {
+        Ok(()) => Ok(Pdfium::default()),
+        Err(err) => Err(err.clone()),
     }
-
-    bind_pdfium()
 }
 
 fn bind_pdfium() -> Result<Pdfium, String> {
@@ -119,7 +118,6 @@ fn bind_pdfium() -> Result<Pdfium, String> {
         match Pdfium::bind_to_library(&candidate) {
             Ok(bindings) => {
                 let pdfium = Pdfium::new(bindings);
-                let _ = PDFIUM_READY.set(());
                 return Ok(pdfium);
             }
             Err(PdfiumError::LoadLibraryError(_)) => continue,
@@ -135,7 +133,6 @@ fn bind_pdfium() -> Result<Pdfium, String> {
     match Pdfium::bind_to_system_library() {
         Ok(bindings) => {
             let pdfium = Pdfium::new(bindings);
-            let _ = PDFIUM_READY.set(());
             Ok(pdfium)
         }
         Err(err) => Err(format!(

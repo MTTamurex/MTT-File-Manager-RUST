@@ -13,8 +13,9 @@ use crate::workers::thumbnail::types::ThumbnailRequestSource;
 use crate::workers::thumbnail::SharedBulkThumbnailProgress;
 use crossbeam_channel::Sender;
 use eframe::egui;
+use parking_lot::{Condvar, Mutex};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::Arc;
 use std::time::Instant;
 use windows::Win32::Media::MediaFoundation::{MFShutdown, MFStartup, MFSTARTUP_NOSOCKET};
 use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED};
@@ -46,17 +47,19 @@ impl Semaphore {
     }
 
     fn acquire(&self) {
-        let mut count = self.count.lock().unwrap_or_else(|e| e.into_inner());
+        let mut count = self.count.lock();
         while *count >= self.max {
-            count = self.condvar.wait(count).unwrap_or_else(|e| e.into_inner());
+            self.condvar.wait(&mut count);
         }
         *count += 1;
     }
 
     fn release(&self) {
-        let mut count = self.count.lock().unwrap_or_else(|e| e.into_inner());
-        if *count > 0 {
-            *count -= 1;
+        {
+            let mut count = self.count.lock();
+            if *count > 0 {
+                *count -= 1;
+            }
         }
         self.condvar.notify_one();
     }

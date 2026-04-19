@@ -2,9 +2,9 @@ use crate::app::state::sidebar_tree_state::SidebarTreeState;
 use crate::domain::pinned_folder::PinnedFolder;
 use crate::infrastructure::windows::{detect_drive_type, DriveType};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense};
+use parking_lot::Mutex;
 use rust_i18n::t;
 use std::collections::HashMap;
-use std::sync::Mutex;
 
 /// Cached drive type results. Drive types don't change at runtime
 /// (a drive letter is always local or always network), so we cache
@@ -14,7 +14,7 @@ static DRIVE_TYPE_CACHE: std::sync::LazyLock<Mutex<HashMap<String, DriveType>>> 
 
 /// Get drive type from cache, only calling GetDriveTypeW on cache miss.
 fn get_cached_drive_type(disk_path: &str) -> DriveType {
-    let mut cache = DRIVE_TYPE_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    let mut cache = DRIVE_TYPE_CACHE.lock();
     if let Some(&dt) = cache.get(disk_path) {
         return dt;
     }
@@ -25,9 +25,7 @@ fn get_cached_drive_type(disk_path: &str) -> DriveType {
 
 /// Clear the drive type cache (call when drive list changes).
 pub fn invalidate_drive_type_cache() {
-    if let Ok(mut cache) = DRIVE_TYPE_CACHE.lock() {
-        cache.clear();
-    }
+    DRIVE_TYPE_CACHE.lock().clear();
 }
 
 /// Context for sidebar rendering

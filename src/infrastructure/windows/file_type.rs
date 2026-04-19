@@ -9,9 +9,9 @@ use std::fs;
 use std::io::Read;
 use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 use std::sync::OnceLock;
 
+use parking_lot::Mutex;
 use windows::{
     core::PCWSTR,
     Win32::UI::Shell::{AssocGetPerceivedType, Common::PERCEIVED},
@@ -144,7 +144,7 @@ pub fn get_perceived_type(extension: &str) -> PerceivedType {
     let cache = PERCEIVED_TYPE_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
 
     {
-        let cache_guard = cache.lock().unwrap_or_else(|e| e.into_inner());
+        let cache_guard = cache.lock();
         if let Some(&cached_type) = cache_guard.get(&ext_with_dot) {
             return cached_type;
         }
@@ -235,7 +235,7 @@ pub fn get_perceived_type(extension: &str) -> PerceivedType {
     // Previously, Other was not cached, causing AssocGetPerceivedType to be called
     // for every non-media file on every frame (2-20ms per call).
     {
-        let mut cache_guard = cache.lock().unwrap_or_else(|e| e.into_inner());
+        let mut cache_guard = cache.lock();
         cache_guard.insert(ext_with_dot, perceived);
     }
 

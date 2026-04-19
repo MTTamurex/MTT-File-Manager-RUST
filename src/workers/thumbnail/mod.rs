@@ -24,9 +24,9 @@ pub use types::{ThumbnailPriority, ThumbnailRequest};
 pub use worker::spawn_thumbnail_workers;
 
 use lru::LruCache;
+use parking_lot::Mutex;
 use std::num::NonZeroUsize;
 use std::path::PathBuf;
-use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 // --- Capacity constants for failure caches ---
@@ -73,29 +73,20 @@ pub fn is_known_failure(path: &PathBuf) -> bool {
         return true;
     }
 
-    get_failure_backoff()
-        .lock()
-        .map(|map| {
-            map.peek(path)
-                .is_some_and(|state| Instant::now() < state.retry_after)
-        })
-        .unwrap_or(false)
+    let map = get_failure_backoff().lock();
+    map.peek(path)
+        .is_some_and(|state| Instant::now() < state.retry_after)
 }
 
 /// Check if a path is permanently failed.
 pub fn is_permanent_failure(path: &PathBuf) -> bool {
-    get_failed_paths()
-        .lock()
-        .map(|set| set.contains(path))
-        .unwrap_or(false)
+    get_failed_paths().lock().contains(path)
 }
 
 /// Mark a path as failed (won't retry until app restart).
 /// LRU eviction ensures oldest entries are dropped transparently.
 pub fn mark_as_failed(path: PathBuf) {
-    if let Ok(mut set) = get_failed_paths().lock() {
-        set.put(path, ());
-    }
+    get_failed_paths().lock().put(path, ());
 }
 
 /// Register a transient failure using exponential backoff.
@@ -103,67 +94,54 @@ pub fn mark_as_failed(path: PathBuf) {
 pub fn mark_as_transient_failure(path: PathBuf) {
     const MAX_TRANSIENT_ATTEMPTS: u8 = 6;
 
-    if let Ok(mut map) = get_failure_backoff().lock() {
-        let attempts = map
-            .peek(&path)
-            .map_or(1, |state| state.attempts.saturating_add(1));
+    let mut map = get_failure_backoff().lock();
+    let attempts = map
+        .peek(&path)
+        .map_or(1, |state| state.attempts.saturating_add(1));
 
-        if attempts >= MAX_TRANSIENT_ATTEMPTS {
-            map.pop(&path);
-            drop(map);
-            mark_as_failed(path);
-            return;
-        }
-
-        let retry_after = Instant::now() + compute_backoff(attempts);
-        map.put(
-            path,
-            FailureBackoffState {
-                attempts,
-                retry_after,
-            },
-        );
+    if attempts >= MAX_TRANSIENT_ATTEMPTS {
+        map.pop(&path);
+        drop(map);
+        mark_as_failed(path);
+        return;
     }
+
+    let retry_after = Instant::now() + compute_backoff(attempts);
+    map.put(
+        path,
+        FailureBackoffState {
+            attempts,
+            retry_after,
+        },
+    );
 }
 
 /// Register a short-lived block when the file is actively being written
 /// (download/encode in progress). This should never escalate to permanent
 /// failure because the condition is expected to recover shortly.
 pub fn mark_as_temporarily_blocked(path: PathBuf) {
-    if let Ok(mut map) = get_failure_backoff().lock() {
-        let retry_after = Instant::now() + Duration::from_millis(ACTIVE_WRITE_BLOCK_MS);
-        map.put(path, FailureBackoffState {
-            attempts: 0,
-            retry_after,
-        });
-    }
+    let retry_after = Instant::now() + Duration::from_millis(ACTIVE_WRITE_BLOCK_MS);
+    get_failure_backoff().lock().put(path, FailureBackoffState {
+        attempts: 0,
+        retry_after,
+    });
 }
 
 /// Clear transient failure status after a successful load.
 pub fn clear_transient_failure(path: &PathBuf) {
-    if let Ok(mut map) = get_failure_backoff().lock() {
-        map.pop(path);
-    }
+    get_failure_backoff().lock().pop(path);
 }
 
 /// Clear failure status for a specific path (allows retry)
 /// Used when manually refreshing a thumbnail after file changes
 pub fn clear_failure_cache(path: &PathBuf) {
-    if let Ok(mut set) = get_failed_paths().lock() {
-        set.pop(path);
-    }
-    if let Ok(mut map) = get_failure_backoff().lock() {
-        map.pop(path);
-    }
+    get_failed_paths().lock().pop(path);
+    get_failure_backoff().lock().pop(path);
 }
 
 /// Clear all failure status (allows retry for everything)
 /// Used when manually refreshing the entire folder (F5)
 pub fn clear_all_failures() {
-    if let Ok(mut set) = get_failed_paths().lock() {
-        set.clear();
-    }
-    if let Ok(mut map) = get_failure_backoff().lock() {
-        map.clear();
-    }
+    get_failed_paths().lock().clear();
+    get_failure_backoff().lock().clear();
 }
