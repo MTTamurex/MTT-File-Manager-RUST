@@ -10,7 +10,7 @@ pub(super) const FILMSTRIP_THUMB_SIZE: f32 = 80.0;
 const FILMSTRIP_SPACING: f32 = 4.0;
 const FILMSTRIP_PANEL_HEIGHT: f32 = 88.0;
 const FILMSTRIP_OVERSCAN: usize = 20;
-const FILMSTRIP_MAX_CACHED: usize = 200;
+const FILMSTRIP_MAX_CACHED: usize = 96;
 pub(super) const FILMSTRIP_DECODE_MAX_SIDE: u32 = 160;
 const FILMSTRIP_MAX_UPLOADS_PER_FRAME: usize = 6;
 

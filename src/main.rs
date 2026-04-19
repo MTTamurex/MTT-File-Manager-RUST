@@ -1,16 +1,13 @@
 #![cfg_attr(all(target_os = "windows", not(debug_assertions)), windows_subsystem = "windows")]
 
-// Force the discrete GPU on hybrid-GPU laptops (NVIDIA Optimus / AMD PowerXpress).
-// These exported symbols are read by the GPU driver at process start-up to decide
-// which adapter to use.  Without them, the installed binary (windows_subsystem = "windows")
-// may be routed to the integrated GPU, while `cargo run` from a VS Code terminal
-// inherits the parent's GPU affinity and may get the discrete adapter by chance.
-#[cfg(target_os = "windows")]
-#[no_mangle]
-pub static NvOptimusEnablement: u32 = 1;
-#[cfg(target_os = "windows")]
-#[no_mangle]
-pub static AmdPowerXpressRequestHighPerformance: i32 = 1;
+// NOTE: We deliberately do NOT export the NvOptimusEnablement /
+// AmdPowerXpressRequestHighPerformance symbols here.  This binary is reused as
+// the image / pdf / text viewer subprocess and forcing the discrete GPU at
+// process start-up wakes the dGPU even when those viewers ask wgpu for
+// `PowerPreference::LowPower`, costing significant baseline RAM/VRAM per
+// viewer window.  The main file-manager process still asks wgpu for
+// `HighPerformance` in its NativeOptions, which on hybrid laptops is normally
+// honoured by the standard DXGI adapter enumeration.
 
 use eframe::egui;
 use mtt_file_manager::app::ImageViewerApp;
