@@ -27,17 +27,25 @@ struct LoadJob {
     priority: LoadPriority,
 }
 
-/// Maximum memory budget for the image cache.
-/// Frames are downscaled to [`loader::DISPLAY_CACHE_MAX_SIDE`] (4096 px on the
-/// long edge) before being inserted, so a worst-case 4K-clamped RGBA frame
-/// takes ~64 MB; 128 MB therefore comfortably holds the active window for
-/// typical viewing while keeping process working set small.
-const MAX_CACHE_BYTES: usize = 128 * 1024 * 1024;
+/// Cached GPU texture plus original resolution metadata.
+struct CachedTexture {
+    texture: egui::TextureHandle,
+    original_width: u32,
+    original_height: u32,
+}
 
+/// Sliding-window cache that stores decoded images as **GPU textures**
+/// (`TextureHandle`) instead of CPU-side RGBA buffers.
+///
+/// This is the key architectural difference from the previous implementation
+/// (and the reason viewskater-egui uses ~50-100 MB while we used ~200 MB+).
+/// CPU `Vec<u8>` buffers are always resident in process working-set; GPU
+/// textures live in DX12 heaps that Windows can manage separately — on a
+/// dGPU they occupy VRAM, and even on iGPU (UMA) they're in committed
+/// memory that the OS can page out of the working set.
 pub struct WindowCache {
     radius: usize,
-    items: HashMap<usize, Arc<loader::DecodedFrame>>,
-    total_bytes: usize,
+    items: HashMap<usize, CachedTexture>,
 }
 
 impl WindowCache {
@@ -45,7 +53,6 @@ impl WindowCache {
         Self {
             radius,
             items: HashMap::new(),
-            total_bytes: 0,
         }
     }
 
@@ -57,51 +64,44 @@ impl WindowCache {
         self.items.contains_key(&index)
     }
 
-    pub fn put(&mut self, index: usize, frame: Arc<loader::DecodedFrame>) {
-        let new_bytes = frame.rgba.len();
-        if let Some(old) = self.items.insert(index, frame) {
-            self.total_bytes = self.total_bytes.saturating_sub(old.rgba.len());
-        }
-        self.total_bytes += new_bytes;
+    /// Store a decoded image as a GPU texture in the cache.
+    pub fn put(
+        &mut self,
+        index: usize,
+        texture: egui::TextureHandle,
+        original_width: u32,
+        original_height: u32,
+    ) {
+        self.items.insert(
+            index,
+            CachedTexture {
+                texture,
+                original_width,
+                original_height,
+            },
+        );
     }
 
-    pub fn get(&self, index: usize) -> Option<Arc<loader::DecodedFrame>> {
-        self.items.get(&index).map(Arc::clone)
+    /// Clone the TextureHandle (cheap Arc increment) and return it with the
+    /// original resolution. The entry stays in the cache.
+    pub fn get(&self, index: usize) -> Option<(egui::TextureHandle, u32, u32)> {
+        self.items.get(&index).map(|c| {
+            (c.texture.clone(), c.original_width, c.original_height)
+        })
     }
 
+    /// Evict all entries outside the `[center - radius, center + radius]`
+    /// window. Dropped `TextureHandle`s release their GPU memory.
     pub fn retain_window(&mut self, center: usize, total_len: usize) {
         if total_len == 0 {
             self.items.clear();
-            self.total_bytes = 0;
             return;
         }
 
         let min_idx = center.saturating_sub(self.radius);
         let max_idx = (center + self.radius).min(total_len.saturating_sub(1));
-        let evict_bytes: usize = self
-            .items
-            .iter()
-            .filter(|(&idx, _)| idx < min_idx || idx > max_idx)
-            .map(|(_, frame)| frame.rgba.len())
-            .sum();
         self.items
             .retain(|&idx, _| idx >= min_idx && idx <= max_idx);
-        self.total_bytes = self.total_bytes.saturating_sub(evict_bytes);
-    }
-
-    /// Evicts entries from the furthest indices until under budget.
-    pub fn evict_over_budget(&mut self, center: usize) {
-        while self.total_bytes > MAX_CACHE_BYTES {
-            let Some(&idx) = self.items.keys().max_by_key(|&&k| k.abs_diff(center)) else {
-                break;
-            };
-
-            if let Some(frame) = self.items.remove(&idx) {
-                self.total_bytes = self.total_bytes.saturating_sub(frame.rgba.len());
-            } else {
-                break;
-            }
-        }
     }
 }
 
