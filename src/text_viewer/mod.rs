@@ -17,7 +17,7 @@ use crate::viewer_runtime::{apply_saved_locale, build_viewer_native_options, is_
 
 mod viewer_app;
 
-/// Maximum text file size accepted by the viewer (50 MB).
+/// Maximum text file size accepted by the viewer (25 MB).
 const MAX_TEXT_FILE_SIZE: u64 = 25 * 1024 * 1024;
 
 /// Known text file extensions (lowercase, without dot).

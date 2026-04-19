@@ -540,8 +540,9 @@ impl eframe::App for PdfViewerApp {
                 }
             }
 
-            // Reveal window now that wgpu is initialised and the first frame
-            // is ready.  Prevents transient wgpu/DX12 windows from flashing.
+            // Reveal the window once the first frame is ready. The viewport
+            // starts hidden (.with_visible(false)) to avoid startup flashing
+            // before the viewer is ready to present its initial frame.
             ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
             ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
         }
