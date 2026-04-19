@@ -20,6 +20,93 @@ use super::{MAX_QUERY_OFFSET, MAX_QUERY_RESULTS};
 
 /// Minimum seconds between WarmIndex operations to prevent DoS via repeated warm requests.
 const WARM_COOLDOWN_SECS: u64 = 60;
+const ZERO_SIZE_FOLDER_REPAIR_LIMIT: usize = 4_096;
+
+fn repair_suspicious_zero_folder_size(
+    handle: &VolumeIndexHandle,
+    drive_letter: char,
+    path: &str,
+    dir_frn: u64,
+    summary: (u64, u64, u64),
+) -> (u64, u64, u64) {
+    let (total_size, file_count, folder_count) = summary;
+    if total_size > 0 || file_count == 0 {
+        return summary;
+    }
+
+    let volume = match crate::usn_journal::open_volume(drive_letter) {
+        Ok(handle) => handle,
+        Err(error) => {
+            eprintln!(
+                "[FOLDER-SIZE] zero-size repair open-volume failed path={} reason={}",
+                crate::redact_paths(path),
+                crate::redact_paths(&error),
+            );
+            return summary;
+        }
+    };
+
+    let record_size = match crate::mft_reader::query_mft_geometry_pub(volume) {
+        Ok(record_size) => record_size,
+        Err(error) => {
+            crate::usn_journal::close_volume(volume);
+            eprintln!(
+                "[FOLDER-SIZE] zero-size repair geometry failed path={} reason={}",
+                crate::redact_paths(path),
+                crate::redact_paths(&error),
+            );
+            return summary;
+        }
+    };
+
+    let (candidate_count, repaired_count, refreshed_summary) = {
+        let mut vol = handle.write();
+        let candidates = vol.collect_zero_size_file_frns_in_subtree(
+            dir_frn,
+            ZERO_SIZE_FOLDER_REPAIR_LIMIT,
+        );
+        if candidates.is_empty() {
+            (0usize, 0usize, summary)
+        } else {
+            let repaired = crate::mft_reader::repair_zero_size_file_frns(
+                volume,
+                &mut vol,
+                &candidates,
+                record_size,
+            );
+            let refreshed = crate::mft_reader::folder_size_for_service(&vol, dir_frn);
+            (candidates.len(), repaired, refreshed)
+        }
+    };
+
+    crate::usn_journal::close_volume(volume);
+
+    if repaired_count > 0 {
+        eprintln!(
+            "[FOLDER-SIZE] repaired-zero-sizes path={} candidates={} repaired={} total_gb={:.2} files={} folders={}",
+            crate::redact_paths(path),
+            candidate_count,
+            repaired_count,
+            refreshed_summary.0 as f64 / 1_073_741_824.0,
+            refreshed_summary.1,
+            refreshed_summary.2,
+        );
+        return refreshed_summary;
+    }
+
+    if candidate_count > 0 {
+        eprintln!(
+            "[FOLDER-SIZE] zero-size repair no-change path={} candidates={} total_gb={:.2} files={} folders={}",
+            crate::redact_paths(path),
+            candidate_count,
+            total_size as f64 / 1_073_741_824.0,
+            file_count,
+            folder_count,
+        );
+    }
+
+    summary
+}
 
 pub(super) fn handle_client(
     pipe: HANDLE,
@@ -274,17 +361,18 @@ pub(super) fn handle_client(
             // original CRIT-2 reasoning that this comment supersedes.
 
             // Compute folder size from in-memory index.
+            let handle = match volume_indices::find_handle(indices, drive_letter) {
+                Some(h) => h,
+                None => {
+                    let _ = send_response(
+                        pipe,
+                        &SearchResponse::Error("Volume not indexed".to_string()),
+                    );
+                    return;
+                }
+            };
+
             let result = {
-                let handle = match volume_indices::find_handle(indices, drive_letter) {
-                    Some(h) => h,
-                    None => {
-                        let _ = send_response(
-                            pipe,
-                            &SearchResponse::Error("Volume not indexed".to_string()),
-                        );
-                        return;
-                    }
-                };
                 let vol = handle.read();
                 if !matches!(vol.state, IndexState::Ready) {
                     drop(vol);
@@ -303,13 +391,21 @@ pub(super) fn handle_client(
                     return;
                 }
                 match vol.resolve_path_to_frn(&path) {
-                    Some(frn) => Ok(crate::mft_reader::folder_size_for_service(&vol, frn)),
+                    Some(frn) => Ok((frn, crate::mft_reader::folder_size_for_service(&vol, frn))),
                     None => Err("Path not found in index"),
                 }
             };
 
             match result {
-                Ok((total_size, file_count, folder_count)) => {
+                Ok((dir_frn, summary)) => {
+                    let (total_size, file_count, folder_count) =
+                        repair_suspicious_zero_folder_size(
+                            &handle,
+                            drive_letter,
+                            &path,
+                            dir_frn,
+                            summary,
+                        );
                     eprintln!(
                         "[FOLDER-SIZE] responding path={} total_gb={:.2} files={} folders={}",
                         crate::redact_paths(&path),

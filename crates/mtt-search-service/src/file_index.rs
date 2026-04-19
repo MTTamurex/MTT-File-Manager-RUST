@@ -500,6 +500,52 @@ impl VolumeIndex {
         (total_size, file_count, duplicate_hits)
     }
 
+    /// Collect up to `limit` unique file FRNs under `dir_frn` whose recorded
+    /// size is still zero. This is used to target on-demand repair of stale
+    /// cache entries without rescanning the entire volume.
+    pub fn collect_zero_size_file_frns_in_subtree(
+        &self,
+        dir_frn: u64,
+        limit: usize,
+    ) -> Vec<u64> {
+        if limit == 0 {
+            return Vec::new();
+        }
+
+        let mut zero_size_frns = Vec::with_capacity(limit.min(256));
+        let mut stack = vec![dir_frn];
+        let mut visited_dirs = HashSet::with_capacity(256);
+        let mut seen_files = HashSet::with_capacity(limit.min(1024));
+
+        while let Some(frn) = stack.pop() {
+            if !visited_dirs.insert(frn) {
+                continue;
+            }
+
+            if let Some(child_frns) = self.children.get(&frn) {
+                for &child_frn in child_frns {
+                    let Some(record) = self.records.get(&child_frn) else {
+                        continue;
+                    };
+
+                    if record.is_dir {
+                        stack.push(child_frn);
+                        continue;
+                    }
+
+                    if record.size == 0 && seen_files.insert(child_frn) {
+                        zero_size_frns.push(child_frn);
+                        if zero_size_frns.len() >= limit {
+                            return zero_size_frns;
+                        }
+                    }
+                }
+            }
+        }
+
+        zero_size_frns
+    }
+
     /// Report estimated memory usage: (arena_used, arena_capacity, hashmap_estimate).
     pub fn memory_usage(&self) -> (usize, usize, usize) {
         let arena_used = self.names.len();
@@ -768,5 +814,27 @@ mod tests {
 
         let (total, count, folder_count) = index.folder_tree_summary(root);
         assert_eq!((total, count, folder_count), (42, 1, 1));
+    }
+
+    #[test]
+    fn collect_zero_size_file_frns_in_subtree_is_unique_and_respects_limit() {
+        let mut index = VolumeIndex::new('C');
+        let root = 5u64;
+
+        assert!(index.insert_record(10, "folder", root, true, false));
+        assert!(index.insert_record(11, "nested", 10, true, false));
+        assert!(index.insert_record(20, "zero-a.bin", 10, false, false));
+        assert!(index.insert_record(21, "nonzero.bin", 11, false, false));
+        assert!(index.insert_record(22, "zero-b.bin", 11, false, false));
+        assert!(index.insert_record(22, "zero-b.bin", root, false, false));
+
+        index.records.get_mut(&21).unwrap().size = 7;
+
+        let mut collected = index.collect_zero_size_file_frns_in_subtree(root, 10);
+        collected.sort_unstable();
+        assert_eq!(collected, vec![20, 22]);
+
+        let limited = index.collect_zero_size_file_frns_in_subtree(root, 1);
+        assert_eq!(limited.len(), 1);
     }
 }
