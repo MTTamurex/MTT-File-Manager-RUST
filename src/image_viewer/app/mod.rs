@@ -14,7 +14,7 @@ mod rendering;
 use filmstrip::FilmstripState;
 use gif_export::{GifAnimation, ViewerStatusMessage};
 
-const DEFAULT_CACHE_RADIUS: usize = 6;
+const DEFAULT_CACHE_RADIUS: usize = 3;
 const MIN_ZOOM_FACTOR: f32 = 0.10;
 const MAX_ZOOM_FACTOR: f32 = 8.0;
 /// Minimum interval between navigation actions to prevent flooding workers
@@ -332,7 +332,9 @@ impl DedicatedImageViewerApp {
         let texture = ctx.load_texture(texture_name, color_image, egui::TextureOptions::LINEAR);
 
         self.texture = Some(texture);
-        self.image_resolution = Some((frame.width, frame.height));
+        // Report the *original* image resolution in the UI even when the
+        // cached frame was downscaled, so the user still sees the true size.
+        self.image_resolution = Some((frame.original_width, frame.original_height));
         self.last_error = None;
     }
 

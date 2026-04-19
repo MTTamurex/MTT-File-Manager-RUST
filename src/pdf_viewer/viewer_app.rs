@@ -15,14 +15,21 @@ use super::renderer::{PdfRenderer, PdfTextSegment};
 use super::selection::{DragSelection, PageSelection};
 
 /// Pages beyond ±CACHE_RADIUS from the current view are evicted.
-const CACHE_RADIUS: u32 = 6;
+const CACHE_RADIUS: u32 = 3;
 
 /// Number of pages to prefetch ahead/behind the visible range.
-const PREFETCH_AHEAD: u32 = 2;
+const PREFETCH_AHEAD: u32 = 1;
 
 /// Maximum total memory (in bytes) for cached page textures.
 /// When exceeded, furthest pages are evicted even if within CACHE_RADIUS.
-pub(super) const TEXTURE_MEMORY_BUDGET: usize = 512 * 1024 * 1024; // 512 MB
+pub(super) const TEXTURE_MEMORY_BUDGET: usize = 128 * 1024 * 1024; // 128 MB
+
+/// Hard cap on the longest side of a rendered page (pixels). Without this,
+/// a heavily zoomed A0 page could allocate ~256 MB of RGBA per page; capping
+/// at 4096 px keeps a worst-case page at ~64 MB. At zoom levels that would
+/// exceed this, `texture_adequate()` (0.9–2.0×) lets the existing texture
+/// stretch instead of triggering a re-render.
+const MAX_RENDER_SIDE: f32 = 4096.0;
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -216,8 +223,8 @@ impl PdfViewerApp {
     fn needed_render_size(&self, page_idx: u32, scale: f32, ppp: f32) -> (u32, u32) {
         let (nw, nh) = self.page_sizes[page_idx as usize];
         (
-            (nw * scale * ppp).max(1.0).min(8192.0) as u32,
-            (nh * scale * ppp).max(1.0).min(8192.0) as u32,
+            (nw * scale * ppp).max(1.0).min(MAX_RENDER_SIDE) as u32,
+            (nh * scale * ppp).max(1.0).min(MAX_RENDER_SIDE) as u32,
         )
     }
 
@@ -246,6 +253,10 @@ impl PdfViewerApp {
                 false
             }
         });
+        // Drop text-segment metadata for pages whose textures are no longer
+        // cached; without this the per-page text cache grows unboundedly
+        // during long browsing sessions on large documents.
+        self.page_text.retain(|&idx, _| idx >= lo && idx <= hi);
 
         // If still over budget, evict furthest pages from current_page first.
         if self.cache_bytes > TEXTURE_MEMORY_BUDGET {
@@ -264,6 +275,7 @@ impl PdfViewerApp {
                     if let Some(tex) = self.textures.remove(&victim) {
                         self.cache_bytes = self.cache_bytes.saturating_sub(tex.byte_size());
                     }
+                    self.page_text.remove(&victim);
                 } else {
                     break;
                 }

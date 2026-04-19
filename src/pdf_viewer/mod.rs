@@ -14,36 +14,13 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use crate::viewer_runtime::{apply_saved_locale, build_viewer_native_options, is_saved_theme_dark};
+
 mod render_worker;
 mod renderer;
 mod selection;
 mod toolbar;
 mod viewer_app;
-
-fn apply_saved_locale() {
-    let state_dir = dirs::data_local_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("MTT-File-Manager")
-        .join("state");
-
-    if let Ok(db) = crate::infrastructure::app_state_db::AppStateDb::new(state_dir) {
-        if let Some(language) = db.get_preference("language") {
-            rust_i18n::set_locale(&language);
-        }
-    }
-}
-
-fn is_saved_theme_dark() -> bool {
-    let state_dir = dirs::data_local_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("MTT-File-Manager")
-        .join("state");
-    crate::infrastructure::app_state_db::AppStateDb::new(state_dir)
-        .ok()
-        .and_then(|db| db.get_preference("theme_mode"))
-        .map(|s| s == "dark")
-        .unwrap_or(false)
-}
 
 /// Maximum PDF file size accepted by the viewer (512 MB).
 const MAX_PDF_FILE_SIZE: u64 = 512 * 1024 * 1024;
@@ -195,19 +172,7 @@ pub fn run_standalone(path: PathBuf) -> eframe::Result<()> {
         });
     }
 
-    let options = eframe::NativeOptions {
-        viewport,
-        persist_window: false,
-        wgpu_options: eframe::egui_wgpu::WgpuConfiguration {
-            wgpu_setup: eframe::egui_wgpu::WgpuSetup::CreateNew(eframe::egui_wgpu::WgpuSetupCreateNew {
-                power_preference: eframe::wgpu::PowerPreference::HighPerformance,
-                ..Default::default()
-            }),
-            desired_maximum_frame_latency: Some(1),
-            ..Default::default()
-        },
-        ..Default::default()
-    };
+    let options = build_viewer_native_options(viewport);
 
     let dark_mode = is_saved_theme_dark();
 

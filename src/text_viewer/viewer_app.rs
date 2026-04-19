@@ -32,8 +32,17 @@ pub struct TextViewerApp {
     /// Original file path.
     file_path: PathBuf,
 
-    /// All lines of the file (split on `\n`; `\r` stripped).
-    lines: Vec<String>,
+    /// Full decoded file content (single contiguous buffer).
+    /// Lines are accessed via [`Self::line`] using `line_offsets` instead of
+    /// being stored as one `String` per line, which previously caused ~24 B
+    /// of `String`-header overhead per line plus heap fragmentation.
+    content: String,
+
+    /// Byte offset (into `content`) of the start of each line.
+    /// `u32` is sufficient because [`super::MAX_TEXT_FILE_SIZE`] caps files
+    /// well below 4 GiB. The end of line `i` is `line_offsets[i+1]` (or
+    /// `content.len()` for the last line).
+    line_offsets: Vec<u32>,
 
     /// Detected encoding label (for display in the toolbar).
     encoding_label: &'static str,
@@ -91,13 +100,16 @@ impl TextViewerApp {
         // Encoding detection
         let (text, encoding_label) = decode_text(&raw);
 
-        // Split into lines
-        let lines: Vec<String> = text.lines().map(|l| l.to_string()).collect();
-        let total_lines = lines.len();
+        // Build line index (offsets into `text`) without copying each line
+        // into its own `String`. Drop the original `raw` bytes by reusing
+        // `text` directly as the storage buffer.
+        let line_offsets = build_line_offsets(&text);
+        let total_lines = line_offsets.len();
 
         Ok(Self {
             file_path: path,
-            lines,
+            content: text,
+            line_offsets,
             encoding_label,
             font_size: DEFAULT_FONT_SIZE,
             word_wrap: false,
@@ -354,7 +366,7 @@ impl TextViewerApp {
 
         scroll_area.show_rows(ui, row_height, total_rows, |ui, row_range| {
             for line_idx in row_range {
-                let line = &self.lines[line_idx];
+                let line = self.line(line_idx);
 
                 ui.horizontal(|ui| {
                     // Line number gutter
@@ -496,8 +508,8 @@ impl TextViewerApp {
         }
 
         let query_lower = self.search_query.to_lowercase();
-        for (idx, line) in self.lines.iter().enumerate() {
-            if line.to_lowercase().contains(&query_lower) {
+        for idx in 0..self.line_offsets.len() {
+            if self.line(idx).to_lowercase().contains(&query_lower) {
                 self.search_hits.push(idx);
             }
         }
@@ -507,6 +519,46 @@ impl TextViewerApp {
             self.scroll_to_line = Some(first);
         }
     }
+
+    /// Returns the text of line `idx` (without the trailing `\n`/`\r`).
+    /// Mimics the semantics of [`str::lines`] without allocating per line.
+    fn line(&self, idx: usize) -> &str {
+        let start = self.line_offsets[idx] as usize;
+        let end = self
+            .line_offsets
+            .get(idx + 1)
+            .map(|&o| o as usize)
+            .unwrap_or(self.content.len());
+        let mut s = &self.content[start..end];
+        if s.ends_with('\n') {
+            s = &s[..s.len() - 1];
+        }
+        if s.ends_with('\r') {
+            s = &s[..s.len() - 1];
+        }
+        s
+    }
+}
+
+/// Build a vector of byte offsets pointing to the start of each line in
+/// `content`. The number of entries equals the number of lines yielded by
+/// [`str::lines`] for the same input (so a trailing `\n` does not produce an
+/// extra empty line).
+fn build_line_offsets(content: &str) -> Vec<u32> {
+    let mut offsets: Vec<u32> = Vec::new();
+    if content.is_empty() {
+        return offsets;
+    }
+    offsets.push(0);
+    let bytes = content.as_bytes();
+    let len = bytes.len();
+    for (i, &b) in bytes.iter().enumerate() {
+        // Don't push an offset for a trailing newline (matches str::lines).
+        if b == b'\n' && i + 1 < len {
+            offsets.push((i + 1) as u32);
+        }
+    }
+    offsets
 }
 
 // ── eframe::App ──────────────────────────────────────────────────────────────

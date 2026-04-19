@@ -42,9 +42,24 @@ pub enum DecodePriority {
 #[derive(Clone, Debug)]
 pub struct DecodedFrame {
     pub rgba: Vec<u8>,
+    /// Width of the data stored in `rgba` (may be downscaled).
     pub width: u32,
+    /// Height of the data stored in `rgba` (may be downscaled).
     pub height: u32,
+    /// Original image width before any cache-side downscaling.
+    /// Equals `width` when the frame was not downscaled.
+    pub original_width: u32,
+    /// Original image height before any cache-side downscaling.
+    /// Equals `height` when the frame was not downscaled.
+    pub original_height: u32,
 }
+
+/// Cap on the longest side of frames stored in the in-memory image cache.
+/// Frames larger than this are downscaled with Lanczos3 before being cached,
+/// reducing per-frame RAM by up to ~16x for high-megapixel images while
+/// remaining visually adequate for typical screen sizes (4K) and moderate zoom.
+/// The original resolution is still reported through `original_width/_height`.
+pub const DISPLAY_CACHE_MAX_SIDE: u32 = 4096;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ExportImageFormat {
@@ -99,9 +114,9 @@ pub struct GifAnimationFrame {
 
 /// Hard cap on total RGBA bytes for GIF frames to prevent OOM on pathological
 /// files (e.g. 1 000-frame 4K GIF ≈ 16 GB without this limit).
-const GIF_MAX_TOTAL_RGBA_BYTES: usize = 512 * 1024 * 1024; // 512 MB
+const GIF_MAX_TOTAL_RGBA_BYTES: usize = 192 * 1024 * 1024; // 192 MB
 /// Hard cap on the number of decoded frames to bound memory and CPU time.
-const GIF_MAX_FRAMES: usize = 500;
+const GIF_MAX_FRAMES: usize = 240;
 
 /// Decodes all frames of an animated GIF. Returns an error if the file is not
 /// a valid GIF or has no decodable frames. For single-frame / static GIFs the
@@ -146,10 +161,14 @@ pub fn decode_gif_frames(path: &Path) -> io::Result<Vec<GifAnimationFrame>> {
                     );
                     break;
                 }
+                let w = rgba.width();
+                let h = rgba.height();
                 frames_out.push(GifAnimationFrame {
                     frame: DecodedFrame {
-                        width: rgba.width(),
-                        height: rgba.height(),
+                        width: w,
+                        height: h,
+                        original_width: w,
+                        original_height: h,
                         rgba: rgba.into_raw(),
                     },
                     delay_ms,
@@ -185,7 +204,7 @@ pub fn decode_full_frame_with_priority(
     }
 
     let image = decode_dynamic(path, priority)?;
-    Ok(frame_from_dynamic(image))
+    Ok(frame_from_dynamic_capped(image, DISPLAY_CACHE_MAX_SIDE))
 }
 
 pub fn decode_preview_frame(path: &Path, max_side: u32) -> io::Result<DecodedFrame> {
@@ -363,6 +382,8 @@ fn decode_svg_bytes(bytes: &[u8], max_side: Option<u32>) -> io::Result<DecodedFr
     Ok(DecodedFrame {
         width: render_width,
         height: render_height,
+        original_width: render_width,
+        original_height: render_height,
         rgba: unpremultiply_rgba(pixmap.data()),
     })
 }
@@ -418,9 +439,37 @@ fn decode_dynamic(path: &Path, priority: DecodePriority) -> io::Result<DynamicIm
 
 fn frame_from_dynamic(image: DynamicImage) -> DecodedFrame {
     let rgba = image.to_rgba8();
+    let w = rgba.width();
+    let h = rgba.height();
+    DecodedFrame {
+        width: w,
+        height: h,
+        original_width: w,
+        original_height: h,
+        rgba: rgba.into_raw(),
+    }
+}
+
+/// Like [`frame_from_dynamic`] but downscales (Lanczos3) when the longest
+/// side exceeds `max_side`. The original dimensions are preserved on the
+/// returned [`DecodedFrame`] so the UI can still report the true resolution.
+fn frame_from_dynamic_capped(image: DynamicImage, max_side: u32) -> DecodedFrame {
+    let original_w = image.width();
+    let original_h = image.height();
+    let longest = original_w.max(original_h);
+
+    let scaled = if max_side > 0 && longest > max_side {
+        image.resize(max_side, max_side, FilterType::Lanczos3)
+    } else {
+        image
+    };
+
+    let rgba = scaled.to_rgba8();
     DecodedFrame {
         width: rgba.width(),
         height: rgba.height(),
+        original_width: original_w,
+        original_height: original_h,
         rgba: rgba.into_raw(),
     }
 }

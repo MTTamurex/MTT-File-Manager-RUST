@@ -28,8 +28,11 @@ struct LoadJob {
 }
 
 /// Maximum memory budget for the image cache.
-/// Full-resolution 4K images use ~33 MB each; 512 MB allows ~15 full-res entries.
-const MAX_CACHE_BYTES: usize = 512 * 1024 * 1024;
+/// Frames are downscaled to [`loader::DISPLAY_CACHE_MAX_SIDE`] (4096 px on the
+/// long edge) before being inserted, so a worst-case 4K-clamped RGBA frame
+/// takes ~64 MB; 128 MB therefore comfortably holds the active window for
+/// typical viewing while keeping process working set small.
+const MAX_CACHE_BYTES: usize = 128 * 1024 * 1024;
 
 pub struct WindowCache {
     radius: usize,
