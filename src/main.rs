@@ -253,6 +253,7 @@ fn main() -> eframe::Result<()> {
 
     let options = eframe::NativeOptions {
         viewport,
+        renderer: eframe::Renderer::Wgpu,
         persist_window: false, // Disable eframe persistence - we control manually
         wgpu_options: eframe::egui_wgpu::WgpuConfiguration {
             // Request the discrete GPU on hybrid-GPU systems (e.g. laptop with
