@@ -340,4 +340,46 @@ impl ImageViewerApp {
             }
         }
     }
+
+    pub fn eject_mounted_iso_drive(&mut self, drive_path: &str) {
+        use crate::infrastructure::windows::detach_iso;
+
+        let Some(iso_path) = self
+            .file_operation_state
+            .mounted_iso_drives
+            .get(drive_path)
+            .cloned()
+        else {
+            return;
+        };
+
+        match detach_iso(&iso_path) {
+            Ok(_) => {
+                self.file_operation_state.mounted_iso_drives.remove(drive_path);
+
+                if !self.navigation_state.is_computer_view
+                    && self.navigation_state.current_path.starts_with(drive_path)
+                {
+                    self.navigate_to_computer();
+                }
+
+                self.reload_drive_list_async();
+                self.notifications
+                    .push(crate::application::AppNotification::info(format!(
+                        "{}",
+                        t!("operations.eject_iso", name = iso_path
+                            .file_name()
+                            .map(|name| name.to_string_lossy().to_string())
+                            .unwrap_or_else(|| drive_path.to_string()))
+                    )));
+            }
+            Err(e) => {
+                self.notifications
+                    .push(crate::application::AppNotification::error(format!(
+                        "{}",
+                        t!("operations.eject_iso_failed", error = e.to_string())
+                    )));
+            }
+        }
+    }
 }

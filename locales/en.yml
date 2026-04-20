@@ -5,6 +5,7 @@ sidebar:
   quick_access: "Quick Access"
   local_disks: "Local Disks"
   network_drives: "Network Drives"
+  eject_drive: "Eject mounted ISO"
 special_folders:
   desktop: "Desktop"
   documents: "Documents"
@@ -135,6 +136,8 @@ operations:
   open_failed: "Failed to open item with default application."
   mount_iso: "Mounting ISO: %{name}"
   mount_iso_failed: "Failed to mount ISO: %{error}"
+  eject_iso: "Ejected ISO: %{name}"
+  eject_iso_failed: "Failed to eject ISO: %{error}"
   shortcut_created: "Shortcut created: %{name}"
   shortcut_create_failed: "Failed to create shortcut: %{error}"
   onedrive_command_failed: "Failed to apply OneDrive command to one or more items"
