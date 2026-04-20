@@ -195,9 +195,11 @@ impl ImageViewerApp {
                             }
                             // Remove extension from loading set.
                             if let Some(ext) = path.extension() {
-                                self.loading_extensions.remove(
-                                    &ext.to_string_lossy().to_lowercase(),
-                                );
+                                let ext_raw = ext.to_string_lossy().to_lowercase();
+                                if !crate::infrastructure::windows::icons::is_per_file_icon_ext(&ext_raw) {
+                                    let ext_key = crate::infrastructure::windows::icons::canonical_icon_ext(&ext_raw);
+                                    self.loading_extensions.remove(ext_key);
+                                }
                             }
                         }
                         continue; // Keep draining pre-warm results (within cap).
@@ -256,9 +258,11 @@ impl ImageViewerApp {
                             }
                         }
                         if let Some(ext) = path.extension() {
-                            self.loading_extensions.remove(
-                                &ext.to_string_lossy().to_lowercase(),
-                            );
+                            let ext_raw = ext.to_string_lossy().to_lowercase();
+                            if !crate::infrastructure::windows::icons::is_per_file_icon_ext(&ext_raw) {
+                                let ext_key = crate::infrastructure::windows::icons::canonical_icon_ext(&ext_raw);
+                                self.loading_extensions.remove(ext_key);
+                            }
                         }
                     }
                     continue; // Don't count against budget.
@@ -297,9 +301,11 @@ impl ImageViewerApp {
         self.loading_icons.remove(&path);
         // Remove extension from loading set.
         if let Some(ext) = path.extension() {
-            self.loading_extensions.remove(
-                &ext.to_string_lossy().to_lowercase(),
-            );
+            let ext_raw = ext.to_string_lossy().to_lowercase();
+            if !crate::infrastructure::windows::icons::is_per_file_icon_ext(&ext_raw) {
+                let ext_key = crate::infrastructure::windows::icons::canonical_icon_ext(&ext_raw);
+                self.loading_extensions.remove(ext_key);
+            }
         }
 
         if pixels.is_empty() || width == 0 || height == 0 {
@@ -325,7 +331,7 @@ impl ImageViewerApp {
             if let Some(ext) = path.extension() {
                 let ext_raw = ext.to_string_lossy().to_lowercase();
                 let ext_str = crate::infrastructure::windows::icons::canonical_icon_ext(&ext_raw);
-                if !matches!(ext_str, "exe" | "lnk" | "ico" | "cur" | "ani" | "com") {
+                if !crate::infrastructure::windows::icons::is_per_file_icon_ext(&ext_raw) {
                     let mut ext_key = String::with_capacity(ext_str.len() + 6);
                     ext_key.push_str(ext_str);
                     ext_key.push_str("_Large");

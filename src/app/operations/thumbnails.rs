@@ -187,11 +187,12 @@ impl ImageViewerApp {
         // Only applies to non-unique-icon extensions.
         if let Some(ext) = path.extension() {
             let ext_lower = ext.to_string_lossy().to_lowercase();
-            if !matches!(ext_lower.as_str(), "exe" | "lnk" | "ico" | "cur" | "ani" | "com" | "scr" | "url") {
-                if self.loading_extensions.contains(&ext_lower) {
+            if !crate::infrastructure::windows::icons::is_per_file_icon_ext(&ext_lower) {
+                let load_ext = crate::infrastructure::windows::icons::canonical_icon_ext(&ext_lower);
+                if self.loading_extensions.contains(load_ext) {
                     return; // Another file with this ext is already in-flight.
                 }
-                self.loading_extensions.insert(ext_lower.clone());
+                self.loading_extensions.insert(load_ext.to_string());
             }
         }
 

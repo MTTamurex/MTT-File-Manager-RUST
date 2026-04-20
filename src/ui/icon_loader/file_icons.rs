@@ -83,8 +83,7 @@ impl IconLoader {
                 });
 
             if let Some(ref ext) = ext_str {
-                if matches!(ext.as_str(), "exe" | "lnk" | "ico" | "cur" | "ani" | "com")
-                {
+                if crate::infrastructure::windows::icons::is_per_file_icon_ext(ext) {
                     let cache_key = make_cache_key(path, size);
                     // Check cache first - async worker may have loaded the real icon.
                     if let Some(texture) = self.icon_cache.get(&cache_key) {
@@ -145,6 +144,34 @@ impl IconLoader {
                     } else {
                         // Real file on disk, non-blocking: let async loader handle it.
                         return None;
+                    }
+                } else if crate::infrastructure::windows::icons::requires_real_file_for_shared_icon(ext)
+                    && allow_blocking
+                {
+                    let canonical_ext = crate::infrastructure::windows::icons::canonical_icon_ext(ext);
+                    let ext_key = format!("{}_{:?}", canonical_ext, size);
+                    if let Some(texture) = self.extension_cache.get(&ext_key) {
+                        return Some(texture.clone());
+                    }
+
+                    let cache_key = make_cache_key(path, size);
+                    if let Some(texture) = self.icon_cache.get(&cache_key) {
+                        return Some(texture.clone());
+                    }
+
+                    if let Ok((pixels, width, height)) = windows::extract_file_icon_by_path(path, size) {
+                        let texture = ctx.load_texture(
+                            cache_key.clone(),
+                            egui::ColorImage::from_rgba_unmultiplied(
+                                [width as usize, height as usize],
+                                &pixels,
+                            ),
+                            egui::TextureOptions::LINEAR,
+                        );
+                        let cloned = texture.clone();
+                        self.extension_cache.entry(ext_key).or_insert_with(|| texture.clone());
+                        self.icon_cache.put(cache_key, texture);
+                        return Some(cloned);
                     }
                 }
             }
@@ -300,7 +327,8 @@ impl IconLoader {
             // Populate extension cache if applicable.
             if !is_folder {
                 if let Some(ext) = path.extension() {
-                    let ext_str = ext.to_string_lossy().to_lowercase();
+                    let ext_raw = ext.to_string_lossy().to_lowercase();
+                    let ext_str = crate::infrastructure::windows::icons::canonical_icon_ext(&ext_raw);
                     let ext_key = format!("{}_{:?}", ext_str, size);
                     self.extension_cache.insert(ext_key, texture.clone());
                 }

@@ -248,7 +248,9 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
         ];
         let mut prewarm_skipped = 0usize;
         for ext in PREWARM {
-            if preloaded_extension_icons.contains_key(*ext) {
+            if preloaded_extension_icons.contains_key(*ext)
+                || crate::infrastructure::windows::icons::requires_real_file_for_shared_icon(ext)
+            {
                 prewarm_skipped += 1;
                 continue; // Already in disk cache — will be loaded instantly.
             }

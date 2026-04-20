@@ -17,6 +17,20 @@ pub fn canonical_icon_ext(ext: &str) -> &str {
     }
 }
 
+/// File types whose icon must be extracted from the real file path because the
+/// icon can vary per file.
+#[inline]
+pub fn is_per_file_icon_ext(ext: &str) -> bool {
+    matches!(ext, "exe" | "lnk" | "ico" | "cur" | "ani" | "com" | "scr" | "url")
+}
+
+/// File types that still share one icon per extension, but require a real file
+/// path to seed that shared icon correctly.
+#[inline]
+pub fn requires_real_file_for_shared_icon(ext: &str) -> bool {
+    matches!(canonical_icon_ext(ext), "dll")
+}
+
 pub use file_icons::{
     extract_drive_icon, extract_file_icon, extract_file_icon_by_path, extract_folder_icon,
     get_file_type_icon,
