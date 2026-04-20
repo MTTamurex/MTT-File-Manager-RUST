@@ -291,6 +291,10 @@ impl ImageViewerApp {
                         .collect();
 
                     if !removed_drives.is_empty() {
+                        for drive in &removed_drives {
+                            self.file_operation_state.mounted_iso_drives.remove(drive);
+                        }
+
                         log::info!("[DRIVE-REFRESH] Drives removed: {:?}", removed_drives);
 
                         // Check if user is currently browsing inside a removed drive
@@ -311,7 +315,7 @@ impl ImageViewerApp {
                     }
 
                     // AUTO-FOCUS FOR RECENTLY MOUNTED ISO
-                    if let Some(_iso_path) = self.file_operation_state.pending_iso_mount.take() {
+                    if let Some(iso_path) = self.file_operation_state.pending_iso_mount.take() {
                         let mut target_drive = None;
                         for (new_path, _label) in &self.drive_state.disks {
                             if !old_disks.iter().any(|(old_path, _)| old_path == new_path)
@@ -325,9 +329,12 @@ impl ImageViewerApp {
                         }
 
                         if let Some(drive) = target_drive {
+                            self.file_operation_state
+                                .mounted_iso_drives
+                                .insert(drive.clone(), iso_path);
                             self.navigate_to(&drive);
                         } else {
-                            self.file_operation_state.pending_iso_mount = Some(_iso_path);
+                            self.file_operation_state.pending_iso_mount = Some(iso_path);
                         }
                     }
 

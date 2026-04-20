@@ -150,5 +150,6 @@ pub(in crate::app) fn build_file_operation_state(
         file_ops_in_progress: 0,
         pending_deletions,
         pending_iso_mount: None,
+        mounted_iso_drives: std::collections::HashMap::new(),
     }
 }

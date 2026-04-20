@@ -47,6 +47,7 @@ pub struct SidebarContext<'a> {
     /// Inline drive rename: (drive_path, editable_text)
     pub sidebar_renaming: Option<(&'a str, &'a str)>,
     pub sidebar_rename_focus: bool,
+    pub mounted_iso_drives: &'a std::collections::HashMap<String, std::path::PathBuf>,
     /// Folder tree expansion state (shared reference for rendering)
     pub tree_state: &'a SidebarTreeState,
 }
@@ -64,6 +65,7 @@ pub enum SidebarAction {
     CommitDriveRename { drive_path: String, new_label: String },
     /// User cancelled inline drive rename
     CancelDriveRename,
+    EjectDrive(String),
     /// Toggle expand/collapse of a folder tree node
     TreeToggleExpand(std::path::PathBuf),
     /// Items were dropped onto a sidebar folder/drive (move or copy)
@@ -369,6 +371,7 @@ pub fn render_sidebar_drives(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Opt
             let root_path = std::path::Path::new(disk_path.as_str());
             let is_expanded = ctx.tree_state.is_expanded(root_path);
             let is_tree_loading = ctx.tree_state.is_loading(root_path);
+            let show_eject_button = ctx.mounted_iso_drives.contains_key(disk_path.as_str());
 
             let (mut rect, response) =
                 ui.allocate_exact_size(egui::vec2(ui.available_width(), 28.0), Sense::click());
@@ -381,6 +384,18 @@ pub fn render_sidebar_drives(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Opt
                 Pos2::new(rect.min.x, rect.min.y),
                 egui::vec2(20.0, rect.height()),
             );
+            let eject_rect = Rect::from_center_size(
+                Pos2::new(rect.max.x - 12.0, rect.center().y),
+                egui::vec2(18.0, 18.0),
+            );
+            let eject_response = show_eject_button.then(|| {
+                ui.interact(
+                    eject_rect,
+                    egui::Id::new(("sidebar_drive_eject", disk_path.as_str())),
+                    Sense::click(),
+                )
+                .on_hover_text(t!("sidebar.eject_drive").to_string())
+            });
 
             if ui.is_rect_visible(rect) {
                 let dark_mode = ui.visuals().dark_mode;
@@ -473,6 +488,26 @@ pub fn render_sidebar_drives(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Opt
                             ui.visuals().text_color()
                         },
                     );
+
+                    if let Some(eject_response) = eject_response.as_ref() {
+                        let eject_color = if eject_response.hovered() {
+                            if is_selected {
+                                crate::ui::theme::selection_text_color(dark_mode)
+                            } else {
+                                ui.visuals().text_color()
+                            }
+                        } else {
+                            Color32::from_gray(140)
+                        };
+
+                        ui.painter().text(
+                            eject_rect.center(),
+                            egui::Align2::CENTER_CENTER,
+                            "⏏",
+                            egui::FontId::proportional(10.0),
+                            eject_color,
+                        );
+                    }
                 }
             }
 
@@ -529,7 +564,16 @@ pub fn render_sidebar_drives(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Opt
                         new_label: buf,
                     });
                 }
-            } else if (response.double_clicked() || response.clicked())
+            } else if action.is_none()
+                && eject_response
+                    .as_ref()
+                    .is_some_and(|response| response.clicked())
+                && !ctx.is_renaming
+                && !ctx.is_item_dragging
+            {
+                action = Some(SidebarAction::EjectDrive(disk_path.to_string()));
+            } else if action.is_none()
+                && (response.double_clicked() || response.clicked())
                 && !ctx.is_renaming
                 && !ctx.is_item_dragging
             {

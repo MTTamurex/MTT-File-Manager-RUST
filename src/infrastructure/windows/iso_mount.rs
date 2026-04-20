@@ -72,3 +72,55 @@ pub fn mount_iso(path: &Path) -> Result<()> {
         Ok(())
     }
 }
+
+/// Detaches a previously mounted ISO file.
+/// SAFETY: Interacts with Windows Virtual Disk API.
+pub fn detach_iso(path: &Path) -> Result<()> {
+    unsafe {
+        let path_wide: Vec<u16> = path
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+
+        let storage_type = VIRTUAL_STORAGE_TYPE {
+            DeviceId: VIRTUAL_STORAGE_TYPE_DEVICE_ISO,
+            VendorId: VIRTUAL_STORAGE_TYPE_VENDOR_MICROSOFT,
+        };
+
+        let mut handle = HANDLE::default();
+
+        let open_params = OPEN_VIRTUAL_DISK_PARAMETERS {
+            Version: OPEN_VIRTUAL_DISK_VERSION_1,
+            ..Default::default()
+        };
+
+        log::debug!("[ISO] Opening virtual disk for detach (V1): {:?}", path);
+        OpenVirtualDisk(
+            &storage_type,
+            PCWSTR(path_wide.as_ptr()),
+            VIRTUAL_DISK_ACCESS_DETACH,
+            OPEN_VIRTUAL_DISK_FLAG_NONE,
+            Some(&open_params),
+            &mut handle,
+        )
+        .ok()
+        .map_err(|e| {
+            log::error!("[ISO] OpenVirtualDisk for detach failed: {:?}", e);
+            e
+        })?;
+
+        log::debug!("[ISO] Detaching virtual disk handle: {:?}", handle);
+        DetachVirtualDisk(handle, DETACH_VIRTUAL_DISK_FLAG_NONE, 0)
+            .ok()
+            .map_err(|e| {
+                log::error!("[ISO] DetachVirtualDisk failed: {:?}", e);
+                let _ = CloseHandle(handle);
+                e
+            })?;
+
+        log::info!("[ISO] Successfully detached: {:?}", path);
+        let _ = CloseHandle(handle);
+        Ok(())
+    }
+}

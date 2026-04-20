@@ -177,6 +177,7 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) -> Option
                 dragging_path,
                 sidebar_renaming: sidebar_renaming_ref,
                 sidebar_rename_focus: app.sidebar_rename_focus,
+                mounted_iso_drives: &app.file_operation_state.mounted_iso_drives,
                 tree_state: &app.sidebar_tree,
             };
 
@@ -298,6 +299,7 @@ fn handle_sidebar_action(app: &mut ImageViewerApp, action: SidebarAction) {
             app.sidebar_renaming = None;
             app.sidebar_rename_focus = false;
         }
+        SidebarAction::EjectDrive(path) => app.eject_mounted_iso_drive(&path),
         SidebarAction::TreeToggleExpand(path) => {
             app.sidebar_tree.toggle_expand(&path);
         }

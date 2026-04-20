@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
@@ -14,4 +15,5 @@ pub struct FileOperationState {
     pub file_ops_in_progress: usize,
     pub pending_deletions: Arc<dashmap::DashMap<PathBuf, ()>>,
     pub pending_iso_mount: Option<PathBuf>,
+    pub mounted_iso_drives: HashMap<String, PathBuf>,
 }
