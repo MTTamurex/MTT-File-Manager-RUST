@@ -182,9 +182,6 @@ pub(in crate::app) fn spawn_icon_worker(
                     CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED,
                 };
 
-                // Extensions that may have unique per-file icons (embedded resources).
-                const UNIQUE_ICON_EXTS: &[&str] = &["exe", "lnk", "ico", "cur", "ani", "com", "scr", "url"];
-
                 // STA (COINIT_APARTMENTTHREADED) is required for SHGetFileInfoW to
                 // correctly resolve ProgID-based icons (e.g. dllfile, sysfile, batfile).
                 // Using MTA causes generic icons for those types.
@@ -224,15 +221,18 @@ pub(in crate::app) fn spawn_icon_worker(
                     // This matches how Windows Explorer resolves icons.
                     let ext_lower = path.extension()
                         .map(|e| e.to_string_lossy().to_lowercase());
-                    let needs_real_path = ext_lower.as_deref()
-                        .map(|e| UNIQUE_ICON_EXTS.contains(&e))
+                    let per_file_icon = ext_lower.as_deref()
+                        .map(crate::infrastructure::windows::icons::is_per_file_icon_ext)
                         .unwrap_or(true);
+                    let needs_real_path_shared_icon = ext_lower.as_deref()
+                        .map(crate::infrastructure::windows::icons::requires_real_file_for_shared_icon)
+                        .unwrap_or(false);
 
                     let is_virtual_archive_path = crate::domain::file_entry::is_path_inside_archive(&path);
 
                     let icon_result = if is_virtual_archive_path {
                         extract_shell_icon(&path, IconSize::Large)
-                    } else if needs_real_path {
+                    } else if per_file_icon {
                         extract_file_icon_by_path(&path, IconSize::Large)
                     } else {
                         let ext_raw = ext_lower.as_deref().unwrap_or("");
@@ -252,11 +252,15 @@ pub(in crate::app) fn spawn_icon_worker(
                         {
                             Ok(cached)
                         } else {
-                            // Use get_file_type_icon (with internal CoInitialize)
-                            // instead of extract_file_icon — the latter produces
-                            // generic icons for ProgID-based types (dll, sys, bat)
-                            // on worker threads.
-                            let r = get_file_type_icon(false, ext_str, IconSize::Large);
+                            let r = if needs_real_path_shared_icon {
+                                extract_file_icon_by_path(&path, IconSize::Large)
+                            } else {
+                                // Use get_file_type_icon (with internal CoInitialize)
+                                // instead of extract_file_icon — the latter produces
+                                // generic icons for ProgID-based types (dll, sys, bat)
+                                // on worker threads.
+                                get_file_type_icon(false, ext_str, IconSize::Large)
+                            };
                             if let Ok(ref data) = r {
                                 ext_cache.insert(dot_ext, data.clone());
                                 // Persist to disk for instant loading on next app launch.

@@ -56,6 +56,14 @@ impl IconDiskCache {
                 let _ = std::fs::remove_file(&path);
                 continue;
             }
+            if crate::infrastructure::windows::icons::requires_real_file_for_shared_icon(&ext) {
+                log::info!(
+                    "[IconDiskCache] Removing path-seeded icon cache {:?} (must be rebuilt from a real file)",
+                    path,
+                );
+                let _ = std::fs::remove_file(&path);
+                continue;
+            }
             let data = match std::fs::read(&path) {
                 Ok(d) => d,
                 Err(_) => {
@@ -96,6 +104,9 @@ impl IconDiskCache {
         // Always save under the canonical extension so mapped types (sys→dll)
         // share a single cache file.
         let canonical = crate::infrastructure::windows::icons::canonical_icon_ext(ext);
+        if crate::infrastructure::windows::icons::requires_real_file_for_shared_icon(canonical) {
+            return;
+        }
         let path = self.dir.join(format!("{}.rgba", canonical.to_lowercase()));
         // Don't overwrite if already exists (another worker may have written it).
         if path.exists() {
