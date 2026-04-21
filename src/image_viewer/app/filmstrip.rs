@@ -12,7 +12,8 @@ const FILMSTRIP_PANEL_HEIGHT: f32 = 88.0;
 const FILMSTRIP_OVERSCAN: usize = 20;
 const FILMSTRIP_MAX_CACHED: usize = 96;
 pub(super) const FILMSTRIP_DECODE_MAX_SIDE: u32 = 160;
-const FILMSTRIP_MAX_UPLOADS_PER_FRAME: usize = 6;
+const FILMSTRIP_MAX_UPLOADS_PER_FRAME: usize = 12;
+const FILMSTRIP_MAX_IN_FLIGHT: usize = 4;
 
 pub(in crate::image_viewer) struct FilmstripState {
     pub(super) thumbnails: HashMap<usize, egui::TextureHandle>,
@@ -71,6 +72,42 @@ impl super::DedicatedImageViewerApp {
             );
             self.filmstrip.thumbnails.insert(index, texture);
             uploads += 1;
+        }
+    }
+
+    /// Proactively decode filmstrip thumbnails around the current image so
+    /// they appear immediately when the user scrolls or clicks neighbours.
+    pub(super) fn prefetch_filmstrip_neighbors(&mut self) {
+        let total = self.sequence.entries.len();
+        if total == 0 {
+            return;
+        }
+        let center = self.current_index;
+        let half_visible = 6usize;
+        let start = center.saturating_sub(half_visible);
+        let end = (center + half_visible).min(total - 1);
+
+        for idx in start..=end {
+            if self.filmstrip.thumbnails.contains_key(&idx)
+                || self.filmstrip.pending.contains(&idx)
+                || self.filmstrip.pending.len() >= FILMSTRIP_MAX_IN_FLIGHT
+            {
+                continue;
+            }
+            if let Some(path) = self.sequence.entries.get(idx).cloned() {
+                let tx = self.filmstrip.result_tx.clone();
+                let gen = self.filmstrip.generation;
+                self.filmstrip.pending.insert(idx);
+                rayon::spawn(move || {
+                    if let Ok(frame) = loader::decode_preview_frame_with_priority(
+                        &path,
+                        FILMSTRIP_DECODE_MAX_SIDE,
+                        loader::DecodePriority::Background,
+                    ) {
+                        let _ = tx.try_send((idx, gen, frame));
+                    }
+                });
+            }
         }
     }
 
@@ -149,6 +186,7 @@ impl super::DedicatedImageViewerApp {
                                 // Request decode if not loaded and not pending
                                 if !self.filmstrip.thumbnails.contains_key(&idx)
                                     && !self.filmstrip.pending.contains(&idx)
+                                    && self.filmstrip.pending.len() < FILMSTRIP_MAX_IN_FLIGHT
                                 {
                                     if let Some(path) = self.sequence.entries.get(idx).cloned() {
                                         let tx = self.filmstrip.result_tx.clone();
@@ -162,7 +200,7 @@ impl super::DedicatedImageViewerApp {
                                                     loader::DecodePriority::Background,
                                                 )
                                             {
-                                                let _ = tx.send((idx, gen, frame));
+                                                let _ = tx.try_send((idx, gen, frame));
                                             }
                                         });
                                     }

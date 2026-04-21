@@ -13,7 +13,7 @@ mod rendering;
 use filmstrip::FilmstripState;
 use gif_export::{GifAnimation, ViewerStatusMessage};
 
-const DEFAULT_CACHE_RADIUS: usize = 1;
+const DEFAULT_CACHE_RADIUS: usize = 3;
 const MIN_ZOOM_FACTOR: f32 = 0.10;
 const MAX_ZOOM_FACTOR: f32 = 8.0;
 /// Minimum interval between navigation actions to prevent flooding workers
@@ -525,6 +525,7 @@ impl DedicatedImageViewerApp {
         }
 
         self.filmstrip.scroll_to_current = true;
+        self.prefetch_filmstrip_neighbors();
     }
 
     pub(super) fn navigate_prev(&mut self, ctx: &egui::Context) {
@@ -704,6 +705,7 @@ impl eframe::App for DedicatedImageViewerApp {
 
         self.poll_filmstrip_results(ctx);
         self.evict_filmstrip_textures();
+        self.prefetch_filmstrip_neighbors();
 
         // Skip top_bar and filmstrip rendering until first texture is ready.
         // This isolates whether layout churn during startup is causing the visual artifact.
