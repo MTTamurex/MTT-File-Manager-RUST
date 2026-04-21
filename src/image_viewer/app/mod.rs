@@ -37,7 +37,11 @@ pub struct DedicatedImageViewerApp {
     pub(super) zoom_factor: f32,
     pub(super) zoom_percent_display: f32,
     pub(super) image_resolution: Option<(u32, u32)>,
+    pub(super) current_window_title: String,
     pub(super) repaint_ctx_set: bool,
+    pub(super) viewport_revealed: bool,
+    #[cfg(target_os = "windows")]
+    pub(super) native_hwnd: Option<windows::Win32::Foundation::HWND>,
     /// Animated GIF state; `Some` when the current image is a multi-frame GIF.
     pub(super) gif_animation: Option<GifAnimation>,
     /// Index for which GIF loading was already attempted (avoids retrying).
@@ -66,12 +70,22 @@ impl DedicatedImageViewerApp {
         startup_sequence_rx: Option<std::sync::mpsc::Receiver<ImageSequence>>,
         startup_preview: Option<(std::path::PathBuf, loader::DecodedFrame)>,
     ) -> Self {
+        let now = std::time::Instant::now();
         let worker_count = std::thread::available_parallelism()
             .map(|v| v.get())
             .unwrap_or(2)
             .clamp(1, 4);
 
         let start_index = sequence.current_index.min(sequence.entries.len().saturating_sub(1));
+        let initial_window_title = if sequence.entries.is_empty() {
+            rust_i18n::t!("imageviewer.title").to_string()
+        } else {
+            let current_filename = sequence.entries[start_index]
+                .file_name()
+                .map(|name| name.to_string_lossy().to_string())
+                .unwrap_or_else(|| rust_i18n::t!("imageviewer.title").to_string());
+            rust_i18n::t!("imageviewer.title_with_file", name = current_filename).to_string()
+        };
         let cache = Self::build_initial_cache(&sequence, start_index);
 
         let app = Self {
@@ -90,14 +104,18 @@ impl DedicatedImageViewerApp {
             zoom_factor: 1.0,
             zoom_percent_display: 100.0,
             image_resolution: None,
+            current_window_title: initial_window_title,
             repaint_ctx_set: false,
+            viewport_revealed: false,
+            #[cfg(target_os = "windows")]
+            native_hwnd: None,
             gif_animation: None,
             gif_loaded_index: None,
             gif_decode_rx: None,
             conversion_rx: None,
             conversion_in_progress: false,
             status_message: None,
-            last_navigate_instant: std::time::Instant::now(),
+            last_navigate_instant: now - Duration::from_millis(100),
             filmstrip: FilmstripState::new(),
             dark_mode,
         };
@@ -116,6 +134,30 @@ impl DedicatedImageViewerApp {
     }
 
     fn open_requested_path(&mut self, path: std::path::PathBuf, ctx: &egui::Context) {
+        log::info!(
+            "[IMAGE-VIEWER] retarget request pid={} current='{}' requested='{}' revealed={}",
+            std::process::id(),
+            self.current_path()
+                .map(|current| current.display().to_string())
+                .unwrap_or_else(|| "<none>".to_string()),
+            path.display(),
+            self.viewport_revealed
+        );
+
+        if self
+            .current_path()
+            .is_some_and(|current| paths_eq_case_insensitive(current, &path))
+        {
+            // Ignore duplicate retargets for the same image during startup.
+            // Rebuilding the sequence and reissuing viewport commands here can
+            // look like multiple rapid open/maximize cycles on Windows.
+            if self.viewport_revealed {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+                ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+            }
+            return;
+        }
+
         // Build sequence on a background thread to avoid blocking the UI
         // with directory enumeration and sorting on large/slow folders.
         let (tx, rx) = std::sync::mpsc::channel();
@@ -161,12 +203,9 @@ impl DedicatedImageViewerApp {
         self.startup_sequence_rx = None;
         self.startup_preview = None;
         self.requested_jobs.clear();
-        self.texture = None;
-        self.texture_index = None;
         self.last_error = None;
         self.zoom_factor = 1.0;
         self.zoom_percent_display = 100.0;
-        self.image_resolution = None;
         self.gif_animation = None;
         self.gif_loaded_index = None;
         self.gif_decode_rx = None;
@@ -177,9 +216,15 @@ impl DedicatedImageViewerApp {
         self.filmstrip.reset();
 
         self.try_show_cached_current(ctx);
-        ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
-        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
-        ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        self.schedule_window_requests();
+        if self.viewport_revealed {
+            let is_minimized = ctx.input(|i| i.viewport().minimized.unwrap_or(false));
+            if is_minimized {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+            }
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        }
         ctx.request_repaint();
     }
 
@@ -236,9 +281,19 @@ impl DedicatedImageViewerApp {
         }
         self.prefetch.set_center(new_index);
         self.requested_jobs.clear();
-        self.texture = None;
-        self.texture_index = None;
+        if let (Some(texture), Some((original_width, original_height))) =
+            (self.texture.clone(), self.image_resolution)
+        {
+            self.cache
+                .put(new_index, texture, original_width, original_height);
+            self.texture_index = Some(new_index);
+        } else {
+            self.texture = None;
+            self.texture_index = None;
+            self.image_resolution = None;
+        }
         self.filmstrip.reset();
+        self.schedule_window_requests();
         ctx.request_repaint();
     }
 
@@ -511,6 +566,57 @@ impl DedicatedImageViewerApp {
             self.navigate_next(ctx);
         }
     }
+
+    fn maybe_reveal_startup_window(&mut self, ctx: &egui::Context) {
+        if self.viewport_revealed {
+            return;
+        }
+
+        let current_texture_ready = self.texture_index == Some(self.current_index);
+        let should_reveal = self.sequence.entries.is_empty() || self.last_error.is_some() || current_texture_ready;
+        if !should_reveal {
+            ctx.request_repaint_after(Duration::from_millis(16));
+            return;
+        }
+
+        log::info!(
+            "[IMAGE-VIEWER] first reveal pid={} path='{}' texture_ready={} error_present={}",
+            std::process::id(),
+            self.current_path()
+                .map(|path| path.display().to_string())
+                .unwrap_or_else(|| "<none>".to_string()),
+            current_texture_ready,
+            self.last_error.is_some()
+        );
+
+        #[cfg(target_os = "windows")]
+        if let Some(hwnd) = self.native_hwnd {
+            unsafe {
+                use windows::Win32::UI::WindowsAndMessaging::{
+                    SetWindowPos, HWND_TOP, SWP_NOMOVE, SWP_NOSIZE, SWP_NOACTIVATE,
+                    SWP_NOZORDER, SWP_SHOWWINDOW,
+                };
+                let _ = SetWindowPos(
+                    hwnd,
+                    Some(HWND_TOP),
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOZORDER | SWP_SHOWWINDOW,
+                );
+            }
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+        }
+
+        ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        self.viewport_revealed = true;
+    }
+
 }
 
 impl eframe::App for DedicatedImageViewerApp {
@@ -528,10 +634,30 @@ impl eframe::App for DedicatedImageViewerApp {
             }
 
             // Apply dark/light title bar on the native Windows decoration.
+            // Keep this aligned with PDF/Text viewers startup behavior.
             use raw_window_handle::HasWindowHandle;
             if let Ok(handle) = frame.window_handle() {
                 if let raw_window_handle::RawWindowHandle::Win32(wh) = handle.as_raw() {
                     let hwnd = windows::Win32::Foundation::HWND(wh.hwnd.get() as _);
+                    self.native_hwnd = Some(hwnd);
+                    unsafe {
+                        use windows::Win32::UI::WindowsAndMessaging::{
+                            SetWindowPos, HWND_TOP, SWP_NOMOVE, SWP_NOSIZE, SWP_NOACTIVATE,
+                            SWP_NOZORDER, SWP_HIDEWINDOW,
+                        };
+                        let _ = SetWindowPos(
+                            hwnd,
+                            Some(HWND_TOP),
+                            0,
+                            0,
+                            0,
+                            0,
+                            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOZORDER | SWP_HIDEWINDOW,
+                        );
+                    }
+                    crate::infrastructure::windows::window_corners::disable_window_transitions(
+                        hwnd,
+                    );
                     crate::infrastructure::windows::window_corners::apply_dark_title_bar(
                         hwnd,
                         self.dark_mode,
@@ -539,32 +665,16 @@ impl eframe::App for DedicatedImageViewerApp {
                 }
             }
 
-            // Reveal the window once the first frame is ready. The viewport
-            // starts hidden (.with_visible(false)) to avoid startup flashing
-            // from native window creation/platform integration before the
-            // viewer is ready to present its initial frame.
-            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
-            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
         }
 
         self.handle_external_open_requests(ctx);
         self.poll_startup_sequence(ctx);
-        self.handle_shortcuts(ctx);
-        self.sync_window_title(ctx);
-
-        self.handle_prefetch_results(ctx);
-
-        if self.sequence.entries.is_empty() {
-            self.render_top_bar(ctx);
-            self.render_bottom_bar(ctx);
-            self.render_center(ctx);
-            return;
-        }
-
         if self.texture.is_none() {
             self.try_show_startup_preview(ctx);
             self.try_show_cached_current(ctx);
         }
+        self.handle_shortcuts(ctx);
+        self.sync_window_title(ctx);
 
         // Fill any gaps in the cache window only when the user is not rapidly
         // navigating. During rapid navigation navigate_to() already requests
@@ -576,6 +686,16 @@ impl eframe::App for DedicatedImageViewerApp {
             self.schedule_window_requests();
         }
 
+        self.handle_prefetch_results(ctx);
+        self.maybe_reveal_startup_window(ctx);
+
+        if self.sequence.entries.is_empty() {
+            self.render_top_bar(ctx);
+            self.render_bottom_bar(ctx);
+            self.render_center(ctx);
+            return;
+        }
+
         // Decode and upload all GIF frames (once per image), then advance timer.
         self.load_gif_if_needed(ctx);
         self.poll_gif_decode(ctx);
@@ -585,9 +705,15 @@ impl eframe::App for DedicatedImageViewerApp {
         self.poll_filmstrip_results(ctx);
         self.evict_filmstrip_textures();
 
-        self.render_top_bar(ctx);
+        // Skip top_bar and filmstrip rendering until first texture is ready.
+        // This isolates whether layout churn during startup is causing the visual artifact.
+        if self.viewport_revealed {
+            self.render_top_bar(ctx);
+        }
         self.render_bottom_bar(ctx);
-        self.render_filmstrip(ctx);
+        if self.viewport_revealed {
+            self.render_filmstrip(ctx);
+        }
         self.render_center(ctx);
 
         // Low-frequency fallback poll — workers trigger immediate repaints via
