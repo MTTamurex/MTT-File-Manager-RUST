@@ -55,11 +55,12 @@ pub struct DecodedFrame {
 }
 
 /// Cap on the longest side of frames stored in the in-memory image cache.
-/// Frames larger than this are downscaled with Lanczos3 before being cached,
-/// reducing per-frame RAM by up to ~16x for high-megapixel images while
-/// remaining visually adequate for typical screen sizes (4K) and moderate zoom.
+/// Frames larger than this are downscaled with Triangle (fast bilinear)
+/// before being cached, reducing per-frame RAM by up to ~16x for
+/// high-megapixel images while remaining visually adequate for typical
+/// screen sizes (4K) and moderate zoom.
 /// The original resolution is still reported through `original_width/_height`.
-pub const DISPLAY_CACHE_MAX_SIDE: u32 = 4096;
+pub const DISPLAY_CACHE_MAX_SIDE: u32 = 2560;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ExportImageFormat {
@@ -405,6 +406,35 @@ fn unpremultiply_rgba(pixels: &[u8]) -> Vec<u8> {
 }
 
 fn decode_dynamic(path: &Path, priority: DecodePriority) -> io::Result<DynamicImage> {
+    // WIC requires COM to be initialized on the calling thread.
+    // Use a thread-local lazy init so each worker thread sets it up once.
+    #[cfg(target_os = "windows")]
+    {
+        thread_local! {
+            static _COM_INIT: () = unsafe {
+                use windows::Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED};
+                let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+            };
+        }
+        _COM_INIT.with(|_| {});
+    }
+
+    // On Windows, WIC (Windows Imaging Component) is significantly faster
+    // than the pure-Rust image crate for common formats (JPEG, PNG, BMP,
+    // TIFF, GIF). Try WIC first; fall back to the cross-platform path.
+    #[cfg(target_os = "windows")]
+    {
+        if let Some((rgba, w, h)) =
+            crate::workers::thumbnail::extraction::stage2_wic::extract(path)
+        {
+            if let Some(buffer) = image::ImageBuffer::<image::Rgba<u8>, Vec<u8>>::from_raw(
+                w, h, rgba,
+            ) {
+                return Ok(DynamicImage::ImageRgba8(buffer));
+            }
+        }
+    }
+
     let bytes = read_file_fast(path, priority)?;
 
     // Fast path: decode with EXIF orientation using image crate.
@@ -446,16 +476,17 @@ fn frame_from_dynamic(image: DynamicImage) -> DecodedFrame {
     }
 }
 
-/// Like [`frame_from_dynamic`] but downscales (Lanczos3) when the longest
-/// side exceeds `max_side`. The original dimensions are preserved on the
-/// returned [`DecodedFrame`] so the UI can still report the true resolution.
+/// Like [`frame_from_dynamic`] but downscales (Triangle / fast bilinear)
+/// when the longest side exceeds `max_side`. The original dimensions are
+/// preserved on the returned [`DecodedFrame`] so the UI can still report
+/// the true resolution.
 fn frame_from_dynamic_capped(image: DynamicImage, max_side: u32) -> DecodedFrame {
     let original_w = image.width();
     let original_h = image.height();
     let longest = original_w.max(original_h);
 
     let scaled = if max_side > 0 && longest > max_side {
-        image.resize(max_side, max_side, FilterType::Lanczos3)
+        image.resize(max_side, max_side, FilterType::Triangle)
     } else {
         image
     };
