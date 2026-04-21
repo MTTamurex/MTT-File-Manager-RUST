@@ -183,6 +183,15 @@ pub fn run_standalone(path: PathBuf) -> eframe::Result<()> {
 
     let options = build_viewer_native_options(viewport);
 
+    // Remove stale eframe storage (app.ron) — eframe restores persisted
+    // window state before with_visible(false) takes effect, causing flicker.
+    if let Some(mut p) = dirs::data_dir() {
+        p.push("mtt-file-manager-text-viewer");
+        p.push("data");
+        p.push("app.ron");
+        let _ = std::fs::remove_file(&p);
+    }
+
     let dark_mode = is_saved_theme_dark();
 
     eframe::run_native(

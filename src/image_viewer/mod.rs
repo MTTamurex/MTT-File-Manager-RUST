@@ -1,17 +1,19 @@
 use eframe::egui;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::mpsc::Receiver;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{CloseHandle, GetLastError, HANDLE, ERROR_ALREADY_EXISTS};
 use windows::Win32::System::Threading::{CreateMutexW, ReleaseMutex};
 
+mod app;
+mod cache;
+mod indexer;
 mod ipc;
 mod loader;
 
-use crate::viewer_runtime::{apply_saved_locale, build_viewer_native_options};
+use crate::viewer_runtime::{apply_saved_locale, build_viewer_native_options, is_saved_theme_dark};
 
 const IMAGE_VIEWER_MUTEX_NAME: &str = "Global\\MTTFileManager_ImageViewer_SingleInstance\0";
 const MAX_IMAGE_FILE_SIZE: u64 = 512 * 1024 * 1024;
@@ -210,6 +212,16 @@ pub fn run_standalone(path: PathBuf) -> eframe::Result<()> {
 
     apply_saved_locale();
 
+    // Remove any stale eframe storage (app.ron) written by previous runs.
+    // eframe restores persisted window state (position, size, visibility)
+    // before with_visible(false) takes effect, causing startup flicker.
+    if let Some(mut p) = dirs::data_dir() {
+        p.push("mtt-file-manager-image-viewer");
+        p.push("data");
+        p.push("app.ron");
+        let _ = std::fs::remove_file(&p);
+    }
+
     let _guard = match SingleInstanceGuard::try_acquire() {
         Some(g) => g,
         None => {
@@ -229,15 +241,48 @@ pub fn run_standalone(path: PathBuf) -> eframe::Result<()> {
     };
 
     let external_open_rx = ipc::start_open_request_server();
-    let title = title_for_path(&path);
 
-    // Pre-read bytes so the texture is ready inside the eframe creator callback.
-    let initial_bytes = std::fs::read(&path).ok();
+    let title_name = path
+        .file_name()
+        .map(|v| v.to_string_lossy().to_string())
+        .unwrap_or_else(|| rust_i18n::t!("imageviewer.title").to_string());
 
-    // Mirror PDF/text viewer startup exactly: hidden viewport + app_id + reveal
-    // on the first update frame. PDF/text never flicker with this pattern.
-    let mut viewport = egui::ViewportBuilder::default()
-        .with_title(title)
+    let startup_preview = None;
+
+    let (startup_sequence_rx, initial_sequence) = {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let path_clone = path.clone();
+        let startup_sequence_rx = match std::thread::Builder::new()
+            .name("image-viewer-startup-seq".into())
+            .spawn(move || {
+                let sequence = match indexer::build_sequence(&path_clone) {
+                    Ok(sequence) => sequence,
+                    Err(err) => {
+                        log::warn!(
+                            "[IMAGE-VIEWER] failed to build startup sequence for '{}': {}",
+                            path_clone.display(),
+                            err
+                        );
+                        indexer::ImageSequence::single(path_clone)
+                    }
+                };
+                let _ = tx.send(sequence);
+            }) {
+            Ok(_) => Some(rx),
+            Err(err) => {
+                log::warn!(
+                    "[IMAGE-VIEWER] failed to spawn startup sequence builder for '{}': {}",
+                    path.display(),
+                    err
+                );
+                None
+            }
+        };
+        (startup_sequence_rx, indexer::ImageSequence::single(path.clone()))
+    };
+
+    let mut viewport = eframe::egui::ViewportBuilder::default()
+        .with_title(rust_i18n::t!("imageviewer.title_with_file", name = title_name).to_string())
         .with_inner_size([1200.0, 850.0])
         .with_visible(false)
         .with_resizable(true)
@@ -255,191 +300,21 @@ pub fn run_standalone(path: PathBuf) -> eframe::Result<()> {
     }
 
     let native_options = build_viewer_native_options(viewport);
+    let dark_mode = is_saved_theme_dark();
 
     eframe::run_native(
         &rust_i18n::t!("imageviewer.title"),
         native_options,
-        Box::new(move |cc| {
-            let mut app = SimpleImageViewerApp::new(path.clone(), external_open_rx);
-            if let Some(bytes) = initial_bytes {
-                app.upload_texture_from_bytes(&cc.egui_ctx, &bytes);
-            } else {
-                app.last_error = Some(format!("Failed to read image: {}", path.display()));
-            }
-            Ok(Box::new(app))
+        Box::new(move |_cc| {
+            Ok(Box::new(app::DedicatedImageViewerApp::new(
+                initial_sequence,
+                external_open_rx,
+                dark_mode,
+                startup_sequence_rx,
+                startup_preview,
+            )))
         }),
     )
-}
-
-struct SimpleImageViewerApp {
-    external_open_rx: Receiver<PathBuf>,
-    current_path: PathBuf,
-    texture: Option<egui::TextureHandle>,
-    texture_size: egui::Vec2,
-    zoom_factor: f32,
-    fit_to_window: bool,
-    last_error: Option<String>,
-    revealed: bool,
-}
-
-impl SimpleImageViewerApp {
-    fn new(current_path: PathBuf, external_open_rx: Receiver<PathBuf>) -> Self {
-        Self {
-            external_open_rx,
-            current_path,
-            texture: None,
-            texture_size: egui::Vec2::ZERO,
-            zoom_factor: 1.0,
-            fit_to_window: true,
-            last_error: None,
-            revealed: false,
-        }
-    }
-
-    fn upload_texture_from_bytes(&mut self, ctx: &egui::Context, bytes: &[u8]) {
-        match image::load_from_memory(bytes) {
-            Ok(decoded) => {
-                let rgba = decoded.to_rgba8();
-                let size = [rgba.width() as usize, rgba.height() as usize];
-                self.texture_size = egui::vec2(rgba.width() as f32, rgba.height() as f32);
-                let image = egui::ColorImage::from_rgba_unmultiplied(size, &rgba);
-                self.texture = Some(ctx.load_texture(
-                    "image-viewer-current",
-                    image,
-                    egui::TextureOptions::LINEAR,
-                ));
-                self.last_error = None;
-            }
-            Err(err) => {
-                self.texture = None;
-                self.texture_size = egui::Vec2::ZERO;
-                self.last_error = Some(format!("Failed to decode image: {}", err));
-            }
-        }
-    }
-
-    fn load_current_image(&mut self, ctx: &egui::Context) {
-        match std::fs::read(&self.current_path) {
-            Ok(bytes) => {
-                self.upload_texture_from_bytes(ctx, &bytes);
-                if self.texture.is_some() {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Title(title_for_path(
-                        &self.current_path,
-                    )));
-                }
-            }
-            Err(err) => {
-                self.texture = None;
-                self.texture_size = egui::Vec2::ZERO;
-                self.last_error = Some(format!("Failed to read image: {}", err));
-            }
-        }
-    }
-
-    fn handle_external_open_requests(&mut self, ctx: &egui::Context) {
-        let mut latest: Option<PathBuf> = None;
-        while let Ok(path) = self.external_open_rx.try_recv() {
-            latest = Some(path);
-        }
-
-        if let Some(path) = latest {
-            if validate_image_path(&path).is_ok() {
-                self.current_path = path;
-                self.zoom_factor = 1.0;
-                self.fit_to_window = true;
-                self.load_current_image(ctx);
-            }
-        }
-    }
-
-    fn handle_shortcuts(&mut self, ctx: &egui::Context) {
-        let zoom_in = ctx.input(|i| i.key_pressed(egui::Key::Plus) || i.key_pressed(egui::Key::Equals));
-        let zoom_out = ctx.input(|i| i.key_pressed(egui::Key::Minus));
-        let reset_zoom = ctx.input(|i| i.key_pressed(egui::Key::Num0));
-        let toggle_fit = ctx.input(|i| i.key_pressed(egui::Key::F));
-
-        if zoom_in {
-            self.fit_to_window = false;
-            self.zoom_factor = (self.zoom_factor * 1.1).clamp(0.1, 8.0);
-        }
-        if zoom_out {
-            self.fit_to_window = false;
-            self.zoom_factor = (self.zoom_factor / 1.1).clamp(0.1, 8.0);
-        }
-        if reset_zoom {
-            self.fit_to_window = true;
-            self.zoom_factor = 1.0;
-        }
-        if toggle_fit {
-            self.fit_to_window = !self.fit_to_window;
-        }
-    }
-
-    fn render_ui(&mut self, ctx: &egui::Context) {
-        egui::TopBottomPanel::top("image_viewer_top").show(ctx, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                ui.label(self.current_path.display().to_string());
-                ui.separator();
-                ui.label("+/- zoom");
-                ui.separator();
-                ui.label("0 fit");
-                ui.separator();
-                ui.label("F toggle fit");
-            });
-        });
-
-        egui::CentralPanel::default().show(ctx, |ui| {
-            if let Some(err) = &self.last_error {
-                ui.colored_label(egui::Color32::from_rgb(220, 80, 80), err);
-                return;
-            }
-
-            let Some(texture) = &self.texture else {
-                ui.label("Loading image...");
-                return;
-            };
-
-            let available = ui.available_size();
-            let mut draw_size = self.texture_size;
-            if self.fit_to_window {
-                let scale = (available.x / self.texture_size.x)
-                    .min(available.y / self.texture_size.y)
-                    .min(1.0);
-                draw_size *= scale;
-            } else {
-                draw_size *= self.zoom_factor;
-            }
-
-            egui::ScrollArea::both().show(ui, |ui| {
-                ui.image(egui::load::SizedTexture::new(texture.id(), draw_size));
-            });
-        });
-    }
-}
-
-impl eframe::App for SimpleImageViewerApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.handle_external_open_requests(ctx);
-        self.handle_shortcuts(ctx);
-        self.render_ui(ctx);
-
-        // Mirror PDF/text viewer reveal pattern: only show the window AFTER the
-        // first frame has been laid out, so the OS never sees an empty window.
-        if !self.revealed {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
-            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
-            self.revealed = true;
-        }
-    }
-}
-
-fn title_for_path(path: &Path) -> String {
-    let title_name = path
-        .file_name()
-        .map(|v| v.to_string_lossy().to_string())
-        .unwrap_or_else(|| rust_i18n::t!("imageviewer.title").to_string());
-
-    rust_i18n::t!("imageviewer.title_with_file", name = title_name).to_string()
 }
 
 pub fn decode_full_for_benchmark(path: &Path) -> std::io::Result<(u32, u32, usize)> {
