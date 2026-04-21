@@ -8,6 +8,8 @@
 - [global_search_worker.rs](file://src/workers/global_search_worker.rs)
 - [global_search.rs](file://src/app/operations/global_search.rs)
 - [global_search_overlay.rs](file://src/ui/global_search_overlay.rs)
+- [results_panel.rs](file://src/ui/global_search_overlay/results_panel.rs)
+- [actions.rs](file://src/ui/global_search_overlay/actions.rs)
 - [usn_journal.rs](file://crates/mtt-search-service/src/usn_journal.rs)
 - [index_db/mod.rs](file://crates/mtt-search-service/src/index_db/mod.rs)
 - [file_index.rs](file://crates/mtt-search-service/src/file_index.rs)
@@ -17,7 +19,18 @@
 - [mod.rs (ipc_server)](file://crates/mtt-search-service/src/ipc_server/mod.rs)
 - [handler.rs](file://crates/mtt-search-service/src/ipc_server/handler.rs)
 - [pipe_io.rs](file://crates/mtt-search-service/src/ipc_server/pipe_io.rs)
+- [shortcuts.rs](file://src/app/shortcuts.rs)
+- [input.rs](file://src/ui/app/input.rs)
+- [file_type.rs](file://src/infrastructure/windows/file_type.rs)
+- [mod.rs](file://src/text_viewer/mod.rs)
 </cite>
+
+## Update Summary
+**Changes Made**
+- Added new section documenting the preview functionality for global search overlay
+- Updated search overlay section to include spacebar shortcut for file preview
+- Enhanced file type detection documentation for intelligent preview support
+- Added configuration options for preview shortcut customization
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -31,7 +44,9 @@
 9. [Conclusion](#conclusion)
 
 ## Introduction
-This document explains the MTT File Manager’s Global Search system. It covers the hybrid indexing approach that combines the NTFS USN journal for near-real-time updates with a fallback full-tree scan for completeness, the dedicated Windows service architecture, IPC communication via named pipes, and the search result ranking and presentation. It also documents indexing strategies, performance optimizations, memory management, offline search behavior, and configuration options.
+This document explains the MTT File Manager's Global Search system. It covers the hybrid indexing approach that combines the NTFS USN journal for near-real-time updates with a fallback full-tree scan for completeness, the dedicated Windows service architecture, IPC communication via named pipes, and the search result ranking and presentation. It also documents indexing strategies, performance optimizations, memory management, offline search behavior, and configuration options.
+
+**Updated** Added comprehensive documentation for the new preview functionality that allows users to preview files directly from search results using keyboard shortcuts.
 
 ## Project Structure
 The global search spans three major areas:
@@ -45,6 +60,7 @@ subgraph "Application"
 A_UI["Global Search Overlay<br/>UI"]
 A_Worker["Global Search Worker<br/>Requests/Responses"]
 A_Client["Search Client<br/>Named Pipes"]
+A_Preview["Preview System<br/>Intelligent File Type Detection"]
 end
 subgraph "Search Service"
 S_Main["Service Entry<br/>run_indexer()"]
@@ -59,6 +75,8 @@ S_IPC --> S_Index
 S_Index --> S_DB
 S_Main --> S_Index
 S_Main --> S_IPC
+A_UI --> A_Preview
+A_Preview --> A_UI
 ```
 
 **Diagram sources**
@@ -71,6 +89,8 @@ S_Main --> S_IPC
 - [global_search.rs:22-119](file://src/infrastructure/global_search.rs#L22-L119)
 - [global_search_worker.rs:327-594](file://src/workers/global_search_worker.rs#L327-L594)
 - [global_search_overlay.rs:25-378](file://src/ui/global_search_overlay.rs#L25-L378)
+- [results_panel.rs:390-411](file://src/ui/global_search_overlay/results_panel.rs#L390-L411)
+- [actions.rs:83-120](file://src/ui/global_search_overlay/actions.rs#L83-L120)
 
 **Section sources**
 - [main.rs:112-307](file://crates/mtt-search-service/src/main.rs#L112-L307)
@@ -94,6 +114,12 @@ S_Main --> S_IPC
   - Session-local index for offline fallback when service is unavailable.
 - UI:
   - Spotlight-style overlay with debounced input, filters, and results panel.
+- **Preview System**:
+  - Spacebar shortcut for instant file preview from search results.
+  - Intelligent file type detection supporting videos, audio, PDFs, images, and text files.
+  - Configurable preview shortcut through the shortcut system.
+
+**Updated** Added comprehensive preview functionality documentation including keyboard shortcuts, file type detection, and configuration options.
 
 **Section sources**
 - [usn_journal.rs:81-138](file://crates/mtt-search-service/src/usn_journal.rs#L81-L138)
@@ -105,6 +131,9 @@ S_Main --> S_IPC
 - [global_search_worker.rs:129-594](file://src/workers/global_search_worker.rs#L129-L594)
 - [global_search.rs:22-224](file://src/infrastructure/global_search.rs#L22-L224)
 - [global_search_overlay.rs:25-378](file://src/ui/global_search_overlay.rs#L25-L378)
+- [results_panel.rs:390-411](file://src/ui/global_search_overlay/results_panel.rs#L390-L411)
+- [actions.rs:83-120](file://src/ui/global_search_overlay/actions.rs#L83-L120)
+- [shortcuts.rs:422](file://src/app/shortcuts.rs#L422)
 
 ## Architecture Overview
 The system consists of:
@@ -112,6 +141,7 @@ The system consists of:
 - A protocol crate defining IPC messages and limits.
 - An application worker that sends requests and receives responses.
 - A UI overlay that renders results and manages filters.
+- A preview system that provides instant file previews via keyboard shortcuts.
 
 ```mermaid
 sequenceDiagram
@@ -121,6 +151,7 @@ participant Client as "Search Client"
 participant IPC as "IPC Server"
 participant Index as "Volume Indexers"
 participant DB as "Index Persistence"
+participant Preview as "Preview System"
 UI->>Worker : "Open overlay"
 Worker->>Client : "Enable status tracking"
 Worker->>Client : "CheckStatus"
@@ -136,6 +167,9 @@ Index->>DB : "Load cache (optional)"
 IPC-->>Client : "Results"
 Client-->>Worker : "Results"
 Worker-->>UI : "Render results"
+UI->>Preview : "Spacebar shortcut"
+Preview->>UI : "Detect file type"
+Preview->>UI : "Open appropriate viewer"
 ```
 
 **Diagram sources**
@@ -146,6 +180,8 @@ Worker-->>UI : "Render results"
 - [usn.rs:39-714](file://crates/mtt-search-service/src/volume_indexers/usn.rs#L39-L714)
 - [non_usn.rs:35-361](file://crates/mtt-search-service/src/volume_indexers/non_usn.rs#L35-L361)
 - [index_db/mod.rs:282-385](file://crates/mtt-search-service/src/index_db/mod.rs#L282-L385)
+- [results_panel.rs:390-411](file://src/ui/global_search_overlay/results_panel.rs#L390-L411)
+- [actions.rs:83-120](file://src/ui/global_search_overlay/actions.rs#L83-L120)
 
 ## Detailed Component Analysis
 
@@ -199,7 +235,7 @@ PersistSnap --> Loop
 - Service entry initializes shared state, opens persistent database, spawns volume indexers, and starts the IPC server.
 - IPC server enforces rate limiting, timeouts, and validates payloads.
 - Handler routes requests to search, status, warming, path checks, and folder size computation.
-- Pipe creation enforces DACL allowing “Authenticated Users” and LocalSystem.
+- Pipe creation enforces DACL allowing "Authenticated Users" and LocalSystem.
 
 ```mermaid
 sequenceDiagram
@@ -267,8 +303,14 @@ Done --> |No| ReturnExact["Return with total_matches"]
   - Minimum query length threshold before delegating to service.
   - Short queries fall back to a local session index.
 - Result presentation:
-  - Results panel with pagination and “has more” handling.
+  - Results panel with pagination and "has more" handling.
   - Metadata and tooltip caches to improve responsiveness.
+- **Preview Functionality**:
+  - Spacebar shortcut triggers file preview for the currently selected result.
+  - Intelligent file type detection supports videos, audio, PDFs, images, and text files.
+  - Preview opens in appropriate internal viewers or falls back to default programs.
+
+**Updated** Added comprehensive documentation for the new preview functionality including keyboard shortcuts, file type detection, and configuration options.
 
 ```mermaid
 flowchart TD
@@ -282,17 +324,50 @@ Service --> Render["Render Results"]
 Local --> Render
 Render --> Filters["Apply Filters"]
 Filters --> Scroll["Virtualized Scroll"]
+Render --> Preview["Spacebar Preview"]
+Preview --> Detect["Detect File Type"]
+Detect --> Viewer["Open Appropriate Viewer"]
 ```
 
 **Diagram sources**
 - [global_search_overlay.rs:110-140](file://src/ui/global_search_overlay.rs#L110-L140)
 - [global_search_worker.rs:428-594](file://src/workers/global_search_worker.rs#L428-L594)
 - [global_search.rs:6-82](file://src/app/operations/global_search.rs#L6-L82)
+- [results_panel.rs:390-411](file://src/ui/global_search_overlay/results_panel.rs#L390-L411)
+- [actions.rs:83-120](file://src/ui/global_search_overlay/actions.rs#L83-L120)
 
 **Section sources**
 - [global_search_overlay.rs:1-623](file://src/ui/global_search_overlay.rs#L1-L623)
 - [global_search_worker.rs:1-594](file://src/workers/global_search_worker.rs#L1-L594)
 - [global_search.rs:1-82](file://src/app/operations/global_search.rs#L1-L82)
+- [results_panel.rs:390-411](file://src/ui/global_search_overlay/results_panel.rs#L390-L411)
+- [actions.rs:83-120](file://src/ui/global_search_overlay/actions.rs#L83-L120)
+
+### Preview System and File Type Detection
+- **Keyboard Shortcut**:
+  - Spacebar (default) triggers preview of the currently selected search result.
+  - Configurable through the shortcut system with customizable modifier keys.
+- **Intelligent File Type Detection**:
+  - Videos: MP4, MKV, AVI, WMV, MOV, FLV, OGV, M4V, and others detected via Windows Perceived Type API.
+  - Audio: MP3, WAV, OGG, WMA, AAC, M4A, FLAC, ALAC, and others.
+  - Images: JPG, PNG, GIF, BMP, SVG, ICO, WEBP, TIFF, and others including special handling for SVG.
+  - PDFs: Direct PDF viewer integration.
+  - Text files: Programming languages, documentation, and plain text files.
+- **Viewer Integration**:
+  - Video/Audio: Opens in standalone video player with configurable volume settings.
+  - PDFs: Dedicated PDF viewer component.
+  - Images: Built-in image viewer with navigation support.
+  - Text: Text editor/viewer for code and documentation files.
+  - Unknown types: Falls back to system default program association.
+
+**New Section** Added comprehensive documentation for the preview system functionality.
+
+**Section sources**
+- [results_panel.rs:390-411](file://src/ui/global_search_overlay/results_panel.rs#L390-L411)
+- [actions.rs:83-120](file://src/ui/global_search_overlay/actions.rs#L83-L120)
+- [shortcuts.rs:422](file://src/app/shortcuts.rs#L422)
+- [file_type.rs:286-303](file://src/infrastructure/windows/file_type.rs#L286-L303)
+- [mod.rs:44](file://src/text_viewer/mod.rs#L44)
 
 ### Integration Between App and Search Service
 - Worker thread:
@@ -344,6 +419,12 @@ Worker-->>App : "Render"
 - Application:
   - Depends on protocol crate for IPC.
   - Uses worker and client to communicate with the service.
+- **Preview System**:
+  - Integrates with file type detection utilities.
+  - Uses shortcut system for keyboard input handling.
+  - Connects to various viewer components for file display.
+
+**Updated** Added dependency analysis for the new preview system components.
 
 ```mermaid
 graph LR
@@ -355,6 +436,10 @@ Service --> DB["Index DB"]
 Service --> IPC["IPC Server"]
 App --> Client["Search Client"]
 Client --> IPC
+App --> Preview["Preview System"]
+Preview --> FileTypes["File Type Detection"]
+Preview --> Viewers["Viewer Components"]
+Preview --> Shortcuts["Shortcut System"]
 ```
 
 **Diagram sources**
@@ -363,6 +448,8 @@ Client --> IPC
 - [mod.rs (ipc_server):1-275](file://crates/mtt-search-service/src/ipc_server/mod.rs#L1-L275)
 - [handler.rs:1-619](file://crates/mtt-search-service/src/ipc_server/handler.rs#L1-L619)
 - [global_search.rs:1-290](file://src/infrastructure/global_search.rs#L1-L290)
+- [file_type.rs:1-445](file://src/infrastructure/windows/file_type.rs#L1-L445)
+- [shortcuts.rs:1-737](file://src/app/shortcuts.rs#L1-L737)
 
 **Section sources**
 - [lib.rs:1-290](file://crates/mtt-search-protocol/src/lib.rs#L1-L290)
@@ -370,6 +457,8 @@ Client --> IPC
 - [mod.rs (ipc_server):1-275](file://crates/mtt-search-service/src/ipc_server/mod.rs#L1-L275)
 - [handler.rs:1-619](file://crates/mtt-search-service/src/ipc_server/handler.rs#L1-L619)
 - [global_search.rs:1-290](file://src/infrastructure/global_search.rs#L1-L290)
+- [file_type.rs:1-445](file://src/infrastructure/windows/file_type.rs#L1-L445)
+- [shortcuts.rs:1-737](file://src/app/shortcuts.rs#L1-L737)
 
 ## Performance Considerations
 - SIMD-accelerated search:
@@ -385,21 +474,32 @@ Client --> IPC
   - Payload limits, timeouts, and rate limiting to prevent DoS and resource exhaustion.
 - Offline fallback:
   - Local session index reduces latency when the service is unavailable.
+- **Preview Optimization**:
+  - File type detection uses caching to avoid repeated Windows API calls.
+  - Preview system minimizes UI thread blocking through asynchronous operations.
+
+**Updated** Added performance considerations for the new preview functionality.
 
 [No sources needed since this section provides general guidance]
 
 ## Troubleshooting Guide
 Common issues and remedies:
 - Service not available:
-  - The client detects “busy” or “no process” conditions and retries; ping attempts are logged.
+  - The client detects "busy" or "no process" conditions and retries; ping attempts are logged.
 - Transient pipe errors:
-  - Errors like “pipe closed during read” or “peeknamedpipe failed” are treated as transient and retried.
+  - Errors like "pipe closed during read" or "peeknamedpipe failed" are treated as transient and retried.
 - USN journal errors:
   - Journal entry deleted or EOF handled by falling back to full scan.
 - Authorization failures:
   - CheckPathsModified requires impersonation; failures return authorization errors.
 - Slowloris protection:
   - IPC watchdog disconnects slow clients to protect server capacity.
+- **Preview Issues**:
+  - Spacebar shortcut conflicts with other applications or system shortcuts.
+  - File type detection may fail for unusual extensions - falls back to default program.
+  - Preview window positioning issues on multi-monitor setups.
+
+**Updated** Added troubleshooting guidance for the new preview functionality.
 
 **Section sources**
 - [global_search.rs:81-130](file://src/infrastructure/global_search.rs#L81-L130)
@@ -407,6 +507,10 @@ Common issues and remedies:
 - [usn_journal.rs:29-31](file://crates/mtt-search-service/src/usn_journal.rs#L29-L31)
 - [handler.rs:273-338](file://crates/mtt-search-service/src/ipc_server/handler.rs#L273-L338)
 - [mod.rs (ipc_server):132-195](file://crates/mtt-search-service/src/ipc_server/mod.rs#L132-L195)
+- [results_panel.rs:390-411](file://src/ui/global_search_overlay/results_panel.rs#L390-L411)
+- [actions.rs:83-120](file://src/ui/global_search_overlay/actions.rs#L83-L120)
 
 ## Conclusion
-MTT File Manager’s Global Search integrates a robust hybrid indexing engine with a dedicated Windows service, secure IPC, and a responsive UI. The USN journal enables near real-time updates for NTFS/ReFS, while fallback scans ensure completeness on other filesystems. The service emphasizes safety with strict IPC validation, impersonation-aware access checks, and controlled resource usage. The application layer provides a smooth user experience with offline fallback and efficient result rendering.
+MTT File Manager's Global Search integrates a robust hybrid indexing engine with a dedicated Windows service, secure IPC, and a responsive UI. The USN journal enables near real-time updates for NTFS/ReFS, while fallback scans ensure completeness on other filesystems. The service emphasizes safety with strict IPC validation, impersonation-aware access checks, and controlled resource usage. The application layer provides a smooth user experience with offline fallback and efficient result rendering.
+
+**Updated** Enhanced conclusion to include the new preview functionality, highlighting the seamless integration of instant file previews with the existing search capabilities. The preview system leverages intelligent file type detection and integrates with the shortcut system for customizable keyboard shortcuts, providing users with an efficient way to preview files directly from search results without leaving the global search overlay.
