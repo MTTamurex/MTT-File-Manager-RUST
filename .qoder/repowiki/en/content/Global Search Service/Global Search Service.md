@@ -78,7 +78,7 @@ WORKER --> UI
 - UI: opens/closes the global search overlay and configures paging.
 
 Key responsibilities:
-- Hybrid indexing: USN journal for NTFS/ReFs; fallback scanning for other file systems.
+- Hybrid indexing: USN journal for NTFS/ReFS; fallback scanning for other file systems.
 - SQLite index: stores file metadata and supports FTS5-based search.
 - IPC: robust named pipe transport with length-prefixed bincode messages and strict validation.
 - Search: paginated results with optional total count computation and local fallback.
@@ -315,7 +315,7 @@ Common symptoms and remedies:
 - [global_search.rs:226-472](file://src/infrastructure/global_search.rs#L226-L472)
 
 ## Conclusion
-The Global Search Service delivers scalable, near-instant search across heterogeneous file systems by combining USN journal-based indexing on NTFS/ReFs with fallback scanning elsewhere, persisting metadata in SQLite, and exposing a robust IPC protocol over named pipes with bincode serialization. The main application integrates seamlessly via a worker that merges service results with a local session index, implements retries, and provides responsive pagination and status tracking.
+The Global Search Service delivers scalable, near-instant search across heterogeneous file systems by combining USN journal-based indexing on NTFS/ReFS with fallback scanning elsewhere, persisting metadata in SQLite, and exposing a robust IPC protocol over named pipes with bincode serialization. The main application integrates seamlessly via a worker that merges service results with a local session index, implements retries, and provides responsive pagination and status tracking.
 
 [No sources needed since this section summarizes without analyzing specific files]
 
