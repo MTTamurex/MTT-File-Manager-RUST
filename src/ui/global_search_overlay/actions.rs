@@ -7,6 +7,8 @@ pub(super) enum ResultAction {
     OpenFile(String, bool),
     /// Navigate to the parent folder and select the item.
     OpenFolder(String, bool),
+    /// Open the file with the internal viewer (text, PDF, image, video/audio).
+    PreviewFile(String),
 }
 
 #[inline]
@@ -74,6 +76,45 @@ pub(super) fn open_file_with_default(app: &mut ImageViewerApp, full_path: &str, 
         app.navigate_to(full_path);
     } else {
         let path = std::path::PathBuf::from(full_path);
+        app.open_with_shell_guarded(&path);
+    }
+}
+
+pub(super) fn preview_search_result(app: &mut ImageViewerApp, full_path: &str) {
+    use crate::ui::components::media_preview::MediaPreview;
+
+    app.close_global_search();
+
+    let path = std::path::PathBuf::from(full_path);
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_owned();
+
+    let is_video = crate::infrastructure::windows::is_video_extension(&ext);
+    let is_audio = crate::infrastructure::windows::is_audio_extension(&ext);
+    let is_pdf = ext.eq_ignore_ascii_case("pdf");
+    let is_image = crate::infrastructure::windows::is_image_extension(&ext);
+    let is_text = crate::text_viewer::is_text_extension(&ext);
+
+    if is_video || is_audio {
+        // Open in standalone window (same as secondary toolbar play button)
+        app.kill_video_player_process();
+        if matches!(app.media_preview.as_ref(), Some(MediaPreview::Video(_))) {
+            app.destroy_media_preview();
+        }
+        if let Some(child) = crate::video_player::open_video_player(path, 0.0, app.session_volume) {
+            app.video_player_process = Some(child);
+        }
+    } else if is_pdf {
+        crate::pdf_viewer::open_pdf_viewer(path);
+    } else if is_image {
+        crate::image_viewer::open_image_viewer(path);
+    } else if is_text {
+        crate::text_viewer::open_text_viewer(path);
+    } else {
+        // Fallback to default program if no internal viewer supports this type
         app.open_with_shell_guarded(&path);
     }
 }

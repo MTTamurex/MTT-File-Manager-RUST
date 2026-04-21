@@ -10,12 +10,19 @@
 - [src/main.rs](file://src/main.rs)
 - [src/infrastructure/windows/window_subclass.rs](file://src/infrastructure/windows/window_subclass.rs)
 - [src/ui/tab_bar/mod.rs](file://src/ui/tab_bar/mod.rs)
-- [src/ui/tab_bar/window_controls.rs](file://src/ui/tab_bar/window_controls.rs)
 - [installer/setup.iss](file://installer/setup.iss)
-- [installer/build_installer.ps1](file://installer/build_installer.ps1)
 - [app.manifest](file://app.manifest)
 - [Cargo.toml](file://Cargo.toml)
 </cite>
+
+## Update Summary
+**Changes Made**
+- Updated project overview to reflect the comprehensive documentation in docs/01_overview.md
+- Enhanced feature descriptions with detailed capabilities from the new overview document
+- Expanded technology stack analysis with new dependency information
+- Updated system requirements and installation options
+- Improved architecture visualization with new layer breakdown
+- Added comprehensive feature comparison matrix
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -30,7 +37,7 @@
 10. [Appendices](#appendices)
 
 ## Introduction
-MTT File Manager is a native Windows file manager built in Rust with a modern UI, advanced media preview, and deep Windows integration. It delivers fast tabbed navigation, rich media preview, and Spotlight-style global search powered by a dedicated background indexing service. The application targets users who want a performant, reliable, and visually modern file manager that feels at home on Windows while leveraging native APIs and modern rendering.
+MTT File Manager is a native Windows file manager built in Rust with a modern borderless UI, tabbed navigation, integrated media preview, and deep Windows integration. It delivers fast tabbed navigation, rich media preview, and Spotlight-style global search powered by a dedicated background indexing service. The application targets users who want a performant, reliable, and visually modern file manager that feels at home on Windows while leveraging native APIs and modern rendering.
 
 Key value propositions:
 - Native Windows integration with deep Shell and COM usage
@@ -39,6 +46,10 @@ Key value propositions:
 - Integrated media preview with dedicated viewers for images, PDFs, text, and video
 - High-performance rendering via WGPU with DPI-awareness and GPU selection
 - Robust caching, async workers, and adaptive batching for responsiveness
+
+**Section sources**
+- [docs/01_overview.md:3-9](file://docs/01_overview.md#L3-L9)
+- [README.md:7-8](file://README.md#L7-L8)
 
 ## Project Structure
 The project is a Cargo workspace with a main GUI crate, a shared IPC protocol crate, and a Windows service crate. The GUI uses eframe/egui for rendering and integrates with Windows APIs for file operations, metadata, and media.
@@ -94,7 +105,6 @@ C --> B
 - DPI-aware rendering and GPU backend selection for performance
 
 **Section sources**
-- [README.md:9-50](file://README.md#L9-L50)
 - [docs/01_overview.md:11-60](file://docs/01_overview.md#L11-L60)
 - [src/main.rs:230-277](file://src/main.rs#L230-L277)
 - [src/infrastructure/windows/window_subclass.rs:217-268](file://src/infrastructure/windows/window_subclass.rs#L217-L268)
@@ -223,7 +233,6 @@ App-->>UI : Display results
 - OneDrive status detection and ISO mounting are supported for cloud and virtual drive scenarios.
 
 **Section sources**
-- [README.md:37-43](file://README.md#L37-L43)
 - [docs/01_overview.md:36-44](file://docs/01_overview.md#L36-L44)
 
 ## Dependency Analysis
@@ -247,7 +256,7 @@ Runtime dependencies:
 
 **Section sources**
 - [docs/05_dependencies_stack.md:1-219](file://docs/05_dependencies_stack.md#L1-L219)
-- [README.md:51-67](file://README.md#L51-L67)
+- [docs/01_overview.md:123-127](file://docs/01_overview.md#L123-L127)
 - [README.md:68-72](file://README.md#L68-L72)
 - [Cargo.toml:67-109](file://Cargo.toml#L67-L109)
 
@@ -274,13 +283,12 @@ Common issues and resolutions:
 - Service installation: The installer installs and starts the search service automatically; verify service status if search is unavailable.
 
 **Section sources**
-- [README.md:68-72](file://README.md#L68-L72)
+- [docs/01_overview.md:129-133](file://docs/01_overview.md#L129-L133)
 - [README.md:238-262](file://README.md#L238-L262)
 - [installer/setup.iss:91-116](file://installer/setup.iss#L91-L116)
-- [installer/build_installer.ps1:114-134](file://installer/build_installer.ps1#L114-L134)
 
 ## Conclusion
-MTT File Manager combines Rust’s performance and safety with a modern Windows-native UI and deep integration with Windows APIs. Its hybrid global search, integrated media preview, and robust performance optimizations deliver a fast, reliable, and visually pleasing file management experience on Windows.
+MTT File Manager combines Rust's performance and safety with a modern Windows-native UI and deep integration with Windows APIs. Its hybrid global search, integrated media preview, and robust performance optimizations deliver a fast, reliable, and visually pleasing file management experience on Windows.
 
 ## Appendices
 
@@ -290,11 +298,11 @@ MTT File Manager combines Rust’s performance and safety with a modern Windows-
 - Professionals managing large collections of media and documents
 
 ### System Requirements
-- Minimum: Windows 10 (Build 1903+) or Windows 11, x64, 2+ cores, 4 GB RAM, 100 MB disk space + cache, GPU/driver capable of initializing the main window’s WGPU backend
+- Minimum: Windows 10 (Build 1903+) or Windows 11, x64, 2+ cores, 4 GB RAM, 100 MB disk space + cache, GPU/driver capable of initializing the main window's WGPU backend
 - Recommended: Windows 11 latest update, x64, 4+ cores, 8 GB+ RAM, SSD, dedicated GPU for video preview
 
 **Section sources**
-- [docs/01_overview.md:135-150](file://docs/01_overview.md#L135-L150)
+- [docs/01_overview.md:135-149](file://docs/01_overview.md#L135-L149)
 
 ### Installation Options and Supported Versions
 - Build from source: cargo build --release --workspace
@@ -311,5 +319,52 @@ MTT File Manager combines Rust’s performance and safety with a modern Windows-
 - MTT File Manager: Modern borderless UI, integrated media preview, hybrid global search, DPI-aware rendering, GPU acceleration, robust caching, and Windows-native operations
 
 **Section sources**
-- [README.md:9-50](file://README.md#L9-L50)
 - [docs/01_overview.md:11-60](file://docs/01_overview.md#L11-L60)
+- [docs/01_overview.md:45-51](file://docs/01_overview.md#L45-L51)
+
+### Comprehensive Feature Matrix
+
+#### Interface & Navigation
+- **Custom borderless window** — Modern frameless UI with native resize support
+- **Dark / Light theme** — Toggle between dark and light mode in Settings > Appearance; persisted in SQLite, applied to all windows
+- **Tabbed navigation** — Multiple tabs with independent history
+- **Grid and List views** — Adjustable thumbnail sizes (64–512px)
+- **Smart address bar** — Direct path input with breadcrumbs
+- **Sidebar** — Quick access to drives, libraries, OneDrive, and Recycle Bin
+- **Quick Access** — Pin folders via right-click or drag-and-drop; reorder via drag; persistent storage
+
+#### Media Preview
+- **Integrated preview** — View files without leaving the app
+- **Dedicated image viewer** — Separate process with a bounded sliding-window GPU texture cache, hidden-first startup, and multi-threaded decoding
+- **Text viewer** — Separate process for plain text, code, logs, and markup files using the same lightweight viewer runtime
+- **Video player** — Standalone mpv-based player with D3D11 GPU pipeline
+- **Audio playback & metadata** — Audio-only files open in the standalone mpv player with real-time waveform visualization
+- **PDF viewer** — Native pdfium-based viewer with bounded texture caching and asynchronous rendering
+- **Smart thumbnails** — Multi-stage generation: image crate → WIC → Shell API → Media Foundation
+- **Animated GIF playback** — Optimized rendering with play/pause controls
+
+#### Global Search
+- **Instant search** — Query an in-memory index supporting millions of files
+- **Hybrid volume indexing** — NTFS/ReFS via USN Journal; non-USN volumes via full-tree scan
+- **Background service** — Dedicated Windows Service for continuous indexing
+- **Spotlight-style overlay** — Activated by Ctrl+Shift+F
+- **Paginated results** — Offset/limit pagination with incremental loading
+
+#### File Operations
+- **Core operations** — Copy, cut, paste, rename, delete
+- **Native context menu** — Full Windows Shell context menu integration
+- **Recycle Bin** — Browse, restore, and permanently delete
+- **OneDrive support** — Sync status detection
+- **ISO mounting** — Mount ISO files as virtual drives
+
+#### Performance & Cache
+- **Multi-level cache** — Memory, disk (SQLite), and GPU textures
+- **Async workers** — Background processing keeps UI responsive
+- **Smart prefetch** — Predictive preloading of folders and files
+- **UI virtualization** — Efficient rendering of large directories
+- **Per-folder monitoring** — Default notify crate watcher with opt-in drive-wide ReadDirectoryChangesW
+
+**Section sources**
+- [docs/01_overview.md:11-60](file://docs/01_overview.md#L11-L60)
+- [docs/01_overview.md:25-44](file://docs/01_overview.md#L25-L44)
+- [docs/01_overview.md:45-60](file://docs/01_overview.md#L45-L60)

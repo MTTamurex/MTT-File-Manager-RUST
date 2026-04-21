@@ -1,3 +1,4 @@
+use crate::app::shortcuts::ShortcutAction;
 use crate::app::state::ImageViewerApp;
 use eframe::egui;
 use rust_i18n::t;
@@ -386,6 +387,29 @@ pub(super) fn render_results_panel(
         }
     }
 
+    // Preview shortcut (Space by default) opens the file with the internal viewer.
+    if activate_result.is_none()
+        && app.shortcuts.is_triggered(ShortcutAction::PreviewSelected, ctx)
+        && !filtered_indices.is_empty()
+    {
+        let selected_idx = app
+            .global_search
+            .selected_index
+            .filter(|idx| actions::filtered_contains(&filtered_indices, *idx))
+            .unwrap_or(filtered_indices[0]);
+        app.global_search.selected_index = Some(selected_idx);
+
+        if let Some(full_path) = app
+            .global_search
+            .results
+            .get(selected_idx)
+            .filter(|r| !r.is_dir)
+            .map(|r| r.full_path.clone())
+        {
+            activate_result = Some(ResultAction::PreviewFile(full_path));
+        }
+    }
+
     // Enter opens selected result (or the first visible one when none is selected).
     if activate_result.is_none()
         && ctx.input(|i| i.key_pressed(egui::Key::Enter))
@@ -418,6 +442,9 @@ pub(super) fn render_results_panel(
             }
             ResultAction::OpenFolder(full_path, is_dir) => {
                 actions::activate_search_result(app, &full_path, is_dir);
+            }
+            ResultAction::PreviewFile(full_path) => {
+                actions::preview_search_result(app, &full_path);
             }
         }
     }
