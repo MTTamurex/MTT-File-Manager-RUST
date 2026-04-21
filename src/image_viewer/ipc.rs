@@ -96,6 +96,11 @@ pub fn start_open_request_server() -> Receiver<PathBuf> {
     std::thread::Builder::new()
         .name("image-viewer-ipc".into())
         .spawn(move || {
+            log::info!(
+                "[IMAGE-VIEWER] IPC server thread starting pid={} pipe='{}'",
+                std::process::id(),
+                IMAGE_VIEWER_PIPE_NAME
+            );
             let pipe = match create_pipe() {
                 Ok(p) => p,
                 Err(err) => {
@@ -113,6 +118,11 @@ pub fn start_open_request_server() -> Receiver<PathBuf> {
                 if connected {
                     match read_message(pipe) {
                         Ok(path) => {
+                            log::info!(
+                                "[IMAGE-VIEWER] IPC open request received pid={} path='{}'",
+                                std::process::id(),
+                                path.display()
+                            );
                             if tx.send(path).is_err() {
                                 let _ = unsafe { DisconnectNamedPipe(pipe) };
                                 let _ = unsafe { CloseHandle(pipe) };

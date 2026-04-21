@@ -59,13 +59,19 @@ impl super::DedicatedImageViewerApp {
         });
     }
 
-    pub(super) fn sync_window_title(&self, ctx: &egui::Context) {
+    pub(super) fn sync_window_title(&mut self, ctx: &egui::Context) {
         let title = if self.sequence.entries.is_empty() {
             t!("imageviewer.title").to_string()
         } else {
             let current_filename = self.current_filename();
             t!("imageviewer.title_with_file", name = current_filename.as_ref()).to_string()
         };
+
+        if self.current_window_title == title {
+            return;
+        }
+
+        self.current_window_title = title.clone();
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
     }
 

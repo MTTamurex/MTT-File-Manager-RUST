@@ -1,30 +1,27 @@
+use eframe::egui;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-#[cfg(target_os = "windows")]
-use std::os::windows::process::CommandExt;
+use std::sync::mpsc::Receiver;
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{CloseHandle, GetLastError, HANDLE, ERROR_ALREADY_EXISTS};
 use windows::Win32::System::Threading::{CreateMutexW, ReleaseMutex};
 
-mod app;
-mod cache;
 mod ipc;
-mod indexer;
 mod loader;
 
-use crate::viewer_runtime::{apply_saved_locale, build_viewer_native_options, is_saved_theme_dark};
+use crate::viewer_runtime::{apply_saved_locale, build_viewer_native_options};
 
-/// Named mutex used to guarantee only one image viewer instance runs at a time.
 const IMAGE_VIEWER_MUTEX_NAME: &str = "Global\\MTTFileManager_ImageViewer_SingleInstance\0";
+const MAX_IMAGE_FILE_SIZE: u64 = 512 * 1024 * 1024;
+const OPEN_REQUEST_DEBOUNCE: Duration = Duration::from_millis(700);
 
-/// RAII guard that holds the named mutex for the viewer's lifetime.
 struct SingleInstanceGuard {
     handle: HANDLE,
 }
 
 impl SingleInstanceGuard {
-    /// Returns `Some(guard)` if this is the first viewer instance.
-    /// Returns `None` if another viewer instance already owns the mutex.
     fn try_acquire() -> Option<Self> {
         let wide: Vec<u16> = IMAGE_VIEWER_MUTEX_NAME.encode_utf16().collect();
         unsafe {
@@ -48,20 +45,40 @@ impl Drop for SingleInstanceGuard {
     }
 }
 
-/// Maximum file size for the image viewer (512 MB).
-const MAX_IMAGE_FILE_SIZE: u64 = 512 * 1024 * 1024;
+fn recent_open_request_state() -> &'static Mutex<Option<(PathBuf, Instant)>> {
+    static RECENT_OPEN_REQUEST: OnceLock<Mutex<Option<(PathBuf, Instant)>>> = OnceLock::new();
+    RECENT_OPEN_REQUEST.get_or_init(|| Mutex::new(None))
+}
 
-/// SEC: Validate the image path before opening. Blocks null bytes, path traversal,
-/// UNC/network paths, non-image extensions, and oversized files.
+fn paths_eq_case_insensitive(a: &Path, b: &Path) -> bool {
+    a.to_string_lossy().eq_ignore_ascii_case(&b.to_string_lossy())
+}
+
+fn should_suppress_duplicate_open(path: &Path) -> bool {
+    let Ok(mut state) = recent_open_request_state().lock() else {
+        return false;
+    };
+
+    let now = Instant::now();
+    let suppress = state
+        .as_ref()
+        .map(|(last_path, last_at)| {
+            now.duration_since(*last_at) <= OPEN_REQUEST_DEBOUNCE
+                && paths_eq_case_insensitive(last_path, path)
+        })
+        .unwrap_or(false);
+
+    *state = Some((path.to_path_buf(), now));
+    suppress
+}
+
 fn validate_image_path(path: &Path) -> Result<(), String> {
     let path_str = path.to_string_lossy();
 
-    // 1. Null bytes
     if path_str.contains('\0') {
         return Err("Path contains null bytes".into());
     }
 
-    // 2. Path traversal
     for component in path.components() {
         if matches!(
             component,
@@ -74,23 +91,22 @@ fn validate_image_path(path: &Path) -> Result<(), String> {
         }
     }
 
-    // 3. Block UNC / network paths
-    if path_str.starts_with("\\\\") || path_str.starts_with("//") || path_str.starts_with("\\\\?\\UNC\\") {
+    if path_str.starts_with("\\\\")
+        || path_str.starts_with("//")
+        || path_str.starts_with("\\\\?\\UNC\\")
+    {
         return Err("Network/UNC paths are not allowed".into());
     }
 
-    // 4. Extension whitelist
     let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
     if !crate::infrastructure::windows::is_image_extension(ext) {
         return Err(format!("Unsupported image extension: '{}'", ext));
     }
 
-    // 5. File existence
     if !path.is_file() {
         return Err(format!("File not found: '{}'", path.display()));
     }
 
-    // 6. File size
     if let Ok(meta) = std::fs::metadata(path) {
         if meta.len() > MAX_IMAGE_FILE_SIZE {
             return Err(format!(
@@ -105,26 +121,42 @@ fn validate_image_path(path: &Path) -> Result<(), String> {
 }
 
 pub fn open_image_viewer(path: PathBuf) {
-    // Spawn a thread so blocking I/O (validation, IPC retry) does not stall the UI.
-    if let Err(err) = std::thread::Builder::new()
-        .name("open-image-viewer".into())
-        .spawn(move || {
-            open_image_viewer_blocking(&path);
-        })
-    {
-        log::error!("[IMAGE-VIEWER] failed to spawn open-image-viewer thread: {}", err);
+    log::info!(
+        "[IMAGE-VIEWER] open_image_viewer requested pid={} path='{}'",
+        std::process::id(),
+        path.display()
+    );
+
+    if should_suppress_duplicate_open(&path) {
+        log::debug!(
+            "[IMAGE-VIEWER] suppressing duplicate open request for '{}'",
+            path.display()
+        );
+        return;
     }
+
+    open_image_viewer_blocking(&path);
 }
 
 fn open_image_viewer_blocking(path: &Path) {
-    // SEC: Validate path before spawning child process.
     if let Err(e) = validate_image_path(path) {
-        log::error!("[IMAGE-VIEWER] path validation failed for '{}': {}", path.display(), e);
+        log::error!(
+            "[IMAGE-VIEWER] path validation failed for '{}': {}",
+            path.display(),
+            e
+        );
         return;
     }
 
     match ipc::send_open_request(path) {
-        Ok(true) => return,
+        Ok(true) => {
+            log::info!(
+                "[IMAGE-VIEWER] existing instance accepted open request pid={} path='{}'",
+                std::process::id(),
+                path.display()
+            );
+            return;
+        }
         Ok(false) => {}
         Err(err) => {
             log::warn!(
@@ -145,26 +177,32 @@ fn open_image_viewer_blocking(path: &Path) {
         }
     };
 
-    // CREATE_NO_WINDOW prevents a transient console-window flash on Windows
-    // (especially in debug builds where windows_subsystem is not set).
-    const CREATE_NO_WINDOW: u32 = 0x08000000;
-    let spawn_result = Command::new(exe)
-        .arg("--image-viewer")
-        .arg(path)
-        .creation_flags(CREATE_NO_WINDOW)
-        .spawn();
-
-    if let Err(err) = spawn_result {
-        log::error!(
-            "[IMAGE-VIEWER] failed to spawn standalone viewer for '{}': {}",
-            path.display(),
-            err
-        );
+    match Command::new(exe).arg("--image-viewer").arg(path).spawn() {
+        Ok(child) => {
+            log::info!(
+                "[IMAGE-VIEWER] spawned standalone viewer parent_pid={} child_pid={} path='{}'",
+                std::process::id(),
+                child.id(),
+                path.display()
+            );
+        }
+        Err(err) => {
+            log::error!(
+                "[IMAGE-VIEWER] failed to spawn standalone viewer for '{}': {}",
+                path.display(),
+                err
+            );
+        }
     }
 }
 
 pub fn run_standalone(path: PathBuf) -> eframe::Result<()> {
-    // SEC: Validate again in child process (defense in depth).
+    log::info!(
+        "[IMAGE-VIEWER] run_standalone enter pid={} path='{}'",
+        std::process::id(),
+        path.display()
+    );
+
     if let Err(e) = validate_image_path(&path) {
         log::error!("[IMAGE-VIEWER] path validation failed in standalone: {}", e);
         return Ok(());
@@ -177,20 +215,13 @@ pub fn run_standalone(path: PathBuf) -> eframe::Result<()> {
         None => {
             match ipc::send_open_request(&path) {
                 Ok(true) => {
-                    log::info!(
-                        "[IMAGE-VIEWER] forwarded image to the existing viewer instance"
-                    );
+                    log::info!("[IMAGE-VIEWER] forwarded image to existing viewer instance");
                 }
                 Ok(false) => {
-                    log::warn!(
-                        "[IMAGE-VIEWER] another instance exists, but its IPC server was unavailable"
-                    );
+                    log::warn!("[IMAGE-VIEWER] existing instance unavailable for IPC forward");
                 }
                 Err(err) => {
-                    log::warn!(
-                        "[IMAGE-VIEWER] failed to forward image to the existing viewer: {}",
-                        err
-                    );
+                    log::warn!("[IMAGE-VIEWER] failed to forward image to existing viewer: {}", err);
                 }
             }
             return Ok(());
@@ -198,55 +229,15 @@ pub fn run_standalone(path: PathBuf) -> eframe::Result<()> {
     };
 
     let external_open_rx = ipc::start_open_request_server();
+    let title = title_for_path(&path);
 
-    let title_name = path
-        .file_name()
-        .map(|v| v.to_string_lossy().to_string())
-        .unwrap_or_else(|| rust_i18n::t!("imageviewer.title").to_string());
+    // Pre-read bytes so the texture is ready inside the eframe creator callback.
+    let initial_bytes = std::fs::read(&path).ok();
 
-    // Do not start the viewer from the thumbnail cache. That path can return
-    // a reduced preview image, which makes the first frame open with the wrong
-    // apparent zoom and, because it occupied `current_index` in the cache,
-    // could block the real full-frame decode from ever being requested.
-    let startup_preview = None;
-
-    let (startup_sequence_rx, initial_sequence) = {
-        let (tx, rx) = std::sync::mpsc::channel();
-        let path_clone = path.clone();
-
-        let startup_sequence_rx = match std::thread::Builder::new()
-            .name("image-viewer-startup-seq".into())
-            .spawn(move || {
-                let sequence = match indexer::build_sequence(&path_clone) {
-                    Ok(sequence) => sequence,
-                    Err(err) => {
-                        log::warn!(
-                            "[IMAGE-VIEWER] failed to build startup sequence for '{}': {}",
-                            path_clone.display(),
-                            err
-                        );
-                        indexer::ImageSequence::single(path_clone)
-                    }
-                };
-
-                let _ = tx.send(sequence);
-            }) {
-            Ok(_) => Some(rx),
-            Err(err) => {
-                log::warn!(
-                    "[IMAGE-VIEWER] failed to spawn startup sequence builder for '{}': {}",
-                    path.display(),
-                    err
-                );
-                None
-            }
-        };
-
-        (startup_sequence_rx, indexer::ImageSequence::single(path.clone()))
-    };
-
-    let mut viewport = eframe::egui::ViewportBuilder::default()
-        .with_title(rust_i18n::t!("imageviewer.title_with_file", name = title_name).to_string())
+    // Mirror PDF/text viewer startup exactly: hidden viewport + app_id + reveal
+    // on the first update frame. PDF/text never flicker with this pattern.
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_title(title)
         .with_inner_size([1200.0, 850.0])
         .with_visible(false)
         .with_resizable(true)
@@ -256,30 +247,199 @@ pub fn run_standalone(path: PathBuf) -> eframe::Result<()> {
     if let Ok(img) = image::load_from_memory(crate::embedded_assets::APP_ICON_PNG) {
         let resized = img.resize_exact(256, 256, image::imageops::FilterType::CatmullRom);
         let rgba_image = resized.to_rgba8();
-        viewport = viewport.with_icon(eframe::egui::IconData {
+        viewport = viewport.with_icon(egui::IconData {
             rgba: rgba_image.into_raw(),
             width: 256,
             height: 256,
         });
     }
 
-    let options = build_viewer_native_options(viewport);
-
-    let dark_mode = is_saved_theme_dark();
+    let native_options = build_viewer_native_options(viewport);
 
     eframe::run_native(
         &rust_i18n::t!("imageviewer.title"),
-        options,
-        Box::new(move |_cc| {
-            Ok(Box::new(app::DedicatedImageViewerApp::new(
-                initial_sequence,
-                external_open_rx,
-                dark_mode,
-                startup_sequence_rx,
-                startup_preview,
-            )))
+        native_options,
+        Box::new(move |cc| {
+            let mut app = SimpleImageViewerApp::new(path.clone(), external_open_rx);
+            if let Some(bytes) = initial_bytes {
+                app.upload_texture_from_bytes(&cc.egui_ctx, &bytes);
+            } else {
+                app.last_error = Some(format!("Failed to read image: {}", path.display()));
+            }
+            Ok(Box::new(app))
         }),
     )
+}
+
+struct SimpleImageViewerApp {
+    external_open_rx: Receiver<PathBuf>,
+    current_path: PathBuf,
+    texture: Option<egui::TextureHandle>,
+    texture_size: egui::Vec2,
+    zoom_factor: f32,
+    fit_to_window: bool,
+    last_error: Option<String>,
+    revealed: bool,
+}
+
+impl SimpleImageViewerApp {
+    fn new(current_path: PathBuf, external_open_rx: Receiver<PathBuf>) -> Self {
+        Self {
+            external_open_rx,
+            current_path,
+            texture: None,
+            texture_size: egui::Vec2::ZERO,
+            zoom_factor: 1.0,
+            fit_to_window: true,
+            last_error: None,
+            revealed: false,
+        }
+    }
+
+    fn upload_texture_from_bytes(&mut self, ctx: &egui::Context, bytes: &[u8]) {
+        match image::load_from_memory(bytes) {
+            Ok(decoded) => {
+                let rgba = decoded.to_rgba8();
+                let size = [rgba.width() as usize, rgba.height() as usize];
+                self.texture_size = egui::vec2(rgba.width() as f32, rgba.height() as f32);
+                let image = egui::ColorImage::from_rgba_unmultiplied(size, &rgba);
+                self.texture = Some(ctx.load_texture(
+                    "image-viewer-current",
+                    image,
+                    egui::TextureOptions::LINEAR,
+                ));
+                self.last_error = None;
+            }
+            Err(err) => {
+                self.texture = None;
+                self.texture_size = egui::Vec2::ZERO;
+                self.last_error = Some(format!("Failed to decode image: {}", err));
+            }
+        }
+    }
+
+    fn load_current_image(&mut self, ctx: &egui::Context) {
+        match std::fs::read(&self.current_path) {
+            Ok(bytes) => {
+                self.upload_texture_from_bytes(ctx, &bytes);
+                if self.texture.is_some() {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Title(title_for_path(
+                        &self.current_path,
+                    )));
+                }
+            }
+            Err(err) => {
+                self.texture = None;
+                self.texture_size = egui::Vec2::ZERO;
+                self.last_error = Some(format!("Failed to read image: {}", err));
+            }
+        }
+    }
+
+    fn handle_external_open_requests(&mut self, ctx: &egui::Context) {
+        let mut latest: Option<PathBuf> = None;
+        while let Ok(path) = self.external_open_rx.try_recv() {
+            latest = Some(path);
+        }
+
+        if let Some(path) = latest {
+            if validate_image_path(&path).is_ok() {
+                self.current_path = path;
+                self.zoom_factor = 1.0;
+                self.fit_to_window = true;
+                self.load_current_image(ctx);
+            }
+        }
+    }
+
+    fn handle_shortcuts(&mut self, ctx: &egui::Context) {
+        let zoom_in = ctx.input(|i| i.key_pressed(egui::Key::Plus) || i.key_pressed(egui::Key::Equals));
+        let zoom_out = ctx.input(|i| i.key_pressed(egui::Key::Minus));
+        let reset_zoom = ctx.input(|i| i.key_pressed(egui::Key::Num0));
+        let toggle_fit = ctx.input(|i| i.key_pressed(egui::Key::F));
+
+        if zoom_in {
+            self.fit_to_window = false;
+            self.zoom_factor = (self.zoom_factor * 1.1).clamp(0.1, 8.0);
+        }
+        if zoom_out {
+            self.fit_to_window = false;
+            self.zoom_factor = (self.zoom_factor / 1.1).clamp(0.1, 8.0);
+        }
+        if reset_zoom {
+            self.fit_to_window = true;
+            self.zoom_factor = 1.0;
+        }
+        if toggle_fit {
+            self.fit_to_window = !self.fit_to_window;
+        }
+    }
+
+    fn render_ui(&mut self, ctx: &egui::Context) {
+        egui::TopBottomPanel::top("image_viewer_top").show(ctx, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(self.current_path.display().to_string());
+                ui.separator();
+                ui.label("+/- zoom");
+                ui.separator();
+                ui.label("0 fit");
+                ui.separator();
+                ui.label("F toggle fit");
+            });
+        });
+
+        egui::CentralPanel::default().show(ctx, |ui| {
+            if let Some(err) = &self.last_error {
+                ui.colored_label(egui::Color32::from_rgb(220, 80, 80), err);
+                return;
+            }
+
+            let Some(texture) = &self.texture else {
+                ui.label("Loading image...");
+                return;
+            };
+
+            let available = ui.available_size();
+            let mut draw_size = self.texture_size;
+            if self.fit_to_window {
+                let scale = (available.x / self.texture_size.x)
+                    .min(available.y / self.texture_size.y)
+                    .min(1.0);
+                draw_size *= scale;
+            } else {
+                draw_size *= self.zoom_factor;
+            }
+
+            egui::ScrollArea::both().show(ui, |ui| {
+                ui.image(egui::load::SizedTexture::new(texture.id(), draw_size));
+            });
+        });
+    }
+}
+
+impl eframe::App for SimpleImageViewerApp {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.handle_external_open_requests(ctx);
+        self.handle_shortcuts(ctx);
+        self.render_ui(ctx);
+
+        // Mirror PDF/text viewer reveal pattern: only show the window AFTER the
+        // first frame has been laid out, so the OS never sees an empty window.
+        if !self.revealed {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+            self.revealed = true;
+        }
+    }
+}
+
+fn title_for_path(path: &Path) -> String {
+    let title_name = path
+        .file_name()
+        .map(|v| v.to_string_lossy().to_string())
+        .unwrap_or_else(|| rust_i18n::t!("imageviewer.title").to_string());
+
+    rust_i18n::t!("imageviewer.title_with_file", name = title_name).to_string()
 }
 
 pub fn decode_full_for_benchmark(path: &Path) -> std::io::Result<(u32, u32, usize)> {
@@ -294,4 +454,3 @@ pub fn decode_preview_for_benchmark(
     let frame = loader::decode_preview_frame(path, max_side)?;
     Ok((frame.width, frame.height, frame.rgba.len()))
 }
-

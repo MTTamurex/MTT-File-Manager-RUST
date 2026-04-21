@@ -22,9 +22,9 @@ use std::sync::Mutex;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetClientRect, IsZoomed, HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT, HTCAPTION, HTCLIENT, HTLEFT,
-    HTRIGHT, HTTOP, HTTOPLEFT, HTTOPRIGHT, WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE,
-    WM_NCHITTEST, WM_SIZE,
+    GetClientRect, IsIconic, IsZoomed, HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT, HTCAPTION,
+    HTCLIENT, HTLEFT, HTRIGHT, HTTOP, HTTOPLEFT, HTTOPRIGHT, WM_ENTERSIZEMOVE,
+    WM_EXITSIZEMOVE, WM_NCACTIVATE, WM_NCHITTEST, WM_SIZE,
 };
 
 /// SIZE_MINIMIZED constant (wParam for WM_SIZE when window is minimized)
@@ -312,9 +312,18 @@ extern "system" fn borderless_subclass_proc(
         return handle_nchittest(hwnd, lparam);
     }
 
-    // Do not swallow WM_NCACTIVATE here. winit 0.30 uses it, together with
-    // WM_SETFOCUS/WM_KILLFOCUS, to maintain the viewport focused state that
-    // egui TextEdit checks before painting the blinking caret.
+    if msg == WM_NCACTIVATE {
+        // Preserve WM_NCACTIVATE propagation so winit/egui keep the correct
+        // focused state, but ask the default handler to skip non-client repaint
+        // on normal focus changes. Microsoft documents lParam = -1 for this.
+        // Minimized windows should keep the original path.
+        let nc_lparam = if unsafe { IsIconic(hwnd).as_bool() } {
+            lparam
+        } else {
+            LPARAM(-1)
+        };
+        return unsafe { DefSubclassProc(hwnd, msg, wparam, nc_lparam) };
+    }
 
     // Pass all other messages to default handler
     unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
