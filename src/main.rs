@@ -169,22 +169,6 @@ fn main() -> eframe::Result<()> {
             log::error!("[IMAGE-VIEWER] missing path argument for --image-viewer");
             return Ok(());
         }
-        if flag_str.eq_ignore_ascii_case("--image-viewer-legacy") {
-            if let Some(path_arg) = args.next() {
-                return mtt_file_manager::image_viewer_minimal::run_minimal(PathBuf::from(path_arg));
-            }
-
-            log::error!("[IMAGE-VIEWER-MINIMAL] missing path argument for --image-viewer-legacy");
-            return Ok(());
-        }
-        if flag_str.eq_ignore_ascii_case("--image-viewer-minimal") {
-            if let Some(path_arg) = args.next() {
-                return mtt_file_manager::image_viewer_minimal::run_minimal(PathBuf::from(path_arg));
-            }
-
-            log::error!("[IMAGE-VIEWER-MINIMAL] missing path argument for --image-viewer-minimal");
-            return Ok(());
-        }
         if flag_str.eq_ignore_ascii_case("--pdf-viewer") {
             if let Some(path_arg) = args.next() {
                 return mtt_file_manager::pdf_viewer::run_standalone(PathBuf::from(path_arg));

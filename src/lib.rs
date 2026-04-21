@@ -5,7 +5,6 @@ pub mod application;
 pub mod domain;
 pub mod embedded_assets; // Embedded resources for portable executable
 pub mod image_viewer;
-pub mod image_viewer_minimal; // Minimal test viewer without complexity
 pub mod infrastructure;
 pub mod pdf_viewer;
 pub mod tabs;
