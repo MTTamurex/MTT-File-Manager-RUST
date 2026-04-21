@@ -92,7 +92,7 @@ Key configuration and error types are defined centrally to ensure consistent enf
 **Section sources**
 - [security.rs:36-63](file://src/infrastructure/security.rs#L36-L63)
 - [security.rs:17-34](file://src/infrastructure/security.rs#L17-L34)
-- [drives.rs:26-55](file-180](file://src/infrastructure/windows/drives.rs#L26-L55)
+- [drives.rs:26-55](file://src/infrastructure/windows/drives.rs#L26-L55)
 - [security_policy.rs:1-16](file://crates/mtt-search-service/src/security_policy.rs#L1-L16)
 
 ## Architecture Overview
