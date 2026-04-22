@@ -39,8 +39,8 @@ pub(super) fn render_results_panel(
     } else {
         0.0
     };
-    // Use modal_max_height as hard cap. 212 accounts for header+input+filters+spacing above.
-    let panel_height = (modal_max_height - 212.0).max(200.0 + footer_height);
+    // Use modal_max_height as hard cap. 244 accounts for header+input+filters+sort+spacing above.
+    let panel_height = (modal_max_height - 244.0).max(200.0 + footer_height);
     let results_height = (panel_height - footer_height).max(200.0);
 
     if app.global_search.loading && app.global_search.results.is_empty() {
