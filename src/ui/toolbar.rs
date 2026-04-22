@@ -69,6 +69,57 @@ fn breadcrumb_segments(current_path: &str) -> Vec<(String, String)> {
     })
 }
 
+/// Measure the width of a text string using the given font.
+fn measure_text_width(ui: &egui::Ui, text: &str, font_id: &egui::FontId) -> f32 {
+    ui.fonts(|fonts| {
+        fonts
+            .layout_no_wrap(text.to_string(), font_id.clone(), ui.visuals().text_color())
+            .size()
+            .x
+    })
+}
+
+/// Render a single breadcrumb button with transparent background and hover effect.
+fn render_breadcrumb_button(
+    ui: &mut egui::Ui,
+    display: &str,
+    target_path: String,
+    action: &mut Option<ToolbarAction>,
+) {
+    let btn_resp = ui
+        .scope(|ui| {
+            let hover_color = if ui.visuals().dark_mode {
+                theme::color_dark_hover()
+            } else {
+                theme::color_hover()
+            };
+
+            ui.visuals_mut().widgets.inactive.bg_fill = egui::Color32::TRANSPARENT;
+            ui.visuals_mut().widgets.inactive.weak_bg_fill = egui::Color32::TRANSPARENT;
+            ui.visuals_mut().widgets.inactive.bg_stroke = egui::Stroke::NONE;
+
+            ui.visuals_mut().widgets.hovered.bg_fill = hover_color;
+            ui.visuals_mut().widgets.hovered.weak_bg_fill = hover_color;
+            ui.visuals_mut().widgets.hovered.bg_stroke = egui::Stroke::NONE;
+
+            ui.visuals_mut().widgets.active.bg_fill = if ui.visuals().dark_mode {
+                egui::Color32::from_gray(70)
+            } else {
+                egui::Color32::from_gray(210)
+            };
+            ui.visuals_mut().widgets.active.bg_stroke = egui::Stroke::NONE;
+
+            ui.button(
+                egui::RichText::new(display).color(theme::text_color(ui.visuals().dark_mode)),
+            )
+        })
+        .inner;
+
+    if btn_resp.clicked() {
+        *action = Some(ToolbarAction::Navigate(target_path));
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum ToolbarAction {
     Navigate(String),
@@ -203,8 +254,8 @@ pub fn render_toolbar(
             ui.separator();
 
             // Search
-            let search_width = 250.0;
             let input_height = 26.0;
+            let search_width = (ui.available_width() * 0.45).min(250.0).max(120.0);
             // Creates a container visually similar to an input, but manual to contain the button
             let (search_rect, search_resp) = ui.allocate_exact_size(
                 egui::vec2(search_width, input_height),
@@ -302,6 +353,7 @@ pub fn render_toolbar(
                     .max_rect(addr_rect.shrink(4.0))
                     .layout(egui::Layout::left_to_right(egui::Align::Center)),
             );
+            addr_ui.set_clip_rect(addr_rect);
 
             if *is_editing_path {
                 let show_history_close_button = *show_address_history_menu && !recent_paths.is_empty();
@@ -391,13 +443,24 @@ pub fn render_toolbar(
                                     }
 
                                     let text_rect = item_rect.shrink2(egui::vec2(8.0, 0.0));
+                                    let font_id = egui::TextStyle::Button.resolve(ui.style());
+                                    let truncated = crate::ui::preview_panel::utils::truncate_text_to_fit(
+                                        display,
+                                        text_rect.width(),
+                                        &font_id,
+                                        ui,
+                                    );
                                     ui.painter().text(
                                         egui::pos2(text_rect.left(), text_rect.center().y),
                                         egui::Align2::LEFT_CENTER,
-                                        display,
-                                        egui::TextStyle::Button.resolve(ui.style()),
+                                        &truncated,
+                                        font_id,
                                         theme::text_color(ui.visuals().dark_mode),
                                     );
+
+                                    if truncated != *display {
+                                        let _ = response.clone().on_hover_text(display.clone());
+                                    }
 
                                     if response.clicked() {
                                         selected_path = Some(actual_path.clone());
@@ -440,44 +503,299 @@ pub fn render_toolbar(
                     let segments = breadcrumb_segments(current_path);
                     let seg_count = segments.len();
 
-                    for (seg_idx, (display, target_path)) in segments.into_iter().enumerate() {
-                        // Clickable breadcrumb - transparent, light gray on hover
-                        let btn_resp = addr_ui
-                            .scope(|ui| {
-                                let hover_color = if ui.visuals().dark_mode {
-                                    theme::color_dark_hover()
-                                } else {
-                                    theme::color_hover()
-                                };
+                    if seg_count == 0 {
+                        // nothing to render
+                    } else {
+                        let btn_font = egui::TextStyle::Button.resolve(addr_ui.style());
+                        let sep_font = egui::FontId::proportional(14.0);
+                        let btn_pad_x = addr_ui.style().spacing.button_padding.x * 2.0;
+                        let sep_width = measure_text_width(&addr_ui, "›", &sep_font);
 
-                                ui.visuals_mut().widgets.inactive.bg_fill =
-                                    egui::Color32::TRANSPARENT;
-                                ui.visuals_mut().widgets.inactive.weak_bg_fill =
-                                    egui::Color32::TRANSPARENT;
-                                ui.visuals_mut().widgets.inactive.bg_stroke = egui::Stroke::NONE;
-
-                                ui.visuals_mut().widgets.hovered.bg_fill = hover_color;
-                                ui.visuals_mut().widgets.hovered.weak_bg_fill = hover_color;
-                                ui.visuals_mut().widgets.hovered.bg_stroke = egui::Stroke::NONE;
-
-                                ui.visuals_mut().widgets.active.bg_fill =
-                                    if ui.visuals().dark_mode { egui::Color32::from_gray(70) } else { egui::Color32::from_gray(210) };
-                                ui.visuals_mut().widgets.active.bg_stroke = egui::Stroke::NONE;
-
-                                ui.button(egui::RichText::new(&display).color(theme::text_color(ui.visuals().dark_mode)))
+                        let seg_widths: Vec<f32> = segments
+                            .iter()
+                            .map(|(display, _)| {
+                                measure_text_width(&addr_ui, display, &btn_font) + btn_pad_x
                             })
-                            .inner;
+                            .collect();
 
-                        if btn_resp.clicked() {
-                            action = Some(ToolbarAction::Navigate(target_path));
-                        }
+                        let total_width: f32 = seg_widths.iter().sum::<f32>()
+                            + sep_width * (seg_count.saturating_sub(1)) as f32;
+                        let available_width = addr_ui.available_width();
 
-                        if seg_idx < seg_count - 1 {
-                            addr_ui.label(
-                                egui::RichText::new("›")
-                                    .size(14.0)
-                                    .color(egui::Color32::from_gray(120)),
-                            );
+                        if total_width <= available_width {
+                            // Everything fits — render all segments normally
+                            for (seg_idx, (display, target_path)) in
+                                segments.into_iter().enumerate()
+                            {
+                                render_breadcrumb_button(
+                                    &mut addr_ui,
+                                    &display,
+                                    target_path,
+                                    &mut action,
+                                );
+                                if seg_idx < seg_count - 1 {
+                                    addr_ui.label(
+                                        egui::RichText::new("›")
+                                            .size(14.0)
+                                            .color(egui::Color32::from_gray(120)),
+                                    );
+                                }
+                            }
+                        } else {
+                            // Truncated layout: root + … + last segments that fit
+                            let ellipsis_w =
+                                measure_text_width(&addr_ui, "…", &btn_font) + btn_pad_x;
+                            let root_width = seg_widths[0];
+                            let last_width = seg_widths[seg_count - 1];
+
+                            // Minimum needed for root + last (always try to keep these)
+                            let mut needed = root_width + sep_width + last_width;
+                            let mut show_ellipsis = false;
+
+                            if seg_count > 2 {
+                                let with_ellipsis = needed + sep_width + ellipsis_w;
+                                if with_ellipsis <= available_width {
+                                    needed = with_ellipsis;
+                                    show_ellipsis = true;
+                                }
+                            }
+
+                            // Try to fit additional segments from the end
+                            let mut visible_end_count = 1;
+                            if needed <= available_width && seg_count > 2 {
+                                for i in (1..seg_count - 1).rev() {
+                                    let extra = seg_widths[i] + sep_width;
+                                    if needed + extra <= available_width {
+                                        needed += extra;
+                                        visible_end_count += 1;
+                                    } else {
+                                        break;
+                                    }
+                                }
+                            }
+
+                            if needed > available_width && seg_count > 1 {
+                                // Fallback: even root+last doesn't fit — show as many tail
+                                // segments as possible without root/ellipsis
+                                let mut used = 0.0;
+                                let mut vis = 0;
+                                for i in (0..seg_count).rev() {
+                                    let extra =
+                                        seg_widths[i] + if vis > 0 { sep_width } else { 0.0 };
+                                    if used + extra <= available_width {
+                                        used += extra;
+                                        vis += 1;
+                                    } else {
+                                        break;
+                                    }
+                                }
+                                let start = seg_count - vis;
+                                for i in start..seg_count {
+                                    let (display, target_path) = segments[i].clone();
+                                    render_breadcrumb_button(
+                                        &mut addr_ui,
+                                        &display,
+                                        target_path,
+                                        &mut action,
+                                    );
+                                    if i < seg_count - 1 {
+                                        addr_ui.label(
+                                            egui::RichText::new("›")
+                                                .size(14.0)
+                                                .color(egui::Color32::from_gray(120)),
+                                        );
+                                    }
+                                }
+                            } else {
+                                // Root
+                                render_breadcrumb_button(
+                                    &mut addr_ui,
+                                    &segments[0].0,
+                                    segments[0].1.clone(),
+                                    &mut action,
+                                );
+                                addr_ui.label(
+                                    egui::RichText::new("›")
+                                        .size(14.0)
+                                        .color(egui::Color32::from_gray(120)),
+                                );
+
+                                let last_visible_start = seg_count - visible_end_count;
+                                let has_hidden_middle = last_visible_start > 1;
+
+                                if show_ellipsis && has_hidden_middle {
+                                    // Clickable ellipsis with overflow popup
+                                    let popup_id =
+                                        egui::Id::new("breadcrumb_overflow_popup");
+                                    let mut show_overflow = addr_ui.ctx().memory(|m| {
+                                        m.data.get_temp::<bool>(popup_id).unwrap_or(false)
+                                    });
+
+                                    let ellipsis_resp = addr_ui
+                                        .scope(|ui| {
+                                            let hover_color = if ui.visuals().dark_mode {
+                                                theme::color_dark_hover()
+                                            } else {
+                                                theme::color_hover()
+                                            };
+                                            ui.visuals_mut().widgets.inactive.bg_fill =
+                                                egui::Color32::TRANSPARENT;
+                                            ui.visuals_mut().widgets.inactive.weak_bg_fill =
+                                                egui::Color32::TRANSPARENT;
+                                            ui.visuals_mut().widgets.inactive.bg_stroke =
+                                                egui::Stroke::NONE;
+
+                                            ui.visuals_mut().widgets.hovered.bg_fill =
+                                                hover_color;
+                                            ui.visuals_mut().widgets.hovered.weak_bg_fill =
+                                                hover_color;
+                                            ui.visuals_mut().widgets.hovered.bg_stroke =
+                                                egui::Stroke::NONE;
+
+                                            ui.visuals_mut().widgets.active.bg_fill =
+                                                if ui.visuals().dark_mode {
+                                                    egui::Color32::from_gray(70)
+                                                } else {
+                                                    egui::Color32::from_gray(210)
+                                                };
+                                            ui.visuals_mut().widgets.active.bg_stroke =
+                                                egui::Stroke::NONE;
+
+                                            ui.button(
+                                                egui::RichText::new("…")
+                                                    .color(theme::text_color(
+                                                        ui.visuals().dark_mode,
+                                                    )),
+                                            )
+                                        })
+                                        .inner;
+
+                                    if ellipsis_resp.clicked() {
+                                        show_overflow = !show_overflow;
+                                        addr_ui.ctx().memory_mut(|m| {
+                                            m.data.insert_temp(popup_id, show_overflow);
+                                        });
+                                    }
+
+                                    if show_overflow {
+                                        let mut selected_path = None;
+                                        let popup_response = egui::Area::new(popup_id)
+                                            .order(egui::Order::Foreground)
+                                            .fixed_pos(egui::pos2(
+                                                ellipsis_resp.rect.left(),
+                                                ellipsis_resp.rect.bottom() + 2.0,
+                                            ))
+                                            .show(addr_ui.ctx(), |ui| {
+                                                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                                                    ui.set_min_width(180.0);
+                                                    ui.spacing_mut().item_spacing.y = 0.0;
+
+                                                    for i in 1..last_visible_start {
+                                                        let (display, actual_path) =
+                                                            segments[i].clone();
+                                                        let item_size =
+                                                            egui::vec2(200.0, 28.0);
+                                                        let (item_rect, response) = ui
+                                                            .allocate_exact_size(
+                                                                item_size,
+                                                                egui::Sense::click(),
+                                                            );
+                                                        let visuals =
+                                                            ui.style().interact(&response);
+
+                                                        if response.hovered()
+                                                            || response.highlighted()
+                                                        {
+                                                            ui.painter().rect_filled(
+                                                                item_rect,
+                                                                visuals.corner_radius,
+                                                                visuals.weak_bg_fill,
+                                                            );
+                                                        }
+
+                                                        let text_rect = item_rect
+                                                            .shrink2(egui::vec2(8.0, 0.0));
+                                                        ui.painter().text(
+                                                            egui::pos2(
+                                                                text_rect.left(),
+                                                                text_rect.center().y,
+                                                            ),
+                                                            egui::Align2::LEFT_CENTER,
+                                                            &display,
+                                                            egui::TextStyle::Button
+                                                                .resolve(ui.style()),
+                                                            theme::text_color(
+                                                                ui.visuals().dark_mode,
+                                                            ),
+                                                        );
+
+                                                        if response.clicked() {
+                                                            selected_path =
+                                                                Some(actual_path);
+                                                        }
+                                                    }
+                                                });
+                                            });
+
+                                        if let Some(path) = selected_path {
+                                            addr_ui.ctx().memory_mut(|m| {
+                                                m.data
+                                                    .insert_temp::<bool>(popup_id, false);
+                                            });
+                                            action =
+                                                Some(ToolbarAction::Navigate(path));
+                                        } else if addr_ui
+                                            .ctx()
+                                            .input(|i| i.pointer.any_pressed())
+                                        {
+                                            if let Some(pointer_pos) = addr_ui
+                                                .ctx()
+                                                .input(|i| i.pointer.press_origin())
+                                            {
+                                                let clicked_ellipsis = ellipsis_resp
+                                                    .rect
+                                                    .contains(pointer_pos);
+                                                let clicked_popup = popup_response
+                                                    .response
+                                                    .rect
+                                                    .contains(pointer_pos);
+                                                if !clicked_ellipsis && !clicked_popup {
+                                                    addr_ui.ctx().memory_mut(|m| {
+                                                        m.data.insert_temp::<bool>(
+                                                            popup_id, false,
+                                                        );
+                                                    });
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    addr_ui.label(
+                                        egui::RichText::new("›")
+                                            .size(14.0)
+                                            .color(egui::Color32::from_gray(120)),
+                                    );
+                                }
+
+                                // Render last visible_end_count segments
+                                let start = seg_count - visible_end_count;
+                                for i in start..seg_count {
+                                    let (display, target_path) = segments[i].clone();
+                                    render_breadcrumb_button(
+                                        &mut addr_ui,
+                                        &display,
+                                        target_path,
+                                        &mut action,
+                                    );
+                                    if i < seg_count - 1 {
+                                        addr_ui.label(
+                                            egui::RichText::new("›")
+                                                .size(14.0)
+                                                .color(egui::Color32::from_gray(120)),
+                                        );
+                                    }
+                                }
+                            }
                         }
                     }
                 }
