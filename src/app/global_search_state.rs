@@ -1,8 +1,11 @@
 use eframe::egui;
 use lru::LruCache;
+use rayon::prelude::*;
 use std::num::NonZeroUsize;
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::Instant;
+
+const MAX_SORT_METADATA_PER_FRAME: usize = 32;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GlobalSearchCategory {
@@ -13,6 +16,12 @@ pub enum GlobalSearchCategory {
     Videos,
     Audio,
     Documents,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GlobalSearchSortMode {
+    Relevance,
+    ModifiedDate,
 }
 
 pub struct GlobalSearchState {
@@ -29,6 +38,8 @@ pub struct GlobalSearchState {
     pub metadata_cache: LruCache<String, u64>,
     pub category: GlobalSearchCategory,
     pub drive_filter: Option<char>,
+    pub sort_mode: GlobalSearchSortMode,
+    pub sort_descending: bool,
     pub active: bool,
     pub opened_at: Instant,
     pub loading: bool,
@@ -64,6 +75,12 @@ pub struct GlobalSearchState {
     /// Generation + filter params when the cache was last built.
     filter_cache_key: (u64, GlobalSearchCategory, Option<char>),
 
+    // --- Cached sorted indices (includes filter + sort) ---
+    pub cached_sorted_indices: Vec<usize>,
+    sort_cache_key: (u64, GlobalSearchCategory, Option<char>, GlobalSearchSortMode, bool, u64),
+    /// Incremented whenever new metadata is loaded for sorting; forces a re-sort next frame.
+    sort_metadata_epoch: u64,
+
 }
 
 impl GlobalSearchState {
@@ -89,6 +106,8 @@ impl GlobalSearchState {
             ),
             category: GlobalSearchCategory::All,
             drive_filter: None,
+            sort_mode: GlobalSearchSortMode::Relevance,
+            sort_descending: false,
             active: false,
             opened_at: Instant::now(),
             loading: false,
@@ -96,7 +115,7 @@ impl GlobalSearchState {
             in_flight_query: None,
             in_flight_started_at: None,
             requested_offset: 0,
-            requested_limit: 200,
+            requested_limit: 500,
             has_more_results: false,
             available: false,
             last_check: Instant::now(),
@@ -114,6 +133,9 @@ impl GlobalSearchState {
             cached_filtered_indices: Vec::new(),
             cached_available_drives: Vec::new(),
             filter_cache_key: (u64::MAX, GlobalSearchCategory::All, None),
+            cached_sorted_indices: Vec::new(),
+            sort_cache_key: (u64::MAX, GlobalSearchCategory::All, None, GlobalSearchSortMode::Relevance, false, 0),
+            sort_metadata_epoch: 0,
         }
     }
 
@@ -134,5 +156,73 @@ impl GlobalSearchState {
             self.filter_cache_key = key;
         }
         &self.cached_filtered_indices
+    }
+
+    /// Returns filtered indices sorted according to the current sort_mode.
+    /// Uses a cache key that includes generation, category, drive_filter, sort_mode, and sort_descending.
+    pub fn ensure_sorted_indices(&mut self) -> &[usize] {
+        self.ensure_filter_cache();
+        let key = (
+            self.results_generation,
+            self.category,
+            self.drive_filter,
+            self.sort_mode,
+            self.sort_descending,
+            self.sort_metadata_epoch,
+        );
+        if self.sort_cache_key != key {
+            let mut sorted = self.cached_filtered_indices.clone();
+            if self.sort_mode == GlobalSearchSortMode::ModifiedDate {
+                // Budgeted metadata loading: avoid UI stalls by reading only a few files per frame.
+                // Missing entries are fetched in parallel via rayon and cached; the epoch bump
+                // triggers a re-sort on the next frame until every item is resolved.
+                let missing: Vec<String> = sorted
+                    .iter()
+                    .filter(|&&idx| self.metadata_cache.get(&self.results[idx].full_path).is_none())
+                    .take(MAX_SORT_METADATA_PER_FRAME)
+                    .map(|&idx| self.results[idx].full_path.clone())
+                    .collect();
+
+                if !missing.is_empty() {
+                    let fetched: Vec<(String, u64)> = missing
+                        .into_par_iter()
+                        .map(|path| {
+                            let ts = std::fs::metadata(&path)
+                                .ok()
+                                .and_then(|m| m.modified().ok())
+                                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                                .map(|d| d.as_secs())
+                                .unwrap_or(0);
+                            (path, ts)
+                        })
+                        .collect();
+
+                    for (path, ts) in fetched {
+                        self.metadata_cache.put(path, ts);
+                    }
+                    self.sort_metadata_epoch = self.sort_metadata_epoch.wrapping_add(1);
+                }
+
+                sorted.sort_by(|&a, &b| {
+                    let ts_a = self
+                        .metadata_cache
+                        .get(&self.results[a].full_path)
+                        .copied()
+                        .unwrap_or(0);
+                    let ts_b = self
+                        .metadata_cache
+                        .get(&self.results[b].full_path)
+                        .copied()
+                        .unwrap_or(0);
+                    ts_a.cmp(&ts_b)
+                });
+                if self.sort_descending {
+                    sorted.reverse();
+                }
+            }
+            self.cached_sorted_indices = sorted;
+            self.sort_cache_key = key;
+        }
+        &self.cached_sorted_indices
     }
 }
