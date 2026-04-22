@@ -173,6 +173,7 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) -> Option
                 is_item_dragging: app.is_item_dragging,
                 is_folder_dragging,
                 dragging_path,
+                show_recycle_bin: app.show_recycle_bin,
                 sidebar_renaming: sidebar_renaming_ref,
                 sidebar_rename_focus: app.sidebar_rename_focus,
                 mounted_iso_drives: &app.file_operation_state.mounted_iso_drives,

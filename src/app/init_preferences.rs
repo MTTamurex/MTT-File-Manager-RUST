@@ -22,6 +22,7 @@ pub(super) struct StartupPreferences {
     pub(super) sidebar_right_width: f32,
     pub(super) session_volume: f32,
     pub(super) show_hidden_files: bool,
+    pub(super) show_recycle_bin: bool,
     pub(super) language: String,
     pub(super) theme_mode: ThemeMode,
     pub(super) gpu_backend_preference: String,
@@ -155,6 +156,11 @@ impl StartupPreferences {
             .map(|s| s == "true")
             .unwrap_or(false);
 
+        let show_recycle_bin = prefs
+            .get("show_recycle_bin")
+            .map(|s| s != "false")
+            .unwrap_or(true);
+
         let language = prefs
             .get("language")
             .cloned()
@@ -193,6 +199,7 @@ impl StartupPreferences {
             sidebar_right_width,
             session_volume,
             show_hidden_files,
+            show_recycle_bin,
             language,
             theme_mode,
             gpu_backend_preference,

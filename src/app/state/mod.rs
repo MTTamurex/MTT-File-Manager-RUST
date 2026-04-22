@@ -120,6 +120,7 @@ pub struct ImageViewerApp {
     pub sort_descending: bool,        // true = Z-A, Newest, Largest
     pub folders_position: FoldersPosition, // First, Last, Mixed
     pub show_hidden_files: bool,           // Show files with FILE_ATTRIBUTE_HIDDEN
+    pub show_recycle_bin: bool,             // Show Recycle Bin in Quick Access
 
     // "Normal" (unlocked) state â€” these track what unlocked folders should use.
     // When a locked folder overrides active settings, these remain unchanged.

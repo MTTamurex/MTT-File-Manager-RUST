@@ -221,6 +221,7 @@ impl eframe::App for ImageViewerApp {
                 &mut self.gpu_backend_preference,
                 &mut self.shortcuts,
                 &mut self.shortcut_editor,
+                &mut self.show_recycle_bin,
             );
             self.navigation_state.show_settings_window = output.keep_open;
             if !output.keep_open {
@@ -244,6 +245,10 @@ impl eframe::App for ImageViewerApp {
                 self.force_save_preferences();
             }
             if output.shortcuts_changed {
+                self.save_preferences();
+                self.force_save_preferences();
+            }
+            if output.recycle_bin_changed {
                 self.save_preferences();
                 self.force_save_preferences();
             }

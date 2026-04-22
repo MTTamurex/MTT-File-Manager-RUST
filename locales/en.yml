@@ -258,6 +258,7 @@ settings:
   theme_light: "Light"
   theme_dark: "Dark"
   theme_apply_immediately: "Theme changes are applied immediately."
+  show_recycle_bin: "Show Recycle Bin in Quick Access"
   backend_title: "Graphics Backend"
   backend_description: "Select the graphics rendering backend used by the application."
   backend_active: "Active backend:"

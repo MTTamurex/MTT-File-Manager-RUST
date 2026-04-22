@@ -9,6 +9,7 @@ pub struct SettingsWindowOutput {
     pub theme_changed: bool,
     pub backend_changed: bool,
     pub shortcuts_changed: bool,
+    pub recycle_bin_changed: bool,
 }
 
 pub fn render_settings_window(
@@ -20,12 +21,14 @@ pub fn render_settings_window(
     gpu_backend_preference: &mut String,
     shortcuts: &mut ShortcutBindings,
     shortcut_editor: &mut ShortcutEditorState,
+    show_recycle_bin: &mut bool,
 ) -> SettingsWindowOutput {
     let mut keep_open = show_window;
     let mut language_changed = false;
     let mut theme_changed = false;
     let mut backend_changed = false;
     let mut shortcuts_changed = false;
+    let mut recycle_bin_changed = false;
 
     egui::Window::new(t!("settings.window_title"))
         .open(&mut keep_open)
@@ -68,6 +71,12 @@ pub fn render_settings_window(
                                     theme_changed |= crate::ui::components::appearance_settings::render_appearance_settings_section(ui, theme_mode);
                                     ui.add_space(16.0);
                                     backend_changed |= crate::ui::components::backend_settings::render_backend_settings_section(ui, active_gpu_backend, gpu_backend_preference);
+                                    ui.add_space(16.0);
+                                    ui.label(egui::RichText::new(t!("settings.show_recycle_bin").to_string()).strong());
+                                    ui.add_space(4.0);
+                                    if ui.checkbox(show_recycle_bin, t!("settings.show_recycle_bin")).changed() {
+                                        recycle_bin_changed = true;
+                                    }
                                 }
                                 SettingsSection::Shortcuts => {
                                     shortcuts_changed |= crate::ui::components::shortcut_settings::render_shortcut_settings_section(
@@ -94,6 +103,7 @@ pub fn render_settings_window(
         theme_changed,
         backend_changed,
         shortcuts_changed,
+        recycle_bin_changed,
     }
 }
 

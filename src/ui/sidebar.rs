@@ -42,6 +42,7 @@ pub struct SidebarContext<'a> {
     pub is_item_dragging: bool,   // ANY item (file or folder) is being dragged
     pub is_folder_dragging: bool,  // A folder is being dragged from the main content area
     pub dragging_path: Option<&'a str>, // Path of the folder being dragged
+    pub show_recycle_bin: bool,
     /// Inline drive rename: (drive_path, editable_text)
     pub sidebar_renaming: Option<(&'a str, &'a str)>,
     pub sidebar_rename_focus: bool,
@@ -162,7 +163,7 @@ pub fn render_sidebar_fixed_top(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> 
     ui.add_space(4.0);
 
     // 1. RECYCLE BIN
-    {
+    if ctx.show_recycle_bin {
         let is_selected = ctx.is_recycle_bin_view;
         let (mut rect, response) =
             ui.allocate_exact_size(egui::vec2(ui.available_width(), 28.0), Sense::click());
@@ -219,7 +220,7 @@ pub fn render_sidebar_fixed_top(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> 
         }
     }
 
-    // 3. USER-PINNED FOLDERS
+    // 2. USER-PINNED FOLDERS
     render_pinned_folders(ui, ctx, &mut action);
 
     // === Drag-to-pin drop zone ===
