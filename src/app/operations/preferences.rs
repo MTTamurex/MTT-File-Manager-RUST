@@ -121,6 +121,15 @@ impl ImageViewerApp {
             })
             .to_string(),
         ));
+        prefs.push((
+            "show_recycle_bin",
+            (if self.show_recycle_bin {
+                "true"
+            } else {
+                "false"
+            })
+            .to_string(),
+        ));
         prefs.push(("upload_budget_ms", self.upload_budget_ms.to_string()));
 
         // Window state persistence

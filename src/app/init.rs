@@ -157,6 +157,7 @@ impl ImageViewerApp {
             sidebar_right_width,
             session_volume,
             show_hidden_files,
+            show_recycle_bin,
             language,
             theme_mode,
             gpu_backend_preference,
@@ -262,6 +263,7 @@ impl ImageViewerApp {
             selected_metadata: None,
             show_left_sidebar, // Loaded from SQLite
             show_preview_panel, // Loaded from SQLite
+            show_recycle_bin, // Loaded from SQLite
             drive_state: build_drive_state(
                 disks,
                 drive_scan_tx,

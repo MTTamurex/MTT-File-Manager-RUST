@@ -258,6 +258,7 @@ settings:
   theme_light: "Claro"
   theme_dark: "Escuro"
   theme_apply_immediately: "As alterações de tema são aplicadas imediatamente."
+  show_recycle_bin: "Mostrar Lixeira no Acesso Rápido"
   backend_title: "Backend Gráfico"
   backend_description: "Selecione o backend de renderização gráfica utilizado pelo aplicativo."
   backend_active: "Backend ativo:"
