@@ -536,10 +536,10 @@ fn render_filter_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
         app.global_search.selected_index = None;
     }
 
+    // Row 1: category filters (left) + drive filter (right)
     ui.horizontal(|ui| {
         let right_width = 190.0;
-        let sort_width = 160.0;
-        let left_width = (ui.available_width() - right_width - sort_width).max(120.0);
+        let left_width = (ui.available_width() - right_width).max(120.0);
 
         ui.allocate_ui_with_layout(
             egui::vec2(left_width, 28.0),
@@ -561,64 +561,6 @@ fn render_filter_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
                         app.global_search.selected_index = None;
                     }
                 }
-            },
-        );
-
-        ui.allocate_ui_with_layout(
-            egui::vec2(sort_width, 28.0),
-            egui::Layout::right_to_left(egui::Align::Center),
-            |ui| {
-                // Sort direction toggle
-                let dir_label = if app.global_search.sort_descending { "↓" } else { "↑" };
-                let dir_hint = if app.global_search.sort_descending {
-                    t!("search.sort_ascending_hint")
-                } else {
-                    t!("search.sort_descending_hint")
-                };
-                if ui
-                    .button(dir_label)
-                    .on_hover_text(dir_hint)
-                    .clicked()
-                {
-                    app.global_search.sort_descending = !app.global_search.sort_descending;
-                    app.global_search.selected_index = None;
-                }
-
-                egui::ComboBox::from_id_salt("global_search_sort_mode")
-                    .width(90.0)
-                    .selected_text(match app.global_search.sort_mode {
-                        GlobalSearchSortMode::Relevance => t!("search.sort_relevance").to_string(),
-                        GlobalSearchSortMode::ModifiedDate => t!("search.sort_modified_date").to_string(),
-                    })
-                    .show_ui(ui, |ui| {
-                        if ui
-                            .selectable_label(
-                                app.global_search.sort_mode == GlobalSearchSortMode::Relevance,
-                                t!("search.sort_relevance"),
-                            )
-                            .clicked()
-                        {
-                            app.global_search.sort_mode = GlobalSearchSortMode::Relevance;
-                            app.global_search.selected_index = None;
-                        }
-                        if ui
-                            .selectable_label(
-                                app.global_search.sort_mode == GlobalSearchSortMode::ModifiedDate,
-                                t!("search.sort_modified_date"),
-                            )
-                            .clicked()
-                        {
-                            app.global_search.sort_mode = GlobalSearchSortMode::ModifiedDate;
-                            app.global_search.selected_index = None;
-                        }
-                    });
-
-                ui.add_space(6.0);
-                ui.label(
-                    egui::RichText::new(t!("search.sort_by"))
-                        .size(10.0)
-                        .color(egui::Color32::from_gray(140)),
-                );
             },
         );
 
@@ -676,6 +618,64 @@ fn render_filter_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
                 egui::Layout::left_to_right(egui::Align::Center),
                 |_| {},
             );
+        }
+    });
+
+    ui.add_space(4.0);
+
+    // Row 2: sort controls
+    ui.horizontal(|ui| {
+        ui.label(
+            egui::RichText::new(t!("search.sort_by"))
+                .size(10.0)
+                .color(egui::Color32::from_gray(140)),
+        );
+
+        egui::ComboBox::from_id_salt("global_search_sort_mode")
+            .width(110.0)
+            .selected_text(match app.global_search.sort_mode {
+                GlobalSearchSortMode::Relevance => t!("search.sort_relevance").to_string(),
+                GlobalSearchSortMode::ModifiedDate => t!("search.sort_modified_date").to_string(),
+            })
+            .show_ui(ui, |ui| {
+                if ui
+                    .selectable_label(
+                        app.global_search.sort_mode == GlobalSearchSortMode::Relevance,
+                        t!("search.sort_relevance"),
+                    )
+                    .clicked()
+                {
+                    app.global_search.sort_mode = GlobalSearchSortMode::Relevance;
+                    app.global_search.selected_index = None;
+                }
+                if ui
+                    .selectable_label(
+                        app.global_search.sort_mode == GlobalSearchSortMode::ModifiedDate,
+                        t!("search.sort_modified_date"),
+                    )
+                    .clicked()
+                {
+                    app.global_search.sort_mode = GlobalSearchSortMode::ModifiedDate;
+                    app.global_search.selected_index = None;
+                }
+            });
+
+        ui.add_space(4.0);
+
+        // Sort direction toggle
+        let dir_label = if app.global_search.sort_descending { "↓" } else { "↑" };
+        let dir_hint = if app.global_search.sort_descending {
+            t!("search.sort_ascending_hint")
+        } else {
+            t!("search.sort_descending_hint")
+        };
+        if ui
+            .button(dir_label)
+            .on_hover_text(dir_hint)
+            .clicked()
+        {
+            app.global_search.sort_descending = !app.global_search.sort_descending;
+            app.global_search.selected_index = None;
         }
     });
 }
