@@ -38,8 +38,6 @@ pub struct SidebarContext<'a> {
     pub computer_icon: Option<&'a egui::TextureHandle>,
     pub is_renaming: bool, // Blocks navigation during renaming
     pub icon_loader: &'a mut crate::ui::icon_loader::IconLoader,
-    pub onedrive_path: Option<&'a str>, // OneDrive path (if installed)
-    pub onedrive_icon: Option<&'a egui::TextureHandle>, // Native OneDrive icon
     pub pinned_folders: &'a [PinnedFolder],
     pub is_item_dragging: bool,   // ANY item (file or folder) is being dragged
     pub is_folder_dragging: bool,  // A folder is being dragged from the main content area
@@ -163,74 +161,7 @@ pub fn render_sidebar_fixed_top(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> 
     }
     ui.add_space(4.0);
 
-    // 1. OneDrive (if available)
-    if let Some(onedrive_path) = ctx.onedrive_path {
-        let is_selected = !ctx.is_computer_view && ctx.current_path.starts_with(onedrive_path);
-
-        let (mut rect, response) =
-            ui.allocate_exact_size(egui::vec2(ui.available_width(), 28.0), Sense::click());
-
-        rect.min.x = ui.clip_rect().min.x;
-        rect.max.x = ui.clip_rect().max.x;
-
-        if ui.is_rect_visible(rect) {
-            let dark_mode = ui.visuals().dark_mode;
-            if is_selected {
-                ui.painter()
-                    .rect_filled(rect, 0.0, crate::ui::theme::selection_color(dark_mode));
-            } else if response.hovered() {
-                ui.painter()
-                    .rect_filled(rect, 0.0, crate::ui::theme::selection_hover_color(dark_mode));
-            }
-
-            let mut cursor_x = rect.min.x + 12.0;
-
-            // OneDrive icon
-            let onedrive_icon = ctx
-                .icon_loader
-                .get_or_load_folder_path_icon(ui.ctx(), onedrive_path);
-            if let Some(icon) = onedrive_icon {
-                let icon_rect = Rect::from_center_size(
-                    Pos2::new(cursor_x + 8.0, rect.center().y),
-                    egui::vec2(16.0, 16.0),
-                );
-                ui.painter().image(
-                    icon.id(),
-                    icon_rect,
-                    Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1.0, 1.0)),
-                    Color32::WHITE,
-                );
-                cursor_x += 24.0;
-            } else {
-                ui.painter().text(
-                    Pos2::new(cursor_x + 8.0, rect.center().y),
-                    egui::Align2::CENTER_CENTER,
-                    "☁",
-                    egui::FontId::proportional(12.0),
-                    Color32::from_rgb(0, 120, 215),
-                );
-                cursor_x += 24.0;
-            }
-
-            ui.painter().text(
-                Pos2::new(cursor_x, rect.center().y),
-                egui::Align2::LEFT_CENTER,
-                "OneDrive",
-                egui::FontId::proportional(11.5),
-                if is_selected {
-                    crate::ui::theme::selection_text_color(dark_mode)
-                } else {
-                    ui.visuals().text_color()
-                },
-            );
-        }
-
-        if response.clicked() && !ctx.is_renaming {
-            action = Some(SidebarAction::NavigateTo(onedrive_path.to_string()));
-        }
-    }
-
-    // 2. RECYCLE BIN
+    // 1. RECYCLE BIN
     {
         let is_selected = ctx.is_recycle_bin_view;
         let (mut rect, response) =
@@ -360,13 +291,8 @@ pub fn render_sidebar_drives(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Opt
         ui.add_space(4.0);
 
         for (disk_path, disk_label) in drives {
-            // Don't select drive if we're in OneDrive (OneDrive has priority)
-            let in_onedrive = ctx
-                .onedrive_path
-                .map(|od| ctx.current_path.starts_with(od))
-                .unwrap_or(false);
             let is_selected = ctx.highlighted_drive_path == Some(disk_path.as_str())
-                || (!ctx.is_computer_view && !in_onedrive && ctx.current_path.starts_with(disk_path));
+                || (!ctx.is_computer_view && ctx.current_path.starts_with(disk_path));
 
             let root_path = std::path::Path::new(disk_path.as_str());
             let is_expanded = ctx.tree_state.is_expanded(root_path);

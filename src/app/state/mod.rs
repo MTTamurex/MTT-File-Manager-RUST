@@ -282,10 +282,6 @@ pub struct ImageViewerApp {
     /// First attempt warns; second attempt on the same path within a short window confirms.
     pub pending_shell_open_confirmation: Option<(PathBuf, Instant)>,
 
-    // ONEDRIVE SIDEBAR SHORTCUT
-    pub onedrive_path: Option<String>, // OneDrive path (if installed)
-    pub onedrive_icon: Option<egui::TextureHandle>, // Native OneDrive icon
-
     // STARTUP OPTIMIZATION: Async Font Loading
     pub font_loader_rx: Option<Receiver<egui::FontDefinitions>>,
 
