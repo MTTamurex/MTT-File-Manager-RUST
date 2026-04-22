@@ -283,6 +283,7 @@ settings:
 preview:
   select_item: "Select a single item to see details"
   items_selected: "%{count} items selected"
+  total_size: "Total size: %{size}"
 tab_bar:
   unmute: "Unmute Audio"
   mute: "Mute Audio"

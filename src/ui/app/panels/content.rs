@@ -87,10 +87,18 @@ pub(super) fn render_preview_panel_layout(
 
                             let is_owner = app.media_preview_owner_tab_id == Some(tab_id);
 
+                            let multi_selection_total_size: u64 = app
+                                .items
+                                .iter()
+                                .filter(|item| app.multi_selection.contains(&item.path))
+                                .map(|item| item.size)
+                                .sum();
+
                             let action = render_preview_panel(
                                 ui,
                                 &file,
                                 app.multi_selection.len(),
+                                multi_selection_total_size,
                                 app.selected_thumbnail.as_ref(),
                                 app.selected_gif.as_mut(),
                                 app.media_preview.as_mut(), // Always pass mut if it exists, visibility is controlled by HWND

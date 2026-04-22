@@ -23,6 +23,7 @@ pub fn render_preview_panel(
     ui: &mut egui::Ui,
     file: &FileEntry,
     multi_selection_count: usize,
+    multi_selection_total_size: u64,
     selected_thumbnail: Option<&egui::TextureHandle>,
     selected_gif: Option<&mut crate::ui::components::media_preview::GifPlayer>,
     media_preview: Option<&mut MediaPreview>,
@@ -73,6 +74,12 @@ pub fn render_preview_panel(
                 egui::RichText::new(rust_i18n::t!("preview.items_selected", count = multi_selection_count).to_string())
                     .strong()
                     .size(18.0),
+            );
+            ui.add_space(6.0);
+            let total_size_text = crate::infrastructure::windows::format_size(multi_selection_total_size);
+            ui.label(
+                egui::RichText::new(rust_i18n::t!("preview.total_size", size = total_size_text).to_string())
+                    .size(14.0),
             );
             ui.add_space(10.0);
             ui.label(
