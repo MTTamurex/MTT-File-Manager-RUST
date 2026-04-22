@@ -23,10 +23,10 @@ pub(super) fn render_results_panel(
     modal_max_height: f32,
     hover_color: egui::Color32,
 ) {
-    // Use cached filtered indices to avoid O(N) recomputation every frame.
+    // Use cached sorted indices to avoid O(N) recomputation every frame.
     // Take ownership temporarily to avoid cloning; put back at the end.
-    app.global_search.ensure_filter_cache();
-    let filtered_indices = std::mem::take(&mut app.global_search.cached_filtered_indices);
+    app.global_search.ensure_sorted_indices();
+    let filtered_indices = std::mem::take(&mut app.global_search.cached_sorted_indices);
 
     let shows_load_more = !app.global_search.query.is_empty()
         && app.global_search.has_more_results
@@ -433,7 +433,7 @@ pub(super) fn render_results_panel(
     }
 
     // Restore the taken Vec so the cache is valid for the next frame.
-    app.global_search.cached_filtered_indices = filtered_indices;
+    app.global_search.cached_sorted_indices = filtered_indices;
 
     if let Some(action) = activate_result {
         match action {

@@ -1,7 +1,7 @@
 use crate::app::state::ImageViewerApp;
 use crate::workers::global_search_worker::GlobalSearchRequest;
 
-const DEFAULT_GLOBAL_SEARCH_PAGE_LIMIT: u32 = 200;
+const DEFAULT_GLOBAL_SEARCH_PAGE_LIMIT: u32 = 500;
 
 impl ImageViewerApp {
     pub(crate) fn open_global_search(&mut self) {
@@ -25,6 +25,10 @@ impl ImageViewerApp {
         self.global_search.scroll_offset_y = 0.0;
         self.global_search.last_scroll_offset_y = 0.0;
         self.global_search.session_total_indexed = 0;
+        self.global_search.category = crate::app::global_search_state::GlobalSearchCategory::All;
+        self.global_search.drive_filter = None;
+        self.global_search.sort_mode = crate::app::global_search_state::GlobalSearchSortMode::Relevance;
+        self.global_search.sort_descending = false;
 
         if let Err(error) = self
             .global_search
