@@ -169,8 +169,6 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) -> Option
                 computer_icon: app.cache_manager.computer_icon.as_ref(),
                 is_renaming: app.renaming_state.is_some() || app.sidebar_renaming.is_some(),
                 icon_loader: &mut app.item_icon_loader,
-                onedrive_path: app.onedrive_path.as_deref(),
-                onedrive_icon: app.onedrive_icon.as_ref(),
                 pinned_folders: &app.pinned_folders,
                 is_item_dragging: app.is_item_dragging,
                 is_folder_dragging,

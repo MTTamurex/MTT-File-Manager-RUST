@@ -381,13 +381,6 @@ impl ImageViewerApp {
             // OPTIMIZED GIF MANAGER
             gif_manager: crate::ui::components::gif_manager::GifManager::new(ctx.clone()),
 
-            // ONEDRIVE SIDEBAR SHORTCUT
-            onedrive_path: std::env::var("OneDrive")
-                .ok()
-                .or_else(|| std::env::var("OneDriveConsumer").ok())
-                .or_else(|| std::env::var("OneDriveCommercial").ok()),
-            onedrive_icon: None, // Will be loaded lazily on first sidebar render
-
             // NAVIGATION / ADDRESS BAR
             is_address_editing: false,
             show_address_history_menu: false,
