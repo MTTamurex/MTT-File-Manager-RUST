@@ -101,11 +101,18 @@ impl RenderWorker {
         let _ = self.bounded_text_tx.send(req);
     }
 
-    /// Drain all completed render results.
-    pub fn drain_results(&self) -> Vec<RenderResult> {
-        let mut out = Vec::new();
-        while let Ok(r) = self.rx.try_recv() {
-            out.push(r);
+    /// Drain up to `max` completed render results. Remaining results stay
+    /// in the channel and are picked up on later frames; this avoids
+    /// pushing many large `glTexImage2D` uploads through the Glow renderer
+    /// in a single frame, which can degrade the GL kernel-mode driver and
+    /// the OS compositor (DWM) under heavy churn.
+    pub fn drain_results(&self, max: usize) -> Vec<RenderResult> {
+        let mut out = Vec::with_capacity(max.min(8));
+        for _ in 0..max {
+            match self.rx.try_recv() {
+                Ok(r) => out.push(r),
+                Err(_) => break,
+            }
         }
         out
     }

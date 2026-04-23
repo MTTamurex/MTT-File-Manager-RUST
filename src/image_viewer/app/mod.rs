@@ -13,7 +13,7 @@ mod rendering;
 use filmstrip::FilmstripState;
 use gif_export::{GifAnimation, ViewerStatusMessage};
 
-const DEFAULT_CACHE_RADIUS: usize = 3;
+const DEFAULT_CACHE_RADIUS: usize = 1;
 const MIN_ZOOM_FACTOR: f32 = 0.10;
 const MAX_ZOOM_FACTOR: f32 = 8.0;
 /// Minimum interval between navigation actions to prevent flooding workers
@@ -442,7 +442,13 @@ impl DedicatedImageViewerApp {
     }
 
     fn handle_prefetch_results(&mut self, ctx: &egui::Context) {
-        for output in self.prefetch.drain_results(256) {
+        // Cap GPU texture uploads per frame. The Glow renderer issues a
+        // glTexImage2D per load_texture, and slamming dozens of multi-MB
+        // uploads in a single frame can degrade the GL kernel-mode driver
+        // / DWM compositor for the whole OS (especially on Intel iGPUs).
+        // Pending results stay in the channel and drain on subsequent frames;
+        // worker threads call ctx.request_repaint() so we wake up promptly.
+        for output in self.prefetch.drain_results(2) {
             self.requested_jobs.remove(&output.index);
 
             match output.frame {
