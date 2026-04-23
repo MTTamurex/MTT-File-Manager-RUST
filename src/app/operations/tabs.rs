@@ -35,6 +35,9 @@ impl ImageViewerApp {
         active.folders_position = self.folders_position;
         active.show_left_sidebar = self.show_left_sidebar;
         active.show_preview_panel = self.show_preview_panel;
+        active.collapse_quick_access = self.collapse_quick_access;
+        active.collapse_local_disks = self.collapse_local_disks;
+        active.collapse_network_drives = self.collapse_network_drives;
 
         // Save per-tab sidebar state (expanded nodes + scroll position)
         active.sidebar_expanded = self.sidebar_tree.snapshot_expanded();
@@ -122,6 +125,9 @@ impl ImageViewerApp {
             self.folders_position = active.folders_position;
             self.show_left_sidebar = active.show_left_sidebar;
             self.show_preview_panel = active.show_preview_panel;
+            self.collapse_quick_access = active.collapse_quick_access;
+            self.collapse_local_disks = active.collapse_local_disks;
+            self.collapse_network_drives = active.collapse_network_drives;
         }
 
         // Restore per-tab sidebar state (expanded nodes + scroll position)

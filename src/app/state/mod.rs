@@ -121,6 +121,9 @@ pub struct ImageViewerApp {
     pub folders_position: FoldersPosition, // First, Last, Mixed
     pub show_hidden_files: bool,           // Show files with FILE_ATTRIBUTE_HIDDEN
     pub show_recycle_bin: bool,             // Show Recycle Bin in Quick Access
+    pub collapse_quick_access: bool,        // Collapse Quick Access section in sidebar
+    pub collapse_local_disks: bool,         // Collapse Local Disks section in sidebar
+    pub collapse_network_drives: bool,      // Collapse Network Drives section in sidebar
 
     // "Normal" (unlocked) state â€” these track what unlocked folders should use.
     // When a locked folder overrides active settings, these remain unchanged.
