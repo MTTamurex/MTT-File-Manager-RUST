@@ -12,7 +12,11 @@ const FILMSTRIP_PANEL_HEIGHT: f32 = 88.0;
 const FILMSTRIP_OVERSCAN: usize = 20;
 const FILMSTRIP_MAX_CACHED: usize = 96;
 pub(super) const FILMSTRIP_DECODE_MAX_SIDE: u32 = 160;
-const FILMSTRIP_MAX_UPLOADS_PER_FRAME: usize = 12;
+// Keep per-frame texture uploads small. The Glow renderer issues a
+// glTexImage2D per load_texture, and pairing this with the main image
+// uploads (handle_prefetch_results) can saturate the GL driver. Pending
+// thumbnails stay in the channel and drain on subsequent frames.
+const FILMSTRIP_MAX_UPLOADS_PER_FRAME: usize = 2;
 const FILMSTRIP_MAX_IN_FLIGHT: usize = 4;
 
 pub(in crate::image_viewer) struct FilmstripState {

@@ -144,7 +144,7 @@ impl PdfViewerApp {
             return;
         }
 
-        let results = worker.drain_results();
+        let results = worker.drain_results(2);
         for r in results {
             self.pending.remove(&r.page_idx);
             let tex = ctx.load_texture(
