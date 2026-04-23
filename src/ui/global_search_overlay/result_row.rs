@@ -337,6 +337,37 @@ pub(super) fn render_result_row(
         }
 
         if hover_duration >= TOOLTIP_DELAY_SECS {
+            // When sorting is active metadata_cache may already contain the
+            // timestamp, which means the else branch below never runs and
+            // size_cache never gets warmed. Warm size_cache explicitly first.
+            if !is_dir && size == 0 && app.global_search.size_cache.get(&full_path).is_none() {
+                if let Ok(meta) = std::fs::metadata(&full_path) {
+                    app.global_search.size_cache.put(full_path.clone(), Some(meta.len()));
+                }
+            }
+
+            // Warm caches first: this reads fs::metadata and populates both
+            // metadata_cache and size_cache, ensuring resolve_result_size
+            // sees fresh data when size == 0.
+            let modified_ts = if let Some(&cached_ts) = app.global_search.metadata_cache.get(&full_path) {
+                cached_ts
+            } else {
+                let meta = std::fs::metadata(&full_path).ok();
+                let ts = meta
+                    .as_ref()
+                    .and_then(|m| m.modified().ok())
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                if !is_dir {
+                    if let Some(len) = meta.as_ref().map(|m| m.len()) {
+                        app.global_search.size_cache.put(full_path.clone(), Some(len));
+                    }
+                }
+                app.global_search.metadata_cache.put(full_path.clone(), ts);
+                ts
+            };
+
             let size_opt = actions::resolve_result_size(app, &full_path, is_dir, size);
             let size_text = size_opt.map(crate::infrastructure::windows::format_size);
             let thumb_tex: Option<egui::TextureHandle> = if !is_dir {
@@ -375,25 +406,6 @@ pub(super) fn render_result_row(
                 }
             } else {
                 None
-            };
-
-            let modified_ts = if let Some(&cached_ts) = app.global_search.metadata_cache.get(&full_path) {
-                cached_ts
-            } else {
-                let meta = std::fs::metadata(&full_path).ok();
-                let ts = meta
-                    .as_ref()
-                    .and_then(|m| m.modified().ok())
-                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                    .map(|d| d.as_secs())
-                    .unwrap_or(0);
-                if !is_dir {
-                    if let Some(len) = meta.as_ref().map(|m| m.len()) {
-                        app.global_search.size_cache.put(full_path.clone(), Some(len));
-                    }
-                }
-                app.global_search.metadata_cache.put(full_path.clone(), ts);
-                ts
             };
 
           if let Some(mouse_pos) = ui.input(|i| i.pointer.hover_pos()) {
