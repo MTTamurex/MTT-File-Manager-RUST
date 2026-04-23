@@ -251,14 +251,7 @@ impl IconLoader {
         let dc = self.disk_cache.clone();
         std::thread::spawn(move || {
             #[cfg(target_os = "windows")]
-            let _com_initialized = unsafe {
-                let ok = ::windows::Win32::System::Com::CoInitializeEx(
-                    None,
-                    ::windows::Win32::System::Com::COINIT_APARTMENTTHREADED,
-                )
-                .is_ok();
-                ok
-            };
+            let _com_guard = super::ComStaGuard::new();
 
             let mut revalidated = 0usize;
             let mut changed = 0usize;
@@ -316,13 +309,7 @@ impl IconLoader {
                     changed,
                 );
             }
-
-            #[cfg(target_os = "windows")]
-            if _com_initialized {
-                unsafe {
-                    ::windows::Win32::System::Com::CoUninitialize();
-                }
-            }
+            // ComStaGuard drops here, balancing CoUninitialize automatically.
         });
     }
 }
