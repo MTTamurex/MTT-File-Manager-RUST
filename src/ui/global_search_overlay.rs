@@ -664,16 +664,7 @@ fn render_filter_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
 
         // Sort direction toggle
         let dir_label = if app.global_search.sort_descending { "↓" } else { "↑" };
-        let dir_hint = if app.global_search.sort_descending {
-            t!("search.sort_ascending_hint")
-        } else {
-            t!("search.sort_descending_hint")
-        };
-        if ui
-            .button(dir_label)
-            .on_hover_text(dir_hint)
-            .clicked()
-        {
+        if ui.button(dir_label).clicked() {
             app.global_search.sort_descending = !app.global_search.sort_descending;
             app.global_search.selected_index = None;
         }
