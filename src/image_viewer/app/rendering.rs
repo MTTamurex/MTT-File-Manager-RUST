@@ -46,10 +46,10 @@ impl super::DedicatedImageViewerApp {
                     ui.label(format!("{} / {}", self.current_index + 1, total));
                 }
                 ui.separator();
-                let current_filename = self.current_filename();
-                ui.label(current_filename.as_ref());
                 if let Some(path) = self.current_path() {
-                    ui.small(path.to_string_lossy());
+                    if let Some(parent) = path.parent() {
+                        ui.small(parent.to_string_lossy());
+                    }
                 }
             });
 
