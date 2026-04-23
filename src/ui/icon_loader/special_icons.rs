@@ -28,7 +28,7 @@ impl IconLoader {
                 let dc = dc.clone();
                 let cached_pixels = data;
                 std::thread::spawn(move || {
-                    unsafe { let _ = ::windows::Win32::System::Com::CoInitializeEx(None, ::windows::Win32::System::Com::COINIT_APARTMENTTHREADED); }
+                    let _com = super::ComStaGuard::new();
                     if let Ok((fresh, w, h)) = windows::extract_computer_icon(IconSize::Jumbo) {
                         if fresh != cached_pixels || w != width || h != height {
                             dc.put_shell_icon("shell:computer", &fresh, w, h);
@@ -84,7 +84,7 @@ impl IconLoader {
                 let dc = dc.clone();
                 let cached_pixels = data;
                 std::thread::spawn(move || {
-                    unsafe { let _ = ::windows::Win32::System::Com::CoInitializeEx(None, ::windows::Win32::System::Com::COINIT_APARTMENTTHREADED); }
+                    let _com = super::ComStaGuard::new();
                     if let Ok((fresh, w, h)) = windows::extract_recycle_bin_icon(IconSize::Jumbo) {
                         if fresh != cached_pixels || w != width || h != height {
                             dc.put_shell_icon(RECYCLE_BIN_CACHE_KEY, &fresh, w, h);

@@ -18,6 +18,59 @@ mod async_ops;
 mod file_icons;
 mod special_icons;
 
+/// RAII guard for Single-Threaded Apartment COM initialization on icon
+/// extraction threads. Required by `SHParseDisplayName` /
+/// `IShellItemImageFactory` to resolve PIDL-based icons correctly.
+///
+/// Behavior:
+/// - On success: schedules `CoUninitialize` in `Drop` (balanced).
+/// - On `RPC_E_CHANGED_MODE`: COM was previously initialized as MTA on this
+///   thread; we do NOT call `CoUninitialize` (we did not init), and shell
+///   icons may degrade to generic. Logged at debug level.
+/// - On any other failure: logged at warn level for diagnostics.
+///
+/// Using a guard ensures `CoUninitialize` is invoked even if the worker
+/// closure panics, preventing per-thread COM leaks.
+struct ComStaGuard {
+    needs_uninit: bool,
+}
+
+impl ComStaGuard {
+    fn new() -> Self {
+        use ::windows::Win32::Foundation::RPC_E_CHANGED_MODE;
+        use ::windows::Win32::System::Com::{CoInitializeEx, COINIT_APARTMENTTHREADED};
+        // SAFETY: CoInitializeEx is balanced by CoUninitialize in Drop when
+        // `needs_uninit` is true. The HRESULT is inspected to distinguish
+        // success from "already initialized in different mode".
+        let hr = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
+        if hr.is_ok() {
+            Self { needs_uninit: true }
+        } else if hr == RPC_E_CHANGED_MODE {
+            log::debug!(
+                "[Icon] COM already initialized as MTA on this thread (RPC_E_CHANGED_MODE); \
+                 shell icons may fall back to generic"
+            );
+            Self { needs_uninit: false }
+        } else {
+            log::warn!(
+                "[Icon] CoInitializeEx(STA) failed: HRESULT 0x{:08X} — \
+                 shell icons may fall back to generic",
+                hr.0 as u32
+            );
+            Self { needs_uninit: false }
+        }
+    }
+}
+
+impl Drop for ComStaGuard {
+    fn drop(&mut self) {
+        if self.needs_uninit {
+            // SAFETY: paired with the successful CoInitializeEx in `new`.
+            unsafe { ::windows::Win32::System::Com::CoUninitialize(); }
+        }
+    }
+}
+
 /// Result from a background icon extraction thread.
 struct AsyncIconResult {
     key: String,
@@ -135,13 +188,9 @@ impl IconLoader {
             // STA COM is required for SHParseDisplayName / IShellItemImageFactory
             // to correctly resolve PIDL-based icons (especially ZIP virtual paths).
             // Without explicit init, Shell API may auto-init as MTA and return
-            // generic icons.
-            use ::windows::Win32::System::Com::{
-                CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED,
-            };
-            unsafe {
-                let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
-            }
+            // generic icons. The guard logs failures and ensures balanced
+            // CoUninitialize even on panic.
+            let _com = ComStaGuard::new();
             let data = if is_virtual {
                 windows::extract_shell_icon(&path_owned, IconSize::Jumbo)
                     .map_err(|e| log::trace!("[Icon] Shell icon extraction failed for {:?}: {}", path_owned, e))
@@ -152,7 +201,6 @@ impl IconLoader {
                     .ok()
             };
             let _ = tx.send(AsyncIconResult { key: cache_key, data });
-            unsafe { CoUninitialize(); }
         });
     }
 

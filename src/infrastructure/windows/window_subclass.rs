@@ -222,7 +222,12 @@ pub fn try_unfreeze_layout(available_width: f32, available_height: f32) -> bool 
 /// # Safety
 /// HWND must be a valid window handle from the current process.
 pub fn install_borderless_subclass(hwnd: HWND) -> bool {
-    if SUBCLASS_INSTALLED.load(Ordering::SeqCst) {
+    // Atomically claim the install slot. If another thread already installed
+    // (or is mid-install), this returns Err and we report success.
+    if SUBCLASS_INSTALLED
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_err()
+    {
         return true; // Already installed
     }
 
@@ -238,9 +243,10 @@ pub fn install_borderless_subclass(hwnd: HWND) -> bool {
     };
 
     if result.as_bool() {
-        SUBCLASS_INSTALLED.store(true, Ordering::SeqCst);
         true
     } else {
+        // Roll back the claim so a future caller may retry.
+        SUBCLASS_INSTALLED.store(false, Ordering::Release);
         log::error!("Failed to install borderless window subclass");
         false
     }
