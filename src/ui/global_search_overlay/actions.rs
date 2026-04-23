@@ -18,12 +18,16 @@ pub(super) fn format_result_meta(file_type: &str) -> String {
 
 #[inline]
 pub(super) fn filtered_contains(filtered_indices: &[usize], source_idx: usize) -> bool {
-    filtered_indices.binary_search(&source_idx).is_ok()
+    // Linear search: indices are no longer numerically sorted when date
+    // sorting is active, so binary_search would return incorrect results.
+    filtered_indices.iter().any(|&idx| idx == source_idx)
 }
 
 #[inline]
 pub(super) fn filtered_position(filtered_indices: &[usize], source_idx: usize) -> Option<usize> {
-    filtered_indices.binary_search(&source_idx).ok()
+    // Linear search: indices are no longer numerically sorted when date
+    // sorting is active, so binary_search would return incorrect results.
+    filtered_indices.iter().position(|&idx| idx == source_idx)
 }
 
 pub(super) fn normalize_path_for_compare(path: &str) -> String {
