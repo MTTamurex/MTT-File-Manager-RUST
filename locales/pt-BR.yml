@@ -6,6 +6,8 @@ sidebar:
   local_disks: "Discos locais"
   network_drives: "Unidades de rede"
   eject_drive: "Ejetar ISO montada"
+  collapse_section: "Recolher seção"
+  expand_section: "Expandir seção"
 special_folders:
   desktop: "Área de Trabalho"
   documents: "Documentos"

@@ -43,6 +43,9 @@ pub struct SidebarContext<'a> {
     pub is_folder_dragging: bool,  // A folder is being dragged from the main content area
     pub dragging_path: Option<&'a str>, // Path of the folder being dragged
     pub show_recycle_bin: bool,
+    pub collapse_quick_access: bool,
+    pub collapse_local_disks: bool,
+    pub collapse_network_drives: bool,
     /// Inline drive rename: (drive_path, editable_text)
     pub sidebar_renaming: Option<(&'a str, &'a str)>,
     pub sidebar_rename_focus: bool,
@@ -67,6 +70,12 @@ pub enum SidebarAction {
     EjectDrive(String),
     /// Toggle expand/collapse of a folder tree node
     TreeToggleExpand(std::path::PathBuf),
+    /// Toggle collapse of Quick Access section
+    ToggleQuickAccess,
+    /// Toggle collapse of Local Disks section
+    ToggleLocalDisks,
+    /// Toggle collapse of Network Drives section
+    ToggleNetworkDrives,
     /// Items were dropped onto a sidebar folder/drive (move or copy)
     DropItemsTo(String),
 }
@@ -145,13 +154,24 @@ pub fn render_sidebar_fixed_top(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> 
     // Track the start Y for drag-to-pin zone detection
     let qa_section_start_y = ui.cursor().top();
 
-    // Section header — pure label, not interactive.
-    // Using Sense::hover() so we can detect pointer position for drag-to-pin
-    // highlight, but the label itself is never a clickable or selectable item.
+    // Section header with inline collapse toggle
     let (qa_label_rect, _) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 16.0), Sense::hover());
+
+    let toggle_size = 18.0;
+    let toggle_rect = Rect::from_center_size(
+        Pos2::new(qa_label_rect.max.x - toggle_size / 2.0 - 3.0, qa_label_rect.center().y),
+        egui::vec2(toggle_size, toggle_size),
+    );
+    let toggle_response = ui
+        .interact(toggle_rect, egui::Id::new("sidebar_toggle_qa"), Sense::click())
+        .on_hover_text(if ctx.collapse_quick_access {
+            t!("sidebar.expand_section")
+        } else {
+            t!("sidebar.collapse_section")
+        });
+
     if ui.is_rect_visible(qa_label_rect) {
-        // Defer highlight drawing until after we know the full QA zone (see below).
         ui.painter().text(
             Pos2::new(qa_label_rect.min.x + 8.0, qa_label_rect.center().y),
             egui::Align2::LEFT_CENTER,
@@ -159,11 +179,31 @@ pub fn render_sidebar_fixed_top(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> 
             egui::FontId::proportional(10.0),
             Color32::from_gray(120),
         );
-    }
-    ui.add_space(4.0);
 
-    // 1. RECYCLE BIN
-    if ctx.show_recycle_bin {
+        let toggle_icon = if ctx.collapse_quick_access { "v" } else { "^" };
+        let toggle_color = if toggle_response.hovered() {
+            ui.visuals().text_color()
+        } else {
+            Color32::from_gray(140)
+        };
+        ui.painter().text(
+            toggle_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            toggle_icon,
+            egui::FontId::proportional(14.0),
+            toggle_color,
+        );
+    }
+
+    if toggle_response.clicked() && action.is_none() {
+        action = Some(SidebarAction::ToggleQuickAccess);
+    }
+
+    if !ctx.collapse_quick_access {
+        ui.add_space(4.0);
+
+        // 1. RECYCLE BIN
+        if ctx.show_recycle_bin {
         let is_selected = ctx.is_recycle_bin_view;
         let (mut rect, response) =
             ui.allocate_exact_size(egui::vec2(ui.available_width(), 28.0), Sense::click());
@@ -220,11 +260,11 @@ pub fn render_sidebar_fixed_top(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> 
         }
     }
 
-    // 2. USER-PINNED FOLDERS
-    render_pinned_folders(ui, ctx, &mut action);
+        // 2. USER-PINNED FOLDERS
+        render_pinned_folders(ui, ctx, &mut action);
 
-    // === Drag-to-pin drop zone ===
-    if ctx.is_folder_dragging {
+        // === Drag-to-pin drop zone ===
+        if ctx.is_folder_dragging {
         let qa_section_end_y = ui.cursor().top();
         let qa_zone = egui::Rect::from_min_max(
             egui::pos2(ui.clip_rect().min.x, qa_section_start_y),
@@ -241,18 +281,19 @@ pub fn render_sidebar_fixed_top(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> 
         // their own hover feedback individually. The zone is only used for
         // the functional "pin folder on drop" logic below.
 
-        let released = ui.ctx().input(|inp| inp.pointer.primary_released());
-        if released && pointer_in_zone {
-            if let Some(path) = ctx.dragging_path {
-                let already_pinned = ctx.pinned_folders.iter().any(|pf| pf.path == path);
-                if !already_pinned && action.is_none() {
-                    action = Some(SidebarAction::PinFolder(path.to_string()));
+            let released = ui.ctx().input(|inp| inp.pointer.primary_released());
+            if released && pointer_in_zone {
+                if let Some(path) = ctx.dragging_path {
+                    let already_pinned = ctx.pinned_folders.iter().any(|pf| pf.path == path);
+                    if !already_pinned && action.is_none() {
+                        action = Some(SidebarAction::PinFolder(path.to_string()));
+                    }
                 }
             }
         }
-    }
 
-    ui.add_space(8.0);
+        ui.add_space(8.0);
+    }
     ui.separator();
 
     action
@@ -276,19 +317,64 @@ pub fn render_sidebar_drives(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Opt
         }
     }
 
-    let mut render_drive_group = |title: &str, drives: Vec<(&String, &String)>| {
+    let mut render_drive_group = |title: &str,
+                                   drives: Vec<(&String, &String)>,
+                                   collapsed: bool,
+                                   toggle_action: SidebarAction| {
         if drives.is_empty() {
             return;
         }
 
-        ui.horizontal(|ui| {
-            ui.add_space(8.0);
-            ui.label(
-                egui::RichText::new(title)
-                    .size(10.0)
-                    .color(Color32::from_gray(120)),
+        // Section header with inline collapse toggle
+        let (header_rect, _) =
+            ui.allocate_exact_size(egui::vec2(ui.available_width(), 16.0), Sense::hover());
+
+        let toggle_size = 18.0;
+        let toggle_rect = Rect::from_center_size(
+            Pos2::new(header_rect.max.x - toggle_size / 2.0 - 3.0, header_rect.center().y),
+            egui::vec2(toggle_size, toggle_size),
+        );
+        let toggle_id = egui::Id::new(("sidebar_toggle_drive", title));
+        let toggle_response = ui
+            .interact(toggle_rect, toggle_id, Sense::click())
+            .on_hover_text(if collapsed {
+                t!("sidebar.expand_section")
+            } else {
+                t!("sidebar.collapse_section")
+            });
+
+        if ui.is_rect_visible(header_rect) {
+            ui.painter().text(
+                Pos2::new(header_rect.min.x + 8.0, header_rect.center().y),
+                egui::Align2::LEFT_CENTER,
+                title,
+                egui::FontId::proportional(10.0),
+                Color32::from_gray(120),
             );
-        });
+
+            let toggle_icon = if collapsed { "v" } else { "^" };
+            let toggle_color = if toggle_response.hovered() {
+                ui.visuals().text_color()
+            } else {
+                Color32::from_gray(140)
+            };
+            ui.painter().text(
+                toggle_rect.center(),
+                egui::Align2::CENTER_CENTER,
+                toggle_icon,
+                egui::FontId::proportional(14.0),
+                toggle_color,
+            );
+        }
+
+        if toggle_response.clicked() && action.is_none() {
+            action = Some(toggle_action);
+        }
+
+        if collapsed {
+            return;
+        }
+
         ui.add_space(4.0);
 
         for (disk_path, disk_label) in drives {
@@ -572,8 +658,18 @@ pub fn render_sidebar_drives(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Opt
         ui.add_space(6.0);
     };
 
-    render_drive_group(&t!("sidebar.local_disks"), local_drives);
-    render_drive_group(&t!("sidebar.network_drives"), network_drives);
+    render_drive_group(
+        &t!("sidebar.local_disks"),
+        local_drives,
+        ctx.collapse_local_disks,
+        SidebarAction::ToggleLocalDisks,
+    );
+    render_drive_group(
+        &t!("sidebar.network_drives"),
+        network_drives,
+        ctx.collapse_network_drives,
+        SidebarAction::ToggleNetworkDrives,
+    );
 
     let drives_ms = t_drives.elapsed().as_millis();
     if drives_ms > 50 {

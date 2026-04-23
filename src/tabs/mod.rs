@@ -82,6 +82,10 @@ pub struct TabState {
     pub sidebar_expanded: HashSet<PathBuf>,
     /// Sidebar tree: scroll position (per-tab)
     pub sidebar_scroll_y: f32,
+    /// Sidebar section collapse states (per-tab)
+    pub collapse_quick_access: bool,
+    pub collapse_local_disks: bool,
+    pub collapse_network_drives: bool,
 }
 
 impl TabState {
@@ -117,6 +121,9 @@ impl TabState {
             quick_search_last_input: std::time::Instant::now(),
             sidebar_expanded: HashSet::new(),
             sidebar_scroll_y: 0.0,
+            collapse_quick_access: false,
+            collapse_local_disks: false,
+            collapse_network_drives: false,
         }
     }
 
@@ -154,6 +161,9 @@ impl TabState {
             quick_search_last_input: std::time::Instant::now(),
             sidebar_expanded: HashSet::new(),
             sidebar_scroll_y: 0.0,
+            collapse_quick_access: false,
+            collapse_local_disks: false,
+            collapse_network_drives: false,
         }
     }
 
@@ -241,6 +251,9 @@ impl TabState {
         self.quick_search_buffer.clear();
         self.sidebar_expanded.clear();
         self.sidebar_scroll_y = 0.0;
+        self.collapse_quick_access = false;
+        self.collapse_local_disks = false;
+        self.collapse_network_drives = false;
         self
     }
 }

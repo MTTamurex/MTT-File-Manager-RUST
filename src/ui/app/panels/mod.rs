@@ -174,6 +174,9 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) -> Option
                 is_folder_dragging,
                 dragging_path,
                 show_recycle_bin: app.show_recycle_bin,
+                collapse_quick_access: app.collapse_quick_access,
+                collapse_local_disks: app.collapse_local_disks,
+                collapse_network_drives: app.collapse_network_drives,
                 sidebar_renaming: sidebar_renaming_ref,
                 sidebar_rename_focus: app.sidebar_rename_focus,
                 mounted_iso_drives: &app.file_operation_state.mounted_iso_drives,
@@ -301,6 +304,15 @@ fn handle_sidebar_action(app: &mut ImageViewerApp, action: SidebarAction) {
         SidebarAction::EjectDrive(path) => app.eject_mounted_iso_drive(&path),
         SidebarAction::TreeToggleExpand(path) => {
             app.sidebar_tree.toggle_expand(&path);
+        }
+        SidebarAction::ToggleQuickAccess => {
+            app.collapse_quick_access = !app.collapse_quick_access;
+        }
+        SidebarAction::ToggleLocalDisks => {
+            app.collapse_local_disks = !app.collapse_local_disks;
+        }
+        SidebarAction::ToggleNetworkDrives => {
+            app.collapse_network_drives = !app.collapse_network_drives;
         }
         SidebarAction::DropItemsTo(path) => {
             if app.is_item_dragging {
