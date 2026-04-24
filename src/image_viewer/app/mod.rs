@@ -11,7 +11,7 @@ mod gif_export;
 mod rendering;
 
 use filmstrip::FilmstripState;
-use gif_export::{GifAnimation, ViewerStatusMessage};
+use gif_export::{GifAnimation, GifUploadQueue, ViewerStatusMessage};
 
 const DEFAULT_CACHE_RADIUS: usize = 1;
 const MIN_ZOOM_FACTOR: f32 = 0.10;
@@ -52,6 +52,8 @@ pub struct DedicatedImageViewerApp {
         usize,
         std::sync::mpsc::Receiver<Result<Vec<loader::GifAnimationFrame>, String>>,
     )>,
+    /// Staged GIF frame textures awaiting rate-limited upload.
+    pub(super) gif_upload_queue: Option<GifUploadQueue>,
     pub(super) conversion_rx: Option<std::sync::mpsc::Receiver<Result<std::path::PathBuf, String>>>,
     pub(super) conversion_in_progress: bool,
     pub(super) status_message: Option<ViewerStatusMessage>,
@@ -60,6 +62,8 @@ pub struct DedicatedImageViewerApp {
     pub(super) filmstrip: FilmstripState,
     /// Whether to apply dark theme on first frame.
     pub(super) dark_mode: bool,
+    /// Periodic resource leak monitor for diagnostics.
+    pub(super) resource_monitor: crate::image_viewer::metrics::ResourceLeakMonitor,
 }
 
 impl DedicatedImageViewerApp {
@@ -112,12 +116,16 @@ impl DedicatedImageViewerApp {
             gif_animation: None,
             gif_loaded_index: None,
             gif_decode_rx: None,
+            gif_upload_queue: None,
             conversion_rx: None,
             conversion_in_progress: false,
             status_message: None,
             last_navigate_instant: now - Duration::from_millis(100),
             filmstrip: FilmstripState::new(),
             dark_mode,
+            resource_monitor: crate::image_viewer::metrics::ResourceLeakMonitor::new(
+                Duration::from_secs(10),
+            ),
         };
 
         app.prefetch.set_center(start_index);
@@ -209,6 +217,7 @@ impl DedicatedImageViewerApp {
         self.gif_animation = None;
         self.gif_loaded_index = None;
         self.gif_decode_rx = None;
+        self.gif_upload_queue = None;
         self.conversion_rx = None;
         self.conversion_in_progress = false;
         self.status_message = None;
@@ -495,6 +504,7 @@ impl DedicatedImageViewerApp {
         // Reset GIF animation state for the new image.
         self.gif_animation = None;
         self.gif_loaded_index = None;
+        self.gif_upload_queue = None;
 
         // Update the atomic center so workers skip irrelevant jobs.
         self.prefetch.set_center(index);
@@ -706,6 +716,7 @@ impl eframe::App for DedicatedImageViewerApp {
         // Decode and upload all GIF frames (once per image), then advance timer.
         self.load_gif_if_needed(ctx);
         self.poll_gif_decode(ctx);
+        self.pump_gif_upload_queue(ctx);
         self.advance_gif_frame(ctx);
         self.poll_conversion();
 
@@ -730,6 +741,9 @@ impl eframe::App for DedicatedImageViewerApp {
         if self.texture_index != Some(self.current_index) && !self.cache.has(self.current_index) {
             ctx.request_repaint_after(Duration::from_millis(200));
         }
+
+        // Periodic resource leak diagnostics (every 10s).
+        self.resource_monitor.tick();
     }
 }
 
