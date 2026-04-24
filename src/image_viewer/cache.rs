@@ -106,13 +106,15 @@ impl WindowCache {
 }
 
 pub struct PrefetchEngine {
-    jobs_tx: Sender<LoadJob>,
-    bg_jobs_tx: Sender<LoadJob>,
+    jobs_tx: Option<Sender<LoadJob>>,
+    bg_jobs_tx: Option<Sender<LoadJob>>,
     urgent_job: Arc<std::sync::Mutex<Option<LoadJob>>>,
-    urgent_notify_tx: Sender<()>,
+    urgent_notify_tx: Option<Sender<()>>,
     results_rx: Receiver<LoadOutput>,
     active_center: Arc<AtomicUsize>,
     repaint_ctx: Arc<OnceLock<egui::Context>>,
+    /// Worker thread handles — joined on Drop to ensure clean COM/WIC teardown.
+    worker_handles: Vec<std::thread::JoinHandle<()>>,
 }
 
 impl PrefetchEngine {
@@ -128,6 +130,7 @@ impl PrefetchEngine {
         let (urgent_notify_tx, urgent_notify_rx) = crossbeam_channel::bounded::<()>(1);
         let active_center = Arc::new(AtomicUsize::new(0));
         let repaint_ctx = Arc::new(OnceLock::<egui::Context>::new());
+        let mut worker_handles = Vec::with_capacity(worker_count);
 
         for worker_id in 0..worker_count {
             let jobs_rx = jobs_rx.clone();
@@ -232,23 +235,29 @@ impl PrefetchEngine {
                     }
                 });
 
-            if let Err(err) = spawn_result {
-                log::warn!(
-                    "[IMAGE-VIEWER] failed to spawn loader worker {}: {}",
-                    worker_id,
-                    err
-                );
+            match spawn_result {
+                Ok(handle) => {
+                    worker_handles.push(handle);
+                }
+                Err(err) => {
+                    log::warn!(
+                        "[IMAGE-VIEWER] failed to spawn loader worker {}: {}",
+                        worker_id,
+                        err
+                    );
+                }
             }
         }
 
         Self {
-            jobs_tx,
-            bg_jobs_tx,
+            jobs_tx: Some(jobs_tx),
+            bg_jobs_tx: Some(bg_jobs_tx),
             urgent_job,
-            urgent_notify_tx,
+            urgent_notify_tx: Some(urgent_notify_tx),
             results_rx,
             active_center,
             repaint_ctx,
+            worker_handles,
         }
     }
 
@@ -281,14 +290,20 @@ impl PrefetchEngine {
                     slot.replace(job);
                     // Wake a worker blocked in select! so it picks up the
                     // urgent job without waiting for a channel message.
-                    let _ = self.urgent_notify_tx.try_send(());
+                    if let Some(tx) = &self.urgent_notify_tx {
+                        let _ = tx.try_send(());
+                    }
                     true
                 } else {
                     false
                 }
             }
-            LoadPriority::High => self.jobs_tx.try_send(job).is_ok(),
-            LoadPriority::Normal => self.bg_jobs_tx.try_send(job).is_ok(),
+            LoadPriority::High => {
+                self.jobs_tx.as_ref().map_or(false, |tx| tx.try_send(job).is_ok())
+            }
+            LoadPriority::Normal => {
+                self.bg_jobs_tx.as_ref().map_or(false, |tx| tx.try_send(job).is_ok())
+            }
         }
     }
 
@@ -301,6 +316,31 @@ impl PrefetchEngine {
             }
         }
         out
+    }
+}
+
+impl Drop for PrefetchEngine {
+    fn drop(&mut self) {
+        // Drop senders first so workers see the channel disconnect and
+        // exit their select! loops. Workers will then run their thread-local
+        // destructors (ComInitGuard → CoUninitialize + WIC factory release).
+        //
+        // We deliberately do NOT join the worker threads here because:
+        // 1. join() blocks the calling thread (UI thread) until the worker
+        //    finishes its current decode, which can take seconds for large
+        //    images/GIFs — this causes eframe's shutdown to hang/crash.
+        // 2. The ComInitGuard thread-local handles COM/WIC cleanup
+        //    automatically when the worker thread exits.
+        // 3. If the process exits before workers finish, the OS reclaims
+        //    all resources (handles, COM apartments, threads) anyway.
+        self.jobs_tx.take();
+        self.bg_jobs_tx.take();
+        self.urgent_notify_tx.take();
+
+        // Drop the JoinHandles without joining. The threads become
+        // detached and will exit on their own once channels are
+        // disconnected. Thread-local destructors handle cleanup.
+        self.worker_handles.clear();
     }
 }
 

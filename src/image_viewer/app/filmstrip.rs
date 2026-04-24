@@ -103,12 +103,29 @@ impl super::DedicatedImageViewerApp {
                 let gen = self.filmstrip.generation;
                 self.filmstrip.pending.insert(idx);
                 rayon::spawn(move || {
-                    if let Ok(frame) = loader::decode_preview_frame_with_priority(
+                    match loader::decode_preview_frame_with_priority(
                         &path,
                         FILMSTRIP_DECODE_MAX_SIDE,
                         loader::DecodePriority::Background,
                     ) {
-                        let _ = tx.try_send((idx, gen, frame));
+                        Ok(frame) => {
+                            let _ = tx.try_send((idx, gen, frame));
+                        }
+                        Err(_) => {
+                            // Send a zero-sized sentinel so poll_filmstrip_results
+                            // removes this index from `pending`. Without this, a
+                            // failed decode leaves the index stuck in pending forever,
+                            // and after FILMSTRIP_MAX_IN_FLIGHT failures the filmstrip
+                            // stops loading entirely.
+                            let sentinel = loader::DecodedFrame {
+                                rgba: Vec::new(),
+                                width: 0,
+                                height: 0,
+                                original_width: 0,
+                                original_height: 0,
+                            };
+                            let _ = tx.try_send((idx, gen, sentinel));
+                        }
                     }
                 });
             }
@@ -197,14 +214,25 @@ impl super::DedicatedImageViewerApp {
                                         let gen = self.filmstrip.generation;
                                         self.filmstrip.pending.insert(idx);
                                         rayon::spawn(move || {
-                                            if let Ok(frame) =
-                                                loader::decode_preview_frame_with_priority(
+                                            match loader::decode_preview_frame_with_priority(
                                                     &path,
                                                     FILMSTRIP_DECODE_MAX_SIDE,
                                                     loader::DecodePriority::Background,
                                                 )
                                             {
-                                                let _ = tx.try_send((idx, gen, frame));
+                                                Ok(frame) => {
+                                                    let _ = tx.try_send((idx, gen, frame));
+                                                }
+                                                Err(_) => {
+                                                    let sentinel = loader::DecodedFrame {
+                                                        rgba: Vec::new(),
+                                                        width: 0,
+                                                        height: 0,
+                                                        original_width: 0,
+                                                        original_height: 0,
+                                                    };
+                                                    let _ = tx.try_send((idx, gen, sentinel));
+                                                }
                                             }
                                         });
                                     }

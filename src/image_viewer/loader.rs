@@ -14,6 +14,41 @@ use std::path::PathBuf;
 
 const MMAP_THRESHOLD_BYTES: u64 = 1_048_576;
 
+// ── COM lifecycle guard ─────────────────────────────────────────────────
+//
+// Ensures every CoInitializeEx is paired with CoUninitialize when the
+// thread exits.  Without this, PrefetchEngine worker threads leak the
+// MTA reference count and WIC's internal per-apartment state is never
+// freed, causing gradual system-wide degradation.
+
+#[cfg(target_os = "windows")]
+struct ComInitGuard;
+
+#[cfg(target_os = "windows")]
+impl ComInitGuard {
+    fn init() -> Self {
+        unsafe {
+            let _ = windows::Win32::System::Com::CoInitializeEx(
+                None,
+                windows::Win32::System::Com::COINIT_MULTITHREADED,
+            );
+        }
+        Self
+    }
+}
+
+#[cfg(target_os = "windows")]
+impl Drop for ComInitGuard {
+    fn drop(&mut self) {
+        // Release the per-thread WIC factory *before* CoUninitialize so
+        // that the COM pointers are freed while the apartment is still valid.
+        crate::workers::thumbnail::extraction::stage2_wic::drop_thread_local_factory();
+        unsafe {
+            windows::Win32::System::Com::CoUninitialize();
+        }
+    }
+}
+
 static VIEWER_THUMBNAIL_CACHE: Lazy<Option<crate::infrastructure::disk_cache::ThumbnailDiskCache>> =
     Lazy::new(|| {
         let cache_dir = dirs::data_local_dir()
@@ -408,15 +443,14 @@ fn unpremultiply_rgba(pixels: &[u8]) -> Vec<u8> {
 fn decode_dynamic(path: &Path, priority: DecodePriority) -> io::Result<DynamicImage> {
     // WIC requires COM to be initialized on the calling thread.
     // Use a thread-local lazy init so each worker thread sets it up once.
+    // The guard calls CoUninitialize on thread exit to keep the MTA refcount
+    // balanced and allow WIC's internal state to be properly cleaned up.
     #[cfg(target_os = "windows")]
     {
         thread_local! {
-            static _COM_INIT: () = unsafe {
-                use windows::Win32::System::Com::{CoInitializeEx, COINIT_MULTITHREADED};
-                let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
-            };
+            static _COM_GUARD: ComInitGuard = ComInitGuard::init();
         }
-        _COM_INIT.with(|_| {});
+        _COM_GUARD.with(|_| {});
     }
 
     // On Windows, WIC (Windows Imaging Component) is significantly faster

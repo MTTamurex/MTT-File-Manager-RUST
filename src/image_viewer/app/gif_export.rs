@@ -14,6 +14,22 @@ pub(in crate::image_viewer) struct GifAnimation {
     pub(super) frame_started: std::time::Instant,
 }
 
+/// Staging buffer for rate-limited GIF texture uploads.
+/// Instead of slamming all frames in a single UI frame (which can issue
+/// hundreds of glTexImage2D calls and stall DWM), we upload a small batch
+/// per frame until all frames are uploaded and then finalize into GifAnimation.
+pub(in crate::image_viewer) struct GifUploadQueue {
+    pub(super) frames: Vec<loader::GifAnimationFrame>,
+    pub(super) textures: Vec<egui::TextureHandle>,
+    pub(super) delays_ms: Vec<u32>,
+    pub(super) decode_index: usize,
+    pub(super) width: u32,
+    pub(super) height: u32,
+}
+
+/// Max GIF frame textures uploaded per UI frame to avoid GPU driver stalls.
+const GIF_MAX_UPLOADS_PER_FRAME: usize = 8;
+
 pub(in crate::image_viewer) struct ViewerStatusMessage {
     pub(super) text: String,
     pub(super) is_error: bool,
@@ -206,7 +222,7 @@ impl super::DedicatedImageViewerApp {
     }
 
     /// Polls the in-flight GIF decode channel. When decoding is complete,
-    /// uploads all frames as textures and builds the `GifAnimation` struct.
+    /// stages the frames for rate-limited upload via `pump_gif_upload_queue`.
     pub(super) fn poll_gif_decode(&mut self, ctx: &egui::Context) {
         let Some((decode_index, rx)) = &self.gif_decode_rx else {
             return;
@@ -222,36 +238,21 @@ impl super::DedicatedImageViewerApp {
         match rx.try_recv() {
             Ok(Ok(frames)) if frames.len() > 1 => {
                 let (w, h) = (frames[0].frame.width, frames[0].frame.height);
-                let mut textures = Vec::with_capacity(frames.len());
-                let mut delays = Vec::with_capacity(frames.len());
+                let total = frames.len();
 
-                for (i, gif_frame) in frames.into_iter().enumerate() {
-                    let frame = gif_frame.frame;
-                    let color_image = egui::ColorImage::from_rgba_unmultiplied(
-                        [frame.width as usize, frame.height as usize],
-                        &frame.rgba,
-                    );
-                    // Drop the CPU RGBA buffer immediately after upload to
-                    // egui — a multi-frame 4K GIF would otherwise pin
-                    // hundreds of MB of pixel data on the CPU heap.
-                    drop(frame);
-                    let tex = ctx.load_texture(
-                        format!("iv-gif-{}-{}", decode_index, i),
-                        color_image,
-                        egui::TextureOptions::LINEAR,
-                    );
-                    textures.push(tex);
-                    delays.push(gif_frame.delay_ms);
-                }
-
-                self.gif_animation = Some(GifAnimation {
-                    textures,
-                    delays_ms: delays,
-                    current_frame: 0,
-                    frame_started: std::time::Instant::now(),
+                // Stage frames for batched upload instead of uploading
+                // all at once (which can issue 100+ glTexImage2D in one frame).
+                self.gif_upload_queue = Some(GifUploadQueue {
+                    frames,
+                    textures: Vec::with_capacity(total),
+                    delays_ms: Vec::with_capacity(total),
+                    decode_index,
+                    width: w,
+                    height: h,
                 });
-                self.image_resolution = Some((w, h));
+
                 self.gif_decode_rx = None;
+                ctx.request_repaint(); // kick the upload pump
             }
             Ok(Ok(_)) => {
                 // Single-frame GIF — static path renders it.
@@ -267,6 +268,55 @@ impl super::DedicatedImageViewerApp {
             Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                 self.gif_decode_rx = None;
             }
+        }
+    }
+
+    /// Uploads a batch of GIF frame textures per frame until the queue is
+    /// drained, then finalizes the GifAnimation. This prevents GPU driver
+    /// stalls from hundreds of concurrent texture uploads.
+    pub(super) fn pump_gif_upload_queue(&mut self, ctx: &egui::Context) {
+        let Some(queue) = &mut self.gif_upload_queue else {
+            return;
+        };
+
+        // User navigated away — discard the queue.
+        if queue.decode_index != self.current_index {
+            self.gif_upload_queue = None;
+            return;
+        }
+
+        let mut uploads = 0;
+        while !queue.frames.is_empty() && uploads < GIF_MAX_UPLOADS_PER_FRAME {
+            let gif_frame = queue.frames.remove(0);
+            let frame = gif_frame.frame;
+            let color_image = egui::ColorImage::from_rgba_unmultiplied(
+                [frame.width as usize, frame.height as usize],
+                &frame.rgba,
+            );
+            drop(frame);
+            let tex = ctx.load_texture(
+                format!("iv-gif-{}-{}", queue.decode_index, queue.textures.len()),
+                color_image,
+                egui::TextureOptions::LINEAR,
+            );
+            queue.textures.push(tex);
+            queue.delays_ms.push(gif_frame.delay_ms);
+            uploads += 1;
+        }
+
+        if queue.frames.is_empty() {
+            // All frames uploaded — finalize.
+            let queue = self.gif_upload_queue.take().unwrap();
+            self.gif_animation = Some(GifAnimation {
+                textures: queue.textures,
+                delays_ms: queue.delays_ms,
+                current_frame: 0,
+                frame_started: std::time::Instant::now(),
+            });
+            self.image_resolution = Some((queue.width, queue.height));
+        } else {
+            // More frames to upload — schedule next batch.
+            ctx.request_repaint();
         }
     }
 

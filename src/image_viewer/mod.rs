@@ -12,6 +12,7 @@ mod cache;
 mod indexer;
 mod ipc;
 mod loader;
+pub(crate) mod metrics;
 
 use crate::viewer_runtime::{apply_saved_locale, build_viewer_native_options, is_saved_theme_dark};
 
@@ -199,6 +200,14 @@ fn open_image_viewer_blocking(path: &Path) {
 }
 
 pub fn run_standalone(path: PathBuf) -> eframe::Result<()> {
+    // Capture panics so we can diagnose shutdown crashes even when stderr
+    // is not attached (GUI-subsystem binary launched from shortcut).
+    let default_panic = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        log::error!("[IMAGE-VIEWER] PANIC: {}", info);
+        default_panic(info);
+    }));
+
     log::info!(
         "[IMAGE-VIEWER] run_standalone enter pid={} path='{}'",
         std::process::id(),
@@ -302,7 +311,7 @@ pub fn run_standalone(path: PathBuf) -> eframe::Result<()> {
     let native_options = build_viewer_native_options(viewport);
     let dark_mode = is_saved_theme_dark();
 
-    eframe::run_native(
+    let result = eframe::run_native(
         &rust_i18n::t!("imageviewer.title"),
         native_options,
         Box::new(move |_cc| {
@@ -314,7 +323,22 @@ pub fn run_standalone(path: PathBuf) -> eframe::Result<()> {
                 startup_preview,
             )))
         }),
-    )
+    );
+
+    // Force-exit to avoid hangs from detached background threads
+    // (IPC server blocked in ConnectNamedPipe, GIF decode mid-flight,
+    //  PrefetchEngine workers finishing a slow decode, etc.).
+    // The main app uses the same belt-and-suspenders approach.
+    #[cfg(target_os = "windows")]
+    {
+        let _ = std::thread::spawn(
+            crate::infrastructure::windows::cancel_pending_io_on_current_process_threads,
+        );
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        crate::infrastructure::windows::terminate_current_process(0);
+    }
+
+    result
 }
 
 pub fn decode_full_for_benchmark(path: &Path) -> std::io::Result<(u32, u32, usize)> {
