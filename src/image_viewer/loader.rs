@@ -239,6 +239,28 @@ pub fn decode_full_frame_with_priority(
         return decode_svg_frame(path, None, priority);
     }
 
+    // Windows fast path: use WIC to decode directly to the target size.
+    // This avoids allocating a full-resolution buffer and is typically
+    // 5–20× faster for high-megapixel JPEGs because WIC can skip
+    // high-frequency DCT coefficients when subsampling.
+    #[cfg(target_os = "windows")]
+    {
+        if let Some((rgba, w, h)) =
+            crate::workers::thumbnail::extraction::stage2_wic::extract_to_size(
+                path,
+                Some(DISPLAY_CACHE_MAX_SIDE),
+            )
+        {
+            return Ok(DecodedFrame {
+                rgba,
+                width: w,
+                height: h,
+                original_width: w,
+                original_height: h,
+            });
+        }
+    }
+
     let image = decode_dynamic(path, priority)?;
     Ok(frame_from_dynamic_capped(image, DISPLAY_CACHE_MAX_SIDE))
 }
@@ -319,7 +341,12 @@ pub fn encode_frame_to_path(
         .map_err(|err| io::Error::other(err.to_string()))
 }
 
-fn decode_preview_from_thumbnail_cache(path: &Path, max_side: u32) -> Option<DecodedFrame> {
+/// Try to load a fast preview from the on-disk thumbnail cache.
+/// This is orders of magnitude faster than full decode for large images
+/// because the cached WebP is already downscaled (typically 256 px).
+/// Used to show an instant placeholder while the full-resolution image
+/// decodes in the background.
+pub fn try_fast_preview_from_disk_cache(path: &Path, max_side: u32) -> Option<DecodedFrame> {
     let cache = VIEWER_THUMBNAIL_CACHE.as_ref()?;
     let modified = std::fs::metadata(path).ok()?.modified().ok()?;
 
@@ -335,6 +362,10 @@ fn decode_preview_from_thumbnail_cache(path: &Path, max_side: u32) -> Option<Dec
     };
 
     Some(frame_from_dynamic(image))
+}
+
+fn decode_preview_from_thumbnail_cache(path: &Path, max_side: u32) -> Option<DecodedFrame> {
+    try_fast_preview_from_disk_cache(path, max_side)
 }
 
 fn is_svg_path(path: &Path) -> bool {

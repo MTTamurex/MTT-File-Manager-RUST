@@ -451,20 +451,23 @@ impl DedicatedImageViewerApp {
     }
 
     fn handle_prefetch_results(&mut self, ctx: &egui::Context) {
-        // Cap GPU texture uploads per frame. The Glow renderer issues a
-        // glTexImage2D per load_texture, and slamming dozens of multi-MB
-        // uploads in a single frame can degrade the GL kernel-mode driver
-        // / DWM compositor for the whole OS (especially on Intel iGPUs).
-        // Pending results stay in the channel and drain on subsequent frames;
-        // worker threads call ctx.request_repaint() so we wake up promptly.
-        for output in self.prefetch.drain_results(2) {
+        // Drain more results when the current image is still pending —
+        // we don't want the urgent current-image result stuck behind
+        // background neighbour uploads.
+        let current_pending = self.texture_index != Some(self.current_index);
+        let max_drain = if current_pending { 8 } else { 2 };
+        let mut results = self.prefetch.drain_results(max_drain);
+
+        // Process the current image FIRST so it appears ASAP.
+        // Background neighbours can wait an extra frame.
+        results.sort_by_key(|r| if r.index == self.current_index { 0 } else { 1 });
+
+        for output in results {
             self.requested_jobs.remove(&output.index);
 
             match output.frame {
                 Ok(frame) => {
                     // Upload to GPU and drop CPU buffer immediately.
-                    // Both current AND neighbour images go through the same
-                    // path — the cache stores TextureHandles, not CPU frames.
                     self.upload_to_cache(ctx, output.index, &frame);
                 }
                 Err(err) => {
