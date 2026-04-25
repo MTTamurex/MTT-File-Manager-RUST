@@ -107,6 +107,15 @@ impl ImageViewerApp {
         priority: ThumbnailPriority,
         modified: u64,
     ) {
+        // When rendering the inactive dual-panel, thumbnail requests must be
+        // suppressed: workers would reject them (generation mismatch with
+        // gen_tracker) and the paths would leak in loading_set, eventually
+        // blocking all thumbnail loads for the active panel.
+        if self.suppress_thumbnail_requests {
+            self.cache_manager.finish_loading(&path);
+            return;
+        }
+
         // Skip files pending deletion to avoid wasteful extraction
         if self
             .file_operation_state
