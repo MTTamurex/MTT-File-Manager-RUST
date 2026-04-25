@@ -117,6 +117,46 @@ impl ImageViewerApp {
         self.clear_tab_cache_for_normalized_path(&folder_norm);
     }
 
+    /// Reload the inactive dual panel if its folder matches any of the given paths.
+    /// Called after file operations (copy/move/delete) that may have affected the
+    /// inactive panel's folder contents.
+    fn reload_inactive_panel_if_matches(&mut self, folders: &[&PathBuf]) {
+        if !self.dual_panel_enabled {
+            return;
+        }
+        let inactive_path = match self.dual_panel_inactive_state.as_ref() {
+            Some(s) => s.path.clone(),
+            None => return,
+        };
+        let inactive_norm = Self::normalize_for_match(Path::new(&inactive_path));
+
+        let matches = folders.iter().any(|f| {
+            Self::normalize_for_match(f.as_path()) == inactive_norm
+        });
+        if !matches {
+            return;
+        }
+
+        log::info!(
+            "[DualPanel] Inactive panel folder affected by file op, reloading: {}",
+            inactive_path
+        );
+
+        // Invalidate caches for the inactive panel's folder
+        let inactive_pb = PathBuf::from(&inactive_path);
+        self.directory_dirty_registry.mark_dirty(&inactive_pb);
+        self.directory_cache.invalidate(&inactive_pb);
+        if let Some(ref di) = self.directory_index {
+            let _ = di.invalidate(&inactive_pb);
+        }
+
+        // Swap in the inactive panel, trigger async reload, swap back
+        self.with_inactive_panel(|app| {
+            app.loaded_path.clear();
+            app.load_folder(false);
+        });
+    }
+
     fn handle_rename_completed(
         &mut self,
         path: PathBuf,
@@ -307,6 +347,9 @@ impl ImageViewerApp {
             self.loaded_path.clear();
             self.load_folder(false);
         }
+
+        // Reload inactive dual panel if it shows the destination folder
+        self.reload_inactive_panel_if_matches(&[&dest_folder]);
     }
 
     fn handle_move_completed(
@@ -343,6 +386,9 @@ impl ImageViewerApp {
             self.loaded_path.clear();
             self.load_folder(false);
         }
+
+        // Reload inactive dual panel if it shows source or destination
+        self.reload_inactive_panel_if_matches(&[&source_folder, &dest_folder]);
     }
 
     fn handle_move_batch_completed(
@@ -403,6 +449,11 @@ impl ImageViewerApp {
             self.loaded_path.clear();
             self.load_folder(false);
         }
+
+        // Reload inactive dual panel if it shows any affected folder
+        let mut affected: Vec<&PathBuf> = source_folders.iter().collect();
+        affected.push(&dest_folder);
+        self.reload_inactive_panel_if_matches(&affected);
     }
 
     fn handle_file_operation_finished(&mut self) {
@@ -459,6 +510,23 @@ impl ImageViewerApp {
 
                 self.loaded_path.clear();
                 self.load_folder(false);
+
+                // Also reload the inactive dual panel if it exists
+                // (its folder may have been affected by the operation)
+                if self.dual_panel_enabled {
+                    if let Some(ref snapshot) = self.dual_panel_inactive_state {
+                        let inactive_path = PathBuf::from(&snapshot.path);
+                        self.directory_dirty_registry.mark_dirty(&inactive_path);
+                        self.directory_cache.invalidate(&inactive_path);
+                        if let Some(ref di) = self.directory_index {
+                            let _ = di.invalidate(&inactive_path);
+                        }
+                    }
+                    self.with_inactive_panel(|app| {
+                        app.loaded_path.clear();
+                        app.load_folder(false);
+                    });
+                }
 
                 // Suppress watcher-triggered reloads for 2 seconds after the
                 // forced reload. Archive extraction creates many files, causing the

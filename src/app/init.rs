@@ -283,6 +283,7 @@ impl ImageViewerApp {
             drag_source_folder: None,
             drag_target_folder: None,
             drag_hovered_folder: None,
+            drag_cross_panel_target: None,
             drag_icon_cache: None,
             total_items: 0,
             // Search & Navigation (NEW)
@@ -454,6 +455,11 @@ impl ImageViewerApp {
 
             // TAB SYSTEM
             tab_manager,
+
+            // DUAL PANEL (split view) — disabled by default
+            dual_panel_enabled: false,
+            dual_panel_active: crate::app::dual_panel::ActivePanel::Left,
+            dual_panel_inactive_state: None,
 
             // FOLDER SIZE CALCULATOR
             folder_size_state: build_folder_size_state(

@@ -39,6 +39,11 @@ impl ImageViewerApp {
         active.collapse_local_disks = self.collapse_local_disks;
         active.collapse_network_drives = self.collapse_network_drives;
 
+        // Save dual panel state per-tab
+        active.dual_panel_enabled = self.dual_panel_enabled;
+        active.dual_panel_active = self.dual_panel_active;
+        active.dual_panel_inactive_state = self.dual_panel_inactive_state.clone();
+
         // Save per-tab sidebar state (expanded nodes + scroll position)
         active.sidebar_expanded = self.sidebar_tree.snapshot_expanded();
         active.sidebar_scroll_y = self.sidebar_tree.snapshot_scroll_y();
@@ -128,6 +133,11 @@ impl ImageViewerApp {
             self.collapse_quick_access = active.collapse_quick_access;
             self.collapse_local_disks = active.collapse_local_disks;
             self.collapse_network_drives = active.collapse_network_drives;
+
+            // Restore dual panel state from tab
+            self.dual_panel_enabled = active.dual_panel_enabled;
+            self.dual_panel_active = active.dual_panel_active;
+            self.dual_panel_inactive_state = active.dual_panel_inactive_state.take();
         }
 
         // Restore per-tab sidebar state (expanded nodes + scroll position)

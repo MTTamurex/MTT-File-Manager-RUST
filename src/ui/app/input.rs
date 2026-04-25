@@ -281,6 +281,7 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
             user_active = true;
         }
 
+        // F5 = Refresh (always, even in dual panel mode)
         if app.shortcuts.is_triggered(ShortcutAction::Refresh, ctx) {
             app.trigger_manual_refresh();
             user_active = true;
@@ -321,6 +322,50 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
         if app.shortcuts.is_triggered(ShortcutAction::GlobalSearch, ctx) {
             app.toggle_global_search();
             user_active = true;
+        }
+
+        // ── DUAL PANEL SHORTCUTS ──
+        // Tab (no modifiers) = switch active panel when dual panel is enabled
+        // Ctrl+Shift+D = toggle dual panel on/off
+        if !text_input_active {
+            let tab_pressed = ctx.input(|i| {
+                i.events.iter().any(|e| matches!(
+                    e,
+                    egui::Event::Key { key: egui::Key::Tab, pressed: true, modifiers, .. }
+                    if !modifiers.ctrl && !modifiers.alt && !modifiers.shift
+                ))
+            });
+            if tab_pressed && app.dual_panel_enabled {
+                app.dual_panel_switch_active();
+                user_active = true;
+            }
+
+            let ctrl_shift_d = ctx.input(|i| {
+                i.events.iter().any(|e| matches!(
+                    e,
+                    egui::Event::Key { key: egui::Key::D, pressed: true, modifiers, .. }
+                    if modifiers.ctrl && modifiers.shift && !modifiers.alt
+                ))
+            });
+            if ctrl_shift_d {
+                app.dual_panel_toggle();
+                user_active = true;
+            }
+
+            // F6 = move selected to other panel (dual panel only)
+            if app.dual_panel_enabled {
+                let f6_pressed = ctx.input(|i| {
+                    i.events.iter().any(|e| matches!(
+                        e,
+                        egui::Event::Key { key: egui::Key::F6, pressed: true, modifiers, .. }
+                        if !modifiers.ctrl && !modifiers.alt && !modifiers.shift
+                    ))
+                });
+                if f6_pressed {
+                    app.dual_panel_move_to_other();
+                    user_active = true;
+                }
+            }
         }
 
         let consumed_preview_shortcut_action = handle_preview_shortcut_action(app, ctx);

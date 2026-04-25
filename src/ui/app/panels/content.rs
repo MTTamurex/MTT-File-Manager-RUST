@@ -382,8 +382,6 @@ fn calculate_effective_file(app: &ImageViewerApp) -> Option<FileEntry> {
 }
 
 pub(super) fn render_central_panel_layout(app: &mut ImageViewerApp, ctx: &egui::Context) {
-    use crate::domain::file_entry::ViewMode;
-
     egui::CentralPanel::default()
         .frame(egui::Frame::NONE.fill(if ctx.style().visuals.dark_mode {
             egui::Color32::from_rgb(45, 45, 45)
@@ -392,120 +390,356 @@ pub(super) fn render_central_panel_layout(app: &mut ImageViewerApp, ctx: &egui::
         }))
         .show(ctx, |ui| {
             // CLIP FIX: Ensure central panel content cannot overflow into sidebars.
-            // CentralPanel renders LAST (after both SidePanels), so unclipped
-            // content would paint ON TOP of sidebar content.
             ui.set_clip_rect(ui.max_rect());
 
-            if app.is_loading_folder && app.items.is_empty() {
-                ui.centered_and_justified(|ui| {
-                    ui.label(rust_i18n::t!("panels.loading"));
-                });
-
-                // During loading, still update drag target so cursor feedback
-                // isn't stale from the previous tab's hovered folder.
-                if app.is_item_dragging {
-                    app.update_item_drag_target_from_hover(None);
-                    let (ctrl, shift, primary_released) = ui.input(|i| {
-                        (
-                            i.modifiers.ctrl,
-                            i.modifiers.shift,
-                            i.pointer.primary_released(),
-                        )
-                    });
-                    if primary_released {
-                        app.complete_item_drag(ctrl, shift);
-                    }
-                }
-            } else if app.items.is_empty() {
-                let response = ui
-                    .centered_and_justified(|ui| {
-                        ui.label(rust_i18n::t!("panels.empty_folder"));
-                    })
-                    .response
-                    .on_hover_cursor(egui::CursorIcon::Default);
-
-                // During an active drag, update the drop target to the current folder
-                // even though there are no items to hover over.
-                if app.is_item_dragging {
-                    app.update_item_drag_target_from_hover(None);
-                    let (ctrl, shift, primary_released) = ui.input(|i| {
-                        (
-                            i.modifiers.ctrl,
-                            i.modifiers.shift,
-                            i.pointer.primary_released(),
-                        )
-                    });
-                    if primary_released {
-                        app.complete_item_drag(ctrl, shift);
-                    }
-                }
-
-                // Handle context menu on empty area
-                let interact_response = ui
-                    .interact(
-                        response.rect,
-                        ui.id().with("empty_bg"),
-                        egui::Sense::click(),
-                    )
-                    .on_hover_cursor(egui::CursorIcon::Default); // Force cursor on the interaction rect
-
-                if interact_response.secondary_clicked() && app.can_open_empty_area_context_menu() {
-                    app.context_menu.target_paths.clear();
-
-                    // Use current path for shell menu
-                    let paths = if app.navigation_state.is_recycle_bin_view {
-                        vec![]
-                    } else {
-                        vec![std::path::PathBuf::from(&app.navigation_state.current_path)]
-                    };
-
-                    // Prepare state
-                    let pos = ui.input(|i| i.pointer.hover_pos().unwrap_or_default());
-                    let right_bound = ui.available_rect_before_wrap().right();
-
-                    // Set state first
-                    app.context_menu
-                        .open(pos, right_bound, None, paths.clone(), true);
-
-                    // Then populate items
-                    app.populate_context_menu(ui.ctx(), &paths, true, None);
-                }
+            if app.dual_panel_enabled {
+                render_dual_panel(app, ui);
             } else {
-                let t_view_render = std::time::Instant::now();
-                match app.view_mode {
-                    ViewMode::Grid => app.render_grid_view(ui),
-                    ViewMode::List => app.render_list_view(ui),
-                }
-                let view_ms = t_view_render.elapsed().as_millis();
-                if view_ms > 120 {
-                    log::warn!(
-                        "[PERF-CENTRAL] Slow list/grid render: {}ms view={:?} items={} all_items={} search_len={} loading={} pending_thumbs={} pending_uploads={} visible_range={:?}",
-                        view_ms,
-                        app.view_mode,
-                        app.items.len(),
-                        app.all_items.len(),
-                        app.search_query.len(),
-                        app.is_loading_folder,
-                        app.pending_thumbnails.len(),
-                        app.cache_manager.pending_upload_set.len(),
-                        app.visible_index_range,
-                    );
-                }
-
-                if app.is_loading_folder {
-                    let rect = ui.max_rect();
-                    let status_rect = egui::Rect::from_min_size(
-                        rect.right_bottom() - egui::vec2(124.0, 22.0),
-                        egui::vec2(110.0, 16.0),
-                    );
-                    ui.allocate_new_ui(egui::UiBuilder::new().max_rect(status_rect), |ui| {
-                        ui.label(
-                            egui::RichText::new(rust_i18n::t!("panels.updating").to_string())
-                                .size(11.0)
-                                .color(egui::Color32::from_gray(130)),
-                        );
-                    });
-                }
+                render_single_panel_content(app, ui);
             }
         });
+}
+
+/// Render the dual-panel split view inside the central panel area.
+fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
+    use crate::app::dual_panel::ActivePanel;
+
+    let total_rect = ui.available_rect_before_wrap();
+    let separator_width = 3.0;
+    let half_width = ((total_rect.width() - separator_width) / 2.0).max(100.0);
+
+    let left_rect = egui::Rect::from_min_size(
+        total_rect.min,
+        egui::vec2(half_width, total_rect.height()),
+    );
+    let right_rect = egui::Rect::from_min_size(
+        egui::pos2(total_rect.min.x + half_width + separator_width, total_rect.min.y),
+        egui::vec2(
+            (total_rect.width() - half_width - separator_width).max(100.0),
+            total_rect.height(),
+        ),
+    );
+
+    // Draw vertical separator
+    let sep_rect = egui::Rect::from_min_size(
+        egui::pos2(left_rect.right(), total_rect.min.y),
+        egui::vec2(separator_width, total_rect.height()),
+    );
+    ui.painter().rect_filled(
+        sep_rect,
+        0.0,
+        if ui.ctx().style().visuals.dark_mode {
+            egui::Color32::from_rgb(60, 60, 60)
+        } else {
+            egui::Color32::from_rgb(200, 200, 200)
+        },
+    );
+
+    // Determine which panel is active vs inactive
+    let active = app.dual_panel_active;
+    let (active_rect, _inactive_rect) = match active {
+        ActivePanel::Left => (left_rect, right_rect),
+        ActivePanel::Right => (right_rect, left_rect),
+    };
+
+    // ── Draw focus indicator (border) on the active panel ──
+    let focus_color = if ui.ctx().style().visuals.dark_mode {
+        egui::Color32::from_rgb(80, 160, 255) // bright blue
+    } else {
+        egui::Color32::from_rgb(0, 100, 220)
+    };
+    ui.painter().rect_stroke(
+        active_rect.shrink(1.0),
+        0.0,
+        egui::Stroke::new(2.0, focus_color),
+        egui::StrokeKind::Inside,
+    );
+
+    // ── Path header for each panel ──
+    let header_height = 24.0;
+    let dark = ui.ctx().style().visuals.dark_mode;
+
+    // Left panel header
+    let left_header_rect = egui::Rect::from_min_size(
+        left_rect.min,
+        egui::vec2(left_rect.width(), header_height),
+    );
+    let left_header_bg = if active == ActivePanel::Left {
+        if dark { egui::Color32::from_rgb(35, 55, 80) } else { egui::Color32::from_rgb(210, 228, 250) }
+    } else {
+        if dark { egui::Color32::from_rgb(50, 50, 50) } else { egui::Color32::from_rgb(240, 240, 240) }
+    };
+    ui.painter().rect_filled(left_header_rect, 0.0, left_header_bg);
+
+    // Right panel header
+    let right_header_rect = egui::Rect::from_min_size(
+        right_rect.min,
+        egui::vec2(right_rect.width(), header_height),
+    );
+    let right_header_bg = if active == ActivePanel::Right {
+        if dark { egui::Color32::from_rgb(35, 55, 80) } else { egui::Color32::from_rgb(210, 228, 250) }
+    } else {
+        if dark { egui::Color32::from_rgb(50, 50, 50) } else { egui::Color32::from_rgb(240, 240, 240) }
+    };
+    ui.painter().rect_filled(right_header_rect, 0.0, right_header_bg);
+
+    // Render path text in headers
+    let active_path = app.navigation_state.current_path.clone();
+    let inactive_path = app
+        .dual_panel_inactive_state
+        .as_ref()
+        .map(|s| s.path.clone())
+        .unwrap_or_default();
+
+    let (left_path, right_path) = match active {
+        ActivePanel::Left => (active_path, inactive_path),
+        ActivePanel::Right => (inactive_path, active_path),
+    };
+
+    let header_text_color = if dark {
+        egui::Color32::from_rgb(220, 220, 220)
+    } else {
+        egui::Color32::from_rgb(30, 30, 30)
+    };
+
+    // Left path label
+    ui.allocate_new_ui(
+        egui::UiBuilder::new().max_rect(left_header_rect.shrink2(egui::vec2(6.0, 2.0))),
+        |ui| {
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(&left_path)
+                            .size(11.0)
+                            .color(header_text_color),
+                    )
+                    .truncate(),
+                );
+            });
+        },
+    );
+
+    // Right path label
+    ui.allocate_new_ui(
+        egui::UiBuilder::new().max_rect(right_header_rect.shrink2(egui::vec2(6.0, 2.0))),
+        |ui| {
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(&right_path)
+                            .size(11.0)
+                            .color(header_text_color),
+                    )
+                    .truncate(),
+                );
+            });
+        },
+    );
+
+    // ── Content areas (below header) ──
+    let left_content_rect = egui::Rect::from_min_max(
+        egui::pos2(left_rect.min.x, left_rect.min.y + header_height),
+        left_rect.max,
+    );
+    let right_content_rect = egui::Rect::from_min_max(
+        egui::pos2(right_rect.min.x, right_rect.min.y + header_height),
+        right_rect.max,
+    );
+
+    let (active_content_rect, inactive_content_rect) = match active {
+        ActivePanel::Left => (left_content_rect, right_content_rect),
+        ActivePanel::Right => (right_content_rect, left_content_rect),
+    };
+
+    // ── Cross-panel drag target: pre-set before rendering so the active
+    //    panel's bridge code doesn't cancel the drag when mouse is over
+    //    the inactive panel. ──
+    if app.is_item_dragging {
+        let hover_pos = ui.input(|i| i.pointer.hover_pos());
+        if let Some(pos) = hover_pos {
+            let inactive_header = match active {
+                ActivePanel::Left => right_header_rect,
+                ActivePanel::Right => left_header_rect,
+            };
+            if inactive_content_rect.contains(pos) || inactive_header.contains(pos) {
+                // Mouse is over the inactive panel — set cross-panel drop target
+                app.drag_cross_panel_target = app
+                    .dual_panel_inactive_state
+                    .as_ref()
+                    .map(|s| std::path::PathBuf::from(&s.path));
+            } else {
+                app.drag_cross_panel_target = None;
+            }
+        } else {
+            app.drag_cross_panel_target = None;
+        }
+    }
+
+    // ── Render ACTIVE panel content with unique ID scope ──
+    let active_id = match active {
+        ActivePanel::Left => "dual_left",
+        ActivePanel::Right => "dual_right",
+    };
+    ui.allocate_new_ui(
+        egui::UiBuilder::new().max_rect(active_content_rect),
+        |ui| {
+            ui.push_id(active_id, |ui| {
+                ui.set_clip_rect(active_content_rect);
+                render_single_panel_content(app, ui);
+            });
+        },
+    );
+
+    // ── Render INACTIVE panel content with unique ID scope ──
+    let inactive_id = match active {
+        ActivePanel::Left => "dual_right",
+        ActivePanel::Right => "dual_left",
+    };
+    app.with_inactive_panel(|app_with_inactive| {
+        ui.allocate_new_ui(
+            egui::UiBuilder::new().max_rect(inactive_content_rect),
+            |ui| {
+                ui.push_id(inactive_id, |ui| {
+                    ui.set_clip_rect(inactive_content_rect);
+                    render_single_panel_content(app_with_inactive, ui);
+                });
+            },
+        );
+    });
+
+    // ── Click-to-focus: detect click AFTER rendering so item interactions
+    //    are processed first. Only switch focus if the click landed in the
+    //    inactive panel's header (content clicks are handled by items). ──
+    let pointer_pos = ui.input(|i| i.pointer.hover_pos());
+    let any_pressed = ui.input(|i| i.pointer.any_pressed());
+    if any_pressed {
+        if let Some(pos) = pointer_pos {
+            // Switch focus when clicking in the inactive panel area
+            let inactive_header = match active {
+                ActivePanel::Left => right_header_rect,
+                ActivePanel::Right => left_header_rect,
+            };
+            if inactive_content_rect.contains(pos) || inactive_header.contains(pos) {
+                app.dual_panel_switch_active();
+            }
+        }
+    }
+}
+
+/// Render a single panel's content (loading / empty / grid or list view).
+/// Extracted so it can be used by both single and dual panel modes.
+fn render_single_panel_content(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
+    use crate::domain::file_entry::ViewMode;
+
+    if app.is_loading_folder && app.items.is_empty() {
+        ui.centered_and_justified(|ui| {
+            ui.label(rust_i18n::t!("panels.loading"));
+        });
+
+        // During loading, still update drag target so cursor feedback
+        // isn't stale from the previous tab's hovered folder.
+        if app.is_item_dragging {
+            app.update_item_drag_target_from_hover(None);
+            let (ctrl, shift, primary_released) = ui.input(|i| {
+                (
+                    i.modifiers.ctrl,
+                    i.modifiers.shift,
+                    i.pointer.primary_released(),
+                )
+            });
+            if primary_released {
+                app.complete_item_drag(ctrl, shift);
+            }
+        }
+    } else if app.items.is_empty() {
+        let response = ui
+            .centered_and_justified(|ui| {
+                ui.label(rust_i18n::t!("panels.empty_folder"));
+            })
+            .response
+            .on_hover_cursor(egui::CursorIcon::Default);
+
+        // During an active drag, update the drop target to the current folder
+        // even though there are no items to hover over.
+        if app.is_item_dragging {
+            app.update_item_drag_target_from_hover(None);
+            let (ctrl, shift, primary_released) = ui.input(|i| {
+                (
+                    i.modifiers.ctrl,
+                    i.modifiers.shift,
+                    i.pointer.primary_released(),
+                )
+            });
+            if primary_released {
+                app.complete_item_drag(ctrl, shift);
+            }
+        }
+
+        // Handle context menu on empty area
+        let interact_response = ui
+            .interact(
+                response.rect,
+                ui.id().with("empty_bg"),
+                egui::Sense::click(),
+            )
+            .on_hover_cursor(egui::CursorIcon::Default);
+
+        if interact_response.secondary_clicked() && app.can_open_empty_area_context_menu() {
+            app.context_menu.target_paths.clear();
+
+            // Use current path for shell menu
+            let paths = if app.navigation_state.is_recycle_bin_view {
+                vec![]
+            } else {
+                vec![std::path::PathBuf::from(&app.navigation_state.current_path)]
+            };
+
+            // Prepare state
+            let pos = ui.input(|i| i.pointer.hover_pos().unwrap_or_default());
+            let right_bound = ui.available_rect_before_wrap().right();
+
+            // Set state first
+            app.context_menu
+                .open(pos, right_bound, None, paths.clone(), true);
+
+            // Then populate items
+            app.populate_context_menu(ui.ctx(), &paths, true, None);
+        }
+    } else {
+        let t_view_render = std::time::Instant::now();
+        match app.view_mode {
+            ViewMode::Grid => app.render_grid_view(ui),
+            ViewMode::List => app.render_list_view(ui),
+        }
+        let view_ms = t_view_render.elapsed().as_millis();
+        if view_ms > 120 {
+            log::warn!(
+                "[PERF-CENTRAL] Slow list/grid render: {}ms view={:?} items={} all_items={} search_len={} loading={} pending_thumbs={} pending_uploads={} visible_range={:?}",
+                view_ms,
+                app.view_mode,
+                app.items.len(),
+                app.all_items.len(),
+                app.search_query.len(),
+                app.is_loading_folder,
+                app.pending_thumbnails.len(),
+                app.cache_manager.pending_upload_set.len(),
+                app.visible_index_range,
+            );
+        }
+
+        if app.is_loading_folder {
+            let rect = ui.max_rect();
+            let status_rect = egui::Rect::from_min_size(
+                rect.right_bottom() - egui::vec2(124.0, 22.0),
+                egui::vec2(110.0, 16.0),
+            );
+            ui.allocate_new_ui(egui::UiBuilder::new().max_rect(status_rect), |ui| {
+                ui.label(
+                    egui::RichText::new(rust_i18n::t!("panels.updating").to_string())
+                        .size(11.0)
+                        .color(egui::Color32::from_gray(130)),
+                );
+            });
+        }
+    }
 }

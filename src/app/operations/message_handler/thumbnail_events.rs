@@ -1,4 +1,5 @@
 use crate::app::state::ImageViewerApp;
+use crate::domain::file_entry::FileEntry;
 use eframe::egui;
 use std::time::{Duration, Instant};
 
@@ -23,10 +24,38 @@ impl ImageViewerApp {
             self.file_operation_state.pending_deletions.clear();
         }
 
+        // Also check inactive panel loading timeout
+        if self.dual_panel_enabled {
+            if let Some(ref mut snapshot) = self.dual_panel_inactive_state {
+                if snapshot.is_loading_folder
+                    && snapshot.loading_started_at.elapsed().as_secs() > 30
+                {
+                    log::warn!(
+                        "[FOLDER-LOADING] TIMEOUT: Inactive panel loading timed out"
+                    );
+                    snapshot.is_loading_folder = false;
+                }
+            }
+        }
+
+        // Determine inactive panel generation for routing (if dual panel active)
+        let inactive_gen: Option<usize> = if self.dual_panel_enabled {
+            self.dual_panel_inactive_state
+                .as_ref()
+                .map(|s| s.generation)
+        } else {
+            None
+        };
+
         let mut saw_end_of_load = false;
         let mut processed_batches = 0usize;
         let mut has_more_stream_batches = false;
         let stream_start = Instant::now();
+
+        // Collect batches destined for the inactive panel (processed after the loop)
+        let mut inactive_batches: Vec<Vec<FileEntry>> = Vec::new();
+        let mut inactive_saw_end = false;
+
         while processed_batches < MAX_FILE_BATCHES_PER_FRAME {
             if stream_start.elapsed() >= std::time::Duration::from_millis(FILE_BATCH_BUDGET_MS) {
                 has_more_stream_batches = true;
@@ -35,38 +64,43 @@ impl ImageViewerApp {
             match self.file_entry_receiver.try_recv() {
                 Ok((gen_id, new_batch)) => {
                     processed_batches += 1;
-                    if gen_id != self.generation {
-                        continue; // Discard data from a previous navigation/refresh
-                    }
 
-                    if new_batch.is_empty() {
-                        // Empty batch = "End of Loading" signal from thread
-                        saw_end_of_load = true;
-                    } else {
-                        // Deferred clear: replace stale items on first real batch
-                        // so the UI never shows an empty list during watcher reloads.
-                        if self.pending_all_items_clear {
-                            // Snapshot old items so we can detect stale textures
-                            // after the new items arrive (mtime/size comparison).
-                            self.stale_items_snapshot = Some(
-                                self.all_items
-                                    .iter()
-                                    .map(|item| {
-                                        (item.path.clone(), (item.modified, item.size))
-                                    })
-                                    .collect(),
-                            );
-                            self.all_items.clear();
-                            self.pending_all_items_clear = false;
+                    if gen_id == self.generation {
+                        // ── Active panel batch ──
+                        if new_batch.is_empty() {
+                            saw_end_of_load = true;
+                        } else {
+                            if self.pending_all_items_clear {
+                                self.stale_items_snapshot = Some(
+                                    self.all_items
+                                        .iter()
+                                        .map(|item| {
+                                            (item.path.clone(), (item.modified, item.size))
+                                        })
+                                        .collect(),
+                                );
+                                self.all_items.clear();
+                                self.pending_all_items_clear = false;
+                            }
+                            self.pending_items_count =
+                                self.pending_items_count.saturating_add(new_batch.len());
+                            self.pending_items_rebuild = true;
+                            self.all_items.extend(new_batch);
                         }
-                        // Data arrived! Add to master list
-                        self.pending_items_count =
-                            self.pending_items_count.saturating_add(new_batch.len());
-                        self.pending_items_rebuild = true;
-                        self.all_items.extend(new_batch);
+                    } else if let Some(ig) = inactive_gen {
+                        if gen_id == ig {
+                            // ── Inactive panel batch ──
+                            if new_batch.is_empty() {
+                                inactive_saw_end = true;
+                            } else {
+                                inactive_batches.push(new_batch);
+                            }
+                        }
+                        // else: stale generation, discard
                     }
+                    // else: stale generation, discard
                 }
-                Err(std::sync::mpsc::TryRecvError::Empty) => break, // No more messages
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
             }
         }
@@ -77,12 +111,18 @@ impl ImageViewerApp {
 
         let t_stream_recv = Instant::now();
 
+        // Process active panel end-of-load / rebuild
         if saw_end_of_load {
             self.handle_items_after_end_of_load(ctx);
         } else if self.pending_items_rebuild {
             self.maybe_schedule_stream_items_rebuild(ctx);
         } else if has_more_stream_batches {
             ctx.request_repaint();
+        }
+
+        // Process inactive panel batches via with_inactive_panel
+        if !inactive_batches.is_empty() || inactive_saw_end {
+            self.apply_inactive_panel_batches(inactive_batches, inactive_saw_end, ctx);
         }
 
         let t_rebuild = Instant::now();
@@ -146,5 +186,75 @@ impl ImageViewerApp {
         }
 
         t_sizes
+    }
+
+    /// Apply collected batches to the inactive panel via state swap.
+    /// Avoids calling `handle_items_after_end_of_load` directly (which has
+    /// global side-effects); instead performs lightweight filter + sort.
+    fn apply_inactive_panel_batches(
+        &mut self,
+        batches: Vec<Vec<FileEntry>>,
+        saw_end: bool,
+        ctx: &egui::Context,
+    ) {
+        let ctx2 = ctx.clone();
+        self.with_inactive_panel(|app| {
+            for batch in batches {
+                if app.pending_all_items_clear {
+                    app.stale_items_snapshot = Some(
+                        app.all_items
+                            .iter()
+                            .map(|item| (item.path.clone(), (item.modified, item.size)))
+                            .collect(),
+                    );
+                    app.all_items.clear();
+                    app.pending_all_items_clear = false;
+                }
+                app.pending_items_count =
+                    app.pending_items_count.saturating_add(batch.len());
+                app.pending_items_rebuild = true;
+                app.all_items.extend(batch);
+            }
+
+            if saw_end {
+                app.is_loading_folder = false;
+                if app.pending_all_items_clear {
+                    app.all_items.clear();
+                    app.pending_all_items_clear = false;
+                }
+                // Reconcile stale textures
+                if let Some(old_snapshot) = app.stale_items_snapshot.take() {
+                    let new_paths: std::collections::HashSet<&std::path::PathBuf> =
+                        app.all_items.iter().map(|i| &i.path).collect();
+                    for item in &app.all_items {
+                        if let Some(&(old_mod, old_sz)) = old_snapshot.get(&item.path) {
+                            if item.modified != old_mod || item.size != old_sz {
+                                app.cache_manager.texture_cache.pop(&item.path);
+                                app.cache_manager.pop_rgba_data(&item.path);
+                                app.cache_manager.failed_thumbnails.pop(&item.path);
+                            }
+                        }
+                    }
+                    for (old_path, _) in &old_snapshot {
+                        if !new_paths.contains(old_path) {
+                            app.cache_manager.texture_cache.pop(old_path);
+                        }
+                    }
+                }
+                app.pending_items_rebuild = false;
+                app.pending_items_count = 0;
+                app.filter_items();
+                app.loaded_path = app.navigation_state.current_path.clone();
+                log::info!(
+                    "[DualPanel] Inactive panel reload complete: {}",
+                    app.navigation_state.current_path
+                );
+            } else if app.pending_items_rebuild {
+                // Intermediate rebuild: apply filter/sort so items are visible
+                app.filter_items();
+                app.pending_items_rebuild = false;
+            }
+        });
+        ctx2.request_repaint();
     }
 }
