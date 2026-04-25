@@ -1,6 +1,7 @@
 use crate::application::navigation::NavigationHistory;
 use crate::domain::file_entry::{SortMode, ViewMode};
 use crate::domain::special_paths::{COMPUTER_VIEW_ID, RECYCLE_BIN_VIEW_ID};
+use crate::ui::preview_panel::utils::truncate_text_to_fit;
 use crate::ui::svg_icons::SvgIconManager;
 use crate::ui::theme;
 use crate::ui::widgets;
@@ -715,19 +716,33 @@ pub fn render_toolbar(
 
                                                         let text_rect = item_rect
                                                             .shrink2(egui::vec2(8.0, 0.0));
+                                                        let font_id =
+                                                            egui::TextStyle::Button
+                                                                .resolve(ui.style());
+                                                        let truncated =
+                                                            truncate_text_to_fit(
+                                                                &display,
+                                                                text_rect.width(),
+                                                                &font_id,
+                                                                ui,
+                                                            );
                                                         ui.painter().text(
                                                             egui::pos2(
                                                                 text_rect.left(),
                                                                 text_rect.center().y,
                                                             ),
                                                             egui::Align2::LEFT_CENTER,
-                                                            &display,
-                                                            egui::TextStyle::Button
-                                                                .resolve(ui.style()),
+                                                            &truncated,
+                                                            font_id,
                                                             theme::text_color(
                                                                 ui.visuals().dark_mode,
                                                             ),
                                                         );
+                                                        if truncated != display {
+                                                            let _ = response
+                                                                .clone()
+                                                                .on_hover_text(display);
+                                                        }
 
                                                         if response.clicked() {
                                                             selected_path =
