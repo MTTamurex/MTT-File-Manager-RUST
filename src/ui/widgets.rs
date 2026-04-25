@@ -101,7 +101,8 @@ pub fn icon_button(
     response.on_hover_text(tooltip)
 }
 
-/// Renders a toggle button that shows active/inactive state
+/// Renders a toggle button that shows active/inactive state.
+/// Uses 18px display inside a 28×28 allocation to match the action buttons.
 pub fn toggle_icon_button(
     ui: &mut egui::Ui,
     svg_manager: &mut SvgIconManager,
@@ -115,8 +116,8 @@ pub fn toggle_icon_button(
         icon,
         active,
         tooltip,
-        theme::ICON_SIZE_LG,
-        theme::PADDING_SM,
+        18.0,
+        5.0,
         0.0,
     )
 }
@@ -166,7 +167,9 @@ pub fn toggle_icon_button_sized(
         [60, 60, 60, 255]
     };
 
-    if let Some(texture) = svg_manager.get_icon(ui.ctx(), icon_name, size as u32, color) {
+    // Render SVG at 2× display size for crisp strokes (same technique as action buttons)
+    let render_size = ((size * 2.0).max(32.0)) as u32;
+    if let Some(texture) = svg_manager.get_icon(ui.ctx(), icon_name, render_size, color) {
         let icon_center = egui::pos2(rect.center().x, rect.center().y + icon_offset_y);
         let icon_rect = egui::Rect::from_center_size(icon_center, egui::vec2(size, size));
         ui.painter().image(
