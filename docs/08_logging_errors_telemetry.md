@@ -17,6 +17,7 @@ The main application uses the `log` crate (`log::info!`, `log::warn!`, `log::err
 | `[PERF]` | Performance | Frame timing and performance data |
 | `[PERF-MSG]` | Message processing | Per-frame message handler timing |
 | `[PERF-ICON]` | Icon performance | Icon extraction timing |
+| `[PERF-THUMB-UPLOAD]` | Thumbnail upload | GPU texture upload budgeting per frame |
 | `[WATCHER]` | Watcher routing | Watcher strategy selection and lifecycle |
 | `[FS-WATCH]` | Filesystem events | Watcher event processing and auto-reload |
 | `[NOTIFY-WATCHER]` | Notify watcher | Per-folder `notify` crate watcher events |
@@ -66,6 +67,13 @@ The main application uses the `log` crate (`log::info!`, `log::warn!`, `log::err
 | `[VOLUME-RENAME]` | Volume rename | Drive volume label changes |
 | `[HardwareDetection]` | Hardware | GPU hardware acceleration detection |
 | `[device_change]` | Device change | Device plug/unplug monitoring |
+| `[ArchiveExtract]` | Archive extraction | Native archive extraction fallback events |
+| `[ArchiveExtract/ZIP]` | ZIP extraction | ZIP archive extraction details |
+| `[ArchiveExtract/7z]` | 7z extraction | 7z archive extraction details |
+| `[ArchiveExtract/RAR]` | RAR extraction | RAR archive extraction details |
+| `[ArchiveExtract/TAR]` | TAR extraction | TAR archive extraction details |
+| `[PASTE-DIAG]` | Paste diagnostics | Clipboard paste operation diagnostics |
+| `[STARTUP]` | Startup diagnostics | Early startup events (GPU backend, storage cleanup) |
 
 #### Search Service (`crates/mtt-search-service/`) — via `eprintln!`
 
@@ -76,6 +84,11 @@ The main application uses the `log` crate (`log::info!`, `log::warn!`, `log::err
 | `[DB]` | Database | SQLite persistence events |
 | `[SCAN]` | Scanning | Volume scanning events |
 | `[USN]` | USN Journal | USN Journal indexing events |
+| `[INDEX-DB]` | Index loading | Binary/SQLite index load events |
+
+### Log Level Behavior
+
+On Windows release builds launched without a console (e.g., from a desktop shortcut), the default log level is raised to `warn,mtt_file_manager=warn` to prevent background worker threads from generating heavy heap-allocator contention through failed stderr writes. When launched from a terminal (`cargo run`, PowerShell), the default is `warn,mtt_file_manager=info`.
 
 ### Capturing Logs
 
@@ -120,10 +133,11 @@ Use this when you want the release app to stay silent by default but still have 
 Defined in `src/domain/errors.rs`:
 
 ```rust
+#[derive(Error, Debug)]
 pub enum AppError {
-    Security(SecurityError),
+    Security(#[from] crate::infrastructure::security::SecurityError),
     WindowsApi(String),
-    Io(std::io::Error),
+    Io(#[from] std::io::Error),
     ThumbnailExtraction { path: PathBuf, #[source] source: Box<dyn std::error::Error + Send + Sync> },
     FileOperation(String),
     InvalidState(String),
@@ -193,6 +207,11 @@ The image viewer tracks performance metrics in `src/image_viewer/metrics.rs` for
 .\target\release\mtt-file-manager.exe 2>&1 | Select-String "NAV|FLOW|ERROR"
 ```
 
+### Archive extraction problems
+```powershell
+.\target\release\mtt-file-manager.exe 2>&1 | Select-String "ArchiveExtract|ERROR"
+```
+
 ### Global search problems
 ```powershell
 # Check service status
@@ -220,4 +239,3 @@ Get-ChildItem "$env:LOCALAPPDATA\MTT-File-Manager" -Recurse | Measure-Object -Pr
 # Check search service
 sc.exe query MTTFileManagerSearch
 ```
-

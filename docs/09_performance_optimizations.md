@@ -83,6 +83,8 @@ Each stage only runs if the previous one fails, minimizing expensive COM/Shell c
 
 **Thumbnail compression**: Generated thumbnails are compressed to WebP format for smaller disk cache footprint.
 
+**GPU texture upload budgeting**: The app tracks frame time and adjusts `upload_budget_ms` (clamped 2.0–10.0 ms) dynamically. During scrolling or video playback, the budget is reduced further (60–85% of normal) to prevent UI stutter.
+
 ## 5. Custom Folder Cover Composition
 
 **Location**: `src/infrastructure/folder_compose.rs`
@@ -178,3 +180,35 @@ When the app returns from an idle or minimized state:
 - **GPU texture flush**: Only flushes textures after 60s of idle (prevents unnecessary VRAM churn on short idle periods)
 - **Burst mode**: Short burst window (`2s + idle_secs/120`, capped at 5s) with aggressive `frame_time_peak_ms` decay (0.50 factor) to prevent inflated peak metrics from starving thumbnail upload budgets
 - **No watcher throttling**: Watcher event batches are not reduced after restore, ensuring filesystem changes are processed at full speed
+
+## 13. Archive Extraction Optimization
+
+**Location**: `src/infrastructure/archive_extract.rs`
+
+Native archive extraction includes several performance and safety optimizations:
+- **Pre-scan**: ZIP, 7z, and RAR handlers pre-scan the central directory to count matching entries before extraction, enabling accurate progress bars
+- **Streaming**: TAR variants use streaming decompression without loading the entire archive into memory
+- **Cancellation**: All extraction paths check an `AtomicBool` cancel flag and abort mid-operation
+- **Path sanitization**: `sanitize_relative_path()` strips `.` and `..` components to prevent Zip Slip attacks
+- **Reserved name filtering**: `sanitize_filename()` rewrites Windows reserved device names (CON, PRN, AUX, NUL, COM0-9, LPT0-9)
+
+## 14. Search Service Performance
+
+**Location**: `crates/mtt-search-service/`
+
+The search service optimizes indexing and query performance through several mechanisms:
+- **Binary snapshots**: `index_<drive>.bin` provides a fast-start cache that loads directly into memory without SQLite parsing overhead
+- **Name arena**: Lowered strings stored in a contiguous `NameArena` enable SIMD-accelerated search via `memchr`
+- **USN incremental loop**: 2-second catch-up cycles minimize re-scanning on NTFS volumes
+- **Per-volume threading**: Each volume gets its own indexer thread, parallelizing startup
+- **Dirty-shutdown detection**: The `service_meta.dirty` flag skips expensive FTS5 rebuilds on clean shutdowns
+
+## 15. Startup Time Optimizations
+
+**Location**: `src/main.rs`, `src/app/init.rs`
+
+- **Async font loading**: Custom fonts (Segoe UI) are loaded in a background thread so the window appears immediately with default fonts
+- **Hidden viewport start**: The main window starts hidden (`with_visible(false)`) and is revealed after the first frame is ready, preventing visual flicker
+- **eframe storage cleanup**: Stale eframe RON storage is removed before startup to prevent truncation-related hangs
+- **DLL search hardening**: `SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS)` removes the current working directory from the DLL search order, preventing DLL planting attacks
+- **GPU backend pre-read**: The `gpu_backend` preference is read from SQLite before eframe initialization to avoid renderer restart

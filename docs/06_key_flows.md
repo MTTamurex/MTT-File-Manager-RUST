@@ -7,7 +7,7 @@
 ```
 User Input
     ↓
-navigate_to() [application/navigation.rs]
+navigate_to() [app/operations/navigation.rs]
     ↓
 load_folder() [app/operations/folder_loading/]
     ↓
@@ -22,7 +22,7 @@ Request thumbnails for visible items [app/operations/thumbnails.rs]
 Render file list [ui/views/grid_view/ or list_view/]
 ```
 
-**Key files**: `application/navigation.rs`, `app/operations/folder_loading/`, `infrastructure/ntfs_reader.rs`, `infrastructure/windows/hdd_directory_reader.rs`, `application/sorting.rs`
+**Key files**: `app/operations/navigation.rs`, `app/operations/folder_loading/`, `infrastructure/ntfs_reader.rs`, `infrastructure/windows/hdd_directory_reader.rs`, `application/sorting.rs`
 
 ## 2. File Preview
 
@@ -108,10 +108,12 @@ Build custom menu items [app/operations/context_menu.rs]
     ↓
 Option: show native Windows Shell menu [infrastructure/windows/native_menu.rs]
     ↓
+Lazy submenu loading via shell_menu_worker [infrastructure/shell_menu_worker.rs]
+    ↓
 Execute selected action
 ```
 
-**Key files**: `ui/context_menu.rs`, `app/operations/context_menu.rs`, `infrastructure/windows/native_menu.rs`
+**Key files**: `ui/context_menu.rs`, `app/operations/context_menu.rs`, `infrastructure/windows/native_menu.rs`, `infrastructure/shell_menu_worker.rs`
 
 ## 6. Recycle Bin Operations
 
@@ -166,6 +168,8 @@ Sidebar renders pinned folders section [ui/sidebar.rs]
 Reorder via drag-and-drop → update position in `app_state.db`
     ↓
 Unpin via 📌 icon → remove from `app_state.db`
+    ↓
+cleanup_deleted_pinned_folders() removes stale entries on startup
 ```
 
 **Key files**: `app/operations/pinned_folder_ops.rs`, `infrastructure/app_state_db/pinned_folders.rs`, `ui/sidebar.rs`
@@ -447,3 +451,70 @@ First frame: ctx.set_visuals() + DwmSetWindowAttribute(DWMWA_USE_IMMERSIVE_DARK_
 
 **Key files**: `app/navigation_state.rs`, `ui/components/appearance_settings.rs`, `ui/theme.rs`, `ui/svg_icons.rs`, `ui/app_impl.rs`, `ui/app/lifecycle.rs`, `app/operations/preferences.rs`, `viewer_runtime.rs`, `image_viewer/mod.rs`, `image_viewer/app/mod.rs`, `pdf_viewer/mod.rs`, `pdf_viewer/viewer_app.rs`, `text_viewer/mod.rs`, `text_viewer/viewer_app.rs`, `infrastructure/windows/window_corners.rs`
 
+## 18. Archive Extraction
+
+**Trigger**: Copy/paste or drag-and-drop from inside an archive file (ZIP, 7z, RAR, TAR).
+
+```
+User copies files from inside an archive via context menu or drag-drop
+    ↓
+Shell IFileOperation may fail on archive virtual paths
+    ↓
+has_native_support() checks if all paths point to supported archive formats [infrastructure/archive_extract.rs]
+    ↓
+extract_files_from_archive() groups paths by parent archive [infrastructure/archive_extract.rs]
+    ↓
+Format-specific handler:
+  - ZIP → zip::ZipArchive
+  - 7z → sevenz_rust::decompress_file_with_extract_fn
+  - RAR → unrar::Archive
+  - TAR variants → tar::Archive with chained decompressor (flate2, bzip2, xz2, zstd)
+    ↓
+EntryMatcher filters entries by exact file, bare name, or folder prefix
+    ↓
+sanitize_filename() strips Windows reserved names (CON, PRN, AUX, NUL, COM0-9, LPT0-9)
+    ↓
+Files written to destination folder with progress updates via SharedExtractionProgress
+```
+
+**Supported formats**: `.zip`, `.7z`, `.rar`, `.tar`, `.tar.gz`, `.tgz`, `.tar.bz2`, `.tbz2`, `.tar.xz`, `.txz`, `.tar.zst`, `.tzst`
+
+**Key files**: `infrastructure/archive_extract.rs`, `domain/file_entry.rs`
+
+## 19. Volume Label Rename (Elevated Helper)
+
+**Trigger**: User renames a drive volume label in the app UI.
+
+```
+User edits drive label
+    ↓
+App spawns itself elevated: mtt-file-manager.exe --set-volume-label <drive> <label>
+    ↓
+run_elevated_volume_rename_helper() calls Windows SetVolumeLabelW [infrastructure/windows/]
+    ↓
+Process exits with exit code (0 = success)
+```
+
+**Key files**: `src/main.rs`, `infrastructure/windows/` (drive volume label functions)
+
+## 20. GPU Backend Preference
+
+**Trigger**: App startup or user changes GPU backend in settings.
+
+```
+main.rs startup
+    ↓
+read_early_preference("gpu_backend") queries app_state.db [main.rs]
+    ↓
+parse_gpu_backend_preference() converts string to wgpu::Backends:
+  - "dx12" → DX12
+  - "vulkan" → VULKAN
+  - "gl" → GL
+  - other / missing → PRIMARY | GL (auto)
+    ↓
+eframe::NativeOptions.wgpu_options configured with selected backends
+    ↓
+Log outputs the selected backend for diagnostics
+```
+
+**Key files**: `src/main.rs`, `app/operations/preferences.rs`

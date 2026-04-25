@@ -17,15 +17,15 @@ winget install Rustlang.Rustup
 ### System Dependencies
 - **Windows 10** or **Windows 11**
 - **libmpv-2.dll** — Required for video playback
-- **pdfium.dll** — Required for PDF viewer
+- **pdfium.dll** — Required for PDF viewer (staged automatically by `build.rs`)
 
 ### GPU Backend Notes
-- The main desktop window uses `eframe` with the `wgpu` renderer.
-- Current startup configuration prefers the native primary `wgpu` backends on Windows and requests `HighPerformance` adapter selection for the main app.
-- A dedicated GPU is not mandatory. On hybrid systems, the discrete adapter is preferred when available, but compatible integrated GPUs can still be selected.
-- The main-window renderer configuration also allows the `GL` backend, which gives Windows an OpenGL/ANGLE compatibility path when the preferred native backend is not available.
-- The standalone image/PDF/text viewers do use a separate `glow` renderer path via `src/viewer_runtime.rs`; this keeps their baseline memory lower than the main app.
-- If `wgpu` cannot initialize any compatible backend or adapter, the **main file-manager window** still fails to start even though the standalone viewers use `glow`.
+- The main desktop window uses `eframe` with the `wgpu` renderer (`dx12` feature on Windows).
+- Current startup configuration prefers the primary `wgpu` backends (`DX12`, `VULKAN`, `GL`) based on the saved `gpu_backend` preference from `app_state.db`.
+- A dedicated GPU is not mandatory. On hybrid systems, `PowerPreference::HighPerformance` is requested, but compatible integrated GPUs can still be selected.
+- The process deliberately does **not** export `NvOptimusEnablement` / `AmdPowerXpressRequestHighPerformance` symbols, because the same executable is reused for standalone viewers.
+- The standalone image/PDF/text viewers use a separate `glow` renderer path via `src/viewer_runtime.rs`.
+- If `wgpu` cannot initialize any compatible backend or adapter, the **main file-manager window** fails to start even though the standalone viewers use `glow`.
 
 ### Optional Dependencies
 ```powershell
@@ -47,7 +47,7 @@ winget install Rustlang.Rustup
 ```
 
 ### Audio Runtime Notes
-- Audio-only files are routed to the standalone mpv player and rendered with a real-time waveform visualization.
+- Audio-only files are routed to the standalone mpv player.
 - Explicit fast-path audio extension handling includes: `mp3`, `wav`, `ogg`, `wma`, `aac`, `m4a`, `ape`, `mid`, `flac`, `alac`, `opus`, `aiff`, `weba`.
 - Audio metadata extraction reads duration, codec, bitrate, channels, sample rate, artist, album, track title, genre, and year.
 - Codec fallback sniffing currently recognizes `AAC`, `MP3`, `FLAC`, `Opus`, `Vorbis`, `AC-3`, `E-AC-3`, `ALAC`, `PCM`, `WMA`, and `DTS`.
@@ -121,7 +121,7 @@ debug-assertions = true
 overflow-checks = true
 ```
 
-**Release** (configured in Cargo.toml):
+**Release** (configured in `Cargo.toml`):
 ```toml
 [profile.release]
 opt-level = 3       # Maximum optimization
@@ -180,7 +180,7 @@ sc.exe start MTTFileManagerSearch
 
 With this flag, the service returns `redacted` volume states and zeroed counts in `GetStatus` responses while search/pagination remains functional.
 
-### Installer Build
+## Installer Build
 
 The installer is generated with Inno Setup 6 and bundles:
 - `mtt-file-manager.exe`
@@ -398,6 +398,9 @@ $env:RUST_BACKTRACE="full"               # Full backtraces
 $env:RUST_LOG="debug"                    # Debug logging
 $env:RUST_LOG="mtt_file_manager=debug"   # Module-specific logging
 $env:CARGO_INCREMENTAL=1                 # Incremental compilation
+$env:PDFIUM_DYNAMIC_LIB_PATH="C:\Path"   # pdfium.dll lookup path
+$env:PDFIUM_SKIP_HASH_CHECK="1"          # Skip pdfium SHA-256 verification (dev only)
+$env:MTT_SEARCH_REDACT_STATUS_METRICS="1" # Redact search service status metrics
 ```
 
 ## VS Code Settings
@@ -409,4 +412,3 @@ $env:CARGO_INCREMENTAL=1                 # Incremental compilation
     "rust-analyzer.cargo.buildScripts.enable": true
 }
 ```
-

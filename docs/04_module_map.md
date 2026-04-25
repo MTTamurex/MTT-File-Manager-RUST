@@ -20,8 +20,9 @@ src/
 │   ├── folder_size_state.rs         # Folder size caches, batch invalidation, stale-result guards
 │   ├── global_search_state.rs       # Global search session state
 │   ├── layout_state.rs              # Layout preferences
+│   ├── live_file_size.rs            # Live file size monitoring state
 │   ├── navigation_state.rs          # Navigation state, history & ThemeMode enum
-│   ├── live_file_size.rs              # Live file size monitoring state
+│   ├── shortcuts.rs                 # Keyboard shortcuts definitions
 │   ├── ui_state.rs                  # UI preferences state
 │   ├── init.rs                      # ImageViewerApp::new() initialization
 │   ├── init_bootstrap.rs            # Bootstrap sequence
@@ -99,8 +100,10 @@ src/
 │   │   ├── gc.rs                    # State garbage collection
 │   │   ├── pinned_folders.rs        # Pinned folder persistence
 │   │   └── preferences.rs           # Preference persistence
+│   ├── archive_extract.rs           # Native archive extraction fallback (ZIP, 7z, RAR, TAR)
 │   ├── db_utils.rs                  # Shared SQLite ACL/PRAGMA/fallback helpers
 │   ├── directory_cache.rs           # In-memory directory cache
+│   ├── directory_dirty_registry.rs  # Directory dirty state tracking
 │   ├── directory_index.rs           # Persisted directory metadata cache (directory_cache.db)
 │   ├── disk_cache.rs                # Thumbnail / preview / shell icon SQLite entry point
 │   ├── disk_cache/                  # Thumbnail cache submodules
@@ -121,7 +124,17 @@ src/
 │   │   ├── detection.rs             # Storage type detection
 │   │   ├── grouped_queue.rs         # Priority queue grouping
 │   │   └── threading.rs             # Thread priority management
+│   ├── media/                       # Media infrastructure
+│   │   ├── mod.rs
+│   │   └── hardware_acceleration.rs # HW acceleration detection
 │   ├── ntfs_reader.rs               # Raw NTFS directory reading
+│   ├── onedrive/                    # OneDrive integration
+│   │   ├── mod.rs
+│   │   ├── attributes.rs            # OneDrive file attributes
+│   │   ├── directory_enum.rs        # OneDrive directory enumeration
+│   │   ├── path_detection.rs        # OneDrive path detection
+│   │   ├── pin_state.rs             # OneDrive pin commands
+│   │   └── timeout_ops.rs           # Timeout operations
 │   ├── security.rs                  # Security validation entry point
 │   ├── security/                    # Security submodules
 │   │   ├── components.rs            # Security components
@@ -130,50 +143,41 @@ src/
 │   │   ├── symlink.rs               # Symlink validation
 │   │   └── unc.rs                   # UNC path validation
 │   ├── shell_menu_worker.rs         # Shell context menu extraction
-│   ├── user_session_search/          # User session search index (split module)
+│   ├── threading.rs                 # Named thread spawning utilities
+│   ├── user_session_search/         # User session search index (split module)
 │   │   ├── mod.rs                   # Search index orchestration
 │   │   ├── db.rs                    # SQLite persistence for search index
 │   │   ├── discovery.rs             # Volume & path discovery
 │   │   └── scanner.rs               # Directory scanning & indexing
 │   ├── virtual_drive_config.rs      # Virtual drive configuration
 │   ├── windows_clipboard.rs         # Windows clipboard (CF_HDROP)
-│   ├── onedrive/                    # OneDrive integration
+│   ├── windows/                     # Windows-specific APIs
 │   │   ├── mod.rs
-│   │   ├── attributes.rs            # OneDrive file attributes
-│   │   ├── directory_enum.rs        # OneDrive directory enumeration
-│   │   ├── path_detection.rs        # OneDrive path detection
-│   │   ├── pin_state.rs             # OneDrive pin commands
-│   │   └── timeout_ops.rs           # Timeout operations
-│   ├── media/                       # Media infrastructure
-│   │   ├── mod.rs
-│   │   └── hardware_acceleration.rs # HW acceleration detection
-│   └── windows/                     # Windows-specific APIs
-│       ├── mod.rs
-│       ├── bitmap_conversion.rs     # Bitmap conversion
-│       ├── codec_registry.rs        # Codec name cache
-│       ├── codec_registry/          # Codec registry submodules
-│       ├── device_change.rs         # Device change monitoring
-│       ├── drives.rs                # Drive enumeration
-│       ├── file_flags.rs            # File attribute flags
-│       ├── file_system.rs           # Filesystem operations
-│       ├── file_type.rs             # File type detection
-│       ├── folder_size.rs           # Folder size calculation
-│       ├── formatting.rs            # Number/string formatting
-│       ├── hdd_directory_reader.rs  # Optimized HDD directory reader
-│       ├── icons.rs                 # Icon extraction
-│       ├── icons/                   # Icon submodules
-│       ├── iso_mount.rs             # ISO file mounting
-│       ├── media_foundation.rs      # Media Foundation integration
-│       ├── metadata/                # Metadata extraction submodules
-│       ├── native_menu.rs           # Native Windows context menu
-│       ├── recycle_bin.rs           # Recycle Bin operations
-│       ├── recycle_bin/             # Recycle Bin submodules
-│       ├── shell_folder.rs          # Shell special folders
-│       ├── shell_operations.rs      # Shell file operations
-│       ├── shell_operations/        # Shell operations submodules
-│       ├── system_info.rs           # System information
-│       ├── window_corners.rs        # Window corner styling & dark title bar (DWM)
-│       └── window_subclass.rs       # Window subclassing
+│   │   ├── bitmap_conversion.rs     # Bitmap conversion
+│   │   ├── codec_registry.rs        # Codec name cache
+│   │   ├── codec_registry/          # Codec registry submodules
+│   │   ├── device_change.rs         # Device change monitoring
+│   │   ├── drives.rs                # Drive enumeration
+│   │   ├── file_flags.rs            # File attribute flags
+│   │   ├── file_system.rs           # Filesystem operations
+│   │   ├── file_type.rs             # File type detection
+│   │   ├── folder_size.rs           # Folder size calculation
+│   │   ├── formatting.rs            # Number/string formatting
+│   │   ├── hdd_directory_reader.rs  # Optimized HDD directory reader
+│   │   ├── icons.rs                 # Icon extraction
+│   │   ├── icons/                   # Icon submodules
+│   │   ├── iso_mount.rs             # ISO file mounting
+│   │   ├── media_foundation.rs      # Media Foundation integration
+│   │   ├── metadata/                # Metadata extraction submodules
+│   │   ├── native_menu.rs           # Native Windows context menu
+│   │   ├── recycle_bin.rs           # Recycle Bin operations
+│   │   ├── recycle_bin/             # Recycle Bin submodules
+│   │   ├── shell_folder.rs          # Shell special folders
+│   │   ├── shell_operations.rs      # Shell file operations
+│   │   ├── shell_operations/        # Shell operations submodules
+│   │   ├── system_info.rs           # System information
+│   │   ├── window_corners.rs        # Window corner styling & dark title bar (DWM)
+│   │   └── window_subclass.rs       # Window subclassing
 │
 ├── ui/                              # User interface
 │   ├── mod.rs
@@ -184,6 +188,7 @@ src/
 │   ├── svg_icons.rs                 # SVG icon renderer (duotone dark-mode support)
 │   ├── toolbar.rs                   # Top toolbar
 │   ├── sidebar.rs                   # Side panel
+│   ├── sidebar_tree.rs              # Tree sidebar for folder navigation
 │   ├── navigation.rs                # Navigation UI
 │   ├── status_bar.rs                # Bottom status bar
 │   ├── context_menu.rs              # Context menu renderer
@@ -211,15 +216,15 @@ src/
 │   │   └── filters.rs               # Search filter logic
 │   ├── components/                  # Reusable UI components
 │   │   ├── mod.rs
-│   │   ├── media_preview.rs         # Media preview component
-│   │   ├── gif_manager.rs           # GIF playback manager
-│   │   ├── video_controls_state.rs  # Video controls state
-│   │   ├── language_settings.rs     # Language settings component
 │   │   ├── appearance_settings.rs   # Theme (dark/light) settings component
-│   │   ├── virtual_drive_settings.rs # Virtual drive settings
+│   │   ├── gif_manager.rs           # GIF playback manager
 │   │   ├── item_slot/               # Item slot rendering (drive/folder/file)
+│   │   ├── language_settings.rs     # Language settings component
+│   │   ├── media_preview.rs         # Media preview component
 │   │   ├── mpv/                     # mpv integration
-│   │   └── mpv_preview/             # mpv preview bridge
+│   │   ├── mpv_preview/             # mpv preview bridge
+│   │   ├── video_controls_state.rs  # Video controls state
+│   │   └── virtual_drive_settings.rs # Virtual drive settings
 │   └── views/                       # File list views
 │       ├── mod.rs
 │       ├── common.rs                # Shared view utilities
@@ -271,7 +276,7 @@ src/
 │   ├── ipc.rs                       # Inter-process communication
 │   ├── loader.rs                    # Image decoding (mmap, EXIF, WIC)
 │   └── metrics.rs                   # Performance metrics
-
+│
 ├── text_viewer/                     # Native text viewer (separate process)
 │   ├── mod.rs                       # Process spawn, path validation, standalone runner
 │   └── viewer_app.rs                # Text viewer state & rendering
@@ -284,7 +289,7 @@ src/
     ├── viewer_app.rs                # PDF viewer state & rendering
     ├── renderer.rs                  # Page rendering
     ├── render_worker.rs             # Async render worker
-    ├── selection.rs                # Text selection support
+    ├── selection.rs                 # Text selection support
     └── toolbar.rs                   # PDF controls
 ```
 
@@ -304,8 +309,9 @@ crates/
         ├── file_index.rs             # In-memory HashMap index
         ├── path_resolver.rs          # Path reconstruction via FRN chain
         ├── index_db/                 # SQLite persistence (split module)
-        │   ├── mod.rs               # DB initialization, schema, dirty-shutdown handling, shared data dir
+        │   ├── mod.rs               # DB initialization, schema, dirty-shutdown handling, shared data dir, ACL hardening
         │   ├── binary.rs            # Per-volume binary snapshot save/load with CRC
+        │   ├── integrity.rs         # Snapshot integrity verification
         │   └── sync.rs              # Record persistence, incremental sync, legacy FTS maintenance helpers
         ├── ipc_server/               # Named Pipe server (split module)
         │   ├── mod.rs               # Server loop, client accept, wait_for_client
@@ -325,7 +331,7 @@ crates/
 
 ```
 Cargo.toml                           # Workspace root + mtt-file-manager dependencies
-build.rs                             # Windows icon + DPI manifest embedding (winresource)
+build.rs                             # Windows icon + DPI manifest embedding + pdfium.dll staging + SHA-256 verification
 app.manifest                         # DPI awareness and Windows compatibility manifest
 virtual_drive_config.json            # Drive letter → storage type overrides
 locales/
@@ -365,4 +371,3 @@ Background Results ──→ UI Update Loop (channels)
 3. **Domain** modules have zero dependencies on infrastructure or UI
 4. **Infrastructure** modules depend only on domain types and external crates
 5. **Workers** are spawned during init and communicate exclusively via channels
-

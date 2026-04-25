@@ -11,16 +11,17 @@ MTT File Manager is a native Windows file manager built in Rust with a modern bo
 ## Key Features
 
 ### Navigation & Interface
-- **Custom borderless window** — No traditional title bar; native resize/move support
+- **Custom borderless window** — No traditional title bar; native resize/move support via window subclassing (`WM_NCHITTEST`)
 - **Dark / Light theme** — Toggle between dark and light mode in Settings > Appearance; setting is persisted in SQLite app state (`app_state.db`) and applied immediately across the main window and standalone image/PDF/text viewers (including native Windows title bar via `DwmSetWindowAttribute` where applicable)
-- **Tabbed navigation** — Multiple tabs with independent history per tab
-- **Grid and List views** — Adjustable thumbnail sizes (64–512px)
+- **GPU backend preference** — Persisted `gpu_backend` preference (`dx12`, `vulkan`, `gl`, `auto`) read from `app_state.db` before eframe initialization
+- **Tabbed navigation** — Multiple tabs with independent history, sort, view, and selection per tab
+- **Grid and List views** — Adjustable thumbnail sizes; list view with resizable columns per view type (regular, OneDrive, Computer)
 - **Editable address bar** — Direct path input with breadcrumb navigation
-- **Sidebar** — Quick access to drives, libraries, OneDrive, and Recycle Bin with auto-scroll on overflow
+- **Sidebar** — Quick access to drives, libraries, OneDrive, and Recycle Bin with auto-scroll on overflow; includes a tree sidebar (`sidebar_tree.rs`)
 - **Quick Access (pinned folders)** — Pin folders via right-click or drag-and-drop; reorder via drag; persisted in SQLite app state (`app_state.db`)
-- **Keyboard navigation** — Full keyboard shortcuts for mouse-free operation
+- **Keyboard navigation** — Full keyboard shortcuts for mouse-free operation (arrow keys, Enter, Backspace, Delete, F2, F5, Ctrl+T, Ctrl+W, Ctrl+Shift+F, Ctrl+L)
 - **Live search** — Type-to-filter files in the current folder
-- **Internationalization** — English and Brazilian Portuguese via `rust-i18n`
+- **Internationalization** — English and Brazilian Portuguese via `rust-i18n` (fallback: `pt-BR`)
 
 ### Preview & Media
 - **Integrated preview panel** — View images, videos, GIFs, and PDFs without leaving the app
@@ -35,12 +36,14 @@ MTT File Manager is a native Windows file manager built in Rust with a modern bo
 
 ### File Operations
 - **Core operations** — Copy, cut, paste, rename, delete
-- **Native context menu** — Full Windows Shell context menu integration
+- **Native context menu** — Full Windows Shell context menu integration with lazy submenu loading
 - **Recycle Bin** — Browse, restore, and permanently delete items
 - **OneDrive support** — Sync status detection (cloud-only, syncing, pinned, locally available)
-- **ISO mounting** — Mount ISO files as virtual drives
+- **ISO mounting** — Mount ISO files as virtual drives; eject mounted ISO drives
 - **Inline renaming** — Rename files directly in the file list
-- **Drag-and-drop** — Move/copy files via drag-and-drop
+- **Drag-and-drop** — Move/copy files via drag-and-drop with visual ghost feedback
+- **Archive extraction** — Native fallback extraction for ZIP, 7z, RAR, and TAR variants (`.tar`, `.tar.gz`, `.tgz`, `.tar.bz2`, `.tbz2`, `.tar.xz`, `.txz`, `.tar.zst`, `.tzst`) when Shell `IFileOperation` fails
+- **Shell shortcuts** — Create Windows `.lnk` shortcuts
 
 ### Global Search
 - **Dedicated overlay** — Activated via Ctrl+Shift+F
@@ -52,11 +55,11 @@ MTT File Manager is a native Windows file manager built in Rust with a modern bo
 ### Cache & Performance
 - **Split SQLite persistence** — Thumbnail cache, app state, directory metadata cache, and search-service index stored in dedicated databases
 - **In-memory LRU cache** — Fast access via DashMap and LRU eviction
-- **Async workers** — Background threads for thumbnails, icons, metadata, folder previews, file operations, and prefetch
-- **Directory caching** — In-memory cache of directory structures for fast navigation
+- **Async workers** — Background threads for thumbnails, icons, metadata, folder previews, file operations, prefetch, and global search IPC
+- **Directory caching** — In-memory cache of directory structures for fast navigation; persisted `directory_cache.db` with `directory_index` and `file_index` tables
 - **UI virtualization** — Only visible items are rendered in grid/list views
 - **Adaptive batching** — Dynamic batch sizes for folder loading based on system performance
-- **I/O prioritization** — Thread priority adjustment based on workload type
+- **I/O prioritization** — Thread priority adjustment based on workload type (interactive, prefetch, background)
 
 ## High-Level Architecture
 
@@ -90,6 +93,7 @@ MTT File Manager is a native Windows file manager built in Rust with a modern bo
 │  ┌─────────────┬──────────────┬───────────────────────┐    │
 │  │ Windows API │ Disk Cache   │  Media Foundation     │    │
 │  │ Shell Integ.│ SQLite       │  Drive Watcher        │    │
+│  │ Archive Ext.│ Threading    │  Security             │    │
 │  └─────────────┴──────────────┴───────────────────────┘    │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -103,34 +107,40 @@ MTT File Manager is a native Windows file manager built in Rust with a modern bo
 | Windows API | windows-rs | 0.61.0 | Native Windows integration |
 | Database | SQLite (rusqlite) | 0.32 | Thumbnail cache, app state, directory metadata, and search persistence |
 | Video | libmpv2 | 5.0.3 | Video playback |
-| PDF | pdfium (pdfium-render) | 0.8.37 | Native PDF rendering |
-| GPU Backend | wgpu + glow (via eframe) | 24.x / via eframe | Main window uses `wgpu` with HighPerformance preference; image/PDF/text viewers use the lighter `glow` renderer |
+| PDF | pdfium (pdfium-render) | 0.8.37 | Native PDF rendering (feature: `thread_safe`) |
+| GPU Backend | wgpu + glow (via eframe) | 24.0 / via eframe | Main window uses `wgpu` with `dx12` feature and `HighPerformance` preference; image/PDF/text viewers use the lighter `glow` renderer |
 | Images | image crate | 0.25 | Image processing (WebP, GIF) |
 | SVG | resvg/usvg | 0.44 | SVG icon rendering |
 | Parallelism | rayon | 1.10 | Parallel processing |
 | Channels | crossbeam-channel | 0.5.15 | High-performance MPSC channels |
-| Hashing | rustc-hash/fxhash | 2.0/0.2.1 | Fast hashing for PathBuf keys |
+| Hashing | rustc-hash / fxhash / blake3 | 2.0 / 0.2.1 / 1.5 | Fast hashing for PathBuf keys; BLAKE3 for cache key stability |
 | Memory Mapping | memmap2 | 0.9 | Efficient large image reading |
 | EXIF | kamadak-exif | 0.5 | JPEG metadata extraction |
 | Compression | webp | 0.3 | WebP compression for thumbnails |
 | Clipboard | clipboard-win | 5.4 | Windows clipboard (CF_HDROP) |
 | File Dialogs | rfd | 0.15 | Native file dialogs |
-| Watcher | Native Drive Watcher + notify (fallback) | native/6.1.1 | Filesystem monitoring (local + UNC) |
+| Watcher | Native Drive Watcher + notify (fallback) | native / 6.1.1 | Filesystem monitoring (local + UNC) |
 | i18n | rust-i18n | 3 | Multi-language support |
 | IPC | Named Pipes + bincode | 1.3 | App ↔ search service communication |
 | Windows Service | windows-service | 0.7 | Background indexing service |
+| Archive Extraction | zip / sevenz-rust / unrar / tar / flate2 / bzip2 / xz2 / zstd | 2 / 0.6 / 0.5 / 0.4 / 1 / 0.5 / 0.1 / 0.13 | Native archive extraction fallback |
+| Logging | log + env_logger | 0.4 / 0.11 | Structured logging with level filtering |
+| Serialization | serde + serde_json + bincode | 1.0 / 1.0 / 1.3 | Serialization framework |
+| Sync Primitives | parking_lot | 0.12 | Low-overhead Mutex/RwLock |
+| Lazy Static | once_cell | 1.19 | Lazy static initialization |
 
 ## Runtime Dependencies
 
 - **libmpv-2.dll** — Required for video playback (place in executable directory or PATH)
-- **pdfium.dll** — Required for PDF viewer (place in executable directory or PATH)
+- **pdfium.dll** — Required for PDF viewer (staged automatically by `build.rs` from `vendor/` or `PDFIUM_DYNAMIC_LIB_PATH`; SHA-256 verified in release builds)
 - **Windows 10+** — Required for native Windows API integration
 
 ## Known Limitations
 
 1. **Windows only** — Depends heavily on Windows APIs (Shell, COM, NTFS, WinRT)
 2. **mpv dependency** — Video playback requires `libmpv-2.dll`
-3. **Minimal test coverage** — Automated tests are sparse
+3. **pdfium dependency** — PDF viewer requires `pdfium.dll`
+4. **Minimal test coverage** — Automated tests are sparse
 
 ## System Requirements
 
@@ -139,7 +149,7 @@ MTT File Manager is a native Windows file manager built in Rust with a modern bo
 - x64 processor, 2+ cores
 - 4 GB RAM
 - 100 MB disk space + cache storage
-- GPU/driver capable of initializing the main window's `wgpu` backend (native backend preferred; OpenGL compatibility path available for diagnostics)
+- GPU/driver capable of initializing the main window's `wgpu` backend (native backend preferred; OpenGL compatibility path available)
 
 ### Recommended
 - Windows 11 (latest update)
@@ -158,4 +168,3 @@ MTT File Manager is a native Windows file manager built in Rust with a modern bo
 - [07_storage_config.md](07_storage_config.md) — Storage and configuration
 - [08_logging_errors_telemetry.md](08_logging_errors_telemetry.md) — Logging and error handling
 - [09_performance_optimizations.md](09_performance_optimizations.md) — Performance optimizations
-

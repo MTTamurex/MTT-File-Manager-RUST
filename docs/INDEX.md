@@ -18,16 +18,19 @@
 **Dependency Stack** — All Cargo dependencies with versions, Windows API features, runtime dependencies, build profiles.
 
 ### [06_key_flows.md](06_key_flows.md)
-**Key Flows** — Step-by-step documentation of major application flows: navigation, preview, file operations, thumbnail pipeline, global search, image/video/PDF viewers.
+**Key Flows** — Step-by-step documentation of major application flows: navigation, preview, file operations, thumbnail pipeline, global search, image/video/PDF viewers, archive extraction, volume rename, GPU backend preference.
 
 ### [07_storage_config.md](07_storage_config.md)
-**Storage & Configuration** — Data locations, SQLite schemas (app + search service), cache structure, preferences, i18n.
+**Storage & Configuration** — Data locations, SQLite schemas (app + search service + session search), cache structure, preferences, i18n.
 
 ### [08_logging_errors_telemetry.md](08_logging_errors_telemetry.md)
 **Logging, Errors & Telemetry** — Log categories, capture methods, AppError type, debugging techniques.
 
 ### [09_performance_optimizations.md](09_performance_optimizations.md)
-**Performance Optimizations** — Drive-wide watcher, NtQueryDirectoryFile, smart DELETE handling, thumbnail pipeline, folder cover composition, I/O priority, caching strategies.
+**Performance Optimizations** — NtQueryDirectoryFile, smart DELETE handling, thumbnail pipeline, folder cover composition, I/O priority, caching strategies, GPU selection, archive extraction, search service performance.
+
+### [10_viewers.md](10_viewers.md)
+**Visualizadores e Media Player** — Documentação detalhada dos viewers standalone (imagem, PDF, texto) e do media player (mpv), incluindo arquitetura, cache, validação, dependências runtime e tabela comparativa.
 
 ## Quick Reference
 
@@ -49,6 +52,9 @@
 
 ### Where is data stored?
 → [07_storage_config.md](07_storage_config.md)
+
+### Understanding the viewers / media player?
+→ [10_viewers.md](10_viewers.md)
 
 ## Project Structure
 
@@ -97,4 +103,3 @@ cargo bench                       # Run benchmarks
 cargo clippy                      # Lint
 cargo fmt                         # Format code
 ```
-

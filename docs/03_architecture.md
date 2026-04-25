@@ -15,7 +15,7 @@ MTT-File-Manager-RUST/
 
 | Crate | Type | Description |
 |-------|------|-------------|
-| `mtt-file-manager` | bin (GUI) | Main application with eframe/egui; also hosts the `--image-viewer`, `--pdf-viewer`, `--text-viewer` and `--video-player` standalone entry points |
+| `mtt-file-manager` | bin (GUI) | Main application with eframe/egui; also hosts `--image-viewer`, `--pdf-viewer`, `--text-viewer`, `--video-player`, and `--set-volume-label` standalone entry points |
 | `mtt-search-protocol` | lib | IPC types and bincode serialization |
 | `mtt-search-service` | bin (service) | Windows Service with hybrid per-volume indexing, binary/SQLite startup caches, and in-memory SIMD search over Named Pipe IPC |
 
@@ -112,11 +112,12 @@ Renders the user interface using eframe/egui (immediate-mode GUI).
 - `src/ui/tab_bar/` — Tab system (renderer, controls, drag-dwell)
 - `src/ui/views/` — File views (grid_view, list_view, computer_view)
 - `src/ui/sidebar.rs` — Side panel with drives and shortcuts
+- `src/ui/sidebar_tree.rs` — Tree sidebar for folder navigation
 - `src/ui/preview_panel/` — File preview panel with video support
 - `src/ui/status_bar.rs` — Bottom status bar
-- `src/ui/app/` — App lifecycle, input handling, and notifications
+- `src/ui/app/` — App lifecycle, input handling, notifications, panels
 - `src/ui/app_impl.rs` — Main `eframe::App` implementation
-- `src/ui/components/` — Reusable widgets (media_preview, gif_manager, item_slot, mpv, mpv_preview, language_settings, video_controls_state, virtual_drive_settings)
+- `src/ui/components/` — Reusable widgets (media_preview, gif_manager, item_slot, mpv, mpv_preview, language_settings, appearance_settings, video_controls_state, virtual_drive_settings)
 - `src/ui/global_search_overlay/` — Global search overlay UI
 - `src/ui/icon_loader/` — Icon extraction and loading
 - `src/ui/cache.rs` — Texture/icon cache manager (CacheManager)
@@ -137,7 +138,7 @@ Business logic and application services.
 - `sorting.rs` — Sorting facade (`sort_items`, `filter_items`)
 - `sorting/sort_impl.rs` — Sort implementation
 - `sorting/filtering.rs` — Filter implementation
-- `watcher.rs` — Filesystem change monitoring integration (default: `notify` per-folder watcher; opt-in: drive-wide `ReadDirectoryChangesW`)
+- `watcher.rs` — Filesystem change monitoring integration
 - `notification.rs` — Toast notification system
 - `renaming.rs` — File rename logic
 - `context_menu.rs` — Context menu logic
@@ -169,14 +170,15 @@ System access, Windows integration, and data persistence.
 - `adaptive_batch.rs` — Adaptive batch configuration for folder loading
 
 **Filesystem**:
-- `ntfs_reader.rs` — NTFS raw directory reading (NtQueryDirectoryFile)
-- `drive_watcher.rs` + `drive_watcher/` — Low-level ReadDirectoryChangesW watcher (buffer_parser, thread_loop) — used internally by the search index (`user_session_search`) to monitor virtual/FUSE volumes; not used by the main app watcher system
+- `ntfs_reader.rs` — NTFS raw directory reading (`NtQueryDirectoryFile`)
+- `drive_watcher.rs` + `drive_watcher/` — Low-level `ReadDirectoryChangesW` watcher (buffer_parser, thread_loop)
 - `folder_compose.rs` — Custom folder cover composition (3-layer PNG)
 - `virtual_drive_config.rs` — Virtual drive and disk type configuration
 - `io_priority.rs` + `io_priority/` — I/O priority management (detection, grouped_queue, threading)
+- `directory_dirty_registry.rs` — Directory dirty state tracking
 
 **Windows Integration** (`src/infrastructure/windows/`):
-- `shell_operations.rs` + `shell_operations/` — File operations via Shell API (IFileOperation)
+- `shell_operations.rs` + `shell_operations/` — File operations via Shell API (`IFileOperation`)
 - `icons.rs` + `icons/` — Windows icon extraction
 - `recycle_bin.rs` + `recycle_bin/` — Recycle Bin operations
 - `native_menu.rs` — Native Windows context menu
@@ -203,10 +205,12 @@ System access, Windows integration, and data persistence.
 - `shell_menu_worker.rs` — Shell context menu extraction worker
 - `user_session_search/` — User session search index (split module: orchestration, db persistence, discovery, scanner)
 - `security.rs` + `security/` — Security validation (components, drive, shell_namespace, symlink, unc)
-- `windows_clipboard.rs` — Windows clipboard (CF_HDROP)
+- `windows_clipboard.rs` — Windows clipboard (`CF_HDROP`)
 - `viewer_runtime.rs` — Shared low-baseline runtime helpers for image/PDF/text viewer subprocesses (read-only prefs, Glow renderer config)
 - `onedrive/` — OneDrive integration (path_detection, attributes, timeout_ops, directory_enum, pin_state)
 - `media/` — Media infrastructure (hardware_acceleration)
+- `archive_extract.rs` — Native archive extraction fallback (ZIP, 7z, RAR, TAR variants)
+- `threading.rs` — Named thread spawning utilities
 
 ### 5. Workers Layer
 **Location**: `src/workers/`
@@ -216,7 +220,7 @@ Background threads for asynchronous processing.
 - `thumbnail/` — Multi-stage thumbnail system
   - `extraction/stage1_image_crate.rs` — Stage 1: image crate (PNG, JPG, GIF, WebP)
   - `extraction/stage2_wic.rs` — Stage 2: Windows Imaging Component
-  - `extraction/stage3_shell_api.rs` — Stage 3: Shell API (IShellItemImageFactory)
+  - `extraction/stage3_shell_api.rs` — Stage 3: Shell API (`IShellItemImageFactory`)
   - `extraction/stage4_force_extract.rs` — Stage 4: Forced extraction
   - `extraction/stage5_media_foundation.rs` — Stage 5: Media Foundation (videos)
   - `queue.rs`, `types.rs`, `worker.rs`, `processing/` — Queue, types, worker loop, and post-processing
@@ -236,7 +240,7 @@ Separate Windows Service that indexes all files with a hybrid per-volume strateg
 - `fs_walker.rs` — Full-tree scanner for non-USN volumes
 - `file_index.rs` — In-memory index: `HashMap<u64, FileRecord>` (FRN → record)
 - `path_resolver.rs` — Full path reconstruction via parent FRN chain
-- `index_db/` — Persistence layer (shared data dir, SQLite schema/metadata, binary snapshot save/load, record sync, legacy FTS maintenance helpers)
+- `index_db/` — Persistence layer (shared data dir, SQLite schema/metadata, binary snapshot save/load with CRC, record sync, integrity verification)
 - `ipc_server/` — Named Pipe server (split module: server loop, pipe I/O with DACL security, request handler)
 - `ipc_authorization.rs` — IPC authorization handling
 - `security_policy.rs` — Security policy configuration
@@ -286,7 +290,7 @@ Dedicated image viewer running as a **separate process** (same binary, `--image-
 ### 8. Video Player (Separate Process)
 **Location**: `src/video_player/`
 
-Standalone mpv-based video player launched as a separate process (`--video-player <path>`).
+Standalone mpv-based video player launched as a separate process (`--video-player <path> [--position <s>] [--volume <v>]`).
 
 - Borderless native mpv window with custom OSC controls
 - D3D11 GPU pipeline (`vo=gpu-next`, `gpu-api=d3d11`, `hwdec=d3d11va`)
@@ -357,17 +361,18 @@ Process Input → Update State → Render UI       │ (60 FPS loop)
 
 ### Startup (main.rs → app/init.rs)
 1. Initialize codec registry
-2. Load app icon, configure viewport (borderless)
-3. Call `eframe::run_native()`
-4. In `ImageViewerApp::new()`:
+2. Load app icon, configure viewport (borderless, hidden initially)
+3. Read `gpu_backend` preference from `app_state.db` before eframe init
+4. Call `eframe::run_native()` with `Wgpu` renderer and `HighPerformance` preference
+5. In `ImageViewerApp::new()`:
    - Create communication channels (multiple workers)
    - Initialize worker threads (thumbnails, files, icons, metadata, covers, folder previews)
-    - Load preferences from `app_state.db` (including theme mode)
+   - Load preferences from `app_state.db` (including theme mode)
    - Apply saved theme visuals (`Visuals::dark()` / `Visuals::light()`) on first frame
    - Configure caches and indices
    - Initialize filesystem watcher (`notify` per-folder watcher + consistency probe)
    - Load initial state
-   - Configure custom fonts
+   - Configure custom fonts (async font loading)
 
 ### Main Loop (ui/app_impl.rs)
 1. Process worker messages (thumbnails, files, icons, metadata)
@@ -382,6 +387,7 @@ Process Input → Update State → Render UI       │ (60 FPS loop)
 - Workers finalize when channels are dropped
 - Cache is persisted automatically
 - COM resources released via RAII
+- Force-kill mechanism via `cancel_pending_io_on_current_process_threads` and `terminate_current_process` to prevent zombie hangs
 
 ## Communication Patterns
 
@@ -432,4 +438,3 @@ while let Ok(result) = receiver.try_recv() {
 2. Add channels to `ImageViewerApp` state
 3. Initialize in `app/init.rs`
 4. Process messages in `ui/app_impl.rs`
-

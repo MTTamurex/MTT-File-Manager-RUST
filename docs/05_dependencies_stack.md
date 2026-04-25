@@ -7,7 +7,7 @@
 | Crate | Version | Purpose |
 |-------|---------|---------|
 | eframe | 0.31 | egui framework with windowing (features: `persistence`, `wgpu`, `glow`) |
-| wgpu | 24.x (via eframe + direct Windows dependency) | GPU rendering backend used by the main window (`Wgpu`, `HighPerformance` preference) |
+| wgpu | 24.0 (via eframe + direct Windows dependency) | GPU rendering backend used by the main window (`dx12` feature, `HighPerformance` preference) |
 | glow | via eframe | Lightweight renderer used by the standalone image/PDF/text viewers |
 
 ### Concurrency & Channels
@@ -17,6 +17,7 @@
 | rayon | 1.10 | Data-parallel processing |
 | crossbeam-channel | 0.5.15 | High-performance MPSC channels |
 | once_cell | 1.19 | Lazy static initialization |
+| parking_lot | 0.12 | Low-overhead Mutex/RwLock |
 
 ### File I/O
 
@@ -35,7 +36,7 @@
 | dashmap | 5.5 | Concurrent hash map |
 | rustc-hash | 2.0 | Fast FxHashSet/FxHashMap |
 | fxhash | 0.2.1 | Fast hashing for PathBuf keys |
-| blake3 | 1.5 | 128-bit hash for cache keys |
+| blake3 | 1.5 | Stable 128-bit hash for cache keys |
 
 ### Image Processing
 
@@ -54,6 +55,19 @@
 |-------|---------|---------|
 | libmpv2 | 5.0.3 | mpv video player bindings |
 | pdfium-render | 0.8.37 | PDF rendering (via pdfium.dll, feature: `thread_safe`) |
+
+### Archive Extraction
+
+| Crate | Version | Purpose |
+|-------|---------|---------|
+| zip | 2 | ZIP archive extraction fallback |
+| sevenz-rust | 0.6 | 7z archive extraction fallback |
+| unrar | 0.5 | RAR archive extraction (statically links unrar C++ source) |
+| tar | 0.4 | TAR archive reading |
+| flate2 | 1 | Gzip decompression for `.tar.gz` / `.tgz` |
+| bzip2 | 0.5 | Bzip2 decompression for `.tar.bz2` / `.tbz2` |
+| xz2 | 0.1 | XZ/LZMA decompression for `.tar.xz` / `.txz` |
+| zstd | 0.13 | Zstandard decompression for `.tar.zst` / `.tzst` |
 
 ### Serialization
 
@@ -107,7 +121,7 @@
 
 | Crate | Version | Purpose |
 |-------|---------|---------|
-| windows | 0.61.0 | Windows API bindings (35 feature flags) |
+| windows | 0.61.0 | Windows API bindings (36 feature flags) |
 
 **Windows feature flags used:**
 - **Shell**: `Win32_UI_Shell`, `Win32_UI_Shell_Common`, `Win32_UI_Shell_PropertiesSystem`
@@ -117,18 +131,19 @@
 - **Registry**: `Win32_System_Registry`
 - **Graphics**: `Win32_Graphics_Gdi`, `Win32_Graphics_Imaging`, `Win32_Graphics_Dwm`
 - **File System**: `Win32_Storage_FileSystem`, `Win32_Storage_Vhd`
-- **Process/Threading**: `Win32_System_ProcessStatus`, `Win32_System_Threading`, `Win32_System_LibraryLoader`
+- **Process/Threading**: `Win32_System_ProcessStatus`, `Win32_System_Threading`, `Win32_System_Diagnostics_ToolHelp`, `Win32_System_LibraryLoader`
 - **Input**: `Win32_UI_Input_KeyboardAndMouse`
 - **Media**: `Win32_Media_MediaFoundation`
 - **Devices**: `Win32_Devices_DeviceAndDriverInstallation`
 - **I/O**: `Win32_System_Ioctl`, `Win32_System_IO`, `Win32_System_Pipes`
-- **Windows**: `Win32_Foundation`, `Win32_UI_WindowsAndMessaging`, `Win32_System_WindowsProgramming`, `Win32_System_Time`
+- **Windows**: `Win32_Foundation`, `Win32_UI_WindowsAndMessaging`, `Win32_System_WindowsProgramming`, `Win32_System_Time`, `Win32_System_SystemInformation`
 - **Network**: `Win32_NetworkManagement_WNet`
 - **Globalization**: `Win32_Globalization`
-- **Security**: `Win32_Security`
+- **Security**: `Win32_Security`, `Win32_Security_Authorization`
 - **Search**: `Win32_System_Search_Common`
 - **Variant**: `Win32_System_Variant`
 - **UWP/WinRT**: `Foundation`, `Data_Pdf`, `Storage`, `Storage_Streams`
+- **WDK**: `Wdk_Storage_FileSystem`
 
 ### Local Dependencies
 
@@ -154,13 +169,14 @@
 | bincode | workspace | Binary IPC encoding |
 | parking_lot | 0.12 | Low-overhead Mutex/RwLock for shared service state |
 | memchr | 2 | SIMD-accelerated substring search over the lowered in-memory name arena |
-| windows | 0.61.0 | Windows API (10 features: Foundation, FileSystem, Console, Ioctl, IO, LibraryLoader, Pipes, Security, Security_Authorization, Threading) |
+| windows | 0.61.0 | Windows API (12 features: Foundation, FileSystem, Console, Ioctl, IO, LibraryLoader, Pipes, Security, Security_Authorization, Security_Cryptography, Threading) |
 
 ## Build Dependencies
 
 | Crate | Version | Purpose |
 |-------|---------|---------|
 | winresource | 0.1 | Embed Windows icon and metadata in executable |
+| sha2 | 0.10 | SHA-256 hash verification for pdfium.dll staging |
 
 ## Dev Dependencies
 
@@ -173,7 +189,7 @@
 | Dependency | Required | Purpose |
 |-----------|----------|---------|
 | libmpv-2.dll | For video playback | mpv shared library |
-| pdfium.dll | For PDF viewer | Google's PDF rendering library |
+| pdfium.dll | For PDF viewer | Google's PDF rendering library (staged by build.rs with SHA-256 verification) |
 | Windows 10+ | Always | Native Windows API integration |
 
 ## Viewer Runtime Notes
@@ -215,4 +231,3 @@ cargo audit
 cargo install cargo-outdated
 cargo outdated
 ```
-

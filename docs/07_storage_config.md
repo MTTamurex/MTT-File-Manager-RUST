@@ -20,9 +20,13 @@
 └── search_index.db            # File index database (USN + full scan data)
 ```
 
+**Security note**: The search service hardcodes `C:\ProgramData` instead of reading the `%PROGRAMDATA%` environment variable to prevent env-var redirection attacks. The directory ACL is hardened via `SetSecurityInfo` on the kernel handle (not by path), and the directory is validated to not be a reparse point before ACL application to prevent junction-planting attacks.
+
 ## SQLite Schema: Thumbnail Cache Database
 
 Located at `%LOCALAPPDATA%\MTT-File-Manager\thumbnails\thumbnails.db`.
+
+Connection management uses a dual writer/reader pattern with WAL mode. If the primary path fails (e.g., ACL hardening failure), the system falls back to a temporary database in `%TEMP%\MTT-File-Manager\thumbnails_fallback.db`.
 
 ### Table: `thumbnails`
 Stores cached thumbnails as WebP-encoded BLOBs.
@@ -38,16 +42,18 @@ Stores cached thumbnails as WebP-encoded BLOBs.
 | `height` | INTEGER | Thumbnail height |
 | `requested_size` | INTEGER | Requested thumbnail size at generation time |
 
+**Migrations**: The schema auto-migrates to add `path`, `width`, `height`, and `requested_size` columns if they are missing from older databases.
+
 ### Table: `folder_previews`
 Cached composed folder preview images (Shell sandwich icons).
 
 | Column | Type | Description |
 |--------|------|-------------|
 | `folder_path` | TEXT (PK) | Folder path |
-| `data` | BLOB | WebP-encoded preview image data |
-| `width` | INTEGER | Image width |
-| `height` | INTEGER | Image height |
-| `created_at` | INTEGER | Cache timestamp |
+| `data` | BLOB NOT NULL | WebP-encoded preview image data |
+| `width` | INTEGER NOT NULL | Image width |
+| `height` | INTEGER NOT NULL | Image height |
+| `created_at` | INTEGER NOT NULL | Cache timestamp |
 
 ### Table: `shell_icons`
 Cached Windows Shell icons (special folders, drives, "This PC", Recycle Bin). Stored as raw RGBA pixel data (not WebP).
@@ -55,19 +61,16 @@ Cached Windows Shell icons (special folders, drives, "This PC", Recycle Bin). St
 | Column | Type | Description |
 |--------|------|-------------|
 | `key` | TEXT (PK) | Icon identifier (e.g. drive letter, CLSID) |
-| `data` | BLOB | Raw RGBA pixel data |
-| `width` | INTEGER | Image width |
-| `height` | INTEGER | Image height |
-| `created_at` | INTEGER | Cache timestamp |
+| `data` | BLOB NOT NULL | Raw RGBA pixel data |
+| `width` | INTEGER NOT NULL | Image width |
+| `height` | INTEGER NOT NULL | Image height |
+| `created_at` | INTEGER NOT NULL | Cache timestamp |
 
 ## SQLite Schema: App State Database
 
 Located at `%LOCALAPPDATA%\MTT-File-Manager\state\app_state.db`.
 
-On upgrade, `app/init_bootstrap.rs` runs a one-time migration that copies the legacy
-`user_preferences`, `folder_covers`, `folder_locks`, and `pinned_folders` tables out of
-the old monolithic `thumbnails.db` into `app_state.db`, then drops the legacy copies from
-`thumbnails.db`.
+On upgrade, `app/init_bootstrap.rs` runs a one-time migration that copies the legacy `user_preferences`, `folder_covers`, `folder_locks`, and `pinned_folders` tables out of the old monolithic `thumbnails.db` into `app_state.db`, then drops the legacy copies from `thumbnails.db`.
 
 ### Table: `user_preferences`
 Stores user preferences as key-value pairs.
@@ -77,7 +80,7 @@ Stores user preferences as key-value pairs.
 | `key` | TEXT (PK) | Preference key |
 | `value` | TEXT | Preference value |
 
-**Stored preference keys**: `sort_mode`, `sort_mode_computer`, `sort_mode_normal`, `sort_descending`, `folders_position`, `thumbnail_size`, `view_mode`, `show_preview_panel`, `upload_budget_ms`, `window_width`, `window_height`, `window_is_maximized`, `sidebar_left_width`, `sidebar_right_width`, `last_folder`, `media_volume`, `show_hidden_files`, `language`, `theme_mode`, `list_col_name_width`, `list_col_date_width`, `list_col_type_width`, `list_col_size_width`, `list_col_onedrive_name_width`, `list_col_onedrive_date_width`, `list_col_onedrive_type_width`, `list_col_onedrive_size_width`, `list_col_onedrive_status_width`, `list_col_computer_name_width`, `list_col_computer_total_width`, `list_col_computer_free_width`
+**Stored preference keys**: `sort_mode`, `sort_mode_computer`, `sort_mode_normal`, `sort_descending`, `folders_position`, `thumbnail_size`, `view_mode`, `show_preview_panel`, `upload_budget_ms`, `window_width`, `window_height`, `window_is_maximized`, `sidebar_left_width`, `sidebar_right_width`, `last_folder`, `media_volume`, `show_hidden_files`, `language`, `theme_mode`, `gpu_backend`, `list_col_name_width`, `list_col_date_width`, `list_col_type_width`, `list_col_size_width`, `list_col_onedrive_name_width`, `list_col_onedrive_date_width`, `list_col_onedrive_type_width`, `list_col_onedrive_size_width`, `list_col_onedrive_status_width`, `list_col_computer_name_width`, `list_col_computer_total_width`, `list_col_computer_free_width`
 
 ### Table: `folder_covers`
 Stores user-selected cover image for folders (which image to use as folder thumbnail).
@@ -93,10 +96,12 @@ Per-folder view preference overrides.
 | Column | Type | Description |
 |--------|------|-------------|
 | `path` | TEXT (PK) | Folder path |
-| `view_mode` | TEXT | Locked view mode (Grid/List) |
-| `sort_mode` | TEXT | Locked sort mode (Name/Date/Size/Type) |
-| `sort_descending` | TEXT | Locked sort direction ("true"/"false") |
-| `folders_position` | TEXT | Locked folder position (First/Last/Mixed) |
+| `view_mode` | TEXT NOT NULL | Locked view mode (Grid/List) |
+| `sort_mode` | TEXT NOT NULL | Locked sort mode (Name/Date/Size/Type) |
+| `sort_descending` | TEXT NOT NULL | Locked sort direction ("true"/"false") |
+| `folders_position` | TEXT NOT NULL | Locked folder position (First/Last/Mixed) |
+
+**Migration note**: The legacy `folder_locks` table had a `search_query NOT NULL` column that caused INSERT failures. The migration drops and recreates the table without that column.
 
 ### Table: `pinned_folders`
 Quick Access pinned folder entries.
@@ -104,8 +109,8 @@ Quick Access pinned folder entries.
 | Column | Type | Description |
 |--------|------|-------------|
 | `path` | TEXT (PK) | Folder path |
-| `display_name` | TEXT | Display name in sidebar |
-| `position` | INTEGER | Sort position for display order |
+| `display_name` | TEXT NOT NULL | Display name in sidebar |
+| `position` | INTEGER NOT NULL DEFAULT 0 | Sort position for display order |
 
 ## SQLite Schema: Directory Cache Database
 
@@ -117,10 +122,10 @@ Cached directory metadata for fast folder size/count lookup.
 | Column | Type | Description |
 |--------|------|-------------|
 | `dir_path` | TEXT (PK) | Directory path |
-| `file_count` | INTEGER | Number of files |
-| `total_size` | INTEGER | Total size of contents |
-| `last_scan_time` | INTEGER | Timestamp of last scan |
-| `scan_duration_ms` | INTEGER | Duration of the scan in milliseconds |
+| `file_count` | INTEGER NOT NULL | Number of files |
+| `total_size` | INTEGER NOT NULL | Total size of contents |
+| `last_scan_time` | INTEGER NOT NULL | Timestamp of last scan |
+| `scan_duration_ms` | INTEGER NOT NULL | Duration of the scan in milliseconds |
 
 ### Table: `file_index`
 File-level index for cached directory contents.
@@ -128,11 +133,11 @@ File-level index for cached directory contents.
 | Column | Type | Description |
 |--------|------|-------------|
 | `id` | INTEGER (PK) | Auto-increment row ID |
-| `dir_path` | TEXT | Parent directory path (indexed) |
-| `file_name` | TEXT | File name |
-| `file_size` | INTEGER | File size in bytes |
-| `modified_time` | INTEGER | File modification timestamp |
-| `is_dir` | INTEGER | Whether entry is a directory |
+| `dir_path` | TEXT NOT NULL | Parent directory path (indexed) |
+| `file_name` | TEXT NOT NULL | File name |
+| `file_size` | INTEGER NOT NULL | File size in bytes |
+| `modified_time` | INTEGER NOT NULL | File modification timestamp |
+| `is_dir` | INTEGER NOT NULL | Whether entry is a directory |
 
 Unique constraint on `(dir_path, file_name)`.
 
@@ -140,6 +145,31 @@ Unique constraint on `(dir_path, file_name)`.
 
 ### Directory Cache
 `infrastructure/directory_cache.rs` provides an in-memory LRU cache (`lru::LruCache`) of directory contents (200 entries max). Not stored in SQLite — entries are populated on navigation and invalidated by filesystem watcher events on changes.
+
+## SQLite Schema: Session Search Database
+
+Located at `%LOCALAPPDATA%\MTT-File-Manager\thumbnails\session_search.db`.
+
+Used by the `user_session_search/` module for the in-app session search index.
+
+### Table: `session_items`
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `drive_letter` | TEXT NOT NULL | Drive letter |
+| `name` | TEXT NOT NULL | File/folder name |
+| `full_path` | TEXT NOT NULL | Full path |
+| `is_dir` | INTEGER NOT NULL | Whether entry is a directory |
+
+Indexed on `drive_letter`.
+
+### Table: `session_volumes`
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `drive_letter` | TEXT (PK) | Drive letter |
+| `label` | TEXT NOT NULL | Volume label |
+| `file_system` | TEXT NOT NULL | File system type |
 
 ## SQLite Schema: Search Service Database
 
@@ -151,24 +181,24 @@ Tracks indexing state per volume.
 | Column | Type | Description |
 |--------|------|-------------|
 | `drive_letter` | TEXT (PK) | Drive letter (e.g., "C") |
-| `journal_id` | INTEGER | USN Journal ID (for validation) |
-| `last_usn` | INTEGER | Last processed USN |
-| `files_indexed` | INTEGER | Number of indexed files |
-| `last_full_scan_epoch` | INTEGER | Timestamp of last full scan |
-| `has_hardlink_parent_data` | INTEGER | Whether `hardlink_parents` is populated for this volume |
-| `has_reparse_point_data` | INTEGER | Whether reparse point metadata was captured |
+| `journal_id` | INTEGER NOT NULL | USN Journal ID (for validation) |
+| `last_usn` | INTEGER NOT NULL | Last processed USN |
+| `files_indexed` | INTEGER NOT NULL | Number of indexed files |
+| `last_full_scan_epoch` | INTEGER NOT NULL | Timestamp of last full scan |
+| `has_hardlink_parent_data` | INTEGER NOT NULL DEFAULT 0 | Whether `hardlink_parents` is populated for this volume |
+| `has_reparse_point_data` | INTEGER NOT NULL DEFAULT 0 | Whether reparse point metadata was captured |
 
 ### Table: `file_records`
 File index entries for search.
 
 | Column | Type | Description |
 |--------|------|-------------|
-| `frn` | INTEGER | File Reference Number |
-| `drive_letter` | TEXT | Drive letter |
-| `name` | TEXT | File/folder name |
-| `parent_frn` | INTEGER | Parent directory FRN |
-| `is_dir` | INTEGER | Whether entry is a directory |
-| `is_reparse` | INTEGER | Whether the entry is a reparse point |
+| `frn` | INTEGER NOT NULL | File Reference Number |
+| `drive_letter` | TEXT NOT NULL | Drive letter |
+| `name` | TEXT NOT NULL | File/folder name |
+| `parent_frn` | INTEGER NOT NULL | Parent directory FRN |
+| `is_dir` | INTEGER NOT NULL | Whether entry is a directory |
+| `is_reparse` | INTEGER NOT NULL DEFAULT 0 | Whether the entry is a reparse point |
 
 Primary key: `(drive_letter, frn)`.
 
@@ -177,9 +207,9 @@ Stores additional parent directories for hardlinked files.
 
 | Column | Type | Description |
 |--------|------|-------------|
-| `drive_letter` | TEXT | Drive letter |
-| `frn` | INTEGER | File Reference Number |
-| `parent_frn` | INTEGER | Additional parent directory FRN |
+| `drive_letter` | TEXT NOT NULL | Drive letter |
+| `frn` | INTEGER NOT NULL | File Reference Number |
+| `parent_frn` | INTEGER NOT NULL | Additional parent directory FRN |
 
 Primary key: `(drive_letter, frn, parent_frn)`.
 
@@ -207,10 +237,17 @@ Stores service-wide metadata.
 | Column | Type | Description |
 |--------|------|-------------|
 | `key` | TEXT (PK) | Metadata key |
-| `value` | INTEGER | Metadata value |
+| `value` | INTEGER NOT NULL | Metadata value |
 
 Currently used key:
 - `dirty` — set to `1` on startup and cleared to `0` on clean shutdown; if startup sees `dirty=1`, the service rebuilds the legacy `search_fts` table before continuing SQLite maintenance.
+
+### Schema migrations in search service
+The service automatically migrates the schema on startup:
+- **7-column → 5-column**: Old `file_records` schema with 7 columns is replaced by the compact 5-column schema (dropping `size` and `mtime` columns)
+- **`has_hardlink_parent_data`**: Added to `volume_state` if missing
+- **`has_reparse_point_data`**: Added to `volume_state` if missing
+- **`is_reparse`**: Added to `file_records` if missing
 
 ### Runtime behavior
 - USN volumes prefer `index_<drive>.bin` for startup and fall back to SQLite only when the binary cache is missing, stale, or invalid.
@@ -293,6 +330,8 @@ User preferences are loaded during app initialization (`app/init_preferences.rs`
 - Media volume
 - Show hidden files toggle
 - Language selection (en, pt-BR)
+- Theme mode (Light/Dark)
+- GPU backend preference (dx12, vulkan, gl, auto)
 - List view column widths (regular, OneDrive, computer views)
 - Upload budget (GPU texture upload time per frame)
 
@@ -303,4 +342,3 @@ Locale files are stored in the `locales/` directory:
 - `locales/pt-BR.yml` — Brazilian Portuguese (fallback and default)
 
 The `rust-i18n` crate loads translations at compile time with `fallback = "pt-BR"`. Language preference is persisted in the `user_preferences` table inside `%LOCALAPPDATA%\MTT-File-Manager\state\app_state.db` and applied on startup. Default language when no preference is saved: `pt-BR`.
-
