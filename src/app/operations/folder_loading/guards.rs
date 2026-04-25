@@ -1,7 +1,22 @@
 use crate::app::state::ImageViewerApp;
-use std::sync::atomic::Ordering as AtomicOrdering;
+use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 use std::sync::Arc;
 use std::time::Instant;
+
+/// Global monotonic counter for folder-load generation IDs.
+///
+/// Using a single global counter guarantees that each panel (active or
+/// inactive) receives a **unique** generation on every load, preventing
+/// the batch-routing logic in `process_streaming_and_thumbnail_events`
+/// from mis-routing results when both panels happen to share the same
+/// generation value.
+static GLOBAL_GENERATION: AtomicUsize = AtomicUsize::new(0);
+
+/// Return the next globally-unique generation ID (1, 2, 3, …).
+/// Value `0` is reserved as the "never loaded" sentinel.
+fn next_generation() -> usize {
+    GLOBAL_GENERATION.fetch_add(1, AtomicOrdering::Relaxed) + 1
+}
 
 impl ImageViewerApp {
     pub(super) fn should_skip_folder_load(&self, force_refresh: bool) -> bool {
@@ -42,7 +57,7 @@ impl ImageViewerApp {
     }
 
     pub(super) fn bump_folder_load_generation(&mut self) {
-        self.generation += 1; // Increment local generation
+        self.generation = next_generation(); // Globally unique generation ID
         self.current_generation
             .store(self.generation, AtomicOrdering::Relaxed); // Sync with workers
     }

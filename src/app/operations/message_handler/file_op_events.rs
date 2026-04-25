@@ -150,10 +150,13 @@ impl ImageViewerApp {
             let _ = di.invalidate(&inactive_pb);
         }
 
-        // Swap in the inactive panel, trigger async reload, swap back
+        // Swap in the inactive panel, trigger async reload, swap back.
+        // Uses load_folder_for_inactive to avoid clearing shared caches
+        // (loading_set, pending_upload_set, pending_thumbnails, etc.)
+        // which would destroy the active panel's thumbnail pipeline.
         self.with_inactive_panel(|app| {
             app.loaded_path.clear();
-            app.load_folder(false);
+            app.load_folder_for_inactive();
         });
     }
 
@@ -524,7 +527,7 @@ impl ImageViewerApp {
                     }
                     self.with_inactive_panel(|app| {
                         app.loaded_path.clear();
-                        app.load_folder(false);
+                        app.load_folder_for_inactive();
                     });
                 }
 
