@@ -695,7 +695,7 @@ pub fn render_toolbar(
                                                         let (display, actual_path) =
                                                             segments[i].clone();
                                                         let item_size =
-                                                            egui::vec2(200.0, 28.0);
+                                                            egui::vec2(400.0, 28.0);
                                                         let (item_rect, response) = ui
                                                             .allocate_exact_size(
                                                                 item_size,
