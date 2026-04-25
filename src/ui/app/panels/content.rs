@@ -596,6 +596,11 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
         ActivePanel::Right => "dual_left",
     };
     app.with_inactive_panel(|app_with_inactive| {
+        // Suppress thumbnail requests: workers would reject them (generation
+        // mismatch with gen_tracker) and the paths would leak in loading_set,
+        // blocking all thumbnail loads for the active panel.  The inactive
+        // panel still displays thumbnails already in the shared texture_cache.
+        app_with_inactive.suppress_thumbnail_requests = true;
         ui.allocate_new_ui(
             egui::UiBuilder::new().max_rect(inactive_content_rect),
             |ui| {
@@ -605,6 +610,7 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
                 });
             },
         );
+        app_with_inactive.suppress_thumbnail_requests = false;
     });
 
     // ── Click-to-focus: detect click AFTER rendering so item interactions
