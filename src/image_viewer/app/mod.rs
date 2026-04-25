@@ -13,7 +13,15 @@ mod rendering;
 use filmstrip::FilmstripState;
 use gif_export::{GifAnimation, GifUploadQueue, ViewerStatusMessage};
 
-const DEFAULT_CACHE_RADIUS: usize = 1;
+/// Number of images kept on each side of the current image in the
+/// GPU texture cache.  A larger radius means more images are already
+/// decoded and uploaded when the user navigates, eliminating the
+/// decode-to-display delay for adjacent images.
+///
+/// viewskater uses a similarly aggressive prefetch window; with WIC
+/// decode-to-size the per-image cost is modest (a few MB of GPU memory
+/// for a 2560 px texture).
+const DEFAULT_CACHE_RADIUS: usize = 3;
 const MIN_ZOOM_FACTOR: f32 = 0.10;
 const MAX_ZOOM_FACTOR: f32 = 8.0;
 /// Minimum interval between navigation actions to prevent flooding workers
@@ -528,19 +536,29 @@ impl DedicatedImageViewerApp {
         // (like viewskater: don't clear texture, don't show spinner).
         self.try_show_cached_current(ctx);
 
-        // Like viewskater: only request the NEW tail image that entered the
-        // window, plus the current image if not cached. All other images
-        // should already be cached or in-flight from previous steps.
+        // Request the current image at highest priority.
+        self.request_job_if_needed(index, LoadPriority::Urgent);
+
+        // Request immediate neighbors with High priority so they're
+        // ready when the user presses the arrow key again.  These are
+        // the images most likely to be navigated to next.
+        let left = index.saturating_sub(1);
+        let right = (index + 1).min(total.saturating_sub(1));
+        if left != index {
+            self.request_job_if_needed(left, LoadPriority::High);
+        }
+        if right != index {
+            self.request_job_if_needed(right, LoadPriority::High);
+        }
+
+        // Request the far tail edge that entered the window.
         let tail = if index > old_index {
-            // Moving right → new right edge
             (index + radius).min(total.saturating_sub(1))
         } else {
-            // Moving left → new left edge
             index.saturating_sub(radius)
         };
-        self.request_job_if_needed(index, LoadPriority::Urgent);
-        if tail != index {
-            self.request_job_if_needed(tail, LoadPriority::High);
+        if tail != index && tail != left && tail != right {
+            self.request_job_if_needed(tail, LoadPriority::Normal);
         }
 
         self.filmstrip.scroll_to_current = true;
@@ -742,7 +760,7 @@ impl eframe::App for DedicatedImageViewerApp {
         // ctx.request_repaint(), but this ensures progress even if the signal
         // is missed (e.g. during the first frame before ctx is propagated).
         if self.texture_index != Some(self.current_index) && !self.cache.has(self.current_index) {
-            ctx.request_repaint_after(Duration::from_millis(200));
+            ctx.request_repaint_after(Duration::from_millis(16));
         }
 
         // Periodic resource leak diagnostics (every 10s).
