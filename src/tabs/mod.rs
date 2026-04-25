@@ -6,6 +6,7 @@
 //! - Selected items
 //! - Sort preferences
 
+use crate::app::dual_panel::{ActivePanel, PanelSnapshot};
 use crate::application::navigation::NavigationHistory;
 use crate::domain::file_entry::{FileEntry, FoldersPosition, SortMode, ViewMode};
 use crate::domain::special_paths::{COMPUTER_VIEW_ID, RECYCLE_BIN_VIEW_ID};
@@ -86,6 +87,10 @@ pub struct TabState {
     pub collapse_quick_access: bool,
     pub collapse_local_disks: bool,
     pub collapse_network_drives: bool,
+    // Dual panel state (per-tab)
+    pub dual_panel_enabled: bool,
+    pub dual_panel_active: ActivePanel,
+    pub dual_panel_inactive_state: Option<PanelSnapshot>,
 }
 
 impl TabState {
@@ -124,6 +129,9 @@ impl TabState {
             collapse_quick_access: false,
             collapse_local_disks: false,
             collapse_network_drives: false,
+            dual_panel_enabled: false,
+            dual_panel_active: ActivePanel::Left,
+            dual_panel_inactive_state: None,
         }
     }
 
@@ -164,6 +172,9 @@ impl TabState {
             collapse_quick_access: false,
             collapse_local_disks: false,
             collapse_network_drives: false,
+            dual_panel_enabled: false,
+            dual_panel_active: ActivePanel::Left,
+            dual_panel_inactive_state: None,
         }
     }
 
@@ -254,6 +265,8 @@ impl TabState {
         self.collapse_quick_access = false;
         self.collapse_local_disks = false;
         self.collapse_network_drives = false;
+        self.dual_panel_enabled = false;
+        self.dual_panel_inactive_state = None;
         self
     }
 }

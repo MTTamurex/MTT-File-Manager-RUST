@@ -7,6 +7,7 @@
 //! - State sub-modules for better organization
 
 pub mod cache_state;
+pub mod dual_panel;
 pub mod drive_state;
 pub mod file_operation_state;
 pub mod folder_size_state;

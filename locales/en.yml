@@ -356,6 +356,8 @@ secondary_toolbar:
   grid: "Grid"
   global_search: "Global search on this computer (Ctrl+Shift+F)"
   open_selected_media_window: "Open selected media in player window"
+  dual_panel_enable: "Enable dual panel (Ctrl+Shift+D)"
+  dual_panel_disable: "Disable dual panel (Ctrl+Shift+D)"
 drag_drop:
   copy: "Copy"
   move: "Move"

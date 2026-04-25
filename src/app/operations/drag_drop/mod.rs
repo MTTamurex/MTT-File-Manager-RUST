@@ -147,7 +147,7 @@ impl ImageViewerApp {
             return;
         }
 
-        let Some(dest_folder) = self.drag_target_folder.clone() else {
+        let Some(dest_folder) = self.drag_target_folder.clone().or_else(|| self.drag_cross_panel_target.take()) else {
             self.cancel_item_drag();
             return;
         };
@@ -199,6 +199,7 @@ impl ImageViewerApp {
         self.drag_payload_is_single_directory = false;
         self.drag_target_folder = None;
         self.drag_hovered_folder = None;
+        self.drag_cross_panel_target = None;
         self.drag_icon_cache = None;
 
         // Clear selection so the detail panel updates to show folder info
@@ -240,6 +241,7 @@ impl ImageViewerApp {
         self.drag_source_folder = None;
         self.drag_target_folder = None;
         self.drag_hovered_folder = None;
+        self.drag_cross_panel_target = None;
         self.drag_icon_cache = None;
     }
 }

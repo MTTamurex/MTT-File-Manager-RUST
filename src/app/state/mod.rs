@@ -24,6 +24,7 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
 use std::time::Instant;
 
+use crate::app::dual_panel::{ActivePanel, PanelSnapshot};
 use crate::app::drive_state::DriveState;
 use crate::app::file_operation_state::FileOperationState;
 use crate::app::folder_size_state::FolderSizeState;
@@ -155,6 +156,9 @@ pub struct ImageViewerApp {
     pub drag_source_folder: Option<PathBuf>,
     pub drag_target_folder: Option<PathBuf>,
     pub drag_hovered_folder: Option<PathBuf>,
+    /// Cross-panel drop target: set by render_dual_panel when dragging over the inactive panel.
+    /// Used as fallback in complete_item_drag when drag_target_folder is None.
+    pub drag_cross_panel_target: Option<PathBuf>,
     /// Icon pre-loaded when drag starts â€” avoids blocking Shell calls in the render loop.
     pub drag_icon_cache: Option<egui::TextureHandle>,
     pub selected_thumbnail: Option<egui::TextureHandle>, // Persistent thumbnail for preview panel
@@ -332,6 +336,11 @@ pub struct ImageViewerApp {
 
     // TAB SYSTEM
     pub tab_manager: crate::tabs::TabManager,
+
+    // DUAL PANEL (split view)
+    pub dual_panel_enabled: bool,
+    pub dual_panel_active: ActivePanel,
+    pub dual_panel_inactive_state: Option<PanelSnapshot>,
 
     // FOLDER SIZE CALCULATOR (async for details panel)
     pub folder_size_state: FolderSizeState,
