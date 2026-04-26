@@ -30,8 +30,9 @@ The application follows a layered architecture with clear separation of responsi
 │  │                           UI Layer                                  │    │
 │  │  ┌────────────┬────────────┬────────────┬────────────┬──────────┐  │    │
 │  │  │  Toolbar   │  Tab Bar   │ File List  │  Sidebar   │ Preview  │  │    │
-│  │  └────────────┴────────────┴────────────┴────────────┴──────────┘  │    │
-│  └─────────────────────────────────────────────────────────────────────┘    │
+│  │  └────────────┴────────────┴────────────┴────────────┴──────────┘  │    ││  │  │  ┌────────────────────────────────────────────────────────────────┐ │    │
+│  │  │  │           Dual Panel (split left / right panels)               │ │    │
+│  │  │  └────────────────────────────────────────────────────────────────┘ │    ││  └─────────────────────────────────────────────────────────────────────┘    │
 │  ┌─────────────────────────────────────────────────────────────────────┐    │
 │  │                    eframe/egui Framework                             │    │
 │  │                    (Immediate Mode GUI)                             │    │
@@ -117,6 +118,7 @@ Renders the user interface using eframe/egui (immediate-mode GUI).
 - `src/ui/status_bar.rs` — Bottom status bar
 - `src/ui/app/` — App lifecycle, input handling, notifications, panels
 - `src/ui/app_impl.rs` — Main `eframe::App` implementation
+- `src/ui/app/panels/content.rs` — Dual panel layout rendering (header, left/right content areas, focus switching)
 - `src/ui/components/` — Reusable widgets (media_preview, gif_manager, item_slot, mpv, mpv_preview, language_settings, appearance_settings, video_controls_state, virtual_drive_settings)
 - `src/ui/global_search_overlay/` — Global search overlay UI
 - `src/ui/icon_loader/` — Icon extraction and loading
@@ -142,6 +144,10 @@ Business logic and application services.
 - `notification.rs` — Toast notification system
 - `renaming.rs` — File rename logic
 - `context_menu.rs` — Context menu logic
+
+**Dual Panel** (`src/app/dual_panel.rs`, `src/app/operations/dual_panel_ops.rs`):
+
+The dual panel subsystem allows side-by-side browsing of two independent directory locations. The active panel occupies the main `ImageViewerApp` fields; the inactive panel's complete state (navigation, items, selection, scroll, view preferences, per-panel generation counter) is captured in a `PanelSnapshot`. Switching panels performs a zero-allocation field swap via `swap_with_app`. Each panel has an independent `generation: usize` and a private `Arc<AtomicUsize>` for routing async folder-load results so workers targeting the inactive panel are never cancelled by the active panel's generation advances. The shared `current_generation` Arc is restored to the active panel's generation on every `with_inactive_panel` exit so thumbnail workers always accept requests from the correct panel.
 
 ### 3. Domain Layer
 **Location**: `src/domain/`

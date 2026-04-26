@@ -11,6 +11,7 @@ MTT File Manager is a native Windows file manager built in Rust that combines fa
 ### Interface & Navigation
 - **Custom borderless window** — Modern frameless UI with native resize support
 - **Dark / Light theme** — Toggle between dark and light mode in Settings > Appearance; persisted in SQLite, applied to all windows including image, PDF, and text viewers with native title bar support via DWM
+- **Dual panel (split view)** — Side-by-side file browsing with independent left and right panels; toggle via the toolbar button. Each panel maintains its own navigation history, sort order, view mode, and selection. File copy/move operations default to the opposite panel as the destination
 - **Tabbed navigation** — Multiple tabs with independent history
 - **Grid and List views** — Adjustable thumbnail sizes
 - **Smart address bar** — Direct path input with breadcrumbs

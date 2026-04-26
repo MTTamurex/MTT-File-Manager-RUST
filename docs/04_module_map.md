@@ -16,6 +16,7 @@ src/
 │   │   └── helpers.rs               # State helper methods & utilities
 │   ├── cache_state.rs               # Cache state management
 │   ├── drive_state.rs               # Drive information state
+│   ├── dual_panel.rs                # Dual panel state types: ActivePanel enum, PanelSnapshot struct (captures/restores per-panel browsing state via from_app/apply_to/swap_with_app)
 │   ├── file_operation_state.rs      # File operation tracking
 │   ├── folder_size_state.rs         # Folder size caches, batch invalidation, stale-result guards
 │   ├── global_search_state.rs       # Global search session state
@@ -44,6 +45,7 @@ src/
 │       │   ├── mod.rs               # Drag-and-drop orchestration
 │       │   ├── validation.rs        # Drop target validation
 │       │   └── rendering.rs         # Drag ghost & visual feedback rendering
+│       ├── dual_panel_ops.rs        # Dual panel enable/disable/toggle, switch active panel, with_inactive_panel closure helper
 │       ├── file_ops.rs              # OS-level file operations
 │       ├── folder_loading/          # Async folder loading
 │       ├── folder_lock_ops.rs       # Per-folder view preferences
@@ -202,7 +204,7 @@ src/
 │   │   ├── notifications.rs         # Notification rendering
 │   │   └── panels/                  # Panel layout (split module)
 │   │       ├── mod.rs               # render_panels entry, sidebar, resize handles
-│   │       └── content.rs           # Preview panel & central panel content rendering
+│   │       └── content.rs           # Preview panel & central panel content rendering; dual panel split layout (left/right rects, path headers, focus switching)
 │   ├── tab_bar/                     # Tab system
 │   ├── preview_panel/               # Preview panel with video support
 │   ├── icon_loader.rs               # Icon loading

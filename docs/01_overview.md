@@ -19,6 +19,7 @@ MTT File Manager is a native Windows file manager built in Rust with a modern bo
 - **Editable address bar** — Direct path input with breadcrumb navigation
 - **Sidebar** — Quick access to drives, libraries, OneDrive, and Recycle Bin with auto-scroll on overflow; includes a tree sidebar (`sidebar_tree.rs`)
 - **Quick Access (pinned folders)** — Pin folders via right-click or drag-and-drop; reorder via drag; persisted in SQLite app state (`app_state.db`)
+- **Dual panel (split view)** — Side-by-side file browsing with a left and right panel; toggle via the toolbar button or keyboard shortcut. Each panel maintains independent navigation history, sort order, view mode, selection, and scroll position. Clicking a panel activates it; file operations (copy/move) default to the opposite panel as the destination. Thumbnails load independently in both panels simultaneously
 - **Keyboard navigation** — Full keyboard shortcuts for mouse-free operation (arrow keys, Enter, Backspace, Delete, F2, F5, Ctrl+T, Ctrl+W, Ctrl+Shift+F, Ctrl+L)
 - **Live search** — Type-to-filter files in the current folder
 - **Internationalization** — English and Brazilian Portuguese via `rust-i18n` (fallback: `pt-BR`)

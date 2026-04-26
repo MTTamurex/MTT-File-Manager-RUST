@@ -518,3 +518,95 @@ Log outputs the selected backend for diagnostics
 ```
 
 **Key files**: `src/main.rs`, `app/operations/preferences.rs`
+
+## 21. Dual Panel (Split View)
+
+**Trigger**: User clicks the dual panel toggle button in the secondary toolbar, or presses the associated keyboard shortcut.
+
+### Enable / Disable
+
+```
+User toggles dual panel button
+    ↓
+dual_panel_toggle() [app/operations/dual_panel_ops.rs]
+    ↓
+┌─────────────────────────────────┬────────────────────────────────────┐
+│ ENABLE                          │ DISABLE                            │
+│ PanelSnapshot::from_app()       │ dual_panel_inactive_state = None   │
+│ stores current state as right   │ Active panel fields remain; right  │
+│ panel; current app fields stay  │ panel is discarded                 │
+│ as left panel; dual_panel_      │                                    │
+│ enabled = true                  │                                    │
+└─────────────────────────────────┴────────────────────────────────────┘
+    ↓
+content.rs renders two equal-width columns inside the central area,
+each with a colored path header (active = blue tint, inactive = grey)
+```
+
+### Panel State Model
+
+The active panel occupies the main `ImageViewerApp` fields. The inactive panel's complete state is stored as a `PanelSnapshot` in `dual_panel_inactive_state: Option<PanelSnapshot>`.
+
+`PanelSnapshot` captures:
+- Navigation: `path`, `path_input`, `is_computer_view`, `is_recycle_bin_view`, `NavigationHistory`
+- Content: `items` (Arc), `all_items`, `total_items`, `is_loading_folder`
+- Selection: `selected_item`, `selected_file`, `multi_selection`, `selection_anchor`
+- View: `view_mode`, `sort_mode`, `sort_descending`, `folders_position`
+- Scroll: `scroll_offset_y`, `scroll_to_selected`
+- Search: `search_query`
+- Preview cache: `selected_thumbnail`, `selected_metadata`, `selected_gif`
+- Async state: `generation`, `current_generation` (Arc), `pending_*` flags, `loading_started_at`, `last_items_rebuild`
+
+### Switching Active Panel
+
+```
+User clicks inactive panel header (or uses Tab / shortcut)
+    ↓
+dual_panel_switch_active() [app/operations/dual_panel_ops.rs]
+    ↓
+snapshot.swap_with_app(app)   ← zero-allocation field swap (active ↔ inactive)
+    ↓
+dual_panel_active flips (Left ↔ Right)
+    ↓
+current_generation.store(self.generation)
+  → thumbnail workers now accept requests from newly active panel
+    ↓
+watch_current_folder()        ← watcher follows the active panel
+    ↓
+if directory_dirty_registry.is_dirty(current_path):
+    load_folder(false)        ← reload if folder was modified while inactive
+```
+
+### Async Folder Loads (Inactive Panel)
+
+Each panel has its own `generation: usize`. When `load_folder_for_inactive` is called inside `with_inactive_panel`, it uses a private `Arc::new(AtomicUsize::new(my_gen))` instead of the shared `current_generation` Arc, so the background thread's generation check never conflicts with the active panel. On exit from `with_inactive_panel`, the shared `current_generation` is restored to the active panel's generation.
+
+```
+with_inactive_panel(|app| app.load_folder_for_inactive())
+    ↓
+snapshot.swap_with_app(app)          ← inactive becomes current
+    ↓
+start_folder_load_pipeline(false, validate=false)
+    ↓
+gen_clone = Arc::new(AtomicUsize::new(inactive_gen))
+    (private Arc — never conflicts with active panel's generation)
+    ↓
+background thread scans folder, sends results via channel
+    ↓
+snapshot.swap_with_app(app)          ← active restored
+current_generation.store(active_gen) ← gen tracker follows active panel
+    ↓
+process_streaming_and_thumbnail_events() routes results to the correct
+panel via the panel's own generation value
+```
+
+### Thumbnail Routing
+
+Both panels share the same thumbnail worker pool. Each request carries the panel's `generation` value. The worker validates the request against the panel's `current_generation` Arc at dequeue time. Because each inactive-panel load uses a private Arc (fixed at `my_gen`), the worker never aborts inactive-panel work due to an active-panel generation bump.
+
+### Write-Activity Cache Clearing
+
+When a copy or move operation completes, the destination paths are removed from `FILE_WRITE_ACTIVITY_CACHE` and `FILE_STABILITY_CACHE` (`infrastructure/windows/file_flags.rs`). This prevents the thumbnail stability guard (12 s minimum stable duration) from delaying thumbnail generation for files the app itself just created.
+
+**Key files**: `app/dual_panel.rs`, `app/operations/dual_panel_ops.rs`, `app/operations/folder_loading/load_pipeline.rs`, `ui/app/panels/content.rs`, `infrastructure/windows/file_flags.rs`
+

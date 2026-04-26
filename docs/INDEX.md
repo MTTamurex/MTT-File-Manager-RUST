@@ -53,8 +53,12 @@
 ### Where is data stored?
 → [07_storage_config.md](07_storage_config.md)
 
-### Understanding the viewers / media player?
-→ [10_viewers.md](10_viewers.md)
+### Understanding a specific feature?
+- **Dual Panel (split view)**: architecture → [03_architecture.md](03_architecture.md) § Dual Panel; flow → [06_key_flows.md](06_key_flows.md) § 21. Dual Panel; modules → [04_module_map.md](04_module_map.md) (`dual_panel.rs`, `dual_panel_ops.rs`)
+- **Global search**: [06_key_flows.md](06_key_flows.md) § 10
+- **Viewers / media player**: [10_viewers.md](10_viewers.md)
+- **Storage / databases**: [07_storage_config.md](07_storage_config.md)
+- **Performance**: [09_performance_optimizations.md](09_performance_optimizations.md)
 
 ## Project Structure
 
