@@ -48,7 +48,7 @@ The image viewer manages a sequence of images from the parent directory, with ar
 | `cache.rs` | `WindowCache` (sliding-window `TextureHandle` cache) + `PrefetchEngine` (bounded-channel workers) |
 | `indexer.rs` | `build_sequence()` — directory read, image extension filter, natural sort |
 | `loader.rs` | Image decoding: memmap for files >1MB, EXIF orientation, WIC fallback |
-| `metrics.rs` | Performance metrics tracking |
+| `metrics.rs` | Resource leak diagnostics/monitoring (handle, GDI, user, thread counters) |
 | `ipc.rs` | Inter-process communication for forwarding images to an existing instance |
 
 ### Constants

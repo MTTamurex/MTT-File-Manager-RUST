@@ -245,8 +245,8 @@ pub fn decode_full_frame_with_priority(
     // high-frequency DCT coefficients when subsampling.
     #[cfg(target_os = "windows")]
     {
-        if let Some((rgba, w, h)) =
-            crate::workers::thumbnail::extraction::stage2_wic::extract_to_size(
+        if let Some((rgba, w, h, original_w, original_h)) =
+            crate::workers::thumbnail::extraction::stage2_wic::extract_to_size_with_original_size(
                 path,
                 Some(DISPLAY_CACHE_MAX_SIDE),
             )
@@ -255,8 +255,8 @@ pub fn decode_full_frame_with_priority(
                 rgba,
                 width: w,
                 height: h,
-                original_width: w,
-                original_height: h,
+                original_width: original_w,
+                original_height: original_h,
             });
         }
     }
