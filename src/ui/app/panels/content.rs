@@ -417,21 +417,24 @@ pub(super) fn render_central_panel_layout(app: &mut ImageViewerApp, ctx: &egui::
 fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
     use crate::app::dual_panel::ActivePanel;
 
-    let total_rect = ui.available_rect_before_wrap();
-    let separator_width = 3.0;
-    let half_width = ((total_rect.width() - separator_width) / 2.0).max(100.0);
+    let total_rect = ui.available_rect_before_wrap().intersect(ui.clip_rect());
+    if total_rect.width() <= 1.0 || total_rect.height() <= 1.0 {
+        return;
+    }
+
+    let separator_width = 3.0_f32.min(total_rect.width());
+    let content_width = (total_rect.width() - separator_width).max(0.0);
+    let left_width = (content_width / 2.0).floor();
+    let right_width = content_width - left_width;
 
     let left_rect =
-        egui::Rect::from_min_size(total_rect.min, egui::vec2(half_width, total_rect.height()));
+        egui::Rect::from_min_size(total_rect.min, egui::vec2(left_width, total_rect.height()));
     let right_rect = egui::Rect::from_min_size(
         egui::pos2(
-            total_rect.min.x + half_width + separator_width,
+            total_rect.min.x + left_width + separator_width,
             total_rect.min.y,
         ),
-        egui::vec2(
-            (total_rect.width() - half_width - separator_width).max(100.0),
-            total_rect.height(),
-        ),
+        egui::vec2(right_width, total_rect.height()),
     );
 
     // Draw vertical separator
@@ -619,9 +622,10 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
         ActivePanel::Left => "dual_left",
         ActivePanel::Right => "dual_right",
     };
+    let central_clip = ui.clip_rect().intersect(total_rect);
     ui.allocate_new_ui(egui::UiBuilder::new().max_rect(active_content_rect), |ui| {
         ui.push_id(active_id, |ui| {
-            ui.set_clip_rect(active_content_rect);
+            ui.set_clip_rect(active_content_rect.intersect(central_clip));
             render_single_panel_content(app, ui);
         });
     });
@@ -642,7 +646,7 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
             egui::UiBuilder::new().max_rect(inactive_content_rect),
             |ui| {
                 ui.push_id(inactive_id, |ui| {
-                    ui.set_clip_rect(inactive_content_rect);
+                    ui.set_clip_rect(inactive_content_rect.intersect(central_clip));
                     render_single_panel_content(app_with_inactive, ui);
                 });
             },
