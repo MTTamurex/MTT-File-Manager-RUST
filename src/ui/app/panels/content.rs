@@ -626,9 +626,13 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
     // ── Click-to-focus: detect click AFTER rendering so item interactions
     //    are processed first. Only switch focus if the click landed in the
     //    inactive panel's header (content clicks are handled by items). ──
+    // Guard: do NOT process panel clicks while the global search overlay is open.
+    // The overlay uses an egui::Area as a backdrop which consumes the click, but
+    // ui.input(pointer.any_pressed()) reads raw events and ignores consumption,
+    // so without this guard clicks on the overlay would switch panel focus.
     let pointer_pos = ui.input(|i| i.pointer.hover_pos());
     let any_pressed = ui.input(|i| i.pointer.any_pressed());
-    if any_pressed {
+    if any_pressed && !app.global_search.active {
         if let Some(pos) = pointer_pos {
             // Switch focus when clicking in the inactive panel area
             let inactive_header = match active {

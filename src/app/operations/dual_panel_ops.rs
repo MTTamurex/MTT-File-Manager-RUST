@@ -73,6 +73,13 @@ impl ImageViewerApp {
             self.dual_panel_active.other()
         );
 
+        // Stop any in-panel video/media preview before swapping state.
+        // media_preview lives on ImageViewerApp directly (not in PanelSnapshot),
+        // so it would otherwise keep playing against the wrong panel's selected_file,
+        // causing the preview panel to render both the video and the new panel's
+        // thumbnail simultaneously.
+        self.destroy_media_preview();
+
         // Zero-alloc swap: active ↔ inactive
         snapshot.swap_with_app(self);
         self.dual_panel_inactive_state = Some(snapshot);
