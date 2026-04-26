@@ -5,11 +5,18 @@ use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::sync::mpsc;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConsistencyProbeMode {
+    ListingDrift,
+    PathLiveness,
+}
+
 pub struct ConsistencyProbeRequest {
     pub path: PathBuf,
     pub is_onedrive: bool,
     pub ui_signature: u64,
     pub show_hidden_files: bool,
+    pub mode: ConsistencyProbeMode,
     /// (folder_path, current_cover_file_path) pairs for visible subfolders whose
     /// folder cover state should be verified.
     pub folder_cover_states: Vec<(PathBuf, Option<PathBuf>)>,
@@ -24,7 +31,8 @@ pub struct ConsistencyProbeResult {
 }
 
 /// Spawns a background thread that performs directory consistency probes
-/// for non-NTFS drives where ReadDirectoryChangesW is unreliable.
+/// for non-NTFS drives where ReadDirectoryChangesW is unreliable, plus
+/// lightweight current-folder liveness checks for focus recovery.
 ///
 /// The worker drains stale requests (only processes the most recent),
 /// reads the directory from disk, and sends back a result only when
@@ -56,6 +64,19 @@ pub fn spawn_consistency_probe_worker(
                 let is_onedrive = latest.is_onedrive;
                 let ui_signature = latest.ui_signature;
 
+                if latest.mode == ConsistencyProbeMode::PathLiveness {
+                    if directory_is_confirmed_gone(path.as_path()) {
+                        let _ = res_tx.send(ConsistencyProbeResult {
+                            path,
+                            disk_signature: 0,
+                            path_vanished: true,
+                            changed_folder_covers: Vec::new(),
+                        });
+                        ctx.request_repaint();
+                    }
+                    continue;
+                }
+
                 let disk_entries = match crate::infrastructure::windows::hdd_directory_reader::read_directory_hdd_optimized(
                     path.as_path(),
                     is_onedrive,
@@ -64,7 +85,7 @@ pub fn spawn_consistency_probe_worker(
                     Ok(entries) => entries,
                     Err(_) => {
                         // Check if directory vanished
-                        if !path.is_dir() {
+                        if directory_is_confirmed_gone(path.as_path()) {
                             let _ = res_tx.send(ConsistencyProbeResult {
                                 path,
                                 disk_signature: 0,
@@ -86,7 +107,8 @@ pub fn spawn_consistency_probe_worker(
                     .folder_cover_states
                     .iter()
                     .filter_map(|(folder_path, current_cover)| {
-                        let discovered_cover = crate::infrastructure::windows::find_folder_preview_item(folder_path);
+                        let discovered_cover =
+                            crate::infrastructure::windows::find_folder_preview_item(folder_path);
                         if discovered_cover != *current_cover {
                             Some(folder_path.clone())
                         } else {
@@ -124,6 +146,13 @@ pub fn spawn_consistency_probe_worker(
     (req_tx, res_rx)
 }
 
+fn directory_is_confirmed_gone(path: &std::path::Path) -> bool {
+    match std::fs::metadata(path) {
+        Ok(metadata) => !metadata.is_dir(),
+        Err(error) => error.kind() == std::io::ErrorKind::NotFound,
+    }
+}
+
 /// Computes an order-independent signature over directory entries.
 /// Uses XOR + wrapping-add for collision resistance without requiring sort.
 fn compute_entries_signature(entries: &[FileEntry]) -> u64 {
@@ -150,4 +179,45 @@ fn compute_entries_signature(entries: &[FileEntry]) -> u64 {
     sum_acc.hash(&mut final_hasher);
     bytes_acc.hash(&mut final_hasher);
     final_hasher.finish()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn unique_temp_path(name: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("mtt_consistency_probe_{name}_{nanos}"))
+    }
+
+    #[test]
+    fn liveness_check_accepts_existing_directory() {
+        let path = unique_temp_path("dir");
+        std::fs::create_dir(&path).unwrap();
+
+        assert!(!directory_is_confirmed_gone(&path));
+
+        let _ = std::fs::remove_dir(&path);
+    }
+
+    #[test]
+    fn liveness_check_detects_missing_directory() {
+        let path = unique_temp_path("missing");
+
+        assert!(directory_is_confirmed_gone(&path));
+    }
+
+    #[test]
+    fn liveness_check_rejects_file_replacing_directory() {
+        let path = unique_temp_path("file");
+        std::fs::write(&path, b"not a directory").unwrap();
+
+        assert!(directory_is_confirmed_gone(&path));
+
+        let _ = std::fs::remove_file(&path);
+    }
 }

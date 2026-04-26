@@ -50,7 +50,11 @@ pub fn set_pin_state(path: &Path, command: PinCommand) -> io::Result<()> {
     };
 
     // 1) Apply to the selected path itself.
-    let direct_args = vec![set_flag.to_string(), clear_flag.to_string(), path_str.clone()];
+    let direct_args = vec![
+        set_flag.to_string(),
+        clear_flag.to_string(),
+        path_str.clone(),
+    ];
     run_attrib(&direct_args, path)?;
 
     // 2) If it's a folder, apply recursively to children too (Explorer-like behavior).

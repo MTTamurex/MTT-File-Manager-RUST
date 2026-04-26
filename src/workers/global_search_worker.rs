@@ -33,7 +33,10 @@ pub enum GlobalSearchResponse {
         has_more: bool,
         total_matches: Option<u32>,
     },
-    TotalCount { query: String, total_matches: u32 },
+    TotalCount {
+        query: String,
+        total_matches: u32,
+    },
     /// Service availability status.
     Status {
         available: bool,
@@ -43,7 +46,10 @@ pub enum GlobalSearchResponse {
         volumes: Vec<VolumeStatus>,
     },
     /// Error message.
-    Error { query: String, message: String },
+    Error {
+        query: String,
+        message: String,
+    },
 }
 
 const OFFLINE_FAILURE_THRESHOLD: u8 = 3;
@@ -93,11 +99,16 @@ fn status_poll_interval(
         return None;
     }
 
-    Some(if !service_available || volumes.is_empty() || volumes.iter().any(volume_is_actively_scanning) {
-        std::time::Duration::from_millis(ACTIVE_STATUS_POLL_MS)
-    } else {
-        std::time::Duration::from_millis(IDLE_STATUS_POLL_MS)
-    })
+    Some(
+        if !service_available
+            || volumes.is_empty()
+            || volumes.iter().any(volume_is_actively_scanning)
+        {
+            std::time::Duration::from_millis(ACTIVE_STATUS_POLL_MS)
+        } else {
+            std::time::Duration::from_millis(IDLE_STATUS_POLL_MS)
+        },
+    )
 }
 
 fn append_unique_items(
@@ -467,18 +478,17 @@ pub fn start_global_search_worker(
 
                 match query_service_with_retry(&query, offset, limit) {
                     Ok(service_page) => {
-                        let local_total_matches = if offset == 0 || service_page.total_matches.is_some() {
-                            Some(session_index.count_matches(&query))
-                        } else {
-                            None
-                        };
+                        let local_total_matches =
+                            if offset == 0 || service_page.total_matches.is_some() {
+                                Some(session_index.count_matches(&query))
+                            } else {
+                                None
+                            };
                         let mut merged = service_page.items;
                         let mut has_more = service_page.has_more;
-                        let total_matches = service_page
-                            .total_matches
-                            .map(|service_total| {
-                                service_total.saturating_add(local_total_matches.unwrap_or(0))
-                            });
+                        let total_matches = service_page.total_matches.map(|service_total| {
+                            service_total.saturating_add(local_total_matches.unwrap_or(0))
+                        });
 
                         if !service_page.has_more && merged.len() < max_limit {
                             let service_total = service_page
@@ -502,10 +512,9 @@ pub fn start_global_search_worker(
                             if let Some(service_total) = service_page.total_matches {
                                 let next_offset = offset.saturating_add(merged.len() as u32);
                                 if next_offset >= service_total {
-                                    let local_offset =
-                                        next_offset.saturating_sub(service_total);
-                                    let (probe_items, probe_has_more) = session_index
-                                        .search_page(&query, local_offset as usize, 1);
+                                    let local_offset = next_offset.saturating_sub(service_total);
+                                    let (probe_items, probe_has_more) =
+                                        session_index.search_page(&query, local_offset as usize, 1);
                                     has_more = !probe_items.is_empty() || probe_has_more;
                                 }
                             }
@@ -568,8 +577,7 @@ pub fn start_global_search_worker(
                                 total_matches: Some(local_total_matches),
                             });
                         } else {
-                            let _ =
-                                sender.send(GlobalSearchResponse::Error { query, message: e });
+                            let _ = sender.send(GlobalSearchResponse::Error { query, message: e });
                         }
                     }
                 }

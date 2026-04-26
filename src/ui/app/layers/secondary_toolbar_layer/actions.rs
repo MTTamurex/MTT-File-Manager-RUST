@@ -26,9 +26,12 @@ pub(super) fn render_action_buttons(ui: &mut egui::Ui, app: &mut ImageViewerApp)
         (app.selected_file.is_some() || !app.multi_selection.is_empty()) && !is_drive_selected;
     let can_copy = has_selection && app.can_copy_from_current_location();
     let can_rename = app.multi_selection.len() <= 1
-        && app.selected_item.is_some_and(|idx| app.can_rename_item(idx));
+        && app
+            .selected_item
+            .is_some_and(|idx| app.can_rename_item(idx));
     let can_paste = app.can_paste_into_current_location() && !is_drive_selected;
-    let can_create_folder = !app.navigation_state.is_computer_view && !app.navigation_state.is_recycle_bin_view;
+    let can_create_folder =
+        !app.navigation_state.is_computer_view && !app.navigation_state.is_recycle_bin_view;
     let can_empty_recycle_bin = is_recycle_bin_view && !app.items.is_empty();
 
     let icon_color = if ui.visuals().dark_mode {
@@ -96,7 +99,11 @@ pub(super) fn render_action_buttons(ui: &mut egui::Ui, app: &mut ImageViewerApp)
             if enabled {
                 response.on_hover_text(tooltip).clicked()
             } else {
-                response.on_hover_text(format!("{} {}", tooltip, t!("secondary_toolbar.disabled_suffix")));
+                response.on_hover_text(format!(
+                    "{} {}",
+                    tooltip,
+                    t!("secondary_toolbar.disabled_suffix")
+                ));
                 false
             }
         };
@@ -113,14 +120,22 @@ pub(super) fn render_action_buttons(ui: &mut egui::Ui, app: &mut ImageViewerApp)
         if render_btn("rename", can_rename, &t!("secondary_toolbar.rename")) {
             action = SecAction::Rename;
         }
-        if render_btn("folder_new", can_create_folder, &t!("secondary_toolbar.create_folder")) {
+        if render_btn(
+            "folder_new",
+            can_create_folder,
+            &t!("secondary_toolbar.create_folder"),
+        ) {
             action = SecAction::CreateFolder;
         }
         if render_btn("delete", has_selection, &t!("secondary_toolbar.delete")) {
             action = SecAction::Delete;
         }
         if is_recycle_bin_view
-            && render_btn("broom", can_empty_recycle_bin, &t!("secondary_toolbar.empty_recycle_bin"))
+            && render_btn(
+                "broom",
+                can_empty_recycle_bin,
+                &t!("secondary_toolbar.empty_recycle_bin"),
+            )
         {
             action = SecAction::EmptyRecycleBin;
         }

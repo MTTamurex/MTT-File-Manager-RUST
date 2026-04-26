@@ -96,7 +96,9 @@ impl eframe::App for ImageViewerApp {
             if self.is_in_restore_burst() {
                 ctx.request_repaint();
             } else {
-                ctx.request_repaint_after(std::time::Duration::from_millis(DRIVE_BITMASK_REPAINT_MS));
+                ctx.request_repaint_after(std::time::Duration::from_millis(
+                    DRIVE_BITMASK_REPAINT_MS,
+                ));
             }
             let t2 = std::time::Instant::now();
             self.poll_drive_scan();
@@ -158,8 +160,9 @@ impl eframe::App for ImageViewerApp {
                     } => {
                         if request_id == self.shell_menu_request_id {
                             log::debug!("[ShellMenu] Extraction error: {}", message);
-                            self.notifications
-                                .warning(rust_i18n::t!("context_menu.shell_menu_error").to_string());
+                            self.notifications.warning(
+                                rust_i18n::t!("context_menu.shell_menu_error").to_string(),
+                            );
                             self.shell_menu_loading = false;
                         }
                     }
@@ -229,8 +232,12 @@ impl eframe::App for ImageViewerApp {
             }
             if output.theme_changed {
                 match self.theme_mode {
-                    crate::app::navigation_state::ThemeMode::Dark => ctx.set_visuals(egui::Visuals::dark()),
-                    crate::app::navigation_state::ThemeMode::Light => ctx.set_visuals(egui::Visuals::light()),
+                    crate::app::navigation_state::ThemeMode::Dark => {
+                        ctx.set_visuals(egui::Visuals::dark())
+                    }
+                    crate::app::navigation_state::ThemeMode::Light => {
+                        ctx.set_visuals(egui::Visuals::light())
+                    }
                 }
                 crate::ui::theme::apply_scroll_style(ctx);
                 self.save_preferences();
@@ -288,7 +295,8 @@ impl eframe::App for ImageViewerApp {
         if !self.layout.saved_is_minimized && frame_total_ms > 100.0 {
             log::warn!(
                 "[PERF] SLOW FRAME: {:.0}ms total (stable_dt={:.0}ms)",
-                frame_total_ms, frame_ms
+                frame_total_ms,
+                frame_ms
             );
         }
     }

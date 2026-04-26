@@ -65,7 +65,8 @@ impl NameArena {
         // Keep lowered arena in sync if it has been built, so that
         // incrementally-inserted names are matchable in the SIMD path.
         if !self.lowered.is_empty() {
-            self.lowered.extend(name.bytes().map(|b| b.to_ascii_lowercase()));
+            self.lowered
+                .extend(name.bytes().map(|b| b.to_ascii_lowercase()));
         }
         Some(NameRef {
             offset: offset as u32,

@@ -2,8 +2,8 @@ use crate::image_viewer::cache::{LoadPriority, PrefetchEngine, WindowCache};
 use crate::image_viewer::indexer::{self, ImageSequence};
 use crate::image_viewer::loader;
 use eframe::egui;
-use std::collections::HashSet;
 use std::borrow::Cow;
+use std::collections::HashSet;
 use std::time::Duration;
 
 mod filmstrip;
@@ -88,7 +88,9 @@ impl DedicatedImageViewerApp {
             .unwrap_or(2)
             .clamp(1, 4);
 
-        let start_index = sequence.current_index.min(sequence.entries.len().saturating_sub(1));
+        let start_index = sequence
+            .current_index
+            .min(sequence.entries.len().saturating_sub(1));
         let initial_window_title = if sequence.entries.is_empty() {
             rust_i18n::t!("imageviewer.title").to_string()
         } else {
@@ -200,12 +202,17 @@ impl DedicatedImageViewerApp {
         let sequence = match rx.recv_timeout(Duration::from_secs(5)) {
             Ok(seq) => seq,
             Err(_) => {
-                log::warn!("[IMAGE-VIEWER] sequence build timed out for '{}'", path.display());
+                log::warn!(
+                    "[IMAGE-VIEWER] sequence build timed out for '{}'",
+                    path.display()
+                );
                 ImageSequence::single(path)
             }
         };
 
-        let start_index = sequence.current_index.min(sequence.entries.len().saturating_sub(1));
+        let start_index = sequence
+            .current_index
+            .min(sequence.entries.len().saturating_sub(1));
         let cache = Self::build_initial_cache(&sequence, start_index);
 
         self.sequence = sequence;
@@ -342,10 +349,7 @@ impl DedicatedImageViewerApp {
             return;
         };
 
-        if self
-            .prefetch
-            .request(index, path, priority)
-        {
+        if self.prefetch.request(index, path, priority) {
             if priority != LoadPriority::Urgent {
                 self.requested_jobs.insert(index);
             }
@@ -393,12 +397,7 @@ impl DedicatedImageViewerApp {
     /// The cache holds only lightweight `TextureHandle` references (Arc to
     /// GPU resource), so neighbour images cost ~0 bytes of process RSS
     /// instead of ~33 MB each.
-    fn upload_to_cache(
-        &mut self,
-        ctx: &egui::Context,
-        index: usize,
-        frame: &loader::DecodedFrame,
-    ) {
+    fn upload_to_cache(&mut self, ctx: &egui::Context, index: usize, frame: &loader::DecodedFrame) {
         if frame.width == 0 || frame.height == 0 || frame.rgba.is_empty() {
             if index == self.current_index {
                 self.last_error = Some("decoded frame is empty".to_string());
@@ -417,7 +416,8 @@ impl DedicatedImageViewerApp {
             egui::TextureOptions::LINEAR,
         );
 
-        self.cache.put(index, texture, frame.original_width, frame.original_height);
+        self.cache
+            .put(index, texture, frame.original_width, frame.original_height);
 
         // Update display immediately if this is the current image.
         if index == self.current_index {
@@ -611,7 +611,8 @@ impl DedicatedImageViewerApp {
         }
 
         let current_texture_ready = self.texture_index == Some(self.current_index);
-        let should_reveal = self.sequence.entries.is_empty() || self.last_error.is_some() || current_texture_ready;
+        let should_reveal =
+            self.sequence.entries.is_empty() || self.last_error.is_some() || current_texture_ready;
         if !should_reveal {
             ctx.request_repaint_after(Duration::from_millis(16));
             return;
@@ -631,8 +632,8 @@ impl DedicatedImageViewerApp {
         if let Some(hwnd) = self.native_hwnd {
             unsafe {
                 use windows::Win32::UI::WindowsAndMessaging::{
-                    SetWindowPos, HWND_TOP, SWP_NOMOVE, SWP_NOSIZE, SWP_NOACTIVATE,
-                    SWP_NOZORDER, SWP_SHOWWINDOW,
+                    SetWindowPos, HWND_TOP, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
+                    SWP_SHOWWINDOW,
                 };
                 let _ = SetWindowPos(
                     hwnd,
@@ -654,7 +655,6 @@ impl DedicatedImageViewerApp {
         ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
         self.viewport_revealed = true;
     }
-
 }
 
 impl eframe::App for DedicatedImageViewerApp {
@@ -680,8 +680,8 @@ impl eframe::App for DedicatedImageViewerApp {
                     self.native_hwnd = Some(hwnd);
                     unsafe {
                         use windows::Win32::UI::WindowsAndMessaging::{
-                            SetWindowPos, HWND_TOP, SWP_NOMOVE, SWP_NOSIZE, SWP_NOACTIVATE,
-                            SWP_NOZORDER, SWP_HIDEWINDOW,
+                            SetWindowPos, HWND_TOP, SWP_HIDEWINDOW, SWP_NOACTIVATE, SWP_NOMOVE,
+                            SWP_NOSIZE, SWP_NOZORDER,
                         };
                         let _ = SetWindowPos(
                             hwnd,
@@ -690,7 +690,11 @@ impl eframe::App for DedicatedImageViewerApp {
                             0,
                             0,
                             0,
-                            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOZORDER | SWP_HIDEWINDOW,
+                            SWP_NOMOVE
+                                | SWP_NOSIZE
+                                | SWP_NOACTIVATE
+                                | SWP_NOZORDER
+                                | SWP_HIDEWINDOW,
                         );
                     }
                     crate::infrastructure::windows::window_corners::disable_window_transitions(
@@ -702,7 +706,6 @@ impl eframe::App for DedicatedImageViewerApp {
                     );
                 }
             }
-
         }
 
         self.handle_external_open_requests(ctx);
@@ -718,8 +721,7 @@ impl eframe::App for DedicatedImageViewerApp {
         // navigating. During rapid navigation navigate_to() already requests
         // the urgent current image + the new tail; flooding workers with the
         // full window would waste time decoding images we'll skip past.
-        let navigating_fast =
-            self.last_navigate_instant.elapsed() < Duration::from_millis(80);
+        let navigating_fast = self.last_navigate_instant.elapsed() < Duration::from_millis(80);
         if !navigating_fast {
             self.schedule_window_requests();
         }
@@ -772,4 +774,3 @@ fn paths_eq_case_insensitive(a: &std::path::Path, b: &std::path::Path) -> bool {
     a.to_string_lossy()
         .eq_ignore_ascii_case(&b.to_string_lossy())
 }
-

@@ -17,10 +17,10 @@ impl NotificationLevel {
     pub fn color(&self) -> eframe::egui::Color32 {
         use eframe::egui::Color32;
         match self {
-            NotificationLevel::Info => Color32::from_rgb(30, 58, 95),    // Dark blue
+            NotificationLevel::Info => Color32::from_rgb(30, 58, 95), // Dark blue
             NotificationLevel::Success => Color32::from_rgb(20, 70, 45), // Dark green
             NotificationLevel::Warning => Color32::from_rgb(80, 60, 10), // Dark amber
-            NotificationLevel::Error => Color32::from_rgb(95, 25, 25),   // Dark red
+            NotificationLevel::Error => Color32::from_rgb(95, 25, 25), // Dark red
         }
     }
 

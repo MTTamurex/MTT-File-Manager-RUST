@@ -26,7 +26,10 @@ pub fn open_with_shell(path: &Path) -> Result<()> {
         if code <= 32 {
             return Err(Error::new(
                 E_FAIL,
-                format!("ShellExecuteW failed with code {} for path {:?}", code, path),
+                format!(
+                    "ShellExecuteW failed with code {} for path {:?}",
+                    code, path
+                ),
             ));
         }
 
@@ -92,7 +95,9 @@ pub fn show_shell_context_menu(
     impl Drop for PidlGuard {
         fn drop(&mut self) {
             if !self.0.is_null() {
-                unsafe { CoTaskMemFree(Some(self.0 as _)); }
+                unsafe {
+                    CoTaskMemFree(Some(self.0 as _));
+                }
             }
         }
     }
@@ -101,8 +106,10 @@ pub fn show_shell_context_menu(
     struct MenuGuard(HMENU);
     impl Drop for MenuGuard {
         fn drop(&mut self) {
-            if !self.0.0.is_null() {
-                unsafe { let _ = DestroyMenu(self.0); }
+            if !self.0 .0.is_null() {
+                unsafe {
+                    let _ = DestroyMenu(self.0);
+                }
             }
         }
     }
@@ -131,7 +138,7 @@ pub fn show_shell_context_menu(
         let hmenu = CreatePopupMenu()?;
         let menu_guard = MenuGuard(hmenu);
 
-        if menu_guard.0.0.is_null() {
+        if menu_guard.0 .0.is_null() {
             return Ok(ContextMenuResult {
                 was_cancelled: true,
                 cursor_x: screen_x,
@@ -141,7 +148,13 @@ pub fn show_shell_context_menu(
         }
 
         context_menu
-            .QueryContextMenu(menu_guard.0, 0, 1, 0x7FFF, windows::Win32::UI::Shell::CMF_NORMAL)
+            .QueryContextMenu(
+                menu_guard.0,
+                0,
+                1,
+                0x7FFF,
+                windows::Win32::UI::Shell::CMF_NORMAL,
+            )
             .ok()?;
 
         let command_id = TrackPopupMenuEx(

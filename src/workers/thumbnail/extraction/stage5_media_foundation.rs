@@ -178,7 +178,8 @@ pub fn extract(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
             if (current_len as usize) < expected_size {
                 log::trace!(
                     "[Thumbnail] Stage 5: NV12 buffer size mismatch: {} vs expected {}",
-                    current_len, expected_size
+                    current_len,
+                    expected_size
                 );
                 let _ = buffer.Unlock();
                 return None;
@@ -192,7 +193,8 @@ pub fn extract(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
             if (current_len as usize) < expected_size {
                 log::trace!(
                     "[Thumbnail] Stage 5: RGB32 buffer size mismatch: {} vs expected {}",
-                    current_len, expected_size
+                    current_len,
+                    expected_size
                 );
                 let _ = buffer.Unlock();
                 return None;

@@ -28,10 +28,8 @@ pub(super) fn render_new_tab_and_drag_area(
         } else {
             egui::Sense::click_and_drag()
         };
-        let (drag_rect, drag_response) = ui.allocate_exact_size(
-            Vec2::new(remaining_width, tab_height),
-            sense,
-        );
+        let (drag_rect, drag_response) =
+            ui.allocate_exact_size(Vec2::new(remaining_width, tab_height), sense);
 
         ui.painter().rect_filled(drag_rect, 0.0, inactive_bg);
 
@@ -55,8 +53,11 @@ pub(super) fn render_new_tab_and_drag_area(
     // Keep "+" as a button, not as another tab.
     // Draw hover only to avoid visual seam with rounded tabs.
     if new_tab_response.hovered() {
-        ui.painter()
-            .rect_filled(new_tab_rect.shrink2(Vec2::splat(4.0)), CornerRadius::same(4), hover_bg);
+        ui.painter().rect_filled(
+            new_tab_rect.shrink2(Vec2::splat(4.0)),
+            CornerRadius::same(4),
+            hover_bg,
+        );
     }
 
     let plus_center = new_tab_rect.center();

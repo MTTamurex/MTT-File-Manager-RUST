@@ -145,7 +145,10 @@ impl ImageViewerApp {
                 cols,
                 cell_h,
                 ui.available_height(),
-                Some(self.shortcuts.get(crate::app::shortcuts::ShortcutAction::Properties)),
+                Some(
+                    self.shortcuts
+                        .get(crate::app::shortcuts::ShortcutAction::Properties),
+                ),
             );
 
             let shift = ui.input(|i| i.modifiers.shift);
@@ -240,7 +243,9 @@ impl ImageViewerApp {
 
         // Check if video is playing in docked mode to reduce disk I/O
         let is_video_docked_visible = self.is_video_docked_visible();
-        let skip_folder_media_reads = crate::infrastructure::windows::is_windows_system_path(&self.navigation_state.current_path);
+        let skip_folder_media_reads = crate::infrastructure::windows::is_windows_system_path(
+            &self.navigation_state.current_path,
+        );
 
         // Non-blocking in render loop: use cached profile only.
         // Unknown drives fall back to HDD behavior to avoid UI stalls.

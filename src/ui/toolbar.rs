@@ -110,9 +110,7 @@ fn render_breadcrumb_button(
             };
             ui.visuals_mut().widgets.active.bg_stroke = egui::Stroke::NONE;
 
-            ui.button(
-                egui::RichText::new(display).color(theme::text_color(ui.visuals().dark_mode)),
-            )
+            ui.button(egui::RichText::new(display).color(theme::text_color(ui.visuals().dark_mode)))
         })
         .inner;
 
@@ -187,14 +185,28 @@ pub fn render_toolbar(
 
         // 1. NAVIGATION (LEFT) - Blocked during renaming
         let can_back = navigation.can_go_back() && !_is_renaming;
-        if widgets::icon_button(ui, svg_manager, theme::ICON_ARROW_LEFT, &t!("toolbar.back"), None).clicked()
+        if widgets::icon_button(
+            ui,
+            svg_manager,
+            theme::ICON_ARROW_LEFT,
+            &t!("toolbar.back"),
+            None,
+        )
+        .clicked()
             && can_back
         {
             action = Some(ToolbarAction::GoBack);
         }
 
         let can_forward = navigation.can_go_forward() && !_is_renaming;
-        if widgets::icon_button(ui, svg_manager, theme::ICON_ARROW_RIGHT, &t!("toolbar.forward"), None).clicked()
+        if widgets::icon_button(
+            ui,
+            svg_manager,
+            theme::ICON_ARROW_RIGHT,
+            &t!("toolbar.forward"),
+            None,
+        )
+        .clicked()
             && can_forward
         {
             action = Some(ToolbarAction::GoForward);
@@ -213,7 +225,14 @@ pub fn render_toolbar(
             action = Some(ToolbarAction::GoUp);
         }
 
-        if widgets::icon_button(ui, svg_manager, theme::ICON_REFRESH, &t!("toolbar.reload"), None).clicked()
+        if widgets::icon_button(
+            ui,
+            svg_manager,
+            theme::ICON_REFRESH,
+            &t!("toolbar.reload"),
+            None,
+        )
+        .clicked()
             && !_is_renaming
         {
             action = Some(ToolbarAction::Refresh);
@@ -265,8 +284,11 @@ pub fn render_toolbar(
 
             // Draw background for search field
             let visuals = ui.style().interact(&search_resp);
-            ui.painter()
-                .rect_filled(search_rect, visuals.corner_radius, theme::input_bg_color(ui.visuals().dark_mode));
+            ui.painter().rect_filled(
+                search_rect,
+                visuals.corner_radius,
+                theme::input_bg_color(ui.visuals().dark_mode),
+            );
             ui.painter().rect_stroke(
                 search_rect,
                 visuals.corner_radius,
@@ -294,7 +316,8 @@ pub fn render_toolbar(
             let text_available_w =
                 search_ui.available_width() - if has_text { 22.0 + 4.0 } else { 4.0 };
 
-            let hint = egui::RichText::new(t!("toolbar.search_placeholder")).color(egui::Color32::from_gray(120));
+            let hint = egui::RichText::new(t!("toolbar.search_placeholder"))
+                .color(egui::Color32::from_gray(120));
             let text_resp = search_ui.add_sized(
                 egui::vec2(text_available_w, input_height - 2.0),
                 egui::TextEdit::singleline(search_query)
@@ -339,8 +362,11 @@ pub fn render_toolbar(
                 ui.allocate_exact_size(egui::vec2(addr_width, input_height), egui::Sense::click());
 
             // Draw background
-            ui.painter()
-                .rect_filled(addr_rect, 4.0, theme::input_bg_color(ui.visuals().dark_mode));
+            ui.painter().rect_filled(
+                addr_rect,
+                4.0,
+                theme::input_bg_color(ui.visuals().dark_mode),
+            );
             ui.painter().rect_stroke(
                 addr_rect,
                 4.0,
@@ -357,7 +383,8 @@ pub fn render_toolbar(
             addr_ui.set_clip_rect(addr_rect);
 
             if *is_editing_path {
-                let show_history_close_button = *show_address_history_menu && !recent_paths.is_empty();
+                let show_history_close_button =
+                    *show_address_history_menu && !recent_paths.is_empty();
                 let close_button_width = if show_history_close_button { 22.0 } else { 0.0 };
                 let text_width = (addr_ui.available_width() - close_button_width).max(40.0);
                 let edit_response = addr_ui.add_sized(
@@ -392,8 +419,8 @@ pub fn render_toolbar(
 
                 if !close_history_clicked
                     && (edit_response.clicked_elsewhere()
-                    || (edit_response.lost_focus()
-                        && !addr_ui.input(|i| i.key_pressed(egui::Key::Enter))))
+                        || (edit_response.lost_focus()
+                            && !addr_ui.input(|i| i.key_pressed(egui::Key::Enter))))
                 {
                     action = Some(ToolbarAction::CancelPathInput);
                 }
@@ -445,12 +472,13 @@ pub fn render_toolbar(
 
                                     let text_rect = item_rect.shrink2(egui::vec2(8.0, 0.0));
                                     let font_id = egui::TextStyle::Button.resolve(ui.style());
-                                    let truncated = crate::ui::preview_panel::utils::truncate_text_to_fit(
-                                        display,
-                                        text_rect.width(),
-                                        &font_id,
-                                        ui,
-                                    );
+                                    let truncated =
+                                        crate::ui::preview_panel::utils::truncate_text_to_fit(
+                                            display,
+                                            text_rect.width(),
+                                            &font_id,
+                                            ui,
+                                        );
                                     ui.painter().text(
                                         egui::pos2(text_rect.left(), text_rect.center().y),
                                         egui::Align2::LEFT_CENTER,
@@ -626,8 +654,7 @@ pub fn render_toolbar(
 
                                 if show_ellipsis && has_hidden_middle {
                                     // Clickable ellipsis with overflow popup
-                                    let popup_id =
-                                        egui::Id::new("breadcrumb_overflow_popup");
+                                    let popup_id = egui::Id::new("breadcrumb_overflow_popup");
                                     let mut show_overflow = addr_ui.ctx().memory(|m| {
                                         m.data.get_temp::<bool>(popup_id).unwrap_or(false)
                                     });
@@ -646,8 +673,7 @@ pub fn render_toolbar(
                                             ui.visuals_mut().widgets.inactive.bg_stroke =
                                                 egui::Stroke::NONE;
 
-                                            ui.visuals_mut().widgets.hovered.bg_fill =
-                                                hover_color;
+                                            ui.visuals_mut().widgets.hovered.bg_fill = hover_color;
                                             ui.visuals_mut().widgets.hovered.weak_bg_fill =
                                                 hover_color;
                                             ui.visuals_mut().widgets.hovered.bg_stroke =
@@ -663,10 +689,9 @@ pub fn render_toolbar(
                                                 egui::Stroke::NONE;
 
                                             ui.button(
-                                                egui::RichText::new("…")
-                                                    .color(theme::text_color(
-                                                        ui.visuals().dark_mode,
-                                                    )),
+                                                egui::RichText::new("…").color(theme::text_color(
+                                                    ui.visuals().dark_mode,
+                                                )),
                                             )
                                         })
                                         .inner;
@@ -694,8 +719,7 @@ pub fn render_toolbar(
                                                     for i in 1..last_visible_start {
                                                         let (display, actual_path) =
                                                             segments[i].clone();
-                                                        let item_size =
-                                                            egui::vec2(400.0, 28.0);
+                                                        let item_size = egui::vec2(400.0, 28.0);
                                                         let (item_rect, response) = ui
                                                             .allocate_exact_size(
                                                                 item_size,
@@ -714,18 +738,16 @@ pub fn render_toolbar(
                                                             );
                                                         }
 
-                                                        let text_rect = item_rect
-                                                            .shrink2(egui::vec2(8.0, 0.0));
-                                                        let font_id =
-                                                            egui::TextStyle::Button
-                                                                .resolve(ui.style());
-                                                        let truncated =
-                                                            truncate_text_to_fit(
-                                                                &display,
-                                                                text_rect.width(),
-                                                                &font_id,
-                                                                ui,
-                                                            );
+                                                        let text_rect =
+                                                            item_rect.shrink2(egui::vec2(8.0, 0.0));
+                                                        let font_id = egui::TextStyle::Button
+                                                            .resolve(ui.style());
+                                                        let truncated = truncate_text_to_fit(
+                                                            &display,
+                                                            text_rect.width(),
+                                                            &font_id,
+                                                            ui,
+                                                        );
                                                         ui.painter().text(
                                                             egui::pos2(
                                                                 text_rect.left(),
@@ -745,8 +767,7 @@ pub fn render_toolbar(
                                                         }
 
                                                         if response.clicked() {
-                                                            selected_path =
-                                                                Some(actual_path);
+                                                            selected_path = Some(actual_path);
                                                         }
                                                     }
                                                 });
@@ -754,31 +775,22 @@ pub fn render_toolbar(
 
                                         if let Some(path) = selected_path {
                                             addr_ui.ctx().memory_mut(|m| {
-                                                m.data
-                                                    .insert_temp::<bool>(popup_id, false);
+                                                m.data.insert_temp::<bool>(popup_id, false);
                                             });
-                                            action =
-                                                Some(ToolbarAction::Navigate(path));
-                                        } else if addr_ui
-                                            .ctx()
-                                            .input(|i| i.pointer.any_pressed())
-                                        {
-                                            if let Some(pointer_pos) = addr_ui
-                                                .ctx()
-                                                .input(|i| i.pointer.press_origin())
+                                            action = Some(ToolbarAction::Navigate(path));
+                                        } else if addr_ui.ctx().input(|i| i.pointer.any_pressed()) {
+                                            if let Some(pointer_pos) =
+                                                addr_ui.ctx().input(|i| i.pointer.press_origin())
                                             {
-                                                let clicked_ellipsis = ellipsis_resp
-                                                    .rect
-                                                    .contains(pointer_pos);
+                                                let clicked_ellipsis =
+                                                    ellipsis_resp.rect.contains(pointer_pos);
                                                 let clicked_popup = popup_response
                                                     .response
                                                     .rect
                                                     .contains(pointer_pos);
                                                 if !clicked_ellipsis && !clicked_popup {
                                                     addr_ui.ctx().memory_mut(|m| {
-                                                        m.data.insert_temp::<bool>(
-                                                            popup_id, false,
-                                                        );
+                                                        m.data.insert_temp::<bool>(popup_id, false);
                                                     });
                                                 }
                                             }

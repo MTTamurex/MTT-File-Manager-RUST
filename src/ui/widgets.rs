@@ -110,16 +110,7 @@ pub fn toggle_icon_button(
     active: bool,
     tooltip: &str,
 ) -> egui::Response {
-    toggle_icon_button_sized(
-        ui,
-        svg_manager,
-        icon,
-        active,
-        tooltip,
-        18.0,
-        5.0,
-        0.0,
-    )
+    toggle_icon_button_sized(ui, svg_manager, icon, active, tooltip, 18.0, 5.0, 0.0)
 }
 
 /// Renders a toggle button with configurable icon size/padding.

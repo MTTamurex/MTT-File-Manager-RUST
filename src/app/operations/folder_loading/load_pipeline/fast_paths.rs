@@ -1,9 +1,9 @@
 use crate::domain::file_entry::{is_archive_extension, FileEntry, SyncStatus};
 use crate::infrastructure::adaptive_batch::AdaptiveBatchTracker;
+use crate::infrastructure::app_state_db::AppStateDb;
 use crate::infrastructure::directory_cache::DirectoryCache;
 use crate::infrastructure::directory_dirty_registry::DirectoryDirtyRegistry;
 use crate::infrastructure::directory_index::DirectoryIndex;
-use crate::infrastructure::app_state_db::AppStateDb;
 use crate::infrastructure::disk_cache::ThumbnailDiskCache;
 use crate::infrastructure::windows::{is_shell_navigation_path, list_shell_folder};
 use eframe::egui;
@@ -56,7 +56,11 @@ pub(super) fn try_handle_fast_paths(
     // to avoid penalizing the fast path on folders with hundreds of subdirectories.
     const MAX_SUBFOLDER_MTIME_CHECKS: usize = 20;
     let any_subfolder_mtime_stale = |entries: &[FileEntry]| -> bool {
-        for entry in entries.iter().filter(|e| e.is_dir).take(MAX_SUBFOLDER_MTIME_CHECKS) {
+        for entry in entries
+            .iter()
+            .filter(|e| e.is_dir)
+            .take(MAX_SUBFOLDER_MTIME_CHECKS)
+        {
             let disk_mtime = std::fs::metadata(&entry.path)
                 .ok()
                 .and_then(|m| m.modified().ok())
@@ -93,10 +97,14 @@ pub(super) fn try_handle_fast_paths(
         // both DirectoryCache and DirectoryIndex for ANY change on the drive.
         // No fs::metadata() mtime check needed — if the cache has data, it's valid.
         if !cache_marked_dirty && can_trust_directory_cache {
-            if let Some((cached_entries, cached_at_ms)) = directory_cache.get_with_meta(base_path_buf) {
+            if let Some((cached_entries, cached_at_ms)) =
+                directory_cache.get_with_meta(base_path_buf)
+            {
                 log::info!(
                     "[FOLDER-LOADING] Phase 1: Cache HIT for {:?} ({} entries, cached_at_ms={})",
-                    base_path_buf, cached_entries.len(), cached_at_ms
+                    base_path_buf,
+                    cached_entries.len(),
+                    cached_at_ms
                 );
                 // Fail-safe against missed watcher events: validate folder mtime.
                 // Skip for OneDrive to avoid potential blocking metadata calls.
@@ -195,7 +203,11 @@ pub(super) fn try_handle_fast_paths(
                 );
             }
         } else {
-            let reason = if cache_marked_dirty { "marked dirty" } else { "non-USN filesystem" };
+            let reason = if cache_marked_dirty {
+                "marked dirty"
+            } else {
+                "non-USN filesystem"
+            };
             log::info!(
                 "[FOLDER-LOADING] Phase 1: Cache BYPASS for {:?} ({}), proceeding to disk load",
                 base_path_buf,
@@ -246,7 +258,12 @@ pub(super) fn try_handle_fast_paths(
         );
     }
 
-    if !force_refresh && !cache_marked_dirty && !is_onedrive_base && can_trust_persistent_index && !_show_hidden {
+    if !force_refresh
+        && !cache_marked_dirty
+        && !is_onedrive_base
+        && can_trust_persistent_index
+        && !_show_hidden
+    {
         if let Some(di) = directory_index_opt {
             let base = PathBuf::from(base_path);
             // SAFETY CHECK: Verify directory mtime before trusting cached index
@@ -308,49 +325,49 @@ pub(super) fn try_handle_fast_paths(
                         let _ = di.invalidate(&base);
                         // Fall through to disk scan below
                     } else {
-                    log::debug!(
-                        "[FOLDER-LOADING] Using DirectoryIndex (pre-built index) for {:?}",
-                        base
-                    );
-                    let mut entries = pre_entries;
+                        log::debug!(
+                            "[FOLDER-LOADING] Using DirectoryIndex (pre-built index) for {:?}",
+                            base
+                        );
+                        let mut entries = pre_entries;
 
-                    let folders: Vec<PathBuf> = entries
-                        .iter()
-                        .filter(|e| e.is_dir)
-                        .map(|e| e.path.clone())
-                        .collect();
-                    if !folders.is_empty() {
-                        let covers = app_state_db.get_folder_covers(&folders);
-                        for entry in entries.iter_mut() {
-                            if entry.is_dir {
-                                if let Some(cover) = covers.get(&entry.path) {
-                                    entry.folder_cover = Some(cover.clone());
+                        let folders: Vec<PathBuf> = entries
+                            .iter()
+                            .filter(|e| e.is_dir)
+                            .map(|e| e.path.clone())
+                            .collect();
+                        if !folders.is_empty() {
+                            let covers = app_state_db.get_folder_covers(&folders);
+                            for entry in entries.iter_mut() {
+                                if entry.is_dir {
+                                    if let Some(cover) = covers.get(&entry.path) {
+                                        entry.folder_cover = Some(cover.clone());
+                                    }
                                 }
                             }
                         }
-                    }
 
-                    directory_cache.put(base.clone(), entries.clone());
-                    directory_dirty_registry.clear_dirty(&base);
+                        directory_cache.put(base.clone(), entries.clone());
+                        directory_dirty_registry.clear_dirty(&base);
 
-                    let mut offset = 0;
-                    while offset < entries.len() {
-                        if gen_clone.load(AtomicOrdering::Relaxed) != my_gen {
-                            return true;
+                        let mut offset = 0;
+                        while offset < entries.len() {
+                            if gen_clone.load(AtomicOrdering::Relaxed) != my_gen {
+                                return true;
+                            }
+                            let end = (offset + *batch_size).min(entries.len());
+                            let chunk = entries[offset..end].to_vec();
+                            let _ = file_entry_sender.send((my_gen, chunk));
+                            ctx.request_repaint();
+                            batch_tracker.record_batch(batch_start.elapsed(), end - offset);
+                            let _ = batch_tracker.batch_size();
+                            *batch_start = std::time::Instant::now();
+                            offset = end;
                         }
-                        let end = (offset + *batch_size).min(entries.len());
-                        let chunk = entries[offset..end].to_vec();
-                        let _ = file_entry_sender.send((my_gen, chunk));
+                        let _ = file_entry_sender.send((my_gen, Vec::new()));
                         ctx.request_repaint();
-                        batch_tracker.record_batch(batch_start.elapsed(), end - offset);
-                        let _ = batch_tracker.batch_size();
-                        *batch_start = std::time::Instant::now();
-                        offset = end;
-                    }
-                    let _ = file_entry_sender.send((my_gen, Vec::new()));
-                    ctx.request_repaint();
-                    return true;
-                  } // end else (subfolder mtimes valid)
+                        return true;
+                    } // end else (subfolder mtimes valid)
                 } // end else (index not stale)
             } // end if let Some((meta, indexed_files))
         } // end if let Some(di)
@@ -399,8 +416,8 @@ pub(super) fn try_handle_fast_paths(
                     base_path
                 );
                 // Unwrap the Arc — clones only if the cache still holds a reference.
-                let mut cached_entries = Arc::try_unwrap(cached_entries_arc)
-                    .unwrap_or_else(|arc| (*arc).clone());
+                let mut cached_entries =
+                    Arc::try_unwrap(cached_entries_arc).unwrap_or_else(|arc| (*arc).clone());
                 let mut changed = false;
                 for entry in cached_entries.iter_mut() {
                     if !entry.is_dir && is_archive_extension(&entry.name) {

@@ -1,8 +1,8 @@
 use crate::domain::file_entry::DriveInfo;
 use crate::domain::file_entry::FileEntry;
+use crate::infrastructure::app_state_db::AppStateDb;
 use crate::infrastructure::directory_cache::DirectoryCache;
 use crate::infrastructure::directory_index::DirectoryIndex;
-use crate::infrastructure::app_state_db::AppStateDb;
 use crate::infrastructure::disk_cache::ThumbnailDiskCache;
 use crate::infrastructure::folder_compose::FolderComposer;
 use crate::infrastructure::icon_disk_cache::IconDiskCache;
@@ -24,10 +24,9 @@ use super::init_preferences::StartupPreferences;
 use super::init_workers::{
     spawn_async_font_loader, spawn_consistency_probe_worker, spawn_cover_worker,
     spawn_disk_cache_invalidation_worker, spawn_file_operation_worker,
-    spawn_folder_preview_workers, spawn_folder_size_worker, spawn_folder_size_batch_worker,
-    spawn_global_search_worker,
-    spawn_icon_worker, spawn_live_file_size_worker, spawn_metadata_worker,
-    spawn_prefetching_workers, PrefetchWorkerHandles,
+    spawn_folder_preview_workers, spawn_folder_size_batch_worker, spawn_folder_size_worker,
+    spawn_global_search_worker, spawn_icon_worker, spawn_live_file_size_worker,
+    spawn_metadata_worker, spawn_prefetching_workers, PrefetchWorkerHandles,
 };
 use super::state::ItemsRebuildResult;
 
@@ -75,7 +74,8 @@ pub(in crate::app) struct AppBootstrap {
     pub(in crate::app) folder_size_res_rx: mpsc::Receiver<FolderSizeMessage>,
     pub(in crate::app) folder_size_cancel: Arc<AtomicBool>,
     pub(in crate::app) batch_size_tx: mpsc::Sender<crate::app::folder_size_state::BatchSizeRequest>,
-    pub(in crate::app) batch_size_rx: mpsc::Receiver<crate::app::folder_size_state::BatchSizeResult>,
+    pub(in crate::app) batch_size_rx:
+        mpsc::Receiver<crate::app::folder_size_state::BatchSizeResult>,
     pub(in crate::app) batch_size_cancel: Arc<AtomicBool>,
     pub(in crate::app) batch_size_generation: Arc<AtomicU64>,
 
@@ -143,17 +143,15 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
                 e
             );
             // Last-resort in-memory fallback — thumbnails won't persist but app keeps running.
-            ThumbnailDiskCache::new(std::env::temp_dir().join("mtt-cache-fallback"))
-                .unwrap_or_else(|e2| {
+            ThumbnailDiskCache::new(std::env::temp_dir().join("mtt-cache-fallback")).unwrap_or_else(
+                |e2| {
                     log::error!("[Cache] In-memory fallback also failed: {:?}. Exiting.", e2);
                     std::process::exit(1);
-                })
+                },
+            )
         }
     });
-    let base_dir = cache_dir
-        .parent()
-        .unwrap_or(&cache_dir)
-        .to_path_buf();
+    let base_dir = cache_dir.parent().unwrap_or(&cache_dir).to_path_buf();
 
     let state_dir = base_dir.join("state");
     let app_state_db = Arc::new(match AppStateDb::new(state_dir.clone()) {
@@ -164,11 +162,10 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
                 state_dir,
                 e
             );
-            AppStateDb::new(std::env::temp_dir().join("mtt-state-fallback"))
-                .unwrap_or_else(|e2| {
-                    log::error!("[State] In-memory fallback also failed: {:?}. Exiting.", e2);
-                    std::process::exit(1);
-                })
+            AppStateDb::new(std::env::temp_dir().join("mtt-state-fallback")).unwrap_or_else(|e2| {
+                log::error!("[State] In-memory fallback also failed: {:?}. Exiting.", e2);
+                std::process::exit(1);
+            })
         }
     });
 
@@ -223,28 +220,27 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
     let icon_disk_cache = Arc::new(IconDiskCache::new(&base_dir));
     let preloaded_extension_icons = icon_disk_cache.load_all();
 
-    let (icon_req_tx, icon_res_rx) =
-        spawn_icon_worker(ctx, shared_gen.clone(), icon_disk_cache, &preloaded_extension_icons);
+    let (icon_req_tx, icon_res_rx) = spawn_icon_worker(
+        ctx,
+        shared_gen.clone(),
+        icon_disk_cache,
+        &preloaded_extension_icons,
+    );
 
     // Pre-warm: only send requests for extensions NOT already in disk cache.
     // Disk-cached extensions are loaded instantly in ImageViewerApp::new().
     {
         const PREWARM: &[&str] = &[
             // C:\Windows visible extensions (highest priority — first in queue)
-            "dll", "sys", "log", "txt", "ini", "xml", "bat", "bin",
-            "exe", "cmd", "dat", "prx", "cat", "mun", "nls", "inf",
-            // Common document/code extensions
-            "pdf", "json", "html", "css", "js", "md", "csv", "rtf",
-            "doc", "docx", "xls", "xlsx", "ppt", "pptx",
-            // Archives
-            "zip", "rar", "7z", "tar", "gz",
-            // Images
-            "jpg", "png", "gif", "bmp", "svg", "ico", "webp",
-            // Media
-            "mp3", "mp4", "mkv", "avi", "wav", "flac",
-            // Code
-            "py", "rs", "cpp", "c", "h", "java", "cs", "go", "ts",
-            "toml", "yaml", "cfg", "reg", "msi", "cab", "tmp",
+            "dll", "sys", "log", "txt", "ini", "xml", "bat", "bin", "exe", "cmd", "dat", "prx",
+            "cat", "mun", "nls", "inf", // Common document/code extensions
+            "pdf", "json", "html", "css", "js", "md", "csv", "rtf", "doc", "docx", "xls", "xlsx",
+            "ppt", "pptx", // Archives
+            "zip", "rar", "7z", "tar", "gz", // Images
+            "jpg", "png", "gif", "bmp", "svg", "ico", "webp", // Media
+            "mp3", "mp4", "mkv", "avi", "wav", "flac", // Code
+            "py", "rs", "cpp", "c", "h", "java", "cs", "go", "ts", "toml", "yaml", "cfg", "reg",
+            "msi", "cab", "tmp",
         ];
         let mut prewarm_skipped = 0usize;
         for ext in PREWARM {
@@ -275,7 +271,8 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
         spawn_folder_preview_workers(ctx, disk_cache.clone(), folder_composer);
     let (folder_size_req_tx, folder_size_res_rx, folder_size_cancel) =
         spawn_folder_size_worker(ctx);
-    let (batch_size_tx, batch_size_rx, batch_size_cancel, batch_size_generation) = spawn_folder_size_batch_worker(ctx);
+    let (batch_size_tx, batch_size_rx, batch_size_cancel, batch_size_generation) =
+        spawn_folder_size_batch_worker(ctx);
 
     let PrefetchWorkerHandles {
         prefetch_sender: prefetch_tx,
@@ -286,9 +283,11 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
         shared_gen.clone(),
     );
 
-    let (file_op_tx, file_op_res_rx, extraction_progress, extraction_cancel) = spawn_file_operation_worker();
+    let (file_op_tx, file_op_res_rx, extraction_progress, extraction_cancel) =
+        spawn_file_operation_worker();
     let (global_search_tx, global_search_res_rx) = spawn_global_search_worker(ctx);
-    let disk_cache_invalidation_tx = spawn_disk_cache_invalidation_worker(disk_cache.clone(), app_state_db.clone());
+    let disk_cache_invalidation_tx =
+        spawn_disk_cache_invalidation_worker(disk_cache.clone(), app_state_db.clone());
     let (consistency_probe_tx, consistency_probe_rx) = spawn_consistency_probe_worker(ctx.clone());
 
     let disks = windows_infra::get_all_drives();
@@ -401,9 +400,7 @@ fn migrate_legacy_tables(thumbnails_db_path: &Path, app_state_db_path: &Path) {
 
     // ATTACH the new app_state.db.
     let attach_path = app_state_db_path.to_string_lossy().replace('\'', "''");
-    if let Err(e) =
-        conn.execute_batch(&format!("ATTACH DATABASE '{}' AS new_state", attach_path))
-    {
+    if let Err(e) = conn.execute_batch(&format!("ATTACH DATABASE '{}' AS new_state", attach_path)) {
         log::error!("[Migration] Failed to ATTACH app_state.db: {:?}", e);
         return;
     }

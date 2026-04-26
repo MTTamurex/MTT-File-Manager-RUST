@@ -9,12 +9,12 @@
 //!
 //! Uses ReadDirectoryChangesW on the entire drive instead of per folder.
 
+use parking_lot::Mutex;
 use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
-use parking_lot::Mutex;
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{HANDLE, INVALID_HANDLE_VALUE};
 use windows::Win32::Storage::FileSystem::{

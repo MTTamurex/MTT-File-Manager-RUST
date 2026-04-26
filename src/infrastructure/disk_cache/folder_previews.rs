@@ -9,10 +9,7 @@ impl ThumbnailDiskCache {
     /// The `created_at` (Unix seconds) allows callers to detect stale entries
     /// by comparing against the folder's last-write time.
     /// [READER]
-    pub fn get_folder_preview_cache(
-        &self,
-        folder_path: &Path,
-    ) -> Option<(Vec<u8>, u32, u32, i64)> {
+    pub fn get_folder_preview_cache(&self, folder_path: &Path) -> Option<(Vec<u8>, u32, u32, i64)> {
         let db = self.reader.lock().ok()?;
         let mut stmt = db
             .prepare_cached(
@@ -21,8 +18,8 @@ impl ThumbnailDiskCache {
             .ok()?;
 
         let folder_path_str = folder_path.to_string_lossy();
-        let (webp_data, _db_width, _db_height, created_at): (Vec<u8>, u32, u32, i64) =
-            match stmt.query_row([&*folder_path_str], |row| {
+        let (webp_data, _db_width, _db_height, created_at): (Vec<u8>, u32, u32, i64) = match stmt
+            .query_row([&*folder_path_str], |row| {
                 Ok((
                     row.get::<_, Vec<u8>>(0)?,
                     row.get::<_, i64>(1)? as u32,
@@ -30,9 +27,9 @@ impl ThumbnailDiskCache {
                     row.get::<_, i64>(3)?,
                 ))
             }) {
-                Ok(row) => row,
-                Err(_) => return None,
-            };
+            Ok(row) => row,
+            Err(_) => return None,
+        };
 
         // Validate WebP container header before passing to decoder.
         // This catches obvious corruption/tampering before the codec processes

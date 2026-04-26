@@ -9,13 +9,13 @@ use windows::Win32::Storage::FileSystem::{
 };
 use windows::Win32::System::Threading::WaitForSingleObject;
 
+use super::wait_for_shutdown_or_timeout;
 use crate::file_index;
 use crate::fs_walker;
-use crate::indexing_progress::IndexingProgress;
 use crate::index_db;
+use crate::indexing_progress::IndexingProgress;
 use crate::volume_indices::{self, SharedVolumeIndices, VolumeIndexHandle};
 use crate::FtsState;
-use super::wait_for_shutdown_or_timeout;
 
 const NON_USN_WAIT_STEP: std::time::Duration = std::time::Duration::from_millis(500);
 
@@ -98,21 +98,16 @@ pub(crate) fn index_non_ntfs_volume(
         scanned_index.state = file_index::IndexState::Scanning;
         indexing_progress.set_scanning(drive_letter, 0, "filesystem_scan");
 
-        match fs_walker::scan_volume(
-            drive_letter,
-            &mut scanned_index,
-            &shutdown,
-            |count| {
-                indexing_progress.update(
-                    drive_letter,
-                    "scanning",
-                    count,
-                    "filesystem_scan",
-                    Some(count),
-                    None,
-                )
-            },
-        ) {
+        match fs_walker::scan_volume(drive_letter, &mut scanned_index, &shutdown, |count| {
+            indexing_progress.update(
+                drive_letter,
+                "scanning",
+                count,
+                "filesystem_scan",
+                Some(count),
+                None,
+            )
+        }) {
             Ok(stats) => {
                 scanned_index.names.shrink_to_fit();
                 scanned_index.journal_id = 0;
@@ -158,14 +153,12 @@ pub(crate) fn index_non_ntfs_volume(
                     let db = db.clone();
                     let fts_state = fts_state.clone();
                     let gen = fts_state.generation();
-                    std::thread::spawn(move || {
-                        match db.rebuild_fts_full() {
-                            Ok(_) => fts_state.try_mark_ready(gen),
-                            Err(e) => eprintln!(
-                                "[SCAN] {}:\\ Background FTS rebuild failed: {}",
-                                drive_letter, e
-                            ),
-                        }
+                    std::thread::spawn(move || match db.rebuild_fts_full() {
+                        Ok(_) => fts_state.try_mark_ready(gen),
+                        Err(e) => eprintln!(
+                            "[SCAN] {}:\\ Background FTS rebuild failed: {}",
+                            drive_letter, e
+                        ),
                     });
                 }
 

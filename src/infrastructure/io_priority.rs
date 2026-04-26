@@ -40,11 +40,7 @@ pub fn is_virtual_drive_path(path: &Path) -> bool {
 /// remote server is unreachable or the virtual FS driver is stalled.
 pub fn is_network_or_virtual(path: &Path) -> bool {
     // UNC paths (\\server\share) are always network
-    if path
-        .to_str()
-        .map(|s| s.starts_with(r"\\"))
-        .unwrap_or(false)
-    {
+    if path.to_str().map(|s| s.starts_with(r"\\")).unwrap_or(false) {
         return true;
     }
     // Check virtual drive (Cryptomator, Dokan, WinFSP, etc.)
@@ -180,4 +176,3 @@ mod tests {
         assert!(IOPriority::Prefetch < IOPriority::Background);
     }
 }
-

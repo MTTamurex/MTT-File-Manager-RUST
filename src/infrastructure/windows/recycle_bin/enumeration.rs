@@ -154,7 +154,8 @@ pub(super) fn enumerate_recycle_bin() -> Result<Vec<RecycleBinItem>> {
         let recycle_bin_folder: IShellItem =
             SHGetKnownFolderItem(&FOLDERID_RecycleBinFolder, KF_FLAG_DEFAULT, None)?;
 
-        let enum_items: IEnumShellItems = recycle_bin_folder.BindToHandler(None, &BHID_EnumItems)?;
+        let enum_items: IEnumShellItems =
+            recycle_bin_folder.BindToHandler(None, &BHID_EnumItems)?;
 
         loop {
             let mut shell_items: [Option<IShellItem>; 1] = [None];

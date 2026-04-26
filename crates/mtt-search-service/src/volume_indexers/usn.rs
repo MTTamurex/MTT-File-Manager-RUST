@@ -3,8 +3,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use crate::file_index;
-use crate::indexing_progress::IndexingProgress;
 use crate::index_db;
+use crate::indexing_progress::IndexingProgress;
 use crate::usn_journal;
 use crate::volume_indices::{self, SharedVolumeIndices, VolumeIndexHandle};
 use crate::FtsState;
@@ -14,7 +14,8 @@ const INCREMENTAL_APPLY_RETRY_SLEEP: std::time::Duration = std::time::Duration::
 /// Bounded fallback timeout for the write lock after try_write retries are
 /// exhausted.  Prevents unbounded blocking that would starve concurrent
 /// readers (search queries) via parking_lot's write-preferring fairness.
-const INCREMENTAL_WRITE_FALLBACK_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(60);
+const INCREMENTAL_WRITE_FALLBACK_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_millis(60);
 const INCREMENTAL_CONTENTION_LOG_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
 
 struct PendingPersistSnapshot {
@@ -27,10 +28,7 @@ struct PendingPersistSnapshot {
     addition_rows: Vec<(u64, String, u64, bool, bool, Vec<u64>)>,
 }
 
-fn restore_pending_snapshot(
-    handle: &VolumeIndexHandle,
-    snapshot: PendingPersistSnapshot,
-) {
+fn restore_pending_snapshot(handle: &VolumeIndexHandle, snapshot: PendingPersistSnapshot) {
     let mut vol_index = handle.write();
     vol_index.pending_additions.extend(snapshot.additions);
     vol_index.pending_removals.extend(snapshot.removals);
@@ -205,7 +203,11 @@ pub(crate) fn index_volume(
                                 "[USN] {}:\\ {} hardlinked files with {} extra parent entries",
                                 drive_letter,
                                 index.hardlink_parents.len(),
-                                index.hardlink_parents.values().map(|v| v.len()).sum::<usize>()
+                                index
+                                    .hardlink_parents
+                                    .values()
+                                    .map(|v| v.len())
+                                    .sum::<usize>()
                             );
                         }
 
@@ -262,20 +264,16 @@ pub(crate) fn index_volume(
         eprintln!("[USN] {}:\\ Starting bulk MFT read...", drive_letter);
         let start = std::time::Instant::now();
 
-        match crate::mft_reader::read_mft_bulk(
-            volume_handle,
-            drive_letter,
-            |done, total| {
-                indexing_progress.update(
-                    drive_letter,
-                    "scanning",
-                    done,
-                    "scanning_mft",
-                    Some(done),
-                    Some(total),
-                )
-            },
-        ) {
+        match crate::mft_reader::read_mft_bulk(volume_handle, drive_letter, |done, total| {
+            indexing_progress.update(
+                drive_letter,
+                "scanning",
+                done,
+                "scanning_mft",
+                Some(done),
+                Some(total),
+            )
+        }) {
             Ok(mut new_index) => {
                 let elapsed = start.elapsed();
                 new_index.journal_id = journal_info.journal_id;
@@ -307,13 +305,21 @@ pub(crate) fn index_volume(
                         "[USN] {}:\\ {} hardlinked files with {} extra parent entries",
                         drive_letter,
                         new_index.hardlink_parents.len(),
-                        new_index.hardlink_parents.values().map(|v| v.len()).sum::<usize>()
+                        new_index
+                            .hardlink_parents
+                            .values()
+                            .map(|v| v.len())
+                            .sum::<usize>()
                     );
                 }
                 index = new_index;
             }
             Err(e) => {
-                indexing_progress.set_error(drive_letter, index.records.len() as u64, "scanning_mft");
+                indexing_progress.set_error(
+                    drive_letter,
+                    index.records.len() as u64,
+                    "scanning_mft",
+                );
                 eprintln!(
                     "[USN] {}:\\ Bulk MFT read failed: {}",
                     drive_letter,
@@ -393,10 +399,8 @@ pub(crate) fn index_volume(
             // Use the bulk MFT reader to extract ALL sizes in a single
             // sequential I/O pass — much faster and more complete than the
             // old per-file FSCTL_GET_NTFS_FILE_RECORD approach.
-            let bulk_result = crate::mft_reader::read_mft_bulk(
-                bg_volume,
-                drive_letter,
-                |done, total| {
+            let bulk_result =
+                crate::mft_reader::read_mft_bulk(bg_volume, drive_letter, |done, total| {
                     indexing_progress.update(
                         drive_letter,
                         "scanning",
@@ -405,8 +409,7 @@ pub(crate) fn index_volume(
                         Some(done),
                         Some(total),
                     );
-                },
-            );
+                });
 
             usn_journal::close_volume(bg_volume);
 
@@ -576,19 +579,22 @@ pub(crate) fn index_volume(
                 // Read sizes without holding any lock (I/O phase).
                 let geometry = crate::mft_reader::query_mft_geometry_pub(volume_handle);
                 if let Ok(record_size) = geometry {
-                    let mut size_updates: Vec<(u64, u64)> =
-                        Vec::with_capacity(pending_frns.len());
+                    let mut size_updates: Vec<(u64, u64)> = Vec::with_capacity(pending_frns.len());
                     for &frn in &pending_frns {
-                        if let Some(size) =
-                            crate::mft_reader::read_single_file_size(volume_handle, frn, record_size)
-                        {
+                        if let Some(size) = crate::mft_reader::read_single_file_size(
+                            volume_handle,
+                            frn,
+                            record_size,
+                        ) {
                             size_updates.push((frn, size));
                         }
                     }
 
                     // Apply sizes under lock.
                     if !size_updates.is_empty() {
-                        if let Some(mut vol) = handle.try_write_for(INCREMENTAL_WRITE_FALLBACK_TIMEOUT) {
+                        if let Some(mut vol) =
+                            handle.try_write_for(INCREMENTAL_WRITE_FALLBACK_TIMEOUT)
+                        {
                             for (frn, size) in &size_updates {
                                 if let Some(rec) = vol.records.get_mut(frn) {
                                     rec.size = *size;

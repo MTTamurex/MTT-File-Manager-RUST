@@ -342,10 +342,12 @@ fn extract_bounded_text(
         .get(page_idx as pdfium_render::prelude::PdfPageIndex)
         .map_err(|e| e.to_string())?;
     let text = page.text().map_err(|e| format!("LoadText: {e}"))?;
-    Ok(text.inside_rect(pdfium_render::prelude::PdfRect::new_from_values(
-        bounds.bottom,
-        bounds.left,
-        bounds.top,
-        bounds.right,
-    )))
+    Ok(
+        text.inside_rect(pdfium_render::prelude::PdfRect::new_from_values(
+            bounds.bottom,
+            bounds.left,
+            bounds.top,
+            bounds.right,
+        )),
+    )
 }

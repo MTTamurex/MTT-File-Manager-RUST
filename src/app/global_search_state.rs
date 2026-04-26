@@ -77,10 +77,16 @@ pub struct GlobalSearchState {
 
     // --- Cached sorted indices (includes filter + sort) ---
     pub cached_sorted_indices: Vec<usize>,
-    sort_cache_key: (u64, GlobalSearchCategory, Option<char>, GlobalSearchSortMode, bool, u64),
+    sort_cache_key: (
+        u64,
+        GlobalSearchCategory,
+        Option<char>,
+        GlobalSearchSortMode,
+        bool,
+        u64,
+    ),
     /// Incremented whenever new metadata is loaded for sorting; forces a re-sort next frame.
     sort_metadata_epoch: u64,
-
 }
 
 impl GlobalSearchState {
@@ -134,7 +140,14 @@ impl GlobalSearchState {
             cached_available_drives: Vec::new(),
             filter_cache_key: (u64::MAX, GlobalSearchCategory::All, None),
             cached_sorted_indices: Vec::new(),
-            sort_cache_key: (u64::MAX, GlobalSearchCategory::All, None, GlobalSearchSortMode::Relevance, false, 0),
+            sort_cache_key: (
+                u64::MAX,
+                GlobalSearchCategory::All,
+                None,
+                GlobalSearchSortMode::Relevance,
+                false,
+                0,
+            ),
             sort_metadata_epoch: 0,
         }
     }
@@ -178,7 +191,11 @@ impl GlobalSearchState {
                 // triggers a re-sort on the next frame until every item is resolved.
                 let missing: Vec<String> = sorted
                     .iter()
-                    .filter(|&&idx| self.metadata_cache.get(&self.results[idx].full_path).is_none())
+                    .filter(|&&idx| {
+                        self.metadata_cache
+                            .get(&self.results[idx].full_path)
+                            .is_none()
+                    })
                     .take(MAX_SORT_METADATA_PER_FRAME)
                     .map(|&idx| self.results[idx].full_path.clone())
                     .collect();

@@ -1,7 +1,10 @@
+use crate::app::init_workers::consistency_probe_worker::{
+    ConsistencyProbeMode, ConsistencyProbeRequest,
+};
 use crate::app::state::ImageViewerApp;
 use crate::domain::file_entry::FileEntry;
-use std::collections::HashSet;
 use std::collections::hash_map::DefaultHasher;
+use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -23,12 +26,16 @@ impl ImageViewerApp {
             .map(|fs| !(fs.eq_ignore_ascii_case("NTFS") || fs.eq_ignore_ascii_case("ReFS")))
             .unwrap_or(false);
 
-        let drive_letter =
-            crate::infrastructure::windows::extract_drive_letter(std::path::Path::new(
-                &self.navigation_state.current_path,
-            ));
+        let drive_letter = crate::infrastructure::windows::extract_drive_letter(
+            std::path::Path::new(&self.navigation_state.current_path),
+        );
         let known_bad = drive_letter
-            .map(|dl| self.rdcw_unreliable_drives.get(&dl).copied().unwrap_or(false))
+            .map(|dl| {
+                self.rdcw_unreliable_drives
+                    .get(&dl)
+                    .copied()
+                    .unwrap_or(false)
+            })
             .unwrap_or(false);
 
         if known_bad {
@@ -90,9 +97,7 @@ impl ImageViewerApp {
         if !self.watcher_fallback_polling {
             return;
         }
-        if self.navigation_state.is_computer_view
-            || self.navigation_state.is_recycle_bin_view
-        {
+        if self.navigation_state.is_computer_view || self.navigation_state.is_recycle_bin_view {
             return;
         }
         if self.is_loading_folder
@@ -147,14 +152,39 @@ impl ImageViewerApp {
 
         let is_onedrive = crate::infrastructure::onedrive::is_onedrive_path(&current_path);
         let _ = self.consistency_probe_tx.send(
-            crate::app::init_workers::consistency_probe_worker::ConsistencyProbeRequest {
+            ConsistencyProbeRequest {
                 path: current_path,
                 is_onedrive,
                 ui_signature,
                 show_hidden_files: self.show_hidden_files,
+                mode: ConsistencyProbeMode::ListingDrift,
                 folder_cover_states,
             },
         );
+    }
+
+    /// Verifies that the current folder still exists using the consistency
+    /// worker thread. This covers NTFS/ReFS cases where ReadDirectoryChangesW
+    /// does not report deletion of the directory handle being watched.
+    pub(crate) fn request_current_folder_liveness_probe(&mut self, reason: &str) {
+        if self.navigation_state.is_computer_view || self.navigation_state.is_recycle_bin_view {
+            return;
+        }
+
+        let current_path = PathBuf::from(&self.navigation_state.current_path);
+        let is_onedrive = crate::infrastructure::onedrive::is_onedrive_path(&current_path);
+        let request = ConsistencyProbeRequest {
+            path: current_path,
+            is_onedrive,
+            ui_signature: 0,
+            show_hidden_files: self.show_hidden_files,
+            mode: ConsistencyProbeMode::PathLiveness,
+            folder_cover_states: Vec::new(),
+        };
+
+        if self.consistency_probe_tx.send(request).is_ok() {
+            log::debug!("[FS-WATCH-LIVENESS] Queued current-folder probe: {reason}");
+        }
     }
 
     /// Processes results from the async consistency probe worker.
@@ -210,7 +240,12 @@ impl ImageViewerApp {
             let drive_letter =
                 crate::infrastructure::windows::extract_drive_letter(result.path.as_path());
             if let Some(dl) = drive_letter {
-                if !self.rdcw_unreliable_drives.get(&dl).copied().unwrap_or(false) {
+                if !self
+                    .rdcw_unreliable_drives
+                    .get(&dl)
+                    .copied()
+                    .unwrap_or(false)
+                {
                     log::warn!(
                         "[FS-WATCH-FALLBACK] RDCW verified UNRELIABLE for drive {}:\\ (fs={:?}). Escalating to active polling.",
                         dl,

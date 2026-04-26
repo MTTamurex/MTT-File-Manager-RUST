@@ -8,18 +8,18 @@
 //! - Failure tracking to avoid repeated attempts on broken files
 
 pub mod extraction;
-pub mod progress;
 pub mod processing;
+pub mod progress;
 pub mod queue;
 pub mod types;
 pub mod worker;
 
-pub use queue::PriorityThumbnailQueue;
 pub use progress::{
     begin_bulk_thumbnail_progress, clear_bulk_thumbnail_progress,
-    new_shared_bulk_thumbnail_progress, set_bulk_thumbnail_current_file,
-    BulkThumbnailProgress, SharedBulkThumbnailProgress,
+    new_shared_bulk_thumbnail_progress, set_bulk_thumbnail_current_file, BulkThumbnailProgress,
+    SharedBulkThumbnailProgress,
 };
+pub use queue::PriorityThumbnailQueue;
 pub use types::{ThumbnailPriority, ThumbnailRequest};
 pub use worker::spawn_thumbnail_workers;
 
@@ -40,9 +40,8 @@ static FAILED_PATHS_CACHE: std::sync::OnceLock<Mutex<LruCache<PathBuf, ()>>> =
     std::sync::OnceLock::new();
 
 fn get_failed_paths() -> &'static Mutex<LruCache<PathBuf, ()>> {
-    FAILED_PATHS_CACHE.get_or_init(|| {
-        Mutex::new(LruCache::new(NonZeroUsize::new(FAILED_PATHS_CAP).unwrap()))
-    })
+    FAILED_PATHS_CACHE
+        .get_or_init(|| Mutex::new(LruCache::new(NonZeroUsize::new(FAILED_PATHS_CAP).unwrap())))
 }
 
 #[derive(Clone, Copy)]
@@ -56,14 +55,18 @@ static FAILURE_BACKOFF_CACHE: std::sync::OnceLock<Mutex<LruCache<PathBuf, Failur
 
 fn get_failure_backoff() -> &'static Mutex<LruCache<PathBuf, FailureBackoffState>> {
     FAILURE_BACKOFF_CACHE.get_or_init(|| {
-        Mutex::new(LruCache::new(NonZeroUsize::new(FAILURE_BACKOFF_CAP).unwrap()))
+        Mutex::new(LruCache::new(
+            NonZeroUsize::new(FAILURE_BACKOFF_CAP).unwrap(),
+        ))
     })
 }
 
 fn compute_backoff(attempts: u8) -> Duration {
     // Exponential backoff capped to keep recovery responsive after transient spikes.
     let shift = attempts.saturating_sub(1).min(6) as u32;
-    let ms = 400_u64.saturating_mul(2_u64.saturating_pow(shift)).min(20_000);
+    let ms = 400_u64
+        .saturating_mul(2_u64.saturating_pow(shift))
+        .min(20_000);
     Duration::from_millis(ms)
 }
 
@@ -121,10 +124,13 @@ pub fn mark_as_transient_failure(path: PathBuf) {
 /// failure because the condition is expected to recover shortly.
 pub fn mark_as_temporarily_blocked(path: PathBuf) {
     let retry_after = Instant::now() + Duration::from_millis(ACTIVE_WRITE_BLOCK_MS);
-    get_failure_backoff().lock().put(path, FailureBackoffState {
-        attempts: 0,
-        retry_after,
-    });
+    get_failure_backoff().lock().put(
+        path,
+        FailureBackoffState {
+            attempts: 0,
+            retry_after,
+        },
+    );
 }
 
 /// Clear transient failure status after a successful load.

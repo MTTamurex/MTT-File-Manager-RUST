@@ -132,8 +132,9 @@ fn query_onedrive_folder_size_with_timeout(
                             totals.total_size.saturating_add(child_totals.total_size);
                         totals.file_count =
                             totals.file_count.saturating_add(child_totals.file_count);
-                        totals.folder_count =
-                            totals.folder_count.saturating_add(child_totals.folder_count);
+                        totals.folder_count = totals
+                            .folder_count
+                            .saturating_add(child_totals.folder_count);
                     } else {
                         totals.total_size = totals.total_size.saturating_add(size);
                         totals.file_count = totals.file_count.saturating_add(1);
@@ -144,10 +145,9 @@ fn query_onedrive_folder_size_with_timeout(
             crate::infrastructure::onedrive::IoTimeoutResult::Timeout => {
                 Err("onedrive directory enumeration timeout".to_string())
             }
-            crate::infrastructure::onedrive::IoTimeoutResult::Err(kind) => Err(format!(
-                "onedrive directory enumeration failed: {:?}",
-                kind
-            )),
+            crate::infrastructure::onedrive::IoTimeoutResult::Err(kind) => {
+                Err(format!("onedrive directory enumeration failed: {:?}", kind))
+            }
         }
     }
 
@@ -309,9 +309,8 @@ pub(in crate::app) fn spawn_folder_size_worker(
                     }
                     Err(e) => {
                         if e == "cancelled" {
-                            let _ = folder_size_res_tx.send(FolderSizeMessage::Cancelled {
-                                folder_path,
-                            });
+                            let _ = folder_size_res_tx
+                                .send(FolderSizeMessage::Cancelled { folder_path });
                             folder_size_ctx.request_repaint();
                             continue;
                         }
@@ -341,9 +340,8 @@ pub(in crate::app) fn spawn_folder_size_worker(
                                     continue;
                                 }
                                 Err(fallback_error) if fallback_error == "cancelled" => {
-                                    let _ = folder_size_res_tx.send(FolderSizeMessage::Cancelled {
-                                        folder_path,
-                                    });
+                                    let _ = folder_size_res_tx
+                                        .send(FolderSizeMessage::Cancelled { folder_path });
                                     folder_size_ctx.request_repaint();
                                     continue;
                                 }
@@ -364,9 +362,8 @@ pub(in crate::app) fn spawn_folder_size_worker(
                             folder_path.display(),
                             e,
                         );
-                        let _ = folder_size_res_tx.send(FolderSizeMessage::Cancelled {
-                            folder_path,
-                        });
+                        let _ =
+                            folder_size_res_tx.send(FolderSizeMessage::Cancelled { folder_path });
                         folder_size_ctx.request_repaint();
                         continue;
                     }

@@ -107,8 +107,7 @@ impl IconLoader {
             }
             let image =
                 egui::ColorImage::from_rgba_unmultiplied([width as usize, height as usize], &data);
-            let texture =
-                ctx.load_texture("recycle_bin_icon", image, egui::TextureOptions::LINEAR);
+            let texture = ctx.load_texture("recycle_bin_icon", image, egui::TextureOptions::LINEAR);
             self.recycle_bin_icon_texture = Some(texture.clone());
             return Some(texture);
         }

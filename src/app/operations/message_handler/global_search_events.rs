@@ -131,11 +131,12 @@ impl ImageViewerApp {
         }
 
         if self.global_search.active {
-            self.ui_ctx.request_repaint_after(if self.global_search.indexing_in_progress {
-                Duration::from_millis(200)
-            } else {
-                Duration::from_millis(500)
-            });
+            self.ui_ctx
+                .request_repaint_after(if self.global_search.indexing_in_progress {
+                    Duration::from_millis(200)
+                } else {
+                    Duration::from_millis(500)
+                });
             return;
         }
 

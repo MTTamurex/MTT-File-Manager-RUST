@@ -36,7 +36,9 @@ pub fn render_preview_panel(
     is_folder_size_loading: bool,
     live_file_size_cache: &mut lru::LruCache<std::path::PathBuf, (u64, u64)>,
     live_file_size_loading: &mut crate::ui::cache::FxHashSet<std::path::PathBuf>,
-    live_file_size_req_sender: &std::sync::mpsc::Sender<crate::app::live_file_size::LiveFileSizeRequest>,
+    live_file_size_req_sender: &std::sync::mpsc::Sender<
+        crate::app::live_file_size::LiveFileSizeRequest,
+    >,
     is_recycle_bin_view: bool,
     item_icon_loader: &mut IconLoader,
     svg_manager: &mut SvgIconManager,
@@ -71,15 +73,21 @@ pub fn render_preview_panel(
 
             ui.add_space(20.0);
             ui.label(
-                egui::RichText::new(rust_i18n::t!("preview.items_selected", count = multi_selection_count).to_string())
-                    .strong()
-                    .size(18.0),
+                egui::RichText::new(
+                    rust_i18n::t!("preview.items_selected", count = multi_selection_count)
+                        .to_string(),
+                )
+                .strong()
+                .size(18.0),
             );
             ui.add_space(6.0);
-            let total_size_text = crate::infrastructure::windows::format_size(multi_selection_total_size);
+            let total_size_text =
+                crate::infrastructure::windows::format_size(multi_selection_total_size);
             ui.label(
-                egui::RichText::new(rust_i18n::t!("preview.total_size", size = total_size_text).to_string())
-                    .size(14.0),
+                egui::RichText::new(
+                    rust_i18n::t!("preview.total_size", size = total_size_text).to_string(),
+                )
+                .size(14.0),
             );
             ui.add_space(10.0);
             ui.label(

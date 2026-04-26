@@ -160,7 +160,10 @@ mod tests {
         let outside = PathBuf::from(r"D:\elsewhere");
 
         for path in [&root, &child, &nested, &sibling, &outside] {
-            cache.put(path.clone(), vec![sample_entry(path.to_string_lossy().as_ref())]);
+            cache.put(
+                path.clone(),
+                vec![sample_entry(path.to_string_lossy().as_ref())],
+            );
         }
 
         cache.invalidate_children(&child);

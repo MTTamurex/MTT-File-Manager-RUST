@@ -99,8 +99,7 @@ pub fn render_context_menu(
     let screen_rect = ctx.screen_rect();
     let separator_count = if !primary_items.is_empty() { 1 } else { 0 }
         + if !overflow_items.is_empty() { 1 } else { 0 };
-    let expected_height = (HEADER_BUTTON_SIZE + 8.0)
-        * (!primary_items.is_empty() as u32 as f32)
+    let expected_height = (HEADER_BUTTON_SIZE + 8.0) * (!primary_items.is_empty() as u32 as f32)
         + (secondary_items.len() as f32 * (ITEM_HEIGHT + 1.0))
         + (overflow_items.len().min(1) as f32 * (ITEM_HEIGHT + 1.0))
         + (separator_count as f32 * 6.0)

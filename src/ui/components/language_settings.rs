@@ -4,10 +4,7 @@ use eframe::egui;
 use rust_i18n::t;
 
 /// Available languages with their locale codes and display names
-const LANGUAGES: &[(&str, &str)] = &[
-    ("pt-BR", "Português (Brasil)"),
-    ("en", "English"),
-];
+const LANGUAGES: &[(&str, &str)] = &[("pt-BR", "Português (Brasil)"), ("en", "English")];
 
 pub fn render_language_settings_section(ui: &mut egui::Ui) -> bool {
     let mut language_changed = false;

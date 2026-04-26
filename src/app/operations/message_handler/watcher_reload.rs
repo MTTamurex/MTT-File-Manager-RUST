@@ -55,8 +55,8 @@ impl ImageViewerApp {
                     // FIX: Removed blocking is_dir() check on the UI thread.
                     // GetFileAttributesW (used by is_dir) can block indefinitely on
                     // network/cloud/USB drives, causing the app to freeze.
-                    // If the folder was deleted, the DriveWatcher DELETE event
-                    // already fired handle_drive_deleted_event() which calls
+                    // If the folder was deleted, explicit notify events and the
+                    // consistency probe route the app through
                     // navigate_to_nearest_valid_ancestor(). load_folder() itself
                     // handles missing folders gracefully via the loading pipeline.
                     #[cfg(debug_assertions)]

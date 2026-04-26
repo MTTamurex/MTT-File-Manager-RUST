@@ -5,9 +5,7 @@ use std::time::Instant;
 
 use crate::infrastructure::drive_watcher::DriveWatcherEvent;
 
-use super::{
-    IndexedItem, IndexedVolume, FILE_ATTRIBUTE_REPARSE_POINT, MAX_ITEMS_PER_VOLUME,
-};
+use super::{IndexedItem, IndexedVolume, FILE_ATTRIBUTE_REPARSE_POINT, MAX_ITEMS_PER_VOLUME};
 
 pub(super) struct ScanOutcome {
     pub items: Vec<IndexedItem>,

@@ -27,9 +27,9 @@ pub fn build_sequence(open_path: &Path) -> io::Result<ImageSequence> {
     }
 
     if open_path.is_file() {
-        let parent = open_path
-            .parent()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "file has no parent directory"))?;
+        let parent = open_path.parent().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::NotFound, "file has no parent directory")
+        })?;
         let entries = collect_image_entries(parent)?;
 
         if entries.is_empty() {
@@ -89,14 +89,8 @@ fn collect_image_entries(dir: &Path) -> io::Result<Vec<PathBuf>> {
     }
 
     paths.sort_by(|a, b| {
-        let a_name = a
-            .file_name()
-            .and_then(|v| v.to_str())
-            .unwrap_or_default();
-        let b_name = b
-            .file_name()
-            .and_then(|v| v.to_str())
-            .unwrap_or_default();
+        let a_name = a.file_name().and_then(|v| v.to_str()).unwrap_or_default();
+        let b_name = b.file_name().and_then(|v| v.to_str()).unwrap_or_default();
         natord::compare_ignore_case(a_name, b_name)
     });
 
@@ -114,4 +108,3 @@ fn paths_eq_case_insensitive(a: &Path, b: &Path) -> bool {
     a.to_string_lossy()
         .eq_ignore_ascii_case(&b.to_string_lossy())
 }
-

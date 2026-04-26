@@ -54,9 +54,8 @@ pub fn start_event_loop(
 
                     if let Ok(mut pending) = pending_seek.write() {
                         if let Some(pending_seek_state) = pending.as_ref() {
-                            let seek_has_settled =
-                                (pos - pending_seek_state.target_time).abs()
-                                    <= SEEK_SETTLE_TOLERANCE_SECS;
+                            let seek_has_settled = (pos - pending_seek_state.target_time).abs()
+                                <= SEEK_SETTLE_TOLERANCE_SECS;
                             let seek_wait_expired =
                                 pending_seek_state.requested_at.elapsed() >= SEEK_PENDING_TIMEOUT;
 

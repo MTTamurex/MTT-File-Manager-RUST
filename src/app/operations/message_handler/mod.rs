@@ -57,8 +57,13 @@ impl ImageViewerApp {
         self.process_items_rebuild_results(ctx);
 
         // OneDrive pin completion: background attrib finished, reload for fresh sync status
-        if self.onedrive_pin_reload_pending.swap(false, std::sync::atomic::Ordering::Acquire) {
-            self.directory_cache.invalidate(&std::path::PathBuf::from(&self.navigation_state.current_path));
+        if self
+            .onedrive_pin_reload_pending
+            .swap(false, std::sync::atomic::Ordering::Acquire)
+        {
+            self.directory_cache.invalidate(&std::path::PathBuf::from(
+                &self.navigation_state.current_path,
+            ));
             self.loaded_path.clear();
             self.load_folder(false);
         }
@@ -106,10 +111,7 @@ impl ImageViewerApp {
         use crate::app::init_workers::CacheInvalidationEntry;
         let entries: Vec<CacheInvalidationEntry> = paths
             .into_iter()
-            .map(|path| CacheInvalidationEntry {
-                path,
-                force: false,
-            })
+            .map(|path| CacheInvalidationEntry { path, force: false })
             .collect();
 
         if let Err(_err) = self
@@ -135,10 +137,7 @@ impl ImageViewerApp {
         use crate::app::init_workers::CacheInvalidationEntry;
         let entries: Vec<CacheInvalidationEntry> = paths
             .into_iter()
-            .map(|path| CacheInvalidationEntry {
-                path,
-                force: true,
-            })
+            .map(|path| CacheInvalidationEntry { path, force: true })
             .collect();
 
         if let Err(_err) = self

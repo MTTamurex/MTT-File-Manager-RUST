@@ -40,10 +40,7 @@ impl AppStateDb {
         accessible
     }
 
-    fn is_on_accessible_drive(
-        path: &str,
-        accessible: &std::collections::HashSet<String>,
-    ) -> bool {
+    fn is_on_accessible_drive(path: &str, accessible: &std::collections::HashSet<String>) -> bool {
         match Self::extract_drive_root(path) {
             Some(root) => accessible.contains(&root),
             None => true,

@@ -30,11 +30,15 @@ pub struct FolderPreviewData {
 /// M-19: RAII guard — ensures `CoUninitialize` runs even if the worker panics.
 /// Tracks whether `CoInitializeEx` succeeded to avoid calling `CoUninitialize`
 /// on a failed init (which is UB per COM contract).
-struct ComGuard { initialized: bool }
+struct ComGuard {
+    initialized: bool,
+}
 impl Drop for ComGuard {
     fn drop(&mut self) {
         if self.initialized {
-            unsafe { CoUninitialize(); }
+            unsafe {
+                CoUninitialize();
+            }
         }
     }
 }
@@ -58,7 +62,9 @@ pub fn spawn_folder_preview_worker(
         // M-19: RAII guard — CoUninitialize guaranteed on normal exit AND panic
         let _com = unsafe {
             let hr = CoInitializeEx(None, COINIT_MULTITHREADED);
-            ComGuard { initialized: hr.is_ok() }
+            ComGuard {
+                initialized: hr.is_ok(),
+            }
         };
 
         // Empty DashMap — content thumbnail extraction doesn't need deletion tracking
@@ -161,7 +167,8 @@ pub fn spawn_folder_preview_worker(
             // download/torrent), we show compose_empty() as a placeholder but do
             // NOT persist it to SQLite. This ensures the next request retries
             // extraction instead of serving a stale empty preview from the DB.
-            let compose_result = try_custom_compose(&path, &composer, io_priority, &empty_deletions);
+            let compose_result =
+                try_custom_compose(&path, &composer, io_priority, &empty_deletions);
             let (rgba_data, width, height, should_cache) = match compose_result {
                 ComposeOutcome::Success(data) => (data.0, data.1, data.2, true),
                 ComposeOutcome::NoMedia => {

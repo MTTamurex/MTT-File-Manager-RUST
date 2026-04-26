@@ -43,9 +43,10 @@ impl ImageViewerApp {
                             parent_folder,
                             current_path_norm,
                         ),
-                        FileOperationResult::DriveRenameCompleted { drive_path, new_label } => {
-                            self.handle_drive_rename_completed(drive_path, new_label)
-                        }
+                        FileOperationResult::DriveRenameCompleted {
+                            drive_path,
+                            new_label,
+                        } => self.handle_drive_rename_completed(drive_path, new_label),
                         FileOperationResult::DriveRenameFailed {
                             drive_path,
                             error,
@@ -69,7 +70,10 @@ impl ImageViewerApp {
                             );
                             self.cleanup_deleted_pinned_folders();
                         }
-                        FileOperationResult::CopyCompleted { dest_folder, copied_dests } => {
+                        FileOperationResult::CopyCompleted {
+                            dest_folder,
+                            copied_dests,
+                        } => {
                             self.handle_copy_completed(dest_folder, copied_dests, current_path_norm)
                         }
                         FileOperationResult::MoveCompleted {
@@ -77,7 +81,12 @@ impl ImageViewerApp {
                             dest_folder,
                             moved_dest,
                         } => {
-                            self.handle_move_completed(source_folder, dest_folder, moved_dest, current_path_norm);
+                            self.handle_move_completed(
+                                source_folder,
+                                dest_folder,
+                                moved_dest,
+                                current_path_norm,
+                            );
                             self.cleanup_deleted_pinned_folders();
                         }
                         FileOperationResult::MoveBatchCompleted {
@@ -131,9 +140,9 @@ impl ImageViewerApp {
         };
         let inactive_norm = Self::normalize_for_match(Path::new(&inactive_path));
 
-        let matches = folders.iter().any(|f| {
-            Self::normalize_for_match(f.as_path()) == inactive_norm
-        });
+        let matches = folders
+            .iter()
+            .any(|f| Self::normalize_for_match(f.as_path()) == inactive_norm);
         if !matches {
             return;
         }
@@ -283,10 +292,8 @@ impl ImageViewerApp {
 
     fn handle_drive_rename_completed(&mut self, drive_path: PathBuf, new_label: String) {
         let drive_path_str = drive_path.to_string_lossy().to_string();
-        let display_name = crate::infrastructure::windows::format_drive_display_name(
-            &drive_path_str,
-            &new_label,
-        );
+        let display_name =
+            crate::infrastructure::windows::format_drive_display_name(&drive_path_str, &new_label);
         if let Some((_, label)) = self
             .drive_state
             .disks
@@ -334,7 +341,12 @@ impl ImageViewerApp {
         self.restore_app_focus();
     }
 
-    fn handle_copy_completed(&mut self, dest_folder: PathBuf, copied_dests: Vec<PathBuf>, current_path_norm: &str) {
+    fn handle_copy_completed(
+        &mut self,
+        dest_folder: PathBuf,
+        copied_dests: Vec<PathBuf>,
+        current_path_norm: &str,
+    ) {
         let dest_str = Self::normalize_for_match(dest_folder.as_path());
         self.invalidate_folder_and_tab_caches(&dest_folder);
 
@@ -346,7 +358,9 @@ impl ImageViewerApp {
         // stability guard does not delay thumbnail generation for 12 seconds.
         // These files were fully written by Windows Shell — they are safe to read.
         if !copied_dests.is_empty() {
-            crate::infrastructure::windows::file_flags::clear_write_activity_for_paths(&copied_dests);
+            crate::infrastructure::windows::file_flags::clear_write_activity_for_paths(
+                &copied_dests,
+            );
         }
 
         if dest_str == current_path_norm {
@@ -429,7 +443,9 @@ impl ImageViewerApp {
             .filter_map(|p| p.file_name().map(|n| dest_folder.join(n)))
             .collect();
         if !moved_dests.is_empty() {
-            crate::infrastructure::windows::file_flags::clear_write_activity_for_paths(&moved_dests);
+            crate::infrastructure::windows::file_flags::clear_write_activity_for_paths(
+                &moved_dests,
+            );
         }
 
         for source_folder in &source_folders {
@@ -502,14 +518,10 @@ impl ImageViewerApp {
             }
             // Watcher events were drained but not processed while ops were active.
             // Force a full reload so the view reflects the final state of the folder.
-            if !self.navigation_state.is_computer_view
-                && !self.navigation_state.is_recycle_bin_view
+            if !self.navigation_state.is_computer_view && !self.navigation_state.is_recycle_bin_view
             {
                 let current = PathBuf::from(&self.navigation_state.current_path);
-                log::info!(
-                    "[FILE-OP] Invalidating cache for current={:?}",
-                    current
-                );
+                log::info!("[FILE-OP] Invalidating cache for current={:?}", current);
                 self.directory_dirty_registry.mark_dirty(&current);
                 self.directory_cache.invalidate(&current);
                 if let Some(ref di) = self.directory_index {
@@ -525,10 +537,7 @@ impl ImageViewerApp {
                 // and serves stale data.  Invalidating both layers forces a full
                 // disk re-read when navigating back to A.
                 if let Some(parent) = current.parent() {
-                    log::info!(
-                        "[FILE-OP] Invalidating cache for parent={:?}",
-                        parent
-                    );
+                    log::info!("[FILE-OP] Invalidating cache for parent={:?}", parent);
                     let parent_buf = parent.to_path_buf();
                     self.directory_dirty_registry.mark_dirty(&parent_buf);
                     self.directory_cache.invalidate(&parent_buf);
@@ -561,8 +570,7 @@ impl ImageViewerApp {
                 // forced reload. Archive extraction creates many files, causing the
                 // watcher to fire events for seconds afterward. Without this
                 // cooldown the status bar item count keeps flickering.
-                self.watcher_cooldown_until =
-                    Some(Instant::now() + Duration::from_secs(2));
+                self.watcher_cooldown_until = Some(Instant::now() + Duration::from_secs(2));
             }
         }
     }

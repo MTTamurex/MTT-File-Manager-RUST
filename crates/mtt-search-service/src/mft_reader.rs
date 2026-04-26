@@ -160,7 +160,10 @@ fn read_frn_le(buffer: &[u8], offset: usize) -> Option<u64> {
 }
 
 fn read_attr_header(buffer: &[u8], offset: usize) -> Option<(u32, usize)> {
-    Some((read_u32_le(buffer, offset)?, read_u32_le(buffer, offset + 4)? as usize))
+    Some((
+        read_u32_le(buffer, offset)?,
+        read_u32_le(buffer, offset + 4)? as usize,
+    ))
 }
 
 fn resident_attr_value_bounds(
@@ -475,8 +478,7 @@ fn fetch_mft_record(
         );
         return Err(format!(
             "FSCTL_GET_NTFS_FILE_RECORD failed for FRN {} (Win32 error {})",
-            frn,
-            err.0
+            frn, err.0
         ));
     }
 
@@ -557,9 +559,7 @@ fn resolve_file_size(
                                 if alen == 0 || off + alen > ext_len {
                                     break;
                                 }
-                                if let Some(size) =
-                                    extract_data_size_at(ext_data, off, ext_len)
-                                {
+                                if let Some(size) = extract_data_size_at(ext_data, off, ext_len) {
                                     return SizeResolution::ViaAttrList(size);
                                 }
                                 off += alen;
@@ -715,14 +715,7 @@ pub fn read_single_file_size(volume: HANDLE, frn: u64, record_size: u32) -> Opti
     let rs = record_size as usize;
     let mut output_buffer = vec![0u8; OUTPUT_HEADER + rs];
     let mut dir_cache = HashMap::new();
-    resolve_file_size_with_fallbacks(
-        volume,
-        None,
-        frn,
-        rs,
-        &mut output_buffer,
-        &mut dir_cache,
-    )
+    resolve_file_size_with_fallbacks(volume, None, frn, rs, &mut output_buffer, &mut dir_cache)
 }
 
 /// Repair known zero-size file entries already present in the in-memory index.
@@ -1068,8 +1061,7 @@ fn parse_mft_record_bulk(
                 // Resident — file attributes at content_start + 0x20.
                 let non_resident = record[offset + 8];
                 if non_resident == 0 {
-                    if let Some((cs, _)) = resident_attr_value_bounds(record, offset, record_size)
-                    {
+                    if let Some((cs, _)) = resident_attr_value_bounds(record, offset, record_size) {
                         if cs + 0x24 <= record_size {
                             let Some(file_attrs) = read_u32_le(record, cs + 0x20) else {
                                 offset += attr_len;
@@ -1089,8 +1081,7 @@ fn parse_mft_record_bulk(
                 // value are the reparse tag (IO_REPARSE_TAG_*).
                 let non_resident = record[offset + 8];
                 if non_resident == 0 {
-                    if let Some((cs, _)) = resident_attr_value_bounds(record, offset, record_size)
-                    {
+                    if let Some((cs, _)) = resident_attr_value_bounds(record, offset, record_size) {
                         if cs + 4 <= record_size {
                             let Some(tag) = read_u32_le(record, cs) else {
                                 offset += attr_len;
@@ -1253,8 +1244,14 @@ where
     // file pointer on the handle used for IOCTL-based incremental updates).
     let read_handle = crate::usn_journal::open_volume(drive_letter)?;
 
-    let result =
-        read_mft_data(read_handle, drive_letter, &geo, &data_runs, total_records, &mut on_progress);
+    let result = read_mft_data(
+        read_handle,
+        drive_letter,
+        &geo,
+        &data_runs,
+        total_records,
+        &mut on_progress,
+    );
 
     crate::usn_journal::close_volume(read_handle);
 
@@ -1299,9 +1296,8 @@ where
         let run_bytes = cluster_count * cluster_size as u64;
 
         // Seek to the start of this data run.
-        let seek_result = unsafe {
-            SetFilePointerEx(handle, run_byte_offset as i64, None, FILE_BEGIN)
-        };
+        let seek_result =
+            unsafe { SetFilePointerEx(handle, run_byte_offset as i64, None, FILE_BEGIN) };
         if seek_result.is_err() {
             eprintln!(
                 "[MFT-BULK] {}:\\ Seek to LCN {} (offset {}) failed, skipping run",

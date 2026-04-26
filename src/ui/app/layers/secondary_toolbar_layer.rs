@@ -75,8 +75,8 @@ pub(crate) fn render_secondary_toolbar_layer(app: &mut ImageViewerApp, ctx: &egu
                 };
                 let show_media_play_button = app.should_show_secondary_toolbar_media_play_button();
                 let separator_count = if show_media_play_button { 5.0 } else { 4.0 };
-                let total_item_count = action_button_count
-                    + if show_media_play_button { 13.0 } else { 11.0 };
+                let total_item_count =
+                    action_button_count + if show_media_play_button { 13.0 } else { 11.0 };
                 let gap_count = total_item_count - 1.0;
                 // Includes action buttons, sort controls, folder-position toggle,
                 // lock, view buttons, the global-search button, and an optional
@@ -93,8 +93,8 @@ pub(crate) fn render_secondary_toolbar_layer(app: &mut ImageViewerApp, ctx: &egu
                     + gap_count * 12.0;
                 let reserved_left_width = toggle_button_width + toggle_gap;
                 let total_available = ui.available_width() + reserved_left_width;
-                let left_pad = ((total_available - content_width) / 2.0 - reserved_left_width)
-                    .max(0.0);
+                let left_pad =
+                    ((total_available - content_width) / 2.0 - reserved_left_width).max(0.0);
                 ui.add_space(left_pad);
 
                 ui.spacing_mut().item_spacing = egui::vec2(12.0, 0.0);
@@ -140,8 +140,14 @@ fn render_lock_button(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
         rust_i18n::t!("secondary_toolbar.lock_folder")
     };
 
-    if widgets::toggle_icon_button(ui, &mut app.svg_icon_manager, icon_name, is_locked, &tooltip)
-        .clicked()
+    if widgets::toggle_icon_button(
+        ui,
+        &mut app.svg_icon_manager,
+        icon_name,
+        is_locked,
+        &tooltip,
+    )
+    .clicked()
     {
         app.toggle_folder_lock();
         if app.current_folder_locked {

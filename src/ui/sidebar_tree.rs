@@ -77,17 +77,15 @@ fn render_tree_node(
     let is_expanded = ctx.tree_state.is_expanded(&node.path);
     let is_loading = ctx.tree_state.is_loading(&node.path);
     let has_children = node.has_subfolders.unwrap_or(true); // optimistic: show arrow until proven empty
-    let is_selected = ctx.current_path.eq_ignore_ascii_case(
-        &node.path.to_string_lossy(),
-    );
+    let is_selected = ctx
+        .current_path
+        .eq_ignore_ascii_case(&node.path.to_string_lossy());
 
     // Allocate row — use max of available width and content width so deep nodes
     // push the ScrollArea's content wider, enabling horizontal scroll.
     // Approximate text width with per-char estimate (avoids font shaping every frame).
     let approx_text_width = node.name.len() as f32 * 7.0;
-    let content_min_width = indent + ARROW_WIDTH + ICON_SIZE + 4.0
-        + approx_text_width
-        + 8.0; // right padding
+    let content_min_width = indent + ARROW_WIDTH + ICON_SIZE + 4.0 + approx_text_width + 8.0; // right padding
     let row_width = ui.available_width().max(content_min_width);
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(row_width, ROW_HEIGHT), Sense::click());
@@ -100,7 +98,8 @@ fn render_tree_node(
         // We check hover_pos manually because egui's response.hovered() won't fire
         // when the drag originated from a different widget.
         let drag_hover = ctx.is_item_dragging
-            && ui.input(|inp| inp.pointer.hover_pos())
+            && ui
+                .input(|inp| inp.pointer.hover_pos())
                 .map(|p| rect.contains(p))
                 .unwrap_or(false);
 
@@ -117,8 +116,11 @@ fn render_tree_node(
             ui.painter()
                 .rect_filled(rect, 0.0, crate::ui::theme::selection_color(dark_mode));
         } else if response.hovered() && !ctx.is_item_dragging {
-            ui.painter()
-                .rect_filled(rect, 0.0, crate::ui::theme::selection_hover_color(dark_mode));
+            ui.painter().rect_filled(
+                rect,
+                0.0,
+                crate::ui::theme::selection_hover_color(dark_mode),
+            );
         }
 
         let mut cursor_x = rect.min.x + indent;
@@ -142,7 +144,8 @@ fn render_tree_node(
                 ui.visuals().text_color()
             } else {
                 Color32::from_gray(140)
-            }.gamma_multiply(hidden_opacity);
+            }
+            .gamma_multiply(hidden_opacity);
 
             ui.painter().text(
                 arrow_rect.center(),
@@ -155,10 +158,9 @@ fn render_tree_node(
         cursor_x += ARROW_WIDTH;
 
         // ── Folder Icon ──
-        let folder_icon = ctx.icon_loader.get_or_load_folder_path_icon(
-            ui.ctx(),
-            &node.path.to_string_lossy(),
-        );
+        let folder_icon = ctx
+            .icon_loader
+            .get_or_load_folder_path_icon(ui.ctx(), &node.path.to_string_lossy());
         if let Some(icon) = folder_icon {
             let icon_rect = Rect::from_center_size(
                 Pos2::new(cursor_x + ICON_SIZE / 2.0, rect.center().y),
@@ -180,7 +182,8 @@ fn render_tree_node(
             crate::ui::theme::selection_text_color(dark_mode)
         } else {
             ui.visuals().text_color()
-        }.gamma_multiply(hidden_opacity);
+        }
+        .gamma_multiply(hidden_opacity);
 
         ui.painter().text(
             Pos2::new(cursor_x, rect.center().y),
@@ -225,7 +228,8 @@ fn render_tree_node(
 
     // ── Handle drop from external item drag ──
     if ctx.is_item_dragging && action.is_none() {
-        let pointer_over = ui.input(|inp| inp.pointer.hover_pos())
+        let pointer_over = ui
+            .input(|inp| inp.pointer.hover_pos())
             .map(|p| rect.contains(p))
             .unwrap_or(false);
         let released = ui.input(|inp| inp.pointer.primary_released());
@@ -263,7 +267,8 @@ fn render_tree_node(
 /// Render a "loading..." placeholder row at the given depth.
 fn render_loading_row(ui: &mut egui::Ui, depth: usize) {
     let indent = BASE_INDENT + (depth as f32) * INDENT_PX + ARROW_WIDTH;
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), ROW_HEIGHT), Sense::hover());
+    let (rect, _) =
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), ROW_HEIGHT), Sense::hover());
 
     if ui.is_rect_visible(rect) {
         ui.painter().text(
@@ -275,4 +280,3 @@ fn render_loading_row(ui: &mut egui::Ui, depth: usize) {
         );
     }
 }
-

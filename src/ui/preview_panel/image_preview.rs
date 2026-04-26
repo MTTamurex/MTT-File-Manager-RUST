@@ -122,12 +122,12 @@ pub fn render_gif_preview(
 
         if preview_launch_allowed
             && ui
-            .interact(
-                media_rect,
-                egui::Id::new("gif_thumb_overlay"),
-                egui::Sense::click(),
-            )
-            .clicked()
+                .interact(
+                    media_rect,
+                    egui::Id::new("gif_thumb_overlay"),
+                    egui::Sense::click(),
+                )
+                .clicked()
         {
             crate::image_viewer::open_image_viewer(file.path.clone());
         }

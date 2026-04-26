@@ -124,7 +124,8 @@ fn path_matches_prefix(path: &Path, prefix: &Path) -> bool {
     // Match children: path starts with "prefix\"
     if path_bytes.len() > prefix_len_no_trail
         && path_bytes.get(prefix_len_no_trail) == Some(&b'\\')
-        && path_bytes[..prefix_len_no_trail].eq_ignore_ascii_case(&prefix_bytes[..prefix_len_no_trail])
+        && path_bytes[..prefix_len_no_trail]
+            .eq_ignore_ascii_case(&prefix_bytes[..prefix_len_no_trail])
     {
         return true;
     }

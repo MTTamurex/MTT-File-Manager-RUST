@@ -131,14 +131,7 @@ pub fn hicon_to_rgba(
         }
 
         let mut dib_bits: *mut c_void = std::ptr::null_mut();
-        let dib = CreateDIBSection(
-            Some(screen_dc),
-            &bi,
-            DIB_RGB_COLORS,
-            &mut dib_bits,
-            None,
-            0,
-        )?;
+        let dib = CreateDIBSection(Some(screen_dc), &bi, DIB_RGB_COLORS, &mut dib_bits, None, 0)?;
 
         if dib.is_invalid() || dib_bits.is_null() {
             let _ = DeleteDC(mem_dc);

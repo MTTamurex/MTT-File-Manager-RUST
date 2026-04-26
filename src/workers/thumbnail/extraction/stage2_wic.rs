@@ -32,9 +32,8 @@ fn get_or_create_factory() -> Option<IWICImagingFactory> {
         if let Some(factory) = slot.as_ref() {
             return Some(factory.clone());
         }
-        let factory: IWICImagingFactory = unsafe {
-            CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER).ok()?
-        };
+        let factory: IWICImagingFactory =
+            unsafe { CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER).ok()? };
         *slot = Some(factory.clone());
         Some(factory)
     })
@@ -169,13 +168,21 @@ pub fn extract_to_size_with_original_size(
 
         let mut final_width = 0u32;
         let mut final_height = 0u32;
-        converter.GetSize(&mut final_width, &mut final_height).ok()?;
+        converter
+            .GetSize(&mut final_width, &mut final_height)
+            .ok()?;
 
         let mut buffer = vec![0u8; (final_width * final_height * 4) as usize];
         converter
             .CopyPixels(std::ptr::null(), final_width * 4, &mut buffer)
             .ok()?;
 
-        Some((buffer, final_width, final_height, native_width, native_height))
+        Some((
+            buffer,
+            final_width,
+            final_height,
+            native_width,
+            native_height,
+        ))
     }
 }

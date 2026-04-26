@@ -1,8 +1,8 @@
 //! Formatting helpers for Windows
 //! Follows .cursorrules: single responsibility, < 300 lines
+use rust_i18n::t;
 use windows::Win32::Foundation::{FILETIME, SYSTEMTIME};
 use windows::Win32::System::Time::{FileTimeToSystemTime, SystemTimeToTzSpecificLocalTime};
-use rust_i18n::t;
 
 /// Formats bytes into human-readable size (KB, MB, GB).
 pub fn format_size(bytes: u64) -> String {

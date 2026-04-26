@@ -252,9 +252,7 @@ pub fn detect_virtual_drive(drive_letter: char) -> Option<DetectedVirtualDrive> 
     };
 
     let provider_name = mapped_provider_name(normalized_letter);
-    let provider_is_virtual = provider_name
-        .as_deref()
-        .is_some_and(has_virtual_markers);
+    let provider_is_virtual = provider_name.as_deref().is_some_and(has_virtual_markers);
 
     if ok.is_err() {
         if !provider_is_virtual {
@@ -263,7 +261,9 @@ pub fn detect_virtual_drive(drive_letter: char) -> Option<DetectedVirtualDrive> 
 
         return Some(DetectedVirtualDrive {
             letter: normalized_letter,
-            label: provider_name.clone().unwrap_or_else(|| format!("{}:\\", normalized_letter)),
+            label: provider_name
+                .clone()
+                .unwrap_or_else(|| format!("{}:\\", normalized_letter)),
             file_system: provider_name.unwrap_or_else(|| "Virtual".to_string()),
         });
     }
@@ -279,9 +279,8 @@ pub fn detect_virtual_drive(drive_letter: char) -> Option<DetectedVirtualDrive> 
 
     let volume = String::from_utf16_lossy(&volume_name[..volume_len]);
     let file_system = String::from_utf16_lossy(&file_system_name[..fs_len]);
-    let is_virtual = has_virtual_markers(&volume)
-        || has_virtual_markers(&file_system)
-        || provider_is_virtual;
+    let is_virtual =
+        has_virtual_markers(&volume) || has_virtual_markers(&file_system) || provider_is_virtual;
 
     if !is_virtual {
         return None;
@@ -372,10 +371,7 @@ pub fn ensure_config_exists() -> Result<(), String> {
         *cfg = config;
     }
 
-    log::info!(
-        "[Config] Created virtual drive configuration at {:?}",
-        path
-    );
+    log::info!("[Config] Created virtual drive configuration at {:?}", path);
     Ok(())
 }
 

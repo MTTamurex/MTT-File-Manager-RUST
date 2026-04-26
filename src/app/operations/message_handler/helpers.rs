@@ -24,12 +24,9 @@ impl ImageViewerApp {
                 .items
                 .iter()
                 .any(|item| item.is_dir && Self::path_matches_normalized(&item.path, &path_norm))
-            || self
-                .selected_file
-                .as_ref()
-                .is_some_and(|item| {
-                    item.is_dir && Self::path_matches_normalized(&item.path, &path_norm)
-                })
+            || self.selected_file.as_ref().is_some_and(|item| {
+                item.is_dir && Self::path_matches_normalized(&item.path, &path_norm)
+            })
     }
 
     pub(super) fn register_changed_folder_for_path(
@@ -74,7 +71,10 @@ impl ImageViewerApp {
         // Track that one stale in-flight result may still be in the
         // worker-to-UI channel.  The upload pipeline will decrement
         // this counter and discard the matching result.
-        *self.thumbnail_eviction_skips.entry(cleaned.clone()).or_insert(0) += 1;
+        *self
+            .thumbnail_eviction_skips
+            .entry(cleaned.clone())
+            .or_insert(0) += 1;
 
         if self.last_metadata_path.as_ref() == Some(&cleaned) {
             self.last_metadata_path = None;
@@ -278,7 +278,9 @@ impl ImageViewerApp {
         self.file_operation_state
             .pending_deletions
             .insert(cleaned_old.clone(), ());
-        self.file_operation_state.pending_deletions.remove(&cleaned_new);
+        self.file_operation_state
+            .pending_deletions
+            .remove(&cleaned_new);
 
         // NOTE: evict_stale_path_caches / enqueue_disk_cache_invalidations_forced
         // are called inside the sub-methods below.  Calling them here too would
@@ -483,10 +485,7 @@ impl ImageViewerApp {
         let mut scheduled_any = false;
         for folder_path in &folders_with_changed_contents {
             if crate::infrastructure::onedrive::is_onedrive_path(folder_path) {
-                log::debug!(
-                    "[MTIME-SCHED] Skipping OneDrive folder: {:?}",
-                    folder_path
-                );
+                log::debug!("[MTIME-SCHED] Skipping OneDrive folder: {:?}", folder_path);
                 continue;
             }
             if crate::infrastructure::io_priority::is_network_or_virtual(folder_path) {
@@ -692,8 +691,7 @@ impl ImageViewerApp {
             self.last_folder_mtime_sort = now;
             log::info!("[MTIME-CHECK] Re-sorted items after folder mtime update");
 
-            let current_path_buf =
-                PathBuf::from(&self.navigation_state.current_path);
+            let current_path_buf = PathBuf::from(&self.navigation_state.current_path);
             self.directory_cache.invalidate(&current_path_buf);
         }
 

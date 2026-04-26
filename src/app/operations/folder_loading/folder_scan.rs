@@ -96,11 +96,10 @@ impl ImageViewerApp {
         } else {
             FOLDER_SCAN_RESOLVE_BUDGET_BASE_MS
         };
-        let resolve_budget_ms =
-            (base_resolve_budget_ms as i64 + tab_budget_adjust_ms).clamp(
-                FOLDER_SCAN_RESOLVE_BUDGET_CRITICAL_MS as i64,
-                FOLDER_SCAN_RESOLVE_BUDGET_HARD_MAX_MS as i64,
-            ) as u64;
+        let resolve_budget_ms = (base_resolve_budget_ms as i64 + tab_budget_adjust_ms).clamp(
+            FOLDER_SCAN_RESOLVE_BUDGET_CRITICAL_MS as i64,
+            FOLDER_SCAN_RESOLVE_BUDGET_HARD_MAX_MS as i64,
+        ) as u64;
         let resolve_budget = Duration::from_millis(resolve_budget_ms);
 
         let mut overflow_paths = if unique_paths.len() > sync_cap {
@@ -156,7 +155,8 @@ impl ImageViewerApp {
                 let fallback_before = worker_fallbacks.len();
                 worker_fallbacks.push(folder_path);
                 worker_fallbacks.extend(unique_paths_iter);
-                worker_fallback_due_to_budget = worker_fallbacks.len().saturating_sub(fallback_before);
+                worker_fallback_due_to_budget =
+                    worker_fallbacks.len().saturating_sub(fallback_before);
                 break;
             }
 
@@ -360,8 +360,7 @@ fn is_invalid_cached_cover_path(path: &Path) -> bool {
     // Stale covers are harmless: the thumbnail worker will fail to load the
     // missing file and the entry is cleaned up lazily.
 
-    path
-        .extension()
+    path.extension()
         .and_then(|e| e.to_str())
         .is_some_and(|ext| ext.eq_ignore_ascii_case("ts"))
 }

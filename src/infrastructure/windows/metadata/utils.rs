@@ -234,7 +234,8 @@ pub unsafe fn read_string(store: &IPropertyStore, key: &PROPERTYKEY) -> Option<S
             if other != 0 {
                 log::debug!(
                     "[DEBUG] read_string: unexpected VT type {} for PKEY {{pid={}}}",
-                    other, key.pid
+                    other,
+                    key.pid
                 );
             }
             None
@@ -274,7 +275,9 @@ pub unsafe fn read_fourcc(store: &IPropertyStore, key: &PROPERTYKEY) -> Option<S
             // Debug log to verify FourCC from Property Store
             log::trace!(
                 "[DEBUG] read_fourcc VT_UI4: fourcc=0x{:08X}, bytes={:?}, codec_str='{}'",
-                fourcc, bytes, codec_str
+                fourcc,
+                bytes,
+                codec_str
             );
             if codec_str.trim().is_empty() {
                 None

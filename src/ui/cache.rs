@@ -23,10 +23,7 @@ const MAX_TEXTURE_CACHE_ITEMS_HARD_CAP: usize = 420;
 #[inline]
 fn nz_cache_size(size: usize, cache_name: &str) -> NonZeroUsize {
     if size == 0 {
-        log::warn!(
-            "{} configured with 0 entries; clamping to 1",
-            cache_name
-        );
+        log::warn!("{} configured with 0 entries; clamping to 1", cache_name);
     }
     NonZeroUsize::new(size.max(1)).expect("size.max(1) is always non-zero")
 }
@@ -483,10 +480,7 @@ impl CacheManager {
     pub fn set_folder_icon(&mut self, ctx: &egui::Context, pixels: &[u8], width: u32, height: u32) {
         let texture = ctx.load_texture(
             "folder_icon_composed",
-            egui::ColorImage::from_rgba_unmultiplied(
-                [width as usize, height as usize],
-                pixels,
-            ),
+            egui::ColorImage::from_rgba_unmultiplied([width as usize, height as usize], pixels),
             egui::TextureOptions::LINEAR,
         );
         self.folder_icon_texture = Some(texture);

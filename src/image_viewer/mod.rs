@@ -4,7 +4,7 @@ use std::process::Command;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use windows::core::PCWSTR;
-use windows::Win32::Foundation::{CloseHandle, GetLastError, HANDLE, ERROR_ALREADY_EXISTS};
+use windows::Win32::Foundation::{CloseHandle, GetLastError, ERROR_ALREADY_EXISTS, HANDLE};
 use windows::Win32::System::Threading::{CreateMutexW, ReleaseMutex};
 
 mod app;
@@ -54,7 +54,8 @@ fn recent_open_request_state() -> &'static Mutex<Option<(PathBuf, Instant)>> {
 }
 
 fn paths_eq_case_insensitive(a: &Path, b: &Path) -> bool {
-    a.to_string_lossy().eq_ignore_ascii_case(&b.to_string_lossy())
+    a.to_string_lossy()
+        .eq_ignore_ascii_case(&b.to_string_lossy())
 }
 
 fn should_suppress_duplicate_open(path: &Path) -> bool {
@@ -242,7 +243,10 @@ pub fn run_standalone(path: PathBuf) -> eframe::Result<()> {
                     log::warn!("[IMAGE-VIEWER] existing instance unavailable for IPC forward");
                 }
                 Err(err) => {
-                    log::warn!("[IMAGE-VIEWER] failed to forward image to existing viewer: {}", err);
+                    log::warn!(
+                        "[IMAGE-VIEWER] failed to forward image to existing viewer: {}",
+                        err
+                    );
                 }
             }
             return Ok(());
@@ -287,7 +291,10 @@ pub fn run_standalone(path: PathBuf) -> eframe::Result<()> {
                 None
             }
         };
-        (startup_sequence_rx, indexer::ImageSequence::single(path.clone()))
+        (
+            startup_sequence_rx,
+            indexer::ImageSequence::single(path.clone()),
+        )
     };
 
     let mut viewport = eframe::egui::ViewportBuilder::default()

@@ -262,9 +262,7 @@ impl PdfViewerApp {
         if self.cache_bytes > TEXTURE_MEMORY_BUDGET {
             let mut pages: Vec<u32> = self.textures.keys().copied().collect();
             pages.sort_by_key(|&p| {
-                std::cmp::Reverse(
-                    (p as i64 - self.current_page as i64).unsigned_abs()
-                )
+                std::cmp::Reverse((p as i64 - self.current_page as i64).unsigned_abs())
             });
             while self.cache_bytes > TEXTURE_MEMORY_BUDGET {
                 if let Some(victim) = pages.pop() {
@@ -320,8 +318,16 @@ impl PdfViewerApp {
     }
 
     fn paint_placeholder(painter: &egui::Painter, rect: egui::Rect, idx: u32, dark_mode: bool) {
-        let bg = if dark_mode { egui::Color32::from_gray(40) } else { egui::Color32::from_gray(220) };
-        let text_color = if dark_mode { egui::Color32::from_gray(140) } else { egui::Color32::from_gray(100) };
+        let bg = if dark_mode {
+            egui::Color32::from_gray(40)
+        } else {
+            egui::Color32::from_gray(220)
+        };
+        let text_color = if dark_mode {
+            egui::Color32::from_gray(140)
+        } else {
+            egui::Color32::from_gray(100)
+        };
         painter.rect_filled(rect, 0.0, bg);
         painter.text(
             rect.center(),
@@ -430,13 +436,7 @@ impl PdfViewerApp {
 
     // ── Page layout in ScrollArea ────────────────────────────────────────
 
-    fn show_pages(
-        &mut self,
-        ui: &mut egui::Ui,
-        ctx: &egui::Context,
-        aw: f32,
-        ah: f32,
-    ) {
+    fn show_pages(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, aw: f32, ah: f32) {
         let ppp = ctx.pixels_per_point();
         let mut first_visible: Option<u32> = None;
         let mut last_visible: u32 = 0;
@@ -450,10 +450,8 @@ impl PdfViewerApp {
             ui.horizontal(|ui| {
                 ui.add_space(indent);
 
-                let (rect, resp) = ui.allocate_exact_size(
-                    egui::vec2(dw, dh),
-                    egui::Sense::click_and_drag(),
-                );
+                let (rect, resp) =
+                    ui.allocate_exact_size(egui::vec2(dw, dh), egui::Sense::click_and_drag());
 
                 if self.scroll_to_page == Some(idx) {
                     resp.scroll_to_me(Some(egui::Align::TOP));
@@ -500,8 +498,7 @@ impl PdfViewerApp {
             // Prefetch adjacent pages for smooth scrolling
             let scale0 = self.get_scale(fv, aw, ah);
             let pf_lo = fv.saturating_sub(PREFETCH_AHEAD);
-            let pf_hi =
-                (last_visible + PREFETCH_AHEAD).min(self.total_pages.saturating_sub(1));
+            let pf_hi = (last_visible + PREFETCH_AHEAD).min(self.total_pages.saturating_sub(1));
             for pidx in pf_lo..=pf_hi {
                 let (nw, nh) = self.needed_render_size(pidx, scale0, ppp);
                 let needs = match self.textures.get(&pidx) {

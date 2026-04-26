@@ -189,7 +189,11 @@ pub fn load_external_subtitle(
     subtitle_path: &Path,
 ) -> Result<(), String> {
     if !subtitle_path.is_file() {
-        return Err(rust_i18n::t!("video.subtitle_not_found", path = subtitle_path.display().to_string()).to_string());
+        return Err(rust_i18n::t!(
+            "video.subtitle_not_found",
+            path = subtitle_path.display().to_string()
+        )
+        .to_string());
     }
 
     let m = mpv
@@ -198,7 +202,9 @@ pub fn load_external_subtitle(
 
     let subtitle_str = subtitle_path.to_string_lossy().to_string();
     m.command("sub-add", &[&subtitle_str, "select"])
-        .map_err(|e| rust_i18n::t!("video.subtitle_load_failed", error = format!("{:?}", e)).to_string())?;
+        .map_err(|e| {
+            rust_i18n::t!("video.subtitle_load_failed", error = format!("{:?}", e)).to_string()
+        })?;
 
     // Force refresh of subtitle track list after sub-add.
     *cached_tracks = None;
@@ -257,8 +263,14 @@ pub fn get_video_aspect(mpv: &mpv::Mpv) -> Option<f64> {
             return Some(aspect);
         }
     }
-    let dw = mpv.get_property::<i64>("video-out-params/dw").ok().unwrap_or(0);
-    let dh = mpv.get_property::<i64>("video-out-params/dh").ok().unwrap_or(0);
+    let dw = mpv
+        .get_property::<i64>("video-out-params/dw")
+        .ok()
+        .unwrap_or(0);
+    let dh = mpv
+        .get_property::<i64>("video-out-params/dh")
+        .ok()
+        .unwrap_or(0);
     if dw > 0 && dh > 0 {
         return Some(dw as f64 / dh as f64);
     }

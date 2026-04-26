@@ -1,10 +1,10 @@
+use parking_lot::Mutex;
 use std::fs::File;
 use std::os::windows::ffi::OsStrExt;
 use std::os::windows::io::{AsRawHandle, FromRawHandle};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant, SystemTime};
-use parking_lot::Mutex;
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{HANDLE, INVALID_HANDLE_VALUE};
 use windows::Win32::Storage::FileSystem::{
@@ -172,12 +172,14 @@ struct FileStabilityState {
     last_seen: Instant,
 }
 
-static FILE_STABILITY_CACHE: OnceLock<Mutex<std::collections::HashMap<PathBuf, FileStabilityState>>> =
-    OnceLock::new();
+static FILE_STABILITY_CACHE: OnceLock<
+    Mutex<std::collections::HashMap<PathBuf, FileStabilityState>>,
+> = OnceLock::new();
 static FILE_WRITE_ACTIVITY_CACHE: OnceLock<Mutex<std::collections::HashMap<PathBuf, Instant>>> =
     OnceLock::new();
 
-fn get_file_stability_cache() -> &'static Mutex<std::collections::HashMap<PathBuf, FileStabilityState>> {
+fn get_file_stability_cache(
+) -> &'static Mutex<std::collections::HashMap<PathBuf, FileStabilityState>> {
     FILE_STABILITY_CACHE.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
 }
 
@@ -338,7 +340,9 @@ fn recent_write_activity_baseline(path: &Path) -> Option<Instant> {
         }
 
         match cache.get(path).copied() {
-            Some(seen_at) if now.duration_since(seen_at) <= WRITE_ACTIVITY_STATE_TTL => Some(seen_at),
+            Some(seen_at) if now.duration_since(seen_at) <= WRITE_ACTIVITY_STATE_TTL => {
+                Some(seen_at)
+            }
             Some(_) => {
                 cache.remove(path);
                 None

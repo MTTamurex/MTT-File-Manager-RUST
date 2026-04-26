@@ -122,7 +122,10 @@ impl ImageViewerApp {
                 self.items.len(),
                 row_height,
                 viewport_h,
-                Some(self.shortcuts.get(crate::app::shortcuts::ShortcutAction::Properties)),
+                Some(
+                    self.shortcuts
+                        .get(crate::app::shortcuts::ShortcutAction::Properties),
+                ),
             );
 
             let shift = ui.input(|i| i.modifiers.shift);
@@ -344,8 +347,14 @@ impl ImageViewerApp {
         // ── Send batch folder-size requests (capped per frame) ──
         {
             const MAX_BATCH_REQUESTS_PER_FRAME: usize = 30;
-            let gen = self.folder_size_state.batch_generation.load(std::sync::atomic::Ordering::Acquire);
-            for path in folder_size_requests.into_iter().take(MAX_BATCH_REQUESTS_PER_FRAME) {
+            let gen = self
+                .folder_size_state
+                .batch_generation
+                .load(std::sync::atomic::Ordering::Acquire);
+            for path in folder_size_requests
+                .into_iter()
+                .take(MAX_BATCH_REQUESTS_PER_FRAME)
+            {
                 let epoch = self
                     .folder_size_state
                     .batch_invalidation_epoch
@@ -353,7 +362,10 @@ impl ImageViewerApp {
                     .copied()
                     .unwrap_or(0);
                 self.folder_size_state.batch_loading.insert(path.clone());
-                let _ = self.folder_size_state.batch_req_sender.send((path, gen, epoch));
+                let _ = self
+                    .folder_size_state
+                    .batch_req_sender
+                    .send((path, gen, epoch));
             }
         }
 

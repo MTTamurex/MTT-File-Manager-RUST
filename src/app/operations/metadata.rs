@@ -51,7 +51,9 @@ impl ImageViewerApp {
                     // downloaded/written — the extraction would open them with
                     // COM APIs that lack FILE_SHARE_WRITE, killing the download.
                     // Uses _fast variant (no CreateFileW) to avoid blocking UI thread.
-                    if !crate::infrastructure::windows::file_flags::is_file_unsafe_to_read_fast(&path) {
+                    if !crate::infrastructure::windows::file_flags::is_file_unsafe_to_read_fast(
+                        &path,
+                    ) {
                         let _ = self.metadata_req_sender.send((path.clone(), mtime));
                         self.metadata_loading.insert(path.clone());
                     }

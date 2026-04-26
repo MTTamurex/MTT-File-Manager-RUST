@@ -69,7 +69,10 @@ fn validate_video_path(path: &Path) -> Result<(), String> {
     }
 
     // 3. Block UNC / network paths
-    if path_str.starts_with("\\\\") || path_str.starts_with("//") || path_str.starts_with("\\\\?\\UNC\\") {
+    if path_str.starts_with("\\\\")
+        || path_str.starts_with("//")
+        || path_str.starts_with("\\\\?\\UNC\\")
+    {
         return Err("Network/UNC paths are not allowed".into());
     }
 
@@ -107,7 +110,11 @@ fn validate_video_path(path: &Path) -> Result<(), String> {
 pub fn open_video_player(path: PathBuf, position: f64, volume: f32) -> Option<Child> {
     // SEC: Validate path before spawning child process.
     if let Err(e) = validate_video_path(&path) {
-        log::error!("[VIDEO-PLAYER] path validation failed for '{}': {}", path.display(), e);
+        log::error!(
+            "[VIDEO-PLAYER] path validation failed for '{}': {}",
+            path.display(),
+            e
+        );
         return None;
     }
 
@@ -164,12 +171,10 @@ fn resolve_mpv_ui_config_dir() -> Option<PathBuf> {
             );
         }
     }
-    candidates
-        .into_iter()
-        .find(|dir| {
-            let scripts = dir.join("scripts");
-            scripts.join("modernH.lua").is_file() && scripts.join("vsr.lua").is_file()
-        })
+    candidates.into_iter().find(|dir| {
+        let scripts = dir.join("scripts");
+        scripts.join("modernH.lua").is_file() && scripts.join("vsr.lua").is_file()
+    })
 }
 
 /// Convert a Windows path to forward-slash form for mpv options.
@@ -200,7 +205,12 @@ fn load_external_subtitle_for_standalone(
 
     let subtitle_str = subtitle_path.to_string_lossy().to_string();
     mpv.command("sub-add", &[&subtitle_str, "select"])
-        .map_err(|e| format!("{}", rust_i18n::t!("video.subtitle_load_failed", error = format!("{:?}", e))))?;
+        .map_err(|e| {
+            format!(
+                "{}",
+                rust_i18n::t!("video.subtitle_load_failed", error = format!("{:?}", e))
+            )
+        })?;
 
     let file_name = subtitle_path
         .file_name()
@@ -215,10 +225,8 @@ fn load_external_subtitle_for_standalone(
 /// Load app icons from the current executable.
 #[cfg(target_os = "windows")]
 fn load_app_icons() -> Option<(isize, isize)> {
-    use windows::Win32::UI::WindowsAndMessaging::{
-        LoadImageW, IMAGE_ICON, LR_SHARED,
-    };
     use windows::core::PCWSTR;
+    use windows::Win32::UI::WindowsAndMessaging::{LoadImageW, IMAGE_ICON, LR_SHARED};
 
     // Load small icon (16x16) and big icon (32x32) from exe resource
     let hmodule = unsafe {
@@ -299,7 +307,9 @@ fn load_app_icons() -> Option<(isize, isize)> {
 fn try_get_mpv_hwnd(mpv: &mpv::Mpv) -> Option<windows::Win32::Foundation::HWND> {
     if let Ok(raw_hwnd) = mpv.get_property::<i64>("window-id") {
         if raw_hwnd > 0 {
-            return Some(windows::Win32::Foundation::HWND(raw_hwnd as *mut std::ffi::c_void));
+            return Some(windows::Win32::Foundation::HWND(
+                raw_hwnd as *mut std::ffi::c_void,
+            ));
         }
     }
 
@@ -308,13 +318,17 @@ fn try_get_mpv_hwnd(mpv: &mpv::Mpv) -> Option<windows::Win32::Foundation::HWND> 
         if !trimmed.is_empty() {
             if let Ok(parsed) = trimmed.parse::<isize>() {
                 if parsed > 0 {
-                    return Some(windows::Win32::Foundation::HWND(parsed as *mut std::ffi::c_void));
+                    return Some(windows::Win32::Foundation::HWND(
+                        parsed as *mut std::ffi::c_void,
+                    ));
                 }
             }
             if let Some(hex) = trimmed.strip_prefix("0x") {
                 if let Ok(parsed) = isize::from_str_radix(hex, 16) {
                     if parsed > 0 {
-                        return Some(windows::Win32::Foundation::HWND(parsed as *mut std::ffi::c_void));
+                        return Some(windows::Win32::Foundation::HWND(
+                            parsed as *mut std::ffi::c_void,
+                        ));
                     }
                 }
             }
@@ -328,8 +342,7 @@ fn try_get_mpv_hwnd(mpv: &mpv::Mpv) -> Option<windows::Win32::Foundation::HWND> 
 fn apply_icon_to_hwnd(hwnd: windows::Win32::Foundation::HWND, small_raw: isize, big_raw: isize) {
     use windows::Win32::Foundation::{LPARAM, WPARAM};
     use windows::Win32::UI::WindowsAndMessaging::{
-        SendMessageW, SetClassLongPtrW, ICON_BIG, ICON_SMALL, GCLP_HICON, GCLP_HICONSM,
-        WM_SETICON,
+        SendMessageW, SetClassLongPtrW, GCLP_HICON, GCLP_HICONSM, ICON_BIG, ICON_SMALL, WM_SETICON,
     };
 
     unsafe {
@@ -386,9 +399,7 @@ fn set_mpv_window_icon(mpv: &mpv::Mpv) {
     unsafe {
         let _ = EnumWindows(
             Some(enum_set_icon),
-            windows::Win32::Foundation::LPARAM(
-                &data as *const (u32, isize, isize) as isize,
-            ),
+            windows::Win32::Foundation::LPARAM(&data as *const (u32, isize, isize) as isize),
         );
     }
 
@@ -472,7 +483,10 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
             log::warn!("[VIDEO-PLAYER] Failed to set osc=no: {:?}", e);
         }
         if let Err(e) = init.set_option("input-default-bindings", true) {
-            log::warn!("[VIDEO-PLAYER] Failed to set input-default-bindings: {:?}", e);
+            log::warn!(
+                "[VIDEO-PLAYER] Failed to set input-default-bindings: {:?}",
+                e
+            );
         }
         if let Err(e) = init.set_option("input-vo-keyboard", true) {
             log::warn!("[VIDEO-PLAYER] Failed to set input-vo-keyboard: {:?}", e);
@@ -592,9 +606,13 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
                 // Log effective GPU pipeline for VSR debugging
                 let vo = mpv.get_property::<String>("vo").unwrap_or_default();
                 let gpu_api = mpv.get_property::<String>("gpu-api").unwrap_or_default();
-                let gpu_ctx = mpv.get_property::<String>("gpu-context").unwrap_or_default();
+                let gpu_ctx = mpv
+                    .get_property::<String>("gpu-context")
+                    .unwrap_or_default();
                 let hwdec_pref = mpv.get_property::<String>("hwdec").unwrap_or_default();
-                let hwdec = mpv.get_property::<String>("hwdec-current").unwrap_or_default();
+                let hwdec = mpv
+                    .get_property::<String>("hwdec-current")
+                    .unwrap_or_default();
                 log::info!(
                     "[VIDEO-PLAYER] Pipeline: vo={}, gpu-api={}, gpu-context={}, hwdec={}, hwdec-current={}",
                     vo, gpu_api, gpu_ctx, hwdec_pref, hwdec
@@ -611,14 +629,20 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
                 if args.first() == Some(&"open-subtitle-picker") {
                     match load_external_subtitle_for_standalone(&mut mpv, &path) {
                         Ok(true) => {
-                            log::debug!("[VIDEO-PLAYER] External subtitle loaded from native picker");
+                            log::debug!(
+                                "[VIDEO-PLAYER] External subtitle loaded from native picker"
+                            );
                         }
                         Ok(false) => {
-                            let cancelled_msg = rust_i18n::t!("video.subtitle_cancelled").to_string();
+                            let cancelled_msg =
+                                rust_i18n::t!("video.subtitle_cancelled").to_string();
                             let _ = mpv.command("show-text", &[&cancelled_msg, "1500"]);
                         }
                         Err(err) => {
-                            log::warn!("[VIDEO-PLAYER] Failed to load subtitle from native picker: {}", err);
+                            log::warn!(
+                                "[VIDEO-PLAYER] Failed to load subtitle from native picker: {}",
+                                err
+                            );
                             let _ = mpv.command("show-text", &[&err, "3000"]);
                         }
                     }
@@ -628,7 +652,7 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
                 log::debug!("[VIDEO-PLAYER] EndFile reason={}", reason);
 
                 // MPV_END_FILE_REASON constants: EOF=0, STOP=2, QUIT=3, ERROR=4, REDIRECT=5
-                const REASON_EOF:  u32 = mpv::mpv_end_file_reason::Eof;
+                const REASON_EOF: u32 = mpv::mpv_end_file_reason::Eof;
                 const REASON_STOP: u32 = mpv::mpv_end_file_reason::Stop;
                 const REASON_QUIT: u32 = mpv::mpv_end_file_reason::Quit;
 
@@ -646,7 +670,9 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
                         // Reset flags for the next file.
                         eof_reached = false;
                         seek_applied = true; // don't re-seek on playlist navigation
-                        log::debug!("[VIDEO-PLAYER] EndFile Stop — playlist navigation or file change");
+                        log::debug!(
+                            "[VIDEO-PLAYER] EndFile Stop — playlist navigation or file change"
+                        );
                     }
                     REASON_QUIT => {
                         log::debug!("[VIDEO-PLAYER] EndFile Quit — exiting");

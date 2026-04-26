@@ -1,4 +1,7 @@
-#![cfg_attr(all(target_os = "windows", not(debug_assertions)), windows_subsystem = "windows")]
+#![cfg_attr(
+    all(target_os = "windows", not(debug_assertions)),
+    windows_subsystem = "windows"
+)]
 
 // NOTE: We deliberately do NOT export the NvOptimusEnablement /
 // AmdPowerXpressRequestHighPerformance symbols here.  This binary is reused as
@@ -155,10 +158,11 @@ fn main() -> eframe::Result<()> {
                 std::process::exit(2);
             };
 
-            let exit_code = mtt_file_manager::infrastructure::windows::run_elevated_volume_rename_helper(
-                &PathBuf::from(drive_path),
-                &new_label.to_string_lossy(),
-            );
+            let exit_code =
+                mtt_file_manager::infrastructure::windows::run_elevated_volume_rename_helper(
+                    &PathBuf::from(drive_path),
+                    &new_label.to_string_lossy(),
+                );
             std::process::exit(exit_code);
         }
         if flag_str.eq_ignore_ascii_case("--image-viewer") {
@@ -260,14 +264,16 @@ fn main() -> eframe::Result<()> {
             // Intel + NVIDIA/AMD).  Without this, the driver may route the app
             // to the integrated GPU, causing slower texture uploads and lower
             // throughput — especially noticeable after returning from idle.
-            wgpu_setup: eframe::egui_wgpu::WgpuSetup::CreateNew(eframe::egui_wgpu::WgpuSetupCreateNew {
-                instance_descriptor: eframe::wgpu::InstanceDescriptor {
-                    backends: selected_backends,
+            wgpu_setup: eframe::egui_wgpu::WgpuSetup::CreateNew(
+                eframe::egui_wgpu::WgpuSetupCreateNew {
+                    instance_descriptor: eframe::wgpu::InstanceDescriptor {
+                        backends: selected_backends,
+                        ..Default::default()
+                    },
+                    power_preference: eframe::wgpu::PowerPreference::HighPerformance,
                     ..Default::default()
                 },
-                power_preference: eframe::wgpu::PowerPreference::HighPerformance,
-                ..Default::default()
-            }),
+            ),
             // Low-latency presentation: queue only 1 frame ahead so the
             // compositor shows our content sooner after texture re-uploads.
             desired_maximum_frame_latency: Some(1),

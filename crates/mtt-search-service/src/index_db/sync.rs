@@ -13,11 +13,7 @@ impl IndexDb {
     ///
     /// The work is split into batched commits so the WAL stays bounded.
     /// `on_progress(current, total)` reports insert progress.
-    pub fn save_volume<F>(
-        &self,
-        index: &VolumeIndex,
-        mut on_progress: F,
-    ) -> Result<(), String>
+    pub fn save_volume<F>(&self, index: &VolumeIndex, mut on_progress: F) -> Result<(), String>
     where
         F: FnMut(u64, u64),
     {
@@ -180,13 +176,13 @@ impl IndexDb {
     pub fn rebuild_fts_full(&self) -> Result<std::time::Duration, String> {
         let conn = self.conn.lock();
         let start = std::time::Instant::now();
-        conn.execute(
-            "INSERT INTO search_fts(search_fts) VALUES('rebuild')",
-            [],
-        )
-        .map_err(|e| format!("FTS5 rebuild error: {}", e))?;
+        conn.execute("INSERT INTO search_fts(search_fts) VALUES('rebuild')", [])
+            .map_err(|e| format!("FTS5 rebuild error: {}", e))?;
         let elapsed = start.elapsed();
-        eprintln!("[DB] FTS5 background rebuild completed in {:.2}s", elapsed.as_secs_f64());
+        eprintln!(
+            "[DB] FTS5 background rebuild completed in {:.2}s",
+            elapsed.as_secs_f64()
+        );
         Ok(elapsed)
     }
 

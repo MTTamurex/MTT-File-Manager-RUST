@@ -1,6 +1,6 @@
-use crate::tabs::TabManager;
 use crate::domain::special_paths::{COMPUTER_VIEW_ID, RECYCLE_BIN_VIEW_ID};
 use crate::infrastructure::onedrive::special_folder_display_name;
+use crate::tabs::TabManager;
 use crate::ui::icon_loader::IconLoader;
 use crate::ui::svg_icons::SvgIconManager;
 use eframe::egui::{self, Color32, CornerRadius, Stroke, Vec2};
@@ -172,9 +172,9 @@ pub(super) fn render_tabs(
         let translated_title = display_title_for_tab_path(&tab.path, &tab.title);
         let full_text: &str = &translated_title;
 
-        let galley = ui
-            .painter()
-            .layout_no_wrap(full_text.to_string(), font_id.clone(), title_color);
+        let galley =
+            ui.painter()
+                .layout_no_wrap(full_text.to_string(), font_id.clone(), title_color);
 
         let draw_pos = egui::pos2(title_x, content_rect.center().y);
 
@@ -220,7 +220,8 @@ pub(super) fn render_tabs(
         } else {
             // M-4: reuse already-computed galley — no re-layout inside painter.text()
             let paint_rect = egui::Align2::LEFT_CENTER.anchor_size(draw_pos, galley.size());
-            ui.painter().galley(paint_rect.min, galley.into(), title_color);
+            ui.painter()
+                .galley(paint_rect.min, galley.into(), title_color);
         }
 
         if has_speaker {
@@ -233,7 +234,7 @@ pub(super) fn render_tabs(
 
             let speaker_response = ui.interact(
                 speaker_rect,
-                egui::Id::new(idx).with("speaker"),  // M-8: no format! alloc
+                egui::Id::new(idx).with("speaker"), // M-8: no format! alloc
                 egui::Sense::click(),
             );
 
@@ -279,7 +280,7 @@ pub(super) fn render_tabs(
 
         let close_response = ui.interact(
             close_btn_rect,
-            egui::Id::new(idx).with("tab_close"),  // M-9: no format! alloc
+            egui::Id::new(idx).with("tab_close"), // M-9: no format! alloc
             egui::Sense::click(),
         );
 

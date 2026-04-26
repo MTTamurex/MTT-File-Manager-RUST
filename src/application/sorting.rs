@@ -313,4 +313,3 @@ mod tests {
         assert_eq!(items[1].name, "newer.txt");
     }
 }
-

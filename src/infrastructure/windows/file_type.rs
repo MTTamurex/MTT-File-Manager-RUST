@@ -49,10 +49,7 @@ fn get_perceived_type_fast(ext: &str) -> Option<PerceivedType> {
 
     match bytes.len() {
         2 => {
-            let b = [
-                bytes[0].to_ascii_lowercase(),
-                bytes[1].to_ascii_lowercase(),
-            ];
+            let b = [bytes[0].to_ascii_lowercase(), bytes[1].to_ascii_lowercase()];
             match &b {
                 // Common non-media: avoid API call entirely
                 b"db" | b"js" | b"py" | b"cs" | b"rs" | b"md" | b"7z" | b"gz" => {
@@ -80,15 +77,13 @@ fn get_perceived_type_fast(ext: &str) -> Option<PerceivedType> {
                     Some(PerceivedType::Audio)
                 }
                 // Common non-media: avoid API call entirely
-                b"exe" | b"dll" | b"sys" | b"ini" | b"cfg" | b"log" | b"txt" | b"xml"
-                | b"dat" | b"nls" | b"bin" | b"cat" | b"msi" | b"cab" | b"tmp" | b"bat"
-                | b"cmd" | b"reg" | b"inf" | b"ttf" | b"otf" | b"zip" | b"rar" | b"lnk"
-                | b"url" | b"htm" | b"css" | b"pdf" | b"doc" | b"xls" | b"ppt" | b"rtf"
-                | b"msc" | b"cpl" | b"scr" | b"com" | b"drv" | b"ocx" | b"mui" | b"man"
-                | b"mof" | b"mum" | b"prx" | b"nfo" | b"ion" | b"rll" | b"tlb" | b"mfl"
-                | b"sdb" | b"cur" | b"ani" => {
-                    Some(PerceivedType::Other)
-                }
+                b"exe" | b"dll" | b"sys" | b"ini" | b"cfg" | b"log" | b"txt" | b"xml" | b"dat"
+                | b"nls" | b"bin" | b"cat" | b"msi" | b"cab" | b"tmp" | b"bat" | b"cmd"
+                | b"reg" | b"inf" | b"ttf" | b"otf" | b"zip" | b"rar" | b"lnk" | b"url"
+                | b"htm" | b"css" | b"pdf" | b"doc" | b"xls" | b"ppt" | b"rtf" | b"msc"
+                | b"cpl" | b"scr" | b"com" | b"drv" | b"ocx" | b"mui" | b"man" | b"mof"
+                | b"mum" | b"prx" | b"nfo" | b"ion" | b"rll" | b"tlb" | b"mfl" | b"sdb"
+                | b"cur" | b"ani" => Some(PerceivedType::Other),
                 _ => None,
             }
         }
@@ -109,10 +104,8 @@ fn get_perceived_type_fast(ext: &str) -> Option<PerceivedType> {
                 // Audio
                 b"flac" | b"alac" | b"opus" | b"aiff" | b"weba" => Some(PerceivedType::Audio),
                 // Common non-media: avoid API call entirely
-                b"docx" | b"xlsx" | b"pptx" | b"json" | b"yaml" | b"toml" | b"html"
-                | b"lock" | b"conf" | b"java" | b"xaml" => {
-                    Some(PerceivedType::Other)
-                }
+                b"docx" | b"xlsx" | b"pptx" | b"json" | b"yaml" | b"toml" | b"html" | b"lock"
+                | b"conf" | b"java" | b"xaml" => Some(PerceivedType::Other),
                 _ => None,
             }
         }

@@ -155,12 +155,14 @@ pub(super) fn render_list_item(
             crate::ui::theme::selection_text_color(ui.visuals().dark_mode)
         } else {
             crate::ui::theme::text_color(ui.visuals().dark_mode)
-        }.gamma_multiply(hidden_opacity);
+        }
+        .gamma_multiply(hidden_opacity);
         let secondary_color = if is_selected {
             crate::ui::theme::selection_text_color(ui.visuals().dark_mode)
         } else {
             crate::ui::theme::secondary_text_color(ui.visuals().dark_mode)
-        }.gamma_multiply(hidden_opacity);
+        }
+        .gamma_multiply(hidden_opacity);
 
         // 1. Icon + Name
         let icon_tint = Color32::WHITE.gamma_multiply(hidden_opacity);

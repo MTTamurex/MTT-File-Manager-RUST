@@ -261,28 +261,56 @@ pub(crate) fn start_file_operation_worker(
                         dest_folder,
                         hwnd,
                     } => {
-                        handlers::handle_copy(path, dest_folder, hwnd, &result_sender, &extraction_progress, &extraction_cancel);
+                        handlers::handle_copy(
+                            path,
+                            dest_folder,
+                            hwnd,
+                            &result_sender,
+                            &extraction_progress,
+                            &extraction_cancel,
+                        );
                     }
                     FileOperationRequest::Move {
                         path,
                         dest_folder,
                         hwnd,
                     } => {
-                        handlers::handle_move(path, dest_folder, hwnd, &result_sender, &extraction_progress, &extraction_cancel);
+                        handlers::handle_move(
+                            path,
+                            dest_folder,
+                            hwnd,
+                            &result_sender,
+                            &extraction_progress,
+                            &extraction_cancel,
+                        );
                     }
                     FileOperationRequest::CopyBatch {
                         paths,
                         dest_folder,
                         hwnd,
                     } => {
-                        handlers::handle_copy_batch(paths, dest_folder, hwnd, &result_sender, &extraction_progress, &extraction_cancel);
+                        handlers::handle_copy_batch(
+                            paths,
+                            dest_folder,
+                            hwnd,
+                            &result_sender,
+                            &extraction_progress,
+                            &extraction_cancel,
+                        );
                     }
                     FileOperationRequest::MoveBatch {
                         paths,
                         dest_folder,
                         hwnd,
                     } => {
-                        handlers::handle_move_batch(paths, dest_folder, hwnd, &result_sender, &extraction_progress, &extraction_cancel);
+                        handlers::handle_move_batch(
+                            paths,
+                            dest_folder,
+                            hwnd,
+                            &result_sender,
+                            &extraction_progress,
+                            &extraction_cancel,
+                        );
                     }
                     FileOperationRequest::RestoreFromRecycleBin { items } => {
                         handlers::handle_restore_from_recycle_bin(items, &result_sender);
@@ -318,9 +346,8 @@ pub(crate) fn start_file_operation_worker(
                         "unknown".to_string()
                     };
                     log::error!("[FileOpWorker] panic: {}", msg);
-                    let _ = result_sender.send(FileOperationResult::OperationFailed {
-                        message: msg,
-                    });
+                    let _ =
+                        result_sender.send(FileOperationResult::OperationFailed { message: msg });
                     let _ = result_sender.send(FileOperationResult::Finished);
                 }
             }
@@ -350,7 +377,9 @@ mod tests {
             r"\\?\::{645FF040-5081-101B-9F08-00AA002F954E}"
         )));
 
-        assert!(!is_explicit_shell_namespace_path(Path::new(r"C:\Temp\file.txt")));
+        assert!(!is_explicit_shell_namespace_path(Path::new(
+            r"C:\Temp\file.txt"
+        )));
         assert!(!is_explicit_shell_namespace_path(Path::new(
             r"C:\Temp\archive.zip\inside"
         )));

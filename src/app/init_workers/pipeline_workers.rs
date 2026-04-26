@@ -48,7 +48,12 @@ pub(in crate::app) fn spawn_file_operation_worker() -> (
         extraction_progress.clone(),
         extraction_cancel.clone(),
     );
-    (file_op_tx, file_op_res_rx, extraction_progress, extraction_cancel)
+    (
+        file_op_tx,
+        file_op_res_rx,
+        extraction_progress,
+        extraction_cancel,
+    )
 }
 
 pub(in crate::app) fn spawn_global_search_worker(

@@ -47,31 +47,59 @@ pub fn color_dark_hover() -> Color32 {
 
 // === Dark-mode-aware color access ===
 pub fn text_color(dark_mode: bool) -> Color32 {
-    if dark_mode { Color32::from_gray(220) } else { Color32::BLACK }
+    if dark_mode {
+        Color32::from_gray(220)
+    } else {
+        Color32::BLACK
+    }
 }
 
 pub fn secondary_text_color(dark_mode: bool) -> Color32 {
-    if dark_mode { Color32::from_gray(160) } else { Color32::from_gray(100) }
+    if dark_mode {
+        Color32::from_gray(160)
+    } else {
+        Color32::from_gray(100)
+    }
 }
 
 pub fn input_bg_color(dark_mode: bool) -> Color32 {
-    if dark_mode { Color32::from_gray(55) } else { Color32::WHITE }
+    if dark_mode {
+        Color32::from_gray(55)
+    } else {
+        Color32::WHITE
+    }
 }
 
 pub fn selection_color(dark_mode: bool) -> Color32 {
-    if dark_mode { COLOR_DARK_SELECTION } else { COLOR_SELECTION }
+    if dark_mode {
+        COLOR_DARK_SELECTION
+    } else {
+        COLOR_SELECTION
+    }
 }
 
 pub fn selection_text_color(dark_mode: bool) -> Color32 {
-    if dark_mode { COLOR_DARK_SELECTION_TEXT } else { COLOR_SELECTION_TEXT }
+    if dark_mode {
+        COLOR_DARK_SELECTION_TEXT
+    } else {
+        COLOR_SELECTION_TEXT
+    }
 }
 
 pub fn header_active_bg(dark_mode: bool) -> Color32 {
-    if dark_mode { Color32::from_gray(60) } else { Color32::from_gray(230) }
+    if dark_mode {
+        Color32::from_gray(60)
+    } else {
+        Color32::from_gray(230)
+    }
 }
 
 pub fn selection_hover_color(dark_mode: bool) -> Color32 {
-    if dark_mode { color_dark_selection_hover() } else { color_selection_hover() }
+    if dark_mode {
+        color_dark_selection_hover()
+    } else {
+        color_selection_hover()
+    }
 }
 
 // === TIMING ===
@@ -93,8 +121,8 @@ pub fn apply_scroll_style(ctx: &egui::Context) {
     ctx.style_mut(|style| {
         let s = &mut style.spacing.scroll;
         s.floating = true;
-        s.bar_width = 8.0;           // Max width when hovered
-        s.floating_width = 3.0;      // Thin resting width
+        s.bar_width = 8.0; // Max width when hovered
+        s.floating_width = 3.0; // Thin resting width
         s.floating_allocated_width = 0.0;
         s.handle_min_length = 20.0;
         s.bar_inner_margin = 2.0;

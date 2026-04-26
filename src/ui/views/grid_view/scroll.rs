@@ -26,7 +26,12 @@ pub(super) fn apply_scroll_input(
     *target_scroll = target_scroll.clamp(0.0, max_scroll);
 }
 
-pub(super) fn compute_visual_scroll(ui: &Ui, target_scroll: f32, viewport_h: f32, generation: usize) -> (f32, f32) {
+pub(super) fn compute_visual_scroll(
+    ui: &Ui,
+    target_scroll: f32,
+    viewport_h: f32,
+    generation: usize,
+) -> (f32, f32) {
     // Scope scroll state to folder generation so visual_scroll resets on navigation
     let scroll_state_id = ui.id().with("scroll_state").with(generation);
     // Use predicted_dt (fixed, ~16.67ms) instead of stable_dt (variable).
@@ -113,7 +118,8 @@ pub(super) fn render_custom_scrollbar(
     let is_hovered = interact.hovered() || interact.dragged();
     // Pointer anywhere in viewport = "active" state (show handle like egui's ScrollArea)
     let pointer_in_viewport = ui.input(|i| {
-        i.pointer.hover_pos()
+        i.pointer
+            .hover_pos()
             .map(|p| viewport_rect.contains(p))
             .unwrap_or(false)
     });
@@ -156,8 +162,11 @@ pub(super) fn render_custom_scrollbar(
         scroll_style.dormant_background_opacity
     };
     if bg_opacity > 0.0 {
-        ui.painter()
-            .rect_filled(scrollbar_rect, 4.0, Color32::from_black_alpha((bg_opacity * 255.0) as u8));
+        ui.painter().rect_filled(
+            scrollbar_rect,
+            4.0,
+            Color32::from_black_alpha((bg_opacity * 255.0) as u8),
+        );
     }
 
     // Handle — use egui's exact scroll handle color and opacity
@@ -178,14 +187,18 @@ pub(super) fn render_custom_scrollbar(
         let current = d.get_temp_mut_or_insert_with::<f32>(opacity_id, || 0.0_f32);
         let speed = if handle_opacity > *current { 12.0 } else { 6.0 };
         *current += (handle_opacity - *current) * (dt * speed).min(1.0);
-        if (*current - handle_opacity).abs() < 0.01 { *current = handle_opacity; }
+        if (*current - handle_opacity).abs() < 0.01 {
+            *current = handle_opacity;
+        }
         *current
     });
 
     if opacity > 0.005 {
         let base_color = ui.visuals().widgets.inactive.fg_stroke.color;
         let color = Color32::from_rgba_unmultiplied(
-            base_color.r(), base_color.g(), base_color.b(),
+            base_color.r(),
+            base_color.g(),
+            base_color.b(),
             (opacity * 255.0) as u8,
         );
         ui.painter().rect_filled(handle_rect, bar_w / 2.0, color);

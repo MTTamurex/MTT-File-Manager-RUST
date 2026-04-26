@@ -104,9 +104,7 @@ impl ThumbnailDiskCache {
         // 1. Open WRITER connection (Primary -> Temp fallback -> Memory fallback)
         let (writer_conn, active_db_path) = if primary_hardened {
             match Connection::open(&db_path) {
-                Ok(c) => {
-                    (c, Some(db_path.clone()))
-                }
+                Ok(c) => (c, Some(db_path.clone())),
                 Err(primary_err) => {
                     log::warn!(
                         "[Cache] Failed to open database at {:?}: {:?}",
@@ -164,7 +162,9 @@ impl ThumbnailDiskCache {
             // reader lock (or vice-versa), because std::sync::Mutex is NOT
             // reentrant and will deadlock.  This fallback only activates for
             // in-memory databases where opening a second connection is impossible.
-            log::warn!("[Cache] Reader shares writer connection — nested lock calls will deadlock.");
+            log::warn!(
+                "[Cache] Reader shares writer connection — nested lock calls will deadlock."
+            );
             writer.clone()
         };
 

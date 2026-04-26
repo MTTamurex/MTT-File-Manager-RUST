@@ -47,7 +47,8 @@ fn render_progress_toast(
         .fixed_pos(pos)
         .order(egui::Order::Foreground)
         .show(ctx, |ui| {
-            let rect = egui::Rect::from_min_size(ui.cursor().min, egui::vec2(toast_width, toast_height));
+            let rect =
+                egui::Rect::from_min_size(ui.cursor().min, egui::vec2(toast_width, toast_height));
             let title_font = egui::FontId::proportional(13.0);
             let subtitle_font = egui::FontId::proportional(11.0);
 
@@ -92,7 +93,8 @@ fn render_progress_toast(
                     egui::pos2(rect.max.x - inner_pad - btn_size, rect.min.y + 6.0),
                     egui::vec2(btn_size, btn_size),
                 );
-                let btn_response = ui.allocate_rect(btn_rect, egui::Sense::click())
+                let btn_response = ui
+                    .allocate_rect(btn_rect, egui::Sense::click())
                     .on_hover_text(t!("extract.cancel_tooltip").to_string());
                 let btn_color = if btn_response.hovered() {
                     egui::Color32::from_rgb(255, 100, 100)
@@ -178,7 +180,10 @@ pub fn render_notifications(app: &mut ImageViewerApp, ctx: &egui::Context) {
         let archive_display = truncate_end(&progress.archive_name, 30);
         let total_known = progress.total > 0;
         let subtitle = if total_known {
-            format!("{} ({}/{})", archive_display, progress.extracted, progress.total)
+            format!(
+                "{} ({}/{})",
+                archive_display, progress.extracted, progress.total
+            )
         } else if progress.extracted > 0 {
             format!(
                 "{} ({} {})",
@@ -228,16 +233,20 @@ pub fn render_notifications(app: &mut ImageViewerApp, ctx: &egui::Context) {
         .lock()
         .ok()
         .and_then(|g| g.clone());
-    let bulk_is_scanning = app.bulk_thumbnail_scanning.load(std::sync::atomic::Ordering::Relaxed);
-    let bulk_total = app.bulk_thumbnail_total.load(std::sync::atomic::Ordering::Relaxed);
+    let bulk_is_scanning = app
+        .bulk_thumbnail_scanning
+        .load(std::sync::atomic::Ordering::Relaxed);
+    let bulk_total = app
+        .bulk_thumbnail_total
+        .load(std::sync::atomic::Ordering::Relaxed);
     let bulk_completed = app
         .bulk_thumbnail_completed
         .load(std::sync::atomic::Ordering::Relaxed)
         .min(bulk_total);
 
-    if let Some(progress) = bulk_progress.filter(|_| {
-        bulk_is_scanning || (bulk_total > 0 && bulk_completed < bulk_total)
-    }) {
+    if let Some(progress) = bulk_progress
+        .filter(|_| bulk_is_scanning || (bulk_total > 0 && bulk_completed < bulk_total))
+    {
         needs_repaint = true;
         let progress_toast_height = 62.0;
         let toast_y = screen.max.y - y_offset - progress_toast_height;
@@ -308,7 +317,10 @@ pub fn render_notifications(app: &mut ImageViewerApp, ctx: &egui::Context) {
             let bg_color = notification.level.color();
             let accent = notification.level.accent_color();
             let bg = egui::Color32::from_rgba_unmultiplied(
-                bg_color.r(), bg_color.g(), bg_color.b(), (alpha * 240.0) as u8,
+                bg_color.r(),
+                bg_color.g(),
+                bg_color.b(),
+                (alpha * 240.0) as u8,
             );
 
             egui::Area::new(egui::Id::new(format!("toast_{}", i)))
@@ -323,7 +335,10 @@ pub fn render_notifications(app: &mut ImageViewerApp, ctx: &egui::Context) {
                     ui.painter().rect_filled(rect, 8.0, bg);
 
                     let icon_color = egui::Color32::from_rgba_unmultiplied(
-                        accent.r(), accent.g(), accent.b(), (alpha * 255.0) as u8,
+                        accent.r(),
+                        accent.g(),
+                        accent.b(),
+                        (alpha * 255.0) as u8,
                     );
                     ui.painter().text(
                         rect.min + egui::vec2(inner_pad, (toast_height - icon_size) / 2.0),
@@ -333,9 +348,8 @@ pub fn render_notifications(app: &mut ImageViewerApp, ctx: &egui::Context) {
                         icon_color,
                     );
 
-                    let text_color = egui::Color32::from_rgba_unmultiplied(
-                        230, 230, 230, (alpha * 255.0) as u8,
-                    );
+                    let text_color =
+                        egui::Color32::from_rgba_unmultiplied(230, 230, 230, (alpha * 255.0) as u8);
                     let text_galley = ui.painter().layout(
                         notification.message.clone(),
                         egui::FontId::proportional(13.5),

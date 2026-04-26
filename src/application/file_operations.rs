@@ -167,9 +167,7 @@ pub fn create_new_folder(base_path: &Path) -> OpResult<PathBuf> {
                 counter += 1;
                 new_folder_name = t!("operations.new_folder_n", n = counter).to_string();
                 if counter > 1000 {
-                    return Err(
-                        t!("operations.error_folder_limit").to_string()
-                    );
+                    return Err(t!("operations.error_folder_limit").to_string());
                 }
             }
             Err(e) => return Err(t!("operations.error_folder_create", error = e).to_string()),
@@ -230,7 +228,10 @@ pub fn create_shortcut(target: &Path, current_path: &str) -> OpResult<PathBuf> {
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| valid_target.to_string_lossy().to_string());
 
-    let mut candidate = dest_dir.join(format!("{}.lnk", t!("operations.shortcut_suffix", name = base_name)));
+    let mut candidate = dest_dir.join(format!(
+        "{}.lnk",
+        t!("operations.shortcut_suffix", name = base_name)
+    ));
     let mut counter = 2;
     // Atomic filename reservation: use create_new to atomically claim the name.
     // This eliminates the TOCTOU race between a prior existence check and the save.
@@ -245,8 +246,14 @@ pub fn create_shortcut(target: &Path, current_path: &str) -> OpResult<PathBuf> {
                 break;
             }
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-                candidate =
-                    dest_dir.join(format!("{}.lnk", t!("operations.shortcut_suffix_n", name = base_name, n = counter)));
+                candidate = dest_dir.join(format!(
+                    "{}.lnk",
+                    t!(
+                        "operations.shortcut_suffix_n",
+                        name = base_name,
+                        n = counter
+                    )
+                ));
                 counter += 1;
                 if counter > 1000 {
                     return Err(t!("operations.error_shortcut_limit").to_string());
@@ -324,7 +331,9 @@ mod tests {
             r"\\?\::{645FF040-5081-101B-9F08-00AA002F954E}"
         )));
 
-        assert!(!is_explicit_shell_namespace_path(Path::new(r"C:\Temp\file.txt")));
+        assert!(!is_explicit_shell_namespace_path(Path::new(
+            r"C:\Temp\file.txt"
+        )));
         assert!(!is_explicit_shell_namespace_path(Path::new(
             r"C:\Temp\archive.zip\inside"
         )));

@@ -23,14 +23,14 @@ pub struct RecycleBinMeta {
 #[derive(Clone, Debug)]
 pub struct FileEntry {
     pub path: PathBuf,
-    pub name: String,                           // Cached name for fast sorting
-    pub is_dir: bool,                           // Folders first
-    pub size: u64,                              // Size in bytes (0 for directories)
-    pub modified: u64,                          // Timestamp (seconds since UNIX_EPOCH)
-    pub folder_cover: Option<PathBuf>, // First image found in the folder (for preview)
-    pub drive_info: Option<DriveInfo>, // Drive metadata (optional)
-    pub sync_status: SyncStatus,       // OneDrive sync status
-    pub is_hidden: bool,               // Windows FILE_ATTRIBUTE_HIDDEN
+    pub name: String,                             // Cached name for fast sorting
+    pub is_dir: bool,                             // Folders first
+    pub size: u64,                                // Size in bytes (0 for directories)
+    pub modified: u64,                            // Timestamp (seconds since UNIX_EPOCH)
+    pub folder_cover: Option<PathBuf>,            // First image found in the folder (for preview)
+    pub drive_info: Option<DriveInfo>,            // Drive metadata (optional)
+    pub sync_status: SyncStatus,                  // OneDrive sync status
+    pub is_hidden: bool,                          // Windows FILE_ATTRIBUTE_HIDDEN
     pub recycle_bin: Option<Box<RecycleBinMeta>>, // Recycle Bin metadata (boxed, only set for recycle items)
 }
 
@@ -245,7 +245,11 @@ pub fn get_file_type_string(entry: &FileEntry) -> String {
         return t!("file_types.folder").to_string();
     }
     if let Some(ext) = entry.path.extension() {
-        return t!("file_info.file_generic", ext = ext.to_string_lossy().to_uppercase()).to_string();
+        return t!(
+            "file_info.file_generic",
+            ext = ext.to_string_lossy().to_uppercase()
+        )
+        .to_string();
     }
     t!("file_info.file_unknown").to_string()
 }
@@ -315,6 +319,8 @@ mod tests {
     #[test]
     fn ignores_regular_files_and_archive_roots() {
         assert!(!is_path_inside_archive(Path::new(r"C:\Temp\archive.zip")));
-        assert!(!is_path_inside_archive(Path::new(r"C:\Temp\folder\file.pdf")));
+        assert!(!is_path_inside_archive(Path::new(
+            r"C:\Temp\folder\file.pdf"
+        )));
     }
 }

@@ -90,7 +90,11 @@ pub fn read_directory_hdd_batched(
 
 /// Internal batched implementation — builds Vec<Vec<FileEntry>> during
 /// the FindFirstFileExW loop, avoiding the double-pass of collect-then-split.
-fn read_directory_impl_batched(path: &Path, is_onedrive: bool, show_hidden: bool) -> Result<Vec<Vec<FileEntry>>, String> {
+fn read_directory_impl_batched(
+    path: &Path,
+    is_onedrive: bool,
+    show_hidden: bool,
+) -> Result<Vec<Vec<FileEntry>>, String> {
     let search_path = if path.to_string_lossy().ends_with('\\') {
         format!("{}*", path.display())
     } else {
@@ -169,7 +173,11 @@ fn read_directory_impl_batched(path: &Path, is_onedrive: bool, show_hidden: bool
 }
 
 /// Internal implementation using Win32 APIs
-fn read_directory_impl(path: &Path, is_onedrive: bool, show_hidden: bool) -> Result<Vec<FileEntry>, String> {
+fn read_directory_impl(
+    path: &Path,
+    is_onedrive: bool,
+    show_hidden: bool,
+) -> Result<Vec<FileEntry>, String> {
     let search_path = if path.to_string_lossy().ends_with('\\') {
         format!("{}*", path.display())
     } else {

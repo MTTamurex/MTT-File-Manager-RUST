@@ -24,8 +24,8 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
 use std::time::Instant;
 
-use crate::app::dual_panel::{ActivePanel, PanelSnapshot};
 use crate::app::drive_state::DriveState;
+use crate::app::dual_panel::{ActivePanel, PanelSnapshot};
 use crate::app::file_operation_state::FileOperationState;
 use crate::app::folder_size_state::FolderSizeState;
 use crate::app::global_search_state::GlobalSearchState;
@@ -35,9 +35,9 @@ use crate::app::shortcuts::{ShortcutBindings, ShortcutEditorState};
 use crate::application::ClipboardManager;
 use crate::domain::file_entry::{FileEntry, FoldersPosition, SortMode, ViewMode};
 use crate::domain::thumbnail::ThumbnailData;
+use crate::infrastructure::app_state_db::AppStateDb;
 use crate::infrastructure::directory_cache::DirectoryCache;
 use crate::infrastructure::directory_index::DirectoryIndex;
-use crate::infrastructure::app_state_db::AppStateDb;
 use crate::infrastructure::disk_cache::ThumbnailDiskCache;
 use crate::infrastructure::windows as windows_infra;
 // use crate::ui::cache::CacheManager;
@@ -120,11 +120,11 @@ pub struct ImageViewerApp {
     pub sort_mode_normal: SortMode,   // Sort mode for normal folder views
     pub sort_descending: bool,        // true = Z-A, Newest, Largest
     pub folders_position: FoldersPosition, // First, Last, Mixed
-    pub show_hidden_files: bool,           // Show files with FILE_ATTRIBUTE_HIDDEN
-    pub show_recycle_bin: bool,             // Show Recycle Bin in Quick Access
-    pub collapse_quick_access: bool,        // Collapse Quick Access section in sidebar
-    pub collapse_local_disks: bool,         // Collapse Local Disks section in sidebar
-    pub collapse_network_drives: bool,      // Collapse Network Drives section in sidebar
+    pub show_hidden_files: bool,      // Show files with FILE_ATTRIBUTE_HIDDEN
+    pub show_recycle_bin: bool,       // Show Recycle Bin in Quick Access
+    pub collapse_quick_access: bool,  // Collapse Quick Access section in sidebar
+    pub collapse_local_disks: bool,   // Collapse Local Disks section in sidebar
+    pub collapse_network_drives: bool, // Collapse Network Drives section in sidebar
 
     // "Normal" (unlocked) state â€” these track what unlocked folders should use.
     // When a locked folder overrides active settings, these remain unchanged.
@@ -172,8 +172,7 @@ pub struct ImageViewerApp {
     pub metadata_cache: LruCache<PathBuf, (u64, windows_infra::MediaMetadata)>,
     pub metadata_loading: FxHashSet<PathBuf>,
     pub live_file_size_req_sender: Sender<crate::app::live_file_size::LiveFileSizeRequest>,
-    pub live_file_size_res_receiver:
-        Receiver<crate::app::live_file_size::LiveFileSizeResponse>,
+    pub live_file_size_res_receiver: Receiver<crate::app::live_file_size::LiveFileSizeResponse>,
     pub live_file_size_cache: LruCache<PathBuf, (u64, u64)>,
     pub live_file_size_loading: FxHashSet<PathBuf>,
     pub last_metadata_refresh: Instant,
@@ -253,8 +252,10 @@ pub struct ImageViewerApp {
     /// Avoids repeated `GetVolumeInformationW` cost during frequent watcher reconfiguration.
     pub watcher_fs_probe_cache: std::collections::HashMap<char, WatcherFsProbeCacheEntry>,
     /// Async consistency probe for non-USN drives (avoids blocking UI thread)
-    pub consistency_probe_tx: Sender<super::init_workers::consistency_probe_worker::ConsistencyProbeRequest>,
-    pub consistency_probe_rx: Receiver<super::init_workers::consistency_probe_worker::ConsistencyProbeResult>,
+    pub consistency_probe_tx:
+        Sender<super::init_workers::consistency_probe_worker::ConsistencyProbeRequest>,
+    pub consistency_probe_rx:
+        Receiver<super::init_workers::consistency_probe_worker::ConsistencyProbeResult>,
 
     // CLIPBOARD (Copy/Cut/Paste)
     pub clipboard: ClipboardManager,
@@ -262,9 +263,11 @@ pub struct ImageViewerApp {
     // CONTEXT MENU STATE
     pub context_menu: ContextMenuState,
     /// Channel to send requests to the shell menu background thread (async extraction).
-    pub shell_menu_req_tx: std::sync::mpsc::Sender<crate::infrastructure::shell_menu_worker::ShellMenuRequest>,
+    pub shell_menu_req_tx:
+        std::sync::mpsc::Sender<crate::infrastructure::shell_menu_worker::ShellMenuRequest>,
     /// Channel to receive results from the shell menu background thread.
-    pub shell_menu_res_rx: std::sync::mpsc::Receiver<crate::infrastructure::shell_menu_worker::ShellMenuResponse>,
+    pub shell_menu_res_rx:
+        std::sync::mpsc::Receiver<crate::infrastructure::shell_menu_worker::ShellMenuResponse>,
     /// True while the background thread is extracting shell items for the active menu.
     pub shell_menu_loading: bool,
     /// Monotonic id used to discard stale async shell-menu responses.
@@ -279,7 +282,7 @@ pub struct ImageViewerApp {
     // ASYNC ICON WORKER (avoids blocking I/O in the render loop)
     pub icon_req_sender: Sender<(PathBuf, usize)>, // UI â†’ Worker
     pub icon_res_receiver: Receiver<(PathBuf, usize, Vec<u8>, u32, u32)>, // Worker â†’ UI
-    pub loading_icons: FxHashSet<PathBuf>, // Tracking in-progress
+    pub loading_icons: FxHashSet<PathBuf>,         // Tracking in-progress
     pub loading_extensions: rustc_hash::FxHashSet<String>, // Dedup by extension (prevent 10x .dll requests)
     pub failed_icons: LruCache<PathBuf, ()>, // Icons that failed extraction (LRU bounded)
 
@@ -341,13 +344,13 @@ pub struct ImageViewerApp {
     pub dual_panel_enabled: bool,
     pub dual_panel_active: ActivePanel,
     pub dual_panel_inactive_state: Option<PanelSnapshot>,
-        /// When true, `request_thumbnail_load_internal` submits requests using
-        /// the active panel's generation (via `current_generation`) and at
-        /// `Prefetch` priority instead of the caller-supplied priority.  Set
-        /// during inactive panel rendering so thumbnails are loaded into the
-        /// shared `texture_cache` without competing with the active panel's
-        /// Interactive-priority requests.
-        pub suppress_thumbnail_requests: bool,
+    /// When true, `request_thumbnail_load_internal` submits requests using
+    /// the active panel's generation (via `current_generation`) and at
+    /// `Prefetch` priority instead of the caller-supplied priority.  Set
+    /// during inactive panel rendering so thumbnails are loaded into the
+    /// shared `texture_cache` without competing with the active panel's
+    /// Interactive-priority requests.
+    pub suppress_thumbnail_requests: bool,
 
     // FOLDER SIZE CALCULATOR (async for details panel)
     pub folder_size_state: FolderSizeState,
@@ -450,8 +453,8 @@ pub struct ImageViewerApp {
     pub focus_lost_at: Option<Instant>,
 }
 
-pub mod sidebar_tree_state;
 mod helpers;
+pub mod sidebar_tree_state;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScrollRequest {

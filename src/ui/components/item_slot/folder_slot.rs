@@ -88,7 +88,10 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
         );
 
         // Icons are pre-loaded at startup — no placeholder needed.
-        if let Some(icon) = ctx.icon_loader.get_or_load_folder_path_icon(ui.ctx(), &item.path.to_string_lossy()) {
+        if let Some(icon) = ctx
+            .icon_loader
+            .get_or_load_folder_path_icon(ui.ctx(), &item.path.to_string_lossy())
+        {
             paint_texture_centered(ui, icon.id(), icon.size_vec2(), special_rect);
         }
     } else {
@@ -101,7 +104,8 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
         } else {
             ctx.folder_preview_cache.get(&item.path)
         };
-        let is_loading = !ctx.is_recycle_bin_view && ctx.folder_preview_loading.contains(&item.path);
+        let is_loading =
+            !ctx.is_recycle_bin_view && ctx.folder_preview_loading.contains(&item.path);
 
         if let Some(tex) = native_preview {
             // If we have the native preview, draw maintaining aspect ratio and centering

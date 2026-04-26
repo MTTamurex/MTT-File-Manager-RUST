@@ -13,8 +13,6 @@ const ACTION_BTN_WIDTH: f32 = 52.0;
 const ACTION_BTN_HEIGHT: f32 = 22.0;
 const ACTION_BTN_GAP: f32 = 4.0;
 
-
-
 #[inline]
 fn cache_key_for_icon(path: &std::path::Path, size: IconSize) -> String {
     format!("{}_{:?}", path.to_string_lossy(), size)
@@ -27,18 +25,15 @@ fn lookup_icon_with_size_guard(
     path: &std::path::Path,
     is_dir: bool,
 ) -> Option<egui::TextureHandle> {
-    if let Some(icon) = app
-        .item_icon_loader
-        .get_or_load_icon_sized(ctx, path, IconSize::Large, is_dir, false)
+    if let Some(icon) =
+        app.item_icon_loader
+            .get_or_load_icon_sized(ctx, path, IconSize::Large, is_dir, false)
     {
         return Some(icon);
     }
 
     let small_key = cache_key_for_icon(path, IconSize::Small);
-    app.item_icon_loader
-        .icon_cache
-        .get(&small_key)
-        .cloned()
+    app.item_icon_loader.icon_cache.get(&small_key).cloned()
 }
 
 #[inline]
@@ -113,12 +108,8 @@ fn paint_action_button(
     };
 
     ui.painter().rect_filled(rect, 4.0, visuals.bg_fill);
-    ui.painter().rect_stroke(
-        rect,
-        4.0,
-        visuals.bg_stroke,
-        egui::StrokeKind::Inside,
-    );
+    ui.painter()
+        .rect_stroke(rect, 4.0, visuals.bg_stroke, egui::StrokeKind::Inside);
     ui.painter().text(
         rect.center(),
         egui::Align2::CENTER_CENTER,
@@ -142,11 +133,8 @@ pub(super) fn render_result_row(
     open_file_label: &str,
     activate_result: &mut Option<ResultAction>,
 ) {
-    let Some((full_path, result_name, is_dir, size)) = app
-        .global_search
-        .results
-        .get(source_idx)
-        .map(|result| {
+    let Some((full_path, result_name, is_dir, size)) =
+        app.global_search.results.get(source_idx).map(|result| {
             (
                 result.full_path.clone(),
                 result.name.clone(),
@@ -261,7 +249,10 @@ pub(super) fn render_result_row(
     }
 
     let icon_rect = egui::Rect::from_min_size(
-        egui::pos2(content_rect.left(), content_rect.center().y - ICON_SIZE * 0.5),
+        egui::pos2(
+            content_rect.left(),
+            content_rect.center().y - ICON_SIZE * 0.5,
+        ),
         egui::vec2(ICON_SIZE, ICON_SIZE),
     );
     if let Some(icon) = icon_tex {
@@ -306,10 +297,7 @@ pub(super) fn render_result_row(
     let path_max_w = (text_right - path_left).max(0.0);
     if path_max_w > 8.0 {
         let display_path = crate::ui::views::list_view::truncate_text_for_column(
-            &full_path,
-            path_max_w,
-            &meta_font,
-            ui,
+            &full_path, path_max_w, &meta_font, ui,
         );
         ui.painter().text(
             egui::pos2(path_left, meta_y),
@@ -342,31 +330,36 @@ pub(super) fn render_result_row(
             // size_cache never gets warmed. Warm size_cache explicitly first.
             if !is_dir && size == 0 && app.global_search.size_cache.get(&full_path).is_none() {
                 if let Ok(meta) = std::fs::metadata(&full_path) {
-                    app.global_search.size_cache.put(full_path.clone(), Some(meta.len()));
+                    app.global_search
+                        .size_cache
+                        .put(full_path.clone(), Some(meta.len()));
                 }
             }
 
             // Warm caches first: this reads fs::metadata and populates both
             // metadata_cache and size_cache, ensuring resolve_result_size
             // sees fresh data when size == 0.
-            let modified_ts = if let Some(&cached_ts) = app.global_search.metadata_cache.get(&full_path) {
-                cached_ts
-            } else {
-                let meta = std::fs::metadata(&full_path).ok();
-                let ts = meta
-                    .as_ref()
-                    .and_then(|m| m.modified().ok())
-                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                    .map(|d| d.as_secs())
-                    .unwrap_or(0);
-                if !is_dir {
-                    if let Some(len) = meta.as_ref().map(|m| m.len()) {
-                        app.global_search.size_cache.put(full_path.clone(), Some(len));
+            let modified_ts =
+                if let Some(&cached_ts) = app.global_search.metadata_cache.get(&full_path) {
+                    cached_ts
+                } else {
+                    let meta = std::fs::metadata(&full_path).ok();
+                    let ts = meta
+                        .as_ref()
+                        .and_then(|m| m.modified().ok())
+                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0);
+                    if !is_dir {
+                        if let Some(len) = meta.as_ref().map(|m| m.len()) {
+                            app.global_search
+                                .size_cache
+                                .put(full_path.clone(), Some(len));
+                        }
                     }
-                }
-                app.global_search.metadata_cache.put(full_path.clone(), ts);
-                ts
-            };
+                    app.global_search.metadata_cache.put(full_path.clone(), ts);
+                    ts
+                };
 
             let size_opt = actions::resolve_result_size(app, &full_path, is_dir, size);
             let size_text = size_opt.map(crate::infrastructure::windows::format_size);
@@ -374,12 +367,16 @@ pub(super) fn render_result_row(
                 let p = std::path::PathBuf::from(&full_path);
                 let is_media = p
                     .extension()
-                    .map(|ext| crate::infrastructure::windows::is_media_extension(&ext.to_string_lossy()))
+                    .map(|ext| {
+                        crate::infrastructure::windows::is_media_extension(&ext.to_string_lossy())
+                    })
                     .unwrap_or(false);
                 if is_media {
                     if let Some(tex) = app.cache_manager.get_thumbnail(&p) {
                         Some(tex.clone())
-                    } else if let Some(tex) = app.global_search.tooltip_texture_cache.get(&full_path) {
+                    } else if let Some(tex) =
+                        app.global_search.tooltip_texture_cache.get(&full_path)
+                    {
                         Some(tex.clone())
                     } else if let Some(entry) = app.disk_cache.get_latest(&p) {
                         if let Ok(img) = image::load_from_memory_with_format(
@@ -393,7 +390,9 @@ pub(super) fn render_result_row(
                                 egui::ColorImage::from_rgba_unmultiplied(size, &rgba),
                                 egui::TextureOptions::LINEAR,
                             );
-                            app.global_search.tooltip_texture_cache.put(full_path.clone(), tex.clone());
+                            app.global_search
+                                .tooltip_texture_cache
+                                .put(full_path.clone(), tex.clone());
                             Some(tex)
                         } else {
                             None
@@ -408,51 +407,49 @@ pub(super) fn render_result_row(
                 None
             };
 
-          if let Some(mouse_pos) = ui.input(|i| i.pointer.hover_pos()) {
-            let tooltip_layer =
-                egui::LayerId::new(egui::Order::Tooltip, row_resp.id.with("tooltip"));
-            egui::show_tooltip_at(
-                ui.ctx(),
-                tooltip_layer,
-                row_resp.id,
-                mouse_pos,
-                |ui: &mut egui::Ui| {
-                    ui.set_max_width(300.0);
-                    ui.vertical(|ui| {
-                        ui.label(egui::RichText::new(&result_name).strong());
-                        ui.separator();
-                        if let Some(tex) = &thumb_tex {
-                            let tex_size = tex.size_vec2();
-                            let max_w = 280.0_f32;
-                            let max_h = 180.0_f32;
-                            let scale = (max_w / tex_size.x).min(max_h / tex_size.y).min(1.0);
-                            let display_size = egui::vec2(tex_size.x * scale, tex_size.y * scale);
-                            ui.with_layout(
-                                egui::Layout::top_down(egui::Align::Center),
-                                |ui| {
+            if let Some(mouse_pos) = ui.input(|i| i.pointer.hover_pos()) {
+                let tooltip_layer =
+                    egui::LayerId::new(egui::Order::Tooltip, row_resp.id.with("tooltip"));
+                egui::show_tooltip_at(
+                    ui.ctx(),
+                    tooltip_layer,
+                    row_resp.id,
+                    mouse_pos,
+                    |ui: &mut egui::Ui| {
+                        ui.set_max_width(300.0);
+                        ui.vertical(|ui| {
+                            ui.label(egui::RichText::new(&result_name).strong());
+                            ui.separator();
+                            if let Some(tex) = &thumb_tex {
+                                let tex_size = tex.size_vec2();
+                                let max_w = 280.0_f32;
+                                let max_h = 180.0_f32;
+                                let scale = (max_w / tex_size.x).min(max_h / tex_size.y).min(1.0);
+                                let display_size =
+                                    egui::vec2(tex_size.x * scale, tex_size.y * scale);
+                                ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
                                     ui.add(egui::Image::new(tex).fit_to_exact_size(display_size));
-                                },
-                            );
-                            ui.add_space(4.0);
-                        }
-                        ui.horizontal(|ui| {
-                            ui.label(t!("file_info.type"));
-                            ui.label(&file_type);
-                        });
-                        if !is_dir {
+                                });
+                                ui.add_space(4.0);
+                            }
                             ui.horizontal(|ui| {
-                                ui.label(t!("file_info.size"));
-                                ui.label(size_text.as_deref().unwrap_or("-"));
+                                ui.label(t!("file_info.type"));
+                                ui.label(&file_type);
                             });
-                        }
-                        ui.horizontal(|ui| {
-                            ui.label(t!("file_info.date_modified"));
-                            ui.label(crate::infrastructure::windows::format_date(modified_ts));
+                            if !is_dir {
+                                ui.horizontal(|ui| {
+                                    ui.label(t!("file_info.size"));
+                                    ui.label(size_text.as_deref().unwrap_or("-"));
+                                });
+                            }
+                            ui.horizontal(|ui| {
+                                ui.label(t!("file_info.date_modified"));
+                                ui.label(crate::infrastructure::windows::format_date(modified_ts));
+                            });
                         });
-                    });
-                },
-            );
-          } // if let Some(mouse_pos)
+                    },
+                );
+            } // if let Some(mouse_pos)
         }
     } else {
         let hover_id = egui::Id::new("global_search_hover_start").with(&full_path);

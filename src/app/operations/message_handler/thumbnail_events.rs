@@ -30,9 +30,7 @@ impl ImageViewerApp {
                 if snapshot.is_loading_folder
                     && snapshot.loading_started_at.elapsed().as_secs() > 30
                 {
-                    log::warn!(
-                        "[FOLDER-LOADING] TIMEOUT: Inactive panel loading timed out"
-                    );
+                    log::warn!("[FOLDER-LOADING] TIMEOUT: Inactive panel loading timed out");
                     snapshot.is_loading_folder = false;
                 }
             }
@@ -74,9 +72,7 @@ impl ImageViewerApp {
                                 self.stale_items_snapshot = Some(
                                     self.all_items
                                         .iter()
-                                        .map(|item| {
-                                            (item.path.clone(), (item.modified, item.size))
-                                        })
+                                        .map(|item| (item.path.clone(), (item.modified, item.size)))
                                         .collect(),
                                 );
                                 self.all_items.clear();
@@ -210,8 +206,7 @@ impl ImageViewerApp {
                     app.all_items.clear();
                     app.pending_all_items_clear = false;
                 }
-                app.pending_items_count =
-                    app.pending_items_count.saturating_add(batch.len());
+                app.pending_items_count = app.pending_items_count.saturating_add(batch.len());
                 app.pending_items_rebuild = true;
                 app.all_items.extend(batch);
             }

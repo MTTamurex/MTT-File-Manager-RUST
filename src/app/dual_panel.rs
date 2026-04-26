@@ -177,8 +177,14 @@ impl PanelSnapshot {
     pub fn swap_with_app(&mut self, app: &mut crate::app::state::ImageViewerApp) {
         std::mem::swap(&mut self.path, &mut app.navigation_state.current_path);
         std::mem::swap(&mut self.path_input, &mut app.navigation_state.path_input);
-        std::mem::swap(&mut self.is_computer_view, &mut app.navigation_state.is_computer_view);
-        std::mem::swap(&mut self.is_recycle_bin_view, &mut app.navigation_state.is_recycle_bin_view);
+        std::mem::swap(
+            &mut self.is_computer_view,
+            &mut app.navigation_state.is_computer_view,
+        );
+        std::mem::swap(
+            &mut self.is_recycle_bin_view,
+            &mut app.navigation_state.is_recycle_bin_view,
+        );
         std::mem::swap(&mut self.navigation, &mut app.navigation_state.navigation);
         std::mem::swap(&mut self.items, &mut app.items);
         std::mem::swap(&mut self.all_items, &mut app.all_items);
@@ -203,11 +209,20 @@ impl PanelSnapshot {
         std::mem::swap(&mut self.focus_rename, &mut app.focus_rename);
         std::mem::swap(&mut self.generation, &mut app.generation);
         std::mem::swap(&mut self.current_generation, &mut app.current_generation);
-        std::mem::swap(&mut self.pending_all_items_clear, &mut app.pending_all_items_clear);
-        std::mem::swap(&mut self.pending_items_rebuild, &mut app.pending_items_rebuild);
+        std::mem::swap(
+            &mut self.pending_all_items_clear,
+            &mut app.pending_all_items_clear,
+        );
+        std::mem::swap(
+            &mut self.pending_items_rebuild,
+            &mut app.pending_items_rebuild,
+        );
         std::mem::swap(&mut self.pending_items_count, &mut app.pending_items_count);
         std::mem::swap(&mut self.loading_started_at, &mut app.loading_started_at);
         std::mem::swap(&mut self.last_items_rebuild, &mut app.last_items_rebuild);
-        std::mem::swap(&mut self.stale_items_snapshot, &mut app.stale_items_snapshot);
+        std::mem::swap(
+            &mut self.stale_items_snapshot,
+            &mut app.stale_items_snapshot,
+        );
     }
 }

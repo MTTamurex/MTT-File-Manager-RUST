@@ -207,7 +207,8 @@ impl ImageViewerApp {
         if let Some(ext) = path.extension() {
             let ext_lower = ext.to_string_lossy().to_lowercase();
             if !crate::infrastructure::windows::icons::is_per_file_icon_ext(&ext_lower) {
-                let load_ext = crate::infrastructure::windows::icons::canonical_icon_ext(&ext_lower);
+                let load_ext =
+                    crate::infrastructure::windows::icons::canonical_icon_ext(&ext_lower);
                 if self.loading_extensions.contains(load_ext) {
                     return; // Another file with this ext is already in-flight.
                 }
@@ -216,7 +217,11 @@ impl ImageViewerApp {
         }
 
         self.loading_icons.insert(path.clone());
-        if self.icon_req_sender.send((path.clone(), self.generation)).is_err() {
+        if self
+            .icon_req_sender
+            .send((path.clone(), self.generation))
+            .is_err()
+        {
             self.loading_icons.remove(&path);
         }
     }

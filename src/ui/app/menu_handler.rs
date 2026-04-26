@@ -6,7 +6,8 @@ use std::sync::Arc;
 
 fn is_onedrive_pin_text(text: &str) -> bool {
     let lower = text.trim().to_lowercase();
-    lower.contains("always keep on this device") || lower.contains("sempre manter neste dispositivo")
+    lower.contains("always keep on this device")
+        || lower.contains("sempre manter neste dispositivo")
 }
 
 fn is_onedrive_free_text(text: &str) -> bool {
@@ -14,7 +15,9 @@ fn is_onedrive_free_text(text: &str) -> bool {
     lower.contains("free up space") || lower.contains("liberar espaço")
 }
 
-fn onedrive_pin_command_from_text(text: &str) -> Option<crate::infrastructure::onedrive::PinCommand> {
+fn onedrive_pin_command_from_text(
+    text: &str,
+) -> Option<crate::infrastructure::onedrive::PinCommand> {
     if is_onedrive_pin_text(text) {
         Some(crate::infrastructure::onedrive::PinCommand::AlwaysKeepOnDevice)
     } else if is_onedrive_free_text(text) {
@@ -59,7 +62,9 @@ fn apply_onedrive_pin(
             if let Err(e) = crate::infrastructure::onedrive::set_pin_state(path, command) {
                 log::warn!(
                     "[OneDrive] Failed to apply pin command {:?} to {:?}: {}",
-                    command, path, e
+                    command,
+                    path,
+                    e
                 );
             }
         }
@@ -98,15 +103,17 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
     // CRITICAL: std::mem::take cleared app.context_menu, so internal commands
     // that call app.context_target_paths() would find empty target_paths and
     // fall back to selected_item/selected_file (wrong target). Restore them.
-    app.context_menu.target_paths.clone_from(&context_menu.target_paths);
+    app.context_menu
+        .target_paths
+        .clone_from(&context_menu.target_paths);
 
     if let Some(id) = context_menu.selected_command_id.take() {
         if id > 0 {
             // Shell command
             let selected_shell_item_text = find_menu_item_text_by_id(&context_menu.items, id);
 
-            let direct_onedrive_pin_command = selected_shell_item_text
-                .and_then(onedrive_pin_command_from_text);
+            let direct_onedrive_pin_command =
+                selected_shell_item_text.and_then(onedrive_pin_command_from_text);
 
             if let Some(command) = direct_onedrive_pin_command {
                 let is_cloud_target = context_menu.target_paths.iter().any(|path| {
@@ -154,9 +161,13 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                         if crate::infrastructure::windows::is_drive_root_path(&path) {
                             // Inline rename in sidebar — don't navigate to Este Computador
                             let drive_path_str = path.to_string_lossy();
-                            let current_label = crate::infrastructure::windows::get_volume_label_raw(drive_path_str.as_ref())
+                            let current_label =
+                                crate::infrastructure::windows::get_volume_label_raw(
+                                    drive_path_str.as_ref(),
+                                )
                                 .unwrap_or_default();
-                            app.sidebar_renaming = Some((drive_path_str.into_owned(), current_label));
+                            app.sidebar_renaming =
+                                Some((drive_path_str.into_owned(), current_label));
                             app.sidebar_rename_focus = true;
                         } else {
                             app.begin_rename_path(&path);
@@ -185,9 +196,9 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                         let target = if app.context_target_is_directory(item_idx, &path) {
                             path
                         } else {
-                            path.parent()
-                                .map(Path::to_path_buf)
-                                .unwrap_or_else(|| PathBuf::from(&app.navigation_state.current_path))
+                            path.parent().map(Path::to_path_buf).unwrap_or_else(|| {
+                                PathBuf::from(&app.navigation_state.current_path)
+                            })
                         };
 
                         let prev_view_mode = app.view_mode;
@@ -224,16 +235,24 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                                 app.load_folder(false);
                                 app.notifications
                                     .push(crate::application::AppNotification::info(
-                                        t!("operations.shortcut_created", name = created
-                                            .file_name()
-                                            .map(|n| n.to_string_lossy().to_string())
-                                            .unwrap_or_default()).to_string(),
+                                        t!(
+                                            "operations.shortcut_created",
+                                            name = created
+                                                .file_name()
+                                                .map(|n| n.to_string_lossy().to_string())
+                                                .unwrap_or_default()
+                                        )
+                                        .to_string(),
                                     ));
                             }
                             Err(e) => {
                                 app.notifications
                                     .push(crate::application::AppNotification::error(
-                                        t!("operations.shortcut_create_failed", error = e.to_string()).to_string(),
+                                        t!(
+                                            "operations.shortcut_create_failed",
+                                            error = e.to_string()
+                                        )
+                                        .to_string(),
                                     ));
                             }
                         }
@@ -253,7 +272,8 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 -54 => app.empty_recycle_bin(),
                 -60 => {
                     // L-12: .to_string() breaks the Cow borrow before the mutable call
-                    let path = app.context_target_paths(item_idx)
+                    let path = app
+                        .context_target_paths(item_idx)
                         .first()
                         .and_then(|p| p.to_str())
                         .map(|s| s.to_string());
@@ -262,7 +282,8 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                     }
                 }
                 -61 => {
-                    let path = app.context_target_paths(item_idx)
+                    let path = app
+                        .context_target_paths(item_idx)
                         .first()
                         .and_then(|p| p.to_str())
                         .map(|s| s.to_string());
@@ -272,11 +293,19 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 }
                 // OneDrive: "Always keep on this device"
                 -70 => {
-                    apply_onedrive_pin(app, &context_menu.target_paths, crate::infrastructure::onedrive::PinCommand::AlwaysKeepOnDevice);
+                    apply_onedrive_pin(
+                        app,
+                        &context_menu.target_paths,
+                        crate::infrastructure::onedrive::PinCommand::AlwaysKeepOnDevice,
+                    );
                 }
                 // OneDrive: "Free up space"
                 -71 => {
-                    apply_onedrive_pin(app, &context_menu.target_paths, crate::infrastructure::onedrive::PinCommand::FreeUpSpace);
+                    apply_onedrive_pin(
+                        app,
+                        &context_menu.target_paths,
+                        crate::infrastructure::onedrive::PinCommand::FreeUpSpace,
+                    );
                 }
                 _ => {}
             }
@@ -285,9 +314,9 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
     } else if !context_menu.is_open {
         // Menu was dismissed without any command being invoked (Escape / click outside).
         // Tell the worker to release its COM context.
-        let _ = app.shell_menu_req_tx.send(
-            crate::infrastructure::shell_menu_worker::ShellMenuRequest::Cancel,
-        );
+        let _ = app
+            .shell_menu_req_tx
+            .send(crate::infrastructure::shell_menu_worker::ShellMenuRequest::Cancel);
         app.shell_menu_loading = false;
     }
     app.context_menu = context_menu;

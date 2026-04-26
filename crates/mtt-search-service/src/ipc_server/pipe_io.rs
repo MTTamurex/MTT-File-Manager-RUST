@@ -1,18 +1,15 @@
 use windows::core::{PCWSTR, PWSTR};
-use windows::Win32::Foundation::{GetLastError, HANDLE, HLOCAL, LocalFree};
+use windows::Win32::Foundation::{GetLastError, LocalFree, HANDLE, HLOCAL};
 use windows::Win32::Security::Authorization::{
-    EXPLICIT_ACCESS_W, SET_ACCESS, SetEntriesInAclW, TRUSTEE_IS_SID, TRUSTEE_IS_USER,
+    SetEntriesInAclW, EXPLICIT_ACCESS_W, SET_ACCESS, TRUSTEE_IS_SID, TRUSTEE_IS_USER,
     TRUSTEE_IS_WELL_KNOWN_GROUP, TRUSTEE_W,
 };
 use windows::Win32::Security::{
-    AllocateAndInitializeSid, FreeSid, InitializeSecurityDescriptor,
-    SetSecurityDescriptorDacl, ACL, PSECURITY_DESCRIPTOR, PSID, SECURITY_ATTRIBUTES,
-    SID_IDENTIFIER_AUTHORITY,
+    AllocateAndInitializeSid, FreeSid, InitializeSecurityDescriptor, SetSecurityDescriptorDacl,
+    ACL, PSECURITY_DESCRIPTOR, PSID, SECURITY_ATTRIBUTES, SID_IDENTIFIER_AUTHORITY,
 };
 use windows::Win32::Storage::FileSystem::{ReadFile, WriteFile};
-use windows::Win32::System::Pipes::{
-    CreateNamedPipeW, PIPE_REJECT_REMOTE_CLIENTS, PIPE_WAIT,
-};
+use windows::Win32::System::Pipes::{CreateNamedPipeW, PIPE_REJECT_REMOTE_CLIENTS, PIPE_WAIT};
 
 use windows::Win32::Storage::FileSystem::FILE_FLAGS_AND_ATTRIBUTES;
 
@@ -70,13 +67,13 @@ impl SidGuard {
     }
 
     fn as_trustee_name(&self) -> PWSTR {
-        PWSTR(self.0.0.cast())
+        PWSTR(self.0 .0.cast())
     }
 }
 
 impl Drop for SidGuard {
     fn drop(&mut self) {
-        if !self.0.0.is_null() {
+        if !self.0 .0.is_null() {
             unsafe {
                 let _ = FreeSid(self.0);
             }
@@ -91,7 +88,10 @@ impl AclGuard {
         let mut acl = std::ptr::null_mut::<ACL>();
         let result = unsafe { SetEntriesInAclW(Some(entries), None, &mut acl) };
         if result.0 != 0 {
-            return Err(format!("SetEntriesInAclW failed with error code {}", result.0));
+            return Err(format!(
+                "SetEntriesInAclW failed with error code {}",
+                result.0
+            ));
         }
 
         Ok(Self(acl))

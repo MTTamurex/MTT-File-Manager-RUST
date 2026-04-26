@@ -77,7 +77,12 @@ impl ImageViewerApp {
 
         // Non-USN filesystem: check if we already learned this drive is unreliable.
         let already_known_bad = drive_letter
-            .map(|dl| self.rdcw_unreliable_drives.get(&dl).copied().unwrap_or(false))
+            .map(|dl| {
+                self.rdcw_unreliable_drives
+                    .get(&dl)
+                    .copied()
+                    .unwrap_or(false)
+            })
             .unwrap_or(false);
 
         if already_known_bad {
@@ -94,7 +99,8 @@ impl ImageViewerApp {
             self.watcher_fallback_polling = true;
             log::info!(
                 "[WATCHER] Drive {:?} (fs={:?}): RDCW unverified → verification probing active",
-                drive_letter, fs_name
+                drive_letter,
+                fs_name
             );
         }
 
@@ -111,7 +117,10 @@ impl ImageViewerApp {
 
         // Skip virtual views that aren't real filesystem paths (e.g. "Lixeira", "Computador").
         if self.navigation_state.is_recycle_bin_view || self.navigation_state.is_computer_view {
-            log::debug!("[WATCHER] Skipping watch for virtual view: {}", current_path);
+            log::debug!(
+                "[WATCHER] Skipping watch for virtual view: {}",
+                current_path
+            );
             return;
         }
 

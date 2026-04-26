@@ -37,130 +37,130 @@ impl ImageViewerApp {
         let _ = std::thread::Builder::new()
             .name("folder-load-pipeline".to_string())
             .spawn(move || {
-            // Immediate generation check: if a newer load was already started
-            // before this thread was scheduled, exit instantly without doing
-            // any I/O. This prevents stale thread buildup from rapid navigation.
-            if gen_clone.load(std::sync::atomic::Ordering::Relaxed) != my_gen {
-                return;
-            }
+                // Immediate generation check: if a newer load was already started
+                // before this thread was scheduled, exit instantly without doing
+                // any I/O. This prevents stale thread buildup from rapid navigation.
+                if gen_clone.load(std::sync::atomic::Ordering::Relaxed) != my_gen {
+                    return;
+                }
 
-            let scan_start = std::time::Instant::now();
+                let scan_start = std::time::Instant::now();
 
-            let base_path = if current_path.len() == 2 && current_path.ends_with(':') {
-                format!("{}\\", current_path)
-            } else {
-                current_path.clone()
-            };
+                let base_path = if current_path.len() == 2 && current_path.ends_with(':') {
+                    format!("{}\\", current_path)
+                } else {
+                    current_path.clone()
+                };
 
-            let is_ssd = io_priority::is_ssd(&PathBuf::from(&current_path));
-            let config = AdaptiveBatchConfig {
-                is_ssd,
-                total_items: directory_index_opt
-                    .as_ref()
-                    .and_then(|di| di.get_directory(&PathBuf::from(&base_path)))
-                    .map(|(meta, _)| meta.file_count),
-            };
-            let mut batch_tracker = AdaptiveBatchTracker::new(config);
-            let mut batch_size = batch_tracker.batch_size();
+                let is_ssd = io_priority::is_ssd(&PathBuf::from(&current_path));
+                let config = AdaptiveBatchConfig {
+                    is_ssd,
+                    total_items: directory_index_opt
+                        .as_ref()
+                        .and_then(|di| di.get_directory(&PathBuf::from(&base_path)))
+                        .map(|(meta, _)| meta.file_count),
+                };
+                let mut batch_tracker = AdaptiveBatchTracker::new(config);
+                let mut batch_size = batch_tracker.batch_size();
 
-            // STALE-WHILE-REVALIDATE STRATEGY: Instant feedback via DirectoryCache
-            let base_path_buf = PathBuf::from(&base_path);
-            // PERFORMANCE: Only use is_onedrive_path() which is string-based (no I/O)
-            // path_has_cloud_attributes() was removed because GetFileAttributesW can BLOCK
-            // indefinitely on cloud-only OneDrive folders
-            let is_onedrive_base = onedrive::is_onedrive_path(&base_path_buf);
-            let prefer_reliable_scan = directory_dirty_registry.is_dirty(base_path_buf.as_path())
-                || (!is_onedrive_base
-                    && !crate::infrastructure::windows::path_is_usn_filesystem(
-                        base_path_buf.as_path(),
-                    )
-                    .unwrap_or(true));
-            let mut batch = Vec::with_capacity(batch_size);
-            let mut all_entries_disk: Vec<FileEntry> = Vec::new();
-            let mut batch_start = std::time::Instant::now();
-            if fast_paths::try_handle_fast_paths(
-                my_gen,
-                &gen_clone,
-                &current_path,
-                force_refresh,
-                &base_path,
-                &base_path_buf,
-                is_ssd,
-                is_onedrive_base,
-                &mut batch_size,
-                &mut batch_tracker,
-                &mut batch_start,
-                &file_entry_sender,
-                &ctx,
-                &disk_cache,
-                &app_state_db,
-                &directory_cache,
-                &directory_dirty_registry,
-                &directory_index_opt,
-                show_hidden,
-            ) {
-                return;
-            }
+                // STALE-WHILE-REVALIDATE STRATEGY: Instant feedback via DirectoryCache
+                let base_path_buf = PathBuf::from(&base_path);
+                // PERFORMANCE: Only use is_onedrive_path() which is string-based (no I/O)
+                // path_has_cloud_attributes() was removed because GetFileAttributesW can BLOCK
+                // indefinitely on cloud-only OneDrive folders
+                let is_onedrive_base = onedrive::is_onedrive_path(&base_path_buf);
+                let prefer_reliable_scan = directory_dirty_registry
+                    .is_dirty(base_path_buf.as_path())
+                    || (!is_onedrive_base
+                        && !crate::infrastructure::windows::path_is_usn_filesystem(
+                            base_path_buf.as_path(),
+                        )
+                        .unwrap_or(true));
+                let mut batch = Vec::with_capacity(batch_size);
+                let mut all_entries_disk: Vec<FileEntry> = Vec::new();
+                let mut batch_start = std::time::Instant::now();
+                if fast_paths::try_handle_fast_paths(
+                    my_gen,
+                    &gen_clone,
+                    &current_path,
+                    force_refresh,
+                    &base_path,
+                    &base_path_buf,
+                    is_ssd,
+                    is_onedrive_base,
+                    &mut batch_size,
+                    &mut batch_tracker,
+                    &mut batch_start,
+                    &file_entry_sender,
+                    &ctx,
+                    &disk_cache,
+                    &app_state_db,
+                    &directory_cache,
+                    &directory_dirty_registry,
+                    &directory_index_opt,
+                    show_hidden,
+                ) {
+                    return;
+                }
 
-            if optimized_tiers::try_handle_optimized_tiers(
-                my_gen,
-                &gen_clone,
-                &scan_start,
-                &base_path,
-                is_ssd,
-                is_onedrive_base,
-                prefer_reliable_scan,
-                &mut batch_size,
-                &mut batch_tracker,
-                &mut batch_start,
-                &mut batch,
-                &mut all_entries_disk,
-                &file_entry_sender,
-                &ctx,
-                &disk_cache,
-                &app_state_db,
-                &directory_cache,
-                &directory_dirty_registry,
-                &directory_index_opt,
-                show_hidden,
-            ) {
-                return;
-            }
+                if optimized_tiers::try_handle_optimized_tiers(
+                    my_gen,
+                    &gen_clone,
+                    &scan_start,
+                    &base_path,
+                    is_ssd,
+                    is_onedrive_base,
+                    prefer_reliable_scan,
+                    &mut batch_size,
+                    &mut batch_tracker,
+                    &mut batch_start,
+                    &mut batch,
+                    &mut all_entries_disk,
+                    &file_entry_sender,
+                    &ctx,
+                    &disk_cache,
+                    &app_state_db,
+                    &directory_cache,
+                    &directory_dirty_registry,
+                    &directory_index_opt,
+                    show_hidden,
+                ) {
+                    return;
+                }
 
-            tier3_fallback::run_tier3_fallback(
-                my_gen,
-                &gen_clone,
-                &scan_start,
-                &current_path,
-                &base_path,
-                is_onedrive_base,
-                &mut batch_size,
-                &mut batch_tracker,
-                &mut batch_start,
-                &mut batch,
-                &mut all_entries_disk,
-                &file_entry_sender,
-                &ctx,
-                &disk_cache,
-                &app_state_db,
-                &directory_cache,
-                &directory_dirty_registry,
-                &directory_index_opt,
-                show_hidden,
-            );
-            // DISABLED: Direct subdirectory prefetch (testing HDD I/O impact)
-            // if !is_ssd && gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
-            //     let subdirs: Vec<PathBuf> = all_entries_disk
-            //         .iter()
-            //         .filter(|e| e.is_dir)
-            //         .take(5)
-            //         .map(|e| e.path.clone())
-            //         .collect();
-            //     if !subdirs.is_empty() {
-            //         let _ = prefetch_sender.send(PrefetchMessage::Prefetch(subdirs));
-            //     }
-            // }
-        });
+                tier3_fallback::run_tier3_fallback(
+                    my_gen,
+                    &gen_clone,
+                    &scan_start,
+                    &current_path,
+                    &base_path,
+                    is_onedrive_base,
+                    &mut batch_size,
+                    &mut batch_tracker,
+                    &mut batch_start,
+                    &mut batch,
+                    &mut all_entries_disk,
+                    &file_entry_sender,
+                    &ctx,
+                    &disk_cache,
+                    &app_state_db,
+                    &directory_cache,
+                    &directory_dirty_registry,
+                    &directory_index_opt,
+                    show_hidden,
+                );
+                // DISABLED: Direct subdirectory prefetch (testing HDD I/O impact)
+                // if !is_ssd && gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
+                //     let subdirs: Vec<PathBuf> = all_entries_disk
+                //         .iter()
+                //         .filter(|e| e.is_dir)
+                //         .take(5)
+                //         .map(|e| e.path.clone())
+                //         .collect();
+                //     if !subdirs.is_empty() {
+                //         let _ = prefetch_sender.send(PrefetchMessage::Prefetch(subdirs));
+                //     }
+                // }
+            });
     }
 }
-

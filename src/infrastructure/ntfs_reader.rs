@@ -46,7 +46,9 @@ pub fn read_directory_fast(dir_path: &Path) -> Option<Vec<DirectoryEntry>> {
     struct HandleGuard(HANDLE);
     impl Drop for HandleGuard {
         fn drop(&mut self) {
-            unsafe { let _ = CloseHandle(self.0); }
+            unsafe {
+                let _ = CloseHandle(self.0);
+            }
         }
     }
 
@@ -144,7 +146,7 @@ pub fn read_directory_fast(dir_path: &Path) -> Option<Vec<DirectoryEntry>> {
                 entries.push(DirectoryEntry {
                     name,
                     is_dir,
-                    size: entry.end_of_file.max(0) as u64,  // M-14: guard against negative value from corrupted NTFS metadata
+                    size: entry.end_of_file.max(0) as u64, // M-14: guard against negative value from corrupted NTFS metadata
                     modified,
                     attributes: entry.file_attributes,
                 });

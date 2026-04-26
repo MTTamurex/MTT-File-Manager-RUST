@@ -158,12 +158,18 @@ mod tests {
         history.navigate_to("2".to_string());
         history.navigate_to("3".to_string());
 
-        assert_eq!(history.recent_paths(5), vec!["2".to_string(), "1".to_string()]);
+        assert_eq!(
+            history.recent_paths(5),
+            vec!["2".to_string(), "1".to_string()]
+        );
 
         history.go_back();
 
         assert_eq!(history.current_path(), Some(&"2".to_string()));
-        assert_eq!(history.recent_paths(5), vec!["3".to_string(), "1".to_string()]);
+        assert_eq!(
+            history.recent_paths(5),
+            vec!["3".to_string(), "1".to_string()]
+        );
     }
 
     #[test]
@@ -174,6 +180,9 @@ mod tests {
         history.navigate_to("2".to_string());
 
         assert_eq!(history.current_path(), Some(&"2".to_string()));
-        assert_eq!(history.recent_paths(5), vec!["3".to_string(), "1".to_string()]);
+        assert_eq!(
+            history.recent_paths(5),
+            vec!["3".to_string(), "1".to_string()]
+        );
     }
 }

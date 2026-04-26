@@ -50,13 +50,11 @@ fn validate_pdf_path(path: &Path) -> Result<(), String> {
             component,
             std::path::Component::ParentDir | std::path::Component::CurDir
         ) {
-            return Err(
-                rust_i18n::t!(
-                    "pdfviewer.invalid_traversal",
-                    component = component.as_os_str().to_string_lossy().to_string()
-                )
-                .to_string(),
-            );
+            return Err(rust_i18n::t!(
+                "pdfviewer.invalid_traversal",
+                component = component.as_os_str().to_string_lossy().to_string()
+            )
+            .to_string());
         }
     }
 
@@ -69,40 +67,35 @@ fn validate_pdf_path(path: &Path) -> Result<(), String> {
     }
 
     // 4. Extension check
-    let ext = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("");
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
     if !ext.eq_ignore_ascii_case("pdf") {
         return Err(rust_i18n::t!("pdfviewer.invalid_extension", ext = ext).to_string());
     }
 
     // 5. File existence
     if !path.is_file() {
-        return Err(
-            rust_i18n::t!("pdfviewer.file_not_found", path = path.display().to_string())
-                .to_string(),
-        );
+        return Err(rust_i18n::t!(
+            "pdfviewer.file_not_found",
+            path = path.display().to_string()
+        )
+        .to_string());
     }
 
     // 6. File size
     match std::fs::metadata(path) {
         Ok(meta) => {
             if meta.len() > MAX_PDF_FILE_SIZE {
-                return Err(
-                    rust_i18n::t!(
-                        "pdfviewer.file_too_large",
-                        size_mb = format!("{:.1}", meta.len() as f64 / (1024.0 * 1024.0)),
-                        max_mb = (MAX_PDF_FILE_SIZE / (1024 * 1024)).to_string()
-                    )
-                    .to_string(),
-                );
+                return Err(rust_i18n::t!(
+                    "pdfviewer.file_too_large",
+                    size_mb = format!("{:.1}", meta.len() as f64 / (1024.0 * 1024.0)),
+                    max_mb = (MAX_PDF_FILE_SIZE / (1024 * 1024)).to_string()
+                )
+                .to_string());
             }
         }
         Err(e) => {
             return Err(
-                rust_i18n::t!("pdfviewer.metadata_read_failed", error = e.to_string())
-                    .to_string(),
+                rust_i18n::t!("pdfviewer.metadata_read_failed", error = e.to_string()).to_string(),
             )
         }
     }
@@ -114,7 +107,11 @@ fn validate_pdf_path(path: &Path) -> Result<(), String> {
 pub fn open_pdf_viewer(path: PathBuf) {
     // Validate the path before spawning a child process.
     if let Err(e) = validate_pdf_path(&path) {
-        log::error!("[PDF-VIEWER] path validation failed for '{}': {}", path.display(), e);
+        log::error!(
+            "[PDF-VIEWER] path validation failed for '{}': {}",
+            path.display(),
+            e
+        );
         return;
     }
 
@@ -189,15 +186,15 @@ pub fn run_standalone(path: PathBuf) -> eframe::Result<()> {
     eframe::run_native(
         &rust_i18n::t!("pdfviewer.title"),
         options,
-        Box::new(move |_cc| {
-            match viewer_app::PdfViewerApp::new(path, dark_mode) {
+        Box::new(
+            move |_cc| match viewer_app::PdfViewerApp::new(path, dark_mode) {
                 Ok(app) => Ok(Box::new(app)),
                 Err(e) => {
                     log::error!("[PDF-VIEWER] failed to open PDF: {}", e);
                     Ok(Box::new(viewer_app::ErrorApp { message: e }))
                 }
-            }
-        }),
+            },
+        ),
     )
 }
 

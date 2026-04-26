@@ -176,7 +176,13 @@ impl IconLoader {
         let dc = self.disk_cache.clone();
         std::thread::spawn(move || {
             let data = windows::extract_drive_icon(&path_owned, IconSize::Jumbo)
-                .map_err(|e| log::trace!("[Icon] Folder icon extraction failed for {}: {}", path_owned, e))
+                .map_err(|e| {
+                    log::trace!(
+                        "[Icon] Folder icon extraction failed for {}: {}",
+                        path_owned,
+                        e
+                    )
+                })
                 .ok();
             // Persist to SQLite for next launch
             if let (Some(dc), Some((ref pixels, w, h))) = (&dc, &data) {
@@ -258,7 +264,9 @@ impl IconLoader {
 
             for path in &paths {
                 let fresh = windows::extract_drive_icon(path, IconSize::Jumbo)
-                    .map_err(|e| log::trace!("[Icon] Revalidation extraction failed for {}: {}", path, e))
+                    .map_err(|e| {
+                        log::trace!("[Icon] Revalidation extraction failed for {}: {}", path, e)
+                    })
                     .ok();
 
                 let sql_key = format!("special:{}", path);

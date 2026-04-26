@@ -147,7 +147,8 @@ impl OneDriveIoPool {
                 if stalled >= STALL_OVERFLOW_CUTOFF {
                     log::warn!(
                         "[ONEDRIVE IO-POOL] Rejecting overflow job: {} stall events (cutoff: {})",
-                        stalled, STALL_OVERFLOW_CUTOFF
+                        stalled,
+                        STALL_OVERFLOW_CUTOFF
                     );
                     return false;
                 }

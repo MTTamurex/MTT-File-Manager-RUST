@@ -270,8 +270,7 @@ pub fn warmup_shell_extensions(hwnd: HWND) {
     }
 
     // Use a temporary file to trigger file-level shell extensions (e.g., 7-Zip, WinRAR)
-    let temp_file =
-        std::env::temp_dir().join(format!("mtt_warmup_{}.txt", std::process::id()));
+    let temp_file = std::env::temp_dir().join(format!("mtt_warmup_{}.txt", std::process::id()));
     let _ = std::fs::File::create(&temp_file);
     if let Ok(_ctx) = extract_shell_menu(hwnd, std::slice::from_ref(&temp_file)) {
         log::debug!("[ShellMenu] File warmup complete");

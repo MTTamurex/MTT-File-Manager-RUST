@@ -50,14 +50,18 @@ impl ComStaGuard {
                 "[Icon] COM already initialized as MTA on this thread (RPC_E_CHANGED_MODE); \
                  shell icons may fall back to generic"
             );
-            Self { needs_uninit: false }
+            Self {
+                needs_uninit: false,
+            }
         } else {
             log::warn!(
                 "[Icon] CoInitializeEx(STA) failed: HRESULT 0x{:08X} — \
                  shell icons may fall back to generic",
                 hr.0 as u32
             );
-            Self { needs_uninit: false }
+            Self {
+                needs_uninit: false,
+            }
         }
     }
 }
@@ -66,7 +70,9 @@ impl Drop for ComStaGuard {
     fn drop(&mut self) {
         if self.needs_uninit {
             // SAFETY: paired with the successful CoInitializeEx in `new`.
-            unsafe { ::windows::Win32::System::Com::CoUninitialize(); }
+            unsafe {
+                ::windows::Win32::System::Com::CoUninitialize();
+            }
         }
     }
 }
@@ -177,7 +183,9 @@ impl IconLoader {
         let cache_key = format!("{}_Jumbo", path_text);
 
         // Already in-flight or previously failed — skip.
-        if self.loading_drive_icons.contains(&cache_key) || self.failed_drive_icons.contains(&cache_key) {
+        if self.loading_drive_icons.contains(&cache_key)
+            || self.failed_drive_icons.contains(&cache_key)
+        {
             return;
         }
 
@@ -193,14 +201,29 @@ impl IconLoader {
             let _com = ComStaGuard::new();
             let data = if is_virtual {
                 windows::extract_shell_icon(&path_owned, IconSize::Jumbo)
-                    .map_err(|e| log::trace!("[Icon] Shell icon extraction failed for {:?}: {}", path_owned, e))
+                    .map_err(|e| {
+                        log::trace!(
+                            "[Icon] Shell icon extraction failed for {:?}: {}",
+                            path_owned,
+                            e
+                        )
+                    })
                     .ok()
             } else {
                 windows::extract_file_icon_by_path(&path_owned, IconSize::Jumbo)
-                    .map_err(|e| log::trace!("[Icon] File icon extraction failed for {:?}: {}", path_owned, e))
+                    .map_err(|e| {
+                        log::trace!(
+                            "[Icon] File icon extraction failed for {:?}: {}",
+                            path_owned,
+                            e
+                        )
+                    })
                     .ok()
             };
-            let _ = tx.send(AsyncIconResult { key: cache_key, data });
+            let _ = tx.send(AsyncIconResult {
+                key: cache_key,
+                data,
+            });
         });
     }
 
@@ -238,7 +261,6 @@ impl IconLoader {
             return;
         }
         self.sync_icon_budget_calls = self.sync_icon_budget_calls.saturating_add(1);
-        self.sync_icon_budget_elapsed =
-            self.sync_icon_budget_elapsed.saturating_add(elapsed);
+        self.sync_icon_budget_elapsed = self.sync_icon_budget_elapsed.saturating_add(elapsed);
     }
 }

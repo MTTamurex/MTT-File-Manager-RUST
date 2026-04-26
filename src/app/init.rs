@@ -8,11 +8,11 @@ use eframe::egui;
 use lru::LruCache;
 use std::num::NonZeroUsize;
 // PERFORMANCE: FxHashSet uses faster hashing for PathBuf keys
+use crate::domain::special_paths::{is_virtual_path, COMPUTER_VIEW_ID};
 use crate::ui::cache::FxHashSet;
-use crate::domain::special_paths::{COMPUTER_VIEW_ID, is_virtual_path};
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 use std::time::Instant;
 
 use crate::application::ClipboardManager;
@@ -170,7 +170,9 @@ impl ImageViewerApp {
         // Apply saved theme preference
         match theme_mode {
             crate::app::navigation_state::ThemeMode::Dark => ctx.set_visuals(egui::Visuals::dark()),
-            crate::app::navigation_state::ThemeMode::Light => ctx.set_visuals(egui::Visuals::light()),
+            crate::app::navigation_state::ThemeMode::Light => {
+                ctx.set_visuals(egui::Visuals::light())
+            }
         }
         crate::ui::theme::apply_scroll_style(&ctx);
 
@@ -204,9 +206,7 @@ impl ImageViewerApp {
         let mut app = Self {
             navigation_state: NavigationState::new(initial_path.clone(), is_computer_view_initial),
             current_folder_modified_hint: None,
-            folder_modified_hints: lru::LruCache::new(
-                std::num::NonZeroUsize::new(500).unwrap(),
-            ),
+            folder_modified_hints: lru::LruCache::new(std::num::NonZeroUsize::new(500).unwrap()),
             loaded_path: String::new(), // Start empty - will be set when first folder loads
             thumbnail_queue,
             image_receiver: img_rx,
@@ -261,9 +261,9 @@ impl ImageViewerApp {
             media_preview_owner_tab_id: None,
             video_player_process: None,
             selected_metadata: None,
-            show_left_sidebar, // Loaded from SQLite
+            show_left_sidebar,  // Loaded from SQLite
             show_preview_panel, // Loaded from SQLite
-            show_recycle_bin, // Loaded from SQLite
+            show_recycle_bin,   // Loaded from SQLite
             collapse_quick_access: false,
             collapse_local_disks: false,
             collapse_network_drives: false,
@@ -529,7 +529,9 @@ impl ImageViewerApp {
 
             // SIDEBAR FOLDER TREE
             sidebar_tree: {
-                let mut tree = crate::app::state::sidebar_tree_state::SidebarTreeState::new(directory_cache.clone());
+                let mut tree = crate::app::state::sidebar_tree_state::SidebarTreeState::new(
+                    directory_cache.clone(),
+                );
                 tree.set_show_hidden(show_hidden_files);
                 tree
             },
@@ -569,7 +571,8 @@ impl ImageViewerApp {
         // Pre-set custom composed folder icon on cache_manager (used by grid/list bridges)
         {
             let (pixels, width, height) = custom_folder_icon;
-            app.cache_manager.set_folder_icon(&ctx, &pixels, width, height);
+            app.cache_manager
+                .set_folder_icon(&ctx, &pixels, width, height);
         }
 
         // Apply folder lock for the initial folder (if it has one saved)
@@ -579,9 +582,7 @@ impl ImageViewerApp {
         // shows the correct "Data modificada" immediately on startup, even if the
         // folder was never visited in the previous session (e.g. pinned shortcuts).
         // This runs once at startup (not in the render loop), so it is safe.
-        if !is_computer_view_initial
-            && !is_virtual_path(&initial_path)
-        {
+        if !is_computer_view_initial && !is_virtual_path(&initial_path) {
             let dest = std::path::PathBuf::from(&initial_path);
             if let Ok(meta) = std::fs::metadata(&dest) {
                 if let Ok(modified_time) = meta.modified() {
@@ -609,7 +610,9 @@ impl ImageViewerApp {
                     h != 0 && h != usize::MAX
                 }
                 #[cfg(not(target_os = "windows"))]
-                { true }
+                {
+                    true
+                }
             };
             let diag = format!(
                 "GPU: {} ({:?})\nBackend: {:?}\nDriver: {} {}\nHas console: {}\nExe: {:?}\nCWD: {:?}\nTimestamp: {:?}\n",

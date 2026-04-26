@@ -145,7 +145,8 @@ impl ImageViewerApp {
             let active = self.tab_manager.active();
             let sidebar_expanded = active.sidebar_expanded.clone();
             let sidebar_scroll_y = active.sidebar_scroll_y;
-            self.sidebar_tree.restore_expanded(sidebar_expanded, sidebar_scroll_y);
+            self.sidebar_tree
+                .restore_expanded(sidebar_expanded, sidebar_scroll_y);
         }
 
         // Apply folder lock if the destination tab's folder has locked preferences
@@ -187,10 +188,7 @@ impl ImageViewerApp {
             } else if self.global_search.available {
                 // Try the search service first (NTFS fast path, ~1-2ms via named pipe)
                 let path_str = self.navigation_state.current_path.clone();
-                match crate::infrastructure::global_search::check_paths_modified(
-                    &[path_str],
-                    120,
-                ) {
+                match crate::infrastructure::global_search::check_paths_modified(&[path_str], 120) {
                     Ok(modified) => {
                         service_checked = true;
                         !modified.is_empty()

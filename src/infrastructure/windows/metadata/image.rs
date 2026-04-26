@@ -142,11 +142,15 @@ pub fn read_image_exif_metadata(path: &Path) -> Result<MediaMetadata, windows::c
                 exif_summary.camera_maker = unsafe { read_string(&store, &PKEY_IMAGE_CAMERAMAKER) };
                 exif_summary.camera_model = unsafe { read_string(&store, &PKEY_IMAGE_CAMERAMODEL) };
                 exif_summary.f_stop = unsafe { read_f_number(&store, &PKEY_IMAGE_FNUMBER) };
-                exif_summary.exposure_time = unsafe { read_exposure_time(&store, &PKEY_IMAGE_EXPOSURETIME) };
+                exif_summary.exposure_time =
+                    unsafe { read_exposure_time(&store, &PKEY_IMAGE_EXPOSURETIME) };
                 exif_summary.iso_speed = unsafe { read_u32(&store, &PKEY_IMAGE_ISOSPEED) };
-                exif_summary.focal_length = unsafe { read_focal_length(&store, &PKEY_IMAGE_FOCALLENGTH) };
-                exif_summary.max_aperture = unsafe { read_aperture(&store, &PKEY_IMAGE_MAXAPERTURE) };
-                exif_summary.metering_mode = unsafe { read_metering_mode(&store, &PKEY_IMAGE_METERINGMODE) };
+                exif_summary.focal_length =
+                    unsafe { read_focal_length(&store, &PKEY_IMAGE_FOCALLENGTH) };
+                exif_summary.max_aperture =
+                    unsafe { read_aperture(&store, &PKEY_IMAGE_MAXAPERTURE) };
+                exif_summary.metering_mode =
+                    unsafe { read_metering_mode(&store, &PKEY_IMAGE_METERINGMODE) };
                 exif_summary.flash_mode = unsafe { read_flash_mode(&store, &PKEY_IMAGE_FLASH) };
                 exif_summary.date_taken = unsafe { read_string(&store, &PKEY_IMAGE_DATETAKEN) };
                 exif_summary.subject = unsafe { read_string(&store, &PKEY_IMAGE_SUBJECT) };

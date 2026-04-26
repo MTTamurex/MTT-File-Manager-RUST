@@ -11,8 +11,8 @@
 //! This means a long USN write on `D:\` no longer blocks a search reader on
 //! `C:\` — they take independent inner locks.
 
-use std::sync::Arc;
 use parking_lot::RwLock;
+use std::sync::Arc;
 
 use crate::file_index::VolumeIndex;
 

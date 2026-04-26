@@ -163,8 +163,7 @@ impl super::DedicatedImageViewerApp {
                 } else {
                     egui::Color32::from_gray(220)
                 };
-                ui.painter()
-                    .rect_filled(ui.max_rect(), 0.0, panel_bg);
+                ui.painter().rect_filled(ui.max_rect(), 0.0, panel_bg);
 
                 let should_scroll = self.filmstrip.scroll_to_current;
                 self.filmstrip.scroll_to_current = false;
@@ -185,15 +184,13 @@ impl super::DedicatedImageViewerApp {
                             ui.spacing_mut().item_spacing.x = FILMSTRIP_SPACING;
 
                             for idx in 0..total {
-                                let item_left =
-                                    content_left + idx as f32 * item_w;
+                                let item_left = content_left + idx as f32 * item_w;
                                 let item_right = item_left + FILMSTRIP_THUMB_SIZE;
 
                                 let in_visible_range = item_right
                                     >= viewport_left - FILMSTRIP_OVERSCAN as f32 * item_w
                                     && item_left
-                                        <= viewport_right
-                                            + FILMSTRIP_OVERSCAN as f32 * item_w;
+                                        <= viewport_right + FILMSTRIP_OVERSCAN as f32 * item_w;
 
                                 if !in_visible_range && !(should_scroll && idx == current) {
                                     // Allocate space but don't render
@@ -215,11 +212,10 @@ impl super::DedicatedImageViewerApp {
                                         self.filmstrip.pending.insert(idx);
                                         rayon::spawn(move || {
                                             match loader::decode_preview_frame_with_priority(
-                                                    &path,
-                                                    FILMSTRIP_DECODE_MAX_SIDE,
-                                                    loader::DecodePriority::Background,
-                                                )
-                                            {
+                                                &path,
+                                                FILMSTRIP_DECODE_MAX_SIDE,
+                                                loader::DecodePriority::Background,
+                                            ) {
                                                 Ok(frame) => {
                                                     let _ = tx.try_send((idx, gen, frame));
                                                 }
@@ -293,8 +289,7 @@ impl super::DedicatedImageViewerApp {
                                         egui::Color32::from_gray(200)
                                     };
                                     let inner = rect.shrink(4.0);
-                                    ui.painter()
-                                        .rect_filled(inner, 2.0, placeholder_color);
+                                    ui.painter().rect_filled(inner, 2.0, placeholder_color);
                                 }
 
                                 // Current image border highlight
