@@ -26,7 +26,7 @@ MTT File Manager is a native Windows file manager built in Rust that combines fa
 - **Audio playback & metadata** — Audio-only files open in the standalone mpv player with real-time waveform visualization; the preview panel extracts codec, bitrate, channels, sample rate, and music tags
 - **PDF viewer** — Native pdfium-based viewer with bounded texture caching and asynchronous rendering in a separate process
 - **Smart thumbnails** — Multi-stage generation: image crate → WIC → Shell API → Media Foundation
-- **Animated GIF playback** — Optimized rendering with play/pause controls
+- **Animated GIF playback** — Animated preview on details panel
 
 ### Global Search
 - **Instant search** — Query an in-memory index supporting millions of files
