@@ -62,7 +62,7 @@ pub(super) fn render_view_and_zoom_controls(ui: &mut egui::Ui, app: &mut ImageVi
         if widgets::toggle_icon_button(
             ui,
             &mut app.svg_icon_manager,
-            "sidebar_left_panel",
+            "dual_panel",
             dual_active,
             &tooltip_text,
         )

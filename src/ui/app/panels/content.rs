@@ -1,6 +1,7 @@
 use crate::app::ImageViewerApp;
 use crate::domain::file_entry::{FileEntry, SyncStatus};
 use crate::domain::special_paths::{COMPUTER_VIEW_ID, RECYCLE_BIN_VIEW_ID};
+use rust_i18n::t;
 use crate::infrastructure::windows as windows_infra;
 use eframe::egui;
 use std::cell::RefCell;
@@ -484,11 +485,20 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
     ui.painter().rect_filled(right_header_rect, 0.0, right_header_bg);
 
     // Render path text in headers
-    let active_path = app.navigation_state.current_path.clone();
+    let path_display = |path: &str| -> String {
+        if path == COMPUTER_VIEW_ID {
+            t!("nav.computer").to_string()
+        } else if path == RECYCLE_BIN_VIEW_ID {
+            t!("nav.recycle_bin").to_string()
+        } else {
+            path.to_string()
+        }
+    };
+    let active_path = path_display(&app.navigation_state.current_path);
     let inactive_path = app
         .dual_panel_inactive_state
         .as_ref()
-        .map(|s| s.path.clone())
+        .map(|s| path_display(&s.path))
         .unwrap_or_default();
 
     let (left_path, right_path) = match active {
