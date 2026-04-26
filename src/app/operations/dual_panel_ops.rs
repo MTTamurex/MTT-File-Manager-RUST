@@ -18,13 +18,10 @@ impl ImageViewerApp {
         // Right panel starts as a snapshot of the current state.
         self.dual_panel_active = ActivePanel::Left;
         let mut snapshot = PanelSnapshot::from_app(self);
-        // Give the inactive panel its OWN generation tracking so its async
-        // folder-loading pipeline doesn't corrupt the active panel's pipeline.
-        // Both panels share the same file_entry channel; the generation tag on
-        // each batch is used to route results to the correct panel.
-        snapshot.generation = 0;
-        snapshot.current_generation =
-            std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        // Keep the SAME current_generation Arc so thumbnail workers stay
+        // synchronized with whichever panel is active.  Each panel has its
+        // own generation value for routing folder-load results, but the
+        // shared gen_tracker must match the active panel's generation.
         snapshot.is_loading_folder = false;
         snapshot.pending_all_items_clear = false;
         snapshot.pending_items_rebuild = false;
@@ -80,6 +77,11 @@ impl ImageViewerApp {
         snapshot.swap_with_app(self);
         self.dual_panel_inactive_state = Some(snapshot);
         self.dual_panel_active = self.dual_panel_active.other();
+
+        // Sync the shared gen tracker with the newly active panel's generation
+        // so thumbnail workers accept requests from the now-active panel.
+        self.current_generation
+            .store(self.generation, std::sync::atomic::Ordering::Relaxed);
 
         // Re-watch the new active folder so watcher events go to the right place
         self.watch_current_folder();

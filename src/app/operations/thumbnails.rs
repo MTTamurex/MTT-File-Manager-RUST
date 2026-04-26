@@ -107,14 +107,24 @@ impl ImageViewerApp {
         priority: ThumbnailPriority,
         modified: u64,
     ) {
-        // When rendering the inactive dual-panel, thumbnail requests must be
-        // suppressed: workers would reject them (generation mismatch with
-        // gen_tracker) and the paths would leak in loading_set, eventually
-        // blocking all thumbnail loads for the active panel.
-        if self.suppress_thumbnail_requests {
-            self.cache_manager.finish_loading(&path);
-            return;
-        }
+        // When rendering the inactive dual-panel, use the active panel's generation
+        // (current_generation always holds the active panel's gen, since both panels
+        // share the same Arc<AtomicUsize>) and downgrade to Prefetch priority so the
+        // active panel's Interactive requests are processed first.
+        //
+        // Previously this code suppressed all inactive-panel requests, which prevented
+        // their thumbnails from ever being loaded into the shared texture_cache.
+        // Now we allow the requests through with the correct generation so the worker
+        // accepts them, results flow into the shared cache, and both panels display
+        // thumbnails independently.
+        let (effective_gen, effective_priority) = if self.suppress_thumbnail_requests {
+            let active_gen = self
+                .current_generation
+                .load(std::sync::atomic::Ordering::Relaxed);
+            (active_gen, ThumbnailPriority::Prefetch)
+        } else {
+            (self.generation, priority)
+        };
 
         // Skip files pending deletion to avoid wasteful extraction
         if self
@@ -150,7 +160,7 @@ impl ImageViewerApp {
                     image_data: rgba_data,
                     width,
                     height,
-                    generation: self.generation,
+                    generation: effective_gen,
                     not_found: false,
                 });
                 return;
@@ -164,15 +174,15 @@ impl ImageViewerApp {
         if let Some(index) = directory_index {
             self.thumbnail_queue.push_with_index(
                 path,
-                self.generation,
+                effective_gen,
                 size_px,
-                priority,
+                effective_priority,
                 Some(index),
                 modified,
             );
         } else {
             self.thumbnail_queue
-                .push(path, self.generation, size_px, priority, modified);
+                .push(path, effective_gen, size_px, effective_priority, modified);
         }
     }
 
