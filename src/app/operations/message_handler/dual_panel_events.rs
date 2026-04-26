@@ -1,4 +1,5 @@
 use crate::app::state::ImageViewerApp;
+use crate::domain::special_paths::COMPUTER_VIEW_ID;
 use std::path::{Path, PathBuf};
 
 fn renamed_path_for_candidate(
@@ -44,7 +45,143 @@ fn renamed_path_for_candidate(
     Some(renamed)
 }
 
+fn parent_path_for_deleted_panel(path: &Path) -> Option<String> {
+    let parent = path.parent()?;
+    if parent.as_os_str().is_empty() {
+        None
+    } else {
+        Some(parent.to_string_lossy().to_string())
+    }
+}
+
+fn path_is_same_or_descendant(candidate: &Path, root: &Path) -> bool {
+    let candidate_clean = ImageViewerApp::clean_path(candidate);
+    let root_clean = ImageViewerApp::clean_path(root);
+
+    if ImageViewerApp::normalize_for_match(&candidate_clean)
+        == ImageViewerApp::normalize_for_match(&root_clean)
+    {
+        return true;
+    }
+
+    let candidate_components: Vec<_> = candidate_clean.components().collect();
+    let root_components: Vec<_> = root_clean.components().collect();
+
+    candidate_components.len() > root_components.len()
+        && root_components.iter().zip(candidate_components.iter()).all(
+            |(root_component, candidate_component)| {
+                root_component
+                    .as_os_str()
+                    .to_string_lossy()
+                    .eq_ignore_ascii_case(&candidate_component.as_os_str().to_string_lossy())
+            },
+        )
+}
+
 impl ImageViewerApp {
+    pub(super) fn inactive_panel_path_matches(&self, path: &Path) -> bool {
+        if !self.dual_panel_enabled {
+            return false;
+        }
+
+        let Some(snapshot) = self.dual_panel_inactive_state.as_ref() else {
+            return false;
+        };
+        if snapshot.is_computer_view || snapshot.is_recycle_bin_view {
+            return false;
+        }
+
+        Self::normalize_for_match(Path::new(&snapshot.path)) == Self::normalize_for_match(path)
+    }
+
+    pub(super) fn navigate_inactive_panel_to_parent_after_vanished(
+        &mut self,
+        vanished_path: &Path,
+    ) -> bool {
+        if !self.inactive_panel_path_matches(vanished_path) {
+            return false;
+        }
+
+        self.navigate_inactive_panel_to_parent_of_deleted_path(vanished_path)
+    }
+
+    pub(super) fn navigate_inactive_panel_after_deleted_paths(
+        &mut self,
+        deleted_paths: &[PathBuf],
+    ) -> bool {
+        if !self.dual_panel_enabled {
+            return false;
+        }
+
+        let Some(inactive_path) = self
+            .dual_panel_inactive_state
+            .as_ref()
+            .map(|snapshot| PathBuf::from(&snapshot.path))
+        else {
+            return false;
+        };
+
+        let Some(deleted_root) = deleted_paths
+            .iter()
+            .find(|deleted_path| path_is_same_or_descendant(&inactive_path, deleted_path))
+            .cloned()
+        else {
+            return false;
+        };
+
+        self.navigate_inactive_panel_to_parent_of_deleted_path(&deleted_root)
+    }
+
+    fn navigate_inactive_panel_to_parent_of_deleted_path(&mut self, deleted_path: &Path) -> bool {
+        if !self.dual_panel_enabled {
+            return false;
+        }
+
+        let target_parent = parent_path_for_deleted_panel(deleted_path);
+        if let Some(parent) = target_parent.as_deref().map(PathBuf::from) {
+            self.directory_dirty_registry.mark_dirty(&parent);
+            self.directory_cache.invalidate(&parent);
+            if let Some(ref di) = self.directory_index {
+                let _ = di.invalidate(&parent);
+            }
+        }
+
+        log::warn!(
+            "[DualPanel] Inactive panel folder vanished: {}",
+            deleted_path.display()
+        );
+
+        self.with_inactive_panel(|app| {
+            app.loaded_path.clear();
+            app.items = std::sync::Arc::new(Vec::new());
+            app.all_items.clear();
+            app.selected_item = None;
+            app.selected_file = None;
+            app.selected_thumbnail = None;
+            app.selected_metadata = None;
+            app.multi_selection.clear();
+            app.selection_anchor = None;
+
+            if let Some(parent_path) = target_parent {
+                app.navigation_state
+                    .navigation
+                    .navigate_to(parent_path.clone());
+                app.navigation_state.current_path = parent_path.clone();
+                app.navigation_state.path_input = parent_path;
+                app.navigation_state.is_computer_view = false;
+                app.navigation_state.is_recycle_bin_view = false;
+                app.load_folder_for_inactive();
+            } else {
+                app.navigation_state
+                    .navigation
+                    .navigate_to(COMPUTER_VIEW_ID.to_string());
+                app.setup_computer_view();
+            }
+        });
+
+        true
+    }
+
     /// Reload the inactive dual panel if its folder matches any of the given paths.
     /// Used when file operations or external watcher events may have affected
     /// the inactive panel's folder contents.
@@ -204,5 +341,29 @@ mod tests {
             Path::new(r"D:\New"),
         )
         .is_none());
+    }
+
+    #[test]
+    fn parent_path_for_deleted_panel_returns_parent_folder() {
+        assert_eq!(
+            parent_path_for_deleted_panel(Path::new(r"D:\Teste")),
+            Some(r"D:\".to_string())
+        );
+    }
+
+    #[test]
+    fn path_is_same_or_descendant_matches_descendant_case_insensitively() {
+        assert!(path_is_same_or_descendant(
+            Path::new(r"D:\Teste\Sub"),
+            Path::new(r"d:\teste")
+        ));
+    }
+
+    #[test]
+    fn path_is_same_or_descendant_rejects_common_prefix_sibling() {
+        assert!(!path_is_same_or_descendant(
+            Path::new(r"D:\Teste 10"),
+            Path::new(r"D:\Teste")
+        ));
     }
 }
