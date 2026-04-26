@@ -62,6 +62,20 @@ fn notify_error_implies_current_folder_removed(
         || (error.paths.is_empty() && matches!(error.kind, notify::ErrorKind::PathNotFound))
 }
 
+#[cfg(feature = "notify-watcher")]
+fn notify_event_is_name_change(event: &notify::Event) -> bool {
+    matches!(
+        event.kind,
+        notify::EventKind::Modify(ModifyKind::Name(
+            RenameMode::Any
+                | RenameMode::Both
+                | RenameMode::From
+                | RenameMode::To
+                | RenameMode::Other
+        ))
+    )
+}
+
 impl ImageViewerApp {
     #[cfg(feature = "notify-watcher")]
     fn navigate_after_current_folder_removed_by_notify(&mut self, reason: &str) {
@@ -114,12 +128,7 @@ impl ImageViewerApp {
                     let mut needs_reload = false;
                     let current_folder_removed =
                         notify_event_removes_current_folder(&evt, current_path_norm);
-                    let is_name_change = matches!(
-                        evt.kind,
-                        notify::EventKind::Modify(ModifyKind::Name(
-                            RenameMode::Any | RenameMode::Both | RenameMode::From | RenameMode::To
-                        ))
-                    );
+                    let is_name_change = notify_event_is_name_change(&evt);
 
                     if matches!(evt.kind, notify::EventKind::Remove(_)) {
                         for path in &evt.paths {
@@ -161,6 +170,14 @@ impl ImageViewerApp {
                         }
 
                         if current_folder_removed {
+                            let affected_folders: Vec<PathBuf> = evt
+                                .paths
+                                .iter()
+                                .map(|path| Self::clean_path(path))
+                                .filter_map(|path| path.parent().map(|parent| parent.to_path_buf()))
+                                .collect();
+                            let affected_refs: Vec<&PathBuf> = affected_folders.iter().collect();
+                            self.reload_inactive_panel_if_matches(&affected_refs);
                             self.navigate_after_current_folder_removed_by_notify(
                                 "[FS-WATCH-LEGACY] Current folder was removed externally",
                             );
@@ -234,6 +251,10 @@ impl ImageViewerApp {
                                 &cleaned_new,
                                 &mut folders_with_changed_contents,
                             );
+                            self.apply_rename_to_inactive_panel_if_affected(
+                                &cleaned_old,
+                                &cleaned_new,
+                            );
 
                             pending_disk_cache_invalidations.push(cleaned_old.clone());
                             pending_disk_cache_invalidations.push(cleaned_new.clone());
@@ -265,6 +286,17 @@ impl ImageViewerApp {
                             }
 
                             if current_folder_removed {
+                                let mut affected_folders =
+                                    vec![cleaned_old.clone(), cleaned_new.clone()];
+                                if let Some(parent) = cleaned_old.parent() {
+                                    affected_folders.push(parent.to_path_buf());
+                                }
+                                if let Some(parent) = cleaned_new.parent() {
+                                    affected_folders.push(parent.to_path_buf());
+                                }
+                                let affected_refs: Vec<&PathBuf> =
+                                    affected_folders.iter().collect();
+                                self.reload_inactive_panel_if_matches(&affected_refs);
                                 self.navigate_after_current_folder_removed_by_notify(
                                     "[FS-WATCH-LEGACY] Current folder was renamed or moved externally",
                                 );
@@ -273,7 +305,46 @@ impl ImageViewerApp {
                         }
                     }
 
+                    if is_name_change {
+                        let affected_folders: Vec<PathBuf> = evt
+                            .paths
+                            .iter()
+                            .filter(|path| {
+                                !self.should_ignore_watcher_path(
+                                    path,
+                                    internal_cache_root_norm,
+                                    internal_cache_root_prefix,
+                                )
+                            })
+                            .map(|path| Self::clean_path(path))
+                            .filter_map(|path| path.parent().map(|parent| parent.to_path_buf()))
+                            .collect();
+
+                        if !affected_folders.is_empty() {
+                            for folder in &affected_folders {
+                                self.invalidate_directory_caches(folder);
+                            }
+
+                            if affected_folders.iter().any(|folder| {
+                                Self::normalize_for_match(folder) == current_path_norm
+                            }) {
+                                needs_reload = true;
+                            }
+
+                            let affected_refs: Vec<&PathBuf> = affected_folders.iter().collect();
+                            self.reload_inactive_panel_if_matches(&affected_refs);
+                        }
+                    }
+
                     if current_folder_removed && is_name_change {
+                        let affected_folders: Vec<PathBuf> = evt
+                            .paths
+                            .iter()
+                            .map(|path| Self::clean_path(path))
+                            .filter_map(|path| path.parent().map(|parent| parent.to_path_buf()))
+                            .collect();
+                        let affected_refs: Vec<&PathBuf> = affected_folders.iter().collect();
+                        self.reload_inactive_panel_if_matches(&affected_refs);
                         self.navigate_after_current_folder_removed_by_notify(
                             "[FS-WATCH-LEGACY] Current folder was renamed or moved externally",
                         );
@@ -371,6 +442,11 @@ impl ImageViewerApp {
                     log::warn!("Erro de watch: {:?}", err);
 
                     if notify_error_implies_current_folder_removed(&err, current_path_norm) {
+                        let current_path = PathBuf::from(&self.navigation_state.current_path);
+                        if let Some(parent) = current_path.parent() {
+                            let parent_path = parent.to_path_buf();
+                            self.reload_inactive_panel_if_matches(&[&parent_path]);
+                        }
                         self.navigate_after_current_folder_removed_by_notify(
                             "[FS-WATCH-LEGACY] Watcher reported missing current folder",
                         );
@@ -401,6 +477,8 @@ impl ImageViewerApp {
         }
 
         if !folders_with_changed_contents.is_empty() {
+            let affected_refs: Vec<&PathBuf> = folders_with_changed_contents.iter().collect();
+            self.reload_inactive_panel_if_matches(&affected_refs);
             self.apply_folder_content_change_invalidations(
                 folders_with_changed_contents,
                 pending_disk_cache_invalidations,
@@ -490,5 +568,13 @@ mod tests {
         assert!(notify_error_implies_current_folder_removed(
             &error, &current
         ));
+    }
+
+    #[test]
+    fn treats_other_name_modify_event_as_name_change() {
+        let event = Event::new(EventKind::Modify(ModifyKind::Name(RenameMode::Other)))
+            .add_path(PathBuf::from(r"C:\Temp\New folder"));
+
+        assert!(notify_event_is_name_change(&event));
     }
 }

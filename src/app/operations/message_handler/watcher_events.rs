@@ -151,16 +151,14 @@ impl ImageViewerApp {
             .collect();
 
         let is_onedrive = crate::infrastructure::onedrive::is_onedrive_path(&current_path);
-        let _ = self.consistency_probe_tx.send(
-            ConsistencyProbeRequest {
-                path: current_path,
-                is_onedrive,
-                ui_signature,
-                show_hidden_files: self.show_hidden_files,
-                mode: ConsistencyProbeMode::ListingDrift,
-                folder_cover_states,
-            },
-        );
+        let _ = self.consistency_probe_tx.send(ConsistencyProbeRequest {
+            path: current_path,
+            is_onedrive,
+            ui_signature,
+            show_hidden_files: self.show_hidden_files,
+            mode: ConsistencyProbeMode::ListingDrift,
+            folder_cover_states,
+        });
     }
 
     /// Verifies that the current folder still exists using the consistency
@@ -206,6 +204,10 @@ impl ImageViewerApp {
                     "[FS-WATCH-FALLBACK] Current folder vanished: {:?} - navigating up",
                     result.path
                 );
+                if let Some(parent) = result.path.parent() {
+                    let parent_path = parent.to_path_buf();
+                    self.reload_inactive_panel_if_matches(&[&parent_path]);
+                }
                 self.navigate_to_nearest_valid_ancestor();
                 return;
             }
