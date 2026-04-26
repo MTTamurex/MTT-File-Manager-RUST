@@ -99,7 +99,8 @@ impl ImageViewerApp {
     pub fn render_list_view(&mut self, ui: &mut egui::Ui) {
         let t_total = Instant::now();
         // Keyboard navigation (ONLY when not renaming and media is NOT focused)
-        if !self.global_search.active
+        if !self.suppress_file_panel_keyboard
+            && !self.global_search.active
             && should_handle_navigation(
                 ui,
                 self.renaming_state.is_some(),

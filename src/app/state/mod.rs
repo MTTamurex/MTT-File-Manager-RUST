@@ -351,6 +351,10 @@ pub struct ImageViewerApp {
     /// shared `texture_cache` without competing with the active panel's
     /// Interactive-priority requests.
     pub suppress_thumbnail_requests: bool,
+    /// Transient render guard set only while drawing the inactive dual panel.
+    /// Mouse interactions still work there, but global keyboard navigation
+    /// must remain owned by the active panel.
+    pub suppress_file_panel_keyboard: bool,
 
     // FOLDER SIZE CALCULATOR (async for details panel)
     pub folder_size_state: FolderSizeState,

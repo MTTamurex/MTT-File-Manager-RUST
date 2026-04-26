@@ -125,7 +125,8 @@ impl ImageViewerApp {
             .max(1.0) as usize;
 
         // Keyboard navigation (ONLY when not renaming and media is NOT focused)
-        if !self.global_search.active
+        if !self.suppress_file_panel_keyboard
+            && !self.global_search.active
             && should_handle_navigation(
                 ui,
                 self.renaming_state.is_some(),
