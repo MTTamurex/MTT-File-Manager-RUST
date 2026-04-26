@@ -234,6 +234,7 @@ impl ImageViewerApp {
             }
         }
 
+        self.navigate_inactive_panel_after_deleted_paths(&deleted_paths);
         self.enqueue_disk_cache_invalidations_forced(deleted_paths);
         self.handle_parent_folder_updates(parent_folders, current_path_norm);
     }

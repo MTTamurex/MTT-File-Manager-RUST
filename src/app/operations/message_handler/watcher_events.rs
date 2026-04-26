@@ -165,14 +165,42 @@ impl ImageViewerApp {
     /// worker thread. This covers NTFS/ReFS cases where ReadDirectoryChangesW
     /// does not report deletion of the directory handle being watched.
     pub(crate) fn request_current_folder_liveness_probe(&mut self, reason: &str) {
-        if self.navigation_state.is_computer_view || self.navigation_state.is_recycle_bin_view {
+        let active_is_filesystem =
+            !self.navigation_state.is_computer_view && !self.navigation_state.is_recycle_bin_view;
+        let current_path = PathBuf::from(&self.navigation_state.current_path);
+        if active_is_filesystem {
+            let is_onedrive = crate::infrastructure::onedrive::is_onedrive_path(&current_path);
+            let request = ConsistencyProbeRequest {
+                path: current_path.clone(),
+                is_onedrive,
+                ui_signature: 0,
+                show_hidden_files: self.show_hidden_files,
+                mode: ConsistencyProbeMode::PathLiveness,
+                folder_cover_states: Vec::new(),
+            };
+
+            if self.consistency_probe_tx.send(request).is_ok() {
+                log::debug!("[FS-WATCH-LIVENESS] Queued current-folder probe: {reason}");
+            }
+        }
+
+        let Some(snapshot) = self.dual_panel_inactive_state.as_ref() else {
+            return;
+        };
+        if snapshot.is_computer_view || snapshot.is_recycle_bin_view {
             return;
         }
 
-        let current_path = PathBuf::from(&self.navigation_state.current_path);
-        let is_onedrive = crate::infrastructure::onedrive::is_onedrive_path(&current_path);
+        let inactive_path = PathBuf::from(&snapshot.path);
+        if active_is_filesystem
+            && Self::normalize_for_match(&inactive_path) == Self::normalize_for_match(&current_path)
+        {
+            return;
+        }
+
+        let is_onedrive = crate::infrastructure::onedrive::is_onedrive_path(&inactive_path);
         let request = ConsistencyProbeRequest {
-            path: current_path,
+            path: inactive_path,
             is_onedrive,
             ui_signature: 0,
             show_hidden_files: self.show_hidden_files,
@@ -181,7 +209,7 @@ impl ImageViewerApp {
         };
 
         if self.consistency_probe_tx.send(request).is_ok() {
-            log::debug!("[FS-WATCH-LIVENESS] Queued current-folder probe: {reason}");
+            log::debug!("[FS-WATCH-LIVENESS] Queued inactive-folder probe: {reason}");
         }
     }
 
@@ -193,9 +221,15 @@ impl ImageViewerApp {
     ) {
         while let Ok(result) = self.consistency_probe_rx.try_recv() {
             let current_path = PathBuf::from(&self.navigation_state.current_path);
+            let result_matches_current =
+                Self::normalize_for_match(&result.path) == Self::normalize_for_match(&current_path);
 
-            // Discard stale results from a different folder.
-            if result.path != current_path {
+            if !result_matches_current {
+                if result.path_vanished
+                    && self.navigate_inactive_panel_to_parent_after_vanished(&result.path)
+                {
+                    self.ui_ctx.request_repaint();
+                }
                 continue;
             }
 
@@ -208,6 +242,7 @@ impl ImageViewerApp {
                     let parent_path = parent.to_path_buf();
                     self.reload_inactive_panel_if_matches(&[&parent_path]);
                 }
+                self.navigate_inactive_panel_to_parent_after_vanished(&result.path);
                 self.navigate_to_nearest_valid_ancestor();
                 return;
             }

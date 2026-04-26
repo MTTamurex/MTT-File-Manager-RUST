@@ -54,11 +54,22 @@ pub fn spawn_consistency_probe_worker(
             );
 
             while let Ok(request) = req_rx.recv() {
-                // Drain stale requests — only process the most recent.
-                let mut latest = request;
+                // Drain stale requests, keeping only the latest request for each
+                // distinct (mode, path). Focus restore can enqueue liveness probes
+                // for both dual-panel folders; processing only the final queued
+                // request would leave one panel stale.
+                let mut pending = vec![request];
                 while let Ok(newer) = req_rx.try_recv() {
-                    latest = newer;
+                    if let Some(existing) = pending.iter_mut().find(|existing| {
+                        existing.mode == newer.mode && existing.path == newer.path
+                    }) {
+                        *existing = newer;
+                    } else {
+                        pending.push(newer);
+                    }
                 }
+
+                for latest in pending {
 
                 let path = latest.path;
                 let is_onedrive = latest.is_onedrive;
@@ -136,6 +147,7 @@ pub fn spawn_consistency_probe_worker(
                         changed_folder_covers,
                     });
                     ctx.request_repaint();
+                }
                 }
             }
         })
