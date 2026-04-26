@@ -16,7 +16,7 @@ pub(crate) mod metrics;
 
 use crate::viewer_runtime::{apply_saved_locale, build_viewer_native_options, is_saved_theme_dark};
 
-const IMAGE_VIEWER_MUTEX_NAME: &str = "Global\\MTTFileManager_ImageViewer_SingleInstance\0";
+const IMAGE_VIEWER_MUTEX_NAME: &str = "Local\\MTTFileManager_ImageViewer_SingleInstance\0";
 const MAX_IMAGE_FILE_SIZE: u64 = 512 * 1024 * 1024;
 const OPEN_REQUEST_DEBOUNCE: Duration = Duration::from_millis(700);
 

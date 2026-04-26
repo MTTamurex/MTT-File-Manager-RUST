@@ -1,12 +1,14 @@
 mod handler;
 mod pipe_io;
 
+use std::collections::HashMap;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use windows::Win32::Foundation::{CloseHandle, HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT};
 use windows::Win32::Storage::FileSystem::FlushFileBuffers;
+use windows::Win32::System::Pipes::GetNamedPipeClientProcessId;
 use windows::Win32::System::Pipes::{ConnectNamedPipe, DisconnectNamedPipe};
 use windows::Win32::System::Threading::{CreateEventW, WaitForSingleObject};
 use windows::Win32::System::IO::OVERLAPPED;
@@ -22,6 +24,8 @@ const PIPE_OPEN_MODE: u32 = 0x40000003;
 
 /// Maximum concurrent client handler threads (rate limiting).
 const MAX_ACTIVE_CLIENTS: u32 = 8;
+/// Maximum concurrent handler threads from one client process.
+const MAX_ACTIVE_CLIENTS_PER_PID: u32 = 4;
 /// Maximum payload size for incoming requests (64 KB).
 const MAX_REQUEST_PAYLOAD: usize = 64 * 1024;
 /// Maximum results per query page.
@@ -41,6 +45,7 @@ pub fn run_ipc_server(
     let is_warming = Arc::new(AtomicBool::new(false));
     let last_warm_epoch_secs = Arc::new(AtomicU64::new(0));
     let active_clients = Arc::new(AtomicU32::new(0));
+    let active_clients_by_pid = Arc::new(Mutex::new(HashMap::<u32, u32>::new()));
     let security_policy = Arc::new(IpcSecurityPolicy::from_env());
 
     if security_policy.redact_status_metrics {
@@ -95,12 +100,49 @@ pub fn run_ipc_server(
             break;
         }
 
+        let client_pid = match pipe_client_process_id(pipe) {
+            Ok(pid) => pid,
+            Err(error) => {
+                eprintln!("[IPC] Failed to identify client process: {}", error);
+                let _ = pipe_io::send_response(
+                    pipe,
+                    &mtt_search_protocol::SearchResponse::Error("Authorization failed".to_string()),
+                );
+                unsafe {
+                    let _ = FlushFileBuffers(pipe);
+                    let _ = DisconnectNamedPipe(pipe);
+                    let _ = CloseHandle(pipe);
+                }
+                continue;
+            }
+        };
+
+        if !try_acquire_pid_slot(&active_clients_by_pid, client_pid) {
+            eprintln!(
+                "[IPC] Rate limit: rejecting pid {} (>{} active)",
+                client_pid, MAX_ACTIVE_CLIENTS_PER_PID
+            );
+            let _ = pipe_io::send_response(
+                pipe,
+                &mtt_search_protocol::SearchResponse::Error(
+                    "Server busy, try again later".to_string(),
+                ),
+            );
+            unsafe {
+                let _ = FlushFileBuffers(pipe);
+                let _ = DisconnectNamedPipe(pipe);
+                let _ = CloseHandle(pipe);
+            }
+            continue;
+        }
+
         // SEC: Atomic rate limiting -- fetch_add first, then rollback if over limit.
         // This closes the TOCTOU race where multiple threads could pass a load+compare
         // check simultaneously before any of them incremented the counter.
         let prev = active_clients.fetch_add(1, Ordering::AcqRel);
         if prev >= MAX_ACTIVE_CLIENTS {
             active_clients.fetch_sub(1, Ordering::Release);
+            release_pid_slot(&active_clients_by_pid, client_pid);
             eprintln!(
                 "[IPC] Rate limit: rejecting connection ({}/{} active)",
                 prev, MAX_ACTIVE_CLIENTS
@@ -108,7 +150,9 @@ pub fn run_ipc_server(
             // Try to send an error response before disconnecting
             let _ = pipe_io::send_response(
                 pipe,
-                &mtt_search_protocol::SearchResponse::Error("Server busy, try again later".to_string()),
+                &mtt_search_protocol::SearchResponse::Error(
+                    "Server busy, try again later".to_string(),
+                ),
             );
             unsafe {
                 let _ = FlushFileBuffers(pipe);
@@ -124,6 +168,7 @@ pub fn run_ipc_server(
         let warming_for_client = is_warming.clone();
         let warm_epoch_for_client = last_warm_epoch_secs.clone();
         let active_for_client = active_clients.clone();
+        let active_pids_for_client = active_clients_by_pid.clone();
         let policy_for_client = security_policy.clone();
         let pipe_raw = pipe.0 as usize;
         std::thread::spawn(move || {
@@ -191,6 +236,7 @@ pub fn run_ipc_server(
                 }
             }
             active_for_client.fetch_sub(1, Ordering::Release);
+            release_pid_slot(&active_pids_for_client, client_pid);
         });
     }
 
@@ -211,6 +257,47 @@ pub fn run_ipc_server(
         }
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
+}
+
+fn pipe_client_process_id(pipe: HANDLE) -> Result<u32, String> {
+    let mut pid = 0u32;
+    unsafe {
+        GetNamedPipeClientProcessId(pipe, &mut pid)
+            .map_err(|e| format!("GetNamedPipeClientProcessId failed: {}", e))?;
+    }
+    if pid == 0 {
+        return Err("client pid is 0".to_string());
+    }
+    Ok(pid)
+}
+
+fn try_acquire_pid_slot(active_clients_by_pid: &Mutex<HashMap<u32, u32>>, pid: u32) -> bool {
+    let mut counts = lock_pid_counts(active_clients_by_pid);
+    let current = counts.get(&pid).copied().unwrap_or(0);
+    if current >= MAX_ACTIVE_CLIENTS_PER_PID {
+        return false;
+    }
+    counts.insert(pid, current + 1);
+    true
+}
+
+fn release_pid_slot(active_clients_by_pid: &Mutex<HashMap<u32, u32>>, pid: u32) {
+    let mut counts = lock_pid_counts(active_clients_by_pid);
+    match counts.get_mut(&pid) {
+        Some(count) if *count > 1 => *count -= 1,
+        Some(_) => {
+            counts.remove(&pid);
+        }
+        None => {}
+    }
+}
+
+fn lock_pid_counts(
+    active_clients_by_pid: &Mutex<HashMap<u32, u32>>,
+) -> MutexGuard<'_, HashMap<u32, u32>> {
+    active_clients_by_pid
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 /// Wait for a client connection using overlapped I/O with 1-second timeout polling.

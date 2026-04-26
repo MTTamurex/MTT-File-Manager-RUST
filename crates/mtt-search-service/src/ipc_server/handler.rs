@@ -8,8 +8,8 @@ use windows::Win32::Foundation::HANDLE;
 use crate::file_index::IndexState;
 use crate::indexing_progress::IndexingProgress;
 use crate::ipc_authorization::{
-    collect_authorized_search_page,
-    current_client_can_read_path, PipeImpersonationGuard,
+    collect_authorized_search_page, current_client_can_read_path, trusted_file_manager_client,
+    PipeImpersonationGuard,
 };
 use crate::security_policy::IpcSecurityPolicy;
 use crate::volume_indices::{self, SharedVolumeIndices, VolumeIndexHandle};
@@ -61,10 +61,8 @@ fn repair_suspicious_zero_folder_size(
 
     let (candidate_count, repaired_count, refreshed_summary) = {
         let mut vol = handle.write();
-        let candidates = vol.collect_zero_size_file_frns_in_subtree(
-            dir_frn,
-            ZERO_SIZE_FOLDER_REPAIR_LIMIT,
-        );
+        let candidates =
+            vol.collect_zero_size_file_frns_in_subtree(dir_frn, ZERO_SIZE_FOLDER_REPAIR_LIMIT);
         if candidates.is_empty() {
             (0usize, 0usize, summary)
         } else {
@@ -142,6 +140,10 @@ pub(super) fn handle_client(
             let _ = send_response(pipe, &SearchResponse::Pong);
         }
         SearchRequest::WarmIndex => {
+            if !require_trusted_metadata_client(pipe, "WarmIndex") {
+                return;
+            }
+
             // Respond immediately so the client is not blocked.
             let _ = send_response(pipe, &SearchResponse::WarmStarted);
 
@@ -164,44 +166,45 @@ pub(super) fn handle_client(
                 let indices_clone = indices.clone();
                 let warming_flag = is_warming.clone();
                 let warm_epoch = last_warm_epoch_secs.clone();
-                let spawn_result = std::thread::Builder::new()
-                    .name("warm-index".into())
-                    .spawn(move || {
-                        struct WarmGuard(Arc<AtomicBool>);
-                        impl Drop for WarmGuard {
-                            fn drop(&mut self) {
-                                self.0.store(false, Ordering::SeqCst);
-                            }
-                        }
-
-                        let _guard = WarmGuard(Arc::clone(&warming_flag));
-
-                        eprintln!("[IPC] WarmIndex: warming in-memory index...");
-                        let start = std::time::Instant::now();
-                        {
-                            let handles = volume_indices::snapshot_handles(&indices_clone);
-                            let mut touched = 0u64;
-                            for handle in &handles {
-                                let vol = handle.read();
-                                let arena_bytes = vol.names.as_bytes();
-                                for chunk in arena_bytes.chunks(4096) {
-                                    black_box(&chunk[0]);
+                let spawn_result =
+                    std::thread::Builder::new()
+                        .name("warm-index".into())
+                        .spawn(move || {
+                            struct WarmGuard(Arc<AtomicBool>);
+                            impl Drop for WarmGuard {
+                                fn drop(&mut self) {
+                                    self.0.store(false, Ordering::SeqCst);
                                 }
-                                touched += vol.records.len() as u64;
                             }
-                            eprintln!(
-                                "[IPC] WarmIndex: touched {} records in {:.2}s",
-                                touched,
-                                start.elapsed().as_secs_f64()
-                            );
-                        }
-                        // Record completion timestamp for cooldown.
-                        let done_epoch = std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_secs();
-                        warm_epoch.store(done_epoch, Ordering::Relaxed);
-                    });
+
+                            let _guard = WarmGuard(Arc::clone(&warming_flag));
+
+                            eprintln!("[IPC] WarmIndex: warming in-memory index...");
+                            let start = std::time::Instant::now();
+                            {
+                                let handles = volume_indices::snapshot_handles(&indices_clone);
+                                let mut touched = 0u64;
+                                for handle in &handles {
+                                    let vol = handle.read();
+                                    let arena_bytes = vol.names.as_bytes();
+                                    for chunk in arena_bytes.chunks(4096) {
+                                        black_box(&chunk[0]);
+                                    }
+                                    touched += vol.records.len() as u64;
+                                }
+                                eprintln!(
+                                    "[IPC] WarmIndex: touched {} records in {:.2}s",
+                                    touched,
+                                    start.elapsed().as_secs_f64()
+                                );
+                            }
+                            // Record completion timestamp for cooldown.
+                            let done_epoch = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_secs();
+                            warm_epoch.store(done_epoch, Ordering::Relaxed);
+                        });
 
                 if let Err(error) = spawn_result {
                     is_warming.store(false, Ordering::SeqCst);
@@ -210,13 +213,14 @@ pub(super) fn handle_client(
             }
         }
         SearchRequest::GetStatus => {
+            if !require_trusted_metadata_client(pipe, "GetStatus") {
+                return;
+            }
+
             let handles = volume_indices::snapshot_handles(indices);
             let status = build_status_response(&handles, indexing_progress, security_policy);
 
-            let _ = send_response(
-                pipe,
-                &SearchResponse::Status(status),
-            );
+            let _ = send_response(pipe, &SearchResponse::Status(status));
         }
         SearchRequest::Query {
             text,
@@ -266,7 +270,10 @@ pub(super) fn handle_client(
                         return;
                     }
                     eprintln!("[IPC] Authorization check failed: {}", e);
-                    let _ = send_response(pipe, &SearchResponse::Error("Authorization failed".to_string()));
+                    let _ = send_response(
+                        pipe,
+                        &SearchResponse::Error("Authorization failed".to_string()),
+                    );
                 }
             }
         }
@@ -337,13 +344,14 @@ pub(super) fn handle_client(
             let _ = send_response(pipe, &SearchResponse::PathsModified { modified });
         }
         SearchRequest::FolderSize { path } => {
+            if !require_trusted_metadata_client(pipe, "FolderSize") {
+                return;
+            }
+
             let drive_letter = match path.chars().next() {
                 Some(c) if c.is_ascii_alphabetic() => c.to_ascii_uppercase(),
                 _ => {
-                    let _ = send_response(
-                        pipe,
-                        &SearchResponse::Error("Invalid path".to_string()),
-                    );
+                    let _ = send_response(pipe, &SearchResponse::Error("Invalid path".to_string()));
                     return;
                 }
             };
@@ -376,18 +384,14 @@ pub(super) fn handle_client(
                 let vol = handle.read();
                 if !matches!(vol.state, IndexState::Ready) {
                     drop(vol);
-                    let _ = send_response(
-                        pipe,
-                        &SearchResponse::Error("Volume not ready".to_string()),
-                    );
+                    let _ =
+                        send_response(pipe, &SearchResponse::Error("Volume not ready".to_string()));
                     return;
                 }
                 if !vol.sizes_loaded {
                     drop(vol);
-                    let _ = send_response(
-                        pipe,
-                        &SearchResponse::Error("Sizes not loaded".to_string()),
-                    );
+                    let _ =
+                        send_response(pipe, &SearchResponse::Error("Sizes not loaded".to_string()));
                     return;
                 }
                 match vol.resolve_path_to_frn(&path) {
@@ -398,14 +402,13 @@ pub(super) fn handle_client(
 
             match result {
                 Ok((dir_frn, summary)) => {
-                    let (total_size, file_count, folder_count) =
-                        repair_suspicious_zero_folder_size(
-                            &handle,
-                            drive_letter,
-                            &path,
-                            dir_frn,
-                            summary,
-                        );
+                    let (total_size, file_count, folder_count) = repair_suspicious_zero_folder_size(
+                        &handle,
+                        drive_letter,
+                        &path,
+                        dir_frn,
+                        summary,
+                    );
                     eprintln!(
                         "[FOLDER-SIZE] responding path={} total_gb={:.2} files={} folders={}",
                         crate::redact_paths(&path),
@@ -429,12 +432,27 @@ pub(super) fn handle_client(
                         crate::redact_paths(&path),
                         e,
                     );
-                    let _ = send_response(
-                        pipe,
-                        &SearchResponse::Error(e.to_string()),
-                    );
+                    let _ = send_response(pipe, &SearchResponse::Error(e.to_string()));
                 }
             }
+        }
+    }
+}
+
+fn require_trusted_metadata_client(pipe: HANDLE, operation: &str) -> bool {
+    match trusted_file_manager_client(pipe) {
+        Ok(()) => true,
+        Err(error) => {
+            eprintln!(
+                "[IPC] {} rejected unauthorized client: {}",
+                operation,
+                crate::redact_paths(&error),
+            );
+            let _ = send_response(
+                pipe,
+                &SearchResponse::Error("Authorization failed".to_string()),
+            );
+            false
         }
     }
 }
@@ -501,7 +519,10 @@ fn build_status_response(
                     // (filesystem paths, driver names, OS error codes). Log the real
                     // error server-side for diagnostics.
                     IndexState::Error(e) => {
-                        eprintln!("[IPC] Volume {} status error (redacted from client): {}", vol.drive_letter, e);
+                        eprintln!(
+                            "[IPC] Volume {} status error (redacted from client): {}",
+                            vol.drive_letter, e
+                        );
                         "error".to_string()
                     }
                 },
@@ -514,14 +535,12 @@ fn build_status_response(
                 },
                 phase_progress: None,
                 phase_total: None,
-                sizes_loading: matches!(vol.state, crate::file_index::IndexState::Ready) && !vol.sizes_loaded,
+                sizes_loading: matches!(vol.state, crate::file_index::IndexState::Ready)
+                    && !vol.sizes_loaded,
             };
 
             match volume_map.get_mut(&vol.drive_letter) {
-                Some(existing)
-                    if existing.state == "scanning"
-                        && next_status.state == "ready" =>
-                {
+                Some(existing) if existing.state == "scanning" && next_status.state == "ready" => {
                     existing.files_indexed = existing.files_indexed.max(next_status.files_indexed);
                 }
                 _ => {
@@ -613,6 +632,8 @@ mod tests {
         assert!(status
             .volumes
             .iter()
-            .any(|volume| volume.drive_letter == 'D' && volume.state == "scanning" && volume.files_indexed == 7));
+            .any(|volume| volume.drive_letter == 'D'
+                && volume.state == "scanning"
+                && volume.files_indexed == 7));
     }
 }

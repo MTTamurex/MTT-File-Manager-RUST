@@ -8,12 +8,16 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fs;
-use std::io::{self, BufWriter};
+use std::io::{self, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::domain::file_entry::{ends_with_ignore_case, split_archive_path};
+
+const MAX_EXTRACTED_ENTRY_BYTES: u64 = 16 * 1024 * 1024 * 1024;
+const MAX_EXTRACTED_TOTAL_BYTES: u64 = 64 * 1024 * 1024 * 1024;
+const MAX_RAR_IN_MEMORY_ENTRY_BYTES: u64 = 1024 * 1024 * 1024;
 
 // ---------------------------------------------------------------------------
 // Entry matching (files + folder prefixes)
@@ -120,7 +124,10 @@ fn derive_output_path(
             if !dest_path.starts_with(dest_folder) {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
-                    format!("path traversal blocked: '{}' escapes destination", entry_name),
+                    format!(
+                        "path traversal blocked: '{}' escapes destination",
+                        entry_name
+                    ),
                 ));
             }
 
@@ -180,11 +187,9 @@ fn is_cancelled(cancel: &ExtractionCancelFlag) -> bool {
 /// Returns true if ALL the given virtual paths point to archive formats
 /// that can be extracted natively (ZIP, 7z, RAR, TAR variants) without relying on Windows Shell.
 pub fn has_native_support(paths: &[PathBuf]) -> bool {
-    paths.iter().all(|p| {
-        match split_archive_path(p) {
-            Some((archive, _)) => is_natively_supported(&archive),
-            None => false,
-        }
+    paths.iter().all(|p| match split_archive_path(p) {
+        Some((archive, _)) => is_natively_supported(&archive),
+        None => false,
     })
 }
 
@@ -258,6 +263,7 @@ pub fn extract_files_from_archive(
     }
 
     let mut global_extracted = 0usize;
+    let mut global_extracted_bytes = 0u64;
     let mut all_ok = true;
     for (archive_path, internal_paths) in &groups {
         let archive_display = archive_path
@@ -279,8 +285,15 @@ pub fn extract_files_from_archive(
         }
 
         let refs: Vec<&str> = internal_paths.iter().map(|s| s.as_str()).collect();
-        let result =
-            extract_from_archive(archive_path, &refs, dest_folder, progress, cancel, &mut global_extracted);
+        let result = extract_from_archive(
+            archive_path,
+            &refs,
+            dest_folder,
+            progress,
+            cancel,
+            &mut global_extracted,
+            &mut global_extracted_bytes,
+        );
         match result {
             Ok(count) => {
                 log::info!(
@@ -320,17 +333,50 @@ fn extract_from_archive(
     progress: &SharedExtractionProgress,
     cancel: &ExtractionCancelFlag,
     global_extracted: &mut usize,
+    global_extracted_bytes: &mut u64,
 ) -> io::Result<usize> {
     let name = archive_path.to_string_lossy();
 
     if ends_with_ignore_case(&name, ".zip") {
-        extract_from_zip(archive_path, internal_paths, dest_folder, progress, cancel, global_extracted)
+        extract_from_zip(
+            archive_path,
+            internal_paths,
+            dest_folder,
+            progress,
+            cancel,
+            global_extracted,
+            global_extracted_bytes,
+        )
     } else if ends_with_ignore_case(&name, ".7z") {
-        extract_from_7z(archive_path, internal_paths, dest_folder, progress, cancel, global_extracted)
+        extract_from_7z(
+            archive_path,
+            internal_paths,
+            dest_folder,
+            progress,
+            cancel,
+            global_extracted,
+            global_extracted_bytes,
+        )
     } else if ends_with_ignore_case(&name, ".rar") {
-        extract_from_rar(archive_path, internal_paths, dest_folder, progress, cancel, global_extracted)
+        extract_from_rar(
+            archive_path,
+            internal_paths,
+            dest_folder,
+            progress,
+            cancel,
+            global_extracted,
+            global_extracted_bytes,
+        )
     } else if is_tar_variant(&name) {
-        extract_from_tar(archive_path, internal_paths, dest_folder, progress, cancel, global_extracted)
+        extract_from_tar(
+            archive_path,
+            internal_paths,
+            dest_folder,
+            progress,
+            cancel,
+            global_extracted,
+            global_extracted_bytes,
+        )
     } else {
         Err(io::Error::new(
             io::ErrorKind::Unsupported,
@@ -356,11 +402,7 @@ fn is_tar_variant(name: &str) -> bool {
 }
 
 /// Helper to update shared progress state.
-fn update_progress(
-    progress: &SharedExtractionProgress,
-    current_file: &str,
-    extracted: usize,
-) {
+fn update_progress(progress: &SharedExtractionProgress, current_file: &str, extracted: usize) {
     if let Ok(mut p) = progress.lock() {
         if let Some(ref mut state) = *p {
             state.current_file = current_file.to_string();
@@ -385,6 +427,112 @@ fn clear_progress(progress: &SharedExtractionProgress) {
     }
 }
 
+fn ensure_declared_entry_size(
+    entry_name: &str,
+    declared_size: u64,
+    total_extracted_bytes: u64,
+    entry_limit: u64,
+) -> io::Result<()> {
+    if declared_size > entry_limit {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "archive entry '{}' exceeds extraction limit ({} bytes > {} bytes)",
+                entry_name, declared_size, entry_limit
+            ),
+        ));
+    }
+    let projected = total_extracted_bytes
+        .checked_add(declared_size)
+        .ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "archive extraction size overflow",
+            )
+        })?;
+    if projected > MAX_EXTRACTED_TOTAL_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "archive extraction exceeds total limit ({} bytes > {} bytes)",
+                projected, MAX_EXTRACTED_TOTAL_BYTES
+            ),
+        ));
+    }
+    Ok(())
+}
+
+fn copy_limited_to_path<R: Read>(
+    mut reader: R,
+    dest_path: &Path,
+    entry_name: &str,
+    total_extracted_bytes: &mut u64,
+) -> io::Result<u64> {
+    let result = (|| {
+        let out_file = fs::File::create(dest_path)?;
+        let mut writer = BufWriter::new(out_file);
+        let bytes = copy_limited(&mut reader, &mut writer, entry_name, *total_extracted_bytes)?;
+        writer.flush()?;
+        Ok(bytes)
+    })();
+
+    match result {
+        Ok(bytes) => {
+            *total_extracted_bytes = total_extracted_bytes.checked_add(bytes).ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "archive extraction size overflow",
+                )
+            })?;
+            Ok(bytes)
+        }
+        Err(error) => {
+            let _ = fs::remove_file(dest_path);
+            Err(error)
+        }
+    }
+}
+
+fn copy_limited<R: Read, W: Write>(
+    reader: &mut R,
+    writer: &mut W,
+    entry_name: &str,
+    total_before_entry: u64,
+) -> io::Result<u64> {
+    let mut buffer = [0u8; 64 * 1024];
+    let mut entry_written = 0u64;
+
+    loop {
+        let read_limit = (MAX_EXTRACTED_ENTRY_BYTES + 1)
+            .saturating_sub(entry_written)
+            .min(buffer.len() as u64) as usize;
+        if read_limit == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "archive entry '{}' exceeds extraction limit ({} bytes)",
+                    entry_name, MAX_EXTRACTED_ENTRY_BYTES
+                ),
+            ));
+        }
+        let read = reader.read(&mut buffer[..read_limit])?;
+        if read == 0 {
+            return Ok(entry_written);
+        }
+
+        entry_written = entry_written.checked_add(read as u64).ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidData, "archive entry size overflow")
+        })?;
+        ensure_declared_entry_size(
+            entry_name,
+            entry_written,
+            total_before_entry,
+            MAX_EXTRACTED_ENTRY_BYTES,
+        )?;
+        writer.write_all(&buffer[..read])?;
+    }
+}
+
 /// Extracts specific files from a ZIP archive.
 fn extract_from_zip(
     archive_path: &Path,
@@ -393,6 +541,7 @@ fn extract_from_zip(
     progress: &SharedExtractionProgress,
     cancel: &ExtractionCancelFlag,
     global_extracted: &mut usize,
+    global_extracted_bytes: &mut u64,
 ) -> io::Result<usize> {
     let file = fs::File::open(archive_path)?;
     let mut archive = zip::ZipArchive::new(file)
@@ -419,7 +568,10 @@ fn extract_from_zip(
     let mut extracted = 0;
     for i in 0..archive.len() {
         if is_cancelled(cancel) {
-            log::info!("[ArchiveExtract/ZIP] Cancelled by user after {} files", extracted);
+            log::info!(
+                "[ArchiveExtract/ZIP] Cancelled by user after {} files",
+                extracted
+            );
             break;
         }
 
@@ -445,8 +597,13 @@ fn extract_from_zip(
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_default();
 
-        let mut out_file = BufWriter::new(fs::File::create(&dest_path)?);
-        io::copy(&mut entry, &mut out_file)?;
+        ensure_declared_entry_size(
+            &entry_name,
+            entry.size(),
+            *global_extracted_bytes,
+            MAX_EXTRACTED_ENTRY_BYTES,
+        )?;
+        copy_limited_to_path(&mut entry, &dest_path, &entry_name, global_extracted_bytes)?;
         extracted += 1;
         *global_extracted += 1;
         update_progress(progress, &sanitized, *global_extracted);
@@ -469,20 +626,25 @@ fn extract_from_7z(
     progress: &SharedExtractionProgress,
     cancel: &ExtractionCancelFlag,
     global_extracted: &mut usize,
+    global_extracted_bytes: &mut u64,
 ) -> io::Result<usize> {
     let matcher = EntryMatcher::new(internal_paths);
 
     // Pre-scan: read archive metadata (no decompression) to count matching entries.
     let total_matching = match sevenz_rust::Archive::open(archive_path) {
         Ok(archive) => {
-            let count = archive.files.iter().filter(|entry| {
-                if entry.is_directory() {
-                    return false;
-                }
-                let name = entry.name().replace('\\', "/");
-                let lower = name.to_ascii_lowercase();
-                !matches!(matcher.match_entry(&lower), MatchKind::None)
-            }).count();
+            let count = archive
+                .files
+                .iter()
+                .filter(|entry| {
+                    if entry.is_directory() {
+                        return false;
+                    }
+                    let name = entry.name().replace('\\', "/");
+                    let lower = name.to_ascii_lowercase();
+                    !matches!(matcher.match_entry(&lower), MatchKind::None)
+                })
+                .count();
             set_progress_total(progress, count);
             count
         }
@@ -518,10 +680,18 @@ fn extract_from_7z(
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_default();
 
-        let mut out_file = BufWriter::new(fs::File::create(&dest_path)
-            .map_err(|e| sevenz_rust::Error::other(format!("Failed to create {}: {}", dest_path.display(), e)))?);
-        io::copy(reader, &mut out_file)
-            .map_err(|e| sevenz_rust::Error::other(format!("Failed to write {}: {}", dest_path.display(), e)))?;
+        ensure_declared_entry_size(
+            &entry_name,
+            entry.size(),
+            *global_extracted_bytes,
+            MAX_EXTRACTED_ENTRY_BYTES,
+        )
+        .map_err(|e| sevenz_rust::Error::other(e.to_string()))?;
+        copy_limited_to_path(reader, &dest_path, &entry_name, global_extracted_bytes).map_err(
+            |e| {
+                sevenz_rust::Error::other(format!("Failed to write {}: {}", dest_path.display(), e))
+            },
+        )?;
         extracted += 1;
         *global_extracted += 1;
         update_progress(progress, &sanitized, *global_extracted);
@@ -554,6 +724,7 @@ fn extract_from_rar(
     progress: &SharedExtractionProgress,
     cancel: &ExtractionCancelFlag,
     global_extracted: &mut usize,
+    global_extracted_bytes: &mut u64,
 ) -> io::Result<usize> {
     let matcher = EntryMatcher::new(internal_paths);
 
@@ -591,7 +762,10 @@ fn extract_from_rar(
 
     loop {
         if is_cancelled(cancel) {
-            log::info!("[ArchiveExtract/RAR] Cancelled by user after {} files", extracted);
+            log::info!(
+                "[ArchiveExtract/RAR] Cancelled by user after {} files",
+                extracted
+            );
             break;
         }
 
@@ -618,11 +792,24 @@ fn extract_from_rar(
             continue;
         }
 
+        ensure_declared_entry_size(
+            &entry_name,
+            entry.unpacked_size,
+            *global_extracted_bytes,
+            MAX_RAR_IN_MEMORY_ENTRY_BYTES,
+        )?;
+
         // Read file content into memory, then write with derived output path.
         let (data, next) = header
             .read()
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
         archive = next;
+        ensure_declared_entry_size(
+            &entry_name,
+            data.len() as u64,
+            *global_extracted_bytes,
+            MAX_RAR_IN_MEMORY_ENTRY_BYTES,
+        )?;
 
         let dest_path = derive_output_path(&entry_name, &match_kind, dest_folder)?;
         let sanitized = dest_path
@@ -630,7 +817,12 @@ fn extract_from_rar(
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_default();
 
-        fs::write(&dest_path, &data)?;
+        copy_limited_to_path(
+            std::io::Cursor::new(data.as_slice()),
+            &dest_path,
+            &entry_name,
+            global_extracted_bytes,
+        )?;
         extracted += 1;
         *global_extracted += 1;
         update_progress(progress, &sanitized, *global_extracted);
@@ -654,26 +846,28 @@ fn extract_from_tar(
     progress: &SharedExtractionProgress,
     cancel: &ExtractionCancelFlag,
     global_extracted: &mut usize,
+    global_extracted_bytes: &mut u64,
 ) -> io::Result<usize> {
     let file = fs::File::open(archive_path)?;
     let name_lower = archive_path.to_string_lossy().to_ascii_lowercase();
 
     // Chain the appropriate decompressor based on file extension.
-    let reader: Box<dyn io::Read> = if name_lower.ends_with(".tar.gz") || name_lower.ends_with(".tgz") {
-        Box::new(flate2::read::GzDecoder::new(file))
-    } else if name_lower.ends_with(".tar.bz2") || name_lower.ends_with(".tbz2") {
-        Box::new(bzip2::read::BzDecoder::new(file))
-    } else if name_lower.ends_with(".tar.xz") || name_lower.ends_with(".txz") {
-        Box::new(xz2::read::XzDecoder::new(file))
-    } else if name_lower.ends_with(".tar.zst") || name_lower.ends_with(".tzst") {
-        Box::new(
-            zstd::stream::read::Decoder::new(file)
-                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?,
-        )
-    } else {
-        // Plain .tar
-        Box::new(file)
-    };
+    let reader: Box<dyn io::Read> =
+        if name_lower.ends_with(".tar.gz") || name_lower.ends_with(".tgz") {
+            Box::new(flate2::read::GzDecoder::new(file))
+        } else if name_lower.ends_with(".tar.bz2") || name_lower.ends_with(".tbz2") {
+            Box::new(bzip2::read::BzDecoder::new(file))
+        } else if name_lower.ends_with(".tar.xz") || name_lower.ends_with(".txz") {
+            Box::new(xz2::read::XzDecoder::new(file))
+        } else if name_lower.ends_with(".tar.zst") || name_lower.ends_with(".tzst") {
+            Box::new(
+                zstd::stream::read::Decoder::new(file)
+                    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?,
+            )
+        } else {
+            // Plain .tar
+            Box::new(file)
+        };
 
     let matcher = EntryMatcher::new(internal_paths);
     let mut archive = tar::Archive::new(reader);
@@ -681,7 +875,10 @@ fn extract_from_tar(
 
     for entry_result in archive.entries()? {
         if is_cancelled(cancel) {
-            log::info!("[ArchiveExtract/TAR] Cancelled by user after {} files", extracted);
+            log::info!(
+                "[ArchiveExtract/TAR] Cancelled by user after {} files",
+                extracted
+            );
             break;
         }
 
@@ -705,8 +902,13 @@ fn extract_from_tar(
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_default();
 
-        let mut out_file = BufWriter::new(fs::File::create(&dest_path)?);
-        io::copy(&mut entry, &mut out_file)?;
+        ensure_declared_entry_size(
+            &entry_path,
+            entry.size(),
+            *global_extracted_bytes,
+            MAX_EXTRACTED_ENTRY_BYTES,
+        )?;
+        copy_limited_to_path(&mut entry, &dest_path, &entry_path, global_extracted_bytes)?;
         extracted += 1;
         *global_extracted += 1;
         update_progress(progress, &sanitized, *global_extracted);
@@ -760,11 +962,31 @@ fn is_windows_reserved_name(stem: &str) -> bool {
         return false;
     }
     let upper: String = stem.to_ascii_uppercase();
-    matches!(upper.as_str(),
-        "CON" | "PRN" | "AUX" | "NUL"
-        | "COM0" | "COM1" | "COM2" | "COM3" | "COM4"
-        | "COM5" | "COM6" | "COM7" | "COM8" | "COM9"
-        | "LPT0" | "LPT1" | "LPT2" | "LPT3" | "LPT4"
-        | "LPT5" | "LPT6" | "LPT7" | "LPT8" | "LPT9"
+    matches!(
+        upper.as_str(),
+        "CON"
+            | "PRN"
+            | "AUX"
+            | "NUL"
+            | "COM0"
+            | "COM1"
+            | "COM2"
+            | "COM3"
+            | "COM4"
+            | "COM5"
+            | "COM6"
+            | "COM7"
+            | "COM8"
+            | "COM9"
+            | "LPT0"
+            | "LPT1"
+            | "LPT2"
+            | "LPT3"
+            | "LPT4"
+            | "LPT5"
+            | "LPT6"
+            | "LPT7"
+            | "LPT8"
+            | "LPT9"
     )
 }
