@@ -30,6 +30,8 @@ pub enum FileOperationResult {
     MoveCompleted {
         source_folder: PathBuf,
         dest_folder: PathBuf,
+        /// Destination path of the moved item (for write-activity cache clearing).
+        moved_dest: Option<PathBuf>,
     },
     /// Batch move completed - multiple source folders need refresh
     MoveBatchCompleted {
@@ -39,7 +41,11 @@ pub enum FileOperationResult {
         moved_files: Vec<PathBuf>,
     },
     /// Copy operation completed - dest folder needs reload if active
-    CopyCompleted { dest_folder: PathBuf },
+    CopyCompleted {
+        dest_folder: PathBuf,
+        /// Destination paths of all copied items (for write-activity cache clearing).
+        copied_dests: Vec<PathBuf>,
+    },
     RenameCompleted {
         path: PathBuf,
         new_name: String,

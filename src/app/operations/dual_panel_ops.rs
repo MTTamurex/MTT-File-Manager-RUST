@@ -107,6 +107,11 @@ impl ImageViewerApp {
     ///
     /// **Safe for `load_folder`** since each panel has its own `generation` /
     /// `current_generation`; results are routed in `process_streaming_and_thumbnail_events`.
+    ///
+    /// **Generation note**: if the closure calls `bump_folder_load_generation` (e.g. via
+    /// `load_folder_for_inactive`), that sets `current_generation` to the inactive panel's
+    /// new generation.  We restore it to the active panel's generation on exit so the
+    /// thumbnail worker keeps accepting requests from the active panel.
     pub fn with_inactive_panel<R>(&mut self, f: impl FnOnce(&mut Self) -> R) -> Option<R> {
         if !self.dual_panel_enabled {
             return None;
@@ -122,6 +127,15 @@ impl ImageViewerApp {
 
         // Swap back: restore active state into app fields
         snapshot.swap_with_app(self);
+
+        // Restore current_generation to the ACTIVE panel's generation.
+        // The closure may have called bump_folder_load_generation (via
+        // load_folder_for_inactive), which stores the inactive panel's generation into
+        // the shared current_generation Arc.  After the swap-back `self.generation` is
+        // the active panel's generation — ensure the worker sees it so it accepts
+        // thumbnail requests from the active panel.
+        self.current_generation
+            .store(self.generation, std::sync::atomic::Ordering::Relaxed);
 
         // Put snapshot back
         self.dual_panel_inactive_state = Some(snapshot);

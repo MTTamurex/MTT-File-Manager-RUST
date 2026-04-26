@@ -69,14 +69,15 @@ impl ImageViewerApp {
                             );
                             self.cleanup_deleted_pinned_folders();
                         }
-                        FileOperationResult::CopyCompleted { dest_folder } => {
-                            self.handle_copy_completed(dest_folder, current_path_norm)
+                        FileOperationResult::CopyCompleted { dest_folder, copied_dests } => {
+                            self.handle_copy_completed(dest_folder, copied_dests, current_path_norm)
                         }
                         FileOperationResult::MoveCompleted {
                             source_folder,
                             dest_folder,
+                            moved_dest,
                         } => {
-                            self.handle_move_completed(source_folder, dest_folder, current_path_norm);
+                            self.handle_move_completed(source_folder, dest_folder, moved_dest, current_path_norm);
                             self.cleanup_deleted_pinned_folders();
                         }
                         FileOperationResult::MoveBatchCompleted {
@@ -333,13 +334,20 @@ impl ImageViewerApp {
         self.restore_app_focus();
     }
 
-    fn handle_copy_completed(&mut self, dest_folder: PathBuf, current_path_norm: &str) {
+    fn handle_copy_completed(&mut self, dest_folder: PathBuf, copied_dests: Vec<PathBuf>, current_path_norm: &str) {
         let dest_str = Self::normalize_for_match(dest_folder.as_path());
         self.invalidate_folder_and_tab_caches(&dest_folder);
 
         // Retry files that previously failed thumbnail extraction while copy was in progress.
         self.cache_manager.clear_failed();
         crate::workers::thumbnail::clear_all_failures();
+
+        // Clear write-activity markers for the files we just copied so the
+        // stability guard does not delay thumbnail generation for 12 seconds.
+        // These files were fully written by Windows Shell — they are safe to read.
+        if !copied_dests.is_empty() {
+            crate::infrastructure::windows::file_flags::clear_write_activity_for_paths(&copied_dests);
+        }
 
         if dest_str == current_path_norm {
             #[cfg(debug_assertions)]
@@ -359,6 +367,7 @@ impl ImageViewerApp {
         &mut self,
         source_folder: PathBuf,
         dest_folder: PathBuf,
+        moved_dest: Option<PathBuf>,
         current_path_norm: &str,
     ) {
         let source_str = Self::normalize_for_match(source_folder.as_path());
@@ -369,6 +378,12 @@ impl ImageViewerApp {
 
         self.cache_manager.clear_failed();
         crate::workers::thumbnail::clear_all_failures();
+
+        // Clear write-activity markers for the moved file so thumbnail generation
+        // is not delayed by the stability guard.
+        if let Some(dest_path) = moved_dest {
+            crate::infrastructure::windows::file_flags::clear_write_activity_for_path(&dest_path);
+        }
 
         if current_path_norm == source_str {
             #[cfg(debug_assertions)]
@@ -405,6 +420,17 @@ impl ImageViewerApp {
 
         self.cache_manager.clear_failed();
         crate::workers::thumbnail::clear_all_failures();
+
+        // Clear write-activity markers for the moved files so thumbnail generation
+        // is not delayed by the stability guard. moved_files are source paths;
+        // compute the destination paths (Shell preserves the original file name).
+        let moved_dests: Vec<std::path::PathBuf> = moved_files
+            .iter()
+            .filter_map(|p| p.file_name().map(|n| dest_folder.join(n)))
+            .collect();
+        if !moved_dests.is_empty() {
+            crate::infrastructure::windows::file_flags::clear_write_activity_for_paths(&moved_dests);
+        }
 
         for source_folder in &source_folders {
             self.invalidate_folder_and_tab_caches(source_folder);
