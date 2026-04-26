@@ -1,6 +1,6 @@
 use super::{sanitize_operation_path, sanitize_operation_paths, FileOperationResult, SendHwnd};
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::Sender;
 
 use crate::infrastructure::archive_extract::{self, ExtractionCancelFlag, SharedExtractionProgress};
@@ -68,6 +68,44 @@ fn is_invalid_rename_target(new_name: &str) -> bool {
         || new_name.ends_with('.')
         || new_name.ends_with(' ')
         || crate::infrastructure::security::is_windows_reserved_name(base_name)
+}
+
+fn known_exact_new_file_copy_dests(
+    paths: &[PathBuf],
+    dest_folder: &Path,
+    contains_virtual_path: bool,
+) -> Vec<PathBuf> {
+    if contains_virtual_path {
+        return Vec::new();
+    }
+
+    let mut seen = HashSet::new();
+    let mut ambiguous = HashSet::new();
+    let mut exact_dests = Vec::new();
+
+    for path in paths {
+        if !path.is_file() {
+            continue;
+        }
+
+        let Some(name) = path.file_name() else {
+            continue;
+        };
+
+        let dest = dest_folder.join(name);
+        if dest.exists() {
+            continue;
+        }
+
+        if seen.insert(dest.clone()) {
+            exact_dests.push(dest);
+        } else {
+            ambiguous.insert(dest);
+        }
+    }
+
+    exact_dests.retain(|dest| !ambiguous.contains(dest));
+    exact_dests
 }
 
 pub(super) fn handle_rename(
@@ -145,11 +183,11 @@ pub(super) fn handle_copy(
             let native_ok = archive_extract::has_native_support(&[path.clone()]);
             log::debug!("[FileOps] handle_copy: path={}, is_virtual={}, native_support={}", path.display(), is_virtual, native_ok);
 
-            // Capture before path is potentially moved into extract_files_from_archive.
-            let copied_dests: Vec<PathBuf> = path
-                .file_name()
-                .map(|name| vec![dest_folder.join(name)])
-                .unwrap_or_default();
+            let mut copied_dests = known_exact_new_file_copy_dests(
+                std::slice::from_ref(&path),
+                &dest_folder,
+                is_virtual,
+            );
 
             let success = if is_virtual && native_ok {
                 log::debug!("[FileOps] Using native archive extraction for: {}", path.display());
@@ -162,6 +200,7 @@ pub(super) fn handle_copy(
             log::debug!("[FileOps] handle_copy result: success={}", success);
 
             if success {
+                copied_dests.retain(|dest| dest.is_file());
                 let _ = result_sender.send(FileOperationResult::CopyCompleted {
                     dest_folder,
                     copied_dests,
@@ -249,6 +288,12 @@ pub(super) fn handle_copy_batch(
                 log::debug!("[FileOps]   batch path: {}", p.display());
             }
 
+            let mut copied_dests = known_exact_new_file_copy_dests(
+                &paths,
+                &dest_folder,
+                has_virtual_path,
+            );
+
             let success = if has_virtual_path && native_ok {
                 log::debug!("[FileOps] Using native archive extraction for batch copy ({} files)", paths.len());
                 archive_extract::extract_files_from_archive(&paths, &dest_folder, progress, cancel)
@@ -260,10 +305,7 @@ pub(super) fn handle_copy_batch(
             log::debug!("[FileOps] handle_copy_batch result: success={}", success);
 
             if success {
-                let copied_dests: Vec<PathBuf> = paths
-                    .iter()
-                    .filter_map(|p| p.file_name().map(|name| dest_folder.join(name)))
-                    .collect();
+                copied_dests.retain(|dest| dest.is_file());
                 let _ = result_sender.send(FileOperationResult::CopyCompleted {
                     dest_folder,
                     copied_dests,

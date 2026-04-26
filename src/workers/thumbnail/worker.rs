@@ -182,6 +182,7 @@ impl Drop for ComMfGuard {
                 let _ = MFShutdown();
             }
             if self.com_initialized {
+                crate::workers::thumbnail::extraction::stage2_wic::drop_thread_local_factory();
                 CoUninitialize();
             }
         }

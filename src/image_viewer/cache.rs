@@ -113,7 +113,8 @@ pub struct PrefetchEngine {
     results_rx: Receiver<LoadOutput>,
     active_center: Arc<AtomicUsize>,
     repaint_ctx: Arc<OnceLock<egui::Context>>,
-    /// Worker thread handles — joined on Drop to ensure clean COM/WIC teardown.
+    /// Worker thread handles retained until Drop, then detached without joining.
+    /// Channel shutdown lets workers exit and run their COM/WIC cleanup.
     worker_handles: Vec<std::thread::JoinHandle<()>>,
 }
 

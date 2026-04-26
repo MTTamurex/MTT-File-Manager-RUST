@@ -72,6 +72,16 @@ pub fn extract(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
 /// When `max_side` is `None`, the native image resolution is returned
 /// (behaviour identical to the old `extract`).
 pub fn extract_to_size(path: &Path, max_side: Option<u32>) -> Option<(Vec<u8>, u32, u32)> {
+    extract_to_size_with_original_size(path, max_side)
+        .map(|(buffer, width, height, _, _)| (buffer, width, height))
+}
+
+/// Decode an image via WIC directly to a target size and return both final
+/// buffer dimensions and native image dimensions.
+pub fn extract_to_size_with_original_size(
+    path: &Path,
+    max_side: Option<u32>,
+) -> Option<(Vec<u8>, u32, u32, u32, u32)> {
     // WIC is for image files only - videos should go directly to Shell API (Stage 3)
     let ext = path.extension()?.to_string_lossy().to_lowercase();
     if !matches!(
@@ -166,6 +176,6 @@ pub fn extract_to_size(path: &Path, max_side: Option<u32>) -> Option<(Vec<u8>, u
             .CopyPixels(std::ptr::null(), final_width * 4, &mut buffer)
             .ok()?;
 
-        Some((buffer, final_width, final_height))
+        Some((buffer, final_width, final_height, native_width, native_height))
     }
 }

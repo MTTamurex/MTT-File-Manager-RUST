@@ -2,6 +2,7 @@ use crate::image_viewer::loader;
 use eframe::egui;
 use rfd::FileDialog;
 use rust_i18n::t;
+use std::collections::VecDeque;
 use std::time::Duration;
 
 /// Holds pre-uploaded textures for each frame of an animated GIF along with
@@ -19,7 +20,7 @@ pub(in crate::image_viewer) struct GifAnimation {
 /// hundreds of glTexImage2D calls and stall DWM), we upload a small batch
 /// per frame until all frames are uploaded and then finalize into GifAnimation.
 pub(in crate::image_viewer) struct GifUploadQueue {
-    pub(super) frames: Vec<loader::GifAnimationFrame>,
+    pub(super) frames: VecDeque<loader::GifAnimationFrame>,
     pub(super) textures: Vec<egui::TextureHandle>,
     pub(super) delays_ms: Vec<u32>,
     pub(super) decode_index: usize,
@@ -243,7 +244,7 @@ impl super::DedicatedImageViewerApp {
                 // Stage frames for batched upload instead of uploading
                 // all at once (which can issue 100+ glTexImage2D in one frame).
                 self.gif_upload_queue = Some(GifUploadQueue {
-                    frames,
+                    frames: VecDeque::from(frames),
                     textures: Vec::with_capacity(total),
                     delays_ms: Vec::with_capacity(total),
                     decode_index,
@@ -287,7 +288,9 @@ impl super::DedicatedImageViewerApp {
 
         let mut uploads = 0;
         while !queue.frames.is_empty() && uploads < GIF_MAX_UPLOADS_PER_FRAME {
-            let gif_frame = queue.frames.remove(0);
+            let Some(gif_frame) = queue.frames.pop_front() else {
+                break;
+            };
             let frame = gif_frame.frame;
             let color_image = egui::ColorImage::from_rgba_unmultiplied(
                 [frame.width as usize, frame.height as usize],
