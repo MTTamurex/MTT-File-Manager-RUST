@@ -20,7 +20,7 @@ impl ImageViewerApp {
 
         self.reset_folder_loading_state(force_refresh);
 
-        self.start_folder_load_pipeline(force_refresh);
+        self.start_folder_load_pipeline(force_refresh, true);
     }
 
     /// Lightweight folder load for the **inactive** dual panel.
@@ -47,6 +47,6 @@ impl ImageViewerApp {
         self.pending_items_count = 0;
         self.last_items_rebuild = std::time::Instant::now();
 
-        self.start_folder_load_pipeline(false);
+        self.start_folder_load_pipeline(false, false);
     }
 }

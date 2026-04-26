@@ -200,6 +200,43 @@ pub fn mark_recent_write_activity(path: &Path) {
     cache.insert(path.to_path_buf(), now);
 }
 
+/// Remove a file from the write-activity and stability caches so that
+/// `classify_file_read_safety` no longer considers it "recently changing".
+///
+/// Call this after our own app's file operation (copy/move) completes for
+/// a destination path.  The operation was done by Windows Shell — the file
+/// is fully written and safe to read immediately.  Without this, the
+/// `MIN_STABLE_MEDIA_DURATION` (12 s) guard would delay thumbnail extraction
+/// for every freshly-copied or freshly-moved media file.
+pub fn clear_write_activity_for_path(path: &Path) {
+    {
+        let mut cache = get_file_write_activity_cache().lock();
+        cache.remove(path);
+    }
+    // Also reset stability tracking so the 12-second window isn't ticking
+    // from the original create-event baseline.
+    {
+        let mut cache = get_file_stability_cache().lock();
+        cache.remove(path);
+    }
+}
+
+/// Batch variant of [`clear_write_activity_for_path`].
+pub fn clear_write_activity_for_paths(paths: &[std::path::PathBuf]) {
+    {
+        let mut act = get_file_write_activity_cache().lock();
+        for p in paths {
+            act.remove(p.as_path());
+        }
+    }
+    {
+        let mut stab = get_file_stability_cache().lock();
+        for p in paths {
+            stab.remove(p.as_path());
+        }
+    }
+}
+
 /// Returns `true` if the file extension indicates an incomplete download.
 ///
 /// Covers Chrome (.crdownload), Firefox (.part), Safari (.download),

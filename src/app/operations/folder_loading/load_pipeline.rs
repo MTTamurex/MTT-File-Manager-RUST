@@ -10,9 +10,17 @@ mod tier3_fallback;
 use std::path::PathBuf;
 
 impl ImageViewerApp {
-    pub(super) fn start_folder_load_pipeline(&mut self, force_refresh: bool) {
+    pub(super) fn start_folder_load_pipeline(
+        &mut self,
+        force_refresh: bool,
+        validate_against_current_generation: bool,
+    ) {
         let my_gen = self.generation;
-        let gen_clone = self.current_generation.clone();
+        let gen_clone = if validate_against_current_generation {
+            self.current_generation.clone()
+        } else {
+            std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(my_gen))
+        };
         let current_path = self.navigation_state.current_path.clone();
         let file_entry_sender = self.file_entry_sender.clone();
         let ctx = self.ui_ctx.clone();

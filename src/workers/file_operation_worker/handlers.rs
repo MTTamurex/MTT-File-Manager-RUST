@@ -145,6 +145,12 @@ pub(super) fn handle_copy(
             let native_ok = archive_extract::has_native_support(&[path.clone()]);
             log::debug!("[FileOps] handle_copy: path={}, is_virtual={}, native_support={}", path.display(), is_virtual, native_ok);
 
+            // Capture before path is potentially moved into extract_files_from_archive.
+            let copied_dests: Vec<PathBuf> = path
+                .file_name()
+                .map(|name| vec![dest_folder.join(name)])
+                .unwrap_or_default();
+
             let success = if is_virtual && native_ok {
                 log::debug!("[FileOps] Using native archive extraction for: {}", path.display());
                 archive_extract::extract_files_from_archive(&[path], &dest_folder, progress, cancel)
@@ -156,7 +162,10 @@ pub(super) fn handle_copy(
             log::debug!("[FileOps] handle_copy result: success={}", success);
 
             if success {
-                let _ = result_sender.send(FileOperationResult::CopyCompleted { dest_folder });
+                let _ = result_sender.send(FileOperationResult::CopyCompleted {
+                    dest_folder,
+                    copied_dests,
+                });
             } else {
                 let _ = result_sender.send(FileOperationResult::OperationFailed {
                     message: rust_i18n::t!("operations.error_cancelled").to_string(),
@@ -200,9 +209,11 @@ pub(super) fn handle_move(
 
             if success {
                 if let Some(src) = source_folder {
+                    let moved_dest = path.file_name().map(|name| dest_folder.join(name));
                     let _ = result_sender.send(FileOperationResult::MoveCompleted {
                         source_folder: src,
                         dest_folder,
+                        moved_dest,
                     });
                 }
             } else {
@@ -249,7 +260,14 @@ pub(super) fn handle_copy_batch(
             log::debug!("[FileOps] handle_copy_batch result: success={}", success);
 
             if success {
-                let _ = result_sender.send(FileOperationResult::CopyCompleted { dest_folder });
+                let copied_dests: Vec<PathBuf> = paths
+                    .iter()
+                    .filter_map(|p| p.file_name().map(|name| dest_folder.join(name)))
+                    .collect();
+                let _ = result_sender.send(FileOperationResult::CopyCompleted {
+                    dest_folder,
+                    copied_dests,
+                });
             } else {
                 let _ = result_sender.send(FileOperationResult::OperationFailed {
                     message: rust_i18n::t!("operations.error_cancelled").to_string(),
