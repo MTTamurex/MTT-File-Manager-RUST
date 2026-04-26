@@ -20,6 +20,7 @@ macro_rules! debug_log {
     }};
 }
 
+mod dual_panel_events;
 mod file_op_events;
 mod global_search_events;
 mod helpers;
