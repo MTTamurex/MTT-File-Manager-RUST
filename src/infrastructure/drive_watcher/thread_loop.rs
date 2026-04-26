@@ -1,16 +1,16 @@
+use parking_lot::Mutex;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use parking_lot::Mutex;
 use windows::Win32::Foundation::HANDLE;
 use windows::Win32::Storage::FileSystem::{
     ReadDirectoryChangesW, FILE_NOTIFY_CHANGE_ATTRIBUTES, FILE_NOTIFY_CHANGE_CREATION,
     FILE_NOTIFY_CHANGE_DIR_NAME, FILE_NOTIFY_CHANGE_FILE_NAME, FILE_NOTIFY_CHANGE_LAST_WRITE,
     FILE_NOTIFY_CHANGE_SIZE,
 };
-use windows::Win32::System::IO::{CancelIoEx, GetOverlappedResult, OVERLAPPED};
 use windows::Win32::System::Threading::{CreateEventW, ResetEvent, WaitForSingleObject};
+use windows::Win32::System::IO::{CancelIoEx, GetOverlappedResult, OVERLAPPED};
 
 use crate::infrastructure::windows::OwnedHandle;
 
@@ -54,7 +54,10 @@ pub(super) fn watcher_thread_main(
 
     unsafe {
         let Some(handle) = OwnedHandle::new(handle) else {
-            log::error!("[DRIVE-WATCHER] Received invalid drive handle for {:?}", drive_root);
+            log::error!(
+                "[DRIVE-WATCHER] Received invalid drive handle for {:?}",
+                drive_root
+            );
             return;
         };
 
@@ -172,12 +175,12 @@ pub(super) fn watcher_thread_main(
                         prefix_snapshot
                     );
                     coalesced.clear();
-                    let _ = event_tx.send(vec![DriveWatcherEvent::PrefixInvalidated(
-                        prefix_snapshot,
-                    )]);
+                    let _ =
+                        event_tx.send(vec![DriveWatcherEvent::PrefixInvalidated(prefix_snapshot)]);
                 } else {
                     // Parse the notification buffer.
-                    let events = parse_notify_buffer(&buffer.0[..bytes_returned as usize], &drive_root);
+                    let events =
+                        parse_notify_buffer(&buffer.0[..bytes_returned as usize], &drive_root);
                     let prefix_snapshot = current_prefix.lock().clone();
 
                     // Insert into coalescing set (deduplicates automatically)

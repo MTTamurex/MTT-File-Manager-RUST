@@ -2,8 +2,8 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::time::Instant;
 
-use super::{IndexedItem, IndexedVolume};
 use super::scanner::normalize_path_key;
+use super::{IndexedItem, IndexedVolume};
 
 pub(super) fn open_session_db() -> Option<rusqlite::Connection> {
     let cache_dir = dirs::data_local_dir()?

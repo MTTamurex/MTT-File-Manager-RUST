@@ -41,8 +41,7 @@ impl MpvPreview {
             } else {
                 "never"
             };
-            if let Err(e) =
-                mpv.command("script-message", &["osc-visibility", visibility_mode, "1"])
+            if let Err(e) = mpv.command("script-message", &["osc-visibility", visibility_mode, "1"])
             {
                 log::warn!(
                     "[MpvPreview] Failed to set custom osc-visibility={} : {:?}",
@@ -55,11 +54,23 @@ impl MpvPreview {
             // docked so the Lua handlers never override our "never" visibility.
             // Re-enable them when entering detached mode.
             if desired_custom_osc_visible {
-                let _ = mpv.command("change-list", &["script-opts", "append", "osc-showonpause=yes"]);
-                let _ = mpv.command("change-list", &["script-opts", "append", "osc-idlescreen=yes"]);
+                let _ = mpv.command(
+                    "change-list",
+                    &["script-opts", "append", "osc-showonpause=yes"],
+                );
+                let _ = mpv.command(
+                    "change-list",
+                    &["script-opts", "append", "osc-idlescreen=yes"],
+                );
             } else {
-                let _ = mpv.command("change-list", &["script-opts", "append", "osc-showonpause=no"]);
-                let _ = mpv.command("change-list", &["script-opts", "append", "osc-idlescreen=no"]);
+                let _ = mpv.command(
+                    "change-list",
+                    &["script-opts", "append", "osc-showonpause=no"],
+                );
+                let _ = mpv.command(
+                    "change-list",
+                    &["script-opts", "append", "osc-idlescreen=no"],
+                );
             }
 
             self.last_osc_enabled = Some(desired_custom_osc_visible);

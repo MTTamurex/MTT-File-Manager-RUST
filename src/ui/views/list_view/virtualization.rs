@@ -369,7 +369,8 @@ fn render_scrollbar(
     let is_hovered = response.hovered() || response.dragged();
     // Pointer anywhere in viewport = "active" state (show handle like egui's ScrollArea)
     let pointer_in_viewport = ui.input(|i| {
-        i.pointer.hover_pos()
+        i.pointer
+            .hover_pos()
             .map(|p| viewport_rect.contains(p))
             .unwrap_or(false)
     });
@@ -412,8 +413,11 @@ fn render_scrollbar(
         scroll_style.dormant_background_opacity
     };
     if bg_opacity > 0.0 {
-        ui.painter()
-            .rect_filled(scroll_bar_rect, 4.0, Color32::from_black_alpha((bg_opacity * 255.0) as u8));
+        ui.painter().rect_filled(
+            scroll_bar_rect,
+            4.0,
+            Color32::from_black_alpha((bg_opacity * 255.0) as u8),
+        );
     }
 
     // Handle — use egui's exact scroll handle color and opacity
@@ -434,17 +438,22 @@ fn render_scrollbar(
         let current = d.get_temp_mut_or_insert_with::<f32>(opacity_id, || 0.0_f32);
         let speed = if handle_opacity > *current { 12.0 } else { 6.0 };
         *current += (handle_opacity - *current) * (dt * speed).min(1.0);
-        if (*current - handle_opacity).abs() < 0.01 { *current = handle_opacity; }
+        if (*current - handle_opacity).abs() < 0.01 {
+            *current = handle_opacity;
+        }
         *current
     });
 
     if opacity > 0.005 {
         let base_color = ui.visuals().widgets.inactive.fg_stroke.color;
         let handle_color = Color32::from_rgba_unmultiplied(
-            base_color.r(), base_color.g(), base_color.b(),
+            base_color.r(),
+            base_color.g(),
+            base_color.b(),
             (opacity * 255.0) as u8,
         );
-        ui.painter().rect_filled(handle_rect, bar_w / 2.0, handle_color);
+        ui.painter()
+            .rect_filled(handle_rect, bar_w / 2.0, handle_color);
     }
 
     if (opacity - handle_opacity).abs() > 0.01 {

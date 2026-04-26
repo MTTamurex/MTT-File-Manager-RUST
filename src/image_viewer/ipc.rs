@@ -3,7 +3,7 @@ use std::sync::mpsc::{self, Receiver};
 use std::time::Duration;
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{
-    CloseHandle, ERROR_FILE_NOT_FOUND, ERROR_PIPE_BUSY, GetLastError, HANDLE,
+    CloseHandle, GetLastError, ERROR_FILE_NOT_FOUND, ERROR_PIPE_BUSY, HANDLE,
 };
 use windows::Win32::Security::{
     InitializeSecurityDescriptor, SetSecurityDescriptorDacl, PSECURITY_DESCRIPTOR,
@@ -171,7 +171,7 @@ fn create_pipe() -> Result<HANDLE, String> {
         sid_system[8..12].copy_from_slice(&18u32.to_le_bytes());
 
         let ace1_size = 8 + user_sid_len;
-        let ace2_size = 8 + sid_system.len();   // 20
+        let ace2_size = 8 + sid_system.len(); // 20
         let acl_size = 8 + ace1_size + ace2_size;
 
         let mut acl_buffer = vec![0u8; acl_size];

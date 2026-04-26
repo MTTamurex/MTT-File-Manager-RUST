@@ -1,11 +1,7 @@
 use eframe::egui;
 use std::{
     ffi::c_void,
-    sync::{
-        Mutex,
-        mpsc::Sender,
-        OnceLock,
-    },
+    sync::{mpsc::Sender, Mutex, OnceLock},
 };
 use windows::{
     core::{Result, PCWSTR},
@@ -15,10 +11,11 @@ use windows::{
     Win32::System::Threading::GetCurrentThreadId,
     Win32::UI::WindowsAndMessaging::{
         CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, PostThreadMessageW,
-        RegisterClassW, RegisterDeviceNotificationW, TranslateMessage, UnregisterDeviceNotification,
-        DBT_DEVICEARRIVAL, DBT_DEVICEREMOVECOMPLETE, DBT_DEVTYP_DEVICEINTERFACE,
-        DEVICE_NOTIFY_WINDOW_HANDLE, DEV_BROADCAST_DEVICEINTERFACE_W, HDEVNOTIFY, HWND_MESSAGE,
-        MSG, WINDOW_EX_STYLE, WINDOW_STYLE, WM_DEVICECHANGE, WM_QUIT, WNDCLASSW,
+        RegisterClassW, RegisterDeviceNotificationW, TranslateMessage,
+        UnregisterDeviceNotification, DBT_DEVICEARRIVAL, DBT_DEVICEREMOVECOMPLETE,
+        DBT_DEVTYP_DEVICEINTERFACE, DEVICE_NOTIFY_WINDOW_HANDLE, DEV_BROADCAST_DEVICEINTERFACE_W,
+        HDEVNOTIFY, HWND_MESSAGE, MSG, WINDOW_EX_STYLE, WINDOW_STYLE, WM_DEVICECHANGE, WM_QUIT,
+        WNDCLASSW,
     },
 };
 

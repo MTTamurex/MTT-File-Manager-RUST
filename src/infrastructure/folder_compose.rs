@@ -172,8 +172,7 @@ impl FolderComposer {
         let gap_w = OUTPUT_W.saturating_sub(CONTENT_MARGIN_LEFT + CONTENT_MARGIN_RIGHT);
 
         if gap_h > 0 && gap_w > 0 {
-            let content_img =
-                RgbaImage::from_raw(content_w, content_h, content_rgba.to_vec())?;
+            let content_img = RgbaImage::from_raw(content_w, content_h, content_rgba.to_vec())?;
             let content_dyn = DynamicImage::ImageRgba8(content_img);
 
             // Scale to fill gap width (extends downward past front — covered naturally by front overlay)

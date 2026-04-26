@@ -128,9 +128,7 @@ impl ThumbnailDiskCache {
                 .unwrap_or_default();
         }
 
-        if sampled_entries.is_empty()
-            && sampled_folder_previews.is_empty()
-        {
+        if sampled_entries.is_empty() && sampled_folder_previews.is_empty() {
             return 0;
         }
 
@@ -158,9 +156,7 @@ impl ThumbnailDiskCache {
             })
             .collect();
 
-        if orphan_thumbs.is_empty()
-            && orphan_folder_previews.is_empty()
-        {
+        if orphan_thumbs.is_empty() && orphan_folder_previews.is_empty() {
             return 0;
         }
 
@@ -258,9 +254,7 @@ impl ThumbnailDiskCache {
             })
             .collect();
 
-        if orphan_thumbs.is_empty()
-            && orphan_folder_previews.is_empty()
-        {
+        if orphan_thumbs.is_empty() && orphan_folder_previews.is_empty() {
             log::debug!("[GC] No orphans found, skipping cleanup");
             return 0;
         }

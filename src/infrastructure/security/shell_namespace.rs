@@ -77,7 +77,10 @@ mod tests {
     #[test]
     fn rejects_regular_filesystem_paths_and_archive_like_paths() {
         assert_eq!(classify_shell_namespace_str(r"C:\temp\file.txt"), None);
-        assert_eq!(classify_shell_namespace_str(r"C:\temp\archive.zip\foo"), None);
+        assert_eq!(
+            classify_shell_namespace_str(r"C:\temp\archive.zip\foo"),
+            None
+        );
         assert_eq!(classify_shell_namespace_str(""), None);
     }
 }

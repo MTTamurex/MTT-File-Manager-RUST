@@ -8,8 +8,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::app::state::ImageViewerApp;
-use crate::domain::special_paths::{COMPUTER_VIEW_ID, RECYCLE_BIN_VIEW_ID};
 use crate::domain::file_entry::FileEntry;
+use crate::domain::special_paths::{COMPUTER_VIEW_ID, RECYCLE_BIN_VIEW_ID};
 use crate::infrastructure::windows as windows_infra;
 
 // PERFORMANCE: Increased from 2s to 30s to avoid periodic HDD access.
@@ -91,10 +91,12 @@ impl ImageViewerApp {
                             drive_info: None,
                             sync_status: crate::domain::file_entry::SyncStatus::None,
                             is_hidden: false,
-                            recycle_bin: Some(Box::new(crate::domain::file_entry::RecycleBinMeta {
-                                deletion_date: item.date_deleted,
-                                original_path: item.original_path,
-                            })),
+                            recycle_bin: Some(Box::new(
+                                crate::domain::file_entry::RecycleBinMeta {
+                                    deletion_date: item.date_deleted,
+                                    original_path: item.original_path,
+                                },
+                            )),
                         };
                         batch.push(entry);
 
@@ -345,7 +347,9 @@ impl ImageViewerApp {
             }
             Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                 if self.drive_state.drive_scan_pending {
-                    log::warn!("[DRIVE-REFRESH] drive_scan channel disconnected; clearing pending flag");
+                    log::warn!(
+                        "[DRIVE-REFRESH] drive_scan channel disconnected; clearing pending flag"
+                    );
                 }
                 self.drive_state.drive_scan_pending = false;
             }

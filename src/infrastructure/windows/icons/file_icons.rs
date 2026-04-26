@@ -293,7 +293,9 @@ pub fn get_file_type_icon(
     impl Drop for ComGuard {
         fn drop(&mut self) {
             if self.0 {
-                unsafe { CoUninitialize(); }
+                unsafe {
+                    CoUninitialize();
+                }
             }
         }
     }

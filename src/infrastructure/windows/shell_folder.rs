@@ -69,7 +69,8 @@ pub fn list_shell_folder(path: &Path) -> Result<Vec<FileEntry>> {
             Err(e) => {
                 log::warn!(
                     "[SHELL-FOLDER] Direct bind FAILED for {:?}: {:?}, trying stepwise...",
-                    path, e
+                    path,
+                    e
                 );
                 // Fallback: step-by-step navigation for nested archive paths
                 bind_to_shell_folder_stepwise(path)?
@@ -245,7 +246,11 @@ unsafe fn process_shell_child(
 
     log::trace!(
         "[SHELL-CHILD] name={:?}, attributes=0x{:08X}, FOLDER={}, STREAM={}, is_dir={}",
-        name, attributes, sfgao_folder, sfgao_stream, is_dir
+        name,
+        attributes,
+        sfgao_folder,
+        sfgao_stream,
+        is_dir
     );
 
     // Size (System.Size)

@@ -335,7 +335,12 @@ fn render_standard_grid(
             );
             let item_ms = t_item.elapsed().as_millis();
             if item_ms > 5 {
-                slow_items.push((index, &ctx.items[index].name, ctx.items[index].is_dir, item_ms));
+                slow_items.push((
+                    index,
+                    &ctx.items[index].name,
+                    ctx.items[index].is_dir,
+                    item_ms,
+                ));
             }
             rendered_items += 1;
         }
@@ -356,7 +361,10 @@ fn render_standard_grid(
         for (idx, name, is_dir, ms) in &slow_items {
             log::warn!(
                 "[PERF-GRID-ITEM] idx={} name={:?} is_dir={} time={}ms",
-                idx, name, is_dir, ms,
+                idx,
+                name,
+                is_dir,
+                ms,
             );
         }
     }

@@ -1,7 +1,7 @@
 mod file_index;
 mod fs_walker;
-mod indexing_progress;
 mod index_db;
+mod indexing_progress;
 mod ipc_authorization;
 mod ipc_server;
 mod mft_reader;
@@ -13,10 +13,10 @@ mod usn_journal;
 mod volume_indexers;
 mod volume_indices;
 
+use parking_lot::Mutex;
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
-use parking_lot::Mutex;
 
 use crate::volume_indices::SharedVolumeIndices;
 
@@ -78,7 +78,10 @@ pub(crate) fn redact_paths(msg: &str) -> String {
         // Strip surrounding quotes/brackets/punctuation that commonly wrap paths
         // in human-readable error strings.
         let stripped = token.trim_matches(|c: char| {
-            matches!(c, '\'' | '"' | '`' | '(' | ')' | '[' | ']' | '{' | '}' | ',' | ';' | '.')
+            matches!(
+                c,
+                '\'' | '"' | '`' | '(' | ')' | '[' | ']' | '{' | '}' | ',' | ';' | '.'
+            )
         });
         if stripped.starts_with("http://") || stripped.starts_with("https://") {
             return false;
@@ -94,17 +97,20 @@ pub(crate) fn redact_paths(msg: &str) -> String {
         }
         // Drive letter form: `C:` or `C:\foo` or `C:/foo`.
         let bytes = stripped.as_bytes();
-        if bytes.len() >= 2
-            && bytes[0].is_ascii_alphabetic()
-            && bytes[1] == b':'
-        {
+        if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
             return true;
         }
         false
     }
 
     msg.split_whitespace()
-        .map(|word| if looks_like_path(word) { "<path>" } else { word })
+        .map(|word| {
+            if looks_like_path(word) {
+                "<path>"
+            } else {
+                word
+            }
+        })
         .collect::<Vec<&str>>()
         .join(" ")
 }
@@ -147,8 +153,12 @@ fn main() {
             if let Err(e) = service_control::run_as_service() {
                 eprintln!("[SERVICE] Failed to start service dispatcher: {}", e);
                 eprintln!("[SERVICE] If running from command line, use one of:");
-                eprintln!("  mtt-search-service.exe install                 - Install as LocalSystem");
-                eprintln!("  mtt-search-service.exe uninstall               - Remove Windows service");
+                eprintln!(
+                    "  mtt-search-service.exe install                 - Install as LocalSystem"
+                );
+                eprintln!(
+                    "  mtt-search-service.exe uninstall               - Remove Windows service"
+                );
                 eprintln!("  mtt-search-service.exe run-console             - Run in console mode");
             }
         }
@@ -158,20 +168,15 @@ fn main() {
 /// Global flag set by the console ctrl handler callback.
 static CONSOLE_SHUTDOWN: AtomicBool = AtomicBool::new(false);
 
-unsafe extern "system" fn console_ctrl_callback(
-    _ctrl_type: u32,
-) -> windows::core::BOOL {
+unsafe extern "system" fn console_ctrl_callback(_ctrl_type: u32) -> windows::core::BOOL {
     CONSOLE_SHUTDOWN.store(true, Ordering::SeqCst);
     true.into()
 }
 
 fn ctrlc_handler(shutdown: Arc<AtomicBool>) -> Result<(), String> {
     unsafe {
-        windows::Win32::System::Console::SetConsoleCtrlHandler(
-            Some(console_ctrl_callback),
-            true,
-        )
-        .map_err(|e| format!("SetConsoleCtrlHandler failed: {}", e))?;
+        windows::Win32::System::Console::SetConsoleCtrlHandler(Some(console_ctrl_callback), true)
+            .map_err(|e| format!("SetConsoleCtrlHandler failed: {}", e))?;
     }
 
     // Propagate the static flag to the shared shutdown Arc.
@@ -368,7 +373,14 @@ fn spawn_volume_indexer(
 
     std::thread::spawn(move || {
         if volume.usn_supported {
-            volume_indexers::index_volume(drive_letter, indices, indexing_progress, db, shutdown, fts_state);
+            volume_indexers::index_volume(
+                drive_letter,
+                indices,
+                indexing_progress,
+                db,
+                shutdown,
+                fts_state,
+            );
         } else {
             volume_indexers::index_non_ntfs_volume(
                 drive_letter,
@@ -385,4 +397,3 @@ fn spawn_volume_indexer(
         tracked.remove(&drive_letter);
     });
 }
-

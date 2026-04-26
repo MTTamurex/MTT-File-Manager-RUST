@@ -100,7 +100,9 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) -> Option
             egui::Color32::WHITE
         }))
         .show(ctx, |ui| {
-            use crate::ui::sidebar::{render_sidebar_fixed_top, render_sidebar_drives, SidebarContext};
+            use crate::ui::sidebar::{
+                render_sidebar_drives, render_sidebar_fixed_top, SidebarContext,
+            };
 
             let is_computer_view = app.navigation_state.is_computer_view;
             let is_folder_dragging = app.is_item_dragging && app.drag_payload_is_single_directory;
@@ -113,18 +115,16 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) -> Option
             let highlighted_drive_path = if app.context_menu.is_open
                 && app.context_menu.target_paths.len() == 1
             {
-                app.context_menu.target_paths[0]
-                    .to_str()
-                    .filter(|path| {
-                        crate::infrastructure::windows::is_drive_root_path(
-                            std::path::Path::new(path),
-                        )
-                    })
+                app.context_menu.target_paths[0].to_str().filter(|path| {
+                    crate::infrastructure::windows::is_drive_root_path(std::path::Path::new(path))
+                })
             } else {
                 None
             };
 
-            let sidebar_renaming_ref = app.sidebar_renaming.as_ref()
+            let sidebar_renaming_ref = app
+                .sidebar_renaming
+                .as_ref()
                 .map(|(p, t)| (p.as_str(), t.as_str()));
 
             // ── Smooth scroll: intercept wheel input and animate ──
@@ -132,7 +132,8 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) -> Option
             const SIDEBAR_SCROLL_SPEED: f32 = 5.0;
             let scroll_delta = ui.input(|i| i.smooth_scroll_delta.y);
             let pointer_in_sidebar = ui.input(|i| {
-                i.pointer.hover_pos()
+                i.pointer
+                    .hover_pos()
                     .map(|p| ui.max_rect().contains(p))
                     .unwrap_or(false)
             });
@@ -271,7 +272,10 @@ fn handle_sidebar_action(app: &mut ImageViewerApp, action: SidebarAction) {
         SidebarAction::PinFolder(path) => app.pin_folder(&path),
         SidebarAction::UnpinFolder(path) => app.unpin_folder(&path),
         SidebarAction::ReorderPinnedFolder { from, to } => app.reorder_pinned_folder(from, to),
-        SidebarAction::CommitDriveRename { drive_path, new_label } => {
+        SidebarAction::CommitDriveRename {
+            drive_path,
+            new_label,
+        } => {
             if drive_path.is_empty() {
                 // Text update only — update the editable buffer
                 if let Some((_, ref mut text)) = app.sidebar_renaming {
@@ -284,15 +288,22 @@ fn handle_sidebar_action(app: &mut ImageViewerApp, action: SidebarAction) {
                 app.sidebar_rename_focus = false;
                 // Dispatch rename to background worker
                 app.file_operation_state.file_ops_in_progress += 1;
-                if app.file_operation_state.file_op_sender.send(
-                    crate::workers::file_operation_worker::FileOperationRequest::rename(
-                        path,
-                        new_label,
-                        app.native_hwnd.unwrap_or_default(),
-                    ),
-                ).is_err() {
-                    app.file_operation_state.file_ops_in_progress =
-                        app.file_operation_state.file_ops_in_progress.saturating_sub(1);
+                if app
+                    .file_operation_state
+                    .file_op_sender
+                    .send(
+                        crate::workers::file_operation_worker::FileOperationRequest::rename(
+                            path,
+                            new_label,
+                            app.native_hwnd.unwrap_or_default(),
+                        ),
+                    )
+                    .is_err()
+                {
+                    app.file_operation_state.file_ops_in_progress = app
+                        .file_operation_state
+                        .file_ops_in_progress
+                        .saturating_sub(1);
                     log::warn!("[FileOps] worker channel closed on sidebar drive rename");
                 }
             }

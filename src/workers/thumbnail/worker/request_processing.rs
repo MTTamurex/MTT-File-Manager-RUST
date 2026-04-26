@@ -76,14 +76,18 @@ pub(super) fn process_thumbnail_request(
     {
         if !is_mpeg_ts_file(path) {
             mark_as_failed(path.clone());
-            send_thumbnail_result(tx, req_priority, ThumbnailData {
-                path: path.clone(),
-                image_data: Vec::new(),
-                width: 0,
-                height: 0,
-                generation: req_gen,
-                not_found: true,
-            });
+            send_thumbnail_result(
+                tx,
+                req_priority,
+                ThumbnailData {
+                    path: path.clone(),
+                    image_data: Vec::new(),
+                    width: 0,
+                    height: 0,
+                    generation: req_gen,
+                    not_found: true,
+                },
+            );
             throttle_repaint_with_priority(ctx, last_repaint, req_priority);
             return;
         }
@@ -97,19 +101,24 @@ pub(super) fn process_thumbnail_request(
     // clear backoff immediately and retry in the same request so thumbnails recover without
     // requiring manual refresh.
     if is_known_failure(path) {
-        let can_retry_now = onedrive::is_onedrive_path(path) && onedrive::is_locally_available_safe(path);
+        let can_retry_now =
+            onedrive::is_onedrive_path(path) && onedrive::is_locally_available_safe(path);
 
         if can_retry_now {
             clear_failure_cache(path);
         } else {
-            send_thumbnail_result(tx, req_priority, ThumbnailData {
-                path: path.clone(),
-                image_data: Vec::new(),
-                width: 0,
-                height: 0,
-                generation: req_gen,
-                not_found: is_permanent_failure(path),
-            });
+            send_thumbnail_result(
+                tx,
+                req_priority,
+                ThumbnailData {
+                    path: path.clone(),
+                    image_data: Vec::new(),
+                    width: 0,
+                    height: 0,
+                    generation: req_gen,
+                    not_found: is_permanent_failure(path),
+                },
+            );
             throttle_repaint_with_priority(ctx, last_repaint, req_priority);
             return;
         }
@@ -141,7 +150,9 @@ pub(super) fn process_thumbnail_request(
     // a stale thumbnail from a *different* file that previously lived at
     // the same path (e.g., delete A, rename B → A).
     if final_result.is_none() {
-        if let Some(decoded) = try_decode_latest_cache_entry(disk_cache, path, req_modified, req_size) {
+        if let Some(decoded) =
+            try_decode_latest_cache_entry(disk_cache, path, req_modified, req_size)
+        {
             final_result = Some(decoded);
         } else {
             log::debug!(
@@ -154,14 +165,18 @@ pub(super) fn process_thumbnail_request(
     // If DB cache hit, send result and return - no source drive I/O needed.
     if let Some((data, w, h)) = final_result {
         clear_failure_cache(path);
-        send_thumbnail_result(tx, req_priority, ThumbnailData {
-            path: path.clone(),
-            image_data: data,
-            width: w,
-            height: h,
-            generation: req_gen,
-            not_found: false,
-        });
+        send_thumbnail_result(
+            tx,
+            req_priority,
+            ThumbnailData {
+                path: path.clone(),
+                image_data: data,
+                width: w,
+                height: h,
+                generation: req_gen,
+                not_found: false,
+            },
+        );
         throttle_repaint_with_priority(ctx, last_repaint, req_priority);
         return;
     }
@@ -173,14 +188,18 @@ pub(super) fn process_thumbnail_request(
         match onedrive::onedrive_exists(path) {
             IoTimeoutResult::Ok(false) => {
                 mark_as_failed(path.clone());
-                send_thumbnail_result(tx, req_priority, ThumbnailData {
-                    path: path.clone(),
-                    image_data: Vec::new(),
-                    width: 0,
-                    height: 0,
-                    generation: req_gen,
-                    not_found: true,
-                });
+                send_thumbnail_result(
+                    tx,
+                    req_priority,
+                    ThumbnailData {
+                        path: path.clone(),
+                        image_data: Vec::new(),
+                        width: 0,
+                        height: 0,
+                        generation: req_gen,
+                        not_found: true,
+                    },
+                );
                 throttle_repaint_with_priority(ctx, last_repaint, req_priority);
                 return;
             }
@@ -191,14 +210,18 @@ pub(super) fn process_thumbnail_request(
             IoTimeoutResult::Ok(true) => {}
             IoTimeoutResult::Err(_) => {
                 mark_as_transient_failure(path.clone());
-                send_thumbnail_result(tx, req_priority, ThumbnailData {
-                    path: path.clone(),
-                    image_data: Vec::new(),
-                    width: 0,
-                    height: 0,
-                    generation: req_gen,
-                    not_found: false,
-                });
+                send_thumbnail_result(
+                    tx,
+                    req_priority,
+                    ThumbnailData {
+                        path: path.clone(),
+                        image_data: Vec::new(),
+                        width: 0,
+                        height: 0,
+                        generation: req_gen,
+                        not_found: false,
+                    },
+                );
                 throttle_repaint_with_priority(ctx, last_repaint, req_priority);
                 return;
             }
@@ -211,14 +234,18 @@ pub(super) fn process_thumbnail_request(
         // Non-OneDrive: use fast_path_exists (GetFileAttributesW).
         if !onedrive::fast_path_exists(path) {
             mark_as_failed(path.clone());
-            send_thumbnail_result(tx, req_priority, ThumbnailData {
-                path: path.clone(),
-                image_data: Vec::new(),
-                width: 0,
-                height: 0,
-                generation: req_gen,
-                not_found: true,
-            });
+            send_thumbnail_result(
+                tx,
+                req_priority,
+                ThumbnailData {
+                    path: path.clone(),
+                    image_data: Vec::new(),
+                    width: 0,
+                    height: 0,
+                    generation: req_gen,
+                    not_found: true,
+                },
+            );
             throttle_repaint_with_priority(ctx, last_repaint, req_priority);
             return;
         }
@@ -249,14 +276,18 @@ pub(super) fn process_thumbnail_request(
     if final_result.is_none() {
         // Cancellation: skip extraction if file is pending deletion.
         if pending_deletions.contains_key(path) {
-            send_thumbnail_result(tx, req_priority, ThumbnailData {
-                path: path.clone(),
-                image_data: Vec::new(),
-                width: 0,
-                height: 0,
-                generation: req_gen,
-                not_found: false,
-            });
+            send_thumbnail_result(
+                tx,
+                req_priority,
+                ThumbnailData {
+                    path: path.clone(),
+                    image_data: Vec::new(),
+                    width: 0,
+                    height: 0,
+                    generation: req_gen,
+                    not_found: false,
+                },
+            );
             throttle_repaint_with_priority(ctx, last_repaint, req_priority);
             return;
         }
@@ -321,14 +352,18 @@ pub(super) fn process_thumbnail_request(
     let permanently_failed = final_result.is_none() && is_permanent_failure(path);
     let (data, w, h) = final_result.unwrap_or_else(|| (Vec::new(), 0, 0));
 
-    send_thumbnail_result(tx, req_priority, ThumbnailData {
-        path: path.clone(),
-        image_data: data,
-        width: w,
-        height: h,
-        generation: req_gen,
-        not_found: permanently_failed,
-    });
+    send_thumbnail_result(
+        tx,
+        req_priority,
+        ThumbnailData {
+            path: path.clone(),
+            image_data: data,
+            width: w,
+            height: h,
+            generation: req_gen,
+            not_found: permanently_failed,
+        },
+    );
     throttle_repaint_with_priority(ctx, last_repaint, req_priority);
 }
 

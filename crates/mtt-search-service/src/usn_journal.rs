@@ -1,8 +1,8 @@
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{CloseHandle, GetLastError, HANDLE, WIN32_ERROR};
 use windows::Win32::Storage::FileSystem::{
-    CreateFileW, GetDriveTypeW, GetVolumeInformationW, FILE_FLAG_BACKUP_SEMANTICS,
-    FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
+    CreateFileW, GetDriveTypeW, GetVolumeInformationW, FILE_FLAG_BACKUP_SEMANTICS, FILE_SHARE_READ,
+    FILE_SHARE_WRITE, OPEN_EXISTING,
 };
 use windows::Win32::System::IO::DeviceIoControl;
 
@@ -404,7 +404,9 @@ pub fn parse_usn_records(
                 // Track that the parent directory's contents changed.
                 // This enables CheckPathsModified to detect external changes
                 // via USN journal without any disk I/O on the client side.
-                index.dir_modified_at.insert(parent_frn, std::time::Instant::now());
+                index
+                    .dir_modified_at
+                    .insert(parent_frn, std::time::Instant::now());
             } else {
                 // Initial enumeration: just insert
                 let is_dir = (file_attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;

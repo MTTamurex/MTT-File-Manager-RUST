@@ -230,7 +230,16 @@ fn thumbnail_worker_loop(
     // RAII guard ensures THREAD_MODE_BACKGROUND_END is called even on panic.
     let _priority_guard = io_priority::ThreadPriorityGuard::new(IOPriority::Background);
 
-    while let Some((path, req_gen, req_size, req_priority, req_modified, req_source, track_bulk_progress)) = queue.pop() {
+    while let Some((
+        path,
+        req_gen,
+        req_size,
+        req_priority,
+        req_modified,
+        req_source,
+        track_bulk_progress,
+    )) = queue.pop()
+    {
         let participates_in_bulk_scan = track_bulk_progress;
 
         // Check generation match - skip stale requests
@@ -239,7 +248,10 @@ fn thumbnail_worker_loop(
         }
 
         if participates_in_bulk_scan {
-            crate::workers::thumbnail::set_bulk_thumbnail_current_file(&bulk_thumbnail_progress, &path);
+            crate::workers::thumbnail::set_bulk_thumbnail_current_file(
+                &bulk_thumbnail_progress,
+                &path,
+            );
         }
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -278,7 +290,11 @@ fn thumbnail_worker_loop(
             } else {
                 "unknown".to_string()
             };
-            log::error!("[ThumbnailWorker] panic processing {}: {}", path.display(), msg);
+            log::error!(
+                "[ThumbnailWorker] panic processing {}: {}",
+                path.display(),
+                msg
+            );
         }
 
         if participates_in_bulk_scan {
@@ -312,7 +328,7 @@ mod tests {
                 semaphore.acquire();
 
                 {
-                    let mut count = active_count.lock().unwrap();
+                    let mut count = active_count.lock();
                     *count += 1;
                     assert!(*count <= max_concurrent, "Too many threads!");
                     println!("Thread {} running. Active: {}", i, *count);
@@ -321,7 +337,7 @@ mod tests {
                 thread::sleep(Duration::from_millis(50));
 
                 {
-                    let mut count = active_count.lock().unwrap();
+                    let mut count = active_count.lock();
                     *count -= 1;
                 }
 
@@ -333,6 +349,4 @@ mod tests {
             h.join().unwrap();
         }
     }
-
 }
-

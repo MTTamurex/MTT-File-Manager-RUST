@@ -78,11 +78,10 @@ fn compute_texture_cache_target_items(
         0
     };
 
-    let raw_target = ((220.0_f32 * tab_factor).round() as i32)
-        + backlog_boost
-        + frame_headroom_boost
-        - frame_penalty
-        - activity_penalty;
+    let raw_target =
+        ((220.0_f32 * tab_factor).round() as i32) + backlog_boost + frame_headroom_boost
+            - frame_penalty
+            - activity_penalty;
 
     raw_target.clamp(140, 420) as usize
 }
@@ -107,16 +106,14 @@ impl ImageViewerApp {
         let incoming_start = Instant::now();
         let mut not_found_failures: Vec<PathBuf> = Vec::new();
         let mut successful_thumb_paths: Vec<PathBuf> = Vec::new();
-        let eviction_visible: Option<HashSet<PathBuf>> = self.visible_index_range
-            .and_then(|(min_vis, max_vis)| {
+        let eviction_visible: Option<HashSet<PathBuf>> =
+            self.visible_index_range.and_then(|(min_vis, max_vis)| {
                 let items = &self.items;
                 if items.is_empty() {
                     return None;
                 }
                 let max_vis = max_vis.min(items.len().saturating_sub(1));
-                Some((min_vis..=max_vis)
-                    .map(|i| items[i].path.clone())
-                    .collect())
+                Some((min_vis..=max_vis).map(|i| items[i].path.clone()).collect())
             });
 
         // Reduce intake when pending queue is already backlogged to spread
@@ -184,7 +181,13 @@ impl ImageViewerApp {
                 continue;
             }
 
-            while self.pending_thumbnails.len() >= if is_burst { MAX_PENDING_THUMBNAILS * 3 } else { MAX_PENDING_THUMBNAILS } {
+            while self.pending_thumbnails.len()
+                >= if is_burst {
+                    MAX_PENDING_THUMBNAILS * 3
+                } else {
+                    MAX_PENDING_THUMBNAILS
+                }
+            {
                 // FIX: Smart eviction — prefer removing off-screen items to keep visible
                 // ones alive. On SSD, the worker queue processes most-recently-added items
                 // first (LIFO), so items from the user's final scroll position arrive first
@@ -192,13 +195,12 @@ impl ImageViewerApp {
                 // eject exactly the items the user is looking at. Instead, scan for the
                 // first off-screen item and evict it; fall back to FIFO only when every
                 // pending item is visible (extremely unlikely with MAX_PENDING=64).
-                let evict_idx = eviction_visible.as_ref()
-                    .and_then(|visible| {
-                        // Find first off-screen item in the deque
-                        self.pending_thumbnails
-                            .iter()
-                            .position(|t| !visible.contains(&t.path))
-                    });
+                let evict_idx = eviction_visible.as_ref().and_then(|visible| {
+                    // Find first off-screen item in the deque
+                    self.pending_thumbnails
+                        .iter()
+                        .position(|t| !visible.contains(&t.path))
+                });
 
                 match evict_idx {
                     Some(idx) => {
@@ -247,11 +249,11 @@ impl ImageViewerApp {
                     continue;
                 };
 
-                if self.all_items.iter().any(|item| {
-                    item.is_dir
-                        && item.folder_cover.is_none()
-                        && item.path == parent
-                }) {
+                if self
+                    .all_items
+                    .iter()
+                    .any(|item| item.is_dir && item.folder_cover.is_none() && item.path == parent)
+                {
                     parent_folders_needing_scan.insert(parent.to_path_buf());
                 }
             }
@@ -265,8 +267,15 @@ impl ImageViewerApp {
                     if item.is_dir && successful_set.contains(cover) {
                         // SQLite miss ⇒ the current preview was a MediaUnsafe placeholder.
                         // SQLite hit  ⇒ preview already composed with real media — skip.
-                        if self.disk_cache.get_folder_preview_cache(&item.path).is_none() {
-                            if self.cache_manager.start_folder_preview_loading(item.path.clone()) {
+                        if self
+                            .disk_cache
+                            .get_folder_preview_cache(&item.path)
+                            .is_none()
+                        {
+                            if self
+                                .cache_manager
+                                .start_folder_preview_loading(item.path.clone())
+                            {
                                 let _ = self.folder_preview_sender.try_send(item.path.clone());
                             }
                             log::debug!(
@@ -543,7 +552,11 @@ impl ImageViewerApp {
 
                 // Skip upload for paths pending deletion — the item was removed
                 // externally and the texture would be immediately stale.
-                if self.file_operation_state.pending_deletions.contains_key(&path) {
+                if self
+                    .file_operation_state
+                    .pending_deletions
+                    .contains_key(&path)
+                {
                     self.cache_manager.finish_pending_upload(&path);
                     continue;
                 }
@@ -567,8 +580,7 @@ impl ImageViewerApp {
                 self.cache_manager.finish_pending_upload(&path);
                 self.cache_manager
                     .put_rgba_data(path.clone(), rgba_data, width, height);
-                self.cache_manager
-                    .put_thumbnail(path, texture.clone());
+                self.cache_manager.put_thumbnail(path, texture.clone());
 
                 if is_selected {
                     self.selected_thumbnail = Some(texture);

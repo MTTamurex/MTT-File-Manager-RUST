@@ -39,9 +39,7 @@ pub enum SearchRequest {
     /// Request the total size of a folder on an NTFS volume.
     /// The service computes the sum in-memory from its MFT-based index
     /// (zero disk I/O). Returns an error for non-NTFS or unindexed volumes.
-    FolderSize {
-        path: String,
-    },
+    FolderSize { path: String },
 }
 
 impl SearchRequest {

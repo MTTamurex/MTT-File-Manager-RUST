@@ -107,7 +107,10 @@ pub fn sanitize_path(path: &Path, config: &SecurityConfig) -> Result<PathBuf, Se
                 }
             }
 
-            return Err(SecurityError::InvalidPath(format!("Cannot canonicalize: {}", e)));
+            return Err(SecurityError::InvalidPath(format!(
+                "Cannot canonicalize: {}",
+                e
+            )));
         }
     };
 
@@ -368,4 +371,3 @@ mod tests {
         assert!(result2.is_ok(), "UNC with IP should pass: {:?}", result2);
     }
 }
-

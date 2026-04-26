@@ -2,8 +2,9 @@ use crate::domain::file_entry::IconSize;
 use std::os::windows::ffi::OsStrExt;
 use std::path::Path;
 use windows::{
-    core::*, Win32::Foundation::*, Win32::Graphics::Gdi::*, Win32::Storage::FileSystem::*, Win32::System::Com::*,
-    Win32::UI::Shell::Common::*, Win32::UI::Shell::*, Win32::UI::WindowsAndMessaging::*,
+    core::*, Win32::Foundation::*, Win32::Graphics::Gdi::*, Win32::Storage::FileSystem::*,
+    Win32::System::Com::*, Win32::UI::Shell::Common::*, Win32::UI::Shell::*,
+    Win32::UI::WindowsAndMessaging::*,
 };
 
 /// Extracts the "This PC" (My Computer) icon using PIDL (robust method).
@@ -65,8 +66,8 @@ pub fn extract_recycle_bin_icon(
     size: IconSize,
 ) -> std::result::Result<(Vec<u8>, u32, u32), Box<dyn std::error::Error>> {
     use windows::Win32::UI::Shell::{
-        FOLDERID_RecycleBinFolder, IShellItem, IShellItemImageFactory, KF_FLAG_DEFAULT,
-        SHGetFileInfoW, SHGetKnownFolderIDList, SHGetKnownFolderItem, SHFILEINFOW, SHGFI_ICON,
+        FOLDERID_RecycleBinFolder, IShellItem, IShellItemImageFactory, SHGetFileInfoW,
+        SHGetKnownFolderIDList, SHGetKnownFolderItem, KF_FLAG_DEFAULT, SHFILEINFOW, SHGFI_ICON,
         SHGFI_LARGEICON, SHGFI_PIDL, SHGFI_SMALLICON, SIIGBF_ICONONLY,
     };
 
@@ -74,9 +75,11 @@ pub fn extract_recycle_bin_icon(
         if matches!(size, IconSize::Jumbo) {
             let _com = crate::infrastructure::windows::recycle_bin::ComApartmentGuard::init_sta_best_effort();
 
-            if let Ok(shell_item) =
-                SHGetKnownFolderItem::<IShellItem>(&FOLDERID_RecycleBinFolder, KF_FLAG_DEFAULT, None)
-            {
+            if let Ok(shell_item) = SHGetKnownFolderItem::<IShellItem>(
+                &FOLDERID_RecycleBinFolder,
+                KF_FLAG_DEFAULT,
+                None,
+            ) {
                 if let Ok(image_factory) = shell_item.cast::<IShellItemImageFactory>() {
                     let size_factory = SIZE { cx: 256, cy: 256 };
                     if let Ok(hbitmap) = image_factory.GetImage(size_factory, SIIGBF_ICONONLY) {

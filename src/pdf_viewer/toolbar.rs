@@ -95,12 +95,8 @@ impl PdfViewerApp {
 
         // Current zoom indicator — always show actual percentage
         let zoom_label = format!("{:.0}%", self.effective_zoom_pct);
-        ui.label(
-            egui::RichText::new(&zoom_label)
-                .strong()
-                .size(13.0),
-        )
-        .on_hover_text(t!("pdfviewer.current_zoom"));
+        ui.label(egui::RichText::new(&zoom_label).strong().size(13.0))
+            .on_hover_text(t!("pdfviewer.current_zoom"));
 
         if ui
             .button("➕")
@@ -111,7 +107,10 @@ impl PdfViewerApp {
         }
 
         if ui
-            .selectable_label(self.zoom_mode == ZoomMode::FitWidth, t!("pdfviewer.fit_width"))
+            .selectable_label(
+                self.zoom_mode == ZoomMode::FitWidth,
+                t!("pdfviewer.fit_width"),
+            )
             .clicked()
         {
             self.zoom_mode = ZoomMode::FitWidth;
@@ -119,7 +118,10 @@ impl PdfViewerApp {
         }
 
         if ui
-            .selectable_label(self.zoom_mode == ZoomMode::FitPage, t!("pdfviewer.fit_page"))
+            .selectable_label(
+                self.zoom_mode == ZoomMode::FitPage,
+                t!("pdfviewer.fit_page"),
+            )
             .clicked()
         {
             self.zoom_mode = ZoomMode::FitPage;

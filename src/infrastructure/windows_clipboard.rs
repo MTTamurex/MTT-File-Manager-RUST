@@ -128,7 +128,11 @@ pub fn clipboard_sequence_number() -> Option<u32> {
     use windows::Win32::System::DataExchange::GetClipboardSequenceNumber;
 
     let seq = unsafe { GetClipboardSequenceNumber() };
-    if seq == 0 { None } else { Some(seq) }
+    if seq == 0 {
+        None
+    } else {
+        Some(seq)
+    }
 }
 
 // --- Internal helper functions ---
@@ -136,10 +140,10 @@ pub fn clipboard_sequence_number() -> Option<u32> {
 /// Sets the preferred drop effect in the clipboard
 fn set_preferred_drop_effect(effect: u32) -> Result<(), String> {
     use windows::core::w;
+    use windows::Win32::Foundation::GlobalFree;
     use windows::Win32::System::DataExchange::RegisterClipboardFormatW;
     use windows::Win32::System::DataExchange::SetClipboardData;
     use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
-    use windows::Win32::Foundation::GlobalFree;
 
     unsafe {
         // Register the "Preferred DropEffect" format

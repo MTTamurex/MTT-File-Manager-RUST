@@ -26,8 +26,10 @@ impl ImageViewerApp {
 
         // Cap per-frame processing to keep message handling responsive under heavy cover streams.
         const MAX_COVER_EVENTS_PER_FRAME: usize = 48;
-        let mut cover_updates: std::collections::HashMap<std::path::PathBuf, Option<std::path::PathBuf>> =
-            std::collections::HashMap::with_capacity(MAX_COVER_EVENTS_PER_FRAME);
+        let mut cover_updates: std::collections::HashMap<
+            std::path::PathBuf,
+            Option<std::path::PathBuf>,
+        > = std::collections::HashMap::with_capacity(MAX_COVER_EVENTS_PER_FRAME);
         let mut processed = 0usize;
         let mut has_more = false;
 
@@ -58,8 +60,7 @@ impl ImageViewerApp {
         let mut folder_updates = false;
         let mut covers_changed: Vec<std::path::PathBuf> = Vec::new();
         // Build a path index for master items and apply only touched updates.
-        let mut all_items_index =
-            std::collections::HashMap::with_capacity(self.all_items.len());
+        let mut all_items_index = std::collections::HashMap::with_capacity(self.all_items.len());
         for (idx, item) in self.all_items.iter().enumerate() {
             all_items_index.insert(item.path.clone(), idx);
         }
@@ -178,7 +179,10 @@ impl ImageViewerApp {
                         if !pixels.is_empty() && width > 0 && height > 0 {
                             if let Some(ext) = path.extension() {
                                 let ext_raw = ext.to_string_lossy().to_lowercase();
-                                let ext_str = crate::infrastructure::windows::icons::canonical_icon_ext(&ext_raw);
+                                let ext_str =
+                                    crate::infrastructure::windows::icons::canonical_icon_ext(
+                                        &ext_raw,
+                                    );
                                 let ext_key = format!("{}_Large", ext_str);
                                 if !self.item_icon_loader.extension_cache.contains_key(&ext_key) {
                                     let texture = ctx.load_texture(
@@ -189,15 +193,22 @@ impl ImageViewerApp {
                                         ),
                                         egui::TextureOptions::LINEAR,
                                     );
-                                    self.item_icon_loader.extension_cache.insert(ext_key, texture);
+                                    self.item_icon_loader
+                                        .extension_cache
+                                        .insert(ext_key, texture);
                                     prewarm_uploads += 1;
                                 }
                             }
                             // Remove extension from loading set.
                             if let Some(ext) = path.extension() {
                                 let ext_raw = ext.to_string_lossy().to_lowercase();
-                                if !crate::infrastructure::windows::icons::is_per_file_icon_ext(&ext_raw) {
-                                    let ext_key = crate::infrastructure::windows::icons::canonical_icon_ext(&ext_raw);
+                                if !crate::infrastructure::windows::icons::is_per_file_icon_ext(
+                                    &ext_raw,
+                                ) {
+                                    let ext_key =
+                                        crate::infrastructure::windows::icons::canonical_icon_ext(
+                                            &ext_raw,
+                                        );
                                     self.loading_extensions.remove(ext_key);
                                 }
                             }
@@ -206,7 +217,14 @@ impl ImageViewerApp {
                     }
                     // Non-pre-warm result found — push back for Phase 2.
                     // We can't push back into mpsc, so process it inline.
-                    self.process_single_icon_result(ctx, path, icon_generation, pixels, width, height);
+                    self.process_single_icon_result(
+                        ctx,
+                        path,
+                        icon_generation,
+                        pixels,
+                        width,
+                        height,
+                    );
                     phase1_processed_regular = true;
                     break; // Switch to budgeted Phase 2.
                 }
@@ -215,8 +233,16 @@ impl ImageViewerApp {
         }
 
         // Phase 2: Process regular icon results with frame budget.
-        let max_icon_uploads = if self.is_video_playing_docked() { 8 } else { 64 };
-        let max_icon_messages = if self.is_video_playing_docked() { 48 } else { 256 };
+        let max_icon_uploads = if self.is_video_playing_docked() {
+            8
+        } else {
+            64
+        };
+        let max_icon_messages = if self.is_video_playing_docked() {
+            48
+        } else {
+            256
+        };
         let icon_budget = if self.frame_time_peak_ms > 33.33 {
             Duration::from_millis(3)
         } else if self.frame_time_peak_ms > 25.0 {
@@ -243,7 +269,8 @@ impl ImageViewerApp {
                     if !pixels.is_empty() && width > 0 && height > 0 {
                         if let Some(ext) = path.extension() {
                             let ext_raw = ext.to_string_lossy().to_lowercase();
-                            let ext_str = crate::infrastructure::windows::icons::canonical_icon_ext(&ext_raw);
+                            let ext_str =
+                                crate::infrastructure::windows::icons::canonical_icon_ext(&ext_raw);
                             let ext_key = format!("{}_Large", ext_str);
                             if !self.item_icon_loader.extension_cache.contains_key(&ext_key) {
                                 let texture = ctx.load_texture(
@@ -254,13 +281,20 @@ impl ImageViewerApp {
                                     ),
                                     egui::TextureOptions::LINEAR,
                                 );
-                                self.item_icon_loader.extension_cache.insert(ext_key, texture);
+                                self.item_icon_loader
+                                    .extension_cache
+                                    .insert(ext_key, texture);
                             }
                         }
                         if let Some(ext) = path.extension() {
                             let ext_raw = ext.to_string_lossy().to_lowercase();
-                            if !crate::infrastructure::windows::icons::is_per_file_icon_ext(&ext_raw) {
-                                let ext_key = crate::infrastructure::windows::icons::canonical_icon_ext(&ext_raw);
+                            if !crate::infrastructure::windows::icons::is_per_file_icon_ext(
+                                &ext_raw,
+                            ) {
+                                let ext_key =
+                                    crate::infrastructure::windows::icons::canonical_icon_ext(
+                                        &ext_raw,
+                                    );
                                 self.loading_extensions.remove(ext_key);
                             }
                         }
@@ -449,8 +483,10 @@ impl ImageViewerApp {
         let mut received_any = false;
         let mut processed_messages = 0usize;
         let mut has_more = false;
-        let mut progress_updates: std::collections::HashMap<std::path::PathBuf, FolderContentSummary> =
-            std::collections::HashMap::new();
+        let mut progress_updates: std::collections::HashMap<
+            std::path::PathBuf,
+            FolderContentSummary,
+        > = std::collections::HashMap::new();
 
         while processed_messages < MAX_FOLDER_SIZE_MSGS_PER_FRAME {
             if start.elapsed() >= folder_size_budget {
@@ -539,15 +575,22 @@ impl ImageViewerApp {
                 let Some(total_size) = total_size else {
                     // Service unavailable — keep in batch_loading and schedule
                     // a deferred retry to prevent per-frame re-requests.
-                    self.folder_size_state.batch_loading.insert(folder_path.clone());
-                    self.folder_size_state.pending_revalidation
+                    self.folder_size_state
+                        .batch_loading
+                        .insert(folder_path.clone());
+                    self.folder_size_state
+                        .pending_revalidation
                         .entry(folder_path)
-                        .or_insert_with(|| std::time::Instant::now() + std::time::Duration::from_secs(5));
+                        .or_insert_with(|| {
+                            std::time::Instant::now() + std::time::Duration::from_secs(5)
+                        });
                     received_any = true;
                     continue;
                 };
 
-                self.folder_size_state.batch_cache.put(folder_path.clone(), total_size);
+                self.folder_size_state
+                    .batch_cache
+                    .put(folder_path.clone(), total_size);
                 // Keep the preview-panel cache in sync so selecting the folder
                 // in the details panel shows the same (fresh) value.
                 upsert_folder_content_summary(
@@ -569,20 +612,23 @@ impl ImageViewerApp {
         // was sent before the revalidation is discarded as stale.
         {
             let now = std::time::Instant::now();
-            if self.folder_size_state.should_prune_pending_revalidations(now) {
+            if self
+                .folder_size_state
+                .should_prune_pending_revalidations(now)
+            {
                 for path in self.folder_size_state.take_expired_revalidations(now) {
-                self.folder_size_state.pending_revalidation.remove(&path);
-                self.folder_size_state.batch_cache.pop(&path);
-                self.folder_size_state.batch_loading.remove(&path);
-                self.folder_size_state.cache.pop(&path);
-                self.folder_size_state.loading.remove(&path);
-                // Bump epoch so in-flight results from before are rejected.
-                *self
-                    .folder_size_state
-                    .batch_invalidation_epoch
-                    .entry(path)
-                    .or_insert(0) += 1;
-                received_any = true;
+                    self.folder_size_state.pending_revalidation.remove(&path);
+                    self.folder_size_state.batch_cache.pop(&path);
+                    self.folder_size_state.batch_loading.remove(&path);
+                    self.folder_size_state.cache.pop(&path);
+                    self.folder_size_state.loading.remove(&path);
+                    // Bump epoch so in-flight results from before are rejected.
+                    *self
+                        .folder_size_state
+                        .batch_invalidation_epoch
+                        .entry(path)
+                        .or_insert(0) += 1;
+                    received_any = true;
                 }
             }
         }

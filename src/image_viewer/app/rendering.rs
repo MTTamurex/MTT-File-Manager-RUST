@@ -15,7 +15,10 @@ impl super::DedicatedImageViewerApp {
                 let next_enabled = self.current_index + 1 < total;
 
                 if ui
-                    .add_enabled(prev_enabled, egui::Button::new(&*t!("imageviewer.previous")))
+                    .add_enabled(
+                        prev_enabled,
+                        egui::Button::new(&*t!("imageviewer.previous")),
+                    )
                     .clicked()
                 {
                     self.navigate_prev(ctx);
@@ -28,16 +31,19 @@ impl super::DedicatedImageViewerApp {
                     self.navigate_next(ctx);
                 }
 
-                ui.add_enabled_ui(!self.sequence.entries.is_empty() && !self.conversion_in_progress, |ui| {
-                    ui.menu_button(t!("imageviewer.convert").to_string(), |ui| {
-                        for format in loader::ExportImageFormat::ALL {
-                            let label = Self::export_format_label(format);
-                            if ui.button(label).clicked() {
-                                selected_format = Some(format);
+                ui.add_enabled_ui(
+                    !self.sequence.entries.is_empty() && !self.conversion_in_progress,
+                    |ui| {
+                        ui.menu_button(t!("imageviewer.convert").to_string(), |ui| {
+                            for format in loader::ExportImageFormat::ALL {
+                                let label = Self::export_format_label(format);
+                                if ui.button(label).clicked() {
+                                    selected_format = Some(format);
+                                }
                             }
-                        }
-                    });
-                });
+                        });
+                    },
+                );
 
                 ui.separator();
                 if total == 0 {
@@ -64,7 +70,11 @@ impl super::DedicatedImageViewerApp {
             t!("imageviewer.title").to_string()
         } else {
             let current_filename = self.current_filename();
-            t!("imageviewer.title_with_file", name = current_filename.as_ref()).to_string()
+            t!(
+                "imageviewer.title_with_file",
+                name = current_filename.as_ref()
+            )
+            .to_string()
         };
 
         if self.current_window_title == title {
@@ -159,17 +169,17 @@ impl super::DedicatedImageViewerApp {
                         // Ensure content size is allowed to exceed viewport on both axes,
                         // so horizontal and vertical scrollbars can appear when needed.
                         ui.set_min_size(canvas_size);
-                        let (canvas_rect, _) = ui.allocate_at_least(canvas_size, egui::Sense::hover());
+                        let (canvas_rect, _) =
+                            ui.allocate_at_least(canvas_size, egui::Sense::hover());
 
                         let image = egui::Image::new(&tex)
                             .fit_to_exact_size(draw_size)
                             .sense(egui::Sense::click());
-                        let image_rect = egui::Rect::from_center_size(canvas_rect.center(), draw_size);
-                        let response = ui
-                            .put(image_rect, image);
+                        let image_rect =
+                            egui::Rect::from_center_size(canvas_rect.center(), draw_size);
+                        let response = ui.put(image_rect, image);
 
                         if response.hovered() {
-
                             let wheel_delta = ui.input(|i| i.raw_scroll_delta.y);
                             if wheel_delta.abs() > f32::EPSILON {
                                 // Granular zoom: track wheel delta continuously.
@@ -180,18 +190,19 @@ impl super::DedicatedImageViewerApp {
                                 }
                             }
 
-                            let left_click =
-                                ui.input(|i| i.pointer.button_clicked(egui::PointerButton::Primary));
+                            let left_click = ui
+                                .input(|i| i.pointer.button_clicked(egui::PointerButton::Primary));
                             if left_click {
-                                self.zoom_factor =
-                                    (self.zoom_factor * 1.25).clamp(MIN_ZOOM_FACTOR, MAX_ZOOM_FACTOR);
+                                self.zoom_factor = (self.zoom_factor * 1.25)
+                                    .clamp(MIN_ZOOM_FACTOR, MAX_ZOOM_FACTOR);
                             }
 
-                            let right_click =
-                                ui.input(|i| i.pointer.button_clicked(egui::PointerButton::Secondary));
+                            let right_click = ui.input(|i| {
+                                i.pointer.button_clicked(egui::PointerButton::Secondary)
+                            });
                             if right_click {
-                                self.zoom_factor =
-                                    (self.zoom_factor / 1.25).clamp(MIN_ZOOM_FACTOR, MAX_ZOOM_FACTOR);
+                                self.zoom_factor = (self.zoom_factor / 1.25)
+                                    .clamp(MIN_ZOOM_FACTOR, MAX_ZOOM_FACTOR);
                             }
                         }
                     });
@@ -200,7 +211,9 @@ impl super::DedicatedImageViewerApp {
                 ui.with_layout(
                     egui::Layout::centered_and_justified(egui::Direction::TopDown),
                     |ui| {
-                        ui.label(egui::RichText::new(err).color(egui::Color32::from_rgb(220, 80, 80)));
+                        ui.label(
+                            egui::RichText::new(err).color(egui::Color32::from_rgb(220, 80, 80)),
+                        );
                     },
                 );
             } else if self.sequence.entries.is_empty() {

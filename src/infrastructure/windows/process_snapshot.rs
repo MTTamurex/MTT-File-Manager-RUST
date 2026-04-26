@@ -1,13 +1,12 @@
 use super::OwnedHandle;
 use windows::Win32::System::Diagnostics::ToolHelp::{
-    CreateToolhelp32Snapshot, Thread32First, Thread32Next, TH32CS_SNAPTHREAD,
-    THREADENTRY32,
+    CreateToolhelp32Snapshot, Thread32First, Thread32Next, TH32CS_SNAPTHREAD, THREADENTRY32,
+};
+use windows::Win32::System::Threading::{
+    GetCurrentProcess, GetCurrentProcessId, GetCurrentThreadId, GetProcessHandleCount, OpenThread,
+    TerminateProcess, THREAD_TERMINATE,
 };
 use windows::Win32::System::IO::CancelSynchronousIo;
-use windows::Win32::System::Threading::{
-    GetCurrentProcess, GetCurrentProcessId, GetCurrentThreadId,
-    GetProcessHandleCount, OpenThread, TerminateProcess, THREAD_TERMINATE,
-};
 
 pub struct ProcessKernelResources {
     pub gdi_objects: u32,
@@ -59,9 +58,7 @@ pub fn cancel_pending_io_on_current_process_threads() -> u32 {
             return;
         }
 
-        let thread_handle = match unsafe {
-            OpenThread(THREAD_TERMINATE, false, thread_id)
-        } {
+        let thread_handle = match unsafe { OpenThread(THREAD_TERMINATE, false, thread_id) } {
             Ok(handle) => handle,
             Err(_) => return,
         };
@@ -85,9 +82,7 @@ pub fn terminate_current_process(exit_code: u32) {
 
 fn for_each_current_process_thread(mut f: impl FnMut(u32)) -> bool {
     let current_pid = unsafe { GetCurrentProcessId() };
-    let snapshot = match unsafe {
-        CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0)
-    } {
+    let snapshot = match unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) } {
         Ok(handle) => handle,
         Err(_) => return false,
     };

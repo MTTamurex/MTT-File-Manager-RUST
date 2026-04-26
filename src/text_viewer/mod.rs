@@ -23,20 +23,78 @@ const MAX_TEXT_FILE_SIZE: u64 = 25 * 1024 * 1024;
 /// Known text file extensions (lowercase, without dot).
 const TEXT_EXTENSIONS: &[&str] = &[
     // Plain text / logs
-    "txt", "log", "csv", "tsv", "nfo", "diz",
+    "txt",
+    "log",
+    "csv",
+    "tsv",
+    "nfo",
+    "diz",
     // Config
-    "cfg", "conf", "ini", "env", "properties", "toml", "yaml", "yml",
-    "editorconfig", "gitignore", "gitattributes", "dockerignore",
+    "cfg",
+    "conf",
+    "ini",
+    "env",
+    "properties",
+    "toml",
+    "yaml",
+    "yml",
+    "editorconfig",
+    "gitignore",
+    "gitattributes",
+    "dockerignore",
     // Data / markup
-    "json", "xml", "svg", "html", "htm", "css", "scss", "sass", "less",
+    "json",
+    "xml",
+    "svg",
+    "html",
+    "htm",
+    "css",
+    "scss",
+    "sass",
+    "less",
     // Code
-    "rs", "py", "js", "ts", "jsx", "tsx", "c", "cpp", "h", "hpp",
-    "cs", "java", "go", "rb", "php", "swift", "kt", "kts", "scala",
-    "lua", "r", "m", "mm", "pl", "pm", "sql",
+    "rs",
+    "py",
+    "js",
+    "ts",
+    "jsx",
+    "tsx",
+    "c",
+    "cpp",
+    "h",
+    "hpp",
+    "cs",
+    "java",
+    "go",
+    "rb",
+    "php",
+    "swift",
+    "kt",
+    "kts",
+    "scala",
+    "lua",
+    "r",
+    "m",
+    "mm",
+    "pl",
+    "pm",
+    "sql",
     // Shell / scripting
-    "sh", "bash", "zsh", "fish", "bat", "cmd", "ps1", "psm1", "psd1",
+    "sh",
+    "bash",
+    "zsh",
+    "fish",
+    "bat",
+    "cmd",
+    "ps1",
+    "psm1",
+    "psd1",
     // Documentation
-    "md", "markdown", "rst", "tex", "adoc",
+    "md",
+    "markdown",
+    "rst",
+    "tex",
+    "adoc",
 ];
 
 /// Check whether the given extension (without dot, case-insensitive)
@@ -62,13 +120,11 @@ fn validate_text_path(path: &Path) -> Result<(), String> {
             component,
             std::path::Component::ParentDir | std::path::Component::CurDir
         ) {
-            return Err(
-                rust_i18n::t!(
-                    "textviewer.invalid_traversal",
-                    component = component.as_os_str().to_string_lossy().to_string()
-                )
-                .to_string(),
-            );
+            return Err(rust_i18n::t!(
+                "textviewer.invalid_traversal",
+                component = component.as_os_str().to_string_lossy().to_string()
+            )
+            .to_string());
         }
     }
 
@@ -81,40 +137,35 @@ fn validate_text_path(path: &Path) -> Result<(), String> {
     }
 
     // 4. Extension check
-    let ext = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("");
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
     if !is_text_extension(ext) {
         return Err(rust_i18n::t!("textviewer.invalid_extension", ext = ext).to_string());
     }
 
     // 5. File existence
     if !path.is_file() {
-        return Err(
-            rust_i18n::t!("textviewer.file_not_found", path = path.display().to_string())
-                .to_string(),
-        );
+        return Err(rust_i18n::t!(
+            "textviewer.file_not_found",
+            path = path.display().to_string()
+        )
+        .to_string());
     }
 
     // 6. File size
     match std::fs::metadata(path) {
         Ok(meta) => {
             if meta.len() > MAX_TEXT_FILE_SIZE {
-                return Err(
-                    rust_i18n::t!(
-                        "textviewer.file_too_large",
-                        size_mb = format!("{:.1}", meta.len() as f64 / (1024.0 * 1024.0)),
-                        max_mb = (MAX_TEXT_FILE_SIZE / (1024 * 1024)).to_string()
-                    )
-                    .to_string(),
-                );
+                return Err(rust_i18n::t!(
+                    "textviewer.file_too_large",
+                    size_mb = format!("{:.1}", meta.len() as f64 / (1024.0 * 1024.0)),
+                    max_mb = (MAX_TEXT_FILE_SIZE / (1024 * 1024)).to_string()
+                )
+                .to_string());
             }
         }
         Err(e) => {
             return Err(
-                rust_i18n::t!("textviewer.metadata_read_failed", error = e.to_string())
-                    .to_string(),
+                rust_i18n::t!("textviewer.metadata_read_failed", error = e.to_string()).to_string(),
             )
         }
     }
@@ -125,7 +176,11 @@ fn validate_text_path(path: &Path) -> Result<(), String> {
 /// Open a text file in a new standalone viewer process (fire-and-forget).
 pub fn open_text_viewer(path: PathBuf) {
     if let Err(e) = validate_text_path(&path) {
-        log::error!("[TEXT-VIEWER] path validation failed for '{}': {}", path.display(), e);
+        log::error!(
+            "[TEXT-VIEWER] path validation failed for '{}': {}",
+            path.display(),
+            e
+        );
         return;
     }
 
@@ -197,15 +252,15 @@ pub fn run_standalone(path: PathBuf) -> eframe::Result<()> {
     eframe::run_native(
         &rust_i18n::t!("textviewer.title"),
         options,
-        Box::new(move |_cc| {
-            match viewer_app::TextViewerApp::new(path, dark_mode) {
+        Box::new(
+            move |_cc| match viewer_app::TextViewerApp::new(path, dark_mode) {
                 Ok(app) => Ok(Box::new(app)),
                 Err(e) => {
                     log::error!("[TEXT-VIEWER] failed to open text file: {}", e);
                     Ok(Box::new(viewer_app::ErrorApp { message: e }))
                 }
-            }
-        }),
+            },
+        ),
     )
 }
 

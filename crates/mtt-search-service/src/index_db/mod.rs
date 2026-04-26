@@ -2,11 +2,11 @@ pub mod binary;
 pub mod integrity;
 mod sync;
 
+use parking_lot::Mutex;
 use std::ffi::OsStr;
 use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
-use parking_lot::Mutex;
 
 use rusqlite::{params, Connection, OpenFlags};
 
@@ -85,25 +85,21 @@ pub fn get_db_path() -> Result<PathBuf, String> {
 /// the ACL to the resulting handle via `SetSecurityInfo` (kernel object) so
 /// the DACL is bound to the inode rather than the path.
 fn harden_directory_acl(dir: &Path) -> Result<(), String> {
+    use windows::core::PCWSTR;
+    use windows::Win32::Foundation::{CloseHandle, LocalFree, HANDLE};
     use windows::Win32::Security::Authorization::{
-        SetSecurityInfo, SE_KERNEL_OBJECT,
-        SET_ACCESS,
-        SetEntriesInAclW, EXPLICIT_ACCESS_W, TRUSTEE_W,
-        TRUSTEE_IS_SID, TRUSTEE_IS_WELL_KNOWN_GROUP,
+        SetEntriesInAclW, SetSecurityInfo, EXPLICIT_ACCESS_W, SET_ACCESS, SE_KERNEL_OBJECT,
+        TRUSTEE_IS_SID, TRUSTEE_IS_WELL_KNOWN_GROUP, TRUSTEE_W,
     };
     use windows::Win32::Security::{
-        ACL as WIN_ACL, ACE_FLAGS,
-        DACL_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION,
+        ACE_FLAGS, ACL as WIN_ACL, DACL_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION,
     };
-    use windows::Win32::Foundation::{CloseHandle, LocalFree, HANDLE};
     use windows::Win32::Storage::FileSystem::{
         CreateFileW, GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION,
-        FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS,
-        FILE_FLAG_OPEN_REPARSE_POINT, FILE_FLAGS_AND_ATTRIBUTES,
-        FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_SHARE_DELETE,
+        FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAGS_AND_ATTRIBUTES, FILE_FLAG_BACKUP_SEMANTICS,
+        FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
         OPEN_EXISTING,
     };
-    use windows::core::PCWSTR;
 
     // READ_CONTROL | WRITE_DAC | FILE_READ_ATTRIBUTES — minimum required to
     // read attributes (reparse-point check) and replace the DACL.
@@ -233,9 +229,7 @@ fn harden_directory_acl(dir: &Path) -> Result<(), String> {
 
     // Build the new ACL from the explicit entries.
     let mut new_acl = std::ptr::null_mut::<WIN_ACL>();
-    let result = unsafe {
-        SetEntriesInAclW(Some(&entries), None, &mut new_acl)
-    };
+    let result = unsafe { SetEntriesInAclW(Some(&entries), None, &mut new_acl) };
     if result.0 != 0 {
         return Err(format!(
             "SetEntriesInAclW failed with error code {}",
@@ -263,9 +257,7 @@ fn harden_directory_acl(dir: &Path) -> Result<(), String> {
     // Free the ACL allocated by SetEntriesInAclW.
     if !new_acl.is_null() {
         unsafe {
-            LocalFree(Some(
-                windows::Win32::Foundation::HLOCAL(new_acl as *mut _),
-            ));
+            LocalFree(Some(windows::Win32::Foundation::HLOCAL(new_acl as *mut _)));
         }
     }
 
@@ -283,8 +275,10 @@ impl IndexDb {
     pub fn open(path: &Path) -> Result<Self, String> {
         let conn = Connection::open(path).map_err(|e| format!("SQLite open error: {}", e))?;
 
-        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=10000;")
-            .map_err(|e| format!("PRAGMA error: {}", e))?;
+        conn.execute_batch(
+            "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=10000;",
+        )
+        .map_err(|e| format!("PRAGMA error: {}", e))?;
 
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS volume_state (
@@ -365,11 +359,8 @@ impl IndexDb {
 
         if has_records && was_dirty {
             let start = std::time::Instant::now();
-            conn.execute(
-                "INSERT INTO search_fts(search_fts) VALUES('rebuild')",
-                [],
-            )
-            .map_err(|e| format!("FTS5 initial rebuild error: {}", e))?;
+            conn.execute("INSERT INTO search_fts(search_fts) VALUES('rebuild')", [])
+                .map_err(|e| format!("FTS5 initial rebuild error: {}", e))?;
             eprintln!(
                 "[DB] FTS5 index rebuilt at startup (dirty shutdown detected) in {:.2}s",
                 start.elapsed().as_secs_f64()

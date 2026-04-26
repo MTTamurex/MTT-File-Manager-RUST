@@ -72,10 +72,7 @@ impl ResourceLeakMonitor {
 
         if self.baseline.is_none() {
             self.baseline = Some(snap);
-            log::info!(
-                "[IMAGE-VIEWER][RESOURCE-MONITOR] baseline: {}",
-                snap
-            );
+            log::info!("[IMAGE-VIEWER][RESOURCE-MONITOR] baseline: {}", snap);
             self.prev = Some(snap);
             return Some(snap);
         }
@@ -115,4 +112,3 @@ impl ResourceLeakMonitor {
         Some(snap)
     }
 }
-

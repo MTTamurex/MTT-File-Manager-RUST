@@ -1,6 +1,6 @@
+use image::imageops::FilterType;
 use image::DynamicImage;
 use image::ImageDecoder;
-use image::imageops::FilterType;
 use image::ImageReader;
 use memmap2::Mmap;
 use once_cell::sync::Lazy;
@@ -162,8 +162,8 @@ const GIF_MAX_FRAMES: usize = 240;
 /// [`GIF_MAX_TOTAL_RGBA_BYTES`] of combined pixel data.  Remaining frames are
 /// silently discarded so the viewer stays responsive.
 pub fn decode_gif_frames(path: &Path) -> io::Result<Vec<GifAnimationFrame>> {
-    use image::AnimationDecoder;
     use image::codecs::gif::GifDecoder;
+    use image::AnimationDecoder;
 
     let bytes = read_file_fast(path, DecodePriority::Interactive)?;
     let cursor = Cursor::new(bytes.as_slice());
@@ -185,7 +185,11 @@ pub fn decode_gif_frames(path: &Path) -> io::Result<Vec<GifAnimationFrame>> {
             Ok(f) => {
                 let (numer, denom) = f.delay().numer_denom_ms();
                 // GIF spec: 0 delay → display "as fast as possible". Use 10 ms minimum.
-                let delay_ms = if denom == 0 { 100 } else { (numer / denom).max(10) };
+                let delay_ms = if denom == 0 {
+                    100
+                } else {
+                    (numer / denom).max(10)
+                };
                 let rgba = f.into_buffer();
                 let frame_bytes = rgba.as_raw().len();
                 total_rgba_bytes = total_rgba_bytes.saturating_add(frame_bytes);
@@ -325,8 +329,7 @@ pub fn encode_frame_to_path(
     format: ExportImageFormat,
     output_path: &Path,
 ) -> io::Result<()> {
-    let Some(buffer) = image::RgbaImage::from_raw(frame.width, frame.height, frame.rgba)
-    else {
+    let Some(buffer) = image::RgbaImage::from_raw(frame.width, frame.height, frame.rgba) else {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "decoded frame buffer has invalid dimensions",
@@ -405,7 +408,12 @@ fn decode_svg_frame(
         .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
 
     rx.recv_timeout(std::time::Duration::from_secs(10))
-        .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "SVG rasterization timed out (10s limit)"))?
+        .map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::TimedOut,
+                "SVG rasterization timed out (10s limit)",
+            )
+        })?
 }
 
 /// Absolute upper bound for SVG rasterisation to prevent multi-gigabyte
@@ -489,12 +497,11 @@ fn decode_dynamic(path: &Path, priority: DecodePriority) -> io::Result<DynamicIm
     // TIFF, GIF). Try WIC first; fall back to the cross-platform path.
     #[cfg(target_os = "windows")]
     {
-        if let Some((rgba, w, h)) =
-            crate::workers::thumbnail::extraction::stage2_wic::extract(path)
+        if let Some((rgba, w, h)) = crate::workers::thumbnail::extraction::stage2_wic::extract(path)
         {
-            if let Some(buffer) = image::ImageBuffer::<image::Rgba<u8>, Vec<u8>>::from_raw(
-                w, h, rgba,
-            ) {
+            if let Some(buffer) =
+                image::ImageBuffer::<image::Rgba<u8>, Vec<u8>>::from_raw(w, h, rgba)
+            {
                 return Ok(DynamicImage::ImageRgba8(buffer));
             }
         }
@@ -512,9 +519,9 @@ fn decode_dynamic(path: &Path, priority: DecodePriority) -> io::Result<DynamicIm
                 if let Some((rgba, w, h)) =
                     crate::workers::thumbnail::extraction::stage2_wic::extract(path)
                 {
-                    if let Some(buffer) = image::ImageBuffer::<image::Rgba<u8>, Vec<u8>>::from_raw(
-                        w, h, rgba,
-                    ) {
+                    if let Some(buffer) =
+                        image::ImageBuffer::<image::Rgba<u8>, Vec<u8>>::from_raw(w, h, rgba)
+                    {
                         return Ok(DynamicImage::ImageRgba8(buffer));
                     }
                 }
@@ -691,4 +698,3 @@ mod tests {
         assert_eq!(frame.rgba.len(), (frame.width * frame.height * 4) as usize);
     }
 }
-

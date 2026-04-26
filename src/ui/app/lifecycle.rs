@@ -9,8 +9,12 @@ pub fn handle_startup_sequence(app: &mut ImageViewerApp, ctx: &egui::Context) {
         if app.startup_tick == 1 {
             // Frame 1: Apply saved theme before anything else
             match app.theme_mode {
-                crate::app::navigation_state::ThemeMode::Dark => ctx.set_visuals(egui::Visuals::dark()),
-                crate::app::navigation_state::ThemeMode::Light => ctx.set_visuals(egui::Visuals::light()),
+                crate::app::navigation_state::ThemeMode::Dark => {
+                    ctx.set_visuals(egui::Visuals::dark())
+                }
+                crate::app::navigation_state::ThemeMode::Light => {
+                    ctx.set_visuals(egui::Visuals::light())
+                }
             }
             crate::ui::theme::apply_scroll_style(ctx);
 
@@ -52,46 +56,47 @@ pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
         freeze_layout, layout_phase, WindowLayoutPhase,
     };
 
-    let (size_changed, maximized_changed, fullscreen_changed, is_minimized, minimized_changed) = ctx.input(|i| {
-        let mut size_changed = false;
-        let mut maximized_changed = false;
+    let (size_changed, maximized_changed, fullscreen_changed, is_minimized, minimized_changed) =
+        ctx.input(|i| {
+            let mut size_changed = false;
+            let mut maximized_changed = false;
 
-        // Detect if window is minimized
-        let minimized = i.viewport().minimized.unwrap_or(false);
-        let prev_minimized = app.layout.saved_is_minimized;
-        let minimized_changed = minimized != prev_minimized;
+            // Detect if window is minimized
+            let minimized = i.viewport().minimized.unwrap_or(false);
+            let prev_minimized = app.layout.saved_is_minimized;
+            let minimized_changed = minimized != prev_minimized;
 
-        if let Some(rect) = i.viewport().inner_rect {
-            // Only save size when NOT maximized
-            if !i.viewport().maximized.unwrap_or(false) {
-                if (app.layout.saved_window_width - rect.width()).abs() > 1.0
-                    || (app.layout.saved_window_height - rect.height()).abs() > 1.0
-                {
-                    size_changed = true;
+            if let Some(rect) = i.viewport().inner_rect {
+                // Only save size when NOT maximized
+                if !i.viewport().maximized.unwrap_or(false) {
+                    if (app.layout.saved_window_width - rect.width()).abs() > 1.0
+                        || (app.layout.saved_window_height - rect.height()).abs() > 1.0
+                    {
+                        size_changed = true;
+                    }
+                    app.layout.saved_window_width = rect.width();
+                    app.layout.saved_window_height = rect.height();
                 }
-                app.layout.saved_window_width = rect.width();
-                app.layout.saved_window_height = rect.height();
             }
-        }
 
-        let new_maximized = i.viewport().maximized.unwrap_or(false);
-        if new_maximized != app.layout.saved_is_maximized {
-            maximized_changed = true;
-        }
-        app.layout.saved_is_maximized = new_maximized;
+            let new_maximized = i.viewport().maximized.unwrap_or(false);
+            if new_maximized != app.layout.saved_is_maximized {
+                maximized_changed = true;
+            }
+            app.layout.saved_is_maximized = new_maximized;
 
-        let new_fullscreen = i.viewport().fullscreen.unwrap_or(false);
-        let fullscreen_changed = new_fullscreen != app.layout.saved_is_fullscreen;
-        app.layout.saved_is_fullscreen = new_fullscreen;
+            let new_fullscreen = i.viewport().fullscreen.unwrap_or(false);
+            let fullscreen_changed = new_fullscreen != app.layout.saved_is_fullscreen;
+            app.layout.saved_is_fullscreen = new_fullscreen;
 
-        (
-            size_changed,
-            maximized_changed,
-            fullscreen_changed,
-            minimized,
-            minimized_changed,
-        )
-    });
+            (
+                size_changed,
+                maximized_changed,
+                fullscreen_changed,
+                minimized,
+                minimized_changed,
+            )
+        });
 
     // Detect background→foreground transitions (window regains focus after being unfocused)
     // This catches the case where the app was NOT minimized but simply behind other windows,
@@ -122,15 +127,15 @@ pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
             // frames are still slow from OS paging — not to keep burning
             // CPU/GPU on continuous repaints for many seconds after.
             let burst_secs = (2.0 + (idle_secs / 120.0)).min(5.0);
-            app.restore_burst_until = Some(
-                std::time::Instant::now()
-                    + std::time::Duration::from_secs_f64(burst_secs),
-            );
+            app.restore_burst_until =
+                Some(std::time::Instant::now() + std::time::Duration::from_secs_f64(burst_secs));
             log::info!(
                 "[LIFECYCLE] App regained focus after {:.1}s in background - burst {:.1}s, texture_flush={}",
                 idle_secs, burst_secs, idle_secs >= 60.0
             );
         }
+
+        app.request_current_folder_liveness_probe("window focus restored");
 
         // Invalidate directory cache and schedule a reload so watcher events
         // that were dropped or throttled while the app was in the background
@@ -140,8 +145,7 @@ pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
             && !app.navigation_state.is_computer_view
             && !app.navigation_state.is_recycle_bin_view
         {
-            let current_path =
-                std::path::PathBuf::from(&app.navigation_state.current_path);
+            let current_path = std::path::PathBuf::from(&app.navigation_state.current_path);
             app.directory_dirty_registry.mark_dirty(&current_path);
             app.directory_cache.invalidate(&current_path);
             app.pending_auto_reload = true;
@@ -178,13 +182,13 @@ pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
             if minimized_secs > 5.0 {
                 let burst_secs = (2.0 + minimized_secs / 120.0).min(5.0);
                 app.restore_burst_until = Some(
-                    std::time::Instant::now()
-                        + std::time::Duration::from_secs_f64(burst_secs),
+                    std::time::Instant::now() + std::time::Duration::from_secs_f64(burst_secs),
                 );
             }
             log::info!(
                 "[LIFECYCLE] App restored after {:.1}s of inactivity - burst, texture_flush={}",
-                minimized_secs, minimized_secs >= 60.0
+                minimized_secs,
+                minimized_secs >= 60.0
             );
         }
     }
@@ -193,7 +197,10 @@ pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
     // This happens when egui reports minimized but we haven't frozen yet
     if is_minimized && layout_phase() == WindowLayoutPhase::Normal {
         // Freeze layout with current sidebar widths
-        freeze_layout(app.layout.sidebar_left_width, app.layout.sidebar_right_width);
+        freeze_layout(
+            app.layout.sidebar_left_width,
+            app.layout.sidebar_right_width,
+        );
     }
 
     // Save preferences when window state changes
@@ -205,8 +212,7 @@ pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
         if let Some(hwnd) = app.native_hwnd {
             let no_round = app.layout.saved_is_maximized || app.layout.saved_is_fullscreen;
             crate::infrastructure::windows::window_corners::apply_window_corner_preference(
-                hwnd,
-                no_round,
+                hwnd, no_round,
             );
         }
     }

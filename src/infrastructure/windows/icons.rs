@@ -21,7 +21,10 @@ pub fn canonical_icon_ext(ext: &str) -> &str {
 /// icon can vary per file.
 #[inline]
 pub fn is_per_file_icon_ext(ext: &str) -> bool {
-    matches!(ext, "exe" | "lnk" | "ico" | "cur" | "ani" | "com" | "scr" | "url")
+    matches!(
+        ext,
+        "exe" | "lnk" | "ico" | "cur" | "ani" | "com" | "scr" | "url"
+    )
 }
 
 /// File types that still share one icon per extension, but require a real file

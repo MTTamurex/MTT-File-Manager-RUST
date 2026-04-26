@@ -77,9 +77,7 @@ impl PdfRenderer {
             page_sizes.push((page.width().value, page.height().value));
         }
 
-        Ok(Self {
-            page_sizes,
-        })
+        Ok(Self { page_sizes })
     }
 
     pub fn page_sizes(&self) -> &[(f32, f32)] {

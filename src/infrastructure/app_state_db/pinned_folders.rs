@@ -32,7 +32,11 @@ impl AppStateDb {
         if let Ok(rows) = rows {
             for row in rows.flatten() {
                 let (path, display_name, position) = row;
-                results.push(PinnedFolder { path, display_name, position });
+                results.push(PinnedFolder {
+                    path,
+                    display_name,
+                    position,
+                });
             }
         }
         log::info!("[PINNED] Loaded {} pinned folders", results.len());

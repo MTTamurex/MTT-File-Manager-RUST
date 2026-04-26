@@ -47,11 +47,9 @@ impl ImageViewerApp {
                     // Warm shell extensions on the managed STA worker thread.
                     // This restores first-open context menu UX without spawning
                     // an unmanaged background thread.
-                    let _ = self
-                        .shell_menu_req_tx
-                        .send(ShellMenuRequest::Warmup {
-                            hwnd_isize: hwnd.0 as isize,
-                        });
+                    let _ = self.shell_menu_req_tx.send(ShellMenuRequest::Warmup {
+                        hwnd_isize: hwnd.0 as isize,
+                    });
                 }
             }
         }

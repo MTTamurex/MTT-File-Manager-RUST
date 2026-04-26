@@ -23,7 +23,9 @@ use std::borrow::Cow;
 /// or the original filesystem name if not a special folder.
 pub(crate) fn display_name_for_item(item: &FileEntry) -> Cow<'_, str> {
     if item.is_dir {
-        if let Some(translated) = crate::infrastructure::onedrive::special_folder_display_name(&item.path) {
+        if let Some(translated) =
+            crate::infrastructure::onedrive::special_folder_display_name(&item.path)
+        {
             return Cow::Owned(translated);
         }
     }

@@ -22,9 +22,9 @@ use std::sync::Mutex;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetClientRect, IsIconic, IsZoomed, HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT, HTCAPTION,
-    HTCLIENT, HTLEFT, HTRIGHT, HTTOP, HTTOPLEFT, HTTOPRIGHT, WM_ENTERSIZEMOVE,
-    WM_EXITSIZEMOVE, WM_NCACTIVATE, WM_NCHITTEST, WM_SIZE,
+    GetClientRect, IsIconic, IsZoomed, HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT, HTCAPTION, HTCLIENT,
+    HTLEFT, HTRIGHT, HTTOP, HTTOPLEFT, HTTOPRIGHT, WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE,
+    WM_NCACTIVATE, WM_NCHITTEST, WM_SIZE,
 };
 
 /// SIZE_MINIMIZED constant (wParam for WM_SIZE when window is minimized)

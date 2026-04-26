@@ -98,7 +98,11 @@ fn draw_basic_controls(
     // Play/Pause
     let play_icon = if is_playing { "pause" } else { "play" };
     if let Some(tex) = svg_manager.get_icon(ui.ctx(), play_icon, 48, icon_color_val) {
-        let tooltip = if is_playing { rust_i18n::t!("video.pause") } else { rust_i18n::t!("video.play") };
+        let tooltip = if is_playing {
+            rust_i18n::t!("video.pause")
+        } else {
+            rust_i18n::t!("video.play")
+        };
         if add_icon_button(ui, &tex, btn_size, &tooltip, ui.visuals().dark_mode) {
             preview.toggle_play();
         }
@@ -146,7 +150,11 @@ fn draw_basic_controls(
     // CRASH FIX: Use try-lock pattern to avoid deadlock with MPV thread
     let vol_icon = if is_muted { "vol_mute" } else { "vol_high" };
     if let Some(tex) = svg_manager.get_icon(ui.ctx(), vol_icon, 48, icon_color_val) {
-        let vol_tooltip = if is_muted { rust_i18n::t!("video.unmute") } else { rust_i18n::t!("video.mute_btn") };
+        let vol_tooltip = if is_muted {
+            rust_i18n::t!("video.unmute")
+        } else {
+            rust_i18n::t!("video.mute_btn")
+        };
         if add_icon_button(ui, &tex, btn_size, &vol_tooltip, ui.visuals().dark_mode) {
             // SAFETY: Wrap in catch_unwind to prevent crash from FFI/panic
             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {

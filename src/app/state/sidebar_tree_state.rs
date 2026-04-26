@@ -108,7 +108,9 @@ impl SidebarTreeState {
         let to_load: Vec<PathBuf> = self
             .expanded
             .iter()
-            .filter(|p| !self.children.contains_key(p.as_path()) && !self.loading.contains(p.as_path()))
+            .filter(|p| {
+                !self.children.contains_key(p.as_path()) && !self.loading.contains(p.as_path())
+            })
             .cloned()
             .collect();
         for path in to_load {
@@ -237,10 +239,7 @@ impl SidebarTreeState {
 
         rayon::spawn(move || {
             let children = enumerate_subfolders(&parent, show_hidden);
-            let _ = tx.send(LoadResult {
-                parent,
-                children,
-            });
+            let _ = tx.send(LoadResult { parent, children });
         });
     }
 
@@ -267,7 +266,9 @@ impl SidebarTreeState {
                     if !has_children {
                         if let Some(grandparent) = result.parent.parent() {
                             if let Some(siblings) = self.children.get_mut(grandparent) {
-                                if let Some(node) = siblings.iter_mut().find(|n| n.path == result.parent) {
+                                if let Some(node) =
+                                    siblings.iter_mut().find(|n| n.path == result.parent)
+                                {
                                     node.has_subfolders = Some(false);
                                 }
                             }
@@ -292,7 +293,10 @@ impl SidebarTreeState {
 // ── Folder Enumeration (runs on background thread) ───────────────────
 
 /// Convert cached FileEntry list into FolderNode list (synchronous, no I/O).
-fn entries_to_folder_nodes(entries: &[crate::domain::file_entry::FileEntry], show_hidden: bool) -> Vec<FolderNode> {
+fn entries_to_folder_nodes(
+    entries: &[crate::domain::file_entry::FileEntry],
+    show_hidden: bool,
+) -> Vec<FolderNode> {
     let mut folders: Vec<FolderNode> = entries
         .iter()
         // The content panel treats archive files as navigable entries, but the

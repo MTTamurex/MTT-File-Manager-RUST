@@ -1,9 +1,9 @@
 use crate::domain::file_entry::{is_archive_extension, FileEntry};
 use crate::infrastructure::adaptive_batch::AdaptiveBatchTracker;
+use crate::infrastructure::app_state_db::AppStateDb;
 use crate::infrastructure::directory_cache::DirectoryCache;
 use crate::infrastructure::directory_dirty_registry::DirectoryDirtyRegistry;
 use crate::infrastructure::directory_index::{DirectoryIndex, IndexedFile};
-use crate::infrastructure::app_state_db::AppStateDb;
 use crate::infrastructure::disk_cache::ThumbnailDiskCache;
 use crate::infrastructure::ntfs_reader;
 use crate::infrastructure::onedrive;
@@ -70,7 +70,11 @@ pub(super) fn try_handle_optimized_tiers(
                     dir_entry.name.to_lowercase().as_str(),
                     "desktop.ini" | "thumbs.db" | "$recycle.bin" | "system volume information"
                 );
-                if (show_hidden || !is_hidden) && !is_system && !is_special && !dir_entry.name.starts_with('.') {
+                if (show_hidden || !is_hidden)
+                    && !is_system
+                    && !is_special
+                    && !dir_entry.name.starts_with('.')
+                {
                     let full_path = PathBuf::from(base_path).join(&dir_entry.name);
                     let mut is_dir = dir_entry.is_dir;
                     let is_archive = !is_dir && is_archive_extension(&dir_entry.name);

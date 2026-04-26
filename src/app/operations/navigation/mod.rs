@@ -350,7 +350,10 @@ impl ImageViewerApp {
         // For root drives (e.g. "E:\"), go straight to computer view.
         if let Some(parent) = current.as_path().parent() {
             if !parent.as_os_str().is_empty() {
-                log::info!("[NAV] Navigating to parent: {:?} (no blocking I/O check)", parent);
+                log::info!(
+                    "[NAV] Navigating to parent: {:?} (no blocking I/O check)",
+                    parent
+                );
                 let target = parent.to_string_lossy();
                 self.navigate_to(target.as_ref());
                 return;

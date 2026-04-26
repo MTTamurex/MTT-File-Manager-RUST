@@ -35,7 +35,11 @@ pub fn spawn_prefetch_worker(
                         }
 
                         if let Some(entries) = ntfs_reader::read_directory_fast(&path) {
-                            log::debug!("[PREFETCH] Cached {} for {:?}", entries.len(), path.file_name().unwrap_or_default());
+                            log::debug!(
+                                "[PREFETCH] Cached {} for {:?}",
+                                entries.len(),
+                                path.file_name().unwrap_or_default()
+                            );
                             let file_entries: Vec<FileEntry> = entries
                                 .into_iter()
                                 .filter(|e| {
@@ -59,7 +63,10 @@ pub fn spawn_prefetch_worker(
 
                             directory_cache.put(path, file_entries);
                         } else {
-                            log::debug!("[PREFETCH] read_directory_fast returned None for {:?}", path.file_name().unwrap_or_default());
+                            log::debug!(
+                                "[PREFETCH] read_directory_fast returned None for {:?}",
+                                path.file_name().unwrap_or_default()
+                            );
                         }
                     }
                 }

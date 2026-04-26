@@ -8,16 +8,14 @@ use windows::{
     core::*,
     Win32::{
         Foundation::{
-            CloseHandle, ERROR_ACCESS_DENIED, ERROR_CANCELLED, GetLastError, HWND,
-            WAIT_OBJECT_0,
+            CloseHandle, GetLastError, ERROR_ACCESS_DENIED, ERROR_CANCELLED, HWND, WAIT_OBJECT_0,
         },
         Storage::FileSystem::*,
         System::Threading::{GetExitCodeProcess, WaitForSingleObject},
         UI::{
             Shell::*,
             WindowsAndMessaging::{
-                BringWindowToTop, IsIconic, SetForegroundWindow, ShowWindow, SW_HIDE,
-                SW_RESTORE,
+                BringWindowToTop, IsIconic, SetForegroundWindow, ShowWindow, SW_HIDE, SW_RESTORE,
             },
         },
     },
@@ -44,7 +42,11 @@ impl std::fmt::Display for VolumeLabelRenameError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Cancelled => write!(f, "{}", rust_i18n::t!("operations.rename_drive_cancelled")),
-            Self::InvalidDrivePath => write!(f, "{}", rust_i18n::t!("operations.rename_drive_invalid_target")),
+            Self::InvalidDrivePath => write!(
+                f,
+                "{}",
+                rust_i18n::t!("operations.rename_drive_invalid_target")
+            ),
             Self::InvalidLabel => write!(f, "{}", rust_i18n::t!("operations.error_invalid_name")),
             Self::AccessDenied => write!(f, "access denied"),
             Self::OsError(message) => f.write_str(message),
@@ -80,7 +82,10 @@ pub fn is_drive_root_path(path: &Path) -> bool {
 }
 
 pub fn drive_supports_volume_label_rename(drive_type: DriveType) -> bool {
-    matches!(drive_type, DriveType::Fixed | DriveType::Removable | DriveType::RamDisk)
+    matches!(
+        drive_type,
+        DriveType::Fixed | DriveType::Removable | DriveType::RamDisk
+    )
 }
 
 pub fn is_valid_volume_label(new_label: &str) -> bool {
@@ -169,7 +174,10 @@ unsafe fn set_volume_label_raw(
     drive_root: &str,
     new_label: &str,
 ) -> std::result::Result<(), VolumeLabelRenameError> {
-    let drive_wide: Vec<u16> = drive_root.encode_utf16().chain(std::iter::once(0)).collect();
+    let drive_wide: Vec<u16> = drive_root
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
     let label_wide: Vec<u16> = new_label.encode_utf16().chain(std::iter::once(0)).collect();
     let label_ptr = if new_label.is_empty() {
         PCWSTR::null()
@@ -195,8 +203,8 @@ fn launch_elevated_volume_rename_helper(
     new_label: &str,
     hwnd: HWND,
 ) -> std::result::Result<(), VolumeLabelRenameError> {
-    let exe = std::env::current_exe()
-        .map_err(|err| VolumeLabelRenameError::OsError(err.to_string()))?;
+    let exe =
+        std::env::current_exe().map_err(|err| VolumeLabelRenameError::OsError(err.to_string()))?;
     let exe_wide: Vec<u16> = exe
         .as_os_str()
         .encode_wide()
@@ -245,13 +253,12 @@ fn launch_elevated_volume_rename_helper(
         let wait = WaitForSingleObject(process, 30_000);
         if wait != WAIT_OBJECT_0 {
             let _ = CloseHandle(process);
-            return Err(VolumeLabelRenameError::OsError(
-                if wait.0 == 258 { // WAIT_TIMEOUT
-                    "Elevated helper timed out after 30 seconds".to_string()
-                } else {
-                    windows::core::Error::from_win32().to_string()
-                },
-            ));
+            return Err(VolumeLabelRenameError::OsError(if wait.0 == 258 {
+                // WAIT_TIMEOUT
+                "Elevated helper timed out after 30 seconds".to_string()
+            } else {
+                windows::core::Error::from_win32().to_string()
+            }));
         }
 
         let mut exit_code = 1u32;
@@ -269,7 +276,8 @@ fn launch_elevated_volume_rename_helper(
             Ok(())
         } else {
             Err(VolumeLabelRenameError::OsError(
-                rust_i18n::t!("operations.rename_drive_helper_failed", code = exit_code).to_string(),
+                rust_i18n::t!("operations.rename_drive_helper_failed", code = exit_code)
+                    .to_string(),
             ))
         }
     }

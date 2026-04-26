@@ -78,7 +78,8 @@ pub fn render_fallback(
         let is_system_path =
             crate::infrastructure::windows::is_windows_system_path(&file.path.to_string_lossy());
 
-        if is_recycle_bin_view || is_system_path
+        if is_recycle_bin_view
+            || is_system_path
             || crate::infrastructure::windows::shell_folder::is_shell_navigation_path(
                 &file.path,
                 file.is_dir,
@@ -125,25 +126,27 @@ pub fn render_fallback(
         let is_virtual_archive_path = crate::domain::file_entry::is_path_inside_archive(&file.path);
 
         // First try non-blocking: returns cached Jumbo icon if available.
-        let icon = item_icon_loader.get_or_load_icon_sized(
-            ui.ctx(),
-            &file.path,
-            IconSize::Jumbo,
-            treat_as_folder,
-            false, // never block the UI thread
-        ).or_else(|| {
-            // Jumbo not cached yet — trigger async extraction and show Large
-            // fallback in the meantime.
-            item_icon_loader.enqueue_jumbo_icon(&file.path, is_virtual_archive_path);
-            // Try Large as immediate fallback.
-            item_icon_loader.get_or_load_icon_sized(
+        let icon = item_icon_loader
+            .get_or_load_icon_sized(
                 ui.ctx(),
                 &file.path,
-                IconSize::Large,
+                IconSize::Jumbo,
                 treat_as_folder,
-                false,
+                false, // never block the UI thread
             )
-        });
+            .or_else(|| {
+                // Jumbo not cached yet — trigger async extraction and show Large
+                // fallback in the meantime.
+                item_icon_loader.enqueue_jumbo_icon(&file.path, is_virtual_archive_path);
+                // Try Large as immediate fallback.
+                item_icon_loader.get_or_load_icon_sized(
+                    ui.ctx(),
+                    &file.path,
+                    IconSize::Large,
+                    treat_as_folder,
+                    false,
+                )
+            });
 
         if let Some(icon) = icon {
             let image_resp = ui.add(
@@ -223,4 +226,3 @@ pub fn render_fallback(
     }
     val_action
 }
-

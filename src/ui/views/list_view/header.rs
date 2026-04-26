@@ -30,8 +30,11 @@ fn draw_header_resizable(
 
     if ui.is_rect_visible(header_rect) {
         if is_active {
-            ui.painter()
-                .rect_filled(header_rect, 2.0, crate::ui::theme::header_active_bg(ui.visuals().dark_mode));
+            ui.painter().rect_filled(
+                header_rect,
+                2.0,
+                crate::ui::theme::header_active_bg(ui.visuals().dark_mode),
+            );
         }
         let text_color = if is_active {
             crate::ui::theme::text_color(ui.visuals().dark_mode)

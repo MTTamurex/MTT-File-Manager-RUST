@@ -5,8 +5,8 @@
 
 use windows::Win32::Foundation::HWND;
 use windows::Win32::Graphics::Dwm::{
-    DwmSetWindowAttribute, DWMWINDOWATTRIBUTE, DWM_WINDOW_CORNER_PREFERENCE,
-    DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND, DWMWCP_ROUND,
+    DwmSetWindowAttribute, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND, DWMWCP_ROUND,
+    DWMWINDOWATTRIBUTE, DWM_WINDOW_CORNER_PREFERENCE,
 };
 
 /// Apply native DWM corner preference for the main window.

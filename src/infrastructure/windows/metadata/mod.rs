@@ -85,7 +85,10 @@ pub fn extract_media_metadata(path: &Path) -> MediaMetadata {
     // These APIs open the file WITHOUT FILE_SHARE_WRITE, causing sharing
     // violations that cancel active downloads (browsers, torrents, encoders).
     if crate::infrastructure::windows::file_flags::is_file_unsafe_to_read(path) {
-        log::debug!("[METADATA] Skipping file unsafe to read (download/write in progress): {:?}", path.file_name());
+        log::debug!(
+            "[METADATA] Skipping file unsafe to read (download/write in progress): {:?}",
+            path.file_name()
+        );
         return MediaMetadata::default();
     }
 
@@ -137,7 +140,11 @@ fn extract_media_metadata_inner(path: &Path, is_image: bool, is_audio: bool) -> 
 /// 1. Reuses a fixed set of worker threads (no unbounded thread creation)
 /// 2. Has a capped overflow mechanism (max 24 temporary workers)
 /// 3. Jobs that block in the pool don't create new kernel threads per call
-fn extract_media_metadata_with_timeout(path: &Path, is_image: bool, is_audio: bool) -> MediaMetadata {
+fn extract_media_metadata_with_timeout(
+    path: &Path,
+    is_image: bool,
+    is_audio: bool,
+) -> MediaMetadata {
     let path_buf = path.to_path_buf();
     let path_for_log = path_buf.clone();
     let timeout = Duration::from_millis(METADATA_EXTRACTION_TIMEOUT_MS);
@@ -162,7 +169,8 @@ fn extract_media_metadata_with_timeout(path: &Path, is_image: bool, is_audio: bo
         Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
             log::warn!(
                 "[METADATA TIMEOUT] Extraction exceeded {}ms for {:?} — returning empty",
-                METADATA_EXTRACTION_TIMEOUT_MS, path_for_log
+                METADATA_EXTRACTION_TIMEOUT_MS,
+                path_for_log
             );
             MediaMetadata::default()
         }

@@ -17,7 +17,60 @@ fn should_preserve_onedrive_media_thumbnail(path: &std::path::Path) -> bool {
         .unwrap_or(false)
 }
 
+#[cfg(feature = "notify-watcher")]
+fn watcher_path_matches_current_folder(path: &std::path::Path, current_path_norm: &str) -> bool {
+    let cleaned = ImageViewerApp::clean_path(path);
+    ImageViewerApp::normalize_for_match(&cleaned) == current_path_norm
+}
+
+#[cfg(feature = "notify-watcher")]
+fn notify_event_removes_current_folder(event: &notify::Event, current_path_norm: &str) -> bool {
+    match &event.kind {
+        notify::EventKind::Remove(_) => event
+            .paths
+            .iter()
+            .any(|path| watcher_path_matches_current_folder(path, current_path_norm)),
+        notify::EventKind::Modify(ModifyKind::Name(rename_mode)) => match rename_mode {
+            RenameMode::From => event
+                .paths
+                .first()
+                .is_some_and(|path| watcher_path_matches_current_folder(path, current_path_norm)),
+            RenameMode::Both | RenameMode::Any => {
+                let old_matches = event.paths.first().is_some_and(|path| {
+                    watcher_path_matches_current_folder(path, current_path_norm)
+                });
+                let new_matches = event.paths.get(1).is_some_and(|path| {
+                    watcher_path_matches_current_folder(path, current_path_norm)
+                });
+                old_matches && !new_matches
+            }
+            RenameMode::To | RenameMode::Other => false,
+        },
+        _ => false,
+    }
+}
+
+#[cfg(feature = "notify-watcher")]
+fn notify_error_implies_current_folder_removed(
+    error: &notify::Error,
+    current_path_norm: &str,
+) -> bool {
+    error
+        .paths
+        .iter()
+        .any(|path| watcher_path_matches_current_folder(path, current_path_norm))
+        || (error.paths.is_empty() && matches!(error.kind, notify::ErrorKind::PathNotFound))
+}
+
 impl ImageViewerApp {
+    #[cfg(feature = "notify-watcher")]
+    fn navigate_after_current_folder_removed_by_notify(&mut self, reason: &str) {
+        log::warn!("{}: {}", reason, self.navigation_state.current_path);
+        self.pending_auto_reload = false;
+        self.skip_next_auto_reload = false;
+        self.navigate_to_nearest_valid_ancestor();
+    }
+
     #[cfg(feature = "notify-watcher")]
     pub(super) fn process_legacy_notify_events(
         &mut self,
@@ -59,6 +112,14 @@ impl ImageViewerApp {
                 Ok(evt) => {
                     let mut meaningful_change = false;
                     let mut needs_reload = false;
+                    let current_folder_removed =
+                        notify_event_removes_current_folder(&evt, current_path_norm);
+                    let is_name_change = matches!(
+                        evt.kind,
+                        notify::EventKind::Modify(ModifyKind::Name(
+                            RenameMode::Any | RenameMode::Both | RenameMode::From | RenameMode::To
+                        ))
+                    );
 
                     if matches!(evt.kind, notify::EventKind::Remove(_)) {
                         for path in &evt.paths {
@@ -72,7 +133,10 @@ impl ImageViewerApp {
                             meaningful_change = true;
 
                             let cleaned = Self::clean_path(path);
-                            self.register_changed_folder_for_path(&cleaned, &mut folders_with_changed_contents);
+                            self.register_changed_folder_for_path(
+                                &cleaned,
+                                &mut folders_with_changed_contents,
+                            );
                             if let Some(parent) = cleaned.parent() {
                                 self.invalidate_directory_caches(parent);
 
@@ -95,6 +159,13 @@ impl ImageViewerApp {
                             );
                             pending_disk_cache_invalidations.push(cleaned.clone());
                         }
+
+                        if current_folder_removed {
+                            self.navigate_after_current_folder_removed_by_notify(
+                                "[FS-WATCH-LEGACY] Current folder was removed externally",
+                            );
+                            return;
+                        }
                     }
 
                     if matches!(evt.kind, notify::EventKind::Create(_)) {
@@ -109,8 +180,13 @@ impl ImageViewerApp {
 
                             meaningful_change = true;
                             let cleaned = Self::clean_path(path);
-                            crate::infrastructure::windows::file_flags::mark_recent_write_activity(&cleaned);
-                            self.register_changed_folder_for_path(&cleaned, &mut folders_with_changed_contents);
+                            crate::infrastructure::windows::file_flags::mark_recent_write_activity(
+                                &cleaned,
+                            );
+                            self.register_changed_folder_for_path(
+                                &cleaned,
+                                &mut folders_with_changed_contents,
+                            );
 
                             if let Some(parent) = cleaned.parent() {
                                 self.invalidate_directory_caches(parent);
@@ -127,13 +203,7 @@ impl ImageViewerApp {
                         }
                     }
 
-                    if matches!(
-                        evt.kind,
-                        notify::EventKind::Modify(ModifyKind::Name(
-                            RenameMode::Any | RenameMode::Both | RenameMode::From | RenameMode::To
-                        ))
-                    ) && evt.paths.len() >= 2
-                    {
+                    if is_name_change && evt.paths.len() >= 2 {
                         let old_path = &evt.paths[0];
                         let new_path = &evt.paths[1];
 
@@ -153,9 +223,17 @@ impl ImageViewerApp {
 
                             let cleaned_old = Self::clean_path(old_path);
                             let cleaned_new = Self::clean_path(new_path);
-                            crate::infrastructure::windows::file_flags::mark_recent_write_activity(&cleaned_new);
-                            self.register_changed_folder_for_path(&cleaned_old, &mut folders_with_changed_contents);
-                            self.register_changed_folder_for_path(&cleaned_new, &mut folders_with_changed_contents);
+                            crate::infrastructure::windows::file_flags::mark_recent_write_activity(
+                                &cleaned_new,
+                            );
+                            self.register_changed_folder_for_path(
+                                &cleaned_old,
+                                &mut folders_with_changed_contents,
+                            );
+                            self.register_changed_folder_for_path(
+                                &cleaned_new,
+                                &mut folders_with_changed_contents,
+                            );
 
                             pending_disk_cache_invalidations.push(cleaned_old.clone());
                             pending_disk_cache_invalidations.push(cleaned_new.clone());
@@ -169,11 +247,15 @@ impl ImageViewerApp {
 
                             let old_in_current = cleaned_old
                                 .parent()
-                                .map(|parent| Self::normalize_for_match(parent) == current_path_norm)
+                                .map(|parent| {
+                                    Self::normalize_for_match(parent) == current_path_norm
+                                })
                                 .unwrap_or(false);
                             let new_in_current = cleaned_new
                                 .parent()
-                                .map(|parent| Self::normalize_for_match(parent) == current_path_norm)
+                                .map(|parent| {
+                                    Self::normalize_for_match(parent) == current_path_norm
+                                })
                                 .unwrap_or(false);
 
                             if old_in_current || new_in_current {
@@ -181,7 +263,21 @@ impl ImageViewerApp {
                                     needs_reload = true;
                                 }
                             }
+
+                            if current_folder_removed {
+                                self.navigate_after_current_folder_removed_by_notify(
+                                    "[FS-WATCH-LEGACY] Current folder was renamed or moved externally",
+                                );
+                                return;
+                            }
                         }
+                    }
+
+                    if current_folder_removed && is_name_change {
+                        self.navigate_after_current_folder_removed_by_notify(
+                            "[FS-WATCH-LEGACY] Current folder was renamed or moved externally",
+                        );
+                        return;
                     }
 
                     for path in &evt.paths {
@@ -197,12 +293,7 @@ impl ImageViewerApp {
                         if matches!(evt.kind, notify::EventKind::Create(_)) {
                             continue;
                         }
-                        if matches!(
-                            evt.kind,
-                            notify::EventKind::Modify(ModifyKind::Name(
-                                RenameMode::Any | RenameMode::Both | RenameMode::From | RenameMode::To
-                            ))
-                        ) {
+                        if is_name_change {
                             continue;
                         }
 
@@ -245,9 +336,15 @@ impl ImageViewerApp {
                         }
 
                         let cleaned = Self::clean_path(path);
-                        crate::infrastructure::windows::file_flags::mark_recent_write_activity(&cleaned);
-                        self.register_changed_folder_for_path(&cleaned, &mut folders_with_changed_contents);
-                        let preserve_media_thumb = should_preserve_onedrive_media_thumbnail(&cleaned);
+                        crate::infrastructure::windows::file_flags::mark_recent_write_activity(
+                            &cleaned,
+                        );
+                        self.register_changed_folder_for_path(
+                            &cleaned,
+                            &mut folders_with_changed_contents,
+                        );
+                        let preserve_media_thumb =
+                            should_preserve_onedrive_media_thumbnail(&cleaned);
                         if !preserve_media_thumb {
                             self.cache_manager.texture_cache.pop(&cleaned);
                         }
@@ -256,7 +353,9 @@ impl ImageViewerApp {
                         // DON'T clear failure cache for files still being written
                         // (active downloads).
                         // Uses _fast variant to avoid blocking UI thread.
-                        if !crate::infrastructure::windows::file_flags::is_file_unsafe_to_read_fast(&cleaned) {
+                        if !crate::infrastructure::windows::file_flags::is_file_unsafe_to_read_fast(
+                            &cleaned,
+                        ) {
                             crate::workers::thumbnail::clear_failure_cache(&cleaned);
                         }
                     }
@@ -267,9 +366,16 @@ impl ImageViewerApp {
                         }
                     }
                 }
-                Err(_err) => {
+                Err(err) => {
                     #[cfg(debug_assertions)]
-                    log::warn!("Erro de watch: {:?}", _err);
+                    log::warn!("Erro de watch: {:?}", err);
+
+                    if notify_error_implies_current_folder_removed(&err, current_path_norm) {
+                        self.navigate_after_current_folder_removed_by_notify(
+                            "[FS-WATCH-LEGACY] Watcher reported missing current folder",
+                        );
+                        return;
+                    }
                 }
             }
         }
@@ -304,5 +410,85 @@ impl ImageViewerApp {
         if has_more_events {
             self.ui_ctx.request_repaint();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use notify::event::{ModifyKind, RemoveKind, RenameMode};
+    use notify::{Event, EventKind};
+    use std::path::{Path, PathBuf};
+
+    fn normalized(path: &str) -> String {
+        ImageViewerApp::normalize_for_match(Path::new(path))
+    }
+
+    #[test]
+    fn detects_current_folder_remove_event() {
+        let current = normalized(r"C:\Temp\Gone");
+        let event = Event::new(EventKind::Remove(RemoveKind::Folder))
+            .add_path(PathBuf::from(r"\\?\C:\Temp\Gone"));
+
+        assert!(notify_event_removes_current_folder(&event, &current));
+    }
+
+    #[test]
+    fn ignores_removed_child_inside_current_folder() {
+        let current = normalized(r"C:\Temp\Gone");
+        let event = Event::new(EventKind::Remove(RemoveKind::File))
+            .add_path(PathBuf::from(r"C:\Temp\Gone\child.txt"));
+
+        assert!(!notify_event_removes_current_folder(&event, &current));
+    }
+
+    #[test]
+    fn detects_current_folder_renamed_away() {
+        let current = normalized(r"C:\Temp\Gone");
+        let event = Event::new(EventKind::Modify(ModifyKind::Name(RenameMode::Both)))
+            .add_path(PathBuf::from(r"C:\Temp\Gone"))
+            .add_path(PathBuf::from(r"C:\Temp\Renamed"));
+
+        assert!(notify_event_removes_current_folder(&event, &current));
+    }
+
+    #[test]
+    fn detects_single_path_current_folder_rename_from_event() {
+        let current = normalized(r"C:\Temp\Gone");
+        let event = Event::new(EventKind::Modify(ModifyKind::Name(RenameMode::From)))
+            .add_path(PathBuf::from(r"C:\Temp\Gone"));
+
+        assert!(notify_event_removes_current_folder(&event, &current));
+    }
+
+    #[test]
+    fn ignores_rename_into_current_folder_path() {
+        let current = normalized(r"C:\Temp\Gone");
+        let event = Event::new(EventKind::Modify(ModifyKind::Name(RenameMode::Both)))
+            .add_path(PathBuf::from(r"C:\Temp\Other"))
+            .add_path(PathBuf::from(r"C:\Temp\Gone"));
+
+        assert!(!notify_event_removes_current_folder(&event, &current));
+    }
+
+    #[test]
+    fn treats_current_folder_path_not_found_error_as_removed() {
+        let current = normalized(r"C:\Temp\Gone");
+        let error = notify::Error::path_not_found();
+
+        assert!(notify_error_implies_current_folder_removed(
+            &error, &current
+        ));
+    }
+
+    #[test]
+    fn treats_watcher_error_for_current_folder_as_removed() {
+        let current = normalized(r"C:\Temp\Gone");
+        let error =
+            notify::Error::generic("watch failed").add_path(PathBuf::from(r"\\?\C:\Temp\Gone"));
+
+        assert!(notify_error_implies_current_folder_removed(
+            &error, &current
+        ));
     }
 }

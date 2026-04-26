@@ -27,12 +27,7 @@ impl DragSelection {
     }
 
     pub fn bounds(&self) -> PdfTextBounds {
-        PdfTextBounds::from_points(
-            self.anchor.x,
-            self.current.x,
-            self.anchor.y,
-            self.current.y,
-        )
+        PdfTextBounds::from_points(self.anchor.x, self.current.x, self.anchor.y, self.current.y)
     }
 }
 
@@ -152,9 +147,11 @@ impl PdfViewerApp {
 
     pub(super) fn selection_summary(&self) -> String {
         match self.selection.as_ref() {
-            Some(selection) if !selection.text.is_empty() => {
-                t!("pdfviewer.selection_ready", count = selection.text.chars().count()).to_string()
-            }
+            Some(selection) if !selection.text.is_empty() => t!(
+                "pdfviewer.selection_ready",
+                count = selection.text.chars().count()
+            )
+            .to_string(),
             _ => t!("pdfviewer.selection_hint").to_string(),
         }
     }
@@ -167,7 +164,9 @@ impl PdfViewerApp {
             return;
         };
 
-        let has_overlap = segments.iter().any(|segment| segment.bounds.overlaps(&bounds));
+        let has_overlap = segments
+            .iter()
+            .any(|segment| segment.bounds.overlaps(&bounds));
 
         if !has_overlap {
             self.selection = None;
@@ -317,12 +316,18 @@ impl PdfViewerApp {
             self.page_point_to_screen(page_idx, page_rect, bounds.right, bounds.top),
         ];
 
-        let min_x = corners.iter().map(|point| point.x).fold(f32::INFINITY, f32::min);
+        let min_x = corners
+            .iter()
+            .map(|point| point.x)
+            .fold(f32::INFINITY, f32::min);
         let max_x = corners
             .iter()
             .map(|point| point.x)
             .fold(f32::NEG_INFINITY, f32::max);
-        let min_y = corners.iter().map(|point| point.y).fold(f32::INFINITY, f32::min);
+        let min_y = corners
+            .iter()
+            .map(|point| point.y)
+            .fold(f32::INFINITY, f32::min);
         let max_y = corners
             .iter()
             .map(|point| point.y)
@@ -346,7 +351,11 @@ impl PdfViewerApp {
             _ => (x, y, natural_w, natural_h),
         };
 
-        let u = if rotated_w <= 0.0 { 0.0 } else { rotated_x / rotated_w };
+        let u = if rotated_w <= 0.0 {
+            0.0
+        } else {
+            rotated_x / rotated_w
+        };
         let v = if rotated_h <= 0.0 {
             0.0
         } else {

@@ -18,9 +18,14 @@ impl ImageViewerApp {
             .to_string();
 
         let position = self.pinned_folders.len() as i64;
-        let pinned = PinnedFolder { path: path.to_string(), display_name: display_name.clone(), position };
+        let pinned = PinnedFolder {
+            path: path.to_string(),
+            display_name: display_name.clone(),
+            position,
+        };
 
-        self.app_state_db.save_pinned_folder(path, &display_name, position);
+        self.app_state_db
+            .save_pinned_folder(path, &display_name, position);
         self.pinned_folders.push(pinned);
     }
 
@@ -30,7 +35,11 @@ impl ImageViewerApp {
         self.app_state_db.remove_pinned_folder(path);
 
         // Reassign positions sequentially after removal
-        let ordered: Vec<String> = self.pinned_folders.iter().map(|pf| pf.path.clone()).collect();
+        let ordered: Vec<String> = self
+            .pinned_folders
+            .iter()
+            .map(|pf| pf.path.clone())
+            .collect();
         for (i, pf) in self.pinned_folders.iter_mut().enumerate() {
             pf.position = i as i64;
         }
@@ -44,7 +53,11 @@ impl ImageViewerApp {
     /// blocking the UI thread. `Path::exists()` calls `GetFileAttributesW`
     /// which can block indefinitely on network/cloud/USB drives.
     pub fn cleanup_deleted_pinned_folders(&mut self) {
-        let paths: Vec<String> = self.pinned_folders.iter().map(|pf| pf.path.clone()).collect();
+        let paths: Vec<String> = self
+            .pinned_folders
+            .iter()
+            .map(|pf| pf.path.clone())
+            .collect();
         if paths.is_empty() {
             return;
         }
@@ -88,7 +101,11 @@ impl ImageViewerApp {
         self.pinned_folders.insert(insert_at, item);
 
         // Update positions in memory and DB
-        let ordered: Vec<String> = self.pinned_folders.iter().map(|pf| pf.path.clone()).collect();
+        let ordered: Vec<String> = self
+            .pinned_folders
+            .iter()
+            .map(|pf| pf.path.clone())
+            .collect();
         for (i, pf) in self.pinned_folders.iter_mut().enumerate() {
             pf.position = i as i64;
         }

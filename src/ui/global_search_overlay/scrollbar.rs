@@ -15,10 +15,7 @@ pub(super) fn compute_visual_scroll(
     viewport_h: f32,
     generation: u64,
 ) -> (f32, f32) {
-    let scroll_state_id = ui
-        .id()
-        .with("global_search_scroll_state")
-        .with(generation);
+    let scroll_state_id = ui.id().with("global_search_scroll_state").with(generation);
     let dt = ui.input(|i| i.predicted_dt).min(0.05);
 
     let visual_scroll = ui.ctx().data_mut(|d| {
@@ -109,6 +106,5 @@ pub(super) fn render_scrollbar(
     } else {
         egui::Color32::from_gray(200)
     };
-    ui.painter()
-        .rect_filled(handle_rect, 2.0, handle_color);
+    ui.painter().rect_filled(handle_rect, 2.0, handle_color);
 }

@@ -24,9 +24,7 @@ use crate::infrastructure::windows::native_menu::{
 /// Commands sent to the shell menu worker thread.
 pub enum ShellMenuRequest {
     /// Pre-initialize shell extensions on the worker STA thread.
-    Warmup {
-        hwnd_isize: isize,
-    },
+    Warmup { hwnd_isize: isize },
     /// Extract the context menu for `paths`. The worker replies with `Ready` or `Error`.
     Extract {
         request_id: u64,
@@ -43,10 +41,7 @@ pub enum ShellMenuRequest {
     /// Discard the active `ShellMenuContext` (menu was dismissed without a command).
     Cancel,
     /// Expand a pending submenu for `item_id` (triggered by hover on a lazy item).
-    LoadSubmenu {
-        request_id: u64,
-        item_id: u32,
-    },
+    LoadSubmenu { request_id: u64, item_id: u32 },
 }
 
 /// Send-safe representation of a `ShellMenuItem` — carries no COM handles or OS handles.
@@ -87,10 +82,7 @@ pub enum ShellMenuResponse {
         items: Vec<ShellMenuItemData>,
     },
     /// Extraction failed (e.g. no shell extensions registered).
-    Error {
-        request_id: u64,
-        message: String,
-    },
+    Error { request_id: u64, message: String },
     /// A shell command was invoked (informational only; no result needed).
     Invoked,
     /// Submenu for `item_id` was lazily loaded; replace its sub_items in the UI.
@@ -202,13 +194,8 @@ fn shell_menu_loop(rx: Receiver<ShellMenuRequest>, tx: Sender<ShellMenuResponse>
             } => {
                 let hwnd = HWND(hwnd_isize as *mut _);
                 if let Some(ref ctx) = active_ctx {
-                    let _ = invoke_menu_command(
-                        hwnd,
-                        &ctx.context_menu,
-                        command_id,
-                        menu_x,
-                        menu_y,
-                    );
+                    let _ =
+                        invoke_menu_command(hwnd, &ctx.context_menu, command_id, menu_x, menu_y);
                 } else {
                     log::warn!("[ShellMenuWorker] Invoke called with no active context");
                 }

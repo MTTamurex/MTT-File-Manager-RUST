@@ -77,13 +77,16 @@ impl SharedFolderScanTotals {
 
     fn add(&self, result: FolderScanResult) {
         if result.total_size > 0 {
-            self.total_size.fetch_add(result.total_size, Ordering::Relaxed);
+            self.total_size
+                .fetch_add(result.total_size, Ordering::Relaxed);
         }
         if result.file_count > 0 {
-            self.file_count.fetch_add(result.file_count, Ordering::Relaxed);
+            self.file_count
+                .fetch_add(result.file_count, Ordering::Relaxed);
         }
         if result.folder_count > 0 {
-            self.folder_count.fetch_add(result.folder_count, Ordering::Relaxed);
+            self.folder_count
+                .fetch_add(result.folder_count, Ordering::Relaxed);
         }
     }
 
@@ -262,8 +265,7 @@ fn scan_dir_wide_local(dir_wide: &[u16], sub_dirs: &mut Vec<Vec<u16>>) -> Folder
             } else {
                 totals.file_count = totals.file_count.saturating_add(1);
                 totals.total_size = totals.total_size.saturating_add(
-                    ((find_data.nFileSizeHigh as u64) << 32)
-                        | (find_data.nFileSizeLow as u64),
+                    ((find_data.nFileSizeHigh as u64) << 32) | (find_data.nFileSizeLow as u64),
                 );
             }
 

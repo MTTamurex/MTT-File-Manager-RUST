@@ -58,12 +58,11 @@ pub fn get_current_user_sid_bytes() -> Option<(Vec<u8>, u32)> {
 pub fn harden_directory_permissions(dir: &Path) -> bool {
     use windows::Win32::Foundation::LocalFree;
     use windows::Win32::Security::Authorization::{
-        SetEntriesInAclW, SetNamedSecurityInfoW, EXPLICIT_ACCESS_W, SE_FILE_OBJECT, SET_ACCESS,
+        SetEntriesInAclW, SetNamedSecurityInfoW, EXPLICIT_ACCESS_W, SET_ACCESS, SE_FILE_OBJECT,
         TRUSTEE_IS_SID, TRUSTEE_IS_USER, TRUSTEE_W,
     };
     use windows::Win32::Security::{
-        ACE_FLAGS, ACL as WIN_ACL, DACL_SECURITY_INFORMATION,
-        PROTECTED_DACL_SECURITY_INFORMATION,
+        ACE_FLAGS, ACL as WIN_ACL, DACL_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION,
     };
 
     let Some((mut user_sid_bytes, _sid_len)) = get_current_user_sid_bytes() else {
@@ -126,9 +125,7 @@ pub fn harden_directory_permissions(dir: &Path) -> bool {
     // Free the ACL allocated by SetEntriesInAclW.
     if !new_acl.is_null() {
         unsafe {
-            LocalFree(Some(
-                windows::Win32::Foundation::HLOCAL(new_acl as *mut _),
-            ));
+            LocalFree(Some(windows::Win32::Foundation::HLOCAL(new_acl as *mut _)));
         }
     }
 

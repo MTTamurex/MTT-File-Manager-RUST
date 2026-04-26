@@ -21,15 +21,15 @@
 //! On legacy magic (`MTTIDX01`) it is treated as missing and rebuilt.
 use std::path::PathBuf;
 
+use windows::core::PCWSTR;
 use windows::Win32::Foundation::LocalFree;
 use windows::Win32::Security::Cryptography::{
     BCryptCloseAlgorithmProvider, BCryptCreateHash, BCryptDestroyHash, BCryptFinishHash,
     BCryptGenRandom, BCryptHashData, BCryptOpenAlgorithmProvider, CryptProtectData,
     CryptUnprotectData, BCRYPT_ALG_HANDLE, BCRYPT_ALG_HANDLE_HMAC_FLAG, BCRYPT_HASH_HANDLE,
-    BCRYPT_SHA256_ALGORITHM, BCRYPT_USE_SYSTEM_PREFERRED_RNG,
-    CRYPT_INTEGER_BLOB, CRYPTPROTECT_LOCAL_MACHINE, CRYPTPROTECT_UI_FORBIDDEN,
+    BCRYPT_SHA256_ALGORITHM, BCRYPT_USE_SYSTEM_PREFERRED_RNG, CRYPTPROTECT_LOCAL_MACHINE,
+    CRYPTPROTECT_UI_FORBIDDEN, CRYPT_INTEGER_BLOB,
 };
-use windows::core::PCWSTR;
 
 const HMAC_KEY_SIZE: usize = 32;
 const KEY_FILE_NAME: &str = "hmac_key.bin";
@@ -47,14 +47,10 @@ fn key_file_path() -> PathBuf {
 pub fn machine_key() -> Result<Vec<u8>, String> {
     let path = key_file_path();
     if path.exists() {
-        let blob = std::fs::read(&path)
-            .map_err(|e| format!("read HMAC key file: {}", e))?;
+        let blob = std::fs::read(&path).map_err(|e| format!("read HMAC key file: {}", e))?;
         let key = dpapi_unprotect(&blob)?;
         if key.len() != HMAC_KEY_SIZE {
-            return Err(format!(
-                "HMAC key blob has unexpected length {}",
-                key.len()
-            ));
+            return Err(format!("HMAC key blob has unexpected length {}", key.len()));
         }
         return Ok(key);
     }
@@ -64,10 +60,8 @@ pub fn machine_key() -> Result<Vec<u8>, String> {
     bcrypt_random(&mut key)?;
     let sealed = dpapi_protect(&key)?;
     let tmp = path.with_extension("bin.tmp");
-    std::fs::write(&tmp, &sealed)
-        .map_err(|e| format!("write HMAC key tmp: {}", e))?;
-    std::fs::rename(&tmp, &path)
-        .map_err(|e| format!("rename HMAC key: {}", e))?;
+    std::fs::write(&tmp, &sealed).map_err(|e| format!("write HMAC key tmp: {}", e))?;
+    std::fs::rename(&tmp, &path).map_err(|e| format!("rename HMAC key: {}", e))?;
     Ok(key)
 }
 
@@ -152,9 +146,8 @@ fn dpapi_protect(plain: &[u8]) -> Result<Vec<u8>, String> {
         .map_err(|e| format!("CryptProtectData: {}", e))?;
     }
 
-    let sealed = unsafe {
-        std::slice::from_raw_parts(output.pbData, output.cbData as usize).to_vec()
-    };
+    let sealed =
+        unsafe { std::slice::from_raw_parts(output.pbData, output.cbData as usize).to_vec() };
     unsafe {
         let _ = LocalFree(Some(windows::Win32::Foundation::HLOCAL(
             output.pbData as *mut _,
@@ -183,9 +176,8 @@ fn dpapi_unprotect(sealed: &[u8]) -> Result<Vec<u8>, String> {
         .map_err(|e| format!("CryptUnprotectData: {}", e))?;
     }
 
-    let plain = unsafe {
-        std::slice::from_raw_parts(output.pbData, output.cbData as usize).to_vec()
-    };
+    let plain =
+        unsafe { std::slice::from_raw_parts(output.pbData, output.cbData as usize).to_vec() };
     unsafe {
         let _ = LocalFree(Some(windows::Win32::Foundation::HLOCAL(
             output.pbData as *mut _,

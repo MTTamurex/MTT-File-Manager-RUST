@@ -25,12 +25,12 @@ fn resolve_tooltip_live_size(ui: &egui::Ui, item: &FileEntry, ctx: &mut ListView
     let mut resolved = item.size;
 
     ui.ctx().data_mut(|d| {
-        let mut state = d
-            .get_temp::<TooltipLiveFileStat>(cache_id)
-            .unwrap_or(TooltipLiveFileStat {
-                checked_at: -10.0,
-                size: item.size,
-            });
+        let mut state =
+            d.get_temp::<TooltipLiveFileStat>(cache_id)
+                .unwrap_or(TooltipLiveFileStat {
+                    checked_at: -10.0,
+                    size: item.size,
+                });
 
         if (now - state.checked_at) >= 1.0 {
             state.size = crate::app::live_file_size::resolve_cached_or_enqueue_live_file_size(
@@ -120,75 +120,81 @@ pub(super) fn render_item_tooltip(
 
         // Only show tooltip if hover duration exceeds threshold
         if hover_duration >= TOOLTIP_DELAY_SECS {
-          if let Some(mouse_pos) = ui.input(|i| i.pointer.hover_pos()) {
-            // SMART TOOLTIP: Position to avoid video player overlay
-            let screen_right = ui.ctx().screen_rect().right();
-            let tooltip_width = 320.0;
+            if let Some(mouse_pos) = ui.input(|i| i.pointer.hover_pos()) {
+                // SMART TOOLTIP: Position to avoid video player overlay
+                let screen_right = ui.ctx().screen_rect().right();
+                let tooltip_width = 320.0;
 
-            let effective_right = if ctx.is_video_docked_visible {
-                screen_right * 0.72
-            } else {
-                screen_right
-            };
+                let effective_right = if ctx.is_video_docked_visible {
+                    screen_right * 0.72
+                } else {
+                    screen_right
+                };
 
-            let tooltip_x = if mouse_pos.x + tooltip_width > effective_right {
-                (effective_right - tooltip_width - 5.0).max(10.0)
-            } else {
-                mouse_pos.x
-            };
-            let tooltip_pos = egui::pos2(tooltip_x, mouse_pos.y);
+                let tooltip_x = if mouse_pos.x + tooltip_width > effective_right {
+                    (effective_right - tooltip_width - 5.0).max(10.0)
+                } else {
+                    mouse_pos.x
+                };
+                let tooltip_pos = egui::pos2(tooltip_x, mouse_pos.y);
 
-            let tooltip_layer =
-                egui::LayerId::new(egui::Order::Tooltip, response.id.with("tooltip"));
-            egui::show_tooltip_at(
-                ui.ctx(),
-                tooltip_layer,
-                response.id,
-                tooltip_pos,
-                |ui: &mut Ui| {
-                    ui.set_max_width(300.0);
-                    ui.vertical(|ui| {
-                        ui.label(RichText::new(crate::ui::components::item_slot::display_name_for_item(item).as_ref()).strong());
-                        ui.separator();
-                        if item.drive_info.is_some() {
-                            render_drive_tooltip(ui, item);
-                            return;
-                        }
-                        ui.horizontal(|ui| {
-                            ui.label(t!("file_info.type"));
-                            ui.label(get_file_type_string(item));
-                        });
-                        if !item.is_dir || item.is_archive() {
-                            ui.horizontal(|ui| {
-                                ui.label(t!("file_info.size"));
-                                ui.label(format_size(resolve_tooltip_live_size(ui, item, ctx)));
-                            });
-                        }
-                        let date_lbl = if is_recycle_bin {
-                            t!("list_view.date_deleted")
-                        } else {
-                            t!("list_view.date_modified")
-                        };
-                        let date_val = if is_recycle_bin {
-                            if item.modified > 0 {
-                                format_date(item.modified)
-                            } else {
-                                item.deletion_date()
-                                    .map(|s| s.to_string())
-                                    .unwrap_or_else(|| "-".to_string())
+                let tooltip_layer =
+                    egui::LayerId::new(egui::Order::Tooltip, response.id.with("tooltip"));
+                egui::show_tooltip_at(
+                    ui.ctx(),
+                    tooltip_layer,
+                    response.id,
+                    tooltip_pos,
+                    |ui: &mut Ui| {
+                        ui.set_max_width(300.0);
+                        ui.vertical(|ui| {
+                            ui.label(
+                                RichText::new(
+                                    crate::ui::components::item_slot::display_name_for_item(item)
+                                        .as_ref(),
+                                )
+                                .strong(),
+                            );
+                            ui.separator();
+                            if item.drive_info.is_some() {
+                                render_drive_tooltip(ui, item);
+                                return;
                             }
-                        } else {
-                            format_date(item.modified)
-                        };
-                        ui.horizontal(|ui| {
-                            ui.label(date_lbl);
-                            ui.label(":");
-                            ui.label(date_val);
+                            ui.horizontal(|ui| {
+                                ui.label(t!("file_info.type"));
+                                ui.label(get_file_type_string(item));
+                            });
+                            if !item.is_dir || item.is_archive() {
+                                ui.horizontal(|ui| {
+                                    ui.label(t!("file_info.size"));
+                                    ui.label(format_size(resolve_tooltip_live_size(ui, item, ctx)));
+                                });
+                            }
+                            let date_lbl = if is_recycle_bin {
+                                t!("list_view.date_deleted")
+                            } else {
+                                t!("list_view.date_modified")
+                            };
+                            let date_val = if is_recycle_bin {
+                                if item.modified > 0 {
+                                    format_date(item.modified)
+                                } else {
+                                    item.deletion_date()
+                                        .map(|s| s.to_string())
+                                        .unwrap_or_else(|| "-".to_string())
+                                }
+                            } else {
+                                format_date(item.modified)
+                            };
+                            ui.horizontal(|ui| {
+                                ui.label(date_lbl);
+                                ui.label(":");
+                                ui.label(date_val);
+                            });
                         });
-                    });
-                },
-            );
-          } // if let Some(mouse_pos)
+                    },
+                );
+            } // if let Some(mouse_pos)
         }
     } else {
         // Clear hover time when not hovering
@@ -250,7 +256,8 @@ pub(super) fn render_item_icon(
         // Special folders (Documents, Pictures, Desktop, etc.) get their native
         // Windows icon via async extraction; regular folders get the generic icon.
         if crate::infrastructure::onedrive::is_special_icon_folder(&item.path) {
-            if let Some(special_icon) = ctx.item_icon_loader
+            if let Some(special_icon) = ctx
+                .item_icon_loader
                 .get_or_load_folder_path_icon(ui.ctx(), &item.path.to_string_lossy())
             {
                 ui.painter().image(
@@ -293,9 +300,9 @@ pub(super) fn render_item_icon(
         return;
     }
 
-    if let Some(file_icon) = ctx
-        .item_icon_loader
-        .get_or_load_icon(ui.ctx(), &item.path, item.is_dir, false)
+    if let Some(file_icon) =
+        ctx.item_icon_loader
+            .get_or_load_icon(ui.ctx(), &item.path, item.is_dir, false)
     {
         ui.painter().image(
             file_icon.id(),

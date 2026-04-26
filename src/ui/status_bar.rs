@@ -27,7 +27,8 @@ static LAST_THREAD_CRITICAL_TIMESTAMP: AtomicU64 = AtomicU64::new(0);
 static THREAD_CRITICAL_STREAK: AtomicU64 = AtomicU64::new(0);
 /// Set by the UI thread so the background kernel monitor can suppress false
 /// thread-count warnings during video playback.
-static VIDEO_PREVIEW_ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static VIDEO_PREVIEW_ACTIVE: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 
 /// Shared timing constant for the background monitor.
 const STATUS_CACHE_TTL_MS: u64 = 1000;
@@ -106,7 +107,10 @@ struct KernelResourceMetrics {
 /// Returns cached kernel resource metrics. The actual system queries run on a
 /// dedicated background thread (spawned once) so the UI thread never blocks on
 /// `CreateToolhelp32Snapshot` or `GetGuiResources`.
-fn get_kernel_resources_cached(_allow_refresh: bool, video_preview_active: bool) -> KernelResourceMetrics {
+fn get_kernel_resources_cached(
+    _allow_refresh: bool,
+    video_preview_active: bool,
+) -> KernelResourceMetrics {
     // Communicate video state to the background thread via atomic.
     VIDEO_PREVIEW_ACTIVE.store(video_preview_active, Ordering::Relaxed);
 
@@ -152,7 +156,8 @@ fn kernel_metrics_poller() {
         let cpu_count = std::thread::available_parallelism()
             .map(|n| n.get() as u32)
             .unwrap_or(4);
-        let expected_baseline = cpu_count * 2 + cpu_count.min(16) + cpu_count.min(8) + cpu_count.min(6) + 28;
+        let expected_baseline =
+            cpu_count * 2 + cpu_count.min(16) + cpu_count.min(8) + cpu_count.min(6) + 28;
         let warn_threshold = expected_baseline + 20;
         let critical_threshold = expected_baseline + 50;
         let stalled = crate::infrastructure::onedrive::get_stalled_io_workers();
@@ -161,8 +166,12 @@ fn kernel_metrics_poller() {
         if metrics.thread_count >= critical_threshold {
             if is_video_preview_thread_spike_expected(video_active, stalled) {
                 THREAD_CRITICAL_STREAK.store(0, Ordering::Relaxed);
-            } else if should_emit_thread_critical(now, metrics.thread_count, critical_threshold, stalled)
-            {
+            } else if should_emit_thread_critical(
+                now,
+                metrics.thread_count,
+                critical_threshold,
+                stalled,
+            ) {
                 log::error!(
                     "[THREAD MONITOR] CRITICAL: {} threads (baseline: ~{}, peak: {}, stalled OneDrive I/O: {}). \
                      Possible sustained thread leak causing system-wide stalls.",
@@ -199,7 +208,10 @@ fn kernel_metrics_poller() {
     }
 }
 
-fn is_video_preview_thread_spike_expected(video_preview_active: bool, stalled_onedrive_workers: usize) -> bool {
+fn is_video_preview_thread_spike_expected(
+    video_preview_active: bool,
+    stalled_onedrive_workers: usize,
+) -> bool {
     video_preview_active && stalled_onedrive_workers == 0
 }
 
@@ -356,7 +368,12 @@ pub fn render_status_bar(
             // (because buttons/eye are taller, so the Frame never becomes the
             // tallest element → no coupling / vicious circle).
             egui::Frame::NONE
-                .inner_margin(egui::Margin { left: 0, right: 0, top: 0, bottom: 2 })
+                .inner_margin(egui::Margin {
+                    left: 0,
+                    right: 0,
+                    top: 0,
+                    bottom: 2,
+                })
                 .show(ui, |ui| {
                     if *is_loading_folder {
                         ui.label(t!("status_bar.loading").to_string());
@@ -372,7 +389,12 @@ pub fn render_status_bar(
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 egui::Frame::NONE
-                    .inner_margin(egui::Margin { left: 0, right: 0, top: 0, bottom: 2 })
+                    .inner_margin(egui::Margin {
+                        left: 0,
+                        right: 0,
+                        top: 0,
+                        bottom: 2,
+                    })
                     .show(ui, |ui| {
                         ui.spacing_mut().item_spacing.x = 4.0;
                         ui.scope(|ui| {

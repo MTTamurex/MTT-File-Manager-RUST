@@ -1,6 +1,6 @@
 use crate::application::file_operations;
-use std::cell::Cell;
 use crate::infrastructure::windows_clipboard;
+use std::cell::Cell;
 use std::path::PathBuf;
 
 /// Clipboard operation type
@@ -123,9 +123,7 @@ impl ClipboardManager {
 
     fn cached_system_has_files_for_sequence(&self, current_sequence: Option<u32>) -> bool {
         match current_sequence {
-            Some(sequence)
-                if self.cached_system_has_files_sequence.get() == Some(sequence) =>
-            {
+            Some(sequence) if self.cached_system_has_files_sequence.get() == Some(sequence) => {
                 self.cached_system_has_files.get().unwrap_or(false)
             }
             _ => false,
@@ -174,7 +172,9 @@ mod tests {
             ..ClipboardManager::default()
         };
 
-        assert!(manager.internal_files_to_paste_for_sequence(Some(11)).is_none());
+        assert!(manager
+            .internal_files_to_paste_for_sequence(Some(11))
+            .is_none());
         assert!(!manager.has_internal_content_for_sequence(Some(11)));
     }
 

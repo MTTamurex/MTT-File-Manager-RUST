@@ -21,7 +21,9 @@ fn resolve_live_file_size(
     is_metadata_loading: bool,
     live_file_size_cache: &mut LruCache<std::path::PathBuf, (u64, u64)>,
     live_file_size_loading: &mut FxHashSet<std::path::PathBuf>,
-    live_file_size_req_sender: &std::sync::mpsc::Sender<crate::app::live_file_size::LiveFileSizeRequest>,
+    live_file_size_req_sender: &std::sync::mpsc::Sender<
+        crate::app::live_file_size::LiveFileSizeRequest,
+    >,
 ) -> u64 {
     if file.is_dir && !file.is_archive() {
         return file.size;
@@ -36,10 +38,12 @@ fn resolve_live_file_size(
     let mut resolved = file.size;
 
     ui.ctx().data_mut(|d| {
-        let mut state = d.get_temp::<LiveFileStat>(cache_id).unwrap_or(LiveFileStat {
-            checked_at: -10.0,
-            size: file.size,
-        });
+        let mut state = d
+            .get_temp::<LiveFileStat>(cache_id)
+            .unwrap_or(LiveFileStat {
+                checked_at: -10.0,
+                size: file.size,
+            });
 
         if (now - state.checked_at) >= 1.0 {
             state.size = crate::app::live_file_size::resolve_cached_or_enqueue_live_file_size(
@@ -69,7 +73,9 @@ pub fn render_file_info_table(
     is_metadata_loading: bool,
     live_file_size_cache: &mut LruCache<std::path::PathBuf, (u64, u64)>,
     live_file_size_loading: &mut FxHashSet<std::path::PathBuf>,
-    live_file_size_req_sender: &std::sync::mpsc::Sender<crate::app::live_file_size::LiveFileSizeRequest>,
+    live_file_size_req_sender: &std::sync::mpsc::Sender<
+        crate::app::live_file_size::LiveFileSizeRequest,
+    >,
     svg_manager: &mut SvgIconManager,
 ) -> Option<PreviewPanelAction> {
     let mut action = None;
@@ -85,8 +91,7 @@ pub fn render_file_info_table(
 
                 // Show refresh button only for image/video files that generate thumbnails.
                 // Folders and drives do not get this button.
-                let has_button =
-                    !file.is_dir && file.drive_info.is_none() && file.is_media();
+                let has_button = !file.is_dir && file.drive_info.is_none() && file.is_media();
                 // Reserve space for button if needed
                 let button_width = if has_button { 22.0 } else { 0.0 };
                 // Calculate available width for text
@@ -102,11 +107,14 @@ pub fn render_file_info_table(
                         } else if file.name == crate::domain::special_paths::RECYCLE_BIN_VIEW_ID {
                             t!("nav.recycle_bin").to_string()
                         } else {
-                            crate::ui::components::item_slot::display_name_for_item(file).to_string()
+                            crate::ui::components::item_slot::display_name_for_item(file)
+                                .to_string()
                         };
                         ui.add(
-                            egui::Label::new(egui::RichText::new(&display_name).strong().size(15.0))
-                                .wrap(),
+                            egui::Label::new(
+                                egui::RichText::new(&display_name).strong().size(15.0),
+                            )
+                            .wrap(),
                         );
                     },
                 );
@@ -120,8 +128,7 @@ pub fn render_file_info_table(
                         } else {
                             [60, 60, 60, 255]
                         };
-                        if let Some(tex) =
-                            svg_manager.get_icon(ui.ctx(), "refresh", 32, icon_color)
+                        if let Some(tex) = svg_manager.get_icon(ui.ctx(), "refresh", 32, icon_color)
                         {
                             if ui
                                 .add(
@@ -134,9 +141,8 @@ pub fn render_file_info_table(
                                 .on_hover_text(t!("status_bar.reload_thumbnail"))
                                 .clicked()
                             {
-                                action = Some(PreviewPanelAction::RefreshThumbnail(
-                                    file.path.clone(),
-                                ));
+                                action =
+                                    Some(PreviewPanelAction::RefreshThumbnail(file.path.clone()));
                             }
                         }
                     });
@@ -162,7 +168,11 @@ pub fn render_file_info_table(
 
             // 2. Type (General)
             if file.name == COMPUTER_VIEW_ID {
-                add_detail(ui, &t!("file_info.type"), t!("file_info.type_system_view").to_string());
+                add_detail(
+                    ui,
+                    &t!("file_info.type"),
+                    t!("file_info.type_system_view").to_string(),
+                );
                 let drive_count = file.size as usize;
                 let drive_text = if drive_count == 1 {
                     t!("file_info.drives_one").to_string()
@@ -176,7 +186,11 @@ pub fn render_file_info_table(
                 if let Some(label) = crate::domain::file_entry::archive_type_label(&file.name) {
                     add_detail(ui, &t!("file_info.type"), label);
                 } else {
-                    add_detail(ui, &t!("file_info.type"), t!("file_info.folder").to_string());
+                    add_detail(
+                        ui,
+                        &t!("file_info.type"),
+                        t!("file_info.folder").to_string(),
+                    );
                 }
             } else {
                 let ext = file
@@ -184,7 +198,11 @@ pub fn render_file_info_table(
                     .extension()
                     .map(|e| e.to_string_lossy().to_string().to_uppercase())
                     .unwrap_or_else(|| t!("file_info.file_unknown").to_string());
-                add_detail(ui, &t!("file_info.type"), t!("file_info.file_generic", ext = ext).to_string());
+                add_detail(
+                    ui,
+                    &t!("file_info.type"),
+                    t!("file_info.file_generic", ext = ext).to_string(),
+                );
             }
 
             // 3. File Metadata (Date/Size)
@@ -196,9 +214,8 @@ pub fn render_file_info_table(
                 let is_virtual_archive_folder = file.is_dir
                     && !file.is_archive()
                     && crate::domain::file_entry::is_path_inside_archive(file.path());
-                let show_folder_aggregate_details = file.is_dir
-                    && !file.is_archive()
-                    && !is_virtual_archive_folder;
+                let show_folder_aggregate_details =
+                    file.is_dir && !file.is_archive() && !is_virtual_archive_folder;
                 let (date_label, date_value) = if is_recycle_item {
                     let value = if file.modified > 0 {
                         crate::infrastructure::windows::format_date(file.modified)
@@ -222,7 +239,8 @@ pub fn render_file_info_table(
                         .unwrap_or(false);
                     let size_str = if show_folder_aggregate_details {
                         if let Some(summary) = folder_summary {
-                            let formatted = crate::infrastructure::windows::format_size(summary.total_size);
+                            let formatted =
+                                crate::infrastructure::windows::format_size(summary.total_size);
                             if is_folder_size_loading || !summary.has_counts() {
                                 format!("{formatted} ({})", t!("file_info.calculating"))
                             } else {
@@ -270,7 +288,11 @@ pub fn render_file_info_table(
 
             // 4. Media Metadata (Images/Videos)
             if is_metadata_loading {
-                add_detail(ui, &t!("file_info.metadata"), t!("file_info.metadata_loading").to_string());
+                add_detail(
+                    ui,
+                    &t!("file_info.metadata"),
+                    t!("file_info.metadata_loading").to_string(),
+                );
             } else if let Some(meta) = metadata {
                 if let (Some(w), Some(h)) = (meta.width, meta.height) {
                     add_detail(ui, &t!("file_info.resolution"), format!("{} x {} px", w, h));
@@ -304,7 +326,11 @@ pub fn render_file_info_table(
                         8 => "7.1".to_string(),
                         _ => t!("file_info.channel_other").to_string(),
                     };
-                    add_detail(ui, &t!("file_info.channels"), format!("{} ({})", channels, channel_name));
+                    add_detail(
+                        ui,
+                        &t!("file_info.channels"),
+                        format!("{} ({})", channels, channel_name),
+                    );
                 }
 
                 if let Some(d) = meta.duration_100ns {

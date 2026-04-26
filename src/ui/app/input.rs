@@ -1,5 +1,5 @@
-use crate::app::ImageViewerApp;
 use crate::app::shortcuts::{ShortcutAction, ShortcutBinding};
+use crate::app::ImageViewerApp;
 use crate::domain::file_entry::ViewMode;
 use crate::infrastructure::windows::is_virtual_key_down;
 use crate::workers::idle_warmup::IdleWarmupMessage;
@@ -16,7 +16,10 @@ fn handle_preview_shortcut_action(app: &mut ImageViewerApp, ctx: &egui::Context)
         return false;
     }
 
-    if !app.shortcuts.is_triggered(ShortcutAction::PreviewSelected, ctx) {
+    if !app
+        .shortcuts
+        .is_triggered(ShortcutAction::PreviewSelected, ctx)
+    {
         return false;
     }
 
@@ -125,7 +128,10 @@ fn handle_delete_permanently_shortcut(
     }
 
     app.delete_key_debounce = false;
-    !text_input_active && app.shortcuts.is_triggered(ShortcutAction::DeletePermanently, ctx)
+    !text_input_active
+        && app
+            .shortcuts
+            .is_triggered(ShortcutAction::DeletePermanently, ctx)
 }
 
 pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
@@ -156,7 +162,10 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
         // While the global search modal is open, keep focus/input inside it.
         // Prevent routing shortcuts/quick-search to the main file views.
         if app.global_search.active {
-            if app.shortcuts.is_triggered(ShortcutAction::GlobalSearch, ctx) {
+            if app
+                .shortcuts
+                .is_triggered(ShortcutAction::GlobalSearch, ctx)
+            {
                 app.close_global_search();
                 user_active = true;
             }
@@ -194,11 +203,7 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
 
             for event in &i.events {
                 match event {
-                    egui::Event::Key {
-                        key,
-                        pressed,
-                        ..
-                    } => {
+                    egui::Event::Key { key, pressed, .. } => {
                         // 2. Keyboard detection (Navigation keys)
                         if *pressed {
                             user_active = true;
@@ -287,7 +292,10 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
             user_active = true;
         }
 
-        if app.shortcuts.is_triggered(ShortcutAction::FocusAddressBar, ctx) {
+        if app
+            .shortcuts
+            .is_triggered(ShortcutAction::FocusAddressBar, ctx)
+        {
             app.navigation_state.path_input = app.navigation_state.current_path.clone();
             app.is_address_editing = true;
             app.show_address_history_menu = false;
@@ -303,15 +311,17 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
             // zoom_delta > 1.0 = scroll up (increase), < 1.0 = decrease
             // Scale: each wheel notch produces delta ~0.1 -> 0.1 x 24 = ~2.4px per notch
             let change = (zoom_delta - 1.0) * 24.0;
-            app.thumbnail_size = (app.thumbnail_size + change)
-                .clamp(crate::ui::theme::THUMBNAIL_MIN, 256.0);
+            app.thumbnail_size =
+                (app.thumbnail_size + change).clamp(crate::ui::theme::THUMBNAIL_MIN, 256.0);
             // Prevent egui from applying zoom to the UI itself
             ctx.set_zoom_factor(1.0);
             app.save_preferences();
             user_active = true;
         }
 
-        if app.shortcuts.is_triggered(ShortcutAction::CreateFolder, ctx)
+        if app
+            .shortcuts
+            .is_triggered(ShortcutAction::CreateFolder, ctx)
             && !app.navigation_state.is_computer_view
             && !app.navigation_state.is_recycle_bin_view
         {
@@ -319,7 +329,10 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
             user_active = true;
         }
 
-        if app.shortcuts.is_triggered(ShortcutAction::GlobalSearch, ctx) {
+        if app
+            .shortcuts
+            .is_triggered(ShortcutAction::GlobalSearch, ctx)
+        {
             app.toggle_global_search();
             user_active = true;
         }
@@ -329,11 +342,13 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
         // Ctrl+Shift+D = toggle dual panel on/off
         if !text_input_active {
             let tab_pressed = ctx.input(|i| {
-                i.events.iter().any(|e| matches!(
-                    e,
-                    egui::Event::Key { key: egui::Key::Tab, pressed: true, modifiers, .. }
-                    if !modifiers.ctrl && !modifiers.alt && !modifiers.shift
-                ))
+                i.events.iter().any(|e| {
+                    matches!(
+                        e,
+                        egui::Event::Key { key: egui::Key::Tab, pressed: true, modifiers, .. }
+                        if !modifiers.ctrl && !modifiers.alt && !modifiers.shift
+                    )
+                })
             });
             if tab_pressed && app.dual_panel_enabled {
                 app.dual_panel_switch_active();
@@ -341,11 +356,13 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
             }
 
             let ctrl_shift_d = ctx.input(|i| {
-                i.events.iter().any(|e| matches!(
-                    e,
-                    egui::Event::Key { key: egui::Key::D, pressed: true, modifiers, .. }
-                    if modifiers.ctrl && modifiers.shift && !modifiers.alt
-                ))
+                i.events.iter().any(|e| {
+                    matches!(
+                        e,
+                        egui::Event::Key { key: egui::Key::D, pressed: true, modifiers, .. }
+                        if modifiers.ctrl && modifiers.shift && !modifiers.alt
+                    )
+                })
             });
             if ctrl_shift_d {
                 app.dual_panel_toggle();
@@ -354,13 +371,14 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
 
             // F6 = move selected to other panel (dual panel only)
             if app.dual_panel_enabled {
-                let f6_pressed = ctx.input(|i| {
-                    i.events.iter().any(|e| matches!(
+                let f6_pressed =
+                    ctx.input(|i| {
+                        i.events.iter().any(|e| matches!(
                         e,
                         egui::Event::Key { key: egui::Key::F6, pressed: true, modifiers, .. }
                         if !modifiers.ctrl && !modifiers.alt && !modifiers.shift
                     ))
-                });
+                    });
                 if f6_pressed {
                     app.dual_panel_move_to_other();
                     user_active = true;

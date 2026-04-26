@@ -153,7 +153,11 @@ impl ShortcutBinding {
         let mut shift = false;
         let mut key = None;
 
-        for token in value.split('+').map(str::trim).filter(|token| !token.is_empty()) {
+        for token in value
+            .split('+')
+            .map(str::trim)
+            .filter(|token| !token.is_empty())
+        {
             match token.to_ascii_lowercase().as_str() {
                 "ctrl" | "control" => ctrl = true,
                 "alt" => alt = true,
@@ -292,9 +296,7 @@ impl ShortcutBindings {
                 let winner = duplicates
                     .iter()
                     .copied()
-                    .find(|other| {
-                        !customized[other.index()] && other.default_binding() == binding
-                    })
+                    .find(|other| !customized[other.index()] && other.default_binding() == binding)
                     .unwrap_or(duplicates[0]);
 
                 for other in duplicates {
@@ -363,9 +365,10 @@ impl ShortcutBindings {
         action: ShortcutAction,
         binding: ShortcutBinding,
     ) -> Option<ShortcutAction> {
-        ShortcutAction::ALL.iter().copied().find(|other| {
-            *other != action && self.bindings[other.index()] == binding
-        })
+        ShortcutAction::ALL
+            .iter()
+            .copied()
+            .find(|other| *other != action && self.bindings[other.index()] == binding)
     }
 
     pub fn append_preferences(&self, prefs: &mut Vec<(&'static str, String)>) {
@@ -376,7 +379,11 @@ impl ShortcutBindings {
 
     pub fn is_triggered(&self, action: ShortcutAction, ctx: &egui::Context) -> bool {
         let binding = self.get(action);
-        ctx.input(|i| i.events.iter().any(|event| binding_from_event(event) == Some(binding)))
+        ctx.input(|i| {
+            i.events
+                .iter()
+                .any(|event| binding_from_event(event) == Some(binding))
+        })
     }
 }
 
@@ -389,7 +396,12 @@ pub fn capture_shortcut(ctx: &egui::Context) -> Option<ShortcutCapture> {
                     pressed,
                     modifiers,
                     ..
-                } if *pressed && *key == egui::Key::Escape && !modifiers.ctrl && !modifiers.alt && !modifiers.shift => {
+                } if *pressed
+                    && *key == egui::Key::Escape
+                    && !modifiers.ctrl
+                    && !modifiers.alt
+                    && !modifiers.shift =>
+                {
                     return Some(ShortcutCapture::Cancelled);
                 }
                 _ => {
@@ -442,8 +454,7 @@ fn validate_binding_policy(binding: ShortcutBinding) -> Result<(), ShortcutValid
         return Err(ShortcutValidationError::Unsupported);
     }
 
-    if !binding.ctrl && !binding.alt && !binding.shift && !is_allowed_unmodified_key(binding.key)
-    {
+    if !binding.ctrl && !binding.alt && !binding.shift && !is_allowed_unmodified_key(binding.key) {
         return Err(ShortcutValidationError::Unsupported);
     }
 

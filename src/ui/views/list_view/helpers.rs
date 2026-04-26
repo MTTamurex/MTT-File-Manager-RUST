@@ -32,7 +32,11 @@ pub(super) fn get_file_type_string(item: &FileEntry) -> String {
     }
 
     if let Some(ext) = item.path.extension() {
-        return t!("file_info.file_generic", ext = ext.to_string_lossy().to_uppercase()).to_string();
+        return t!(
+            "file_info.file_generic",
+            ext = ext.to_string_lossy().to_uppercase()
+        )
+        .to_string();
     }
 
     t!("file_info.file_unknown").to_string()

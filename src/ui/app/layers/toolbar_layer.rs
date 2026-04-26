@@ -117,9 +117,13 @@ pub(crate) fn render_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context
                     ToolbarAction::Search(_query) => app.filter_items(),
                     ToolbarAction::Navigate(path) => app.navigate_to(&path),
                     ToolbarAction::StartAddressEdit => {
-                        app.navigation_state.path_input = if app.navigation_state.current_path == crate::domain::special_paths::COMPUTER_VIEW_ID {
+                        app.navigation_state.path_input = if app.navigation_state.current_path
+                            == crate::domain::special_paths::COMPUTER_VIEW_ID
+                        {
                             t!("nav.computer").to_string()
-                        } else if app.navigation_state.current_path == crate::domain::special_paths::RECYCLE_BIN_VIEW_ID {
+                        } else if app.navigation_state.current_path
+                            == crate::domain::special_paths::RECYCLE_BIN_VIEW_ID
+                        {
                             t!("nav.recycle_bin").to_string()
                         } else {
                             app.navigation_state.current_path.clone()
@@ -128,9 +132,13 @@ pub(crate) fn render_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context
                         app.show_address_history_menu = false;
                     }
                     ToolbarAction::StartAddressEditWithHistory => {
-                        app.navigation_state.path_input = if app.navigation_state.current_path == crate::domain::special_paths::COMPUTER_VIEW_ID {
+                        app.navigation_state.path_input = if app.navigation_state.current_path
+                            == crate::domain::special_paths::COMPUTER_VIEW_ID
+                        {
                             t!("nav.computer").to_string()
-                        } else if app.navigation_state.current_path == crate::domain::special_paths::RECYCLE_BIN_VIEW_ID {
+                        } else if app.navigation_state.current_path
+                            == crate::domain::special_paths::RECYCLE_BIN_VIEW_ID
+                        {
                             t!("nav.recycle_bin").to_string()
                         } else {
                             app.navigation_state.current_path.clone()
@@ -149,11 +157,10 @@ pub(crate) fn render_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context
                             app.navigate_to(&path);
                             app.is_address_editing = false;
                         } else {
-                            app.notifications.error(format!(
-                                "{}",
-                                t!("operations.path_not_found", path = path)
-                            ));
-                            app.navigation_state.path_input = app.navigation_state.current_path.clone();
+                            app.notifications
+                                .error(format!("{}", t!("operations.path_not_found", path = path)));
+                            app.navigation_state.path_input =
+                                app.navigation_state.current_path.clone();
                             app.is_address_editing = false;
                         }
                     }

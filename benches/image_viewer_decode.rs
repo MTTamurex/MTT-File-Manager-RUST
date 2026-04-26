@@ -71,13 +71,18 @@ fn decode_benchmark(c: &mut Criterion) {
             },
         );
 
-        group.bench_with_input(BenchmarkId::new("preview", label), &path, |b, image_path| {
-            b.iter(|| {
-                let _ =
-                    mtt_file_manager::image_viewer::decode_preview_for_benchmark(image_path, 1440)
-                        .expect("preview decode should succeed");
-            });
-        });
+        group.bench_with_input(
+            BenchmarkId::new("preview", label),
+            &path,
+            |b, image_path| {
+                b.iter(|| {
+                    let _ = mtt_file_manager::image_viewer::decode_preview_for_benchmark(
+                        image_path, 1440,
+                    )
+                    .expect("preview decode should succeed");
+                });
+            },
+        );
     }
 
     group.finish();
@@ -85,4 +90,3 @@ fn decode_benchmark(c: &mut Criterion) {
 
 criterion_group!(benches, decode_benchmark);
 criterion_main!(benches);
-

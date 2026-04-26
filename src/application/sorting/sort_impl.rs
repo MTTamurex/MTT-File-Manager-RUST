@@ -81,7 +81,8 @@ pub(super) fn sort_items(
     folders_position: FoldersPosition,
 ) {
     // Helper to check if an item is a "true" directory (not an archive file).
-    let is_true_dir = |item: &FileEntry| -> bool { item.is_dir && !is_archive_extension(&item.name) };
+    let is_true_dir =
+        |item: &FileEntry| -> bool { item.is_dir && !is_archive_extension(&item.name) };
 
     let compare = |a: &FileEntry, b: &FileEntry| -> Ordering {
         // 1. Folders position logic (ZIP files should be treated as files, not folders).
@@ -115,7 +116,9 @@ pub(super) fn sort_items(
                 let ext_ord = match (ext_a, ext_b) {
                     (Some(ea), Some(eb)) => {
                         // Case-insensitive byte-by-byte comparison, zero allocations.
-                        ea.as_bytes().iter().map(|b| b.to_ascii_lowercase())
+                        ea.as_bytes()
+                            .iter()
+                            .map(|b| b.to_ascii_lowercase())
                             .cmp(eb.as_bytes().iter().map(|b| b.to_ascii_lowercase()))
                     }
                     (Some(_), None) => Ordering::Greater,

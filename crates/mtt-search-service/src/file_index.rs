@@ -166,9 +166,8 @@ impl VolumeIndex {
             if record.is_dir {
                 remove_entry = true;
             } else {
-                parents.retain(|&parent| {
-                    parent != 0 && parent != frn && parent != record.parent_ref
-                });
+                parents
+                    .retain(|&parent| parent != 0 && parent != frn && parent != record.parent_ref);
                 parents.sort_unstable();
                 parents.dedup();
                 remove_entry = parents.is_empty();
@@ -503,11 +502,7 @@ impl VolumeIndex {
     /// Collect up to `limit` unique file FRNs under `dir_frn` whose recorded
     /// size is still zero. This is used to target on-demand repair of stale
     /// cache entries without rescanning the entire volume.
-    pub fn collect_zero_size_file_frns_in_subtree(
-        &self,
-        dir_frn: u64,
-        limit: usize,
-    ) -> Vec<u64> {
+    pub fn collect_zero_size_file_frns_in_subtree(&self, dir_frn: u64, limit: usize) -> Vec<u64> {
         if limit == 0 {
             return Vec::new();
         }
@@ -580,7 +575,11 @@ impl VolumeIndex {
                 child_frns.iter().copied().find(|child_frn| {
                     self.records
                         .get(child_frn)
-                        .map(|record| self.names.get(record.name_ref()).eq_ignore_ascii_case(component))
+                        .map(|record| {
+                            self.names
+                                .get(record.name_ref())
+                                .eq_ignore_ascii_case(component)
+                        })
                         .unwrap_or(false)
                 })
             });
@@ -647,7 +646,9 @@ fn contains_case_insensitive(haystack: &str, needle_lower: &str) -> bool {
 /// Single-token slices behave identically to the old `contains_case_insensitive` call.
 #[inline]
 fn matches_all_tokens(haystack: &str, tokens: &[&str]) -> bool {
-    tokens.iter().all(|token| contains_case_insensitive(haystack, token))
+    tokens
+        .iter()
+        .all(|token| contains_case_insensitive(haystack, token))
 }
 
 /// Search the indices for files matching a query string.
@@ -729,7 +730,9 @@ pub fn search_page(
 
             if matches {
                 let name = index.names.get(record.name_ref());
-                if let Some(full_path) = path_resolver::resolve_path_cached(frn, index, &mut dir_path_cache) {
+                if let Some(full_path) =
+                    path_resolver::resolve_path_cached(frn, index, &mut dir_path_cache)
+                {
                     if matched_after_filters < offset {
                         matched_after_filters += 1;
                         continue;
@@ -796,8 +799,7 @@ mod tests {
         let (raw_total, raw_count, raw_folders) = index.folder_tree_summary(root);
         assert_eq!((raw_total, raw_count, raw_folders), (111, 3, 2));
 
-        let (unique_total, unique_count, duplicate_hits) =
-            index.folder_size_sum_unique_files(root);
+        let (unique_total, unique_count, duplicate_hits) = index.folder_size_sum_unique_files(root);
         assert_eq!((unique_total, unique_count, duplicate_hits), (111, 3, 0));
     }
 

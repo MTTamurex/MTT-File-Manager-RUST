@@ -10,8 +10,8 @@ pub mod pdf_viewer;
 pub mod tabs;
 pub mod text_viewer;
 pub mod ui;
-pub mod viewer_runtime;
 pub mod video_player;
+pub mod viewer_runtime;
 pub mod workers;
 
 // Re-export main app struct for easy access

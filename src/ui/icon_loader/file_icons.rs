@@ -23,10 +23,7 @@ impl IconLoader {
     pub fn set_folder_icon(&mut self, ctx: &egui::Context, pixels: &[u8], width: u32, height: u32) {
         let texture = ctx.load_texture(
             "folder_icon_custom",
-            egui::ColorImage::from_rgba_unmultiplied(
-                [width as usize, height as usize],
-                pixels,
-            ),
+            egui::ColorImage::from_rgba_unmultiplied([width as usize, height as usize], pixels),
             egui::TextureOptions::LINEAR,
         );
         self.folder_icon_texture = Some(texture);
@@ -110,7 +107,8 @@ impl IconLoader {
                             return None;
                         }
                         // Preview panel: blocking extraction allowed.
-                        if let Ok((pixels, width, height)) = windows::extract_shell_icon(path, size) {
+                        if let Ok((pixels, width, height)) = windows::extract_shell_icon(path, size)
+                        {
                             let texture = ctx.load_texture(
                                 cache_key.clone(),
                                 egui::ColorImage::from_rgba_unmultiplied(
@@ -145,10 +143,12 @@ impl IconLoader {
                         // Real file on disk, non-blocking: let async loader handle it.
                         return None;
                     }
-                } else if crate::infrastructure::windows::icons::requires_real_file_for_shared_icon(ext)
-                    && allow_blocking
+                } else if crate::infrastructure::windows::icons::requires_real_file_for_shared_icon(
+                    ext,
+                ) && allow_blocking
                 {
-                    let canonical_ext = crate::infrastructure::windows::icons::canonical_icon_ext(ext);
+                    let canonical_ext =
+                        crate::infrastructure::windows::icons::canonical_icon_ext(ext);
                     let ext_key = format!("{}_{:?}", canonical_ext, size);
                     if let Some(texture) = self.extension_cache.get(&ext_key) {
                         return Some(texture.clone());
@@ -159,7 +159,9 @@ impl IconLoader {
                         return Some(texture.clone());
                     }
 
-                    if let Ok((pixels, width, height)) = windows::extract_file_icon_by_path(path, size) {
+                    if let Ok((pixels, width, height)) =
+                        windows::extract_file_icon_by_path(path, size)
+                    {
                         let texture = ctx.load_texture(
                             cache_key.clone(),
                             egui::ColorImage::from_rgba_unmultiplied(
@@ -169,7 +171,9 @@ impl IconLoader {
                             egui::TextureOptions::LINEAR,
                         );
                         let cloned = texture.clone();
-                        self.extension_cache.entry(ext_key).or_insert_with(|| texture.clone());
+                        self.extension_cache
+                            .entry(ext_key)
+                            .or_insert_with(|| texture.clone());
                         self.icon_cache.put(cache_key, texture);
                         return Some(cloned);
                     }
@@ -262,7 +266,11 @@ impl IconLoader {
             let result = windows::get_file_type_icon(true, "", size);
             let elapsed = lookup_start.elapsed();
             if elapsed.as_millis() > 5 {
-                log::warn!("[PERF-ICON] SLOW get_file_type_icon(folder) {}ms path={:?}", elapsed.as_millis(), path);
+                log::warn!(
+                    "[PERF-ICON] SLOW get_file_type_icon(folder) {}ms path={:?}",
+                    elapsed.as_millis(),
+                    path
+                );
             }
             self.record_non_blocking_sync_icon_lookup(elapsed, allow_blocking);
             result
@@ -275,7 +283,12 @@ impl IconLoader {
             let result = windows::get_file_type_icon(false, &ext_str, size);
             let elapsed = lookup_start.elapsed();
             if elapsed.as_millis() > 5 {
-                log::warn!("[PERF-ICON] SLOW get_file_type_icon(ext={}) {}ms path={:?}", ext_str, elapsed.as_millis(), path);
+                log::warn!(
+                    "[PERF-ICON] SLOW get_file_type_icon(ext={}) {}ms path={:?}",
+                    ext_str,
+                    elapsed.as_millis(),
+                    path
+                );
             }
             self.record_non_blocking_sync_icon_lookup(elapsed, allow_blocking);
             result
@@ -328,7 +341,8 @@ impl IconLoader {
             if !is_folder {
                 if let Some(ext) = path.extension() {
                     let ext_raw = ext.to_string_lossy().to_lowercase();
-                    let ext_str = crate::infrastructure::windows::icons::canonical_icon_ext(&ext_raw);
+                    let ext_str =
+                        crate::infrastructure::windows::icons::canonical_icon_ext(&ext_raw);
                     let ext_key = format!("{}_{:?}", ext_str, size);
                     self.extension_cache.insert(ext_key, texture.clone());
                 }

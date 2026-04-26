@@ -92,8 +92,10 @@ pub(super) fn draw_subtitle_track_picker(
             &t!("video.load_external_subtitle"),
             ui.visuals().dark_mode,
         ) {
-            let mut file_dialog =
-                FileDialog::new().add_filter(t!("video.subtitle_filter").to_string(), &["srt", "ass", "ssa", "vtt", "sub"]);
+            let mut file_dialog = FileDialog::new().add_filter(
+                t!("video.subtitle_filter").to_string(),
+                &["srt", "ass", "ssa", "vtt", "sub"],
+            );
 
             if let Some(current_video_path) = preview.path() {
                 if let Some(parent) = current_video_path.parent() {

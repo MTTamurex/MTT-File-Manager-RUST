@@ -60,10 +60,7 @@ impl super::DedicatedImageViewerApp {
         format!("{}.{}", stem, format.extension())
     }
 
-    fn pick_export_path(
-        &self,
-        format: loader::ExportImageFormat,
-    ) -> Option<std::path::PathBuf> {
+    fn pick_export_path(&self, format: loader::ExportImageFormat) -> Option<std::path::PathBuf> {
         let mut dialog = FileDialog::new()
             .add_filter(format.filter_label(), &[format.extension()])
             .set_file_name(&self.suggested_export_filename(format));
@@ -89,7 +86,11 @@ impl super::DedicatedImageViewerApp {
         loader::decode_full_frame(path).map_err(|err| err.to_string())
     }
 
-    pub(super) fn start_conversion(&mut self, format: loader::ExportImageFormat, ctx: &egui::Context) {
+    pub(super) fn start_conversion(
+        &mut self,
+        format: loader::ExportImageFormat,
+        ctx: &egui::Context,
+    ) {
         if self.conversion_in_progress {
             return;
         }
@@ -172,7 +173,8 @@ impl super::DedicatedImageViewerApp {
                 self.conversion_rx = None;
                 self.conversion_in_progress = false;
                 self.status_message = Some(ViewerStatusMessage {
-                    text: t!("imageviewer.convert_error", error = "worker disconnected").to_string(),
+                    text: t!("imageviewer.convert_error", error = "worker disconnected")
+                        .to_string(),
                     is_error: true,
                 });
             }
@@ -213,8 +215,7 @@ impl super::DedicatedImageViewerApp {
         std::thread::Builder::new()
             .name("gif-decode".into())
             .spawn(move || {
-                let result = loader::decode_gif_frames(&path)
-                    .map_err(|e| e.to_string());
+                let result = loader::decode_gif_frames(&path).map_err(|e| e.to_string());
                 let _ = tx.send(result);
                 ctx_clone.request_repaint();
             })
@@ -260,7 +261,11 @@ impl super::DedicatedImageViewerApp {
                 self.gif_decode_rx = None;
             }
             Ok(Err(e)) => {
-                log::warn!("[IMAGE-VIEWER] GIF decode failed for index {}: {}", decode_index, e);
+                log::warn!(
+                    "[IMAGE-VIEWER] GIF decode failed for index {}: {}",
+                    decode_index,
+                    e
+                );
                 self.gif_decode_rx = None;
             }
             Err(std::sync::mpsc::TryRecvError::Empty) => {

@@ -42,7 +42,14 @@ impl AppStateDb {
                     folders_pos_str
                 ],
             ) {
-                Ok(_) => log::info!("[FOLDER-LOCK] Saved lock for {:?}: view={}, sort={}, desc={}, pos={}", path, view_mode_str, sort_mode_str, sort_desc_str, folders_pos_str),
+                Ok(_) => log::info!(
+                    "[FOLDER-LOCK] Saved lock for {:?}: view={}, sort={}, desc={}, pos={}",
+                    path,
+                    view_mode_str,
+                    sort_mode_str,
+                    sort_desc_str,
+                    folders_pos_str
+                ),
                 Err(e) => log::error!("[FOLDER-LOCK] Failed to save lock for {:?}: {:?}", path, e),
             }
         } else {
@@ -118,7 +125,11 @@ impl AppStateDb {
                 );
             }
         }
-        log::info!("[FOLDER-LOCK] Loaded {} folder locks from DB: {:?}", results.len(), results.keys().collect::<Vec<_>>());
+        log::info!(
+            "[FOLDER-LOCK] Loaded {} folder locks from DB: {:?}",
+            results.len(),
+            results.keys().collect::<Vec<_>>()
+        );
         results
     }
 }

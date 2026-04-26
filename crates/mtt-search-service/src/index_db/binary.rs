@@ -74,8 +74,7 @@ const _: () = {
 /// Uses the shared data directory set at startup by `get_db_path`,
 /// so binary and SQLite caches always live together.
 pub fn index_path(drive_letter: char) -> PathBuf {
-    super::data_dir()
-        .join(format!("index_{}.bin", drive_letter))
+    super::data_dir().join(format!("index_{}.bin", drive_letter))
 }
 
 /// Save a VolumeIndex to a binary file atomically (write temp + rename).
@@ -93,8 +92,7 @@ pub fn save(index: &VolumeIndex) -> Result<(), String> {
 
     // SEC: Resolve the per-machine HMAC key BEFORE opening the temp file so a
     // missing/unreadable key never produces a half-written index on disk.
-    let key = integrity::machine_key()
-        .map_err(|e| format!("HMAC key unavailable: {}", e))?;
+    let key = integrity::machine_key().map_err(|e| format!("HMAC key unavailable: {}", e))?;
 
     let mut file = std::fs::File::create(&tmp_path)
         .map_err(|e| format!("Failed to create temp index file: {}", e))?;
@@ -176,21 +174,18 @@ pub fn save(index: &VolumeIndex) -> Result<(), String> {
     }
 
     // SEC: Compute HMAC-SHA256 over the entire payload and append as trailer.
-    let tag = integrity::hmac_sha256(&key, &payload)
-        .map_err(|e| format!("HMAC compute: {}", e))?;
+    let tag = integrity::hmac_sha256(&key, &payload).map_err(|e| format!("HMAC compute: {}", e))?;
 
     file.write_all(&payload)
         .map_err(|e| format!("Write payload: {}", e))?;
     file.write_all(&tag)
         .map_err(|e| format!("Write HMAC trailer: {}", e))?;
 
-    file.flush()
-        .map_err(|e| format!("Flush: {}", e))?;
+    file.flush().map_err(|e| format!("Flush: {}", e))?;
     drop(file);
 
     // Atomic rename.
-    std::fs::rename(&tmp_path, &path)
-        .map_err(|e| format!("Rename temp index: {}", e))?;
+    std::fs::rename(&tmp_path, &path).map_err(|e| format!("Rename temp index: {}", e))?;
 
     let elapsed = start.elapsed();
     eprintln!(
@@ -213,8 +208,7 @@ pub fn load(drive_letter: char) -> Result<Option<(VolumeIndex, PersistedBinarySt
 
     let start = std::time::Instant::now();
 
-    let data = std::fs::read(&path)
-        .map_err(|e| format!("Read binary index: {}", e))?;
+    let data = std::fs::read(&path).map_err(|e| format!("Read binary index: {}", e))?;
 
     if data.len() < HEADER_SIZE + TRAILER_SIZE {
         return Err("Binary index too small".into());
@@ -240,10 +234,9 @@ pub fn load(drive_letter: char) -> Result<Option<(VolumeIndex, PersistedBinarySt
     let payload = &data[..data.len() - TRAILER_SIZE];
     let stored_tag = &data[data.len() - TRAILER_SIZE..];
 
-    let key = integrity::machine_key()
-        .map_err(|e| format!("HMAC key unavailable: {}", e))?;
-    let computed_tag = integrity::hmac_sha256(&key, payload)
-        .map_err(|e| format!("HMAC compute: {}", e))?;
+    let key = integrity::machine_key().map_err(|e| format!("HMAC key unavailable: {}", e))?;
+    let computed_tag =
+        integrity::hmac_sha256(&key, payload).map_err(|e| format!("HMAC compute: {}", e))?;
     if !integrity::ct_eq(stored_tag, &computed_tag) {
         // Treat HMAC mismatch as tampering/corruption: delete and force rescan.
         let _ = std::fs::remove_file(&path);
@@ -251,9 +244,7 @@ pub fn load(drive_letter: char) -> Result<Option<(VolumeIndex, PersistedBinarySt
     }
 
     // Parse header.
-    let header: Header = unsafe {
-        std::ptr::read_unaligned(data.as_ptr() as *const Header)
-    };
+    let header: Header = unsafe { std::ptr::read_unaligned(data.as_ptr() as *const Header) };
     if &header.magic != MAGIC {
         return Err("Bad magic".into());
     }
@@ -299,7 +290,10 @@ pub fn load(drive_letter: char) -> Result<Option<(VolumeIndex, PersistedBinarySt
         return Err(format!("arena_size too large: {}", arena_size));
     }
     if hardlink_count > MAX_HARDLINK_PAIRS {
-        return Err(format!("hardlink_entry_count too large: {}", hardlink_count));
+        return Err(format!(
+            "hardlink_entry_count too large: {}",
+            hardlink_count
+        ));
     }
     if reparse_count > MAX_REPARSE {
         return Err(format!("reparse_count too large: {}", reparse_count));
@@ -337,9 +331,8 @@ pub fn load(drive_letter: char) -> Result<Option<(VolumeIndex, PersistedBinarySt
     for _ in 0..record_count {
         let frn = u64::from_le_bytes(data[offset..offset + 8].try_into().unwrap());
         offset += 8;
-        let rec: FileRecord = unsafe {
-            std::ptr::read_unaligned(data[offset..].as_ptr() as *const FileRecord)
-        };
+        let rec: FileRecord =
+            unsafe { std::ptr::read_unaligned(data[offset..].as_ptr() as *const FileRecord) };
         offset += FILE_RECORD_SIZE;
         records.insert(frn, rec);
     }
@@ -390,7 +383,10 @@ pub fn load(drive_letter: char) -> Result<Option<(VolumeIndex, PersistedBinarySt
     let elapsed = start.elapsed();
     eprintln!(
         "[BINARY-IDX] {}:\\ Loaded {} records + {} arena bytes in {:.3}s",
-        drive_letter, record_count, arena_size, elapsed.as_secs_f64()
+        drive_letter,
+        record_count,
+        arena_size,
+        elapsed.as_secs_f64()
     );
 
     Ok(Some((index, state)))

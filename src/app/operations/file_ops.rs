@@ -3,10 +3,10 @@
 //! This module handles basic file operations interacting with the shell.
 
 use crate::app::state::ImageViewerApp;
-use rust_i18n::t;
 use crate::application::file_operations;
 use crate::domain::file_entry::FileEntry;
 use crate::infrastructure::security::classify_shell_namespace_path;
+use rust_i18n::t;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -61,9 +61,10 @@ impl ImageViewerApp {
 
             if !confirmed {
                 self.pending_shell_open_confirmation = Some((path.to_path_buf(), now));
-                self.notifications.push(crate::application::AppNotification::warning(
-                    t!("operations.high_risk_source").to_string(),
-                ));
+                self.notifications
+                    .push(crate::application::AppNotification::warning(
+                        t!("operations.high_risk_source").to_string(),
+                    ));
                 return;
             }
 
@@ -78,9 +79,10 @@ impl ImageViewerApp {
                 path.display(),
                 e
             );
-            self.notifications.push(crate::application::AppNotification::warning(
-                t!("operations.open_failed").to_string(),
-            ));
+            self.notifications
+                .push(crate::application::AppNotification::warning(
+                    t!("operations.open_failed").to_string(),
+                ));
         } else if is_onedrive_media_file(path) {
             // Hydration/open may not always emit a watcher path that triggers thumbnail retry.
             // Force a light retry path for media files in OneDrive.
@@ -107,14 +109,21 @@ impl ImageViewerApp {
         }
 
         self.file_operation_state.file_ops_in_progress += 1;
-        if self.file_operation_state.file_op_sender.send(
-            crate::workers::file_operation_worker::FileOperationRequest::delete_permanently(
-                paths.clone(),
-                self.native_hwnd.unwrap_or_default(),
-            ),
-        ).is_err() {
-            self.file_operation_state.file_ops_in_progress =
-                self.file_operation_state.file_ops_in_progress.saturating_sub(1);
+        if self
+            .file_operation_state
+            .file_op_sender
+            .send(
+                crate::workers::file_operation_worker::FileOperationRequest::delete_permanently(
+                    paths.clone(),
+                    self.native_hwnd.unwrap_or_default(),
+                ),
+            )
+            .is_err()
+        {
+            self.file_operation_state.file_ops_in_progress = self
+                .file_operation_state
+                .file_ops_in_progress
+                .saturating_sub(1);
             log::warn!("[FileOps] H-3: worker channel closed on delete_permanently");
         }
 
@@ -133,14 +142,21 @@ impl ImageViewerApp {
 
         // Send request to background worker (BATCH)
         self.file_operation_state.file_ops_in_progress += 1;
-        if self.file_operation_state.file_op_sender.send(
-            crate::workers::file_operation_worker::FileOperationRequest::delete(
-                paths.to_vec(),
-                self.native_hwnd.unwrap_or_default(),
-            ),
-        ).is_err() {
-            self.file_operation_state.file_ops_in_progress =
-                self.file_operation_state.file_ops_in_progress.saturating_sub(1);
+        if self
+            .file_operation_state
+            .file_op_sender
+            .send(
+                crate::workers::file_operation_worker::FileOperationRequest::delete(
+                    paths.to_vec(),
+                    self.native_hwnd.unwrap_or_default(),
+                ),
+            )
+            .is_err()
+        {
+            self.file_operation_state.file_ops_in_progress = self
+                .file_operation_state
+                .file_ops_in_progress
+                .saturating_sub(1);
             log::warn!("[FileOps] H-3: worker channel closed on delete");
         }
 
@@ -166,12 +182,11 @@ impl ImageViewerApp {
 
         // Dispatch to the file operation worker (STA COM thread) — avoids blocking the UI thread.
         // SHObjectProperties opens a modeless dialog that manages its own lifetime.
-        let _ = self
-            .file_operation_state
-            .file_op_sender
-            .send(crate::workers::file_operation_worker::FileOperationRequest::show_properties(
+        let _ = self.file_operation_state.file_op_sender.send(
+            crate::workers::file_operation_worker::FileOperationRequest::show_properties(
                 paths, hwnd,
-            ));
+            ),
+        );
         // Note: do NOT increment file_ops_in_progress — this is fire-and-forget.
     }
 
@@ -233,9 +248,7 @@ impl ImageViewerApp {
 
         self.items.get(idx).is_some_and(|item| {
             item.drive_info.as_ref().map_or(true, |drive| {
-                crate::infrastructure::windows::drive_supports_volume_label_rename(
-                    drive.drive_type,
-                )
+                crate::infrastructure::windows::drive_supports_volume_label_rename(drive.drive_type)
             })
         })
     }
@@ -293,15 +306,22 @@ impl ImageViewerApp {
             if let Some(item) = self.items.get(idx) {
                 // Send request to background worker
                 self.file_operation_state.file_ops_in_progress += 1;
-                if self.file_operation_state.file_op_sender.send(
-                    crate::workers::file_operation_worker::FileOperationRequest::rename(
-                        item.path.clone(),
-                        new_name,
-                        self.native_hwnd.unwrap_or_default(),
-                    ),
-                ).is_err() {
-                    self.file_operation_state.file_ops_in_progress =
-                        self.file_operation_state.file_ops_in_progress.saturating_sub(1);
+                if self
+                    .file_operation_state
+                    .file_op_sender
+                    .send(
+                        crate::workers::file_operation_worker::FileOperationRequest::rename(
+                            item.path.clone(),
+                            new_name,
+                            self.native_hwnd.unwrap_or_default(),
+                        ),
+                    )
+                    .is_err()
+                {
+                    self.file_operation_state.file_ops_in_progress = self
+                        .file_operation_state
+                        .file_ops_in_progress
+                        .saturating_sub(1);
                     log::warn!("[FileOps] H-3: worker channel closed on rename");
                 }
             }
@@ -325,9 +345,13 @@ impl ImageViewerApp {
                 self.notifications
                     .push(crate::application::AppNotification::info(format!(
                         "{}",
-                        t!("operations.mount_iso", name = path.file_name()
-                            .map(|n| n.to_string_lossy().to_string())
-                            .unwrap_or_default())
+                        t!(
+                            "operations.mount_iso",
+                            name = path
+                                .file_name()
+                                .map(|n| n.to_string_lossy().to_string())
+                                .unwrap_or_default()
+                        )
                     )));
             }
             Err(e) => {
@@ -355,7 +379,9 @@ impl ImageViewerApp {
 
         match detach_iso(&iso_path) {
             Ok(_) => {
-                self.file_operation_state.mounted_iso_drives.remove(drive_path);
+                self.file_operation_state
+                    .mounted_iso_drives
+                    .remove(drive_path);
 
                 if !self.navigation_state.is_computer_view
                     && self.navigation_state.current_path.starts_with(drive_path)
@@ -367,10 +393,13 @@ impl ImageViewerApp {
                 self.notifications
                     .push(crate::application::AppNotification::info(format!(
                         "{}",
-                        t!("operations.eject_iso", name = iso_path
-                            .file_name()
-                            .map(|name| name.to_string_lossy().to_string())
-                            .unwrap_or_else(|| drive_path.to_string()))
+                        t!(
+                            "operations.eject_iso",
+                            name = iso_path
+                                .file_name()
+                                .map(|name| name.to_string_lossy().to_string())
+                                .unwrap_or_else(|| drive_path.to_string())
+                        )
                     )));
             }
             Err(e) => {

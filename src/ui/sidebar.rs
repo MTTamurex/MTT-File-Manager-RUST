@@ -39,8 +39,8 @@ pub struct SidebarContext<'a> {
     pub is_renaming: bool, // Blocks navigation during renaming
     pub icon_loader: &'a mut crate::ui::icon_loader::IconLoader,
     pub pinned_folders: &'a [PinnedFolder],
-    pub is_item_dragging: bool,   // ANY item (file or folder) is being dragged
-    pub is_folder_dragging: bool,  // A folder is being dragged from the main content area
+    pub is_item_dragging: bool, // ANY item (file or folder) is being dragged
+    pub is_folder_dragging: bool, // A folder is being dragged from the main content area
     pub dragging_path: Option<&'a str>, // Path of the folder being dragged
     pub show_recycle_bin: bool,
     pub collapse_quick_access: bool,
@@ -62,9 +62,15 @@ pub enum SidebarAction {
     OpenDriveContextMenu(String),
     PinFolder(String),
     UnpinFolder(String),
-    ReorderPinnedFolder { from: usize, to: usize },
+    ReorderPinnedFolder {
+        from: usize,
+        to: usize,
+    },
     /// User confirmed inline drive rename
-    CommitDriveRename { drive_path: String, new_label: String },
+    CommitDriveRename {
+        drive_path: String,
+        new_label: String,
+    },
     /// User cancelled inline drive rename
     CancelDriveRename,
     EjectDrive(String),
@@ -82,7 +88,10 @@ pub enum SidebarAction {
 
 /// Renders the fixed top section of the sidebar (This PC + Quick Access).
 /// This section does NOT scroll — it stays pinned at the top.
-pub fn render_sidebar_fixed_top(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<SidebarAction> {
+pub fn render_sidebar_fixed_top(
+    ui: &mut egui::Ui,
+    ctx: &mut SidebarContext,
+) -> Option<SidebarAction> {
     let mut action = None;
     ui.add_space(10.0);
 
@@ -101,8 +110,11 @@ pub fn render_sidebar_fixed_top(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> 
         // Background
         let dark_mode = ui.visuals().dark_mode;
         if is_selected {
-            ui.painter()
-                .rect_filled(header_rect_full, 0.0, crate::ui::theme::selection_color(dark_mode));
+            ui.painter().rect_filled(
+                header_rect_full,
+                0.0,
+                crate::ui::theme::selection_color(dark_mode),
+            );
         } else if header_response.hovered() && !ctx.is_item_dragging {
             ui.painter().rect_filled(
                 header_rect_full,
@@ -160,11 +172,18 @@ pub fn render_sidebar_fixed_top(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> 
 
     let toggle_size = 18.0;
     let toggle_rect = Rect::from_center_size(
-        Pos2::new(qa_label_rect.max.x - toggle_size / 2.0 - 3.0, qa_label_rect.center().y),
+        Pos2::new(
+            qa_label_rect.max.x - toggle_size / 2.0 - 3.0,
+            qa_label_rect.center().y,
+        ),
         egui::vec2(toggle_size, toggle_size),
     );
     let toggle_response = ui
-        .interact(toggle_rect, egui::Id::new("sidebar_toggle_qa"), Sense::click())
+        .interact(
+            toggle_rect,
+            egui::Id::new("sidebar_toggle_qa"),
+            Sense::click(),
+        )
         .on_hover_text(if ctx.collapse_quick_access {
             t!("sidebar.expand_section")
         } else {
@@ -204,82 +223,88 @@ pub fn render_sidebar_fixed_top(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> 
 
         // 1. RECYCLE BIN
         if ctx.show_recycle_bin {
-        let is_selected = ctx.is_recycle_bin_view;
-        let (mut rect, response) =
-            ui.allocate_exact_size(egui::vec2(ui.available_width(), 28.0), Sense::click());
+            let is_selected = ctx.is_recycle_bin_view;
+            let (mut rect, response) =
+                ui.allocate_exact_size(egui::vec2(ui.available_width(), 28.0), Sense::click());
 
-        rect.min.x = ui.clip_rect().min.x;
-        rect.max.x = ui.clip_rect().max.x;
+            rect.min.x = ui.clip_rect().min.x;
+            rect.max.x = ui.clip_rect().max.x;
 
-        if ui.is_rect_visible(rect) {
-            let dark_mode = ui.visuals().dark_mode;
-            if is_selected {
-                ui.painter()
-                    .rect_filled(rect, 0.0, crate::ui::theme::selection_color(dark_mode));
-            } else if response.hovered() && !ctx.is_item_dragging {
-                ui.painter()
-                    .rect_filled(rect, 0.0, crate::ui::theme::selection_hover_color(dark_mode));
-            }
-
-            let mut cursor_x = rect.min.x + 12.0;
-
-            // Recycle Bin has a dedicated shell extraction path to match Explorer.
-            let recycle_icon = ctx.icon_loader.ensure_recycle_bin_icon(ui.ctx());
-
-            if let Some(icon) = recycle_icon {
-                let icon_rect = Rect::from_center_size(
-                    Pos2::new(cursor_x + 8.0, rect.center().y),
-                    egui::vec2(16.0, 16.0),
-                );
-                ui.painter().image(
-                    icon.id(),
-                    icon_rect,
-                    Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1.0, 1.0)),
-                    Color32::WHITE,
-                );
-                cursor_x += 24.0;
-            } else {
-                cursor_x += 24.0;
-            }
-
-            ui.painter().text(
-                Pos2::new(cursor_x, rect.center().y),
-                egui::Align2::LEFT_CENTER,
-                t!("nav.recycle_bin"),
-                egui::FontId::proportional(11.5),
+            if ui.is_rect_visible(rect) {
+                let dark_mode = ui.visuals().dark_mode;
                 if is_selected {
-                    crate::ui::theme::selection_text_color(dark_mode)
-                } else {
-                    ui.visuals().text_color()
-                },
-            );
-        }
+                    ui.painter().rect_filled(
+                        rect,
+                        0.0,
+                        crate::ui::theme::selection_color(dark_mode),
+                    );
+                } else if response.hovered() && !ctx.is_item_dragging {
+                    ui.painter().rect_filled(
+                        rect,
+                        0.0,
+                        crate::ui::theme::selection_hover_color(dark_mode),
+                    );
+                }
 
-        if response.clicked() && !ctx.is_renaming {
-            action = Some(SidebarAction::NavigateToRecycleBin);
+                let mut cursor_x = rect.min.x + 12.0;
+
+                // Recycle Bin has a dedicated shell extraction path to match Explorer.
+                let recycle_icon = ctx.icon_loader.ensure_recycle_bin_icon(ui.ctx());
+
+                if let Some(icon) = recycle_icon {
+                    let icon_rect = Rect::from_center_size(
+                        Pos2::new(cursor_x + 8.0, rect.center().y),
+                        egui::vec2(16.0, 16.0),
+                    );
+                    ui.painter().image(
+                        icon.id(),
+                        icon_rect,
+                        Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1.0, 1.0)),
+                        Color32::WHITE,
+                    );
+                    cursor_x += 24.0;
+                } else {
+                    cursor_x += 24.0;
+                }
+
+                ui.painter().text(
+                    Pos2::new(cursor_x, rect.center().y),
+                    egui::Align2::LEFT_CENTER,
+                    t!("nav.recycle_bin"),
+                    egui::FontId::proportional(11.5),
+                    if is_selected {
+                        crate::ui::theme::selection_text_color(dark_mode)
+                    } else {
+                        ui.visuals().text_color()
+                    },
+                );
+            }
+
+            if response.clicked() && !ctx.is_renaming {
+                action = Some(SidebarAction::NavigateToRecycleBin);
+            }
         }
-    }
 
         // 2. USER-PINNED FOLDERS
         render_pinned_folders(ui, ctx, &mut action);
 
         // === Drag-to-pin drop zone ===
         if ctx.is_folder_dragging {
-        let qa_section_end_y = ui.cursor().top();
-        let qa_zone = egui::Rect::from_min_max(
-            egui::pos2(ui.clip_rect().min.x, qa_section_start_y),
-            egui::pos2(ui.clip_rect().max.x, qa_section_end_y),
-        );
+            let qa_section_end_y = ui.cursor().top();
+            let qa_zone = egui::Rect::from_min_max(
+                egui::pos2(ui.clip_rect().min.x, qa_section_start_y),
+                egui::pos2(ui.clip_rect().max.x, qa_section_end_y),
+            );
 
-        let pointer_in_zone = ui
-            .ctx()
-            .input(|inp| inp.pointer.hover_pos())
-            .map(|p| qa_zone.contains(p))
-            .unwrap_or(false);
+            let pointer_in_zone = ui
+                .ctx()
+                .input(|inp| inp.pointer.hover_pos())
+                .map(|p| qa_zone.contains(p))
+                .unwrap_or(false);
 
-        // No visual highlight on the QA zone — pinned folders already show
-        // their own hover feedback individually. The zone is only used for
-        // the functional "pin folder on drop" logic below.
+            // No visual highlight on the QA zone — pinned folders already show
+            // their own hover feedback individually. The zone is only used for
+            // the functional "pin folder on drop" logic below.
 
             let released = ui.ctx().input(|inp| inp.pointer.primary_released());
             if released && pointer_in_zone {
@@ -318,9 +343,9 @@ pub fn render_sidebar_drives(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Opt
     }
 
     let mut render_drive_group = |title: &str,
-                                   drives: Vec<(&String, &String)>,
-                                   collapsed: bool,
-                                   toggle_action: SidebarAction| {
+                                  drives: Vec<(&String, &String)>,
+                                  collapsed: bool,
+                                  toggle_action: SidebarAction| {
         if drives.is_empty() {
             return;
         }
@@ -331,7 +356,10 @@ pub fn render_sidebar_drives(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Opt
 
         let toggle_size = 18.0;
         let toggle_rect = Rect::from_center_size(
-            Pos2::new(header_rect.max.x - toggle_size / 2.0 - 3.0, header_rect.center().y),
+            Pos2::new(
+                header_rect.max.x - toggle_size / 2.0 - 3.0,
+                header_rect.center().y,
+            ),
             egui::vec2(toggle_size, toggle_size),
         );
         let toggle_id = egui::Id::new(("sidebar_toggle_drive", title));
@@ -415,7 +443,8 @@ pub fn render_sidebar_drives(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Opt
 
                 // Detect pointer hovering this drive row during an external item drag.
                 let drag_hover = ctx.is_item_dragging
-                    && ui.input(|inp| inp.pointer.hover_pos())
+                    && ui
+                        .input(|inp| inp.pointer.hover_pos())
                         .map(|p| rect.contains(p))
                         .unwrap_or(false);
 
@@ -428,11 +457,17 @@ pub fn render_sidebar_drives(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Opt
                         egui::StrokeKind::Inside,
                     );
                 } else if is_selected {
-                    ui.painter()
-                        .rect_filled(rect, 0.0, crate::ui::theme::selection_color(dark_mode));
+                    ui.painter().rect_filled(
+                        rect,
+                        0.0,
+                        crate::ui::theme::selection_color(dark_mode),
+                    );
                 } else if response.hovered() && !ctx.is_item_dragging {
-                    ui.painter()
-                        .rect_filled(rect, 0.0, crate::ui::theme::selection_hover_color(dark_mode));
+                    ui.painter().rect_filled(
+                        rect,
+                        0.0,
+                        crate::ui::theme::selection_hover_color(dark_mode),
+                    );
                 }
 
                 let mut cursor_x = rect.min.x + 2.0; // Start with expand arrow
@@ -447,9 +482,8 @@ pub fn render_sidebar_drives(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Opt
                         "▸"
                     };
                     let pointer_pos = ui.input(|inp| inp.pointer.hover_pos());
-                    let arrow_hovered = pointer_pos
-                        .map(|p| arrow_zone.contains(p))
-                        .unwrap_or(false);
+                    let arrow_hovered =
+                        pointer_pos.map(|p| arrow_zone.contains(p)).unwrap_or(false);
                     let arrow_color = if arrow_hovered {
                         ui.visuals().text_color()
                     } else {
@@ -485,7 +519,8 @@ pub fn render_sidebar_drives(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Opt
                 }
 
                 // Check if this drive is being renamed inline
-                let is_inline_renaming = ctx.sidebar_renaming
+                let is_inline_renaming = ctx
+                    .sidebar_renaming
                     .map(|(rp, _)| rp == disk_path.as_str())
                     .unwrap_or(false);
 
@@ -525,7 +560,8 @@ pub fn render_sidebar_drives(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Opt
             }
 
             // Inline rename TextEdit (rendered outside the visibility guard so it always works)
-            let is_inline_renaming = ctx.sidebar_renaming
+            let is_inline_renaming = ctx
+                .sidebar_renaming
                 .map(|(rp, _)| rp == disk_path.as_str())
                 .unwrap_or(false);
 
@@ -550,18 +586,18 @@ pub fn render_sidebar_drives(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Opt
                     te.request_focus();
                     // Select all text on first frame
                     if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), text_edit_id) {
-                        state.cursor.set_char_range(Some(egui::text::CCursorRange::two(
-                            egui::text::CCursor::new(0),
-                            egui::text::CCursor::new(buf.len()),
-                        )));
+                        state
+                            .cursor
+                            .set_char_range(Some(egui::text::CCursorRange::two(
+                                egui::text::CCursor::new(0),
+                                egui::text::CCursor::new(buf.len()),
+                            )));
                         state.store(ui.ctx(), text_edit_id);
                     }
                 }
 
-                let committed = te.lost_focus()
-                    && ui.input(|i| i.key_pressed(egui::Key::Enter));
-                let cancelled = te.lost_focus()
-                    && !ui.input(|i| i.key_pressed(egui::Key::Enter));
+                let committed = te.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                let cancelled = te.lost_focus() && !ui.input(|i| i.key_pressed(egui::Key::Enter));
 
                 if committed {
                     action = Some(SidebarAction::CommitDriveRename {
@@ -591,9 +627,7 @@ pub fn render_sidebar_drives(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Opt
                 && !ctx.is_item_dragging
             {
                 let click_pos = ui.input(|inp| inp.pointer.interact_pos());
-                let clicked_arrow = click_pos
-                    .map(|p| arrow_zone.contains(p))
-                    .unwrap_or(false);
+                let clicked_arrow = click_pos.map(|p| arrow_zone.contains(p)).unwrap_or(false);
 
                 if response.double_clicked() && !clicked_arrow {
                     action = Some(SidebarAction::TreeToggleExpand(root_path.to_path_buf()));
@@ -610,7 +644,8 @@ pub fn render_sidebar_drives(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Opt
 
             // ── Handle drop from external item drag onto drive root ──
             if ctx.is_item_dragging && action.is_none() {
-                let pointer_over = ui.input(|inp| inp.pointer.hover_pos())
+                let pointer_over = ui
+                    .input(|inp| inp.pointer.hover_pos())
                     .map(|p| rect.contains(p))
                     .unwrap_or(false);
                 let released = ui.input(|inp| inp.pointer.primary_released());
@@ -700,10 +735,8 @@ fn render_pinned_folders(
     let mut hover_drop_idx: Option<usize> = None;
 
     for (i, pinned) in ctx.pinned_folders.iter().enumerate() {
-        let is_selected = !ctx.is_computer_view
-            && !ctx.is_recycle_bin_view
-            && ctx.current_path == pinned.path;
-
+        let is_selected =
+            !ctx.is_computer_view && !ctx.is_recycle_bin_view && ctx.current_path == pinned.path;
 
         // Drop indicator line above this item
         if let Some(src) = drag_src {
@@ -757,8 +790,11 @@ fn render_pinned_folders(
                 ui.painter()
                     .rect_filled(rect, 0.0, crate::ui::theme::selection_color(dark_mode));
             } else if response.hovered() || response.dragged() {
-                ui.painter()
-                    .rect_filled(rect, 0.0, crate::ui::theme::selection_hover_color(dark_mode));
+                ui.painter().rect_filled(
+                    rect,
+                    0.0,
+                    crate::ui::theme::selection_hover_color(dark_mode),
+                );
             }
 
             let mut cursor_x = rect.min.x + 12.0;

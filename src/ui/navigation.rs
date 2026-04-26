@@ -3,9 +3,9 @@
 //! This module contains navigation methods like go_back, go_forward,
 //! go_up_one_level, navigate_to, etc.
 
+use crate::domain::special_paths::COMPUTER_VIEW_ID;
 use std::path::Path;
 use std::sync::Arc;
-use crate::domain::special_paths::COMPUTER_VIEW_ID;
 
 // Note: ImageViewerApp is defined in main.rs, not in a module.
 // These methods will be implemented in main.rs using this module.

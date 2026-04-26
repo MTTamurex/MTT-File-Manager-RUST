@@ -22,7 +22,9 @@ impl FileOpComGuard {
 impl Drop for FileOpComGuard {
     fn drop(&mut self) {
         if self.0 {
-            unsafe { CoUninitialize(); }
+            unsafe {
+                CoUninitialize();
+            }
         }
     }
 }
@@ -31,7 +33,6 @@ impl Drop for FileOpComGuard {
 pub fn copy_item_with_file_op(path: &Path, dest_folder: &Path, hwnd: HWND) -> bool {
     let _com = FileOpComGuard::init();
     unsafe {
-
         // Use IFileOperation for modern Shell features (like ZIP extraction).
         let file_op: IFileOperation = match CoCreateInstance(&FileOperation, None, CLSCTX_ALL) {
             Ok(op) => op,
@@ -46,10 +47,11 @@ pub fn copy_item_with_file_op(path: &Path, dest_folder: &Path, hwnd: HWND) -> bo
             .encode_wide()
             .chain(std::iter::once(0))
             .collect();
-        let src_item: IShellItem = match SHCreateItemFromParsingName(PCWSTR(src_wide.as_ptr()), None) {
-            Ok(i) => i,
-            Err(_) => return copy_item_with_shell(path, dest_folder, hwnd),
-        };
+        let src_item: IShellItem =
+            match SHCreateItemFromParsingName(PCWSTR(src_wide.as_ptr()), None) {
+                Ok(i) => i,
+                Err(_) => return copy_item_with_shell(path, dest_folder, hwnd),
+            };
 
         let dest_wide: Vec<u16> = dest_folder
             .as_os_str()
@@ -79,7 +81,6 @@ pub fn copy_items_with_file_op(paths: &[PathBuf], dest_folder: &Path, hwnd: HWND
 
     let _com = FileOpComGuard::init();
     unsafe {
-
         // Use IFileOperation for modern Shell features (like ZIP extraction).
         let file_op: IFileOperation = match CoCreateInstance(&FileOperation, None, CLSCTX_ALL) {
             Ok(op) => op,
@@ -154,10 +155,11 @@ pub fn move_item_with_file_op(path: &Path, dest_folder: &Path, hwnd: HWND) -> bo
             .encode_wide()
             .chain(std::iter::once(0))
             .collect();
-        let src_item: IShellItem = match SHCreateItemFromParsingName(PCWSTR(src_wide.as_ptr()), None) {
-            Ok(i) => i,
-            Err(_) => return move_item_with_shell(path, dest_folder, hwnd),
-        };
+        let src_item: IShellItem =
+            match SHCreateItemFromParsingName(PCWSTR(src_wide.as_ptr()), None) {
+                Ok(i) => i,
+                Err(_) => return move_item_with_shell(path, dest_folder, hwnd),
+            };
 
         let dest_wide: Vec<u16> = dest_folder
             .as_os_str()
@@ -186,7 +188,6 @@ pub fn move_items_with_file_op(paths: &[PathBuf], dest_folder: &Path, hwnd: HWND
 
     let _com = FileOpComGuard::init();
     unsafe {
-
         // Use IFileOperation for modern Shell features.
         let file_op: IFileOperation = match CoCreateInstance(&FileOperation, None, CLSCTX_ALL) {
             Ok(op) => op,

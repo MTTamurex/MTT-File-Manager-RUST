@@ -19,7 +19,8 @@ where
     if super::is_app_minimized() {
         log::debug!(
             "[ONEDRIVE] App minimized - skipping {} for {:?}",
-            op_name, path
+            op_name,
+            path
         );
         return IoTimeoutResult::Timeout;
     }
@@ -67,7 +68,8 @@ where
         if super::is_app_minimized() {
             log::debug!(
                 "[ONEDRIVE] App minimized during operation - aborting {} for {:?}",
-                op_name, path_for_log
+                op_name,
+                path_for_log
             );
             break IoTimeoutResult::Timeout;
         }
@@ -75,7 +77,9 @@ where
         if start.elapsed() >= timeout {
             log::warn!(
                 "[ONEDRIVE TIMEOUT] {} exceeded {}ms for {:?}",
-                op_name, timeout_ms, path_for_log
+                op_name,
+                timeout_ms,
+                path_for_log
             );
             break IoTimeoutResult::Timeout;
         }

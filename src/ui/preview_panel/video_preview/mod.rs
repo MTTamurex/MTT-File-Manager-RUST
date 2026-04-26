@@ -83,17 +83,14 @@ pub fn render_media_launcher(
 
     if preview_launch_allowed && is_hovered {
         let center_size = 64.0;
-        let center_rect = egui::Rect::from_center_size(
-            media_rect.center(),
-            egui::vec2(center_size, center_size),
-        );
+        let center_rect =
+            egui::Rect::from_center_size(media_rect.center(), egui::vec2(center_size, center_size));
         ui.painter().rect_filled(
             center_rect,
             center_size / 2.0,
             egui::Color32::from_black_alpha(160),
         );
-        if let Some(tex_play) = svg_manager.get_icon(ui.ctx(), "play", 96, [255, 255, 255, 255])
-        {
+        if let Some(tex_play) = svg_manager.get_icon(ui.ctx(), "play", 96, [255, 255, 255, 255]) {
             ui.painter().image(
                 tex_play.id(),
                 center_rect.shrink(14.0),
@@ -105,12 +102,12 @@ pub fn render_media_launcher(
 
     if preview_launch_allowed
         && ui
-        .interact(
-            media_rect,
-            egui::Id::new(("media_play_overlay", &file.path)),
-            egui::Sense::click(),
-        )
-        .clicked()
+            .interact(
+                media_rect,
+                egui::Id::new(("media_play_overlay", &file.path)),
+                egui::Sense::click(),
+            )
+            .clicked()
     {
         return Some(PreviewPanelAction::RequestPlay(file.path.clone()));
     }

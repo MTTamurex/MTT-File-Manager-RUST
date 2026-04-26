@@ -28,18 +28,17 @@ pub(in crate::app) fn spawn_cover_worker(
         );
 
         while let Ok(folder_path) = cover_req_rx.recv() {
-            let cover = windows_infra::find_folder_preview_item(&folder_path)
-                .filter(|p| {
-                    // Reject .ts files that aren't real MPEG-TS video.
-                    // Real MPEG-TS starts with sync byte 0x47.
-                    if p.extension()
-                        .and_then(|e| e.to_str())
-                        .is_some_and(|ext| ext.eq_ignore_ascii_case("ts"))
-                    {
-                        return is_mpeg_ts_file(p);
-                    }
-                    true
-                });
+            let cover = windows_infra::find_folder_preview_item(&folder_path).filter(|p| {
+                // Reject .ts files that aren't real MPEG-TS video.
+                // Real MPEG-TS starts with sync byte 0x47.
+                if p.extension()
+                    .and_then(|e| e.to_str())
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("ts"))
+                {
+                    return is_mpeg_ts_file(p);
+                }
+                true
+            });
 
             if let Some(c) = &cover {
                 cover_worker_db.set_folder_cover(&folder_path, c);
@@ -109,10 +108,7 @@ pub(in crate::app) fn spawn_async_font_loader() -> mpsc::Receiver<egui::FontDefi
                 proportional.extend(loaded_fonts.clone());
             }
 
-            if let Some(monospace) = fonts
-                .families
-                .get_mut(&eframe::egui::FontFamily::Monospace)
-            {
+            if let Some(monospace) = fonts.families.get_mut(&eframe::egui::FontFamily::Monospace) {
                 monospace.extend(loaded_fonts.clone());
             }
         }
@@ -303,7 +299,10 @@ pub(in crate::app) fn spawn_icon_worker(
 
 pub(in crate::app) fn spawn_metadata_worker(
     ctx: &egui::Context,
-) -> (mpsc::Sender<MetadataRequest>, mpsc::Receiver<MetadataResponse>) {
+) -> (
+    mpsc::Sender<MetadataRequest>,
+    mpsc::Receiver<MetadataResponse>,
+) {
     let (meta_req_tx, meta_req_rx) = mpsc::channel::<MetadataRequest>();
     let (meta_res_tx, meta_res_rx) = mpsc::channel();
     let meta_ctx = ctx.clone();

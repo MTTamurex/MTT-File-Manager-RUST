@@ -30,7 +30,11 @@ impl ImageViewerApp {
             return item.is_dir || item.drive_info.is_some();
         }
 
-        if self.pinned_folders.iter().any(|pinned| Path::new(&pinned.path) == path) {
+        if self
+            .pinned_folders
+            .iter()
+            .any(|pinned| Path::new(&pinned.path) == path)
+        {
             return true;
         }
 
@@ -54,8 +58,7 @@ impl ImageViewerApp {
         }
 
         if idx.is_none() && !self.context_menu.target_paths.is_empty() {
-            self.clipboard
-                .copy(&self.context_menu.target_paths.clone());
+            self.clipboard.copy(&self.context_menu.target_paths.clone());
             return;
         }
 
@@ -118,7 +121,11 @@ impl ImageViewerApp {
 
     /// Paste: Reads from clipboard using ClipboardManager via Background Worker
     pub fn command_paste(&mut self, idx: Option<usize>) {
-        log::debug!("[PASTE-DIAG] command_paste called with idx: {:?}, ops_in_progress: {}", idx, self.file_operation_state.file_ops_in_progress);
+        log::debug!(
+            "[PASTE-DIAG] command_paste called with idx: {:?}, ops_in_progress: {}",
+            idx,
+            self.file_operation_state.file_ops_in_progress
+        );
 
         if !self.can_paste_into_current_location() {
             self.context_menu.target_paths.clear();
@@ -168,8 +175,10 @@ impl ImageViewerApp {
             };
             self.file_operation_state.file_ops_in_progress += 1;
             if self.file_operation_state.file_op_sender.send(req).is_err() {
-                self.file_operation_state.file_ops_in_progress =
-                    self.file_operation_state.file_ops_in_progress.saturating_sub(1);
+                self.file_operation_state.file_ops_in_progress = self
+                    .file_operation_state
+                    .file_ops_in_progress
+                    .saturating_sub(1);
                 log::warn!("[FileOps] H-3: worker channel closed on clipboard op");
             }
 

@@ -88,9 +88,12 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
 
     if app.global_search.loading
         && app.global_search.pending_query_dispatch_at.is_none()
-        && app.global_search.in_flight_started_at.is_some_and(|started_at| {
-            started_at.elapsed() >= std::time::Duration::from_millis(SEARCH_LOADING_TIMEOUT_MS)
-        })
+        && app
+            .global_search
+            .in_flight_started_at
+            .is_some_and(|started_at| {
+                started_at.elapsed() >= std::time::Duration::from_millis(SEARCH_LOADING_TIMEOUT_MS)
+            })
     {
         log::warn!(
             "[GLOBAL-SEARCH] Search watchdog released stuck loading state for query='{}'",
@@ -107,9 +110,13 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
             .send(crate::workers::global_search_worker::GlobalSearchRequest::CheckStatus);
     }
 
-    if app.global_search.pending_query_dispatch_at.is_some_and(|deadline| {
-        std::time::Instant::now() >= deadline && !app.global_search.query.is_empty()
-    }) {
+    if app
+        .global_search
+        .pending_query_dispatch_at
+        .is_some_and(|deadline| {
+            std::time::Instant::now() >= deadline && !app.global_search.query.is_empty()
+        })
+    {
         app.global_search.selected_index = None;
         app.global_search.loading = true;
         app.global_search.results.clear();
@@ -151,7 +158,8 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
             };
             let dark_mode = ui.visuals().dark_mode;
             ui.visuals_mut().selection.bg_fill = theme::selection_color(dark_mode);
-            ui.visuals_mut().selection.stroke = egui::Stroke::new(0.0, theme::selection_text_color(dark_mode));
+            ui.visuals_mut().selection.stroke =
+                egui::Stroke::new(0.0, theme::selection_text_color(dark_mode));
             ui.visuals_mut().widgets.inactive.bg_stroke = egui::Stroke::NONE;
             ui.visuals_mut().widgets.hovered.bg_fill = hover_color;
             ui.visuals_mut().widgets.hovered.weak_bg_fill = hover_color;
@@ -159,8 +167,7 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                 egui::Stroke::new(1.0, theme::COLOR_ACCENT);
             ui.visuals_mut().widgets.active.bg_fill = hover_color;
             ui.visuals_mut().widgets.active.weak_bg_fill = hover_color;
-            ui.visuals_mut().widgets.active.bg_stroke =
-                egui::Stroke::new(1.0, theme::COLOR_ACCENT);
+            ui.visuals_mut().widgets.active.bg_stroke = egui::Stroke::new(1.0, theme::COLOR_ACCENT);
 
             egui::Frame::window(ui.style())
                 .inner_margin(egui::Margin::same(16))
@@ -177,7 +184,11 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
 
                     // Header
                     ui.horizontal_wrapped(|ui| {
-                        ui.label(egui::RichText::new(&*t!("search.title")).size(16.0).strong());
+                        ui.label(
+                            egui::RichText::new(&*t!("search.title"))
+                                .size(16.0)
+                                .strong(),
+                        );
                         ui.add_space(10.0);
 
                         if !app.global_search.available {
@@ -189,12 +200,12 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                                 } else {
                                     t!("search.service_offline")
                                 })
-                                    .size(11.0)
-                                    .color(if service_starting {
-                                        egui::Color32::from_gray(120)
-                                    } else {
-                                        egui::Color32::from_rgb(200, 80, 80)
-                                    }),
+                                .size(11.0)
+                                .color(if service_starting {
+                                    egui::Color32::from_gray(120)
+                                } else {
+                                    egui::Color32::from_rgb(200, 80, 80)
+                                }),
                             );
                         } else if app.global_search.total_indexed == 0 {
                             ui.label(
@@ -391,9 +402,15 @@ fn render_indexing_activity(ui: &mut egui::Ui, app: &ImageViewerApp, dark_mode: 
         egui::Color32::from_rgba_unmultiplied(0, 0, 0, 10)
     };
     let stroke = if idle_for >= Duration::from_secs(NO_PROGRESS_WARNING_SECS) {
-        egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(196, 141, 56, 120))
+        egui::Stroke::new(
+            1.0,
+            egui::Color32::from_rgba_unmultiplied(196, 141, 56, 120),
+        )
     } else {
-        egui::Stroke::new(1.0, egui::Color32::from_rgba_unmultiplied(120, 120, 120, 60))
+        egui::Stroke::new(
+            1.0,
+            egui::Color32::from_rgba_unmultiplied(120, 120, 120, 60),
+        )
     };
     let status_color = if status_age >= Duration::from_secs(2) {
         egui::Color32::from_rgb(196, 141, 56)
@@ -440,11 +457,7 @@ fn render_indexing_activity(ui: &mut egui::Ui, app: &ImageViewerApp, dark_mode: 
         .inner_margin(egui::Margin::symmetric(10, 8))
         .show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.label(
-                    egui::RichText::new(activity_title)
-                    .size(11.0)
-                    .strong(),
-                );
+                ui.label(egui::RichText::new(activity_title).size(11.0).strong());
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.label(
                         egui::RichText::new(freshness_text)
@@ -573,35 +586,35 @@ fn render_filter_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
                 egui::ComboBox::from_id_salt(
                     egui::Id::new("global_search_drive_filter").with(&drives),
                 )
-                    .width(120.0)
-                    .height(800.0)
-                    .selected_text(match app.global_search.drive_filter {
-                        Some(drive) => format!("{}:\\", drive),
-                        None => t!("search.all_drives").to_string(),
-                    })
-                    .show_ui(ui, |ui| {
+                .width(120.0)
+                .height(800.0)
+                .selected_text(match app.global_search.drive_filter {
+                    Some(drive) => format!("{}:\\", drive),
+                    None => t!("search.all_drives").to_string(),
+                })
+                .show_ui(ui, |ui| {
+                    if ui
+                        .selectable_label(
+                            app.global_search.drive_filter.is_none(),
+                            t!("search.all_drives"),
+                        )
+                        .clicked()
+                    {
+                        app.global_search.drive_filter = None;
+                        app.global_search.selected_index = None;
+                    }
+
+                    for drive in &drives {
+                        let selected = app.global_search.drive_filter == Some(*drive);
                         if ui
-                            .selectable_label(
-                                app.global_search.drive_filter.is_none(),
-                                t!("search.all_drives"),
-                            )
+                            .selectable_label(selected, format!("{}:\\", drive))
                             .clicked()
                         {
-                            app.global_search.drive_filter = None;
+                            app.global_search.drive_filter = Some(*drive);
                             app.global_search.selected_index = None;
                         }
-
-                        for drive in &drives {
-                            let selected = app.global_search.drive_filter == Some(*drive);
-                            if ui
-                                .selectable_label(selected, format!("{}:\\", drive))
-                                .clicked()
-                            {
-                                app.global_search.drive_filter = Some(*drive);
-                                app.global_search.selected_index = None;
-                            }
-                        }
-                    });
+                    }
+                });
 
                 ui.add_space(6.0);
                 ui.label(
@@ -663,7 +676,11 @@ fn render_filter_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
         ui.add_space(4.0);
 
         // Sort direction toggle
-        let dir_label = if app.global_search.sort_descending { "↓" } else { "↑" };
+        let dir_label = if app.global_search.sort_descending {
+            "↓"
+        } else {
+            "↑"
+        };
         if ui.button(dir_label).clicked() {
             app.global_search.sort_descending = !app.global_search.sort_descending;
             app.global_search.selected_index = None;

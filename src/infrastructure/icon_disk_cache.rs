@@ -51,7 +51,8 @@ impl IconDiskCache {
             if canonical != ext {
                 log::info!(
                     "[IconDiskCache] Removing stale mapped icon {:?} (canonical={})",
-                    path, canonical,
+                    path,
+                    canonical,
                 );
                 let _ = std::fs::remove_file(&path);
                 continue;

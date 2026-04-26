@@ -1,9 +1,9 @@
 use crate::app::ImageViewerApp;
 use crate::domain::file_entry::{FileEntry, SyncStatus};
 use crate::domain::special_paths::{COMPUTER_VIEW_ID, RECYCLE_BIN_VIEW_ID};
-use rust_i18n::t;
 use crate::infrastructure::windows as windows_infra;
 use eframe::egui;
+use rust_i18n::t;
 use std::cell::RefCell;
 use std::path::PathBuf;
 
@@ -303,12 +303,12 @@ fn calculate_effective_file(app: &ImageViewerApp) -> Option<FileEntry> {
         }
         let path = std::path::PathBuf::from(&app.navigation_state.current_path);
         let current_folder_modified = mod_hint; // reuse already-computed value
-        // CRITICAL FIX: Do NOT use FileEntry::from_path() here!
-        // from_path() calls std::fs::metadata() which uses CreateFileW internally.
-        // On OneDrive, this can block the UI thread for 30-60s on cloud-only files.
-        // This function runs EVERY FRAME — even a 1ms delay compounds.
-        // Build the entry with defaults instead; size/modified are not needed for
-        // the preview panel display of the current directory.
+                                                // CRITICAL FIX: Do NOT use FileEntry::from_path() here!
+                                                // from_path() calls std::fs::metadata() which uses CreateFileW internally.
+                                                // On OneDrive, this can block the UI thread for 30-60s on cloud-only files.
+                                                // This function runs EVERY FRAME — even a 1ms delay compounds.
+                                                // Build the entry with defaults instead; size/modified are not needed for
+                                                // the preview panel display of the current directory.
         let name = path
             .file_name()
             .and_then(|n| n.to_str())
@@ -333,7 +333,10 @@ fn calculate_effective_file(app: &ImageViewerApp) -> Option<FileEntry> {
                 .drive_state
                 .disks
                 .iter()
-                .find(|(p, _)| p.starts_with(&app.navigation_state.current_path) || app.navigation_state.current_path.starts_with(p))
+                .find(|(p, _)| {
+                    p.starts_with(&app.navigation_state.current_path)
+                        || app.navigation_state.current_path.starts_with(p)
+                })
                 .map(|(_, l)| l.clone())
                 .unwrap_or_else(|| app.navigation_state.current_path.clone());
             entry.name = label;
@@ -345,18 +348,27 @@ fn calculate_effective_file(app: &ImageViewerApp) -> Option<FileEntry> {
                 .find(|item| {
                     let item_str = item.path.to_string_lossy();
                     item_str.starts_with(&app.navigation_state.current_path)
-                        || app.navigation_state.current_path.starts_with(item_str.as_ref())
+                        || app
+                            .navigation_state
+                            .current_path
+                            .starts_with(item_str.as_ref())
                 })
                 .and_then(|item| item.drive_info.clone())
                 // Fallback: persistent drive_info_cache survives navigation away from computer view
-                .or_else(|| app.drive_state.drive_info_cache.get(&app.navigation_state.current_path).cloned());
+                .or_else(|| {
+                    app.drive_state
+                        .drive_info_cache
+                        .get(&app.navigation_state.current_path)
+                        .cloned()
+                });
 
             if let Some(info) = cached_info {
                 entry.drive_info = Some(info);
             } else {
                 // Fallback NON-BLOCKING: avoid volume probes in render loop.
                 // Detailed volume info is filled asynchronously by computer view pipeline.
-                let drive_type = windows_infra::detect_drive_type(&app.navigation_state.current_path);
+                let drive_type =
+                    windows_infra::detect_drive_type(&app.navigation_state.current_path);
                 entry.drive_info = Some(crate::domain::file_entry::DriveInfo {
                     file_system: String::new(),
                     total_space: 0,
@@ -409,12 +421,13 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
     let separator_width = 3.0;
     let half_width = ((total_rect.width() - separator_width) / 2.0).max(100.0);
 
-    let left_rect = egui::Rect::from_min_size(
-        total_rect.min,
-        egui::vec2(half_width, total_rect.height()),
-    );
+    let left_rect =
+        egui::Rect::from_min_size(total_rect.min, egui::vec2(half_width, total_rect.height()));
     let right_rect = egui::Rect::from_min_size(
-        egui::pos2(total_rect.min.x + half_width + separator_width, total_rect.min.y),
+        egui::pos2(
+            total_rect.min.x + half_width + separator_width,
+            total_rect.min.y,
+        ),
         egui::vec2(
             (total_rect.width() - half_width - separator_width).max(100.0),
             total_rect.height(),
@@ -461,16 +474,23 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
     let dark = ui.ctx().style().visuals.dark_mode;
 
     // Left panel header
-    let left_header_rect = egui::Rect::from_min_size(
-        left_rect.min,
-        egui::vec2(left_rect.width(), header_height),
-    );
+    let left_header_rect =
+        egui::Rect::from_min_size(left_rect.min, egui::vec2(left_rect.width(), header_height));
     let left_header_bg = if active == ActivePanel::Left {
-        if dark { egui::Color32::from_rgb(35, 55, 80) } else { egui::Color32::from_rgb(210, 228, 250) }
+        if dark {
+            egui::Color32::from_rgb(35, 55, 80)
+        } else {
+            egui::Color32::from_rgb(210, 228, 250)
+        }
     } else {
-        if dark { egui::Color32::from_rgb(50, 50, 50) } else { egui::Color32::from_rgb(240, 240, 240) }
+        if dark {
+            egui::Color32::from_rgb(50, 50, 50)
+        } else {
+            egui::Color32::from_rgb(240, 240, 240)
+        }
     };
-    ui.painter().rect_filled(left_header_rect, 0.0, left_header_bg);
+    ui.painter()
+        .rect_filled(left_header_rect, 0.0, left_header_bg);
 
     // Right panel header
     let right_header_rect = egui::Rect::from_min_size(
@@ -478,11 +498,20 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
         egui::vec2(right_rect.width(), header_height),
     );
     let right_header_bg = if active == ActivePanel::Right {
-        if dark { egui::Color32::from_rgb(35, 55, 80) } else { egui::Color32::from_rgb(210, 228, 250) }
+        if dark {
+            egui::Color32::from_rgb(35, 55, 80)
+        } else {
+            egui::Color32::from_rgb(210, 228, 250)
+        }
     } else {
-        if dark { egui::Color32::from_rgb(50, 50, 50) } else { egui::Color32::from_rgb(240, 240, 240) }
+        if dark {
+            egui::Color32::from_rgb(50, 50, 50)
+        } else {
+            egui::Color32::from_rgb(240, 240, 240)
+        }
     };
-    ui.painter().rect_filled(right_header_rect, 0.0, right_header_bg);
+    ui.painter()
+        .rect_filled(right_header_rect, 0.0, right_header_bg);
 
     // Render path text in headers
     let path_display = |path: &str| -> String {
@@ -590,15 +619,12 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
         ActivePanel::Left => "dual_left",
         ActivePanel::Right => "dual_right",
     };
-    ui.allocate_new_ui(
-        egui::UiBuilder::new().max_rect(active_content_rect),
-        |ui| {
-            ui.push_id(active_id, |ui| {
-                ui.set_clip_rect(active_content_rect);
-                render_single_panel_content(app, ui);
-            });
-        },
-    );
+    ui.allocate_new_ui(egui::UiBuilder::new().max_rect(active_content_rect), |ui| {
+        ui.push_id(active_id, |ui| {
+            ui.set_clip_rect(active_content_rect);
+            render_single_panel_content(app, ui);
+        });
+    });
 
     // ── Render INACTIVE panel content with unique ID scope ──
     let inactive_id = match active {
@@ -630,9 +656,8 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
     // The overlay uses an egui::Area as a backdrop which consumes the click, but
     // ui.input(pointer.primary_clicked()) reads raw events and ignores consumption,
     // so without this guard clicks on the overlay would switch panel focus.
-    let (pointer_pos, primary_clicked) = ui.input(|i| {
-        (i.pointer.hover_pos(), i.pointer.primary_clicked())
-    });
+    let (pointer_pos, primary_clicked) =
+        ui.input(|i| (i.pointer.hover_pos(), i.pointer.primary_clicked()));
     if primary_clicked && !app.global_search.active {
         if let Some(pos) = pointer_pos {
             // Switch focus when clicking in the inactive panel area.

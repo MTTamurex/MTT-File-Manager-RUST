@@ -134,10 +134,7 @@ impl ImageViewerApp {
 
         // Window state persistence
         prefs.push(("window_width", self.layout.saved_window_width.to_string()));
-        prefs.push((
-            "window_height",
-            self.layout.saved_window_height.to_string(),
-        ));
+        prefs.push(("window_height", self.layout.saved_window_height.to_string()));
         prefs.push((
             "window_is_maximized",
             (if self.layout.saved_is_maximized {
@@ -171,7 +168,12 @@ impl ImageViewerApp {
         // Show hidden files toggle
         prefs.push((
             "show_hidden_files",
-            (if self.show_hidden_files { "true" } else { "false" }).to_string(),
+            (if self.show_hidden_files {
+                "true"
+            } else {
+                "false"
+            })
+            .to_string(),
         ));
 
         // Language preference
@@ -191,10 +193,22 @@ impl ImageViewerApp {
         self.shortcuts.append_preferences(&mut prefs);
 
         // Save list view column widths - Regular view
-        prefs.push(("list_col_name_width", self.layout.list_col_name_width.to_string()));
-        prefs.push(("list_col_date_width", self.layout.list_col_date_width.to_string()));
-        prefs.push(("list_col_type_width", self.layout.list_col_type_width.to_string()));
-        prefs.push(("list_col_size_width", self.layout.list_col_size_width.to_string()));
+        prefs.push((
+            "list_col_name_width",
+            self.layout.list_col_name_width.to_string(),
+        ));
+        prefs.push((
+            "list_col_date_width",
+            self.layout.list_col_date_width.to_string(),
+        ));
+        prefs.push((
+            "list_col_type_width",
+            self.layout.list_col_type_width.to_string(),
+        ));
+        prefs.push((
+            "list_col_size_width",
+            self.layout.list_col_size_width.to_string(),
+        ));
         // Save list view column widths - OneDrive view
         prefs.push((
             "list_col_onedrive_name_width",

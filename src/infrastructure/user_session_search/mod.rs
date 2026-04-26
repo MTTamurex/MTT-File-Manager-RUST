@@ -300,9 +300,7 @@ impl UserSessionSearchIndex {
 
 fn item_matches_query(volume: &IndexedVolume, item: &IndexedItem, tokens: &[&str]) -> bool {
     volume.live_paths.contains(&item.path_key)
-        && tokens
-            .iter()
-            .all(|token| item.name_lower.contains(token))
+        && tokens.iter().all(|token| item.name_lower.contains(token))
 }
 
 impl Default for UserSessionSearchIndex {

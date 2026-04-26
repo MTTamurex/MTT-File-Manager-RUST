@@ -111,9 +111,11 @@ pub(super) fn render_results_panel(
     {
         app.global_search.selected_index = None;
     }
-    if app.global_search.selected_index.is_some_and(|idx| {
-        !actions::filtered_contains(&filtered_indices, idx)
-    }) {
+    if app
+        .global_search
+        .selected_index
+        .is_some_and(|idx| !actions::filtered_contains(&filtered_indices, idx))
+    {
         app.global_search.selected_index = None;
     }
 
@@ -121,7 +123,12 @@ pub(super) fn render_results_panel(
     ui.horizontal(|ui| {
         let shown_count = filtered_indices.len() as u64;
         let header_text = if let Some(total_matches) = app.global_search.total_matches {
-            t!("search.results_count", shown = shown_count, total = total_matches).to_string()
+            t!(
+                "search.results_count",
+                shown = shown_count,
+                total = total_matches
+            )
+            .to_string()
         } else {
             t!("search.results_count_partial", shown = shown_count).to_string()
         };
@@ -248,8 +255,10 @@ pub(super) fn render_results_panel(
 
     // Compute visible row range with adaptive overscan.
     let overscan: usize = if is_scrolling { 2 } else { 5 };
-    let vis_min_row = ((current_scroll / RESULT_ROW_HEIGHT).floor() as usize).saturating_sub(overscan);
-    let vis_max_row = (((current_scroll + viewport_h) / RESULT_ROW_HEIGHT).ceil() as usize) + overscan;
+    let vis_min_row =
+        ((current_scroll / RESULT_ROW_HEIGHT).floor() as usize).saturating_sub(overscan);
+    let vis_max_row =
+        (((current_scroll + viewport_h) / RESULT_ROW_HEIGHT).ceil() as usize) + overscan;
     let vis_max_row = vis_max_row.min(total_rows);
     let trim_rows = overscan.saturating_sub(SCROLL_RENDER_OVERSCAN);
     let tentative_render_min = if is_scrolling {
@@ -338,9 +347,11 @@ pub(super) fn render_results_panel(
             footer_ui.add_space(6.0);
             footer_ui.horizontal(|ui| {
                 ui.label(
-                    egui::RichText::new(t!("search.results_loaded", count = current_loaded).to_string())
-                        .size(10.0)
-                        .color(egui::Color32::from_gray(120)),
+                    egui::RichText::new(
+                        t!("search.results_loaded", count = current_loaded).to_string(),
+                    )
+                    .size(10.0)
+                    .color(egui::Color32::from_gray(120)),
                 );
                 if ui
                     .button(t!("search.load_more", count = next_limit).to_string())
@@ -389,7 +400,9 @@ pub(super) fn render_results_panel(
 
     // Preview shortcut (Space by default) opens the file with the internal viewer.
     if activate_result.is_none()
-        && app.shortcuts.is_triggered(ShortcutAction::PreviewSelected, ctx)
+        && app
+            .shortcuts
+            .is_triggered(ShortcutAction::PreviewSelected, ctx)
         && !filtered_indices.is_empty()
     {
         let selected_idx = app
@@ -449,4 +462,3 @@ pub(super) fn render_results_panel(
         }
     }
 }
-

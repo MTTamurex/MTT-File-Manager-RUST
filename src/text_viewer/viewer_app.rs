@@ -84,9 +84,8 @@ pub struct TextViewerApp {
 impl TextViewerApp {
     pub fn new(path: PathBuf, dark_mode: bool) -> Result<Self, String> {
         // Read raw bytes
-        let raw = std::fs::read(&path).map_err(|e| {
-            t!("textviewer.read_failed", error = e.to_string()).to_string()
-        })?;
+        let raw = std::fs::read(&path)
+            .map_err(|e| t!("textviewer.read_failed", error = e.to_string()).to_string())?;
 
         let file_size_bytes = raw.len() as u64;
 
@@ -140,38 +139,31 @@ impl TextViewerApp {
                 .file_name()
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_default();
-            ui.label(
-                egui::RichText::new(&file_name)
-                    .strong()
-                    .size(13.0),
-            );
+            ui.label(egui::RichText::new(&file_name).strong().size(13.0));
 
             ui.separator();
 
             // Line count
             ui.label(
-                egui::RichText::new(t!(
-                    "textviewer.line_count",
-                    count = self.total_lines.to_string()
-                ).to_string())
+                egui::RichText::new(
+                    t!(
+                        "textviewer.line_count",
+                        count = self.total_lines.to_string()
+                    )
+                    .to_string(),
+                )
                 .size(12.0),
             );
 
             ui.separator();
 
             // File size
-            ui.label(
-                egui::RichText::new(format_file_size(self.file_size_bytes))
-                    .size(12.0),
-            );
+            ui.label(egui::RichText::new(format_file_size(self.file_size_bytes)).size(12.0));
 
             ui.separator();
 
             // Encoding
-            ui.label(
-                egui::RichText::new(self.encoding_label)
-                    .size(12.0),
-            );
+            ui.label(egui::RichText::new(self.encoding_label).size(12.0));
 
             ui.separator();
 
@@ -272,7 +264,12 @@ impl TextViewerApp {
                 ui.label(t!("textviewer.no_results").to_string());
             }
 
-            if ui.button("<").on_hover_text(t!("textviewer.search_prev")).clicked() && has_hits {
+            if ui
+                .button("<")
+                .on_hover_text(t!("textviewer.search_prev"))
+                .clicked()
+                && has_hits
+            {
                 if self.search_hit_cursor == 0 {
                     self.search_hit_cursor = self.search_hits.len().saturating_sub(1);
                 } else {
@@ -280,7 +277,12 @@ impl TextViewerApp {
                 }
                 self.scroll_to_line = Some(self.search_hits[self.search_hit_cursor]);
             }
-            if ui.button(">").on_hover_text(t!("textviewer.search_next")).clicked() && has_hits {
+            if ui
+                .button(">")
+                .on_hover_text(t!("textviewer.search_next"))
+                .clicked()
+                && has_hits
+            {
                 self.search_hit_cursor = (self.search_hit_cursor + 1) % self.search_hits.len();
                 self.scroll_to_line = Some(self.search_hits[self.search_hit_cursor]);
             }
@@ -292,7 +294,11 @@ impl TextViewerApp {
                 resp.request_focus();
             }
 
-            if ui.button("X").on_hover_text(t!("textviewer.search_close")).clicked() {
+            if ui
+                .button("X")
+                .on_hover_text(t!("textviewer.search_close"))
+                .clicked()
+            {
                 self.search_open = false;
                 self.search_query.clear();
                 self.search_hits.clear();
@@ -319,8 +325,7 @@ impl TextViewerApp {
             }
 
             let go = ui.button("Go").clicked()
-                || (resp.lost_focus()
-                    && ui.input(|i| i.key_pressed(egui::Key::Enter)));
+                || (resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)));
 
             if go {
                 if let Ok(line_num) = self.goto_input.trim().parse::<usize>() {
@@ -340,7 +345,8 @@ impl TextViewerApp {
     // ── Text content ─────────────────────────────────────────────────────
 
     fn show_content(&mut self, ui: &mut egui::Ui) {
-        let line_number_width = format!("{}", self.total_lines).len() as f32 * self.font_size * 0.6 + 16.0;
+        let line_number_width =
+            format!("{}", self.total_lines).len() as f32 * self.font_size * 0.6 + 16.0;
         let available_width = ui.available_width();
 
         // Determine row height from font
@@ -350,13 +356,9 @@ impl TextViewerApp {
         // Build a set of search-hit lines for fast lookup
         let search_hit_set: std::collections::HashSet<usize> =
             self.search_hits.iter().copied().collect();
-        let current_hit_line = self
-            .search_hits
-            .get(self.search_hit_cursor)
-            .copied();
+        let current_hit_line = self.search_hits.get(self.search_hit_cursor).copied();
 
-        let mut scroll_area = egui::ScrollArea::both()
-            .auto_shrink([false, false]);
+        let mut scroll_area = egui::ScrollArea::both().auto_shrink([false, false]);
 
         // Handle scroll-to-line
         if let Some(target_line) = self.scroll_to_line.take() {
@@ -370,7 +372,11 @@ impl TextViewerApp {
 
                 ui.horizontal(|ui| {
                     // Line number gutter
-                    let line_num_text = format!("{:>width$}", line_idx + 1, width = format!("{}", self.total_lines).len());
+                    let line_num_text = format!(
+                        "{:>width$}",
+                        line_idx + 1,
+                        width = format!("{}", self.total_lines).len()
+                    );
                     ui.add_sized(
                         [line_number_width, row_height],
                         egui::Label::new(
@@ -413,9 +419,7 @@ impl TextViewerApp {
 
                     // Text content
                     let text_widget = egui::Label::new(
-                        egui::RichText::new(line)
-                            .monospace()
-                            .size(self.font_size),
+                        egui::RichText::new(line).monospace().size(self.font_size),
                     )
                     .selectable(true);
 

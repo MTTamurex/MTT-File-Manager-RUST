@@ -27,7 +27,8 @@ impl ImageViewerApp {
         self.global_search.session_total_indexed = 0;
         self.global_search.category = crate::app::global_search_state::GlobalSearchCategory::All;
         self.global_search.drive_filter = None;
-        self.global_search.sort_mode = crate::app::global_search_state::GlobalSearchSortMode::Relevance;
+        self.global_search.sort_mode =
+            crate::app::global_search_state::GlobalSearchSortMode::Relevance;
         self.global_search.sort_descending = false;
 
         if let Err(error) = self
@@ -35,7 +36,10 @@ impl ImageViewerApp {
             .sender
             .send(GlobalSearchRequest::SetStatusTracking { active: true })
         {
-            log::error!("[GLOBAL-SEARCH] Failed to enable status tracking: {}", error);
+            log::error!(
+                "[GLOBAL-SEARCH] Failed to enable status tracking: {}",
+                error
+            );
         }
 
         if let Err(error) = self
@@ -71,7 +75,10 @@ impl ImageViewerApp {
             .sender
             .send(GlobalSearchRequest::SetStatusTracking { active: false })
         {
-            log::error!("[GLOBAL-SEARCH] Failed to disable status tracking: {}", error);
+            log::error!(
+                "[GLOBAL-SEARCH] Failed to disable status tracking: {}",
+                error
+            );
         }
     }
 

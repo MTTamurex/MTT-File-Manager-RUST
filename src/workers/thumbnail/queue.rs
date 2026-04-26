@@ -308,7 +308,17 @@ impl PriorityThumbnailQueue {
     }
 
     /// Pop the next request, optimizing for disk locality on HDDs
-    pub fn pop(&self) -> Option<(PathBuf, usize, u32, IOPriority, u64, ThumbnailRequestSource, bool)> {
+    pub fn pop(
+        &self,
+    ) -> Option<(
+        PathBuf,
+        usize,
+        u32,
+        IOPriority,
+        u64,
+        ThumbnailRequestSource,
+        bool,
+    )> {
         let mut state = self.state.lock();
 
         loop {
@@ -496,7 +506,7 @@ mod tests {
 
         let queue = PriorityThumbnailQueue::new();
         {
-            let mut state = queue.state.lock().unwrap();
+            let mut state = queue.state.lock();
             state
                 .drive_is_ssd
                 .insert(PriorityThumbnailQueue::drive_key(&path_a), false);
@@ -539,7 +549,7 @@ mod tests {
 
         let queue = PriorityThumbnailQueue::new();
         {
-            let mut state = queue.state.lock().unwrap();
+            let mut state = queue.state.lock();
             state.pending.insert(path.clone());
         }
 

@@ -16,17 +16,18 @@ pub fn render_shortcut_settings_section(
         if let Some(capture) = capture_shortcut(ui.ctx()) {
             match capture {
                 ShortcutCapture::Cancelled => editor_state.clear(),
-                ShortcutCapture::Binding(binding) => match shortcuts.validate_candidate(action, binding)
-                {
-                    Ok(()) => {
-                        shortcuts.set(action, binding);
-                        editor_state.clear();
-                        changed = true;
+                ShortcutCapture::Binding(binding) => {
+                    match shortcuts.validate_candidate(action, binding) {
+                        Ok(()) => {
+                            shortcuts.set(action, binding);
+                            editor_state.clear();
+                            changed = true;
+                        }
+                        Err(err) => {
+                            editor_state.message = Some(err);
+                        }
                     }
-                    Err(err) => {
-                        editor_state.message = Some(err);
-                    }
-                },
+                }
             }
         }
     }
@@ -100,18 +101,17 @@ pub fn render_shortcut_settings_section(
                 if is_capturing {
                     ui.label("");
                     ui.label(
-                        egui::RichText::new(t!("settings.shortcuts_press_binding_hint").to_string())
-                            .small(),
+                        egui::RichText::new(
+                            t!("settings.shortcuts_press_binding_hint").to_string(),
+                        )
+                        .small(),
                     );
                     ui.label("");
                     ui.end_row();
 
                     if let Some(message) = editor_state.message {
                         ui.label("");
-                        ui.colored_label(
-                            ui.visuals().error_fg_color,
-                            validation_message(message),
-                        );
+                        ui.colored_label(ui.visuals().error_fg_color, validation_message(message));
                         ui.label("");
                         ui.end_row();
                     }
@@ -135,13 +135,9 @@ fn action_label(action: ShortcutAction) -> String {
         ShortcutAction::Paste => t!("settings.shortcut_paste").to_string(),
         ShortcutAction::Rename => t!("settings.shortcut_rename").to_string(),
         ShortcutAction::Delete => t!("settings.shortcut_delete").to_string(),
-        ShortcutAction::DeletePermanently => {
-            t!("settings.shortcut_delete_permanently").to_string()
-        }
+        ShortcutAction::DeletePermanently => t!("settings.shortcut_delete_permanently").to_string(),
         ShortcutAction::Refresh => t!("settings.shortcut_refresh").to_string(),
-        ShortcutAction::FocusAddressBar => {
-            t!("settings.shortcut_focus_address_bar").to_string()
-        }
+        ShortcutAction::FocusAddressBar => t!("settings.shortcut_focus_address_bar").to_string(),
         ShortcutAction::GlobalSearch => t!("settings.shortcut_global_search").to_string(),
         ShortcutAction::Properties => t!("settings.shortcut_properties").to_string(),
         ShortcutAction::CreateFolder => t!("settings.shortcut_create_folder").to_string(),
@@ -151,9 +147,11 @@ fn action_label(action: ShortcutAction) -> String {
 
 fn validation_message(message: ShortcutValidationError) -> String {
     match message {
-        ShortcutValidationError::Conflict(action) => {
-            t!("settings.shortcuts_error_conflict", action = action_label(action)).to_string()
-        }
+        ShortcutValidationError::Conflict(action) => t!(
+            "settings.shortcuts_error_conflict",
+            action = action_label(action)
+        )
+        .to_string(),
         ShortcutValidationError::Reserved => t!("settings.shortcuts_error_reserved").to_string(),
         ShortcutValidationError::Unsupported => {
             t!("settings.shortcuts_error_unsupported").to_string()

@@ -161,12 +161,16 @@ pub(super) fn render_drive_slot<O: ItemSlotOperations>(
         ui.put(
             details_rect,
             egui::Label::new(
-                egui::RichText::new(t!("drive_slot.free_of",
-                    free_val = format!("{:.1}", free_val),
-                    free_unit = unit,
-                    total_val = format!("{:.1}", total_val),
-                    total_unit = total_unit
-                ).to_string())
+                egui::RichText::new(
+                    t!(
+                        "drive_slot.free_of",
+                        free_val = format!("{:.1}", free_val),
+                        free_unit = unit,
+                        total_val = format!("{:.1}", total_val),
+                        total_unit = total_unit
+                    )
+                    .to_string(),
+                )
                 .size(9.0)
                 .color(egui::Color32::from_gray(100)),
             )

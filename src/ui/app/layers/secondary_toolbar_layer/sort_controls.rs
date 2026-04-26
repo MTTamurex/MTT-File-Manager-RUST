@@ -91,7 +91,11 @@ pub(super) fn render_sort_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) 
             })
             .show_ui(ui, |ui| {
                 if ui
-                    .selectable_value(&mut SortMode::Name, app.sort_mode, t!("secondary_toolbar.sort_name"))
+                    .selectable_value(
+                        &mut SortMode::Name,
+                        app.sort_mode,
+                        t!("secondary_toolbar.sort_name"),
+                    )
                     .clicked()
                 {
                     app.sort_mode = SortMode::Name;
@@ -133,7 +137,11 @@ pub(super) fn render_sort_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) 
                     }
                 } else {
                     if ui
-                        .selectable_value(&mut SortMode::Date, app.sort_mode, t!("secondary_toolbar.sort_date"))
+                        .selectable_value(
+                            &mut SortMode::Date,
+                            app.sort_mode,
+                            t!("secondary_toolbar.sort_date"),
+                        )
                         .clicked()
                     {
                         app.sort_mode = SortMode::Date;
@@ -142,7 +150,11 @@ pub(super) fn render_sort_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) 
                         app.save_preferences();
                     }
                     if ui
-                        .selectable_value(&mut SortMode::Size, app.sort_mode, t!("secondary_toolbar.sort_size"))
+                        .selectable_value(
+                            &mut SortMode::Size,
+                            app.sort_mode,
+                            t!("secondary_toolbar.sort_size"),
+                        )
                         .clicked()
                     {
                         app.sort_mode = SortMode::Size;
@@ -151,7 +163,11 @@ pub(super) fn render_sort_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) 
                         app.save_preferences();
                     }
                     if ui
-                        .selectable_value(&mut SortMode::Type, app.sort_mode, t!("secondary_toolbar.sort_type"))
+                        .selectable_value(
+                            &mut SortMode::Type,
+                            app.sort_mode,
+                            t!("secondary_toolbar.sort_type"),
+                        )
                         .clicked()
                     {
                         app.sort_mode = SortMode::Type;
@@ -205,7 +221,8 @@ fn render_folders_position_button(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
         let (rect, response) = ui.allocate_exact_size(button_size, egui::Sense::click());
 
         if response.hovered() {
-            ui.painter().rect_filled(rect, theme::PADDING_SM, hover_color);
+            ui.painter()
+                .rect_filled(rect, theme::PADDING_SM, hover_color);
         }
 
         let icon_color = if locked {
@@ -226,10 +243,12 @@ fn render_folders_position_button(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
             rect.center().y - 1.0,
         );
 
-        if let Some(texture) = app
-            .svg_icon_manager
-            .get_icon(ui.ctx(), "folder", theme::ICON_SIZE_LG as u32, icon_color)
-        {
+        if let Some(texture) = app.svg_icon_manager.get_icon(
+            ui.ctx(),
+            "folder",
+            theme::ICON_SIZE_LG as u32,
+            icon_color,
+        ) {
             let icon_rect = egui::Rect::from_center_size(
                 folder_center,
                 egui::vec2(theme::ICON_SIZE_LG, theme::ICON_SIZE_LG),

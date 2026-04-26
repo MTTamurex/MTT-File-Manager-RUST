@@ -51,11 +51,11 @@ pub(super) fn init_onedrive_paths() {
 /// and also covers OneDrive "Known Folder Move" redirections.
 #[cfg(target_os = "windows")]
 fn resolve_known_folder_paths(out: &mut HashSet<String>, keys: &mut HashMap<String, &'static str>) {
+    use windows::Win32::UI::Shell::KF_FLAG_DONT_VERIFY;
     use windows::Win32::UI::Shell::{
         FOLDERID_Desktop, FOLDERID_Documents, FOLDERID_Downloads, FOLDERID_Music,
         FOLDERID_Pictures, FOLDERID_SavedGames, FOLDERID_Videos, SHGetKnownFolderPath,
     };
-    use windows::Win32::UI::Shell::KF_FLAG_DONT_VERIFY;
 
     let folder_ids: [(&windows::core::GUID, &'static str); 7] = [
         (&FOLDERID_Desktop, "desktop"),
@@ -83,7 +83,11 @@ fn resolve_known_folder_paths(out: &mut HashSet<String>, keys: &mut HashMap<Stri
 }
 
 #[cfg(not(target_os = "windows"))]
-fn resolve_known_folder_paths(_out: &mut HashSet<String>, _keys: &mut HashMap<String, &'static str>) {}
+fn resolve_known_folder_paths(
+    _out: &mut HashSet<String>,
+    _keys: &mut HashMap<String, &'static str>,
+) {
+}
 
 pub(super) fn is_onedrive_path(path: &Path) -> bool {
     let path_lower = path.to_string_lossy().to_lowercase();

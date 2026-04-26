@@ -1,8 +1,8 @@
 use crate::infrastructure::app_state_db::AppStateDb;
 use crate::infrastructure::disk_cache::ThumbnailDiskCache;
 use eframe::egui;
-use std::sync::{mpsc, Arc};
 use std::sync::atomic::Ordering;
+use std::sync::{mpsc, Arc};
 
 static GC_WORKER_RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 

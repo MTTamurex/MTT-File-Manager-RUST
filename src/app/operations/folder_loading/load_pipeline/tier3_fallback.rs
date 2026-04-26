@@ -1,9 +1,9 @@
 use crate::domain::file_entry::{is_archive_extension, FileEntry};
 use crate::infrastructure::adaptive_batch::AdaptiveBatchTracker;
+use crate::infrastructure::app_state_db::AppStateDb;
 use crate::infrastructure::directory_cache::DirectoryCache;
 use crate::infrastructure::directory_dirty_registry::DirectoryDirtyRegistry;
 use crate::infrastructure::directory_index::{DirectoryIndex, IndexedFile};
-use crate::infrastructure::app_state_db::AppStateDb;
 use crate::infrastructure::disk_cache::ThumbnailDiskCache;
 use crate::infrastructure::onedrive;
 use eframe::egui;
@@ -73,7 +73,11 @@ pub(super) fn run_tier3_fallback(
                         "desktop.ini" | "thumbs.db" | "$recycle.bin" | "system volume information"
                     );
 
-                    if (show_hidden || !is_hidden) && !is_system && !is_special && !filename.starts_with('.') {
+                    if (show_hidden || !is_hidden)
+                        && !is_system
+                        && !is_special
+                        && !filename.starts_with('.')
+                    {
                         let mut is_dir = (attrs & FILE_ATTRIBUTE_DIRECTORY.0) != 0;
                         let full_path = PathBuf::from(base_path).join(&filename);
 
@@ -165,9 +169,7 @@ pub(super) fn run_tier3_fallback(
                 // CRITICAL FIX: Do NOT fall through to standard FindFirstFileW.
                 let _ = file_entry_sender.send((my_gen, Vec::new()));
                 ctx.request_repaint();
-                log::warn!(
-                    "[FOLDER-LOADING] OneDrive enumeration timed out - sent empty results"
-                );
+                log::warn!("[FOLDER-LOADING] OneDrive enumeration timed out - sent empty results");
                 return;
             }
             onedrive::IoTimeoutResult::Err(_) => {
@@ -217,13 +219,14 @@ pub(super) fn run_tier3_fallback(
                     let is_system = (extended_attrs & FILE_ATTRIBUTE_SYSTEM.0) != 0;
                     let is_special = matches!(
                         filename.to_lowercase().as_str(),
-                        "desktop.ini"
-                            | "thumbs.db"
-                            | "$recycle.bin"
-                            | "system volume information"
+                        "desktop.ini" | "thumbs.db" | "$recycle.bin" | "system volume information"
                     );
 
-                    if (show_hidden || !is_hidden) && !is_system && !is_special && !filename.starts_with('.') {
+                    if (show_hidden || !is_hidden)
+                        && !is_system
+                        && !is_special
+                        && !filename.starts_with('.')
+                    {
                         let mut is_dir = (extended_attrs & FILE_ATTRIBUTE_DIRECTORY.0) != 0;
 
                         // Treat archive files as navigable folders.
@@ -235,11 +238,13 @@ pub(super) fn run_tier3_fallback(
                         let size = if is_dir && !is_archive {
                             0
                         } else {
-                            ((find_data.nFileSizeHigh as u64) << 32) | (find_data.nFileSizeLow as u64)
+                            ((find_data.nFileSizeHigh as u64) << 32)
+                                | (find_data.nFileSizeLow as u64)
                         };
 
                         let ft = find_data.ftLastWriteTime;
-                        let windows_ticks = ((ft.dwHighDateTime as u64) << 32) | (ft.dwLowDateTime as u64);
+                        let windows_ticks =
+                            ((ft.dwHighDateTime as u64) << 32) | (ft.dwLowDateTime as u64);
                         let modified = if windows_ticks > 116444736000000000 {
                             (windows_ticks - 116444736000000000) / 10_000_000
                         } else {

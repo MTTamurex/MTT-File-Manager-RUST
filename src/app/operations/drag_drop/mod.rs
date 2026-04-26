@@ -147,7 +147,11 @@ impl ImageViewerApp {
             return;
         }
 
-        let Some(dest_folder) = self.drag_target_folder.clone().or_else(|| self.drag_cross_panel_target.take()) else {
+        let Some(dest_folder) = self
+            .drag_target_folder
+            .clone()
+            .or_else(|| self.drag_cross_panel_target.take())
+        else {
             self.cancel_item_drag();
             return;
         };

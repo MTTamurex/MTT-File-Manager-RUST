@@ -85,9 +85,9 @@ impl WindowCache {
     /// Clone the TextureHandle (cheap Arc increment) and return it with the
     /// original resolution. The entry stays in the cache.
     pub fn get(&self, index: usize) -> Option<(egui::TextureHandle, u32, u32)> {
-        self.items.get(&index).map(|c| {
-            (c.texture.clone(), c.original_width, c.original_height)
-        })
+        self.items
+            .get(&index)
+            .map(|c| (c.texture.clone(), c.original_width, c.original_height))
     }
 
     /// Evict all entries outside the `[center - radius, center + radius]`
@@ -150,10 +150,7 @@ impl PrefetchEngine {
                         // select! below — otherwise the UI thread deadlocks when
                         // trying to post a new urgent job while a worker blocks
                         // on empty channels.
-                        let urgent = urgent_job
-                            .lock()
-                            .ok()
-                            .and_then(|mut slot| slot.take());
+                        let urgent = urgent_job.lock().ok().and_then(|mut slot| slot.take());
 
                         let job = if let Some(job) = urgent {
                             Some(job)
@@ -213,10 +210,8 @@ impl PrefetchEngine {
                             LoadPriority::Normal => loader::DecodePriority::Background,
                         };
 
-                        let frame = loader::decode_full_frame_with_priority(
-                            &job.path,
-                            decode_priority,
-                        );
+                        let frame =
+                            loader::decode_full_frame_with_priority(&job.path, decode_priority);
 
                         // Re-check relevance after (potentially slow) decode.
                         let center = active_center.load(Ordering::Relaxed);
@@ -224,10 +219,13 @@ impl PrefetchEngine {
                             continue;
                         }
 
-                        if results_tx.send(LoadOutput {
-                            index: job.index,
-                            frame,
-                        }).is_err() {
+                        if results_tx
+                            .send(LoadOutput {
+                                index: job.index,
+                                frame,
+                            })
+                            .is_err()
+                        {
                             break; // Receiver dropped; exit worker loop.
                         }
                         if let Some(ctx) = repaint_ctx.get() {
@@ -273,12 +271,7 @@ impl PrefetchEngine {
         self.active_center.store(index, Ordering::Relaxed);
     }
 
-    pub fn request(
-        &self,
-        index: usize,
-        path: PathBuf,
-        priority: LoadPriority,
-    ) -> bool {
+    pub fn request(&self, index: usize, path: PathBuf, priority: LoadPriority) -> bool {
         let job = LoadJob {
             index,
             path,
@@ -299,12 +292,14 @@ impl PrefetchEngine {
                     false
                 }
             }
-            LoadPriority::High => {
-                self.jobs_tx.as_ref().map_or(false, |tx| tx.try_send(job).is_ok())
-            }
-            LoadPriority::Normal => {
-                self.bg_jobs_tx.as_ref().map_or(false, |tx| tx.try_send(job).is_ok())
-            }
+            LoadPriority::High => self
+                .jobs_tx
+                .as_ref()
+                .map_or(false, |tx| tx.try_send(job).is_ok()),
+            LoadPriority::Normal => self
+                .bg_jobs_tx
+                .as_ref()
+                .map_or(false, |tx| tx.try_send(job).is_ok()),
         }
     }
 
@@ -344,4 +339,3 @@ impl Drop for PrefetchEngine {
         self.worker_handles.clear();
     }
 }
-

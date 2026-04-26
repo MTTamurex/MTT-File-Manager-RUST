@@ -162,7 +162,8 @@ impl ImageViewerApp {
             self.destroy_media_preview();
         }
 
-        if let Some(child) = crate::video_player::open_video_player(path, 0.0, self.session_volume) {
+        if let Some(child) = crate::video_player::open_video_player(path, 0.0, self.session_volume)
+        {
             self.video_player_process = Some(child);
             true
         } else {
@@ -239,8 +240,9 @@ impl ImageViewerApp {
                 crate::text_viewer::open_text_viewer(path);
                 true
             }
-            SelectedPreviewOverlayAction::BlockedInArchive
-            | SelectedPreviewOverlayAction::None => false,
+            SelectedPreviewOverlayAction::BlockedInArchive | SelectedPreviewOverlayAction::None => {
+                false
+            }
         }
     }
 

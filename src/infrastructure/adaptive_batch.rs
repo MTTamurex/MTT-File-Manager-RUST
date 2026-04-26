@@ -50,7 +50,10 @@ impl AdaptiveBatchTracker {
         if items_processed == 0 {
             return;
         }
-        self.samples.push_back(BatchSample { duration, items: items_processed });
+        self.samples.push_back(BatchSample {
+            duration,
+            items: items_processed,
+        });
 
         if self.samples.len() > 5 {
             self.samples.pop_front();
@@ -61,7 +64,11 @@ impl AdaptiveBatchTracker {
         }
 
         // Compute weighted average: total_time / total_items across recent samples.
-        let total_micros: f64 = self.samples.iter().map(|s| s.duration.as_micros() as f64).sum();
+        let total_micros: f64 = self
+            .samples
+            .iter()
+            .map(|s| s.duration.as_micros() as f64)
+            .sum();
         let total_items: f64 = self.samples.iter().map(|s| s.items as f64).sum();
 
         let avg_time_per_item = total_micros / total_items;
