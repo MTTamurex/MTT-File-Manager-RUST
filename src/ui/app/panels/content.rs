@@ -637,6 +637,7 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
         // blocking all thumbnail loads for the active panel.  The inactive
         // panel still displays thumbnails already in the shared texture_cache.
         app_with_inactive.suppress_thumbnail_requests = true;
+        app_with_inactive.suppress_file_panel_keyboard = true;
         ui.allocate_new_ui(
             egui::UiBuilder::new().max_rect(inactive_content_rect),
             |ui| {
@@ -647,6 +648,7 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
             },
         );
         app_with_inactive.suppress_thumbnail_requests = false;
+        app_with_inactive.suppress_file_panel_keyboard = false;
     });
 
     // ── Click-to-focus: detect click AFTER rendering so item interactions
