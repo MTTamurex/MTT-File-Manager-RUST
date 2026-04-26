@@ -1,4 +1,5 @@
 use std::ffi::OsString;
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -30,6 +31,17 @@ pub fn install_service() {
 
     let exe_path = std::env::current_exe().expect("Cannot get executable path");
     eprintln!("[SERVICE] Executable path: {}", exe_path.display());
+    if let Err(error) = validate_service_install_path(&exe_path) {
+        eprintln!(
+            "[SERVICE] Refusing to install insecure service path: {}",
+            error
+        );
+        eprintln!(
+            "[SERVICE] Move the service executable to a protected install directory, or set \
+             MTT_SEARCH_ALLOW_UNSAFE_SERVICE_INSTALL=1 only for an intentional admin/dev install."
+        );
+        return;
+    }
 
     let service_info = ServiceInfo {
         name: OsString::from(SERVICE_NAME),
@@ -59,6 +71,64 @@ pub fn install_service() {
                 exe_path.display()
             );
         }
+    }
+}
+
+fn validate_service_install_path(exe_path: &Path) -> Result<(), String> {
+    if env_flag_enabled("MTT_SEARCH_ALLOW_UNSAFE_SERVICE_INSTALL") {
+        eprintln!(
+            "[SERVICE] WARNING: MTT_SEARCH_ALLOW_UNSAFE_SERVICE_INSTALL=1; path hardening bypassed"
+        );
+        return Ok(());
+    }
+
+    let normalized = normalize_path_for_policy(exe_path);
+    if normalized.contains("\\target\\") || normalized.ends_with("\\target") {
+        return Err(format!(
+            "service executable is under a build target directory: {}",
+            exe_path.display()
+        ));
+    }
+
+    for variable in ["USERPROFILE", "TEMP", "TMP"] {
+        if path_starts_with_env_path(&normalized, variable) {
+            return Err(format!(
+                "service executable is under %{}%: {}",
+                variable,
+                exe_path.display()
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+fn path_starts_with_env_path(path: &str, variable: &str) -> bool {
+    let Ok(value) = std::env::var(variable) else {
+        return false;
+    };
+    if value.trim().is_empty() {
+        return false;
+    }
+    let env_path = normalize_path_for_policy(Path::new(&value));
+    path == env_path || path.starts_with(&format!("{}\\", env_path.trim_end_matches('\\')))
+}
+
+fn normalize_path_for_policy(path: &Path) -> String {
+    let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    canonical
+        .to_string_lossy()
+        .replace('/', "\\")
+        .to_ascii_lowercase()
+}
+
+fn env_flag_enabled(name: &str) -> bool {
+    match std::env::var(name) {
+        Ok(value) => matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        ),
+        Err(_) => false,
     }
 }
 

@@ -7,7 +7,9 @@ use windows::Win32::Storage::FileSystem::{
     CreateFileW, ReadFile, WriteFile, FILE_ATTRIBUTE_NORMAL, FILE_FLAGS_AND_ATTRIBUTES,
     FILE_SHARE_NONE, OPEN_EXISTING,
 };
-use windows::Win32::System::Pipes::{GetNamedPipeServerProcessId, PeekNamedPipe};
+use windows::Win32::System::Pipes::{
+    GetNamedPipeServerProcessId, GetNamedPipeServerSessionId, PeekNamedPipe,
+};
 
 const SEARCH_PIPE_IO_TIMEOUT_MS: u64 = 8_000;
 const CONTROL_PIPE_IO_TIMEOUT_MS: u64 = 5_000;
@@ -297,33 +299,18 @@ fn open_pipe() -> Result<HANDLE, String> {
 ///      App still runs as a non-elevated normal user. So the server runs at
 ///      High integrity while the app is at Medium.
 ///
-/// In BOTH scenarios the pipe server is more privileged than the app, which
-/// means `OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION)` on the server PID
-/// will typically fail with `ERROR_ACCESS_DENIED` (0x80070005) — a UAC/IL
-/// boundary, not a bug. We exploit that asymmetry as the verification:
-///
-///   * `OpenProcess` denied → server is higher-privilege than us. A
-///     non-privileged attacker cannot create such a process, so the peer is
-///     trusted. Accept.
-///   * `OpenProcess` succeeds → peer is at our privilege level (or below).
-///     Validate (a) executable basename == `mtt-search-service.exe` AND
-///     (b) token user SID == LocalSystem OR the current process's user SID
-///     (covers the rare case where both app and service run elevated as the
-///     same user).
-///   * `OpenProcess` fails with anything other than ACCESS_DENIED → suspicious,
-///     reject.
-///
-/// We intentionally do NOT reject install locations based on path substring
-/// heuristics: the installer may legitimately place the service under
-/// `C:\Program Files\...` or, during developer testing, under paths that
-/// contain `\Users\` (e.g. a `target\release\` build tree).
+/// A bare `ERROR_ACCESS_DENIED` from `OpenProcess` is not enough to prove the
+/// peer is legitimate: another elevated process could squat the pipe.  We first
+/// ask SCM for the registered running service PID.  Only console-mode fallback
+/// uses process/session/path checks, preserving the elevated developer workflow
+/// without accepting arbitrary same-name pipe servers.
 fn verify_server_process(pipe: HANDLE) -> Result<(), String> {
+    use windows::core::PWSTR;
     use windows::Win32::Foundation::{CloseHandle as Win32CloseHandle, ERROR_ACCESS_DENIED};
     use windows::Win32::System::Threading::{
-        OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
-        QueryFullProcessImageNameW, PROCESS_NAME_FORMAT,
+        OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_FORMAT,
+        PROCESS_QUERY_LIMITED_INFORMATION,
     };
-    use windows::core::PWSTR;
 
     let mut server_pid: u32 = 0;
     unsafe {
@@ -334,22 +321,45 @@ fn verify_server_process(pipe: HANDLE) -> Result<(), String> {
         return Err("Server PID is 0".into());
     }
 
-    // Try to open the server process. In BOTH supported scenarios (LocalSystem
-    // service OR elevated console-mode service) the peer is more privileged
-    // than the non-elevated app, so OpenProcess will typically fail with
-    // ERROR_ACCESS_DENIED. That denial is itself the legitimacy signal:
-    // a non-privileged attacker cannot create a higher-privilege squatter.
-    let process = match unsafe {
-        OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, server_pid)
-    } {
-        Ok(h) => h,
-        Err(e) if e.code() == ERROR_ACCESS_DENIED.to_hresult() => {
+    if let Some(service_pid) = query_running_search_service_pid()? {
+        if service_pid == server_pid {
             log::debug!(
-                "[SEARCH-CLIENT] OpenProcess denied for server pid {} -- \
-                 treating as legitimate higher-privilege service peer",
+                "[SEARCH-CLIENT] Pipe server pid {} matches SCM service pid",
                 server_pid
             );
             return Ok(());
+        }
+        return Err(format!(
+            "Pipe server pid {} does not match running SCM service pid {}",
+            server_pid, service_pid
+        ));
+    }
+
+    // No registered running service was found. Treat this as console-mode
+    // development and require same-session plus image checks where available.
+    let process = match unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, server_pid) }
+    {
+        Ok(h) => h,
+        Err(e) if e.code() == ERROR_ACCESS_DENIED.to_hresult() => {
+            let server_session = named_pipe_server_session_id(pipe)?;
+            let current_session = current_process_session_id()?;
+            if server_session == current_session {
+                log::debug!(
+                    "[SEARCH-CLIENT] OpenProcess denied for console-mode server pid {} in session {}",
+                    server_pid,
+                    server_session
+                );
+                return Ok(());
+            }
+            log::debug!(
+                "[SEARCH-CLIENT] OpenProcess denied for server pid {} in session {}, current session {}",
+                server_pid,
+                server_session,
+                current_session
+            );
+            return Err(
+                "Pipe server process is inaccessible and not in the current session".into(),
+            );
         }
         Err(e) => {
             return Err(format!(
@@ -393,25 +403,146 @@ fn verify_server_process(pipe: HANDLE) -> Result<(), String> {
         ));
     }
 
+    ensure_service_image_is_sibling(&exe_path)?;
+
     // (b) Token user SID must be either LocalSystem (S-1-5-18) OR the same
     // user that the current app process is running under. The latter covers
     // the elevated console-mode case where both processes run as the same
     // interactive user (but at different integrity levels).
-    let server_sid = read_token_user_sid(process)
-        .map_err(|e| format!("read server token: {}", e))?;
+    let server_sid =
+        read_token_user_sid(process).map_err(|e| format!("read server token: {}", e))?;
     const LOCAL_SYSTEM_SID: [u8; 12] = [1, 1, 0, 0, 0, 0, 0, 5, 18, 0, 0, 0];
     if server_sid == LOCAL_SYSTEM_SID {
         return Ok(());
     }
-    let our_sid = read_token_user_sid(unsafe {
-        windows::Win32::System::Threading::GetCurrentProcess()
-    })
-    .map_err(|e| format!("read current token: {}", e))?;
+    let our_sid =
+        read_token_user_sid(unsafe { windows::Win32::System::Threading::GetCurrentProcess() })
+            .map_err(|e| format!("read current token: {}", e))?;
     if server_sid == our_sid {
         return Ok(());
     }
 
     Err("Server token SID is neither LocalSystem nor the current user".into())
+}
+
+fn query_running_search_service_pid() -> Result<Option<u32>, String> {
+    use windows::Win32::System::Services::{
+        CloseServiceHandle, OpenSCManagerW, OpenServiceW, QueryServiceStatusEx, SC_HANDLE,
+        SC_MANAGER_CONNECT, SC_STATUS_PROCESS_INFO, SERVICE_QUERY_STATUS, SERVICE_RUNNING,
+        SERVICE_STATUS_PROCESS,
+    };
+
+    struct ServiceHandleGuard(SC_HANDLE);
+    impl Drop for ServiceHandleGuard {
+        fn drop(&mut self) {
+            unsafe {
+                let _ = CloseServiceHandle(self.0);
+            }
+        }
+    }
+
+    let manager =
+        match unsafe { OpenSCManagerW(PCWSTR::null(), PCWSTR::null(), SC_MANAGER_CONNECT) } {
+            Ok(handle) => handle,
+            Err(e) => {
+                log::debug!("[SEARCH-CLIENT] OpenSCManagerW failed: {}", e);
+                return Ok(None);
+            }
+        };
+    let _manager_guard = ServiceHandleGuard(manager);
+
+    let service_name = wide_null("MTTFileManagerSearch");
+    let service =
+        match unsafe { OpenServiceW(manager, PCWSTR(service_name.as_ptr()), SERVICE_QUERY_STATUS) }
+        {
+            Ok(handle) => handle,
+            Err(e) => {
+                log::debug!("[SEARCH-CLIENT] OpenServiceW failed: {}", e);
+                return Ok(None);
+            }
+        };
+    let _service_guard = ServiceHandleGuard(service);
+
+    let mut status = SERVICE_STATUS_PROCESS::default();
+    let mut bytes_needed = 0u32;
+    let status_bytes = unsafe {
+        std::slice::from_raw_parts_mut(
+            (&mut status as *mut SERVICE_STATUS_PROCESS).cast::<u8>(),
+            std::mem::size_of::<SERVICE_STATUS_PROCESS>(),
+        )
+    };
+    unsafe {
+        QueryServiceStatusEx(
+            service,
+            SC_STATUS_PROCESS_INFO,
+            Some(status_bytes),
+            &mut bytes_needed,
+        )
+        .map_err(|e| format!("QueryServiceStatusEx failed: {}", e))?;
+    }
+
+    if status.dwCurrentState == SERVICE_RUNNING && status.dwProcessId != 0 {
+        Ok(Some(status.dwProcessId))
+    } else {
+        Ok(None)
+    }
+}
+
+fn named_pipe_server_session_id(pipe: HANDLE) -> Result<u32, String> {
+    let mut session_id = 0u32;
+    unsafe {
+        GetNamedPipeServerSessionId(pipe, &mut session_id)
+            .map_err(|e| format!("GetNamedPipeServerSessionId failed: {}", e))?;
+    }
+    Ok(session_id)
+}
+
+fn current_process_session_id() -> Result<u32, String> {
+    use windows::Win32::System::RemoteDesktop::ProcessIdToSessionId;
+    use windows::Win32::System::Threading::GetCurrentProcessId;
+
+    let mut session_id = 0u32;
+    unsafe {
+        ProcessIdToSessionId(GetCurrentProcessId(), &mut session_id)
+            .map_err(|e| format!("ProcessIdToSessionId failed: {}", e))?;
+    }
+    Ok(session_id)
+}
+
+fn ensure_service_image_is_sibling(service_image_path: &str) -> Result<(), String> {
+    let current_exe = std::env::current_exe().map_err(|e| format!("current_exe failed: {}", e))?;
+    let current_dir = current_exe
+        .parent()
+        .ok_or_else(|| "Current executable has no parent directory".to_string())?;
+    let service_dir = std::path::Path::new(service_image_path)
+        .parent()
+        .ok_or_else(|| "Server executable has no parent directory".to_string())?;
+
+    if paths_equivalent_case_insensitive(current_dir, service_dir) {
+        return Ok(());
+    }
+
+    Err(format!(
+        "Server executable is not in the app directory: {}",
+        service_image_path
+    ))
+}
+
+fn paths_equivalent_case_insensitive(left: &std::path::Path, right: &std::path::Path) -> bool {
+    let left_norm = std::fs::canonicalize(left).unwrap_or_else(|_| left.to_path_buf());
+    let right_norm = std::fs::canonicalize(right).unwrap_or_else(|_| right.to_path_buf());
+    left_norm
+        .to_string_lossy()
+        .eq_ignore_ascii_case(&right_norm.to_string_lossy())
+}
+
+fn wide_null(value: &str) -> Vec<u16> {
+    use std::os::windows::ffi::OsStrExt;
+
+    std::ffi::OsStr::new(value)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect()
 }
 
 /// Read the `TokenUser` SID octet sequence from a process handle's token.
@@ -523,10 +654,7 @@ fn read_response<T: for<'de> serde::Deserialize<'de>>(
 
 /// Reads and validates a [`SearchResponse`] from the pipe. Returns an error if
 /// the response fails post-deserialization validation (e.g. too many items).
-fn read_validated_response(
-    pipe: HANDLE,
-    timeout_ms: u64,
-) -> Result<SearchResponse, String> {
+fn read_validated_response(pipe: HANDLE, timeout_ms: u64) -> Result<SearchResponse, String> {
     let resp: SearchResponse = read_response(pipe, timeout_ms)?;
     resp.validate()?;
     Ok(resp)
