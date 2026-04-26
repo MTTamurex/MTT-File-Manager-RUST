@@ -341,11 +341,12 @@ pub struct ImageViewerApp {
     pub dual_panel_enabled: bool,
     pub dual_panel_active: ActivePanel,
     pub dual_panel_inactive_state: Option<PanelSnapshot>,
-        /// When true, `request_thumbnail_load_internal` returns early after
-        /// cleaning up `loading_set`.  Set during inactive panel rendering so
-        /// thumbnail requests (which would be rejected by workers due to
-        /// generation mismatch) don't permanently pollute the shared
-        /// `loading_set`, blocking the active panel's thumbnail pipeline.
+        /// When true, `request_thumbnail_load_internal` submits requests using
+        /// the active panel's generation (via `current_generation`) and at
+        /// `Prefetch` priority instead of the caller-supplied priority.  Set
+        /// during inactive panel rendering so thumbnails are loaded into the
+        /// shared `texture_cache` without competing with the active panel's
+        /// Interactive-priority requests.
         pub suppress_thumbnail_requests: bool,
 
     // FOLDER SIZE CALCULATOR (async for details panel)
