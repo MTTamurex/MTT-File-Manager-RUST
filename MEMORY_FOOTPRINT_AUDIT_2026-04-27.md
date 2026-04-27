@@ -15,6 +15,26 @@ Os maiores vetores de memória estão em quatro áreas:
 3. Caches/filas do file manager: `DirectoryCache` é limitado por número de pastas, não por entradas/bytes, e a fila de bulk thumbnails pode crescer com a árvore inteira.
 4. egui/GPU: `IconLoader` tem mapas de `TextureHandle` sem LRU, enquanto o `CacheManager` principal já é bem limitado.
 
+## Status de implementação
+
+Itens já implementados nesta etapa:
+
+- `IconLoader`: `drive_icon_cache`, `extension_cache` e cache de falhas migrados para LRU com limites explícitos.
+- Folder covers: removidos índices temporários `HashMap<PathBuf, usize>` proporcionais ao diretório inteiro durante a aplicação de lotes.
+- Bulk thumbnails: produtor do scan em massa agora aplica backpressure via `pending_count()` antes de continuar a varredura.
+- `DirectoryCache`: além do limite por número de pastas, agora há orçamento global por total de entradas cacheadas.
+- Text viewer: caminho UTF-8 puro agora move `Vec<u8>` para `String` sem cópia extra quando possível.
+- Image viewer SVG: validação do limite de 50 MB ocorre antes de duplicar o buffer do arquivo.
+- Search service: o caminho de load binário passou a usar índice vazio; MFT, USN e non-USN agora usam capacidade proporcional ou vazia em vez da pré-alocação fixa agressiva quando já existe estimativa ou quando o índice ainda não foi preenchido.
+- Search service: após load/scan completo, `VolumeIndex` agora compacta arena e mapas (`HashMap`/`HashSet`) antes de entrar em regime estável.
+- Folder size batch state: `batch_invalidation_epoch` agora sofre poda periódica de paths sem cache, request em voo ou revalidação pendente.
+
+Itens ainda pendentes por maior risco ou necessidade de benchmark:
+
+- Redução estrutural da duplicação entre `all_items`, `items`, tabs e snapshots de dual-panel.
+- Rework de load/save binário do search service para streaming/mmap com HMAC incremental.
+- Estratégia alternativa para `NameArena.lowered` e para memória de GIFs sem degradar latência/UX.
+
 ## Achados de alto impacto
 
 ### 🔴 1. Pré-alocação fixa agressiva em `VolumeIndex::new`

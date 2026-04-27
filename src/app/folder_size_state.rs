@@ -9,6 +9,8 @@ use std::time::{Duration, Instant};
 
 const PENDING_REVALIDATION_PRUNE_INTERVAL: Duration = Duration::from_millis(250);
 const PENDING_REVALIDATION_PRUNE_THRESHOLD: usize = 500;
+const INVALIDATION_EPOCH_PRUNE_INTERVAL: Duration = Duration::from_secs(2);
+const INVALIDATION_EPOCH_PRUNE_THRESHOLD: usize = 1_024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FolderContentSummary {
@@ -106,6 +108,7 @@ pub struct FolderSizeState {
     /// Per-path invalidation counter.  Incremented each time
     /// `invalidate_folder_size_cache(path)` is called.
     pub batch_invalidation_epoch: HashMap<PathBuf, u64>,
+    pub batch_invalidation_last_prune: Instant,
 }
 
 impl FolderSizeState {
@@ -157,5 +160,30 @@ impl FolderSizeState {
         });
 
         expired
+    }
+
+    pub fn should_prune_invalidation_epochs(&self, now: Instant) -> bool {
+        !self.batch_invalidation_epoch.is_empty()
+            && (self.batch_invalidation_epoch.len() > INVALIDATION_EPOCH_PRUNE_THRESHOLD
+                || now.duration_since(self.batch_invalidation_last_prune)
+                    >= INVALIDATION_EPOCH_PRUNE_INTERVAL)
+    }
+
+    pub fn prune_stale_invalidation_epochs(&mut self, now: Instant) {
+        self.batch_invalidation_last_prune = now;
+
+        let loading = &self.loading;
+        let batch_loading = &self.batch_loading;
+        let cache = &self.cache;
+        let batch_cache = &self.batch_cache;
+        let pending_revalidation = &self.pending_revalidation;
+
+        self.batch_invalidation_epoch.retain(|path, _| {
+            loading.contains(path)
+                || batch_loading.contains(path)
+                || cache.contains(path)
+                || batch_cache.contains(path)
+                || pending_revalidation.contains_key(path)
+        });
     }
 }

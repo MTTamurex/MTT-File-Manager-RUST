@@ -41,6 +41,10 @@ pub(crate) fn index_non_ntfs_volume(
     shutdown: Arc<AtomicBool>,
     fts_state: Arc<FtsState>,
 ) {
+    let persisted_record_estimate = db
+        .load_volume_state(drive_letter)
+        .map(|state| state.files_indexed.min(usize::MAX as u64) as usize);
+
     let cadence = non_usn_scan_cadence(&file_system);
     let fs_lower = file_system.to_ascii_lowercase();
     let change_monitor = if is_fat_family_fs(&fs_lower) {
@@ -64,9 +68,11 @@ pub(crate) fn index_non_ntfs_volume(
 
     // Fast startup path: reuse persisted snapshot while a fresh scan runs.
     let mut handle: Option<VolumeIndexHandle> = None;
-    let mut cached_index = file_index::VolumeIndex::new(drive_letter);
+    let mut cached_index = persisted_record_estimate
+        .map(|estimate| file_index::VolumeIndex::with_estimated_records(drive_letter, estimate))
+        .unwrap_or_else(|| file_index::VolumeIndex::empty(drive_letter));
     if let Some(cached_count) = db.load_into_index(&mut cached_index, |_| {}) {
-        cached_index.names.shrink_to_fit();
+        cached_index.shrink_to_fit();
         cached_index.journal_id = 0;
         cached_index.last_usn = 0;
         cached_index.state = file_index::IndexState::Ready;
@@ -87,14 +93,16 @@ pub(crate) fn index_non_ntfs_volume(
     // immediately on real changes regardless of backoff.
     let max_interval = cadence.periodic_interval * 3;
     let mut current_interval = cadence.periodic_interval;
-    let mut prev_record_count: Option<usize> = None;
+    let mut prev_record_count: Option<usize> = persisted_record_estimate;
 
     loop {
         if shutdown.load(Ordering::Relaxed) {
             break;
         }
 
-        let mut scanned_index = file_index::VolumeIndex::new(drive_letter);
+        let mut scanned_index = prev_record_count
+            .map(|estimate| file_index::VolumeIndex::with_estimated_records(drive_letter, estimate))
+            .unwrap_or_else(|| file_index::VolumeIndex::empty(drive_letter));
         scanned_index.state = file_index::IndexState::Scanning;
         indexing_progress.set_scanning(drive_letter, 0, "filesystem_scan");
 
@@ -109,7 +117,6 @@ pub(crate) fn index_non_ntfs_volume(
             )
         }) {
             Ok(stats) => {
-                scanned_index.names.shrink_to_fit();
                 scanned_index.journal_id = 0;
                 scanned_index.last_usn = 0;
                 scanned_index.state = file_index::IndexState::Ready;
@@ -143,6 +150,7 @@ pub(crate) fn index_non_ntfs_volume(
                 scanned_index.clear_pending();
                 // SEC: Prune stale dir_modified_at entries.
                 scanned_index.prune_old_modifications(std::time::Duration::from_secs(600));
+                scanned_index.shrink_to_fit();
 
                 let records = stats.records_indexed;
                 handle = Some(volume_indices::upsert(&indices, scanned_index));

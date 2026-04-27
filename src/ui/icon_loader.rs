@@ -2,7 +2,7 @@
 //!
 //! This module handles loading Windows shell icons for files and folders.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::num::NonZeroUsize;
 use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
@@ -83,6 +83,10 @@ struct AsyncIconResult {
     data: Option<(Vec<u8>, u32, u32)>,
 }
 
+const DRIVE_ICON_CACHE_CAPACITY: usize = 64;
+const FAILED_DRIVE_ICON_CAPACITY: usize = 256;
+const EXTENSION_ICON_CACHE_CAPACITY: usize = 512;
+
 /// Manages loading and caching of Windows shell icons.
 pub struct IconLoader {
     /// Cache for file icons (path -> texture)
@@ -94,11 +98,11 @@ pub struct IconLoader {
     /// Recycle bin icon texture (cached)
     recycle_bin_icon_texture: Option<egui::TextureHandle>,
     /// Drive icon cache (drive path -> texture)
-    drive_icon_cache: HashMap<String, egui::TextureHandle>,
+    drive_icon_cache: LruCache<String, egui::TextureHandle>,
     /// Remember failed drive/shell icon attempts to avoid retrying every frame
-    failed_drive_icons: HashSet<String>,
+    failed_drive_icons: LruCache<String, ()>,
     /// Cache for extension-based icons (extension -> texture)
-    pub extension_cache: HashMap<String, egui::TextureHandle>,
+    pub extension_cache: LruCache<String, egui::TextureHandle>,
     /// Keys currently being loaded in background threads (prevents duplicate requests)
     loading_drive_icons: HashSet<String>,
     /// Channel to receive completed icon extractions from background threads
@@ -134,9 +138,18 @@ impl IconLoader {
             folder_icon_texture: None,
             computer_icon_texture: None,
             recycle_bin_icon_texture: None,
-            drive_icon_cache: HashMap::new(),
-            failed_drive_icons: HashSet::new(),
-            extension_cache: HashMap::new(),
+            drive_icon_cache: LruCache::new(
+                NonZeroUsize::new(DRIVE_ICON_CACHE_CAPACITY)
+                    .expect("drive icon cache size must be non-zero"),
+            ),
+            failed_drive_icons: LruCache::new(
+                NonZeroUsize::new(FAILED_DRIVE_ICON_CAPACITY)
+                    .expect("failed drive icon cache size must be non-zero"),
+            ),
+            extension_cache: LruCache::new(
+                NonZeroUsize::new(EXTENSION_ICON_CACHE_CAPACITY)
+                    .expect("extension icon cache size must be non-zero"),
+            ),
             loading_drive_icons: HashSet::new(),
             icon_result_rx: rx,
             icon_result_tx: tx,
@@ -152,6 +165,7 @@ impl IconLoader {
         self.icon_cache.clear();
         self.drive_icon_cache.clear();
         self.failed_drive_icons.clear();
+        self.extension_cache.clear();
         // NOTE: folder_icon_texture is NOT cleared — it's a static custom composed
         // graphic set once at startup (back+front+paper_sheet layers).
         self.computer_icon_texture = None;
@@ -184,7 +198,7 @@ impl IconLoader {
 
         // Already in-flight or previously failed — skip.
         if self.loading_drive_icons.contains(&cache_key)
-            || self.failed_drive_icons.contains(&cache_key)
+            || self.failed_drive_icons.peek(&cache_key).is_some()
         {
             return;
         }

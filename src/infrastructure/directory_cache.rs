@@ -10,6 +10,7 @@ use parking_lot::Mutex;
 use crate::domain::file_entry::FileEntry;
 
 const CACHE_CAPACITY: usize = 200; // Bounded to avoid high long-session RAM growth
+const MAX_TOTAL_CACHED_ITEMS: usize = 50_000; // Global cap to prevent a few huge folders from dominating RAM
 
 struct CachedFolder {
     entries: Arc<Vec<FileEntry>>,
@@ -33,6 +34,10 @@ impl DirectoryCacheInner {
 
     fn sync_ordered_keys(&mut self) {
         self.ordered_keys = self.entries.iter().map(|(path, _)| path.clone()).collect();
+    }
+
+    fn total_items(&self) -> usize {
+        self.entries.iter().map(|(_, cached)| cached.entries.len()).sum()
     }
 }
 
@@ -91,6 +96,16 @@ impl DirectoryCache {
                 cached_at_ms,
             },
         );
+
+        let mut total_items = cache.total_items();
+        while total_items > MAX_TOTAL_CACHED_ITEMS && cache.entries.len() > 1 {
+            let Some((evicted_path, evicted)) = cache.entries.pop_lru() else {
+                break;
+            };
+            total_items = total_items.saturating_sub(evicted.entries.len());
+            cache.ordered_keys.remove(&evicted_path);
+        }
+
         cache.sync_ordered_keys();
     }
 
@@ -130,8 +145,7 @@ impl DirectoryCache {
 
     pub fn stats(&self) -> (usize, usize) {
         let cache = self.inner.lock();
-        let total_items: usize = cache.entries.iter().map(|(_, v)| v.entries.len()).sum();
-        (cache.entries.len(), total_items)
+        (cache.entries.len(), cache.total_items())
     }
 }
 
@@ -173,5 +187,29 @@ mod tests {
         assert!(cache.get(&nested).is_none());
         assert!(cache.get(&sibling).is_some());
         assert!(cache.get(&outside).is_some());
+    }
+
+    #[test]
+    fn put_evicts_older_large_folders_when_total_item_budget_is_exceeded() {
+        let cache = DirectoryCache::new();
+
+        let older_path = PathBuf::from(r"C:\older");
+        let newer_path = PathBuf::from(r"C:\newer");
+
+        let older_entries: Vec<FileEntry> = (0..30_000)
+            .map(|idx| sample_entry(&format!(r"C:\older\item{}", idx)))
+            .collect();
+        let newer_entries: Vec<FileEntry> = (0..30_000)
+            .map(|idx| sample_entry(&format!(r"C:\newer\item{}", idx)))
+            .collect();
+
+        cache.put(older_path.clone(), older_entries);
+        cache.put(newer_path.clone(), newer_entries);
+
+        let (folders, total_items) = cache.stats();
+        assert_eq!(folders, 1);
+        assert_eq!(total_items, 30_000);
+        assert!(cache.get(&older_path).is_none());
+        assert!(cache.get(&newer_path).is_some());
     }
 }

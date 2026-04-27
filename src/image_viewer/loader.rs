@@ -384,16 +384,17 @@ fn decode_svg_frame(
     priority: DecodePriority,
 ) -> io::Result<DecodedFrame> {
     let bytes = read_file_fast(path, priority)?;
-    let bytes_vec = bytes.as_slice().to_vec();
 
     // Reject SVGs with obviously abusive intrinsic dimensions early
     // (before allocating the parse tree).
-    if bytes_vec.len() > 50 * 1024 * 1024 {
+    if bytes.as_slice().len() > 50 * 1024 * 1024 {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "SVG file exceeds 50 MB size limit",
         ));
     }
+
+    let bytes_vec = bytes.as_slice().to_vec();
 
     // Render in a worker thread with a timeout to prevent pathological SVGs
     // from blocking the viewer indefinitely.

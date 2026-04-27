@@ -44,7 +44,7 @@ pub(crate) fn index_volume(
 ) {
     eprintln!("[USN] Starting indexing for volume {}:\\", drive_letter);
 
-    let mut index = file_index::VolumeIndex::new(drive_letter);
+    let mut index = file_index::VolumeIndex::empty(drive_letter);
 
     // Try to load cached state — prefer binary file, fall back to SQLite.
     let cached_state = match crate::index_db::binary::load(drive_letter) {
@@ -126,6 +126,10 @@ pub(crate) fn index_volume(
                 );
                 Some(count)
             } else {
+                index = file_index::VolumeIndex::with_estimated_records(
+                    drive_letter,
+                    state.files_indexed.min(usize::MAX as u64) as usize,
+                );
                 indexing_progress.update(
                     drive_letter,
                     "scanning",
@@ -353,6 +357,7 @@ pub(crate) fn index_volume(
         index.clear_pending();
     }
 
+    index.shrink_to_fit();
     index.state = file_index::IndexState::Ready;
     // Build lowercased arena for case-insensitive SIMD search.
     index.names.build_lowered();

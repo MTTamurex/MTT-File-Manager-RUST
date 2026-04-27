@@ -103,6 +103,10 @@ pub(crate) fn render_status_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Cont
                             use crate::infrastructure::windows::is_media_extension;
                             use crate::workers::thumbnail::ThumbnailPriority;
 
+                            const MAX_BULK_THUMBNAIL_PENDING: usize = 4096;
+                            const BULK_THUMBNAIL_BACKPRESSURE_SLEEP: std::time::Duration =
+                                std::time::Duration::from_millis(8);
+
                             for entry in walkdir::WalkDir::new(&root)
                                 .follow_links(false)
                                 .into_iter()
@@ -134,6 +138,17 @@ pub(crate) fn render_status_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Cont
                                 {
                                     continue;
                                 }
+
+                                while queue.pending_count() >= MAX_BULK_THUMBNAIL_PENDING {
+                                    if !scanning_flag.load(std::sync::atomic::Ordering::Relaxed) {
+                                        break;
+                                    }
+                                    std::thread::sleep(BULK_THUMBNAIL_BACKPRESSURE_SLEEP);
+                                }
+                                if !scanning_flag.load(std::sync::atomic::Ordering::Relaxed) {
+                                    break;
+                                }
+
                                 crate::workers::thumbnail::set_bulk_thumbnail_current_file(
                                     &progress_state,
                                     path,

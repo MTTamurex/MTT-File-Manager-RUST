@@ -357,7 +357,7 @@ pub fn load(drive_letter: char) -> Result<Option<(VolumeIndex, PersistedBinarySt
     }
 
     // Build VolumeIndex.
-    let mut index = VolumeIndex::new(drive_letter);
+    let mut index = VolumeIndex::empty(drive_letter);
     // Replace the default arena with one containing our loaded data.
     index.names = crate::name_arena::NameArena::from_raw(arena_slice);
     index.records = records;
@@ -371,6 +371,7 @@ pub fn load(drive_letter: char) -> Result<Option<(VolumeIndex, PersistedBinarySt
 
     // Rebuild the children reverse index from loaded records + hardlinks.
     index.rebuild_children();
+    index.shrink_to_fit();
 
     let state = PersistedBinaryState {
         journal_id: h_journal_id,
