@@ -79,14 +79,13 @@ pub(in crate::app) fn spawn_async_font_loader() -> mpsc::Receiver<egui::FontDefi
             loaded_fonts.push("segoe_ui_symbol".to_owned());
         }
 
-        let arial_path = fonts_dir.join("ARIALUNI.TTF");
-        if let Ok(font_data) = std::fs::read(&arial_path) {
-            fonts.font_data.insert(
-                "arial_unicode".to_owned(),
-                std::sync::Arc::new(eframe::egui::FontData::from_owned(font_data)),
-            );
-            loaded_fonts.push("arial_unicode".to_owned());
-        }
+        // NOTE: `ARIALUNI.TTF` (~24 MB CJK fallback) used to be loaded here as a
+        // generic Unicode coverage font. It was removed because the file is huge
+        // relative to its actual usefulness for this app's languages (PT-BR / EN):
+        // its bytes stay resident in `FontData` for the entire process lifetime
+        // and inflate the egui font atlas. Latin glyphs are already covered by
+        // Segoe UI, and rare CJK names will fall back to system shaping rather
+        // than render perfectly — an acceptable trade for the RAM win.
 
         {
             let data = crate::embedded_assets::REMIXICON_TTF.to_vec();
@@ -122,7 +121,7 @@ pub(in crate::app) fn spawn_icon_worker(
     ctx: &egui::Context,
     current_generation: Arc<AtomicUsize>,
     icon_disk_cache: Arc<IconDiskCache>,
-    preloaded_icons: &std::collections::HashMap<String, (Vec<u8>, u32, u32)>,
+    _preloaded_icons: &std::collections::HashMap<String, (Vec<u8>, u32, u32)>,
 ) -> (mpsc::Sender<IconRequest>, mpsc::Receiver<IconResponse>) {
     let (icon_req_tx, icon_req_rx_thread) = mpsc::channel::<IconRequest>();
     let (fanout_tx, fanout_rx) = crossbeam_channel::bounded::<IconRequest>(256);
@@ -139,25 +138,26 @@ pub(in crate::app) fn spawn_icon_worker(
     });
 
     // Shared extension icon cache across all workers.
-    // Pre-populated with disk-cached data so workers never call SHGetFileInfoW
-    // for already-known extensions.
+    //
+    // MEMORY: the cache starts EMPTY. The persistent on-disk RGBA blobs are
+    // pulled lazily via `IconDiskCache::load_one` the first time a worker is
+    // asked for an extension that isn't in the GPU texture cache. Eager-seeding
+    // every disk-cached icon here used to retain ~20 MB of RGBA permanently
+    // (256x256 Jumbo × ~80 extensions) for entries the user might never view.
+    //
     // DashMap allows concurrent reads without blocking, eliminating contention
-    // across 16 icon workers.
-    let shared_ext_cache: Arc<dashmap::DashMap<String, (Vec<u8>, u32, u32)>> = {
-        let initial = dashmap::DashMap::with_capacity(128);
-        for (ext, data) in preloaded_icons {
-            let dot_ext = format!(".{}", ext);
-            initial.insert(dot_ext, data.clone());
-        }
-        Arc::new(initial)
-    };
+    // across the icon workers.
+    let shared_ext_cache: Arc<dashmap::DashMap<String, (Vec<u8>, u32, u32)>> =
+        Arc::new(dashmap::DashMap::with_capacity(32));
 
     let cpu = std::thread::available_parallelism()
         .map(|n| n.get())
         .unwrap_or(4);
-    // SHGetFileInfoW is IO-bound (registry + COM), not CPU-bound.
-    // More threads = more parallel cold-extension lookups.
-    let worker_count = cpu.clamp(2, 16);
+    // SHGetFileInfoW is IO-bound (registry + COM); ~4 STA threads are enough
+    // to saturate the Shell pipeline. Higher counts add committed stack RAM
+    // (each OS thread commits ~1 MB by default) without parallel throughput
+    // gains, so cap at 4 and explicitly request a 256 KB stack per worker.
+    let worker_count = cpu.clamp(2, 4);
 
     for worker_id in 0..worker_count {
         let icon_ctx = ctx.clone();
@@ -169,6 +169,7 @@ pub(in crate::app) fn spawn_icon_worker(
 
         let _ = std::thread::Builder::new()
             .name(format!("icon-worker-{}", worker_id))
+            .stack_size(256 * 1024)
             .spawn(move || {
                 use crate::domain::file_entry::IconSize;
                 use crate::infrastructure::windows::{
@@ -246,6 +247,12 @@ pub(in crate::app) fn spawn_icon_worker(
                             .get(&dot_ext)
                             .map(|entry| entry.value().clone())
                         {
+                            Ok(cached)
+                        } else if let Some(cached) = disk_cache.load_one(ext_str) {
+                            // Lazy disk hit: persistent on-disk RGBA exists but
+                            // wasn't materialised at boot. Cache it now so the
+                            // next request for this extension hits the DashMap.
+                            ext_cache.insert(dot_ext, cached.clone());
                             Ok(cached)
                         } else {
                             let r = if needs_real_path_shared_icon {

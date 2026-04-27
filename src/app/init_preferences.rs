@@ -26,6 +26,7 @@ pub(super) struct StartupPreferences {
     pub(super) language: String,
     pub(super) theme_mode: ThemeMode,
     pub(super) gpu_backend_preference: String,
+    pub(super) renderer_preference: String,
     pub(super) shortcuts: ShortcutBindings,
 }
 
@@ -179,6 +180,11 @@ impl StartupPreferences {
             .cloned()
             .unwrap_or_else(|| "auto".to_string());
 
+        let renderer_preference = prefs
+            .get("renderer")
+            .cloned()
+            .unwrap_or_else(|| "wgpu".to_string());
+
         let shortcuts = ShortcutBindings::from_preferences(&prefs);
 
         Self {
@@ -203,6 +209,7 @@ impl StartupPreferences {
             language,
             theme_mode,
             gpu_backend_preference,
+            renderer_preference,
             shortcuts,
         }
     }

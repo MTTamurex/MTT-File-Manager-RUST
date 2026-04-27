@@ -227,40 +227,13 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
         &preloaded_extension_icons,
     );
 
-    // Pre-warm: only send requests for extensions NOT already in disk cache.
-    // Disk-cached extensions are loaded instantly in ImageViewerApp::new().
-    {
-        const PREWARM: &[&str] = &[
-            // C:\Windows visible extensions (highest priority — first in queue)
-            "dll", "sys", "log", "txt", "ini", "xml", "bat", "bin", "exe", "cmd", "dat", "prx",
-            "cat", "mun", "nls", "inf", // Common document/code extensions
-            "pdf", "json", "html", "css", "js", "md", "csv", "rtf", "doc", "docx", "xls", "xlsx",
-            "ppt", "pptx", // Archives
-            "zip", "rar", "7z", "tar", "gz", // Images
-            "jpg", "png", "gif", "bmp", "svg", "ico", "webp", // Media
-            "mp3", "mp4", "mkv", "avi", "wav", "flac", // Code
-            "py", "rs", "cpp", "c", "h", "java", "cs", "go", "ts", "toml", "yaml", "cfg", "reg",
-            "msi", "cab", "tmp",
-        ];
-        let mut prewarm_skipped = 0usize;
-        for ext in PREWARM {
-            if preloaded_extension_icons.contains_key(*ext)
-                || crate::infrastructure::windows::icons::requires_real_file_for_shared_icon(ext)
-            {
-                prewarm_skipped += 1;
-                continue; // Already in disk cache — will be loaded instantly.
-            }
-            let fake = PathBuf::from(format!("__prewarm__\\file.{}", ext));
-            let _ = icon_req_tx.send((fake, usize::MAX));
-        }
-        if prewarm_skipped > 0 {
-            log::info!(
-                "[IconPrewarm] Skipped {} extensions (disk-cached), sending {} to workers",
-                prewarm_skipped,
-                PREWARM.len() - prewarm_skipped,
-            );
-        }
-    }
+    // NOTE: the eager pre-warm dispatch (sending ~60 hard-coded extensions to the
+    // icon workers at boot) was removed in favour of pure lazy loading. Disk-cached
+    // RGBA blobs are still uploaded to egui textures via `preloaded_extension_icons`
+    // (so already-known extensions paint instantly on first frame), and unknown
+    // extensions are extracted on demand the first time they appear in a folder.
+    // This avoids holding RGBA in the worker's shared DashMap for extensions the
+    // user may never view in the current session.
 
     let (meta_req_tx, meta_res_rx) = spawn_metadata_worker(ctx);
     let (live_size_req_tx, live_size_res_rx) = spawn_live_file_size_worker(ctx);

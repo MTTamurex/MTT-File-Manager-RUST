@@ -58,7 +58,13 @@ pub fn spawn_folder_preview_worker(
     disk_cache: Arc<ThumbnailDiskCache>,
     composer: Arc<FolderComposer>,
 ) {
-    std::thread::spawn(move || {
+    // Smaller-than-default stack: this worker only runs Shell/COM calls and a
+    // few alpha-blend passes; 512 KB is comfortably enough and saves ~512 KB of
+    // committed RAM per worker compared to the 1 MB default commit on Windows.
+    let _ = std::thread::Builder::new()
+        .name("folder-preview-worker".to_string())
+        .stack_size(512 * 1024)
+        .spawn(move || {
         // M-19: RAII guard — CoUninitialize guaranteed on normal exit AND panic
         let _com = unsafe {
             let hr = CoInitializeEx(None, COINIT_MULTITHREADED);

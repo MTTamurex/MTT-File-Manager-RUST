@@ -96,6 +96,42 @@ impl IconDiskCache {
         map
     }
 
+    /// Lazily load a single extension's cached icon from disk on demand.
+    ///
+    /// Returns `Some((pixels, width, height))` when a valid file exists for
+    /// the canonical extension, `None` otherwise. Invalid/stale files found
+    /// during the read are removed so the caller can fall back to a fresh
+    /// Shell extraction.
+    ///
+    /// This avoids the boot-time `load_all()` walk that materialises every
+    /// cached icon (each Jumbo entry is 256 KB of RGBA) into a permanent
+    /// in-process `HashMap` even for extensions the user may never view in
+    /// the current session.
+    pub fn load_one(&self, ext: &str) -> Option<(Vec<u8>, u32, u32)> {
+        if ext.is_empty() {
+            return None;
+        }
+        let canonical = crate::infrastructure::windows::icons::canonical_icon_ext(ext);
+        if crate::infrastructure::windows::icons::requires_real_file_for_shared_icon(canonical) {
+            return None;
+        }
+        let path = self.dir.join(format!("{}.rgba", canonical.to_lowercase()));
+        let data = std::fs::read(&path).ok()?;
+        if data.len() < 8 {
+            let _ = std::fs::remove_file(&path);
+            return None;
+        }
+        let width = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+        let height = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+        let pixels = data[8..].to_vec();
+        let expected = (width as usize) * (height as usize) * 4;
+        if pixels.len() != expected || width == 0 || height == 0 {
+            let _ = std::fs::remove_file(&path);
+            return None;
+        }
+        Some((pixels, width, height))
+    }
+
     /// Save an extension's icon data to disk.
     /// Called from worker threads after extracting a new extension icon.
     pub fn save(&self, ext: &str, pixels: &[u8], width: u32, height: u32) {
