@@ -19,6 +19,7 @@ pub fn render_settings_window(
     theme_mode: &mut ThemeMode,
     active_gpu_backend: &str,
     gpu_backend_preference: &mut String,
+    renderer_preference: &mut String,
     shortcuts: &mut ShortcutBindings,
     shortcut_editor: &mut ShortcutEditorState,
     show_recycle_bin: &mut bool,
@@ -70,7 +71,7 @@ pub fn render_settings_window(
                                     ui.add_space(16.0);
                                     theme_changed |= crate::ui::components::appearance_settings::render_appearance_settings_section(ui, theme_mode);
                                     ui.add_space(16.0);
-                                    backend_changed |= crate::ui::components::backend_settings::render_backend_settings_section(ui, active_gpu_backend, gpu_backend_preference);
+                                    backend_changed |= crate::ui::components::backend_settings::render_backend_settings_section(ui, active_gpu_backend, gpu_backend_preference, renderer_preference);
                                     ui.add_space(16.0);
                                     ui.label(egui::RichText::new(t!("settings.show_recycle_bin").to_string()).strong());
                                     ui.add_space(4.0);

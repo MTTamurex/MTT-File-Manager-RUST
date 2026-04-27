@@ -238,10 +238,10 @@ pub(in crate::app) fn spawn_folder_preview_workers(
 
     {
         use crate::workers::folder_preview_worker::spawn_folder_preview_worker;
-        let cpu = std::thread::available_parallelism()
-            .map(|n| n.get())
-            .unwrap_or(4);
-        let worker_count = cpu.clamp(2, 6);
+        // Folder-preview composition is dominated by Shell COM calls + SQLite
+        // cache hits; 2 workers fully cover scroll bursts while keeping the
+        // committed stack footprint low (each OS thread commits ~1 MB by default).
+        let worker_count: usize = 2;
         for _ in 0..worker_count {
             spawn_folder_preview_worker(
                 folder_preview_rx.clone(),

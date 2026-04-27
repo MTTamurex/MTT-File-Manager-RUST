@@ -83,8 +83,11 @@ fn available_cpu_count() -> usize {
 }
 
 fn compute_thumbnail_worker_count(cpu_count: usize) -> usize {
-    // Keep a balanced default: enough workers to saturate I/O/decode without overscheduling.
-    cpu_count.clamp(4, 8)
+    // Decode parallelism is bounded by `compute_decode_limit` (max 4) via the
+    // shared semaphore, so worker counts above 4 only add idle threads waiting
+    // on the semaphore — each costing ~1 MB of committed stack RAM by default.
+    // Cap at 4 and request smaller stacks at spawn time to keep the baseline tight.
+    cpu_count.clamp(4, 4)
 }
 
 fn compute_decode_limit(worker_count: usize) -> usize {
@@ -143,6 +146,7 @@ pub fn spawn_thumbnail_workers(
 
         let spawn_result = std::thread::Builder::new()
             .name(format!("thumb-worker-{}", worker_id))
+            .stack_size(512 * 1024)
             .spawn(move || {
                 thumbnail_worker_loop(
                     queue,

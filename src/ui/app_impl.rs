@@ -222,6 +222,7 @@ impl eframe::App for ImageViewerApp {
                 &mut self.theme_mode,
                 &self.active_gpu_backend,
                 &mut self.gpu_backend_preference,
+                &mut self.renderer_preference,
                 &mut self.shortcuts,
                 &mut self.shortcut_editor,
                 &mut self.show_recycle_bin,

@@ -161,6 +161,7 @@ impl ImageViewerApp {
             language,
             theme_mode,
             gpu_backend_preference,
+            renderer_preference,
             shortcuts,
         } = startup_preferences;
 
@@ -522,6 +523,7 @@ impl ImageViewerApp {
 
             active_gpu_backend: String::new(), // Set after construction from render_state
             gpu_backend_preference,
+            renderer_preference,
             shortcuts,
             shortcut_editor: crate::app::shortcuts::ShortcutEditorState::default(),
 
@@ -602,6 +604,11 @@ impl ImageViewerApp {
         run_post_startup_jobs(&mut app, &ctx);
 
         // Log GPU adapter info to file for diagnostics (works without console).
+        // With the Glow renderer there is no `wgpu_render_state`, so report the
+        // active renderer label directly so the settings UI has something to show.
+        if cc.wgpu_render_state.is_none() {
+            app.active_gpu_backend = "Glow (OpenGL)".to_string();
+        }
         if let Some(render_state) = &cc.wgpu_render_state {
             let info = render_state.adapter.get_info();
             app.active_gpu_backend = format!("{:?}", info.backend);
