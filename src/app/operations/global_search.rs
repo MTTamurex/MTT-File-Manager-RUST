@@ -7,17 +7,14 @@ impl ImageViewerApp {
     pub(crate) fn open_global_search(&mut self) {
         self.global_search.active = true;
         self.global_search.opened_at = std::time::Instant::now();
-        self.global_search.selected_index = None;
         self.global_search.focus_request = true;
         self.global_search.query.clear();
-        self.global_search.results.clear();
-        self.global_search.results_generation += 1;
+        self.global_search.clear_transient_results();
+        self.global_search.clear_transient_caches();
         self.global_search.loading = false;
         self.global_search.pending_query_dispatch_at = None;
         self.global_search.in_flight_query = None;
         self.global_search.in_flight_started_at = None;
-        self.global_search.has_more_results = false;
-        self.global_search.total_matches = None;
         self.global_search.last_status_received_at = std::time::Instant::now();
         self.global_search.last_progress_advance_at = std::time::Instant::now();
         self.global_search.requested_offset = 0;
@@ -53,22 +50,18 @@ impl ImageViewerApp {
 
     pub(crate) fn close_global_search(&mut self) {
         self.global_search.active = false;
-        self.global_search.selected_index = None;
+        self.global_search.release_transient_results();
+        self.global_search.clear_transient_caches();
         self.global_search.focus_request = false;
         self.global_search.loading = false;
         self.global_search.pending_query_dispatch_at = None;
         self.global_search.in_flight_query = None;
         self.global_search.in_flight_started_at = None;
-        self.global_search.has_more_results = false;
-        self.global_search.total_matches = None;
         self.global_search.requested_offset = 0;
         self.global_search.requested_limit = DEFAULT_GLOBAL_SEARCH_PAGE_LIMIT;
         self.global_search.scroll_offset_y = 0.0;
         self.global_search.last_scroll_offset_y = 0.0;
         self.global_search.session_total_indexed = 0;
-        self.global_search.size_cache.clear();
-        self.global_search.tooltip_texture_cache.clear();
-        self.global_search.metadata_cache.clear();
 
         if let Err(error) = self
             .global_search
