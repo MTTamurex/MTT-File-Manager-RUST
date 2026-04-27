@@ -28,6 +28,8 @@ Itens já implementados nesta etapa:
 - Search service: o caminho de load binário passou a usar índice vazio; MFT, USN e non-USN agora usam capacidade proporcional ou vazia em vez da pré-alocação fixa agressiva quando já existe estimativa ou quando o índice ainda não foi preenchido.
 - Search service: após load/scan completo, `VolumeIndex` agora compacta arena e mapas (`HashMap`/`HashSet`) antes de entrar em regime estável.
 - Folder size batch state: `batch_invalidation_epoch` agora sofre poda periódica de paths sem cache, request em voo ou revalidação pendente.
+- Tabs: snapshots de tabs inativas agora podem descartar `items` quando ele é redundante com `all_items`, reconstruindo a view só ao reativar o tab.
+- Dual panel: o snapshot do painel inativo agora também compacta `items` redundante e restaura a lista apenas quando o painel volta a ser ativo.
 
 Itens ainda pendentes por maior risco ou necessidade de benchmark:
 

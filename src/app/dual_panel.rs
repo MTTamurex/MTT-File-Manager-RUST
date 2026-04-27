@@ -48,6 +48,7 @@ pub struct PanelSnapshot {
     // Content
     pub items: Arc<Vec<FileEntry>>,
     pub all_items: Vec<FileEntry>,
+    pub items_snapshot_compact: bool,
     pub total_items: usize,
     pub is_loading_folder: bool,
 
@@ -94,9 +95,32 @@ pub struct PanelSnapshot {
 }
 
 impl PanelSnapshot {
+    fn can_compact_items_snapshot(&self) -> bool {
+        self.search_query.is_empty()
+            && !self.is_loading_folder
+            && !self.pending_items_rebuild
+            && self.items.len() == self.all_items.len()
+    }
+
+    fn compact_items_snapshot(&mut self) {
+        if self.can_compact_items_snapshot() {
+            self.items = Arc::new(Vec::new());
+            self.items_snapshot_compact = true;
+        } else {
+            self.items_snapshot_compact = false;
+        }
+    }
+
+    fn restore_items_snapshot(&mut self) {
+        if self.items_snapshot_compact {
+            self.items = Arc::new(self.all_items.clone());
+            self.items_snapshot_compact = false;
+        }
+    }
+
     /// Capture the current app state into a snapshot.
     pub fn from_app(app: &crate::app::state::ImageViewerApp) -> Self {
-        Self {
+        let mut snapshot = Self {
             path: app.navigation_state.current_path.clone(),
             path_input: app.navigation_state.path_input.clone(),
             is_computer_view: app.navigation_state.is_computer_view,
@@ -104,6 +128,7 @@ impl PanelSnapshot {
             navigation: app.navigation_state.navigation.clone(),
             items: app.items.clone(),
             all_items: app.all_items.clone(),
+            items_snapshot_compact: false,
             total_items: app.total_items,
             is_loading_folder: app.is_loading_folder,
             selected_item: app.selected_item,
@@ -131,11 +156,14 @@ impl PanelSnapshot {
             loading_started_at: app.loading_started_at,
             last_items_rebuild: app.last_items_rebuild,
             stale_items_snapshot: app.stale_items_snapshot.clone(),
-        }
+        };
+        snapshot.compact_items_snapshot();
+        snapshot
     }
 
     /// Restore this snapshot into the app's main fields.
-    pub fn apply_to(self, app: &mut crate::app::state::ImageViewerApp) {
+    pub fn apply_to(mut self, app: &mut crate::app::state::ImageViewerApp) {
+        self.restore_items_snapshot();
         app.navigation_state.current_path = self.path;
         app.navigation_state.path_input = self.path_input;
         app.navigation_state.is_computer_view = self.is_computer_view;
@@ -175,6 +203,7 @@ impl PanelSnapshot {
     /// Zero-allocation swap: exchange every field between `self` and the app's
     /// main fields using `std::mem::swap`. No clones, no allocations.
     pub fn swap_with_app(&mut self, app: &mut crate::app::state::ImageViewerApp) {
+        self.restore_items_snapshot();
         std::mem::swap(&mut self.path, &mut app.navigation_state.current_path);
         std::mem::swap(&mut self.path_input, &mut app.navigation_state.path_input);
         std::mem::swap(
@@ -224,5 +253,6 @@ impl PanelSnapshot {
             &mut self.stale_items_snapshot,
             &mut app.stale_items_snapshot,
         );
+        self.compact_items_snapshot();
     }
 }

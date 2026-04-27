@@ -39,6 +39,9 @@ pub struct TabState {
     pub items: Arc<Vec<FileEntry>>,
     /// Unfiltered items (for search)
     pub all_items: Vec<FileEntry>,
+    /// Whether `items` was intentionally compacted away because the visible
+    /// snapshot is identical to `all_items` for this stored tab state.
+    pub items_snapshot_compact: bool,
     /// Selected item index
     pub selected_item: Option<usize>,
     /// Selected file entry
@@ -104,6 +107,7 @@ impl TabState {
             is_computer_view: true,
             items: Arc::new(Vec::new()),
             all_items: Vec::new(),
+            items_snapshot_compact: false,
             selected_item: None,
             selected_file: None,
             search_query: String::new(),
@@ -147,6 +151,7 @@ impl TabState {
             is_computer_view: false,
             items: Arc::new(Vec::new()),
             all_items: Vec::new(),
+            items_snapshot_compact: false,
             selected_item: None,
             selected_file: None,
             search_query: String::new(),
@@ -247,10 +252,27 @@ impl TabState {
         self.navigation.can_go_forward()
     }
 
+    pub fn restore_items_snapshot(&self) -> Arc<Vec<FileEntry>> {
+        if self.items_snapshot_compact {
+            Arc::new(self.all_items.clone())
+        } else {
+            self.items.clone()
+        }
+    }
+
+    pub fn visible_items_len(&self) -> usize {
+        if self.items_snapshot_compact {
+            self.all_items.len()
+        } else {
+            self.items.len()
+        }
+    }
+
     /// Keep only lightweight state for closed-tab history to avoid retaining heavy caches.
     fn into_lightweight_closed_snapshot(mut self) -> Self {
         self.items = Arc::new(Vec::new());
         self.all_items.clear();
+        self.items_snapshot_compact = false;
         self.selected_item = None;
         self.selected_file = None;
         self.selected_thumbnail = None;
@@ -350,8 +372,13 @@ impl TabManager {
         let mut new_tab = TabState::new_at_path(self.next_id, &current.path);
         new_tab.navigation = current.navigation.clone();
         new_tab.is_computer_view = current.is_computer_view;
-        new_tab.items = current.items.clone();
+        new_tab.items = if current.items_snapshot_compact {
+            Arc::new(Vec::new())
+        } else {
+            current.items.clone()
+        };
         new_tab.all_items = current.all_items.clone();
+        new_tab.items_snapshot_compact = current.items_snapshot_compact;
         new_tab.selected_item = current.selected_item;
         new_tab.selected_file = current.selected_file.clone();
         new_tab.selected_thumbnail = current.selected_thumbnail.clone();
@@ -438,6 +465,7 @@ impl TabManager {
             reopened.is_computer_view = tab.is_computer_view;
             reopened.items = tab.items;
             reopened.all_items = tab.all_items;
+            reopened.items_snapshot_compact = tab.items_snapshot_compact;
             reopened.selected_item = tab.selected_item;
             reopened.selected_file = tab.selected_file;
             reopened.selected_thumbnail = tab.selected_thumbnail;
