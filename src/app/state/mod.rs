@@ -422,11 +422,6 @@ pub struct ImageViewerApp {
     pub active_gpu_backend: String,
     pub gpu_backend_preference: String,
 
-    // Renderer (Wgpu vs Glow): user preference. `"wgpu"` (default) loads the
-    // full wgpu stack; `"glow"` loads the lighter OpenGL-only renderer for a
-    // smaller RAM baseline. Requires restart to switch.
-    pub renderer_preference: String,
-
     // Configurable keyboard shortcuts
     pub shortcuts: ShortcutBindings,
     pub shortcut_editor: ShortcutEditorState,

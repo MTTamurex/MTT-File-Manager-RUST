@@ -106,16 +106,6 @@ fn parse_gpu_backend_preference(pref: Option<&str>) -> eframe::wgpu::Backends {
     }
 }
 
-/// Convert a stored renderer preference string into the corresponding eframe renderer.
-/// `"glow"` selects the lightweight OpenGL-only renderer (lower RAM baseline);
-/// anything else (including the default `"wgpu"`) keeps the wgpu renderer.
-fn parse_renderer_preference(pref: Option<&str>) -> eframe::Renderer {
-    match pref {
-        Some("glow") => eframe::Renderer::Glow,
-        _ => eframe::Renderer::Wgpu,
-    }
-}
-
 fn main() -> eframe::Result<()> {
     // SEC: Remove the current working directory from the default DLL search order.
     // Prevents DLL planting attacks (e.g. malicious pdfium.dll or libmpv-2.dll in CWD).
@@ -265,26 +255,10 @@ fn main() -> eframe::Result<()> {
         selected_backends
     );
 
-    // Read user's preferred renderer (wgpu or glow) before eframe init so the
-    // choice can change which graphics stack the app loads. Glow ships a much
-    // smaller runtime (no naga / wgpu-core / dx12 driver heaps), so users can
-    // trade some upload throughput for a lower RAM baseline.
-    let renderer_pref = read_early_preference("renderer");
-    let selected_renderer = parse_renderer_preference(renderer_pref.as_deref());
-    log::info!(
-        "[STARTUP] Renderer preference: {:?} -> renderer: {:?}",
-        renderer_pref.as_deref().unwrap_or("wgpu"),
-        selected_renderer
-    );
-
     let options = eframe::NativeOptions {
         viewport,
-        renderer: selected_renderer,
+        renderer: eframe::Renderer::Wgpu,
         persist_window: false, // Disable eframe persistence - we control manually
-        // wgpu_options is only consulted when `renderer == Renderer::Wgpu`. With
-        // `Renderer::Glow` selected this whole struct is ignored by eframe but
-        // costs nothing to keep here — lets the user swap renderers at runtime
-        // (with a restart) without us touching this code path.
         wgpu_options: eframe::egui_wgpu::WgpuConfiguration {
             // Request the discrete GPU on hybrid-GPU systems (e.g. laptop with
             // Intel + NVIDIA/AMD).  Without this, the driver may route the app
