@@ -73,12 +73,14 @@ impl ImageViewerApp {
             self.dual_panel_active.other()
         );
 
-        // Stop any in-panel video/media preview before swapping state.
-        // media_preview lives on ImageViewerApp directly (not in PanelSnapshot),
-        // so it would otherwise keep playing against the wrong panel's selected_file,
-        // causing the preview panel to render both the video and the new panel's
-        // thumbnail simultaneously.
-        self.destroy_media_preview();
+        // Stop in-panel media only when this tab owns the global preview.
+        // A video owned by another tab may be playing in the background and
+        // must not be torn down by browsing or focusing dual-panel panes here.
+        let active_tab_id = self.tab_manager.active().id;
+        let current_tab_owns_media = self.media_preview_owner_tab_id == Some(active_tab_id);
+        if current_tab_owns_media {
+            self.destroy_media_preview();
+        }
 
         // Zero-alloc swap: active ↔ inactive
         snapshot.swap_with_app(self);
@@ -92,6 +94,10 @@ impl ImageViewerApp {
 
         // Re-watch the new active folder so watcher events go to the right place
         self.watch_current_folder();
+
+        if !current_tab_owns_media {
+            self.update_video_visibility();
+        }
 
         // Check if the newly active panel's folder was marked dirty while inactive
         // (e.g., by a file operation that completed while this panel was inactive).
