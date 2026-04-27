@@ -13,6 +13,9 @@ use std::time::{Duration, Instant};
 /// Maximum number of concurrent GIF decode workers.
 /// Prevents unbounded thread creation when many GIFs are visible simultaneously.
 const GIF_DECODE_WORKERS: usize = 3;
+const GIF_MAX_MEMORY_BYTES: usize = 150 * 1024 * 1024;
+const GIF_MAX_BYTES_PER_ENTRY: usize = 24 * 1024 * 1024;
+const GIF_MAX_FRAMES: usize = 500;
 
 /// Job sent to a GIF decode worker thread.
 struct GifDecodeJob {
@@ -22,6 +25,8 @@ struct GifDecodeJob {
     global_gen: Arc<AtomicUsize>,
     ui_ctx: egui::Context,
     running_total: Arc<AtomicUsize>,
+    max_memory_bytes: usize,
+    max_gif_bytes: usize,
 }
 
 /// A single decoded frame of a GIF
@@ -87,6 +92,8 @@ impl GifManager {
                             job.global_gen,
                             job.ui_ctx,
                             job.running_total,
+                            job.max_memory_bytes,
+                            job.max_gif_bytes,
                         ) {
                             log::error!("GifWorker-{}: {}", worker_id, e);
                         }
@@ -99,7 +106,7 @@ impl GifManager {
             cache: LruCache::new(NonZeroUsize::new(100).expect("gif cache size must be non-zero")),
             current_generation: Arc::new(AtomicUsize::new(0)),
             ui_ctx,
-            max_memory_bytes: 150 * 1024 * 1024, // 150 MB
+            max_memory_bytes: GIF_MAX_MEMORY_BYTES,
             running_total_bytes: Arc::new(AtomicUsize::new(0)),
             job_sender,
         }
@@ -128,6 +135,7 @@ impl GifManager {
         let current_gen = self.current_generation.clone();
         let ui_ctx = self.ui_ctx.clone();
         let running_total = self.running_total_bytes.clone();
+        let max_memory_bytes = self.max_memory_bytes;
 
         // Send to bounded worker pool instead of spawning unbounded threads.
         // If the pool is full, the oldest pending job is implicitly throttled.
@@ -138,6 +146,8 @@ impl GifManager {
             global_gen: current_gen,
             ui_ctx,
             running_total,
+            max_memory_bytes,
+            max_gif_bytes: GIF_MAX_BYTES_PER_ENTRY,
         });
 
         data
@@ -194,6 +204,8 @@ impl GifManager {
         _global_gen: Arc<AtomicUsize>,
         ui_ctx: egui::Context,
         running_total: Arc<AtomicUsize>,
+        max_memory_bytes: usize,
+        max_gif_bytes: usize,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let file = std::fs::File::open(&path)?;
         let reader = std::io::BufReader::new(file);
@@ -239,11 +251,32 @@ impl GifManager {
             };
 
             let frame_bytes = rgba.len();
+            let running_total_before = running_total.load(Ordering::SeqCst);
 
             {
                 let mut d = data.lock();
                 // Check generation and cancellation inside lock
                 if d.generation != generation || d.cancelled.load(Ordering::SeqCst) {
+                    return Ok(());
+                }
+
+                let has_visible_frames = !d.frames.is_empty();
+                let exceeds_per_gif_budget = d.total_bytes.saturating_add(frame_bytes) > max_gif_bytes;
+                let exceeds_global_budget = running_total_before.saturating_add(frame_bytes) > max_memory_bytes;
+
+                if has_visible_frames && (exceeds_per_gif_budget || exceeds_global_budget) {
+                    d.is_complete = true;
+                    ui_ctx.request_repaint();
+                    log::debug!(
+                        "[GIF] Truncated decode for {:?}: frames={} total_bytes={} next_frame={} global_total={} exceeds_per_gif={} exceeds_global={}",
+                        path,
+                        d.frames.len(),
+                        d.total_bytes,
+                        frame_bytes,
+                        running_total_before,
+                        exceeds_per_gif_budget,
+                        exceeds_global_budget
+                    );
                     return Ok(());
                 }
 
@@ -269,7 +302,7 @@ impl GifManager {
             }
 
             // Limit total frames to avoid OOM for crazy GIFs
-            if i > 500 {
+            if i >= GIF_MAX_FRAMES {
                 break;
             }
         }
