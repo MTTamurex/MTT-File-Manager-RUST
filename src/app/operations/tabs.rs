@@ -29,8 +29,7 @@ impl ImageViewerApp {
         }
         active.selected_item = self.selected_item;
         active.selected_file = self.selected_file.clone();
-        // PERF: Keep thumbnail when syncing (user might return to this tab)
-        active.selected_thumbnail = self.selected_thumbnail.clone();
+        active.selected_thumbnail = None;
         active.selected_gif = self.selected_gif.clone();
         active.selected_metadata = self.selected_metadata.clone();
         active.search_query = self.search_query.clone();
@@ -174,6 +173,13 @@ impl ImageViewerApp {
 
         // Apply folder lock if the destination tab's folder has locked preferences
         self.apply_folder_lock_if_present();
+
+        if self.show_preview_panel
+            && self.selected_file.is_some()
+            && self.selected_thumbnail.is_none()
+        {
+            self.update_selected_thumbnail();
+        }
 
         self.watch_current_folder();
 

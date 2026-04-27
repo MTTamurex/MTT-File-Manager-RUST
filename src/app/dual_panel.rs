@@ -97,6 +97,7 @@ pub struct PanelSnapshot {
 impl PanelSnapshot {
     pub(crate) fn compact_for_storage(&mut self) {
         self.compact_items_snapshot();
+        self.selected_thumbnail = None;
     }
 
     pub(crate) fn restore_from_storage(&mut self) {

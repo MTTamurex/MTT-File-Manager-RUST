@@ -100,6 +100,13 @@ impl ImageViewerApp {
             self.update_video_visibility();
         }
 
+        if self.show_preview_panel
+            && self.selected_file.is_some()
+            && self.selected_thumbnail.is_none()
+        {
+            self.update_selected_thumbnail();
+        }
+
         // Check if the newly active panel's folder was marked dirty while inactive
         // (e.g., by a file operation that completed while this panel was inactive).
         let current = std::path::PathBuf::from(&self.navigation_state.current_path);

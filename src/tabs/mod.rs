@@ -381,7 +381,7 @@ impl TabManager {
         new_tab.items_snapshot_compact = current.items_snapshot_compact;
         new_tab.selected_item = current.selected_item;
         new_tab.selected_file = current.selected_file.clone();
-        new_tab.selected_thumbnail = current.selected_thumbnail.clone();
+        new_tab.selected_thumbnail = None;
         new_tab.selected_metadata = current.selected_metadata.clone();
         new_tab.selected_gif = current.selected_gif.clone();
         new_tab.search_query = current.search_query.clone();
