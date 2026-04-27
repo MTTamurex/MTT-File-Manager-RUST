@@ -262,7 +262,7 @@ impl ImageViewerApp {
                 self.request_folder_scans_batch(parent_folders_needing_scan.into_iter().collect());
             }
 
-            for item in &self.all_items {
+            for item in self.all_items.iter() {
                 if let Some(ref cover) = item.folder_cover {
                     if item.is_dir && successful_set.contains(cover) {
                         // SQLite miss ⇒ the current preview was a MediaUnsafe placeholder.
@@ -632,8 +632,9 @@ impl ImageViewerApp {
         let mut folders_to_refresh: HashSet<PathBuf> = HashSet::new();
         let mut updated_any = false;
         let mut remaining_master = failed_paths.len();
+        let mut removed_folder_covers: Vec<PathBuf> = Vec::new();
 
-        for item in self.all_items.iter_mut() {
+        for item in self.all_items_mut().iter_mut() {
             if remaining_master == 0 {
                 break;
             }
@@ -644,11 +645,15 @@ impl ImageViewerApp {
             {
                 let folder_path = item.path.clone();
                 item.folder_cover = None;
-                self.app_state_db.remove_folder_cover(&folder_path);
+                removed_folder_covers.push(folder_path.clone());
                 folders_to_refresh.insert(folder_path);
                 updated_any = true;
                 remaining_master = remaining_master.saturating_sub(1);
             }
+        }
+
+        for folder_path in &removed_folder_covers {
+            self.app_state_db.remove_folder_cover(folder_path);
         }
 
         let items = std::sync::Arc::make_mut(&mut self.items);

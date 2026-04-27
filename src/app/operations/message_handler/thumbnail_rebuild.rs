@@ -47,7 +47,7 @@ impl ImageViewerApp {
         let new_paths: std::collections::HashSet<&std::path::PathBuf> =
             self.all_items.iter().map(|item| &item.path).collect();
 
-        for item in &self.all_items {
+        for item in self.all_items.iter() {
             if let Some(&(old_modified, old_size)) = old_snapshot.get(&item.path) {
                 if item.modified != old_modified || item.size != old_size {
                     self.cache_manager.texture_cache.pop(&item.path);
@@ -113,7 +113,7 @@ impl ImageViewerApp {
         {
             Some(filtered) => filtered,
             None => {
-                let mut all = self.all_items.clone();
+                let mut all = self.all_items.as_ref().clone();
                 sorting::sort_items(
                     &mut all,
                     self.sort_mode,
@@ -156,7 +156,10 @@ impl ImageViewerApp {
             let mut result_items = match sorting::filter_items_opt(&items, &query) {
                 Some(filtered) => filtered,
                 None => {
-                    let mut all = items;
+                    let mut all = match Arc::try_unwrap(items) {
+                        Ok(all) => all,
+                        Err(shared) => shared.as_ref().clone(),
+                    };
                     sorting::sort_items(&mut all, sort_mode, sort_descending, folders_position);
                     all
                 }
@@ -255,7 +258,7 @@ impl ImageViewerApp {
         // If the deferred clear was never consumed (e.g., empty folder),
         // apply it now so stale items don't leak into the final snapshot.
         if self.pending_all_items_clear {
-            self.all_items.clear();
+            self.all_items_mut().clear();
             self.pending_all_items_clear = false;
         }
 

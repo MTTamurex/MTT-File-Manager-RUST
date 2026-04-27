@@ -75,7 +75,7 @@ impl ImageViewerApp {
         if force_refresh {
             // Hard refresh (F5): clear everything immediately.
             self.items = Arc::new(Vec::new());
-            self.all_items.clear();
+            self.all_items_mut().clear();
             self.pending_all_items_clear = false;
         } else {
             // Watcher-triggered soft reload: keep old items visible to prevent

@@ -18,13 +18,16 @@ impl ImageViewerApp {
             None => {
                 // Empty query: sort all_items in-place and use directly
                 // This avoids a full clone of the entire vector
+                let sort_mode = self.sort_mode;
+                let sort_descending = self.sort_descending;
+                let folders_position = self.folders_position;
                 sorting::sort_items(
-                    &mut self.all_items,
-                    self.sort_mode,
-                    self.sort_descending,
-                    self.folders_position,
+                    self.all_items_mut(),
+                    sort_mode,
+                    sort_descending,
+                    folders_position,
                 );
-                self.items = Arc::new(self.all_items.clone());
+                self.share_visible_items_from_all_items();
             }
         }
         self.total_items = self.items.len();
@@ -43,15 +46,28 @@ impl ImageViewerApp {
     /// - Uses par_sort_by for lists >5000 items (rayon)
     /// - Uses case-insensitive comparisons without allocation (natord::compare_ignore_case)
     pub fn sort_items(&mut self) {
-        // PERFORMANCE: If we have unique ownership of the Arc, we can modify in-place
-        // using Arc::make_mut(). Otherwise, we need to clone.
-        let items = Arc::make_mut(&mut self.items);
-        sorting::sort_items(
-            items,
-            self.sort_mode,
-            self.sort_descending,
-            self.folders_position,
-        );
+        if self.search_query.is_empty() {
+            let sort_mode = self.sort_mode;
+            let sort_descending = self.sort_descending;
+            let folders_position = self.folders_position;
+            sorting::sort_items(
+                self.all_items_mut(),
+                sort_mode,
+                sort_descending,
+                folders_position,
+            );
+            self.share_visible_items_from_all_items();
+        } else {
+            // PERFORMANCE: If we have unique ownership of the Arc, we can modify in-place
+            // using Arc::make_mut(). Otherwise, we need to clone.
+            let items = Arc::make_mut(&mut self.items);
+            sorting::sort_items(
+                items,
+                self.sort_mode,
+                self.sort_descending,
+                self.folders_position,
+            );
+        }
         self.reconcile_visible_selection_index();
     }
 }

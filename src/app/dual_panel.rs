@@ -47,7 +47,7 @@ pub struct PanelSnapshot {
 
     // Content
     pub items: Arc<Vec<FileEntry>>,
-    pub all_items: Vec<FileEntry>,
+    pub all_items: Arc<Vec<FileEntry>>,
     pub items_snapshot_compact: bool,
     pub total_items: usize,
     pub is_loading_folder: bool,
@@ -123,7 +123,7 @@ impl PanelSnapshot {
 
     fn restore_items_snapshot(&mut self) {
         if self.items_snapshot_compact {
-            self.items = Arc::new(self.all_items.clone());
+            self.items = self.all_items.clone();
             self.items_snapshot_compact = false;
         }
     }

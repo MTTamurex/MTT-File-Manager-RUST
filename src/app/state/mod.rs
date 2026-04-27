@@ -184,7 +184,7 @@ pub struct ImageViewerApp {
     pub total_items: usize,
 
     // Search & Navigation (NEW)
-    pub all_items: Vec<FileEntry>,            // Master cache for search
+    pub all_items: Arc<Vec<FileEntry>>,       // Master cache for search
     pub search_query: String,                 // Search text
     pub last_grid_cols: usize,                // Memory for vertical navigation (keyboard)
     pub generation: usize,                    // Local counter (Main Thread)

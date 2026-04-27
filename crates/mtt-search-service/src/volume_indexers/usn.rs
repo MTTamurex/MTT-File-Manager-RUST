@@ -361,6 +361,7 @@ pub(crate) fn index_volume(
     index.state = file_index::IndexState::Ready;
     // Build lowercased arena for case-insensitive SIMD search.
     index.names.build_lowered();
+    index.touch_search_cache();
     let mut current_usn = index.last_usn;
     let sizes_already_loaded = index.sizes_loaded;
 
@@ -704,6 +705,7 @@ pub(crate) fn index_volume(
             {
                 let mut vol = handle.write();
                 vol.prune_old_modifications(std::time::Duration::from_secs(600));
+                vol.release_search_buffers_if_idle(file_index::SEARCH_BUFFER_IDLE_TTL);
             }
         }
     }

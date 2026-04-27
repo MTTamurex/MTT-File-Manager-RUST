@@ -117,7 +117,7 @@ impl ImageViewerApp {
         // Watcher-triggered reloads (same path) don't go through navigate_to()
         // so they still benefit from stale-while-revalidate in load_folder.
         self.items = std::sync::Arc::new(Vec::new());
-        self.all_items.clear();
+        self.all_items_mut().clear();
 
         // Cancel pending batch folder-size calculations for the old folder.
         self.folder_size_state.cancel_batch();
@@ -182,7 +182,7 @@ impl ImageViewerApp {
 
                 // Clear stale items (see navigate_to comment)
                 self.items = std::sync::Arc::new(Vec::new());
-                self.all_items.clear();
+                self.all_items_mut().clear();
 
                 // SYNC TAB STATE after clearing stale lists to avoid heavy cloning on navigation.
                 self.sync_to_tab();
@@ -244,7 +244,7 @@ impl ImageViewerApp {
 
                 // Clear stale items (see navigate_to comment)
                 self.items = std::sync::Arc::new(Vec::new());
-                self.all_items.clear();
+                self.all_items_mut().clear();
 
                 // SYNC TAB STATE after clearing stale lists to avoid heavy cloning on navigation.
                 self.sync_to_tab();

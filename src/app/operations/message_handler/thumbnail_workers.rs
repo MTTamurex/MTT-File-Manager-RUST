@@ -60,7 +60,7 @@ impl ImageViewerApp {
         let mut folder_updates = false;
         let mut covers_changed: Vec<std::path::PathBuf> = Vec::new();
         // Apply updates in-place without building temporary full-directory path indexes.
-        for item in &mut self.all_items {
+        for item in self.all_items_mut().iter_mut() {
             if let Some(cover_opt) = cover_updates.get(&item.path) {
                 if item.folder_cover != *cover_opt {
                     // Only invalidate composed preview when cover PATH genuinely

@@ -229,7 +229,7 @@ impl ImageViewerApp {
             let resolve_map: std::collections::HashMap<&PathBuf, &PathBuf> =
                 resolved.iter().map(|(fp, cp)| (fp, cp)).collect();
 
-            for item in self.all_items.iter_mut() {
+            for item in self.all_items_mut().iter_mut() {
                 if let Some(cover) = resolve_map.get(&item.path) {
                     if item.folder_cover.as_ref() != Some(cover) {
                         item.folder_cover = Some((*cover).clone());

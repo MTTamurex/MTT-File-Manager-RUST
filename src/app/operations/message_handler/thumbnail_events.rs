@@ -70,13 +70,13 @@ impl ImageViewerApp {
                         } else {
                             if self.pending_all_items_clear {
                                 self.capture_stale_items_snapshot();
-                                self.all_items.clear();
+                                self.all_items_mut().clear();
                                 self.pending_all_items_clear = false;
                             }
                             self.pending_items_count =
                                 self.pending_items_count.saturating_add(new_batch.len());
                             self.pending_items_rebuild = true;
-                            self.all_items.extend(new_batch);
+                            self.all_items_mut().extend(new_batch);
                         }
                     } else if let Some(ig) = inactive_gen {
                         if gen_id == ig {
@@ -195,18 +195,18 @@ impl ImageViewerApp {
             for batch in batches {
                 if app.pending_all_items_clear {
                     app.capture_stale_items_snapshot();
-                    app.all_items.clear();
+                    app.all_items_mut().clear();
                     app.pending_all_items_clear = false;
                 }
                 app.pending_items_count = app.pending_items_count.saturating_add(batch.len());
                 app.pending_items_rebuild = true;
-                app.all_items.extend(batch);
+                app.all_items_mut().extend(batch);
             }
 
             if saw_end {
                 app.is_loading_folder = false;
                 if app.pending_all_items_clear {
-                    app.all_items.clear();
+                    app.all_items_mut().clear();
                     app.pending_all_items_clear = false;
                 }
                 // Reconcile stale textures

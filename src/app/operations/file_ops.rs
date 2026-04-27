@@ -208,7 +208,7 @@ impl ImageViewerApp {
                 // CRITICAL: Immediately create entry to allow renaming
                 let new_item = FileEntry::from_path(full_path.clone(), true);
 
-                self.all_items.push(new_item);
+                self.all_items_mut().push(new_item);
                 self.filter_items();
 
                 // Find index in filtered vector
