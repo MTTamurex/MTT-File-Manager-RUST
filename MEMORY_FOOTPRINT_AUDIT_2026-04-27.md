@@ -29,9 +29,11 @@ Itens já implementados nesta etapa:
 - Search service: após load/scan completo, `VolumeIndex` agora compacta arena e mapas (`HashMap`/`HashSet`) antes de entrar em regime estável.
 - Folder size batch state: `batch_invalidation_epoch` agora sofre poda periódica de paths sem cache, request em voo ou revalidação pendente.
 - Tabs: snapshots de tabs inativas agora podem descartar `items` quando ele é redundante com `all_items`, reconstruindo a view só ao reativar o tab.
-- Dual panel: o snapshot do painel inativo agora também compacta `items` redundante e restaura a lista apenas quando o painel volta a ser ativo.
+- Dual panel: o estado do painel inativo armazenado dentro de tabs agora é compactado para não carregar `items` redundante quando o tab está fora de foco, sem repetir reconstruções de lista no snapshot vivo do dual panel renderizado a cada frame.
 - GIF manager: o decode incremental agora respeita teto por GIF e também interrompe crescimento adicional quando o orçamento global já foi alcançado, mantendo os primeiros frames já decodificados em vez de continuar acumulando memória até a próxima limpeza.
 - Rebuild assíncrono de `items`: o painel ativo agora coalesce rebuilds em voo, evitando spawn de múltiplos jobs que clonavam `all_items` repetidamente antes do resultado anterior voltar; mudanças acumuladas durante o job são reagendadas só após a conclusão do rebuild atual.
+- Dual panel streaming: rebuilds intermediários do painel inativo agora são throttled/coalescidos durante o streaming, em vez de forçar `filter_items()` a cada lote recebido.
+- Mutações pontuais da lista: removidos caminhos que faziam `filter_items()` seguido de `sort_items()`, embora `filter_items()` já produza o resultado ordenado.
 
 Itens ainda pendentes por maior risco ou necessidade de benchmark:
 

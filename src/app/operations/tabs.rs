@@ -52,7 +52,10 @@ impl ImageViewerApp {
         // Save dual panel state per-tab
         active.dual_panel_enabled = self.dual_panel_enabled;
         active.dual_panel_active = self.dual_panel_active;
-        active.dual_panel_inactive_state = self.dual_panel_inactive_state.clone();
+        active.dual_panel_inactive_state = self.dual_panel_inactive_state.clone().map(|mut snapshot| {
+            snapshot.compact_for_storage();
+            snapshot
+        });
 
         // Save per-tab sidebar state (expanded nodes + scroll position)
         active.sidebar_expanded = self.sidebar_tree.snapshot_expanded();
@@ -154,7 +157,10 @@ impl ImageViewerApp {
             // Restore dual panel state from tab
             self.dual_panel_enabled = active.dual_panel_enabled;
             self.dual_panel_active = active.dual_panel_active;
-            self.dual_panel_inactive_state = active.dual_panel_inactive_state.take();
+            self.dual_panel_inactive_state = active.dual_panel_inactive_state.take().map(|mut snapshot| {
+                snapshot.restore_from_storage();
+                snapshot
+            });
         }
 
         // Restore per-tab sidebar state (expanded nodes + scroll position)

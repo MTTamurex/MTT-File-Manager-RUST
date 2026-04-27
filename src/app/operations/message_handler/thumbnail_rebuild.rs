@@ -12,6 +12,12 @@ const MAX_EAGER_FOLDER_PREVIEWS: usize = 80;
 const MAX_EAGER_NON_USN_FOLDER_COVER_REVALIDATIONS: usize = 96;
 
 impl ImageViewerApp {
+    pub(super) fn should_run_pending_items_rebuild(&self) -> bool {
+        let elapsed = self.last_items_rebuild.elapsed();
+        elapsed > Duration::from_millis(REBUILD_THROTTLE_MS)
+            || self.pending_items_count >= REBUILD_PENDING_THRESHOLD
+    }
+
     fn hydrate_current_folder_modified_hint_after_load(&mut self) {
         if self.navigation_state.is_computer_view || self.navigation_state.is_recycle_bin_view {
             return;
@@ -252,10 +258,7 @@ impl ImageViewerApp {
             return;
         }
 
-        let elapsed = self.last_items_rebuild.elapsed();
-        if elapsed <= Duration::from_millis(REBUILD_THROTTLE_MS)
-            && self.pending_items_count < REBUILD_PENDING_THRESHOLD
-        {
+        if !self.should_run_pending_items_rebuild() {
             return;
         }
 

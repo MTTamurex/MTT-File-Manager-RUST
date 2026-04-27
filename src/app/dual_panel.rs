@@ -95,6 +95,14 @@ pub struct PanelSnapshot {
 }
 
 impl PanelSnapshot {
+    pub(crate) fn compact_for_storage(&mut self) {
+        self.compact_items_snapshot();
+    }
+
+    pub(crate) fn restore_from_storage(&mut self) {
+        self.restore_items_snapshot();
+    }
+
     fn can_compact_items_snapshot(&self) -> bool {
         self.search_query.is_empty()
             && !self.is_loading_folder
@@ -120,7 +128,7 @@ impl PanelSnapshot {
 
     /// Capture the current app state into a snapshot.
     pub fn from_app(app: &crate::app::state::ImageViewerApp) -> Self {
-        let mut snapshot = Self {
+        Self {
             path: app.navigation_state.current_path.clone(),
             path_input: app.navigation_state.path_input.clone(),
             is_computer_view: app.navigation_state.is_computer_view,
@@ -156,9 +164,7 @@ impl PanelSnapshot {
             loading_started_at: app.loading_started_at,
             last_items_rebuild: app.last_items_rebuild,
             stale_items_snapshot: app.stale_items_snapshot.clone(),
-        };
-        snapshot.compact_items_snapshot();
-        snapshot
+        }
     }
 
     /// Restore this snapshot into the app's main fields.
@@ -253,6 +259,5 @@ impl PanelSnapshot {
             &mut self.stale_items_snapshot,
             &mut app.stale_items_snapshot,
         );
-        self.compact_items_snapshot();
     }
 }

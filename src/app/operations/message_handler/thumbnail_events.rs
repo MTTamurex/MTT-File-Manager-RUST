@@ -119,6 +119,8 @@ impl ImageViewerApp {
         // Process inactive panel batches via with_inactive_panel
         if !inactive_batches.is_empty() || inactive_saw_end {
             self.apply_inactive_panel_batches(inactive_batches, inactive_saw_end, ctx);
+        } else {
+            self.maybe_rebuild_inactive_panel_items(ctx);
         }
 
         let t_rebuild = Instant::now();
@@ -244,12 +246,33 @@ impl ImageViewerApp {
                     "[DualPanel] Inactive panel reload complete: {}",
                     app.navigation_state.current_path
                 );
-            } else if app.pending_items_rebuild {
-                // Intermediate rebuild: apply filter/sort so items are visible
-                app.filter_items();
-                app.pending_items_rebuild = false;
             }
         });
+        self.maybe_rebuild_inactive_panel_items(&ctx2);
         ctx2.request_repaint();
+    }
+
+    fn maybe_rebuild_inactive_panel_items(&mut self, ctx: &egui::Context) {
+        if !self.dual_panel_enabled {
+            return;
+        }
+
+        let ctx2 = ctx.clone();
+        let mut rebuilt = false;
+        self.with_inactive_panel(|app| {
+            if !app.pending_items_rebuild || !app.should_run_pending_items_rebuild() {
+                return;
+            }
+
+            app.filter_items();
+            app.pending_items_rebuild = false;
+            app.pending_items_count = 0;
+            app.last_items_rebuild = Instant::now();
+            rebuilt = true;
+        });
+
+        if rebuilt {
+            ctx2.request_repaint();
+        }
     }
 }
