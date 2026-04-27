@@ -210,7 +210,6 @@ impl ImageViewerApp {
 
                 self.all_items.push(new_item);
                 self.filter_items();
-                self.sort_items();
 
                 // Find index in filtered vector
                 if let Some(idx) = self.items.iter().position(|i| i.path == full_path) {

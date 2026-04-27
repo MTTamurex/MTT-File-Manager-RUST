@@ -254,7 +254,6 @@ impl ImageViewerApp {
         }
 
         self.filter_items();
-        self.sort_items();
         if is_dir {
             self.request_folder_scan(cleaned.clone());
         }
