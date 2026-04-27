@@ -86,6 +86,7 @@ impl ImageViewerApp {
         snapshot.swap_with_app(self);
         self.dual_panel_inactive_state = Some(snapshot);
         self.dual_panel_active = self.dual_panel_active.other();
+        self.invalidate_active_items_rebuild();
 
         // Sync the shared gen tracker with the newly active panel's generation
         // so thumbnail workers accept requests from the now-active panel.

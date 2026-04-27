@@ -101,6 +101,7 @@ pub struct ImageViewerApp {
     pub items_rebuild_sender: Sender<ItemsRebuildResult>,
     pub items_rebuild_receiver: Receiver<ItemsRebuildResult>,
     pub items_rebuild_request_id: usize,
+    pub items_rebuild_in_flight: bool,
 
     // COVER WORKER: Folder cover system (Single Thread Worker)
     pub cover_worker_sender: Sender<PathBuf>, // UI â†’ Worker: Sends folder to process

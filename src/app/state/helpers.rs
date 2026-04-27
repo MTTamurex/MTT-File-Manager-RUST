@@ -5,6 +5,18 @@ use crate::domain::file_entry::ViewMode;
 use super::ImageViewerApp;
 
 impl ImageViewerApp {
+    pub(crate) fn clear_pending_items_rebuild_flags(&mut self) {
+        self.pending_items_rebuild = false;
+        self.pending_items_count = 0;
+    }
+
+    pub(crate) fn invalidate_active_items_rebuild(&mut self) {
+        self.items_rebuild_request_id = self.items_rebuild_request_id.wrapping_add(1);
+        self.items_rebuild_in_flight = false;
+        self.clear_pending_items_rebuild_flags();
+        self.last_items_rebuild = Instant::now();
+    }
+
     /// Returns `true` while the post-restore burst window is active.
     /// During burst, thumbnail upload throttling is bypassed to recover visual
     /// state quickly after the OS pages out the GPU working set.

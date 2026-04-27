@@ -74,6 +74,10 @@ impl ImageViewerApp {
     }
 
     fn spawn_items_rebuild_job(&mut self) {
+        if self.items_rebuild_in_flight {
+            return;
+        }
+
         self.items_rebuild_request_id = self.items_rebuild_request_id.wrapping_add(1);
         let request_id = self.items_rebuild_request_id;
         let generation = self.generation;
@@ -83,6 +87,9 @@ impl ImageViewerApp {
         let sort_descending = self.sort_descending;
         let folders_position = self.folders_position;
         let sender = self.items_rebuild_sender.clone();
+        let ui_ctx = self.ui_ctx.clone();
+
+        self.items_rebuild_in_flight = true;
 
         std::thread::spawn(move || {
             let mut result_items = match sorting::filter_items_opt(&items, &query) {
@@ -108,6 +115,7 @@ impl ImageViewerApp {
                 items: result_items,
                 total_items: total,
             });
+            ui_ctx.request_repaint();
         });
     }
 
@@ -180,8 +188,7 @@ impl ImageViewerApp {
     pub(super) fn handle_items_after_end_of_load(&mut self, ctx: &egui::Context) {
         self.is_loading_folder = false;
         self.file_operation_state.pending_deletions.clear();
-        self.pending_items_rebuild = false;
-        self.pending_items_count = 0;
+        self.invalidate_active_items_rebuild();
         self.hydrate_current_folder_modified_hint_after_load();
 
         // If the deferred clear was never consumed (e.g., empty folder),
@@ -252,10 +259,14 @@ impl ImageViewerApp {
             return;
         }
 
+        if self.items_rebuild_in_flight {
+            ctx.request_repaint_after(Duration::from_millis(REBUILD_THROTTLE_MS));
+            return;
+        }
+
         self.spawn_items_rebuild_job();
         self.last_items_rebuild = Instant::now();
-        self.pending_items_count = 0;
-        self.pending_items_rebuild = false;
+        self.clear_pending_items_rebuild_flags();
         ctx.request_repaint();
     }
 }

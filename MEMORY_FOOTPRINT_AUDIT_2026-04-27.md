@@ -31,6 +31,7 @@ Itens já implementados nesta etapa:
 - Tabs: snapshots de tabs inativas agora podem descartar `items` quando ele é redundante com `all_items`, reconstruindo a view só ao reativar o tab.
 - Dual panel: o snapshot do painel inativo agora também compacta `items` redundante e restaura a lista apenas quando o painel volta a ser ativo.
 - GIF manager: o decode incremental agora respeita teto por GIF e também interrompe crescimento adicional quando o orçamento global já foi alcançado, mantendo os primeiros frames já decodificados em vez de continuar acumulando memória até a próxima limpeza.
+- Rebuild assíncrono de `items`: o painel ativo agora coalesce rebuilds em voo, evitando spawn de múltiplos jobs que clonavam `all_items` repetidamente antes do resultado anterior voltar; mudanças acumuladas durante o job são reagendadas só após a conclusão do rebuild atual.
 
 Itens ainda pendentes por maior risco ou necessidade de benchmark:
 

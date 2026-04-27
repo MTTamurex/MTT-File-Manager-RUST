@@ -140,8 +140,7 @@ impl ImageViewerApp {
         self.generation += 1;
         self.current_generation
             .store(self.generation, AtomicOrdering::Relaxed);
-        self.pending_items_rebuild = false;
-        self.pending_items_count = 0;
+        self.invalidate_active_items_rebuild();
 
         // Set computer view
         self.navigation_state.current_path = COMPUTER_VIEW_ID.to_string();
