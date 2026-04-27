@@ -1273,7 +1273,8 @@ where
     let record_size = geo.bytes_per_file_record as usize;
     let cluster_size = geo.bytes_per_cluster as usize;
 
-    let mut index = VolumeIndex::new(drive_letter);
+    let estimated_records = total_records.min(usize::MAX as u64) as usize;
+    let mut index = VolumeIndex::with_estimated_records(drive_letter, estimated_records);
     let mut extension_sizes: HashMap<u64, u64> = HashMap::new();
     let mut extension_parents: HashMap<u64, Vec<u64>> = HashMap::new();
     let mut size_recheck_candidates: Vec<u64> = Vec::new();
@@ -1457,6 +1458,8 @@ where
     }
 
     on_progress(frn, total_records);
+
+    index.shrink_to_fit();
 
     let elapsed = start.elapsed();
     let (arena_used, _arena_cap, map_est) = index.memory_usage();

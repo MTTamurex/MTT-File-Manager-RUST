@@ -97,7 +97,7 @@ impl TextViewerApp {
         }
 
         // Encoding detection
-        let (text, encoding_label) = decode_text(&raw);
+        let (text, encoding_label) = decode_text(raw);
 
         // Build line index (offsets into `text`) without copying each line
         // into its own `String`. Drop the original `raw` bytes by reusing
@@ -649,19 +649,19 @@ impl eframe::App for ErrorApp {
 /// 1. UTF-8 BOM → strip BOM, decode as UTF-8
 /// 2. UTF-8 (valid) → use as-is
 /// 3. Fallback → decode as Windows-1252 / Latin-1 (lossless for all byte values)
-fn decode_text(raw: &[u8]) -> (String, &'static str) {
+fn decode_text(raw: Vec<u8>) -> (String, &'static str) {
     // Check UTF-8 BOM
     if raw.starts_with(&[0xEF, 0xBB, 0xBF]) {
-        let without_bom = &raw[3..];
-        if let Ok(s) = std::str::from_utf8(without_bom) {
-            return (s.to_string(), "UTF-8 BOM");
+        if let Ok(text) = String::from_utf8(raw[3..].to_vec()) {
+            return (text, "UTF-8 BOM");
         }
     }
 
     // Try UTF-8
-    if let Ok(s) = std::str::from_utf8(raw) {
-        return (s.to_string(), "UTF-8");
-    }
+    let raw = match String::from_utf8(raw) {
+        Ok(text) => return (text, "UTF-8"),
+        Err(err) => err.into_bytes(),
+    };
 
     // Fallback: decode as Windows-1252 (Latin-1 superset).
     // Windows-1252 maps 0x00–0xFF to Unicode code points, so it's a lossless

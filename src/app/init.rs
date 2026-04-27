@@ -352,7 +352,7 @@ impl ImageViewerApp {
                         ),
                         eframe::egui::TextureOptions::LINEAR,
                     );
-                    loader.extension_cache.insert(ext_key, texture);
+                    loader.extension_cache.put(ext_key, texture);
                 }
                 if !preloaded_extension_icons.is_empty() {
                     log::info!(

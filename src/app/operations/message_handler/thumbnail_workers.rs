@@ -59,14 +59,9 @@ impl ImageViewerApp {
 
         let mut folder_updates = false;
         let mut covers_changed: Vec<std::path::PathBuf> = Vec::new();
-        // Build a path index for master items and apply only touched updates.
-        let mut all_items_index = std::collections::HashMap::with_capacity(self.all_items.len());
-        for (idx, item) in self.all_items.iter().enumerate() {
-            all_items_index.insert(item.path.clone(), idx);
-        }
-        for (folder_path, cover_opt) in &cover_updates {
-            if let Some(idx) = all_items_index.get(folder_path) {
-                let item = &mut self.all_items[*idx];
+        // Apply updates in-place without building temporary full-directory path indexes.
+        for item in &mut self.all_items {
+            if let Some(cover_opt) = cover_updates.get(&item.path) {
                 if item.folder_cover != *cover_opt {
                     // Only invalidate composed preview when cover PATH genuinely
                     // changed (Some(old) → Some(new)  or  Some(_) → None).
@@ -82,7 +77,7 @@ impl ImageViewerApp {
                     item.folder_cover = cover_opt.clone();
                     folder_updates = true;
                     if cover_path_changed {
-                        covers_changed.push(folder_path.clone());
+                        covers_changed.push(item.path.clone());
                     }
                 }
             }
@@ -90,15 +85,10 @@ impl ImageViewerApp {
 
         let t_all_items = Instant::now();
 
-        // Build a path index for rendered items and apply only touched updates.
+        // Apply the same updates to the rendered snapshot without a second path index.
         let items = std::sync::Arc::make_mut(&mut self.items);
-        let mut visible_items_index = std::collections::HashMap::with_capacity(items.len());
-        for (idx, item) in items.iter().enumerate() {
-            visible_items_index.insert(item.path.clone(), idx);
-        }
-        for (folder_path, cover_opt) in &cover_updates {
-            if let Some(idx) = visible_items_index.get(folder_path) {
-                let item = &mut items[*idx];
+        for item in items.iter_mut() {
+            if let Some(cover_opt) = cover_updates.get(&item.path) {
                 if item.folder_cover != *cover_opt {
                     item.folder_cover = cover_opt.clone();
                     folder_updates = true;
@@ -184,7 +174,7 @@ impl ImageViewerApp {
                                         &ext_raw,
                                     );
                                 let ext_key = format!("{}_Large", ext_str);
-                                if !self.item_icon_loader.extension_cache.contains_key(&ext_key) {
+                                if self.item_icon_loader.extension_cache.peek(&ext_key).is_none() {
                                     let texture = ctx.load_texture(
                                         ext_key.clone(),
                                         egui::ColorImage::from_rgba_unmultiplied(
@@ -195,7 +185,7 @@ impl ImageViewerApp {
                                     );
                                     self.item_icon_loader
                                         .extension_cache
-                                        .insert(ext_key, texture);
+                                        .put(ext_key, texture);
                                     prewarm_uploads += 1;
                                 }
                             }
@@ -272,7 +262,7 @@ impl ImageViewerApp {
                             let ext_str =
                                 crate::infrastructure::windows::icons::canonical_icon_ext(&ext_raw);
                             let ext_key = format!("{}_Large", ext_str);
-                            if !self.item_icon_loader.extension_cache.contains_key(&ext_key) {
+                            if self.item_icon_loader.extension_cache.peek(&ext_key).is_none() {
                                 let texture = ctx.load_texture(
                                     ext_key.clone(),
                                     egui::ColorImage::from_rgba_unmultiplied(
@@ -283,7 +273,7 @@ impl ImageViewerApp {
                                 );
                                 self.item_icon_loader
                                     .extension_cache
-                                    .insert(ext_key, texture);
+                                    .put(ext_key, texture);
                             }
                         }
                         if let Some(ext) = path.extension() {
@@ -369,10 +359,11 @@ impl ImageViewerApp {
                     let mut ext_key = String::with_capacity(ext_str.len() + 6);
                     ext_key.push_str(ext_str);
                     ext_key.push_str("_Large");
-                    self.item_icon_loader
-                        .extension_cache
-                        .entry(ext_key)
-                        .or_insert_with(|| texture.clone());
+                        if self.item_icon_loader.extension_cache.peek(&ext_key).is_none() {
+                            self.item_icon_loader
+                                .extension_cache
+                                .put(ext_key, texture.clone());
+                        }
                 }
             }
 
@@ -630,6 +621,10 @@ impl ImageViewerApp {
                         .or_insert(0) += 1;
                     received_any = true;
                 }
+            }
+
+            if self.folder_size_state.should_prune_invalidation_epochs(now) {
+                self.folder_size_state.prune_stale_invalidation_epochs(now);
             }
         }
 

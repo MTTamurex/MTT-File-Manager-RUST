@@ -58,12 +58,12 @@ impl IconLoader {
                     if result.key.ends_with("_Jumbo") {
                         self.icon_cache.put(result.key, texture);
                     } else {
-                        self.drive_icon_cache.insert(result.key, texture);
+                        self.drive_icon_cache.put(result.key, texture);
                     }
                     uploads += 1;
                 }
                 None => {
-                    self.failed_drive_icons.insert(result.key);
+                    self.failed_drive_icons.put(result.key, ());
                 }
             }
         }
@@ -83,7 +83,7 @@ impl IconLoader {
         _ctx: &egui::Context,
         drive_path: &str,
     ) -> Option<egui::TextureHandle> {
-        if self.failed_drive_icons.contains(drive_path) {
+        if self.failed_drive_icons.peek(drive_path).is_some() {
             return None;
         }
 
@@ -142,7 +142,7 @@ impl IconLoader {
     ) -> Option<egui::TextureHandle> {
         let cache_key = folder_path.to_string();
 
-        if self.failed_drive_icons.contains(&cache_key) {
+        if self.failed_drive_icons.peek(&cache_key).is_some() {
             return None;
         }
 

@@ -104,13 +104,24 @@ pub struct VolumeIndex {
 }
 
 impl VolumeIndex {
-    pub fn new(drive_letter: char) -> Self {
+    const DEFAULT_RECORD_CAPACITY: usize = 500_000;
+    const DEFAULT_NAME_BYTES_PER_RECORD: usize = 25;
+
+    #[inline]
+    fn estimated_child_bucket_capacity(estimated_records: usize) -> usize {
+        if estimated_records == 0 {
+            0
+        } else {
+            estimated_records.saturating_mul(2).max(5) / 5
+        }
+    }
+
+    pub fn empty(drive_letter: char) -> Self {
         Self {
             drive_letter,
-            records: HashMap::with_capacity(500_000),
-            children: HashMap::with_capacity(200_000),
-            // Pre-allocate ~12.5 MB for names (500K files × ~25 bytes avg).
-            names: NameArena::with_capacity(500_000 * 25),
+            records: HashMap::new(),
+            children: HashMap::new(),
+            names: NameArena::with_capacity(0),
             last_usn: 0,
             journal_id: 0,
             state: IndexState::NotStarted,
@@ -124,6 +135,45 @@ impl VolumeIndex {
             hardlink_data_complete: false,
             reparse_data_complete: false,
         }
+    }
+
+    pub fn with_capacity(
+        drive_letter: char,
+        estimated_records: usize,
+        estimated_name_bytes: usize,
+    ) -> Self {
+        let child_capacity = Self::estimated_child_bucket_capacity(estimated_records);
+
+        Self {
+            drive_letter,
+            records: HashMap::with_capacity(estimated_records),
+            children: HashMap::with_capacity(child_capacity),
+            names: NameArena::with_capacity(estimated_name_bytes),
+            last_usn: 0,
+            journal_id: 0,
+            state: IndexState::NotStarted,
+            sizes_loaded: false,
+            pending_additions: HashSet::new(),
+            pending_removals: HashSet::new(),
+            dir_modified_at: HashMap::new(),
+            pending_size_refresh: HashSet::new(),
+            hardlink_parents: HashMap::new(),
+            reparse_points: HashSet::new(),
+            hardlink_data_complete: false,
+            reparse_data_complete: false,
+        }
+    }
+
+    pub fn with_estimated_records(drive_letter: char, estimated_records: usize) -> Self {
+        Self::with_capacity(
+            drive_letter,
+            estimated_records,
+            estimated_records.saturating_mul(Self::DEFAULT_NAME_BYTES_PER_RECORD),
+        )
+    }
+
+    pub fn new(drive_letter: char) -> Self {
+        Self::with_estimated_records(drive_letter, Self::DEFAULT_RECORD_CAPACITY)
     }
 
     /// The NTFS root directory's File Reference Number.
@@ -385,10 +435,29 @@ impl VolumeIndex {
             record.name_len = nr.len;
         }
         self.names = new_arena;
-        self.names.shrink_to_fit();
 
         // Rebuild reverse children index after compaction.
         self.rebuild_children();
+        self.shrink_to_fit();
+    }
+
+    /// Release excess capacity after a bulk load/scan has stabilized.
+    pub fn shrink_to_fit(&mut self) {
+        self.records.shrink_to_fit();
+        self.children.shrink_to_fit();
+        for siblings in self.children.values_mut() {
+            siblings.shrink_to_fit();
+        }
+        self.names.shrink_to_fit();
+        self.pending_additions.shrink_to_fit();
+        self.pending_removals.shrink_to_fit();
+        self.dir_modified_at.shrink_to_fit();
+        self.pending_size_refresh.shrink_to_fit();
+        self.hardlink_parents.shrink_to_fit();
+        for parents in self.hardlink_parents.values_mut() {
+            parents.shrink_to_fit();
+        }
+        self.reparse_points.shrink_to_fit();
     }
 
     /// Rebuild the `children` reverse index from `records` and `hardlink_parents`.

@@ -171,9 +171,9 @@ impl IconLoader {
                             egui::TextureOptions::LINEAR,
                         );
                         let cloned = texture.clone();
-                        self.extension_cache
-                            .entry(ext_key)
-                            .or_insert_with(|| texture.clone());
+                        if self.extension_cache.peek(&ext_key).is_none() {
+                            self.extension_cache.put(ext_key, texture.clone());
+                        }
                         self.icon_cache.put(cache_key, texture);
                         return Some(cloned);
                     }
@@ -344,7 +344,7 @@ impl IconLoader {
                     let ext_str =
                         crate::infrastructure::windows::icons::canonical_icon_ext(&ext_raw);
                     let ext_key = format!("{}_{:?}", ext_str, size);
-                    self.extension_cache.insert(ext_key, texture.clone());
+                    self.extension_cache.put(ext_key, texture.clone());
                 }
             }
 
