@@ -48,6 +48,20 @@ pub struct SidebarTreeState {
 }
 
 impl SidebarTreeState {
+    fn prune_collapsed_children_cache(&mut self) {
+        if self.children.is_empty() {
+            return;
+        }
+
+        let expanded = self.expanded.clone();
+        self.children.retain(|path, _| {
+            expanded.contains(path)
+                || expanded
+                    .iter()
+                    .any(|expanded_path| expanded_path.starts_with(path))
+        });
+    }
+
     pub fn new(dir_cache: Arc<DirectoryCache>) -> Self {
         let (tx, rx) = mpsc::channel();
         Self {
@@ -101,6 +115,7 @@ impl SidebarTreeState {
         self.expanded = expanded;
         self.scroll_target_y = scroll_y;
         self.scroll_visual_y = scroll_y;
+        self.prune_collapsed_children_cache();
 
         // Ensure children are loaded for all expanded directories.
         // If they're already cached, this is a no-op; otherwise
@@ -140,6 +155,7 @@ impl SidebarTreeState {
     pub fn toggle_expand(&mut self, path: &Path) {
         if self.expanded.contains(path) {
             self.expanded.remove(path);
+            self.prune_collapsed_children_cache();
         } else {
             self.expanded.insert(path.to_path_buf());
             if !self.children.contains_key(path) && !self.loading.contains(path) {
@@ -286,6 +302,11 @@ impl SidebarTreeState {
 
             any = true;
         }
+
+        if any {
+            self.prune_collapsed_children_cache();
+        }
+
         any
     }
 }

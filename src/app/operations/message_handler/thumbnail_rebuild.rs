@@ -1,6 +1,7 @@
 use crate::app::state::{ImageViewerApp, ItemsRebuildResult};
 use crate::application::sorting;
 use eframe::egui;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -12,6 +13,60 @@ const MAX_EAGER_FOLDER_PREVIEWS: usize = 80;
 const MAX_EAGER_NON_USN_FOLDER_COVER_REVALIDATIONS: usize = 96;
 
 impl ImageViewerApp {
+    fn has_relevant_stale_visual_state(&self, path: &PathBuf) -> bool {
+        self.cache_manager.has_thumbnail(path)
+            || self.cache_manager.has_rgba_data(path)
+            || self.cache_manager.is_failed(path)
+            || self.cache_manager.has_folder_preview(path)
+    }
+
+    pub(super) fn capture_stale_items_snapshot(&mut self) {
+        if self.stale_items_snapshot.is_some() {
+            return;
+        }
+
+        let snapshot: HashMap<PathBuf, (u64, u64)> = self
+            .all_items
+            .iter()
+            .filter_map(|item| {
+                self.has_relevant_stale_visual_state(&item.path)
+                    .then_some((item.path.clone(), (item.modified, item.size)))
+            })
+            .collect();
+
+        if !snapshot.is_empty() {
+            self.stale_items_snapshot = Some(snapshot);
+        }
+    }
+
+    pub(super) fn reconcile_stale_visual_caches(&mut self) {
+        let Some(old_snapshot) = self.stale_items_snapshot.take() else {
+            return;
+        };
+
+        let new_paths: std::collections::HashSet<&std::path::PathBuf> =
+            self.all_items.iter().map(|item| &item.path).collect();
+
+        for item in &self.all_items {
+            if let Some(&(old_modified, old_size)) = old_snapshot.get(&item.path) {
+                if item.modified != old_modified || item.size != old_size {
+                    self.cache_manager.texture_cache.pop(&item.path);
+                    self.cache_manager.pop_rgba_data(&item.path);
+                    self.cache_manager.failed_thumbnails.pop(&item.path);
+                }
+            }
+        }
+
+        for (old_path, _) in &old_snapshot {
+            if !new_paths.contains(old_path) {
+                self.cache_manager.texture_cache.pop(old_path);
+                self.cache_manager.pop_rgba_data(old_path);
+                self.cache_manager.failed_thumbnails.pop(old_path);
+                self.cache_manager.invalidate_folder_preview(old_path);
+            }
+        }
+    }
+
     pub(super) fn should_run_pending_items_rebuild(&self) -> bool {
         let elapsed = self.last_items_rebuild.elapsed();
         elapsed > Duration::from_millis(REBUILD_THROTTLE_MS)
@@ -208,27 +263,7 @@ impl ImageViewerApp {
         // Without this, watcher-triggered reloads (force_refresh=false) preserve
         // old GPU textures for items whose content changed on disk, causing the
         // UI to show the wrong thumbnail until the texture is LRU-evicted.
-        if let Some(old_snapshot) = self.stale_items_snapshot.take() {
-            let new_paths: std::collections::HashSet<&std::path::PathBuf> =
-                self.all_items.iter().map(|i| &i.path).collect();
-
-            for item in &self.all_items {
-                if let Some(&(old_modified, old_size)) = old_snapshot.get(&item.path) {
-                    if item.modified != old_modified || item.size != old_size {
-                        self.cache_manager.texture_cache.pop(&item.path);
-                        self.cache_manager.pop_rgba_data(&item.path);
-                        self.cache_manager.failed_thumbnails.pop(&item.path);
-                    }
-                }
-            }
-
-            // Evict textures for items that no longer exist in the folder.
-            for (old_path, _) in &old_snapshot {
-                if !new_paths.contains(old_path) {
-                    self.cache_manager.texture_cache.pop(old_path);
-                }
-            }
-        }
+        self.reconcile_stale_visual_caches();
 
         if self.all_items.len() <= INLINE_REBUILD_THRESHOLD {
             let result_items = self.build_sorted_items_snapshot();

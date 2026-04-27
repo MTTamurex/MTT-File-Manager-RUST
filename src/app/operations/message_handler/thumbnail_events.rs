@@ -69,12 +69,7 @@ impl ImageViewerApp {
                             saw_end_of_load = true;
                         } else {
                             if self.pending_all_items_clear {
-                                self.stale_items_snapshot = Some(
-                                    self.all_items
-                                        .iter()
-                                        .map(|item| (item.path.clone(), (item.modified, item.size)))
-                                        .collect(),
-                                );
+                                self.capture_stale_items_snapshot();
                                 self.all_items.clear();
                                 self.pending_all_items_clear = false;
                             }
@@ -199,12 +194,7 @@ impl ImageViewerApp {
         self.with_inactive_panel(|app| {
             for batch in batches {
                 if app.pending_all_items_clear {
-                    app.stale_items_snapshot = Some(
-                        app.all_items
-                            .iter()
-                            .map(|item| (item.path.clone(), (item.modified, item.size)))
-                            .collect(),
-                    );
+                    app.capture_stale_items_snapshot();
                     app.all_items.clear();
                     app.pending_all_items_clear = false;
                 }
@@ -220,24 +210,7 @@ impl ImageViewerApp {
                     app.pending_all_items_clear = false;
                 }
                 // Reconcile stale textures
-                if let Some(old_snapshot) = app.stale_items_snapshot.take() {
-                    let new_paths: std::collections::HashSet<&std::path::PathBuf> =
-                        app.all_items.iter().map(|i| &i.path).collect();
-                    for item in &app.all_items {
-                        if let Some(&(old_mod, old_sz)) = old_snapshot.get(&item.path) {
-                            if item.modified != old_mod || item.size != old_sz {
-                                app.cache_manager.texture_cache.pop(&item.path);
-                                app.cache_manager.pop_rgba_data(&item.path);
-                                app.cache_manager.failed_thumbnails.pop(&item.path);
-                            }
-                        }
-                    }
-                    for (old_path, _) in &old_snapshot {
-                        if !new_paths.contains(old_path) {
-                            app.cache_manager.texture_cache.pop(old_path);
-                        }
-                    }
-                }
+                app.reconcile_stale_visual_caches();
                 app.pending_items_rebuild = false;
                 app.pending_items_count = 0;
                 app.filter_items();
