@@ -1,13 +1,15 @@
 use crate::app::init_workers::consistency_probe_worker::{
-    ConsistencyProbeMode, ConsistencyProbeRequest,
+    ConsistencyProbeMode, ConsistencyProbeRequest, ConsistencyProbeResult,
 };
 use crate::app::state::ImageViewerApp;
 use crate::domain::file_entry::FileEntry;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
+
+const INACTIVE_PANEL_PROBE_INTERVAL: Duration = Duration::from_secs(3);
 
 pub(super) struct WatcherPerfMarks {
     pub(super) watcher_start: Instant,
@@ -91,6 +93,19 @@ impl ImageViewerApp {
         final_hasher.finish()
     }
 
+    fn collect_folder_cover_states(entries: &[FileEntry]) -> Vec<(PathBuf, Option<PathBuf>)> {
+        entries
+            .iter()
+            .filter_map(|entry| {
+                if entry.is_dir {
+                    Some((entry.path.clone(), entry.folder_cover.clone()))
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
     /// Sends a consistency probe request to the background worker if the interval has elapsed.
     /// The actual disk read happens off the UI thread.
     fn maybe_send_consistency_probe(&mut self) {
@@ -138,17 +153,7 @@ impl ImageViewerApp {
 
         // Collect visible subfolder cover state so the non-USN consistency probe can
         // detect cover changes even when the directory listing itself is unchanged.
-        let folder_cover_states: Vec<(PathBuf, Option<PathBuf>)> = self
-            .all_items
-            .iter()
-            .filter_map(|entry| {
-                if entry.is_dir {
-                    Some((entry.path.clone(), entry.folder_cover.clone()))
-                } else {
-                    None
-                }
-            })
-            .collect();
+        let folder_cover_states = Self::collect_folder_cover_states(&self.all_items);
 
         let is_onedrive = crate::infrastructure::onedrive::is_onedrive_path(&current_path);
         let _ = self.consistency_probe_tx.send(ConsistencyProbeRequest {
@@ -159,6 +164,116 @@ impl ImageViewerApp {
             mode: ConsistencyProbeMode::ListingDrift,
             folder_cover_states,
         });
+    }
+
+    fn maybe_send_inactive_panel_consistency_probe(&mut self) {
+        if !self.dual_panel_enabled
+            || self.file_operation_state.file_ops_in_progress > 0
+            || self.layout.saved_is_minimized
+        {
+            return;
+        }
+
+        if self.minimized_duration_secs >= 10.0
+            && self.last_restore_time.elapsed() < Duration::from_secs(8)
+        {
+            return;
+        }
+
+        let Some(snapshot) = self.dual_panel_inactive_state.as_ref() else {
+            return;
+        };
+        if snapshot.is_loading_folder || snapshot.is_computer_view || snapshot.is_recycle_bin_view {
+            return;
+        }
+
+        let inactive_path = PathBuf::from(&snapshot.path);
+        let current_path = PathBuf::from(&self.navigation_state.current_path);
+        if !self.navigation_state.is_computer_view
+            && !self.navigation_state.is_recycle_bin_view
+            && Self::normalize_for_match(&inactive_path) == Self::normalize_for_match(&current_path)
+        {
+            return;
+        }
+
+        if self.dual_panel_inactive_last_probe.elapsed() < INACTIVE_PANEL_PROBE_INTERVAL {
+            return;
+        }
+        self.dual_panel_inactive_last_probe = Instant::now();
+
+        let ui_signature = Self::compute_entries_signature(&snapshot.all_items);
+        let folder_cover_states = Self::collect_folder_cover_states(&snapshot.all_items);
+        let is_onedrive = crate::infrastructure::onedrive::is_onedrive_path(&inactive_path);
+
+        let _ = self.consistency_probe_tx.send(ConsistencyProbeRequest {
+            path: inactive_path,
+            is_onedrive,
+            ui_signature,
+            show_hidden_files: self.show_hidden_files,
+            mode: ConsistencyProbeMode::ListingDrift,
+            folder_cover_states,
+        });
+    }
+
+    fn inactive_panel_matches_path(&self, path: &Path) -> bool {
+        self.dual_panel_enabled
+            && self
+                .dual_panel_inactive_state
+                .as_ref()
+                .is_some_and(|snapshot| {
+                    !snapshot.is_computer_view
+                        && !snapshot.is_recycle_bin_view
+                        && Self::normalize_for_match(Path::new(&snapshot.path))
+                            == Self::normalize_for_match(path)
+                })
+    }
+
+    fn handle_inactive_consistency_probe_result(
+        &mut self,
+        result: ConsistencyProbeResult,
+        pending_disk_cache_invalidations: &mut Vec<PathBuf>,
+    ) {
+        if result.path_vanished {
+            if self.navigate_inactive_panel_to_parent_after_vanished(&result.path) {
+                self.ui_ctx.request_repaint();
+            }
+            return;
+        }
+
+        let inactive_signature = self
+            .dual_panel_inactive_state
+            .as_ref()
+            .map(|snapshot| Self::compute_entries_signature(&snapshot.all_items));
+        if inactive_signature == Some(result.disk_signature)
+            && result.changed_folder_covers.is_empty()
+        {
+            return;
+        }
+
+        for folder_path in &result.changed_folder_covers {
+            let folder_path = folder_path.to_path_buf();
+            self.invalidate_folder_size_cache(&folder_path);
+            self.cache_manager.invalidate_folder_preview(&folder_path);
+            self.scanned_folders.pop(&folder_path);
+        }
+
+        self.directory_dirty_registry.mark_dirty(&result.path);
+        self.directory_cache.invalidate(&result.path);
+        if let Some(di) = &self.directory_index {
+            let _ = di.invalidate(&result.path);
+        }
+        pending_disk_cache_invalidations.push(result.path.clone());
+
+        log::info!(
+            "[DualPanel] Inactive panel consistency probe detected drift, reloading: {:?}",
+            result.path
+        );
+
+        self.with_inactive_panel(|app| {
+            app.loaded_path.clear();
+            app.load_folder_for_inactive();
+        });
+        self.ui_ctx.request_repaint();
     }
 
     /// Verifies that the current folder still exists using the consistency
@@ -225,6 +340,14 @@ impl ImageViewerApp {
                 Self::normalize_for_match(&result.path) == Self::normalize_for_match(&current_path);
 
             if !result_matches_current {
+                if self.inactive_panel_matches_path(&result.path) {
+                    self.handle_inactive_consistency_probe_result(
+                        result,
+                        pending_disk_cache_invalidations,
+                    );
+                    continue;
+                }
+
                 if result.path_vanished
                     && self.navigate_inactive_panel_to_parent_after_vanished(&result.path)
                 {
@@ -375,6 +498,7 @@ impl ImageViewerApp {
         self.process_consistency_probe_results(&mut pending_disk_cache_invalidations);
         // Send new probe request if interval elapsed (disk read happens in background)
         self.maybe_send_consistency_probe();
+        self.maybe_send_inactive_panel_consistency_probe();
 
         // Process deferred folder mtime rechecks (Windows lazy-write delay)
         self.process_pending_folder_mtime_rechecks();

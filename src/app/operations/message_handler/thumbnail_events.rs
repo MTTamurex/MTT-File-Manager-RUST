@@ -233,10 +233,14 @@ impl ImageViewerApp {
         let ctx2 = ctx.clone();
         let mut rebuilt = false;
         self.with_inactive_panel(|app| {
-            if !app.pending_items_rebuild || !app.should_run_pending_items_rebuild() {
+            if !app.pending_items_rebuild {
                 return;
             }
 
+            // UX: the inactive dual-panel is still visible, so its listing must
+            // reflect watcher/file-op changes as soon as the next frame arrives.
+            // Keep the batch coalescing done earlier in this frame, but do not
+            // throttle the visual rebuild behind the active-panel debounce.
             app.filter_items();
             app.pending_items_rebuild = false;
             app.pending_items_count = 0;

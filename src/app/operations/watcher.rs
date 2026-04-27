@@ -6,10 +6,17 @@
 use crate::app::state::{ImageViewerApp, WatcherFsProbeCacheEntry};
 #[cfg(feature = "notify-watcher")]
 use notify::{RecursiveMode, Watcher};
+#[cfg(feature = "notify-watcher")]
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 const WATCHER_FS_PROBE_CACHE_TTL: Duration = Duration::from_secs(600);
+
+#[cfg(feature = "notify-watcher")]
+fn normalize_watch_path(path: &Path) -> String {
+    path.to_string_lossy().replace('/', "\\").to_lowercase()
+}
 
 impl ImageViewerApp {
     fn configure_watcher_fallback_mode(&mut self, path: &Path) -> (u128, bool, Option<char>) {
@@ -152,15 +159,33 @@ impl ImageViewerApp {
     #[cfg(feature = "notify-watcher")]
     fn setup_notify_watcher(&mut self) {
         let current_path = self.navigation_state.current_path.clone();
+        let mut paths_to_watch = Vec::new();
+        let mut seen_paths = HashSet::new();
 
-        // Canonicalize the path for Windows compatibility
-        let path_to_watch = if let Ok(p) = Path::new(&current_path).canonicalize() {
-            log::debug!("[NOTIFY-WATCHER] Canonicalized path: {:?}", p);
-            p
-        } else {
-            log::warn!("[NOTIFY-WATCHER] Using original path (canonicalize failed)");
-            PathBuf::from(&current_path)
+        let mut push_watch_path = |path: String, label: &str| {
+            let path_to_watch = if let Ok(p) = Path::new(&path).canonicalize() {
+                log::debug!("[NOTIFY-WATCHER] Canonicalized {label} path: {:?}", p);
+                p
+            } else {
+                log::warn!("[NOTIFY-WATCHER] Using original {label} path (canonicalize failed)");
+                PathBuf::from(&path)
+            };
+
+            let normalized = normalize_watch_path(&path_to_watch);
+            if seen_paths.insert(normalized) {
+                paths_to_watch.push(path_to_watch);
+            }
         };
+
+        push_watch_path(current_path, "active");
+
+        if self.dual_panel_enabled {
+            if let Some(snapshot) = self.dual_panel_inactive_state.as_ref() {
+                if !snapshot.is_computer_view && !snapshot.is_recycle_bin_view {
+                    push_watch_path(snapshot.path.clone(), "inactive dual-panel");
+                }
+            }
+        }
 
         // Drop the previous watcher if it exists
         if self.watcher.is_some() {
@@ -191,22 +216,31 @@ impl ImageViewerApp {
             });
 
         match watcher_result {
-            Ok(mut watcher) => match watcher.watch(&path_to_watch, RecursiveMode::NonRecursive) {
-                Ok(_) => {
-                    log::debug!(
-                        "[NOTIFY-WATCHER] Successfully watching: {:?}",
-                        path_to_watch
-                    );
+            Ok(mut watcher) => {
+                let mut watched_any = false;
+                for path_to_watch in &paths_to_watch {
+                    match watcher.watch(path_to_watch, RecursiveMode::NonRecursive) {
+                        Ok(_) => {
+                            watched_any = true;
+                            log::debug!(
+                                "[NOTIFY-WATCHER] Successfully watching: {:?}",
+                                path_to_watch
+                            );
+                        }
+                        Err(e) => {
+                            log::error!(
+                                "[NOTIFY-WATCHER] Failed to watch path: {:?} - Error: {}",
+                                path_to_watch,
+                                e
+                            );
+                        }
+                    }
+                }
+
+                if watched_any {
                     self.watcher = Some(watcher);
                 }
-                Err(e) => {
-                    log::error!(
-                        "[NOTIFY-WATCHER] Failed to watch path: {:?} - Error: {}",
-                        path_to_watch,
-                        e
-                    );
-                }
-            },
+            }
             Err(e) => {
                 log::error!("[NOTIFY-WATCHER] Failed to create watcher: {}", e);
             }
