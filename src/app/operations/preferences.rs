@@ -189,9 +189,6 @@ impl ImageViewerApp {
         // GPU backend preference
         prefs.push(("gpu_backend", self.gpu_backend_preference.clone()));
 
-        // Renderer preference (wgpu or glow)
-        prefs.push(("renderer", self.renderer_preference.clone()));
-
         // Configurable keyboard shortcuts
         self.shortcuts.append_preferences(&mut prefs);
 
