@@ -96,8 +96,6 @@ impl ImageViewerApp {
         self.is_loading_folder = true;
         self.loading_started_at = Instant::now(); // Track loading start for timeout
         self.total_items = 0;
-        self.pending_items_rebuild = false;
-        self.pending_items_count = 0;
-        self.last_items_rebuild = Instant::now();
+        self.invalidate_active_items_rebuild();
     }
 }

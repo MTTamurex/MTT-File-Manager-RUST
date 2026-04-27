@@ -222,6 +222,7 @@ impl ImageViewerApp {
             items_rebuild_sender,
             items_rebuild_receiver,
             items_rebuild_request_id: 0,
+            items_rebuild_in_flight: false,
             // Cover Worker
             cover_worker_sender: cover_req_tx,
             cover_worker_receiver: cover_res_rx,

@@ -72,6 +72,7 @@ impl ImageViewerApp {
     /// Syncs the active tab state to the app
     pub fn sync_from_tab(&mut self) {
         let sync_start = std::time::Instant::now();
+        self.invalidate_active_items_rebuild();
         let source_tab_id = self.tab_manager.active().id;
         let source_tab_items_len = self.tab_manager.active().visible_items_len();
         let source_tab_all_items_len = self.tab_manager.active().all_items.len();

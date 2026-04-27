@@ -46,6 +46,7 @@ impl ImageViewerApp {
         }
 
         if let Some(result) = latest_valid {
+            self.items_rebuild_in_flight = false;
             self.items = Arc::new(result.items);
             self.total_items = result.total_items;
 
@@ -55,7 +56,11 @@ impl ImageViewerApp {
                 let _ = self.select_item_by_path(&target_path);
             }
 
-            ctx.request_repaint();
+            if self.pending_items_rebuild {
+                self.maybe_schedule_stream_items_rebuild(ctx);
+            } else {
+                ctx.request_repaint();
+            }
         } else if has_more {
             ctx.request_repaint();
         }
