@@ -152,6 +152,32 @@ impl GlobalSearchState {
         }
     }
 
+    pub fn clear_transient_results(&mut self) {
+        self.results.clear();
+        self.cached_filtered_indices.clear();
+        self.cached_available_drives.clear();
+        self.cached_sorted_indices.clear();
+        self.selected_index = None;
+        self.has_more_results = false;
+        self.total_matches = None;
+        self.results_generation = self.results_generation.wrapping_add(1);
+    }
+
+    pub fn release_transient_results(&mut self) {
+        self.clear_transient_results();
+        self.results.shrink_to_fit();
+        self.cached_filtered_indices.shrink_to_fit();
+        self.cached_available_drives.shrink_to_fit();
+        self.cached_sorted_indices.shrink_to_fit();
+    }
+
+    pub fn clear_transient_caches(&mut self) {
+        self.size_cache.clear();
+        self.tooltip_texture_cache.clear();
+        self.metadata_cache.clear();
+        self.sort_metadata_epoch = 0;
+    }
+
     /// Rebuild the cached filtered indices and available drives only when the
     /// inputs have changed (results generation, category, or drive filter).
     /// Returns a reference to the cached filtered indices.

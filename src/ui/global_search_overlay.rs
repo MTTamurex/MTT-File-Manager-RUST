@@ -300,18 +300,13 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                             .clicked()
                         {
                             app.global_search.query.clear();
-                            app.global_search.results.clear();
-                            app.global_search.results_generation += 1;
-                            app.global_search.selected_index = None;
-                            app.global_search.has_more_results = false;
-                            app.global_search.total_matches = None;
+                            app.global_search.release_transient_results();
+                            app.global_search.clear_transient_caches();
                             app.global_search.loading = false;
                             app.global_search.scroll_offset_y = 0.0;
                             app.global_search.last_scroll_offset_y = 0.0;
                             app.global_search.in_flight_query = None;
                             app.global_search.in_flight_started_at = None;
-                            app.global_search.tooltip_texture_cache.clear();
-                            app.global_search.metadata_cache.clear();
                             search_resp.request_focus();
                         }
                     }
@@ -329,20 +324,16 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
 
                     // Trigger search on text change (with debounce)
                     if search_resp.changed() && !app.global_search.query.is_empty() {
-                        app.global_search.selected_index = None;
-                        app.global_search.results.clear();
-                        app.global_search.results_generation += 1;
+                        app.global_search.clear_transient_results();
+                        app.global_search.tooltip_texture_cache.clear();
+                        app.global_search.metadata_cache.clear();
                         app.global_search.loading = true;
-                        app.global_search.has_more_results = false;
-                        app.global_search.total_matches = None;
                         app.global_search.requested_offset = 0;
                         app.global_search.requested_limit = INITIAL_PAGE_LIMIT;
                         app.global_search.scroll_offset_y = 0.0;
                         app.global_search.last_scroll_offset_y = 0.0;
                         app.global_search.in_flight_query = None;
                         app.global_search.in_flight_started_at = None;
-                        app.global_search.tooltip_texture_cache.clear();
-                        app.global_search.metadata_cache.clear();
                         app.global_search.pending_query_dispatch_at = Some(
                             std::time::Instant::now()
                                 + std::time::Duration::from_millis(SEARCH_INPUT_DEBOUNCE_MS),
@@ -351,12 +342,9 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                             SEARCH_INPUT_DEBOUNCE_MS,
                         ));
                     } else if app.global_search.query.is_empty() {
-                        app.global_search.selected_index = None;
-                        app.global_search.results.clear();
-                        app.global_search.results_generation += 1;
+                        app.global_search.release_transient_results();
+                        app.global_search.clear_transient_caches();
                         app.global_search.loading = false;
-                        app.global_search.has_more_results = false;
-                        app.global_search.total_matches = None;
                         app.global_search.requested_offset = 0;
                         app.global_search.requested_limit = INITIAL_PAGE_LIMIT;
                         app.global_search.pending_query_dispatch_at = None;
@@ -364,8 +352,6 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                         app.global_search.last_scroll_offset_y = 0.0;
                         app.global_search.in_flight_query = None;
                         app.global_search.in_flight_started_at = None;
-                        app.global_search.tooltip_texture_cache.clear();
-                        app.global_search.metadata_cache.clear();
                     }
 
                     if app.global_search.available && app.global_search.indexing_in_progress {
