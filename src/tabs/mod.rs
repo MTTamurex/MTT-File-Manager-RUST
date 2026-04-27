@@ -383,7 +383,7 @@ impl TabManager {
         new_tab.selected_file = current.selected_file.clone();
         new_tab.selected_thumbnail = None;
         new_tab.selected_metadata = current.selected_metadata.clone();
-        new_tab.selected_gif = current.selected_gif.clone();
+        new_tab.selected_gif = None;
         new_tab.search_query = current.search_query.clone();
         new_tab.total_items = current.total_items;
         new_tab.view_mode = current.view_mode;

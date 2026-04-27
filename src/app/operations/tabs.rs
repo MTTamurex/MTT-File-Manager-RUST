@@ -30,7 +30,7 @@ impl ImageViewerApp {
         active.selected_item = self.selected_item;
         active.selected_file = self.selected_file.clone();
         active.selected_thumbnail = None;
-        active.selected_gif = self.selected_gif.clone();
+        active.selected_gif = None;
         active.selected_metadata = self.selected_metadata.clone();
         active.search_query = self.search_query.clone();
         active.scroll_to_selected = self.scroll_to_selected;
