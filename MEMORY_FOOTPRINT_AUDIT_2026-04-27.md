@@ -34,6 +34,9 @@ Itens já implementados nesta etapa:
 - Rebuild assíncrono de `items`: o painel ativo agora coalesce rebuilds em voo, evitando spawn de múltiplos jobs que clonavam `all_items` repetidamente antes do resultado anterior voltar; mudanças acumuladas durante o job são reagendadas só após a conclusão do rebuild atual.
 - Dual panel streaming: rebuilds intermediários do painel inativo agora são throttled/coalescidos durante o streaming, em vez de forçar `filter_items()` a cada lote recebido.
 - Mutações pontuais da lista: removidos caminhos que faziam `filter_items()` seguido de `sort_items()`, embora `filter_items()` já produza o resultado ordenado.
+- Soft reload por watcher: `stale_items_snapshot` agora captura só paths com estado visual realmente cacheado (texture, RGBA, preview de pasta ou falha), em vez de copiar metadados do diretório inteiro; paths removidos também liberam mais estado associado ao reconciliar o snapshot.
+- Sidebar tree: o cache `children` agora poda ramos colapsados que não são mais ancestrais de nós expandidos, reduzindo retenção de subárvores antigas em sessões longas.
+- Search service USN: o caminho que carrega índice via SQLite agora também chama `shrink_to_fit()` completo, alinhando a compactação de mapas com os demais caminhos de load.
 
 Itens ainda pendentes por maior risco ou necessidade de benchmark:
 

@@ -151,7 +151,7 @@ pub(crate) fn index_volume(
             };
 
             if let Some(count) = loaded_count {
-                index.names.shrink_to_fit();
+                index.shrink_to_fit();
                 let (arena_used, _arena_cap, map_est) = index.memory_usage();
                 if !loaded_from_binary {
                     eprintln!(
