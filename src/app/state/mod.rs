@@ -184,12 +184,12 @@ pub struct ImageViewerApp {
     pub total_items: usize,
 
     // Search & Navigation (NEW)
-    pub all_items: Arc<Vec<FileEntry>>,       // Master cache for search
-    pub search_query: String,                 // Search text
-    pub last_grid_cols: usize,                // Memory for vertical navigation (keyboard)
-    pub generation: usize,                    // Local counter (Main Thread)
+    pub all_items: Arc<Vec<FileEntry>>, // Master cache for search
+    pub search_query: String,           // Search text
+    pub last_grid_cols: usize,          // Memory for vertical navigation (keyboard)
+    pub generation: usize,              // Local counter (Main Thread)
     pub current_generation: Arc<AtomicUsize>, // Shared counter (Workers)
-    pub ui_ctx: egui::Context,                // Reference to UI context for async repaints
+    pub ui_ctx: egui::Context,          // Reference to UI context for async repaints
     // PERFORMANCE: Throttle list rebuild during streaming
     pub last_items_rebuild: Instant,
     pub pending_items_rebuild: bool,
@@ -231,6 +231,10 @@ pub struct ImageViewerApp {
     pub watcher_fallback_fs: Option<String>,
     pub watcher_fallback_last_probe: Instant,
     pub watcher_fallback_signature: Option<u64>,
+    /// Independent drift probe cadence for the visible inactive dual-panel.
+    /// The OS watcher is configured for both panels, but this catches missed
+    /// cross-process events without making the inactive panel focused.
+    pub dual_panel_inactive_last_probe: Instant,
     /// Per-drive RDCW reliability verdict, learned during the session.
     /// `true` = RDCW confirmed unreliable (drift was detected at least once).
     /// Drives not in this map are still being verified.

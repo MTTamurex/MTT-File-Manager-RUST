@@ -270,6 +270,7 @@ impl ImageViewerApp {
             // GetFileAttributesW reads cached attributes — no network I/O.
             if !is_virtual_path && !onedrive::fast_path_exists(&path) {
                 self.selected_file = None;
+                self.gif_manager.unload_all();
                 self.update_video_visibility(); // Sync visibility after clearing selection
                 return;
             }
@@ -325,16 +326,16 @@ impl ImageViewerApp {
             if is_gif {
                 // Initialize async GIF player
                 use crate::ui::components::media_preview::GifPlayer;
+                self.gif_manager.unload_except(Some(&path));
                 let data = self.gif_manager.request_load(&path);
                 self.selected_gif = Some(GifPlayer::new(path.clone(), data));
             } else {
-                // Not a GIF -> Cleanup non-active GIFs (subject to memory/TTL)
-                self.gif_manager.cleanup(false);
+                self.gif_manager.unload_all();
             }
         } else {
             // No selection -> if owner, clear media
             // Also cleanup ALL GIFs immediately as there's no active preview
-            self.gif_manager.cleanup(true);
+            self.gif_manager.unload_all();
 
             let active_tab_id = self.tab_manager.active().id;
             if self.media_preview_owner_tab_id == Some(active_tab_id) {
@@ -391,7 +392,7 @@ impl ImageViewerApp {
         self.scroll_offset_y = 0.0;
 
         // Reset also drops all active GIF previews
-        self.gif_manager.cleanup(true);
+        self.gif_manager.unload_all();
 
         // CLEANUP LOGIC: If owner resets selection, clear media
         let active_tab_id = self.tab_manager.active().id;

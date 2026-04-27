@@ -14,7 +14,6 @@ use std::time::{Duration, Instant};
 /// Prevents unbounded thread creation when many GIFs are visible simultaneously.
 const GIF_DECODE_WORKERS: usize = 3;
 const GIF_MAX_MEMORY_BYTES: usize = 150 * 1024 * 1024;
-const GIF_MAX_BYTES_PER_ENTRY: usize = 24 * 1024 * 1024;
 const GIF_MAX_FRAMES: usize = 500;
 
 /// Job sent to a GIF decode worker thread.
@@ -147,10 +146,44 @@ impl GifManager {
             ui_ctx,
             running_total,
             max_memory_bytes,
-            max_gif_bytes: GIF_MAX_BYTES_PER_ENTRY,
+            max_gif_bytes: max_memory_bytes,
         });
 
         data
+    }
+
+    /// Drop every cached GIF except the currently visible preview.
+    pub fn unload_except(&mut self, keep_path: Option<&Path>) {
+        let keep_path = keep_path.map(Path::to_path_buf);
+        let mut total_removed = 0usize;
+        let paths_to_remove: Vec<PathBuf> = self
+            .cache
+            .iter()
+            .filter_map(|(path, _)| {
+                if keep_path.as_ref().is_some_and(|keep| keep == path) {
+                    None
+                } else {
+                    Some(path.clone())
+                }
+            })
+            .collect();
+
+        for path in paths_to_remove {
+            if let Some(data) = self.cache.pop(&path) {
+                let d = data.lock();
+                d.cancelled.store(true, Ordering::SeqCst);
+                total_removed = total_removed.saturating_add(d.total_bytes);
+            }
+        }
+
+        if total_removed > 0 {
+            self.running_total_bytes
+                .fetch_sub(total_removed, Ordering::SeqCst);
+        }
+    }
+
+    pub fn unload_all(&mut self) {
+        self.unload_except(None);
     }
 
     /// Periodic or manual cleanup of the GIF cache
@@ -291,8 +324,10 @@ impl GifManager {
                 }
 
                 let has_visible_frames = !d.frames.is_empty();
-                let exceeds_per_gif_budget = d.total_bytes.saturating_add(frame_bytes) > max_gif_bytes;
-                let exceeds_global_budget = running_total_before.saturating_add(frame_bytes) > max_memory_bytes;
+                let exceeds_per_gif_budget =
+                    d.total_bytes.saturating_add(frame_bytes) > max_gif_bytes;
+                let exceeds_global_budget =
+                    running_total_before.saturating_add(frame_bytes) > max_memory_bytes;
 
                 if has_visible_frames && (exceeds_per_gif_budget || exceeds_global_budget) {
                     d.is_complete = true;
