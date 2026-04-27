@@ -65,42 +65,62 @@ pub fn machine_key() -> Result<Vec<u8>, String> {
     Ok(key)
 }
 
-/// Computes HMAC-SHA256(key, data) and returns the 32-byte tag.
-pub fn hmac_sha256(key: &[u8], data: &[u8]) -> Result<[u8; HMAC_OUTPUT_SIZE], String> {
-    let mut alg = BCRYPT_ALG_HANDLE::default();
-    let mut hash = BCRYPT_HASH_HANDLE::default();
-    let mut tag = [0u8; HMAC_OUTPUT_SIZE];
+pub struct HmacSha256 {
+    _alg: AlgGuard,
+    hash: HashGuard,
+}
 
-    unsafe {
-        let status = BCryptOpenAlgorithmProvider(
-            &mut alg,
-            BCRYPT_SHA256_ALGORITHM,
-            PCWSTR::null(),
-            BCRYPT_ALG_HANDLE_HMAC_FLAG,
-        );
-        if status.is_err() {
-            return Err(format!("BCryptOpenAlgorithmProvider: 0x{:08x}", status.0));
-        }
-        let _alg_guard = AlgGuard(alg);
+impl HmacSha256 {
+    pub fn new(key: &[u8]) -> Result<Self, String> {
+        let mut alg = BCRYPT_ALG_HANDLE::default();
+        let mut hash = BCRYPT_HASH_HANDLE::default();
 
-        let status = BCryptCreateHash(alg, &mut hash, None, Some(key), 0);
-        if status.is_err() {
-            return Err(format!("BCryptCreateHash: 0x{:08x}", status.0));
-        }
-        let _hash_guard = HashGuard(hash);
+        unsafe {
+            let status = BCryptOpenAlgorithmProvider(
+                &mut alg,
+                BCRYPT_SHA256_ALGORITHM,
+                PCWSTR::null(),
+                BCRYPT_ALG_HANDLE_HMAC_FLAG,
+            );
+            if status.is_err() {
+                return Err(format!("BCryptOpenAlgorithmProvider: 0x{:08x}", status.0));
+            }
 
-        let status = BCryptHashData(hash, data, 0);
-        if status.is_err() {
-            return Err(format!("BCryptHashData: 0x{:08x}", status.0));
+            let status = BCryptCreateHash(alg, &mut hash, None, Some(key), 0);
+            if status.is_err() {
+                let _ = BCryptCloseAlgorithmProvider(alg, 0);
+                return Err(format!("BCryptCreateHash: 0x{:08x}", status.0));
+            }
         }
 
-        let status = BCryptFinishHash(hash, &mut tag, 0);
-        if status.is_err() {
-            return Err(format!("BCryptFinishHash: 0x{:08x}", status.0));
-        }
+        Ok(Self {
+            _alg: AlgGuard(alg),
+            hash: HashGuard(hash),
+        })
     }
 
-    Ok(tag)
+    pub fn update(&mut self, data: &[u8]) -> Result<(), String> {
+        unsafe {
+            let status = BCryptHashData(self.hash.0, data, 0);
+            if status.is_err() {
+                return Err(format!("BCryptHashData: 0x{:08x}", status.0));
+            }
+        }
+        Ok(())
+    }
+
+    pub fn finalize(self) -> Result<[u8; HMAC_OUTPUT_SIZE], String> {
+        let mut tag = [0u8; HMAC_OUTPUT_SIZE];
+
+        unsafe {
+            let status = BCryptFinishHash(self.hash.0, &mut tag, 0);
+            if status.is_err() {
+                return Err(format!("BCryptFinishHash: 0x{:08x}", status.0));
+            }
+        }
+
+        Ok(tag)
+    }
 }
 
 /// Constant-time equality check for HMAC tags, to avoid leaking the prefix

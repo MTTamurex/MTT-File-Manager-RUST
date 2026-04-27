@@ -37,7 +37,7 @@ impl ImageViewerApp {
 
         self.is_loading_folder = true;
         self.items = Arc::new(Vec::new());
-        self.all_items.clear();
+        self.all_items_mut().clear();
         self.total_items = 0;
 
         // Increment generation to invalidate old thumbnails
@@ -197,8 +197,8 @@ impl ImageViewerApp {
             }
         }
 
-        self.all_items = computer_items.clone();
-        self.items = Arc::new(computer_items);
+        self.all_items = Arc::new(computer_items);
+        self.share_visible_items_from_all_items();
 
         // PRE-COMPUTE SECTION INDICES (O(n) once, not per frame)
         self.navigation_state.computer_view_local_indices.clear();
@@ -398,15 +398,14 @@ impl ImageViewerApp {
             }
 
             // Update all_items with the received drive info
-            for item in self.all_items.iter_mut() {
+            for item in self.all_items_mut().iter_mut() {
                 let item_path = item.path.to_string_lossy();
                 if let Some((_, info)) = results.iter().find(|(p, _)| p == item_path.as_ref()) {
                     item.drive_info = Some(info.clone());
                 }
             }
 
-            // Rebuild Arc<Vec> for items
-            self.items = Arc::new(self.all_items.clone());
+            self.share_visible_items_from_all_items();
         }
     }
 }

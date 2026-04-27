@@ -172,6 +172,9 @@ impl GifManager {
         // 1. TTL Cleanup - collect expired paths without holding locks
         let mut to_remove = Vec::new();
         for (path, data) in self.cache.iter() {
+            if Arc::strong_count(data) > 1 {
+                continue;
+            }
             let d = data.lock();
             if now.duration_since(d.last_used) > ttl {
                 d.cancelled.store(true, Ordering::SeqCst);
@@ -187,12 +190,39 @@ impl GifManager {
         while self.running_total_bytes.load(Ordering::SeqCst) > self.max_memory_bytes
             && !self.cache.is_empty()
         {
-            // Pop least recently used
-            if let Some((_, data)) = self.cache.pop_lru() {
+            let mut eviction_candidates = Vec::new();
+            for (path, data) in self.cache.iter() {
+                if Arc::strong_count(data) > 1 {
+                    continue;
+                }
+
                 let d = data.lock();
-                d.cancelled.store(true, Ordering::SeqCst);
-                self.running_total_bytes
-                    .fetch_sub(d.total_bytes, Ordering::SeqCst);
+                eviction_candidates.push((path.clone(), d.last_used));
+            }
+
+            if eviction_candidates.is_empty() {
+                break;
+            }
+
+            eviction_candidates.sort_by_key(|(_, last_used)| *last_used);
+            let mut evicted_any = false;
+
+            for (path, _) in eviction_candidates {
+                if self.running_total_bytes.load(Ordering::SeqCst) <= self.max_memory_bytes {
+                    break;
+                }
+
+                if let Some(data) = self.cache.pop(&path) {
+                    let d = data.lock();
+                    d.cancelled.store(true, Ordering::SeqCst);
+                    self.running_total_bytes
+                        .fetch_sub(d.total_bytes, Ordering::SeqCst);
+                    evicted_any = true;
+                }
+            }
+
+            if !evicted_any {
+                break;
             }
         }
     }

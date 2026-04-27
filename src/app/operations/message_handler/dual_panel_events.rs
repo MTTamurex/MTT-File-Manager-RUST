@@ -154,7 +154,7 @@ impl ImageViewerApp {
         self.with_inactive_panel(|app| {
             app.loaded_path.clear();
             app.items = std::sync::Arc::new(Vec::new());
-            app.all_items.clear();
+                app.all_items_mut().clear();
             app.selected_item = None;
             app.selected_file = None;
             app.selected_thumbnail = None;
@@ -281,7 +281,7 @@ impl ImageViewerApp {
 
                 app.loaded_path.clear();
                 app.items = std::sync::Arc::new(Vec::new());
-                app.all_items.clear();
+                app.all_items_mut().clear();
                 app.selected_item = None;
                 app.selected_file = None;
                 app.selected_thumbnail = None;

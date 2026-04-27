@@ -39,12 +39,10 @@ impl NameArena {
         }
     }
 
-    /// Reconstruct an arena from raw bytes (loaded from binary index).
-    /// The caller is responsible for ensuring the bytes are valid UTF-8
-    /// (e.g. verified by CRC integrity check on the containing file).
-    pub fn from_raw(bytes: &[u8]) -> Self {
+    /// Reconstruct an arena from owned raw bytes without an extra copy.
+    pub fn from_vec(bytes: Vec<u8>) -> Self {
         Self {
-            buf: bytes.to_vec(),
+            buf: bytes,
             lowered: Vec::new(),
         }
     }
@@ -97,6 +95,7 @@ impl NameArena {
     /// Release excess capacity after the initial scan is complete.
     pub fn shrink_to_fit(&mut self) {
         self.buf.shrink_to_fit();
+        self.lowered.shrink_to_fit();
     }
 
     /// Build the lowercased copy of the arena for case-insensitive search.
@@ -110,6 +109,12 @@ impl NameArena {
         // per-record confirmation step in the caller.
         self.lowered = self.buf.clone();
         self.lowered.make_ascii_lowercase();
+    }
+
+    /// Release the lowered search buffer while keeping the main arena intact.
+    pub fn release_lowered(&mut self) {
+        self.lowered.clear();
+        self.lowered.shrink_to_fit();
     }
 
     /// Get the lowercased byte at a given offset (for verification).

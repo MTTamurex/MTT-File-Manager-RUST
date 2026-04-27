@@ -112,7 +112,7 @@ impl ImageViewerApp {
         let mut stale_cover_paths = std::collections::HashSet::new();
         let mut updated_any = false;
 
-        for item in &mut self.all_items {
+        for item in self.all_items_mut().iter_mut() {
             if item.is_dir && item.path == folder_path {
                 if let Some(cover) = item.folder_cover.take() {
                     stale_cover_paths.insert(cover);
@@ -179,7 +179,7 @@ impl ImageViewerApp {
             .iter()
             .position(|item| Self::path_matches_normalized(&item.path, &path_norm))
             .map(|idx| {
-                self.all_items.remove(idx);
+                self.all_items_mut().remove(idx);
                 true
             })
             .unwrap_or(false);
@@ -248,9 +248,9 @@ impl ImageViewerApp {
             .iter()
             .position(|item| Self::path_matches_normalized(&item.path, &cleaned_norm))
         {
-            self.all_items[idx] = new_entry;
+            self.all_items_mut()[idx] = new_entry;
         } else {
-            self.all_items.push(new_entry);
+            self.all_items_mut().push(new_entry);
         }
 
         self.filter_items();
@@ -369,7 +369,7 @@ impl ImageViewerApp {
             let tab_path = Self::normalize_for_match(Path::new(&tab.path));
             if tab_path == path_norm {
                 tab.items = Arc::new(Vec::new());
-                tab.all_items.clear();
+                tab.all_items = Arc::new(Vec::new());
             }
         }
     }
@@ -460,7 +460,7 @@ impl ImageViewerApp {
         }
 
         let mut cleared_any = false;
-        for item in &mut self.all_items {
+        for item in self.all_items_mut().iter_mut() {
             if item.is_dir
                 && item.folder_cover.is_some()
                 && folders_with_changed_contents.contains(&item.path)
@@ -652,7 +652,7 @@ impl ImageViewerApp {
                 continue;
             }
 
-            for item in self.all_items.iter_mut() {
+            for item in self.all_items_mut().iter_mut() {
                 if item.is_dir
                     && (item.path == *folder_path
                         || Self::normalize_for_match(&item.path) == folder_norm)

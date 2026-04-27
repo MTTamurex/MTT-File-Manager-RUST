@@ -90,7 +90,7 @@ impl ImageViewerApp {
             let restore_items_from_all_items = active.items_snapshot_compact;
             self.all_items = std::mem::take(&mut active.all_items);
             self.items = if restore_items_from_all_items {
-                Arc::new(self.all_items.clone())
+                self.all_items.clone()
             } else {
                 active.items.clone()
             };

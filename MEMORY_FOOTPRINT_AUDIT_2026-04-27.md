@@ -40,12 +40,14 @@ Itens já implementados nesta etapa:
 - Tabs / dual panel frio: snapshots armazenados fora de foco deixaram de persistir `selected_thumbnail`; a textura do preview agora é reidratada só quando o tab ou painel volta a ficar ativo, evitando manter `TextureHandle` vivo fora do LRU principal.
 - Tabs / dual panel frio: snapshots fora de foco também deixaram de persistir `selected_gif`, evitando manter `Arc<GifData>` e a textura local do player vivos quando o preview de GIF não está em uso.
 - Search service USN: o caminho que carrega índice via SQLite agora também chama `shrink_to_fit()` completo, alinhando a compactação de mapas com os demais caminhos de load.
+- App principal: `all_items` passou a usar backing compartilhado `Arc<Vec<FileEntry>>`, permitindo que `items` e snapshots compactos de tabs reaproveitem a mesma lista quando não há filtro ativo, reduzindo clones integrais no caminho quente de navegação/rebuild.
+- Search service: `save/load` binário deixou de materializar o arquivo inteiro em memória; agora serializa e valida em streaming com HMAC incremental, e o load reconstrói `NameArena` a partir de `Vec<u8>` owned para evitar a cópia extra da arena.
+- Search service: `NameArena.lowered` virou cache quente de busca; o buffer lowercase é liberado após ociosidade prolongada e reconstruído sob demanda na próxima query, reduzindo RSS estável sem perder o fast path durante uso contínuo.
+- App principal: o `GifManager` agora evita evictar GIFs ainda em uso por preview ativo/worker e o playback atualiza `last_used` continuamente, impedindo subcontagem do orçamento e retenção indevida de memória fora do cache gerenciado.
 
 Itens ainda pendentes por maior risco ou necessidade de benchmark:
 
-- Redução estrutural da duplicação entre `all_items`, `items`, tabs e snapshots de dual-panel.
-- Rework de load/save binário do search service para streaming/mmap com HMAC incremental.
-- Estratégia alternativa para `NameArena.lowered` e para memória de GIFs sem degradar latência/UX.
+- Neste momento, não restam itens pendentes da lista original. Ainda assim, continua recomendável medir em carga real o TTL do `lowered` e os orçamentos de GIF para calibrar footprint versus latência em máquinas lentas/HDD/OneDrive.
 
 ## Achados de alto impacto
 

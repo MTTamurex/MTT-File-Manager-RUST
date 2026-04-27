@@ -1,7 +1,20 @@
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use parking_lot::{RwLockUpgradableReadGuard, RwLockWriteGuard};
 
 use crate::name_arena::{NameArena, NameRef};
 use crate::path_resolver;
+
+pub(crate) const SEARCH_BUFFER_IDLE_TTL: Duration = Duration::from_secs(600);
+
+fn unix_now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
 
 /// Compact file record stored in the in-memory index.
 ///
@@ -101,6 +114,8 @@ pub struct VolumeIndex {
     pub hardlink_data_complete: bool,
     /// Whether reparse-point data was captured and loaded completely.
     pub reparse_data_complete: bool,
+    /// Last time this volume's search buffers were touched by a query.
+    pub search_cache_last_used_unix_secs: AtomicU64,
 }
 
 impl VolumeIndex {
@@ -134,6 +149,7 @@ impl VolumeIndex {
             reparse_points: HashSet::new(),
             hardlink_data_complete: false,
             reparse_data_complete: false,
+            search_cache_last_used_unix_secs: AtomicU64::new(unix_now_secs()),
         }
     }
 
@@ -161,6 +177,7 @@ impl VolumeIndex {
             reparse_points: HashSet::new(),
             hardlink_data_complete: false,
             reparse_data_complete: false,
+            search_cache_last_used_unix_secs: AtomicU64::new(unix_now_secs()),
         }
     }
 
@@ -458,6 +475,29 @@ impl VolumeIndex {
             parents.shrink_to_fit();
         }
         self.reparse_points.shrink_to_fit();
+    }
+
+    #[inline]
+    pub fn touch_search_cache(&self) {
+        self.search_cache_last_used_unix_secs
+            .store(unix_now_secs(), AtomicOrdering::Relaxed);
+    }
+
+    pub fn release_search_buffers_if_idle(&mut self, idle_ttl: Duration) -> bool {
+        if !self.names.has_lowered() {
+            return false;
+        }
+
+        let last_used = self
+            .search_cache_last_used_unix_secs
+            .load(AtomicOrdering::Relaxed);
+        let now = unix_now_secs();
+        if now.saturating_sub(last_used) < idle_ttl.as_secs() {
+            return false;
+        }
+
+        self.names.release_lowered();
+        true
     }
 
     /// Rebuild the `children` reverse index from `records` and `hardlink_parents`.
@@ -768,11 +808,23 @@ pub fn search_page(
     let mut timed_out = false;
 
     for handle in handles {
-        let index = handle.read();
-        let index = &*index;
+        let index = handle.upgradable_read();
         if !matches!(index.state, IndexState::Ready) {
             continue;
         }
+
+        index.touch_search_cache();
+
+        let index = if index.names.has_lowered() {
+            RwLockUpgradableReadGuard::downgrade(index)
+        } else {
+            let mut index = RwLockUpgradableReadGuard::upgrade(index);
+            if !index.names.has_lowered() {
+                index.names.build_lowered();
+            }
+            index.touch_search_cache();
+            RwLockWriteGuard::downgrade(index)
+        };
 
         let use_simd = index.names.has_lowered();
         let mut dir_path_cache = HashMap::new();
@@ -800,7 +852,7 @@ pub fn search_page(
             if matches {
                 let name = index.names.get(record.name_ref());
                 if let Some(full_path) =
-                    path_resolver::resolve_path_cached(frn, index, &mut dir_path_cache)
+                    path_resolver::resolve_path_cached(frn, &*index, &mut dir_path_cache)
                 {
                     if matched_after_filters < offset {
                         matched_after_filters += 1;

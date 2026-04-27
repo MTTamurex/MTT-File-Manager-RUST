@@ -14,7 +14,7 @@
 //! requires the per-machine key (see [`super::integrity`]). Files written by
 //! the legacy `MTTIDX01` format are treated as missing on load and rebuilt.
 
-use std::io::Write;
+use std::io::{BufReader, BufWriter, Read, Write};
 use std::path::PathBuf;
 
 use super::integrity::{self, HMAC_OUTPUT_SIZE};
@@ -77,6 +77,29 @@ pub fn index_path(drive_letter: char) -> PathBuf {
     super::data_dir().join(format!("index_{}.bin", drive_letter))
 }
 
+fn write_authenticated_chunk<W: Write>(
+    writer: &mut W,
+    hmac: &mut integrity::HmacSha256,
+    bytes: &[u8],
+) -> Result<(), String> {
+    writer
+        .write_all(bytes)
+        .map_err(|e| format!("Write payload: {}", e))?;
+    hmac.update(bytes).map_err(|e| format!("HMAC update: {}", e))
+}
+
+fn read_authenticated_chunk<R: Read>(
+    reader: &mut R,
+    hmac: &mut integrity::HmacSha256,
+    buf: &mut [u8],
+    label: &str,
+) -> Result<(), String> {
+    reader
+        .read_exact(buf)
+        .map_err(|e| format!("Read {}: {}", label, e))?;
+    hmac.update(buf).map_err(|e| format!("HMAC update: {}", e))
+}
+
 /// Save a VolumeIndex to a binary file atomically (write temp + rename).
 pub fn save(index: &VolumeIndex) -> Result<(), String> {
     let path = index_path(index.drive_letter);
@@ -94,25 +117,12 @@ pub fn save(index: &VolumeIndex) -> Result<(), String> {
     // missing/unreadable key never produces a half-written index on disk.
     let key = integrity::machine_key().map_err(|e| format!("HMAC key unavailable: {}", e))?;
 
-    let mut file = std::fs::File::create(&tmp_path)
+    let file = std::fs::File::create(&tmp_path)
         .map_err(|e| format!("Failed to create temp index file: {}", e))?;
+    let mut writer = BufWriter::new(file);
+    let mut hmac = integrity::HmacSha256::new(&key).map_err(|e| format!("HMAC init: {}", e))?;
 
-    // Buffer the entire payload in memory so we can MAC it in one pass.
-    // The format already requires us to know record/arena sizes up front,
-    // so this does not change the memory profile materially.
-    let mut payload: Vec<u8> = Vec::with_capacity(
-        HEADER_SIZE
-            + index.names.len()
-            + index.records.len() * RECORD_SIZE
-            + index.reparse_points.len() * REPARSE_ENTRY_SIZE,
-    );
-
-    // Flatten hardlink_parents into (child_frn, parent_frn) pairs.
-    let hardlink_pairs: Vec<(u64, u64)> = index
-        .hardlink_parents
-        .iter()
-        .flat_map(|(&child, parents)| parents.iter().map(move |&p| (child, p)))
-        .collect();
+    let hardlink_entry_count: usize = index.hardlink_parents.values().map(Vec::len).sum();
 
     // Build header.
     let mut flags: u64 = 0;
@@ -135,7 +145,7 @@ pub fn save(index: &VolumeIndex) -> Result<(), String> {
         last_usn: index.last_usn,
         record_count: index.records.len() as u64,
         arena_size: index.names.len() as u64,
-        hardlink_entry_count: hardlink_pairs.len() as u64,
+        hardlink_entry_count: hardlink_entry_count as u64,
         reparse_count: index.reparse_points.len() as u64,
         flags,
     };
@@ -143,45 +153,49 @@ pub fn save(index: &VolumeIndex) -> Result<(), String> {
     // Write header.
     let header_bytes: &[u8] =
         unsafe { std::slice::from_raw_parts(&header as *const Header as *const u8, HEADER_SIZE) };
-    payload.extend_from_slice(header_bytes);
+    write_authenticated_chunk(&mut writer, &mut hmac, header_bytes)?;
 
     // Write NameArena.
-    payload.extend_from_slice(index.names.as_bytes());
+    write_authenticated_chunk(&mut writer, &mut hmac, index.names.as_bytes())?;
 
     // Write Records (sorted by FRN for deterministic output).
     let mut sorted_frns: Vec<u64> = index.records.keys().copied().collect();
     sorted_frns.sort_unstable();
     for &frn in &sorted_frns {
         let rec = &index.records[&frn];
-        payload.extend_from_slice(&frn.to_le_bytes());
+        write_authenticated_chunk(&mut writer, &mut hmac, &frn.to_le_bytes())?;
         let rec_bytes: &[u8] = unsafe {
             std::slice::from_raw_parts(rec as *const FileRecord as *const u8, FILE_RECORD_SIZE)
         };
-        payload.extend_from_slice(rec_bytes);
+        write_authenticated_chunk(&mut writer, &mut hmac, rec_bytes)?;
     }
 
     // Write Hardlink pairs.
-    for &(child, parent) in &hardlink_pairs {
-        payload.extend_from_slice(&child.to_le_bytes());
-        payload.extend_from_slice(&parent.to_le_bytes());
+    for (&child, parents) in &index.hardlink_parents {
+        for &parent in parents {
+            write_authenticated_chunk(&mut writer, &mut hmac, &child.to_le_bytes())?;
+            write_authenticated_chunk(&mut writer, &mut hmac, &parent.to_le_bytes())?;
+        }
     }
 
     // Write Reparse points.
     let mut sorted_reparse: Vec<u64> = index.reparse_points.iter().copied().collect();
     sorted_reparse.sort_unstable();
     for &frn in &sorted_reparse {
-        payload.extend_from_slice(&frn.to_le_bytes());
+        write_authenticated_chunk(&mut writer, &mut hmac, &frn.to_le_bytes())?;
     }
 
-    // SEC: Compute HMAC-SHA256 over the entire payload and append as trailer.
-    let tag = integrity::hmac_sha256(&key, &payload).map_err(|e| format!("HMAC compute: {}", e))?;
+    // SEC: Compute HMAC-SHA256 incrementally over the serialized payload.
+    let tag = hmac.finalize().map_err(|e| format!("HMAC compute: {}", e))?;
 
-    file.write_all(&payload)
-        .map_err(|e| format!("Write payload: {}", e))?;
-    file.write_all(&tag)
+    writer
+        .write_all(&tag)
         .map_err(|e| format!("Write HMAC trailer: {}", e))?;
-
-    file.flush().map_err(|e| format!("Flush: {}", e))?;
+    writer.flush().map_err(|e| format!("Flush: {}", e))?;
+    let file = writer
+        .into_inner()
+        .map_err(|e| format!("Finish buffered write: {}", e))?;
+    file.sync_all().map_err(|e| format!("Sync: {}", e))?;
     drop(file);
 
     // Atomic rename.
@@ -208,15 +222,25 @@ pub fn load(drive_letter: char) -> Result<Option<(VolumeIndex, PersistedBinarySt
 
     let start = std::time::Instant::now();
 
-    let data = std::fs::read(&path).map_err(|e| format!("Read binary index: {}", e))?;
+    let file = std::fs::File::open(&path).map_err(|e| format!("Read binary index: {}", e))?;
+    let file_len = file
+        .metadata()
+        .map_err(|e| format!("Read binary metadata: {}", e))?
+        .len() as usize;
+    let mut reader = BufReader::new(file);
 
-    if data.len() < HEADER_SIZE + TRAILER_SIZE {
+    if file_len < HEADER_SIZE + TRAILER_SIZE {
         return Err("Binary index too small".into());
     }
 
+    let mut header_bytes = [0u8; HEADER_SIZE];
+    reader
+        .read_exact(&mut header_bytes)
+        .map_err(|e| format!("Read header: {}", e))?;
+
     // SEC: Magic check FIRST so we can recognize legacy files and silently
     // request a rebuild instead of erroring out.
-    if data[..8] == *LEGACY_MAGIC {
+    if header_bytes[..8] == *LEGACY_MAGIC {
         eprintln!(
             "[BINARY-IDX] {}:\\ Legacy MTTIDX01 (CRC32) format detected; \
              discarding and rebuilding under MTTIDX02 (HMAC-SHA256).",
@@ -225,26 +249,13 @@ pub fn load(drive_letter: char) -> Result<Option<(VolumeIndex, PersistedBinarySt
         let _ = std::fs::remove_file(&path);
         return Ok(None);
     }
-    if data[..8] != *MAGIC {
+    if header_bytes[..8] != *MAGIC {
         let _ = std::fs::remove_file(&path);
         return Err("Bad magic".into());
     }
 
-    // Verify HMAC-SHA256 over everything except the trailer.
-    let payload = &data[..data.len() - TRAILER_SIZE];
-    let stored_tag = &data[data.len() - TRAILER_SIZE..];
-
-    let key = integrity::machine_key().map_err(|e| format!("HMAC key unavailable: {}", e))?;
-    let computed_tag =
-        integrity::hmac_sha256(&key, payload).map_err(|e| format!("HMAC compute: {}", e))?;
-    if !integrity::ct_eq(stored_tag, &computed_tag) {
-        // Treat HMAC mismatch as tampering/corruption: delete and force rescan.
-        let _ = std::fs::remove_file(&path);
-        return Err("HMAC mismatch (tampering or corruption)".into());
-    }
-
     // Parse header.
-    let header: Header = unsafe { std::ptr::read_unaligned(data.as_ptr() as *const Header) };
+    let header: Header = unsafe { std::ptr::read_unaligned(header_bytes.as_ptr() as *const Header) };
     if &header.magic != MAGIC {
         return Err("Bad magic".into());
     }
@@ -309,57 +320,71 @@ pub fn load(drive_letter: char) -> Result<Option<(VolumeIndex, PersistedBinarySt
         .and_then(|s| s.checked_add(reparse_count.checked_mul(REPARSE_ENTRY_SIZE)?))
         .and_then(|s| s.checked_add(TRAILER_SIZE)) // HMAC-SHA256
         .ok_or_else(|| "Size overflow in header arithmetic".to_string())?;
-    if data.len() != expected {
+    if file_len != expected {
         return Err(format!(
             "Size mismatch: expected {} got {}",
             expected,
-            data.len()
+            file_len
         ));
     }
 
-    let mut offset = HEADER_SIZE;
+    let key = integrity::machine_key().map_err(|e| format!("HMAC key unavailable: {}", e))?;
+    let mut hmac = integrity::HmacSha256::new(&key).map_err(|e| format!("HMAC init: {}", e))?;
+    hmac.update(&header_bytes)
+        .map_err(|e| format!("HMAC update: {}", e))?;
 
     // Load NameArena.
-    // Reconstruct by bulk-inserting the raw arena bytes.
-    // NameArena::insert() validates UTF-8 per-entry, but we already CRC-verified
-    // the whole file. Use a direct reconstruction approach instead.
-    let arena_slice = &data[offset..offset + arena_size];
-    offset += arena_size;
+    // Reconstruct by owning the raw arena bytes directly, avoiding the old
+    // second copy that happened after reading the entire file into memory.
+    let mut arena_bytes = vec![0u8; arena_size];
+    read_authenticated_chunk(&mut reader, &mut hmac, &mut arena_bytes, "name arena")?;
 
     // Load Records.
     let mut records = std::collections::HashMap::with_capacity(record_count);
+    let mut record_buf = [0u8; RECORD_SIZE];
     for _ in 0..record_count {
-        let frn = u64::from_le_bytes(data[offset..offset + 8].try_into().unwrap());
-        offset += 8;
-        let rec: FileRecord =
-            unsafe { std::ptr::read_unaligned(data[offset..].as_ptr() as *const FileRecord) };
-        offset += FILE_RECORD_SIZE;
+        read_authenticated_chunk(&mut reader, &mut hmac, &mut record_buf, "record")?;
+        let frn = u64::from_le_bytes(record_buf[..FRN_SIZE].try_into().unwrap());
+        let rec: FileRecord = unsafe {
+            std::ptr::read_unaligned(record_buf[FRN_SIZE..].as_ptr() as *const FileRecord)
+        };
         records.insert(frn, rec);
     }
 
     // Load Hardlinks.
     let mut hardlink_parents: std::collections::HashMap<u64, Vec<u64>> =
-        std::collections::HashMap::new();
+        std::collections::HashMap::with_capacity(hardlink_count.min(record_count));
+    let mut hardlink_buf = [0u8; HARDLINK_ENTRY_SIZE];
     for _ in 0..hardlink_count {
-        let child = u64::from_le_bytes(data[offset..offset + 8].try_into().unwrap());
-        offset += 8;
-        let parent = u64::from_le_bytes(data[offset..offset + 8].try_into().unwrap());
-        offset += 8;
+        read_authenticated_chunk(&mut reader, &mut hmac, &mut hardlink_buf, "hardlink pair")?;
+        let child = u64::from_le_bytes(hardlink_buf[..FRN_SIZE].try_into().unwrap());
+        let parent = u64::from_le_bytes(hardlink_buf[FRN_SIZE..].try_into().unwrap());
         hardlink_parents.entry(child).or_default().push(parent);
     }
 
     // Load Reparse points.
     let mut reparse_points = std::collections::HashSet::with_capacity(reparse_count);
+    let mut reparse_buf = [0u8; REPARSE_ENTRY_SIZE];
     for _ in 0..reparse_count {
-        let frn = u64::from_le_bytes(data[offset..offset + 8].try_into().unwrap());
-        offset += 8;
+        read_authenticated_chunk(&mut reader, &mut hmac, &mut reparse_buf, "reparse point")?;
+        let frn = u64::from_le_bytes(reparse_buf.try_into().unwrap());
         reparse_points.insert(frn);
+    }
+
+    let mut stored_tag = [0u8; TRAILER_SIZE];
+    reader
+        .read_exact(&mut stored_tag)
+        .map_err(|e| format!("Read HMAC trailer: {}", e))?;
+
+    let computed_tag = hmac.finalize().map_err(|e| format!("HMAC compute: {}", e))?;
+    if !integrity::ct_eq(&stored_tag, &computed_tag) {
+        let _ = std::fs::remove_file(&path);
+        return Err("HMAC mismatch (tampering or corruption)".into());
     }
 
     // Build VolumeIndex.
     let mut index = VolumeIndex::empty(drive_letter);
-    // Replace the default arena with one containing our loaded data.
-    index.names = crate::name_arena::NameArena::from_raw(arena_slice);
+    index.names = crate::name_arena::NameArena::from_vec(arena_bytes);
     index.records = records;
     index.hardlink_parents = hardlink_parents;
     index.reparse_points = reparse_points;

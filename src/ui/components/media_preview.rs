@@ -44,11 +44,13 @@ impl GifPlayer {
         // A blocking .lock() here causes priority inversion: the UI thread
         // (high priority) waits on the decode thread (low priority, possibly
         // blocked on cloud filter driver), stalling the Windows message pump.
-        let Some(data) = self.data.try_lock() else {
+        let Some(mut data) = self.data.try_lock() else {
             // Decode worker holds the lock — skip this frame, retry next paint.
             ctx.request_repaint_after(Duration::from_millis(16));
             return;
         };
+
+        data.last_used = Instant::now();
 
         if data.frames.is_empty() {
             let is_complete = data.is_complete;

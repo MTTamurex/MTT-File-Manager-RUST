@@ -1,10 +1,21 @@
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use crate::domain::file_entry::FileEntry;
 use crate::domain::file_entry::ViewMode;
 
 use super::ImageViewerApp;
 
 impl ImageViewerApp {
+    pub(crate) fn all_items_mut(&mut self) -> &mut Vec<FileEntry> {
+        Arc::make_mut(&mut self.all_items)
+    }
+
+    pub(crate) fn share_visible_items_from_all_items(&mut self) {
+        self.items = self.all_items.clone();
+        self.total_items = self.items.len();
+    }
+
     pub(crate) fn clear_pending_items_rebuild_flags(&mut self) {
         self.pending_items_rebuild = false;
         self.pending_items_count = 0;

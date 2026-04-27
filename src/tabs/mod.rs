@@ -38,7 +38,7 @@ pub struct TabState {
     /// Items in this tab's view
     pub items: Arc<Vec<FileEntry>>,
     /// Unfiltered items (for search)
-    pub all_items: Vec<FileEntry>,
+    pub all_items: Arc<Vec<FileEntry>>,
     /// Whether `items` was intentionally compacted away because the visible
     /// snapshot is identical to `all_items` for this stored tab state.
     pub items_snapshot_compact: bool,
@@ -106,7 +106,7 @@ impl TabState {
             navigation: NavigationHistory::new(COMPUTER_VIEW_ID.to_string()),
             is_computer_view: true,
             items: Arc::new(Vec::new()),
-            all_items: Vec::new(),
+            all_items: Arc::new(Vec::new()),
             items_snapshot_compact: false,
             selected_item: None,
             selected_file: None,
@@ -150,7 +150,7 @@ impl TabState {
             navigation: NavigationHistory::new(path.to_string()),
             is_computer_view: false,
             items: Arc::new(Vec::new()),
-            all_items: Vec::new(),
+            all_items: Arc::new(Vec::new()),
             items_snapshot_compact: false,
             selected_item: None,
             selected_file: None,
@@ -254,7 +254,7 @@ impl TabState {
 
     pub fn restore_items_snapshot(&self) -> Arc<Vec<FileEntry>> {
         if self.items_snapshot_compact {
-            Arc::new(self.all_items.clone())
+            self.all_items.clone()
         } else {
             self.items.clone()
         }
@@ -271,7 +271,7 @@ impl TabState {
     /// Keep only lightweight state for closed-tab history to avoid retaining heavy caches.
     fn into_lightweight_closed_snapshot(mut self) -> Self {
         self.items = Arc::new(Vec::new());
-        self.all_items.clear();
+        self.all_items = Arc::new(Vec::new());
         self.items_snapshot_compact = false;
         self.selected_item = None;
         self.selected_file = None;

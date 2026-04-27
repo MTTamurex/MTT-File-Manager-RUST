@@ -288,7 +288,7 @@ impl ImageViewerApp {
             drag_icon_cache: None,
             total_items: 0,
             // Search & Navigation (NEW)
-            all_items: Vec::new(),
+            all_items: Arc::new(Vec::new()),
             search_query: String::new(),
             last_grid_cols: 1,
             generation: 0,
