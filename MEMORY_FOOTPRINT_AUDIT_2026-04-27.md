@@ -38,6 +38,7 @@ Itens já implementados nesta etapa:
 - Sidebar tree: o cache `children` agora poda ramos colapsados que não são mais ancestrais de nós expandidos, reduzindo retenção de subárvores antigas em sessões longas.
 - Global search: fechar o overlay ou zerar a consulta agora libera também os vetores derivados (`results`, índices filtrados/ordenados e drives disponíveis) com `shrink_to_fit()`, em vez de só limpar conteúdo lógico e manter a capacidade reservada após buscas grandes.
 - Tabs / dual panel frio: snapshots armazenados fora de foco deixaram de persistir `selected_thumbnail`; a textura do preview agora é reidratada só quando o tab ou painel volta a ficar ativo, evitando manter `TextureHandle` vivo fora do LRU principal.
+- Tabs / dual panel frio: snapshots fora de foco também deixaram de persistir `selected_gif`, evitando manter `Arc<GifData>` e a textura local do player vivos quando o preview de GIF não está em uso.
 - Search service USN: o caminho que carrega índice via SQLite agora também chama `shrink_to_fit()` completo, alinhando a compactação de mapas com os demais caminhos de load.
 
 Itens ainda pendentes por maior risco ou necessidade de benchmark:
