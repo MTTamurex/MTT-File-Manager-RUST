@@ -30,6 +30,7 @@ Itens já implementados nesta etapa:
 - Folder size batch state: `batch_invalidation_epoch` agora sofre poda periódica de paths sem cache, request em voo ou revalidação pendente.
 - Tabs: snapshots de tabs inativas agora podem descartar `items` quando ele é redundante com `all_items`, reconstruindo a view só ao reativar o tab.
 - Dual panel: o snapshot do painel inativo agora também compacta `items` redundante e restaura a lista apenas quando o painel volta a ser ativo.
+- GIF manager: o decode incremental agora respeita teto por GIF e também interrompe crescimento adicional quando o orçamento global já foi alcançado, mantendo os primeiros frames já decodificados em vez de continuar acumulando memória até a próxima limpeza.
 
 Itens ainda pendentes por maior risco ou necessidade de benchmark:
 
