@@ -567,7 +567,7 @@ mod tests {
     use crate::volume_indices::handle_from;
 
     fn make_volume(drive_letter: char, records_len: usize, state: IndexState) -> VolumeIndex {
-        let mut index = VolumeIndex::new(drive_letter);
+        let mut index = VolumeIndex::empty(drive_letter);
         index.state = state;
         for i in 0..records_len {
             index.insert_record(i as u64 + 1, "sample.txt", 0, false, false);

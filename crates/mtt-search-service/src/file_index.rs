@@ -119,7 +119,6 @@ pub struct VolumeIndex {
 }
 
 impl VolumeIndex {
-    const DEFAULT_RECORD_CAPACITY: usize = 500_000;
     const DEFAULT_NAME_BYTES_PER_RECORD: usize = 25;
 
     #[inline]
@@ -187,10 +186,6 @@ impl VolumeIndex {
             estimated_records,
             estimated_records.saturating_mul(Self::DEFAULT_NAME_BYTES_PER_RECORD),
         )
-    }
-
-    pub fn new(drive_letter: char) -> Self {
-        Self::with_estimated_records(drive_letter, Self::DEFAULT_RECORD_CAPACITY)
     }
 
     /// The NTFS root directory's File Reference Number.
@@ -899,7 +894,7 @@ mod tests {
 
     #[test]
     fn folder_size_includes_reparse_children() {
-        let mut index = VolumeIndex::new('C');
+        let mut index = VolumeIndex::empty('C');
         let root = 5u64;
 
         // "real" dir (non-reparse) with a file
@@ -926,7 +921,7 @@ mod tests {
 
     #[test]
     fn folder_size_visited_dirs_prevents_cycles() {
-        let mut index = VolumeIndex::new('C');
+        let mut index = VolumeIndex::empty('C');
         let root = 5u64;
 
         // Create a dir structure where the same FRN could appear twice
@@ -941,7 +936,7 @@ mod tests {
 
     #[test]
     fn collect_zero_size_file_frns_in_subtree_is_unique_and_respects_limit() {
-        let mut index = VolumeIndex::new('C');
+        let mut index = VolumeIndex::empty('C');
         let root = 5u64;
 
         assert!(index.insert_record(10, "folder", root, true, false));
