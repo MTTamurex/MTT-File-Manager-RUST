@@ -87,7 +87,7 @@ fn compute_thumbnail_worker_count(cpu_count: usize) -> usize {
     // shared semaphore, so worker counts above 4 only add idle threads waiting
     // on the semaphore — each costing ~1 MB of committed stack RAM by default.
     // Cap at 4 and request smaller stacks at spawn time to keep the baseline tight.
-    cpu_count.clamp(4, 4)
+    cpu_count.clamp(1, 4)
 }
 
 fn compute_decode_limit(worker_count: usize) -> usize {
@@ -315,6 +315,15 @@ mod tests {
     use std::sync::Arc;
     use std::thread;
     use std::time::Duration;
+
+    #[test]
+    fn test_compute_thumbnail_worker_count_scales_down_and_caps() {
+        assert_eq!(compute_thumbnail_worker_count(1), 1);
+        assert_eq!(compute_thumbnail_worker_count(2), 2);
+        assert_eq!(compute_thumbnail_worker_count(3), 3);
+        assert_eq!(compute_thumbnail_worker_count(4), 4);
+        assert_eq!(compute_thumbnail_worker_count(16), 4);
+    }
 
     #[test]
     fn test_semaphore_concurrency() {

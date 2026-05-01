@@ -9,6 +9,55 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+const RGBA_HEADER_LEN: usize = 8;
+const RGBA_BYTES_PER_PIXEL: usize = 4;
+const MAX_ICON_DIMENSION: u32 = 512;
+const MAX_ICON_RGBA_BYTES: usize =
+    (MAX_ICON_DIMENSION as usize) * (MAX_ICON_DIMENSION as usize) * RGBA_BYTES_PER_PIXEL;
+const MAX_ICON_CACHE_FILE_BYTES: u64 = (RGBA_HEADER_LEN + MAX_ICON_RGBA_BYTES) as u64;
+
+fn expected_rgba_len(width: u32, height: u32) -> Option<usize> {
+    if width == 0 || height == 0 || width > MAX_ICON_DIMENSION || height > MAX_ICON_DIMENSION {
+        return None;
+    }
+
+    let width = usize::try_from(width).ok()?;
+    let height = usize::try_from(height).ok()?;
+    let len = width
+        .checked_mul(height)?
+        .checked_mul(RGBA_BYTES_PER_PIXEL)?;
+    (len <= MAX_ICON_RGBA_BYTES).then_some(len)
+}
+
+fn read_cache_file(path: &Path) -> Option<Vec<u8>> {
+    match std::fs::metadata(path) {
+        Ok(metadata) if metadata.is_file() && metadata.len() <= MAX_ICON_CACHE_FILE_BYTES => {}
+        _ => {
+            let _ = std::fs::remove_file(path);
+            return None;
+        }
+    }
+
+    std::fs::read(path).ok()
+}
+
+fn parse_cached_icon(mut data: Vec<u8>) -> Option<(Vec<u8>, u32, u32)> {
+    if data.len() < RGBA_HEADER_LEN {
+        return None;
+    }
+
+    let width = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+    let height = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+    let expected = expected_rgba_len(width, height)?;
+    let total_len = RGBA_HEADER_LEN.checked_add(expected)?;
+    if data.len() != total_len {
+        return None;
+    }
+
+    drop(data.drain(..RGBA_HEADER_LEN));
+    Some((data, width, height))
+}
+
 /// On-disk cache for extension → RGBA icon data.
 pub struct IconDiskCache {
     dir: PathBuf,
@@ -65,26 +114,11 @@ impl IconDiskCache {
                 let _ = std::fs::remove_file(&path);
                 continue;
             }
-            let data = match std::fs::read(&path) {
-                Ok(d) => d,
-                Err(_) => {
-                    // Corrupted file — remove it.
-                    let _ = std::fs::remove_file(&path);
-                    continue;
-                }
+            let Some((pixels, width, height)) = read_cache_file(&path).and_then(parse_cached_icon)
+            else {
+                let _ = std::fs::remove_file(&path);
+                continue;
             };
-            if data.len() < 8 {
-                let _ = std::fs::remove_file(&path);
-                continue;
-            }
-            let width = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-            let height = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-            let pixels = data[8..].to_vec();
-            let expected = (width as usize) * (height as usize) * 4;
-            if pixels.len() != expected || width == 0 || height == 0 {
-                let _ = std::fs::remove_file(&path);
-                continue;
-            }
             map.insert(ext, (pixels, width, height));
         }
         if !map.is_empty() {
@@ -116,26 +150,21 @@ impl IconDiskCache {
             return None;
         }
         let path = self.dir.join(format!("{}.rgba", canonical.to_lowercase()));
-        let data = std::fs::read(&path).ok()?;
-        if data.len() < 8 {
+        let Some((pixels, width, height)) = read_cache_file(&path).and_then(parse_cached_icon)
+        else {
             let _ = std::fs::remove_file(&path);
             return None;
-        }
-        let width = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
-        let height = u32::from_le_bytes([data[4], data[5], data[6], data[7]]);
-        let pixels = data[8..].to_vec();
-        let expected = (width as usize) * (height as usize) * 4;
-        if pixels.len() != expected || width == 0 || height == 0 {
-            let _ = std::fs::remove_file(&path);
-            return None;
-        }
+        };
         Some((pixels, width, height))
     }
 
     /// Save an extension's icon data to disk.
     /// Called from worker threads after extracting a new extension icon.
     pub fn save(&self, ext: &str, pixels: &[u8], width: u32, height: u32) {
-        if ext.is_empty() || pixels.is_empty() || width == 0 || height == 0 {
+        if ext.is_empty()
+            || pixels.is_empty()
+            || expected_rgba_len(width, height) != Some(pixels.len())
+        {
             return;
         }
         // Always save under the canonical extension so mapped types (sys→dll)
@@ -156,5 +185,44 @@ impl IconDiskCache {
         if let Err(e) = std::fs::write(&path, &data) {
             log::warn!("[IconDiskCache] Failed to write {:?}: {}", path, e);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cache_blob(width: u32, height: u32, pixels: &[u8]) -> Vec<u8> {
+        let mut data = Vec::with_capacity(RGBA_HEADER_LEN + pixels.len());
+        data.extend_from_slice(&width.to_le_bytes());
+        data.extend_from_slice(&height.to_le_bytes());
+        data.extend_from_slice(pixels);
+        data
+    }
+
+    #[test]
+    fn parse_cached_icon_accepts_valid_rgba() {
+        let pixels = vec![7; 2 * 3 * RGBA_BYTES_PER_PIXEL];
+        let parsed = parse_cached_icon(cache_blob(2, 3, &pixels)).unwrap();
+
+        assert_eq!(parsed.0, pixels);
+        assert_eq!(parsed.1, 2);
+        assert_eq!(parsed.2, 3);
+    }
+
+    #[test]
+    fn parse_cached_icon_rejects_size_mismatch() {
+        let pixels = vec![7; 7];
+
+        assert!(parse_cached_icon(cache_blob(2, 2, &pixels)).is_none());
+    }
+
+    #[test]
+    fn expected_rgba_len_rejects_zero_and_oversized_dimensions() {
+        assert_eq!(expected_rgba_len(0, 1), None);
+        assert_eq!(expected_rgba_len(1, 0), None);
+        assert_eq!(expected_rgba_len(MAX_ICON_DIMENSION + 1, 1), None);
+        assert_eq!(expected_rgba_len(1, MAX_ICON_DIMENSION + 1), None);
+        assert_eq!(expected_rgba_len(u32::MAX, u32::MAX), None);
     }
 }
