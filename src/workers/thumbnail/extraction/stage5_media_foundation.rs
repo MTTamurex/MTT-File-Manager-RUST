@@ -168,12 +168,31 @@ pub fn extract(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
             return None;
         }
 
+        if data_ptr.is_null() {
+            log::trace!("[Thumbnail] Stage 5: Lock returned null data pointer");
+            let _ = buffer.Unlock();
+            return None;
+        }
+
+        let pixels = match (width as usize).checked_mul(height as usize) {
+            Some(pixels) => pixels,
+            None => {
+                log::trace!("[Thumbnail] Stage 5: dimension overflow");
+                let _ = buffer.Unlock();
+                return None;
+            }
+        };
+
         // Convert to RGBA based on format
         let rgba_data = if use_nv12 {
             // NV12 format: Y plane (width*height bytes) + UV plane (width*height/2 bytes)
-            let y_size = (width * height) as usize;
+            let y_size = pixels;
             let uv_size = y_size / 2;
-            let expected_size = y_size + uv_size;
+            let Some(expected_size) = y_size.checked_add(uv_size) else {
+                log::trace!("[Thumbnail] Stage 5: NV12 size overflow");
+                let _ = buffer.Unlock();
+                return None;
+            };
 
             if (current_len as usize) < expected_size {
                 log::trace!(
@@ -189,7 +208,11 @@ pub fn extract(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
             convert_nv12_to_rgba(nv12_slice, width, height)
         } else {
             // RGB32 format: straight BGRA copy and swap
-            let expected_size = (width * height * 4) as usize;
+            let Some(expected_size) = pixels.checked_mul(4) else {
+                log::trace!("[Thumbnail] Stage 5: RGB32 size overflow");
+                let _ = buffer.Unlock();
+                return None;
+            };
             if (current_len as usize) < expected_size {
                 log::trace!(
                     "[Thumbnail] Stage 5: RGB32 buffer size mismatch: {} vs expected {}",

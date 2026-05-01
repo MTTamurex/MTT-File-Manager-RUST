@@ -136,7 +136,7 @@ pub(crate) fn index_volume(
                     Some(0),
                     Some(state.files_indexed),
                 );
-                db.load_into_index(&mut index, |loaded| {
+                match db.load_into_index(&mut index, |loaded| {
                     indexing_progress.update(
                         drive_letter,
                         "scanning",
@@ -145,7 +145,17 @@ pub(crate) fn index_volume(
                         Some(loaded as u64),
                         Some(state.files_indexed),
                     )
-                })
+                }) {
+                    Ok(loaded) => loaded,
+                    Err(error) => {
+                        eprintln!(
+                            "[USN] {}:\\ SQLite cache load failed ({}), full scan needed",
+                            drive_letter,
+                            crate::redact_paths(&error)
+                        );
+                        None
+                    }
+                }
             };
 
             if let Some(count) = loaded_count {
@@ -429,12 +439,25 @@ pub(crate) fn index_volume(
                         vol.sizes_loaded = true;
                         sizes_marked = true;
                     }
-                    // Ensure sizes_loaded is set even if the bulk update
-                    // lock timed out — avoids leaving the UI stuck on
-                    // "sizes not loaded" indefinitely.
                     if !sizes_marked {
-                        let mut vol = bg_handle.write();
-                        vol.sizes_loaded = true;
+                        loop {
+                            if let Some(mut vol) =
+                                bg_handle.try_write_for(std::time::Duration::from_millis(250))
+                            {
+                                for (&frn, bulk_rec) in &bulk_index.records {
+                                    if bulk_rec.size > 0 {
+                                        if let Some(rec) = vol.records.get_mut(&frn) {
+                                            if rec.size != bulk_rec.size {
+                                                rec.size = bulk_rec.size;
+                                                applied += 1;
+                                            }
+                                        }
+                                    }
+                                }
+                                vol.sizes_loaded = true;
+                                break;
+                            }
+                        }
                     }
                     let elapsed = start.elapsed();
                     eprintln!(
@@ -444,14 +467,9 @@ pub(crate) fn index_volume(
                 }
                 Err(e) => {
                     eprintln!(
-                        "[MFT-SIZE] {}:\\ Bulk size extraction failed: {}, marking sizes loaded anyway",
+                        "[MFT-SIZE] {}:\\ Bulk size extraction failed: {}, keeping sizes unloaded",
                         drive_letter, e
                     );
-                    // Still mark as loaded to avoid blocking the UI forever.
-                    {
-                        let mut vol = bg_handle.write();
-                        vol.sizes_loaded = true;
-                    }
                 }
             }
 

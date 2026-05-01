@@ -344,8 +344,15 @@ fn verify_server_process(pipe: HANDLE) -> Result<(), String> {
             let server_session = named_pipe_server_session_id(pipe)?;
             let current_session = current_process_session_id()?;
             if server_session == current_session {
+                let basename = process_basename_from_snapshot(server_pid)?;
+                if basename != "mtt-search-service.exe" {
+                    return Err(format!(
+                        "Inaccessible same-session pipe server image is '{}', expected 'mtt-search-service.exe'",
+                        basename
+                    ));
+                }
                 log::debug!(
-                    "[SEARCH-CLIENT] OpenProcess denied for console-mode server pid {} in session {}",
+                    "[SEARCH-CLIENT] OpenProcess denied for console-mode server pid {} in session {}, Toolhelp basename verified",
                     server_pid,
                     server_session
                 );
@@ -423,6 +430,57 @@ fn verify_server_process(pipe: HANDLE) -> Result<(), String> {
     }
 
     Err("Server token SID is neither LocalSystem nor the current user".into())
+}
+
+fn process_basename_from_snapshot(pid: u32) -> Result<String, String> {
+    use windows::Win32::Foundation::CloseHandle as Win32CloseHandle;
+    use windows::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
+        TH32CS_SNAPPROCESS,
+    };
+
+    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) }
+        .map_err(|e| format!("CreateToolhelp32Snapshot failed: {}", e))?;
+
+    struct SnapshotGuard(HANDLE);
+    impl Drop for SnapshotGuard {
+        fn drop(&mut self) {
+            unsafe {
+                let _ = Win32CloseHandle(self.0);
+            }
+        }
+    }
+    let _guard = SnapshotGuard(snapshot);
+
+    let mut entry = PROCESSENTRY32W {
+        dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
+        ..Default::default()
+    };
+
+    unsafe {
+        Process32FirstW(snapshot, &mut entry)
+            .map_err(|e| format!("Process32FirstW failed: {}", e))?;
+    }
+
+    loop {
+        if entry.th32ProcessID == pid {
+            let end = entry
+                .szExeFile
+                .iter()
+                .position(|&ch| ch == 0)
+                .unwrap_or(entry.szExeFile.len());
+            return Ok(String::from_utf16_lossy(&entry.szExeFile[..end]).to_ascii_lowercase());
+        }
+
+        if unsafe { Process32NextW(snapshot, &mut entry) }.is_err() {
+            break;
+        }
+    }
+
+    Err(format!(
+        "process pid {} was not present in Toolhelp snapshot",
+        pid
+    ))
 }
 
 fn query_running_search_service_pid() -> Result<Option<u32>, String> {

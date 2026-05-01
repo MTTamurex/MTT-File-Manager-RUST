@@ -65,7 +65,7 @@ pub struct VolumeIndex {
     pub records: RecordStore,
     /// Reverse index: parent FRN -> child FRNs.
     /// Enables O(subtree) descent for folder size calculation.
-    pub children: HashMap<u64, Box<[u64]>>,
+    pub children: HashMap<u64, Vec<u64>>,
     /// Contiguous arena storing all file name strings.
     pub names: NameArena,
     /// Last USN processed (for incremental updates).
@@ -188,17 +188,10 @@ impl VolumeIndex {
     #[inline]
     fn add_child_edge(&mut self, parent_ref: u64, child_frn: u64) {
         let bucket = Self::normalized_parent_bucket(child_frn, parent_ref);
-        let children = self
-            .children
-            .entry(bucket)
-            .or_insert_with(|| Vec::new().into_boxed_slice());
-        if children.contains(&child_frn) {
-            return;
+        let children = self.children.entry(bucket).or_default();
+        if !children.contains(&child_frn) {
+            children.push(child_frn);
         }
-
-        let mut expanded = children.to_vec();
-        expanded.push(child_frn);
-        *children = expanded.into_boxed_slice();
     }
 
     #[inline]
@@ -207,12 +200,8 @@ impl VolumeIndex {
         let mut remove_bucket = false;
         if let Some(siblings) = self.children.get_mut(&bucket) {
             if siblings.contains(&child_frn) {
-                let mut compacted = siblings.to_vec();
-                compacted.retain(|&c| c != child_frn);
-                remove_bucket = compacted.is_empty();
-                if !remove_bucket {
-                    *siblings = compacted.into_boxed_slice();
-                }
+                siblings.retain(|&c| c != child_frn);
+                remove_bucket = siblings.is_empty();
             }
         }
         if remove_bucket {
@@ -505,7 +494,8 @@ impl VolumeIndex {
             .map(|(parent, mut child_frns)| {
                 child_frns.sort_unstable();
                 child_frns.dedup();
-                (parent, child_frns.into_boxed_slice())
+                child_frns.shrink_to_fit();
+                (parent, child_frns)
             })
             .collect();
         self.children.shrink_to_fit();

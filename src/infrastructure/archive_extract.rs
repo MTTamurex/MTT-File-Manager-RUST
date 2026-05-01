@@ -467,30 +467,79 @@ fn copy_limited_to_path<R: Read>(
     dest_path: &Path,
     entry_name: &str,
     total_extracted_bytes: &mut u64,
-) -> io::Result<u64> {
+) -> io::Result<(u64, PathBuf)> {
+    let mut created_path: Option<PathBuf> = None;
     let result = (|| {
-        let out_file = fs::File::create(dest_path)?;
+        let (out_file, final_path) = create_unique_output_file(dest_path)?;
+        created_path = Some(final_path.clone());
         let mut writer = BufWriter::new(out_file);
         let bytes = copy_limited(&mut reader, &mut writer, entry_name, *total_extracted_bytes)?;
         writer.flush()?;
-        Ok(bytes)
+        Ok((bytes, final_path))
     })();
 
     match result {
-        Ok(bytes) => {
+        Ok((bytes, final_path)) => {
             *total_extracted_bytes = total_extracted_bytes.checked_add(bytes).ok_or_else(|| {
                 io::Error::new(
                     io::ErrorKind::InvalidData,
                     "archive extraction size overflow",
                 )
             })?;
-            Ok(bytes)
+            Ok((bytes, final_path))
         }
         Err(error) => {
-            let _ = fs::remove_file(dest_path);
+            if let Some(path) = created_path {
+                let _ = fs::remove_file(path);
+            }
             Err(error)
         }
     }
+}
+
+fn create_unique_output_file(dest_path: &Path) -> io::Result<(fs::File, PathBuf)> {
+    match fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(dest_path)
+    {
+        Ok(file) => return Ok((file, dest_path.to_path_buf())),
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+        Err(error) => return Err(error),
+    }
+
+    let parent = dest_path.parent().unwrap_or_else(|| Path::new(""));
+    let stem = dest_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .filter(|s| !s.is_empty())
+        .unwrap_or("_extracted");
+    let extension = dest_path.extension().and_then(|s| s.to_str());
+
+    for suffix in 1..10_000u32 {
+        let file_name = match extension {
+            Some(ext) if !ext.is_empty() => format!("{} ({suffix}).{}", stem, ext),
+            _ => format!("{} ({suffix})", stem),
+        };
+        let candidate = parent.join(file_name);
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&candidate)
+        {
+            Ok(file) => return Ok((file, candidate)),
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        }
+    }
+
+    Err(io::Error::new(
+        io::ErrorKind::AlreadyExists,
+        format!(
+            "too many extraction name collisions for {}",
+            dest_path.display()
+        ),
+    ))
 }
 
 fn copy_limited<R: Read, W: Write>(
@@ -592,10 +641,6 @@ fn extract_from_zip(
         }
 
         let dest_path = derive_output_path(&entry_name, &match_kind, dest_folder)?;
-        let sanitized = dest_path
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_default();
 
         ensure_declared_entry_size(
             &entry_name,
@@ -603,7 +648,12 @@ fn extract_from_zip(
             *global_extracted_bytes,
             MAX_EXTRACTED_ENTRY_BYTES,
         )?;
-        copy_limited_to_path(&mut entry, &dest_path, &entry_name, global_extracted_bytes)?;
+        let (_, final_path) =
+            copy_limited_to_path(&mut entry, &dest_path, &entry_name, global_extracted_bytes)?;
+        let sanitized = final_path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
         extracted += 1;
         *global_extracted += 1;
         update_progress(progress, &sanitized, *global_extracted);
@@ -611,7 +661,7 @@ fn extract_from_zip(
         log::debug!(
             "[ArchiveExtract/ZIP] Extracted '{}' → {}",
             entry_name,
-            dest_path.display()
+            final_path.display()
         );
     }
 
@@ -675,10 +725,6 @@ fn extract_from_7z(
 
         let dest_path = derive_output_path(&entry_name, &match_kind, dest_folder)
             .map_err(|e| sevenz_rust::Error::other(format!("Path error: {}", e)))?;
-        let sanitized = dest_path
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_default();
 
         ensure_declared_entry_size(
             &entry_name,
@@ -687,11 +733,19 @@ fn extract_from_7z(
             MAX_EXTRACTED_ENTRY_BYTES,
         )
         .map_err(|e| sevenz_rust::Error::other(e.to_string()))?;
-        copy_limited_to_path(reader, &dest_path, &entry_name, global_extracted_bytes).map_err(
-            |e| {
-                sevenz_rust::Error::other(format!("Failed to write {}: {}", dest_path.display(), e))
-            },
-        )?;
+        let (_, final_path) = copy_limited_to_path(
+            reader,
+            &dest_path,
+            &entry_name,
+            global_extracted_bytes,
+        )
+        .map_err(|e| {
+            sevenz_rust::Error::other(format!("Failed to write {}: {}", dest_path.display(), e))
+        })?;
+        let sanitized = final_path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
         extracted += 1;
         *global_extracted += 1;
         update_progress(progress, &sanitized, *global_extracted);
@@ -699,7 +753,7 @@ fn extract_from_7z(
         log::debug!(
             "[ArchiveExtract/7z] Extracted '{}' → {}",
             entry_name,
-            dest_path.display()
+            final_path.display()
         );
 
         // Clear progress immediately after last matching file is extracted,
@@ -812,17 +866,17 @@ fn extract_from_rar(
         )?;
 
         let dest_path = derive_output_path(&entry_name, &match_kind, dest_folder)?;
-        let sanitized = dest_path
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_default();
 
-        copy_limited_to_path(
+        let (_, final_path) = copy_limited_to_path(
             std::io::Cursor::new(data.as_slice()),
             &dest_path,
             &entry_name,
             global_extracted_bytes,
         )?;
+        let sanitized = final_path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
         extracted += 1;
         *global_extracted += 1;
         update_progress(progress, &sanitized, *global_extracted);
@@ -830,7 +884,7 @@ fn extract_from_rar(
         log::debug!(
             "[ArchiveExtract/RAR] Extracted '{}' → {}",
             entry_name,
-            dest_path.display()
+            final_path.display()
         );
     }
 
@@ -897,10 +951,6 @@ fn extract_from_tar(
         }
 
         let dest_path = derive_output_path(&entry_path, &match_kind, dest_folder)?;
-        let sanitized = dest_path
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_default();
 
         ensure_declared_entry_size(
             &entry_path,
@@ -908,7 +958,12 @@ fn extract_from_tar(
             *global_extracted_bytes,
             MAX_EXTRACTED_ENTRY_BYTES,
         )?;
-        copy_limited_to_path(&mut entry, &dest_path, &entry_path, global_extracted_bytes)?;
+        let (_, final_path) =
+            copy_limited_to_path(&mut entry, &dest_path, &entry_path, global_extracted_bytes)?;
+        let sanitized = final_path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
         extracted += 1;
         *global_extracted += 1;
         update_progress(progress, &sanitized, *global_extracted);
@@ -916,7 +971,7 @@ fn extract_from_tar(
         log::debug!(
             "[ArchiveExtract/TAR] Extracted '{}' → {}",
             entry_path,
-            dest_path.display()
+            final_path.display()
         );
     }
 

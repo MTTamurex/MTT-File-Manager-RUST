@@ -69,7 +69,7 @@ pub(crate) fn index_non_ntfs_volume(
     let mut cached_index = persisted_record_estimate
         .map(|estimate| file_index::VolumeIndex::with_estimated_records(drive_letter, estimate))
         .unwrap_or_else(|| file_index::VolumeIndex::empty(drive_letter));
-    if let Some(cached_count) = db.load_into_index(&mut cached_index, |_| {}) {
+    if let Ok(Some(cached_count)) = db.load_into_index(&mut cached_index, |_| {}) {
         cached_index.shrink_to_fit();
         cached_index.journal_id = 0;
         cached_index.last_usn = 0;
