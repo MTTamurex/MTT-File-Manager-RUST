@@ -249,9 +249,8 @@ pub(super) fn handle_client(
                 return;
             }
 
-            // Always use in-memory SIMD search (Phase 3). The lowered NameArena
-            // + memchr::memmem is faster than FTS5 for all query lengths, and
-            // has zero index build overhead.
+            // Always use in-memory search. It avoids the FTS5 rebuild path and
+            // uses a tiny reusable lowercase buffer for ASCII SIMD matching.
             let result = collect_authorized_search_page(pipe, indices, &text, offset, limit);
 
             match result {

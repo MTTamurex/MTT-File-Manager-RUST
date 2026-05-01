@@ -1,20 +1,8 @@
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-
-use parking_lot::{RwLockUpgradableReadGuard, RwLockWriteGuard};
+use std::time::Duration;
 
 use crate::name_arena::{NameArena, NameRef};
 use crate::path_resolver;
-
-pub(crate) const SEARCH_BUFFER_IDLE_TTL: Duration = Duration::from_secs(600);
-
-fn unix_now_secs() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-}
 
 /// Compact file record stored in the in-memory index.
 ///
@@ -114,8 +102,6 @@ pub struct VolumeIndex {
     pub hardlink_data_complete: bool,
     /// Whether reparse-point data was captured and loaded completely.
     pub reparse_data_complete: bool,
-    /// Last time this volume's search buffers were touched by a query.
-    pub search_cache_last_used_unix_secs: AtomicU64,
 }
 
 impl VolumeIndex {
@@ -148,7 +134,6 @@ impl VolumeIndex {
             reparse_points: HashSet::new(),
             hardlink_data_complete: false,
             reparse_data_complete: false,
-            search_cache_last_used_unix_secs: AtomicU64::new(unix_now_secs()),
         }
     }
 
@@ -176,7 +161,6 @@ impl VolumeIndex {
             reparse_points: HashSet::new(),
             hardlink_data_complete: false,
             reparse_data_complete: false,
-            search_cache_last_used_unix_secs: AtomicU64::new(unix_now_secs()),
         }
     }
 
@@ -422,7 +406,7 @@ impl VolumeIndex {
 
     /// SEC: Remove `dir_modified_at` entries older than `max_age` to prevent
     /// unbounded memory growth from long-running incremental USN updates.
-    pub fn prune_old_modifications(&mut self, max_age: std::time::Duration) {
+    pub fn prune_old_modifications(&mut self, max_age: Duration) {
         let now = std::time::Instant::now();
         self.dir_modified_at.retain(|_frn, ts| {
             now.checked_duration_since(*ts)
@@ -470,29 +454,6 @@ impl VolumeIndex {
             parents.shrink_to_fit();
         }
         self.reparse_points.shrink_to_fit();
-    }
-
-    #[inline]
-    pub fn touch_search_cache(&self) {
-        self.search_cache_last_used_unix_secs
-            .store(unix_now_secs(), AtomicOrdering::Relaxed);
-    }
-
-    pub fn release_search_buffers_if_idle(&mut self, idle_ttl: Duration) -> bool {
-        if !self.names.has_lowered() {
-            return false;
-        }
-
-        let last_used = self
-            .search_cache_last_used_unix_secs
-            .load(AtomicOrdering::Relaxed);
-        let now = unix_now_secs();
-        if now.saturating_sub(last_used) < idle_ttl.as_secs() {
-            return false;
-        }
-
-        self.names.release_lowered();
-        true
     }
 
     /// Rebuild the `children` reverse index from `records` and `hardlink_parents`.
@@ -759,9 +720,9 @@ fn matches_all_tokens(haystack: &str, tokens: &[&str]) -> bool {
 /// Returns one page (`offset`, `limit`) of matching records with resolved paths.
 /// Enforces a time limit to avoid holding locks indefinitely on cold memory.
 ///
-/// When the lowered NameArena is available (Phase 3), uses SIMD-accelerated
-/// `memchr::memmem` on the pre-lowered arena bytes — zero allocations per
-/// record, ~10-50 ms for ~1.7 M files.
+/// Uses SIMD-accelerated `memchr::memmem` over a reusable lowercased scratch
+/// buffer for ASCII file names, avoiding a permanent lowercased copy of the
+/// entire name arena. Non-ASCII names use the Unicode-safe fallback.
 ///
 /// Each volume's read lock is acquired independently for the duration of
 /// scanning that single volume only — see `volume_indices` (F5.4). A USN
@@ -795,6 +756,8 @@ pub fn search_page(
         .iter()
         .map(|t| memchr::memmem::Finder::new(t.as_bytes()))
         .collect();
+    let tokens_are_ascii = tokens.iter().all(|t| t.is_ascii());
+    let mut lowercase_scratch = Vec::with_capacity(512);
 
     let mut items = Vec::with_capacity(limit.min(1000));
     let deadline = std::time::Instant::now() + std::time::Duration::from_millis(1_500);
@@ -803,25 +766,10 @@ pub fn search_page(
     let mut timed_out = false;
 
     for handle in handles {
-        let index = handle.upgradable_read();
+        let index = handle.read();
         if !matches!(index.state, IndexState::Ready) {
             continue;
         }
-
-        index.touch_search_cache();
-
-        let index = if index.names.has_lowered() {
-            RwLockUpgradableReadGuard::downgrade(index)
-        } else {
-            let mut index = RwLockUpgradableReadGuard::upgrade(index);
-            if !index.names.has_lowered() {
-                index.names.build_lowered();
-            }
-            index.touch_search_cache();
-            RwLockWriteGuard::downgrade(index)
-        };
-
-        let use_simd = index.names.has_lowered();
         let mut dir_path_cache = HashMap::new();
 
         for (&frn, record) in &index.records {
@@ -835,17 +783,19 @@ pub fn search_page(
                 break;
             }
 
-            // Match check — SIMD fast path when lowered arena is available.
-            let matches = if use_simd {
-                let lowered_name = index.names.get_lowered(record.name_ref());
-                finders.iter().all(|f| f.find(lowered_name).is_some())
+            let name = index.names.get(record.name_ref());
+            let matches = if tokens_are_ascii && name.is_ascii() {
+                lowercase_scratch.clear();
+                lowercase_scratch.extend_from_slice(name.as_bytes());
+                lowercase_scratch.make_ascii_lowercase();
+                finders
+                    .iter()
+                    .all(|finder| finder.find(&lowercase_scratch).is_some())
             } else {
-                let name = index.names.get(record.name_ref());
                 matches_all_tokens(name, &tokens)
             };
 
             if matches {
-                let name = index.names.get(record.name_ref());
                 if let Some(full_path) =
                     path_resolver::resolve_path_cached(frn, &*index, &mut dir_path_cache)
                 {
@@ -890,7 +840,8 @@ pub fn search_page(
 
 #[cfg(test)]
 mod tests {
-    use super::VolumeIndex;
+    use super::{search_page, IndexState, VolumeIndex};
+    use crate::volume_indices::handle_from;
 
     #[test]
     fn folder_size_includes_reparse_children() {
@@ -954,5 +905,35 @@ mod tests {
 
         let limited = index.collect_zero_size_file_frns_in_subtree(root, 1);
         assert_eq!(limited.len(), 1);
+    }
+
+    #[test]
+    fn search_page_matches_ascii_case_insensitively_without_lowered_arena() {
+        let mut index = VolumeIndex::empty('C');
+        index.state = IndexState::Ready;
+        assert!(index.insert_record(10, "Annual Report.TXT", 5, false, false));
+        assert!(index.insert_record(11, "other.bin", 5, false, false));
+
+        let handle = handle_from(index);
+        let page = search_page(&[handle], "report", 0, 10);
+
+        assert_eq!(page.total_matches, Some(1));
+        assert_eq!(page.items.len(), 1);
+        assert_eq!(page.items[0].name, "Annual Report.TXT");
+        assert_eq!(page.items[0].full_path, r"C:\Annual Report.TXT");
+    }
+
+    #[test]
+    fn search_page_preserves_unicode_case_insensitive_fallback() {
+        let mut index = VolumeIndex::empty('C');
+        index.state = IndexState::Ready;
+        assert!(index.insert_record(10, "Relatório Café.txt", 5, false, false));
+
+        let handle = handle_from(index);
+        let page = search_page(&[handle], "relatório café", 0, 10);
+
+        assert_eq!(page.total_matches, Some(1));
+        assert_eq!(page.items.len(), 1);
+        assert_eq!(page.items[0].name, "Relatório Café.txt");
     }
 }
