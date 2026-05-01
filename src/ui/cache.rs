@@ -25,6 +25,7 @@ pub(crate) const MIN_RGBA_BUDGET_BYTES: usize = 64 * 1024 * 1024;
 pub(crate) const DEFAULT_DYNAMIC_RGBA_BUDGET_BYTES: usize = 96 * 1024 * 1024;
 pub(crate) const MAX_RGBA_BUDGET_BYTES: usize = 192 * 1024 * 1024;
 pub(crate) const MAX_THUMBNAIL_LOADING_SET_ITEMS: usize = 1024;
+const MAX_PENDING_UPLOAD_SET_ITEMS: usize = 2048;
 
 #[inline]
 fn nz_cache_size(size: usize, cache_name: &str) -> NonZeroUsize {
@@ -214,6 +215,31 @@ impl CacheManager {
         target_bytes
     }
 
+    pub fn retune_rgba_cache_capacity(&mut self, requested_items: usize) -> usize {
+        let target_items = requested_items
+            .clamp(DEFAULT_RGBA_CACHE_ITEMS, MAX_DYNAMIC_TEXTURE_CACHE_ITEMS)
+            .max(1);
+
+        let current_items = self.rgba_data_cache.cap().get();
+        if current_items == target_items {
+            return current_items;
+        }
+
+        while self.rgba_data_cache.len() > target_items {
+            if let Some((_, (data, _, _))) = self.rgba_data_cache.pop_lru() {
+                self.rgba_data_bytes = self.rgba_data_bytes.saturating_sub(data.len());
+            } else {
+                self.rgba_data_bytes = 0;
+                break;
+            }
+        }
+
+        self.rgba_data_cache
+            .resize(nz_cache_size(target_items, "rgba_data_cache(retune)"));
+
+        target_items
+    }
+
     /// Checks if a thumbnail is being loaded
     pub fn is_loading(&self, path: &PathBuf) -> bool {
         self.loading_set.contains(path)
@@ -241,6 +267,15 @@ impl CacheManager {
 
     /// Marks a thumbnail as waiting for upload
     pub fn start_pending_upload(&mut self, path: PathBuf) {
+        if self.pending_upload_set.len() >= MAX_PENDING_UPLOAD_SET_ITEMS
+            && !self.pending_upload_set.contains(&path)
+        {
+            log::warn!(
+                "[CACHE] pending_upload_set reached {} entries; clearing stale markers",
+                self.pending_upload_set.len()
+            );
+            self.pending_upload_set.clear();
+        }
         self.pending_upload_set.insert(path);
     }
 
@@ -284,7 +319,11 @@ impl CacheManager {
             self.rgba_data_bytes = self.rgba_data_bytes.saturating_sub(old_data.len());
         }
 
-        self.rgba_data_cache.put(path, (data, width, height));
+        if let Some((_, (evicted_data, _, _))) =
+            self.rgba_data_cache.push(path, (data, width, height))
+        {
+            self.rgba_data_bytes = self.rgba_data_bytes.saturating_sub(evicted_data.len());
+        }
         self.rgba_data_bytes = self.rgba_data_bytes.saturating_add(new_bytes);
         self.enforce_rgba_budget(self.max_rgba_data_bytes);
     }
@@ -631,5 +670,40 @@ mod tests {
 
         let _ = cache.pop_rgba_data(&path);
         assert_eq!(cache.estimate_ram_cache_usage(), 0);
+    }
+
+    #[test]
+    fn test_rgba_accounting_updates_on_lru_capacity_eviction() {
+        let mut cache = CacheManager::new();
+
+        for idx in 0..=DEFAULT_RGBA_CACHE_ITEMS {
+            cache.put_rgba_data(PathBuf::from(format!("img_{idx}.webp")), vec![1; 4], 1, 1);
+        }
+
+        assert_eq!(cache.rgba_data_cache.len(), DEFAULT_RGBA_CACHE_ITEMS);
+        assert_eq!(
+            cache.estimate_ram_cache_usage(),
+            DEFAULT_RGBA_CACHE_ITEMS * 4
+        );
+    }
+
+    #[test]
+    fn test_rgba_accounting_updates_when_capacity_shrinks() {
+        let mut cache = CacheManager::new();
+        cache.retune_rgba_cache_capacity(100);
+
+        for idx in 0..100 {
+            cache.put_rgba_data(PathBuf::from(format!("img_{idx}.webp")), vec![1; 4], 1, 1);
+        }
+
+        assert_eq!(cache.estimate_ram_cache_usage(), 400);
+
+        cache.retune_rgba_cache_capacity(DEFAULT_RGBA_CACHE_ITEMS);
+
+        assert_eq!(cache.rgba_data_cache.len(), DEFAULT_RGBA_CACHE_ITEMS);
+        assert_eq!(
+            cache.estimate_ram_cache_usage(),
+            DEFAULT_RGBA_CACHE_ITEMS * 4
+        );
     }
 }

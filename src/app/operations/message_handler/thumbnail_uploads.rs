@@ -8,7 +8,6 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-const MAX_PENDING_THUMBNAILS: usize = 64;
 const MAX_INCOMING_THUMBNAIL_MSGS_PER_FRAME: usize = 96;
 const CRITICAL_FRAME_TIME_MS: f32 = 33.33;
 const SEVERE_FRAME_TIME_MS: f32 = 25.0;
@@ -16,7 +15,6 @@ const MAX_INCOMING_THUMBNAIL_BUDGET_MS: u64 = 4;
 const MIN_INCOMING_THUMBNAIL_BUDGET_MS: u64 = 2;
 const TEXTURE_CACHE_RETUNE_INTERVAL_MS: u64 = 900;
 const TEXTURE_CACHE_RETUNE_MIN_DELTA_ITEMS: usize = 16;
-const MAX_DYNAMIC_PENDING_THUMBNAILS: usize = 1024;
 
 fn live_frame_pressure_ms(app: &ImageViewerApp) -> f32 {
     app.last_actual_frame_ms.max(app.frame_time_avg_ms)
@@ -143,14 +141,10 @@ impl ImageViewerApp {
         let visible_rgba_budget =
             self.current_dynamic_rgba_budget_bytes(DEFAULT_DYNAMIC_RGBA_BUDGET_BYTES);
         self.cache_manager.retune_rgba_budget(visible_rgba_budget);
+        self.cache_manager
+            .retune_rgba_cache_capacity(visible_texture_keep);
 
-        let dynamic_pending_limit = if is_burst {
-            MAX_DYNAMIC_PENDING_THUMBNAILS
-        } else {
-            visible_texture_keep
-                .max(MAX_PENDING_THUMBNAILS)
-                .min(MAX_DYNAMIC_PENDING_THUMBNAILS)
-        };
+        let dynamic_pending_limit = self.current_pending_thumbnail_upload_limit();
 
         // Reduce intake when pending queue is already backlogged to spread
         // GPU upload work across more frames and prevent frame-time spikes.
@@ -218,13 +212,9 @@ impl ImageViewerApp {
             }
 
             while self.pending_thumbnails.len() >= dynamic_pending_limit {
-                // FIX: Smart eviction — prefer removing off-screen items to keep visible
-                // ones alive. On SSD, the worker queue processes most-recently-added items
-                // first (LIFO), so items from the user's final scroll position arrive first
-                // and sit at the front of the deque. Blind FIFO eviction (pop_front) would
-                // eject exactly the items the user is looking at. Instead, scan for the
-                // first off-screen item and evict it; fall back to FIFO only when every
-                // pending item is visible (extremely unlikely with MAX_PENDING=64).
+                // Prefer removing off-screen items to keep visible ones alive. If every
+                // pending item is visible, still fall back to FIFO so the decoded RGBA
+                // queue remains bounded by the byte-aware cap.
                 let evict_idx = eviction_visible.as_ref().and_then(|visible| {
                     // Find first off-screen item in the deque
                     self.pending_thumbnails
@@ -239,9 +229,10 @@ impl ImageViewerApp {
                         }
                     }
                     None => {
-                        // All items visible — fall back to FIFO
                         if let Some(old) = self.pending_thumbnails.pop_front() {
                             self.cache_manager.finish_pending_upload(&old.path);
+                        } else {
+                            break;
                         }
                     }
                 }
@@ -314,7 +305,11 @@ impl ImageViewerApp {
                                         path: item.path.clone(),
                                         size_px: self.effective_folder_preview_request_size_px(),
                                     };
-                                let _ = self.folder_preview_sender.try_send(request);
+                                if let Err(err) = self.folder_preview_sender.try_send(request) {
+                                    let request = err.into_inner();
+                                    self.cache_manager
+                                        .finish_folder_preview_loading(&request.path);
+                                }
                             }
                             log::debug!(
                                 "[FOLDER PREVIEW] Re-composing {:?} (cover {:?} now available)",
@@ -393,6 +388,8 @@ impl ImageViewerApp {
             let target_rgba_budget =
                 self.current_dynamic_rgba_budget_bytes(DEFAULT_DYNAMIC_RGBA_BUDGET_BYTES);
             self.cache_manager.retune_rgba_budget(target_rgba_budget);
+            self.cache_manager
+                .retune_rgba_cache_capacity(target_texture_items);
             self.last_texture_cache_retune = Instant::now();
         }
 
