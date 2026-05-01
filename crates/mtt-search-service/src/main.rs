@@ -7,6 +7,7 @@ mod ipc_server;
 mod mft_reader;
 mod name_arena;
 mod path_resolver;
+mod record_store;
 mod security_policy;
 mod service_control;
 mod usn_journal;

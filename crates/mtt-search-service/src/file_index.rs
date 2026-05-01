@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use crate::name_arena::{NameArena, NameRef};
 use crate::path_resolver;
+use crate::record_store::RecordStore;
 
 /// Compact file record stored in the in-memory index.
 ///
@@ -61,7 +62,7 @@ pub struct VolumeIndex {
     /// Drive letter, e.g., 'C'.
     pub drive_letter: char,
     /// File Reference Number -> FileRecord.
-    pub records: HashMap<u64, FileRecord>,
+    pub records: RecordStore,
     /// Reverse index: parent FRN -> child FRNs.
     /// Enables O(subtree) descent for folder size calculation.
     pub children: HashMap<u64, Box<[u64]>>,
@@ -119,7 +120,7 @@ impl VolumeIndex {
     pub fn empty(drive_letter: char) -> Self {
         Self {
             drive_letter,
-            records: HashMap::new(),
+            records: RecordStore::new(),
             children: HashMap::new(),
             names: NameArena::with_capacity(0),
             last_usn: 0,
@@ -146,7 +147,7 @@ impl VolumeIndex {
 
         Self {
             drive_letter,
-            records: HashMap::with_capacity(estimated_records),
+            records: RecordStore::with_capacity(estimated_records),
             children: HashMap::with_capacity(child_capacity),
             names: NameArena::with_capacity(estimated_name_bytes),
             last_usn: 0,
@@ -625,13 +626,12 @@ impl VolumeIndex {
         zero_size_frns
     }
 
-    /// Report estimated memory usage: (arena_used, arena_capacity, hashmap_estimate).
+    /// Report estimated memory usage: (arena_used, arena_capacity, records_estimate).
     pub fn memory_usage(&self) -> (usize, usize, usize) {
         let arena_used = self.names.len();
         let arena_cap = self.names.capacity();
-        let slot_size = std::mem::size_of::<u64>() + std::mem::size_of::<FileRecord>() + 1;
-        let map_est = self.records.capacity() * slot_size;
-        (arena_used, arena_cap, map_est)
+        let records_est = self.records.estimated_heap_bytes();
+        (arena_used, arena_cap, records_est)
     }
 
     /// Resolve a filesystem path (e.g., `C:\Users\foo`) to the FRN of the

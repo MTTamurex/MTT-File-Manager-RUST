@@ -21,6 +21,7 @@ use memmap2::MmapOptions;
 
 use super::integrity::{self, HMAC_OUTPUT_SIZE};
 use crate::file_index::{FileRecord, VolumeIndex};
+use crate::record_store::RecordStore;
 
 const MAGIC: &[u8; 8] = b"MTTIDX02";
 const LEGACY_MAGIC: &[u8; 8] = b"MTTIDX01";
@@ -388,8 +389,11 @@ pub fn load(drive_letter: char) -> Result<Option<(VolumeIndex, PersistedBinarySt
         Some(arena_bytes)
     };
 
-    // Load Records.
-    let mut records = std::collections::HashMap::with_capacity(record_count);
+    // Load Records. The binary writer stores records sorted by FRN, so load
+    // directly into the compact stable representation instead of rebuilding a
+    // large transient HashMap.
+    let mut record_frns = Vec::with_capacity(record_count);
+    let mut record_values = Vec::with_capacity(record_count);
     let mut record_buf = [0u8; RECORD_SIZE];
     for _ in 0..record_count {
         read_authenticated_chunk(&mut reader, &mut hmac, &mut record_buf, "record")?;
@@ -397,8 +401,10 @@ pub fn load(drive_letter: char) -> Result<Option<(VolumeIndex, PersistedBinarySt
         let rec: FileRecord = unsafe {
             std::ptr::read_unaligned(record_buf[FRN_SIZE..].as_ptr() as *const FileRecord)
         };
-        records.insert(frn, rec);
+        record_frns.push(frn);
+        record_values.push(rec);
     }
+    let records = RecordStore::from_sorted_parts(record_frns, record_values)?;
 
     // Load Hardlinks.
     let mut hardlink_parents: std::collections::HashMap<u64, Vec<u64>> =
