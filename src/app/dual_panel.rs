@@ -114,6 +114,7 @@ impl PanelSnapshot {
 
     fn compact_items_snapshot(&mut self) {
         if self.can_compact_items_snapshot() {
+            self.all_items = self.items.clone();
             self.items = Arc::new(Vec::new());
             self.items_snapshot_compact = true;
         } else {

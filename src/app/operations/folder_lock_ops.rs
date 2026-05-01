@@ -79,4 +79,38 @@ impl ImageViewerApp {
             );
         }
     }
+
+    /// Like `apply_folder_lock_if_present`, but does **not** reset view/sort
+    /// settings to the global "normal" defaults when no lock exists.
+    ///
+    /// Used when restoring a tab: the tab's own stored sort/view preferences
+    /// must be preserved for unlocked folders. Only a lock override (if one
+    /// exists for the current path) should win over the tab's saved state.
+    pub fn apply_folder_lock_on_tab_restore(&mut self) {
+        let path = &self.navigation_state.current_path;
+        if let Some(lock) = self.folder_locks.get(path).cloned() {
+            log::info!(
+                "[FOLDER-LOCK] Applying lock (tab restore) for {:?}: view={:?}, sort={:?}, desc={}, pos={:?}",
+                path,
+                lock.view_mode,
+                lock.sort_mode,
+                lock.sort_descending,
+                lock.folders_position
+            );
+            self.view_mode = lock.view_mode;
+            self.sort_mode = lock.sort_mode;
+            self.sort_descending = lock.sort_descending;
+            self.folders_position = lock.folders_position;
+            self.current_folder_locked = true;
+        } else {
+            log::debug!(
+                "[FOLDER-LOCK] No lock for {:?} on tab restore - preserving tab sort/view settings",
+                path
+            );
+            // Do NOT reset to sort_mode_normal / view_mode_normal here.
+            // The tab's own saved sort_mode/view_mode are already loaded into the
+            // app state by sync_from_tab() before this call.
+            self.current_folder_locked = false;
+        }
+    }
 }
