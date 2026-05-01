@@ -2,7 +2,6 @@ use image::imageops::FilterType;
 use image::DynamicImage;
 use image::ImageDecoder;
 use image::ImageReader;
-use memmap2::Mmap;
 use once_cell::sync::Lazy;
 use std::fs::File;
 use std::io;
@@ -11,8 +10,6 @@ use std::io::BufWriter;
 use std::io::Cursor;
 use std::path::Path;
 use std::path::PathBuf;
-
-const MMAP_THRESHOLD_BYTES: u64 = 1_048_576;
 
 // ── COM lifecycle guard ─────────────────────────────────────────────────
 //
@@ -574,21 +571,7 @@ fn frame_from_dynamic_capped(image: DynamicImage, max_side: u32) -> DecodedFrame
     }
 }
 
-enum FileBytes {
-    Owned(Vec<u8>),
-    Mapped(Mmap),
-}
-
-impl FileBytes {
-    fn as_slice(&self) -> &[u8] {
-        match self {
-            Self::Owned(v) => v.as_slice(),
-            Self::Mapped(m) => m.as_ref(),
-        }
-    }
-}
-
-fn read_file_fast(path: &Path, priority: DecodePriority) -> io::Result<FileBytes> {
+fn read_file_fast(path: &Path, priority: DecodePriority) -> io::Result<Vec<u8>> {
     #[cfg(target_os = "windows")]
     {
         let open_result = match priority {
@@ -602,29 +585,20 @@ fn read_file_fast(path: &Path, priority: DecodePriority) -> io::Result<FileBytes
 
         if let Ok(file) = open_result {
             let meta = file.metadata()?;
-            if meta.len() > MMAP_THRESHOLD_BYTES {
-                // SAFETY: mapping read-only file descriptor for immutable read.
-                let mmap = unsafe { Mmap::map(&file)? };
-                return Ok(FileBytes::Mapped(mmap));
-            }
-
             let mut reader = BufReader::with_capacity(64 * 1024, file);
             let mut out = Vec::with_capacity(meta.len() as usize);
             std::io::Read::read_to_end(&mut reader, &mut out)?;
-            return Ok(FileBytes::Owned(out));
+            return Ok(out);
         }
     }
 
     let file = File::open(path)?;
     let meta = file.metadata()?;
 
-    if meta.len() > MMAP_THRESHOLD_BYTES {
-        // SAFETY: mapping read-only file descriptor for immutable read.
-        let mmap = unsafe { Mmap::map(&file)? };
-        return Ok(FileBytes::Mapped(mmap));
-    }
-
-    Ok(FileBytes::Owned(std::fs::read(path)?))
+    let mut reader = BufReader::with_capacity(64 * 1024, file);
+    let mut out = Vec::with_capacity(meta.len() as usize);
+    std::io::Read::read_to_end(&mut reader, &mut out)?;
+    Ok(out)
 }
 
 fn decode_with_exif_orientation(bytes: &[u8]) -> io::Result<DynamicImage> {

@@ -125,12 +125,28 @@ impl PriorityThumbnailQueue {
         modified: u64,
         source: ThumbnailRequestSource,
     ) {
+        let parent = path.parent().unwrap_or(&path).to_path_buf();
+        let drive = Self::drive_key(&path);
+        let cached_is_ssd = {
+            let state = self.state.lock();
+            state.drive_is_ssd.get(&drive).copied()
+        };
+        let detected_is_ssd = cached_is_ssd.unwrap_or_else(|| io_priority::is_ssd(&path));
+
         {
             let mut state = self.state.lock();
 
             // Group by parent directory (for HDD seek optimization)
-            let parent = path.parent().unwrap_or(&path).to_path_buf();
-            let is_ssd = Self::detect_drive_class(&mut state, &path);
+            let is_ssd = *state
+                .drive_is_ssd
+                .entry(drive.clone())
+                .or_insert(detected_is_ssd);
+            if !is_ssd && cached_is_ssd.is_none() {
+                log::info!(
+                    "[IO] HDD detected on drive {:?} - enabling directory grouping for seek optimization",
+                    drive
+                );
+            }
             let request = ThumbnailRequest {
                 path: path.clone(),
                 generation: gen,
@@ -186,23 +202,6 @@ impl PriorityThumbnailQueue {
             Some(Component::RootDir) => PathBuf::from(std::path::MAIN_SEPARATOR.to_string()),
             _ => PathBuf::new(),
         }
-    }
-
-    fn detect_drive_class(state: &mut QueueState, path: &Path) -> bool {
-        let drive = Self::drive_key(path);
-        if let Some(is_ssd) = state.drive_is_ssd.get(&drive) {
-            return *is_ssd;
-        }
-
-        let is_ssd = io_priority::is_ssd(path);
-        state.drive_is_ssd.insert(drive.clone(), is_ssd);
-        if !is_ssd {
-            log::info!(
-                "[IO] HDD detected on drive {:?} - enabling directory grouping for seek optimization",
-                drive
-            );
-        }
-        is_ssd
     }
 
     fn is_directory_ssd(state: &QueueState, dir: &Path) -> bool {
@@ -279,7 +278,7 @@ impl PriorityThumbnailQueue {
                     });
                 }
 
-                return updated;
+                return true;
             }
         }
 

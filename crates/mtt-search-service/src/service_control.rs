@@ -29,7 +29,13 @@ pub fn install_service() {
         }
     };
 
-    let exe_path = std::env::current_exe().expect("Cannot get executable path");
+    let exe_path = match std::env::current_exe() {
+        Ok(path) => path,
+        Err(error) => {
+            eprintln!("[SERVICE] Cannot get executable path: {}", error);
+            return;
+        }
+    };
     eprintln!("[SERVICE] Executable path: {}", exe_path.display());
     if let Err(error) = validate_service_install_path(&exe_path) {
         eprintln!(

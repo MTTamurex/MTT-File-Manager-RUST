@@ -75,6 +75,60 @@ const _: () = {
     assert!(std::mem::offset_of!(FileRecord, _pad) == 23);
 };
 
+fn read_u16_le(bytes: &[u8], offset: usize, label: &str) -> Result<u16, String> {
+    let raw: [u8; 2] = bytes
+        .get(offset..offset + 2)
+        .and_then(|slice| slice.try_into().ok())
+        .ok_or_else(|| format!("Corrupt binary index: short {}", label))?;
+    Ok(u16::from_le_bytes(raw))
+}
+
+fn read_u32_le(bytes: &[u8], offset: usize, label: &str) -> Result<u32, String> {
+    let raw: [u8; 4] = bytes
+        .get(offset..offset + 4)
+        .and_then(|slice| slice.try_into().ok())
+        .ok_or_else(|| format!("Corrupt binary index: short {}", label))?;
+    Ok(u32::from_le_bytes(raw))
+}
+
+fn read_u64_le(bytes: &[u8], offset: usize, label: &str) -> Result<u64, String> {
+    let raw: [u8; 8] = bytes
+        .get(offset..offset + 8)
+        .and_then(|slice| slice.try_into().ok())
+        .ok_or_else(|| format!("Corrupt binary index: short {}", label))?;
+    Ok(u64::from_le_bytes(raw))
+}
+
+fn decode_file_record(bytes: &[u8]) -> Result<FileRecord, String> {
+    if bytes.len() != FILE_RECORD_SIZE {
+        return Err(format!(
+            "Corrupt binary index: record payload size {} != {}",
+            bytes.len(),
+            FILE_RECORD_SIZE
+        ));
+    }
+
+    let is_dir = match bytes[22] {
+        0 => false,
+        1 => true,
+        other => {
+            return Err(format!(
+                "Corrupt binary index: invalid FileRecord.is_dir byte {}",
+                other
+            ));
+        }
+    };
+
+    Ok(FileRecord {
+        parent_ref: read_u64_le(bytes, 0, "record parent_ref")?,
+        size: read_u64_le(bytes, 8, "record size")?,
+        name_offset: read_u32_le(bytes, 16, "record name_offset")?,
+        name_len: read_u16_le(bytes, 20, "record name_len")?,
+        is_dir,
+        _pad: bytes[23],
+    })
+}
+
 /// Returns the path for the binary index file for a given drive letter.
 /// Uses the shared data directory set at startup by `get_db_path`,
 /// so binary and SQLite caches always live together.
@@ -204,7 +258,10 @@ pub fn save(index: &VolumeIndex) -> Result<(), String> {
     let mut sorted_frns: Vec<u64> = index.records.keys().copied().collect();
     sorted_frns.sort_unstable();
     for &frn in &sorted_frns {
-        let rec = &index.records[&frn];
+        let rec = index
+            .records
+            .get(&frn)
+            .ok_or_else(|| format!("Record FRN {} disappeared during binary save", frn))?;
         write_authenticated_chunk(&mut writer, &mut hmac, &frn.to_le_bytes())?;
         let rec_bytes: &[u8] = unsafe {
             std::slice::from_raw_parts(rec as *const FileRecord as *const u8, FILE_RECORD_SIZE)
@@ -397,10 +454,8 @@ pub fn load(drive_letter: char) -> Result<Option<(VolumeIndex, PersistedBinarySt
     let mut record_buf = [0u8; RECORD_SIZE];
     for _ in 0..record_count {
         read_authenticated_chunk(&mut reader, &mut hmac, &mut record_buf, "record")?;
-        let frn = u64::from_le_bytes(record_buf[..FRN_SIZE].try_into().unwrap());
-        let rec: FileRecord = unsafe {
-            std::ptr::read_unaligned(record_buf[FRN_SIZE..].as_ptr() as *const FileRecord)
-        };
+        let frn = read_u64_le(&record_buf, 0, "record frn")?;
+        let rec = decode_file_record(&record_buf[FRN_SIZE..])?;
         record_frns.push(frn);
         record_values.push(rec);
     }
@@ -412,8 +467,8 @@ pub fn load(drive_letter: char) -> Result<Option<(VolumeIndex, PersistedBinarySt
     let mut hardlink_buf = [0u8; HARDLINK_ENTRY_SIZE];
     for _ in 0..hardlink_count {
         read_authenticated_chunk(&mut reader, &mut hmac, &mut hardlink_buf, "hardlink pair")?;
-        let child = u64::from_le_bytes(hardlink_buf[..FRN_SIZE].try_into().unwrap());
-        let parent = u64::from_le_bytes(hardlink_buf[FRN_SIZE..].try_into().unwrap());
+        let child = read_u64_le(&hardlink_buf, 0, "hardlink child")?;
+        let parent = read_u64_le(&hardlink_buf, FRN_SIZE, "hardlink parent")?;
         hardlink_parents.entry(child).or_default().push(parent);
     }
 
@@ -422,7 +477,7 @@ pub fn load(drive_letter: char) -> Result<Option<(VolumeIndex, PersistedBinarySt
     let mut reparse_buf = [0u8; REPARSE_ENTRY_SIZE];
     for _ in 0..reparse_count {
         read_authenticated_chunk(&mut reader, &mut hmac, &mut reparse_buf, "reparse point")?;
-        let frn = u64::from_le_bytes(reparse_buf.try_into().unwrap());
+        let frn = read_u64_le(&reparse_buf, 0, "reparse frn")?;
         reparse_points.insert(frn);
     }
 

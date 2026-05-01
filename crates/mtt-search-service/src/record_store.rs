@@ -1,7 +1,5 @@
-use std::collections::{HashMap, HashSet};
-use std::ops::Index;
-
 use crate::file_index::FileRecord;
+use std::collections::{HashMap, HashSet};
 
 /// FRN -> FileRecord store optimized for the service's steady state.
 ///
@@ -234,14 +232,6 @@ impl RecordStore {
 impl Default for RecordStore {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-impl Index<&u64> for RecordStore {
-    type Output = FileRecord;
-
-    fn index(&self, index: &u64) -> &Self::Output {
-        self.get(index).expect("record FRN not found")
     }
 }
 

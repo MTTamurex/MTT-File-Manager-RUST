@@ -85,9 +85,6 @@ pub(crate) fn current_client_can_read_path(full_path: &str) -> bool {
                 true
             }
             Err(e) => {
-                // Diagnostic — surfaces the real reason the impersonated open
-                // failed (typically ACCESS_DENIED if SQOS was anonymous on the
-                // pipe client side, or an unexpected Win32 error).
                 eprintln!(
                     "[IPC-AUTHZ] CreateFileW(GENERIC_READ) denied for {}: {}",
                     crate::redact_paths(full_path),
@@ -248,10 +245,7 @@ pub fn collect_authorized_search_page(
 
     let mut authorized_items: Vec<SearchResultItem> = Vec::with_capacity(limit.min(1024));
     let mut authorized_total_seen = 0usize;
-    let mut raw_offset = 0usize;
-    let mut raw_has_more = true;
     let mut has_more_authorized = false;
-    let mut batches = 0usize;
 
     // Cache authorization results by parent directory to avoid redundant
     // CreateFileW calls for files in the same folder (common in search results).
@@ -259,78 +253,59 @@ pub fn collect_authorized_search_page(
     let response_deadline = std::time::Instant::now() + AUTHZ_RESPONSE_DEADLINE;
     let mut deadline_exceeded = false;
 
-    while raw_has_more && batches < AUTHZ_MAX_BATCHES && !has_more_authorized && !deadline_exceeded
-    {
-        ensure_client_connected(pipe)?;
-        batches += 1;
+    ensure_client_connected(pipe)?;
+    let raw_scan_limit = AUTHZ_RAW_BATCH_SIZE.saturating_mul(AUTHZ_MAX_BATCHES);
 
-        // Snapshot the per-volume handles (cheap Arc clones); search_page
-        // takes each volume's read lock independently for the duration of
-        // that volume's scan only — concurrent USN writers on *other* volumes
-        // are not blocked.
-        let raw_page = {
-            let handles = volume_indices::snapshot_handles(indices);
-            file_index::search_page(&handles, query, raw_offset, AUTHZ_RAW_BATCH_SIZE)
+    // Snapshot per-volume handles once and scan the raw index once for this
+    // client request. The previous loop restarted `search_page` from record 0
+    // for every raw batch and paid O(index * batches) under read locks before
+    // authorization began.
+    let raw_page = {
+        let handles = volume_indices::snapshot_handles(indices);
+        file_index::search_page(&handles, query, 0, raw_scan_limit)
+    };
+    let raw_has_more = raw_page.has_more;
+
+    // Authorization runs WITHOUT the index lock held — CreateFileW, ACL
+    // checks, and path resolution can now take arbitrarily long without
+    // blocking writers (USN journal incremental updates).
+    for (result_index, result) in raw_page.items.into_iter().enumerate() {
+        if result_index.is_multiple_of(CLIENT_CONNECTION_CHECK_INTERVAL) {
+            ensure_client_connected(pipe)?;
+            if std::time::Instant::now() >= response_deadline {
+                deadline_exceeded = true;
+                break;
+            }
+        }
+
+        let authorized = match parent_dir_of(&result.full_path) {
+            Some(parent) => is_parent_authorized(&mut dir_auth_cache, parent),
+            None => current_client_can_read_path(&result.full_path),
         };
-        if raw_page.items.is_empty() {
-            raw_has_more = false;
-            break;
+
+        if !authorized {
+            continue;
         }
 
-        raw_offset = raw_offset.saturating_add(raw_page.items.len());
-        raw_has_more = raw_page.has_more;
+        authorized_total_seen = authorized_total_seen.saturating_add(1);
 
-        // Authorization runs WITHOUT the index lock held — CreateFileW, ACL
-        // checks, and path resolution can now take arbitrarily long without
-        // blocking writers (USN journal incremental updates).
-        for (result_index, result) in raw_page.items.into_iter().enumerate() {
-            if result_index.is_multiple_of(CLIENT_CONNECTION_CHECK_INTERVAL) {
-                ensure_client_connected(pipe)?;
-                // Bail out early if we are approaching the client-side pipe
-                // timeout.  During heavy disk I/O (file copy, AV scan) each
-                // CreateFileW can take 50–200 ms and the cumulative time
-                // easily exceeds the 8 s client timeout, causing the search
-                // to return zero results.  Delivering partial results with
-                // has_more=true is always better than a timeout error.
-                if std::time::Instant::now() >= response_deadline {
-                    deadline_exceeded = true;
-                    break;
-                }
-            }
-
-            // Fast path: check parent directory authorization from cache.
-            // Most files inherit ACLs from their parent, so a single directory
-            // check covers all sibling files without per-file CreateFileW.
-            let authorized = match parent_dir_of(&result.full_path) {
-                Some(parent) => is_parent_authorized(&mut dir_auth_cache, parent),
-                None => current_client_can_read_path(&result.full_path),
-            };
-
-            if !authorized {
-                continue;
-            }
-
-            authorized_total_seen = authorized_total_seen.saturating_add(1);
-
-            // Offset is now applied to AUTHORIZED results (not raw index results).
-            if authorized_total_seen <= offset {
-                continue;
-            }
-
-            if authorized_items.len() < limit {
-                authorized_items.push(SearchResultItem {
-                    name: result.name,
-                    full_path: result.full_path,
-                    is_dir: result.is_dir,
-                    size: 0,
-                });
-                continue;
-            }
-
-            // Found at least one more authorized item after this page.
-            has_more_authorized = true;
-            break;
+        // Offset is applied to AUTHORIZED results, not raw index results.
+        if authorized_total_seen <= offset {
+            continue;
         }
+
+        if authorized_items.len() < limit {
+            authorized_items.push(SearchResultItem {
+                name: result.name,
+                full_path: result.full_path,
+                is_dir: result.is_dir,
+                size: 0,
+            });
+            continue;
+        }
+
+        has_more_authorized = true;
+        break;
     }
 
     // Safety cap reached with pending raw pages: keep pagination open only
@@ -338,10 +313,7 @@ pub fn collect_authorized_search_page(
     // authorized items were collected the caller's offset cannot advance and
     // returning has_more=true would cause an infinite retry with the same
     // offset (raw_offset always restarts from 0 on each call).
-    if (batches >= AUTHZ_MAX_BATCHES || deadline_exceeded)
-        && raw_has_more
-        && !authorized_items.is_empty()
-    {
+    if (raw_has_more || deadline_exceeded) && !authorized_items.is_empty() {
         has_more_authorized = true;
     }
 

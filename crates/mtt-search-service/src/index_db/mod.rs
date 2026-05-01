@@ -460,17 +460,19 @@ impl IndexDb {
         &self,
         index: &mut crate::file_index::VolumeIndex,
         mut on_progress: F,
-    ) -> Option<usize>
+    ) -> Result<Option<usize>, String>
     where
         F: FnMut(usize),
     {
-        let conn = self.open_read_connection().ok()?;
+        let conn = self
+            .open_read_connection()
+            .map_err(|e| format!("open read connection: {}", e))?;
         let mut stmt = conn
             .prepare(
                 "SELECT frn, name, parent_frn, is_dir, is_reparse
                  FROM file_records WHERE drive_letter = ?1",
             )
-            .ok()?;
+            .map_err(|e| format!("prepare file_records query: {}", e))?;
 
         let mut count = 0usize;
         let rows = stmt
@@ -482,12 +484,13 @@ impl IndexDb {
                 let is_reparse: bool = row.get(4)?;
                 Ok((frn as u64, name, parent_frn as u64, is_dir, is_reparse))
             })
-            .ok()?;
+            .map_err(|e| format!("query file_records: {}", e))?;
 
-        for (frn, name, parent_ref, is_dir, is_reparse) in rows.flatten() {
+        for row in rows {
+            let (frn, name, parent_ref, is_dir, is_reparse) =
+                row.map_err(|e| format!("decode file_records row: {}", e))?;
             if !index.insert_record(frn, &name, parent_ref, is_dir, is_reparse) {
-                eprintln!("[INDEX-DB] Name arena full — stopping load for volume");
-                break;
+                return Err("name arena full while loading file_records".to_string());
             }
             count += 1;
             if count == 1 || count % 128 == 0 {
@@ -500,7 +503,7 @@ impl IndexDb {
                 "SELECT frn, parent_frn
                  FROM hardlink_parents WHERE drive_letter = ?1",
             )
-            .ok()?;
+            .map_err(|e| format!("prepare hardlink_parents query: {}", e))?;
 
         let hardlink_rows = hardlink_stmt
             .query_map(params![index.drive_letter.to_string()], |row| {
@@ -508,9 +511,11 @@ impl IndexDb {
                 let parent_frn: i64 = row.get(1)?;
                 Ok((frn as u64, parent_frn as u64))
             })
-            .ok()?;
+            .map_err(|e| format!("query hardlink_parents: {}", e))?;
 
-        for (frn, parent_ref) in hardlink_rows.flatten() {
+        for row in hardlink_rows {
+            let (frn, parent_ref) =
+                row.map_err(|e| format!("decode hardlink_parents row: {}", e))?;
             let parents = index.hardlink_parents.entry(frn).or_default();
             if !parents.contains(&parent_ref) {
                 parents.push(parent_ref);
@@ -519,9 +524,9 @@ impl IndexDb {
 
         if count > 0 {
             on_progress(count);
-            Some(count)
+            Ok(Some(count))
         } else {
-            None
+            Ok(None)
         }
     }
 }
