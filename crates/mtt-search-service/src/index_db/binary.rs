@@ -85,7 +85,8 @@ fn write_authenticated_chunk<W: Write>(
     writer
         .write_all(bytes)
         .map_err(|e| format!("Write payload: {}", e))?;
-    hmac.update(bytes).map_err(|e| format!("HMAC update: {}", e))
+    hmac.update(bytes)
+        .map_err(|e| format!("HMAC update: {}", e))
 }
 
 fn read_authenticated_chunk<R: Read>(
@@ -186,7 +187,9 @@ pub fn save(index: &VolumeIndex) -> Result<(), String> {
     }
 
     // SEC: Compute HMAC-SHA256 incrementally over the serialized payload.
-    let tag = hmac.finalize().map_err(|e| format!("HMAC compute: {}", e))?;
+    let tag = hmac
+        .finalize()
+        .map_err(|e| format!("HMAC compute: {}", e))?;
 
     writer
         .write_all(&tag)
@@ -255,7 +258,8 @@ pub fn load(drive_letter: char) -> Result<Option<(VolumeIndex, PersistedBinarySt
     }
 
     // Parse header.
-    let header: Header = unsafe { std::ptr::read_unaligned(header_bytes.as_ptr() as *const Header) };
+    let header: Header =
+        unsafe { std::ptr::read_unaligned(header_bytes.as_ptr() as *const Header) };
     if &header.magic != MAGIC {
         return Err("Bad magic".into());
     }
@@ -323,8 +327,7 @@ pub fn load(drive_letter: char) -> Result<Option<(VolumeIndex, PersistedBinarySt
     if file_len != expected {
         return Err(format!(
             "Size mismatch: expected {} got {}",
-            expected,
-            file_len
+            expected, file_len
         ));
     }
 
@@ -376,7 +379,9 @@ pub fn load(drive_letter: char) -> Result<Option<(VolumeIndex, PersistedBinarySt
         .read_exact(&mut stored_tag)
         .map_err(|e| format!("Read HMAC trailer: {}", e))?;
 
-    let computed_tag = hmac.finalize().map_err(|e| format!("HMAC compute: {}", e))?;
+    let computed_tag = hmac
+        .finalize()
+        .map_err(|e| format!("HMAC compute: {}", e))?;
     if !integrity::ct_eq(&stored_tag, &computed_tag) {
         let _ = std::fs::remove_file(&path);
         return Err("HMAC mismatch (tampering or corruption)".into());

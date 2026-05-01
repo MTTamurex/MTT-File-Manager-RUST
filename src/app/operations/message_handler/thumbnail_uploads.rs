@@ -1,4 +1,8 @@
 use crate::app::state::ImageViewerApp;
+use crate::ui::cache::{
+    FxHashSet, DEFAULT_DYNAMIC_RGBA_BUDGET_BYTES, MAX_DYNAMIC_TEXTURE_CACHE_ITEMS,
+    MIN_DYNAMIC_TEXTURE_CACHE_ITEMS,
+};
 use eframe::egui;
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -12,6 +16,7 @@ const MAX_INCOMING_THUMBNAIL_BUDGET_MS: u64 = 4;
 const MIN_INCOMING_THUMBNAIL_BUDGET_MS: u64 = 2;
 const TEXTURE_CACHE_RETUNE_INTERVAL_MS: u64 = 900;
 const TEXTURE_CACHE_RETUNE_MIN_DELTA_ITEMS: usize = 16;
+const MAX_DYNAMIC_PENDING_THUMBNAILS: usize = 1024;
 
 fn live_frame_pressure_ms(app: &ImageViewerApp) -> f32 {
     app.last_actual_frame_ms.max(app.frame_time_avg_ms)
@@ -24,6 +29,7 @@ fn compute_texture_cache_target_items(
     is_scrolling: bool,
     is_video_playing: bool,
 ) -> usize {
+    let visible_base = app.estimated_visible_grid_items().max(220) as f32;
     let tab_factor: f32 = if open_tabs <= 1 {
         1.25
     } else if open_tabs <= 3 {
@@ -79,11 +85,14 @@ fn compute_texture_cache_target_items(
     };
 
     let raw_target =
-        ((220.0_f32 * tab_factor).round() as i32) + backlog_boost + frame_headroom_boost
+        ((visible_base * tab_factor).round() as i32) + backlog_boost + frame_headroom_boost
             - frame_penalty
             - activity_penalty;
 
-    raw_target.clamp(140, 420) as usize
+    raw_target.clamp(
+        MIN_DYNAMIC_TEXTURE_CACHE_ITEMS as i32,
+        MAX_DYNAMIC_TEXTURE_CACHE_ITEMS as i32,
+    ) as usize
 }
 
 impl ImageViewerApp {
@@ -106,7 +115,7 @@ impl ImageViewerApp {
         let incoming_start = Instant::now();
         let mut not_found_failures: Vec<PathBuf> = Vec::new();
         let mut successful_thumb_paths: Vec<PathBuf> = Vec::new();
-        let eviction_visible: Option<HashSet<PathBuf>> =
+        let eviction_visible: Option<FxHashSet<PathBuf>> =
             self.visible_index_range.and_then(|(min_vis, max_vis)| {
                 let items = &self.items;
                 if items.is_empty() {
@@ -116,13 +125,40 @@ impl ImageViewerApp {
                 Some((min_vis..=max_vis).map(|i| items[i].path.clone()).collect())
             });
 
+        let visible_texture_keep = self.current_dynamic_texture_keep_count();
+        if let Some(visible_paths) = eviction_visible.as_ref() {
+            self.cache_manager.promote_visible(visible_paths);
+        }
+        if self.cache_manager.texture_cache.cap().get() < visible_texture_keep {
+            self.cache_manager
+                .retune_texture_cache_capacity(visible_texture_keep);
+        }
+
+        let visible_folder_preview_keep = self.current_dynamic_folder_preview_keep_count();
+        if self.cache_manager.folder_preview_cache.cap().get() < visible_folder_preview_keep {
+            self.cache_manager
+                .retune_folder_preview_cache_capacity(visible_folder_preview_keep);
+        }
+
+        let visible_rgba_budget =
+            self.current_dynamic_rgba_budget_bytes(DEFAULT_DYNAMIC_RGBA_BUDGET_BYTES);
+        self.cache_manager.retune_rgba_budget(visible_rgba_budget);
+
+        let dynamic_pending_limit = if is_burst {
+            MAX_DYNAMIC_PENDING_THUMBNAILS
+        } else {
+            visible_texture_keep
+                .max(MAX_PENDING_THUMBNAILS)
+                .min(MAX_DYNAMIC_PENDING_THUMBNAILS)
+        };
+
         // Reduce intake when pending queue is already backlogged to spread
         // GPU upload work across more frames and prevent frame-time spikes.
         // During burst mode, skip the throttle — we want to fill the queue fast.
         let effective_incoming_cap = if is_burst {
             MAX_INCOMING_THUMBNAIL_MSGS_PER_FRAME
-        } else if self.pending_thumbnails.len() > 32 {
-            24
+        } else if self.pending_thumbnails.len() > dynamic_pending_limit / 2 {
+            48
         } else {
             MAX_INCOMING_THUMBNAIL_MSGS_PER_FRAME
         };
@@ -181,13 +217,7 @@ impl ImageViewerApp {
                 continue;
             }
 
-            while self.pending_thumbnails.len()
-                >= if is_burst {
-                    MAX_PENDING_THUMBNAILS * 3
-                } else {
-                    MAX_PENDING_THUMBNAILS
-                }
-            {
+            while self.pending_thumbnails.len() >= dynamic_pending_limit {
                 // FIX: Smart eviction — prefer removing off-screen items to keep visible
                 // ones alive. On SSD, the worker queue processes most-recently-added items
                 // first (LIFO), so items from the user's final scroll position arrive first
@@ -269,14 +299,22 @@ impl ImageViewerApp {
                         // SQLite hit  ⇒ preview already composed with real media — skip.
                         if self
                             .disk_cache
-                            .get_folder_preview_cache(&item.path)
+                            .get_folder_preview_cache(
+                                &item.path,
+                                self.current_folder_preview_bucket_size(),
+                            )
                             .is_none()
                         {
                             if self
                                 .cache_manager
                                 .start_folder_preview_loading(item.path.clone())
                             {
-                                let _ = self.folder_preview_sender.try_send(item.path.clone());
+                                let request =
+                                    crate::workers::folder_preview_worker::FolderPreviewRequest {
+                                        path: item.path.clone(),
+                                        size_px: self.effective_folder_preview_request_size_px(),
+                                    };
+                                let _ = self.folder_preview_sender.try_send(request);
                             }
                             log::debug!(
                                 "[FOLDER PREVIEW] Re-composing {:?} (cover {:?} now available)",
@@ -316,7 +354,8 @@ impl ImageViewerApp {
                 open_tabs,
                 is_scrolling,
                 is_video_playing,
-            );
+            )
+            .max(self.current_dynamic_texture_keep_count());
 
             let current_texture_items = self.cache_manager.texture_cache.cap().get();
             if current_texture_items.abs_diff(target_texture_items)
@@ -341,6 +380,19 @@ impl ImageViewerApp {
                     );
                 }
             }
+
+            let target_folder_preview_items = self.current_dynamic_folder_preview_keep_count();
+            let current_folder_preview_items = self.cache_manager.folder_preview_cache.cap().get();
+            if current_folder_preview_items.abs_diff(target_folder_preview_items)
+                >= TEXTURE_CACHE_RETUNE_MIN_DELTA_ITEMS
+            {
+                self.cache_manager
+                    .retune_folder_preview_cache_capacity(target_folder_preview_items);
+            }
+
+            let target_rgba_budget =
+                self.current_dynamic_rgba_budget_bytes(DEFAULT_DYNAMIC_RGBA_BUDGET_BYTES);
+            self.cache_manager.retune_rgba_budget(target_rgba_budget);
             self.last_texture_cache_retune = Instant::now();
         }
 
@@ -578,6 +630,9 @@ impl ImageViewerApp {
                 );
 
                 self.cache_manager.finish_pending_upload(&path);
+                if let Some(visible_paths) = eviction_visible.as_ref() {
+                    self.cache_manager.promote_visible(visible_paths);
+                }
                 self.cache_manager
                     .put_rgba_data(path.clone(), rgba_data, width, height);
                 self.cache_manager.put_thumbnail(path, texture.clone());
@@ -701,6 +756,7 @@ impl ImageViewerApp {
         let start = Instant::now();
 
         let mut folder_uploads = 0;
+        let visible_paths = self.visible_grid_paths_snapshot();
         while folder_uploads < max_folder_uploads {
             if folder_uploads > 0 && start.elapsed() >= budget {
                 break;
@@ -720,6 +776,9 @@ impl ImageViewerApp {
                         egui::TextureOptions::LINEAR,
                     );
 
+                    if let Some(visible_paths) = visible_paths.as_ref() {
+                        self.cache_manager.promote_visible(visible_paths);
+                    }
                     self.cache_manager.put_folder_preview(data.path, texture);
                 }
 

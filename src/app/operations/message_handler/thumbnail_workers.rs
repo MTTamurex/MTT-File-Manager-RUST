@@ -174,7 +174,12 @@ impl ImageViewerApp {
                                         &ext_raw,
                                     );
                                 let ext_key = format!("{}_Large", ext_str);
-                                if self.item_icon_loader.extension_cache.peek(&ext_key).is_none() {
+                                if self
+                                    .item_icon_loader
+                                    .extension_cache
+                                    .peek(&ext_key)
+                                    .is_none()
+                                {
                                     let texture = ctx.load_texture(
                                         ext_key.clone(),
                                         egui::ColorImage::from_rgba_unmultiplied(
@@ -183,9 +188,7 @@ impl ImageViewerApp {
                                         ),
                                         egui::TextureOptions::LINEAR,
                                     );
-                                    self.item_icon_loader
-                                        .extension_cache
-                                        .put(ext_key, texture);
+                                    self.item_icon_loader.extension_cache.put(ext_key, texture);
                                     prewarm_uploads += 1;
                                 }
                             }
@@ -262,7 +265,12 @@ impl ImageViewerApp {
                             let ext_str =
                                 crate::infrastructure::windows::icons::canonical_icon_ext(&ext_raw);
                             let ext_key = format!("{}_Large", ext_str);
-                            if self.item_icon_loader.extension_cache.peek(&ext_key).is_none() {
+                            if self
+                                .item_icon_loader
+                                .extension_cache
+                                .peek(&ext_key)
+                                .is_none()
+                            {
                                 let texture = ctx.load_texture(
                                     ext_key.clone(),
                                     egui::ColorImage::from_rgba_unmultiplied(
@@ -271,9 +279,7 @@ impl ImageViewerApp {
                                     ),
                                     egui::TextureOptions::LINEAR,
                                 );
-                                self.item_icon_loader
-                                    .extension_cache
-                                    .put(ext_key, texture);
+                                self.item_icon_loader.extension_cache.put(ext_key, texture);
                             }
                         }
                         if let Some(ext) = path.extension() {
@@ -359,11 +365,16 @@ impl ImageViewerApp {
                     let mut ext_key = String::with_capacity(ext_str.len() + 6);
                     ext_key.push_str(ext_str);
                     ext_key.push_str("_Large");
-                        if self.item_icon_loader.extension_cache.peek(&ext_key).is_none() {
-                            self.item_icon_loader
-                                .extension_cache
-                                .put(ext_key, texture.clone());
-                        }
+                    if self
+                        .item_icon_loader
+                        .extension_cache
+                        .peek(&ext_key)
+                        .is_none()
+                    {
+                        self.item_icon_loader
+                            .extension_cache
+                            .put(ext_key, texture.clone());
+                    }
                 }
             }
 

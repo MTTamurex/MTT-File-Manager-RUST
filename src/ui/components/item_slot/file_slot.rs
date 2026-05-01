@@ -15,17 +15,28 @@ pub(super) fn render_file_slot<O: ItemSlotOperations>(
 
     // Thumbnail loading for media files (disabled in Recycle Bin and system folders)
     if is_media_file && !ctx.is_recycle_bin_view && !ctx.skip_folder_media_reads {
-        let has_texture = ctx.texture_cache.contains(&item.path);
+        let desired_thumbnail_bucket = crate::workers::thumbnail::processing::get_bucket_size(
+            (ctx.thumbnail_size.max(1.0) * ui.ctx().pixels_per_point().max(1.0)).ceil() as u32,
+        );
+        let cached_max_dim = ctx
+            .texture_cache
+            .peek(&item.path)
+            .map(|texture| texture.size()[0].max(texture.size()[1]) as u32);
+        let needs_bucket_refresh = cached_max_dim.is_some_and(|dim| {
+            dim > desired_thumbnail_bucket
+                || (dim < desired_thumbnail_bucket && matches!(dim, 128 | 256 | 512 | 1024))
+        });
+        let has_texture = cached_max_dim.is_some();
         let is_loading = ctx.loading_set.contains(&item.path);
         let is_failed = ctx.failed_thumbnails.contains(&item.path);
         let is_pending_upload = ctx.pending_upload_set.contains(&item.path);
 
         const MAX_THUMBNAIL_REQUESTS_PER_FRAME: usize = 24;
-        if !has_texture
+        if (!has_texture || needs_bucket_refresh)
             && !is_loading
             && !is_failed
             && !is_pending_upload
-            && ctx.loading_set.len() < 200
+            && ctx.loading_set.len() < crate::ui::cache::MAX_THUMBNAIL_LOADING_SET_ITEMS
             && *ctx.thumbnail_requests_this_frame < MAX_THUMBNAIL_REQUESTS_PER_FRAME
         {
             // MAX_CONCURRENT_LOADS (increased for performance - stale entries are cleaned by grid_view)

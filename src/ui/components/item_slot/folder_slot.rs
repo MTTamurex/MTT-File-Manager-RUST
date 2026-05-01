@@ -50,7 +50,7 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
             if !ctx.texture_cache.contains(cover_path)
                 && !ctx.loading_set.contains(cover_path)
                 && !ctx.failed_thumbnails.contains(cover_path)
-                && ctx.loading_set.len() < 200
+                && ctx.loading_set.len() < crate::ui::cache::MAX_THUMBNAIL_LOADING_SET_ITEMS
             {
                 ctx.loading_set.insert(cover_path.clone());
                 ops.request_thumbnail_load(cover_path.clone(), ctx.thumbnail_size as u32, None, 0);
@@ -62,6 +62,9 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
     let available_h = rect.height();
     let folder_w = ctx.thumbnail_size * 0.85;
     let folder_h = folder_w * 0.85;
+    let desired_preview_bucket = crate::workers::thumbnail::processing::get_bucket_size(
+        (folder_w.max(1.0) * ui.ctx().pixels_per_point().max(1.0)).ceil() as u32,
+    );
     let text_height = 18.0;
     let content_h = folder_h + text_height;
     let vertical_margin = ((available_h - content_h) / 2.0).max(2.0);
@@ -106,6 +109,12 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
         };
         let is_loading =
             !ctx.is_recycle_bin_view && ctx.folder_preview_loading.contains(&item.path);
+        let needs_bucket_refresh =
+            native_preview.is_some_and(|tex| tex.size()[0] as u32 != desired_preview_bucket);
+
+        if needs_bucket_refresh && !is_loading {
+            ops.request_folder_preview_load(item.path.clone());
+        }
 
         if let Some(tex) = native_preview {
             // If we have the native preview, draw maintaining aspect ratio and centering

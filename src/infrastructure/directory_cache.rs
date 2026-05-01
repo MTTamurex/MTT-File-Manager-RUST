@@ -37,7 +37,10 @@ impl DirectoryCacheInner {
     }
 
     fn total_items(&self) -> usize {
-        self.entries.iter().map(|(_, cached)| cached.entries.len()).sum()
+        self.entries
+            .iter()
+            .map(|(_, cached)| cached.entries.len())
+            .sum()
     }
 }
 

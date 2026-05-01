@@ -280,8 +280,7 @@ fn main() -> eframe::Result<()> {
                     // negligible upload-throughput penalty for a meaningfully
                     // smaller process baseline (driver heaps + GPU mirror copies).
                     device_descriptor: std::sync::Arc::new(|adapter| {
-                        let base_limits = if adapter.get_info().backend
-                            == eframe::wgpu::Backend::Gl
+                        let base_limits = if adapter.get_info().backend == eframe::wgpu::Backend::Gl
                         {
                             eframe::wgpu::Limits::downlevel_webgl2_defaults()
                         } else {
