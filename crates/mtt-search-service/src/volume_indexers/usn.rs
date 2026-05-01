@@ -7,7 +7,6 @@ use crate::index_db;
 use crate::indexing_progress::IndexingProgress;
 use crate::usn_journal;
 use crate::volume_indices::{self, SharedVolumeIndices, VolumeIndexHandle};
-use crate::FtsState;
 
 const INCREMENTAL_APPLY_RETRY_ATTEMPTS: usize = 3;
 const INCREMENTAL_APPLY_RETRY_SLEEP: std::time::Duration = std::time::Duration::from_millis(35);
@@ -40,7 +39,6 @@ pub(crate) fn index_volume(
     indexing_progress: Arc<IndexingProgress>,
     db: Arc<index_db::IndexDb>,
     shutdown: Arc<AtomicBool>,
-    fts_state: Arc<FtsState>,
 ) {
     eprintln!("[USN] Starting indexing for volume {}:\\", drive_letter);
 
@@ -336,7 +334,6 @@ pub(crate) fn index_volume(
         }
 
         // Persist to binary format (fast — typically <1s).
-        fts_state.invalidate();
         indexing_progress.update(
             drive_letter,
             "scanning",
@@ -368,11 +365,6 @@ pub(crate) fn index_volume(
     // never blocked by this thread.
     let handle: VolumeIndexHandle = volume_indices::upsert(&indices, index);
     indexing_progress.clear(drive_letter);
-
-    // FTS5 rebuild is no longer needed — in-memory SIMD search (Phase 3)
-    // replaces FTS for all queries. Mark FTS as ready so any leftover
-    // references don't block unnecessarily.
-    fts_state.try_mark_ready(fts_state.generation());
 
     // Background file size extraction — only needed when loaded from a cache
     // that doesn't have sizes (old binary format or SQLite fallback).
@@ -684,7 +676,7 @@ pub(crate) fn index_volume(
                 }
 
                 if !snapshot.additions.is_empty() || !snapshot.removals.is_empty() {
-                    if let Err(e) = db.sync_fts_incremental_snapshot(
+                    if let Err(e) = db.sync_records_incremental_snapshot(
                         snapshot.drive_letter,
                         &snapshot.addition_rows,
                         &snapshot.removals,

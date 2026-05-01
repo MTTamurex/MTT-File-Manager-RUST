@@ -18,51 +18,10 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 use parking_lot::Mutex;
 use std::collections::HashSet;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use crate::volume_indices::SharedVolumeIndices;
-
-/// Tracks whether the FTS5 index is in sync with `file_records`.
-///
-/// Volume saves strip FTS ops for speed, then rebuild FTS in a background
-/// thread.  Between save and rebuild completion, the IPC handler falls back
-/// to the in-memory linear scan.
-///
-/// A generation counter prevents a stale rebuild (started before a second
-/// volume save) from prematurely marking the index as ready.
-pub(crate) struct FtsState {
-    ready: AtomicBool,
-    generation: AtomicU64,
-}
-
-impl FtsState {
-    pub fn new() -> Self {
-        Self {
-            ready: AtomicBool::new(true),
-            generation: AtomicU64::new(0),
-        }
-    }
-
-    /// Mark FTS as stale (a new volume save is about to replace records).
-    pub fn invalidate(&self) {
-        self.generation.fetch_add(1, Ordering::SeqCst);
-        self.ready.store(false, Ordering::Release);
-    }
-
-    /// Snapshot the current generation for a rebuild thread.
-    pub fn generation(&self) -> u64 {
-        self.generation.load(Ordering::SeqCst)
-    }
-
-    /// Mark FTS as ready, but only if no other save invalidated it since
-    /// `expected_gen`.
-    pub fn try_mark_ready(&self, expected_gen: u64) {
-        if self.generation.load(Ordering::SeqCst) == expected_gen {
-            self.ready.store(true, Ordering::Release);
-        }
-    }
-}
 
 /// Redact filesystem paths from error messages to prevent information leakage.
 /// SEC: Detects path-like substrings using multiple signals so we redact even
@@ -231,9 +190,6 @@ pub fn run_indexer(shutdown: Arc<AtomicBool>) {
         }
     };
 
-    // FTS5 readiness state — shared between indexers and IPC server.
-    let fts_state = Arc::new(FtsState::new());
-
     // Spawn volume discovery + indexing in a background thread.
     // This allows the IPC server to start listening immediately instead of
     // blocking on discover_volumes() which can take seconds if network or
@@ -243,8 +199,6 @@ pub fn run_indexer(shutdown: Arc<AtomicBool>) {
         let indexing_progress = indexing_progress.clone();
         let db = db.clone();
         let shutdown = shutdown.clone();
-        let fts_state = fts_state.clone();
-
         std::thread::spawn(move || {
             let tracked_volumes = Arc::new(Mutex::new(HashSet::<char>::new()));
 
@@ -274,7 +228,6 @@ pub fn run_indexer(shutdown: Arc<AtomicBool>) {
                 &indexing_progress,
                 &db,
                 &shutdown,
-                &fts_state,
             );
 
             // Keep discovering newly mounted drives (e.g., Cryptomator mounts).
@@ -292,7 +245,6 @@ pub fn run_indexer(shutdown: Arc<AtomicBool>) {
                     &indexing_progress,
                     &db,
                     &shutdown,
-                    &fts_state,
                 );
             }
         });
@@ -303,14 +255,7 @@ pub fn run_indexer(shutdown: Arc<AtomicBool>) {
         "[SERVICE] Starting IPC server on {}...",
         mtt_search_protocol::PIPE_NAME
     );
-    ipc_server::run_ipc_server(
-        indices.clone(),
-        indexing_progress.clone(),
-        shutdown.clone(),
-        fts_state,
-    );
-
-    db.mark_clean_shutdown();
+    ipc_server::run_ipc_server(indices.clone(), indexing_progress.clone(), shutdown.clone());
     eprintln!("[SERVICE] Shutting down...");
 }
 
@@ -321,7 +266,6 @@ fn spawn_indexers_for_discovered_volumes(
     indexing_progress: &Arc<indexing_progress::IndexingProgress>,
     db: &Arc<index_db::IndexDb>,
     shutdown: &Arc<AtomicBool>,
-    fts_state: &Arc<FtsState>,
 ) {
     for volume in discovered {
         let drive_letter = volume.drive_letter;
@@ -341,7 +285,6 @@ fn spawn_indexers_for_discovered_volumes(
             indexing_progress.clone(),
             db.clone(),
             shutdown.clone(),
-            fts_state.clone(),
         );
     }
 }
@@ -353,7 +296,6 @@ fn spawn_volume_indexer(
     indexing_progress: Arc<indexing_progress::IndexingProgress>,
     db: Arc<index_db::IndexDb>,
     shutdown: Arc<AtomicBool>,
-    fts_state: Arc<FtsState>,
 ) {
     let drive_letter = volume.drive_letter;
     let label = if volume.label.is_empty() {
@@ -376,14 +318,7 @@ fn spawn_volume_indexer(
 
     std::thread::spawn(move || {
         if volume.usn_supported {
-            volume_indexers::index_volume(
-                drive_letter,
-                indices,
-                indexing_progress,
-                db,
-                shutdown,
-                fts_state,
-            );
+            volume_indexers::index_volume(drive_letter, indices, indexing_progress, db, shutdown);
         } else {
             volume_indexers::index_non_ntfs_volume(
                 drive_letter,
@@ -392,7 +327,6 @@ fn spawn_volume_indexer(
                 indexing_progress,
                 db,
                 shutdown,
-                fts_state,
             );
         }
 

@@ -3131,6 +3131,7 @@ version = "0.1.0"
 dependencies = [
  "bincode",
  "memchr",
+ "memmap2",
  "mimalloc",
  "mtt-search-protocol",
  "parking_lot",
