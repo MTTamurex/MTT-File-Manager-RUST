@@ -15,15 +15,16 @@ impl ImageViewerApp {
         active.is_computer_view = self.navigation_state.is_computer_view;
         active.is_recycle_bin_view = self.navigation_state.is_recycle_bin_view;
         active.navigation = self.navigation_state.navigation.clone();
-        active.all_items = self.all_items.clone();
         let compact_items_snapshot = self.search_query.is_empty()
             && !self.is_loading_folder
             && !self.pending_items_rebuild
             && self.items.len() == self.all_items.len();
         if compact_items_snapshot {
+            active.all_items = self.items.clone();
             active.items = Arc::new(Vec::new());
             active.items_snapshot_compact = true;
         } else {
+            active.all_items = self.all_items.clone();
             active.items = self.items.clone();
             active.items_snapshot_compact = false;
         }
@@ -173,8 +174,11 @@ impl ImageViewerApp {
                 .restore_expanded(sidebar_expanded, sidebar_scroll_y);
         }
 
-        // Apply folder lock if the destination tab's folder has locked preferences
-        self.apply_folder_lock_if_present();
+        // Apply folder lock if the destination tab's folder has locked preferences.
+        // Use the tab-restore variant so that per-tab sort/view preferences are
+        // preserved for unlocked folders (the full apply_folder_lock_if_present
+        // would reset them to global "normal" defaults, discarding tab state).
+        self.apply_folder_lock_on_tab_restore();
 
         if self.show_preview_panel
             && self.selected_file.is_some()
