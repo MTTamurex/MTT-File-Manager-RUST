@@ -12,6 +12,11 @@ use crate::workers::thumbnail::processing::get_bucket_size;
 
 use super::ImageViewerApp;
 
+const BASE_PENDING_THUMBNAILS: usize = 64;
+const MIN_DYNAMIC_PENDING_THUMBNAILS: usize = 16;
+const MAX_DYNAMIC_PENDING_THUMBNAILS: usize = 1024;
+const MAX_PENDING_THUMBNAIL_RGBA_BYTES: usize = 192 * 1024 * 1024;
+
 impl ImageViewerApp {
     pub(crate) fn all_items_mut(&mut self) -> &mut Vec<FileEntry> {
         Arc::make_mut(&mut self.all_items)
@@ -100,6 +105,49 @@ impl ImageViewerApp {
         )
     }
 
+    pub(crate) fn current_pending_thumbnail_upload_limit(&self) -> usize {
+        let bucket_size = self.current_thumbnail_bucket_size() as usize;
+        let bucket_bytes = bucket_size
+            .saturating_mul(bucket_size)
+            .saturating_mul(4)
+            .max(1);
+        let byte_limited_items =
+            (MAX_PENDING_THUMBNAIL_RGBA_BYTES / bucket_bytes).max(MIN_DYNAMIC_PENDING_THUMBNAILS);
+
+        self.current_dynamic_texture_keep_count()
+            .max(BASE_PENDING_THUMBNAILS)
+            .min(MAX_DYNAMIC_PENDING_THUMBNAILS)
+            .min(byte_limited_items)
+    }
+
+    pub(crate) fn trim_pending_thumbnail_uploads_to_limit(&mut self) {
+        let max_pending = self.current_pending_thumbnail_upload_limit();
+        if self.pending_thumbnails.len() <= max_pending {
+            return;
+        }
+
+        let visible_paths = self.visible_grid_paths_snapshot();
+        while self.pending_thumbnails.len() > max_pending {
+            let evict_idx = visible_paths.as_ref().and_then(|visible_paths| {
+                self.pending_thumbnails
+                    .iter()
+                    .position(|thumb| !visible_paths.contains(&thumb.path))
+            });
+
+            let old = if let Some(evict_idx) = evict_idx {
+                self.pending_thumbnails.remove(evict_idx)
+            } else {
+                self.pending_thumbnails.pop_front()
+            };
+
+            if let Some(old) = old {
+                self.cache_manager.finish_pending_upload(&old.path);
+            } else {
+                break;
+            }
+        }
+    }
+
     /// Check if the media player should currently capture all keyboard arrow/space input.
     /// Returns true if player is detached/fullscreen AND has focus.
     pub fn is_media_keyboard_focused(&self) -> bool {
@@ -166,22 +214,13 @@ impl ImageViewerApp {
         }
 
         let aggressive = working_set_bytes >= HARD_LIMIT_BYTES;
-        // During restore burst, allow a larger pending queue — we're actively
-        // re-populating VRAM after an OS paging event.
         let is_burst = self.is_in_restore_burst();
         let visible_grid_items = self.estimated_visible_grid_items();
         let visible_paths = self.visible_grid_paths_snapshot();
         let texture_keep = self.current_dynamic_texture_keep_count();
         let folder_preview_keep = self.current_dynamic_folder_preview_keep_count();
         let rgba_budget = self.current_dynamic_rgba_budget_bytes(DEFAULT_DYNAMIC_RGBA_BUDGET_BYTES);
-        let max_pending = if is_burst {
-            texture_keep.max(192)
-        } else if aggressive {
-            texture_keep.max(96)
-        } else {
-            texture_keep.max(48)
-        }
-        .min(MAX_DYNAMIC_TEXTURE_CACHE_ITEMS);
+        let max_pending = self.current_pending_thumbnail_upload_limit();
 
         while self.pending_thumbnails.len() > max_pending {
             let evict_idx = visible_paths.as_ref().and_then(|visible_paths| {
@@ -192,10 +231,8 @@ impl ImageViewerApp {
 
             let old = if let Some(evict_idx) = evict_idx {
                 self.pending_thumbnails.remove(evict_idx)
-            } else if visible_paths.is_none() {
-                self.pending_thumbnails.pop_front()
             } else {
-                break;
+                self.pending_thumbnails.pop_front()
             };
 
             if let Some(old) = old {
@@ -205,7 +242,7 @@ impl ImageViewerApp {
             }
         }
 
-        let (textures_removed, rgba_removed, folder_previews_removed) = if is_burst {
+        let (textures_removed, rgba_removed, folder_previews_removed) = if is_burst && !aggressive {
             // Skip texture/RGBA trimming during burst — we need the caches full.
             (0, 0, 0)
         } else if aggressive {

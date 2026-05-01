@@ -165,6 +165,7 @@ impl ImageViewerApp {
                     generation: effective_gen,
                     not_found: false,
                 });
+                self.trim_pending_thumbnail_uploads_to_limit();
                 return;
             }
         }
@@ -202,7 +203,11 @@ impl ImageViewerApp {
                 path,
                 size_px: self.effective_folder_preview_request_size_px(),
             };
-            let _ = self.folder_preview_sender.try_send(request);
+            if let Err(err) = self.folder_preview_sender.try_send(request) {
+                let request = err.into_inner();
+                self.cache_manager
+                    .finish_folder_preview_loading(&request.path);
+            }
         }
     }
 
