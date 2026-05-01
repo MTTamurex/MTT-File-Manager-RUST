@@ -64,7 +64,7 @@ pub struct VolumeIndex {
     pub records: HashMap<u64, FileRecord>,
     /// Reverse index: parent FRN -> child FRNs.
     /// Enables O(subtree) descent for folder size calculation.
-    pub children: HashMap<u64, Vec<u64>>,
+    pub children: HashMap<u64, Box<[u64]>>,
     /// Contiguous arena storing all file name strings.
     pub names: NameArena,
     /// Last USN processed (for incremental updates).
@@ -187,17 +187,35 @@ impl VolumeIndex {
     #[inline]
     fn add_child_edge(&mut self, parent_ref: u64, child_frn: u64) {
         let bucket = Self::normalized_parent_bucket(child_frn, parent_ref);
-        let children = self.children.entry(bucket).or_default();
-        if !children.contains(&child_frn) {
-            children.push(child_frn);
+        let children = self
+            .children
+            .entry(bucket)
+            .or_insert_with(|| Vec::new().into_boxed_slice());
+        if children.contains(&child_frn) {
+            return;
         }
+
+        let mut expanded = children.to_vec();
+        expanded.push(child_frn);
+        *children = expanded.into_boxed_slice();
     }
 
     #[inline]
     fn remove_child_edge(&mut self, parent_ref: u64, child_frn: u64) {
         let bucket = Self::normalized_parent_bucket(child_frn, parent_ref);
+        let mut remove_bucket = false;
         if let Some(siblings) = self.children.get_mut(&bucket) {
-            siblings.retain(|&c| c != child_frn);
+            if siblings.contains(&child_frn) {
+                let mut compacted = siblings.to_vec();
+                compacted.retain(|&c| c != child_frn);
+                remove_bucket = compacted.is_empty();
+                if !remove_bucket {
+                    *siblings = compacted.into_boxed_slice();
+                }
+            }
+        }
+        if remove_bucket {
+            self.children.remove(&bucket);
         }
     }
 
@@ -306,7 +324,7 @@ impl VolumeIndex {
             }
         }
 
-        // Track for incremental FTS sync.
+        // Track for incremental SQLite persistence.
         self.pending_removals.remove(&frn);
         self.pending_additions.insert(frn);
         true
@@ -441,9 +459,6 @@ impl VolumeIndex {
     pub fn shrink_to_fit(&mut self) {
         self.records.shrink_to_fit();
         self.children.shrink_to_fit();
-        for siblings in self.children.values_mut() {
-            siblings.shrink_to_fit();
-        }
         self.names.shrink_to_fit();
         self.pending_additions.shrink_to_fit();
         self.pending_removals.shrink_to_fit();
@@ -460,11 +475,10 @@ impl VolumeIndex {
     /// Call after bulk operations (load from DB, compaction) to ensure consistency.
     pub fn rebuild_children(&mut self) {
         self.sanitize_hardlink_parents();
-        self.children.clear();
-        self.children.reserve(self.records.len() / 3);
+        let mut rebuilt: HashMap<u64, Vec<u64>> = HashMap::with_capacity(self.records.len() / 3);
         // Primary parent from each record.
         for (&frn, record) in &self.records {
-            self.children
+            rebuilt
                 .entry(Self::normalized_parent_bucket(frn, record.parent_ref))
                 .or_default()
                 .push(frn);
@@ -481,14 +495,19 @@ impl VolumeIndex {
             for &parent in extra_parents {
                 let bucket = Self::normalized_parent_bucket(frn, parent);
                 if Some(bucket) != primary {
-                    self.children.entry(bucket).or_default().push(frn);
+                    rebuilt.entry(bucket).or_default().push(frn);
                 }
             }
         }
-        for child_frns in self.children.values_mut() {
-            child_frns.sort_unstable();
-            child_frns.dedup();
-        }
+        self.children = rebuilt
+            .into_iter()
+            .map(|(parent, mut child_frns)| {
+                child_frns.sort_unstable();
+                child_frns.dedup();
+                (parent, child_frns.into_boxed_slice())
+            })
+            .collect();
+        self.children.shrink_to_fit();
     }
 
     /// Compute recursive subtree totals for a directory using the `children`

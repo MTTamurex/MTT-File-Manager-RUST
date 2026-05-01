@@ -40,7 +40,6 @@ pub fn run_ipc_server(
     indices: SharedVolumeIndices,
     indexing_progress: Arc<IndexingProgress>,
     shutdown: Arc<AtomicBool>,
-    _fts_state: Arc<crate::FtsState>,
 ) {
     let is_warming = Arc::new(AtomicBool::new(false));
     let last_warm_epoch_secs = Arc::new(AtomicU64::new(0));

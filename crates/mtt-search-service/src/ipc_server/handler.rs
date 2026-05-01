@@ -186,10 +186,11 @@ pub(super) fn handle_client(
                                 let mut touched = 0u64;
                                 for handle in &handles {
                                     let vol = handle.read();
-                                    let arena_bytes = vol.names.as_bytes();
-                                    for chunk in arena_bytes.chunks(4096) {
-                                        black_box(&chunk[0]);
-                                    }
+                                    vol.names.for_each_slice(|arena_slice| {
+                                        for chunk in arena_slice.chunks(4096) {
+                                            black_box(&chunk[0]);
+                                        }
+                                    });
                                     touched += vol.records.len() as u64;
                                 }
                                 eprintln!(
@@ -249,8 +250,8 @@ pub(super) fn handle_client(
                 return;
             }
 
-            // Always use in-memory search. It avoids the FTS5 rebuild path and
-            // uses a tiny reusable lowercase buffer for ASCII SIMD matching.
+            // Always use in-memory search with a tiny reusable lowercase buffer
+            // for ASCII SIMD matching.
             let result = collect_authorized_search_page(pipe, indices, &text, offset, limit);
 
             match result {

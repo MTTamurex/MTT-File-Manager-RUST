@@ -17,6 +17,8 @@
 use std::io::{BufReader, BufWriter, Read, Write};
 use std::path::PathBuf;
 
+use memmap2::MmapOptions;
+
 use super::integrity::{self, HMAC_OUTPUT_SIZE};
 use crate::file_index::{FileRecord, VolumeIndex};
 
@@ -24,6 +26,8 @@ const MAGIC: &[u8; 8] = b"MTTIDX02";
 const LEGACY_MAGIC: &[u8; 8] = b"MTTIDX01";
 const VERSION: u32 = 2;
 const TRAILER_SIZE: usize = HMAC_OUTPUT_SIZE;
+const MMAP_ARENA_MIN_BYTES: usize = 64 * 1024 * 1024;
+const HMAC_STREAM_BUF_SIZE: usize = 64 * 1024;
 
 #[repr(C, packed)]
 struct Header {
@@ -101,6 +105,40 @@ fn read_authenticated_chunk<R: Read>(
     hmac.update(buf).map_err(|e| format!("HMAC update: {}", e))
 }
 
+fn read_authenticated_bytes<R: Read>(
+    reader: &mut R,
+    hmac: &mut integrity::HmacSha256,
+    mut len: usize,
+    label: &str,
+) -> Result<(), String> {
+    let mut buf = vec![0u8; HMAC_STREAM_BUF_SIZE.min(len.max(1))];
+    while len > 0 {
+        let chunk_len = len.min(buf.len());
+        let chunk = &mut buf[..chunk_len];
+        reader
+            .read_exact(chunk)
+            .map_err(|e| format!("Read {}: {}", label, e))?;
+        hmac.update(chunk)
+            .map_err(|e| format!("HMAC update: {}", e))?;
+        len -= chunk_len;
+    }
+    Ok(())
+}
+
+fn mmap_arena_enabled(arena_size: usize) -> bool {
+    if arena_size < MMAP_ARENA_MIN_BYTES {
+        return false;
+    }
+
+    match std::env::var("MTT_SEARCH_MMAP_ARENA") {
+        Ok(value) => !matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "0" | "false" | "no" | "off"
+        ),
+        Err(_) => true,
+    }
+}
+
 /// Save a VolumeIndex to a binary file atomically (write temp + rename).
 pub fn save(index: &VolumeIndex) -> Result<(), String> {
     let path = index_path(index.drive_letter);
@@ -157,7 +195,9 @@ pub fn save(index: &VolumeIndex) -> Result<(), String> {
     write_authenticated_chunk(&mut writer, &mut hmac, header_bytes)?;
 
     // Write NameArena.
-    write_authenticated_chunk(&mut writer, &mut hmac, index.names.as_bytes())?;
+    index
+        .names
+        .try_for_each_slice(|slice| write_authenticated_chunk(&mut writer, &mut hmac, slice))?;
 
     // Write Records (sorted by FRN for deterministic output).
     let mut sorted_frns: Vec<u64> = index.records.keys().copied().collect();
@@ -230,7 +270,7 @@ pub fn load(drive_letter: char) -> Result<Option<(VolumeIndex, PersistedBinarySt
         .metadata()
         .map_err(|e| format!("Read binary metadata: {}", e))?
         .len() as usize;
-    let mut reader = BufReader::new(file);
+    let mut reader = BufReader::new(&file);
 
     if file_len < HEADER_SIZE + TRAILER_SIZE {
         return Err("Binary index too small".into());
@@ -336,11 +376,17 @@ pub fn load(drive_letter: char) -> Result<Option<(VolumeIndex, PersistedBinarySt
     hmac.update(&header_bytes)
         .map_err(|e| format!("HMAC update: {}", e))?;
 
-    // Load NameArena.
-    // Reconstruct by owning the raw arena bytes directly, avoiding the old
-    // second copy that happened after reading the entire file into memory.
-    let mut arena_bytes = vec![0u8; arena_size];
-    read_authenticated_chunk(&mut reader, &mut hmac, &mut arena_bytes, "name arena")?;
+    // Authenticate NameArena. Large arenas are streamed through HMAC and then
+    // mapped read-only, avoiding a private Vec allocation while preserving the
+    // same whole-file integrity check.
+    let arena_bytes = if mmap_arena_enabled(arena_size) {
+        read_authenticated_bytes(&mut reader, &mut hmac, arena_size, "name arena")?;
+        None
+    } else {
+        let mut arena_bytes = vec![0u8; arena_size];
+        read_authenticated_chunk(&mut reader, &mut hmac, &mut arena_bytes, "name arena")?;
+        Some(arena_bytes)
+    };
 
     // Load Records.
     let mut records = std::collections::HashMap::with_capacity(record_count);
@@ -389,7 +435,18 @@ pub fn load(drive_letter: char) -> Result<Option<(VolumeIndex, PersistedBinarySt
 
     // Build VolumeIndex.
     let mut index = VolumeIndex::empty(drive_letter);
-    index.names = crate::name_arena::NameArena::from_vec(arena_bytes);
+    index.names = if let Some(arena_bytes) = arena_bytes {
+        crate::name_arena::NameArena::from_vec(arena_bytes)
+    } else {
+        let mmap = unsafe {
+            MmapOptions::new()
+                .offset(HEADER_SIZE as u64)
+                .len(arena_size)
+                .map(&file)
+        }
+        .map_err(|e| format!("Map name arena: {}", e))?;
+        crate::name_arena::NameArena::from_mmap(mmap)
+    };
     index.records = records;
     index.hardlink_parents = hardlink_parents;
     index.reparse_points = reparse_points;

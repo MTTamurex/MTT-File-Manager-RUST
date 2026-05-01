@@ -314,81 +314,10 @@ impl IndexDb {
 
         Self::migrate_schema(&conn)?;
 
-        conn.execute_batch(
-            "CREATE VIRTUAL TABLE IF NOT EXISTS search_fts USING fts5(
-                name,
-                content='file_records',
-                content_rowid='rowid',
-                tokenize='trigram'
-            );",
-        )
-        .map_err(|e| format!("FTS5 table creation error: {}", e))?;
-
-        // --- Dirty-shutdown detection ---
-        // A `service_meta` table tracks whether the previous session shut down
-        // cleanly.  If dirty (crash / kill), the FTS5 shadow tables may be
-        // stale, so we rebuild.  On a clean shutdown the flag is 0 and we
-        // skip the expensive rebuild entirely.
-        conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS service_meta (
-                key TEXT PRIMARY KEY,
-                value INTEGER NOT NULL
-            );",
-        )
-        .map_err(|e| format!("service_meta table creation error: {}", e))?;
-
-        let was_dirty: bool = conn
-            .query_row(
-                "SELECT value FROM service_meta WHERE key = 'dirty'",
-                [],
-                |row| row.get::<_, i64>(0),
-            )
-            .map(|v| v != 0)
-            .unwrap_or(true); // No row yet → treat as dirty (first run or upgrade).
-
-        // Mark as dirty immediately.  Cleared by `mark_clean_shutdown()`.
-        conn.execute(
-            "INSERT OR REPLACE INTO service_meta (key, value) VALUES ('dirty', 1)",
-            [],
-        )
-        .map_err(|e| format!("service_meta dirty flag error: {}", e))?;
-
-        let has_records: bool = conn
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM file_records LIMIT 1)",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap_or(false);
-
-        if has_records && was_dirty {
-            let start = std::time::Instant::now();
-            conn.execute("INSERT INTO search_fts(search_fts) VALUES('rebuild')", [])
-                .map_err(|e| format!("FTS5 initial rebuild error: {}", e))?;
-            eprintln!(
-                "[DB] FTS5 index rebuilt at startup (dirty shutdown detected) in {:.2}s",
-                start.elapsed().as_secs_f64()
-            );
-        } else if has_records {
-            eprintln!("[DB] FTS5 index intact (clean shutdown), skipping rebuild");
-        }
-
         Ok(Self {
             db_path: path.to_path_buf(),
             conn: Mutex::new(conn),
         })
-    }
-
-    /// Mark the database as cleanly shut down so the next startup skips
-    /// the expensive FTS5 rebuild.
-    pub fn mark_clean_shutdown(&self) {
-        let conn = self.conn.lock();
-        if let Err(e) = conn.execute(
-            "INSERT OR REPLACE INTO service_meta (key, value) VALUES ('dirty', 0)",
-            [],
-        ) {
-            eprintln!("[DB] Failed to clear dirty flag: {}", e);
-        }
     }
 
     fn open_read_connection(&self) -> Result<Connection, String> {

@@ -4,12 +4,9 @@ use super::IndexDb;
 use crate::file_index::VolumeIndex;
 
 impl IndexDb {
-    /// Save the complete volume index to the database (records only, no FTS).
+    /// Save the complete volume index to the database.
     ///
     /// Replaces all `file_records` and `hardlink_parents` for this volume.
-    /// FTS5 is **not** touched here — call `rebuild_fts_full()` separately
-    /// (typically from a background thread) so the user can search via the
-    /// in-memory linear scan while the FTS index is being rebuilt.
     ///
     /// The work is split into batched commits so the WAL stays bounded.
     /// `on_progress(current, total)` reports insert progress.
@@ -161,29 +158,11 @@ impl IndexDb {
         }
 
         eprintln!(
-            "[DB] Saved {} records for volume {}:\\ (records only, FTS deferred)",
+            "[DB] Saved {} records for volume {}:\\",
             index.records.len(),
             index.drive_letter,
         );
         Ok(())
-    }
-
-    /// Rebuild the FTS5 index from the current `file_records` table.
-    ///
-    /// This is expensive (~25-60 s for ~1.7 M records with the trigram
-    /// tokenizer) so it should be called from a **background thread** after
-    /// the volume has already been marked `Ready`.
-    pub fn rebuild_fts_full(&self) -> Result<std::time::Duration, String> {
-        let conn = self.conn.lock();
-        let start = std::time::Instant::now();
-        conn.execute("INSERT INTO search_fts(search_fts) VALUES('rebuild')", [])
-            .map_err(|e| format!("FTS5 rebuild error: {}", e))?;
-        let elapsed = start.elapsed();
-        eprintln!(
-            "[DB] FTS5 background rebuild completed in {:.2}s",
-            elapsed.as_secs_f64()
-        );
-        Ok(elapsed)
     }
 
     pub fn save_volume_state_snapshot(
@@ -222,7 +201,7 @@ impl IndexDb {
         Ok(())
     }
 
-    pub fn sync_fts_incremental_snapshot(
+    pub fn sync_records_incremental_snapshot(
         &self,
         drive_letter: char,
         additions: &[(u64, String, u64, bool, bool, Vec<u64>)],
@@ -245,30 +224,19 @@ impl IndexDb {
 
         // --- Process removals ---
         for &frn in removals {
-            let existing: Option<(i64, String)> = tx
-                .query_row(
-                    "SELECT rowid, name FROM file_records WHERE drive_letter = ?1 AND frn = ?2",
-                    params![drive, frn as i64],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
-                )
-                .ok();
-
-            if let Some((rowid, old_name)) = existing {
-                let _ = tx.execute(
-                    "INSERT INTO search_fts(search_fts, rowid, name) VALUES('delete', ?1, ?2)",
-                    params![rowid, old_name],
-                );
-                tx.execute(
+            let deleted = tx
+                .execute(
                     "DELETE FROM file_records WHERE drive_letter = ?1 AND frn = ?2",
                     params![drive, frn as i64],
                 )
                 .map_err(|e| format!("Delete record error: {}", e))?;
+            if deleted > 0 {
                 tx.execute(
                     "DELETE FROM hardlink_parents WHERE drive_letter = ?1 AND frn = ?2",
                     params![drive, frn as i64],
                 )
                 .map_err(|e| format!("Delete hardlink parent error: {}", e))?;
-                removed_count += 1;
+                removed_count += deleted;
             }
         }
 
@@ -279,31 +247,16 @@ impl IndexDb {
             let is_dir = *is_dir;
             let is_reparse = *is_reparse;
 
-            let existing: Option<(i64, String)> = tx
-                .query_row(
-                    "SELECT rowid, name FROM file_records WHERE drive_letter = ?1 AND frn = ?2",
-                    params![drive, frn as i64],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
-                )
-                .ok();
-
-            if let Some((rowid, old_name)) = existing {
-                tx.execute(
+            let updated = tx
+                .execute(
                     "UPDATE file_records SET name = ?1, parent_frn = ?2, is_dir = ?3, is_reparse = ?4
                      WHERE drive_letter = ?5 AND frn = ?6",
                     params![name, parent_ref as i64, is_dir, is_reparse, drive, frn as i64],
                 )
                 .map_err(|e| format!("Update record error: {}", e))?;
 
-                let _ = tx.execute(
-                    "INSERT INTO search_fts(search_fts, rowid, name) VALUES('delete', ?1, ?2)",
-                    params![rowid, old_name],
-                );
-                let _ = tx.execute(
-                    "INSERT INTO search_fts(rowid, name) VALUES(?1, ?2)",
-                    params![rowid, name],
-                );
-                updated_count += 1;
+            if updated > 0 {
+                updated_count += updated;
             } else {
                 tx.execute(
                     "INSERT INTO file_records (frn, drive_letter, name, parent_frn, is_dir, is_reparse)
@@ -311,12 +264,6 @@ impl IndexDb {
                     params![frn as i64, drive, name, parent_ref as i64, is_dir, is_reparse],
                 )
                 .map_err(|e| format!("Insert record error: {}", e))?;
-
-                let new_rowid = tx.last_insert_rowid();
-                let _ = tx.execute(
-                    "INSERT INTO search_fts(rowid, name) VALUES(?1, ?2)",
-                    params![new_rowid, name],
-                );
                 added_count += 1;
             }
 
