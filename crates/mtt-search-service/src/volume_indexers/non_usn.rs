@@ -150,7 +150,6 @@ pub(crate) fn index_non_ntfs_volume(
                 scanned_index.clear_pending();
                 // SEC: Prune stale dir_modified_at entries.
                 scanned_index.prune_old_modifications(std::time::Duration::from_secs(600));
-                scanned_index.release_search_buffers_if_idle(file_index::SEARCH_BUFFER_IDLE_TTL);
                 scanned_index.shrink_to_fit();
 
                 let records = stats.records_indexed;

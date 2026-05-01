@@ -359,9 +359,6 @@ pub(crate) fn index_volume(
 
     index.shrink_to_fit();
     index.state = file_index::IndexState::Ready;
-    // Build lowercased arena for case-insensitive SIMD search.
-    index.names.build_lowered();
-    index.touch_search_cache();
     let mut current_usn = index.last_usn;
     let sizes_already_loaded = index.sizes_loaded;
 
@@ -667,7 +664,10 @@ pub(crate) fn index_volume(
                 })
             };
 
+            let mut should_shrink_index = false;
             if let Some(snapshot) = pending_snapshot {
+                should_shrink_index =
+                    !snapshot.additions.is_empty() || !snapshot.removals.is_empty();
                 if let Err(e) = db.save_volume_state_snapshot(
                     snapshot.drive_letter,
                     snapshot.journal_id,
@@ -705,7 +705,10 @@ pub(crate) fn index_volume(
             {
                 let mut vol = handle.write();
                 vol.prune_old_modifications(std::time::Duration::from_secs(600));
-                vol.release_search_buffers_if_idle(file_index::SEARCH_BUFFER_IDLE_TTL);
+                vol.dir_modified_at.shrink_to_fit();
+                if should_shrink_index {
+                    vol.shrink_to_fit();
+                }
             }
         }
     }

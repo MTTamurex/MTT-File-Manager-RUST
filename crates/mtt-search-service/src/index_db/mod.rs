@@ -276,7 +276,11 @@ impl IndexDb {
         let conn = Connection::open(path).map_err(|e| format!("SQLite open error: {}", e))?;
 
         conn.execute_batch(
-            "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=10000;",
+            "PRAGMA journal_mode=WAL;
+             PRAGMA synchronous=NORMAL;
+             PRAGMA busy_timeout=10000;
+             PRAGMA mmap_size=0;
+             PRAGMA cache_size=-2000;",
         )
         .map_err(|e| format!("PRAGMA error: {}", e))?;
 
@@ -394,8 +398,12 @@ impl IndexDb {
         )
         .map_err(|e| format!("SQLite read-open error: {}", e))?;
 
-        conn.execute_batch("PRAGMA busy_timeout=10000;")
-            .map_err(|e| format!("SQLite read PRAGMA error: {}", e))?;
+        conn.execute_batch(
+            "PRAGMA busy_timeout=10000;
+             PRAGMA mmap_size=0;
+             PRAGMA cache_size=-2000;",
+        )
+        .map_err(|e| format!("SQLite read PRAGMA error: {}", e))?;
 
         Ok(conn)
     }
