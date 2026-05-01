@@ -109,7 +109,8 @@ pub struct ImageViewerApp {
     pub scanned_folders: LruCache<PathBuf, ()>, // Cache: avoids re-scan (LRU bounded)
 
     // FOLDER PREVIEW WORKER: Native Windows Shell folder previews (sandwich effect)
-    pub folder_preview_sender: crossbeam_channel::Sender<PathBuf>,
+    pub folder_preview_sender:
+        crossbeam_channel::Sender<crate::workers::folder_preview_worker::FolderPreviewRequest>,
     pub folder_preview_receiver: Receiver<crate::workers::folder_preview_worker::FolderPreviewData>,
 
     // Cache Manager (unifica texture_cache, icon_cache, loading_set, etc.)

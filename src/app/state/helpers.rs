@@ -3,6 +3,12 @@ use std::time::{Duration, Instant};
 
 use crate::domain::file_entry::FileEntry;
 use crate::domain::file_entry::ViewMode;
+use crate::ui::cache::{
+    FxHashSet, DEFAULT_DYNAMIC_RGBA_BUDGET_BYTES, MAX_DYNAMIC_FOLDER_PREVIEW_ITEMS,
+    MAX_DYNAMIC_TEXTURE_CACHE_ITEMS, MAX_RGBA_BUDGET_BYTES, MIN_DYNAMIC_FOLDER_PREVIEW_ITEMS,
+    MIN_DYNAMIC_TEXTURE_CACHE_ITEMS, MIN_RGBA_BUDGET_BYTES,
+};
+use crate::workers::thumbnail::processing::get_bucket_size;
 
 use super::ImageViewerApp;
 
@@ -56,6 +62,42 @@ impl ImageViewerApp {
         } else {
             false
         }
+    }
+
+    pub(crate) fn effective_thumbnail_request_size_px(&self, logical_size_px: u32) -> u32 {
+        let scale = self.ui_ctx.pixels_per_point().max(1.0);
+        ((logical_size_px.max(1) as f32) * scale).ceil() as u32
+    }
+
+    pub(crate) fn current_thumbnail_bucket_size(&self) -> u32 {
+        let logical_size = self.thumbnail_size.max(crate::ui::theme::THUMBNAIL_MIN) as u32;
+        get_bucket_size(self.effective_thumbnail_request_size_px(logical_size))
+    }
+
+    pub(crate) fn effective_folder_preview_request_size_px(&self) -> u32 {
+        let logical_size =
+            (self.thumbnail_size.max(crate::ui::theme::THUMBNAIL_MIN) * 0.85).ceil() as u32;
+        self.effective_thumbnail_request_size_px(logical_size)
+    }
+
+    pub(crate) fn current_folder_preview_bucket_size(&self) -> u32 {
+        get_bucket_size(self.effective_folder_preview_request_size_px())
+    }
+
+    pub(crate) fn current_dynamic_texture_keep_count(&self) -> usize {
+        dynamic_texture_keep_count(self.estimated_visible_grid_items())
+    }
+
+    pub(crate) fn current_dynamic_folder_preview_keep_count(&self) -> usize {
+        dynamic_folder_preview_keep_count(self.estimated_visible_grid_items())
+    }
+
+    pub(crate) fn current_dynamic_rgba_budget_bytes(&self, floor_bytes: usize) -> usize {
+        dynamic_rgba_budget_bytes(
+            self.estimated_visible_grid_items(),
+            self.current_thumbnail_bucket_size(),
+            floor_bytes,
+        )
     }
 
     /// Check if the media player should currently capture all keyboard arrow/space input.
@@ -127,17 +169,36 @@ impl ImageViewerApp {
         // During restore burst, allow a larger pending queue — we're actively
         // re-populating VRAM after an OS paging event.
         let is_burst = self.is_in_restore_burst();
+        let visible_grid_items = self.estimated_visible_grid_items();
+        let visible_paths = self.visible_grid_paths_snapshot();
+        let texture_keep = self.current_dynamic_texture_keep_count();
+        let folder_preview_keep = self.current_dynamic_folder_preview_keep_count();
+        let rgba_budget = self.current_dynamic_rgba_budget_bytes(DEFAULT_DYNAMIC_RGBA_BUDGET_BYTES);
         let max_pending = if is_burst {
-            192
+            texture_keep.max(192)
         } else if aggressive {
-            24
+            texture_keep.max(96)
         } else {
-            48
-        };
-        let min_folder_previews_keep = self.estimated_visible_folder_previews();
+            texture_keep.max(48)
+        }
+        .min(MAX_DYNAMIC_TEXTURE_CACHE_ITEMS);
 
         while self.pending_thumbnails.len() > max_pending {
-            if let Some(old) = self.pending_thumbnails.pop_front() {
+            let evict_idx = visible_paths.as_ref().and_then(|visible_paths| {
+                self.pending_thumbnails
+                    .iter()
+                    .position(|thumb| !visible_paths.contains(&thumb.path))
+            });
+
+            let old = if let Some(evict_idx) = evict_idx {
+                self.pending_thumbnails.remove(evict_idx)
+            } else if visible_paths.is_none() {
+                self.pending_thumbnails.pop_front()
+            } else {
+                break;
+            };
+
+            if let Some(old) = old {
                 self.cache_manager.finish_pending_upload(&old.path);
             } else {
                 break;
@@ -149,15 +210,21 @@ impl ImageViewerApp {
             (0, 0, 0)
         } else if aggressive {
             self.cache_manager.trim_thumbnail_caches(
-                96,
-                64 * 1024 * 1024,
-                min_folder_previews_keep.max(72),
+                texture_keep.max(96),
+                dynamic_rgba_budget_bytes(
+                    visible_grid_items,
+                    self.current_thumbnail_bucket_size(),
+                    MIN_RGBA_BUDGET_BYTES,
+                ),
+                folder_preview_keep.max(72),
+                visible_paths.as_ref(),
             )
         } else {
             self.cache_manager.trim_thumbnail_caches(
-                140,
-                96 * 1024 * 1024,
-                min_folder_previews_keep.max(120),
+                texture_keep,
+                rgba_budget,
+                folder_preview_keep,
+                visible_paths.as_ref(),
             )
         };
 
@@ -183,7 +250,7 @@ impl ImageViewerApp {
         }
     }
 
-    fn estimated_visible_folder_previews(&self) -> usize {
+    pub(crate) fn estimated_visible_grid_items(&self) -> usize {
         if !matches!(self.view_mode, ViewMode::Grid)
             || self.navigation_state.is_computer_view
             || self.navigation_state.is_recycle_bin_view
@@ -215,8 +282,66 @@ impl ImageViewerApp {
         let row_height = thumbnail_size + 20.0 + padding;
         let rows = (central_height / row_height).ceil().max(1.0) as usize;
 
-        cols.saturating_mul(rows.saturating_add(2)).clamp(48, 320)
+        cols.saturating_mul(rows.saturating_add(2))
+            .clamp(0, MAX_DYNAMIC_TEXTURE_CACHE_ITEMS)
     }
+
+    pub(crate) fn visible_grid_paths_snapshot(&self) -> Option<FxHashSet<std::path::PathBuf>> {
+        if !matches!(self.view_mode, ViewMode::Grid) {
+            return None;
+        }
+
+        let (min_idx, max_idx) = self.visible_index_range?;
+        if self.items.is_empty() {
+            return None;
+        }
+
+        let max_idx = max_idx.min(self.items.len().saturating_sub(1));
+        if min_idx > max_idx {
+            return None;
+        }
+
+        let mut visible_paths = FxHashSet::default();
+        visible_paths.reserve(max_idx.saturating_sub(min_idx).saturating_add(1));
+        for idx in min_idx..=max_idx {
+            visible_paths.insert(self.items[idx].path.clone());
+        }
+
+        (!visible_paths.is_empty()).then_some(visible_paths)
+    }
+}
+
+pub(crate) fn dynamic_texture_keep_count(visible_grid_items: usize) -> usize {
+    let target = visible_grid_items.saturating_mul(3).saturating_add(1) / 2;
+
+    target
+        .max(MIN_DYNAMIC_TEXTURE_CACHE_ITEMS)
+        .min(MAX_DYNAMIC_TEXTURE_CACHE_ITEMS)
+}
+
+pub(crate) fn dynamic_folder_preview_keep_count(visible_grid_items: usize) -> usize {
+    let target = visible_grid_items.saturating_mul(3).saturating_add(1) / 2;
+
+    target
+        .max(MIN_DYNAMIC_FOLDER_PREVIEW_ITEMS)
+        .min(MAX_DYNAMIC_FOLDER_PREVIEW_ITEMS)
+}
+
+pub(crate) fn dynamic_rgba_budget_bytes(
+    visible_grid_items: usize,
+    bucket_size: u32,
+    floor_bytes: usize,
+) -> usize {
+    let bucket_bytes = (bucket_size as usize)
+        .saturating_mul(bucket_size as usize)
+        .saturating_mul(4);
+    let target = visible_grid_items
+        .saturating_mul(bucket_bytes)
+        .saturating_mul(3)
+        .saturating_add(1)
+        / 2;
+
+    target.clamp(floor_bytes, MAX_RGBA_BUDGET_BYTES)
 }
 
 #[cfg(target_os = "windows")]

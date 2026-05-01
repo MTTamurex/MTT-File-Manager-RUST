@@ -17,8 +17,14 @@ const DEFAULT_FOLDER_PREVIEW_CACHE_ITEMS: usize = 80;
 const DEFAULT_RGBA_CACHE_ITEMS: usize = 80;
 const DEFAULT_MAX_CONCURRENT_LOADS: usize = 80;
 const DEFAULT_RGBA_BUDGET_BYTES: usize = 32 * 1024 * 1024;
-const MIN_DYNAMIC_TEXTURE_CACHE_ITEMS: usize = 140;
-const MAX_TEXTURE_CACHE_ITEMS_HARD_CAP: usize = 220;
+pub(crate) const MIN_DYNAMIC_TEXTURE_CACHE_ITEMS: usize = 140;
+pub(crate) const MAX_DYNAMIC_TEXTURE_CACHE_ITEMS: usize = 1500;
+pub(crate) const MIN_DYNAMIC_FOLDER_PREVIEW_ITEMS: usize = 120;
+pub(crate) const MAX_DYNAMIC_FOLDER_PREVIEW_ITEMS: usize = 1500;
+pub(crate) const MIN_RGBA_BUDGET_BYTES: usize = 64 * 1024 * 1024;
+pub(crate) const DEFAULT_DYNAMIC_RGBA_BUDGET_BYTES: usize = 96 * 1024 * 1024;
+pub(crate) const MAX_RGBA_BUDGET_BYTES: usize = 192 * 1024 * 1024;
+pub(crate) const MAX_THUMBNAIL_LOADING_SET_ITEMS: usize = 1024;
 
 #[inline]
 fn nz_cache_size(size: usize, cache_name: &str) -> NonZeroUsize {
@@ -95,7 +101,7 @@ impl CacheManager {
                 "rgba_data_cache",
             )),
             rgba_data_bytes: 0,
-            max_rgba_data_bytes: DEFAULT_RGBA_BUDGET_BYTES,
+            max_rgba_data_bytes: DEFAULT_DYNAMIC_RGBA_BUDGET_BYTES,
 
             config: TextureCacheConfig::default(),
         }
@@ -104,8 +110,8 @@ impl CacheManager {
     /// Creates a cache manager with custom configuration
     pub fn with_config(config: TextureCacheConfig) -> Self {
         let rgba_cache_items = (config.max_size * 6 / 5).max(DEFAULT_RGBA_CACHE_ITEMS);
-        let rgba_budget_bytes =
-            (config.max_size * 1024 * 1024 / 2).clamp(DEFAULT_RGBA_BUDGET_BYTES, 256 * 1024 * 1024);
+        let rgba_budget_bytes = (config.max_size * 1024 * 1024 / 2)
+            .clamp(DEFAULT_RGBA_BUDGET_BYTES, MAX_RGBA_BUDGET_BYTES);
 
         Self {
             texture_cache: LruCache::new(nz_cache_size(
@@ -147,13 +153,23 @@ impl CacheManager {
         self.texture_cache.put(path, texture);
     }
 
+    /// Touches all currently visible thumbnail-related entries so LRU eviction
+    /// prefers off-screen assets during large visible grids.
+    pub fn promote_visible(&mut self, visible_paths: &FxHashSet<PathBuf>) {
+        for path in visible_paths {
+            let _ = self.texture_cache.get(path);
+            let _ = self.folder_preview_cache.get(path);
+            let _ = self.rgba_data_cache.get(path);
+        }
+    }
+
     /// Dynamically adjusts thumbnail cache capacity by rebuilding the LRU with a new cap.
     /// Keeps the hottest entries and drops oldest items if the new cap is smaller.
     pub fn retune_texture_cache_capacity(&mut self, requested_items: usize) -> usize {
         let target_items = requested_items
             .clamp(
                 MIN_DYNAMIC_TEXTURE_CACHE_ITEMS,
-                MAX_TEXTURE_CACHE_ITEMS_HARD_CAP,
+                MAX_DYNAMIC_TEXTURE_CACHE_ITEMS,
             )
             .max(1);
 
@@ -168,6 +184,34 @@ impl CacheManager {
             .resize(nz_cache_size(target_items, "texture_cache(retune)"));
 
         target_items
+    }
+
+    pub fn retune_folder_preview_cache_capacity(&mut self, requested_items: usize) -> usize {
+        let target_items = requested_items
+            .clamp(
+                MIN_DYNAMIC_FOLDER_PREVIEW_ITEMS,
+                MAX_DYNAMIC_FOLDER_PREVIEW_ITEMS,
+            )
+            .max(1);
+
+        let current_items = self.folder_preview_cache.cap().get();
+        if current_items == target_items {
+            return current_items;
+        }
+
+        self.folder_preview_cache
+            .resize(nz_cache_size(target_items, "folder_preview_cache(retune)"));
+
+        target_items
+    }
+
+    pub fn retune_rgba_budget(&mut self, requested_bytes: usize) -> usize {
+        let target_bytes = requested_bytes.clamp(MIN_RGBA_BUDGET_BYTES, MAX_RGBA_BUDGET_BYTES);
+        if self.max_rgba_data_bytes != target_bytes {
+            self.max_rgba_data_bytes = target_bytes;
+            self.enforce_rgba_budget(target_bytes);
+        }
+        target_bytes
     }
 
     /// Checks if a thumbnail is being loaded
@@ -262,10 +306,15 @@ impl CacheManager {
         target_texture_items: usize,
         target_rgba_bytes: usize,
         target_folder_preview_items: usize,
+        visible_paths: Option<&FxHashSet<PathBuf>>,
     ) -> (usize, usize, usize) {
         let mut textures_removed = 0;
         let mut rgba_removed = 0;
         let mut folder_previews_removed = 0;
+
+        if let Some(visible_paths) = visible_paths {
+            self.promote_visible(visible_paths);
+        }
 
         while self.texture_cache.len() > target_texture_items {
             if let Some((path, _)) = self.texture_cache.pop_lru() {
@@ -396,7 +445,16 @@ impl CacheManager {
             })
             .sum();
 
-        texture_usage + icon_usage + drive_icon_usage
+        let folder_preview_usage: usize = self
+            .folder_preview_cache
+            .iter()
+            .map(|(_, tex)| {
+                let size = tex.size();
+                size[0] * size[1] * 4
+            })
+            .sum();
+
+        texture_usage + folder_preview_usage + icon_usage + drive_icon_usage
     }
 
     /// Estimates RAM usage by the RGBA data cache in bytes

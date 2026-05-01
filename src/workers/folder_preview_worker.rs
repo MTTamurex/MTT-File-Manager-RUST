@@ -12,6 +12,7 @@
 
 use crate::infrastructure::disk_cache::ThumbnailDiskCache;
 use crate::infrastructure::folder_compose::FolderComposer;
+use crate::workers::thumbnail::processing::get_bucket_size;
 use eframe::egui;
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
@@ -25,6 +26,12 @@ pub struct FolderPreviewData {
     pub rgba_data: Vec<u8>,
     pub width: u32,
     pub height: u32,
+}
+
+#[derive(Clone)]
+pub struct FolderPreviewRequest {
+    pub path: PathBuf,
+    pub size_px: u32,
 }
 
 /// M-19: RAII guard — ensures `CoUninitialize` runs even if the worker panics.
@@ -52,7 +59,7 @@ impl Drop for ComGuard {
 /// * `disk_cache` - SQLite disk cache for persistent folder preview storage
 /// * `composer` - Pre-decoded folder layers for custom composition
 pub fn spawn_folder_preview_worker(
-    rx: crossbeam_channel::Receiver<PathBuf>,
+    rx: crossbeam_channel::Receiver<FolderPreviewRequest>,
     tx: Sender<FolderPreviewData>,
     ctx: egui::Context,
     disk_cache: Arc<ThumbnailDiskCache>,
@@ -65,79 +72,25 @@ pub fn spawn_folder_preview_worker(
         .name("folder-preview-worker".to_string())
         .stack_size(512 * 1024)
         .spawn(move || {
-        // M-19: RAII guard — CoUninitialize guaranteed on normal exit AND panic
-        let _com = unsafe {
-            let hr = CoInitializeEx(None, COINIT_MULTITHREADED);
-            ComGuard {
-                initialized: hr.is_ok(),
-            }
-        };
+            // M-19: RAII guard — CoUninitialize guaranteed on normal exit AND panic
+            let _com = unsafe {
+                let hr = CoInitializeEx(None, COINIT_MULTITHREADED);
+                ComGuard {
+                    initialized: hr.is_ok(),
+                }
+            };
 
-        // Empty DashMap — content thumbnail extraction doesn't need deletion tracking
-        let empty_deletions = dashmap::DashMap::new();
-        let mut last_repaint = Instant::now();
-        let mut last_ssd_state: Option<bool> = None;
+            // Empty DashMap — content thumbnail extraction doesn't need deletion tracking
+            let empty_deletions = dashmap::DashMap::new();
+            let mut last_repaint = Instant::now();
+            let mut last_ssd_state: Option<bool> = None;
 
-        while let Ok(path) = rx.recv() {
-            if crate::infrastructure::windows::is_windows_system_path(&path.to_string_lossy()) {
-                let (rgba_data, width, height) = composer.compose_empty();
-                let _ = tx.send(FolderPreviewData {
-                    path,
-                    rgba_data,
-                    width,
-                    height,
-                });
-                throttle_repaint(&ctx, &mut last_repaint);
-                continue;
-            }
+            while let Ok(request) = rx.recv() {
+                let path = request.path;
+                let bucket_size = get_bucket_size(request.size_px);
 
-            let is_ssd = crate::infrastructure::io_priority::is_ssd(&path);
-            if last_ssd_state != Some(is_ssd) {
-                let priority = if is_ssd {
-                    crate::infrastructure::io_priority::IOPriority::Prefetch
-                } else {
-                    crate::infrastructure::io_priority::IOPriority::Background
-                };
-                crate::infrastructure::io_priority::set_thread_priority(priority);
-                last_ssd_state = Some(is_ssd);
-            }
-
-            // Skip cloud-only OneDrive folders — Shell API can block on network I/O
-            if crate::infrastructure::onedrive::is_onedrive_path(&path)
-                && !crate::infrastructure::onedrive::is_locally_available(&path)
-            {
-                let _ = tx.send(FolderPreviewData {
-                    path,
-                    rgba_data: Vec::new(),
-                    width: 0,
-                    height: 0,
-                });
-                throttle_repaint(&ctx, &mut last_repaint);
-                continue;
-            }
-
-            // FAST PATH: Check SQLite disk cache first (NVMe read, ~1ms)
-            // Then verify the cache entry is still fresh by comparing
-            // its created_at timestamp against the folder's last-write time.
-            let cache_start = Instant::now();
-            if let Some((rgba_data, width, height, created_at)) =
-                disk_cache.get_folder_preview_cache(&path)
-            {
-                let is_stale = std::fs::metadata(&path)
-                    .and_then(|m| m.modified())
-                    .ok()
-                    .and_then(|mtime| mtime.duration_since(UNIX_EPOCH).ok())
-                    .map(|dur| dur.as_secs() as i64 > created_at)
-                    .unwrap_or(false);
-
-                if !is_stale {
-                    log::debug!(
-                        "[FOLDER PREVIEW] DB HIT {:?} ({}x{}, {:.1}ms)",
-                        path.file_name().unwrap_or_default(),
-                        width,
-                        height,
-                        cache_start.elapsed().as_secs_f64() * 1000.0
-                    );
+                if crate::infrastructure::windows::is_windows_system_path(&path.to_string_lossy()) {
+                    let (rgba_data, width, height) = composer.compose_empty_for_size(bucket_size);
                     let _ = tx.send(FolderPreviewData {
                         path,
                         rgba_data,
@@ -147,65 +100,133 @@ pub fn spawn_folder_preview_worker(
                     throttle_repaint(&ctx, &mut last_repaint);
                     continue;
                 }
-                log::debug!(
-                    "[FOLDER PREVIEW] DB STALE {:?} (folder modified after cache)",
-                    path.file_name().unwrap_or_default(),
+
+                let is_ssd = crate::infrastructure::io_priority::is_ssd(&path);
+                if last_ssd_state != Some(is_ssd) {
+                    let priority = if is_ssd {
+                        crate::infrastructure::io_priority::IOPriority::Prefetch
+                    } else {
+                        crate::infrastructure::io_priority::IOPriority::Background
+                    };
+                    crate::infrastructure::io_priority::set_thread_priority(priority);
+                    last_ssd_state = Some(is_ssd);
+                }
+
+                // Skip cloud-only OneDrive folders — Shell API can block on network I/O
+                if crate::infrastructure::onedrive::is_onedrive_path(&path)
+                    && !crate::infrastructure::onedrive::is_locally_available(&path)
+                {
+                    let _ = tx.send(FolderPreviewData {
+                        path,
+                        rgba_data: Vec::new(),
+                        width: 0,
+                        height: 0,
+                    });
+                    throttle_repaint(&ctx, &mut last_repaint);
+                    continue;
+                }
+
+                // FAST PATH: Check SQLite disk cache first (NVMe read, ~1ms)
+                // Then verify the cache entry is still fresh by comparing
+                // its created_at timestamp against the folder's last-write time.
+                let cache_start = Instant::now();
+                if let Some((rgba_data, width, height, created_at)) =
+                    disk_cache.get_folder_preview_cache(&path, bucket_size)
+                {
+                    let is_stale = std::fs::metadata(&path)
+                        .and_then(|m| m.modified())
+                        .ok()
+                        .and_then(|mtime| mtime.duration_since(UNIX_EPOCH).ok())
+                        .map(|dur| dur.as_secs() as i64 > created_at)
+                        .unwrap_or(false);
+
+                    if !is_stale {
+                        log::debug!(
+                            "[FOLDER PREVIEW] DB HIT {:?} ({}x{}, {:.1}ms)",
+                            path.file_name().unwrap_or_default(),
+                            width,
+                            height,
+                            cache_start.elapsed().as_secs_f64() * 1000.0
+                        );
+                        let _ = tx.send(FolderPreviewData {
+                            path,
+                            rgba_data,
+                            width,
+                            height,
+                        });
+                        throttle_repaint(&ctx, &mut last_repaint);
+                        continue;
+                    }
+                    log::debug!(
+                        "[FOLDER PREVIEW] DB STALE {:?} (folder modified after cache)",
+                        path.file_name().unwrap_or_default(),
+                    );
+                } else {
+                    log::debug!(
+                        "[FOLDER PREVIEW] DB MISS {:?} ({:.1}ms)",
+                        path.file_name().unwrap_or_default(),
+                        cache_start.elapsed().as_secs_f64() * 1000.0
+                    );
+                }
+
+                // SLOW PATH: Custom composition (primary) → Shell API (fallback)
+                let io_priority = if is_ssd {
+                    crate::infrastructure::io_priority::IOPriority::Prefetch
+                } else {
+                    crate::infrastructure::io_priority::IOPriority::Background
+                };
+
+                // Try custom composition first; fall back to empty (back+front only) for folders
+                // without media. Shell API is no longer used — we always use our own folder assets.
+                //
+                // IMPORTANT: When the media file exists but is UnsafeToRead (active
+                // download/torrent), we show compose_empty() as a placeholder but do
+                // NOT persist it to SQLite. This ensures the next request retries
+                // extraction instead of serving a stale empty preview from the DB.
+                let compose_result = try_custom_compose(
+                    &path,
+                    &composer,
+                    bucket_size,
+                    io_priority,
+                    &empty_deletions,
                 );
-            } else {
-                log::debug!(
-                    "[FOLDER PREVIEW] DB MISS {:?} ({:.1}ms)",
-                    path.file_name().unwrap_or_default(),
-                    cache_start.elapsed().as_secs_f64() * 1000.0
-                );
+                let (rgba_data, width, height, should_cache) = match compose_result {
+                    ComposeOutcome::Success(data) => (data.0, data.1, data.2, true),
+                    ComposeOutcome::NoMedia => {
+                        let empty = composer.compose_empty_for_size(bucket_size);
+                        (empty.0, empty.1, empty.2, true)
+                    }
+                    ComposeOutcome::MediaUnsafe => {
+                        let empty = composer.compose_empty_for_size(bucket_size);
+                        (empty.0, empty.1, empty.2, false) // Do NOT persist placeholder
+                    }
+                };
+
+                if should_cache {
+                    disk_cache.put_folder_preview_cache(
+                        &path,
+                        bucket_size,
+                        &rgba_data,
+                        width,
+                        height,
+                    );
+                }
+                let _ = tx.send(FolderPreviewData {
+                    path,
+                    rgba_data,
+                    width,
+                    height,
+                });
+                throttle_repaint(&ctx, &mut last_repaint);
             }
 
-            // SLOW PATH: Custom composition (primary) → Shell API (fallback)
-            let io_priority = if is_ssd {
-                crate::infrastructure::io_priority::IOPriority::Prefetch
-            } else {
-                crate::infrastructure::io_priority::IOPriority::Background
-            };
-
-            // Try custom composition first; fall back to empty (back+front only) for folders
-            // without media. Shell API is no longer used — we always use our own folder assets.
-            //
-            // IMPORTANT: When the media file exists but is UnsafeToRead (active
-            // download/torrent), we show compose_empty() as a placeholder but do
-            // NOT persist it to SQLite. This ensures the next request retries
-            // extraction instead of serving a stale empty preview from the DB.
-            let compose_result =
-                try_custom_compose(&path, &composer, io_priority, &empty_deletions);
-            let (rgba_data, width, height, should_cache) = match compose_result {
-                ComposeOutcome::Success(data) => (data.0, data.1, data.2, true),
-                ComposeOutcome::NoMedia => {
-                    let empty = composer.compose_empty();
-                    (empty.0, empty.1, empty.2, true)
-                }
-                ComposeOutcome::MediaUnsafe => {
-                    let empty = composer.compose_empty();
-                    (empty.0, empty.1, empty.2, false) // Do NOT persist placeholder
-                }
-            };
-
-            if should_cache {
-                disk_cache.put_folder_preview_cache(&path, &rgba_data, width, height);
-            }
-            let _ = tx.send(FolderPreviewData {
-                path,
-                rgba_data,
-                width,
-                height,
-            });
-            throttle_repaint(&ctx, &mut last_repaint);
-        }
-
-        crate::infrastructure::io_priority::reset_thread_priority();
-        // _com dropped here — CoUninitialize() guaranteed by RAII
-        // NOTE: Folder preview worker uses per-request set_thread_priority() based
-        // on SSD detection. The reset at the end is the final cleanup. Future
-        // improvement: use ThreadPriorityGuard here too, but requires refactoring
-        // the per-request priority change pattern.
-    });
+            crate::infrastructure::io_priority::reset_thread_priority();
+            // _com dropped here — CoUninitialize() guaranteed by RAII
+            // NOTE: Folder preview worker uses per-request set_thread_priority() based
+            // on SSD detection. The reset at the end is the final cleanup. Future
+            // improvement: use ThreadPriorityGuard here too, but requires refactoring
+            // the per-request priority change pattern.
+        });
 }
 
 /// Outcome of folder preview composition.
@@ -228,6 +249,7 @@ enum ComposeOutcome {
 fn try_custom_compose(
     folder_path: &std::path::Path,
     composer: &FolderComposer,
+    bucket_size: u32,
     priority: crate::infrastructure::io_priority::IOPriority,
     empty_deletions: &dashmap::DashMap<PathBuf, ()>,
 ) -> ComposeOutcome {
@@ -268,7 +290,7 @@ fn try_custom_compose(
     };
 
     // 3. Compose: back → content → front
-    match composer.compose(&content_rgba, content_w, content_h) {
+    match composer.compose_for_size(&content_rgba, content_w, content_h, bucket_size) {
         Some(result) => {
             log::debug!(
                 "[FOLDER PREVIEW] Custom compose SUCCESS {:?} via {:?} ({:.1}ms)",

@@ -67,7 +67,8 @@ pub(in crate::app) struct AppBootstrap {
     pub(in crate::app) live_size_req_tx: mpsc::Sender<super::live_file_size::LiveFileSizeRequest>,
     pub(in crate::app) live_size_res_rx:
         mpsc::Receiver<super::live_file_size::LiveFileSizeResponse>,
-    pub(in crate::app) folder_preview_tx: crossbeam_channel::Sender<PathBuf>,
+    pub(in crate::app) folder_preview_tx:
+        crossbeam_channel::Sender<crate::workers::folder_preview_worker::FolderPreviewRequest>,
     pub(in crate::app) folder_preview_res_rx:
         mpsc::Receiver<crate::workers::folder_preview_worker::FolderPreviewData>,
     pub(in crate::app) folder_size_req_tx: mpsc::Sender<PathBuf>,

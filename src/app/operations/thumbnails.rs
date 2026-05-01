@@ -107,6 +107,8 @@ impl ImageViewerApp {
         priority: ThumbnailPriority,
         modified: u64,
     ) {
+        let effective_size_px = self.effective_thumbnail_request_size_px(size_px);
+
         // When rendering the inactive dual-panel, use the active panel's generation
         // (current_generation always holds the active panel's gen, since both panels
         // share the same Arc<AtomicUsize>) and downgrade to Prefetch priority so the
@@ -145,7 +147,7 @@ impl ImageViewerApp {
             let cached_max_dim = width.max(height);
 
             // Only reuse RAM cache if it meets or exceeds the requested size
-            if cached_max_dim >= size_px {
+            if cached_max_dim >= effective_size_px {
                 // Data is in RAM cache - add directly to pending_thumbnails for GPU upload
                 // No disk I/O needed!
                 //
@@ -175,14 +177,19 @@ impl ImageViewerApp {
             self.thumbnail_queue.push_with_index(
                 path,
                 effective_gen,
-                size_px,
+                effective_size_px,
                 effective_priority,
                 Some(index),
                 modified,
             );
         } else {
-            self.thumbnail_queue
-                .push(path, effective_gen, size_px, effective_priority, modified);
+            self.thumbnail_queue.push(
+                path,
+                effective_gen,
+                effective_size_px,
+                effective_priority,
+                modified,
+            );
         }
     }
 
@@ -191,7 +198,11 @@ impl ImageViewerApp {
             .cache_manager
             .start_folder_preview_loading(path.clone())
         {
-            let _ = self.folder_preview_sender.try_send(path);
+            let request = crate::workers::folder_preview_worker::FolderPreviewRequest {
+                path,
+                size_px: self.effective_folder_preview_request_size_px(),
+            };
+            let _ = self.folder_preview_sender.try_send(request);
         }
     }
 

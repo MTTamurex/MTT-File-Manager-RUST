@@ -42,7 +42,7 @@ pub(super) fn render_list_item(
             && !ctx.loading_set.contains(&item.path)
             && !ctx.failed_thumbnails.contains(&item.path)
             && !ctx.pending_upload_set.contains(&item.path)
-            && ctx.loading_set.len() < 200
+            && ctx.loading_set.len() < crate::ui::cache::MAX_THUMBNAIL_LOADING_SET_ITEMS
         {
             ctx.loading_set.insert(item.path.clone());
             ops.request_thumbnail_load(item.path.clone(), i, item.modified);

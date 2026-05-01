@@ -226,14 +226,16 @@ pub(in crate::app) fn spawn_folder_preview_workers(
     disk_cache: Arc<ThumbnailDiskCache>,
     folder_composer: Arc<crate::infrastructure::folder_compose::FolderComposer>,
 ) -> (
-    crossbeam_channel::Sender<PathBuf>,
+    crossbeam_channel::Sender<crate::workers::folder_preview_worker::FolderPreviewRequest>,
     mpsc::Receiver<crate::workers::folder_preview_worker::FolderPreviewData>,
 ) {
     // M-18: crossbeam Receiver is Clone + Send + Sync — workers share it directly
     // without the Arc<Mutex<>> serialisation bottleneck.
     // Bounded(60): inherent backpressure prevents unbounded growth during rapid
     // navigation — preview is best-effort so dropping overflow is safe.
-    let (folder_preview_tx, folder_preview_rx) = crossbeam_channel::bounded::<PathBuf>(60);
+    let (folder_preview_tx, folder_preview_rx) = crossbeam_channel::bounded::<
+        crate::workers::folder_preview_worker::FolderPreviewRequest,
+    >(60);
     let (folder_preview_res_tx, folder_preview_res_rx) = mpsc::channel();
 
     {

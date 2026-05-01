@@ -37,7 +37,9 @@ impl ImageViewerApp {
 
         // Folder-preview worker (crossbeam channel)
         {
-            let (d, _rx) = crossbeam_channel::bounded::<std::path::PathBuf>(1);
+            let (d, _rx) = crossbeam_channel::bounded::<
+                crate::workers::folder_preview_worker::FolderPreviewRequest,
+            >(1);
             let _ = std::mem::replace(&mut self.folder_preview_sender, d);
         }
 

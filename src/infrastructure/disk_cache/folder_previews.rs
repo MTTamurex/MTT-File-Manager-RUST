@@ -9,17 +9,21 @@ impl ThumbnailDiskCache {
     /// The `created_at` (Unix seconds) allows callers to detect stale entries
     /// by comparing against the folder's last-write time.
     /// [READER]
-    pub fn get_folder_preview_cache(&self, folder_path: &Path) -> Option<(Vec<u8>, u32, u32, i64)> {
+    pub fn get_folder_preview_cache(
+        &self,
+        folder_path: &Path,
+        bucket_size: u32,
+    ) -> Option<(Vec<u8>, u32, u32, i64)> {
         let db = self.reader.lock().ok()?;
         let mut stmt = db
             .prepare_cached(
-                "SELECT data, width, height, created_at FROM folder_previews WHERE folder_path = ?",
+                "SELECT data, width, height, created_at FROM folder_previews WHERE folder_path = ? AND bucket_size = ?",
             )
             .ok()?;
 
         let folder_path_str = folder_path.to_string_lossy();
         let (webp_data, _db_width, _db_height, created_at): (Vec<u8>, u32, u32, i64) = match stmt
-            .query_row([&*folder_path_str], |row| {
+            .query_row(params![&*folder_path_str, bucket_size as i64], |row| {
                 Ok((
                     row.get::<_, Vec<u8>>(0)?,
                     row.get::<_, i64>(1)? as u32,
@@ -66,6 +70,7 @@ impl ThumbnailDiskCache {
     pub fn put_folder_preview_cache(
         &self,
         folder_path: &Path,
+        bucket_size: u32,
         rgba_data: &[u8],
         width: u32,
         height: u32,
@@ -88,13 +93,14 @@ impl ThumbnailDiskCache {
 
         if let Ok(db) = self.writer.lock() {
             let _ = db.execute(
-                "INSERT OR REPLACE INTO folder_previews (folder_path, data, width, height, created_at)
-                 VALUES (?, ?, ?, ?, ?)",
+                "INSERT OR REPLACE INTO folder_previews (folder_path, data, width, height, bucket_size, created_at)
+                 VALUES (?, ?, ?, ?, ?, ?)",
                 params![
                     folder_path.to_string_lossy().to_string(),
                     webp_data.to_vec(),
                     width as i64,
                     height as i64,
+                    bucket_size as i64,
                     now
                 ],
             );

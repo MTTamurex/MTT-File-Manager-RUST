@@ -389,7 +389,10 @@ fn decode_cache_entry(entry: ThumbnailCacheEntry, req_size: u32) -> Option<(Vec<
 
     let img = image::load_from_memory_with_format(&entry.data, ImageFormat::WebP).ok()?;
     let rgba = img.to_rgba8();
-    Some((rgba.to_vec(), rgba.width(), rgba.height()))
+    let width = rgba.width();
+    let height = rgba.height();
+    let bucket_size = get_bucket_size(req_size);
+    Some(resize_to_bucket(rgba.to_vec(), width, height, bucket_size))
 }
 
 pub(super) fn cache_entry_satisfies_request(entry: &ThumbnailCacheEntry, req_size: u32) -> bool {

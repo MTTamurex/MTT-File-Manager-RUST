@@ -225,11 +225,17 @@ impl ThumbnailDiskCache {
                 data BLOB NOT NULL,
                 width INTEGER NOT NULL,
                 height INTEGER NOT NULL,
+                bucket_size INTEGER NOT NULL DEFAULT 256,
                 created_at INTEGER NOT NULL
             )",
             [],
         )
         .unwrap_or(0);
+
+        let _ = conn.execute(
+            "ALTER TABLE folder_previews ADD COLUMN bucket_size INTEGER NOT NULL DEFAULT 256",
+            [],
+        );
 
         // Shell icon cache (special folders, drives, computer, recycle bin)
         conn.execute(
