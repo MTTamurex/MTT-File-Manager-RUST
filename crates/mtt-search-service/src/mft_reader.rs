@@ -1462,7 +1462,7 @@ where
     index.shrink_to_fit();
 
     let elapsed = start.elapsed();
-    let (arena_used, _arena_cap, map_est) = index.memory_usage();
+    let (arena_used, _arena_cap, records_est) = index.memory_usage();
     eprintln!(
         "[MFT-BULK] {}:\\ Read {} MFT records in {:.2}s: {} files/dirs indexed, {} ext sizes applied, {} ext hardlink edges, {} precise rechecks (direct={}, attr_list={}, metadata={}, file_id={}, unresolved={})",
         drive_letter,
@@ -1479,10 +1479,10 @@ where
         precise_unresolved,
     );
     eprintln!(
-        "[MFT-BULK] {}:\\ Memory: arena {:.1} MB, map ~{:.1} MB",
+        "[MFT-BULK] {}:\\ Memory: arena {:.1} MB, records ~{:.1} MB",
         drive_letter,
         arena_used as f64 / 1_048_576.0,
-        map_est as f64 / 1_048_576.0,
+        records_est as f64 / 1_048_576.0,
     );
 
     Ok(index)

@@ -150,7 +150,7 @@ pub(crate) fn index_volume(
 
             if let Some(count) = loaded_count {
                 index.shrink_to_fit();
-                let (arena_used, _arena_cap, map_est) = index.memory_usage();
+                let (arena_used, _arena_cap, records_est) = index.memory_usage();
                 if !loaded_from_binary {
                     eprintln!(
                         "[USN] {}:\\ Loaded {} cached records (db reported {}), catching up from USN {}...",
@@ -158,10 +158,10 @@ pub(crate) fn index_volume(
                     );
                 }
                 eprintln!(
-                    "[USN] {}:\\ Memory after cache load: arena {:.1} MB, map ~{:.1} MB",
+                    "[USN] {}:\\ Memory after cache load: arena {:.1} MB, records ~{:.1} MB",
                     drive_letter,
                     arena_used as f64 / 1_048_576.0,
-                    map_est as f64 / 1_048_576.0,
+                    records_est as f64 / 1_048_576.0,
                 );
                 index.journal_id = state.journal_id;
                 index.last_usn = state.last_usn;
@@ -293,14 +293,14 @@ pub(crate) fn index_volume(
                 // Compact arena: eliminate dead space from duplicate MFT names.
                 let arena_before = new_index.names.len();
                 new_index.compact_arena();
-                let (arena_used, arena_cap, map_est) = new_index.memory_usage();
+                let (arena_used, arena_cap, records_est) = new_index.memory_usage();
                 eprintln!(
-                    "[USN] {}:\\ Arena compacted: {:.1} MB -> {:.1} MB, map ~{:.1} MB, total ~{:.1} MB",
+                    "[USN] {}:\\ Arena compacted: {:.1} MB -> {:.1} MB, records ~{:.1} MB, total ~{:.1} MB",
                     drive_letter,
                     arena_before as f64 / 1_048_576.0,
                     arena_used as f64 / 1_048_576.0,
-                    map_est as f64 / 1_048_576.0,
-                    (arena_cap + map_est) as f64 / 1_048_576.0
+                    records_est as f64 / 1_048_576.0,
+                    (arena_cap + records_est) as f64 / 1_048_576.0
                 );
                 if !new_index.hardlink_parents.is_empty() {
                     eprintln!(
