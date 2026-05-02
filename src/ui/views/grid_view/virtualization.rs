@@ -144,7 +144,13 @@ fn cleanup_loading_set(
             std::iter::once(&item.path).chain(item.folder_cover.iter())
         })
         .collect();
-    ctx.loading_set.retain(|path| keep_paths.contains(path));
+    ctx.loading_set.retain(|path| {
+        keep_paths.contains(path)
+            || ctx
+                .shared_visible_paths
+                .as_ref()
+                .is_some_and(|visible_paths| visible_paths.contains(path))
+    });
 }
 
 #[allow(clippy::too_many_arguments)]

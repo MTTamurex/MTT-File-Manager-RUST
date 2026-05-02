@@ -70,6 +70,8 @@ pub(in crate::app) struct AppBootstrap {
         crossbeam_channel::Sender<crate::workers::folder_preview_worker::FolderPreviewRequest>,
     pub(in crate::app) folder_preview_res_rx:
         mpsc::Receiver<crate::workers::folder_preview_worker::FolderPreviewData>,
+    pub(in crate::app) folder_preview_trace:
+        Arc<crate::workers::folder_preview_worker::FolderPreviewTraceCounters>,
     pub(in crate::app) folder_size_req_tx: mpsc::Sender<PathBuf>,
     pub(in crate::app) folder_size_res_rx: mpsc::Receiver<FolderSizeMessage>,
     pub(in crate::app) folder_size_cancel: Arc<AtomicBool>,
@@ -218,10 +220,17 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
     let (meta_req_tx, meta_res_rx) = spawn_metadata_worker(ctx);
     let (live_size_req_tx, live_size_res_rx) = spawn_live_file_size_worker(ctx);
     let folder_composer = Arc::new(FolderComposer::new());
+    let folder_preview_trace = Arc::new(
+        crate::workers::folder_preview_worker::FolderPreviewTraceCounters::default(),
+    );
     // Compose the custom empty folder icon ONCE before sharing the composer.
     let custom_folder_icon = folder_composer.compose_empty();
-    let (folder_preview_tx, folder_preview_res_rx) =
-        spawn_folder_preview_workers(ctx, disk_cache.clone(), folder_composer);
+    let (folder_preview_tx, folder_preview_res_rx) = spawn_folder_preview_workers(
+        ctx,
+        disk_cache.clone(),
+        folder_composer,
+        folder_preview_trace.clone(),
+    );
     let (folder_size_req_tx, folder_size_res_rx, folder_size_cancel) =
         spawn_folder_size_worker(ctx);
     let (batch_size_tx, batch_size_rx, batch_size_cancel, batch_size_generation) =
@@ -281,6 +290,7 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
         live_size_res_rx,
         folder_preview_tx,
         folder_preview_res_rx,
+        folder_preview_trace,
         folder_size_req_tx,
         folder_size_res_rx,
         folder_size_cancel,

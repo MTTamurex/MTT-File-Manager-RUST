@@ -136,6 +136,7 @@ pub struct GridViewContext<'a> {
     pub global_search_active: bool,
     pub texture_cache: &'a mut lru::LruCache<PathBuf, egui::TextureHandle>,
     pub loading_set: &'a mut FxHashSet<PathBuf>,
+    pub shared_visible_paths: Option<FxHashSet<PathBuf>>,
     /// Set of icons currently loading (async)
     pub loading_icons: &'a mut FxHashSet<PathBuf>,
     /// Set of icons that failed extraction (prevents infinite retry)

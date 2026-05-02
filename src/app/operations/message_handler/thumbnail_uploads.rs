@@ -265,6 +265,10 @@ impl ImageViewerApp {
             for item in self.all_items.iter() {
                 if let Some(ref cover) = item.folder_cover {
                     if item.is_dir && successful_set.contains(cover) {
+                        if self.cache_manager.has_folder_preview(&item.path) {
+                            continue;
+                        }
+
                         // SQLite miss ⇒ the current preview was a MediaUnsafe placeholder.
                         // SQLite hit  ⇒ preview already composed with real media — skip.
                         if self
@@ -503,29 +507,12 @@ impl ImageViewerApp {
             }
         }
 
-        let visible_paths: Option<&crate::ui::cache::FxHashSet<PathBuf>> = if is_scrolling {
-            if self.visible_range_cached != self.visible_index_range {
-                self.visible_paths_cache.clear();
-                if let Some((min_idx, max_idx)) = self.visible_index_range {
-                    let items = &self.items;
-                    if !items.is_empty() {
-                        let max_idx = max_idx.min(items.len().saturating_sub(1));
-                        for i in min_idx..=max_idx {
-                            self.visible_paths_cache.insert(items[i].path.clone());
-                        }
-                    }
-                }
-                self.visible_range_cached = self.visible_index_range;
-            }
-
-            if self.visible_paths_cache.is_empty() {
-                None
-            } else {
-                Some(&self.visible_paths_cache)
-            }
+        let upload_visible_paths = if is_scrolling {
+            self.visible_grid_paths_snapshot()
         } else {
             None
         };
+        let visible_paths = upload_visible_paths.as_ref();
         let mut deferred_count = 0;
         let offscreen_upload_budget = if is_scrolling {
             if is_performance_critical {
@@ -749,8 +736,33 @@ impl ImageViewerApp {
                 self.cache_manager.finish_folder_preview_loading(&data.path);
 
                 if !data.rgba_data.is_empty() {
+                    let cached_size = self
+                        .cache_manager
+                        .folder_preview_cache
+                        .peek(&data.path)
+                        .map(|existing| existing.size());
+                    match cached_size {
+                        Some(size)
+                            if size == [data.width as usize, data.height as usize] =>
+                        {
+                            folder_uploads += 1;
+                            continue;
+                        }
+                        Some(_) => {
+                            self.cache_manager
+                                .folder_preview_trace
+                                .record_upload_size_diff();
+                        }
+                        None => {
+                            self.cache_manager
+                                .folder_preview_trace
+                                .record_upload_no_cache();
+                        }
+                    }
+
                     let mut texture_name = String::from("folder_preview_");
                     texture_name.push_str(data.path.to_string_lossy().as_ref());
+                    self.cache_manager.folder_preview_trace.record_upload();
                     let texture = ctx.load_texture(
                         texture_name,
                         egui::ColorImage::from_rgba_unmultiplied(
