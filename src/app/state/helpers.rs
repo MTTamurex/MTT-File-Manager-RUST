@@ -15,8 +15,12 @@ use super::ImageViewerApp;
 const BASE_PENDING_THUMBNAILS: usize = 64;
 const MIN_DYNAMIC_PENDING_THUMBNAILS: usize = 16;
 const MAX_DYNAMIC_PENDING_THUMBNAILS: usize = 1024;
-const MAX_PENDING_THUMBNAIL_RGBA_BYTES: usize = 192 * 1024 * 1024;
+const MAX_PENDING_THUMBNAIL_RGBA_BYTES: usize = 64 * 1024 * 1024;
 const MEMORY_TRACE_INTERVAL: Duration = Duration::from_secs(5);
+const IDLE_THUMBNAIL_TEXTURE_KEEP: usize = 8;
+const IDLE_FOLDER_PREVIEW_KEEP: usize = 0;
+const IDLE_RGBA_BUDGET_BYTES: usize = 4 * 1024 * 1024;
+const IDLE_PENDING_THUMBNAILS: usize = 1;
 
 #[derive(Clone, Copy, Debug)]
 struct ProcessMemorySnapshot {
@@ -116,14 +120,26 @@ impl ImageViewerApp {
     }
 
     pub(crate) fn current_dynamic_texture_keep_count(&self) -> usize {
+        if !self.thumbnail_caches_active() {
+            return IDLE_THUMBNAIL_TEXTURE_KEEP;
+        }
+
         dynamic_texture_keep_count(self.visible_grid_items_for_cache())
     }
 
     pub(crate) fn current_dynamic_folder_preview_keep_count(&self) -> usize {
+        if !self.thumbnail_caches_active() {
+            return IDLE_FOLDER_PREVIEW_KEEP;
+        }
+
         dynamic_folder_preview_keep_count(self.visible_grid_items_for_cache())
     }
 
     pub(crate) fn current_dynamic_rgba_budget_bytes(&self, floor_bytes: usize) -> usize {
+        if !self.thumbnail_caches_active() {
+            return IDLE_RGBA_BUDGET_BYTES;
+        }
+
         dynamic_rgba_budget_bytes(
             self.visible_grid_items_for_cache(),
             self.current_thumbnail_bucket_size(),
@@ -132,6 +148,10 @@ impl ImageViewerApp {
     }
 
     pub(crate) fn current_pending_thumbnail_upload_limit(&self) -> usize {
+        if !self.thumbnail_caches_active() {
+            return IDLE_PENDING_THUMBNAILS;
+        }
+
         let bucket_size = self.current_thumbnail_bucket_size() as usize;
         let bucket_bytes = bucket_size
             .saturating_mul(bucket_size)
@@ -172,6 +192,19 @@ impl ImageViewerApp {
                 break;
             }
         }
+    }
+
+    fn trim_pending_thumbnail_uploads_to_count(&mut self, max_pending: usize) -> usize {
+        let mut removed = 0usize;
+        while self.pending_thumbnails.len() > max_pending {
+            if let Some(old) = self.pending_thumbnails.pop_front() {
+                self.cache_manager.finish_pending_upload(&old.path);
+                removed += 1;
+            } else {
+                break;
+            }
+        }
+        removed
     }
 
     pub fn log_memory_snapshot(&self, label: &str) {
@@ -315,6 +348,32 @@ impl ImageViewerApp {
         }
         self.last_memory_maintenance = Instant::now();
 
+        let thumbnails_active = self.thumbnail_caches_active();
+        if !thumbnails_active && !self.is_in_restore_burst() {
+            let pending_removed = self.trim_pending_thumbnail_uploads_to_count(0);
+            let (textures_removed, rgba_removed, folder_previews_removed) =
+                self.cache_manager.trim_thumbnail_caches(
+                    IDLE_THUMBNAIL_TEXTURE_KEEP,
+                    IDLE_RGBA_BUDGET_BYTES,
+                    IDLE_FOLDER_PREVIEW_KEEP,
+                    None,
+                );
+
+            if textures_removed > 0
+                || rgba_removed > 0
+                || folder_previews_removed > 0
+                || pending_removed > 0
+            {
+                log::debug!(
+                    "[MEMORY] idle thumbnail trim textures={} rgba={} folder_previews={} pending={}",
+                    textures_removed,
+                    rgba_removed,
+                    folder_previews_removed,
+                    pending_removed,
+                );
+            }
+        }
+
         let Some(process_memory) = current_process_memory_snapshot() else {
             return;
         };
@@ -437,6 +496,13 @@ impl ImageViewerApp {
             .clamp(0, MAX_DYNAMIC_TEXTURE_CACHE_ITEMS)
     }
 
+    pub(crate) fn thumbnail_caches_active(&self) -> bool {
+        matches!(self.view_mode, ViewMode::Grid)
+            && !self.navigation_state.is_computer_view
+            && !self.navigation_state.is_recycle_bin_view
+            && !self.items.is_empty()
+    }
+
     pub(crate) fn visible_grid_items_for_cache(&self) -> usize {
         if matches!(self.view_mode, ViewMode::Grid) {
             if let Some((min_idx, max_idx)) = self.visible_index_range {
@@ -504,8 +570,8 @@ pub(crate) fn dynamic_rgba_budget_bytes(
     let target = visible_grid_items
         .saturating_mul(bucket_bytes)
         .saturating_mul(3)
-        .saturating_add(1)
-        / 2;
+        .saturating_add(3)
+        / 4;
 
     target.clamp(floor_bytes, MAX_RGBA_BUDGET_BYTES)
 }
