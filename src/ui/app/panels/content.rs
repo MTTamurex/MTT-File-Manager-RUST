@@ -183,6 +183,7 @@ pub(super) fn render_preview_panel_layout(
                                             app.enqueue_disk_cache_invalidations_forced(vec![path.clone()]);
                                             log::debug!("[REFRESH THUMBNAIL] Disk cache cleared");
                                             app.cache_manager.texture_cache.pop(&path);
+                                            app.cache_manager.forget_attempted_thumbnail_bucket(&path);
                                             log::debug!("[REFRESH THUMBNAIL] Texture cache cleared");
                                             app.cache_manager.loading_set.remove(&path);
                                             log::debug!("[REFRESH THUMBNAIL] Loading set cleared");

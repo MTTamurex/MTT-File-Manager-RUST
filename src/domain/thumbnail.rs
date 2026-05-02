@@ -1,3 +1,4 @@
+use crate::infrastructure::io_priority::IOPriority;
 use std::path::PathBuf;
 
 /// Thumbnail data extracted from file
@@ -8,5 +9,6 @@ pub struct ThumbnailData {
     pub width: u32,
     pub height: u32,
     pub generation: usize, // Tracks extraction validity
-    pub not_found: bool,   // File no longer exists on disk
+    pub priority: IOPriority,
+    pub not_found: bool, // File no longer exists on disk
 }

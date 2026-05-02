@@ -72,6 +72,10 @@ pub struct ItemSlotContext<'a> {
     pub is_recycle_bin_view: bool,
     /// Cache de texturas (LRU)
     pub texture_cache: &'a mut lru::LruCache<std::path::PathBuf, egui::TextureHandle>,
+    /// Bucket sizes most recently requested for each path. Used to decide
+    /// re-extraction need without comparing against actual texture dims
+    /// (which loops forever for naturally-small source images).
+    pub attempted_thumbnail_bucket: &'a rustc_hash::FxHashMap<std::path::PathBuf, u32>,
     /// Icon loader (PERSISTENT - do not create a new one each call!)
     pub icon_loader: &'a mut IconLoader,
     /// Set of scanned folders

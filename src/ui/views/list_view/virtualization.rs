@@ -7,7 +7,6 @@ use super::helpers::render_section_header;
 use super::item_renderer::render_list_item;
 use super::scroll;
 use super::{ColumnWidths, ListViewContext, ListViewOperations};
-use crate::ui::views::ViewportTracker;
 
 /// Result of user interactions during rendering
 pub(super) struct InteractionResult {
@@ -469,7 +468,7 @@ fn handle_prefetch(
     viewport_h: f32,
     row_height: f32,
     total_rows: usize,
-    is_scrolling: bool,
+    _is_scrolling: bool,
 ) {
     let first_visible_index = (current_scroll / row_height).floor() as usize;
     let last_visible_index = ((current_scroll + viewport_h) / row_height).ceil() as usize;
@@ -478,40 +477,6 @@ fn handle_prefetch(
 
     // Export visible range for GPU upload prioritization
     *ctx.visible_index_range = Some((first_visible_index, last_visible_index));
-
-    // PERFORMANCE: On HDD, skip prefetch during active scroll to avoid competing
-    // for disk I/O with visible item rendering. Prefetch only when scroll stops.
-    if ctx.is_on_hdd && is_scrolling {
-        return;
-    }
-
-    let tracker = ViewportTracker {
-        first_visible_index,
-        last_visible_index,
-        prefetch_rows: ctx.prefetch_rows,
-        columns: 1,
-    };
-    let (prefetch_start, prefetch_end) = tracker.get_prefetch_range(total_rows);
-
-    for index in prefetch_start..prefetch_end {
-        if index >= total_rows {
-            break;
-        }
-        if tracker.is_visible(index) {
-            continue;
-        }
-        let item = &ctx.items[index];
-        // FIX: Only prefetch thumbnails for media files (prevents .exe/.dll extraction)
-        if !item.is_dir
-            && item.is_media()
-            && !ctx.texture_cache.contains(&item.path)
-            && !ctx.loading_set.contains(&item.path)
-            && !ctx.pending_upload_set.contains(&item.path)
-        {
-            ctx.loading_set.insert(item.path.clone());
-            ops.request_thumbnail_prefetch_with_index(item.path.clone(), 64, index, item.modified);
-        }
-    }
 
     let mut idle_visible_items = Vec::new();
     for index in first_visible_index..=last_visible_index {

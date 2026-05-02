@@ -275,6 +275,7 @@ impl ImageViewerApp {
             is_recycle_bin_view: self.navigation_state.is_recycle_bin_view,
             global_search_active: self.global_search.active,
             texture_cache: &mut self.cache_manager.texture_cache,
+            attempted_thumbnail_bucket: &self.cache_manager.attempted_thumbnail_bucket,
             loading_set: &mut self.cache_manager.loading_set,
             shared_visible_paths,
             loading_icons: &mut self.loading_icons,
