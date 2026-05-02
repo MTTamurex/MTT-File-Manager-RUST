@@ -47,15 +47,13 @@ pub(super) fn render_virtualized_grid(
             2
         }
     } else {
-        // Idle (view not scrolling): no overscan. The visible items are already
-        // rendered; pre-rendering rows beyond the viewport adds ~cols×rows extra
-        // thumbnail requests. With dynamic_texture_keep_count(visible_items)
-        // sized to hold exactly visible*1.5 textures, those extra requests
-        // fill every spare cache slot → every upload evicts an existing texture
-        // → that texture is immediately re-requested → infinite GPU staging
-        // buffer churn and steady working-set growth. Zero overscan when idle
-        // breaks the cycle: total active items << cache cap → no evictions.
-        0
+        // Idle (view not scrolling): 1-row overscan.
+        // Previously 4 rows caused 4×cols×2 ≈ 64 extra thumbnail requests that filled
+        // the cache cap exactly (visible + overscan = cap), triggering a perpetual
+        // evict→re-upload cycle. Reduced to 1: visible(~73) + overscan(~16) = ~89,
+        // well below cap(~110), so no eviction pressure, while still pre-decoding
+        // the adjacent rows to avoid blank thumbnails when scrolling.
+        1
     };
 
     let loop_min_row = vis_min_row.saturating_sub(overscan);

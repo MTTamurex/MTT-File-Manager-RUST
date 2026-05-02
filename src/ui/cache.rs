@@ -46,7 +46,11 @@ const FOLDER_PREVIEW_DEBOUNCE_CAPACITY: usize = 4096;
 /// slowly than we allocate it, producing a steady working-set leak even
 /// when the cache cap is technically large enough to hold every visible
 /// path.
-const THUMBNAIL_REQUEST_COOLDOWN: Duration = Duration::from_millis(2000);
+// 300 ms is enough to prevent per-frame re-request loops (~60fps × 300ms = 18 retries/s
+// maximum), while still allowing stuck items to recover quickly: items dropped from
+// the pending queue (because it was full) or evicted from the texture cache can be
+// re-requested within 300 ms rather than the previous 2000 ms.
+const THUMBNAIL_REQUEST_COOLDOWN: Duration = Duration::from_millis(300);
 /// Bounded LRU for the thumbnail cooldown map; ~96B/entry → ~400KB ceiling.
 const THUMBNAIL_DEBOUNCE_CAPACITY: usize = 4096;
 
