@@ -166,9 +166,9 @@ impl ImageViewerApp {
     }
 
     pub(crate) fn effective_folder_preview_request_size_px(&self) -> u32 {
-        let logical_size =
-            (self.thumbnail_size.max(crate::ui::theme::THUMBNAIL_MIN) * 0.85).ceil() as u32;
-        self.effective_thumbnail_request_size_px(logical_size)
+        let scale = self.ui_ctx.pixels_per_point().max(1.0);
+        let logical_size = self.thumbnail_size.max(crate::ui::theme::THUMBNAIL_MIN) * 0.85;
+        ((logical_size.max(1.0)) * scale).ceil() as u32
     }
 
     pub(crate) fn current_folder_preview_bucket_size(&self) -> u32 {
@@ -188,7 +188,10 @@ impl ImageViewerApp {
             return IDLE_FOLDER_PREVIEW_KEEP;
         }
 
-        dynamic_folder_preview_keep_count(self.visible_grid_items_for_cache())
+        dynamic_folder_preview_keep_count(
+            self.visible_grid_items_for_cache(),
+            self.current_directory_folder_count(),
+        )
     }
 
     pub(crate) fn current_dynamic_rgba_budget_bytes(&self, floor_bytes: usize) -> usize {
@@ -298,8 +301,33 @@ impl ImageViewerApp {
         let folder_preview_target = self.current_dynamic_folder_preview_keep_count();
         let rgba_target = self.current_dynamic_rgba_budget_bytes(DEFAULT_DYNAMIC_RGBA_BUDGET_BYTES);
 
+        // Extra diagnostics — coleções não cobertas pelos campos principais.
+        // Mantidas em variáveis locais para evitar custo se MTT_MEMORY_TRACE estiver off
+        // (chamador já gateia via memory_trace_enabled()).
+        let fs_size_cache = self.folder_size_state.cache.len();
+        let fs_size_loading = self.folder_size_state.loading.len();
+        let fs_batch_cache = self.folder_size_state.batch_cache.len();
+        let fs_batch_loading = self.folder_size_state.batch_loading.len();
+        let fs_pending_reval = self.folder_size_state.pending_revalidation.len();
+        let fs_inval_epoch = self.folder_size_state.batch_invalidation_epoch.len();
+        let live_size_cache = self.live_file_size_cache.len();
+        let live_size_loading = self.live_file_size_loading.len();
+        let metadata_cache_n = self.metadata_cache.len();
+        let metadata_loading_n = self.metadata_loading.len();
+        let scanned_folders_n = self.scanned_folders.len();
+        let failed_icons_n = self.failed_icons.len();
+        let loading_icons_n = self.loading_icons.len();
+        let deletion_date_cache_n = self.deletion_date_cache.len();
+        let visible_paths_cache_n = self.visible_paths_cache.len();
+        let pending_mtime_recheck_n = self.pending_folder_mtime_recheck.len();
+        let multi_selection_n = self.multi_selection.len();
+        let drag_payload_n = self.drag_payload_paths.len();
+        let pinned_n = self.pinned_folders.len();
+        let dirty_registry_n = self.directory_dirty_registry.len();
+        let folder_preview_trace = self.cache_manager.folder_preview_trace.take_snapshot();
+
         log::info!(
-            "[MEM-TRACE:{label}] ws={:.1}MB private={:.1}MB items={} all_items={} tabs={} dir_cache={}/{} visible_items={} textures={}/{} texture_target={} folder_tex={}/{} folder_target={} rgba_items={} rgba={:.1}/{:.1}MB pending={} pending_rgba={:.1}MB pending_set={} loading={} folder_loading={} failed_thumbs={} queue={} vram_est={:.1}MB icons={} ext_icons={} drive_icons={} failed_drive_icons={} loading_drive_icons={} gifs={} gif_rgba={:.1}MB visible={:?} thumb_bucket={} folder_bucket={} frame_avg={:.1}ms frame_peak={:.1}ms upload_budget={:.1}ms",
+            "[MEM-TRACE:{label}] ws={:.1}MB private={:.1}MB items={} all_items={} tabs={} dir_cache={}/{} visible_items={} textures={}/{} texture_target={} folder_tex={}/{} folder_target={} rgba_items={} rgba={:.1}/{:.1}MB pending={} pending_rgba={:.1}MB pending_set={} loading={} folder_loading={} failed_thumbs={} queue={} vram_est={:.1}MB icons={} ext_icons={} drive_icons={} failed_drive_icons={} loading_drive_icons={} gifs={} gif_rgba={:.1}MB visible={:?} thumb_bucket={} folder_bucket={} frame_avg={:.1}ms frame_peak={:.1}ms upload_budget={:.1}ms fs_size={}/{} fs_batch={}/{} fs_reval={} fs_inval_ep={} live_size={}/{} meta={}/{} scanned={} failed_ico={} loading_ico={} del_date={} vis_paths={} mtime_re={} multisel={} drag={} pinned={} dirty_reg={} fp_req={} fp_dup={} fp_dbnc={} fp_inval={} fp_upl={} fp_upl_none={} fp_upl_diff={} fp_evict={} fp_db_w={} fp_comp={} fp_sample={:?}",
             bytes_to_mb(process.working_set_bytes),
             bytes_to_mb(process.private_usage_bytes),
             self.items.len(),
@@ -338,6 +366,37 @@ impl ImageViewerApp {
             self.frame_time_avg_ms,
             self.frame_time_peak_ms,
             self.upload_budget_ms,
+            fs_size_cache,
+            fs_size_loading,
+            fs_batch_cache,
+            fs_batch_loading,
+            fs_pending_reval,
+            fs_inval_epoch,
+            live_size_cache,
+            live_size_loading,
+            metadata_cache_n,
+            metadata_loading_n,
+            scanned_folders_n,
+            failed_icons_n,
+            loading_icons_n,
+            deletion_date_cache_n,
+            visible_paths_cache_n,
+            pending_mtime_recheck_n,
+            multi_selection_n,
+            drag_payload_n,
+            pinned_n,
+            dirty_registry_n,
+            folder_preview_trace.requests,
+            folder_preview_trace.duplicate_skips,
+            folder_preview_trace.debounce_skips,
+            folder_preview_trace.invalidations,
+            folder_preview_trace.uploads,
+            folder_preview_trace.upload_no_cache,
+            folder_preview_trace.upload_size_diff,
+            folder_preview_trace.lru_evictions,
+            folder_preview_trace.db_writes,
+            folder_preview_trace.composes,
+            folder_preview_trace.sample_path,
         );
     }
 
@@ -552,6 +611,30 @@ impl ImageViewerApp {
             .clamp(0, MAX_DYNAMIC_TEXTURE_CACHE_ITEMS)
     }
 
+    /// Total number of folder-like entries in the directories currently being
+    /// rendered. Used to size the folder preview cache so it never thrashes
+    /// when every folder slot is asking for its preview each frame.
+    pub(crate) fn current_directory_folder_count(&self) -> usize {
+        let mut count = self
+            .items
+            .iter()
+            .filter(|item| item.is_dir && !item.is_archive())
+            .count();
+
+        if self.dual_panel_enabled {
+            if let Some(snapshot) = self.dual_panel_inactive_state.as_ref() {
+                count = count.saturating_add(
+                    visible_items_for_snapshot(snapshot)
+                        .iter()
+                        .filter(|item| item.is_dir && !item.is_archive())
+                        .count(),
+                );
+            }
+        }
+
+        count.min(MAX_DYNAMIC_FOLDER_PREVIEW_ITEMS)
+    }
+
     pub(crate) fn thumbnail_caches_active(&self) -> bool {
         if panel_thumbnail_caches_active(
             self.view_mode,
@@ -641,6 +724,18 @@ impl ImageViewerApp {
             }
         }
 
+        if self.show_preview_panel && self.multi_selection.len() <= 1 {
+            if let Some(selected) = self.selected_file.as_ref() {
+                visible_paths.insert(selected.path.clone());
+            } else if !self.navigation_state.is_computer_view
+                && !self.navigation_state.is_recycle_bin_view
+            {
+                visible_paths.insert(std::path::PathBuf::from(
+                    &self.navigation_state.current_path,
+                ));
+            }
+        }
+
         (!visible_paths.is_empty()).then_some(visible_paths)
     }
 }
@@ -653,10 +748,19 @@ pub(crate) fn dynamic_texture_keep_count(visible_grid_items: usize) -> usize {
         .min(MAX_DYNAMIC_TEXTURE_CACHE_ITEMS)
 }
 
-pub(crate) fn dynamic_folder_preview_keep_count(visible_grid_items: usize) -> usize {
-    let target = visible_grid_items.saturating_mul(3).saturating_add(1) / 2;
+pub(crate) fn dynamic_folder_preview_keep_count(
+    visible_grid_items: usize,
+    directory_folder_items: usize,
+) -> usize {
+    let viewport_target = visible_grid_items.saturating_mul(3).saturating_add(1) / 2;
 
-    target
+    // Anti-thrash floor: when the renderer can request a preview for any folder
+    // currently displayed in the directory, the cache must fit at least all of
+    // them. Otherwise every upload evicts a path that is re-requested in the
+    // following frame, producing a constant `ctx.load_texture` storm and a
+    // steady GPU staging-buffer leak.
+    viewport_target
+        .max(directory_folder_items)
         .max(MIN_DYNAMIC_FOLDER_PREVIEW_ITEMS)
         .min(MAX_DYNAMIC_FOLDER_PREVIEW_ITEMS)
 }

@@ -188,10 +188,34 @@ impl ImageViewerApp {
     }
 
     pub fn request_folder_preview_load(&mut self, path: PathBuf) {
+        self.cache_manager.folder_preview_trace.record_request();
+        self.cache_manager
+            .folder_preview_trace
+            .record_request_path(&path);
+
+        // Already in flight: dedup without poisoning the debounce timestamp.
+        if self.cache_manager.is_folder_preview_loading(&path) {
+            self.cache_manager
+                .folder_preview_trace
+                .record_duplicate_skip();
+            return;
+        }
+
+        // Per-path cooldown — defends against render-loop thrash when the LRU
+        // cap is smaller than the directory's folder set. Without this, an
+        // evicted preview is re-requested every frame and each upload leaks
+        // GPU staging memory.
         if self
             .cache_manager
-            .start_folder_preview_loading(path.clone())
+            .should_throttle_folder_preview_request(&path)
         {
+            self.cache_manager
+                .folder_preview_trace
+                .record_debounce_skip();
+            return;
+        }
+
+        if self.cache_manager.start_folder_preview_loading(path.clone()) {
             let request = crate::workers::folder_preview_worker::FolderPreviewRequest {
                 path,
                 size_px: self.effective_folder_preview_request_size_px(),

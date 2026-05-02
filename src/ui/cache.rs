@@ -5,6 +5,8 @@ use eframe::egui;
 use lru::LruCache;
 use std::num::NonZeroUsize;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 // PERFORMANCE: FxHashSet uses a faster hash function than std::collections::HashSet.
 // This is especially beneficial for PathBuf keys which have expensive default hashing.
@@ -26,6 +28,15 @@ pub(crate) const DEFAULT_DYNAMIC_RGBA_BUDGET_BYTES: usize = 24 * 1024 * 1024;
 pub(crate) const MAX_RGBA_BUDGET_BYTES: usize = 64 * 1024 * 1024;
 pub(crate) const MAX_THUMBNAIL_LOADING_SET_ITEMS: usize = 1024;
 const MAX_PENDING_UPLOAD_SET_ITEMS: usize = 2048;
+
+/// Per-path cooldown for `request_folder_preview_load`. Prevents render-loop
+/// thrash when the LRU cap is smaller than the directory's folder set:
+/// without this, an evicted preview would be re-requested every frame and
+/// each `ctx.load_texture` call accumulates GPU staging that is not freed
+/// at the same rate, producing a steady working-set leak.
+const FOLDER_PREVIEW_REQUEST_COOLDOWN: Duration = Duration::from_millis(2000);
+/// Bounded LRU for the cooldown map; ~96B/entry → ~400KB ceiling.
+const FOLDER_PREVIEW_DEBOUNCE_CAPACITY: usize = 4096;
 
 #[inline]
 fn nz_cache_size(size: usize, cache_name: &str) -> NonZeroUsize {
@@ -62,10 +73,16 @@ pub struct CacheManager {
     pub folder_preview_cache: LruCache<PathBuf, egui::TextureHandle>,
     /// Set of folder paths currently being loaded
     pub folder_preview_loading: FxHashSet<PathBuf>,
+    /// Per-path debounce so an evicted folder cannot be re-requested every
+    /// frame by the renderer when the LRU cap is smaller than the directory's
+    /// folder set. Bounded LRU keeps memory ceiling deterministic.
+    folder_preview_request_debounce: LruCache<PathBuf, Instant>,
     /// Set of paths that failed thumbnail extraction (LRU bounded to 1000)
     pub failed_thumbnails: LruCache<PathBuf, ()>,
     /// Set of paths received from worker but waiting for GPU upload
     pub pending_upload_set: FxHashSet<PathBuf>,
+    pub(crate) folder_preview_trace:
+        Arc<crate::workers::folder_preview_worker::FolderPreviewTraceCounters>,
     /// PERFORMANCE: RAM cache for decoded RGBA data (Layer 2 - larger than VRAM cache)
     /// When a texture is evicted from VRAM, the RGBA data remains here for fast re-upload
     /// without needing disk I/O. This is critical for HDD performance during video playback.
@@ -79,6 +96,14 @@ pub struct CacheManager {
 impl CacheManager {
     /// Creates a new cache manager with default configuration
     pub fn new() -> Self {
+        Self::new_with_folder_preview_trace(Arc::new(
+            crate::workers::folder_preview_worker::FolderPreviewTraceCounters::default(),
+        ))
+    }
+
+    pub fn new_with_folder_preview_trace(
+        folder_preview_trace: Arc<crate::workers::folder_preview_worker::FolderPreviewTraceCounters>,
+    ) -> Self {
         Self {
             // Bounded default keeps enough history for smooth scrolling without runaway RAM.
             texture_cache: LruCache::new(nz_cache_size(
@@ -95,8 +120,13 @@ impl CacheManager {
                 "folder_preview_cache",
             )),
             folder_preview_loading: FxHashSet::default(),
+            folder_preview_request_debounce: LruCache::new(nz_cache_size(
+                FOLDER_PREVIEW_DEBOUNCE_CAPACITY,
+                "folder_preview_request_debounce",
+            )),
             failed_thumbnails: LruCache::new(nz_cache_size(1000, "failed_thumbnails")),
             pending_upload_set: FxHashSet::default(),
+            folder_preview_trace,
             rgba_data_cache: LruCache::new(nz_cache_size(
                 DEFAULT_RGBA_CACHE_ITEMS,
                 "rgba_data_cache",
@@ -110,6 +140,16 @@ impl CacheManager {
 
     /// Creates a cache manager with custom configuration
     pub fn with_config(config: TextureCacheConfig) -> Self {
+        Self::with_config_and_folder_preview_trace(
+            config,
+            Arc::new(crate::workers::folder_preview_worker::FolderPreviewTraceCounters::default()),
+        )
+    }
+
+    pub fn with_config_and_folder_preview_trace(
+        config: TextureCacheConfig,
+        folder_preview_trace: Arc<crate::workers::folder_preview_worker::FolderPreviewTraceCounters>,
+    ) -> Self {
         let rgba_cache_items = (config.max_size * 6 / 5).max(DEFAULT_RGBA_CACHE_ITEMS);
         let rgba_budget_bytes = (config.max_size * 1024 * 1024 / 2)
             .clamp(DEFAULT_RGBA_BUDGET_BYTES, MAX_RGBA_BUDGET_BYTES);
@@ -129,8 +169,13 @@ impl CacheManager {
                 "folder_preview_cache",
             )),
             folder_preview_loading: FxHashSet::default(),
+            folder_preview_request_debounce: LruCache::new(nz_cache_size(
+                FOLDER_PREVIEW_DEBOUNCE_CAPACITY,
+                "folder_preview_request_debounce",
+            )),
             failed_thumbnails: LruCache::new(nz_cache_size(1000, "failed_thumbnails")),
             pending_upload_set: FxHashSet::default(),
+            folder_preview_trace,
             rgba_data_cache: LruCache::new(nz_cache_size(rgba_cache_items, "rgba_data_cache")),
             rgba_data_bytes: 0,
             max_rgba_data_bytes: rgba_budget_bytes,
@@ -425,6 +470,11 @@ impl CacheManager {
 
     /// Stores folder preview in cache
     pub fn put_folder_preview(&mut self, path: PathBuf, texture: egui::TextureHandle) {
+        if self.folder_preview_cache.len() >= self.folder_preview_cache.cap().get()
+            && !self.folder_preview_cache.contains(&path)
+        {
+            self.folder_preview_trace.record_lru_eviction();
+        }
         self.folder_preview_cache.put(path, texture);
     }
 
@@ -433,12 +483,32 @@ impl CacheManager {
         self.folder_preview_loading.contains(path)
     }
 
+    /// Returns true if a request for `path` should be skipped because another
+    /// request was issued within `FOLDER_PREVIEW_REQUEST_COOLDOWN`. Otherwise
+    /// records `now` as the latest request timestamp and returns false.
+    /// Used to break the render-loop thrash when the LRU cap is smaller than
+    /// the directory's folder set (path keeps getting evicted and re-requested
+    /// every frame, leaking GPU staging memory).
+    pub fn should_throttle_folder_preview_request(&mut self, path: &PathBuf) -> bool {
+        let now = Instant::now();
+        if let Some(last) = self.folder_preview_request_debounce.get(path) {
+            if now.duration_since(*last) < FOLDER_PREVIEW_REQUEST_COOLDOWN {
+                return true;
+            }
+        }
+        self.folder_preview_request_debounce.put(path.clone(), now);
+        false
+    }
+
     /// Starts loading a folder preview (returns false if too many loads in progress)
     pub fn start_folder_preview_loading(&mut self, path: PathBuf) -> bool {
+        if self.folder_preview_loading.contains(&path) {
+            return false;
+        }
+
         // Allow deeper queueing so initial folders can request previews without waiting.
         if self.folder_preview_loading.len() < 120 {
-            self.folder_preview_loading.insert(path);
-            true
+            self.folder_preview_loading.insert(path)
         } else {
             false
         }
@@ -452,6 +522,7 @@ impl CacheManager {
     /// Invalidates a folder preview (removes from cache and loading set)
     /// Called when folder contents change to trigger reload
     pub fn invalidate_folder_preview(&mut self, path: &PathBuf) {
+        self.folder_preview_trace.record_invalidation();
         self.folder_preview_cache.pop(path);
         self.folder_preview_loading.remove(path);
     }

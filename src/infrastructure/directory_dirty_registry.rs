@@ -34,4 +34,9 @@ impl DirectoryDirtyRegistry {
         let mut entries = self.inner.lock();
         let _ = entries.remove(path);
     }
+
+    /// Number of currently tracked dirty entries (for diagnostics only).
+    pub fn len(&self) -> usize {
+        self.inner.lock().len()
+    }
 }

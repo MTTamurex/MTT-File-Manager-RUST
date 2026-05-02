@@ -255,6 +255,12 @@ impl ImageViewerApp {
         let prefetch_rows = if is_ssd { 1 } else { 3 };
         let mut drag_started_item = None;
         let mut drag_hovered_item = None;
+        let shared_visible_paths = if self.dual_panel_enabled {
+            self.visible_grid_paths_snapshot()
+        } else {
+            None
+        };
+
         let mut ctx = GridViewContext {
             items: &items,
             selected_item,
@@ -270,6 +276,7 @@ impl ImageViewerApp {
             global_search_active: self.global_search.active,
             texture_cache: &mut self.cache_manager.texture_cache,
             loading_set: &mut self.cache_manager.loading_set,
+            shared_visible_paths,
             loading_icons: &mut self.loading_icons,
             failed_icons: &self.failed_icons,
             scanned_folders: &mut self.scanned_folders,

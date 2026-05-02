@@ -15,10 +15,116 @@ use crate::infrastructure::folder_compose::FolderComposer;
 use crate::workers::thumbnail::processing::get_bucket_size;
 use eframe::egui;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
 use std::time::{Instant, UNIX_EPOCH};
 use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED};
+
+#[derive(Default)]
+pub struct FolderPreviewTraceCounters {
+    requests: AtomicU64,
+    duplicate_skips: AtomicU64,
+    debounce_skips: AtomicU64,
+    invalidations: AtomicU64,
+    uploads: AtomicU64,
+    upload_no_cache: AtomicU64,
+    upload_size_diff: AtomicU64,
+    lru_evictions: AtomicU64,
+    db_writes: AtomicU64,
+    composes: AtomicU64,
+    sample_path: parking_lot::Mutex<Option<std::path::PathBuf>>,
+}
+
+#[derive(Clone, Default)]
+pub struct FolderPreviewTraceSnapshot {
+    pub requests: u64,
+    pub duplicate_skips: u64,
+    pub debounce_skips: u64,
+    pub invalidations: u64,
+    pub uploads: u64,
+    pub upload_no_cache: u64,
+    pub upload_size_diff: u64,
+    pub lru_evictions: u64,
+    pub db_writes: u64,
+    pub composes: u64,
+    pub sample_path: Option<std::path::PathBuf>,
+}
+
+impl FolderPreviewTraceCounters {
+    #[inline]
+    pub fn record_request(&self) {
+        self.requests.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_request_path(&self, path: &std::path::Path) {
+        let mut slot = self.sample_path.lock();
+        if slot.is_none() {
+            *slot = Some(path.to_path_buf());
+        }
+    }
+
+    #[inline]
+    pub fn record_duplicate_skip(&self) {
+        self.duplicate_skips.fetch_add(1, Ordering::Relaxed);
+    }
+
+    #[inline]
+    pub fn record_debounce_skip(&self) {
+        self.debounce_skips.fetch_add(1, Ordering::Relaxed);
+    }
+
+    #[inline]
+    pub fn record_invalidation(&self) {
+        self.invalidations.fetch_add(1, Ordering::Relaxed);
+    }
+
+    #[inline]
+    pub fn record_upload(&self) {
+        self.uploads.fetch_add(1, Ordering::Relaxed);
+    }
+
+    #[inline]
+    pub fn record_upload_no_cache(&self) {
+        self.upload_no_cache.fetch_add(1, Ordering::Relaxed);
+    }
+
+    #[inline]
+    pub fn record_upload_size_diff(&self) {
+        self.upload_size_diff.fetch_add(1, Ordering::Relaxed);
+    }
+
+    #[inline]
+    pub fn record_lru_eviction(&self) {
+        self.lru_evictions.fetch_add(1, Ordering::Relaxed);
+    }
+
+    #[inline]
+    pub fn record_db_write(&self) {
+        self.db_writes.fetch_add(1, Ordering::Relaxed);
+    }
+
+    #[inline]
+    pub fn record_compose(&self) {
+        self.composes.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn take_snapshot(&self) -> FolderPreviewTraceSnapshot {
+        FolderPreviewTraceSnapshot {
+            requests: self.requests.swap(0, Ordering::Relaxed),
+            duplicate_skips: self.duplicate_skips.swap(0, Ordering::Relaxed),
+            debounce_skips: self.debounce_skips.swap(0, Ordering::Relaxed),
+            invalidations: self.invalidations.swap(0, Ordering::Relaxed),
+            uploads: self.uploads.swap(0, Ordering::Relaxed),
+            upload_no_cache: self.upload_no_cache.swap(0, Ordering::Relaxed),
+            upload_size_diff: self.upload_size_diff.swap(0, Ordering::Relaxed),
+            lru_evictions: self.lru_evictions.swap(0, Ordering::Relaxed),
+            db_writes: self.db_writes.swap(0, Ordering::Relaxed),
+            composes: self.composes.swap(0, Ordering::Relaxed),
+            sample_path: self.sample_path.lock().take(),
+        }
+    }
+}
 
 /// Data returned from folder preview worker
 pub struct FolderPreviewData {
@@ -64,6 +170,7 @@ pub fn spawn_folder_preview_worker(
     ctx: egui::Context,
     disk_cache: Arc<ThumbnailDiskCache>,
     composer: Arc<FolderComposer>,
+    trace: Arc<FolderPreviewTraceCounters>,
 ) {
     // Smaller-than-default stack: this worker only runs Shell/COM calls and a
     // few alpha-blend passes; 512 KB is comfortably enough and saves ~512 KB of
@@ -183,6 +290,7 @@ pub fn spawn_folder_preview_worker(
                 // download/torrent), we show compose_empty() as a placeholder but do
                 // NOT persist it to SQLite. This ensures the next request retries
                 // extraction instead of serving a stale empty preview from the DB.
+                trace.record_compose();
                 let compose_result = try_custom_compose(
                     &path,
                     &composer,
@@ -203,6 +311,7 @@ pub fn spawn_folder_preview_worker(
                 };
 
                 if should_cache {
+                    trace.record_db_write();
                     disk_cache.put_folder_preview_cache(
                         &path,
                         bucket_size,

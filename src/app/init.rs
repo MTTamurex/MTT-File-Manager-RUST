@@ -112,6 +112,7 @@ impl ImageViewerApp {
             live_size_res_rx,
             folder_preview_tx,
             folder_preview_res_rx,
+            folder_preview_trace,
             folder_size_req_tx,
             folder_size_res_rx,
             folder_size_cancel,
@@ -233,7 +234,9 @@ impl ImageViewerApp {
             folder_preview_sender: folder_preview_tx,
             folder_preview_receiver: folder_preview_res_rx,
             // Cache Manager (unifica texture_cache, icon_cache, loading_set, etc.)
-            cache_manager: crate::ui::cache::CacheManager::new(),
+            cache_manager: crate::ui::cache::CacheManager::new_with_folder_preview_trace(
+                folder_preview_trace,
+            ),
             // Sorting - loaded from SQLite or defaults
             sort_mode,
             sort_mode_computer,
