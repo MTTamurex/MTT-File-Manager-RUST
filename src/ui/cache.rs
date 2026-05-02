@@ -12,18 +12,18 @@ use std::path::PathBuf;
 // Re-exported for use in other modules.
 pub use rustc_hash::FxHashSet;
 
-const DEFAULT_TEXTURE_CACHE_ITEMS: usize = 96;
-const DEFAULT_FOLDER_PREVIEW_CACHE_ITEMS: usize = 64;
-const DEFAULT_RGBA_CACHE_ITEMS: usize = 80;
+const DEFAULT_TEXTURE_CACHE_ITEMS: usize = 64;
+const DEFAULT_FOLDER_PREVIEW_CACHE_ITEMS: usize = 48;
+const DEFAULT_RGBA_CACHE_ITEMS: usize = 32;
 const DEFAULT_MAX_CONCURRENT_LOADS: usize = 80;
 const DEFAULT_RGBA_BUDGET_BYTES: usize = 32 * 1024 * 1024;
-pub(crate) const MIN_DYNAMIC_TEXTURE_CACHE_ITEMS: usize = 72;
+pub(crate) const MIN_DYNAMIC_TEXTURE_CACHE_ITEMS: usize = 48;
 pub(crate) const MAX_DYNAMIC_TEXTURE_CACHE_ITEMS: usize = 1500;
-pub(crate) const MIN_DYNAMIC_FOLDER_PREVIEW_ITEMS: usize = 48;
+pub(crate) const MIN_DYNAMIC_FOLDER_PREVIEW_ITEMS: usize = 32;
 pub(crate) const MAX_DYNAMIC_FOLDER_PREVIEW_ITEMS: usize = 1500;
-pub(crate) const MIN_RGBA_BUDGET_BYTES: usize = 32 * 1024 * 1024;
-pub(crate) const DEFAULT_DYNAMIC_RGBA_BUDGET_BYTES: usize = 48 * 1024 * 1024;
-pub(crate) const MAX_RGBA_BUDGET_BYTES: usize = 128 * 1024 * 1024;
+pub(crate) const MIN_RGBA_BUDGET_BYTES: usize = 4 * 1024 * 1024;
+pub(crate) const DEFAULT_DYNAMIC_RGBA_BUDGET_BYTES: usize = 24 * 1024 * 1024;
+pub(crate) const MAX_RGBA_BUDGET_BYTES: usize = 64 * 1024 * 1024;
 pub(crate) const MAX_THUMBNAIL_LOADING_SET_ITEMS: usize = 1024;
 const MAX_PENDING_UPLOAD_SET_ITEMS: usize = 2048;
 
