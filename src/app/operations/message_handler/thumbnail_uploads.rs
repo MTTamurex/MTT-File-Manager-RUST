@@ -15,6 +15,7 @@ const MAX_INCOMING_THUMBNAIL_BUDGET_MS: u64 = 4;
 const MIN_INCOMING_THUMBNAIL_BUDGET_MS: u64 = 2;
 const TEXTURE_CACHE_RETUNE_INTERVAL_MS: u64 = 900;
 const TEXTURE_CACHE_RETUNE_MIN_DELTA_ITEMS: usize = 16;
+const MAX_TEXTURE_CACHE_SHRINK_PER_RETUNE: usize = 8;
 
 fn live_frame_pressure_ms(app: &ImageViewerApp) -> f32 {
     app.last_actual_frame_ms.max(app.frame_time_avg_ms)
@@ -27,16 +28,8 @@ fn compute_texture_cache_target_items(
     is_scrolling: bool,
     is_video_playing: bool,
 ) -> usize {
-    let visible_base = app.estimated_visible_grid_items().max(220) as f32;
-    let tab_factor: f32 = if open_tabs <= 1 {
-        1.25
-    } else if open_tabs <= 3 {
-        1.12
-    } else if open_tabs <= 5 {
-        1.0
-    } else {
-        0.90
-    };
+    let visible_base = app.current_dynamic_texture_keep_count() as f32;
+    let tab_factor: f32 = if open_tabs <= 5 { 1.0 } else { 0.90 };
 
     let queue_pending = app.thumbnail_queue.pending_count();
     let upload_pending = app.pending_thumbnails.len();
@@ -54,13 +47,7 @@ fn compute_texture_cache_target_items(
         0
     };
 
-    let frame_headroom_boost = if frame_pressure_ms < 12.0 {
-        24
-    } else if frame_pressure_ms < 16.0 {
-        12
-    } else {
-        0
-    };
+    let frame_headroom_boost = 0;
 
     let frame_penalty = if frame_pressure_ms > CRITICAL_FRAME_TIME_MS {
         80
@@ -356,9 +343,17 @@ impl ImageViewerApp {
             if current_texture_items.abs_diff(target_texture_items)
                 >= TEXTURE_CACHE_RETUNE_MIN_DELTA_ITEMS
             {
+                let retune_texture_items = if target_texture_items < current_texture_items {
+                    current_texture_items
+                        .saturating_sub(MAX_TEXTURE_CACHE_SHRINK_PER_RETUNE)
+                        .max(target_texture_items)
+                } else {
+                    target_texture_items
+                };
+
                 let applied_texture_items = self
                     .cache_manager
-                    .retune_texture_cache_capacity(target_texture_items);
+                    .retune_texture_cache_capacity(retune_texture_items);
 
                 if applied_texture_items != current_texture_items {
                     log::debug!(

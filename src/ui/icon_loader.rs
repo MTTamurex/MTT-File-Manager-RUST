@@ -10,6 +10,8 @@ use std::time::{Duration, Instant};
 use eframe::egui;
 use lru::LruCache;
 
+extern crate windows as windows_crate;
+
 use crate::domain::file_entry::IconSize;
 use crate::infrastructure::disk_cache::ThumbnailDiskCache;
 use crate::infrastructure::windows;
@@ -37,8 +39,8 @@ struct ComStaGuard {
 
 impl ComStaGuard {
     fn new() -> Self {
-        use ::windows::Win32::Foundation::RPC_E_CHANGED_MODE;
-        use ::windows::Win32::System::Com::{CoInitializeEx, COINIT_APARTMENTTHREADED};
+        use windows_crate::Win32::Foundation::RPC_E_CHANGED_MODE;
+        use windows_crate::Win32::System::Com::{CoInitializeEx, COINIT_APARTMENTTHREADED};
         // SAFETY: CoInitializeEx is balanced by CoUninitialize in Drop when
         // `needs_uninit` is true. The HRESULT is inspected to distinguish
         // success from "already initialized in different mode".
@@ -179,6 +181,16 @@ impl IconLoader {
     pub fn clear_drive_icons(&mut self) {
         self.drive_icon_cache.clear();
         self.failed_drive_icons.clear();
+    }
+
+    pub fn cache_counts(&self) -> (usize, usize, usize, usize, usize) {
+        (
+            self.icon_cache.len(),
+            self.extension_cache.len(),
+            self.drive_icon_cache.len(),
+            self.failed_drive_icons.len(),
+            self.loading_drive_icons.len(),
+        )
     }
 
     /// Set of Jumbo icon cache keys currently being loaded in background.

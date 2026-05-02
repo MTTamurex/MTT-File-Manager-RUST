@@ -135,7 +135,6 @@ impl ImageViewerApp {
             drive_scan_rx,
             drive_info_tx,
             drive_info_rx,
-            preloaded_extension_icons,
             custom_folder_icon,
         } = bootstrap_app(&ctx);
 
@@ -340,28 +339,6 @@ impl ImageViewerApp {
             // PERSISTENT ICON LOADER
             item_icon_loader: {
                 let mut loader = IconLoader::new(Some(disk_cache.clone()));
-                // Pre-populate extension_cache from disk cache → instant icons on first frame.
-                for (ext, (pixels, width, height)) in &preloaded_extension_icons {
-                    // Use canonical extension so mapped types (sys→dll) share
-                    // the same texture key as in the render-loop lookup.
-                    let canonical = crate::infrastructure::windows::icons::canonical_icon_ext(ext);
-                    let ext_key = format!("{}_Large", canonical);
-                    let texture = ctx.load_texture(
-                        ext_key.clone(),
-                        eframe::egui::ColorImage::from_rgba_unmultiplied(
-                            [*width as usize, *height as usize],
-                            pixels,
-                        ),
-                        eframe::egui::TextureOptions::LINEAR,
-                    );
-                    loader.extension_cache.put(ext_key, texture);
-                }
-                if !preloaded_extension_icons.is_empty() {
-                    log::info!(
-                        "[IconDiskCache] Pre-populated {} extension textures from disk cache",
-                        preloaded_extension_icons.len(),
-                    );
-                }
                 // Pre-set custom composed folder icon (back+front+paper_sheet).
                 {
                     let (ref pixels, width, height) = custom_folder_icon;
@@ -505,6 +482,7 @@ impl ImageViewerApp {
             upload_budget_ms,
             last_upload_budget_update: Instant::now(),
             last_memory_maintenance: Instant::now(),
+            last_memory_trace_log: Instant::now(),
             last_texture_cache_retune: Instant::now(),
 
             // INACTIVITY RECOVERY
@@ -600,6 +578,7 @@ impl ImageViewerApp {
         }
 
         run_post_startup_jobs(&mut app, &ctx);
+        app.log_memory_snapshot("post-init");
 
         // Log GPU adapter info to file for diagnostics (works without console).
         if let Some(render_state) = &cc.wgpu_render_state {

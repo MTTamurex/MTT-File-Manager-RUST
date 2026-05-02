@@ -394,6 +394,7 @@ pub struct ImageViewerApp {
     pub upload_budget_ms: f32,
     pub last_upload_budget_update: Instant,
     pub last_memory_maintenance: Instant,
+    pub last_memory_trace_log: Instant,
     pub last_texture_cache_retune: Instant,
 
     // INACTIVITY RECOVERY: Track when app was restored from minimized state

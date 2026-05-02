@@ -18,8 +18,10 @@
 //! - Much faster than Shell API (20-200ms per folder via COM interop)
 
 use image::{imageops, DynamicImage, RgbaImage};
+use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::io::Cursor;
+use std::sync::Arc;
 
 /// Default output width used for the static folder icon.
 pub const DEFAULT_OUTPUT_W: u32 = 256;
@@ -46,17 +48,19 @@ struct FolderCompositionLayers {
     content_margin_bottom: u32,
 }
 
-/// Pre-decoded folder composition layers.
+/// Lazily decoded and scaled folder composition layers.
 ///
-/// Created once at app startup, shared across all folder preview worker
-/// threads via `Arc<FolderComposer>`. Thread-safe because all fields
-/// are immutable after construction.
+/// The embedded PNGs are decoded once at startup. Bucket-specific scaled layers
+/// are built on first use and then shared by all folder preview workers.
 pub struct FolderComposer {
-    layers: HashMap<u32, FolderCompositionLayers>,
+    back_img: DynamicImage,
+    front_img: DynamicImage,
+    sheet_img: DynamicImage,
+    layers: Mutex<HashMap<u32, Arc<FolderCompositionLayers>>>,
 }
 
 impl FolderComposer {
-    /// Decodes and pre-scales the embedded folder PNG layers for every bucket.
+    /// Decodes the embedded folder PNG layers. Bucket scaling happens on demand.
     ///
     /// Called ONCE at app startup. Panics if the embedded PNGs are invalid
     /// (should never happen since they're compile-time embedded).
@@ -79,20 +83,12 @@ impl FolderComposer {
         )
         .expect("Failed to decode embedded paper_sheet.png");
 
-        let mut layers = HashMap::with_capacity(BUCKET_OUTPUT_WIDTHS.len());
-        for output_w in BUCKET_OUTPUT_WIDTHS {
-            layers.insert(
-                output_w,
-                Self::build_layers(output_w, &back_img, &front_img, &sheet_img),
-            );
+        Self {
+            back_img,
+            front_img,
+            sheet_img,
+            layers: Mutex::new(HashMap::with_capacity(BUCKET_OUTPUT_WIDTHS.len())),
         }
-
-        log::info!(
-            "[FOLDER COMPOSE] Layers decoded for buckets: {:?}",
-            BUCKET_OUTPUT_WIDTHS
-        );
-
-        Self { layers }
     }
 
     fn build_layers(
@@ -137,11 +133,32 @@ impl FolderComposer {
         }
     }
 
-    fn layers_for(&self, output_w: u32) -> &FolderCompositionLayers {
-        self.layers
-            .get(&output_w)
-            .or_else(|| self.layers.get(&DEFAULT_OUTPUT_W))
-            .expect("default folder compose bucket must exist")
+    fn layers_for(&self, output_w: u32) -> Arc<FolderCompositionLayers> {
+        let output_w = if BUCKET_OUTPUT_WIDTHS.contains(&output_w) {
+            output_w
+        } else {
+            DEFAULT_OUTPUT_W
+        };
+
+        if let Some(layers) = self.layers.lock().get(&output_w).cloned() {
+            return layers;
+        }
+
+        let layers = Arc::new(Self::build_layers(
+            output_w,
+            &self.back_img,
+            &self.front_img,
+            &self.sheet_img,
+        ));
+
+        let mut cache = self.layers.lock();
+        cache
+            .entry(output_w)
+            .or_insert_with(|| {
+                log::info!("[FOLDER COMPOSE] Built layers for bucket {}", output_w);
+                Arc::clone(&layers)
+            })
+            .clone()
     }
 
     /// Composes a default-size folder cover with no media content.
@@ -153,8 +170,12 @@ impl FolderComposer {
     pub fn compose_empty_for_size(&self, output_w: u32) -> (Vec<u8>, u32, u32) {
         let layers = self.layers_for(output_w);
         let sheet = &layers.paper_sheet;
-        let result =
-            self.compose_with_layers(layers, sheet.as_raw(), sheet.width(), sheet.height());
+        let result = self.compose_with_layers(
+            layers.as_ref(),
+            sheet.as_raw(),
+            sheet.width(),
+            sheet.height(),
+        );
         result.unwrap_or_else(|| {
             let mut canvas = RgbaImage::new(layers.output_w, layers.canvas_h);
             let bx = layers.output_w.saturating_sub(layers.back.width()) / 2;
@@ -186,7 +207,7 @@ impl FolderComposer {
         output_w: u32,
     ) -> Option<(Vec<u8>, u32, u32)> {
         let layers = self.layers_for(output_w);
-        self.compose_with_layers(layers, content_rgba, content_w, content_h)
+        self.compose_with_layers(layers.as_ref(), content_rgba, content_w, content_h)
     }
 
     fn compose_with_layers(
