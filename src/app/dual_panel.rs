@@ -67,6 +67,9 @@ pub struct PanelSnapshot {
     // Scroll
     pub scroll_offset_y: f32,
     pub scroll_to_selected: bool,
+    pub visible_index_range: Option<(usize, usize)>,
+    pub visible_paths_cache: FxHashSet<PathBuf>,
+    pub visible_range_cached: Option<(usize, usize)>,
 
     // Search
     pub search_query: String,
@@ -152,6 +155,9 @@ impl PanelSnapshot {
             folders_position: app.folders_position,
             scroll_offset_y: app.scroll_offset_y,
             scroll_to_selected: app.scroll_to_selected,
+            visible_index_range: app.visible_index_range,
+            visible_paths_cache: app.visible_paths_cache.clone(),
+            visible_range_cached: app.visible_range_cached,
             search_query: app.search_query.clone(),
             selected_thumbnail: app.selected_thumbnail.clone(),
             selected_metadata: app.selected_metadata.clone(),
@@ -192,6 +198,9 @@ impl PanelSnapshot {
         app.folders_position = self.folders_position;
         app.scroll_offset_y = self.scroll_offset_y;
         app.scroll_to_selected = self.scroll_to_selected;
+        app.visible_index_range = self.visible_index_range;
+        app.visible_paths_cache = self.visible_paths_cache;
+        app.visible_range_cached = self.visible_range_cached;
         app.search_query = self.search_query;
         app.selected_thumbnail = self.selected_thumbnail;
         app.selected_metadata = self.selected_metadata;
@@ -238,6 +247,12 @@ impl PanelSnapshot {
         std::mem::swap(&mut self.folders_position, &mut app.folders_position);
         std::mem::swap(&mut self.scroll_offset_y, &mut app.scroll_offset_y);
         std::mem::swap(&mut self.scroll_to_selected, &mut app.scroll_to_selected);
+        std::mem::swap(&mut self.visible_index_range, &mut app.visible_index_range);
+        std::mem::swap(&mut self.visible_paths_cache, &mut app.visible_paths_cache);
+        std::mem::swap(
+            &mut self.visible_range_cached,
+            &mut app.visible_range_cached,
+        );
         std::mem::swap(&mut self.search_query, &mut app.search_query);
         std::mem::swap(&mut self.selected_thumbnail, &mut app.selected_thumbnail);
         std::mem::swap(&mut self.selected_metadata, &mut app.selected_metadata);

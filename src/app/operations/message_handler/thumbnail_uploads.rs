@@ -1,6 +1,6 @@
 use crate::app::state::ImageViewerApp;
 use crate::ui::cache::{
-    FxHashSet, DEFAULT_DYNAMIC_RGBA_BUDGET_BYTES, MAX_DYNAMIC_TEXTURE_CACHE_ITEMS,
+    DEFAULT_DYNAMIC_RGBA_BUDGET_BYTES, MAX_DYNAMIC_TEXTURE_CACHE_ITEMS,
     MIN_DYNAMIC_TEXTURE_CACHE_ITEMS,
 };
 use eframe::egui;
@@ -100,15 +100,7 @@ impl ImageViewerApp {
         let incoming_start = Instant::now();
         let mut not_found_failures: Vec<PathBuf> = Vec::new();
         let mut successful_thumb_paths: Vec<PathBuf> = Vec::new();
-        let eviction_visible: Option<FxHashSet<PathBuf>> =
-            self.visible_index_range.and_then(|(min_vis, max_vis)| {
-                let items = &self.items;
-                if items.is_empty() {
-                    return None;
-                }
-                let max_vis = max_vis.min(items.len().saturating_sub(1));
-                Some((min_vis..=max_vis).map(|i| items[i].path.clone()).collect())
-            });
+        let eviction_visible = self.visible_grid_paths_snapshot();
 
         let visible_texture_keep = self.current_dynamic_texture_keep_count();
         if let Some(visible_paths) = eviction_visible.as_ref() {
