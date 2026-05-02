@@ -215,15 +215,30 @@ impl ImageViewerApp {
             return;
         }
 
-        if self.cache_manager.start_folder_preview_loading(path.clone()) {
-            let request = crate::workers::folder_preview_worker::FolderPreviewRequest {
-                path,
-                size_px: self.effective_folder_preview_request_size_px(),
-            };
-            if let Err(err) = self.folder_preview_sender.try_send(request) {
+        if !self.cache_manager.start_folder_preview_loading(path.clone()) {
+            // Loading-set rejection (full or duplicate). Don't poison the
+            // cooldown — the renderer must be able to retry next frame.
+            return;
+        }
+
+        let request = crate::workers::folder_preview_worker::FolderPreviewRequest {
+            path: path.clone(),
+            size_px: self.effective_folder_preview_request_size_px(),
+        };
+        match self.folder_preview_sender.try_send(request) {
+            Ok(()) => {
+                // Only NOW the request is committed to the worker pipeline —
+                // record the cooldown to suppress redundant per-frame requests
+                // until the upload completes (or the cooldown window expires).
+                self.cache_manager
+                    .note_folder_preview_request_sent(&path);
+            }
+            Err(err) => {
                 let request = err.into_inner();
                 self.cache_manager
                     .finish_folder_preview_loading(&request.path);
+                // Channel full — leave the cooldown untouched so the next
+                // frame can retry as soon as a worker drains the queue.
             }
         }
     }
