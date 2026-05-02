@@ -484,20 +484,26 @@ impl CacheManager {
     }
 
     /// Returns true if a request for `path` should be skipped because another
-    /// request was issued within `FOLDER_PREVIEW_REQUEST_COOLDOWN`. Otherwise
-    /// records `now` as the latest request timestamp and returns false.
-    /// Used to break the render-loop thrash when the LRU cap is smaller than
-    /// the directory's folder set (path keeps getting evicted and re-requested
-    /// every frame, leaking GPU staging memory).
+    /// request was successfully enqueued within `FOLDER_PREVIEW_REQUEST_COOLDOWN`.
+    /// IMPORTANT: this is a pure read — it does NOT poison the cooldown when
+    /// the caller cannot enqueue (bounded worker channel full, loading set
+    /// rejection, etc.). Callers MUST invoke [`note_folder_preview_request_sent`]
+    /// after a request actually reaches the worker.
     pub fn should_throttle_folder_preview_request(&mut self, path: &PathBuf) -> bool {
         let now = Instant::now();
         if let Some(last) = self.folder_preview_request_debounce.get(path) {
-            if now.duration_since(*last) < FOLDER_PREVIEW_REQUEST_COOLDOWN {
-                return true;
-            }
+            return now.duration_since(*last) < FOLDER_PREVIEW_REQUEST_COOLDOWN;
         }
-        self.folder_preview_request_debounce.put(path.clone(), now);
         false
+    }
+
+    /// Records the timestamp of a successfully-enqueued folder preview request.
+    /// Pair with [`should_throttle_folder_preview_request`] — only call once the
+    /// path is committed to the worker pipeline so transient failures (channel
+    /// full, loading-set rejection) don't lock the path out for 2s.
+    pub fn note_folder_preview_request_sent(&mut self, path: &PathBuf) {
+        self.folder_preview_request_debounce
+            .put(path.clone(), Instant::now());
     }
 
     /// Starts loading a folder preview (returns false if too many loads in progress)
