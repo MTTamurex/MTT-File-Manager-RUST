@@ -116,7 +116,12 @@ pub(in crate::app) struct AppBootstrap {
 }
 
 pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
-    const THUMBNAIL_RESULT_CHANNEL_CAPACITY: usize = 2048;
+    // Worker results carry decoded RGBA buffers. At the largest thumbnail
+    // bucket (1024px), a single result can be ~4 MiB, so a large channel turns
+    // into hidden working-set growth outside the visible pending/RGBA caches.
+    // Keep this small enough to provide backpressure to decoder workers while
+    // still allowing the UI upload loop to batch a few frames worth of results.
+    const THUMBNAIL_RESULT_CHANNEL_CAPACITY: usize = 32;
 
     if let Err(error) = crate::infrastructure::virtual_drive_config::ensure_config_exists() {
         log::warn!(
@@ -220,9 +225,8 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
     let (meta_req_tx, meta_res_rx) = spawn_metadata_worker(ctx);
     let (live_size_req_tx, live_size_res_rx) = spawn_live_file_size_worker(ctx);
     let folder_composer = Arc::new(FolderComposer::new());
-    let folder_preview_trace = Arc::new(
-        crate::workers::folder_preview_worker::FolderPreviewTraceCounters::default(),
-    );
+    let folder_preview_trace =
+        Arc::new(crate::workers::folder_preview_worker::FolderPreviewTraceCounters::default());
     // Compose the custom empty folder icon ONCE before sharing the composer.
     let custom_folder_icon = folder_composer.compose_empty();
     let (folder_preview_tx, folder_preview_res_rx) = spawn_folder_preview_workers(

@@ -85,6 +85,7 @@ pub(super) fn process_thumbnail_request(
                     width: 0,
                     height: 0,
                     generation: req_gen,
+                    priority: req_priority,
                     not_found: true,
                 },
             );
@@ -116,6 +117,7 @@ pub(super) fn process_thumbnail_request(
                     width: 0,
                     height: 0,
                     generation: req_gen,
+                    priority: req_priority,
                     not_found: is_permanent_failure(path),
                 },
             );
@@ -174,6 +176,7 @@ pub(super) fn process_thumbnail_request(
                 width: w,
                 height: h,
                 generation: req_gen,
+                priority: req_priority,
                 not_found: false,
             },
         );
@@ -197,6 +200,7 @@ pub(super) fn process_thumbnail_request(
                         width: 0,
                         height: 0,
                         generation: req_gen,
+                        priority: req_priority,
                         not_found: true,
                     },
                 );
@@ -219,6 +223,7 @@ pub(super) fn process_thumbnail_request(
                         width: 0,
                         height: 0,
                         generation: req_gen,
+                        priority: req_priority,
                         not_found: false,
                     },
                 );
@@ -243,6 +248,7 @@ pub(super) fn process_thumbnail_request(
                     width: 0,
                     height: 0,
                     generation: req_gen,
+                    priority: req_priority,
                     not_found: true,
                 },
             );
@@ -285,6 +291,7 @@ pub(super) fn process_thumbnail_request(
                     width: 0,
                     height: 0,
                     generation: req_gen,
+                    priority: req_priority,
                     not_found: false,
                 },
             );
@@ -361,6 +368,7 @@ pub(super) fn process_thumbnail_request(
             width: w,
             height: h,
             generation: req_gen,
+            priority: req_priority,
             not_found: permanently_failed,
         },
     );

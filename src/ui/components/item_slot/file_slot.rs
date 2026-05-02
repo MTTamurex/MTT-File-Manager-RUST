@@ -15,23 +15,34 @@ pub(super) fn render_file_slot<O: ItemSlotOperations>(
 
     // Thumbnail loading for media files (disabled in Recycle Bin and system folders)
     if is_media_file && !ctx.is_recycle_bin_view && !ctx.skip_folder_media_reads {
-        let desired_thumbnail_bucket = crate::workers::thumbnail::processing::get_bucket_size(
-            (ctx.thumbnail_size.max(1.0) * ui.ctx().pixels_per_point().max(1.0)).ceil() as u32,
-        );
-        let cached_max_dim = ctx
-            .texture_cache
-            .peek(&item.path)
-            .map(|texture| texture.size()[0].max(texture.size()[1]) as u32);
-        let needs_bucket_refresh = cached_max_dim.is_some_and(|dim| {
-            dim > desired_thumbnail_bucket
-                || (dim < desired_thumbnail_bucket && matches!(dim, 128 | 256 | 512 | 1024))
-        });
-        let has_texture = cached_max_dim.is_some();
+        // CRITICAL: compute the bucket EXACTLY the way `request_thumbnail_load_internal`
+        // does. Previously the slot used `ctx.thumbnail_size as f32 * ppp` (preserving
+        // fractional part), while internal used `(ctx.thumbnail_size as u32) as f32 * ppp`
+        // (truncating first). When `thumbnail_size` had a fractional part that pushed
+        // the scaled value across a bucket boundary, the slot believed it had requested
+        // a higher bucket than internal actually did — every frame the slot saw
+        // attempted < desired and re-issued the request, producing an infinite extraction
+        // loop and continuous `ctx.load_texture` calls that leak GPU staging memory.
+        let request_size_px = (ctx.thumbnail_size as u32).max(1);
+        let effective_size_px =
+            ((request_size_px as f32) * ui.ctx().pixels_per_point().max(1.0)).ceil() as u32;
+        let desired_thumbnail_bucket =
+            crate::workers::thumbnail::processing::get_bucket_size(effective_size_px);
+        let has_texture = ctx.texture_cache.peek(&item.path).is_some();
+        let attempted_bucket = ctx.attempted_thumbnail_bucket.get(&item.path).copied();
+        let needs_bucket_refresh = match attempted_bucket {
+            Some(b) => b < desired_thumbnail_bucket,
+            None => false,
+        };
         let is_loading = ctx.loading_set.contains(&item.path);
         let is_failed = ctx.failed_thumbnails.contains(&item.path);
         let is_pending_upload = ctx.pending_upload_set.contains(&item.path);
 
         const MAX_THUMBNAIL_REQUESTS_PER_FRAME: usize = 24;
+        // Allow a request whenever the texture is missing or the cached bucket
+        // is too small. Per-path cooldown in `should_throttle_thumbnail_request`
+        // (2s) prevents the upload->evict->re-request feedback loop after the
+        // texture cache is at capacity.
         if (!has_texture || needs_bucket_refresh)
             && !is_loading
             && !is_failed

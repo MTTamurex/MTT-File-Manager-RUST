@@ -205,6 +205,7 @@ pub struct ListViewContext<'a> {
     pub is_onedrive_folder: bool,
     pub global_search_active: bool,
     pub texture_cache: &'a mut lru::LruCache<PathBuf, egui::TextureHandle>,
+    pub attempted_thumbnail_bucket: &'a rustc_hash::FxHashMap<PathBuf, u32>,
     pub loading_set: &'a mut FxHashSet<PathBuf>,
     pub loading_icons: &'a mut FxHashSet<PathBuf>,
     /// Set of icons that failed extraction (prevents infinite retry)

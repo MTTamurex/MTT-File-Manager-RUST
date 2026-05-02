@@ -190,6 +190,38 @@ impl ImageViewerApp {
                 continue;
             }
 
+            if let Some(existing) = self
+                .pending_thumbnails
+                .iter_mut()
+                .find(|pending| pending.path == thumbnail_data.path)
+            {
+                let existing_dim = existing.width.max(existing.height);
+                let incoming_dim = thumbnail_data.width.max(thumbnail_data.height);
+                if thumbnail_data.priority < existing.priority {
+                    existing.priority = thumbnail_data.priority;
+                }
+                if incoming_dim > existing_dim {
+                    *existing = thumbnail_data;
+                }
+                continue;
+            }
+
+            let already_cached = self
+                .cache_manager
+                .texture_cache
+                .peek(&thumbnail_data.path)
+                .is_some_and(|texture| {
+                    let size = texture.size();
+                    let cached_dim = size[0].max(size[1]) as u32;
+                    cached_dim >= thumbnail_data.width.max(thumbnail_data.height)
+                });
+            if already_cached {
+                self.cache_manager
+                    .thumbnail_trace
+                    .record_upload_already_cached();
+                continue;
+            }
+
             while self.pending_thumbnails.len() >= dynamic_pending_limit {
                 // Prefer removing off-screen items to keep visible ones alive. If every
                 // pending item is visible, still fall back to FIFO so the decoded RGBA
@@ -572,6 +604,10 @@ impl ImageViewerApp {
                 let width = thumbnail_data.width;
                 let height = thumbnail_data.height;
                 let rgba_data = thumbnail_data.image_data;
+                let is_interactive = matches!(
+                    thumbnail_data.priority,
+                    crate::infrastructure::io_priority::IOPriority::Interactive
+                );
 
                 // Skip upload for paths pending deletion — the item was removed
                 // externally and the texture would be immediately stale.
@@ -589,6 +625,36 @@ impl ImageViewerApp {
                     .as_ref()
                     .is_some_and(|selected_file| selected_file.path == path);
 
+                let is_visible_or_selected = is_interactive
+                    || is_selected
+                    || eviction_visible
+                        .as_ref()
+                        .is_some_and(|visible_paths| visible_paths.contains(&path));
+                if !is_visible_or_selected
+                    && self.cache_manager.texture_cache.len()
+                        >= self.cache_manager.texture_cache.cap().get()
+                {
+                    self.cache_manager.finish_pending_upload(&path);
+                    continue;
+                }
+
+                let already_cached =
+                    self.cache_manager
+                        .texture_cache
+                        .peek(&path)
+                        .is_some_and(|texture| {
+                            let size = texture.size();
+                            let cached_dim = size[0].max(size[1]) as u32;
+                            cached_dim >= width.max(height)
+                        });
+                if already_cached {
+                    self.cache_manager
+                        .thumbnail_trace
+                        .record_upload_already_cached();
+                    self.cache_manager.finish_pending_upload(&path);
+                    continue;
+                }
+
                 let texture_name = path.to_string_lossy().into_owned();
 
                 let texture = ctx.load_texture(
@@ -600,13 +666,20 @@ impl ImageViewerApp {
                     egui::TextureOptions::LINEAR,
                 );
 
+                self.cache_manager.thumbnail_trace.record_upload(&path);
                 self.cache_manager.finish_pending_upload(&path);
-                if let Some(visible_paths) = eviction_visible.as_ref() {
-                    self.cache_manager.promote_visible(visible_paths);
-                }
                 self.cache_manager
                     .put_rgba_data(path.clone(), rgba_data, width, height);
-                self.cache_manager.put_thumbnail(path, texture.clone());
+                if let Some(visible_paths) = eviction_visible.as_ref() {
+                    self.cache_manager.promote_visible(visible_paths);
+                    self.cache_manager.put_thumbnail_preserving_visible(
+                        path,
+                        texture.clone(),
+                        visible_paths,
+                    );
+                } else {
+                    self.cache_manager.put_thumbnail(path, texture.clone());
+                }
 
                 if is_selected {
                     self.selected_thumbnail = Some(texture);
@@ -742,9 +815,7 @@ impl ImageViewerApp {
                         .peek(&data.path)
                         .map(|existing| existing.size());
                     match cached_size {
-                        Some(size)
-                            if size == [data.width as usize, data.height as usize] =>
-                        {
+                        Some(size) if size == [data.width as usize, data.height as usize] => {
                             folder_uploads += 1;
                             continue;
                         }

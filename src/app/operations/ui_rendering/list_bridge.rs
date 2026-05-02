@@ -282,6 +282,7 @@ impl ImageViewerApp {
             is_onedrive_folder,
             global_search_active: self.global_search.active,
             texture_cache: &mut self.cache_manager.texture_cache,
+            attempted_thumbnail_bucket: &self.cache_manager.attempted_thumbnail_bucket,
             loading_set: &mut self.cache_manager.loading_set,
             loading_icons: &mut self.loading_icons,
             failed_icons: &self.failed_icons,

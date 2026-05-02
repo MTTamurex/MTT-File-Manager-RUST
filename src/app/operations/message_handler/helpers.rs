@@ -53,6 +53,8 @@ impl ImageViewerApp {
 
         self.thumbnail_queue.remove_paths(&remove_paths);
         self.cache_manager.texture_cache.pop(&cleaned);
+        self.cache_manager
+            .forget_attempted_thumbnail_bucket(&cleaned);
         self.cache_manager.loading_set.remove(&cleaned);
         self.cache_manager.pop_rgba_data(&cleaned);
         self.cache_manager.failed_thumbnails.pop(&cleaned);

@@ -266,7 +266,7 @@ impl ImageViewerApp {
         removed
     }
 
-    pub fn log_memory_snapshot(&self, label: &str) {
+    pub fn log_memory_snapshot(&mut self, label: &str) {
         if !memory_trace_enabled() {
             return;
         }
@@ -325,9 +325,10 @@ impl ImageViewerApp {
         let pinned_n = self.pinned_folders.len();
         let dirty_registry_n = self.directory_dirty_registry.len();
         let folder_preview_trace = self.cache_manager.folder_preview_trace.take_snapshot();
+        let thumbnail_trace = self.cache_manager.thumbnail_trace.take_snapshot();
 
         log::info!(
-            "[MEM-TRACE:{label}] ws={:.1}MB private={:.1}MB items={} all_items={} tabs={} dir_cache={}/{} visible_items={} textures={}/{} texture_target={} folder_tex={}/{} folder_target={} rgba_items={} rgba={:.1}/{:.1}MB pending={} pending_rgba={:.1}MB pending_set={} loading={} folder_loading={} failed_thumbs={} queue={} vram_est={:.1}MB icons={} ext_icons={} drive_icons={} failed_drive_icons={} loading_drive_icons={} gifs={} gif_rgba={:.1}MB visible={:?} thumb_bucket={} folder_bucket={} frame_avg={:.1}ms frame_peak={:.1}ms upload_budget={:.1}ms fs_size={}/{} fs_batch={}/{} fs_reval={} fs_inval_ep={} live_size={}/{} meta={}/{} scanned={} failed_ico={} loading_ico={} del_date={} vis_paths={} mtime_re={} multisel={} drag={} pinned={} dirty_reg={} fp_req={} fp_dup={} fp_dbnc={} fp_inval={} fp_upl={} fp_upl_none={} fp_upl_diff={} fp_evict={} fp_db_w={} fp_comp={} fp_sample={:?}",
+            "[MEM-TRACE:{label}] ws={:.1}MB private={:.1}MB items={} all_items={} tabs={} dir_cache={}/{} visible_items={} textures={}/{} texture_target={} folder_tex={}/{} folder_target={} rgba_items={} rgba={:.1}/{:.1}MB pending={} pending_rgba={:.1}MB pending_set={} loading={} folder_loading={} failed_thumbs={} queue={} img_rx={} vram_est={:.1}MB icons={} ext_icons={} drive_icons={} failed_drive_icons={} loading_drive_icons={} gifs={} gif_rgba={:.1}MB visible={:?} thumb_bucket={} folder_bucket={} frame_avg={:.1}ms frame_peak={:.1}ms upload_budget={:.1}ms fs_size={}/{} fs_batch={}/{} fs_reval={} fs_inval_ep={} live_size={}/{} meta={}/{} scanned={} failed_ico={} loading_ico={} del_date={} vis_paths={} mtime_re={} multisel={} drag={} pinned={} dirty_reg={} fp_req={} fp_dup={} fp_dbnc={} fp_inval={} fp_upl={} fp_upl_none={} fp_upl_diff={} fp_evict={} fp_db_w={} fp_comp={} fp_sample={:?} th_req={} th_dupL={} th_dupP={} th_pdel={} th_ram={} th_disp={} th_upl={} th_upl_dup={} th_evict={} th_uniq={} th_top={:?} th_req_sample={:?} th_upl_sample={:?}",
             bytes_to_mb(process.working_set_bytes),
             bytes_to_mb(process.private_usage_bytes),
             self.items.len(),
@@ -352,6 +353,7 @@ impl ImageViewerApp {
             self.cache_manager.folder_preview_loading.len(),
             self.cache_manager.failed_thumbnails.len(),
             self.thumbnail_queue.pending_count(),
+            self.image_receiver.len(),
             bytes_to_mb(vram_estimate as u64),
             icon_items,
             extension_icon_items,
@@ -397,6 +399,19 @@ impl ImageViewerApp {
             folder_preview_trace.db_writes,
             folder_preview_trace.composes,
             folder_preview_trace.sample_path,
+            thumbnail_trace.req_total,
+            thumbnail_trace.req_dup_loading,
+            thumbnail_trace.req_dup_pending,
+            thumbnail_trace.req_pending_deletion,
+            thumbnail_trace.ram_cache_hit,
+            thumbnail_trace.worker_dispatch,
+            thumbnail_trace.uploads,
+            thumbnail_trace.upload_already_cached,
+            thumbnail_trace.upload_evictions,
+            thumbnail_trace.unique_request_paths,
+            thumbnail_trace.top_paths,
+            thumbnail_trace.sample_request_path,
+            thumbnail_trace.sample_upload_path,
         );
     }
 

@@ -107,7 +107,18 @@ impl ImageViewerApp {
         priority: ThumbnailPriority,
         modified: u64,
     ) {
+        self.cache_manager.thumbnail_trace.record_request(&path);
+
         let effective_size_px = self.effective_thumbnail_request_size_px(size_px);
+        // Record the bucket we are about to request so the slot renderer
+        // does NOT re-request this path once the worker returns. The slot
+        // compares against this value, not the actual cached texture
+        // dimensions (which can be smaller than the bucket for naturally
+        // small source images and would otherwise loop forever).
+        let attempted_bucket =
+            crate::workers::thumbnail::processing::get_bucket_size(effective_size_px);
+        self.cache_manager
+            .note_attempted_thumbnail_bucket(&path, attempted_bucket);
 
         // When rendering the unfocused dual-panel pane, use the active generation
         // accepted by the shared thumbnail workers while preserving caller priority.
@@ -127,6 +138,34 @@ impl ImageViewerApp {
             .pending_deletions
             .contains_key(&path)
         {
+            self.cache_manager.thumbnail_trace.record_pending_deletion();
+            return;
+        }
+
+        // Caller-side dedup signals — these reflect requests issued for paths
+        // that are already in flight either at the worker side or pending GPU
+        // upload. They should never be hot in idle.
+        if self.cache_manager.loading_set.contains(&path) {
+            self.cache_manager.thumbnail_trace.record_dup_loading();
+        }
+        if self.cache_manager.pending_upload_set.contains(&path) {
+            self.cache_manager.thumbnail_trace.record_dup_pending();
+        }
+
+        // Per-path cooldown — defends against render-loop thrash when a freshly
+        // uploaded thumbnail texture is somehow popped from the LRU between
+        // frames (e.g. visible LRU rotation, generation-mismatch discards,
+        // pending-queue evictions). Without this, the slot re-requests every
+        // frame, the worker re-extracts, and each `ctx.load_texture` upload
+        // accumulates GPU staging memory the OS releases more slowly than we
+        // allocate it — producing a steady working-set leak even when the
+        // texture cache cap is technically large enough to hold every visible
+        // path. Mirrors the same fix applied to folder previews.
+        if self.cache_manager.should_throttle_thumbnail_request(&path) {
+            // Caller (file_slot/list_view) inserted into loading_set BEFORE
+            // queueing the deferred action. Remove it so the next frame's
+            // slot guard does not see is_loading=true forever.
+            self.cache_manager.finish_loading(&path);
             return;
         }
 
@@ -141,6 +180,7 @@ impl ImageViewerApp {
 
             // Only reuse RAM cache if it meets or exceeds the requested size
             if cached_max_dim >= effective_size_px {
+                self.cache_manager.thumbnail_trace.record_ram_cache_hit();
                 // Data is in RAM cache - add directly to pending_thumbnails for GPU upload
                 // No disk I/O needed!
                 //
@@ -150,12 +190,14 @@ impl ImageViewerApp {
                 // reaching the 200-entry cap and blocking ALL new thumbnail loads.
                 self.cache_manager.finish_loading(&path);
                 self.cache_manager.start_pending_upload(path.clone());
+                self.cache_manager.note_thumbnail_request_sent(&path);
                 self.pending_thumbnails.push_back(ThumbnailData {
                     path,
                     image_data: rgba_data,
                     width,
                     height,
                     generation: effective_gen,
+                    priority: effective_priority,
                     not_found: false,
                 });
                 self.trim_pending_thumbnail_uploads_to_limit();
@@ -167,6 +209,8 @@ impl ImageViewerApp {
         // Now all thumbnails are loaded, but with intelligent prioritization
 
         // Not in RAM cache - send to worker (will read from disk cache or generate)
+        self.cache_manager.thumbnail_trace.record_worker_dispatch();
+        self.cache_manager.note_thumbnail_request_sent(&path);
         if let Some(index) = directory_index {
             self.thumbnail_queue.push_with_index(
                 path,
@@ -215,7 +259,10 @@ impl ImageViewerApp {
             return;
         }
 
-        if !self.cache_manager.start_folder_preview_loading(path.clone()) {
+        if !self
+            .cache_manager
+            .start_folder_preview_loading(path.clone())
+        {
             // Loading-set rejection (full or duplicate). Don't poison the
             // cooldown — the renderer must be able to retry next frame.
             return;
@@ -230,8 +277,7 @@ impl ImageViewerApp {
                 // Only NOW the request is committed to the worker pipeline —
                 // record the cooldown to suppress redundant per-frame requests
                 // until the upload completes (or the cooldown window expires).
-                self.cache_manager
-                    .note_folder_preview_request_sent(&path);
+                self.cache_manager.note_folder_preview_request_sent(&path);
             }
             Err(err) => {
                 let request = err.into_inner();

@@ -1,5 +1,4 @@
 use super::{GridViewContext, GridViewOperations};
-use crate::ui::views::ViewportTracker;
 
 pub(super) fn flush_pending_operations(
     ctx: &mut GridViewContext,
@@ -30,7 +29,7 @@ pub(super) fn process_visible_range_prefetch(
     ctx: &mut GridViewContext,
     cols: usize,
     visible_rows_range: Option<(usize, usize)>,
-    is_scrolling: bool,
+    _is_scrolling: bool,
     ops: &mut dyn GridViewOperations,
 ) {
     if let Some((vis_min, vis_max)) = visible_rows_range {
@@ -40,42 +39,6 @@ pub(super) fn process_visible_range_prefetch(
             let last_visible_index = (vis_max * cols).min(count).saturating_sub(1);
 
             *ctx.visible_index_range = Some((first_visible_index, last_visible_index));
-            let tracker = ViewportTracker {
-                first_visible_index,
-                last_visible_index,
-                prefetch_rows: ctx.prefetch_rows,
-                columns: cols,
-            };
-
-            if is_scrolling {
-                return;
-            }
-
-            let (prefetch_start, prefetch_end) = tracker.get_prefetch_range(count);
-
-            for index in prefetch_start..prefetch_end {
-                if index >= count {
-                    break;
-                }
-                if tracker.is_visible(index) {
-                    continue;
-                }
-                let item = &ctx.items[index];
-                if !item.is_dir
-                    && item.is_media()
-                    && !ctx.texture_cache.contains(&item.path)
-                    && !ctx.loading_set.contains(&item.path)
-                    && !ctx.pending_upload_set.contains(&item.path)
-                {
-                    ctx.loading_set.insert(item.path.clone());
-                    ops.request_thumbnail_prefetch_with_index(
-                        item.path.clone(),
-                        ctx.thumbnail_size as u32,
-                        index,
-                        item.modified,
-                    );
-                }
-            }
 
             let mut idle_visible_items = Vec::new();
             for index in first_visible_index..=last_visible_index {

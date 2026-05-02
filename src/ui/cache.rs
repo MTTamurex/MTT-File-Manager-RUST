@@ -38,6 +38,131 @@ const FOLDER_PREVIEW_REQUEST_COOLDOWN: Duration = Duration::from_millis(2000);
 /// Bounded LRU for the cooldown map; ~96B/entry → ~400KB ceiling.
 const FOLDER_PREVIEW_DEBOUNCE_CAPACITY: usize = 4096;
 
+/// Per-path cooldown for `request_thumbnail_load_internal`. Mirrors the
+/// folder-preview cooldown: an evicted thumbnail texture would otherwise be
+/// re-requested every render frame, dispatching new worker jobs whose
+/// uploaded textures pop the previously visible ones from the LRU. Each
+/// `ctx.load_texture` accumulates GPU staging that the OS releases more
+/// slowly than we allocate it, producing a steady working-set leak even
+/// when the cache cap is technically large enough to hold every visible
+/// path.
+const THUMBNAIL_REQUEST_COOLDOWN: Duration = Duration::from_millis(2000);
+/// Bounded LRU for the thumbnail cooldown map; ~96B/entry → ~400KB ceiling.
+const THUMBNAIL_DEBOUNCE_CAPACITY: usize = 4096;
+
+/// UI-thread counters for thumbnail pipeline diagnostics. Identical purpose
+/// to `FolderPreviewTraceCounters` but plain (non-atomic) since every site
+/// runs on the UI thread under `&mut CacheManager`.
+#[derive(Default)]
+pub struct ThumbnailTraceCounters {
+    pub req_total: u64,
+    pub req_dup_loading: u64,
+    pub req_dup_pending: u64,
+    pub req_pending_deletion: u64,
+    pub ram_cache_hit: u64,
+    pub worker_dispatch: u64,
+    pub uploads: u64,
+    pub upload_already_cached: u64,
+    pub upload_evictions: u64,
+    pub sample_request_path: Option<PathBuf>,
+    pub sample_upload_path: Option<PathBuf>,
+    /// path -> count for the request hot-set so we can identify the actual
+    /// source paths that are looping.
+    pub request_freq: rustc_hash::FxHashMap<PathBuf, u64>,
+}
+
+#[derive(Clone, Default)]
+pub struct ThumbnailTraceSnapshot {
+    pub req_total: u64,
+    pub req_dup_loading: u64,
+    pub req_dup_pending: u64,
+    pub req_pending_deletion: u64,
+    pub ram_cache_hit: u64,
+    pub worker_dispatch: u64,
+    pub uploads: u64,
+    pub upload_already_cached: u64,
+    pub upload_evictions: u64,
+    pub sample_request_path: Option<PathBuf>,
+    pub sample_upload_path: Option<PathBuf>,
+    pub unique_request_paths: usize,
+    pub top_paths: Vec<(PathBuf, u64)>,
+}
+
+impl ThumbnailTraceCounters {
+    pub fn record_request(&mut self, path: &PathBuf) {
+        self.req_total = self.req_total.saturating_add(1);
+        if self.sample_request_path.is_none() {
+            self.sample_request_path = Some(path.clone());
+        }
+        // Bound the map: if it grows past 256 unique paths in a single
+        // sampling window, just stop counting new ones — the looping ones
+        // will already be captured.
+        if self.request_freq.len() < 256 || self.request_freq.contains_key(path) {
+            *self.request_freq.entry(path.clone()).or_insert(0) += 1;
+        }
+    }
+    pub fn record_dup_loading(&mut self) {
+        self.req_dup_loading = self.req_dup_loading.saturating_add(1);
+    }
+    pub fn record_dup_pending(&mut self) {
+        self.req_dup_pending = self.req_dup_pending.saturating_add(1);
+    }
+    pub fn record_pending_deletion(&mut self) {
+        self.req_pending_deletion = self.req_pending_deletion.saturating_add(1);
+    }
+    pub fn record_ram_cache_hit(&mut self) {
+        self.ram_cache_hit = self.ram_cache_hit.saturating_add(1);
+    }
+    pub fn record_worker_dispatch(&mut self) {
+        self.worker_dispatch = self.worker_dispatch.saturating_add(1);
+    }
+    pub fn record_upload(&mut self, path: &PathBuf) {
+        self.uploads = self.uploads.saturating_add(1);
+        if self.sample_upload_path.is_none() {
+            self.sample_upload_path = Some(path.clone());
+        }
+    }
+    pub fn record_upload_already_cached(&mut self) {
+        self.upload_already_cached = self.upload_already_cached.saturating_add(1);
+    }
+    pub fn record_upload_eviction(&mut self) {
+        self.upload_evictions = self.upload_evictions.saturating_add(1);
+    }
+    pub fn take_snapshot(&mut self) -> ThumbnailTraceSnapshot {
+        // Compute top-3 by frequency before clearing.
+        let mut entries: Vec<(PathBuf, u64)> = self.request_freq.drain().collect();
+        entries.sort_by(|a, b| b.1.cmp(&a.1));
+        let unique_request_paths = entries.len();
+        entries.truncate(3);
+
+        let snap = ThumbnailTraceSnapshot {
+            req_total: self.req_total,
+            req_dup_loading: self.req_dup_loading,
+            req_dup_pending: self.req_dup_pending,
+            req_pending_deletion: self.req_pending_deletion,
+            ram_cache_hit: self.ram_cache_hit,
+            worker_dispatch: self.worker_dispatch,
+            uploads: self.uploads,
+            upload_already_cached: self.upload_already_cached,
+            upload_evictions: self.upload_evictions,
+            sample_request_path: self.sample_request_path.take(),
+            sample_upload_path: self.sample_upload_path.take(),
+            unique_request_paths,
+            top_paths: entries,
+        };
+        self.req_total = 0;
+        self.req_dup_loading = 0;
+        self.req_dup_pending = 0;
+        self.req_pending_deletion = 0;
+        self.ram_cache_hit = 0;
+        self.worker_dispatch = 0;
+        self.uploads = 0;
+        self.upload_already_cached = 0;
+        self.upload_evictions = 0;
+        snap
+    }
+}
+
 #[inline]
 fn nz_cache_size(size: usize, cache_name: &str) -> NonZeroUsize {
     if size == 0 {
@@ -77,12 +202,25 @@ pub struct CacheManager {
     /// frame by the renderer when the LRU cap is smaller than the directory's
     /// folder set. Bounded LRU keeps memory ceiling deterministic.
     folder_preview_request_debounce: LruCache<PathBuf, Instant>,
+    /// Per-path debounce for `request_thumbnail_load_internal` — pairs with
+    /// `THUMBNAIL_REQUEST_COOLDOWN`. Bounded LRU keeps memory ceiling
+    /// deterministic and behaves identically to `folder_preview_request_debounce`.
+    thumbnail_request_debounce: LruCache<PathBuf, Instant>,
     /// Set of paths that failed thumbnail extraction (LRU bounded to 1000)
     pub failed_thumbnails: LruCache<PathBuf, ()>,
     /// Set of paths received from worker but waiting for GPU upload
     pub pending_upload_set: FxHashSet<PathBuf>,
     pub(crate) folder_preview_trace:
         Arc<crate::workers::folder_preview_worker::FolderPreviewTraceCounters>,
+    pub(crate) thumbnail_trace: ThumbnailTraceCounters,
+    /// Tracks the bucket size we ASKED the worker to extract for a given
+    /// path, NOT the actual texture dimensions. Used by the slot renderer
+    /// to decide whether to re-request at a higher bucket. Comparing against
+    /// the cached texture's real dimensions caused infinite re-extraction
+    /// loops for images whose native size is smaller than the desired bucket
+    /// (e.g. a 256x256 PNG when the UI wants 512: worker keeps returning 256,
+    /// slot keeps re-requesting). Bounded to MAX_DYNAMIC_TEXTURE_CACHE_ITEMS.
+    pub attempted_thumbnail_bucket: rustc_hash::FxHashMap<PathBuf, u32>,
     /// PERFORMANCE: RAM cache for decoded RGBA data (Layer 2 - larger than VRAM cache)
     /// When a texture is evicted from VRAM, the RGBA data remains here for fast re-upload
     /// without needing disk I/O. This is critical for HDD performance during video playback.
@@ -102,7 +240,9 @@ impl CacheManager {
     }
 
     pub fn new_with_folder_preview_trace(
-        folder_preview_trace: Arc<crate::workers::folder_preview_worker::FolderPreviewTraceCounters>,
+        folder_preview_trace: Arc<
+            crate::workers::folder_preview_worker::FolderPreviewTraceCounters,
+        >,
     ) -> Self {
         Self {
             // Bounded default keeps enough history for smooth scrolling without runaway RAM.
@@ -124,9 +264,15 @@ impl CacheManager {
                 FOLDER_PREVIEW_DEBOUNCE_CAPACITY,
                 "folder_preview_request_debounce",
             )),
+            thumbnail_request_debounce: LruCache::new(nz_cache_size(
+                THUMBNAIL_DEBOUNCE_CAPACITY,
+                "thumbnail_request_debounce",
+            )),
             failed_thumbnails: LruCache::new(nz_cache_size(1000, "failed_thumbnails")),
             pending_upload_set: FxHashSet::default(),
             folder_preview_trace,
+            thumbnail_trace: ThumbnailTraceCounters::default(),
+            attempted_thumbnail_bucket: rustc_hash::FxHashMap::default(),
             rgba_data_cache: LruCache::new(nz_cache_size(
                 DEFAULT_RGBA_CACHE_ITEMS,
                 "rgba_data_cache",
@@ -148,7 +294,9 @@ impl CacheManager {
 
     pub fn with_config_and_folder_preview_trace(
         config: TextureCacheConfig,
-        folder_preview_trace: Arc<crate::workers::folder_preview_worker::FolderPreviewTraceCounters>,
+        folder_preview_trace: Arc<
+            crate::workers::folder_preview_worker::FolderPreviewTraceCounters,
+        >,
     ) -> Self {
         let rgba_cache_items = (config.max_size * 6 / 5).max(DEFAULT_RGBA_CACHE_ITEMS);
         let rgba_budget_bytes = (config.max_size * 1024 * 1024 / 2)
@@ -173,9 +321,15 @@ impl CacheManager {
                 FOLDER_PREVIEW_DEBOUNCE_CAPACITY,
                 "folder_preview_request_debounce",
             )),
+            thumbnail_request_debounce: LruCache::new(nz_cache_size(
+                THUMBNAIL_DEBOUNCE_CAPACITY,
+                "thumbnail_request_debounce",
+            )),
             failed_thumbnails: LruCache::new(nz_cache_size(1000, "failed_thumbnails")),
             pending_upload_set: FxHashSet::default(),
             folder_preview_trace,
+            thumbnail_trace: ThumbnailTraceCounters::default(),
+            attempted_thumbnail_bucket: rustc_hash::FxHashMap::default(),
             rgba_data_cache: LruCache::new(nz_cache_size(rgba_cache_items, "rgba_data_cache")),
             rgba_data_bytes: 0,
             max_rgba_data_bytes: rgba_budget_bytes,
@@ -196,7 +350,119 @@ impl CacheManager {
 
     /// Puts a thumbnail in the cache
     pub fn put_thumbnail(&mut self, path: PathBuf, texture: egui::TextureHandle) {
+        if self.texture_cache.contains(&path) {
+            self.thumbnail_trace.record_upload_already_cached();
+            self.texture_cache.put(path, texture);
+            return;
+        }
+
+        if self.texture_cache.len() >= self.texture_cache.cap().get() {
+            if let Some((old_path, _)) = self.texture_cache.pop_lru() {
+                // NOTE: Do NOT call forget_attempted_thumbnail_bucket here.
+                // Doing so clears the per-path request cooldown debounce,
+                // which immediately re-arms the slot to re-request the
+                // evicted thumbnail next frame, producing a feedback loop:
+                // upload -> evict -> forget cooldown -> slot re-requests ->
+                // upload -> evict ... draining GPU staging memory.
+                // The attempted_bucket map and cooldown are intentionally
+                // sticky; explicit invalidation paths (rename/delete/refresh)
+                // call forget_attempted_thumbnail_bucket directly.
+                self.pending_upload_set.remove(&old_path);
+            }
+            self.thumbnail_trace.record_upload_eviction();
+        }
+
         self.texture_cache.put(path, texture);
+    }
+
+    /// Puts a thumbnail while preserving visible textures when possible.
+    /// `LruCache::put` evicts the current LRU blindly; during thumbnail churn
+    /// that can evict a visible tile and immediately trigger another upload on
+    /// the next frame. This method first removes an offscreen LRU entry, then
+    /// restores any visible entries it had to walk past.
+    pub fn put_thumbnail_preserving_visible(
+        &mut self,
+        path: PathBuf,
+        texture: egui::TextureHandle,
+        visible_paths: &FxHashSet<PathBuf>,
+    ) {
+        if self.texture_cache.contains(&path) {
+            self.thumbnail_trace.record_upload_already_cached();
+            self.texture_cache.put(path, texture);
+            return;
+        }
+
+        if self.texture_cache.len() >= self.texture_cache.cap().get() {
+            let mut protected_entries = Vec::new();
+            let mut removed_offscreen = false;
+
+            while let Some((old_path, old_texture)) = self.texture_cache.pop_lru() {
+                if visible_paths.contains(&old_path) {
+                    protected_entries.push((old_path, old_texture));
+                } else {
+                    // See note in put_thumbnail: do NOT clear cooldown on
+                    // LRU eviction or the slot will re-request next frame.
+                    self.pending_upload_set.remove(&old_path);
+                    removed_offscreen = true;
+                    break;
+                }
+            }
+
+            for (old_path, old_texture) in protected_entries {
+                self.texture_cache.put(old_path, old_texture);
+            }
+
+            if removed_offscreen || self.texture_cache.len() >= self.texture_cache.cap().get() {
+                self.thumbnail_trace.record_upload_eviction();
+            }
+
+            if self.texture_cache.len() >= self.texture_cache.cap().get() {
+                if let Some((old_path, _)) = self.texture_cache.pop_lru() {
+                    // See note in put_thumbnail: do NOT clear cooldown here.
+                    self.pending_upload_set.remove(&old_path);
+                }
+            }
+        }
+
+        self.texture_cache.put(path, texture);
+    }
+
+    /// Records the bucket size that was requested from the worker for `path`.
+    /// The slot renderer uses this to decide whether a higher-resolution
+    /// re-extraction is needed, instead of comparing against the cached
+    /// texture's actual dimensions (which can be smaller than the bucket
+    /// when the source image is intrinsically small).
+    pub fn note_attempted_thumbnail_bucket(&mut self, path: &PathBuf, bucket: u32) {
+        // Defensive cap to prevent unbounded growth on degenerate workloads.
+        // The map is keyed by paths that exist or have been requested in the
+        // current session; the texture cache itself caps at
+        // MAX_DYNAMIC_TEXTURE_CACHE_ITEMS, so this is a safe upper bound.
+        if self.attempted_thumbnail_bucket.len() >= MAX_DYNAMIC_TEXTURE_CACHE_ITEMS * 2
+            && !self.attempted_thumbnail_bucket.contains_key(path)
+        {
+            self.attempted_thumbnail_bucket.clear();
+        }
+        let entry = self
+            .attempted_thumbnail_bucket
+            .entry(path.clone())
+            .or_insert(0);
+        if bucket > *entry {
+            *entry = bucket;
+        }
+    }
+
+    /// Returns the bucket size most recently requested for `path`, if any.
+    pub fn attempted_thumbnail_bucket_for(&self, path: &PathBuf) -> Option<u32> {
+        self.attempted_thumbnail_bucket.get(path).copied()
+    }
+
+    /// Forgets the attempted-bucket record for `path`. Callers must invoke
+    /// this whenever they pop the texture or otherwise force re-extraction
+    /// (rename/delete/refresh-button), so the slot renderer will request
+    /// fresh extraction with the desired bucket again.
+    pub fn forget_attempted_thumbnail_bucket(&mut self, path: &PathBuf) {
+        self.attempted_thumbnail_bucket.remove(path);
+        self.thumbnail_request_debounce.pop(path);
     }
 
     /// Touches all currently visible thumbnail-related entries so LRU eviction
@@ -341,6 +607,8 @@ impl CacheManager {
         self.pending_upload_set.clear();
         self.rgba_data_cache.clear();
         self.rgba_data_bytes = 0;
+        self.attempted_thumbnail_bucket.clear();
+        self.thumbnail_request_debounce.clear();
         // Note: folder_icon_texture and computer_icon are kept as they're singletons
     }
 
@@ -504,6 +772,34 @@ impl CacheManager {
     pub fn note_folder_preview_request_sent(&mut self, path: &PathBuf) {
         self.folder_preview_request_debounce
             .put(path.clone(), Instant::now());
+    }
+
+    /// Returns true if a `request_thumbnail_load_internal` call for `path`
+    /// should be skipped because another request was successfully committed
+    /// (worker dispatch or RAM-cache pending push) within
+    /// `THUMBNAIL_REQUEST_COOLDOWN`. Pure read — does NOT poison the cooldown
+    /// when the caller cannot enqueue.
+    pub fn should_throttle_thumbnail_request(&mut self, path: &PathBuf) -> bool {
+        let now = Instant::now();
+        if let Some(last) = self.thumbnail_request_debounce.get(path) {
+            return now.duration_since(*last) < THUMBNAIL_REQUEST_COOLDOWN;
+        }
+        false
+    }
+
+    /// Records the timestamp of a successfully-committed thumbnail request
+    /// (RAM-cache pending push or worker dispatch). Only call after the path
+    /// is in flight so transient failures don't lock the path out for 2s.
+    pub fn note_thumbnail_request_sent(&mut self, path: &PathBuf) {
+        self.thumbnail_request_debounce
+            .put(path.clone(), Instant::now());
+    }
+
+    /// Clears the cooldown entry for `path`. Callers MUST invoke this when the
+    /// path is invalidated (rename/delete/refresh-button) so the next request
+    /// is not silently throttled.
+    pub fn forget_thumbnail_request_cooldown(&mut self, path: &PathBuf) {
+        self.thumbnail_request_debounce.pop(path);
     }
 
     /// Starts loading a folder preview (returns false if too many loads in progress)
