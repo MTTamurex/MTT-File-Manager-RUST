@@ -186,6 +186,13 @@ impl GifManager {
         self.unload_except(None);
     }
 
+    pub fn stats(&self) -> (usize, usize) {
+        (
+            self.cache.len(),
+            self.running_total_bytes.load(Ordering::SeqCst),
+        )
+    }
+
     /// Periodic or manual cleanup of the GIF cache
     /// PERFORMANCE: Uses running_total_bytes for O(1) memory check instead of O(N) iteration
     pub fn cleanup(&mut self, force_all: bool) {

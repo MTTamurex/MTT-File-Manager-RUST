@@ -1,12 +1,11 @@
 //! Persistent disk cache for extension-based file icons.
 //!
 //! Stores raw RGBA pixel data per extension so that subsequent app launches
-//! can populate the `extension_cache` instantly without calling `SHGetFileInfoW`.
+//! can hydrate the `extension_cache` lazily without calling `SHGetFileInfoW`.
 //!
 //! File format per extension: `{ext}.rgba`
 //!   [width: u32 LE][height: u32 LE][rgba_pixels...]
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 const RGBA_HEADER_LEN: usize = 8;
@@ -73,63 +72,6 @@ impl IconDiskCache {
         Self { dir }
     }
 
-    /// Load ALL cached extension icons from disk.
-    /// Returns `HashMap<extension_lowercase, (rgba_pixels, width, height)>`.
-    /// Typically completes in <5ms for ~100 extensions (files are tiny, OS-cached).
-    pub fn load_all(&self) -> HashMap<String, (Vec<u8>, u32, u32)> {
-        let mut map = HashMap::with_capacity(128);
-        let entries = match std::fs::read_dir(&self.dir) {
-            Ok(e) => e,
-            Err(_) => return map,
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) != Some("rgba") {
-                continue;
-            }
-            let ext = match path.file_stem().and_then(|s| s.to_str()) {
-                Some(e) => e.to_lowercase(),
-                None => continue,
-            };
-
-            // If this extension maps to a different canonical form (e.g. sys→dll),
-            // the cached icon is stale (wrong icon from a pre-mapping session).
-            // Delete the file and skip — the worker will re-extract under the
-            // canonical key on the next run.
-            let canonical = crate::infrastructure::windows::icons::canonical_icon_ext(&ext);
-            if canonical != ext {
-                log::info!(
-                    "[IconDiskCache] Removing stale mapped icon {:?} (canonical={})",
-                    path,
-                    canonical,
-                );
-                let _ = std::fs::remove_file(&path);
-                continue;
-            }
-            if crate::infrastructure::windows::icons::requires_real_file_for_shared_icon(&ext) {
-                log::info!(
-                    "[IconDiskCache] Removing path-seeded icon cache {:?} (must be rebuilt from a real file)",
-                    path,
-                );
-                let _ = std::fs::remove_file(&path);
-                continue;
-            }
-            let Some((pixels, width, height)) = read_cache_file(&path).and_then(parse_cached_icon)
-            else {
-                let _ = std::fs::remove_file(&path);
-                continue;
-            };
-            map.insert(ext, (pixels, width, height));
-        }
-        if !map.is_empty() {
-            log::info!(
-                "[IconDiskCache] Loaded {} cached extension icons from disk",
-                map.len()
-            );
-        }
-        map
-    }
-
     /// Lazily load a single extension's cached icon from disk on demand.
     ///
     /// Returns `Some((pixels, width, height))` when a valid file exists for
@@ -145,7 +87,11 @@ impl IconDiskCache {
         if ext.is_empty() {
             return None;
         }
-        let canonical = crate::infrastructure::windows::icons::canonical_icon_ext(ext);
+        let ext_lower = ext.to_lowercase();
+        let canonical = crate::infrastructure::windows::icons::canonical_icon_ext(&ext_lower);
+        if canonical != ext_lower {
+            let _ = std::fs::remove_file(self.dir.join(format!("{}.rgba", ext_lower)));
+        }
         if crate::infrastructure::windows::icons::requires_real_file_for_shared_icon(canonical) {
             return None;
         }

@@ -280,7 +280,7 @@ impl IndexDb {
              PRAGMA synchronous=NORMAL;
              PRAGMA busy_timeout=10000;
              PRAGMA mmap_size=0;
-             PRAGMA cache_size=-2000;",
+             PRAGMA cache_size=-1000;",
         )
         .map_err(|e| format!("PRAGMA error: {}", e))?;
 
@@ -330,7 +330,7 @@ impl IndexDb {
         conn.execute_batch(
             "PRAGMA busy_timeout=10000;
              PRAGMA mmap_size=0;
-             PRAGMA cache_size=-2000;",
+             PRAGMA cache_size=-1000;",
         )
         .map_err(|e| format!("SQLite read PRAGMA error: {}", e))?;
 

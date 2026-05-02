@@ -14,7 +14,6 @@ use crate::workers::thumbnail::{
 };
 use eframe::egui;
 use rusqlite::Connection;
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize};
 use std::sync::{mpsc, Arc};
@@ -108,10 +107,6 @@ pub(in crate::app) struct AppBootstrap {
     pub(in crate::app) drive_scan_rx: mpsc::Receiver<Vec<(String, String)>>,
     pub(in crate::app) drive_info_tx: mpsc::Sender<Vec<(String, DriveInfo)>>,
     pub(in crate::app) drive_info_rx: mpsc::Receiver<Vec<(String, DriveInfo)>>,
-
-    /// Pre-loaded extension icon pixel data from disk cache.
-    /// Key = extension (e.g. "dll"), Value = (rgba_pixels, width, height).
-    pub(in crate::app) preloaded_extension_icons: HashMap<String, (Vec<u8>, u32, u32)>,
 
     /// Custom composed empty folder icon (back+front+paper_sheet).
     /// Used as the default folder icon instead of the Windows yellow folder.
@@ -217,24 +212,8 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
         bulk_thumbnail_completed.clone(),
     );
 
-    // --- Icon disk cache: persist extension icons across app launches ---
     let icon_disk_cache = Arc::new(IconDiskCache::new(&base_dir));
-    let preloaded_extension_icons = icon_disk_cache.load_all();
-
-    let (icon_req_tx, icon_res_rx) = spawn_icon_worker(
-        ctx,
-        shared_gen.clone(),
-        icon_disk_cache,
-        &preloaded_extension_icons,
-    );
-
-    // NOTE: the eager pre-warm dispatch (sending ~60 hard-coded extensions to the
-    // icon workers at boot) was removed in favour of pure lazy loading. Disk-cached
-    // RGBA blobs are still uploaded to egui textures via `preloaded_extension_icons`
-    // (so already-known extensions paint instantly on first frame), and unknown
-    // extensions are extracted on demand the first time they appear in a folder.
-    // This avoids holding RGBA in the worker's shared DashMap for extensions the
-    // user may never view in the current session.
+    let (icon_req_tx, icon_res_rx) = spawn_icon_worker(ctx, shared_gen.clone(), icon_disk_cache);
 
     let (meta_req_tx, meta_res_rx) = spawn_metadata_worker(ctx);
     let (live_size_req_tx, live_size_res_rx) = spawn_live_file_size_worker(ctx);
@@ -325,7 +304,6 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
         drive_scan_rx,
         drive_info_tx,
         drive_info_rx,
-        preloaded_extension_icons,
         custom_folder_icon,
     }
 }

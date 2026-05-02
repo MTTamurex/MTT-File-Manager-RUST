@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 use crate::domain::file_entry::FileEntry;
@@ -16,6 +16,32 @@ const BASE_PENDING_THUMBNAILS: usize = 64;
 const MIN_DYNAMIC_PENDING_THUMBNAILS: usize = 16;
 const MAX_DYNAMIC_PENDING_THUMBNAILS: usize = 1024;
 const MAX_PENDING_THUMBNAIL_RGBA_BYTES: usize = 192 * 1024 * 1024;
+const MEMORY_TRACE_INTERVAL: Duration = Duration::from_secs(5);
+
+#[derive(Clone, Copy, Debug)]
+struct ProcessMemorySnapshot {
+    working_set_bytes: u64,
+    private_usage_bytes: u64,
+}
+
+fn bytes_to_mb(bytes: u64) -> f64 {
+    bytes as f64 / 1024.0 / 1024.0
+}
+
+fn memory_trace_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        std::env::var("MTT_MEMORY_TRACE")
+            .map(|value| {
+                let value = value.trim();
+                value == "1"
+                    || value.eq_ignore_ascii_case("true")
+                    || value.eq_ignore_ascii_case("yes")
+                    || value.eq_ignore_ascii_case("on")
+            })
+            .unwrap_or(false)
+    })
+}
 
 impl ImageViewerApp {
     pub(crate) fn all_items_mut(&mut self) -> &mut Vec<FileEntry> {
@@ -90,16 +116,16 @@ impl ImageViewerApp {
     }
 
     pub(crate) fn current_dynamic_texture_keep_count(&self) -> usize {
-        dynamic_texture_keep_count(self.estimated_visible_grid_items())
+        dynamic_texture_keep_count(self.visible_grid_items_for_cache())
     }
 
     pub(crate) fn current_dynamic_folder_preview_keep_count(&self) -> usize {
-        dynamic_folder_preview_keep_count(self.estimated_visible_grid_items())
+        dynamic_folder_preview_keep_count(self.visible_grid_items_for_cache())
     }
 
     pub(crate) fn current_dynamic_rgba_budget_bytes(&self, floor_bytes: usize) -> usize {
         dynamic_rgba_budget_bytes(
-            self.estimated_visible_grid_items(),
+            self.visible_grid_items_for_cache(),
             self.current_thumbnail_bucket_size(),
             floor_bytes,
         )
@@ -146,6 +172,93 @@ impl ImageViewerApp {
                 break;
             }
         }
+    }
+
+    pub fn log_memory_snapshot(&self, label: &str) {
+        if !memory_trace_enabled() {
+            return;
+        }
+
+        let Some(process) = current_process_memory_snapshot() else {
+            return;
+        };
+
+        let pending_thumbnail_bytes: usize = self
+            .pending_thumbnails
+            .iter()
+            .map(|thumbnail| thumbnail.image_data.len())
+            .sum();
+        let (directory_cache_folders, directory_cache_items) = self.directory_cache.stats();
+        let (gif_entries, gif_bytes) = self.gif_manager.stats();
+        let (
+            icon_items,
+            extension_icon_items,
+            drive_icon_items,
+            failed_drive_icons,
+            loading_drive_icons,
+        ) = self.item_icon_loader.cache_counts();
+        let texture_items = self.cache_manager.texture_cache.len();
+        let texture_cap = self.cache_manager.texture_cache.cap().get();
+        let folder_preview_items = self.cache_manager.folder_preview_cache.len();
+        let folder_preview_cap = self.cache_manager.folder_preview_cache.cap().get();
+        let rgba_items = self.cache_manager.rgba_data_cache.len();
+        let rgba_bytes = self.cache_manager.estimate_ram_cache_usage();
+        let vram_estimate = self.cache_manager.estimate_vram_usage();
+        let visible_grid_items = self.visible_grid_items_for_cache();
+        let texture_target = self.current_dynamic_texture_keep_count();
+        let folder_preview_target = self.current_dynamic_folder_preview_keep_count();
+        let rgba_target = self.current_dynamic_rgba_budget_bytes(DEFAULT_DYNAMIC_RGBA_BUDGET_BYTES);
+
+        log::info!(
+            "[MEM-TRACE:{label}] ws={:.1}MB private={:.1}MB items={} all_items={} tabs={} dir_cache={}/{} visible_items={} textures={}/{} texture_target={} folder_tex={}/{} folder_target={} rgba_items={} rgba={:.1}/{:.1}MB pending={} pending_rgba={:.1}MB pending_set={} loading={} folder_loading={} failed_thumbs={} queue={} vram_est={:.1}MB icons={} ext_icons={} drive_icons={} failed_drive_icons={} loading_drive_icons={} gifs={} gif_rgba={:.1}MB visible={:?} thumb_bucket={} folder_bucket={} frame_avg={:.1}ms frame_peak={:.1}ms upload_budget={:.1}ms",
+            bytes_to_mb(process.working_set_bytes),
+            bytes_to_mb(process.private_usage_bytes),
+            self.items.len(),
+            self.all_items.len(),
+            self.tab_manager.count(),
+            directory_cache_folders,
+            directory_cache_items,
+            visible_grid_items,
+            texture_items,
+            texture_cap,
+            texture_target,
+            folder_preview_items,
+            folder_preview_cap,
+            folder_preview_target,
+            rgba_items,
+            bytes_to_mb(rgba_bytes as u64),
+            bytes_to_mb(rgba_target as u64),
+            self.pending_thumbnails.len(),
+            bytes_to_mb(pending_thumbnail_bytes as u64),
+            self.cache_manager.pending_upload_set.len(),
+            self.cache_manager.loading_set.len(),
+            self.cache_manager.folder_preview_loading.len(),
+            self.cache_manager.failed_thumbnails.len(),
+            self.thumbnail_queue.pending_count(),
+            bytes_to_mb(vram_estimate as u64),
+            icon_items,
+            extension_icon_items,
+            drive_icon_items,
+            failed_drive_icons,
+            loading_drive_icons,
+            gif_entries,
+            bytes_to_mb(gif_bytes as u64),
+            self.visible_index_range,
+            self.current_thumbnail_bucket_size(),
+            self.current_folder_preview_bucket_size(),
+            self.frame_time_avg_ms,
+            self.frame_time_peak_ms,
+            self.upload_budget_ms,
+        );
+    }
+
+    pub fn maybe_log_memory_snapshot(&mut self, label: &str) {
+        if !memory_trace_enabled() || self.last_memory_trace_log.elapsed() < MEMORY_TRACE_INTERVAL {
+            return;
+        }
+
+        self.last_memory_trace_log = Instant::now();
+        self.log_memory_snapshot(label);
     }
 
     /// Check if the media player should currently capture all keyboard arrow/space input.
@@ -202,9 +315,10 @@ impl ImageViewerApp {
         }
         self.last_memory_maintenance = Instant::now();
 
-        let Some(working_set_bytes) = current_working_set_bytes() else {
+        let Some(process_memory) = current_process_memory_snapshot() else {
             return;
         };
+        let working_set_bytes = process_memory.working_set_bytes;
 
         const SOFT_LIMIT_BYTES: u64 = 550 * 1024 * 1024;
         const HARD_LIMIT_BYTES: u64 = 700 * 1024 * 1024;
@@ -215,7 +329,7 @@ impl ImageViewerApp {
 
         let aggressive = working_set_bytes >= HARD_LIMIT_BYTES;
         let is_burst = self.is_in_restore_burst();
-        let visible_grid_items = self.estimated_visible_grid_items();
+        let visible_grid_items = self.visible_grid_items_for_cache();
         let visible_paths = self.visible_grid_paths_snapshot();
         let texture_keep = self.current_dynamic_texture_keep_count();
         let folder_preview_keep = self.current_dynamic_folder_preview_keep_count();
@@ -323,6 +437,21 @@ impl ImageViewerApp {
             .clamp(0, MAX_DYNAMIC_TEXTURE_CACHE_ITEMS)
     }
 
+    pub(crate) fn visible_grid_items_for_cache(&self) -> usize {
+        if matches!(self.view_mode, ViewMode::Grid) {
+            if let Some((min_idx, max_idx)) = self.visible_index_range {
+                if !self.items.is_empty() {
+                    let max_idx = max_idx.min(self.items.len().saturating_sub(1));
+                    if min_idx <= max_idx {
+                        return max_idx.saturating_sub(min_idx).saturating_add(1);
+                    }
+                }
+            }
+        }
+
+        self.estimated_visible_grid_items()
+    }
+
     pub(crate) fn visible_grid_paths_snapshot(&self) -> Option<FxHashSet<std::path::PathBuf>> {
         if !matches!(self.view_mode, ViewMode::Grid) {
             return None;
@@ -382,7 +511,7 @@ pub(crate) fn dynamic_rgba_budget_bytes(
 }
 
 #[cfg(target_os = "windows")]
-fn current_working_set_bytes() -> Option<u64> {
+fn current_process_memory_snapshot() -> Option<ProcessMemorySnapshot> {
     use windows::Win32::System::ProcessStatus::{K32GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS};
     use windows::Win32::System::Threading::GetCurrentProcess;
 
@@ -395,7 +524,10 @@ fn current_working_set_bytes() -> Option<u64> {
         )
         .as_bool()
         {
-            Some(counters.WorkingSetSize as u64)
+            Some(ProcessMemorySnapshot {
+                working_set_bytes: counters.WorkingSetSize as u64,
+                private_usage_bytes: counters.PagefileUsage as u64,
+            })
         } else {
             None
         }
@@ -403,6 +535,6 @@ fn current_working_set_bytes() -> Option<u64> {
 }
 
 #[cfg(not(target_os = "windows"))]
-fn current_working_set_bytes() -> Option<u64> {
+fn current_process_memory_snapshot() -> Option<ProcessMemorySnapshot> {
     None
 }

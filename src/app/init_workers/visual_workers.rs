@@ -121,7 +121,6 @@ pub(in crate::app) fn spawn_icon_worker(
     ctx: &egui::Context,
     current_generation: Arc<AtomicUsize>,
     icon_disk_cache: Arc<IconDiskCache>,
-    _preloaded_icons: &std::collections::HashMap<String, (Vec<u8>, u32, u32)>,
 ) -> (mpsc::Sender<IconRequest>, mpsc::Receiver<IconResponse>) {
     let (icon_req_tx, icon_req_rx_thread) = mpsc::channel::<IconRequest>();
     let (fanout_tx, fanout_rx) = crossbeam_channel::bounded::<IconRequest>(256);

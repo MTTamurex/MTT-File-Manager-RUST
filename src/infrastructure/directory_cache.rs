@@ -9,8 +9,8 @@ use parking_lot::Mutex;
 
 use crate::domain::file_entry::FileEntry;
 
-const CACHE_CAPACITY: usize = 200; // Bounded to avoid high long-session RAM growth
-const MAX_TOTAL_CACHED_ITEMS: usize = 50_000; // Global cap to prevent a few huge folders from dominating RAM
+const CACHE_CAPACITY: usize = 120; // Bounded to avoid high long-session RAM growth
+const MAX_TOTAL_CACHED_ITEMS: usize = 20_000; // Global cap to prevent a few huge folders from dominating RAM
 
 struct CachedFolder {
     entries: Arc<Vec<FileEntry>>,
