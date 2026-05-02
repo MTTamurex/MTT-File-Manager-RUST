@@ -351,12 +351,11 @@ pub struct ImageViewerApp {
     pub dual_panel_active: ActivePanel,
     pub dual_panel_inactive_state: Option<PanelSnapshot>,
     /// When true, `request_thumbnail_load_internal` submits requests using
-    /// the active panel's generation (via `current_generation`) and at
-    /// `Prefetch` priority instead of the caller-supplied priority.  Set
-    /// during inactive panel rendering so thumbnails are loaded into the
-    /// shared `texture_cache` without competing with the active panel's
-    /// Interactive-priority requests.
-    pub suppress_thumbnail_requests: bool,
+    /// the active panel's generation (via `current_generation`) while keeping
+    /// the caller-supplied priority. Set while drawing the unfocused dual pane
+    /// so both visible panes can load thumbnails normally through the shared
+    /// worker generation gate.
+    pub use_active_generation_for_thumbnail_requests: bool,
     /// Transient render guard set only while drawing the inactive dual panel.
     /// Mouse interactions still work there, but global keyboard navigation
     /// must remain owned by the active panel.

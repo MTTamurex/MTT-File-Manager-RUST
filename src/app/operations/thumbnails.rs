@@ -109,24 +109,17 @@ impl ImageViewerApp {
     ) {
         let effective_size_px = self.effective_thumbnail_request_size_px(size_px);
 
-        // When rendering the inactive dual-panel, use the active panel's generation
-        // (current_generation always holds the active panel's gen, since both panels
-        // share the same Arc<AtomicUsize>) and downgrade to Prefetch priority so the
-        // active panel's Interactive requests are processed first.
-        //
-        // Previously this code suppressed all inactive-panel requests, which prevented
-        // their thumbnails from ever being loaded into the shared texture_cache.
-        // Now we allow the requests through with the correct generation so the worker
-        // accepts them, results flow into the shared cache, and both panels display
-        // thumbnails independently.
-        let (effective_gen, effective_priority) = if self.suppress_thumbnail_requests {
+        // When rendering the unfocused dual-panel pane, use the active generation
+        // accepted by the shared thumbnail workers while preserving caller priority.
+        let effective_gen = if self.use_active_generation_for_thumbnail_requests {
             let active_gen = self
                 .current_generation
                 .load(std::sync::atomic::Ordering::Relaxed);
-            (active_gen, ThumbnailPriority::Prefetch)
+            active_gen
         } else {
-            (self.generation, priority)
+            self.generation
         };
+        let effective_priority = priority;
 
         // Skip files pending deletion to avoid wasteful extraction
         if self

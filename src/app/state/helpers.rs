@@ -47,6 +47,62 @@ fn memory_trace_enabled() -> bool {
     })
 }
 
+fn panel_thumbnail_caches_active(
+    view_mode: ViewMode,
+    is_computer_view: bool,
+    is_recycle_bin_view: bool,
+    item_count: usize,
+) -> bool {
+    matches!(view_mode, ViewMode::Grid)
+        && !is_computer_view
+        && !is_recycle_bin_view
+        && item_count > 0
+}
+
+fn visible_count_from_range(
+    item_count: usize,
+    visible_index_range: Option<(usize, usize)>,
+) -> Option<usize> {
+    let (min_idx, max_idx) = visible_index_range?;
+    if item_count == 0 {
+        return None;
+    }
+
+    let max_idx = max_idx.min(item_count.saturating_sub(1));
+    (min_idx <= max_idx).then(|| max_idx.saturating_sub(min_idx).saturating_add(1))
+}
+
+fn visible_items_for_snapshot(snapshot: &crate::app::dual_panel::PanelSnapshot) -> &[FileEntry] {
+    if snapshot.items_snapshot_compact && snapshot.items.is_empty() {
+        snapshot.all_items.as_ref().as_slice()
+    } else {
+        snapshot.items.as_ref().as_slice()
+    }
+}
+
+fn insert_visible_paths_from_range(
+    visible_paths: &mut FxHashSet<std::path::PathBuf>,
+    items: &[FileEntry],
+    visible_index_range: Option<(usize, usize)>,
+) {
+    let Some((min_idx, max_idx)) = visible_index_range else {
+        return;
+    };
+    if items.is_empty() {
+        return;
+    }
+
+    let max_idx = max_idx.min(items.len().saturating_sub(1));
+    if min_idx > max_idx {
+        return;
+    }
+
+    visible_paths.reserve(max_idx.saturating_sub(min_idx).saturating_add(1));
+    for idx in min_idx..=max_idx {
+        visible_paths.insert(items[idx].path.clone());
+    }
+}
+
 impl ImageViewerApp {
     pub(crate) fn all_items_mut(&mut self) -> &mut Vec<FileEntry> {
         Arc::make_mut(&mut self.all_items)
@@ -497,46 +553,92 @@ impl ImageViewerApp {
     }
 
     pub(crate) fn thumbnail_caches_active(&self) -> bool {
-        matches!(self.view_mode, ViewMode::Grid)
-            && !self.navigation_state.is_computer_view
-            && !self.navigation_state.is_recycle_bin_view
-            && !self.items.is_empty()
+        if panel_thumbnail_caches_active(
+            self.view_mode,
+            self.navigation_state.is_computer_view,
+            self.navigation_state.is_recycle_bin_view,
+            self.items.len(),
+        ) {
+            return true;
+        }
+
+        self.dual_panel_enabled
+            && self
+                .dual_panel_inactive_state
+                .as_ref()
+                .is_some_and(|snapshot| {
+                    panel_thumbnail_caches_active(
+                        snapshot.view_mode,
+                        snapshot.is_computer_view,
+                        snapshot.is_recycle_bin_view,
+                        visible_items_for_snapshot(snapshot).len(),
+                    )
+                })
     }
 
     pub(crate) fn visible_grid_items_for_cache(&self) -> usize {
-        if matches!(self.view_mode, ViewMode::Grid) {
-            if let Some((min_idx, max_idx)) = self.visible_index_range {
-                if !self.items.is_empty() {
-                    let max_idx = max_idx.min(self.items.len().saturating_sub(1));
-                    if min_idx <= max_idx {
-                        return max_idx.saturating_sub(min_idx).saturating_add(1);
-                    }
+        let mut visible_items = 0usize;
+
+        if panel_thumbnail_caches_active(
+            self.view_mode,
+            self.navigation_state.is_computer_view,
+            self.navigation_state.is_recycle_bin_view,
+            self.items.len(),
+        ) {
+            visible_items = visible_items.saturating_add(
+                visible_count_from_range(self.items.len(), self.visible_index_range)
+                    .unwrap_or_else(|| self.estimated_visible_grid_items()),
+            );
+        }
+
+        if self.dual_panel_enabled {
+            if let Some(snapshot) = self.dual_panel_inactive_state.as_ref() {
+                let inactive_items = visible_items_for_snapshot(snapshot);
+                if panel_thumbnail_caches_active(
+                    snapshot.view_mode,
+                    snapshot.is_computer_view,
+                    snapshot.is_recycle_bin_view,
+                    inactive_items.len(),
+                ) {
+                    visible_items = visible_items.saturating_add(
+                        visible_count_from_range(
+                            inactive_items.len(),
+                            snapshot.visible_index_range,
+                        )
+                        .unwrap_or_else(|| self.estimated_visible_grid_items()),
+                    );
                 }
             }
         }
 
-        self.estimated_visible_grid_items()
+        if visible_items == 0 {
+            self.estimated_visible_grid_items()
+        } else {
+            visible_items.clamp(0, MAX_DYNAMIC_TEXTURE_CACHE_ITEMS)
+        }
     }
 
     pub(crate) fn visible_grid_paths_snapshot(&self) -> Option<FxHashSet<std::path::PathBuf>> {
-        if !matches!(self.view_mode, ViewMode::Grid) {
-            return None;
-        }
-
-        let (min_idx, max_idx) = self.visible_index_range?;
-        if self.items.is_empty() {
-            return None;
-        }
-
-        let max_idx = max_idx.min(self.items.len().saturating_sub(1));
-        if min_idx > max_idx {
-            return None;
-        }
-
         let mut visible_paths = FxHashSet::default();
-        visible_paths.reserve(max_idx.saturating_sub(min_idx).saturating_add(1));
-        for idx in min_idx..=max_idx {
-            visible_paths.insert(self.items[idx].path.clone());
+
+        if matches!(self.view_mode, ViewMode::Grid) {
+            insert_visible_paths_from_range(
+                &mut visible_paths,
+                self.items.as_ref().as_slice(),
+                self.visible_index_range,
+            );
+        }
+
+        if self.dual_panel_enabled {
+            if let Some(snapshot) = self.dual_panel_inactive_state.as_ref() {
+                if matches!(snapshot.view_mode, ViewMode::Grid) {
+                    insert_visible_paths_from_range(
+                        &mut visible_paths,
+                        visible_items_for_snapshot(snapshot),
+                        snapshot.visible_index_range,
+                    );
+                }
+            }
         }
 
         (!visible_paths.is_empty()).then_some(visible_paths)

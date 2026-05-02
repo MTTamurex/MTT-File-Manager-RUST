@@ -636,11 +636,9 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
         ActivePanel::Right => "dual_left",
     };
     app.with_inactive_panel(|app_with_inactive| {
-        // Suppress thumbnail requests: workers would reject them (generation
-        // mismatch with gen_tracker) and the paths would leak in loading_set,
-        // blocking all thumbnail loads for the active panel.  The inactive
-        // panel still displays thumbnails already in the shared texture_cache.
-        app_with_inactive.suppress_thumbnail_requests = true;
+        // The unfocused pane is still visible; only route its thumbnail requests
+        // through the active generation so the shared workers accept them.
+        app_with_inactive.use_active_generation_for_thumbnail_requests = true;
         app_with_inactive.suppress_file_panel_keyboard = true;
         ui.allocate_new_ui(
             egui::UiBuilder::new().max_rect(inactive_content_rect),
@@ -651,7 +649,7 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
                 });
             },
         );
-        app_with_inactive.suppress_thumbnail_requests = false;
+        app_with_inactive.use_active_generation_for_thumbnail_requests = false;
         app_with_inactive.suppress_file_panel_keyboard = false;
     });
 
