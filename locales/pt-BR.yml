@@ -494,7 +494,7 @@ batch_rename:
   sep_dash: "Traço  (Nome-1)"
   sep_space: "Espaço  (Nome 1)"
   sep_none: "Nenhum  (Nome1)"
-  conflict_warning: "Aviso: %{count} nome(s) já existem no destino e serão ignorados."
+  conflict_warning: "Aviso: %{count} nome(s) têm conflitos e serão ignorados."
   conflict_suffix: " (conflito)"
   btn_rename: "Renomear %{count} arquivo(s)"
   btn_cancel: "Cancelar"

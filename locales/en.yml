@@ -494,7 +494,7 @@ batch_rename:
   sep_dash: "Dash  (Name-1)"
   sep_space: "Space  (Name 1)"
   sep_none: "None  (Name1)"
-  conflict_warning: "Warning: %{count} name(s) already exist at destination and will be skipped."
+  conflict_warning: "Warning: %{count} name(s) have conflicts and will be skipped."
   conflict_suffix: " (conflict)"
   btn_rename: "Rename %{count} file(s)"
   btn_cancel: "Cancel"

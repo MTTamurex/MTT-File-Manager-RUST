@@ -1,7 +1,10 @@
 //! Batch rename state and name-generation logic.
 
 use rust_i18n::t;
-use std::path::PathBuf;
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+};
 
 // ── Enums ────────────────────────────────────────────────────────────────────
 
@@ -58,8 +61,8 @@ pub struct PreviewRow {
     pub source: PathBuf,
     pub old_name: String,
     pub new_name: String,
-    /// true if the generated destination already exists on disk (and is not the
-    /// source itself or another file in the same batch that will be renamed away).
+    /// true if the generated destination already exists on disk or another row
+    /// in this batch generates the same destination path.
     pub conflict: bool,
 }
 
@@ -112,11 +115,18 @@ impl BatchRenameState {
     /// Generates the ordered list of (old_name, new_name, conflict) triples.
     ///
     /// Conflict detection:
-    /// - The generated destination path exists on disk, AND
-    /// - it is not the source file itself (no-op rename), AND
-    /// - it is not another file in this batch (which will be renamed away).
+    /// - The generated destination path exists on disk, OR
+    /// - another row in this same batch generates the same destination path.
     pub fn compute_preview(&self) -> Vec<PreviewRow> {
-        let mut rows = Vec::with_capacity(self.sources.len());
+        struct PendingRow {
+            source: PathBuf,
+            old_name: String,
+            new_name: String,
+            dest: Option<PathBuf>,
+        }
+
+        let mut pending = Vec::with_capacity(self.sources.len());
+        let mut dest_counts: HashMap<String, usize> = HashMap::new();
         let mut n = self.start as u64;
 
         for source in &self.sources {
@@ -126,10 +136,7 @@ impl BatchRenameState {
                 .unwrap_or("")
                 .to_string();
 
-            let ext = source
-                .extension()
-                .and_then(|s| s.to_str())
-                .unwrap_or("");
+            let ext = source.extension().and_then(|s| s.to_str()).unwrap_or("");
 
             let num_str = if self.padding > 0 {
                 format!("{:0>width$}", n, width = self.padding)
@@ -140,26 +147,38 @@ impl BatchRenameState {
             let new_name = self.build_new_name(&self.name_template, &num_str, ext);
 
             let dest = source.parent().map(|p| p.join(&new_name));
-            let conflict = dest.as_ref().map_or(false, |d| {
-                // Exists on disk
-                d.exists()
-                // Not a no-op rename to the same path
-                && d != source
-                // Not a file in this batch (it will be renamed away)
-                && !self.sources.contains(d)
-            });
+            if let Some(dest) = &dest {
+                *dest_counts.entry(destination_key(dest)).or_insert(0) += 1;
+            }
 
-            rows.push(PreviewRow {
+            pending.push(PendingRow {
                 source: source.clone(),
                 old_name,
                 new_name,
-                conflict,
+                dest,
             });
 
             n = n.saturating_add(self.step as u64);
         }
 
-        rows
+        pending
+            .into_iter()
+            .map(|row| {
+                let conflict = row.dest.as_ref().map_or(false, |dest| {
+                    dest.exists()
+                        || dest_counts
+                            .get(&destination_key(dest))
+                            .map_or(false, |count| *count > 1)
+                });
+
+                PreviewRow {
+                    source: row.source,
+                    old_name: row.old_name,
+                    new_name: row.new_name,
+                    conflict,
+                }
+            })
+            .collect()
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────
@@ -203,5 +222,70 @@ impl BatchRenameState {
                 format!("{}{}{}", num_str, base, ext_suffix)
             }
         }
+    }
+}
+
+fn destination_key(path: &Path) -> String {
+    path.to_string_lossy().to_lowercase()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs::File;
+
+    #[test]
+    fn selected_source_destination_is_conflict() {
+        let dir = tempfile::tempdir().unwrap();
+        let source_one = dir.path().join("Photo1.txt");
+        let source_two = dir.path().join("Photo2.txt");
+        File::create(&source_one).unwrap();
+        File::create(&source_two).unwrap();
+
+        let mut state = BatchRenameState::new(vec![source_one, source_two]);
+        state.name_template = "Photo".to_string();
+        state.separator = NumberSeparator::None;
+        state.start = 2;
+        state.step = 1;
+
+        let preview = state.compute_preview();
+
+        assert!(preview[0].conflict);
+        assert!(!preview[1].conflict);
+    }
+
+    #[test]
+    fn no_op_rename_is_conflict() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("Photo1.txt");
+        File::create(&source).unwrap();
+
+        let mut state = BatchRenameState::new(vec![source]);
+        state.name_template = "Photo".to_string();
+        state.separator = NumberSeparator::None;
+        state.start = 1;
+
+        let preview = state.compute_preview();
+
+        assert!(preview[0].conflict);
+    }
+
+    #[test]
+    fn duplicate_destinations_in_same_batch_are_conflicts() {
+        let dir = tempfile::tempdir().unwrap();
+        let source_one = dir.path().join("A.txt");
+        let source_two = dir.path().join("B.txt");
+        File::create(&source_one).unwrap();
+        File::create(&source_two).unwrap();
+
+        let mut state = BatchRenameState::new(vec![source_one, source_two]);
+        state.name_template = "Photo".to_string();
+        state.separator = NumberSeparator::None;
+        state.start = 1;
+        state.step = 0;
+
+        let preview = state.compute_preview();
+
+        assert!(preview.iter().all(|row| row.conflict));
     }
 }
