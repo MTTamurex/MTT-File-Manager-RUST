@@ -37,6 +37,7 @@ MTT File Manager is a native Windows file manager built in Rust that combines fa
 
 ### File Operations
 - **Core operations** — Copy, cut, paste, rename, delete
+- **Batch rename** — Select 2+ files and press F2 to open the batch rename modal; configure a shared base name, number position (suffix/prefix), separator style (parentheses, underscore, dash, space, or none), and start/step/padding; drag-to-reorder; live preview table with per-row conflict detection
 - **Native context menu** — Full Windows Shell context menu integration
 - **Recycle Bin** — Browse, restore, and permanently delete
 - **OneDrive support** — Sync status detection
@@ -119,7 +120,7 @@ Some app-level shortcuts are configurable in Settings > Keyboard Shortcuts. Stan
 | Ctrl+X | Cut |
 | Delete | Move to Recycle Bin |
 | Shift+Delete | Permanent delete |
-| F2 | Rename |
+| F2 | Rename (single file) / Batch Rename modal (2+ files selected) |
 | F5 | Reload folder |
 | Ctrl+Shift+F | Global search |
 | Ctrl+L | Focus address bar |
