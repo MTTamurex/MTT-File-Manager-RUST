@@ -140,23 +140,17 @@ impl FolderComposer {
             DEFAULT_OUTPUT_W
         };
 
-        if let Some(layers) = self.layers.lock().get(&output_w).cloned() {
-            return layers;
-        }
-
-        let layers = Arc::new(Self::build_layers(
-            output_w,
-            &self.back_img,
-            &self.front_img,
-            &self.sheet_img,
-        ));
-
         let mut cache = self.layers.lock();
         cache
             .entry(output_w)
             .or_insert_with(|| {
                 log::info!("[FOLDER COMPOSE] Built layers for bucket {}", output_w);
-                Arc::clone(&layers)
+                Arc::new(Self::build_layers(
+                    output_w,
+                    &self.back_img,
+                    &self.front_img,
+                    &self.sheet_img,
+                ))
             })
             .clone()
     }
