@@ -613,6 +613,7 @@ impl CacheManager {
         self.rgba_data_bytes = 0;
         self.attempted_thumbnail_bucket.clear();
         self.thumbnail_request_debounce.clear();
+        self.folder_preview_request_debounce.clear();
         // Note: folder_icon_texture and computer_icon are kept as they're singletons
     }
 
@@ -778,6 +779,13 @@ impl CacheManager {
             .put(path.clone(), Instant::now());
     }
 
+    /// Clears the folder-preview cooldown entry for `path`. Explicit
+    /// invalidation and full-cache refresh paths need the next request to go
+    /// through immediately instead of waiting for the debounce window.
+    pub fn forget_folder_preview_request_cooldown(&mut self, path: &PathBuf) {
+        self.folder_preview_request_debounce.pop(path);
+    }
+
     /// Returns true if a `request_thumbnail_load_internal` call for `path`
     /// should be skipped because another request was successfully committed
     /// (worker dispatch or RAM-cache pending push) within
@@ -793,7 +801,8 @@ impl CacheManager {
 
     /// Records the timestamp of a successfully-committed thumbnail request
     /// (RAM-cache pending push or worker dispatch). Only call after the path
-    /// is in flight so transient failures don't lock the path out for 2s.
+    /// is in flight so transient failures don't lock the path out for the
+    /// thumbnail request cooldown.
     pub fn note_thumbnail_request_sent(&mut self, path: &PathBuf) {
         self.thumbnail_request_debounce
             .put(path.clone(), Instant::now());
@@ -831,6 +840,7 @@ impl CacheManager {
         self.folder_preview_trace.record_invalidation();
         self.folder_preview_cache.pop(path);
         self.folder_preview_loading.remove(path);
+        self.forget_folder_preview_request_cooldown(path);
     }
     /// Estimates VRAM usage in bytes
     pub fn estimate_vram_usage(&self) -> usize {
