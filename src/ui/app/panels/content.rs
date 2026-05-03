@@ -68,6 +68,8 @@ pub(super) fn render_preview_panel_layout(
                         let effective_file = calculate_effective_file(app);
 
                         if let Some(file) = effective_file {
+                            app.ensure_detail_panel_thumbnail_for_file(&file);
+
                             let tab_id = app.tab_manager.active().id;
                             let selected_metadata =
                                 app.selected_metadata.as_ref().and_then(|(p, meta)| {

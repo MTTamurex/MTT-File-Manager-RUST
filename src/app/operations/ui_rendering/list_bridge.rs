@@ -511,6 +511,8 @@ impl ImageViewerApp {
             _ => {}
         }
 
+        self.warm_detail_panel_folder_preview();
+
         if !is_renaming {
             if let Some(start_idx) = drag_started_item {
                 self.begin_item_drag(start_idx);
@@ -547,7 +549,9 @@ impl ImageViewerApp {
                 ListAction::NavigateTo(path) => self.navigate_to(&path),
                 ListAction::OpenWithShell(path) => open_with_shell(self, &path),
                 ListAction::RequestThumbnailLoad(path, size, index, modified) => {
-                    self.request_thumbnail_load_with_index_and_modified(path, size, index, modified)
+                    self.request_thumbnail_load_with_index_and_modified(
+                        path, size, index, modified,
+                    );
                 }
                 ListAction::RequestFolderScan(path) => folder_scan_paths.push(path),
                 ListAction::RequestFolderPreviewLoad(path) => {
