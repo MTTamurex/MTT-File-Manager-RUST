@@ -188,6 +188,13 @@ fn worker_loop(
     // Stores OCR word data for pages whose text came from Windows OCR rather
     // than Pdfium.  Used as a fallback when extract_bounded_text returns empty.
     let mut ocr_cache: HashMap<u32, Vec<OcrWord>> = HashMap::new();
+    // For OCR-backed pages, the longest bitmap side used when OCR last ran.
+    // When a significantly higher-resolution render arrives, OCR is refreshed
+    // so that zoomed-in selections get tighter word bounds.
+    let mut ocr_render_side: HashMap<u32, u32> = HashMap::new();
+    // Factor by which the new render must exceed the last OCR render to justify
+    // a re-run (avoids redundant work during minor zoom adjustments).
+    const OCR_RERUN_THRESHOLD: f32 = 1.5;
 
     loop {
         // Drain high-priority bounded-text requests before blocking.
@@ -248,37 +255,57 @@ fn worker_loop(
                         Ok((p, page_w, page_h)) => {
                             // Text / OCR extraction must run before pixels are
                             // consumed by render_tx.send so OCR can read them.
-                            if !text_extracted.contains(&page_idx) {
-                                text_extracted.insert(page_idx);
+                            //
+                            // Three cases:
+                            // 1. Pdfium-text page: run once, result is exact.
+                            // 2. OCR page, first render: run OCR, record side.
+                            // 3. OCR page, higher-res render: re-run OCR for
+                            //    tighter bounds (better zoom-in accuracy).
+                            let new_side = p.width.max(p.height);
+                            let needs_ocr_rerun = ocr_render_side
+                                .get(&page_idx)
+                                .map(|&prev| new_side as f32 > prev as f32 * OCR_RERUN_THRESHOLD)
+                                .unwrap_or(false);
 
-                                let segments = match extract_text_segments(&document, page_idx) {
-                                    Ok(segs) if !segs.is_empty() => segs,
-                                    Ok(_) => {
-                                        // No embedded text layer — try Windows OCR.
-                                        match super::ocr::ocr_page_bitmap(
-                                            &p.pixels,
-                                            p.width,
-                                            p.height,
-                                            page_w,
-                                            page_h,
-                                        ) {
-                                            Some(ocr_words) => {
-                                                let display: Vec<PdfTextSegment> = ocr_words
-                                                    .iter()
-                                                    .map(|w| PdfTextSegment { bounds: w.bounds })
-                                                    .collect();
-                                                ocr_cache.insert(page_idx, ocr_words);
-                                                display
-                                            }
-                                            None => vec![],
+                            if !text_extracted.contains(&page_idx) || needs_ocr_rerun {
+                                let segments = if text_extracted.contains(&page_idx) {
+                                    // Already know this is an OCR page — re-run with
+                                    // the new higher-resolution bitmap.
+                                    run_ocr_for_page(
+                                        &p.pixels,
+                                        p.width,
+                                        p.height,
+                                        page_w,
+                                        page_h,
+                                        page_idx,
+                                        &mut ocr_cache,
+                                        &mut ocr_render_side,
+                                    )
+                                } else {
+                                    // First visit to this page.
+                                    text_extracted.insert(page_idx);
+                                    match extract_text_segments(&document, page_idx) {
+                                        Ok(segs) if !segs.is_empty() => segs,
+                                        Ok(_) => {
+                                            // No embedded text layer — try Windows OCR.
+                                            run_ocr_for_page(
+                                                &p.pixels,
+                                                p.width,
+                                                p.height,
+                                                page_w,
+                                                page_h,
+                                                page_idx,
+                                                &mut ocr_cache,
+                                                &mut ocr_render_side,
+                                            )
                                         }
-                                    }
-                                    Err(e) => {
-                                        log::error!(
-                                            "[PDF-RENDER] text segment extraction for page \
-                                             {page_idx} failed: {e}"
-                                        );
-                                        vec![]
+                                        Err(e) => {
+                                            log::error!(
+                                                "[PDF-RENDER] text segment extraction for page \
+                                                 {page_idx} failed: {e}"
+                                            );
+                                            vec![]
+                                        }
                                     }
                                 };
 
@@ -367,6 +394,32 @@ fn handle_bounded_text(
         text,
     });
     repaint.request_repaint();
+}
+
+/// Run Windows OCR on a rendered bitmap, update the caches, and return
+/// display segments. Silently returns empty on OCR unavailability.
+fn run_ocr_for_page(
+    pixels: &[u8],
+    bitmap_w: u32,
+    bitmap_h: u32,
+    page_w: f32,
+    page_h: f32,
+    page_idx: u32,
+    ocr_cache: &mut HashMap<u32, Vec<OcrWord>>,
+    ocr_render_side: &mut HashMap<u32, u32>,
+) -> Vec<PdfTextSegment> {
+    match super::ocr::ocr_page_bitmap(pixels, bitmap_w, bitmap_h, page_w, page_h) {
+        Some(ocr_words) => {
+            let display = ocr_words
+                .iter()
+                .map(|w| PdfTextSegment { bounds: w.bounds })
+                .collect();
+            ocr_render_side.insert(page_idx, bitmap_w.max(bitmap_h));
+            ocr_cache.insert(page_idx, ocr_words);
+            display
+        }
+        None => vec![],
+    }
 }
 
 fn extract_text_segments(
