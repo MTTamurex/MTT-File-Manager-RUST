@@ -10,7 +10,7 @@
 
 use crossbeam_channel::{Receiver, Sender};
 use eframe::egui;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -184,17 +184,15 @@ fn worker_loop(
         )
     };
 
-    let mut text_extracted: HashSet<u32> = HashSet::new();
-    // Stores OCR word data for pages whose text came from Windows OCR rather
-    // than Pdfium.  Used as a fallback when extract_bounded_text returns empty.
+    // Single cache for ALL page text segments (Pdfium or OCR).
+    // Computed once on first render; re-sent on every subsequent render so
+    // the UI-side page_text map is always up-to-date regardless of zoom
+    // changes, eviction, or any other UI-side cache invalidation.
+    let mut segment_cache: HashMap<u32, Vec<PdfTextSegment>> = HashMap::new();
+    // OCR word data (with text) for scanned pages, used by bounded-text
+    // extraction (Ctrl+C copy path).  Separate from segment_cache because it
+    // carries the actual string content per word.
     let mut ocr_cache: HashMap<u32, Vec<OcrWord>> = HashMap::new();
-    // For OCR-backed pages, the longest bitmap side used when OCR last ran.
-    // When a significantly higher-resolution render arrives, OCR is refreshed
-    // so that zoomed-in selections get tighter word bounds.
-    let mut ocr_render_side: HashMap<u32, u32> = HashMap::new();
-    // Factor by which the new render must exceed the last OCR render to justify
-    // a re-run (avoids redundant work during minor zoom adjustments).
-    const OCR_RERUN_THRESHOLD: f32 = 1.5;
 
     loop {
         // Drain high-priority bounded-text requests before blocking.
@@ -253,69 +251,46 @@ fn worker_loop(
 
                     match render_result {
                         Ok((p, page_w, page_h)) => {
-                            // Text / OCR extraction must run before pixels are
-                            // consumed by render_tx.send so OCR can read them.
-                            //
-                            // Three cases:
-                            // 1. Pdfium-text page: run once, result is exact.
-                            // 2. OCR page, first render: run OCR, record side.
-                            // 3. OCR page, higher-res render: re-run OCR for
-                            //    tighter bounds (better zoom-in accuracy).
-                            let new_side = p.width.max(p.height);
-                            let needs_ocr_rerun = ocr_render_side
-                                .get(&page_idx)
-                                .map(|&prev| new_side as f32 > prev as f32 * OCR_RERUN_THRESHOLD)
-                                .unwrap_or(false);
-
-                            if !text_extracted.contains(&page_idx) || needs_ocr_rerun {
-                                let segments = if text_extracted.contains(&page_idx) {
-                                    // Already know this is an OCR page — re-run with
-                                    // the new higher-resolution bitmap.
-                                    run_ocr_for_page(
-                                        &p.pixels,
-                                        p.width,
-                                        p.height,
-                                        page_w,
-                                        page_h,
-                                        page_idx,
-                                        &mut ocr_cache,
-                                        &mut ocr_render_side,
-                                    )
-                                } else {
-                                    // First visit to this page.
-                                    text_extracted.insert(page_idx);
-                                    match extract_text_segments(&document, page_idx) {
-                                        Ok(segs) if !segs.is_empty() => segs,
-                                        Ok(_) => {
-                                            // No embedded text layer — try Windows OCR.
-                                            run_ocr_for_page(
-                                                &p.pixels,
-                                                p.width,
-                                                p.height,
-                                                page_w,
-                                                page_h,
-                                                page_idx,
-                                                &mut ocr_cache,
-                                                &mut ocr_render_side,
-                                            )
-                                        }
-                                        Err(e) => {
-                                            log::error!(
-                                                "[PDF-RENDER] text segment extraction for page \
-                                                 {page_idx} failed: {e}"
-                                            );
-                                            vec![]
-                                        }
+                            // Ensure segments are computed for this page.  On first
+                            // visit: extract from Pdfium or run OCR.  On subsequent
+                            // renders (zoom, scroll back into view): use the cache.
+                            if !segment_cache.contains_key(&page_idx) {
+                                let segments = match extract_text_segments(&document, page_idx) {
+                                    Ok(segs) if !segs.is_empty() => segs,
+                                    Ok(_) => {
+                                        // No embedded text layer — try Windows OCR.
+                                        run_ocr_canonical(
+                                            &document,
+                                            page_idx,
+                                            &p.pixels,
+                                            p.width,
+                                            p.height,
+                                            page_w,
+                                            page_h,
+                                            &mut ocr_cache,
+                                        )
+                                    }
+                                    Err(e) => {
+                                        log::error!(
+                                            "[PDF-RENDER] text segment extraction for page \
+                                             {page_idx} failed: {e}"
+                                        );
+                                        vec![]
                                     }
                                 };
-
                                 if !segments.is_empty() {
-                                    let _ = text_seg_tx.send(TextSegmentResult {
-                                        page_idx,
-                                        segments,
-                                    });
-                                    repaint.request_repaint();
+                                    segment_cache.insert(page_idx, segments);
                                 }
+                            }
+
+                            // Always re-send cached segments on every render so the
+                            // UI-side page_text is refreshed after zoom or eviction.
+                            if let Some(segments) = segment_cache.get(&page_idx) {
+                                let _ = text_seg_tx.send(TextSegmentResult {
+                                    page_idx,
+                                    segments: segments.clone(),
+                                });
+                                repaint.request_repaint();
                             }
 
                             let _ = render_tx.send(RenderResult {
@@ -396,29 +371,76 @@ fn handle_bounded_text(
     repaint.request_repaint();
 }
 
-/// Run Windows OCR on a rendered bitmap, update the caches, and return
-/// display segments. Silently returns empty on OCR unavailability.
-fn run_ocr_for_page(
-    pixels: &[u8],
-    bitmap_w: u32,
-    bitmap_h: u32,
+/// Canonical OCR side length (pixels).  Represents a good trade-off between
+/// recognition quality and runtime: long side ~200 DPI for a Letter page.
+const OCR_CANONICAL_SIDE: u32 = 1500;
+
+/// Minimum display-bitmap long side accepted for OCR without a re-render.
+/// Below this threshold a dedicated canonical bitmap is produced.
+const OCR_MIN_DISPLAY_SIDE: u32 = 800;
+
+/// Run Windows OCR for a page, selecting the bitmap source as follows:
+/// - If the display bitmap (already rendered) meets `OCR_MIN_DISPLAY_SIDE`,
+///   use it directly — no extra Pdfium call needed.
+/// - Otherwise render a fresh canonical bitmap at `OCR_CANONICAL_SIDE` on the
+///   longest side so OCR quality is independent of display zoom.
+///
+/// Results are stored in `ocr_cache` once and never replaced.
+fn run_ocr_canonical(
+    document: &pdfium_render::prelude::PdfDocument<'_>,
+    page_idx: u32,
+    display_pixels: &[u8],
+    display_w: u32,
+    display_h: u32,
     page_w: f32,
     page_h: f32,
-    page_idx: u32,
     ocr_cache: &mut HashMap<u32, Vec<OcrWord>>,
-    ocr_render_side: &mut HashMap<u32, u32>,
 ) -> Vec<PdfTextSegment> {
-    match super::ocr::ocr_page_bitmap(pixels, bitmap_w, bitmap_h, page_w, page_h) {
-        Some(ocr_words) => {
-            let display = ocr_words
-                .iter()
-                .map(|w| PdfTextSegment { bounds: w.bounds })
-                .collect();
-            ocr_render_side.insert(page_idx, bitmap_w.max(bitmap_h));
-            ocr_cache.insert(page_idx, ocr_words);
-            display
+    let display_side = display_w.max(display_h);
+
+    // Closure that converts OcrWords into display segments and updates the cache.
+    let commit = |words: Vec<OcrWord>, cache: &mut HashMap<u32, Vec<OcrWord>>| {
+        let segs = words
+            .iter()
+            .map(|w| PdfTextSegment { bounds: w.bounds })
+            .collect::<Vec<_>>();
+        cache.insert(page_idx, words);
+        segs
+    };
+
+    if display_side >= OCR_MIN_DISPLAY_SIDE {
+        // Reuse the display bitmap — no extra render.
+        return match super::ocr::ocr_page_bitmap(display_pixels, display_w, display_h, page_w, page_h) {
+            Some(words) => commit(words, ocr_cache),
+            None => vec![],
+        };
+    }
+
+    // Display bitmap is too small — render a dedicated canonical bitmap.
+    let scale = OCR_CANONICAL_SIDE as f32 / page_w.max(page_h);
+    let ocr_w = ((page_w * scale) as u32).max(1);
+    let ocr_h = ((page_h * scale) as u32).max(1);
+
+    let canonical = (|| -> Result<(Vec<u8>, u32, u32), String> {
+        let page = document
+            .pages()
+            .get(page_idx as pdfium_render::prelude::PdfPageIndex)
+            .map_err(|e| e.to_string())?;
+        let bm = page
+            .render(ocr_w as pdfium_render::prelude::Pixels, ocr_h as pdfium_render::prelude::Pixels, None)
+            .map_err(|e| format!("OCR render: {e}"))?;
+        Ok((bm.as_rgba_bytes(), bm.width() as u32, bm.height() as u32))
+    })();
+
+    match canonical {
+        Ok((pixels, w, h)) => match super::ocr::ocr_page_bitmap(&pixels, w, h, page_w, page_h) {
+            Some(words) => commit(words, ocr_cache),
+            None => vec![],
+        },
+        Err(e) => {
+            log::error!("[PDF-RENDER] canonical OCR render for page {page_idx} failed: {e}");
+            vec![]
         }
-        None => vec![],
     }
 }
 
