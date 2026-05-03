@@ -105,9 +105,13 @@ features = [
     "Win32_Globalization",
     "Wdk_Storage_FileSystem",
     "Foundation",
+    "Foundation_Collections",
     "Data_Pdf",
     "Storage",
     "Storage_Streams",
+    "Media_Ocr",
+    "Graphics_Imaging",
+    "Win32_System_WinRT",
 ]
 
 [target.'cfg(windows)'.dependencies]
