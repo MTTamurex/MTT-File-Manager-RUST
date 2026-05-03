@@ -610,3 +610,101 @@ When a copy or move operation completes, the destination paths are removed from 
 
 **Key files**: `app/dual_panel.rs`, `app/operations/dual_panel_ops.rs`, `app/operations/folder_loading/load_pipeline.rs`, `ui/app/panels/content.rs`, `infrastructure/windows/file_flags.rs`
 
+## 22. Batch Rename
+
+**Trigger**: User selects 2 or more files and presses F2.
+
+```
+User selects 2+ files → F2
+    ↓
+begin_batch_rename() [app/operations/file_ops.rs]
+    ↓
+Guards:
+  - multi_selection.len() < 2 → early return (single-file path uses inline rename)
+  - Active panel is a drive root → skip
+  - Active panel is Recycle Bin → skip
+    ↓
+Collect sources: iterate self.items in display order,
+filter by multi_selection → Vec<PathBuf>
+    ↓
+BatchRenameState::new(sources) set in app.batch_rename_state
+    ↓
+render_batch_rename_modal() called each frame while batch_rename_state.is_some()
+[ui/components/batch_rename_modal.rs]
+```
+
+### Modal Layout
+
+```
+┌──────────────────────────────────────────┐
+│  Batch Rename (N files)                  │
+│  ┌────────────────────────────────────┐  │
+│  │ Controls (egui::Grid)              │  │
+│  │  Base name: [TextEdit]             │  │
+│  │  Position: [ComboBox] Separator: [ComboBox] │
+│  │  Start: [DragValue] Step: [DragValue] Padding: [DragValue] │
+│  └────────────────────────────────────┘  │
+│  Rename order         ← fixed 140px      │
+│  ┌────────────────────────────────────┐  │
+│  │ [⠿] filename.ext                  │  │ ← drag handle per row
+│  │ [⠿] another.ext                   │  │
+│  └────────────────────────────────────┘  │
+│  Preview              ← fixed 140px      │
+│  ┌────────────────────────────────────┐  │
+│  │  #  │ Original name │ New name     │  │
+│  │  1  │ file.jpg      │ Photo (1).jpg│  │
+│  │  2  │ img.png       │ Photo (2).png│  │
+│  └────────────────────────────────────┘  │
+│  [⚠ N name(s) already exist — skipped]  │ ← amber, shown if conflicts
+│  [Rename N file(s)]  [Cancel]            │
+└──────────────────────────────────────────┘
+```
+
+### Name Generation
+
+`build_new_name(base, num_str, ext)` in `app/batch_rename.rs` covers 10 combinations:
+
+| Position | Separator | Example output |
+|----------|-----------|---------------|
+| Suffix | Parentheses | `Photo (1).jpg` |
+| Suffix | Underscore | `Photo_1.jpg` |
+| Suffix | Dash | `Photo-1.jpg` |
+| Suffix | Space | `Photo 1.jpg` |
+| Suffix | None | `Photo1.jpg` |
+| Prefix | Parentheses | `(1) Photo.jpg` |
+| Prefix | Underscore | `1_Photo.jpg` |
+| Prefix | Dash | `1-Photo.jpg` |
+| Prefix | Space | `1 Photo.jpg` |
+| Prefix | None | `1Photo.jpg` |
+
+Padding (0–6 digits) zero-pads the number: e.g. padding=3, num=1 → `001`.
+
+### Conflict Detection
+
+`compute_preview()` marks a row as conflict if:
+- `dest.exists()` — destination path already exists on disk, **and**
+- `dest != source` — it is not the file renaming to itself, **and**
+- `!sources.contains(&dest)` — destination is not another file in the same rename batch
+
+Conflict rows are shown in red in the preview table. A conflict banner shows the count. The Apply button is disabled if `name_template` is empty or all rows are conflicts.
+
+### Apply
+
+```
+User clicks "Rename N file(s)"
+    ↓
+apply_batch_rename() [app/operations/file_ops.rs]
+    ↓
+compute_preview() — regenerate to ensure state is current
+    ↓
+For each non-conflict PreviewRow:
+  FileOperationRequest::rename(row.source, row.new_name, hwnd)
+  → sent to file_operation_worker via channel
+    ↓
+Worker executes shell_operations::rename_item_with_shell() (Shell IFileOperation)
+    ↓
+batch_rename_state = None  ← modal closes
+```
+
+**Key files**: `app/batch_rename.rs`, `ui/components/batch_rename_modal.rs`, `app/operations/file_ops.rs`, `ui/app/input.rs`, `workers/file_operation_worker.rs`
+

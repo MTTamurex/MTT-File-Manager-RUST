@@ -18,7 +18,7 @@
 **Dependency Stack** — All Cargo dependencies with versions, Windows API features, runtime dependencies, build profiles.
 
 ### [06_key_flows.md](06_key_flows.md)
-**Key Flows** — Step-by-step documentation of major application flows: navigation, preview, file operations, thumbnail pipeline, global search, image/video/PDF viewers, archive extraction, volume rename, GPU backend preference.
+**Key Flows** — Step-by-step documentation of major application flows: navigation, preview, file operations, thumbnail pipeline, global search, image/video/PDF viewers, archive extraction, volume rename, GPU backend preference, batch rename.
 
 ### [07_storage_config.md](07_storage_config.md)
 **Storage & Configuration** — Data locations, SQLite schemas (app + search service + session search), cache structure, preferences, i18n.

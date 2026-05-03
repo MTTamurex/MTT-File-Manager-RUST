@@ -14,6 +14,7 @@ src/
 │   ├── state/                       # ImageViewerApp — main app state (split module)
 │   │   ├── mod.rs                   # ImageViewerApp struct definition & core state
 │   │   └── helpers.rs               # State helper methods & utilities
+│   ├── batch_rename.rs              # Batch rename domain logic: BatchRenameState, name generation, conflict detection, drag-reorder state
 │   ├── cache_state.rs               # Cache state management
 │   ├── drive_state.rs               # Drive information state
 │   ├── dual_panel.rs                # Dual panel state types: ActivePanel enum, PanelSnapshot struct (captures/restores per-panel browsing state via from_app/apply_to/swap_with_app)
@@ -219,6 +220,7 @@ src/
 │   ├── components/                  # Reusable UI components
 │   │   ├── mod.rs
 │   │   ├── appearance_settings.rs   # Theme (dark/light) settings component
+│   │   ├── batch_rename_modal.rs    # Batch rename modal: controls, drag-reorder list, live preview table, conflict banner
 │   │   ├── gif_manager.rs           # GIF playback manager
 │   │   ├── item_slot/               # Item slot rendering (drive/folder/file)
 │   │   ├── language_settings.rs     # Language settings component

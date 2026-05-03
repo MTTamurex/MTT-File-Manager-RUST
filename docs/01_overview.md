@@ -42,6 +42,7 @@ MTT File Manager is a native Windows file manager built in Rust with a modern bo
 - **OneDrive support** — Sync status detection (cloud-only, syncing, pinned, locally available)
 - **ISO mounting** — Mount ISO files as virtual drives; eject mounted ISO drives
 - **Inline renaming** — Rename files directly in the file list
+- **Batch rename** — Select 2+ files and press F2 to open the batch rename modal; configure a shared base name, number position (suffix/prefix), separator style (parentheses, underscore, dash, space, or none), and start/step/padding; drag-to-reorder items; live preview table with per-row conflict detection; executes all renames through the Shell API worker
 - **Drag-and-drop** — Move/copy files via drag-and-drop with visual ghost feedback
 - **Archive extraction** — Native fallback extraction for ZIP, 7z, RAR, and TAR variants (`.tar`, `.tar.gz`, `.tgz`, `.tar.bz2`, `.tbz2`, `.tar.xz`, `.txz`, `.tar.zst`, `.tzst`) when Shell `IFileOperation` fails
 - **Shell shortcuts** — Create Windows `.lnk` shortcuts
