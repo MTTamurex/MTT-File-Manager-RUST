@@ -4,6 +4,30 @@ use rust_i18n::t;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+/// Launches a terminal in the given directory.
+/// Tries Windows Terminal (`wt.exe`) first; falls back to PowerShell.
+fn open_terminal_at(path: &Path) {
+    let dir = if path.is_dir() {
+        path.to_path_buf()
+    } else {
+        path.parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| path.to_path_buf())
+    };
+
+    if std::process::Command::new("wt.exe")
+        .arg("-d")
+        .arg(&dir)
+        .spawn()
+        .is_err()
+    {
+        let _ = std::process::Command::new("powershell.exe")
+            .arg("-NoExit")
+            .current_dir(&dir)
+            .spawn();
+    }
+}
+
 fn is_onedrive_pin_text(text: &str) -> bool {
     let lower = text.trim().to_lowercase();
     lower.contains("always keep on this device")
@@ -306,6 +330,20 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                         &context_menu.target_paths,
                         crate::infrastructure::onedrive::PinCommand::FreeUpSpace,
                     );
+                }
+                -80 => {
+                    let path = if context_menu.is_empty_area {
+                        PathBuf::from(&app.navigation_state.current_path)
+                    } else {
+                        context_menu
+                            .target_paths
+                            .first()
+                            .cloned()
+                            .unwrap_or_else(|| {
+                                PathBuf::from(&app.navigation_state.current_path)
+                            })
+                    };
+                    open_terminal_at(&path);
                 }
                 _ => {}
             }

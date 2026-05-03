@@ -168,6 +168,7 @@ context_menu:
   properties: "Propriedades"
   always_keep_on_device: "Sempre manter neste dispositivo"
   free_up_space: "Liberar espaço"
+  open_terminal: "Abrir no Terminal"
   show_more: "Mostrar mais opções"
   shell_menu_error: "Não foi possível carregar o menu de contexto para este item"
 search:
