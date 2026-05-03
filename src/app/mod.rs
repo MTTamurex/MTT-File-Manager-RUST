@@ -6,6 +6,7 @@
 //! - `operations`: Implements business logic and operations.
 //! - State sub-modules for better organization
 
+pub mod batch_rename;
 pub mod cache_state;
 pub mod drive_state;
 pub mod dual_panel;

@@ -327,6 +327,75 @@ impl ImageViewerApp {
         }
     }
 
+    /// Begins a batch rename operation for the current multi-selection.
+    ///
+    /// Collects all selected, non-drive items in display order, then opens the
+    /// batch rename modal by setting `batch_rename_state`.
+    pub fn begin_batch_rename(&mut self) {
+        if self.multi_selection.len() < 2 {
+            return;
+        }
+
+        let sources: Vec<PathBuf> = self
+            .items
+            .iter()
+            .filter(|item| {
+                // Skip drives – cannot batch-rename volume labels
+                item.drive_info.is_none()
+                    // Skip Recycle Bin entries
+                    && !self.navigation_state.is_recycle_bin_view
+                    && self.multi_selection.contains(&item.path)
+            })
+            .map(|item| item.path.clone())
+            .collect();
+
+        if sources.len() < 2 {
+            return;
+        }
+
+        self.batch_rename_state =
+            Some(crate::app::batch_rename::BatchRenameState::new(sources));
+    }
+
+    /// Applies the current `batch_rename_state`, sending one rename request per
+    /// non-conflicting file to the background worker.
+    pub fn apply_batch_rename(&mut self) {
+        let Some(state): Option<crate::app::batch_rename::BatchRenameState> =
+            self.batch_rename_state.take()
+        else {
+            return;
+        };
+
+        let preview = state.compute_preview();
+        let hwnd = self.native_hwnd.unwrap_or_default();
+
+        for row in preview {
+            if row.conflict {
+                continue;
+            }
+
+            self.file_operation_state.file_ops_in_progress += 1;
+            if self
+                .file_operation_state
+                .file_op_sender
+                .send(
+                    crate::workers::file_operation_worker::FileOperationRequest::rename(
+                        row.source,
+                        row.new_name,
+                        hwnd,
+                    ),
+                )
+                .is_err()
+            {
+                self.file_operation_state.file_ops_in_progress = self
+                    .file_operation_state
+                    .file_ops_in_progress
+                    .saturating_sub(1);
+                log::warn!("[FileOps] H-3: worker channel closed on batch rename");
+            }
+        }
+    }
+
     /// Create a Windows shell shortcut (.lnk) pointing to `target` in the same directory.
     pub fn create_shell_shortcut(&self, target: &Path) -> Result<PathBuf, String> {
         file_operations::create_shortcut(target, &self.navigation_state.current_path)

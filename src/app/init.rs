@@ -302,6 +302,7 @@ impl ImageViewerApp {
             pending_all_items_clear: false,
             renaming_state: None,
             focus_rename: false,
+            batch_rename_state: None,
             sidebar_renaming: None,
             sidebar_rename_focus: false,
 

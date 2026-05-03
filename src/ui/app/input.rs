@@ -136,7 +136,11 @@ fn handle_delete_permanently_shortcut(
 
 pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
     let mut user_active = false;
-    if app.renaming_state.is_none() && app.sidebar_renaming.is_none() && !app.is_address_editing {
+    if app.renaming_state.is_none()
+        && app.sidebar_renaming.is_none()
+        && !app.is_address_editing
+        && app.batch_rename_state.is_none()
+    {
         if app.shortcut_editor.is_capturing() {
             user_active = ctx.input(|i| {
                 i.pointer.any_pressed()
@@ -265,7 +269,10 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
         }
 
         if !text_input_active && app.shortcuts.is_triggered(ShortcutAction::Rename, ctx) {
-            if let Some(idx) = app.selected_item {
+            if app.multi_selection.len() > 1 {
+                app.begin_batch_rename();
+                user_active = true;
+            } else if let Some(idx) = app.selected_item {
                 app.begin_rename_item(idx);
                 user_active = true;
             }
@@ -395,10 +402,14 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
             handle_quick_search(app, ctx);
         }
     } else {
-        // During rename: ESC cancels the operation
+        // During rename or batch-rename modal: ESC cancels the operation
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-            app.renaming_state = None;
-            app.focus_rename = false;
+            if app.batch_rename_state.is_some() {
+                app.batch_rename_state = None;
+            } else {
+                app.renaming_state = None;
+                app.focus_rename = false;
+            }
             user_active = true;
         }
     }

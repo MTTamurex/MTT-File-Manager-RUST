@@ -1,5 +1,6 @@
 pub mod about_settings;
 pub mod appearance_settings;
+pub mod batch_rename_modal;
 pub mod backend_settings;
 pub mod gif_manager;
 pub mod item_slot;
