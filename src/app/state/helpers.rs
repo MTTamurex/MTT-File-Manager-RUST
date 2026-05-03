@@ -53,7 +53,7 @@ fn panel_thumbnail_caches_active(
     is_recycle_bin_view: bool,
     item_count: usize,
 ) -> bool {
-    matches!(view_mode, ViewMode::Grid)
+    matches!(view_mode, ViewMode::Grid | ViewMode::List)
         && !is_computer_view
         && !is_recycle_bin_view
         && item_count > 0
@@ -481,12 +481,23 @@ impl ImageViewerApp {
         let thumbnails_active = self.thumbnail_caches_active();
         if !thumbnails_active && !self.is_in_restore_burst() {
             let pending_removed = self.trim_pending_thumbnail_uploads_to_count(0);
+
+            let folder_preview_keep = self
+                .idle_folder_preview_keep_count()
+                .max(IDLE_FOLDER_PREVIEW_KEEP);
+            let mut visible_for_trim = self.visible_grid_paths_snapshot();
+            if let Some(detail_panel_paths) = self.detail_panel_folder_preview_paths_for_trim() {
+                visible_for_trim
+                    .get_or_insert_with(FxHashSet::default)
+                    .extend(detail_panel_paths);
+            }
+
             let (textures_removed, rgba_removed, folder_previews_removed) =
                 self.cache_manager.trim_thumbnail_caches(
                     IDLE_THUMBNAIL_TEXTURE_KEEP,
                     IDLE_RGBA_BUDGET_BYTES,
-                    IDLE_FOLDER_PREVIEW_KEEP,
-                    None,
+                    folder_preview_keep,
+                    visible_for_trim.as_ref(),
                 );
 
             if textures_removed > 0
@@ -519,9 +530,16 @@ impl ImageViewerApp {
         let aggressive = working_set_bytes >= HARD_LIMIT_BYTES;
         let is_burst = self.is_in_restore_burst();
         let visible_grid_items = self.visible_grid_items_for_cache();
-        let visible_paths = self.visible_grid_paths_snapshot();
+        let mut visible_paths = self.visible_grid_paths_snapshot();
+        if let Some(detail_panel_paths) = self.detail_panel_folder_preview_paths_for_trim() {
+            visible_paths
+                .get_or_insert_with(FxHashSet::default)
+                .extend(detail_panel_paths);
+        }
         let texture_keep = self.current_dynamic_texture_keep_count();
-        let folder_preview_keep = self.current_dynamic_folder_preview_keep_count();
+        let folder_preview_keep = self
+            .current_dynamic_folder_preview_keep_count()
+            .max(self.idle_folder_preview_keep_count());
         let rgba_budget = self.current_dynamic_rgba_budget_bytes(DEFAULT_DYNAMIC_RGBA_BUDGET_BYTES);
         let max_pending = self.current_pending_thumbnail_upload_limit();
 

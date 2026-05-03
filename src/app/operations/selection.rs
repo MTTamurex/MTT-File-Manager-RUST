@@ -6,6 +6,7 @@
 //! Non-owner tabs can change their own selection without affecting the global media player.
 
 use crate::app::state::ImageViewerApp;
+use crate::domain::file_entry::FileEntry;
 use crate::infrastructure::onedrive;
 
 enum SelectedPreviewOverlayAction {
@@ -18,6 +19,55 @@ enum SelectedPreviewOverlayAction {
 }
 
 impl ImageViewerApp {
+    pub fn ensure_detail_panel_thumbnail_for_file(&mut self, file: &FileEntry) {
+        self.ensure_detail_panel_thumbnail_request(
+            file.path.clone(),
+            file.modified,
+            file.is_media(),
+        );
+    }
+
+    fn ensure_detail_panel_thumbnail_request(
+        &mut self,
+        path: std::path::PathBuf,
+        modified: u64,
+        is_media: bool,
+    ) {
+        if !is_media || self.cache_manager.is_failed(&path) {
+            return;
+        }
+
+        let has_required_texture = if let Some(tex) = self.cache_manager.texture_cache.peek(&path) {
+            if self
+                .selected_file
+                .as_ref()
+                .is_some_and(|selected| selected.path == path)
+            {
+                self.selected_thumbnail = Some(tex.clone());
+            }
+            let tex_size = tex.size();
+            (tex_size[0].max(tex_size[1]) as u32) >= 512
+        } else {
+            false
+        };
+
+        let required_preview_bucket = crate::workers::thumbnail::processing::get_bucket_size(
+            self.effective_thumbnail_request_size_px(512),
+        );
+        let has_required_request = self
+            .cache_manager
+            .attempted_thumbnail_bucket_for(&path)
+            .is_some_and(|bucket| bucket >= required_preview_bucket);
+        let required_request_in_flight = has_required_request
+            && (self.cache_manager.is_loading(&path)
+                || self.cache_manager.is_pending_upload(&path));
+
+        if !has_required_texture && !required_request_in_flight {
+            self.cache_manager.loading_set.insert(path.clone());
+            self.request_thumbnail_load_with_modified(path, 512, modified);
+        }
+    }
+
     /// Keeps the visible focus index aligned with the currently selected file.
     ///
     /// When filtering or sorting changes the current `items` snapshot, the old
@@ -275,29 +325,7 @@ impl ImageViewerApp {
                 return;
             }
 
-            // Keep currently available texture, but only request 512px when the existing one
-            // is missing or smaller than needed for the detail panel.
-            let has_required_texture =
-                if let Some(tex) = self.cache_manager.texture_cache.peek(&path) {
-                    self.selected_thumbnail = Some(tex.clone());
-                    let tex_size = tex.size();
-                    (tex_size[0].max(tex_size[1]) as u32) >= 512
-                } else {
-                    false
-                };
-
-            // Avoid re-request loops: once 512px exists (or is already in-flight/pending upload),
-            // selection changes should not enqueue extraction again.
-            if is_media
-                && !has_required_texture
-                && !self.cache_manager.is_loading(&path)
-                && !self.cache_manager.is_pending_upload(&path)
-                && !self.cache_manager.is_failed(&path)
-            {
-                // Mark as loading here because selection-triggered requests bypass item slot code.
-                self.cache_manager.loading_set.insert(path.clone());
-                self.request_thumbnail_load_with_modified(path.clone(), 512, modified);
-            }
+            self.ensure_detail_panel_thumbnail_request(path.clone(), modified, is_media);
 
             let active_tab_id = self.tab_manager.active().id;
 
