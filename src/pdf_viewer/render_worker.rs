@@ -14,6 +14,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use super::ocr::OcrWord;
 use super::renderer::{PdfTextBounds, PdfTextSegment};
 
 pub(super) struct RenderRequest {
@@ -176,11 +177,21 @@ fn worker_loop(
         }
     };
 
+    // Initialize WinRT MTA so Windows.Media.Ocr calls work on this thread.
+    let _ = unsafe {
+        windows::Win32::System::WinRT::RoInitialize(
+            windows::Win32::System::WinRT::RO_INIT_MULTITHREADED,
+        )
+    };
+
     let mut text_extracted: HashSet<u32> = HashSet::new();
+    // Stores OCR word data for pages whose text came from Windows OCR rather
+    // than Pdfium.  Used as a fallback when extract_bounded_text returns empty.
+    let mut ocr_cache: HashMap<u32, Vec<OcrWord>> = HashMap::new();
 
     loop {
         // Drain high-priority bounded-text requests before blocking.
-        drain_bounded_text(&document, &bt_rx, &bt_tx, &repaint);
+        drain_bounded_text(&document, &bt_rx, &bt_tx, &repaint, &ocr_cache);
 
         // Wait for either a render request or a bounded-text request.
         crossbeam_channel::select! {
@@ -199,16 +210,20 @@ fn worker_loop(
 
                 for (_, req) in latest {
                     // Prioritise bounded-text between page renders.
-                    drain_bounded_text(&document, &bt_rx, &bt_tx, &repaint);
+                    drain_bounded_text(&document, &bt_rx, &bt_tx, &repaint, &ocr_cache);
 
                     let page_idx = req.page_idx;
 
-                    // Render page bitmap.
-                    let render_result = (|| -> Result<super::renderer::RenderedPage, String> {
+                    // Render page bitmap, also capturing natural page dimensions
+                    // for OCR coordinate mapping.
+                    let render_result = (|| -> Result<(super::renderer::RenderedPage, f32, f32), String> {
                         let page = document
                             .pages()
                             .get(page_idx as pdfium_render::prelude::PdfPageIndex)
                             .map_err(|e| e.to_string())?;
+
+                        let page_w = page.width().value;
+                        let page_h = page.height().value;
 
                         let bitmap = page
                             .render(
@@ -218,15 +233,64 @@ fn worker_loop(
                             )
                             .map_err(|e| format!("RenderPage: {e}"))?;
 
-                        Ok(super::renderer::RenderedPage {
-                            width: bitmap.width() as u32,
-                            height: bitmap.height() as u32,
-                            pixels: bitmap.as_rgba_bytes(),
-                        })
+                        Ok((
+                            super::renderer::RenderedPage {
+                                width: bitmap.width() as u32,
+                                height: bitmap.height() as u32,
+                                pixels: bitmap.as_rgba_bytes(),
+                            },
+                            page_w,
+                            page_h,
+                        ))
                     })();
 
                     match render_result {
-                        Ok(p) => {
+                        Ok((p, page_w, page_h)) => {
+                            // Text / OCR extraction must run before pixels are
+                            // consumed by render_tx.send so OCR can read them.
+                            if !text_extracted.contains(&page_idx) {
+                                text_extracted.insert(page_idx);
+
+                                let segments = match extract_text_segments(&document, page_idx) {
+                                    Ok(segs) if !segs.is_empty() => segs,
+                                    Ok(_) => {
+                                        // No embedded text layer — try Windows OCR.
+                                        match super::ocr::ocr_page_bitmap(
+                                            &p.pixels,
+                                            p.width,
+                                            p.height,
+                                            page_w,
+                                            page_h,
+                                        ) {
+                                            Some(ocr_words) => {
+                                                let display: Vec<PdfTextSegment> = ocr_words
+                                                    .iter()
+                                                    .map(|w| PdfTextSegment { bounds: w.bounds })
+                                                    .collect();
+                                                ocr_cache.insert(page_idx, ocr_words);
+                                                display
+                                            }
+                                            None => vec![],
+                                        }
+                                    }
+                                    Err(e) => {
+                                        log::error!(
+                                            "[PDF-RENDER] text segment extraction for page \
+                                             {page_idx} failed: {e}"
+                                        );
+                                        vec![]
+                                    }
+                                };
+
+                                if !segments.is_empty() {
+                                    let _ = text_seg_tx.send(TextSegmentResult {
+                                        page_idx,
+                                        segments,
+                                    });
+                                    repaint.request_repaint();
+                                }
+                            }
+
                             let _ = render_tx.send(RenderResult {
                                 page_idx,
                                 pixels: p.pixels,
@@ -236,34 +300,14 @@ fn worker_loop(
                             repaint.request_repaint();
                         }
                         Err(e) => {
-                            log::error!("[PDF-RENDER] page {} failed: {e}", page_idx);
-                        }
-                    }
-
-                    // Eagerly extract text segments on first render of each page.
-                    if !text_extracted.contains(&page_idx) {
-                        text_extracted.insert(page_idx);
-                        match extract_text_segments(&document, page_idx) {
-                            Ok(segments) => {
-                                let _ = text_seg_tx.send(TextSegmentResult {
-                                    page_idx,
-                                    segments,
-                                });
-                                repaint.request_repaint();
-                            }
-                            Err(e) => {
-                                log::error!(
-                                    "[PDF-RENDER] text segment extraction for page {} failed: {e}",
-                                    page_idx
-                                );
-                            }
+                            log::error!("[PDF-RENDER] page {page_idx} failed: {e}");
                         }
                     }
                 }
             },
             recv(bt_rx) -> msg => {
                 if let Ok(req) = msg {
-                    handle_bounded_text(&document, &req, &bt_tx, &repaint);
+                    handle_bounded_text(&document, &req, &bt_tx, &repaint, &ocr_cache);
                 }
             },
         }
@@ -277,9 +321,10 @@ fn drain_bounded_text(
     rx: &Receiver<BoundedTextRequest>,
     tx: &Sender<BoundedTextResult>,
     repaint: &egui::Context,
+    ocr_cache: &HashMap<u32, Vec<OcrWord>>,
 ) {
     while let Ok(req) = rx.try_recv() {
-        handle_bounded_text(document, &req, tx, repaint);
+        handle_bounded_text(document, &req, tx, repaint, ocr_cache);
     }
 }
 
@@ -288,14 +333,35 @@ fn handle_bounded_text(
     req: &BoundedTextRequest,
     tx: &Sender<BoundedTextResult>,
     repaint: &egui::Context,
+    ocr_cache: &HashMap<u32, Vec<OcrWord>>,
 ) {
-    let text = extract_bounded_text(document, req.page_idx, req.bounds).unwrap_or_else(|e| {
-        log::warn!(
-            "[PDF-RENDER] bounded text for page {} failed: {e}",
-            req.page_idx
-        );
-        String::new()
-    });
+    let pdfium_text =
+        extract_bounded_text(document, req.page_idx, req.bounds).unwrap_or_else(|e| {
+            log::warn!(
+                "[PDF-RENDER] bounded text for page {} failed: {e}",
+                req.page_idx
+            );
+            String::new()
+        });
+
+    // For scanned PDFs (no text layer) Pdfium returns empty; fall back to
+    // words collected by Windows OCR that overlap the selection bounds.
+    let text = if pdfium_text.is_empty() {
+        ocr_cache
+            .get(&req.page_idx)
+            .map(|words| {
+                words
+                    .iter()
+                    .filter(|w| w.bounds.overlaps(&req.bounds))
+                    .map(|w| w.text.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
+            .unwrap_or_default()
+    } else {
+        pdfium_text
+    };
+
     let _ = tx.send(BoundedTextResult {
         page_idx: req.page_idx,
         text,

@@ -16,6 +16,7 @@ use std::process::Command;
 
 use crate::viewer_runtime::{apply_saved_locale, build_viewer_native_options, is_saved_theme_dark};
 
+mod ocr;
 mod render_worker;
 mod renderer;
 mod selection;
