@@ -204,6 +204,9 @@ pub struct ImageViewerApp {
     pub renaming_state: Option<(usize, String)>, // (Index, Editable Text)
     pub focus_rename: bool,                      // Trigger to focus the input
 
+    // BATCH RENAME STATE
+    pub batch_rename_state: Option<crate::app::batch_rename::BatchRenameState>,
+
     // SIDEBAR DRIVE RENAME (inline in sidebar, not in main view)
     /// (drive_path, editable_label) â€” active inline rename in the sidebar
     pub sidebar_renaming: Option<(String, String)>,

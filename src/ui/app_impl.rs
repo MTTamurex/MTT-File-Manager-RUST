@@ -262,7 +262,12 @@ impl eframe::App for ImageViewerApp {
             }
         }
 
-        // 12. Notifications
+        // 12. Batch Rename Modal
+        if self.batch_rename_state.is_some() {
+            crate::ui::components::batch_rename_modal::render_batch_rename_modal(self, ctx);
+        }
+
+        // 13. Notifications
         app::notifications::render_notifications(self, ctx);
 
         // 13. Global Search Overlay (on top of everything)
