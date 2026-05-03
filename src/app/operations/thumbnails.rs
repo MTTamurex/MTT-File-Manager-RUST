@@ -110,15 +110,6 @@ impl ImageViewerApp {
         self.cache_manager.thumbnail_trace.record_request(&path);
 
         let effective_size_px = self.effective_thumbnail_request_size_px(size_px);
-        // Record the bucket we are about to request so the slot renderer
-        // does NOT re-request this path once the worker returns. The slot
-        // compares against this value, not the actual cached texture
-        // dimensions (which can be smaller than the bucket for naturally
-        // small source images and would otherwise loop forever).
-        let attempted_bucket =
-            crate::workers::thumbnail::processing::get_bucket_size(effective_size_px);
-        self.cache_manager
-            .note_attempted_thumbnail_bucket(&path, attempted_bucket);
 
         // When rendering the unfocused dual-panel pane, use the active generation
         // accepted by the shared thumbnail workers while preserving caller priority.
@@ -180,6 +171,10 @@ impl ImageViewerApp {
 
             // Only reuse RAM cache if it meets or exceeds the requested size
             if cached_max_dim >= effective_size_px {
+                let attempted_bucket =
+                    crate::workers::thumbnail::processing::get_bucket_size(effective_size_px);
+                self.cache_manager
+                    .note_attempted_thumbnail_bucket(&path, attempted_bucket);
                 self.cache_manager.thumbnail_trace.record_ram_cache_hit();
                 // Data is in RAM cache - add directly to pending_thumbnails for GPU upload
                 // No disk I/O needed!
@@ -209,6 +204,10 @@ impl ImageViewerApp {
         // Now all thumbnails are loaded, but with intelligent prioritization
 
         // Not in RAM cache - send to worker (will read from disk cache or generate)
+        let attempted_bucket =
+            crate::workers::thumbnail::processing::get_bucket_size(effective_size_px);
+        self.cache_manager
+            .note_attempted_thumbnail_bucket(&path, attempted_bucket);
         self.cache_manager.thumbnail_trace.record_worker_dispatch();
         self.cache_manager.note_thumbnail_request_sent(&path);
         if let Some(index) = directory_index {

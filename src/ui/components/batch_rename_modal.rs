@@ -203,7 +203,12 @@ fn render_reorderable_list(
     let filenames: Vec<String> = state
         .sources
         .iter()
-        .map(|p| p.file_name().and_then(|s| s.to_str()).unwrap_or("").to_string())
+        .map(|p| {
+            p.file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("")
+                .to_string()
+        })
         .collect();
 
     let n = filenames.len();
@@ -222,8 +227,10 @@ fn render_reorderable_list(
             ui.set_min_width(ui.available_width());
 
             for i in 0..n {
-                let is_drag_src =
-                    state.drag_state.as_ref().map_or(false, |ds| ds.dragging_idx == i);
+                let is_drag_src = state
+                    .drag_state
+                    .as_ref()
+                    .map_or(false, |ds| ds.dragging_idx == i);
                 let is_drag_tgt = state
                     .drag_state
                     .as_ref()
@@ -263,9 +270,7 @@ fn render_reorderable_list(
                         // Row number
                         ui.add_sized(
                             [NUM_WIDTH, ROW_HEIGHT],
-                            egui::Label::new(
-                                RichText::new(format!("{}.", i + 1)).weak(),
-                            ),
+                            egui::Label::new(RichText::new(format!("{}.", i + 1)).weak()),
                         );
 
                         // Filename (conflict highlighted)
@@ -338,8 +343,15 @@ fn render_reorderable_list(
     if drag_released {
         if let Some(ds) = state.drag_state.take() {
             if ds.dragging_idx != ds.hover_idx {
+                let insert_idx = if ds.dragging_idx < ds.hover_idx {
+                    ds.hover_idx.saturating_sub(1)
+                } else {
+                    ds.hover_idx
+                };
                 let item = state.sources.remove(ds.dragging_idx);
-                state.sources.insert(ds.hover_idx, item);
+                state
+                    .sources
+                    .insert(insert_idx.min(state.sources.len()), item);
             }
         }
     }
