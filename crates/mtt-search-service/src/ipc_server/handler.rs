@@ -27,11 +27,27 @@ fn repair_suspicious_zero_folder_size(
     drive_letter: char,
     path: &str,
     dir_frn: u64,
-    summary: (u64, u64, u64),
+    summary: (u64, u64, u64, u64),
+    has_pending_refreshes: bool,
 ) -> (u64, u64, u64) {
-    let (total_size, file_count, folder_count) = summary;
-    if total_size > 0 || file_count == 0 {
-        return summary;
+    let (total_size, file_count, folder_count, zero_size_count) = summary;
+
+    // Determine whether a repair is warranted:
+    //   (a) total=0 with files present: all sizes are missing from the index.
+    //   (b) has_pending_refreshes=true AND ≥25% of files (min 5) have zero size:
+    //       post-restart race condition where USN catch-up inserted new file FRNs
+    //       (size=0) before the background pending_size_refresh task ran, causing
+    //       folder totals to be severely underreported (e.g. 185 KB vs 1.30 GB).
+    let needs_repair = if total_size == 0 {
+        file_count > 0
+    } else {
+        has_pending_refreshes
+            && zero_size_count >= 5
+            && zero_size_count.saturating_mul(4) >= file_count
+    };
+
+    if !needs_repair {
+        return (total_size, file_count, folder_count);
     }
 
     let volume = match crate::usn_journal::open_volume(drive_letter) {
@@ -42,7 +58,7 @@ fn repair_suspicious_zero_folder_size(
                 crate::redact_paths(path),
                 crate::redact_paths(&error),
             );
-            return summary;
+            return (total_size, file_count, folder_count);
         }
     };
 
@@ -55,7 +71,7 @@ fn repair_suspicious_zero_folder_size(
                 crate::redact_paths(path),
                 crate::redact_paths(&error),
             );
-            return summary;
+            return (total_size, file_count, folder_count);
         }
     };
 
@@ -64,7 +80,7 @@ fn repair_suspicious_zero_folder_size(
         let candidates =
             vol.collect_zero_size_file_frns_in_subtree(dir_frn, ZERO_SIZE_FOLDER_REPAIR_LIMIT);
         if candidates.is_empty() {
-            (0usize, 0usize, summary)
+            (0usize, 0usize, (total_size, file_count, folder_count))
         } else {
             let repaired = crate::mft_reader::repair_zero_size_file_frns(
                 volume,
@@ -72,8 +88,9 @@ fn repair_suspicious_zero_folder_size(
                 &candidates,
                 record_size,
             );
-            let refreshed = crate::mft_reader::folder_size_for_service(&vol, dir_frn);
-            (candidates.len(), repaired, refreshed)
+            let (rt, rfc, rfoldc, _) =
+                crate::mft_reader::folder_size_for_service(&vol, dir_frn);
+            (candidates.len(), repaired, (rt, rfc, rfoldc))
         }
     };
 
@@ -103,7 +120,7 @@ fn repair_suspicious_zero_folder_size(
         );
     }
 
-    summary
+    (total_size, file_count, folder_count)
 }
 
 pub(super) fn handle_client(
@@ -380,7 +397,7 @@ pub(super) fn handle_client(
                 }
             };
 
-            let result = {
+            let (result, has_pending_refreshes) = {
                 let vol = handle.read();
                 if !matches!(vol.state, IndexState::Ready) {
                     drop(vol);
@@ -394,10 +411,15 @@ pub(super) fn handle_client(
                         send_response(pipe, &SearchResponse::Error("Sizes not loaded".to_string()));
                     return;
                 }
-                match vol.resolve_path_to_frn(&path) {
+                // Capture whether there are pending size refreshes while we hold the
+                // read lock. This is passed to repair_suspicious_zero_folder_size to
+                // decide whether to repair partial-zero subtrees (post-restart race).
+                let has_pending = !vol.pending_size_refresh.is_empty();
+                let r = match vol.resolve_path_to_frn(&path) {
                     Some(frn) => Ok((frn, crate::mft_reader::folder_size_for_service(&vol, frn))),
                     None => Err("Path not found in index"),
-                }
+                };
+                (r, has_pending)
             };
 
             match result {
@@ -408,6 +430,7 @@ pub(super) fn handle_client(
                         &path,
                         dir_frn,
                         summary,
+                        has_pending_refreshes,
                     );
                     eprintln!(
                         "[FOLDER-SIZE] responding path={} total_gb={:.2} files={} folders={}",

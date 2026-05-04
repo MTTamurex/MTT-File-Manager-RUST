@@ -162,6 +162,7 @@ impl ImageViewerApp {
             ui_signature,
             show_hidden_files: self.show_hidden_files,
             mode: ConsistencyProbeMode::ListingDrift,
+            modified_threshold_secs: (interval.as_secs().saturating_add(2) as u32).max(5),
             folder_cover_states,
         });
     }
@@ -211,6 +212,7 @@ impl ImageViewerApp {
             ui_signature,
             show_hidden_files: self.show_hidden_files,
             mode: ConsistencyProbeMode::ListingDrift,
+            modified_threshold_secs: 5,
             folder_cover_states,
         });
     }
@@ -246,6 +248,7 @@ impl ImageViewerApp {
             .map(|snapshot| Self::compute_entries_signature(&snapshot.all_items));
         if inactive_signature == Some(result.disk_signature)
             && result.changed_folder_covers.is_empty()
+            && result.changed_folder_contents.is_empty()
         {
             return;
         }
@@ -255,6 +258,10 @@ impl ImageViewerApp {
             self.invalidate_folder_size_cache(&folder_path);
             self.cache_manager.invalidate_folder_preview(&folder_path);
             self.scanned_folders.pop(&folder_path);
+        }
+
+        for folder_path in &result.changed_folder_contents {
+            self.invalidate_folder_size_cache(folder_path);
         }
 
         self.directory_dirty_registry.mark_dirty(&result.path);
@@ -291,6 +298,7 @@ impl ImageViewerApp {
                 ui_signature: 0,
                 show_hidden_files: self.show_hidden_files,
                 mode: ConsistencyProbeMode::PathLiveness,
+                modified_threshold_secs: 0,
                 folder_cover_states: Vec::new(),
             };
 
@@ -320,6 +328,7 @@ impl ImageViewerApp {
             ui_signature: 0,
             show_hidden_files: self.show_hidden_files,
             mode: ConsistencyProbeMode::PathLiveness,
+            modified_threshold_secs: 0,
             folder_cover_states: Vec::new(),
         };
 
@@ -388,6 +397,17 @@ impl ImageViewerApp {
                     self.invalidate_folder_cover_state(folder_path);
                 }
                 self.pending_items_rebuild = true;
+            }
+
+            if !result.changed_folder_contents.is_empty() {
+                log::debug!(
+                    "[FS-WATCH-FALLBACK] {} folder content change(s) detected in {:?}",
+                    result.changed_folder_contents.len(),
+                    result.path.file_name().unwrap_or_default()
+                );
+                for folder_path in &result.changed_folder_contents {
+                    self.invalidate_folder_size_cache(folder_path);
+                }
             }
 
             // Re-check UI signature in case items changed while probe was in flight.

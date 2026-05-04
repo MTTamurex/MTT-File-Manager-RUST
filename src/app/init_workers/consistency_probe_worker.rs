@@ -17,6 +17,9 @@ pub struct ConsistencyProbeRequest {
     pub ui_signature: u64,
     pub show_hidden_files: bool,
     pub mode: ConsistencyProbeMode,
+    /// Time window for "recently modified" checks against the search service.
+    /// Used to detect subfolder content changes that do not alter parent listing shape.
+    pub modified_threshold_secs: u32,
     /// (folder_path, current_cover_file_path) pairs for visible subfolders whose
     /// folder cover state should be verified.
     pub folder_cover_states: Vec<(PathBuf, Option<PathBuf>)>,
@@ -28,6 +31,9 @@ pub struct ConsistencyProbeResult {
     pub path_vanished: bool,
     /// Folder paths whose effective folder cover changed (None->Some, Some->None, Some->Some(new)).
     pub changed_folder_covers: Vec<PathBuf>,
+    /// Folder paths whose contents changed recently according to the search service.
+    /// This is used to invalidate folder-size caches without forcing a full reload.
+    pub changed_folder_contents: Vec<PathBuf>,
 }
 
 /// Spawns a background thread that performs directory consistency probes
@@ -82,6 +88,7 @@ pub fn spawn_consistency_probe_worker(
                             disk_signature: 0,
                             path_vanished: true,
                             changed_folder_covers: Vec::new(),
+                            changed_folder_contents: Vec::new(),
                         });
                         ctx.request_repaint();
                     }
@@ -102,6 +109,7 @@ pub fn spawn_consistency_probe_worker(
                                 disk_signature: 0,
                                 path_vanished: true,
                                 changed_folder_covers: Vec::new(),
+                                changed_folder_contents: Vec::new(),
                             });
                             ctx.request_repaint();
                         }
@@ -128,23 +136,69 @@ pub fn spawn_consistency_probe_worker(
                     })
                     .collect();
 
+                // Also probe visible subfolders for recent content changes via
+                // the NTFS search service. This catches size changes that do
+                // not affect parent listing signature (same child names/mtimes).
+                let changed_folder_contents: Vec<PathBuf> = if latest.is_onedrive
+                    || latest.folder_cover_states.is_empty()
+                {
+                    Vec::new()
+                } else {
+                    let candidate_paths: Vec<String> = latest
+                        .folder_cover_states
+                        .iter()
+                        .map(|(folder_path, _)| folder_path.to_string_lossy().to_string())
+                        .collect();
+
+                    if candidate_paths.is_empty() {
+                        Vec::new()
+                    } else {
+                        let threshold = latest.modified_threshold_secs.max(5);
+                        match crate::infrastructure::global_search::check_paths_modified(
+                            &candidate_paths,
+                            threshold,
+                        ) {
+                            Ok(modified_paths) => {
+                                let modified_set: std::collections::HashSet<String> =
+                                    modified_paths.into_iter().collect();
+                                latest
+                                    .folder_cover_states
+                                    .iter()
+                                    .filter_map(|(folder_path, _)| {
+                                        let key = folder_path.to_string_lossy().to_string();
+                                        if modified_set.contains(&key) {
+                                            Some(folder_path.clone())
+                                        } else {
+                                            None
+                                        }
+                                    })
+                                    .collect()
+                            }
+                            Err(_) => Vec::new(),
+                        }
+                    }
+                };
+
                 let signature_changed = disk_signature != ui_signature;
                 let has_cover_changes = !changed_folder_covers.is_empty();
+                let has_folder_content_changes = !changed_folder_contents.is_empty();
 
                 log::debug!(
-                    "[PROBE-WORKER] path={:?} entries={} sig_match={} changed_folder_covers={}",
+                    "[PROBE-WORKER] path={:?} entries={} sig_match={} changed_folder_covers={} changed_folder_contents={}",
                     path.file_name().unwrap_or_default(),
                     disk_entries.len(),
                     !signature_changed,
-                    changed_folder_covers.len()
+                    changed_folder_covers.len(),
+                    changed_folder_contents.len()
                 );
 
-                if signature_changed || has_cover_changes {
+                if signature_changed || has_cover_changes || has_folder_content_changes {
                     let _ = res_tx.send(ConsistencyProbeResult {
                         path,
                         disk_signature,
                         path_vanished: false,
                         changed_folder_covers,
+                        changed_folder_contents,
                     });
                     ctx.request_repaint();
                 }
