@@ -145,6 +145,15 @@ const FAST_RECENT_GUARD_SECS: u64 = 5;
 /// changing media file as safe to read.
 const MIN_STABLE_MEDIA_DURATION: Duration = Duration::from_secs(12);
 
+/// Reduced stability window when the watcher has observed live write events.
+///
+/// The file system watcher (notify/ReadDirectoryChangesW) fires a Modify event
+/// for every block qBittorrent (or any other writer) commits.  When those events
+/// are the baseline, 3 s of silence reliably signals that writing has stopped.
+/// The full 12 s window (`MIN_STABLE_MEDIA_DURATION`) is kept as a fallback for
+/// the "entered the folder mid-download without observing the Create event" case.
+const STABLE_AFTER_ACTIVITY_SECS: Duration = Duration::from_secs(3);
+
 const STABILITY_STATE_CAP: usize = 8192;
 const STABILITY_STATE_TTL: Duration = Duration::from_secs(15 * 60);
 const WRITE_ACTIVITY_STATE_CAP: usize = 8192;
@@ -375,10 +384,16 @@ fn read_stability_snapshot(path: &Path) -> Option<FileStabilitySnapshot> {
     })
 }
 
-fn is_stable_enough_across_attempts(
+/// Tracks per-path stability across classify calls.  Returns `true` once the
+/// file has been unchanged (same `len` + `mtime`) for at least `required_duration`
+/// since the last observed write activity.
+/// stability duration.  This lets `classify_file_read_safety` use a shorter
+/// window (3 s) when the write-activity baseline comes from a live watcher event.
+fn is_stable_enough_with_duration(
     path: &Path,
     snapshot: FileStabilitySnapshot,
     recent_write_baseline: Option<Instant>,
+    required_duration: Duration,
 ) -> bool {
     let now = Instant::now();
 
@@ -405,7 +420,7 @@ fn is_stable_enough_across_attempts(
                 false
             } else {
                 state.last_seen = now;
-                now.duration_since(state.stable_since) >= MIN_STABLE_MEDIA_DURATION
+                now.duration_since(state.stable_since) >= required_duration
             }
         }
         None => {
@@ -419,7 +434,7 @@ fn is_stable_enough_across_attempts(
                     last_seen: now,
                 },
             );
-            now.duration_since(stable_since) >= MIN_STABLE_MEDIA_DURATION
+            now.duration_since(stable_since) >= required_duration
         }
     };
 
@@ -431,25 +446,83 @@ fn is_stable_enough_across_attempts(
 ///
 /// Worker-thread usage only: may perform lock probe and short sleep for
 /// stability verification on recently modified media files.
+///
+/// # Ordering rationale
+///
+/// The lock probe (`is_file_locked_for_write`) opens the file **without**
+/// `FILE_SHARE_WRITE`.  While that handle is alive, any concurrent `WriteFile`
+/// from the writing process (e.g. qBittorrent) receives `ERROR_SHARING_VIOLATION`
+/// and may abort the transfer.  Therefore the probe must **never** run when the
+/// watcher has already established that the file is actively being written.
+///
+/// New order:
+///   1. Extension blacklist (zero cost, no handle).
+///   2. Watcher-event activity check.
+///      • If activity is present → pure mtime/size stability via `std::fs::metadata`
+///        (always uses share-all flags; safe for active writers).  The stability
+///        window is `STABLE_AFTER_ACTIVITY_SECS` (3 s) when the event baseline is
+///        trusted, `MIN_STABLE_MEDIA_DURATION` (12 s) when it comes from the mtime
+///        fallback alone.
+///      • If no activity at all → the lock probe runs as a last-resort fallback to
+///        catch external writers whose `Create` event we may have missed (e.g. the
+///        file existed before the watcher started).  This path is narrow: any file
+///        touched after the watcher started will be in the activity cache.
 pub fn classify_file_read_safety(path: &Path) -> FileReadSafety {
     if is_incomplete_download(path) {
         return FileReadSafety::IncompleteDownload;
     }
 
-    if is_file_locked_for_write(path) {
-        return FileReadSafety::WriteLocked;
-    }
-
     let recent_write_baseline = recent_write_activity_baseline(path);
+
     if recent_write_baseline.is_some() {
+        // Watcher (or recent mtime) has observed write activity on this file.
+        // Use only std::fs::metadata-based stability (share-all, never hostile to
+        // active writers) — do NOT call is_file_locked_for_write here.
         let snapshot = match read_stability_snapshot(path) {
             Some(v) => v,
             None => return FileReadSafety::RecentlyChanging,
         };
 
-        if !is_stable_enough_across_attempts(path, snapshot, recent_write_baseline) {
+        // Decide which stability window to apply:
+        //   • Event-driven baseline (from watcher cache, age < WRITE_ACTIVITY_STATE_TTL):
+        //     3 s is enough — the watcher fires on every committed block, so 3 s of
+        //     silence reliably means the writer has paused or finished.
+        //   • mtime-only fallback (no cached event, pure filesystem age):
+        //     Keep the conservative 12 s window to ride out multi-second inter-block
+        //     gaps on slow HDDs or throttled torrent clients.
+        let has_event_baseline = {
+            let cache = get_file_write_activity_cache().lock();
+            cache.contains_key(path)
+        };
+        let required_stability = if has_event_baseline {
+            STABLE_AFTER_ACTIVITY_SECS
+        } else {
+            MIN_STABLE_MEDIA_DURATION
+        };
+
+        // We need is_stable_enough_across_attempts to use our chosen window.
+        // That function internally uses MIN_STABLE_MEDIA_DURATION; supply the
+        // effective required duration and compare against elapsed since stable_since.
+        if !is_stable_enough_with_duration(
+            path,
+            snapshot,
+            recent_write_baseline,
+            required_stability,
+        ) {
             return FileReadSafety::RecentlyChanging;
         }
+
+        return FileReadSafety::Safe;
+    }
+
+    // No watcher activity observed for this path.  Run the lock probe as a
+    // last-resort to catch writers whose Create/Modify events we missed (e.g.
+    // file was being written before the watcher started watching this folder).
+    // This path will NOT be hit for any active qBittorrent download because
+    // qBittorrent always triggers at least a Create event when it first writes
+    // to the file, which populates the activity cache.
+    if is_file_locked_for_write(path) {
+        return FileReadSafety::WriteLocked;
     }
 
     FileReadSafety::Safe
