@@ -33,6 +33,115 @@ fn restore_pending_snapshot(handle: &VolumeIndexHandle, snapshot: PendingPersist
     vol_index.pending_removals.extend(snapshot.removals);
 }
 
+fn take_pending_snapshot(handle: &VolumeIndexHandle) -> PendingPersistSnapshot {
+    let mut vol_index = handle.write();
+    let additions = std::mem::take(&mut vol_index.pending_additions);
+    let removals = std::mem::take(&mut vol_index.pending_removals);
+    let addition_rows = additions
+        .iter()
+        .filter_map(|frn| {
+            let record = vol_index.records.get(frn)?;
+            Some((
+                *frn,
+                vol_index.names.get(record.name_ref()).to_string(),
+                record.parent_ref,
+                record.is_dir,
+                vol_index.reparse_points.contains(frn),
+                vol_index
+                    .hardlink_parents
+                    .get(frn)
+                    .cloned()
+                    .unwrap_or_default(),
+            ))
+        })
+        .collect();
+
+    PendingPersistSnapshot {
+        drive_letter: vol_index.drive_letter,
+        journal_id: vol_index.journal_id,
+        last_usn: vol_index.last_usn,
+        files_indexed: vol_index.records.len(),
+        additions,
+        removals,
+        addition_rows,
+    }
+}
+
+fn persist_pending_snapshot(
+    db: &index_db::IndexDb,
+    handle: &VolumeIndexHandle,
+    drive_letter: char,
+    snapshot: PendingPersistSnapshot,
+) -> bool {
+    let had_structural_changes = !snapshot.additions.is_empty() || !snapshot.removals.is_empty();
+
+    if let Err(e) = db.save_volume_state_snapshot(
+        snapshot.drive_letter,
+        snapshot.journal_id,
+        snapshot.last_usn,
+        snapshot.files_indexed,
+        true,
+        true,
+    ) {
+        eprintln!(
+            "[USN] {}:\\ Volume state persist error: {}",
+            drive_letter,
+            crate::redact_paths(&e.to_string())
+        );
+    }
+
+    if had_structural_changes {
+        if let Err(e) = db.sync_records_incremental_snapshot(
+            snapshot.drive_letter,
+            &snapshot.addition_rows,
+            &snapshot.removals,
+        ) {
+            eprintln!(
+                "[USN] {}:\\ Incremental sync error (will retry): {}",
+                drive_letter,
+                crate::redact_paths(&e.to_string())
+            );
+            restore_pending_snapshot(handle, snapshot);
+            return false;
+        }
+    }
+
+    had_structural_changes
+}
+
+fn flush_binary_snapshot_if_dirty(handle: &VolumeIndexHandle, drive_letter: char) {
+    let mut vol = handle.write();
+    if !vol.binary_dirty || !vol.sizes_loaded {
+        return;
+    }
+
+    match crate::index_db::binary::save(&vol) {
+        Ok(()) => {
+            vol.binary_dirty = false;
+        }
+        Err(e) => {
+            eprintln!(
+                "[USN] {}:\\ Binary snapshot flush failed: {}",
+                drive_letter,
+                crate::redact_paths(&e)
+            );
+        }
+    }
+}
+
+fn should_prefer_sqlite_over_binary(
+    sqlite_state: &index_db::PersistedVolumeState,
+    binary_state: &index_db::PersistedVolumeState,
+    current_journal_id: u64,
+) -> bool {
+    let sqlite_matches_current = sqlite_state.journal_id == current_journal_id;
+    let binary_matches_current = binary_state.journal_id == current_journal_id;
+    let sqlite_is_fresher_same_journal = sqlite_state.journal_id == binary_state.journal_id
+        && sqlite_state.last_usn > binary_state.last_usn;
+
+    sqlite_is_fresher_same_journal || (sqlite_matches_current && !binary_matches_current)
+}
+
 pub(crate) fn index_volume(
     drive_letter: char,
     indices: SharedVolumeIndices,
@@ -43,34 +152,32 @@ pub(crate) fn index_volume(
     eprintln!("[USN] Starting indexing for volume {}:\\", drive_letter);
 
     let mut index = file_index::VolumeIndex::empty(drive_letter);
+    let sqlite_state = db.load_volume_state(drive_letter);
 
     // Try to load cached state — prefer binary file, fall back to SQLite.
-    let cached_state = match crate::index_db::binary::load(drive_letter) {
+    let binary_candidate = match crate::index_db::binary::load(drive_letter) {
         Ok(Some((bin_index, bin_state))) => {
-            // Successfully loaded from binary — inject into `index`.
-            index = bin_index;
-            Some(crate::index_db::PersistedVolumeState {
+            Some((
+                bin_index,
+                crate::index_db::PersistedVolumeState {
                 drive_letter,
                 journal_id: bin_state.journal_id,
                 last_usn: bin_state.last_usn,
                 files_indexed: bin_state.files_indexed,
                 has_hardlink_parent_data: bin_state.has_hardlink_parent_data,
                 has_reparse_point_data: bin_state.has_reparse_point_data,
-            })
+                },
+            ))
         }
-        Ok(None) => {
-            // No binary file — try SQLite.
-            db.load_volume_state(drive_letter)
-        }
+        Ok(None) => None,
         Err(e) => {
             eprintln!(
                 "[USN] {}:\\ Binary index load failed ({}), trying SQLite",
                 drive_letter, e
             );
-            db.load_volume_state(drive_letter)
+            None
         }
     };
-    let loaded_from_binary = !index.records.is_empty();
 
     // Open volume handle.
     let volume_handle = match usn_journal::open_volume(drive_letter) {
@@ -100,6 +207,38 @@ pub(crate) fn index_volume(
         "[USN] {}:\\ Journal ID: {}, First USN: {}, Next USN: {}",
         drive_letter, journal_info.journal_id, journal_info.first_usn, journal_info.next_usn
     );
+
+    let (cached_state, loaded_from_binary) = match (binary_candidate, sqlite_state) {
+        (Some((bin_index, bin_state)), Some(sqlite_state))
+            if should_prefer_sqlite_over_binary(&sqlite_state, &bin_state, journal_info.journal_id) =>
+        {
+            eprintln!(
+                "[USN] {}:\\ Discarding stale binary snapshot in favor of fresher SQLite metadata (bin_journal={}, bin_usn={}, db_journal={}, db_usn={})",
+                drive_letter,
+                bin_state.journal_id,
+                bin_state.last_usn,
+                sqlite_state.journal_id,
+                sqlite_state.last_usn,
+            );
+            if let Err(e) = std::fs::remove_file(crate::index_db::binary::index_path(drive_letter)) {
+                if e.kind() != std::io::ErrorKind::NotFound {
+                    eprintln!(
+                        "[USN] {}:\\ Failed to remove stale binary snapshot: {}",
+                        drive_letter,
+                        crate::redact_paths(&e.to_string())
+                    );
+                }
+            }
+            drop(bin_index);
+            (Some(sqlite_state), false)
+        }
+        (Some((bin_index, bin_state)), _) => {
+            index = bin_index;
+            (Some(bin_state), true)
+        }
+        (None, Some(sqlite_state)) => (Some(sqlite_state), false),
+        (None, None) => (None, false),
+    };
 
     let need_full_scan;
 
@@ -358,6 +497,8 @@ pub(crate) fn index_volume(
                 drive_letter,
                 crate::redact_paths(&e)
             );
+        } else {
+            index.binary_dirty = false;
         }
 
         // Reset change tracking so the incremental sync starts fresh.
@@ -426,17 +567,25 @@ pub(crate) fn index_volume(
                     if let Some(mut vol) =
                         bg_handle.try_write_for(std::time::Duration::from_secs(10))
                     {
+                        let mut changed = false;
                         for (&frn, bulk_rec) in &bulk_index.records {
                             if bulk_rec.size > 0 {
                                 if let Some(rec) = vol.records.get_mut(&frn) {
                                     if rec.size != bulk_rec.size {
                                         rec.size = bulk_rec.size;
                                         applied += 1;
+                                        changed = true;
                                     }
                                 }
                             }
                         }
+                        if !vol.sizes_loaded {
+                            changed = true;
+                        }
                         vol.sizes_loaded = true;
+                        if changed {
+                            vol.binary_dirty = true;
+                        }
                         sizes_marked = true;
                     }
                     if !sizes_marked {
@@ -444,17 +593,25 @@ pub(crate) fn index_volume(
                             if let Some(mut vol) =
                                 bg_handle.try_write_for(std::time::Duration::from_millis(250))
                             {
+                                let mut changed = false;
                                 for (&frn, bulk_rec) in &bulk_index.records {
                                     if bulk_rec.size > 0 {
                                         if let Some(rec) = vol.records.get_mut(&frn) {
                                             if rec.size != bulk_rec.size {
                                                 rec.size = bulk_rec.size;
                                                 applied += 1;
+                                                changed = true;
                                             }
                                         }
                                     }
                                 }
+                                if !vol.sizes_loaded {
+                                    changed = true;
+                                }
                                 vol.sizes_loaded = true;
+                                if changed {
+                                    vol.binary_dirty = true;
+                                }
                                 break;
                             }
                         }
@@ -608,10 +765,17 @@ pub(crate) fn index_volume(
                         if let Some(mut vol) =
                             handle.try_write_for(INCREMENTAL_WRITE_FALLBACK_TIMEOUT)
                         {
+                            let mut changed = false;
                             for (frn, size) in &size_updates {
                                 if let Some(rec) = vol.records.get_mut(frn) {
-                                    rec.size = *size;
+                                    if rec.size != *size {
+                                        rec.size = *size;
+                                        changed = true;
+                                    }
                                 }
+                            }
+                            if changed {
+                                vol.binary_dirty = true;
                             }
                         }
                     }
@@ -640,74 +804,9 @@ pub(crate) fn index_volume(
 
         // 3) Persist every 5 minutes — incremental sync only (not full rebuild).
         if last_persist.elapsed() > std::time::Duration::from_secs(300) {
-            let pending_snapshot = {
-                let mut vol_index = handle.write();
-                let additions = std::mem::take(&mut vol_index.pending_additions);
-                let removals = std::mem::take(&mut vol_index.pending_removals);
-                let addition_rows = additions
-                    .iter()
-                    .filter_map(|frn| {
-                        let record = vol_index.records.get(frn)?;
-                        Some((
-                            *frn,
-                            vol_index.names.get(record.name_ref()).to_string(),
-                            record.parent_ref,
-                            record.is_dir,
-                            vol_index.reparse_points.contains(frn),
-                            vol_index
-                                .hardlink_parents
-                                .get(frn)
-                                .cloned()
-                                .unwrap_or_default(),
-                        ))
-                    })
-                    .collect();
-
-                Some(PendingPersistSnapshot {
-                    drive_letter: vol_index.drive_letter,
-                    journal_id: vol_index.journal_id,
-                    last_usn: vol_index.last_usn,
-                    files_indexed: vol_index.records.len(),
-                    additions,
-                    removals,
-                    addition_rows,
-                })
-            };
-
-            let mut should_shrink_index = false;
-            if let Some(snapshot) = pending_snapshot {
-                should_shrink_index =
-                    !snapshot.additions.is_empty() || !snapshot.removals.is_empty();
-                if let Err(e) = db.save_volume_state_snapshot(
-                    snapshot.drive_letter,
-                    snapshot.journal_id,
-                    snapshot.last_usn,
-                    snapshot.files_indexed,
-                    true,
-                    true,
-                ) {
-                    eprintln!(
-                        "[USN] {}:\\ Volume state persist error: {}",
-                        drive_letter,
-                        crate::redact_paths(&e.to_string())
-                    );
-                }
-
-                if !snapshot.additions.is_empty() || !snapshot.removals.is_empty() {
-                    if let Err(e) = db.sync_records_incremental_snapshot(
-                        snapshot.drive_letter,
-                        &snapshot.addition_rows,
-                        &snapshot.removals,
-                    ) {
-                        eprintln!(
-                            "[USN] {}:\\ Incremental sync error (will retry): {}",
-                            drive_letter,
-                            crate::redact_paths(&e.to_string())
-                        );
-                        restore_pending_snapshot(&handle, snapshot);
-                    }
-                }
-            }
+            let snapshot = take_pending_snapshot(&handle);
+            let should_shrink_index =
+                persist_pending_snapshot(db.as_ref(), &handle, drive_letter, snapshot);
             last_persist = std::time::Instant::now();
 
             // SEC: Prune stale dir_modified_at entries to prevent unbounded memory growth.
@@ -720,6 +819,8 @@ pub(crate) fn index_volume(
                     vol.shrink_to_fit();
                 }
             }
+
+            flush_binary_snapshot_if_dirty(&handle, drive_letter);
         }
     }
 
@@ -733,6 +834,10 @@ pub(crate) fn index_volume(
             contention_skipped_cycles
         );
     }
+
+    let final_snapshot = take_pending_snapshot(&handle);
+    let _ = persist_pending_snapshot(db.as_ref(), &handle, drive_letter, final_snapshot);
+    flush_binary_snapshot_if_dirty(&handle, drive_letter);
 
     usn_journal::close_volume(volume_handle);
     eprintln!("[USN] {}:\\ Indexer stopped", drive_letter);
