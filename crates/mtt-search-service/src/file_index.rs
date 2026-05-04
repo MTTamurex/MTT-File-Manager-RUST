@@ -512,10 +512,11 @@ impl VolumeIndex {
     /// lives under the *target* FRN) so they add nothing.  Cloud-reparse
     /// folders (OneDrive) DO have real children and must be counted to
     /// match Explorer.  `visited_dirs` prevents cycles.
-    pub fn folder_tree_summary(&self, dir_frn: u64) -> (u64, u64, u64) {
+    pub fn folder_tree_summary(&self, dir_frn: u64) -> (u64, u64, u64, u64) {
         let mut total_size: u64 = 0;
         let mut file_count: u64 = 0;
         let mut folder_count: u64 = 0;
+        let mut zero_size_count: u64 = 0;
         let mut stack = vec![dir_frn];
         let mut visited_dirs = HashSet::with_capacity(256);
         while let Some(frn) = stack.pop() {
@@ -531,13 +532,16 @@ impl VolumeIndex {
                         } else {
                             total_size = total_size.saturating_add(record.size);
                             file_count += 1;
+                            if record.size == 0 {
+                                zero_size_count += 1;
+                            }
                         }
                     }
                 }
             }
         }
 
-        (total_size, file_count, folder_count)
+        (total_size, file_count, folder_count, zero_size_count)
     }
 
     /// Diagnostic variant of `folder_size_sum` that also computes a unique-by-FRN
@@ -650,9 +654,15 @@ impl VolumeIndex {
                     self.records
                         .get(child_frn)
                         .map(|record| {
-                            self.names
-                                .get(record.name_ref())
-                                .eq_ignore_ascii_case(component)
+                            // Directory path resolution must only traverse
+                            // directory records. This avoids selecting stale
+                            // non-directory siblings in ambiguous indexes and
+                            // returning incorrect subtree totals.
+                            record.is_dir
+                                && self
+                                    .names
+                                    .get(record.name_ref())
+                                    .eq_ignore_ascii_case(component)
                         })
                         .unwrap_or(false)
                 })
@@ -872,7 +882,7 @@ mod tests {
         index.records.get_mut(&21).unwrap().size = 100;
 
         // Reparse children are now included (needed for OneDrive cloud folders).
-        let (raw_total, raw_count, raw_folders) = index.folder_tree_summary(root);
+        let (raw_total, raw_count, raw_folders, _zero) = index.folder_tree_summary(root);
         assert_eq!((raw_total, raw_count, raw_folders), (111, 3, 2));
 
         let (unique_total, unique_count, duplicate_hits) = index.folder_size_sum_unique_files(root);
@@ -890,7 +900,7 @@ mod tests {
         assert!(index.insert_record(20, "file.bin", 10, false, false));
         index.records.get_mut(&20).unwrap().size = 42;
 
-        let (total, count, folder_count) = index.folder_tree_summary(root);
+        let (total, count, folder_count, _zero) = index.folder_tree_summary(root);
         assert_eq!((total, count, folder_count), (42, 1, 1));
     }
 
@@ -944,5 +954,22 @@ mod tests {
         assert_eq!(page.total_matches, Some(1));
         assert_eq!(page.items.len(), 1);
         assert_eq!(page.items[0].name, "Relatório Café.txt");
+    }
+
+    #[test]
+    fn resolve_path_to_frn_prefers_directory_records() {
+        let mut index = VolumeIndex::empty('C');
+
+        // Simulate a stale/ambiguous index bucket where a file and a
+        // directory share the same displayed name under one parent.
+        assert!(index.insert_record(10, "Sample", 5, false, false));
+        assert!(index.insert_record(11, "Sample", 5, true, false));
+        assert!(index.insert_record(12, "nested.bin", 11, false, false));
+
+        let resolved = index.resolve_path_to_frn(r"C:\Sample");
+        assert_eq!(resolved, Some(11));
+
+        let (total, files, folders, _zero) = index.folder_tree_summary(11);
+        assert_eq!((total, files, folders), (0, 1, 0));
     }
 }

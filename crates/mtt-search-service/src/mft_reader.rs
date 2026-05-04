@@ -577,8 +577,9 @@ fn resolve_file_size(
 /// Compute folder size from the in-memory index using the service's indexed
 /// view of the volume. This is the fast NTFS path used by the app so folder
 /// sizes are stable and do not depend on the caller's elevation token.
-pub fn folder_size_for_service(index: &VolumeIndex, dir_frn: u64) -> (u64, u64, u64) {
-    let (raw_total, raw_count, raw_folder_count) = index.folder_tree_summary(dir_frn);
+pub fn folder_size_for_service(index: &VolumeIndex, dir_frn: u64) -> (u64, u64, u64, u64) {
+    let (raw_total, raw_count, raw_folder_count, raw_zero_count) =
+        index.folder_tree_summary(dir_frn);
 
     let (uniq_total, uniq_count, dup_hits) = index.folder_size_sum_unique_files(dir_frn);
     if dup_hits > 0 || raw_total != uniq_total {
@@ -595,7 +596,7 @@ pub fn folder_size_for_service(index: &VolumeIndex, dir_frn: u64) -> (u64, u64, 
         );
     }
 
-    (raw_total, raw_count, raw_folder_count)
+    (raw_total, raw_count, raw_folder_count, raw_zero_count)
 }
 
 fn resolve_file_size_with_fallbacks(
