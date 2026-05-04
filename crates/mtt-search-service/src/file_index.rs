@@ -76,6 +76,8 @@ pub struct VolumeIndex {
     pub state: IndexState,
     /// Whether file sizes have been populated from the MFT.
     pub sizes_loaded: bool,
+    /// Whether the on-disk binary snapshot needs to be rewritten.
+    pub binary_dirty: bool,
     /// FRNs added or modified since the last DB persist.
     pub pending_additions: HashSet<u64>,
     /// FRNs removed since the last DB persist.
@@ -127,6 +129,7 @@ impl VolumeIndex {
             journal_id: 0,
             state: IndexState::NotStarted,
             sizes_loaded: false,
+            binary_dirty: false,
             pending_additions: HashSet::new(),
             pending_removals: HashSet::new(),
             dir_modified_at: HashMap::new(),
@@ -154,6 +157,7 @@ impl VolumeIndex {
             journal_id: 0,
             state: IndexState::NotStarted,
             sizes_loaded: false,
+            binary_dirty: false,
             pending_additions: HashSet::new(),
             pending_removals: HashSet::new(),
             dir_modified_at: HashMap::new(),
@@ -317,6 +321,7 @@ impl VolumeIndex {
         // Track for incremental SQLite persistence.
         self.pending_removals.remove(&frn);
         self.pending_additions.insert(frn);
+        self.binary_dirty = true;
         true
     }
 
@@ -340,6 +345,7 @@ impl VolumeIndex {
         if !self.pending_additions.remove(&frn) {
             self.pending_removals.insert(frn);
         }
+        self.binary_dirty = true;
     }
 
     /// Move/rename a file: remove from old parent's children and re-insert
@@ -387,6 +393,7 @@ impl VolumeIndex {
 
         self.pending_removals.remove(&frn);
         self.pending_additions.insert(frn);
+        self.binary_dirty = true;
         true
     }
 
@@ -396,6 +403,7 @@ impl VolumeIndex {
         self.children.clear();
         self.names.clear();
         self.sizes_loaded = false;
+        self.binary_dirty = false;
         self.pending_additions.clear();
         self.pending_removals.clear();
         self.dir_modified_at.clear();

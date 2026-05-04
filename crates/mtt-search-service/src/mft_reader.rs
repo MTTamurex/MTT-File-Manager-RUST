@@ -764,6 +764,7 @@ pub fn repair_zero_size_file_frns(
                 if record.size != size {
                     record.size = size;
                     repaired += 1;
+                    index.binary_dirty = true;
                 }
             }
         }
