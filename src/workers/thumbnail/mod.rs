@@ -29,10 +29,17 @@ use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+use crate::infrastructure::io_priority::IOPriority;
+
 // --- Capacity constants for failure caches ---
 const FAILED_PATHS_CAP: usize = 2048;
 const FAILURE_BACKOFF_CAP: usize = 4096;
 const ACTIVE_WRITE_BLOCK_MS: u64 = 2500;
+
+/// Max entries tracked in the deferred-retry registry.
+const UNSAFE_REGISTRY_CAP: usize = 2048;
+/// Drop entries that have been waiting longer than this without becoming safe.
+const UNSAFE_REGISTRY_MAX_AGE: Duration = Duration::from_secs(30 * 60);
 
 /// Global cache of paths that failed thumbnail extraction (shared across workers)
 /// Uses LRU eviction so oldest failures are dropped instead of clearing everything.
@@ -150,4 +157,69 @@ pub fn clear_failure_cache(path: &PathBuf) {
 pub fn clear_all_failures() {
     get_failed_paths().lock().clear();
     get_failure_backoff().lock().clear();
+}
+
+// ---------------------------------------------------------------------------
+// Deferred-retry registry for UnsafeToRead files
+//
+// When thumbnail extraction is deferred because the file is being written
+// (e.g. an active qBittorrent download), we record the request here.
+// A dedicated retry thread (`spawn_deferred_retry_thread`) polls this registry
+// every ~1 s and re-injects requests into the queue as soon as the file
+// becomes safe to read.
+// ---------------------------------------------------------------------------
+
+/// Metadata stored per deferred path so the retry thread can recreate the request.
+#[derive(Clone)]
+pub struct DeferredThumbnailEntry {
+    pub req_size: u32,
+    pub req_priority: IOPriority,
+    pub req_modified: u64,
+    pub req_generation: usize,
+    pub inserted_at: Instant,
+}
+
+static UNSAFE_REGISTRY: std::sync::OnceLock<
+    Mutex<LruCache<PathBuf, DeferredThumbnailEntry>>,
+> = std::sync::OnceLock::new();
+
+fn get_unsafe_registry() -> &'static Mutex<LruCache<PathBuf, DeferredThumbnailEntry>> {
+    UNSAFE_REGISTRY.get_or_init(|| {
+        Mutex::new(LruCache::new(
+            NonZeroUsize::new(UNSAFE_REGISTRY_CAP).unwrap(),
+        ))
+    })
+}
+
+/// Register a file as deferred so the retry thread re-queues it once it is safe.
+pub fn defer_unsafe_thumbnail(path: PathBuf, entry: DeferredThumbnailEntry) {
+    get_unsafe_registry().lock().put(path, entry);
+}
+
+/// Drain all entries from the registry, returning them as a `Vec`.
+/// Caller is responsible for re-inserting any that are still not safe.
+pub fn drain_unsafe_registry() -> Vec<(PathBuf, DeferredThumbnailEntry)> {
+    let mut cache = get_unsafe_registry().lock();
+    let entries: Vec<(PathBuf, DeferredThumbnailEntry)> = cache
+        .iter()
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+    cache.clear();
+    entries
+}
+
+/// Remove a single path from the deferred registry (e.g. on successful extraction).
+pub fn remove_from_unsafe_registry(path: &PathBuf) {
+    get_unsafe_registry().lock().pop(path);
+}
+
+/// Returns the number of entries currently in the deferred registry.
+#[allow(dead_code)]
+pub fn unsafe_registry_len() -> usize {
+    get_unsafe_registry().lock().len()
+}
+
+/// Expiry helper: is this entry older than `UNSAFE_REGISTRY_MAX_AGE`?
+pub fn deferred_entry_expired(entry: &DeferredThumbnailEntry) -> bool {
+    entry.inserted_at.elapsed() >= UNSAFE_REGISTRY_MAX_AGE
 }

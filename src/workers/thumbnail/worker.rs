@@ -170,6 +170,110 @@ pub fn spawn_thumbnail_workers(
             );
         }
     }
+
+    // Spawn the deferred-retry thread.
+    // It polls the unsafe-path registry every ~1 s and re-injects requests
+    // into the queue once classify_file_read_safety returns Safe.
+    // By the time it calls classify_file_read_safety, Phase 1 guarantees that
+    // actively-written files are checked via std::fs::metadata only (share-all
+    // flags), never via the write-lock probe.
+    {
+        let queue = queue.clone();
+        let gen_tracker = gen_tracker.clone();
+
+        let spawn_result = std::thread::Builder::new()
+            .name("thumb-deferred-retry".to_string())
+            .stack_size(256 * 1024)
+            .spawn(move || {
+                deferred_retry_loop(queue, gen_tracker);
+            });
+
+        if let Err(e) = spawn_result {
+            log::warn!("[THUMB-PIPELINE] Failed to spawn deferred-retry thread: {}", e);
+        }
+    }
+}
+
+/// Background thread that periodically retries thumbnail extraction for files that
+/// were previously deferred because they were being written (e.g. active torrent
+/// download with qBittorrent sparse pre-allocation).
+///
+/// Flow:
+///   1. Sleep 1 s.
+///   2. Drain the `UNSAFE_REGISTRY`.
+///   3. For each entry, call `classify_file_read_safety` (cheap; no write-lock
+///      probe for actively-writing files after Phase 1).
+///   4. If `Safe` → clear the transient backoff and re-push into the queue.
+///   5. If still unsafe AND not expired → re-insert into the registry.
+///   6. If expired (>30 min) → drop silently.
+///
+/// A 4-permit semaphore limits concurrent re-classify probes to avoid an I/O
+/// spike on folders with many partial files.
+fn deferred_retry_loop(
+    queue: Arc<PriorityThumbnailQueue>,
+    gen_tracker: Arc<AtomicUsize>,
+) {
+    use crate::infrastructure::windows::file_flags::{
+        classify_file_read_safety, FileReadSafety,
+    };
+    use crate::workers::thumbnail::{
+        clear_transient_failure, deferred_entry_expired, defer_unsafe_thumbnail,
+        drain_unsafe_registry,
+    };
+
+    // 4-permit semaphore: cap concurrent classify probes to avoid I/O spikes.
+    let probe_sem = Arc::new(Semaphore::new(4));
+
+    loop {
+        std::thread::sleep(std::time::Duration::from_millis(1000));
+
+        let entries = drain_unsafe_registry();
+        if entries.is_empty() {
+            continue;
+        }
+
+        let current_gen = gen_tracker.load(Ordering::Relaxed);
+
+        for (path, entry) in entries {
+            // Drop stale entries that have been waiting too long.
+            if deferred_entry_expired(&entry) {
+                log::debug!(
+                    "[THUMB-RETRY] Dropping expired deferred entry: {:?}",
+                    path.file_name()
+                );
+                continue;
+            }
+
+            let probe_sem = probe_sem.clone();
+            let queue = queue.clone();
+
+            let _permit = probe_sem.acquire_guard();
+            let safety = classify_file_read_safety(&path);
+
+            match safety {
+                FileReadSafety::Safe => {
+                    clear_transient_failure(&path);
+                    // Re-queue at the original priority so the UI sees the thumbnail
+                    // appear within one worker cycle (~tens of ms).
+                    queue.push(
+                        path.clone(),
+                        current_gen,
+                        entry.req_size,
+                        entry.req_priority,
+                        entry.req_modified,
+                    );
+                    log::debug!(
+                        "[THUMB-RETRY] Re-queued after becoming safe: {:?}",
+                        path.file_name()
+                    );
+                }
+                _ => {
+                    // Still not safe — re-insert into the registry for the next tick.
+                    defer_unsafe_thumbnail(path, entry);
+                }
+            }
+        }
+    }
 }
 
 /// RAII guard for COM and Media Foundation initialization.

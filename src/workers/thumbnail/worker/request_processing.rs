@@ -65,6 +65,7 @@ pub(super) fn process_thumbnail_request(
     use crate::workers::thumbnail::{
         clear_failure_cache, clear_transient_failure, is_known_failure, is_permanent_failure,
         mark_as_failed, mark_as_temporarily_blocked, mark_as_transient_failure,
+        DeferredThumbnailEntry, defer_unsafe_thumbnail,
     };
 
     // Block .ts files that are NOT real MPEG-TS video (e.g. TypeScript sources).
@@ -342,6 +343,19 @@ pub(super) fn process_thumbnail_request(
                         reason
                     );
                     mark_as_temporarily_blocked(path.clone());
+                    // Register in the deferred-retry registry so the retry thread
+                    // re-queues this request as soon as the file becomes safe,
+                    // without requiring user interaction (scroll / F5).
+                    defer_unsafe_thumbnail(
+                        path.to_path_buf(),
+                        DeferredThumbnailEntry {
+                            req_size,
+                            req_priority,
+                            req_modified,
+                            req_generation: req_gen,
+                            inserted_at: std::time::Instant::now(),
+                        },
+                    );
                 }
                 ThumbnailExtractionOutcome::Failed => {
                     // All 5 extraction stages failed — the system likely lacks
