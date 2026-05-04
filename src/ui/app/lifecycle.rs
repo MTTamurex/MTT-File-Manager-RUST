@@ -2,6 +2,26 @@ use crate::app::ImageViewerApp;
 use crate::infrastructure::onedrive;
 use eframe::egui;
 
+fn recover_empty_current_folder_after_restore(app: &mut ImageViewerApp, reason: &str) {
+    if app.navigation_state.is_computer_view || app.navigation_state.is_recycle_bin_view {
+        return;
+    }
+    if !app.search_query.is_empty() || app.is_loading_folder || app.items_rebuild_in_flight {
+        return;
+    }
+    if !app.all_items.is_empty() {
+        return;
+    }
+
+    log::warn!(
+        "[LIFECYCLE] Empty current listing detected after restore ({reason}) - reloading: {}",
+        app.navigation_state.current_path
+    );
+    app.loaded_path.clear();
+    app.load_folder(false);
+    app.ui_ctx.request_repaint();
+}
+
 pub fn handle_startup_sequence(app: &mut ImageViewerApp, ctx: &egui::Context) {
     if app.startup_tick < 5 {
         app.startup_tick += 1;
@@ -102,6 +122,7 @@ pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
     // This catches the case where the app was NOT minimized but simply behind other windows,
     // which still causes OS paging and GPU wake spikes on return.
     let is_focused = ctx.input(|i| i.viewport().focused.unwrap_or(true));
+    let mut restored_from_background = false;
     if is_focused && !app.was_focused {
         let idle_secs = app
             .focus_lost_at
@@ -135,6 +156,7 @@ pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
             );
         }
 
+        restored_from_background = true;
         app.request_current_folder_liveness_probe("window focus restored");
     }
     if !is_focused && app.was_focused {
@@ -171,7 +193,14 @@ pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 minimized_secs,
                 minimized_secs >= 60.0
             );
+
+            restored_from_background = true;
+            app.request_current_folder_liveness_probe("window restored from minimized");
         }
+    }
+
+    if restored_from_background {
+        recover_empty_current_folder_after_restore(app, "background->foreground transition");
     }
 
     // LAYOUT FREEZE: Capture sidebar widths before minimize
