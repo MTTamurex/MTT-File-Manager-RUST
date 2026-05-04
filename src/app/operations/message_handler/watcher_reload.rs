@@ -37,6 +37,7 @@ impl ImageViewerApp {
 
         if self.pending_auto_reload
             && self.file_operation_state.file_ops_in_progress == 0
+            && !self.layout.saved_is_minimized
             && !self.is_loading_folder
         {
             let elapsed = self.last_auto_reload.elapsed();
