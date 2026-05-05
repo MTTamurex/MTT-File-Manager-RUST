@@ -23,6 +23,13 @@ fn paths_to_double_null_terminated(paths: &[PathBuf]) -> Vec<u16> {
     buffer
 }
 
+fn is_case_only_rename(path: &Path, new_path: &Path) -> bool {
+    let current = path.as_os_str().to_string_lossy();
+    let renamed = new_path.as_os_str().to_string_lossy();
+
+    current != renamed && current.eq_ignore_ascii_case(&renamed)
+}
+
 /// Deletes a file or directory using Windows Shell (moves to Recycle Bin by default).
 /// Returns true if operation was successful (not cancelled).
 pub fn delete_item_with_shell(path: &Path, hwnd: HWND) -> bool {
@@ -106,10 +113,19 @@ pub fn rename_item_with_shell(path: &Path, new_name: &str, hwnd: HWND) -> bool {
     };
 
     let new_path = parent.join(new_name);
+    let case_only_rename = is_case_only_rename(path, &new_path);
 
     // If destination exists, avoid merge/replace side-effects from FO_RENAME.
-    if new_path.exists() {
+    if new_path.exists() && !case_only_rename {
         return false;
+    }
+
+    // FO_RENAME rejects case-only path changes because the destination already
+    // resolves to the same entry on case-insensitive filesystems. Use the file
+    // system rename directly for this narrow case, then let the app trigger its
+    // normal folder reload on success.
+    if case_only_rename {
+        return std::fs::rename(path, &new_path).is_ok();
     }
 
     let from_str = path.to_string_lossy();
@@ -131,6 +147,36 @@ pub fn rename_item_with_shell(path: &Path, new_name: &str, hwnd: HWND) -> bool {
     // SAFETY: op is initialized with valid double-null terminated strings.
     let result = unsafe { SHFileOperationW(&mut op) };
     result == 0 && op.fAnyOperationsAborted.0 == 0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_case_only_rename;
+    use std::path::Path;
+
+    #[test]
+    fn detects_case_only_rename() {
+        let current = Path::new(r"C:\Temp\teste 1.txt");
+        let renamed = Path::new(r"C:\Temp\Teste 1.txt");
+
+        assert!(is_case_only_rename(current, renamed));
+    }
+
+    #[test]
+    fn ignores_exact_same_path() {
+        let current = Path::new(r"C:\Temp\teste 1.txt");
+        let renamed = Path::new(r"C:\Temp\teste 1.txt");
+
+        assert!(!is_case_only_rename(current, renamed));
+    }
+
+    #[test]
+    fn ignores_distinct_target_path() {
+        let current = Path::new(r"C:\Temp\teste 1.txt");
+        let renamed = Path::new(r"C:\Temp\teste 2.txt");
+
+        assert!(!is_case_only_rename(current, renamed));
+    }
 }
 
 /// Copies multiple files/directories to a destination using a single Windows Shell operation.
