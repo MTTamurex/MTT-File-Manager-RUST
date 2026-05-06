@@ -20,7 +20,6 @@ pub(super) fn render_list_item(
     clicked_item: &mut Option<usize>,
     double_clicked_item: &mut Option<usize>,
     secondary_clicked_item: &mut Option<usize>,
-    empty_area_clicked: &mut bool,
     col_widths: &ColumnWidths,
     row_height: f32,
 ) {
@@ -60,25 +59,11 @@ pub(super) fn render_list_item(
         let hidden_opacity = if item.is_hidden { 0.5 } else { 1.0 };
         let response = ui.interact(rect, ui.id().with(i), Sense::click_and_drag());
 
-        let click_over_content = response
-            .interact_pointer_pos()
-            .map(|pos| {
-                ctx.is_computer_view
-                    || list_item_content_contains_pointer(
-                        ui, item, ctx, rect, col_widths, row_height, pos,
-                    )
-            })
-            .unwrap_or(ctx.is_computer_view);
-
         if response.clicked() {
-            if click_over_content {
-                *clicked_item = Some(i);
-            } else {
-                *empty_area_clicked = true;
-            }
+            *clicked_item = Some(i);
         }
 
-        if response.double_clicked() && click_over_content {
+        if response.double_clicked() {
             *double_clicked_item = Some(i);
         }
 

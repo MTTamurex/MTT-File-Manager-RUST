@@ -33,7 +33,6 @@ pub(super) fn render_virtualized_content(
     let mut clicked_item = None;
     let mut double_clicked_item = None;
     let mut secondary_clicked_item = None;
-    let mut empty_area_clicked = false;
 
     // --- MANUAL VIRTUALIZATION START ---
     let total_content_height = total_rows as f32 * row_height;
@@ -137,7 +136,6 @@ pub(super) fn render_virtualized_content(
             &mut clicked_item,
             &mut double_clicked_item,
             &mut secondary_clicked_item,
-            &mut empty_area_clicked,
         );
     } else {
         render_regular_virtualized(
@@ -155,7 +153,6 @@ pub(super) fn render_virtualized_content(
             &mut clicked_item,
             &mut double_clicked_item,
             &mut secondary_clicked_item,
-            &mut empty_area_clicked,
         );
     }
 
@@ -200,8 +197,8 @@ pub(super) fn render_virtualized_content(
     // Fallback global: detect secondary click on empty area if no item was clicked
     let empty_area_secondary_click =
         secondary_clicked_item.is_none() && bg_response.secondary_clicked();
-    let empty_area_click = empty_area_clicked
-        || (clicked_item.is_none() && double_clicked_item.is_none() && bg_response.clicked());
+    let empty_area_click =
+        clicked_item.is_none() && double_clicked_item.is_none() && bg_response.clicked();
 
     InteractionResult {
         clicked_item,
@@ -226,7 +223,6 @@ fn render_computer_view_grouped(
     clicked_item: &mut Option<usize>,
     double_clicked_item: &mut Option<usize>,
     secondary_clicked_item: &mut Option<usize>,
-    empty_area_clicked: &mut bool,
 ) {
     let mut local = Vec::new();
     let mut network = Vec::new();
@@ -273,7 +269,6 @@ fn render_computer_view_grouped(
                     clicked_item,
                     double_clicked_item,
                     secondary_clicked_item,
-                    empty_area_clicked,
                     col_widths,
                     row_height,
                 );
@@ -311,7 +306,6 @@ fn render_computer_view_grouped(
                     clicked_item,
                     double_clicked_item,
                     secondary_clicked_item,
-                    empty_area_clicked,
                     col_widths,
                     row_height,
                 );
@@ -338,7 +332,6 @@ fn render_regular_virtualized(
     clicked_item: &mut Option<usize>,
     double_clicked_item: &mut Option<usize>,
     secondary_clicked_item: &mut Option<usize>,
-    empty_area_clicked: &mut bool,
 ) {
     let overscan = if is_scrolling { 2 } else { 5 };
     let vis_min_row = ((current_scroll / row_height).floor() as usize).saturating_sub(overscan);
@@ -379,7 +372,6 @@ fn render_regular_virtualized(
             clicked_item,
             double_clicked_item,
             secondary_clicked_item,
-            empty_area_clicked,
             col_widths,
             row_height,
         );

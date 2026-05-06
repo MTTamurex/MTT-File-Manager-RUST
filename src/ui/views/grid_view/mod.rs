@@ -263,7 +263,6 @@ pub fn render_grid_view(
     let mut clicked_item = None;
     let mut double_clicked_item = None;
     let mut secondary_clicked_item = None;
-    let mut empty_area_clicked = false;
     #[allow(unused_assignments)]
     let mut visible_rows_range: Option<(usize, usize)> = None;
     // --- MANUAL VIRTUALIZATION START ---
@@ -372,7 +371,6 @@ pub fn render_grid_view(
         &mut clicked_item,
         &mut double_clicked_item,
         &mut secondary_clicked_item,
-        &mut empty_area_clicked,
     );
     let t_after_virtualized = std::time::Instant::now();
 
@@ -425,7 +423,7 @@ pub fn render_grid_view(
         clicked_item,
         double_clicked_item,
         secondary_clicked_item,
-        empty_area_clicked || bg_response.clicked(),
+        bg_response.clicked(),
         bg_response.secondary_clicked(),
     )
 }
