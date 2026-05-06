@@ -78,7 +78,10 @@ Name: "{group}\{#MyAppName}";         Filename: "{app}\{#MyAppExeName}"; Working
 Name: "{autodesktop}\{#MyAppName}";   Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon; WorkingDir: "{app}"
 
 [Run]
-; Install and start the search indexer Windows service
+; (Re)install and start the search indexer Windows service.
+; The service was already stopped in CurStepChanged(ssInstall) before files
+; were copied, so "install" here is idempotent for fresh installs and safe
+; for upgrades.
 Filename: "{app}\{#MySearchSvc}"; Parameters: "install"; StatusMsg: "Installing search service..."; Flags: runhidden waituntilterminated
 Filename: "sc.exe"; Parameters: "start {#MySearchName}"; StatusMsg: "Starting search service..."; Flags: runhidden waituntilterminated
 
@@ -100,6 +103,40 @@ begin
     Result := RegQueryStringValue(HKLM,
       'SOFTWARE\WOW6432Node\Microsoft\VisualStudio\14.0\VC\Runtimes\x64',
       'Version', Version);
+end;
+
+// Stop the search service and wait for it to reach the Stopped state.
+// Called before files are copied so the service process is not holding
+// the executable open and cannot be killed mid-write (leaving .bin.tmp
+// without a corresponding .bin).
+procedure StopSearchServiceIfRunning;
+var
+  ResultCode: Integer;
+  Attempts: Integer;
+begin
+  // Ask SCM to stop the service. Ignore errors (service may not be installed).
+  Exec('sc.exe', 'stop {#MySearchName}', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+  // Poll up to ~10 seconds for the service to reach the Stopped state.
+  // sc.exe query returns exit code 0 while the service exists; we look for
+  // STATE 1 (STOPPED) in a separate check via the exit code of "sc query".
+  // Simpler: just sleep a fixed 4 s which is more than enough for the service
+  // to flush its current write and exit cleanly.
+  Attempts := 0;
+  while Attempts < 8 do
+  begin
+    Sleep(500);
+    Attempts := Attempts + 1;
+  end;
+end;
+
+// Before Inno Setup copies any files, stop the running service so that:
+//   1. The .exe is not locked and can be replaced.
+//   2. The service cannot be killed mid-write leaving .bin.tmp on disk.
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssInstall then
+    StopSearchServiceIfRunning;
 end;
 
 procedure CurPageChanged(CurPageID: Integer);

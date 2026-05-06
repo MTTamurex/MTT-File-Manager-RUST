@@ -197,7 +197,7 @@ impl ImageViewerApp {
             dest
         );
 
-        let hwnd = self.native_hwnd.unwrap_or_default();
+        let hwnd = self.shell_op_hwnd();
         let req = crate::workers::file_operation_worker::FileOperationRequest::copy_batch(
             sources, dest, hwnd,
         );
@@ -236,7 +236,7 @@ impl ImageViewerApp {
             dest
         );
 
-        let hwnd = self.native_hwnd.unwrap_or_default();
+        let hwnd = self.shell_op_hwnd();
         let req = crate::workers::file_operation_worker::FileOperationRequest::move_batch(
             sources, dest, hwnd,
         );

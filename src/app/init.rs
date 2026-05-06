@@ -397,6 +397,9 @@ impl ImageViewerApp {
             // Native HWND (captured on first update)
             native_hwnd: None,
 
+            // Shell op proxy HWND (created alongside native_hwnd)
+            shell_op_proxy_hwnd: None,
+
             // 3-stage startup counter
             startup_tick: 0,
 

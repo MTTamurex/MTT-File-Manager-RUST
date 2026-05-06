@@ -157,7 +157,7 @@ impl ImageViewerApp {
         // 1. Get files and operation from clipboard via Manager
         // Optimized to use the manager's logic which checks system then internal.
         if let Some((files_to_op, is_move)) = self.clipboard.get_files_to_paste() {
-            let hwnd = self.native_hwnd.unwrap_or_default();
+            let hwnd = self.shell_op_hwnd();
 
             // 2. Dispatch as a single batch operation (single Windows progress dialog)
             let req = if is_move {

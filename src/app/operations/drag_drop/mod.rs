@@ -167,7 +167,7 @@ impl ImageViewerApp {
             return;
         }
 
-        let hwnd = self.native_hwnd.unwrap_or_default();
+        let hwnd = self.shell_op_hwnd();
         let request = match self.resolve_drag_operation(&dest_folder, ctrl_pressed, shift_pressed) {
             DragDropOperation::Copy => {
                 crate::workers::file_operation_worker::FileOperationRequest::copy_batch(
