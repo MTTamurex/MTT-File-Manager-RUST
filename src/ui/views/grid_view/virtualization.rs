@@ -23,6 +23,7 @@ pub(super) fn render_virtualized_grid(
     clicked_item: &mut Option<usize>,
     double_clicked_item: &mut Option<usize>,
     secondary_clicked_item: &mut Option<usize>,
+    empty_area_clicked: &mut bool,
 ) -> Option<(usize, usize)> {
     let t_total = std::time::Instant::now();
     let mut child_ui = ui.new_child(egui::UiBuilder::new().max_rect(viewport_rect));
@@ -77,6 +78,7 @@ pub(super) fn render_virtualized_grid(
             clicked_item,
             double_clicked_item,
             secondary_clicked_item,
+            empty_area_clicked,
         );
     } else {
         render_standard_grid(
@@ -96,6 +98,7 @@ pub(super) fn render_virtualized_grid(
             clicked_item,
             double_clicked_item,
             secondary_clicked_item,
+            empty_area_clicked,
         );
     }
 
@@ -177,6 +180,7 @@ fn render_computer_view_sections(
     clicked_item: &mut Option<usize>,
     double_clicked_item: &mut Option<usize>,
     secondary_clicked_item: &mut Option<usize>,
+    empty_area_clicked: &mut bool,
 ) {
     let mut current_y = content_min.y - current_scroll;
 
@@ -202,6 +206,7 @@ fn render_computer_view_sections(
         clicked_item,
         double_clicked_item,
         secondary_clicked_item,
+        empty_area_clicked,
     );
     render_section_indices(
         ui,
@@ -221,6 +226,7 @@ fn render_computer_view_sections(
         clicked_item,
         double_clicked_item,
         secondary_clicked_item,
+        empty_area_clicked,
     );
 }
 
@@ -243,6 +249,7 @@ fn render_section_indices(
     clicked_item: &mut Option<usize>,
     double_clicked_item: &mut Option<usize>,
     secondary_clicked_item: &mut Option<usize>,
+    empty_area_clicked: &mut bool,
 ) {
     let section_count = indices.len();
     if section_count == 0 {
@@ -287,6 +294,7 @@ fn render_section_indices(
                     clicked_item,
                     double_clicked_item,
                     secondary_clicked_item,
+                    empty_area_clicked,
                     is_scrolling,
                 );
             }
@@ -314,6 +322,7 @@ fn render_standard_grid(
     clicked_item: &mut Option<usize>,
     double_clicked_item: &mut Option<usize>,
     secondary_clicked_item: &mut Option<usize>,
+    empty_area_clicked: &mut bool,
 ) {
     let t_start = std::time::Instant::now();
     let mut rendered_items = 0usize;
@@ -343,6 +352,7 @@ fn render_standard_grid(
                 clicked_item,
                 double_clicked_item,
                 secondary_clicked_item,
+                empty_area_clicked,
                 is_scrolling,
             );
             let item_ms = t_item.elapsed().as_millis();

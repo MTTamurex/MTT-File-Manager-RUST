@@ -1,7 +1,6 @@
 use eframe::egui::{self, Color32, Pos2, Rect, Stroke};
 use std::path::PathBuf;
 
-use crate::domain::file_entry::FileEntry;
 use crate::ui::cache::FxHashSet;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -269,95 +268,4 @@ pub fn paint_overlay(
         Stroke::new(1.0, stroke),
         egui::StrokeKind::Inside,
     );
-}
-
-pub fn grid_item_content_contains(
-    item: &FileEntry,
-    rect: Rect,
-    thumbnail_size: f32,
-    point: Pos2,
-) -> bool {
-    if item.drive_info.is_some() {
-        return grid_drive_content_contains(rect, thumbnail_size, point);
-    }
-    if item.is_dir && !item.is_archive() {
-        return grid_folder_content_contains(rect, thumbnail_size, point);
-    }
-    grid_file_content_contains(rect, thumbnail_size, point)
-}
-
-fn grid_file_content_contains(rect: Rect, thumbnail_size: f32, point: Pos2) -> bool {
-    let available_h = rect.height();
-    let available_w = rect.width();
-    let thumb_size = (thumbnail_size - 6.0).min(available_w - 4.0).max(1.0);
-    let text_height = 18.0;
-    let content_h = thumb_size + text_height;
-    let vertical_margin = ((available_h - content_h) / 2.0).max(2.0);
-    let x_offset = (available_w - thumb_size) / 2.0;
-    let thumb_rect = Rect::from_min_size(
-        rect.min + egui::vec2(x_offset.max(0.0), vertical_margin),
-        egui::vec2(thumb_size, thumb_size),
-    );
-    let text_rect = Rect::from_min_size(
-        egui::pos2(rect.left(), thumb_rect.bottom() + 4.0),
-        egui::vec2(rect.width(), 20.0),
-    );
-    thumb_rect.expand(2.0).contains(point) || text_rect.expand(2.0).contains(point)
-}
-
-fn grid_folder_content_contains(rect: Rect, thumbnail_size: f32, point: Pos2) -> bool {
-    let available_h = rect.height();
-    let folder_w = thumbnail_size * 0.85;
-    let folder_h = folder_w * 0.85;
-    let text_height = 18.0;
-    let content_h = folder_h + text_height;
-    let vertical_margin = ((available_h - content_h) / 2.0).max(2.0);
-    let x_offset = (rect.width() - folder_w) / 2.0;
-    let folder_rect = Rect::from_min_size(
-        rect.min + egui::vec2(x_offset.max(0.0), vertical_margin),
-        egui::vec2(folder_w, folder_h),
-    );
-    let text_rect = Rect::from_min_size(
-        egui::pos2(rect.left(), folder_rect.bottom() + 6.0),
-        egui::vec2(rect.width(), 20.0),
-    );
-    folder_rect.expand(2.0).contains(point) || text_rect.expand(2.0).contains(point)
-}
-
-fn grid_drive_content_contains(rect: Rect, thumbnail_size: f32, point: Pos2) -> bool {
-    let available_h = rect.height();
-    let available_w = rect.width();
-    let icon_size = (thumbnail_size * 0.4).min(available_w * 0.5);
-    let progress_w = (available_w * 0.8).min(150.0);
-    let text_height = 36.0;
-    let content_h = icon_size + 12.0 + 8.0 + text_height;
-    let vertical_margin = ((available_h - content_h) / 2.0).max(2.0);
-
-    let mut current_y = rect.top() + vertical_margin;
-    let icon_rect = Rect::from_center_size(
-        egui::pos2(rect.center().x, current_y + icon_size / 2.0),
-        egui::vec2(icon_size, icon_size),
-    );
-    current_y += icon_size + 8.0;
-
-    let bar_rect = Rect::from_center_size(
-        egui::pos2(rect.center().x, current_y + 6.0),
-        egui::vec2(progress_w, 12.0),
-    );
-    current_y += 18.0;
-
-    let name_rect = Rect::from_center_size(
-        egui::pos2(rect.center().x, current_y + 9.0),
-        egui::vec2(progress_w, 18.0),
-    );
-    current_y += 18.0;
-
-    let details_rect = Rect::from_center_size(
-        egui::pos2(rect.center().x, current_y + 9.0),
-        egui::vec2(progress_w, 18.0),
-    );
-
-    [icon_rect, bar_rect, name_rect, details_rect]
-        .into_iter()
-        .any(|rect| rect.expand(2.0).contains(point))
 }

@@ -270,6 +270,7 @@ pub enum ListViewAction {
     DoubleClick(usize),
     SecondaryClick(usize),
     SortChange(SortMode),
+    EmptyAreaClick,
     EmptyAreaSecondaryClick,
 }
 
@@ -341,6 +342,10 @@ pub fn render_list_view(
     // Handle actions after rendering - ORDER MATTERS!
     if interaction.empty_area_secondary_click {
         return Some(ListViewAction::EmptyAreaSecondaryClick);
+    }
+
+    if interaction.empty_area_click {
+        return Some(ListViewAction::EmptyAreaClick);
     }
 
     // Sort header clicks take priority
