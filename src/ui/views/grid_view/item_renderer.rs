@@ -93,24 +93,13 @@ pub(super) fn render_grid_item(
     clicked_item: &mut Option<usize>,
     double_clicked_item: &mut Option<usize>,
     secondary_clicked_item: &mut Option<usize>,
-    empty_area_clicked: &mut bool,
     is_scrolling: bool,
 ) {
     let response = ui.interact(rect, ui.id().with(index), Sense::click_and_drag());
-    let click_over_content = response
-        .interact_pointer_pos()
-        .map(|pos| {
-            super::hit_testing::grid_item_content_contains(ui, item, rect.shrink(3.0), ctx, pos)
-        })
-        .unwrap_or(ctx.is_computer_view);
     if response.clicked() {
-        if click_over_content {
-            *clicked_item = Some(index);
-        } else {
-            *empty_area_clicked = true;
-        }
+        *clicked_item = Some(index);
     }
-    if response.double_clicked() && click_over_content {
+    if response.double_clicked() {
         *double_clicked_item = Some(index);
     }
     if response.secondary_clicked() {
