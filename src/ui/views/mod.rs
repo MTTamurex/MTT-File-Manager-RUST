@@ -5,6 +5,7 @@ pub mod common;
 pub mod computer_view;
 pub mod grid_view;
 pub mod list_view;
+pub mod rectangle_selection;
 
 // Re-export for convenience
 pub use common::*;

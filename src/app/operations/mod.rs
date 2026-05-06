@@ -34,6 +34,7 @@ pub mod metadata;
 pub mod navigation;
 pub mod pinned_folder_ops;
 pub mod preferences;
+pub mod rectangle_selection;
 pub mod recycle_bin_ops;
 pub mod selection;
 pub mod shutdown;

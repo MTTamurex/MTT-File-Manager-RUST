@@ -106,11 +106,28 @@ pub(super) fn render_grid_item(
         *secondary_clicked_item = Some(index);
     }
     let pointer_moved = ui.input(|i| i.pointer.delta() != egui::Vec2::ZERO);
-    if response.drag_started()
+    let drag_candidate = response.drag_started()
         || response.dragged()
-        || (response.is_pointer_button_down_on() && pointer_moved)
-    {
-        *ctx.drag_started_item = Some(index);
+        || (response.is_pointer_button_down_on() && pointer_moved);
+    let rectangle_select_active = ctx.rectangle_selection_state.is_some();
+    if drag_candidate && !rectangle_select_active {
+        if ctx.is_computer_view {
+            *ctx.drag_started_item = Some(index);
+        } else if let Some(origin) = ui.input(|input| input.pointer.press_origin()) {
+            let content_rect = rect.shrink(3.0);
+            if crate::ui::views::rectangle_selection::grid_item_content_contains(
+                item,
+                content_rect,
+                ctx.thumbnail_size,
+                origin,
+            ) {
+                *ctx.drag_started_item = Some(index);
+            } else {
+                ctx.rectangle_selection_frame.request_start(origin);
+            }
+        } else {
+            *ctx.drag_started_item = Some(index);
+        }
     }
     let is_pointer_over = response.contains_pointer() || response.hovered();
     // For drag-hover detection use ONLY contains_pointer() (geometric check).
@@ -121,7 +138,10 @@ pub(super) fn render_grid_item(
         *ctx.drag_hovered_item = Some(index);
     }
 
-    let is_selected = ctx.multi_selection.contains(&item.path);
+    let is_selected = ctx
+        .rectangle_selection_state
+        .map(|state| state.preview_contains(index))
+        .unwrap_or_else(|| ctx.multi_selection.contains(&item.path));
     let allow_hover = matches!(ctx.last_input, crate::app::state::LastInput::Mouse);
     let is_hovered_visual = allow_hover && response.hovered() && !is_selected;
     let is_focused = ctx.selected_item == Some(index);
@@ -169,7 +189,7 @@ pub(super) fn render_grid_item(
         );
     }
 
-    if response.hovered() && !ctx.is_item_dragging {
+    if response.hovered() && !ctx.is_item_dragging && !rectangle_select_active {
         let current_time = ui.input(|i| i.time);
         // PERF FIX: Use path-based hover ID so the tooltip timer resets when
         // navigating to a different folder (prevents stale timer from the

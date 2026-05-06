@@ -151,6 +151,8 @@ pub struct ImageViewerApp {
     pub selected_item: Option<usize>,
     pub selected_file: Option<FileEntry>,
     pub multi_selection: FxHashSet<PathBuf>,
+    pub rectangle_selection_state:
+        Option<crate::ui::views::rectangle_selection::RectangleSelectionState>,
     // Internal drag-and-drop state (Explorer-like item move/copy inside file list views)
     pub is_item_dragging: bool,
     pub drag_payload_paths: Vec<PathBuf>,

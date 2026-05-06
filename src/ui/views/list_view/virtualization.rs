@@ -7,6 +7,9 @@ use super::helpers::render_section_header;
 use super::item_renderer::render_list_item;
 use super::scroll;
 use super::{ColumnWidths, ListViewContext, ListViewOperations};
+use crate::ui::views::rectangle_selection::{
+    ListRectangleMetrics, RectangleSelectionMetrics, RectangleSelectionView,
+};
 
 /// Result of user interactions during rendering
 pub(super) struct InteractionResult {
@@ -76,6 +79,20 @@ pub(super) fn render_virtualized_content(
         scroll::compute_visual_scroll(ui, target_scroll, viewport_h, ctx.generation);
     let is_scrolling = scroll_delta > 0.5;
 
+    let rectangle_metrics =
+        (!ctx.is_computer_view).then_some(RectangleSelectionMetrics::List(ListRectangleMetrics {
+            count: total_rows,
+            row_height,
+            content_width: available_w,
+            content_height: total_content_height,
+        }));
+    ctx.rectangle_selection_frame.begin(
+        viewport_rect,
+        current_scroll,
+        max_scroll,
+        rectangle_metrics,
+    );
+
     // PERFORMANCE: Track scroll changes for GPU upload throttling
     if (target_scroll - *ctx.last_scroll_offset).abs() > 0.1 {
         *ctx.last_scroll_time = std::time::Instant::now();
@@ -84,7 +101,19 @@ pub(super) fn render_virtualized_content(
 
     // 3. Render Virtual List
     // DETECT BACKGROUND INTERACTION (Sense::click() captures secondary_clicked without global leakage)
-    let bg_response = ui.interact(viewport_rect, ui.id().with("list_bg"), Sense::click());
+    let bg_response = ui.interact(
+        viewport_rect,
+        ui.id().with("list_bg"),
+        Sense::click_and_drag(),
+    );
+    if !ctx.is_computer_view
+        && ctx.rectangle_selection_state.is_none()
+        && bg_response.drag_started()
+    {
+        if let Some(origin) = ui.input(|input| input.pointer.press_origin()) {
+            ctx.rectangle_selection_frame.request_start(origin);
+        }
+    }
 
     let mut child_ui = ui.new_child(egui::UiBuilder::new().max_rect(viewport_rect));
     // CLIP FIX: Intersect with parent clip rect to ensure content never
@@ -123,6 +152,17 @@ pub(super) fn render_virtualized_content(
             &mut clicked_item,
             &mut double_clicked_item,
             &mut secondary_clicked_item,
+        );
+    }
+
+    if let Some(state) = ctx.rectangle_selection_state.filter(|state| {
+        matches!(state.view, RectangleSelectionView::List) && state.generation == ctx.generation
+    }) {
+        crate::ui::views::rectangle_selection::paint_overlay(
+            ui,
+            state,
+            viewport_rect,
+            current_scroll,
         );
     }
 
