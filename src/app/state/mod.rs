@@ -340,6 +340,11 @@ pub struct ImageViewerApp {
     // Window handle for native shell interactions
     pub native_hwnd: Option<HWND>,
 
+    // Invisible proxy window used as owner for Shell file-operation dialogs.
+    // Prevents the Shell from disabling the app's main window during long
+    // or cancelled copy/move/delete operations.
+    pub shell_op_proxy_hwnd: Option<HWND>,
+
     // 3-stage startup: hidden -> maximize/resize -> reveal
     pub startup_tick: usize,
 

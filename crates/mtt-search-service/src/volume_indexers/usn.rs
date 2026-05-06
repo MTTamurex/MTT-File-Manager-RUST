@@ -298,90 +298,101 @@ pub(crate) fn index_volume(
             };
 
             if let Some(count) = loaded_count {
-                index.shrink_to_fit();
-                let (arena_used, _arena_cap, records_est) = index.memory_usage();
-                if !loaded_from_binary {
+                if !loaded_from_binary && count as u64 != state.files_indexed {
                     eprintln!(
-                        "[USN] {}:\\ Loaded {} cached records (db reported {}), catching up from USN {}...",
-                        drive_letter, count, state.files_indexed, state.last_usn
+                        "[USN] {}:\\ SQLite fallback snapshot is incomplete (loaded {} rows, volume_state says {}); forcing full scan",
+                        drive_letter,
+                        count,
+                        state.files_indexed,
                     );
-                }
-                eprintln!(
-                    "[USN] {}:\\ Memory after cache load: arena {:.1} MB, records ~{:.1} MB",
-                    drive_letter,
-                    arena_used as f64 / 1_048_576.0,
-                    records_est as f64 / 1_048_576.0,
-                );
-                index.journal_id = state.journal_id;
-                index.last_usn = state.last_usn;
-                index.hardlink_data_complete = state.has_hardlink_parent_data;
-                index.reparse_data_complete = state.has_reparse_point_data;
-
-                // DB-loaded rows are already persisted. Keep only real USN catch-up
-                // changes as pending for the next incremental sync.
-                index.clear_pending();
-                indexing_progress.update(
-                    drive_letter,
-                    "scanning",
-                    index.records.len() as u64,
-                    "catching_up",
-                    Some(index.records.len() as u64),
-                    None,
-                );
-
-                // Catch up from last USN.
-                match usn_journal::read_usn_changes(
-                    volume_handle,
-                    &journal_info,
-                    index.last_usn,
-                    &mut index,
-                ) {
-                    Ok(new_usn) => {
-                        index.last_usn = new_usn;
+                    index.clear();
+                    need_full_scan = true;
+                } else {
+                    index.shrink_to_fit();
+                    let (arena_used, _arena_cap, records_est) = index.memory_usage();
+                    if !loaded_from_binary {
                         eprintln!(
-                            "[USN] {}:\\ Caught up to USN {}, {} total records",
-                            drive_letter,
-                            new_usn,
-                            index.records.len()
+                            "[USN] {}:\\ Loaded {} cached records (db reported {}), catching up from USN {}...",
+                            drive_letter, count, state.files_indexed, state.last_usn
                         );
-
-                        // Rebuild reverse children index after cache load
-                        // (binary load already does this, but USN catch-up may
-                        // have added/moved entries).
-                        index.rebuild_children();
-                        if !index.hardlink_parents.is_empty() {
-                            eprintln!(
-                                "[USN] {}:\\ {} hardlinked files with {} extra parent entries",
-                                drive_letter,
-                                index.hardlink_parents.len(),
-                                index
-                                    .hardlink_parents
-                                    .values()
-                                    .map(|v| v.len())
-                                    .sum::<usize>()
-                            );
-                        }
-
-                        // File sizes are deferred to a background thread after
-                        // the volume is marked Ready (Phase 1 optimisation).
-                        // This lets search results appear within seconds instead
-                        // of waiting minutes for per-file MFT IOCTL reads.
-
-                        need_full_scan = false;
                     }
-                    Err(e) => {
-                        indexing_progress.set_error(
-                            drive_letter,
-                            index.records.len() as u64,
-                            "catching_up",
-                        );
-                        eprintln!(
-                            "[USN] {}:\\ Catch-up failed ({}), doing full scan",
-                            drive_letter,
-                            crate::redact_paths(&e)
-                        );
-                        index.clear();
-                        need_full_scan = true;
+                    eprintln!(
+                        "[USN] {}:\\ Memory after cache load: arena {:.1} MB, records ~{:.1} MB",
+                        drive_letter,
+                        arena_used as f64 / 1_048_576.0,
+                        records_est as f64 / 1_048_576.0,
+                    );
+                    index.journal_id = state.journal_id;
+                    index.last_usn = state.last_usn;
+                    index.hardlink_data_complete = state.has_hardlink_parent_data;
+                    index.reparse_data_complete = state.has_reparse_point_data;
+
+                    // DB-loaded rows are already persisted. Keep only real USN catch-up
+                    // changes as pending for the next incremental sync.
+                    index.clear_pending();
+                    indexing_progress.update(
+                        drive_letter,
+                        "scanning",
+                        index.records.len() as u64,
+                        "catching_up",
+                        Some(index.records.len() as u64),
+                        None,
+                    );
+
+                    // Catch up from last USN.
+                    match usn_journal::read_usn_changes(
+                        volume_handle,
+                        &journal_info,
+                        index.last_usn,
+                        &mut index,
+                    ) {
+                        Ok(new_usn) => {
+                            index.last_usn = new_usn;
+                            eprintln!(
+                                "[USN] {}:\\ Caught up to USN {}, {} total records",
+                                drive_letter,
+                                new_usn,
+                                index.records.len()
+                            );
+
+                            // Rebuild reverse children index after cache load
+                            // (binary load already does this, but USN catch-up may
+                            // have added/moved entries).
+                            index.rebuild_children();
+                            if !index.hardlink_parents.is_empty() {
+                                eprintln!(
+                                    "[USN] {}:\\ {} hardlinked files with {} extra parent entries",
+                                    drive_letter,
+                                    index.hardlink_parents.len(),
+                                    index
+                                        .hardlink_parents
+                                        .values()
+                                        .map(|v| v.len())
+                                        .sum::<usize>()
+                                );
+                            }
+
+                            // File sizes are deferred to a background thread after
+                            // the volume is marked Ready (Phase 1 optimisation).
+                            // This lets search results appear within seconds instead
+                            // of waiting minutes for per-file MFT IOCTL reads.
+
+                            need_full_scan = false;
+                        }
+                        Err(e) => {
+                            indexing_progress.set_error(
+                                drive_letter,
+                                index.records.len() as u64,
+                                "catching_up",
+                            );
+                            eprintln!(
+                                "[USN] {}:\\ Catch-up failed ({}), doing full scan",
+                                drive_letter,
+                                crate::redact_paths(&e)
+                            );
+                            index.clear();
+                            need_full_scan = true;
+                        }
                     }
                 }
             } else {
@@ -499,6 +510,35 @@ pub(crate) fn index_volume(
             );
         } else {
             index.binary_dirty = false;
+        }
+
+        // Keep SQLite as a true full-volume fallback snapshot. Without this,
+        // losing the binary cache can resurrect a sparse incremental-only DB
+        // view after restart, which breaks search and folder-size resolution
+        // for most paths on the volume.
+        indexing_progress.update(
+            drive_letter,
+            "scanning",
+            index.records.len() as u64,
+            "persisting_sqlite",
+            None,
+            None,
+        );
+        if let Err(e) = db.save_volume(&index, |inserted, total| {
+            indexing_progress.update(
+                drive_letter,
+                "scanning",
+                inserted,
+                "persisting_sqlite",
+                Some(inserted),
+                Some(total),
+            );
+        }) {
+            eprintln!(
+                "[USN] {}:\\ SQLite full snapshot save failed: {}",
+                drive_letter,
+                crate::redact_paths(&e)
+            );
         }
 
         // Reset change tracking so the incremental sync starts fresh.

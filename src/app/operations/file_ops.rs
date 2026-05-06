@@ -115,7 +115,7 @@ impl ImageViewerApp {
             .send(
                 crate::workers::file_operation_worker::FileOperationRequest::delete_permanently(
                     paths.clone(),
-                    self.native_hwnd.unwrap_or_default(),
+                    self.shell_op_hwnd(),
                 ),
             )
             .is_err()
@@ -148,7 +148,7 @@ impl ImageViewerApp {
             .send(
                 crate::workers::file_operation_worker::FileOperationRequest::delete(
                     paths.to_vec(),
-                    self.native_hwnd.unwrap_or_default(),
+                    self.shell_op_hwnd(),
                 ),
             )
             .is_err()
@@ -312,7 +312,7 @@ impl ImageViewerApp {
                         crate::workers::file_operation_worker::FileOperationRequest::rename(
                             item.path.clone(),
                             new_name,
-                            self.native_hwnd.unwrap_or_default(),
+                            self.shell_op_hwnd(),
                         ),
                     )
                     .is_err()
@@ -367,7 +367,7 @@ impl ImageViewerApp {
         };
 
         let preview = state.compute_preview();
-        let hwnd = self.native_hwnd.unwrap_or_default();
+        let hwnd = self.shell_op_hwnd();
 
         for row in preview {
             if row.conflict {

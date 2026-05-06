@@ -317,6 +317,22 @@ pub fn save(index: &VolumeIndex) -> Result<(), String> {
 /// Returns Err on corruption (CRC mismatch, truncation, bad magic).
 pub fn load(drive_letter: char) -> Result<Option<(VolumeIndex, PersistedBinaryState)>, String> {
     let path = index_path(drive_letter);
+
+    // Clean up any orphaned .tmp file left by a prior abrupt shutdown (e.g. the
+    // installer killed the service mid-write between File::create(.tmp) and the
+    // atomic rename(.tmp → .bin)).  The .tmp is never valid on load — it is
+    // either incomplete or was already renamed.  Leaving it around wastes disk
+    // space and can confuse monitoring tools.
+    let tmp_path = path.with_extension("bin.tmp");
+    if tmp_path.exists() {
+        eprintln!(
+            "[BINARY-IDX] {}:\\ Orphaned .tmp found at startup; removing (likely caused by \
+             abrupt shutdown during a previous save).",
+            drive_letter
+        );
+        let _ = std::fs::remove_file(&tmp_path);
+    }
+
     if !path.exists() {
         return Ok(None);
     }

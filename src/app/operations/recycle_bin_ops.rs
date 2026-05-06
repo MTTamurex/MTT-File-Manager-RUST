@@ -92,7 +92,7 @@ impl ImageViewerApp {
 
         // Send request to background worker (BATCH)
         // Windows will show a native confirmation dialog before deleting.
-        let hwnd = self.native_hwnd.unwrap_or_default();
+        let hwnd = self.shell_op_hwnd();
         self.file_operation_state.file_ops_in_progress += 1;
         if self
             .file_operation_state
@@ -122,7 +122,7 @@ impl ImageViewerApp {
 
         // Send request to background worker.
         // Windows will show a native confirmation dialog before emptying.
-        let hwnd = self.native_hwnd.unwrap_or_default();
+        let hwnd = self.shell_op_hwnd();
         self.file_operation_state.file_ops_in_progress += 1;
         if self
             .file_operation_state
