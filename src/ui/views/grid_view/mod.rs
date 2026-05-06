@@ -7,6 +7,10 @@ use std::path::{Path, PathBuf};
 use crate::domain::file_entry::FileEntry;
 // PERFORMANCE: Use FxHashSet for PathBuf keys - faster hashing than std::collections::HashSet
 use crate::ui::cache::FxHashSet;
+use crate::ui::views::rectangle_selection::{
+    GridRectangleMetrics, RectangleSelectionFrame, RectangleSelectionMetrics,
+    RectangleSelectionState, RectangleSelectionView,
+};
 mod interactions;
 mod item_renderer;
 mod prefetch;
@@ -177,6 +181,8 @@ pub struct GridViewContext<'a> {
     pub drag_started_item: &'a mut Option<usize>,
     /// Output: currently hovered folder item during drag
     pub drag_hovered_item: &'a mut Option<usize>,
+    pub rectangle_selection_state: Option<&'a RectangleSelectionState>,
+    pub rectangle_selection_frame: &'a mut RectangleSelectionFrame,
     pub live_file_size_cache: &'a mut lru::LruCache<PathBuf, (u64, u64)>,
     pub live_file_size_loading: &'a mut FxHashSet<PathBuf>,
     pub live_file_size_req_sender:
@@ -281,6 +287,23 @@ pub fn render_grid_view(
     scroll::apply_scroll_input(ui, ctx.mut_scroll_offset_y, max_scroll, consume_scroll);
     let (current_scroll, scroll_delta) =
         scroll::compute_visual_scroll(ui, *ctx.mut_scroll_offset_y, viewport_h, ctx.generation);
+    let rectangle_metrics =
+        (!ctx.is_computer_view).then_some(RectangleSelectionMetrics::Grid(GridRectangleMetrics {
+            count,
+            cols,
+            padding,
+            item_w,
+            item_h,
+            virtual_cell_h,
+            content_width: available_w,
+            content_height: total_content_height,
+        }));
+    ctx.rectangle_selection_frame.begin(
+        viewport_rect,
+        current_scroll,
+        max_scroll,
+        rectangle_metrics,
+    );
     let t_after_scroll = std::time::Instant::now();
 
     // PERFORMANCE: Track scroll changes
@@ -315,7 +338,19 @@ pub fn render_grid_view(
 
     // 3. Render Virtual Grid
     // DETECT BACKGROUND INTERACTION
-    let bg_response = ui.interact(viewport_rect, ui.id().with("grid_bg"), Sense::click());
+    let bg_response = ui.interact(
+        viewport_rect,
+        ui.id().with("grid_bg"),
+        Sense::click_and_drag(),
+    );
+    if !ctx.is_computer_view
+        && ctx.rectangle_selection_state.is_none()
+        && bg_response.drag_started()
+    {
+        if let Some(origin) = ui.input(|input| input.pointer.press_origin()) {
+            ctx.rectangle_selection_frame.request_start(origin);
+        }
+    }
     visible_rows_range = virtualization::render_virtualized_grid(
         ui,
         ctx,
@@ -336,6 +371,17 @@ pub fn render_grid_view(
         &mut secondary_clicked_item,
     );
     let t_after_virtualized = std::time::Instant::now();
+
+    if let Some(state) = ctx.rectangle_selection_state.filter(|state| {
+        matches!(state.view, RectangleSelectionView::Grid) && state.generation == ctx.generation
+    }) {
+        crate::ui::views::rectangle_selection::paint_overlay(
+            ui,
+            state,
+            viewport_rect,
+            current_scroll,
+        );
+    }
 
     scroll::render_custom_scrollbar(
         ui,

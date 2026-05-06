@@ -18,6 +18,7 @@ use std::path::{Path, PathBuf};
 use crate::domain::file_entry::{FileEntry, SortMode};
 // PERFORMANCE: Use FxHashSet for PathBuf keys - faster hashing than std::collections::HashSet
 use crate::ui::cache::FxHashSet;
+use crate::ui::views::rectangle_selection::{RectangleSelectionFrame, RectangleSelectionState};
 
 // PERFORMANCE: Thread-local cache for font metrics using u64 hash key with LRU eviction
 // Uses LruCache instead of HashMap to avoid full clear when limit is reached
@@ -242,6 +243,8 @@ pub struct ListViewContext<'a> {
     pub drag_started_item: &'a mut Option<usize>,
     /// Output: currently hovered folder item during drag
     pub drag_hovered_item: &'a mut Option<usize>,
+    pub rectangle_selection_state: Option<&'a RectangleSelectionState>,
+    pub rectangle_selection_frame: &'a mut RectangleSelectionFrame,
     pub live_file_size_cache: &'a mut lru::LruCache<PathBuf, (u64, u64)>,
     pub live_file_size_loading: &'a mut FxHashSet<PathBuf>,
     pub live_file_size_req_sender:

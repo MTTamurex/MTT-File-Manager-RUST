@@ -72,11 +72,24 @@ pub(super) fn render_list_item(
             *secondary_clicked_item = Some(i);
         }
         let pointer_moved = ui.input(|i| i.pointer.delta() != egui::Vec2::ZERO);
-        if response.drag_started()
+        let drag_candidate = response.drag_started()
             || response.dragged()
-            || (response.is_pointer_button_down_on() && pointer_moved)
-        {
-            *ctx.drag_started_item = Some(i);
+            || (response.is_pointer_button_down_on() && pointer_moved);
+        let rectangle_select_active = ctx.rectangle_selection_state.is_some();
+        if drag_candidate && !rectangle_select_active {
+            if ctx.is_computer_view {
+                *ctx.drag_started_item = Some(i);
+            } else if let Some(origin) = ui.input(|input| input.pointer.press_origin()) {
+                if list_item_content_contains_pointer(
+                    ui, item, ctx, rect, col_widths, row_height, origin,
+                ) {
+                    *ctx.drag_started_item = Some(i);
+                } else {
+                    ctx.rectangle_selection_frame.request_start(origin);
+                }
+            } else {
+                *ctx.drag_started_item = Some(i);
+            }
         }
         let is_pointer_over = response.contains_pointer() || response.hovered();
         // For drag-hover detection use ONLY contains_pointer() (geometric check).
@@ -88,7 +101,10 @@ pub(super) fn render_list_item(
         }
 
         // --- VISUAL FEEDBACK: BORDER-ONLY (MODERN DESIGN) ---
-        let is_selected = ctx.multi_selection.contains(&item.path);
+        let is_selected = ctx
+            .rectangle_selection_state
+            .map(|state| state.preview_contains(i))
+            .unwrap_or_else(|| ctx.multi_selection.contains(&item.path));
 
         // STRICT HOVER LOGIC: Only allow hover if LastInput was Mouse
         let allow_hover = matches!(ctx.last_input, crate::app::state::LastInput::Mouse);
@@ -147,7 +163,7 @@ pub(super) fn render_list_item(
 
         // PERFORMANCE: Tooltip with debounce to avoid spam during scroll
         // Suppress tooltips during item drag to avoid clutter with drag ghost
-        if !ctx.is_item_dragging {
+        if !ctx.is_item_dragging && !rectangle_select_active {
             render_item_tooltip(ui, &response, item, ctx, is_recycle_bin);
         }
 
@@ -262,6 +278,184 @@ pub(super) fn render_list_item(
             );
         }
     });
+}
+
+fn list_item_content_contains_pointer(
+    ui: &Ui,
+    item: &FileEntry,
+    ctx: &ListViewContext,
+    rect: Rect,
+    col_widths: &ColumnWidths,
+    row_height: f32,
+    point: Pos2,
+) -> bool {
+    let icon_rect = Rect::from_min_size(rect.min + egui::vec2(4.0, 4.0), egui::vec2(16.0, 16.0));
+    if icon_rect.expand(2.0).contains(point) {
+        return true;
+    }
+
+    let font_id = FontId::proportional(12.0);
+    let resolved_name = crate::ui::components::item_slot::display_name_for_item(item);
+    if text_content_contains(
+        ui,
+        resolved_name.as_ref(),
+        col_widths.name - 30.0,
+        font_id.clone(),
+        rect.min + egui::vec2(24.0, 5.0),
+        row_height,
+        point,
+    ) {
+        return true;
+    }
+
+    if ctx.is_computer_view {
+        let total_str = item
+            .drive_info
+            .as_ref()
+            .map(|drive| format_size(drive.total_space))
+            .unwrap_or_else(|| "-".to_string());
+        if text_content_contains(
+            ui,
+            &total_str,
+            col_widths.date - 8.0,
+            font_id.clone(),
+            Pos2::new(rect.min.x + col_widths.name, rect.min.y + 5.0),
+            row_height,
+            point,
+        ) {
+            return true;
+        }
+
+        let free_str = item
+            .drive_info
+            .as_ref()
+            .map(|drive| format_size(drive.free_space))
+            .unwrap_or_else(|| "-".to_string());
+        return text_content_contains(
+            ui,
+            &free_str,
+            col_widths.size - 8.0,
+            font_id,
+            Pos2::new(
+                rect.min.x + col_widths.name + col_widths.date,
+                rect.min.y + 5.0,
+            ),
+            row_height,
+            point,
+        );
+    }
+
+    let date_str = if ctx.is_recycle_bin_view {
+        if item.modified > 0 {
+            format_date(item.modified)
+        } else {
+            item.deletion_date()
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "-".to_string())
+        }
+    } else {
+        format_date(item.modified)
+    };
+    if text_content_contains(
+        ui,
+        &date_str,
+        col_widths.date - 8.0,
+        font_id.clone(),
+        Pos2::new(rect.min.x + col_widths.name, rect.min.y + 5.0),
+        row_height,
+        point,
+    ) {
+        return true;
+    }
+
+    let type_str = get_file_type_string(item);
+    if text_content_contains(
+        ui,
+        &type_str,
+        col_widths.type_col - 8.0,
+        font_id.clone(),
+        Pos2::new(
+            rect.min.x + col_widths.name + col_widths.date,
+            rect.min.y + 5.0,
+        ),
+        row_height,
+        point,
+    ) {
+        return true;
+    }
+
+    let size_str = if item.is_dir && !item.is_archive() {
+        ctx.folder_size_cache
+            .peek(&item.path)
+            .map(|size| format_size(*size))
+            .unwrap_or_default()
+    } else {
+        format_size(item.size)
+    };
+    if text_content_contains(
+        ui,
+        &size_str,
+        col_widths.size - 8.0,
+        font_id,
+        Pos2::new(
+            rect.min.x + col_widths.name + col_widths.date + col_widths.type_col,
+            rect.min.y + 5.0,
+        ),
+        row_height,
+        point,
+    ) {
+        return true;
+    }
+
+    if ctx.is_onedrive_folder {
+        let status_rect = Rect::from_min_size(
+            Pos2::new(
+                rect.min.x
+                    + col_widths.name
+                    + col_widths.date
+                    + col_widths.type_col
+                    + col_widths.size
+                    + 8.0,
+                rect.min.y + 4.0,
+            ),
+            egui::vec2(18.0, 16.0),
+        );
+        return status_rect.expand(2.0).contains(point);
+    }
+
+    false
+}
+
+fn text_content_contains(
+    ui: &Ui,
+    text: &str,
+    max_width: f32,
+    font_id: FontId,
+    origin: Pos2,
+    row_height: f32,
+    point: Pos2,
+) -> bool {
+    let max_width = max_width.max(0.0);
+    if text.is_empty() || max_width <= 0.0 {
+        return false;
+    }
+
+    let display_text = truncate_text_for_column(text, max_width, &font_id, ui);
+    if display_text.is_empty() {
+        return false;
+    }
+
+    let width = ui.fonts(|fonts| {
+        fonts
+            .layout_no_wrap(display_text, font_id, Color32::WHITE)
+            .rect
+            .width()
+    });
+    let hit_rect = Rect::from_min_size(
+        origin,
+        egui::vec2(width.min(max_width), (row_height - 6.0).max(12.0)),
+    );
+    hit_rect.expand(3.0).contains(point)
 }
 
 /// Renders columns for Computer View (Total Space, Free Space)

@@ -10,6 +10,7 @@ use std::time::Instant;
 use crate::app::operations::navigation::{process_grid_keyboard_input, should_handle_navigation};
 use crate::app::state::ImageViewerApp;
 use crate::infrastructure::io_priority;
+use crate::ui::views::rectangle_selection::{RectangleSelectionFrame, RectangleSelectionView};
 use crate::ui::views::{grid_view, GridViewContext, GridViewOperations};
 
 // Helper function equivalent to open_with_shell from ops
@@ -127,6 +128,7 @@ impl ImageViewerApp {
         // Keyboard navigation (ONLY when not renaming and media is NOT focused)
         if !self.suppress_file_panel_keyboard
             && !self.global_search.active
+            && self.rectangle_selection_state.is_none()
             && should_handle_navigation(
                 ui,
                 self.renaming_state.is_some(),
@@ -255,6 +257,11 @@ impl ImageViewerApp {
         let prefetch_rows = if is_ssd { 1 } else { 3 };
         let mut drag_started_item = None;
         let mut drag_hovered_item = None;
+        let mut rectangle_selection_frame = RectangleSelectionFrame::default();
+        let rectangle_selection_state = self
+            .rectangle_selection_state
+            .as_ref()
+            .filter(|state| state.view == RectangleSelectionView::Grid);
         let shared_visible_paths = if self.dual_panel_enabled {
             self.visible_grid_paths_snapshot()
         } else {
@@ -304,6 +311,8 @@ impl ImageViewerApp {
             drag_target_folder: self.drag_target_folder.clone(),
             drag_started_item: &mut drag_started_item,
             drag_hovered_item: &mut drag_hovered_item,
+            rectangle_selection_state,
+            rectangle_selection_frame: &mut rectangle_selection_frame,
             live_file_size_cache: &mut self.live_file_size_cache,
             live_file_size_loading: &mut self.live_file_size_loading,
             live_file_size_req_sender: &self.live_file_size_req_sender,
@@ -328,10 +337,20 @@ impl ImageViewerApp {
         let t_after_core_render = Instant::now();
 
         // Update state from context
-        self.last_grid_cols = ctx.last_grid_cols;
-        self.renaming_state = ctx.renaming_state;
+        let last_grid_cols = ctx.last_grid_cols;
+        let renaming_state = ctx.renaming_state.take();
+        drop(ctx);
+        self.last_grid_cols = last_grid_cols;
+        self.renaming_state = renaming_state;
         // Always consume focus_rename after one frame (cursor selection applied once)
         self.focus_rename = false;
+
+        let suppress_rectangle_start = drag_started_item.is_some();
+        self.handle_rectangle_selection_frame(
+            ui,
+            &rectangle_selection_frame,
+            suppress_rectangle_start,
+        );
 
         // Process actions (blocked during renaming, except click on item itself)
         let is_renaming = self.renaming_state.is_some();
@@ -455,7 +474,7 @@ impl ImageViewerApp {
             _ => {}
         }
 
-        if !is_renaming {
+        if !is_renaming && self.rectangle_selection_state.is_none() {
             if let Some(start_idx) = drag_started_item {
                 self.begin_item_drag(start_idx);
             }
