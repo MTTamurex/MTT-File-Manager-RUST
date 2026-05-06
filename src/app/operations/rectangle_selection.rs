@@ -103,6 +103,27 @@ pub(crate) fn resolve_rectangle_selection(
 }
 
 impl ImageViewerApp {
+    pub fn clear_file_view_selection(&mut self) {
+        if self.selected_item.is_none()
+            && self.selected_file.is_none()
+            && self.multi_selection.is_empty()
+            && self.selection_anchor.is_none()
+            && self.selected_metadata.is_none()
+            && !self.scroll_to_selected
+        {
+            return;
+        }
+
+        self.multi_selection.clear();
+        self.selected_item = None;
+        self.selected_file = None;
+        self.selection_anchor = None;
+        self.selected_metadata = None;
+        self.scroll_to_selected = false;
+        self.update_selected_thumbnail();
+        self.ui_ctx.request_repaint();
+    }
+
     pub fn handle_rectangle_selection_frame(
         &mut self,
         ui: &egui::Ui,

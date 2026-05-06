@@ -471,6 +471,9 @@ impl ImageViewerApp {
                 self.context_menu
                     .open(pointer_pos, right_bound, None, vec![path], true);
             }
+            Some(grid_view::GridViewAction::EmptyAreaClick) if !is_renaming => {
+                self.clear_file_view_selection();
+            }
             _ => {}
         }
 

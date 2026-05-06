@@ -93,13 +93,24 @@ pub(super) fn render_grid_item(
     clicked_item: &mut Option<usize>,
     double_clicked_item: &mut Option<usize>,
     secondary_clicked_item: &mut Option<usize>,
+    empty_area_clicked: &mut bool,
     is_scrolling: bool,
 ) {
     let response = ui.interact(rect, ui.id().with(index), Sense::click_and_drag());
+    let click_over_content = response
+        .interact_pointer_pos()
+        .map(|pos| {
+            super::hit_testing::grid_item_content_contains(ui, item, rect.shrink(3.0), ctx, pos)
+        })
+        .unwrap_or(ctx.is_computer_view);
     if response.clicked() {
-        *clicked_item = Some(index);
+        if click_over_content {
+            *clicked_item = Some(index);
+        } else {
+            *empty_area_clicked = true;
+        }
     }
-    if response.double_clicked() {
+    if response.double_clicked() && click_over_content {
         *double_clicked_item = Some(index);
     }
     if response.secondary_clicked() {
@@ -115,12 +126,7 @@ pub(super) fn render_grid_item(
             *ctx.drag_started_item = Some(index);
         } else if let Some(origin) = ui.input(|input| input.pointer.press_origin()) {
             let content_rect = rect.shrink(3.0);
-            if crate::ui::views::rectangle_selection::grid_item_content_contains(
-                item,
-                content_rect,
-                ctx.thumbnail_size,
-                origin,
-            ) {
+            if super::hit_testing::grid_item_content_contains(ui, item, content_rect, ctx, origin) {
                 *ctx.drag_started_item = Some(index);
             } else {
                 ctx.rectangle_selection_frame.request_start(origin);
