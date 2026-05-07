@@ -142,6 +142,7 @@ fn action_label(action: ShortcutAction) -> String {
         ShortcutAction::Properties => t!("settings.shortcut_properties").to_string(),
         ShortcutAction::CreateFolder => t!("settings.shortcut_create_folder").to_string(),
         ShortcutAction::PreviewSelected => t!("settings.shortcut_preview_selected").to_string(),
+        ShortcutAction::SelectAll => t!("settings.shortcut_select_all").to_string(),
     }
 }
 

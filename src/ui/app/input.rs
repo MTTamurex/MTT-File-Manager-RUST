@@ -253,6 +253,13 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
             user_active = true;
         }
 
+        if !text_input_active && app.shortcuts.is_triggered(ShortcutAction::SelectAll, ctx) {
+            if app.select_all_current_items() {
+                app.last_input = crate::app::state::LastInput::Keyboard;
+            }
+            user_active = true;
+        }
+
         if !text_input_active && app.shortcuts.is_triggered(ShortcutAction::Copy, ctx) {
             app.command_copy(None);
             user_active = true;

@@ -288,6 +288,7 @@ settings:
   shortcut_properties: "Properties"
   shortcut_create_folder: "New folder"
   shortcut_preview_selected: "Open internal preview"
+  shortcut_select_all: "Select all"
 preview:
   select_item: "Select a single item to see details"
   items_selected: "%{count} items selected"
