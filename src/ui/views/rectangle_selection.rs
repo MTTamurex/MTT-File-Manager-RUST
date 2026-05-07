@@ -70,6 +70,7 @@ pub struct RectangleSelectionState {
     pub anchor_content: Pos2,
     pub current_content: Pos2,
     pub base_selection: FxHashSet<PathBuf>,
+    pub base_preview_indices: FxHashSet<usize>,
     pub hit_indices: FxHashSet<usize>,
     pub preview_indices: FxHashSet<usize>,
     pub modifiers: RectangleSelectionModifiers,
@@ -81,6 +82,7 @@ impl RectangleSelectionState {
         view: RectangleSelectionView,
         anchor_content: Pos2,
         base_selection: FxHashSet<PathBuf>,
+        base_preview_indices: FxHashSet<usize>,
         modifiers: RectangleSelectionModifiers,
         generation: usize,
     ) -> Self {
@@ -89,6 +91,7 @@ impl RectangleSelectionState {
             anchor_content,
             current_content: anchor_content,
             base_selection,
+            base_preview_indices,
             hit_indices: FxHashSet::default(),
             preview_indices: FxHashSet::default(),
             modifiers,
@@ -233,7 +236,52 @@ fn collect_list_indices(selection_rect: Rect, metrics: ListRectangleMetrics) -> 
 }
 
 fn rects_intersect(a: Rect, b: Rect) -> bool {
-    a.min.x <= b.max.x && b.min.x <= a.max.x && a.min.y <= b.max.y && b.min.y <= a.max.y
+    a.min.x < b.max.x && b.min.x < a.max.x && a.min.y < b.max.y && b.min.y < a.max.y
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sorted(indices: FxHashSet<usize>) -> Vec<usize> {
+        let mut values: Vec<_> = indices.into_iter().collect();
+        values.sort_unstable();
+        values
+    }
+
+    #[test]
+    fn list_selection_does_not_include_row_that_only_touches_edge() {
+        let indices = collect_indices_in_rect(
+            Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(100.0, 20.0)),
+            RectangleSelectionMetrics::List(ListRectangleMetrics {
+                count: 3,
+                row_height: 20.0,
+                content_width: 100.0,
+                content_height: 60.0,
+            }),
+        );
+
+        assert_eq!(sorted(indices), vec![0]);
+    }
+
+    #[test]
+    fn grid_selection_does_not_include_item_that_only_touches_edge() {
+        let indices = collect_indices_in_rect(
+            Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(10.0, 10.0)),
+            RectangleSelectionMetrics::Grid(GridRectangleMetrics {
+                count: 4,
+                cols: 2,
+                padding: 0.0,
+                item_w: 10.0,
+                item_h: 10.0,
+                virtual_cell_h: 10.0,
+                content_width: 20.0,
+                content_height: 20.0,
+            }),
+        );
+
+        assert_eq!(sorted(indices), vec![0]);
+    }
 }
 
 pub fn paint_overlay(
