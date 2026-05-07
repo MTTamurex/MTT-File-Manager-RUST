@@ -22,6 +22,7 @@ impl ImageViewerApp {
         // synchronized with whichever panel is active.  Each panel has its
         // own generation value for routing folder-load results, but the
         // shared gen_tracker must match the active panel's generation.
+        snapshot.rectangle_selection_state = None;
         snapshot.is_loading_folder = false;
         snapshot.pending_all_items_clear = false;
         snapshot.pending_items_rebuild = false;

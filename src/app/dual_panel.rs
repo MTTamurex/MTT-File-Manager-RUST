@@ -57,6 +57,8 @@ pub struct PanelSnapshot {
     pub selected_file: Option<FileEntry>,
     pub multi_selection: FxHashSet<PathBuf>,
     pub selection_anchor: Option<usize>,
+    pub rectangle_selection_state:
+        Option<crate::ui::views::rectangle_selection::RectangleSelectionState>,
 
     // View preferences
     pub view_mode: ViewMode,
@@ -149,6 +151,7 @@ impl PanelSnapshot {
             selected_file: app.selected_file.clone(),
             multi_selection: app.multi_selection.clone(),
             selection_anchor: app.selection_anchor,
+            rectangle_selection_state: app.rectangle_selection_state.clone(),
             view_mode: app.view_mode,
             sort_mode: app.sort_mode,
             sort_descending: app.sort_descending,
@@ -192,6 +195,7 @@ impl PanelSnapshot {
         app.selected_file = self.selected_file;
         app.multi_selection = self.multi_selection;
         app.selection_anchor = self.selection_anchor;
+        app.rectangle_selection_state = self.rectangle_selection_state;
         app.view_mode = self.view_mode;
         app.sort_mode = self.sort_mode;
         app.sort_descending = self.sort_descending;
@@ -241,6 +245,10 @@ impl PanelSnapshot {
         std::mem::swap(&mut self.selected_file, &mut app.selected_file);
         std::mem::swap(&mut self.multi_selection, &mut app.multi_selection);
         std::mem::swap(&mut self.selection_anchor, &mut app.selection_anchor);
+        std::mem::swap(
+            &mut self.rectangle_selection_state,
+            &mut app.rectangle_selection_state,
+        );
         std::mem::swap(&mut self.view_mode, &mut app.view_mode);
         std::mem::swap(&mut self.sort_mode, &mut app.sort_mode);
         std::mem::swap(&mut self.sort_descending, &mut app.sort_descending);
