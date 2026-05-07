@@ -401,6 +401,41 @@ impl ImageViewerApp {
         true
     }
 
+    /// Selects every item in the current loaded folder/item snapshot.
+    pub fn select_all_current_items(&mut self) -> bool {
+        if self.items.is_empty() {
+            return false;
+        }
+
+        let previous_selected_path = self.selected_file.as_ref().map(|item| item.path.clone());
+        self.multi_selection.clear();
+        self.multi_selection.reserve(self.items.len());
+
+        for item in self.items.iter() {
+            self.multi_selection.insert(item.path.clone());
+        }
+
+        let focus_index = self
+            .selected_file
+            .as_ref()
+            .and_then(|selected| self.items.iter().position(|item| item.path == selected.path))
+            .or_else(|| self.selected_item.filter(|idx| *idx < self.items.len()))
+            .unwrap_or(0);
+        let focused_item = self.items[focus_index].clone();
+        let focused_path = focused_item.path.clone();
+
+        self.selected_item = Some(focus_index);
+        self.selected_file = Some(focused_item);
+        self.selection_anchor = Some(focus_index);
+        self.rectangle_selection_state = None;
+
+        if previous_selected_path.as_ref() != Some(&focused_path) {
+            self.update_selected_thumbnail();
+        }
+
+        true
+    }
+
     /// Clears the current selection, persistent thumbnail, metadata and search.
     /// Useful during navigation between folders.
     /// NOTE: Only clears media_preview if current tab is the owner.

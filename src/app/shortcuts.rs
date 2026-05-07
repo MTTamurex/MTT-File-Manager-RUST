@@ -20,10 +20,11 @@ pub enum ShortcutAction {
     Properties,
     CreateFolder,
     PreviewSelected,
+    SelectAll,
 }
 
 impl ShortcutAction {
-    pub const COUNT: usize = 16;
+    pub const COUNT: usize = 17;
     pub const ALL: [Self; Self::COUNT] = [
         Self::NewTab,
         Self::CloseTab,
@@ -41,6 +42,7 @@ impl ShortcutAction {
         Self::Properties,
         Self::CreateFolder,
         Self::PreviewSelected,
+        Self::SelectAll,
     ];
     pub const CONFIGURABLE_COUNT: usize = 8;
     pub const CONFIGURABLE: [Self; Self::CONFIGURABLE_COUNT] = [
@@ -76,6 +78,7 @@ impl ShortcutAction {
             Self::Properties => "shortcut_properties",
             Self::CreateFolder => "shortcut_create_folder",
             Self::PreviewSelected => "shortcut_preview_selected",
+            Self::SelectAll => "shortcut_select_all",
         }
     }
 
@@ -97,6 +100,7 @@ impl ShortcutAction {
             Self::Properties => "settings.shortcut_properties",
             Self::CreateFolder => "settings.shortcut_create_folder",
             Self::PreviewSelected => "settings.shortcut_preview_selected",
+            Self::SelectAll => "settings.shortcut_select_all",
         }
     }
 
@@ -432,6 +436,7 @@ const DEFAULT_BINDINGS: [ShortcutBinding; ShortcutAction::COUNT] = [
     ShortcutBinding::alt(egui::Key::Enter),
     ShortcutBinding::ctrl_shift(egui::Key::N),
     ShortcutBinding::plain(egui::Key::Space),
+    ShortcutBinding::ctrl(egui::Key::A),
 ];
 
 fn binding_from_event(event: &egui::Event) -> Option<ShortcutBinding> {

@@ -288,6 +288,7 @@ settings:
   shortcut_properties: "Propriedades"
   shortcut_create_folder: "Nova pasta"
   shortcut_preview_selected: "Abrir preview interno"
+  shortcut_select_all: "Selecionar tudo"
 preview:
   select_item: "Selecione um único item para ver detalhes"
   items_selected: "%{count} itens selecionados"
