@@ -94,12 +94,69 @@ pub(crate) fn resolve_rectangle_selection(
         }
     }
 
+    let selection_changed = selected_paths != *base_selection;
+
     RectangleSelectionResolveResult {
         selected_paths,
-        focus_index,
-        anchor_index,
-        selection_changed: true,
+        focus_index: selection_changed.then_some(focus_index).flatten(),
+        anchor_index: if selection_changed {
+            anchor_index
+        } else {
+            anchor
+        },
+        selection_changed,
     }
+}
+
+fn resolve_rectangle_preview_indices(
+    item_count: usize,
+    base_preview_indices: &FxHashSet<usize>,
+    hit_indices: &FxHashSet<usize>,
+    anchor: Option<usize>,
+    modifiers: RectangleSelectionModifiers,
+) -> FxHashSet<usize> {
+    let mut hits: Vec<usize> = hit_indices
+        .iter()
+        .copied()
+        .filter(|idx| *idx < item_count)
+        .collect();
+    hits.sort_unstable();
+
+    if hits.is_empty() {
+        return base_preview_indices.clone();
+    }
+
+    if !modifiers.ctrl && !modifiers.shift {
+        return hits.into_iter().collect();
+    }
+
+    let mut preview_indices = base_preview_indices.clone();
+
+    if modifiers.ctrl {
+        for idx in hits {
+            if !preview_indices.remove(&idx) {
+                preview_indices.insert(idx);
+            }
+        }
+    } else if let (Some(anchor_idx), Some(first), Some(last)) =
+        (anchor, hits.first().copied(), hits.last().copied())
+    {
+        let (start, end) = if anchor_idx < first {
+            (anchor_idx, last)
+        } else if anchor_idx > last {
+            (first, anchor_idx)
+        } else {
+            (first, last)
+        };
+
+        for idx in start..=end.min(item_count.saturating_sub(1)) {
+            preview_indices.insert(idx);
+        }
+    } else {
+        preview_indices.extend(hits);
+    }
+
+    preview_indices
 }
 
 impl ImageViewerApp {
@@ -160,10 +217,13 @@ impl ImageViewerApp {
                         ctrl: input.modifiers.ctrl,
                         shift: input.modifiers.shift,
                     });
+                    let base_selection = self.multi_selection.clone();
+                    let base_preview_indices = self.indices_for_selected_paths(&base_selection);
                     self.rectangle_selection_state = Some(RectangleSelectionState::new(
                         view,
                         anchor_content,
-                        self.multi_selection.clone(),
+                        base_selection,
+                        base_preview_indices,
                         modifiers,
                         self.generation,
                     ));
@@ -203,7 +263,9 @@ impl ImageViewerApp {
     }
 
     pub fn cancel_rectangle_selection(&mut self) {
-        self.rectangle_selection_state = None;
+        if self.rectangle_selection_state.take().is_some() {
+            self.ui_ctx.request_repaint();
+        }
     }
 
     fn apply_rectangle_selection_autoscroll(
@@ -240,16 +302,15 @@ impl ImageViewerApp {
             return;
         };
         let selection_rect = state.content_rect();
+        let modifiers = state.modifiers;
         let hit_indices = collect_indices_in_rect(selection_rect, metrics);
-        let resolved = resolve_rectangle_selection(
+        let preview_indices = resolve_rectangle_preview_indices(
             self.items.len(),
-            &state.base_selection,
+            &state.base_preview_indices,
             &hit_indices,
             self.selection_anchor,
-            state.modifiers,
-            |idx| self.items.get(idx).map(|item| item.path.clone()),
+            modifiers,
         );
-        let preview_indices = self.indices_for_selected_paths(&resolved.selected_paths);
 
         if let Some(state) = self.rectangle_selection_state.as_mut() {
             state.hit_indices = hit_indices;
@@ -272,6 +333,7 @@ impl ImageViewerApp {
         );
 
         if !resolved.selection_changed {
+            self.ui_ctx.request_repaint();
             return;
         }
 
@@ -391,5 +453,39 @@ mod tests {
         assert_eq!(result.focus_index, None);
         assert_eq!(result.anchor_index, Some(1));
         assert!(!result.selection_changed);
+    }
+
+    #[test]
+    fn identical_resolved_selection_is_reported_unchanged() {
+        let items = paths(6);
+        let result = resolve_rectangle_selection(
+            items.len(),
+            &path_set(&[2, 4]),
+            &set(&[2, 4]),
+            Some(1),
+            RectangleSelectionModifiers::default(),
+            |idx| items.get(idx).cloned(),
+        );
+
+        assert_eq!(result.selected_paths, path_set(&[2, 4]));
+        assert_eq!(result.focus_index, None);
+        assert_eq!(result.anchor_index, Some(1));
+        assert!(!result.selection_changed);
+    }
+
+    #[test]
+    fn preview_indices_resolve_without_path_rebuild() {
+        let preview = resolve_rectangle_preview_indices(
+            8,
+            &set(&[0]),
+            &set(&[4, 5]),
+            Some(2),
+            RectangleSelectionModifiers {
+                ctrl: false,
+                shift: true,
+            },
+        );
+
+        assert_eq!(preview, set(&[0, 2, 3, 4, 5]));
     }
 }
