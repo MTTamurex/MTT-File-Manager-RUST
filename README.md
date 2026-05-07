@@ -2,16 +2,11 @@
 
 **Native Windows file manager** built in Rust with a modern UI, advanced media preview, and deep Windows integration.
 
-## About
-
-MTT File Manager is a native Windows file manager built in Rust that combines fast tabbed navigation, rich media preview, and deep Windows integration in a modern desktop UI. It also includes instant global search powered by a dedicated background indexing service and in-memory index, giving you Spotlight-style access to millions of files alongside everyday file management workflows.
-
 <img width="3839" height="2064" alt="MTT-File-Manager Screenshot" src="https://github.com/user-attachments/assets/b6923890-a12b-4890-b5e0-d794b19d7b3b" />
 
 ## Key Features
 
 ### Interface & Navigation
-- **Custom borderless window** — Modern frameless UI with native resize support
 - **Dark / Light theme** — Toggle between dark and light mode in Settings > Appearance; persisted in SQLite, applied to all windows including image, PDF, and text viewers with native title bar support via DWM
 - **Dual panel (split view)** — Side-by-side file browsing with independent left and right panels; toggle via the toolbar button. Each panel maintains its own navigation history, sort order, view mode, and selection. File copy/move operations default to the opposite panel as the destination
 - **Tabbed navigation** — Multiple tabs with independent history
@@ -74,39 +69,6 @@ MTT File Manager is a native Windows file manager built in Rust that combines fa
 - **pdfium.dll** — Required for PDF viewer
 - **Video codecs** — Required for video thumbnail extraction (see [Video Thumbnail Codecs](#video-thumbnail-codecs) below)
 
-## Installation
-
-### Option 1: Build from Source
-```bash
-# Clone the repository
-git clone <repository-url>
-cd MTT-File-Manager-RUST
-
-# Release build of the full workspace (main app + search service)
-cargo build --release --workspace
-
-# Run (release build opens without a console window on Windows)
-.\target\release\mtt-file-manager.exe
-```
-
-### libmpv Setup
-```powershell
-# Download from: https://sourceforge.net/projects/mpv-player-windows/files/libmpv/
-# Place libmpv-2.dll in the same directory as the executable
-```
-
-### pdfium Setup
-```powershell
-# build.rs tries to stage pdfium.dll automatically for local builds.
-# Supported lookup locations:
-#   .\vendor\pdfium.dll
-#   .\vendor\pdfium\pdfium.dll
-#   $env:PDFIUM_DYNAMIC_LIB_PATH\pdfium.dll
-
-# If automatic staging does not happen, place pdfium.dll next to the executable
-# before running the app or building the installer.
-```
-
 ## Usage
 
 ### Keyboard Shortcuts
@@ -130,114 +92,6 @@ Some app-level shortcuts are configurable in Settings > Keyboard Shortcuts. Stan
 | Ctrl+Mouse Wheel | Adjust thumbnail size |
 | Alt+Enter | Properties |
 | Space | Open file with internal viewer |
-
-## Development
-
-### Environment Setup
-```bash
-# Install Rust
-rustup toolchain install stable
-rustup default stable-msvc
-
-# Verify
-rustc --version
-cargo --version
-```
-
-### Build & Run
-```bash
-# Development (entire workspace)
-cargo build --workspace
-cargo run
-
-# Standalone viewer entry points (same executable, alternate mode flags)
-cargo run -- --image-viewer "C:\path\to\image.jpg"
-cargo run -- --pdf-viewer "C:\path\to\file.pdf"
-cargo run -- --text-viewer "C:\path\to\file.txt"
-
-# Release build
-cargo build --release --workspace
-
-# Release build - search service only
-cargo build --release -p mtt-search-service
-
-# Run with logs
-cargo run 2>&1 | Tee-Object "debug.log"
-
-# Benchmarks
-cargo bench
-```
-
-### Global Search Service
-The search service is a separate workspace binary at `crates/mtt-search-service` and is also included automatically when you build the full workspace.
-
-```powershell
-# Build only the search service binary
-cargo build --release -p mtt-search-service
-
-# Binary output
-.\target\release\mtt-search-service.exe
-```
-
-```powershell
-# Install as service (requires Administrator)
-.\target\release\mtt-search-service.exe install
-
-# Start
-sc.exe start MTTFileManagerSearch
-
-# Check status
-sc.exe query MTTFileManagerSearch
-
-# Console mode (debug, no install needed)
-.\target\release\mtt-search-service.exe run-console
-
-# Uninstall
-.\target\release\mtt-search-service.exe uninstall
-```
-
-Notes:
-- The service installs as `LocalSystem` and exposes IPC over `\\.\pipe\MTTFileManagerSearch`.
-- `cargo build --release --workspace` is the simplest way to produce both `mtt-file-manager.exe` and `mtt-search-service.exe` for local testing or packaging.
-
-### Installer Build
-The installer is generated with Inno Setup 6 and bundles the main app, search service, `libmpv-2.dll`, `pdfium.dll`, the portable mpv configuration, and the repository license / notice files used for redistribution.
-
-```powershell
-# Install Inno Setup 6
-winget install JRSoftware.InnoSetup
-
-# From the repository root: build release artifacts + installer
-.\installer\build_installer.ps1
-
-# Reuse an existing release build
-.\installer\build_installer.ps1 -SkipBuild
-
-# Manual compilation (equivalent)
-ISCC.exe .\installer\setup.iss
-```
-
-Artifacts explicitly prevalidated by `installer\build_installer.ps1`:
-- `target\release\mtt-file-manager.exe`
-- `target\release\mtt-search-service.exe`
-- `target\release\libmpv-2.dll`
-- `target\release\pdfium.dll`
-- `LICENSE`
-- `NOTICE`
-- `THIRD_PARTY_NOTICES.md`
-- `appicon.ico`
-- `mpv_ui\portable_config\mpv.conf`
-- `mpv_ui\portable_config\scripts\`
-- `mpv_ui\portable_config\scripts\autoload.lua`
-- `mpv_ui\portable_config\scripts\modernH.lua`
-- `mpv_ui\portable_config\scripts\vsr.lua`
-- `mpv_ui\portable_config\script-opts\`
-- `mpv_ui\portable_config\script-opts\osc.conf`
-
-Installer behavior:
-- Output is written to `installer\output\MTT-File-Manager-Setup-<version>.exe`
-- The installer automatically installs and starts the `MTTFileManagerSearch` Windows service
-- The installer warns if Microsoft Visual C++ Redistributable 2015-2022 (x64) is not detected
 
 ## Video Thumbnail Codecs
 
