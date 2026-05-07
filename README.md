@@ -1,6 +1,6 @@
 # MTT File Manager
 
-**Native Windows file manager** built in Rust with a modern UI, advanced media preview, and deep Windows integration.
+**Native Windows file manager** built in Rust with a modern UI, advanced media preview, and Windows integration.
 
 <img width="3839" height="2064" alt="MTT-File-Manager Screenshot" src="https://github.com/user-attachments/assets/b6923890-a12b-4890-b5e0-d794b19d7b3b" />
 
@@ -43,7 +43,6 @@
 ### Performance & Cache
 - **Multi-level cache** — Memory, disk (SQLite), and GPU textures
 - **Async workers** — Background processing keeps UI responsive
-- **Smart prefetch** — Predictive preloading of folders and files
 - **UI virtualization** — Efficient rendering of large directories
 - **Per-folder monitoring** — Default `notify` crate watcher with opt-in drive-wide `ReadDirectoryChangesW`
 
