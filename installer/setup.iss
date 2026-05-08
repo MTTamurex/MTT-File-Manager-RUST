@@ -56,6 +56,7 @@ Source: "{#SrcRoot}\target\release\{#MyAppExeName}"; DestDir: "{app}"; Flags: ig
 Source: "{#SrcRoot}\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SrcRoot}\NOTICE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SrcRoot}\THIRD_PARTY_NOTICES.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SrcRoot}\third_party_licenses\*"; DestDir: "{app}\third_party_licenses"; Flags: ignoreversion recursesubdirs
 
 ; libmpv runtime
 Source: "{#SrcRoot}\target\release\libmpv-2.dll"; DestDir: "{app}"; Flags: ignoreversion
