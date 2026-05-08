@@ -410,7 +410,13 @@ fn run_ocr_canonical(
 
     if display_side >= OCR_MIN_DISPLAY_SIDE {
         // Reuse the display bitmap — no extra render.
-        return match super::ocr::ocr_page_bitmap(display_pixels, display_w, display_h, page_w, page_h) {
+        return match super::ocr::ocr_page_bitmap(
+            display_pixels,
+            display_w,
+            display_h,
+            page_w,
+            page_h,
+        ) {
             Some(words) => commit(words, ocr_cache),
             None => vec![],
         };
@@ -427,7 +433,11 @@ fn run_ocr_canonical(
             .get(page_idx as pdfium_render::prelude::PdfPageIndex)
             .map_err(|e| e.to_string())?;
         let bm = page
-            .render(ocr_w as pdfium_render::prelude::Pixels, ocr_h as pdfium_render::prelude::Pixels, None)
+            .render(
+                ocr_w as pdfium_render::prelude::Pixels,
+                ocr_h as pdfium_render::prelude::Pixels,
+                None,
+            )
             .map_err(|e| format!("OCR render: {e}"))?;
         Ok((bm.as_rgba_bytes(), bm.width() as u32, bm.height() as u32))
     })();

@@ -401,10 +401,7 @@ pub fn parse_usn_records(
                     // event yet) also have their sizes fetched from MFT,
                     // preventing them from staying at size=0 indefinitely
                     // when they are copied or moved onto the volume.
-                    if !is_dir
-                        && (reason
-                            & (USN_REASON_SIZE_CHANGED | USN_REASON_FILE_CREATE)
-                            != 0)
+                    if !is_dir && (reason & (USN_REASON_SIZE_CHANGED | USN_REASON_FILE_CREATE) != 0)
                     {
                         index.pending_size_refresh.insert(frn);
                     }

@@ -88,8 +88,7 @@ fn repair_suspicious_zero_folder_size(
                 &candidates,
                 record_size,
             );
-            let (rt, rfc, rfoldc, _) =
-                crate::mft_reader::folder_size_for_service(&vol, dir_frn);
+            let (rt, rfc, rfoldc, _) = crate::mft_reader::folder_size_for_service(&vol, dir_frn);
             (candidates.len(), repaired, (rt, rfc, rfoldc))
         }
     };

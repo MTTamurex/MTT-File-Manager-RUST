@@ -418,7 +418,11 @@ impl ImageViewerApp {
         let focus_index = self
             .selected_file
             .as_ref()
-            .and_then(|selected| self.items.iter().position(|item| item.path == selected.path))
+            .and_then(|selected| {
+                self.items
+                    .iter()
+                    .position(|item| item.path == selected.path)
+            })
             .or_else(|| self.selected_item.filter(|idx| *idx < self.items.len()))
             .unwrap_or(0);
         let focused_item = self.items[focus_index].clone();

@@ -41,7 +41,7 @@ fn create_shell_op_proxy_window() -> Option<HWND> {
             0,
             0,
             0,
-            None,  // no owner — Shell only disables this window, not the app
+            None, // no owner — Shell only disables this window, not the app
             None,
             None,
             None,

@@ -497,6 +497,8 @@ batch_rename:
   sep_none: "Nenhum  (Nome1)"
   conflict_warning: "Aviso: %{count} nome(s) têm conflitos e serão ignorados."
   conflict_suffix: " (conflito)"
+  progress_title: "Renomeando arquivos"
+  progress_complete: "%{count} arquivo(s) renomeado(s)"
   btn_rename: "Renomear %{count} arquivo(s)"
   btn_cancel: "Cancelar"
   col_num: "#"

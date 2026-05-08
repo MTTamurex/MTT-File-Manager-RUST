@@ -353,12 +353,11 @@ impl ImageViewerApp {
             return;
         }
 
-        self.batch_rename_state =
-            Some(crate::app::batch_rename::BatchRenameState::new(sources));
+        self.batch_rename_state = Some(crate::app::batch_rename::BatchRenameState::new(sources));
     }
 
-    /// Applies the current `batch_rename_state`, sending one rename request per
-    /// non-conflicting file to the background worker.
+    /// Applies the current `batch_rename_state`, sending one aggregate rename
+    /// request for all non-conflicting files to the background worker.
     pub fn apply_batch_rename(&mut self) {
         let Some(state): Option<crate::app::batch_rename::BatchRenameState> =
             self.batch_rename_state.take()
@@ -368,31 +367,41 @@ impl ImageViewerApp {
 
         let preview = state.compute_preview();
         let hwnd = self.shell_op_hwnd();
+        let renames: Vec<(PathBuf, String)> = preview
+            .into_iter()
+            .filter(|row| !row.conflict)
+            .map(|row| (row.source, row.new_name))
+            .collect();
 
-        for row in preview {
-            if row.conflict {
-                continue;
-            }
+        if renames.is_empty() {
+            return;
+        }
 
-            self.file_operation_state.file_ops_in_progress += 1;
-            if self
+        let total = renames.len();
+        self.file_operation_state.batch_rename_progress =
+            Some(crate::app::file_operation_state::BatchRenameProgress {
+                completed: 0,
+                total,
+                current_name: None,
+            });
+
+        self.file_operation_state.file_ops_in_progress += 1;
+        if self
+            .file_operation_state
+            .file_op_sender
+            .send(
+                crate::workers::file_operation_worker::FileOperationRequest::rename_batch(
+                    renames, hwnd,
+                ),
+            )
+            .is_err()
+        {
+            self.file_operation_state.batch_rename_progress = None;
+            self.file_operation_state.file_ops_in_progress = self
                 .file_operation_state
-                .file_op_sender
-                .send(
-                    crate::workers::file_operation_worker::FileOperationRequest::rename(
-                        row.source,
-                        row.new_name,
-                        hwnd,
-                    ),
-                )
-                .is_err()
-            {
-                self.file_operation_state.file_ops_in_progress = self
-                    .file_operation_state
-                    .file_ops_in_progress
-                    .saturating_sub(1);
-                log::warn!("[FileOps] H-3: worker channel closed on batch rename");
-            }
+                .file_ops_in_progress
+                .saturating_sub(1);
+            log::warn!("[FileOps] H-3: worker channel closed on batch rename");
         }
     }
 

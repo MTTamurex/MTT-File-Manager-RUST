@@ -1,5 +1,6 @@
 use crate::app::state::ImageViewerApp;
-use crate::workers::file_operation_worker::FileOperationResult;
+use crate::workers::file_operation_worker::{FileOperationResult, RenameCompletedItem};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::TryRecvError;
 use std::time::{Duration, Instant};
@@ -43,6 +44,14 @@ impl ImageViewerApp {
                             parent_folder,
                             current_path_norm,
                         ),
+                        FileOperationResult::RenameBatchProgress {
+                            completed,
+                            total,
+                            current_name,
+                        } => self.handle_rename_batch_progress(completed, total, current_name),
+                        FileOperationResult::RenameBatchCompleted { renames } => {
+                            self.handle_rename_batch_completed(renames, current_path_norm)
+                        }
                         FileOperationResult::DriveRenameCompleted {
                             drive_path,
                             new_label,
@@ -127,27 +136,27 @@ impl ImageViewerApp {
         self.clear_tab_cache_for_normalized_path(&folder_norm);
     }
 
-    fn handle_rename_completed(
+    fn apply_rename_completed_to_memory(
         &mut self,
-        path: PathBuf,
-        new_name: String,
-        parent_folder: PathBuf,
-        current_path_norm: &str,
-    ) {
-        let parent_str = Self::normalize_for_match(parent_folder.as_path());
-        let path_str = Self::normalize_for_match(&path);
-        self.invalidate_folder_and_tab_caches(&parent_folder);
+        path: &Path,
+        new_name: &str,
+        parent_folder: &Path,
+    ) -> PathBuf {
+        let old_path = path.to_path_buf();
+        let new_path = parent_folder.join(new_name);
+        let path_str = Self::normalize_for_match(path);
 
-        // Keep details panel selection in sync before reload completes.
         if let Some(selected) = &mut self.selected_file {
             if Self::normalize_for_match(&selected.path) == path_str {
-                let new_path = parent_folder.join(&new_name);
-                selected.path = new_path;
-                selected.name = new_name.clone();
+                selected.path = new_path.clone();
+                selected.name = new_name.to_string();
             }
         }
 
-        // If renamed file is currently playing, drop stale preview state.
+        if self.multi_selection.remove(&old_path) {
+            self.multi_selection.insert(new_path.clone());
+        }
+
         let should_destroy_preview = match self.media_preview.as_ref() {
             Some(crate::ui::components::media_preview::MediaPreview::Video(player)) => {
                 Self::normalize_for_match(&player.path) == path_str
@@ -158,22 +167,29 @@ impl ImageViewerApp {
             self.destroy_media_preview();
         }
 
-        // Clear stale in-memory caches for both old and new paths.
-        // If a previously-deleted file lived at new_path, its thumbnail
-        // texture may still be cached in RAM — evict it so the renamed
-        // file gets a fresh extraction.
-        self.cache_manager.texture_cache.pop(&path);
-        self.cache_manager.loading_set.remove(&path);
-        self.cache_manager.pop_rgba_data(&path);
-        self.cache_manager.failed_thumbnails.pop(&path);
-        let new_path = parent_folder.join(&new_name);
+        self.cache_manager.texture_cache.pop(&old_path);
+        self.cache_manager.loading_set.remove(&old_path);
+        self.cache_manager.pop_rgba_data(&old_path);
+        self.cache_manager.failed_thumbnails.pop(&old_path);
         self.cache_manager.texture_cache.pop(&new_path);
         self.cache_manager.loading_set.remove(&new_path);
         self.cache_manager.pop_rgba_data(&new_path);
         self.cache_manager.failed_thumbnails.pop(&new_path);
 
-        // Also invalidate SQLite disk cache for the new path (forced) so
-        // get_latest won't return a stale row from a previous file.
+        new_path
+    }
+
+    fn handle_rename_completed(
+        &mut self,
+        path: PathBuf,
+        new_name: String,
+        parent_folder: PathBuf,
+        current_path_norm: &str,
+    ) {
+        let parent_str = Self::normalize_for_match(parent_folder.as_path());
+        self.invalidate_folder_and_tab_caches(&parent_folder);
+        let new_path =
+            self.apply_rename_completed_to_memory(&path, &new_name, parent_folder.as_path());
         self.enqueue_disk_cache_invalidations_forced(vec![new_path.clone()]);
 
         if parent_str == current_path_norm {
@@ -181,6 +197,79 @@ impl ImageViewerApp {
             self.loaded_path.clear();
             self.load_folder(false);
         }
+    }
+
+    fn handle_rename_batch_progress(
+        &mut self,
+        completed: usize,
+        total: usize,
+        current_name: String,
+    ) {
+        if total == 0 {
+            self.file_operation_state.batch_rename_progress = None;
+            return;
+        }
+
+        self.file_operation_state.batch_rename_progress =
+            Some(crate::app::file_operation_state::BatchRenameProgress {
+                completed: completed.min(total),
+                total,
+                current_name: Some(current_name),
+            });
+    }
+
+    fn handle_rename_batch_completed(
+        &mut self,
+        renames: Vec<RenameCompletedItem>,
+        current_path_norm: &str,
+    ) {
+        if renames.is_empty() {
+            self.file_operation_state.batch_rename_progress = None;
+            return;
+        }
+
+        let renamed_count = renames.len();
+
+        let mut seen_parent_norms = HashSet::new();
+        let mut affected_parent_folders = Vec::new();
+        let mut forced_cache_invalidations = Vec::with_capacity(renames.len());
+        let mut should_reload_current = false;
+        let mut select_after_reload = None;
+
+        for rename in renames {
+            let parent_norm = Self::normalize_for_match(rename.parent_folder.as_path());
+            if seen_parent_norms.insert(parent_norm.clone()) {
+                self.invalidate_folder_and_tab_caches(&rename.parent_folder);
+                affected_parent_folders.push(rename.parent_folder.clone());
+            }
+
+            let new_path = self.apply_rename_completed_to_memory(
+                &rename.path,
+                &rename.new_name,
+                rename.parent_folder.as_path(),
+            );
+            forced_cache_invalidations.push(new_path.clone());
+
+            if parent_norm == current_path_norm {
+                should_reload_current = true;
+                select_after_reload = Some(new_path);
+            }
+        }
+
+        self.enqueue_disk_cache_invalidations_forced(forced_cache_invalidations);
+
+        if should_reload_current {
+            self.pending_select_path = select_after_reload;
+            self.loaded_path.clear();
+            self.load_folder(false);
+        }
+
+        let affected_refs: Vec<&PathBuf> = affected_parent_folders.iter().collect();
+        self.reload_inactive_panel_if_matches(&affected_refs);
+        self.file_operation_state.batch_rename_progress = None;
+        self.notifications.success(
+            rust_i18n::t!("batch_rename.progress_complete", count = renamed_count).to_string(),
+        );
     }
 
     fn handle_recycle_bin_changed(&mut self) {
@@ -469,6 +558,14 @@ impl ImageViewerApp {
             self.file_operation_state.file_ops_in_progress
         );
         if self.file_operation_state.file_ops_in_progress == 0 {
+            if self
+                .file_operation_state
+                .batch_rename_progress
+                .as_ref()
+                .is_some_and(|progress| progress.completed >= progress.total)
+            {
+                self.file_operation_state.batch_rename_progress = None;
+            }
             self.pending_auto_reload = false;
             // Keep pending_deletions until folder load completion to avoid stale thumbnail retries.
             if !self.is_loading_folder {

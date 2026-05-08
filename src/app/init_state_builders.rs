@@ -157,6 +157,7 @@ pub(in crate::app) fn build_file_operation_state(
         prefetch_sender,
         idle_warmup_sender,
         file_ops_in_progress: 0,
+        batch_rename_progress: None,
         pending_deletions,
         pending_iso_mount: None,
         mounted_iso_drives: std::collections::HashMap::new(),
