@@ -42,6 +42,8 @@ pub struct TabState {
     /// Whether `items` was intentionally compacted away because the visible
     /// snapshot is identical to `all_items` for this stored tab state.
     pub items_snapshot_compact: bool,
+    /// Folder-load generation owned by this tab.
+    pub generation: usize,
     /// Selected item index
     pub selected_item: Option<usize>,
     /// Selected file entry
@@ -108,6 +110,7 @@ impl TabState {
             items: Arc::new(Vec::new()),
             all_items: Arc::new(Vec::new()),
             items_snapshot_compact: false,
+            generation: 0,
             selected_item: None,
             selected_file: None,
             search_query: String::new(),
@@ -152,6 +155,7 @@ impl TabState {
             items: Arc::new(Vec::new()),
             all_items: Arc::new(Vec::new()),
             items_snapshot_compact: false,
+            generation: 0,
             selected_item: None,
             selected_file: None,
             search_query: String::new(),
@@ -273,6 +277,7 @@ impl TabState {
         self.items = Arc::new(Vec::new());
         self.all_items = Arc::new(Vec::new());
         self.items_snapshot_compact = false;
+        self.generation = 0;
         self.selected_item = None;
         self.selected_file = None;
         self.selected_thumbnail = None;

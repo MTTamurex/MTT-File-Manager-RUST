@@ -63,9 +63,9 @@ pub(super) fn process_thumbnail_request(
     last_repaint: &mut Instant,
 ) {
     use crate::workers::thumbnail::{
-        clear_failure_cache, clear_transient_failure, is_known_failure, is_permanent_failure,
-        mark_as_failed, mark_as_temporarily_blocked, mark_as_transient_failure,
-        DeferredThumbnailEntry, defer_unsafe_thumbnail,
+        clear_failure_cache, clear_transient_failure, defer_unsafe_thumbnail, is_known_failure,
+        is_permanent_failure, mark_as_failed, mark_as_temporarily_blocked,
+        mark_as_transient_failure, DeferredThumbnailEntry,
     };
 
     // Block .ts files that are NOT real MPEG-TS video (e.g. TypeScript sources).

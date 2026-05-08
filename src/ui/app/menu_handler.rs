@@ -339,9 +339,7 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                             .target_paths
                             .first()
                             .cloned()
-                            .unwrap_or_else(|| {
-                                PathBuf::from(&app.navigation_state.current_path)
-                            })
+                            .unwrap_or_else(|| PathBuf::from(&app.navigation_state.current_path))
                     };
                     open_terminal_at(&path);
                 }

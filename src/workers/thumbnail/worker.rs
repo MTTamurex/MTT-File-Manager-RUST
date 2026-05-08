@@ -189,7 +189,10 @@ pub fn spawn_thumbnail_workers(
             });
 
         if let Err(e) = spawn_result {
-            log::warn!("[THUMB-PIPELINE] Failed to spawn deferred-retry thread: {}", e);
+            log::warn!(
+                "[THUMB-PIPELINE] Failed to spawn deferred-retry thread: {}",
+                e
+            );
         }
     }
 }
@@ -209,15 +212,10 @@ pub fn spawn_thumbnail_workers(
 ///
 /// A 4-permit semaphore limits concurrent re-classify probes to avoid an I/O
 /// spike on folders with many partial files.
-fn deferred_retry_loop(
-    queue: Arc<PriorityThumbnailQueue>,
-    gen_tracker: Arc<AtomicUsize>,
-) {
-    use crate::infrastructure::windows::file_flags::{
-        classify_file_read_safety, FileReadSafety,
-    };
+fn deferred_retry_loop(queue: Arc<PriorityThumbnailQueue>, gen_tracker: Arc<AtomicUsize>) {
+    use crate::infrastructure::windows::file_flags::{classify_file_read_safety, FileReadSafety};
     use crate::workers::thumbnail::{
-        clear_transient_failure, deferred_entry_expired, defer_unsafe_thumbnail,
+        clear_transient_failure, defer_unsafe_thumbnail, deferred_entry_expired,
         drain_unsafe_registry,
     };
 

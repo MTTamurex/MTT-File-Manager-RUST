@@ -1,4 +1,7 @@
-use super::{sanitize_operation_path, sanitize_operation_paths, FileOperationResult, SendHwnd};
+use super::{
+    sanitize_operation_path, sanitize_operation_paths, FileOperationResult, RenameCompletedItem,
+    SendHwnd,
+};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::Sender;
@@ -173,6 +176,64 @@ pub(super) fn handle_rename(
         Err(err) => {
             log::warn!("[SECURITY] Rename blocked: {}", err);
         }
+    }
+}
+
+pub(super) fn handle_rename_batch(
+    renames: Vec<(PathBuf, String)>,
+    hwnd: SendHwnd,
+    result_sender: &Sender<FileOperationResult>,
+) {
+    let total = renames.len();
+    let mut completed = Vec::with_capacity(renames.len());
+    let mut failed_count = 0usize;
+
+    for (index, (path, new_name)) in renames.into_iter().enumerate() {
+        let current_name = new_name.clone();
+        match sanitize_operation_path(&path) {
+            Ok(valid_path) => {
+                if crate::infrastructure::windows::is_drive_root_path(&valid_path) {
+                    failed_count += 1;
+                } else if is_invalid_rename_target(&new_name) {
+                    log::warn!(
+                        "[SECURITY] Batch rename blocked item: invalid target name '{}'",
+                        new_name
+                    );
+                    failed_count += 1;
+                } else if shell_operations::rename_item_with_shell(&valid_path, &new_name, hwnd.0) {
+                    if let Some(parent) = valid_path.parent().map(|p| p.to_path_buf()) {
+                        completed.push(RenameCompletedItem {
+                            path: valid_path,
+                            new_name,
+                            parent_folder: parent,
+                        });
+                    }
+                } else {
+                    failed_count += 1;
+                }
+            }
+            Err(err) => {
+                log::warn!("[SECURITY] Batch rename blocked item: {}", err);
+                failed_count += 1;
+            }
+        }
+
+        let _ = result_sender.send(FileOperationResult::RenameBatchProgress {
+            completed: index + 1,
+            total,
+            current_name,
+        });
+    }
+
+    if !completed.is_empty() {
+        let _ =
+            result_sender.send(FileOperationResult::RenameBatchCompleted { renames: completed });
+    }
+
+    if failed_count > 0 {
+        let _ = result_sender.send(FileOperationResult::OperationFailed {
+            message: rust_i18n::t!("operations.error_cancelled").to_string(),
+        });
     }
 }
 

@@ -228,6 +228,45 @@ pub fn render_notifications(app: &mut ImageViewerApp, ctx: &egui::Context) {
         }
     }
 
+    if let Some(progress) = app.file_operation_state.batch_rename_progress.clone() {
+        if progress.total > 0 {
+            needs_repaint = true;
+            let progress_toast_height = 62.0;
+            let toast_y = screen.max.y - y_offset - progress_toast_height;
+            y_offset += progress_toast_height + padding;
+
+            let completed = progress.completed.min(progress.total);
+            let title = format!(
+                "{} ({}/{})",
+                t!("batch_rename.progress_title"),
+                completed,
+                progress.total,
+            );
+
+            render_progress_toast(
+                ctx,
+                egui::Id::new("batch_rename_progress_toast"),
+                egui::pos2(base_x, toast_y),
+                toast_width,
+                progress_toast_height,
+                inner_pad,
+                icon_size,
+                text_left,
+                max_text_width,
+                egui::Color32::from_rgb(30, 58, 95),
+                egui::Color32::from_rgb(100, 160, 255),
+                "✎",
+                title,
+                progress
+                    .current_name
+                    .filter(|name| !name.is_empty())
+                    .map(|name| truncate_tail(&name, 35)),
+                Some((completed, progress.total)),
+                false,
+            );
+        }
+    }
+
     let bulk_progress = app
         .bulk_thumbnail_progress
         .lock()

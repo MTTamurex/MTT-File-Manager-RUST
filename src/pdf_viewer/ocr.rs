@@ -113,11 +113,7 @@ fn run_ocr(
 }
 
 /// Create a `SoftwareBitmap` (RGBA8, alpha-ignored) from raw RGBA bytes.
-fn create_software_bitmap(
-    rgba: &[u8],
-    w: u32,
-    h: u32,
-) -> windows::core::Result<SoftwareBitmap> {
+fn create_software_bitmap(rgba: &[u8], w: u32, h: u32) -> windows::core::Result<SoftwareBitmap> {
     let bitmap = SoftwareBitmap::CreateWithAlpha(
         BitmapPixelFormat::Rgba8,
         w as i32,

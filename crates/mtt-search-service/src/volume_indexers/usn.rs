@@ -156,19 +156,17 @@ pub(crate) fn index_volume(
 
     // Try to load cached state — prefer binary file, fall back to SQLite.
     let binary_candidate = match crate::index_db::binary::load(drive_letter) {
-        Ok(Some((bin_index, bin_state))) => {
-            Some((
-                bin_index,
-                crate::index_db::PersistedVolumeState {
+        Ok(Some((bin_index, bin_state))) => Some((
+            bin_index,
+            crate::index_db::PersistedVolumeState {
                 drive_letter,
                 journal_id: bin_state.journal_id,
                 last_usn: bin_state.last_usn,
                 files_indexed: bin_state.files_indexed,
                 has_hardlink_parent_data: bin_state.has_hardlink_parent_data,
                 has_reparse_point_data: bin_state.has_reparse_point_data,
-                },
-            ))
-        }
+            },
+        )),
         Ok(None) => None,
         Err(e) => {
             eprintln!(
@@ -210,7 +208,11 @@ pub(crate) fn index_volume(
 
     let (cached_state, loaded_from_binary) = match (binary_candidate, sqlite_state) {
         (Some((bin_index, bin_state)), Some(sqlite_state))
-            if should_prefer_sqlite_over_binary(&sqlite_state, &bin_state, journal_info.journal_id) =>
+            if should_prefer_sqlite_over_binary(
+                &sqlite_state,
+                &bin_state,
+                journal_info.journal_id,
+            ) =>
         {
             eprintln!(
                 "[USN] {}:\\ Discarding stale binary snapshot in favor of fresher SQLite metadata (bin_journal={}, bin_usn={}, db_journal={}, db_usn={})",
@@ -220,7 +222,8 @@ pub(crate) fn index_volume(
                 sqlite_state.journal_id,
                 sqlite_state.last_usn,
             );
-            if let Err(e) = std::fs::remove_file(crate::index_db::binary::index_path(drive_letter)) {
+            if let Err(e) = std::fs::remove_file(crate::index_db::binary::index_path(drive_letter))
+            {
                 if e.kind() != std::io::ErrorKind::NotFound {
                     eprintln!(
                         "[USN] {}:\\ Failed to remove stale binary snapshot: {}",

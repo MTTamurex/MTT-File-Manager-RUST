@@ -179,9 +179,8 @@ pub struct DeferredThumbnailEntry {
     pub inserted_at: Instant,
 }
 
-static UNSAFE_REGISTRY: std::sync::OnceLock<
-    Mutex<LruCache<PathBuf, DeferredThumbnailEntry>>,
-> = std::sync::OnceLock::new();
+static UNSAFE_REGISTRY: std::sync::OnceLock<Mutex<LruCache<PathBuf, DeferredThumbnailEntry>>> =
+    std::sync::OnceLock::new();
 
 fn get_unsafe_registry() -> &'static Mutex<LruCache<PathBuf, DeferredThumbnailEntry>> {
     UNSAFE_REGISTRY.get_or_init(|| {
@@ -200,10 +199,8 @@ pub fn defer_unsafe_thumbnail(path: PathBuf, entry: DeferredThumbnailEntry) {
 /// Caller is responsible for re-inserting any that are still not safe.
 pub fn drain_unsafe_registry() -> Vec<(PathBuf, DeferredThumbnailEntry)> {
     let mut cache = get_unsafe_registry().lock();
-    let entries: Vec<(PathBuf, DeferredThumbnailEntry)> = cache
-        .iter()
-        .map(|(k, v)| (k.clone(), v.clone()))
-        .collect();
+    let entries: Vec<(PathBuf, DeferredThumbnailEntry)> =
+        cache.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
     cache.clear();
     entries
 }

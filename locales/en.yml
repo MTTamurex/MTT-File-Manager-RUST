@@ -497,6 +497,8 @@ batch_rename:
   sep_none: "None  (Name1)"
   conflict_warning: "Warning: %{count} name(s) have conflicts and will be skipped."
   conflict_suffix: " (conflict)"
+  progress_title: "Renaming files"
+  progress_complete: "Renamed %{count} file(s)"
   btn_rename: "Rename %{count} file(s)"
   btn_cancel: "Cancel"
   col_num: "#"

@@ -5,6 +5,7 @@
 use crate::app::state::ImageViewerApp;
 use crate::domain::special_paths::COMPUTER_VIEW_ID;
 use std::path::Path;
+use std::sync::atomic::Ordering as AtomicOrdering;
 use std::sync::Arc;
 
 impl ImageViewerApp {
@@ -29,6 +30,7 @@ impl ImageViewerApp {
             active.items_snapshot_compact = false;
         }
         active.selected_item = self.selected_item;
+        active.generation = self.generation;
         active.selected_file = self.selected_file.clone();
         active.selected_thumbnail = None;
         active.selected_gif = None;
@@ -97,6 +99,7 @@ impl ImageViewerApp {
                 active.items.clone()
             };
             active.items_snapshot_compact = false;
+            self.generation = active.generation;
             self.selected_item = active.selected_item;
             self.selected_file = active.selected_file.clone();
 
@@ -164,6 +167,9 @@ impl ImageViewerApp {
                     snapshot
                 });
         }
+
+        self.current_generation
+            .store(self.generation, AtomicOrdering::Relaxed);
 
         // Restore per-tab sidebar state (expanded nodes + scroll position)
         {
