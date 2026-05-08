@@ -1,7 +1,4 @@
-use super::{
-    sanitize_operation_path, sanitize_operation_paths, FileOperationResult, RenameCompletedItem,
-    SendHwnd,
-};
+use super::{sanitize_operation_path, sanitize_operation_paths, FileOperationResult, SendHwnd};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::Sender;
@@ -185,7 +182,7 @@ pub(super) fn handle_rename_batch(
     result_sender: &Sender<FileOperationResult>,
 ) {
     let total = renames.len();
-    let mut completed = Vec::with_capacity(renames.len());
+    let mut successful_count = 0usize;
     let mut failed_count = 0usize;
 
     for (index, (path, new_name)) in renames.into_iter().enumerate() {
@@ -202,11 +199,14 @@ pub(super) fn handle_rename_batch(
                     failed_count += 1;
                 } else if shell_operations::rename_item_with_shell(&valid_path, &new_name, hwnd.0) {
                     if let Some(parent) = valid_path.parent().map(|p| p.to_path_buf()) {
-                        completed.push(RenameCompletedItem {
+                        // Send a per-item completion event so the UI can update
+                        // each entry incrementally without a full folder reload.
+                        let _ = result_sender.send(FileOperationResult::RenameCompleted {
                             path: valid_path,
                             new_name,
                             parent_folder: parent,
                         });
+                        successful_count += 1;
                     }
                 } else {
                     failed_count += 1;
@@ -225,9 +225,10 @@ pub(super) fn handle_rename_batch(
         });
     }
 
-    if !completed.is_empty() {
-        let _ =
-            result_sender.send(FileOperationResult::RenameBatchCompleted { renames: completed });
+    if successful_count > 0 {
+        let _ = result_sender.send(FileOperationResult::RenameBatchCompleted {
+            count: successful_count,
+        });
     }
 
     if failed_count > 0 {

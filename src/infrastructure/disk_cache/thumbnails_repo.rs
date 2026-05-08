@@ -7,7 +7,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 impl ThumbnailDiskCache {
     /// Generates a stable, collision-resistant hash for a file path.
     /// Uses blake3 (128-bit) instead of DefaultHasher (64-bit, unstable across Rust versions).
-    fn hash_path(path: &Path) -> String {
+    pub(super) fn hash_path(path: &Path) -> String {
         let hash = blake3::hash(path.as_os_str().as_encoded_bytes());
         // Use first 128 bits (32 hex chars) - collision probability ~1 in 2^64 at 10B entries
         hash.to_hex()[..32].to_string()

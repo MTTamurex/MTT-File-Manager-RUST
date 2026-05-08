@@ -23,12 +23,12 @@ pub struct RenameCompletedItem {
 pub enum FileOperationResult {
     /// Generic notification that a file operation finished
     Finished,
+    /// Operation finished, but a specific completion handler already updated the affected views.
+    FinishedNoRefresh,
     /// Specifically for Recycle Bin operations to trigger targeted refresh
     RecycleBinChanged,
     /// Restore operation completed - original folders need refresh
-    RestoreCompleted {
-        parent_folders: Vec<PathBuf>,
-    },
+    RestoreCompleted { parent_folders: Vec<PathBuf> },
     /// Delete operation completed - parent folders need refresh
     DeleteCompleted {
         parent_folders: Vec<PathBuf>,
@@ -65,7 +65,8 @@ pub enum FileOperationResult {
         current_name: String,
     },
     RenameBatchCompleted {
-        renames: Vec<RenameCompletedItem>,
+        /// Number of items successfully renamed.
+        count: usize,
     },
     DriveRenameCompleted {
         drive_path: PathBuf,
@@ -77,9 +78,7 @@ pub enum FileOperationResult {
         cancelled: bool,
     },
     /// A file operation failed or was cancelled by the user.
-    OperationFailed {
-        message: String,
-    },
+    OperationFailed { message: String },
 }
 
 /// Transparent wrapper for HWND to make it Send.
@@ -286,6 +285,8 @@ pub(crate) fn start_file_operation_worker(
                     }
                     FileOperationRequest::RenameBatch { renames, hwnd } => {
                         handlers::handle_rename_batch(renames, hwnd, &result_sender);
+                        let _ = result_sender.send(FileOperationResult::FinishedNoRefresh);
+                        return false;
                     }
                     FileOperationRequest::Copy {
                         path,

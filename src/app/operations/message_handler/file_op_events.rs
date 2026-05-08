@@ -1,8 +1,8 @@
 use crate::app::state::ImageViewerApp;
-use crate::workers::file_operation_worker::{FileOperationResult, RenameCompletedItem};
-use std::collections::HashSet;
+use crate::workers::file_operation_worker::FileOperationResult;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::TryRecvError;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 impl ImageViewerApp {
@@ -49,8 +49,8 @@ impl ImageViewerApp {
                             total,
                             current_name,
                         } => self.handle_rename_batch_progress(completed, total, current_name),
-                        FileOperationResult::RenameBatchCompleted { renames } => {
-                            self.handle_rename_batch_completed(renames, current_path_norm)
+                        FileOperationResult::RenameBatchCompleted { count } => {
+                            self.handle_rename_batch_completed(count)
                         }
                         FileOperationResult::DriveRenameCompleted {
                             drive_path,
@@ -111,7 +111,10 @@ impl ImageViewerApp {
                             );
                             self.cleanup_deleted_pinned_folders();
                         }
-                        FileOperationResult::Finished => self.handle_file_operation_finished(),
+                        FileOperationResult::Finished => self.handle_file_operation_finished(true),
+                        FileOperationResult::FinishedNoRefresh => {
+                            self.handle_file_operation_finished(false)
+                        }
                     }
                 }
                 Err(TryRecvError::Empty) => break,
@@ -167,13 +170,51 @@ impl ImageViewerApp {
             self.destroy_media_preview();
         }
 
-        self.cache_manager.texture_cache.pop(&old_path);
+        // Update items in-place so no full folder reload is needed.
+        // Determine divergence BEFORE make_mut (which may clone the arc).
+        let items_diverged = !Arc::ptr_eq(&self.items, &self.all_items);
+        let all_items = Arc::make_mut(&mut self.all_items);
+        if let Some(item) = all_items
+            .iter_mut()
+            .find(|item| Self::normalize_for_match(&item.path) == path_str)
+        {
+            item.path = new_path.clone();
+            item.name = new_name.to_string();
+        }
+        if items_diverged {
+            let items = Arc::make_mut(&mut self.items);
+            if let Some(item) = items
+                .iter_mut()
+                .find(|item| Self::normalize_for_match(&item.path) == path_str)
+            {
+                item.path = new_path.clone();
+                item.name = new_name.to_string();
+            }
+        }
+
+        // Move thumbnail cache entries from old path to new path so existing
+        // thumbnails remain visible without needing re-extraction.
+        if let Some(texture) = self.cache_manager.texture_cache.pop(&old_path) {
+            self.cache_manager
+                .texture_cache
+                .put(new_path.clone(), texture);
+        }
+        if let Some((data, w, h)) = self.cache_manager.pop_rgba_data(&old_path) {
+            self.cache_manager
+                .put_rgba_data(new_path.clone(), data, w, h);
+        }
+        if let Some(bucket) = self
+            .cache_manager
+            .attempted_thumbnail_bucket
+            .remove(&old_path)
+        {
+            self.cache_manager
+                .attempted_thumbnail_bucket
+                .insert(new_path.clone(), bucket);
+        }
         self.cache_manager.loading_set.remove(&old_path);
-        self.cache_manager.pop_rgba_data(&old_path);
         self.cache_manager.failed_thumbnails.pop(&old_path);
-        self.cache_manager.texture_cache.pop(&new_path);
-        self.cache_manager.loading_set.remove(&new_path);
-        self.cache_manager.pop_rgba_data(&new_path);
+        // Clear any stale failure record under the new path.
         self.cache_manager.failed_thumbnails.pop(&new_path);
 
         new_path
@@ -190,12 +231,34 @@ impl ImageViewerApp {
         self.invalidate_folder_and_tab_caches(&parent_folder);
         let new_path =
             self.apply_rename_completed_to_memory(&path, &new_name, parent_folder.as_path());
-        self.enqueue_disk_cache_invalidations_forced(vec![new_path.clone()]);
+
+        // Migrate the disk-cache row from old path to new path so thumbnails
+        // are preserved after the in-memory caches are evicted on scroll.
+        // Use a rename entry instead of the old forced-invalidate.
+        use crate::app::init_workers::CacheInvalidationEntry;
+        let _ = self
+            .file_operation_state
+            .disk_cache_invalidation_sender
+            .send(vec![CacheInvalidationEntry {
+                path: path.clone(),
+                force: false,
+                rename_to: Some(new_path.clone()),
+            }]);
 
         if parent_str == current_path_norm {
-            self.pending_select_path = Some(new_path);
-            self.loaded_path.clear();
-            self.load_folder(false);
+            // Clear the dirty flag set by invalidate_folder_and_tab_caches above.
+            // The in-place update already reflects the rename in self.items /
+            // self.all_items, so the tab-switch staleness check must not force
+            // an unnecessary full reload of the already-correct view.
+            // Inactive tabs had their cached items cleared by
+            // clear_tab_cache_for_normalized_path and will reload via the
+            // empty-items path in sync_from_tab instead.
+            self.directory_dirty_registry.clear_dirty(&parent_folder);
+            // Only move selection for single (non-batch) renames.
+            if self.file_operation_state.batch_rename_progress.is_none() {
+                self.pending_select_path = Some(new_path);
+            }
+            self.pending_items_rebuild = true;
         }
     }
 
@@ -218,58 +281,16 @@ impl ImageViewerApp {
             });
     }
 
-    fn handle_rename_batch_completed(
-        &mut self,
-        renames: Vec<RenameCompletedItem>,
-        current_path_norm: &str,
-    ) {
-        if renames.is_empty() {
-            self.file_operation_state.batch_rename_progress = None;
-            return;
-        }
-
-        let renamed_count = renames.len();
-
-        let mut seen_parent_norms = HashSet::new();
-        let mut affected_parent_folders = Vec::new();
-        let mut forced_cache_invalidations = Vec::with_capacity(renames.len());
-        let mut should_reload_current = false;
-        let mut select_after_reload = None;
-
-        for rename in renames {
-            let parent_norm = Self::normalize_for_match(rename.parent_folder.as_path());
-            if seen_parent_norms.insert(parent_norm.clone()) {
-                self.invalidate_folder_and_tab_caches(&rename.parent_folder);
-                affected_parent_folders.push(rename.parent_folder.clone());
-            }
-
-            let new_path = self.apply_rename_completed_to_memory(
-                &rename.path,
-                &rename.new_name,
-                rename.parent_folder.as_path(),
-            );
-            forced_cache_invalidations.push(new_path.clone());
-
-            if parent_norm == current_path_norm {
-                should_reload_current = true;
-                select_after_reload = Some(new_path);
-            }
-        }
-
-        self.enqueue_disk_cache_invalidations_forced(forced_cache_invalidations);
-
-        if should_reload_current {
-            self.pending_select_path = select_after_reload;
-            self.loaded_path.clear();
-            self.load_folder(false);
-        }
-
-        let affected_refs: Vec<&PathBuf> = affected_parent_folders.iter().collect();
-        self.reload_inactive_panel_if_matches(&affected_refs);
+    fn handle_rename_batch_completed(&mut self, count: usize) {
+        // Each item was already handled incrementally by handle_rename_completed
+        // (in-place path/name update, cache key migration, dirty-flag cleanup).
+        // This handler only finalises the progress indicator and shows the toast.
         self.file_operation_state.batch_rename_progress = None;
-        self.notifications.success(
-            rust_i18n::t!("batch_rename.progress_complete", count = renamed_count).to_string(),
-        );
+        if count > 0 {
+            self.notifications.success(
+                rust_i18n::t!("batch_rename.progress_complete", count = count).to_string(),
+            );
+        }
     }
 
     fn handle_recycle_bin_changed(&mut self) {
@@ -548,7 +569,7 @@ impl ImageViewerApp {
         self.reload_inactive_panel_if_matches(&affected);
     }
 
-    fn handle_file_operation_finished(&mut self) {
+    fn handle_file_operation_finished(&mut self, refresh_current_view: bool) {
         self.file_operation_state.file_ops_in_progress = self
             .file_operation_state
             .file_ops_in_progress
@@ -571,10 +592,21 @@ impl ImageViewerApp {
             if !self.is_loading_folder {
                 self.file_operation_state.pending_deletions.clear();
             }
+
+            if !refresh_current_view {
+                self.watcher_cooldown_until = Some(Instant::now() + Duration::from_secs(2));
+                return;
+            }
+
             // Watcher events were drained but not processed while ops were active.
             // Force a full reload so the view reflects the final state of the folder.
             if !self.navigation_state.is_computer_view && !self.navigation_state.is_recycle_bin_view
             {
+                if self.is_loading_folder {
+                    self.watcher_cooldown_until = Some(Instant::now() + Duration::from_secs(2));
+                    return;
+                }
+
                 let current = PathBuf::from(&self.navigation_state.current_path);
                 log::info!("[FILE-OP] Invalidating cache for current={:?}", current);
                 self.directory_dirty_registry.mark_dirty(&current);
