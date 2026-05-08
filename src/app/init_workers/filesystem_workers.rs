@@ -20,6 +20,9 @@ const NTFS_FOLDER_SIZE_SERVICE_DEADLINE_SECS: u64 = 30;
 pub struct CacheInvalidationEntry {
     pub path: PathBuf,
     pub force: bool,
+    /// If `Some`, this is a rename operation: the disk-cache row for `path`
+    /// should be moved to `rename_to` rather than deleted.
+    pub rename_to: Option<PathBuf>,
 }
 
 fn should_skip_exists_guard(path: &std::path::Path) -> bool {
@@ -169,7 +172,12 @@ pub(in crate::app) fn spawn_disk_cache_invalidation_worker(
             let mut unique_paths = std::collections::HashSet::with_capacity(entries.len());
             for entry in entries {
                 if unique_paths.insert(entry.path.clone()) {
-                    if entry.force {
+                    if let Some(new_path) = entry.rename_to {
+                        // Rename: migrate the disk-cache row to the new path
+                        // so thumbnails survive rename without re-extraction.
+                        disk_cache_for_invalidation
+                            .rename_cache_entry(&entry.path, &new_path);
+                    } else if entry.force {
                         // App-initiated delete/refresh: unconditionally remove
                         // all cache rows. The Shell may not have finished yet,
                         // so `fast_path_exists` would give a false positive.

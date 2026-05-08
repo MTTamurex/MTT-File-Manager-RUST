@@ -112,7 +112,11 @@ impl ImageViewerApp {
         use crate::app::init_workers::CacheInvalidationEntry;
         let entries: Vec<CacheInvalidationEntry> = paths
             .into_iter()
-            .map(|path| CacheInvalidationEntry { path, force: false })
+            .map(|path| CacheInvalidationEntry {
+                path,
+                force: false,
+                rename_to: None,
+            })
             .collect();
 
         if let Err(_err) = self
@@ -138,7 +142,11 @@ impl ImageViewerApp {
         use crate::app::init_workers::CacheInvalidationEntry;
         let entries: Vec<CacheInvalidationEntry> = paths
             .into_iter()
-            .map(|path| CacheInvalidationEntry { path, force: true })
+            .map(|path| CacheInvalidationEntry {
+                path,
+                force: true,
+                rename_to: None,
+            })
             .collect();
 
         if let Err(_err) = self
