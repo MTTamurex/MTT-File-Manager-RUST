@@ -1,0 +1,34 @@
+mpv copyright and license mode notice
+Source: https://github.com/mpv-player/mpv/blob/master/Copyright
+
+mpv is a fork of mplayer2, which is a fork of MPlayer.
+
+The upstream mpv project states that mpv as a whole is licensed under the GNU
+General Public License version 2 or later by default. The mpv program is
+licensed under the GNU Lesser General Public License version 2.1 or later only
+when built without using GPL-only files.
+
+The upstream build option `-Dgpl=false` is provided as a convenience for
+excluding GPL-only files from the build process, but upstream also states that
+using this option does not by itself create an LGPLv2.1+ license grant.
+
+Linked libraries can also affect the final binary license. For example, an mpv
+binary linked against GPL FFmpeg components must be treated consistently with
+those GPL terms.
+
+For public MTT File Manager releases, record the exact `libmpv-2.dll` source,
+build flags, linked dependency license mode, and SHA-256 hash in `PROVENANCE.md`.
+Treat the DLL as GPLv2+ unless that evidence supports LGPLv2.1+ redistribution.
+
+GPLv2+ is not a ban on public, free, or noncommercial distribution. It means
+public releases that include a GPL mpv binary must preserve GPL notices and
+provide corresponding source access or source-location information for the GPL
+component. MTT File Manager's own repository-authored source remains
+Apache-2.0, but the official installer must not be described as Apache-only
+while it includes GPL/LGPL third-party files.
+
+The currently staged `libmpv-2.dll` was reported as coming from shinchiro's mpv
+Windows build distribution family. Its embedded Windows version metadata says:
+`mpv is distributed under the terms of the GNU General Public License Version 2
+or later.` That metadata is release-relevant and should be treated as GPLv2+
+evidence unless replaced by a confirmed LGPL-compatible libmpv build.

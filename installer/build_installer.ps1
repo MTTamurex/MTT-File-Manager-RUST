@@ -42,7 +42,10 @@ Write-Host "`n[2/3] Validating required files and directories..." -ForegroundCol
 
 $requiredDirectories = @(
     "$RepoRoot\mpv_ui\portable_config\scripts",
-    "$RepoRoot\mpv_ui\portable_config\script-opts"
+    "$RepoRoot\mpv_ui\portable_config\script-opts",
+    "$RepoRoot\third_party_licenses",
+    "$RepoRoot\third_party_licenses\pdfium-win-x64",
+    "$RepoRoot\third_party_licenses\pdfium-win-x64\licenses"
 )
 
 $requiredFiles = @(
@@ -53,6 +56,34 @@ $requiredFiles = @(
     "$RepoRoot\LICENSE",
     "$RepoRoot\NOTICE",
     "$RepoRoot\THIRD_PARTY_NOTICES.md",
+    "$RepoRoot\third_party_licenses\README.md",
+    "$RepoRoot\third_party_licenses\PROVENANCE.md",
+    "$RepoRoot\third_party_licenses\GPL-2.0.txt",
+    "$RepoRoot\third_party_licenses\LGPL-2.1.txt",
+    "$RepoRoot\third_party_licenses\MPV-COPYRIGHT-NOTICE.txt",
+    "$RepoRoot\third_party_licenses\PDFIUM-LICENSE.txt",
+    "$RepoRoot\third_party_licenses\PDFIUM-BINARIES-LICENSE.txt",
+    "$RepoRoot\third_party_licenses\SOURCE-AVAILABILITY.md",
+    "$RepoRoot\third_party_licenses\pdfium-win-x64\LICENSE",
+    "$RepoRoot\third_party_licenses\pdfium-win-x64\VERSION",
+    "$RepoRoot\third_party_licenses\pdfium-win-x64\args.gn",
+    "$RepoRoot\third_party_licenses\pdfium-win-x64\licenses\abseil.txt",
+    "$RepoRoot\third_party_licenses\pdfium-win-x64\licenses\agg23.txt",
+    "$RepoRoot\third_party_licenses\pdfium-win-x64\licenses\fast_float.txt",
+    "$RepoRoot\third_party_licenses\pdfium-win-x64\licenses\freetype.txt",
+    "$RepoRoot\third_party_licenses\pdfium-win-x64\licenses\icu.txt",
+    "$RepoRoot\third_party_licenses\pdfium-win-x64\licenses\lcms.txt",
+    "$RepoRoot\third_party_licenses\pdfium-win-x64\licenses\libjpeg_turbo.ijg",
+    "$RepoRoot\third_party_licenses\pdfium-win-x64\licenses\libjpeg_turbo.md",
+    "$RepoRoot\third_party_licenses\pdfium-win-x64\licenses\libopenjpeg.txt",
+    "$RepoRoot\third_party_licenses\pdfium-win-x64\licenses\libpng.txt",
+    "$RepoRoot\third_party_licenses\pdfium-win-x64\licenses\libtiff.txt",
+    "$RepoRoot\third_party_licenses\pdfium-win-x64\licenses\llvm-libc.txt",
+    "$RepoRoot\third_party_licenses\pdfium-win-x64\licenses\pdfium.txt",
+    "$RepoRoot\third_party_licenses\pdfium-win-x64\licenses\simdutf.txt",
+    "$RepoRoot\third_party_licenses\pdfium-win-x64\licenses\zlib.txt",
+    "$RepoRoot\third_party_licenses\UNRAR-LICENSE.txt",
+    "$RepoRoot\third_party_licenses\MATERIAL-DESIGN-ICONIC-FONT-NOTICE.txt",
     "$RepoRoot\appicon.ico",
     "$RepoRoot\mpv_ui\portable_config\mpv.conf",
     "$RepoRoot\mpv_ui\portable_config\scripts\autoload.lua",
@@ -83,7 +114,7 @@ foreach ($file in $requiredFiles) {
 # Update these hashes when upgrading the corresponding libraries.
 $dllHashes = @{
     "$RepoRoot\target\release\pdfium.dll"   = "7167AEE6BB3D2724EE62FD83BBEB8883EDC786A6E1999782857D4952536A0ED3"
-    "$RepoRoot\target\release\libmpv-2.dll"  = "87F088C280C7E582D969BAE474485D6999868A8B87ED599A01A6384E2F4D9392"
+    "$RepoRoot\target\release\libmpv-2.dll"  = "8F77950F7D98770B1FFB1D02742C1EE5A17F9C05BCCE0723693188C69CC7C865"
 }
 
 $hashFailed = $false

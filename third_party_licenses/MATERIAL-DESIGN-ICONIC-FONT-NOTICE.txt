@@ -1,0 +1,15 @@
+Material Design Iconic Font
+
+Files in this repository:
+- mpv_ui/portable_config/fonts/Material-Design-Iconic-Font.ttf
+
+Source:
+- https://github.com/zavoloklom/material-design-iconic-font
+
+License notice:
+- The upstream repository's License.md currently contains the Creative Commons
+  Attribution-ShareAlike 4.0 International license text.
+- License URL: https://creativecommons.org/licenses/by-sa/4.0/
+
+Keep this attribution and the upstream license reference with any distribution
+that includes the font file.

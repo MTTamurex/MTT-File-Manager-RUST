@@ -140,4 +140,13 @@ This repository also contains or redistributes third-party components that remai
 - `mpv_ui/portable_config/fonts/Material-Design-Iconic-Font.ttf`, which has its own upstream asset license.
 - `unrar`, whose Rust wrapper is permissive but whose embedded UnRAR sources retain the upstream UnRAR license.
 
-See `THIRD_PARTY_NOTICES.md` for the copied, bundled, or otherwise redistribution-sensitive components that most directly affect packaging and release distribution.
+The official Windows installer is therefore a multi-license distribution, not
+an Apache-only artifact. Public redistribution is intended to be allowed when
+the installer keeps the bundled notices/license texts, the matching source code
+or source locations remain available, and third-party components are not
+described as being relicensed under Apache-2.0.
+
+For practical release guidance, see `THIRD_PARTY_NOTICES.md` and the
+`third_party_licenses/` bundle. Public installers include that directory, which
+contains full license texts, attribution notes, source availability notes, and
+release-sensitive binary provenance.

@@ -188,6 +188,7 @@ The installer is generated with Inno Setup 6 and bundles:
 - `libmpv-2.dll`
 - `pdfium.dll`
 - `mpv_ui\portable_config\*`
+- `LICENSE`, `NOTICE`, `THIRD_PARTY_NOTICES.md`, and `third_party_licenses\*`
 
 ```powershell
 # Install Inno Setup 6
@@ -208,6 +209,10 @@ Artifacts explicitly prevalidated by `installer\build_installer.ps1`:
 - `target\release\mtt-search-service.exe`
 - `target\release\libmpv-2.dll`
 - `target\release\pdfium.dll`
+- `LICENSE`
+- `NOTICE`
+- `THIRD_PARTY_NOTICES.md`
+- `third_party_licenses\`
 - `appicon.ico`
 - `mpv_ui\portable_config\mpv.conf`
 - `mpv_ui\portable_config\scripts\`
