@@ -432,6 +432,12 @@ pdfviewer:
   file_not_found: "File not found: %{path}"
   file_too_large: "File too large (%{size_mb} MB). Maximum allowed: %{max_mb} MB"
   metadata_read_failed: "Cannot read file metadata: %{error}"
+  password_title: "Password Required"
+  password_prompt: "This PDF is password-protected. Enter the password to open it."
+  password_wrong: "Incorrect password. Please try again."
+  password_hint: "Password..."
+  password_submit: "Open"
+  password_cancel: "Cancel"
 drive_slot:
   free_of: "%{free_val} %{free_unit} free of %{total_val} %{total_unit}"
 extract:

@@ -46,6 +46,29 @@ pub struct PdfTextSegment {
     pub bounds: PdfTextBounds,
 }
 
+/// Error returned when opening a PDF document.
+pub enum PdfOpenError {
+    /// The document is password-protected and no (or wrong) password was provided.
+    PasswordRequired,
+    /// Any other failure (library load error, corrupt file, etc.).
+    Other(String),
+}
+
+impl PdfOpenError {
+    pub fn is_password_required(&self) -> bool {
+        matches!(self, Self::PasswordRequired)
+    }
+}
+
+impl std::fmt::Display for PdfOpenError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::PasswordRequired => write!(f, "PDF is password-protected"),
+            Self::Other(s) => write!(f, "{s}"),
+        }
+    }
+}
+
 /// A loaded PDF document ready for page rendering.
 pub struct PdfRenderer {
     page_sizes: Vec<(f32, f32)>,
@@ -59,12 +82,24 @@ pub struct RenderedPage {
 }
 
 impl PdfRenderer {
-    /// Open a PDF file from disk.
-    pub fn open(path: &Path) -> Result<Self, String> {
-        let pdfium = pdfium()?;
+    /// Open a PDF file from disk, optionally with a password.
+    ///
+    /// Returns `Err(PdfOpenError::PasswordRequired)` if the document is
+    /// encrypted and the given password (or `None`) is insufficient.
+    pub fn open(path: &Path, password: Option<&str>) -> Result<Self, PdfOpenError> {
+        let pdfium = pdfium().map_err(PdfOpenError::Other)?;
         let document = pdfium
-            .load_pdf_from_file(path, None)
-            .map_err(|e| format!("LoadPdf: {e}"))?;
+            .load_pdf_from_file(path, password)
+            .map_err(|e| {
+                if matches!(
+                    e,
+                    PdfiumError::PdfiumLibraryInternalError(PdfiumInternalError::PasswordError)
+                ) {
+                    PdfOpenError::PasswordRequired
+                } else {
+                    PdfOpenError::Other(format!("LoadPdf: {e}"))
+                }
+            })?;
 
         let page_count = document.pages().len();
         let mut page_sizes = Vec::with_capacity(page_count as usize);
@@ -73,7 +108,7 @@ impl PdfRenderer {
             let page = document
                 .pages()
                 .get(index as PdfPageIndex)
-                .map_err(|e| e.to_string())?;
+                .map_err(|e| PdfOpenError::Other(e.to_string()))?;
             page_sizes.push((page.width().value, page.height().value));
         }
 
