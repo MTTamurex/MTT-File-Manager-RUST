@@ -1,6 +1,6 @@
 # MTT File Manager
 
-**Native Windows file manager** built in Rust with a modern UI, advanced media preview, and Windows integration.
+**Native Windows file manager** built in Rust with a modern UI, archive browsing, advanced media preview, and Windows integration.
 
 <img width="3839" height="2064" alt="MTT-File-Manager Screenshot" src="https://github.com/user-attachments/assets/b6923890-a12b-4890-b5e0-d794b19d7b3b" />
 
@@ -14,6 +14,7 @@
 - **Smart address bar** — Direct path input with breadcrumbs
 - **Sidebar** — Quick access to drives, libraries, OneDrive, and Recycle Bin
 - **Quick Access** — Pin folders via right-click or drag-and-drop; reorder via drag; persistent storage
+- **Archive navigation** — Open supported compressed files like folders and browse their contents directly (`.zip`, `.7z`, `.rar`, `.tar`, `.tar.gz`, `.tgz`, `.tar.bz2`, `.tbz2`, `.tar.xz`, `.txz`, `.tar.zst`, `.tzst`, `.gz`, `.gzip`)
 
 ### Media Preview
 - **Integrated preview** — View files without leaving the app
@@ -58,6 +59,8 @@
 | **PDF** | pdfium (pdfium-render) | 0.8.37 | Native PDF rendering (requires pdfium.dll) |
 | **Database** | SQLite (rusqlite) | 0.32 | Reliable persistence |
 | **Images** | image crate | 0.25 | Image processing |
+| **Archives** | zip + sevenz-rust + tar + flate2/bzip2/xz2/zstd | 2 / 0.6 / 0.4 / 1 / 0.5 / 0.1 / 0.13 | Native archive handling for ZIP, 7z, TAR, and compressed TAR variants |
+| **RAR** | unrar | 0.5 | Native RAR handling via the upstream UnRAR source |
 | **Parallelism** | rayon | 1.10 | Parallel processing |
 | **IPC** | Named Pipes + bincode | 1.3 | App ↔ search service communication |
 | **Service** | windows-service | 0.7 | Background indexing service |
