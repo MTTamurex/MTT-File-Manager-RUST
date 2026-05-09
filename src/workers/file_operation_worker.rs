@@ -13,13 +13,6 @@ use crate::infrastructure::security::{
 };
 use crate::infrastructure::windows::ComScope;
 
-/// Results sent back from the worker to the UI.
-pub struct RenameCompletedItem {
-    pub path: PathBuf,
-    pub new_name: String,
-    pub parent_folder: PathBuf,
-}
-
 pub enum FileOperationResult {
     /// Generic notification that a file operation finished
     Finished,
@@ -79,6 +72,12 @@ pub enum FileOperationResult {
     },
     /// A file operation failed or was cancelled by the user.
     OperationFailed { message: String },
+}
+
+enum CompletionBehavior {
+    SendFinished,
+    SendFinishedNoRefresh,
+    NoFinished,
 }
 
 /// Transparent wrapper for HWND to make it Send.
@@ -285,8 +284,7 @@ pub(crate) fn start_file_operation_worker(
                     }
                     FileOperationRequest::RenameBatch { renames, hwnd } => {
                         handlers::handle_rename_batch(renames, hwnd, &result_sender);
-                        let _ = result_sender.send(FileOperationResult::FinishedNoRefresh);
-                        return false;
+                        return CompletionBehavior::SendFinishedNoRefresh;
                     }
                     FileOperationRequest::Copy {
                         path,
@@ -357,18 +355,21 @@ pub(crate) fn start_file_operation_worker(
                     FileOperationRequest::ShowProperties { paths, hwnd } => {
                         handlers::handle_show_properties(paths, hwnd);
                         // No Finished message — fire-and-forget, dialog manages itself
-                        return false;
+                        return CompletionBehavior::NoFinished;
                     }
                 }
-                true
+                CompletionBehavior::SendFinished
             }));
 
             match result {
-                Ok(true) => {
+                Ok(CompletionBehavior::SendFinished) => {
                     // Notify general completion for other operations.
                     let _ = result_sender.send(FileOperationResult::Finished);
                 }
-                Ok(false) => { /* ShowProperties — no Finished */ }
+                Ok(CompletionBehavior::SendFinishedNoRefresh) => {
+                    let _ = result_sender.send(FileOperationResult::FinishedNoRefresh);
+                }
+                Ok(CompletionBehavior::NoFinished) => {}
                 Err(e) => {
                     let msg = if let Some(s) = e.downcast_ref::<&str>() {
                         s.to_string()

@@ -139,6 +139,21 @@ impl ImageViewerApp {
         self.clear_tab_cache_for_normalized_path(&folder_norm);
     }
 
+    fn update_renamed_item_in_place(
+        items: &mut [crate::domain::file_entry::FileEntry],
+        old_path: &Path,
+        old_path_norm: &str,
+        new_path: &Path,
+        new_name: &str,
+    ) {
+        if let Some(item) = items.iter_mut().find(|item| {
+            item.path == old_path || Self::normalize_for_match(&item.path) == old_path_norm
+        }) {
+            item.path = new_path.to_path_buf();
+            item.name = new_name.to_string();
+        }
+    }
+
     fn apply_rename_completed_to_memory(
         &mut self,
         path: &Path,
@@ -171,25 +186,14 @@ impl ImageViewerApp {
         }
 
         // Update items in-place so no full folder reload is needed.
-        // Determine divergence BEFORE make_mut (which may clone the arc).
+        // Prefer exact PathBuf equality and only fall back to normalized matching
+        // for verbatim-prefix or casing differences.
         let items_diverged = !Arc::ptr_eq(&self.items, &self.all_items);
         let all_items = Arc::make_mut(&mut self.all_items);
-        if let Some(item) = all_items
-            .iter_mut()
-            .find(|item| Self::normalize_for_match(&item.path) == path_str)
-        {
-            item.path = new_path.clone();
-            item.name = new_name.to_string();
-        }
+        Self::update_renamed_item_in_place(all_items, &old_path, &path_str, &new_path, new_name);
         if items_diverged {
             let items = Arc::make_mut(&mut self.items);
-            if let Some(item) = items
-                .iter_mut()
-                .find(|item| Self::normalize_for_match(&item.path) == path_str)
-            {
-                item.path = new_path.clone();
-                item.name = new_name.to_string();
-            }
+            Self::update_renamed_item_in_place(items, &old_path, &path_str, &new_path, new_name);
         }
 
         // Move thumbnail cache entries from old path to new path so existing
