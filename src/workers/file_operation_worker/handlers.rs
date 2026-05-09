@@ -183,20 +183,21 @@ pub(super) fn handle_rename_batch(
 ) {
     let total = renames.len();
     let mut successful_count = 0usize;
-    let mut failed_count = 0usize;
+    let mut invalid_name_failures = 0usize;
+    let mut other_failures = 0usize;
 
     for (index, (path, new_name)) in renames.into_iter().enumerate() {
         let current_name = new_name.clone();
         match sanitize_operation_path(&path) {
             Ok(valid_path) => {
                 if crate::infrastructure::windows::is_drive_root_path(&valid_path) {
-                    failed_count += 1;
+                    other_failures += 1;
                 } else if is_invalid_rename_target(&new_name) {
                     log::warn!(
                         "[SECURITY] Batch rename blocked item: invalid target name '{}'",
                         new_name
                     );
-                    failed_count += 1;
+                    invalid_name_failures += 1;
                 } else if shell_operations::rename_item_with_shell(&valid_path, &new_name, hwnd.0) {
                     if let Some(parent) = valid_path.parent().map(|p| p.to_path_buf()) {
                         // Send a per-item completion event so the UI can update
@@ -209,12 +210,12 @@ pub(super) fn handle_rename_batch(
                         successful_count += 1;
                     }
                 } else {
-                    failed_count += 1;
+                    other_failures += 1;
                 }
             }
             Err(err) => {
                 log::warn!("[SECURITY] Batch rename blocked item: {}", err);
-                failed_count += 1;
+                other_failures += 1;
             }
         }
 
@@ -231,7 +232,13 @@ pub(super) fn handle_rename_batch(
         });
     }
 
-    if failed_count > 0 {
+    if invalid_name_failures > 0 {
+        let _ = result_sender.send(FileOperationResult::OperationFailed {
+            message: rust_i18n::t!("operations.error_invalid_name").to_string(),
+        });
+    }
+
+    if other_failures > 0 {
         let _ = result_sender.send(FileOperationResult::OperationFailed {
             message: rust_i18n::t!("operations.error_cancelled").to_string(),
         });

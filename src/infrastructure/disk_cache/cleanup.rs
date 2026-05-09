@@ -1,15 +1,16 @@
 use super::ThumbnailDiskCache;
 use std::path::Path;
 
+fn normalize_cache_path(path: &Path) -> String {
+    let path_str = path.to_string_lossy();
+    path_str.strip_prefix(r"\\?\").unwrap_or(&path_str).to_string()
+}
+
 impl ThumbnailDiskCache {
     /// Remove cache entries for a specific path (file or folder)
     /// [WRITER]
     pub fn remove_cache_for_path(&self, path: &Path) {
-        let path_str = path.to_string_lossy().to_string();
-        let path_str = path_str
-            .strip_prefix(r"\\?\")
-            .unwrap_or(&path_str)
-            .to_string();
+        let path_str = normalize_cache_path(path);
 
         if let Ok(mut db) = self.writer.lock() {
             let pattern = format!("{}\\%", path_str.trim_end_matches('\\'));
@@ -51,11 +52,7 @@ impl ThumbnailDiskCache {
     pub fn rename_cache_entry(&self, old_path: &Path, new_path: &Path) {
         let old_id = Self::hash_path(old_path);
         let new_id = Self::hash_path(new_path);
-        let new_path_str = new_path.to_string_lossy();
-        let new_path_str = new_path_str
-            .strip_prefix(r"\\?\\")
-            .unwrap_or(&new_path_str)
-            .to_string();
+        let new_path_str = normalize_cache_path(new_path);
 
         if let Ok(db) = self.writer.lock() {
             // If a stale entry already exists under new_id (e.g. from a
