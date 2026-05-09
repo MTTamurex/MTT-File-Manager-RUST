@@ -55,6 +55,26 @@ impl PageTexture {
     }
 }
 
+// ── Password prompt ─────────────────────────────────────────────────────────
+
+struct PasswordPrompt {
+    input: String,
+    /// Set to `true` after the user submits an incorrect password.
+    wrong: bool,
+    /// Only request focus once; re-requesting every frame breaks Enter handling.
+    focus_requested: bool,
+}
+
+impl Default for PasswordPrompt {
+    fn default() -> Self {
+        Self {
+            input: String::new(),
+            wrong: false,
+            focus_requested: false,
+        }
+    }
+}
+
 // ── App ──────────────────────────────────────────────────────────────────────
 
 pub struct PdfViewerApp {
@@ -92,12 +112,19 @@ pub struct PdfViewerApp {
     pub(super) worker_error: Option<String>,
     /// Whether to apply dark theme (set once at creation, applied on first frame).
     dark_mode: Option<bool>,
+    /// Active password prompt (present when the PDF is encrypted and no password has been confirmed yet).
+    password_prompt: Option<PasswordPrompt>,
+    /// The password successfully used to open this document.
+    confirmed_password: Option<String>,
 }
 
 impl PdfViewerApp {
     pub fn new(path: PathBuf, dark_mode: bool) -> Result<Self, String> {
-        let renderer = PdfRenderer::open(&path)?;
-        let page_sizes = renderer.page_sizes().to_vec();
+        let (page_sizes, password_prompt) = match PdfRenderer::open(&path, None) {
+            Ok(renderer) => (renderer.page_sizes().to_vec(), None),
+            Err(e) if e.is_password_required() => (vec![], Some(PasswordPrompt::default())),
+            Err(e) => return Err(e.to_string()),
+        };
         let total_pages = page_sizes.len() as u32;
 
         Ok(Self {
@@ -120,6 +147,8 @@ impl PdfViewerApp {
             selection: None,
             worker_error: None,
             dark_mode: Some(dark_mode),
+            password_prompt,
+            confirmed_password: None,
         })
     }
 
@@ -127,7 +156,96 @@ impl PdfViewerApp {
 
     fn ensure_worker(&mut self, ctx: &egui::Context) {
         if self.worker.is_none() {
-            self.worker = Some(RenderWorker::spawn(self.worker_path.clone(), ctx.clone()));
+            self.worker = Some(RenderWorker::spawn(
+                self.worker_path.clone(),
+                self.confirmed_password.clone(),
+                ctx.clone(),
+            ));
+        }
+    }
+
+    /// Show the password-entry dialog.
+    ///
+    /// If the user submits a password, this method tries to open the PDF with
+    /// it and — on success — populates `page_sizes`, `total_pages`, and
+    /// `confirmed_password` so the normal render path can proceed.
+    fn handle_password_dialog(&mut self, ctx: &egui::Context) {
+        let mut submitted_password: Option<String> = None;
+        let mut cancelled = false;
+
+        egui::Window::new(t!("pdfviewer.password_title").to_string())
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                if let Some(prompt) = &mut self.password_prompt {
+                    ui.label(t!("pdfviewer.password_prompt").to_string());
+
+                    if prompt.wrong {
+                        ui.colored_label(
+                            egui::Color32::RED,
+                            t!("pdfviewer.password_wrong").to_string(),
+                        );
+                    }
+
+                    let resp = ui.add(
+                        egui::TextEdit::singleline(&mut prompt.input)
+                            .password(true)
+                            .desired_width(260.0)
+                            .hint_text(t!("pdfviewer.password_hint").to_string()),
+                    );
+                    if !prompt.focus_requested {
+                        resp.request_focus();
+                        prompt.focus_requested = true;
+                    }
+
+                    let submit_with_enter = resp.lost_focus()
+                        && ui.input(|i| i.key_pressed(egui::Key::Enter));
+
+                    ui.add_space(4.0);
+                    ui.horizontal(|ui| {
+                        if ui
+                            .button(t!("pdfviewer.password_submit").to_string())
+                            .clicked()
+                            || submit_with_enter
+                        {
+                            submitted_password = Some(prompt.input.clone());
+                        }
+                        if ui
+                            .button(t!("pdfviewer.password_cancel").to_string())
+                            .clicked()
+                        {
+                            cancelled = true;
+                        }
+                    });
+                }
+            });
+
+        if cancelled {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            return;
+        }
+
+        if let Some(pwd) = submitted_password {
+            match PdfRenderer::open(&self.worker_path, Some(&pwd)) {
+                Ok(renderer) => {
+                    self.page_sizes = renderer.page_sizes().to_vec();
+                    self.total_pages = self.page_sizes.len() as u32;
+                    self.confirmed_password = Some(pwd);
+                    self.password_prompt = None;
+                }
+                Err(e) if e.is_password_required() => {
+                    if let Some(prompt) = &mut self.password_prompt {
+                        prompt.wrong = true;
+                        prompt.input.clear();
+                        prompt.focus_requested = false;
+                    }
+                }
+                Err(e) => {
+                    self.worker_error = Some(e.to_string());
+                    self.password_prompt = None;
+                }
+            }
         }
     }
 
@@ -544,6 +662,13 @@ impl eframe::App for PdfViewerApp {
             ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
         }
 
+        // ── Password prompt ──────────────────────────────────────────────────
+        // Shown before any rendering; worker is not spawned until confirmed.
+        if self.password_prompt.is_some() {
+            egui::CentralPanel::default().show(ctx, |_ui| {});
+            self.handle_password_dialog(ctx);
+            return;
+        }
         self.ensure_worker(ctx);
         self.poll_results(ctx);
         self.handle_keyboard(ctx);

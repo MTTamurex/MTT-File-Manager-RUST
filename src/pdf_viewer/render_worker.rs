@@ -57,7 +57,7 @@ pub(super) struct RenderWorker {
 
 impl RenderWorker {
     /// Spawn the worker thread.
-    pub fn spawn(path: PathBuf, repaint: egui::Context) -> Self {
+    pub fn spawn(path: PathBuf, password: Option<String>, repaint: egui::Context) -> Self {
         let (req_tx, req_rx) = crossbeam_channel::bounded(32);
         let (res_tx, res_rx) = crossbeam_channel::bounded(64);
         let (text_seg_tx, text_seg_rx) = crossbeam_channel::bounded(64);
@@ -71,6 +71,7 @@ impl RenderWorker {
             .spawn(move || {
                 worker_loop(
                     path,
+                    password,
                     req_rx,
                     res_tx,
                     text_seg_tx,
@@ -144,6 +145,7 @@ impl RenderWorker {
 
 fn worker_loop(
     path: PathBuf,
+    password: Option<String>,
     render_rx: Receiver<RenderRequest>,
     render_tx: Sender<RenderResult>,
     text_seg_tx: Sender<TextSegmentResult>,
@@ -165,7 +167,7 @@ fn worker_loop(
             return;
         }
     };
-    let document = match pdfium.load_pdf_from_file(&path, None) {
+    let document = match pdfium.load_pdf_from_file(&path, password.as_deref()) {
         Ok(d) => d,
         Err(err) => {
             log::error!("[PDF-RENDER] failed to load document: {err}");
