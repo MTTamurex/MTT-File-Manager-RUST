@@ -3064,7 +3064,7 @@ dependencies = [
 
 [[package]]
 name = "mtt-file-manager"
-version = "0.1.0"
+version = "0.1.0-beta.1"
 dependencies = [
  "bincode",
  "blake3",
@@ -3119,7 +3119,7 @@ dependencies = [
 
 [[package]]
 name = "mtt-search-protocol"
-version = "0.1.0"
+version = "0.1.0-beta.1"
 dependencies = [
  "bincode",
  "serde",
@@ -3127,7 +3127,7 @@ dependencies = [
 
 [[package]]
 name = "mtt-search-service"
-version = "0.1.0"
+version = "0.1.0-beta.1"
 dependencies = [
  "bincode",
  "memchr",
