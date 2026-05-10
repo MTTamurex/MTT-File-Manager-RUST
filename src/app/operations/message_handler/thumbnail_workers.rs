@@ -99,7 +99,17 @@ impl ImageViewerApp {
         // When a folder's cover changes, the composed preview is stale —
         // invalidate it so the next frame triggers a fresh composition.
         for folder_path in &covers_changed {
-            self.cache_manager.invalidate_folder_preview(folder_path);
+            if !self
+                .suppress_next_folder_preview_invalidation
+                .remove(folder_path)
+            {
+                self.cache_manager.invalidate_folder_preview(folder_path);
+            }
+        }
+
+        for folder_path in cover_updates.keys() {
+            self.suppress_next_folder_preview_invalidation
+                .remove(folder_path);
         }
 
         let t_items = Instant::now();

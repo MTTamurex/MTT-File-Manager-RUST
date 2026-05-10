@@ -233,6 +233,8 @@ impl ImageViewerApp {
             // Folder Preview Worker (Native Windows Shell)
             folder_preview_sender: folder_preview_tx,
             folder_preview_receiver: folder_preview_res_rx,
+            pending_folder_preview_replace: FxHashSet::default(),
+            suppress_next_folder_preview_invalidation: FxHashSet::default(),
             // Cache Manager (unifica texture_cache, icon_cache, loading_set, etc.)
             cache_manager: crate::ui::cache::CacheManager::new_with_folder_preview_trace(
                 folder_preview_trace,
@@ -326,6 +328,7 @@ impl ImageViewerApp {
             dual_panel_inactive_last_probe: Instant::now(),
             rdcw_unreliable_drives: std::collections::HashMap::new(),
             pending_folder_mtime_recheck: Vec::new(),
+            pending_folder_cover_refresh: Vec::new(),
             last_folder_mtime_sort: Instant::now(),
             watcher_fs_probe_cache: std::collections::HashMap::new(),
             consistency_probe_tx,

@@ -139,6 +139,15 @@ impl ImageViewerApp {
         self.clear_tab_cache_for_normalized_path(&folder_norm);
     }
 
+    fn invalidate_folder_listing_and_tab_caches(&mut self, folder: &Path) {
+        self.invalidate_directory_listing_caches(folder);
+        self.sidebar_tree.clear_children(folder);
+        let folder_norm = Self::normalize_for_match(folder);
+        self.clear_tab_cache_for_normalized_path(&folder_norm);
+        self.enqueue_disk_cache_invalidations(vec![folder.to_path_buf()]);
+        self.schedule_folder_cover_refresh(folder);
+    }
+
     fn update_renamed_item_in_place(
         items: &mut [crate::domain::file_entry::FileEntry],
         old_path: &Path,
@@ -420,7 +429,7 @@ impl ImageViewerApp {
         current_path_norm: &str,
     ) {
         let dest_str = Self::normalize_for_match(dest_folder.as_path());
-        self.invalidate_folder_and_tab_caches(&dest_folder);
+        self.invalidate_folder_listing_and_tab_caches(&dest_folder);
 
         // Retry files that previously failed thumbnail extraction while copy was in progress.
         self.cache_manager.clear_failed();
@@ -459,8 +468,8 @@ impl ImageViewerApp {
         let source_str = Self::normalize_for_match(source_folder.as_path());
         let dest_str = Self::normalize_for_match(dest_folder.as_path());
 
-        self.invalidate_folder_and_tab_caches(&source_folder);
-        self.invalidate_folder_and_tab_caches(&dest_folder);
+        self.invalidate_folder_listing_and_tab_caches(&source_folder);
+        self.invalidate_folder_listing_and_tab_caches(&dest_folder);
 
         self.cache_manager.clear_failed();
         crate::workers::thumbnail::clear_all_failures();
@@ -521,9 +530,9 @@ impl ImageViewerApp {
         }
 
         for source_folder in &source_folders {
-            self.invalidate_folder_and_tab_caches(source_folder);
+            self.invalidate_folder_listing_and_tab_caches(source_folder);
         }
-        self.invalidate_folder_and_tab_caches(&dest_folder);
+        self.invalidate_folder_listing_and_tab_caches(&dest_folder);
 
         // If any moved file was a folder cover, force re-discovery.
         for source_folder in &source_folders {

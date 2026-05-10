@@ -394,7 +394,8 @@ impl ImageViewerApp {
                     // folder-size caches alongside the cover so list rows and the
                     // details panel both re-read the updated size.
                     self.invalidate_folder_size_cache(folder_path);
-                    self.invalidate_folder_cover_state(folder_path);
+                    pending_disk_cache_invalidations.push(folder_path.clone());
+                    self.schedule_folder_cover_refresh(folder_path);
                 }
                 self.pending_items_rebuild = true;
             }
@@ -522,6 +523,7 @@ impl ImageViewerApp {
 
         // Process deferred folder mtime rechecks (Windows lazy-write delay)
         self.process_pending_folder_mtime_rechecks();
+        self.process_pending_folder_cover_refreshes();
 
         self.enqueue_disk_cache_invalidations(pending_disk_cache_invalidations);
         self.apply_watcher_reload_policy();

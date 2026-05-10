@@ -5,6 +5,50 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+const FOLDER_COVER_REFRESH_DEBOUNCE: Duration = Duration::from_secs(2);
+const MAX_PENDING_FOLDER_COVER_REFRESHES: usize = 500;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DebounceQueueAction {
+    Inserted,
+    Updated,
+    Dropped,
+}
+
+fn upsert_debounced_path(
+    entries: &mut Vec<(PathBuf, Instant)>,
+    path: &Path,
+    due_at: Instant,
+    max_entries: usize,
+) -> DebounceQueueAction {
+    if let Some(existing) = entries
+        .iter_mut()
+        .find(|(existing_path, _)| existing_path.as_path() == path)
+    {
+        existing.1 = due_at;
+        DebounceQueueAction::Updated
+    } else if entries.len() >= max_entries {
+        DebounceQueueAction::Dropped
+    } else {
+        entries.push((path.to_path_buf(), due_at));
+        DebounceQueueAction::Inserted
+    }
+}
+
+fn take_due_debounced_paths(entries: &mut Vec<(PathBuf, Instant)>, now: Instant) -> Vec<PathBuf> {
+    let due_entries: Vec<PathBuf> = entries
+        .iter()
+        .filter(|(_, refresh_at)| now >= *refresh_at)
+        .map(|(path, _)| path.clone())
+        .collect();
+
+    if !due_entries.is_empty() {
+        entries.retain(|(_, refresh_at)| now < *refresh_at);
+    }
+
+    due_entries
+}
+
 impl ImageViewerApp {
     fn path_matches_normalized(candidate: &Path, target_norm: &str) -> bool {
         Self::normalize_for_match(candidate) == target_norm
@@ -149,6 +193,11 @@ impl ImageViewerApp {
     }
 
     pub(super) fn invalidate_directory_caches(&mut self, path: &Path) {
+        self.invalidate_directory_listing_caches(path);
+        self.invalidate_folder_cover_state(path);
+    }
+
+    pub(super) fn invalidate_directory_listing_caches(&mut self, path: &Path) {
         let path_buf = path.to_path_buf();
         self.directory_dirty_registry.mark_dirty(path);
         self.directory_cache.invalidate(&path_buf);
@@ -159,7 +208,6 @@ impl ImageViewerApp {
         // changed. Invalidate folder-size caches here too so callers do not
         // need to remember to clear size separately from cover/listing state.
         self.invalidate_folder_size_cache(path);
-        self.invalidate_folder_cover_state(path);
     }
 
     pub(super) fn try_remove_deleted_path_from_ui(&mut self, path: &Path) -> bool {
@@ -425,15 +473,13 @@ impl ImageViewerApp {
             Self::normalize_for_match(Path::new(&self.navigation_state.current_path));
         for folder_path in &folders_with_changed_contents {
             self.invalidate_folder_size_cache(folder_path);
-            self.cache_manager.invalidate_folder_preview(folder_path);
-            self.scanned_folders.pop(folder_path);
             let folder_norm = Self::normalize_for_match(folder_path);
             if folder_norm != current_path_norm {
                 self.directory_cache.invalidate(folder_path);
                 self.clear_tab_cache_for_normalized_path(&folder_norm);
             }
             pending_disk_cache_invalidations.push(folder_path.clone());
-            let _ = self.cover_worker_sender.send(folder_path.clone());
+            self.schedule_folder_cover_refresh(folder_path);
 
             if let Some(parent) = folder_path.parent() {
                 let parent_buf = parent.to_path_buf();
@@ -441,44 +487,6 @@ impl ImageViewerApp {
                     let parent_norm = Self::normalize_for_match(parent);
                     self.directory_cache.invalidate(&parent_buf);
                     self.clear_tab_cache_for_normalized_path(&parent_norm);
-                }
-            }
-        }
-
-        let covers_to_evict: Vec<PathBuf> = self
-            .all_items
-            .iter()
-            .filter(|item| {
-                item.is_dir
-                    && item.folder_cover.is_some()
-                    && folders_with_changed_contents.contains(&item.path)
-            })
-            .filter_map(|item| item.folder_cover.clone())
-            .collect();
-
-        for cover in &covers_to_evict {
-            self.cache_manager.texture_cache.pop(cover);
-            self.cache_manager.loading_set.remove(cover);
-        }
-
-        let mut cleared_any = false;
-        for item in self.all_items_mut().iter_mut() {
-            if item.is_dir
-                && item.folder_cover.is_some()
-                && folders_with_changed_contents.contains(&item.path)
-            {
-                item.folder_cover = None;
-                cleared_any = true;
-            }
-        }
-        if cleared_any {
-            let items = Arc::make_mut(&mut self.items);
-            for item in items.iter_mut() {
-                if item.is_dir
-                    && item.folder_cover.is_some()
-                    && folders_with_changed_contents.contains(&item.path)
-                {
-                    item.folder_cover = None;
                 }
             }
         }
@@ -544,6 +552,91 @@ impl ImageViewerApp {
         if scheduled_any {
             self.ui_ctx
                 .request_repaint_after(Duration::from_millis(2500));
+        }
+    }
+
+    pub(super) fn schedule_folder_cover_refresh(&mut self, folder_path: &Path) {
+        let refresh_at = Instant::now() + FOLDER_COVER_REFRESH_DEBOUNCE;
+
+        match upsert_debounced_path(
+            &mut self.pending_folder_cover_refresh,
+            folder_path,
+            refresh_at,
+            MAX_PENDING_FOLDER_COVER_REFRESHES,
+        ) {
+            DebounceQueueAction::Updated => {
+                log::debug!(
+                    "[FOLDER-COVER-SCHED] Debounce push for folder: {:?}",
+                    folder_path.file_name().unwrap_or_default()
+                );
+            }
+            DebounceQueueAction::Inserted => {
+                log::debug!(
+                    "[FOLDER-COVER-SCHED] Scheduled cover refresh for folder: {:?} (due in {}ms)",
+                    folder_path.file_name().unwrap_or_default(),
+                    FOLDER_COVER_REFRESH_DEBOUNCE.as_millis()
+                );
+            }
+            DebounceQueueAction::Dropped => {
+                log::warn!(
+                    "[FOLDER-COVER-SCHED] Pending cover refresh list full ({}), dropping: {:?}",
+                    MAX_PENDING_FOLDER_COVER_REFRESHES,
+                    folder_path.file_name().unwrap_or_default()
+                );
+                return;
+            }
+        }
+
+        self.ui_ctx.request_repaint_after(
+            FOLDER_COVER_REFRESH_DEBOUNCE + Duration::from_millis(500),
+        );
+    }
+
+    pub(super) fn process_pending_folder_cover_refreshes(&mut self) {
+        if self.pending_folder_cover_refresh.is_empty() {
+            return;
+        }
+
+        let now = Instant::now();
+        let due_entries = take_due_debounced_paths(&mut self.pending_folder_cover_refresh, now);
+
+        if due_entries.is_empty() {
+            if let Some(earliest) = self
+                .pending_folder_cover_refresh
+                .iter()
+                .map(|(_, t)| *t)
+                .min()
+            {
+                if let Some(wait) = earliest.checked_duration_since(now) {
+                    self.ui_ctx
+                        .request_repaint_after(wait + Duration::from_millis(50));
+                }
+            }
+            return;
+        }
+
+        for folder_path in &due_entries {
+            if self.cache_manager.has_folder_preview(folder_path) {
+                // Keep the current composed preview visible during the write burst.
+                // When the folder goes quiet, re-compose in the background and
+                // swap the texture only when the new pixels are ready.
+                self.request_folder_preview_refresh_preserving_current(folder_path.clone());
+            }
+            let _ = self.cover_worker_sender.send(folder_path.clone());
+        }
+
+        self.ui_ctx.request_repaint();
+
+        if let Some(earliest) = self
+            .pending_folder_cover_refresh
+            .iter()
+            .map(|(_, t)| *t)
+            .min()
+        {
+            if let Some(wait) = earliest.checked_duration_since(now) {
+                self.ui_ctx
+                    .request_repaint_after(wait + Duration::from_millis(50));
+            }
         }
     }
 
@@ -709,5 +802,72 @@ impl ImageViewerApp {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn folder_cover_refresh_upsert_updates_existing_deadline() {
+        let path = PathBuf::from(r"C:\Temp\Dest");
+        let first_due = Instant::now() + Duration::from_millis(250);
+        let second_due = first_due + Duration::from_secs(2);
+        let mut entries = Vec::new();
+
+        assert_eq!(
+            upsert_debounced_path(&mut entries, &path, first_due, 8),
+            DebounceQueueAction::Inserted
+        );
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].0, path);
+        assert_eq!(entries[0].1, first_due);
+
+        let same_path = entries[0].0.clone();
+
+        assert_eq!(
+            upsert_debounced_path(&mut entries, &same_path, second_due, 8),
+            DebounceQueueAction::Updated
+        );
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].1, second_due);
+    }
+
+    #[test]
+    fn folder_cover_refresh_upsert_drops_when_queue_is_full() {
+        let now = Instant::now();
+        let mut entries = vec![(PathBuf::from(r"C:\Temp\One"), now)];
+
+        assert_eq!(
+            upsert_debounced_path(
+                &mut entries,
+                Path::new(r"C:\Temp\Two"),
+                now + Duration::from_secs(1),
+                1,
+            ),
+            DebounceQueueAction::Dropped
+        );
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].0, PathBuf::from(r"C:\Temp\One"));
+    }
+
+    #[test]
+    fn folder_cover_refresh_take_due_paths_retains_future_entries() {
+        let now = Instant::now();
+        let due_path = PathBuf::from(r"C:\Temp\Due");
+        let future_path = PathBuf::from(r"C:\Temp\Future");
+        let future_due = now + Duration::from_secs(5);
+        let mut entries = vec![
+            (due_path.clone(), now - Duration::from_millis(1)),
+            (future_path.clone(), future_due),
+        ];
+
+        let due_entries = take_due_debounced_paths(&mut entries, now);
+
+        assert_eq!(due_entries, vec![due_path]);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].0, future_path);
+        assert_eq!(entries[0].1, future_due);
     }
 }
