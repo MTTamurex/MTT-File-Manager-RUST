@@ -5,6 +5,7 @@ use crate::infrastructure::directory_cache::DirectoryCache;
 use crate::infrastructure::directory_dirty_registry::DirectoryDirtyRegistry;
 use crate::infrastructure::directory_index::DirectoryIndex;
 use crate::infrastructure::disk_cache::ThumbnailDiskCache;
+use crate::infrastructure::onedrive;
 use crate::infrastructure::windows::{is_shell_navigation_path, list_shell_folder};
 use eframe::egui;
 use std::path::PathBuf;
@@ -93,9 +94,9 @@ pub(super) fn try_handle_fast_paths(
                 base_path_buf
             );
         }
-        // DriveWatcher monitors the ENTIRE drive and proactively invalidates
-        // both DirectoryCache and DirectoryIndex for ANY change on the drive.
-        // No fs::metadata() mtime check needed — if the cache has data, it's valid.
+        // DirectoryCache is instant, but it is only safe when the folder is not
+        // dirty and the cache can be validated without blocking the UI. OneDrive
+        // skips metadata validation, so its memory-only cache is short-lived.
         if !cache_marked_dirty && can_trust_directory_cache {
             if let Some((cached_entries, cached_at_ms)) =
                 directory_cache.get_with_meta(base_path_buf)
@@ -106,9 +107,18 @@ pub(super) fn try_handle_fast_paths(
                     cached_entries.len(),
                     cached_at_ms
                 );
-                // Fail-safe against missed watcher events: validate folder mtime.
-                // Skip for OneDrive to avoid potential blocking metadata calls.
-                if !is_onedrive_base {
+                if is_onedrive_base && !onedrive::directory_cache_is_recent(cached_at_ms) {
+                    log::info!(
+                        "[FOLDER-LOADING] DirectoryCache stale for OneDrive {:?} (cached_at_ms={}), invalidating",
+                        base_path_buf,
+                        cached_at_ms
+                    );
+                    directory_cache.invalidate(base_path_buf);
+                    if let Some(di) = directory_index_opt {
+                        let _ = di.invalidate(base_path_buf);
+                    }
+                } else if !is_onedrive_base {
+                    // Fail-safe against missed watcher events: validate folder mtime.
                     let dir_mtime_ms = directory_mtime_ms(base_path_buf);
                     if dir_mtime_ms > cached_at_ms {
                         log::debug!(
@@ -159,7 +169,7 @@ pub(super) fn try_handle_fast_paths(
                         ctx.request_repaint();
 
                         log::debug!(
-                            "[FOLDER-LOADING] Phase 2: Cache valid, trusting watcher for {:?} - HDD silence maintained",
+                            "[FOLDER-LOADING] Phase 2: Cache valid for {:?} - HDD silence maintained",
                             base_path_buf
                         );
                         return true;
@@ -191,7 +201,7 @@ pub(super) fn try_handle_fast_paths(
                     ctx.request_repaint();
 
                     log::debug!(
-                        "[FOLDER-LOADING] Phase 2: Cache valid, trusting watcher for {:?} - HDD silence maintained",
+                        "[FOLDER-LOADING] Phase 2: Recent OneDrive cache valid for {:?} - HDD silence maintained",
                         base_path_buf
                     );
                     return true;
@@ -379,12 +389,26 @@ pub(super) fn try_handle_fast_paths(
     } // end if !force_refresh && !is_onedrive_base
 
     if !force_refresh {
-        // DriveWatcher pre-invalidates cache — no mtime check needed
+        // Secondary cache path after shell/index attempts. Apply the same
+        // validation rules before serving cached entries.
         let base_path_buf_owned = PathBuf::from(base_path);
         if !directory_dirty_registry.is_dirty(&base_path_buf_owned) {
             if let Some((cached_entries_arc, cached_at_ms)) =
                 directory_cache.get_with_meta(&base_path_buf_owned)
             {
+                if is_onedrive_base && !onedrive::directory_cache_is_recent(cached_at_ms) {
+                    log::info!(
+                        "[FOLDER-LOADING] Secondary DirectoryCache stale for OneDrive {:?} (cached_at_ms={}), invalidating",
+                        base_path_buf_owned,
+                        cached_at_ms
+                    );
+                    directory_cache.invalidate(&base_path_buf_owned);
+                    if let Some(di) = directory_index_opt {
+                        let _ = di.invalidate(&base_path_buf_owned);
+                    }
+                    return false;
+                }
+
                 if !is_onedrive_base {
                     let dir_mtime_ms = directory_mtime_ms(&base_path_buf_owned);
                     if dir_mtime_ms > cached_at_ms {
