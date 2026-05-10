@@ -525,15 +525,27 @@ pub fn is_locally_available_safe(path: &Path) -> bool {
 }
 
 pub fn directory_cache_is_recent(cached_at_ms: u64) -> bool {
-    let now_ms = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64;
+    directory_cache_is_recent_from_duration_since_epoch(
+        cached_at_ms,
+        SystemTime::now().duration_since(UNIX_EPOCH),
+    )
+}
+
+fn directory_cache_is_recent_from_duration_since_epoch(
+    cached_at_ms: u64,
+    now_since_epoch: Result<Duration, std::time::SystemTimeError>,
+) -> bool {
+    let Ok(now_since_epoch) = now_since_epoch else {
+        return false;
+    };
+    let now_ms = now_since_epoch.as_millis() as u64;
     directory_cache_is_recent_at(cached_at_ms, now_ms)
 }
 
 fn directory_cache_is_recent_at(cached_at_ms: u64, now_ms: u64) -> bool {
-    now_ms.saturating_sub(cached_at_ms) <= DIRECTORY_CACHE_MAX_AGE_MS
+    now_ms
+        .checked_sub(cached_at_ms)
+        .is_some_and(|age_ms| age_ms <= DIRECTORY_CACHE_MAX_AGE_MS)
 }
 
 /// Result type for directory enumeration with timeout
@@ -640,7 +652,14 @@ mod tests {
     }
 
     #[test]
-    fn directory_cache_future_timestamp_is_recent() {
-        assert!(directory_cache_is_recent_at(10_000, 9_000));
+    fn directory_cache_future_timestamp_is_stale() {
+        assert!(!directory_cache_is_recent_at(10_000, 9_000));
+    }
+
+    #[test]
+    fn directory_cache_time_read_failure_is_stale() {
+        let err = UNIX_EPOCH.duration_since(SystemTime::now()).unwrap_err();
+
+        assert!(!directory_cache_is_recent_from_duration_since_epoch(1_000, Err(err)));
     }
 }
