@@ -225,7 +225,12 @@ impl ImageViewerApp {
             let is_stale = if is_dirty {
                 true
             } else if crate::infrastructure::onedrive::is_onedrive_path(&tab_path) {
-                false
+                self.directory_cache
+                    .cached_at_ms(&tab_path)
+                    .map(|cached_at_ms| {
+                        !crate::infrastructure::onedrive::directory_cache_is_recent(cached_at_ms)
+                    })
+                    .unwrap_or(true)
             } else if self.global_search.available {
                 // Try the search service first (NTFS fast path, ~1-2ms via named pipe)
                 let path_str = self.navigation_state.current_path.clone();

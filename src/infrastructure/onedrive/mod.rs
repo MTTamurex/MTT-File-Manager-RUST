@@ -9,7 +9,7 @@
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc, Mutex, OnceLock};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::domain::file_entry::SyncStatus;
 mod attributes;
@@ -24,6 +24,8 @@ const ONEDRIVE_IO_BASE_WORKERS: usize = 4;
 const ONEDRIVE_IO_MAX_OVERFLOW_WORKERS: usize = 24;
 // Maximum concurrent timeout requests waiting on results.
 const MAX_CONCURRENT_TIMEOUT_THREADS: u64 = 32;
+
+pub const DIRECTORY_CACHE_MAX_AGE_MS: u64 = 2_000;
 
 // Threshold (seconds) after which a worker job is considered "stalled".
 // Cloud filter driver I/O for OneDrive cloud-only files can block 30-60s.
@@ -522,6 +524,18 @@ pub fn is_locally_available_safe(path: &Path) -> bool {
     is_locally_available(path)
 }
 
+pub fn directory_cache_is_recent(cached_at_ms: u64) -> bool {
+    let now_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+    directory_cache_is_recent_at(cached_at_ms, now_ms)
+}
+
+fn directory_cache_is_recent_at(cached_at_ms: u64, now_ms: u64) -> bool {
+    now_ms.saturating_sub(cached_at_ms) <= DIRECTORY_CACHE_MAX_AGE_MS
+}
+
 /// Result type for directory enumeration with timeout
 pub type DirectoryEntries = Vec<(String, u32, u64, u64)>; // (name, attributes, size, modified)
 
@@ -607,5 +621,26 @@ mod tests {
             get_sync_status(FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS, false),
             SyncStatus::None
         );
+    }
+
+    #[test]
+    fn directory_cache_is_recent_within_max_age() {
+        let now_ms = 10_000;
+        let cached_at_ms = now_ms - DIRECTORY_CACHE_MAX_AGE_MS;
+
+        assert!(directory_cache_is_recent_at(cached_at_ms, now_ms));
+    }
+
+    #[test]
+    fn directory_cache_is_stale_after_max_age() {
+        let now_ms = 10_000;
+        let cached_at_ms = now_ms - DIRECTORY_CACHE_MAX_AGE_MS - 1;
+
+        assert!(!directory_cache_is_recent_at(cached_at_ms, now_ms));
+    }
+
+    #[test]
+    fn directory_cache_future_timestamp_is_recent() {
+        assert!(directory_cache_is_recent_at(10_000, 9_000));
     }
 }
