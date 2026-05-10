@@ -373,11 +373,13 @@ fn try_custom_compose(
     // 2. Extract content thumbnail using the 5-stage hybrid pipeline.
     //    Use the _detailed variant so we can distinguish UnsafeToRead from
     //    real extraction failures — the former must NOT be cached to SQLite.
-    let outcome = crate::workers::thumbnail::extraction::generate_thumbnail_hybrid_detailed(
-        &media_path,
-        priority,
-        empty_deletions,
-    );
+    let outcome =
+        crate::workers::thumbnail::extraction::generate_thumbnail_hybrid_detailed_with_target(
+            &media_path,
+            priority,
+            empty_deletions,
+            Some(bucket_size),
+        );
 
     let (content_rgba, content_w, content_h) = match outcome {
         crate::workers::thumbnail::extraction::ThumbnailExtractionOutcome::Success(data) => data,
