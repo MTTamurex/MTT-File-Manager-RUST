@@ -4,7 +4,7 @@ use crate::infrastructure::io_priority::IOPriority;
 use crate::infrastructure::onedrive::{self, IoTimeoutResult};
 use crate::infrastructure::windows::is_mpeg_ts_file;
 use crate::workers::thumbnail::extraction::{
-    generate_thumbnail_hybrid_detailed, ThumbnailExtractionOutcome,
+    generate_thumbnail_hybrid_detailed_with_target, ThumbnailExtractionOutcome,
 };
 use crate::workers::thumbnail::processing::resize::{get_bucket_size, resize_to_bucket};
 use crossbeam_channel::Sender;
@@ -314,10 +314,15 @@ pub(super) fn process_thumbnail_request(
         }
 
         if final_result.is_none() {
-            match generate_thumbnail_hybrid_detailed(path, req_priority, pending_deletions) {
+            let bucket_size = get_bucket_size(req_size);
+            match generate_thumbnail_hybrid_detailed_with_target(
+                path,
+                req_priority,
+                pending_deletions,
+                Some(bucket_size),
+            ) {
                 ThumbnailExtractionOutcome::Success((raw_data, w, h)) => {
                     // Resize to bucket (frees RAM and optimizes GPU upload).
-                    let bucket_size = get_bucket_size(req_size);
                     let resized = resize_to_bucket(raw_data, w, h, bucket_size);
 
                     // Save optimized version to SQLite.

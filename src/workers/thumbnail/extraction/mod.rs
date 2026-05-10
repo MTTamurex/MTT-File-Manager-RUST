@@ -1,8 +1,9 @@
 //! Thumbnail extraction pipeline
 //!
-//! Implements a 5-stage hybrid extraction pipeline:
+//! Implements a hybrid extraction pipeline with an image-only sized-decode fast path:
 //!
-//! 1. **Image Crate** (Fast Path) - Uses `image` crate for common formats
+//! 0. **WIC Sized Decode** (Image Fast Path) - Decodes large still images directly to the requested bucket
+//! 1. **Image Crate** (Legacy Fast Path) - Uses `image` crate for common formats
 //! 2. **WIC** (Robust Fallback) - Windows Imaging Component for CMYK/problematic images
 //! 3. **Shell API** (Universal) - IShellItemImageFactory for most file types
 //! 4. **Force Extraction** - IThumbnailCache with WTS_FORCEEXTRACTION flag
@@ -17,6 +18,9 @@ pub mod stage5_media_foundation;
 use crate::infrastructure::io_priority::IOPriority;
 use crate::infrastructure::onedrive;
 use std::path::Path;
+
+const SIZED_WIC_FAST_PATH_EXTENSIONS: &[&str] =
+    &["jpg", "jpeg", "png", "bmp", "tiff", "tif", "webp"];
 
 #[derive(Debug)]
 pub enum ThumbnailExtractionOutcome {
@@ -40,7 +44,7 @@ pub fn generate_thumbnail_hybrid(
     priority: IOPriority,
     pending_deletions: &dashmap::DashMap<std::path::PathBuf, ()>,
 ) -> Option<(Vec<u8>, u32, u32)> {
-    match generate_thumbnail_hybrid_detailed(path, priority, pending_deletions) {
+    match generate_thumbnail_hybrid_detailed_with_target(path, priority, pending_deletions, None) {
         ThumbnailExtractionOutcome::Success(data) => Some(data),
         ThumbnailExtractionOutcome::UnsafeToRead(_) | ThumbnailExtractionOutcome::Failed => None,
     }
@@ -50,6 +54,15 @@ pub fn generate_thumbnail_hybrid_detailed(
     path: &Path,
     priority: IOPriority,
     pending_deletions: &dashmap::DashMap<std::path::PathBuf, ()>,
+) -> ThumbnailExtractionOutcome {
+    generate_thumbnail_hybrid_detailed_with_target(path, priority, pending_deletions, None)
+}
+
+pub fn generate_thumbnail_hybrid_detailed_with_target(
+    path: &Path,
+    priority: IOPriority,
+    pending_deletions: &dashmap::DashMap<std::path::PathBuf, ()>,
+    image_target_max_side: Option<u32>,
 ) -> ThumbnailExtractionOutcome {
     // DEFENSE IN DEPTH: Early exit for non-media files
     // This catches any requests that slipped through UI-level filtering (e.g., .exe, .dll)
@@ -84,6 +97,22 @@ pub fn generate_thumbnail_hybrid_detailed(
     let read_safety = crate::infrastructure::windows::file_flags::classify_file_read_safety(path);
     if read_safety != crate::infrastructure::windows::file_flags::FileReadSafety::Safe {
         return ThumbnailExtractionOutcome::UnsafeToRead(read_safety);
+    }
+
+    if let Some(max_side) = image_sized_fast_path_target(path, image_target_max_side) {
+        log::trace!(
+            "[Thumbnail] Trying Stage 0 (WIC sized image fast path, {}px)...",
+            max_side
+        );
+        if let Some(result) = stage2_wic::extract_to_size(path, Some(max_side)) {
+            log::trace!("[Thumbnail] Stage 0 SUCCESS for: {:?}", path.file_name());
+            return ThumbnailExtractionOutcome::Success(result);
+        }
+        log::trace!("[Thumbnail] Stage 0 failed, trying Stage 1...");
+
+        if pending_deletions.contains_key(path) || !onedrive::fast_path_exists(path) {
+            return ThumbnailExtractionOutcome::Failed;
+        }
     }
 
     // Stage 1: image crate (Fast Path)
@@ -164,4 +193,49 @@ pub fn generate_thumbnail_hybrid_detailed(
         log::warn!("[Thumbnail] ALL STAGES FAILED for: {:?}", path.file_name());
     }
     ThumbnailExtractionOutcome::Failed
+}
+
+fn image_sized_fast_path_target(path: &Path, requested_max_side: Option<u32>) -> Option<u32> {
+    let max_side = requested_max_side?.max(1);
+    let ext = path.extension()?.to_str()?;
+    if SIZED_WIC_FAST_PATH_EXTENSIONS
+        .iter()
+        .any(|candidate| ext.eq_ignore_ascii_case(candidate))
+    {
+        Some(max_side)
+    } else {
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::image_sized_fast_path_target;
+    use std::path::Path;
+
+    #[test]
+    fn image_sized_fast_path_target_matches_supported_still_images() {
+        assert_eq!(
+            image_sized_fast_path_target(Path::new("photo.JPG"), Some(256)),
+            Some(256)
+        );
+        assert_eq!(
+            image_sized_fast_path_target(Path::new("poster.png"), Some(512)),
+            Some(512)
+        );
+        assert_eq!(
+            image_sized_fast_path_target(Path::new("cover.webp"), Some(1024)),
+            Some(1024)
+        );
+    }
+
+    #[test]
+    fn image_sized_fast_path_target_rejects_videos_and_missing_target() {
+        assert_eq!(
+            image_sized_fast_path_target(Path::new("clip.mp4"), Some(256)),
+            None
+        );
+        assert_eq!(image_sized_fast_path_target(Path::new("anim.gif"), Some(256)), None);
+        assert_eq!(image_sized_fast_path_target(Path::new("photo.jpg"), None), None);
+    }
 }
