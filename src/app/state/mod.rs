@@ -112,6 +112,12 @@ pub struct ImageViewerApp {
     pub folder_preview_sender:
         crossbeam_channel::Sender<crate::workers::folder_preview_worker::FolderPreviewRequest>,
     pub folder_preview_receiver: Receiver<crate::workers::folder_preview_worker::FolderPreviewData>,
+    /// Paths whose current folder preview should stay visible while a
+    /// background refresh prepares a replacement texture.
+    pub pending_folder_preview_replace: FxHashSet<PathBuf>,
+    /// Suppresses one immediate folder-preview invalidation after a paired
+    /// background refresh was already queued for the same folder.
+    pub suppress_next_folder_preview_invalidation: FxHashSet<PathBuf>,
 
     // Cache Manager (unifica texture_cache, icon_cache, loading_set, etc.)
     pub cache_manager: crate::ui::cache::CacheManager,
@@ -256,6 +262,10 @@ pub struct ImageViewerApp {
     /// torrent writes) coalesce into a single metadata read + re-sort.
     /// Each entry stores `(path, scheduled_recheck_time)`.
     pub pending_folder_mtime_recheck: Vec<(std::path::PathBuf, Instant)>,
+    /// Debounced folder-cover refresh: folders whose composed preview /
+    /// persisted cover metadata should be refreshed once the folder stops
+    /// receiving rapid watcher events.
+    pub pending_folder_cover_refresh: Vec<(std::path::PathBuf, Instant)>,
     /// Timestamp of the last folder-mtime re-sort to enforce a cooldown and
     /// prevent excessive re-sorts during sustained write bursts.
     pub last_folder_mtime_sort: Instant,

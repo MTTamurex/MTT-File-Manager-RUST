@@ -288,6 +288,48 @@ impl ImageViewerApp {
         }
     }
 
+    pub fn request_folder_preview_refresh_preserving_current(&mut self, path: PathBuf) {
+        self.cache_manager.folder_preview_trace.record_request();
+        self.cache_manager
+            .folder_preview_trace
+            .record_request_path(&path);
+
+        if self.cache_manager.is_folder_preview_loading(&path) {
+            self.suppress_next_folder_preview_invalidation
+                .insert(path);
+            return;
+        }
+
+        if !self
+            .cache_manager
+            .start_folder_preview_loading(path.clone())
+        {
+            return;
+        }
+
+        self.pending_folder_preview_replace.insert(path.clone());
+        self.suppress_next_folder_preview_invalidation
+            .insert(path.clone());
+
+        let request = crate::workers::folder_preview_worker::FolderPreviewRequest {
+            path: path.clone(),
+            size_px: self.effective_folder_preview_request_size_px(),
+        };
+        match self.folder_preview_sender.try_send(request) {
+            Ok(()) => {
+                self.cache_manager.note_folder_preview_request_sent(&path);
+            }
+            Err(err) => {
+                let request = err.into_inner();
+                self.pending_folder_preview_replace.remove(&request.path);
+                self.suppress_next_folder_preview_invalidation
+                    .remove(&request.path);
+                self.cache_manager
+                    .finish_folder_preview_loading(&request.path);
+            }
+        }
+    }
+
     pub fn request_icon_load(&mut self, path: PathBuf) {
         if self.loading_icons.contains(&path) {
             return;

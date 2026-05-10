@@ -807,6 +807,7 @@ impl ImageViewerApp {
             }
             if let Ok(data) = self.folder_preview_receiver.try_recv() {
                 self.cache_manager.finish_folder_preview_loading(&data.path);
+                let force_replace = self.pending_folder_preview_replace.remove(&data.path);
 
                 if !data.rgba_data.is_empty() {
                     let cached_size = self
@@ -815,7 +816,10 @@ impl ImageViewerApp {
                         .peek(&data.path)
                         .map(|existing| existing.size());
                     match cached_size {
-                        Some(size) if size == [data.width as usize, data.height as usize] => {
+                        Some(size)
+                            if size == [data.width as usize, data.height as usize]
+                                && !force_replace =>
+                        {
                             folder_uploads += 1;
                             continue;
                         }

@@ -147,7 +147,7 @@ impl ImageViewerApp {
                                 &mut folders_with_changed_contents,
                             );
                             if let Some(parent) = cleaned.parent() {
-                                self.invalidate_directory_caches(parent);
+                                self.invalidate_directory_listing_caches(parent);
 
                                 let parent_norm = Self::normalize_for_match(parent);
                                 if parent_norm == current_path_norm {
@@ -206,7 +206,7 @@ impl ImageViewerApp {
                             );
 
                             if let Some(parent) = cleaned.parent() {
-                                self.invalidate_directory_caches(parent);
+                                self.invalidate_directory_listing_caches(parent);
 
                                 let parent_norm = Self::normalize_for_match(parent);
                                 if parent_norm == current_path_norm {
@@ -260,10 +260,10 @@ impl ImageViewerApp {
                             pending_disk_cache_invalidations.push(cleaned_new.clone());
 
                             if let Some(parent) = cleaned_old.parent() {
-                                self.invalidate_directory_caches(parent);
+                                self.invalidate_directory_listing_caches(parent);
                             }
                             if let Some(parent) = cleaned_new.parent() {
-                                self.invalidate_directory_caches(parent);
+                                self.invalidate_directory_listing_caches(parent);
                             }
 
                             let old_in_current = cleaned_old
@@ -322,7 +322,7 @@ impl ImageViewerApp {
 
                         if !affected_folders.is_empty() {
                             for folder in &affected_folders {
-                                self.invalidate_directory_caches(folder);
+                                self.invalidate_directory_listing_caches(folder);
                             }
 
                             if affected_folders.iter().any(|folder| {
