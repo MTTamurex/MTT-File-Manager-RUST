@@ -225,12 +225,13 @@ System access, Windows integration, and data persistence.
 
 Background threads for asynchronous processing.
 
-- `thumbnail/` — Multi-stage thumbnail system
-  - `extraction/stage1_image_crate.rs` — Stage 1: image crate (PNG, JPG, GIF, WebP)
-  - `extraction/stage2_wic.rs` — Stage 2: Windows Imaging Component
-  - `extraction/stage3_shell_api.rs` — Stage 3: Shell API (`IShellItemImageFactory`)
-  - `extraction/stage4_force_extract.rs` — Stage 4: Forced extraction
-  - `extraction/stage5_media_foundation.rs` — Stage 5: Media Foundation (videos)
+- `thumbnail/` — Image-aware multi-stage thumbnail system
+    - `extraction/stage0_embedded_exif_thumbnail.rs` — JPEG embedded EXIF thumbnail fast path
+    - `extraction/stage1_image_crate.rs` — Image crate fallback for common formats
+    - `extraction/stage2_wic.rs` — Windows Imaging Component image-target path and robust fallback
+    - `extraction/stage3_shell_api.rs` — Shell API (`IShellItemImageFactory`) fallback and video handoff
+    - `extraction/stage4_force_extract.rs` — Forced extraction
+    - `extraction/stage5_media_foundation.rs` — Media Foundation (videos)
   - `queue.rs`, `types.rs`, `worker.rs`, `processing/` — Queue, types, worker loop, and post-processing
 - `folder_preview_worker.rs` — Folder cover composition worker
 - `file_operation_worker.rs` + `file_operation_worker/` — Async file operations

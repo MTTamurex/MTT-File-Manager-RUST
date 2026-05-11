@@ -65,7 +65,7 @@ UI updates file list
 
 **Key files**: `app/operations/clipboard_ops.rs`, `app/operations/file_ops.rs`, `workers/file_operation_worker.rs`, `infrastructure/windows/shell_operations.rs`
 
-## 4. Thumbnail Generation (5-Stage Pipeline)
+## 4. Thumbnail Generation (Image-Aware Hybrid Pipeline)
 
 **Trigger**: Folder loads and visible items need thumbnails.
 
@@ -74,6 +74,10 @@ Request queued in PriorityThumbnailQueue
     ↓
 Thumbnail worker picks item [workers/thumbnail/worker.rs]
     ↓
+For JPEG still images, try embedded EXIF thumbnail if it satisfies the requested bucket
+    ↓ (miss or too small?)
+For still images, try WIC image-target path using the requested bucket
+    ↓ (fail?)
 Stage 1: image crate (PNG, JPG, GIF, WebP)
     ↓ (fail?)
 Stage 2: Windows Imaging Component (WIC)
@@ -91,7 +95,9 @@ Store in SQLite disk cache [infrastructure/disk_cache/thumbnails_repo.rs]
 Send ThumbnailData via channel → UI loads as GPU texture
 ```
 
-**Key files**: `workers/thumbnail/extraction/stage1_image_crate.rs` through `stage5_media_foundation.rs`, `workers/thumbnail/queue.rs`
+Still-image requests now receive their bucket target before extraction so the image-only fast paths can avoid unnecessary full-resolution work. Video thumbnails keep the existing Shell API / Media Foundation flow.
+
+**Key files**: `workers/thumbnail/extraction/stage0_embedded_exif_thumbnail.rs` through `stage5_media_foundation.rs`, `workers/thumbnail/queue.rs`
 
 **Codec requirements for video thumbnails**: Stages 3, 4, and 5 depend on video codecs registered on the system. MP4 (H.264), WMV, and AVI work natively on Windows 10/11. For MKV, WEBM, HEVC, VP9, and AV1, the user must install a codec pack such as [K-Lite Codec Pack Standard](https://codecguide.com/download_kl.htm). See the [README — Video Thumbnail Codecs](../README.md#video-thumbnail-codecs) section for details.
 

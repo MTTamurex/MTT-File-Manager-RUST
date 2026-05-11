@@ -30,7 +30,7 @@ MTT File Manager is a native Windows file manager built in Rust with a modern bo
 - **Text viewer** — Separate process for plain text, code, logs, and markup with a lightweight viewer runtime
 - **Video player** — Standalone mpv-based player with D3D11 GPU pipeline, borderless window, and subtitle support
 - **PDF viewer** — Native viewer using pdfium (Google's PDF rendering library via `pdfium-render` crate), with bounded texture memory, an async render worker, and separate process isolation
-- **Smart thumbnails** — Multi-stage generation pipeline: image crate → WIC → Shell API → force extract → Media Foundation
+- **Smart thumbnails** — Image-aware generation pipeline: embedded JPEG EXIF thumbnail → WIC image-target path → image crate → WIC → Shell API → force extract → Media Foundation. Early image stages are bucket-aware; the video path remains unchanged
 - **Custom folder covers** — Folder previews composed from 3 PNG layers (back/thumbnail/front) via `image` crate, replacing Shell API
 - **Animated GIF playback** — Optimized GIF rendering with play/pause controls
 - **Metadata extraction** — EXIF data from images, video/audio metadata via Media Foundation

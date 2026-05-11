@@ -262,6 +262,7 @@ src/
 │       ├── processing/              # Post-processing
 │       └── extraction/              # Multi-stage extraction
 │           ├── mod.rs
+│           ├── stage0_embedded_exif_thumbnail.rs
 │           ├── stage1_image_crate.rs
 │           ├── stage2_wic.rs
 │           ├── stage3_shell_api.rs

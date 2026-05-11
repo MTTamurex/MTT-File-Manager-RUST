@@ -71,15 +71,19 @@ List-view folder sizes are handled by a dedicated batch worker with:
 
 ## 4. Thumbnail Pipeline Optimization
 
-The 5-stage thumbnail pipeline is designed for maximum hit rate with minimal overhead:
+The thumbnail pipeline now uses image-only cheap paths before the legacy fallback stages:
 
-1. **Stage 1 (image crate)**: Fastest path — pure Rust, no COM initialization
-2. **Stage 2 (WIC)**: Windows Imaging Component — handles formats not supported by image crate
-3. **Stage 3 (Shell API)**: IShellItemImageFactory — handles Shell-specific formats
-4. **Stage 4 (Force extract)**: Forced extraction for edge cases
-5. **Stage 5 (Media Foundation)**: Video thumbnails via frame extraction
+1. **Embedded EXIF JPEG thumbnail**: Camera and phone JPEGs often carry an embedded preview. When that preview already satisfies the requested bucket, the worker can skip the expensive full-image path entirely.
+2. **WIC image-target path**: Still-image requests pass the target bucket into the extraction layer before the legacy stages run.
+3. **Stage 1 (image crate)**: Pure-Rust fallback for common formats when the image-only fast paths do not apply or fail.
+4. **Stage 2 (WIC)**: Robust fallback for CMYK or problematic still images.
+5. **Stage 3 (Shell API)**: IShellItemImageFactory fallback for formats handled better by Shell.
+6. **Stage 4 (Force extract)**: Forced extraction for edge cases.
+7. **Stage 5 (Media Foundation)**: Video thumbnails via frame extraction.
 
-Each stage only runs if the previous one fails, minimizing expensive COM/Shell calls.
+Each stage only runs if the previous one fails, minimizing expensive Shell and codec-dependent calls. The video thumbnail path is intentionally unchanged.
+
+For large HDD-hosted JPEGs, the biggest win comes from the embedded EXIF preview path. When a folder preview uses a still image as its first media item, the same image-only fast paths are reused before composition.
 
 **Thumbnail compression**: Generated thumbnails are compressed to WebP format for smaller disk cache footprint.
 

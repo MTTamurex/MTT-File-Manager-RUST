@@ -47,7 +47,7 @@
 | resvg | 0.44 | SVG rendering |
 | usvg | 0.44 | SVG parsing |
 | tiny-skia | 0.11 | Rasterization backend for SVG |
-| kamadak-exif | 0.5 | EXIF metadata extraction from JPEG |
+| kamadak-exif | 0.5 | JPEG EXIF metadata and embedded thumbnail access |
 
 ### Media
 
