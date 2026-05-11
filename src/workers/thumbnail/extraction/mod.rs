@@ -1,14 +1,16 @@
 //! Thumbnail extraction pipeline
 //!
-//! Implements a hybrid extraction pipeline with an image-only sized-decode fast path:
+//! Implements a hybrid extraction pipeline with image-only fast paths:
 //!
-//! 0. **WIC Sized Decode** (Image Fast Path) - Decodes large still images directly to the requested bucket
-//! 1. **Image Crate** (Legacy Fast Path) - Uses `image` crate for common formats
-//! 2. **WIC** (Robust Fallback) - Windows Imaging Component for CMYK/problematic images
-//! 3. **Shell API** (Universal) - IShellItemImageFactory for most file types
-//! 4. **Force Extraction** - IThumbnailCache with WTS_FORCEEXTRACTION flag
-//! 5. **Media Foundation** (Nuclear Option) - Direct video frame extraction
+//! 0. **Embedded EXIF JPEG Thumbnail** - Uses the low-resolution preview embedded in camera JPEGs when it satisfies the requested bucket
+//! 1. **WIC Sized Decode** - Decodes large still images directly to the requested bucket
+//! 2. **Image Crate** (Legacy Fast Path) - Uses `image` crate for common formats
+//! 3. **WIC** (Robust Fallback) - Windows Imaging Component for CMYK/problematic images
+//! 4. **Shell API** (Universal) - IShellItemImageFactory for most file types
+//! 5. **Force Extraction** - IThumbnailCache with WTS_FORCEEXTRACTION flag
+//! 6. **Media Foundation** (Nuclear Option) - Direct video frame extraction
 
+pub mod stage0_embedded_exif_thumbnail;
 pub mod stage1_image_crate;
 pub mod stage2_wic;
 pub mod stage3_shell_api;
@@ -97,6 +99,22 @@ pub fn generate_thumbnail_hybrid_detailed_with_target(
     let read_safety = crate::infrastructure::windows::file_flags::classify_file_read_safety(path);
     if read_safety != crate::infrastructure::windows::file_flags::FileReadSafety::Safe {
         return ThumbnailExtractionOutcome::UnsafeToRead(read_safety);
+    }
+
+    if let Some(max_side) = embedded_exif_thumbnail_target(path, image_target_max_side) {
+        log::trace!(
+            "[Thumbnail] Trying Stage EXIF (embedded JPEG thumbnail, {}px)...",
+            max_side
+        );
+        if let Some(result) = stage0_embedded_exif_thumbnail::extract(path, priority, max_side) {
+            log::trace!("[Thumbnail] Stage EXIF SUCCESS for: {:?}", path.file_name());
+            return ThumbnailExtractionOutcome::Success(result);
+        }
+        log::trace!("[Thumbnail] Stage EXIF unavailable or too small, trying Stage 0...");
+
+        if pending_deletions.contains_key(path) || !onedrive::fast_path_exists(path) {
+            return ThumbnailExtractionOutcome::Failed;
+        }
     }
 
     if let Some(max_side) = image_sized_fast_path_target(path, image_target_max_side) {
@@ -208,9 +226,19 @@ fn image_sized_fast_path_target(path: &Path, requested_max_side: Option<u32>) ->
     }
 }
 
+fn embedded_exif_thumbnail_target(path: &Path, requested_max_side: Option<u32>) -> Option<u32> {
+    let max_side = requested_max_side?.max(1);
+    let ext = path.extension()?.to_str()?;
+    if ext.eq_ignore_ascii_case("jpg") || ext.eq_ignore_ascii_case("jpeg") {
+        Some(max_side)
+    } else {
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::image_sized_fast_path_target;
+    use super::{embedded_exif_thumbnail_target, image_sized_fast_path_target};
     use std::path::Path;
 
     #[test]
@@ -237,5 +265,22 @@ mod tests {
         );
         assert_eq!(image_sized_fast_path_target(Path::new("anim.gif"), Some(256)), None);
         assert_eq!(image_sized_fast_path_target(Path::new("photo.jpg"), None), None);
+    }
+
+    #[test]
+    fn embedded_exif_thumbnail_target_accepts_only_jpeg_requests() {
+        assert_eq!(
+            embedded_exif_thumbnail_target(Path::new("photo.jpeg"), Some(256)),
+            Some(256)
+        );
+        assert_eq!(
+            embedded_exif_thumbnail_target(Path::new("photo.jpg"), Some(512)),
+            Some(512)
+        );
+        assert_eq!(
+            embedded_exif_thumbnail_target(Path::new("photo.png"), Some(256)),
+            None
+        );
+        assert_eq!(embedded_exif_thumbnail_target(Path::new("photo.jpg"), None), None);
     }
 }
