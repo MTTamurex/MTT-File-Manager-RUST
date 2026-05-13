@@ -226,47 +226,43 @@ pub(in crate::app) fn spawn_icon_worker(
 
                     let is_virtual_archive_path = crate::domain::file_entry::is_path_inside_archive(&path);
 
+                    // For files, prefer Jumbo (256×256 via IShellItemImageFactory)
+                    // so grid icons render at high resolution instead of the
+                    // blurry upscaled 48×48 Large icons.
                     let icon_result = if is_virtual_archive_path {
-                        extract_shell_icon(&path, IconSize::Large)
+                        extract_shell_icon(&path, IconSize::Jumbo)
                     } else if per_file_icon {
-                        extract_file_icon_by_path(&path, IconSize::Large)
+                        extract_file_icon_by_path(&path, IconSize::Jumbo)
                     } else {
                         let ext_raw = ext_lower.as_deref().unwrap_or("");
-                        // Map extensions that share the same shell icon (sys→dll etc.)
-                        // so all variants share a single cache entry.
                         let ext_str = crate::infrastructure::windows::icons::canonical_icon_ext(ext_raw);
-                        let dot_ext = if ext_str.is_empty() {
+                        // Check shared Jumbo cache first.
+                        let jumbo_dot_ext = if ext_str.is_empty() {
                             String::new()
                         } else {
-                            format!(".{}", ext_str)
+                            format!(".{}_Jumbo", ext_str)
                         };
-                        // Check shared cache first — another worker may have
-                        // already extracted this extension's icon.
                         if let Some(cached) = ext_cache
-                            .get(&dot_ext)
+                            .get(&jumbo_dot_ext)
                             .map(|entry| entry.value().clone())
                         {
                             Ok(cached)
-                        } else if let Some(cached) = disk_cache.load_one(ext_str) {
-                            // Lazy disk hit: persistent on-disk RGBA exists but
-                            // wasn't materialised at boot. Cache it now so the
-                            // next request for this extension hits the DashMap.
-                            ext_cache.insert(dot_ext, cached.clone());
+                        } else if let Some(cached) = disk_cache.load_one(&format!("{}_Jumbo", ext_str)) {
+                            ext_cache.insert(jumbo_dot_ext, cached.clone());
                             Ok(cached)
                         } else {
-                            let r = if needs_real_path_shared_icon {
-                                extract_file_icon_by_path(&path, IconSize::Large)
+                            // Try Jumbo extraction via IShellItemImageFactory on the real file.
+                            // Falls back to SHGetFileInfoW (48×48) if IShellItemImageFactory fails.
+                            let r = if needs_real_path_shared_icon
+                                || path.exists()
+                            {
+                                extract_file_icon_by_path(&path, IconSize::Jumbo)
                             } else {
-                                // Use get_file_type_icon (with internal CoInitialize)
-                                // instead of extract_file_icon — the latter produces
-                                // generic icons for ProgID-based types (dll, sys, bat)
-                                // on worker threads.
-                                get_file_type_icon(false, ext_str, IconSize::Large)
+                                get_file_type_icon(false, ext_str, IconSize::Jumbo)
                             };
                             if let Ok(ref data) = r {
-                                ext_cache.insert(dot_ext, data.clone());
-                                // Persist to disk for instant loading on next app launch.
-                                disk_cache.save(ext_str, &data.0, data.1, data.2);
+                                ext_cache.insert(jumbo_dot_ext, data.clone());
+                                disk_cache.save(&format!("{}_Jumbo", ext_str), &data.0, data.1, data.2);
                             }
                             r
                         }

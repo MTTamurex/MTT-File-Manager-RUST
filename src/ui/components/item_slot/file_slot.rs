@@ -1,5 +1,6 @@
 use super::badges::render_sync_badge;
 use super::*;
+use crate::domain::file_entry::IconSize;
 
 /// Renders a file slot
 pub(super) fn render_file_slot<O: ItemSlotOperations>(
@@ -65,9 +66,14 @@ pub(super) fn render_file_slot<O: ItemSlotOperations>(
     // Load icon (always, serves as fallback)
     // In Recycle Bin, uses get_or_load_icon which now supports virtual paths with extension
     // PERFORMANCE: allow_blocking=false prevents UI stutter on slow icons (exe/lnk)
+    // Prefer Jumbo (256×256) for high-res grid rendering; fall back to Large (48×48).
     let file_icon = ctx
         .icon_loader
-        .get_or_load_icon(ui.ctx(), &item.path, false, false);
+        .get_or_load_icon_sized(ui.ctx(), &item.path, IconSize::Jumbo, false, false)
+        .or_else(|| {
+            ctx.icon_loader
+                .get_or_load_icon(ui.ctx(), &item.path, false, false)
+        });
 
     // If icon is not cached AND not loading AND not failed:
     // Triggers async loading (only for slow cases where allow_blocking=false returned None)
