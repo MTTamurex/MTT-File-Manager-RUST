@@ -277,6 +277,13 @@ fn render_section_indices(
                     egui::pos2(content_min.x + x_pos, item_y),
                     egui::vec2(item_w, item_h),
                 );
+                // SAFETY: computer_local_indices / computer_network_indices are pre-computed
+                // from the full items list. When a local search/filter replaces self.items
+                // with a smaller subset, these indices become stale and can be out of bounds.
+                // Skip the item instead of panicking.
+                if real_idx >= ctx.items.len() {
+                    continue;
+                }
                 let item = &ctx.items[real_idx];
                 item_renderer::render_grid_item(
                     ui,
