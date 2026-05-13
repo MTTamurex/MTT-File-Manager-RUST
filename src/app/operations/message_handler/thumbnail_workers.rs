@@ -176,6 +176,7 @@ impl ImageViewerApp {
                 Ok((path, icon_generation, pixels, width, height)) => {
                     if icon_generation == usize::MAX {
                         // Pre-warm result: populate extension_cache only.
+                        // Store under _Jumbo (primary) and _Large (backward compat).
                         if !pixels.is_empty() && width > 0 && height > 0 {
                             if let Some(ext) = path.extension() {
                                 let ext_raw = ext.to_string_lossy().to_lowercase();
@@ -183,22 +184,33 @@ impl ImageViewerApp {
                                     crate::infrastructure::windows::icons::canonical_icon_ext(
                                         &ext_raw,
                                     );
-                                let ext_key = format!("{}_Large", ext_str);
-                                if self
+                                let ext_key_jumbo = format!("{}_Jumbo", ext_str);
+                                let ext_key_large = format!("{}_Large", ext_str);
+                                let need_jumbo = self
                                     .item_icon_loader
                                     .extension_cache
-                                    .peek(&ext_key)
-                                    .is_none()
-                                {
+                                    .peek(&ext_key_jumbo)
+                                    .is_none();
+                                let need_large = self
+                                    .item_icon_loader
+                                    .extension_cache
+                                    .peek(&ext_key_large)
+                                    .is_none();
+                                if need_jumbo || need_large {
                                     let texture = ctx.load_texture(
-                                        ext_key.clone(),
+                                        ext_key_jumbo.clone(),
                                         egui::ColorImage::from_rgba_unmultiplied(
                                             [width as usize, height as usize],
                                             &pixels,
                                         ),
                                         egui::TextureOptions::LINEAR,
                                     );
-                                    self.item_icon_loader.extension_cache.put(ext_key, texture);
+                                    if need_jumbo {
+                                        self.item_icon_loader.extension_cache.put(ext_key_jumbo, texture.clone());
+                                    }
+                                    if need_large {
+                                        self.item_icon_loader.extension_cache.put(ext_key_large, texture);
+                                    }
                                     prewarm_uploads += 1;
                                 }
                             }
@@ -274,22 +286,33 @@ impl ImageViewerApp {
                             let ext_raw = ext.to_string_lossy().to_lowercase();
                             let ext_str =
                                 crate::infrastructure::windows::icons::canonical_icon_ext(&ext_raw);
-                            let ext_key = format!("{}_Large", ext_str);
-                            if self
+                            let ext_key_jumbo = format!("{}_Jumbo", ext_str);
+                            let ext_key_large = format!("{}_Large", ext_str);
+                            let need_jumbo = self
                                 .item_icon_loader
                                 .extension_cache
-                                .peek(&ext_key)
-                                .is_none()
-                            {
+                                .peek(&ext_key_jumbo)
+                                .is_none();
+                            let need_large = self
+                                .item_icon_loader
+                                .extension_cache
+                                .peek(&ext_key_large)
+                                .is_none();
+                            if need_jumbo || need_large {
                                 let texture = ctx.load_texture(
-                                    ext_key.clone(),
+                                    ext_key_jumbo.clone(),
                                     egui::ColorImage::from_rgba_unmultiplied(
                                         [width as usize, height as usize],
                                         &pixels,
                                     ),
                                     egui::TextureOptions::LINEAR,
                                 );
-                                self.item_icon_loader.extension_cache.put(ext_key, texture);
+                                if need_jumbo {
+                                    self.item_icon_loader.extension_cache.put(ext_key_jumbo, texture.clone());
+                                }
+                                if need_large {
+                                    self.item_icon_loader.extension_cache.put(ext_key_large, texture);
+                                }
                             }
                         }
                         if let Some(ext) = path.extension() {
@@ -354,9 +377,10 @@ impl ImageViewerApp {
         }
 
         let path_text = path.to_string_lossy();
-        let mut cache_key = String::with_capacity(path_text.len() + 6);
+        // Store as Jumbo (256×256) — the async worker now extracts at Jumbo size.
+        let mut cache_key = String::with_capacity(path_text.len() + 7);
         cache_key.push_str(path_text.as_ref());
-        cache_key.push_str("_Large");
+        cache_key.push_str("_Jumbo");
         if !self.item_icon_loader.icon_cache.contains(&cache_key) {
             let texture = ctx.load_texture(
                 cache_key.clone(),
@@ -368,22 +392,38 @@ impl ImageViewerApp {
             );
 
             // Populate extension cache for instant icon sharing.
+            // Store under both _Jumbo (primary, high-res) and _Large (backward compat)
+            // so both get_or_load_icon_sized(Jumbo) and get_or_load_icon_sized(Large) hit.
             if let Some(ext) = path.extension() {
                 let ext_raw = ext.to_string_lossy().to_lowercase();
                 let ext_str = crate::infrastructure::windows::icons::canonical_icon_ext(&ext_raw);
                 if !crate::infrastructure::windows::icons::is_per_file_icon_ext(&ext_raw) {
-                    let mut ext_key = String::with_capacity(ext_str.len() + 6);
-                    ext_key.push_str(ext_str);
-                    ext_key.push_str("_Large");
+                    let mut ext_key_jumbo = String::with_capacity(ext_str.len() + 7);
+                    ext_key_jumbo.push_str(ext_str);
+                    ext_key_jumbo.push_str("_Jumbo");
                     if self
                         .item_icon_loader
                         .extension_cache
-                        .peek(&ext_key)
+                        .peek(&ext_key_jumbo)
                         .is_none()
                     {
                         self.item_icon_loader
                             .extension_cache
-                            .put(ext_key, texture.clone());
+                            .put(ext_key_jumbo, texture.clone());
+                    }
+                    // Also seed _Large for callers that haven't migrated to Jumbo yet
+                    let mut ext_key_large = String::with_capacity(ext_str.len() + 7);
+                    ext_key_large.push_str(ext_str);
+                    ext_key_large.push_str("_Large");
+                    if self
+                        .item_icon_loader
+                        .extension_cache
+                        .peek(&ext_key_large)
+                        .is_none()
+                    {
+                        self.item_icon_loader
+                            .extension_cache
+                            .put(ext_key_large, texture.clone());
                     }
                 }
             }

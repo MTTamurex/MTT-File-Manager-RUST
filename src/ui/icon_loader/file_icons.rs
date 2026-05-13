@@ -231,6 +231,20 @@ impl IconLoader {
                 if let Some(texture) = self.extension_cache.get(&ext_key) {
                     return Some(texture.clone());
                 }
+
+                // Cross-size fallback: if Jumbo isn't cached yet but Large is, use Large.
+                // If Large isn't cached but Jumbo is, use Jumbo (higher res, downscales well).
+                if size == IconSize::Jumbo {
+                    let large_key = format!("{}_Large", ext_str);
+                    if let Some(texture) = self.extension_cache.get(&large_key) {
+                        return Some(texture.clone());
+                    }
+                } else if size == IconSize::Large {
+                    let jumbo_key = format!("{}_Jumbo", ext_str);
+                    if let Some(texture) = self.extension_cache.get(&jumbo_key) {
+                        return Some(texture.clone());
+                    }
+                }
             }
 
             // Critical for extensionless files: async worker stores results in
