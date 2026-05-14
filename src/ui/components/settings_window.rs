@@ -31,6 +31,7 @@ pub fn render_settings_window(
     let mut recycle_bin_changed = false;
 
     egui::Window::new(t!("settings.window_title"))
+        .id(egui::Id::new("settings_window"))
         .open(&mut keep_open)
         .collapsible(false)
         .resizable(true)
