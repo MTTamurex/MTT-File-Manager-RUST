@@ -302,6 +302,7 @@ pub fn handle_exit(app: &mut ImageViewerApp) {
     // process::exit will tear it down.
     std::thread::sleep(std::time::Duration::from_millis(30));
     log::info!("[EXIT] Grace period elapsed. Exiting.");
+    crate::infrastructure::diagnostic_logger::flush();
 
     // ── Phase 3: exit process ────────────────────────────────────────────
     // std::process::exit runs libc atexit handlers (including SQLite's) and

@@ -39,6 +39,7 @@ impl eframe::App for ImageViewerApp {
         // 2. Lifecycle: Startup sequence & window state tracking
         app::lifecycle::handle_startup_sequence(self, ctx);
         app::lifecycle::track_window_state(self, ctx);
+        self.auto_disable_diagnostic_mode_if_needed();
         let frame_ms = ctx.input(|i| i.stable_dt) * 1000.0;
 
         // Use the larger of egui's stable_dt and the previous frame's actual render
@@ -216,6 +217,8 @@ impl eframe::App for ImageViewerApp {
 
         // 11. Settings window
         if self.navigation_state.show_settings_window {
+            let diagnostic_log_path = crate::infrastructure::diagnostic_logger::log_file_path();
+            let mut diagnostic_mode = self.diagnostic_mode;
             let output = crate::ui::components::settings_window::render_settings_window(
                 ctx,
                 self.navigation_state.show_settings_window,
@@ -226,6 +229,8 @@ impl eframe::App for ImageViewerApp {
                 &mut self.shortcuts,
                 &mut self.shortcut_editor,
                 &mut self.show_recycle_bin,
+                &mut diagnostic_mode,
+                &diagnostic_log_path,
             );
             self.navigation_state.show_settings_window = output.keep_open;
             if !output.keep_open {
@@ -259,6 +264,12 @@ impl eframe::App for ImageViewerApp {
             if output.recycle_bin_changed {
                 self.save_preferences();
                 self.force_save_preferences();
+            }
+            if output.diagnostic_mode_changed {
+                self.set_diagnostic_mode(diagnostic_mode);
+            }
+            if output.open_diagnostic_folder {
+                self.open_diagnostic_log_folder();
             }
         }
 

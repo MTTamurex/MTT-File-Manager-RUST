@@ -11,6 +11,8 @@ use crate::app::navigation_state::ThemeMode;
 use crate::app::state::ImageViewerApp;
 use crate::domain::file_entry::{FoldersPosition, SortMode, ViewMode};
 use crate::domain::special_paths::is_virtual_path;
+use crate::infrastructure::diagnostic_logger;
+use std::time::SystemTime;
 
 /// Minimum interval between actual disk writes
 const PREFERENCES_FLUSH_INTERVAL_MS: u64 = 1000;
@@ -189,6 +191,21 @@ impl ImageViewerApp {
         // GPU backend preference
         prefs.push(("gpu_backend", self.gpu_backend_preference.clone()));
 
+        // Diagnostic mode preference
+        prefs.push((
+            diagnostic_logger::DIAGNOSTIC_MODE_KEY,
+            if self.diagnostic_mode {
+                "true".to_string()
+            } else {
+                "false".to_string()
+            },
+        ));
+        prefs.push((
+            diagnostic_logger::DIAGNOSTIC_MODE_ENABLED_AT_KEY,
+            diagnostic_logger::format_enabled_at_preference(self.diagnostic_mode_enabled_at)
+                .unwrap_or_default(),
+        ));
+
         // Configurable keyboard shortcuts
         self.shortcuts.append_preferences(&mut prefs);
 
@@ -257,5 +274,61 @@ impl ImageViewerApp {
     fn do_save_preferences_blocking(&self) {
         let prefs = self.collect_preferences();
         self.app_state_db.set_preferences_batch(&prefs);
+    }
+
+    pub fn set_diagnostic_mode(&mut self, enabled: bool) {
+        let logger_matches_state =
+            self.diagnostic_mode == enabled && (!enabled || diagnostic_logger::is_enabled());
+        if logger_matches_state {
+            return;
+        }
+
+        if enabled {
+            let enabled_since = self.diagnostic_mode_enabled_at.unwrap_or_else(SystemTime::now);
+            match diagnostic_logger::enable_file_logging_with_since(enabled_since) {
+                Ok(log_path) => {
+                    self.diagnostic_mode = true;
+                    self.diagnostic_mode_enabled_at = Some(enabled_since);
+                    log::info!(
+                        "[DIAGNOSTIC] Diagnostic mode enabled. Writing info logs to '{}'",
+                        log_path.display()
+                    );
+                }
+                Err(error) => {
+                    self.diagnostic_mode = false;
+                    self.diagnostic_mode_enabled_at = None;
+                    log::error!("[DIAGNOSTIC] Failed to enable diagnostic logging: {}", error);
+                }
+            }
+        } else {
+            if diagnostic_logger::is_enabled() {
+                log::info!("[DIAGNOSTIC] Diagnostic mode disabled");
+            }
+            diagnostic_logger::disable_file_logging();
+            self.diagnostic_mode = false;
+            self.diagnostic_mode_enabled_at = None;
+        }
+
+        self.save_preferences();
+        self.force_save_preferences();
+    }
+
+    pub fn auto_disable_diagnostic_mode_if_needed(&mut self) {
+        if !self.diagnostic_mode {
+            return;
+        }
+
+        if diagnostic_logger::is_preference_expired(self.diagnostic_mode_enabled_at, SystemTime::now())
+        {
+            log::info!("[DIAGNOSTIC] Auto-disabling diagnostic mode after 24 hours");
+            self.set_diagnostic_mode(false);
+        }
+    }
+
+    pub fn open_diagnostic_log_folder(&mut self) {
+        if let Err(error) = diagnostic_logger::open_log_folder() {
+            log::warn!("[DIAGNOSTIC] Failed to open diagnostic log folder: {}", error);
+            self.notifications.warning(error);
+        }
     }
 }

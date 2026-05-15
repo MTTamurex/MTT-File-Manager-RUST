@@ -2,6 +2,7 @@ use crate::app::navigation_state::{SettingsSection, ThemeMode};
 use crate::app::shortcuts::{ShortcutBindings, ShortcutEditorState};
 use eframe::egui;
 use rust_i18n::t;
+use std::path::Path;
 
 pub struct SettingsWindowOutput {
     pub keep_open: bool,
@@ -10,6 +11,8 @@ pub struct SettingsWindowOutput {
     pub backend_changed: bool,
     pub shortcuts_changed: bool,
     pub recycle_bin_changed: bool,
+    pub diagnostic_mode_changed: bool,
+    pub open_diagnostic_folder: bool,
 }
 
 pub fn render_settings_window(
@@ -22,6 +25,8 @@ pub fn render_settings_window(
     shortcuts: &mut ShortcutBindings,
     shortcut_editor: &mut ShortcutEditorState,
     show_recycle_bin: &mut bool,
+    diagnostic_mode: &mut bool,
+    diagnostic_log_path: &Path,
 ) -> SettingsWindowOutput {
     let mut keep_open = show_window;
     let mut language_changed = false;
@@ -29,6 +34,8 @@ pub fn render_settings_window(
     let mut backend_changed = false;
     let mut shortcuts_changed = false;
     let mut recycle_bin_changed = false;
+    let mut diagnostic_mode_changed = false;
+    let mut open_diagnostic_folder = false;
 
     egui::Window::new(t!("settings.window_title"))
         .id(egui::Id::new("settings_window"))
@@ -79,6 +86,41 @@ pub fn render_settings_window(
                                         recycle_bin_changed = true;
                                     }
                                 }
+                                SettingsSection::Diagnostics => {
+                                    ui.add_space(16.0);
+                                    ui.label(
+                                        egui::RichText::new(t!("settings.diagnostics").to_string())
+                                            .strong(),
+                                    );
+                                    ui.add_space(4.0);
+                                    ui.label(t!("settings.diagnostics_description"));
+                                    ui.add_space(8.0);
+                                    if ui
+                                        .checkbox(
+                                            diagnostic_mode,
+                                            t!("settings.diagnostics_enable"),
+                                        )
+                                        .changed()
+                                    {
+                                        diagnostic_mode_changed = true;
+                                    }
+                                    ui.add_space(8.0);
+                                    ui.add(
+                                        egui::Label::new(
+                                            egui::RichText::new(
+                                                diagnostic_log_path.display().to_string(),
+                                            )
+                                            .monospace(),
+                                        )
+                                        .wrap(),
+                                    );
+                                    ui.add_space(6.0);
+                                    if ui.button(t!("settings.diagnostics_open_folder")).clicked() {
+                                        open_diagnostic_folder = true;
+                                    }
+                                    ui.add_space(6.0);
+                                    ui.small(t!("settings.diagnostics_note"));
+                                }
                                 SettingsSection::Shortcuts => {
                                     shortcuts_changed |= crate::ui::components::shortcut_settings::render_shortcut_settings_section(
                                         ui,
@@ -105,6 +147,8 @@ pub fn render_settings_window(
         backend_changed,
         shortcuts_changed,
         recycle_bin_changed,
+        diagnostic_mode_changed,
+        open_diagnostic_folder,
     }
 }
 
@@ -117,6 +161,11 @@ fn render_settings_sidebar(ui: &mut egui::Ui, active_section: &mut SettingsSecti
         active_section,
         SettingsSection::General,
         &*t!("settings.general"),
+    );
+    ui.selectable_value(
+        active_section,
+        SettingsSection::Diagnostics,
+        &*t!("settings.diagnostics"),
     );
     ui.selectable_value(
         active_section,

@@ -22,7 +22,7 @@ use crate::ui::cache::FxHashSet;
 use std::sync::atomic::{AtomicBool, AtomicUsize};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Instant, SystemTime};
 
 use crate::app::drive_state::DriveState;
 use crate::app::dual_panel::{ActivePanel, PanelSnapshot};
@@ -442,6 +442,8 @@ pub struct ImageViewerApp {
     // GPU backend: active backend name (from adapter info, read-only) and user preference
     pub active_gpu_backend: String,
     pub gpu_backend_preference: String,
+    pub diagnostic_mode: bool,
+    pub diagnostic_mode_enabled_at: Option<SystemTime>,
 
     // Configurable keyboard shortcuts
     pub shortcuts: ShortcutBindings,

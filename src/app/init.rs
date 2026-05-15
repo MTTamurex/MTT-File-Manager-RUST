@@ -161,6 +161,9 @@ impl ImageViewerApp {
             language,
             theme_mode,
             gpu_backend_preference,
+            diagnostic_mode,
+            diagnostic_mode_enabled_at,
+            diagnostic_mode_needs_persist,
             shortcuts,
         } = startup_preferences;
 
@@ -511,6 +514,8 @@ impl ImageViewerApp {
 
             active_gpu_backend: String::new(), // Set after construction from render_state
             gpu_backend_preference,
+            diagnostic_mode,
+            diagnostic_mode_enabled_at,
             shortcuts,
             shortcut_editor: crate::app::shortcuts::ShortcutEditorState::default(),
 
@@ -559,6 +564,13 @@ impl ImageViewerApp {
             was_focused: true,
             focus_lost_at: None,
         };
+
+        if app.diagnostic_mode && !crate::infrastructure::diagnostic_logger::is_enabled() {
+            app.set_diagnostic_mode(true);
+        } else if diagnostic_mode_needs_persist {
+            app.save_preferences();
+            app.force_save_preferences();
+        }
 
         // Pre-set custom composed folder icon on cache_manager (used by grid/list bridges)
         {
