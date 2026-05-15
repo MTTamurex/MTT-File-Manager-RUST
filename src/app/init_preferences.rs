@@ -2,7 +2,9 @@ use crate::app::navigation_state::ThemeMode;
 use crate::app::shortcuts::ShortcutBindings;
 use crate::domain::file_entry::{FoldersPosition, SortMode, ViewMode};
 use crate::infrastructure::app_state_db::AppStateDb;
+use crate::infrastructure::diagnostic_logger;
 use crate::ui::theme;
+use std::time::SystemTime;
 
 pub(super) struct StartupPreferences {
     pub(super) sort_mode: SortMode,
@@ -26,6 +28,9 @@ pub(super) struct StartupPreferences {
     pub(super) language: String,
     pub(super) theme_mode: ThemeMode,
     pub(super) gpu_backend_preference: String,
+    pub(super) diagnostic_mode: bool,
+    pub(super) diagnostic_mode_enabled_at: Option<SystemTime>,
+    pub(super) diagnostic_mode_needs_persist: bool,
     pub(super) shortcuts: ShortcutBindings,
 }
 
@@ -179,6 +184,33 @@ impl StartupPreferences {
             .cloned()
             .unwrap_or_else(|| "auto".to_string());
 
+        let diagnostic_mode_requested = prefs
+            .get(diagnostic_logger::DIAGNOSTIC_MODE_KEY)
+            .map(|s| s == "true")
+            .unwrap_or(false);
+        let diagnostic_enabled_at_raw = prefs
+            .get(diagnostic_logger::DIAGNOSTIC_MODE_ENABLED_AT_KEY)
+            .map(String::as_str);
+        let parsed_diagnostic_enabled_at =
+            diagnostic_logger::parse_enabled_at_preference(diagnostic_enabled_at_raw);
+        let now = SystemTime::now();
+        let diagnostic_mode_enabled_at = if diagnostic_mode_requested {
+            parsed_diagnostic_enabled_at.or(Some(now))
+        } else {
+            None
+        };
+        let diagnostic_mode_expired = diagnostic_mode_requested
+            && diagnostic_logger::is_preference_expired(diagnostic_mode_enabled_at, now);
+        let diagnostic_mode = diagnostic_mode_requested && !diagnostic_mode_expired;
+        let diagnostic_mode_enabled_at = if diagnostic_mode {
+            diagnostic_mode_enabled_at
+        } else {
+            None
+        };
+        let diagnostic_mode_needs_persist = (diagnostic_mode_requested
+            && (parsed_diagnostic_enabled_at.is_none() || diagnostic_mode_expired))
+            || (!diagnostic_mode_requested && diagnostic_enabled_at_raw.is_some());
+
         let shortcuts = ShortcutBindings::from_preferences(&prefs);
 
         Self {
@@ -203,6 +235,9 @@ impl StartupPreferences {
             language,
             theme_mode,
             gpu_backend_preference,
+            diagnostic_mode,
+            diagnostic_mode_enabled_at,
+            diagnostic_mode_needs_persist,
             shortcuts,
         }
     }

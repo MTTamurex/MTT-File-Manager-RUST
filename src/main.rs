@@ -15,6 +15,7 @@
 use eframe::egui;
 use mtt_file_manager::app::ImageViewerApp;
 use std::path::PathBuf;
+use std::time::SystemTime;
 
 const APP_ID: &str = "mtt-file-manager";
 
@@ -141,7 +142,48 @@ fn main() -> eframe::Result<()> {
     let mut log_builder =
         env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(default_filter));
     log_builder.format_timestamp_millis();
-    log_builder.init();
+    let console_logger = log_builder.build();
+    mtt_file_manager::infrastructure::diagnostic_logger::init(console_logger)
+        .expect("global logger should initialize exactly once");
+
+    let diagnostic_mode_requested = read_early_preference(
+        mtt_file_manager::infrastructure::diagnostic_logger::DIAGNOSTIC_MODE_KEY,
+    )
+    .as_deref()
+    .map(|value| value == "true")
+    .unwrap_or(false);
+    let diagnostic_enabled_at = mtt_file_manager::infrastructure::diagnostic_logger::parse_enabled_at_preference(
+        read_early_preference(
+            mtt_file_manager::infrastructure::diagnostic_logger::DIAGNOSTIC_MODE_ENABLED_AT_KEY,
+        )
+        .as_deref(),
+    )
+    .or_else(|| diagnostic_mode_requested.then_some(SystemTime::now()));
+    let diagnostic_mode_active = diagnostic_mode_requested
+        && !mtt_file_manager::infrastructure::diagnostic_logger::is_preference_expired(
+            diagnostic_enabled_at,
+            SystemTime::now(),
+        );
+    if diagnostic_mode_active {
+        if let Some(enabled_since) = diagnostic_enabled_at {
+            match mtt_file_manager::infrastructure::diagnostic_logger::enable_file_logging_with_since(
+                enabled_since,
+            ) {
+                Ok(log_path) => {
+                    log::info!(
+                        "[DIAGNOSTIC] Diagnostic mode active. Writing info logs to '{}'",
+                        log_path.display()
+                    );
+                }
+                Err(error) => {
+                    log::error!(
+                        "[DIAGNOSTIC] Failed to activate diagnostic file logging during startup: {}",
+                        error
+                    );
+                }
+            }
+        }
+    }
 
     // Standalone dedicated image viewer mode (separate process).
     let mut args = std::env::args_os();

@@ -4,6 +4,7 @@ pub mod adaptive_batch;
 pub mod app_state_db;
 pub mod archive_extract;
 pub mod db_utils;
+pub mod diagnostic_logger;
 pub mod directory_cache;
 pub mod directory_dirty_registry;
 pub mod directory_index;
