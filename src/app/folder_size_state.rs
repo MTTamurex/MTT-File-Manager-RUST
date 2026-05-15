@@ -117,6 +117,10 @@ impl FolderSizeState {
     /// Call on every navigation or List→Grid switch to stop orphan
     /// slow-path scans from the previous folder.
     pub fn cancel_batch(&mut self) {
+        // 0. Abort any in-flight single-folder full-tree scan so it
+        //    doesn't keep running after the user navigates away.
+        self.cancel.store(true, Ordering::Release);
+
         // 1. Bump generation so the worker discards all queued requests
         //    from the previous folder (they carry the old generation).
         self.batch_generation.fetch_add(1, Ordering::Release);
