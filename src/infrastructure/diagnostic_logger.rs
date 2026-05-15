@@ -18,7 +18,9 @@ const TAIL_LOG_BYTES: u64 = 5 * 1024 * 1024;
 static LOGGER: OnceLock<DiagnosticLogger> = OnceLock::new();
 
 struct DiagnosticFile {
+    path: PathBuf,
     writer: BufWriter<File>,
+    bytes_written: u64,
 }
 
 #[derive(Default)]
@@ -31,6 +33,104 @@ pub struct DiagnosticLogger {
     console: Logger,
     base_level: LevelFilter,
     state: Mutex<DiagnosticState>,
+}
+
+struct CountingWriter<W> {
+    inner: W,
+    bytes_written: u64,
+}
+
+impl<W> CountingWriter<W> {
+    fn new(inner: W) -> Self {
+        Self {
+            inner,
+            bytes_written: 0,
+        }
+    }
+
+    fn bytes_written(&self) -> u64 {
+        self.bytes_written
+    }
+}
+
+impl<W: Write> Write for CountingWriter<W> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let written = self.inner.write(buf)?;
+        self.bytes_written = self.bytes_written.saturating_add(written as u64);
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
+    }
+
+    fn write_all(&mut self, buf: &[u8]) -> std::io::Result<()> {
+        self.inner.write_all(buf)?;
+        self.bytes_written = self.bytes_written.saturating_add(buf.len() as u64);
+        Ok(())
+    }
+}
+
+impl DiagnosticFile {
+    fn from_file(path: PathBuf, file: File) -> std::io::Result<Self> {
+        let bytes_written = file.metadata()?.len();
+        Ok(Self {
+            path,
+            writer: BufWriter::new(file),
+            bytes_written,
+        })
+    }
+
+    fn write_session_header(&mut self, enabled_since: SystemTime) -> std::io::Result<()> {
+        let written = {
+            let mut writer = CountingWriter::new(&mut self.writer);
+            write_session_header(&mut writer, enabled_since)?;
+            writer.bytes_written()
+        };
+        self.finish_write(written)?;
+        self.writer.flush()
+    }
+
+    fn write_session_footer(&mut self) -> std::io::Result<()> {
+        let written = {
+            let mut writer = CountingWriter::new(&mut self.writer);
+            write_session_footer(&mut writer)?;
+            writer.bytes_written()
+        };
+        self.finish_write(written)
+    }
+
+    fn write_record(&mut self, record: &Record<'_>) -> std::io::Result<()> {
+        let written = {
+            let mut writer = CountingWriter::new(&mut self.writer);
+            write_record(&mut writer, record)?;
+            writer.bytes_written()
+        };
+        self.finish_write(written)
+    }
+
+    fn finish_write(&mut self, written: u64) -> std::io::Result<()> {
+        self.bytes_written = self.bytes_written.saturating_add(written);
+        if self.bytes_written <= MAX_LOG_BYTES {
+            return Ok(());
+        }
+
+        self.writer.flush()?;
+        truncate_if_oversized(&self.path)?;
+        self.reopen()
+    }
+
+    fn reopen(&mut self) -> std::io::Result<()> {
+        let file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .read(true)
+            .open(&self.path)?;
+        self.bytes_written = file.metadata()?.len();
+        self.writer = BufWriter::new(file);
+        Ok(())
+    }
+
 }
 
 impl DiagnosticLogger {
@@ -70,8 +170,14 @@ impl DiagnosticLogger {
             .open(&path)
             .map_err(|err| format!("Failed to open diagnostic log '{}': {}", path.display(), err))?;
 
-        let mut writer = BufWriter::new(file);
-        write_session_header(&mut writer, enabled_since).map_err(|err| {
+        let mut diagnostic_file = DiagnosticFile::from_file(path.clone(), file).map_err(|err| {
+            format!(
+                "Failed to inspect diagnostic log '{}': {}",
+                path.display(),
+                err
+            )
+        })?;
+        diagnostic_file.write_session_header(enabled_since).map_err(|err| {
             format!(
                 "Failed to write diagnostic log header '{}': {}",
                 path.display(),
@@ -81,9 +187,7 @@ impl DiagnosticLogger {
 
         {
             let mut state = self.state.lock();
-            state.file = Some(DiagnosticFile {
-                writer,
-            });
+            state.file = Some(diagnostic_file);
             state.enabled_since = Some(enabled_since);
         }
 
@@ -94,7 +198,7 @@ impl DiagnosticLogger {
     fn disable_file_logging(&self) {
         let mut state = self.state.lock();
         if let Some(mut file) = state.file.take() {
-            let _ = write_session_footer(&mut file.writer);
+            let _ = file.write_session_footer();
             let _ = file.writer.flush();
         }
         state.enabled_since = None;
@@ -136,7 +240,7 @@ impl Log for DiagnosticLogger {
 
         let mut state = self.state.lock();
         if let Some(file) = state.file.as_mut() {
-            let _ = write_record(&mut file.writer, record);
+            let _ = file.write_record(record);
         }
     }
 
@@ -250,10 +354,7 @@ fn truncate_if_oversized(path: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-fn write_session_header(
-    writer: &mut BufWriter<File>,
-    enabled_since: SystemTime,
-) -> std::io::Result<()> {
+fn write_session_header<W: Write>(writer: &mut W, enabled_since: SystemTime) -> std::io::Result<()> {
     writeln!(writer)?;
     writeln!(writer, "===== Diagnostic Session Started =====")?;
     writeln!(writer, "timestamp_ms={}", unix_millis(SystemTime::now()))?;
@@ -263,17 +364,16 @@ fn write_session_header(
     writeln!(writer, "exe={}", display_path(std::env::current_exe().ok()))?;
     writeln!(writer, "cwd={}", display_path(std::env::current_dir().ok()))?;
     writeln!(writer, "=====================================")?;
-    writer.flush()?;
     Ok(())
 }
 
-fn write_session_footer(writer: &mut BufWriter<File>) -> std::io::Result<()> {
+fn write_session_footer<W: Write>(writer: &mut W) -> std::io::Result<()> {
     writeln!(writer, "===== Diagnostic Session Ended =====")?;
     writeln!(writer, "timestamp_ms={}", unix_millis(SystemTime::now()))?;
     Ok(())
 }
 
-fn write_record(writer: &mut BufWriter<File>, record: &Record<'_>) -> std::io::Result<()> {
+fn write_record<W: Write>(writer: &mut W, record: &Record<'_>) -> std::io::Result<()> {
     let thread = std::thread::current();
     let thread_name = thread.name().unwrap_or("unnamed");
     writeln!(
@@ -302,4 +402,45 @@ fn unix_millis(time: SystemTime) -> u128 {
 fn display_path(path: Option<PathBuf>) -> String {
     path.map(|path| path.display().to_string())
         .unwrap_or_else(|| "<unavailable>".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    fn open_diagnostic_file(path: &Path) -> DiagnosticFile {
+        let file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .read(true)
+            .open(path)
+            .unwrap();
+        DiagnosticFile::from_file(path.to_path_buf(), file).unwrap()
+    }
+
+    #[test]
+    fn write_record_reapplies_size_cap_after_overflow() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join(LOG_FILE_NAME);
+        let prefix_len = (MAX_LOG_BYTES - 64) as usize;
+        let prefix = vec![b'a'; prefix_len];
+        let message = "b".repeat(256);
+
+        fs::write(&path, &prefix).unwrap();
+
+        let mut file = open_diagnostic_file(&path);
+        let args = format_args!("{}", message);
+        let record = Record::builder()
+            .args(args)
+            .level(Level::Info)
+            .target("diagnostic_logger_test")
+            .build();
+        file.write_record(&record).unwrap();
+        file.writer.flush().unwrap();
+
+        let contents = fs::read(&path).unwrap();
+        assert!(contents.len() as u64 <= MAX_LOG_BYTES);
+        assert!(contents.ends_with(format!("{message}\n").as_bytes()));
+    }
 }
