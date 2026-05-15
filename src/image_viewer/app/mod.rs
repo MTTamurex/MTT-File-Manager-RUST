@@ -21,9 +21,10 @@ use gif_export::{GifAnimation, GifUploadQueue, ViewerStatusMessage};
 /// viewskater uses a similarly aggressive prefetch window; with WIC
 /// decode-to-size the per-image cost is modest (a few MB of GPU memory
 /// for a 2560 px texture).
-const DEFAULT_CACHE_RADIUS: usize = 3;
+const DEFAULT_CACHE_RADIUS: usize = 6;
 const MIN_ZOOM_FACTOR: f32 = 0.10;
 const MAX_ZOOM_FACTOR: f32 = 8.0;
+const NORMAL_PREFETCH_BURST_PER_FRAME: usize = 2;
 /// Minimum interval between navigation actions to prevent flooding workers
 /// during rapid key-repeat. 20 ms ≈ 50 navigations/sec — fast enough to feel
 /// responsive but slow enough for workers to keep up.
@@ -325,6 +326,16 @@ impl DedicatedImageViewerApp {
         self.sequence.entries.get(self.current_index)
     }
 
+    pub(super) fn has_current_texture(&self) -> bool {
+        self.texture_index == Some(self.current_index)
+    }
+
+    pub(super) fn is_current_image_pending(&self) -> bool {
+        !self.sequence.entries.is_empty()
+            && !self.has_current_texture()
+            && self.last_error.is_none()
+    }
+
     pub(super) fn current_filename(&self) -> Cow<'_, str> {
         self.current_path()
             .and_then(|p| p.file_name())
@@ -332,27 +343,30 @@ impl DedicatedImageViewerApp {
             .unwrap_or_else(|| Cow::Borrowed("<unknown>"))
     }
 
-    fn request_job_if_needed(&mut self, index: usize, priority: LoadPriority) {
+    fn request_job_if_needed(&mut self, index: usize, priority: LoadPriority) -> bool {
         // Already cached as GPU texture — skip.
         if self.cache.has(index) {
-            return;
+            return false;
         }
         // Currently displayed (texture survived cache eviction via Arc ref).
         if self.texture_index == Some(index) {
-            return;
+            return false;
         }
         if priority != LoadPriority::Urgent && self.requested_jobs.contains(&index) {
-            return;
+            return false;
         }
 
         let Some(path) = self.sequence.entries.get(index).cloned() else {
-            return;
+            return false;
         };
 
         if self.prefetch.request(index, path, priority) {
             if priority != LoadPriority::Urgent {
                 self.requested_jobs.insert(index);
             }
+            true
+        } else {
+            false
         }
     }
 
@@ -380,12 +394,36 @@ impl DedicatedImageViewerApp {
             self.request_job_if_needed(right, LoadPriority::High);
         }
 
-        // Rest of window: normal priority
-        for idx in min_idx..=max_idx {
-            if idx == center || idx == left || idx == right {
-                continue;
+        if self.is_current_image_pending() {
+            return;
+        }
+
+        // Fill the rest of the window gradually so visible filmstrip thumbnails
+        // and the urgent display decode are not starved by a burst of full-image
+        // background work.
+        let mut normal_requested = 0;
+        for distance in 2..=self.cache.radius() {
+            if normal_requested >= NORMAL_PREFETCH_BURST_PER_FRAME {
+                break;
             }
-            self.request_job_if_needed(idx, LoadPriority::Normal);
+
+            let candidate_indices = [
+                center.checked_sub(distance),
+                center.checked_add(distance).filter(|&idx| idx < total),
+            ];
+
+            for candidate in candidate_indices.into_iter().flatten() {
+                if candidate < min_idx || candidate > max_idx {
+                    continue;
+                }
+
+                if self.request_job_if_needed(candidate, LoadPriority::Normal) {
+                    normal_requested += 1;
+                    if normal_requested >= NORMAL_PREFETCH_BURST_PER_FRAME {
+                        break;
+                    }
+                }
+            }
         }
     }
 
@@ -462,7 +500,7 @@ impl DedicatedImageViewerApp {
         // Drain more results when the current image is still pending —
         // we don't want the urgent current-image result stuck behind
         // background neighbour uploads.
-        let current_pending = self.texture_index != Some(self.current_index);
+        let current_pending = self.is_current_image_pending();
         let max_drain = if current_pending { 8 } else { 2 };
         let mut results = self.prefetch.drain_results(max_drain);
 
@@ -511,6 +549,7 @@ impl DedicatedImageViewerApp {
         let old_index = self.current_index;
         self.current_index = index;
         self.zoom_factor = 1.0;
+        self.last_error = None;
 
         // Reset GIF animation state for the new image.
         self.gif_animation = None;
@@ -551,6 +590,11 @@ impl DedicatedImageViewerApp {
             self.request_job_if_needed(right, LoadPriority::High);
         }
 
+        self.filmstrip.scroll_to_current = true;
+        if self.is_current_image_pending() {
+            return;
+        }
+
         // Request the far tail edge that entered the window.
         let tail = if index > old_index {
             (index + radius).min(total.saturating_sub(1))
@@ -561,7 +605,6 @@ impl DedicatedImageViewerApp {
             self.request_job_if_needed(tail, LoadPriority::Normal);
         }
 
-        self.filmstrip.scroll_to_current = true;
         self.prefetch_filmstrip_neighbors();
     }
 
@@ -610,7 +653,7 @@ impl DedicatedImageViewerApp {
             return;
         }
 
-        let current_texture_ready = self.texture_index == Some(self.current_index);
+        let current_texture_ready = self.has_current_texture();
         let should_reveal =
             self.sequence.entries.is_empty() || self.last_error.is_some() || current_texture_ready;
         if !should_reveal {
@@ -761,7 +804,7 @@ impl eframe::App for DedicatedImageViewerApp {
         // Low-frequency fallback poll — workers trigger immediate repaints via
         // ctx.request_repaint(), but this ensures progress even if the signal
         // is missed (e.g. during the first frame before ctx is propagated).
-        if self.texture_index != Some(self.current_index) && !self.cache.has(self.current_index) {
+        if self.is_current_image_pending() && !self.cache.has(self.current_index) {
             ctx.request_repaint_after(Duration::from_millis(16));
         }
 

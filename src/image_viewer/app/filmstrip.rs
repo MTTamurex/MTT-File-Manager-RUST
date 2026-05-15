@@ -2,6 +2,7 @@ use crate::image_viewer::loader;
 use crate::ui::theme;
 use eframe::egui;
 use eframe::egui::scroll_area::ScrollBarVisibility;
+use eframe::egui::{Rect, Sense};
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
@@ -12,16 +13,13 @@ const FILMSTRIP_PANEL_HEIGHT: f32 = 88.0;
 const FILMSTRIP_OVERSCAN: usize = 20;
 const FILMSTRIP_MAX_CACHED: usize = 96;
 pub(super) const FILMSTRIP_DECODE_MAX_SIDE: u32 = 160;
-// Keep per-frame texture uploads small. The Glow renderer issues a
-// glTexImage2D per load_texture, and pairing this with the main image
-// uploads (handle_prefetch_results) can saturate the GL driver. Pending
-// thumbnails stay in the channel and drain on subsequent frames.
-const FILMSTRIP_MAX_UPLOADS_PER_FRAME: usize = 2;
-const FILMSTRIP_MAX_IN_FLIGHT: usize = 4;
+const FILMSTRIP_MAX_UPLOADS_PER_FRAME: usize = 8;
+const FILMSTRIP_MAX_IN_FLIGHT: usize = 16;
 
 pub(in crate::image_viewer) struct FilmstripState {
     pub(super) thumbnails: HashMap<usize, egui::TextureHandle>,
     pub(super) pending: HashSet<usize>,
+    pub(super) cache_misses: HashSet<usize>,
     pub(super) result_tx: crossbeam_channel::Sender<(usize, u64, loader::DecodedFrame)>,
     pub(super) result_rx: crossbeam_channel::Receiver<(usize, u64, loader::DecodedFrame)>,
     pub(super) generation: u64,
@@ -34,6 +32,7 @@ impl FilmstripState {
         Self {
             thumbnails: HashMap::new(),
             pending: HashSet::new(),
+            cache_misses: HashSet::new(),
             result_tx,
             result_rx,
             generation: 0,
@@ -44,6 +43,7 @@ impl FilmstripState {
     pub(super) fn reset(&mut self) {
         self.thumbnails.clear();
         self.pending.clear();
+        self.cache_misses.clear();
         self.generation = self.generation.wrapping_add(1);
         self.scroll_to_current = true;
         // Drain any stale results from the old generation
@@ -54,15 +54,16 @@ impl FilmstripState {
 impl super::DedicatedImageViewerApp {
     pub(super) fn poll_filmstrip_results(&mut self, ctx: &egui::Context) {
         let mut uploads = 0;
-        while let Ok((index, gen, frame)) = self.filmstrip.result_rx.try_recv() {
+        while uploads < FILMSTRIP_MAX_UPLOADS_PER_FRAME {
+            let Ok((index, gen, frame)) = self.filmstrip.result_rx.try_recv() else {
+                break;
+            };
             self.filmstrip.pending.remove(&index);
             if gen != self.filmstrip.generation {
                 continue;
             }
-            if uploads >= FILMSTRIP_MAX_UPLOADS_PER_FRAME {
-                break;
-            }
             if frame.width == 0 || frame.height == 0 || frame.rgba.is_empty() {
+                self.filmstrip.cache_misses.insert(index);
                 continue;
             }
             let color_image = egui::ColorImage::from_rgba_unmultiplied(
@@ -86,6 +87,7 @@ impl super::DedicatedImageViewerApp {
         if total == 0 {
             return;
         }
+
         let center = self.current_index;
         let half_visible = 6usize;
         let start = center.saturating_sub(half_visible);
@@ -94,6 +96,7 @@ impl super::DedicatedImageViewerApp {
         for idx in start..=end {
             if self.filmstrip.thumbnails.contains_key(&idx)
                 || self.filmstrip.pending.contains(&idx)
+                || self.filmstrip.cache_misses.contains(&idx)
                 || self.filmstrip.pending.len() >= FILMSTRIP_MAX_IN_FLIGHT
             {
                 continue;
@@ -103,30 +106,10 @@ impl super::DedicatedImageViewerApp {
                 let gen = self.filmstrip.generation;
                 self.filmstrip.pending.insert(idx);
                 rayon::spawn(move || {
-                    match loader::decode_preview_frame_with_priority(
-                        &path,
-                        FILMSTRIP_DECODE_MAX_SIDE,
-                        loader::DecodePriority::Background,
-                    ) {
-                        Ok(frame) => {
-                            let _ = tx.try_send((idx, gen, frame));
-                        }
-                        Err(_) => {
-                            // Send a zero-sized sentinel so poll_filmstrip_results
-                            // removes this index from `pending`. Without this, a
-                            // failed decode leaves the index stuck in pending forever,
-                            // and after FILMSTRIP_MAX_IN_FLIGHT failures the filmstrip
-                            // stops loading entirely.
-                            let sentinel = loader::DecodedFrame {
-                                rgba: Vec::new(),
-                                width: 0,
-                                height: 0,
-                                original_width: 0,
-                                original_height: 0,
-                            };
-                            let _ = tx.try_send((idx, gen, sentinel));
-                        }
-                    }
+                    let frame =
+                        loader::try_fast_preview_from_disk_cache(&path, FILMSTRIP_DECODE_MAX_SIDE)
+                            .unwrap_or_else(empty_decoded_frame);
+                    let _ = tx.try_send((idx, gen, frame));
                 });
             }
         }
@@ -172,144 +155,43 @@ impl super::DedicatedImageViewerApp {
                     .id_salt("filmstrip_scroll")
                     .auto_shrink([false, false])
                     .scroll_bar_visibility(ScrollBarVisibility::AlwaysHidden)
-                    .show(ui, |ui| {
+                    .show_viewport(ui, |ui, viewport| {
                         ui.spacing_mut().item_spacing = egui::vec2(FILMSTRIP_SPACING, 0.0);
                         ui.set_min_width(total_content_w);
 
-                        let viewport_left = ui.clip_rect().left();
-                        let viewport_right = ui.clip_rect().right();
-                        let content_left = ui.min_rect().left();
+                        let first_visible = (viewport.min.x / item_w).floor().max(0.0) as usize;
+                        let last_visible = (viewport.max.x / item_w).ceil().max(0.0) as usize;
+                        let start = first_visible.saturating_sub(FILMSTRIP_OVERSCAN);
+                        let end = (last_visible + FILMSTRIP_OVERSCAN + 1).min(total);
 
-                        ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                            ui.spacing_mut().item_spacing.x = FILMSTRIP_SPACING;
+                        let content_left = ui.max_rect().left();
+                        let top = ui.max_rect().top();
+                        if should_scroll {
+                            let current_rect = Rect::from_min_size(
+                                egui::pos2(content_left + current as f32 * item_w, top),
+                                egui::vec2(FILMSTRIP_THUMB_SIZE, FILMSTRIP_THUMB_SIZE),
+                            );
+                            ui.scroll_to_rect(current_rect, Some(egui::Align::Center));
+                        }
 
-                            for idx in 0..total {
-                                let item_left = content_left + idx as f32 * item_w;
-                                let item_right = item_left + FILMSTRIP_THUMB_SIZE;
+                        for idx in start..end {
+                            let rect = Rect::from_min_size(
+                                egui::pos2(content_left + idx as f32 * item_w, top),
+                                egui::vec2(FILMSTRIP_THUMB_SIZE, FILMSTRIP_THUMB_SIZE),
+                            );
 
-                                let in_visible_range = item_right
-                                    >= viewport_left - FILMSTRIP_OVERSCAN as f32 * item_w
-                                    && item_left
-                                        <= viewport_right + FILMSTRIP_OVERSCAN as f32 * item_w;
+                            self.request_filmstrip_thumbnail(idx);
+                            let response = ui.interact(
+                                rect,
+                                ui.id().with(("filmstrip_item", idx)),
+                                Sense::click(),
+                            );
+                            self.paint_filmstrip_item(ui, idx, rect, response.hovered());
 
-                                if !in_visible_range && !(should_scroll && idx == current) {
-                                    // Allocate space but don't render
-                                    ui.allocate_exact_size(
-                                        egui::vec2(FILMSTRIP_THUMB_SIZE, FILMSTRIP_THUMB_SIZE),
-                                        egui::Sense::hover(),
-                                    );
-                                    continue;
-                                }
-
-                                // Request decode if not loaded and not pending
-                                if !self.filmstrip.thumbnails.contains_key(&idx)
-                                    && !self.filmstrip.pending.contains(&idx)
-                                    && self.filmstrip.pending.len() < FILMSTRIP_MAX_IN_FLIGHT
-                                {
-                                    if let Some(path) = self.sequence.entries.get(idx).cloned() {
-                                        let tx = self.filmstrip.result_tx.clone();
-                                        let gen = self.filmstrip.generation;
-                                        self.filmstrip.pending.insert(idx);
-                                        rayon::spawn(move || {
-                                            match loader::decode_preview_frame_with_priority(
-                                                &path,
-                                                FILMSTRIP_DECODE_MAX_SIDE,
-                                                loader::DecodePriority::Background,
-                                            ) {
-                                                Ok(frame) => {
-                                                    let _ = tx.try_send((idx, gen, frame));
-                                                }
-                                                Err(_) => {
-                                                    let sentinel = loader::DecodedFrame {
-                                                        rgba: Vec::new(),
-                                                        width: 0,
-                                                        height: 0,
-                                                        original_width: 0,
-                                                        original_height: 0,
-                                                    };
-                                                    let _ = tx.try_send((idx, gen, sentinel));
-                                                }
-                                            }
-                                        });
-                                    }
-                                }
-
-                                let is_current = idx == current;
-
-                                let (rect, response) = ui.allocate_exact_size(
-                                    egui::vec2(FILMSTRIP_THUMB_SIZE, FILMSTRIP_THUMB_SIZE),
-                                    egui::Sense::click(),
-                                );
-
-                                // Background
-                                let bg_color = if is_current {
-                                    if ui.visuals().dark_mode {
-                                        egui::Color32::from_gray(50)
-                                    } else {
-                                        egui::Color32::from_gray(200)
-                                    }
-                                } else if response.hovered() {
-                                    if ui.visuals().dark_mode {
-                                        egui::Color32::from_gray(45)
-                                    } else {
-                                        egui::Color32::from_gray(210)
-                                    }
-                                } else {
-                                    egui::Color32::TRANSPARENT
-                                };
-                                ui.painter().rect_filled(rect, 4.0, bg_color);
-
-                                // Thumbnail image
-                                if let Some(tex) = self.filmstrip.thumbnails.get(&idx) {
-                                    let tex_size = tex.size_vec2();
-                                    let scale = if tex_size.x > 0.0 && tex_size.y > 0.0 {
-                                        let sx = (FILMSTRIP_THUMB_SIZE - 4.0) / tex_size.x;
-                                        let sy = (FILMSTRIP_THUMB_SIZE - 4.0) / tex_size.y;
-                                        sx.min(sy)
-                                    } else {
-                                        1.0
-                                    };
-                                    let draw_size = tex_size * scale;
-                                    let image_rect =
-                                        egui::Rect::from_center_size(rect.center(), draw_size);
-                                    ui.painter().image(
-                                        tex.id(),
-                                        image_rect,
-                                        egui::Rect::from_min_max(
-                                            egui::pos2(0.0, 0.0),
-                                            egui::pos2(1.0, 1.0),
-                                        ),
-                                        egui::Color32::WHITE,
-                                    );
-                                } else {
-                                    // Placeholder
-                                    let placeholder_color = if ui.visuals().dark_mode {
-                                        egui::Color32::from_gray(40)
-                                    } else {
-                                        egui::Color32::from_gray(200)
-                                    };
-                                    let inner = rect.shrink(4.0);
-                                    ui.painter().rect_filled(inner, 2.0, placeholder_color);
-                                }
-
-                                // Current image border highlight
-                                if is_current {
-                                    ui.painter().rect_stroke(
-                                        rect,
-                                        4.0,
-                                        egui::Stroke::new(2.0, theme::COLOR_ACCENT),
-                                        egui::StrokeKind::Outside,
-                                    );
-                                    if should_scroll {
-                                        response.scroll_to_me(Some(egui::Align::Center));
-                                    }
-                                }
-
-                                if response.clicked() {
-                                    self.navigate_to(idx, ctx);
-                                }
+                            if response.clicked() {
+                                self.navigate_to(idx, ctx);
                             }
-                        });
+                        }
                     });
 
                 // Request repaint if we have pending thumbnails
@@ -319,5 +201,94 @@ impl super::DedicatedImageViewerApp {
 
                 let _ = scroll_output;
             });
+    }
+
+    fn request_filmstrip_thumbnail(&mut self, idx: usize) {
+        if self.filmstrip.thumbnails.contains_key(&idx)
+            || self.filmstrip.pending.contains(&idx)
+            || self.filmstrip.cache_misses.contains(&idx)
+            || self.filmstrip.pending.len() >= FILMSTRIP_MAX_IN_FLIGHT
+        {
+            return;
+        }
+
+        let Some(path) = self.sequence.entries.get(idx).cloned() else {
+            return;
+        };
+
+        let tx = self.filmstrip.result_tx.clone();
+        let gen = self.filmstrip.generation;
+        self.filmstrip.pending.insert(idx);
+        rayon::spawn(move || {
+            let frame = loader::try_fast_preview_from_disk_cache(&path, FILMSTRIP_DECODE_MAX_SIDE)
+                .unwrap_or_else(empty_decoded_frame);
+            let _ = tx.try_send((idx, gen, frame));
+        });
+    }
+
+    fn paint_filmstrip_item(&self, ui: &mut egui::Ui, idx: usize, rect: Rect, hovered: bool) {
+        let is_current = idx == self.current_index;
+        let bg_color = if is_current {
+            if ui.visuals().dark_mode {
+                egui::Color32::from_gray(50)
+            } else {
+                egui::Color32::from_gray(200)
+            }
+        } else if hovered {
+            if ui.visuals().dark_mode {
+                egui::Color32::from_gray(45)
+            } else {
+                egui::Color32::from_gray(210)
+            }
+        } else {
+            egui::Color32::TRANSPARENT
+        };
+        ui.painter().rect_filled(rect, 4.0, bg_color);
+
+        if let Some(tex) = self.filmstrip.thumbnails.get(&idx) {
+            let tex_size = tex.size_vec2();
+            let scale = if tex_size.x > 0.0 && tex_size.y > 0.0 {
+                let sx = (FILMSTRIP_THUMB_SIZE - 4.0) / tex_size.x;
+                let sy = (FILMSTRIP_THUMB_SIZE - 4.0) / tex_size.y;
+                sx.min(sy)
+            } else {
+                1.0
+            };
+            let draw_size = tex_size * scale;
+            let image_rect = Rect::from_center_size(rect.center(), draw_size);
+            ui.painter().image(
+                tex.id(),
+                image_rect,
+                Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                egui::Color32::WHITE,
+            );
+        } else {
+            let placeholder_color = if ui.visuals().dark_mode {
+                egui::Color32::from_gray(40)
+            } else {
+                egui::Color32::from_gray(200)
+            };
+            ui.painter()
+                .rect_filled(rect.shrink(4.0), 2.0, placeholder_color);
+        }
+
+        if is_current {
+            ui.painter().rect_stroke(
+                rect,
+                4.0,
+                egui::Stroke::new(2.0, theme::COLOR_ACCENT),
+                egui::StrokeKind::Outside,
+            );
+        }
+    }
+}
+
+fn empty_decoded_frame() -> loader::DecodedFrame {
+    loader::DecodedFrame {
+        rgba: Vec::new(),
+        width: 0,
+        height: 0,
+        original_width: 0,
+        original_height: 0,
     }
 }

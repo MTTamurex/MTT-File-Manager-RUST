@@ -283,6 +283,24 @@ pub fn decode_preview_frame_with_priority(
         return Ok(frame);
     }
 
+    #[cfg(target_os = "windows")]
+    {
+        if let Some((rgba, w, h, original_w, original_h)) =
+            crate::workers::thumbnail::extraction::stage2_wic::extract_to_size_with_original_size(
+                path,
+                Some(max_side),
+            )
+        {
+            return Ok(DecodedFrame {
+                rgba,
+                width: w,
+                height: h,
+                original_width: original_w,
+                original_height: original_h,
+            });
+        }
+    }
+
     let image = decode_dynamic(path, priority)?;
     if image.width() <= max_side && image.height() <= max_side {
         return Ok(frame_from_dynamic(image));
@@ -348,11 +366,7 @@ pub fn encode_frame_to_path(
 /// decodes in the background.
 pub fn try_fast_preview_from_disk_cache(path: &Path, max_side: u32) -> Option<DecodedFrame> {
     let cache = VIEWER_THUMBNAIL_CACHE.as_ref()?;
-    let modified = std::fs::metadata(path).ok()?.modified().ok()?;
-
-    let entry = cache
-        .get(path, modified)
-        .or_else(|| cache.get_latest(path))?;
+    let entry = cache.get_latest(path)?;
 
     let image = image::load_from_memory_with_format(&entry.data, image::ImageFormat::WebP).ok()?;
     let image = if image.width() > max_side || image.height() > max_side {
