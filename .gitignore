@@ -95,4 +95,3 @@ coverage/
 errors.txt
 debug_output.txt
 bench_perf/target/
-.roo/rules/rules.md
