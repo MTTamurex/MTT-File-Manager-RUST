@@ -11,6 +11,7 @@ use crate::infrastructure::security::{
     classify_shell_namespace_path, sanitize_path_with_local_drive_fallback, sanitize_unc_path,
     SecurityConfig,
 };
+use crate::infrastructure::diagnostic_logger::{diag_error, field_label};
 use crate::infrastructure::windows::ComScope;
 
 pub enum FileOperationResult {
@@ -371,14 +372,19 @@ pub(crate) fn start_file_operation_worker(
                 }
                 Ok(CompletionBehavior::NoFinished) => {}
                 Err(e) => {
-                    let msg = if let Some(s) = e.downcast_ref::<&str>() {
-                        s.to_string()
+                    let (msg, panic_payload) = if let Some(s) = e.downcast_ref::<&str>() {
+                        (s.to_string(), "str")
                     } else if let Some(s) = e.downcast_ref::<String>() {
-                        s.clone()
+                        (s.clone(), "string")
                     } else {
-                        "unknown".to_string()
+                        ("unknown".to_string(), "unknown")
                     };
-                    log::error!("[FileOpWorker] panic: {}", msg);
+                    log::error!("[FileOpWorker] worker thread panicked");
+                    diag_error(
+                        "file_operation_worker",
+                        "worker_panic",
+                        &[field_label("payload_kind", panic_payload)],
+                    );
                     let _ =
                         result_sender.send(FileOperationResult::OperationFailed { message: msg });
                     let _ = result_sender.send(FileOperationResult::Finished);
@@ -390,6 +396,7 @@ pub(crate) fn start_file_operation_worker(
 
     if let Err(error) = spawn_result {
         log::error!("[FileOpWorker] failed to spawn worker thread: {}", error);
+        diag_error("file_operation_worker", "spawn_failed", &[]);
     }
 }
 

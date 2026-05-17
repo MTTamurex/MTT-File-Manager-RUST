@@ -2,7 +2,6 @@ use crate::app::navigation_state::{SettingsSection, ThemeMode};
 use crate::app::shortcuts::{ShortcutBindings, ShortcutEditorState};
 use eframe::egui;
 use rust_i18n::t;
-use std::path::Path;
 
 pub struct SettingsWindowOutput {
     pub keep_open: bool,
@@ -26,7 +25,6 @@ pub fn render_settings_window(
     shortcut_editor: &mut ShortcutEditorState,
     show_recycle_bin: &mut bool,
     diagnostic_mode: &mut bool,
-    diagnostic_log_path: &Path,
 ) -> SettingsWindowOutput {
     let mut keep_open = show_window;
     let mut language_changed = false;
@@ -104,20 +102,26 @@ pub fn render_settings_window(
                                     {
                                         diagnostic_mode_changed = true;
                                     }
-                                    ui.add_space(8.0);
-                                    ui.add(
-                                        egui::Label::new(
-                                            egui::RichText::new(
-                                                diagnostic_log_path.display().to_string(),
-                                            )
-                                            .monospace(),
-                                        )
-                                        .wrap(),
-                                    );
                                     ui.add_space(6.0);
                                     if ui.button(t!("settings.diagnostics_open_folder")).clicked() {
                                         open_diagnostic_folder = true;
                                     }
+                                    ui.add_space(12.0);
+                                    ui.group(|ui| {
+                                        ui.set_width(ui.available_width());
+                                        ui.label(
+                                            egui::RichText::new(
+                                                t!("settings.diagnostics_privacy_title").to_string(),
+                                            )
+                                            .strong(),
+                                        );
+                                        ui.add_space(4.0);
+                                        ui.small(t!("settings.diagnostics_privacy_scope"));
+                                        ui.add_space(4.0);
+                                        ui.small(t!("settings.diagnostics_privacy_excludes"));
+                                        ui.add_space(4.0);
+                                        ui.small(t!("settings.diagnostics_privacy_transmission"));
+                                    });
                                     ui.add_space(6.0);
                                     ui.small(t!("settings.diagnostics_note"));
                                 }

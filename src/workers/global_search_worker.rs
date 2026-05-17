@@ -309,12 +309,24 @@ fn refresh_and_send_status(
             {
                 *last_known_available = false;
             }
+            if let Some(error) = last_error.as_deref() {
+                log::warn!(
+                    "[GLOBAL-SEARCH] Service status refresh failed attempts={} consecutive_failures={} reason={}",
+                    STATUS_RETRY_COUNT,
+                    *consecutive_failures,
+                    error
+                );
+            }
         }
     } else {
         *consecutive_failures = (*consecutive_failures).saturating_add(1);
         if *consecutive_failures >= OFFLINE_FAILURE_THRESHOLD {
             *last_known_available = false;
         }
+        log::warn!(
+            "[GLOBAL-SEARCH] Search service ping failed consecutive_failures={}",
+            *consecutive_failures
+        );
     }
 
     let service_volume_letters = service_volume_letters(last_known_status_volumes);

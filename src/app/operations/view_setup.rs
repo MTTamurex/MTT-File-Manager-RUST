@@ -249,6 +249,17 @@ impl ImageViewerApp {
                     },
                 ));
             }
+            let incomplete_queries = results
+                .iter()
+                .filter(|(_, info)| info.total_space == 0 && info.free_space == 0)
+                .count();
+            if incomplete_queries > 0 {
+                log::warn!(
+                    "[DRIVE-REFRESH] Volume info refresh completed with incomplete results drives={} incomplete={}",
+                    disks_snapshot.len(),
+                    incomplete_queries
+                );
+            }
             let _ = tx.send(results);
             ctx.request_repaint();
         });

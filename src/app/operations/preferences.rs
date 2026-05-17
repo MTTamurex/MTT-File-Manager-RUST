@@ -277,6 +277,10 @@ impl ImageViewerApp {
     }
 
     pub fn set_diagnostic_mode(&mut self, enabled: bool) {
+        self.set_diagnostic_mode_with_reason(enabled, "manual");
+    }
+
+    fn set_diagnostic_mode_with_reason(&mut self, enabled: bool, disable_reason: &'static str) {
         let logger_matches_state =
             self.diagnostic_mode == enabled && (!enabled || diagnostic_logger::is_enabled());
         if logger_matches_state {
@@ -286,12 +290,14 @@ impl ImageViewerApp {
         if enabled {
             let enabled_since = self.diagnostic_mode_enabled_at.unwrap_or_else(SystemTime::now);
             match diagnostic_logger::enable_file_logging_with_since(enabled_since) {
-                Ok(log_path) => {
+                Ok(_) => {
                     self.diagnostic_mode = true;
                     self.diagnostic_mode_enabled_at = Some(enabled_since);
-                    log::info!(
-                        "[DIAGNOSTIC] Diagnostic mode enabled. Writing info logs to '{}'",
-                        log_path.display()
+                    log::info!("[DIAGNOSTIC] Diagnostic mode enabled");
+                    diagnostic_logger::diag_info(
+                        "diagnostic_mode",
+                        "enabled",
+                        &[diagnostic_logger::field_label("activation", "manual")],
                     );
                 }
                 Err(error) => {
@@ -302,6 +308,11 @@ impl ImageViewerApp {
             }
         } else {
             if diagnostic_logger::is_enabled() {
+                diagnostic_logger::diag_info(
+                    "diagnostic_mode",
+                    "disabled",
+                    &[diagnostic_logger::field_label("reason", disable_reason)],
+                );
                 log::info!("[DIAGNOSTIC] Diagnostic mode disabled");
             }
             diagnostic_logger::disable_file_logging();
@@ -321,12 +332,13 @@ impl ImageViewerApp {
         if diagnostic_logger::is_preference_expired(self.diagnostic_mode_enabled_at, SystemTime::now())
         {
             log::info!("[DIAGNOSTIC] Auto-disabling diagnostic mode after 24 hours");
-            self.set_diagnostic_mode(false);
+            self.set_diagnostic_mode_with_reason(false, "expired_24h");
         }
     }
 
     pub fn open_diagnostic_log_folder(&mut self) {
         if let Err(error) = diagnostic_logger::open_log_folder() {
+            diagnostic_logger::diag_warn("diagnostic_mode", "open_log_folder_failed", &[]);
             log::warn!("[DIAGNOSTIC] Failed to open diagnostic log folder: {}", error);
             self.notifications.warning(error);
         }

@@ -230,7 +230,12 @@ impl DriveWatcher {
             match handle {
                 Ok(h) if h != INVALID_HANDLE_VALUE => Some(h),
                 _ => {
-                    log::error!("[DRIVE-WATCHER] Failed to open drive: {:?}", drive_root);
+                    log::error!("[DRIVE-WATCHER] Failed to open watched drive root");
+                    crate::infrastructure::diagnostic_logger::diag_error(
+                        "drive_watcher",
+                        "open_drive_failed",
+                        &[],
+                    );
                     None
                 }
             }

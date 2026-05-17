@@ -95,6 +95,15 @@ Some app-level shortcuts are configurable in Settings > Keyboard Shortcuts. Stan
 | Alt+Enter | Properties |
 | Space | Open file with internal viewer |
 
+## Diagnostic Mode Privacy Notes
+
+- `Settings > Diagnostics` writes a privacy-filtered diagnostic file intended for technical troubleshooting with data minimization by design.
+- The diagnostic file is meant to keep only technical information relevant to application behavior.
+- File names, folder names, full paths, search text, and other sensitive or private user identifiers should not be exposed in this artifact.
+- Nothing is sent automatically outside the application. The diagnostic file stays local unless the user chooses to share it.
+- The feature auto-disables after 24 hours and keeps only the latest 10 MiB of filtered diagnostic events.
+- This is a technical privacy measure for minimization and safer troubleshooting. It is not a standalone legal certification of LGPD or any other regulatory compliance.
+
 ## Video Thumbnail Codecs
 
 The thumbnail pipeline uses 3 Windows APIs for video files: **Shell API** (Stage 3), **IThumbnailCache** (Stage 4), and **Media Foundation** (Stage 5). All three require video codecs to be registered on the system.

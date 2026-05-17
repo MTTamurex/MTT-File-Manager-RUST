@@ -8,7 +8,7 @@
 //! - Breadth-first directory collection for better parallel work distribution
 
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 
 use windows::core::PCWSTR;
@@ -47,6 +47,8 @@ pub struct FolderScanResult {
     pub total_size: u64,
     pub file_count: u64,
     pub folder_count: u64,
+    pub inaccessible_dir_count: u64,
+    pub last_error_code: i32,
 }
 
 impl FolderScanResult {
@@ -54,10 +56,19 @@ impl FolderScanResult {
         self.total_size = self.total_size.saturating_add(other.total_size);
         self.file_count = self.file_count.saturating_add(other.file_count);
         self.folder_count = self.folder_count.saturating_add(other.folder_count);
+        self.inaccessible_dir_count = self
+            .inaccessible_dir_count
+            .saturating_add(other.inaccessible_dir_count);
+        if other.last_error_code != 0 {
+            self.last_error_code = other.last_error_code;
+        }
     }
 
     fn is_empty(&self) -> bool {
-        self.total_size == 0 && self.file_count == 0 && self.folder_count == 0
+        self.total_size == 0
+            && self.file_count == 0
+            && self.folder_count == 0
+            && self.inaccessible_dir_count == 0
     }
 }
 
@@ -65,6 +76,8 @@ struct SharedFolderScanTotals {
     total_size: AtomicU64,
     file_count: AtomicU64,
     folder_count: AtomicU64,
+    inaccessible_dir_count: AtomicU64,
+    last_error_code: AtomicI32,
 }
 
 impl SharedFolderScanTotals {
@@ -73,6 +86,8 @@ impl SharedFolderScanTotals {
             total_size: AtomicU64::new(0),
             file_count: AtomicU64::new(0),
             folder_count: AtomicU64::new(0),
+            inaccessible_dir_count: AtomicU64::new(0),
+            last_error_code: AtomicI32::new(0),
         }
     }
 
@@ -89,6 +104,14 @@ impl SharedFolderScanTotals {
             self.folder_count
                 .fetch_add(result.folder_count, Ordering::Relaxed);
         }
+        if result.inaccessible_dir_count > 0 {
+            self.inaccessible_dir_count
+                .fetch_add(result.inaccessible_dir_count, Ordering::Relaxed);
+        }
+        if result.last_error_code != 0 {
+            self.last_error_code
+                .store(result.last_error_code, Ordering::Relaxed);
+        }
     }
 
     fn snapshot(&self) -> FolderScanResult {
@@ -96,6 +119,8 @@ impl SharedFolderScanTotals {
             total_size: self.total_size.load(Ordering::Relaxed),
             file_count: self.file_count.load(Ordering::Relaxed),
             folder_count: self.folder_count.load(Ordering::Relaxed),
+            inaccessible_dir_count: self.inaccessible_dir_count.load(Ordering::Relaxed),
+            last_error_code: self.last_error_code.load(Ordering::Relaxed),
         }
     }
 }
@@ -158,7 +183,16 @@ pub fn calculate_folder_size_parallel(
         return None;
     }
 
-    Some(totals.snapshot())
+    let snapshot = totals.snapshot();
+    if snapshot.inaccessible_dir_count > 0 {
+        log::warn!(
+            "[FOLDER-SIZE] Enumeration skipped inaccessible directories count={} last_error_code={}",
+            snapshot.inaccessible_dir_count,
+            snapshot.last_error_code
+        );
+    }
+
+    Some(snapshot)
 }
 
 /// Recursively scan directories in parallel using rayon.
@@ -249,7 +283,11 @@ fn scan_dir_wide_local(dir_wide: &[u16], sub_dirs: &mut Vec<Vec<u16>>) -> Folder
 
         let handle = match handle {
             Ok(h) => h,
-            Err(_) => return totals,
+            Err(error) => {
+                totals.inaccessible_dir_count = 1;
+                totals.last_error_code = error.code().0;
+                return totals;
+            }
         };
 
         loop {

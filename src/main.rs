@@ -169,10 +169,15 @@ fn main() -> eframe::Result<()> {
             match mtt_file_manager::infrastructure::diagnostic_logger::enable_file_logging_with_since(
                 enabled_since,
             ) {
-                Ok(log_path) => {
-                    log::info!(
-                        "[DIAGNOSTIC] Diagnostic mode active. Writing info logs to '{}'",
-                        log_path.display()
+                Ok(_) => {
+                    log::info!("[DIAGNOSTIC] Diagnostic mode active during startup");
+                    mtt_file_manager::infrastructure::diagnostic_logger::diag_info(
+                        "startup",
+                        "diagnostic_mode_restored",
+                        &[mtt_file_manager::infrastructure::diagnostic_logger::field_label(
+                            "source",
+                            "startup_preference",
+                        )],
                     );
                 }
                 Err(error) => {

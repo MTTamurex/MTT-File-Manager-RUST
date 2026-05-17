@@ -4,6 +4,7 @@
 //! can reuse the ACL hardening and connection setup logic.
 
 use rusqlite::Connection;
+use crate::infrastructure::diagnostic_logger::{diag_warn, field_i64, field_label};
 use std::ffi::OsStr;
 use std::os::windows::ffi::OsStrExt;
 use std::path::Path;
@@ -66,10 +67,9 @@ pub fn harden_directory_permissions(dir: &Path) -> bool {
     };
 
     let Some((mut user_sid_bytes, _sid_len)) = get_current_user_sid_bytes() else {
-        log::warn!(
-            "[DB-UTILS] Failed to get current user SID; skipping ACL hardening for {:?}",
-            dir
-        );
+        let _ = dir;
+        log::warn!("[DB-UTILS] Failed to get current user SID; skipping ACL hardening");
+        diag_warn("db_utils", "current_user_sid_unavailable", &[]);
         return false;
     };
 
@@ -95,10 +95,12 @@ pub fn harden_directory_permissions(dir: &Path) -> bool {
     let mut new_acl = std::ptr::null_mut::<WIN_ACL>();
     let result = unsafe { SetEntriesInAclW(Some(&entries), None, &mut new_acl) };
     if result.0 != 0 {
-        log::warn!(
-            "[DB-UTILS] SetEntriesInAclW failed with code {} for {:?}",
-            result.0,
-            dir
+        let _ = dir;
+        log::warn!("[DB-UTILS] SetEntriesInAclW failed with code {}", result.0);
+        diag_warn(
+            "db_utils",
+            "set_entries_in_acl_failed",
+            &[field_i64("win32_code", result.0 as i64)],
         );
         return false;
     }
@@ -130,10 +132,15 @@ pub fn harden_directory_permissions(dir: &Path) -> bool {
     }
 
     if set_result.0 != 0 {
+        let _ = dir;
         log::warn!(
-            "[DB-UTILS] SetNamedSecurityInfoW failed with code {} for {:?}",
-            set_result.0,
-            dir
+            "[DB-UTILS] SetNamedSecurityInfoW failed with code {}",
+            set_result.0
+        );
+        diag_warn(
+            "db_utils",
+            "set_named_security_info_failed",
+            &[field_i64("win32_code", set_result.0 as i64)],
         );
         return false;
     }
@@ -149,11 +156,9 @@ pub fn open_temp_fallback_connection(
 ) -> rusqlite::Result<(Connection, Option<std::path::PathBuf>)> {
     if let Some(parent) = temp_fallback_path.parent() {
         if let Err(e) = std::fs::create_dir_all(parent) {
-            log::warn!(
-                "[DB-UTILS] Failed to ensure temporary fallback directory {:?}: {}",
-                parent,
-                e
-            );
+            let _ = (parent, e);
+            log::warn!("[DB-UTILS] Failed to ensure temporary fallback directory");
+            diag_warn("db_utils", "temp_fallback_dir_ensure_failed", &[]);
         }
     }
 
@@ -166,21 +171,30 @@ pub fn open_temp_fallback_connection(
         log::warn!(
             "[DB-UTILS] Temporary fallback directory ACL hardening failed. Using in-memory database instead."
         );
+        diag_warn("db_utils", "temp_fallback_acl_hardening_failed", &[]);
         return Ok((Connection::open_in_memory()?, None));
     }
 
     match Connection::open(temp_fallback_path) {
         Ok(c) => {
-            log::warn!(
-                "[DB-UTILS] Using temporary fallback database at {:?}",
-                temp_fallback_path
+            let _ = temp_fallback_path;
+            log::warn!("[DB-UTILS] Using temporary fallback database on disk");
+            diag_warn(
+                "db_utils",
+                "temp_fallback_database_enabled",
+                &[field_label("mode", "disk")],
             );
             Ok((c, Some(temp_fallback_path.to_path_buf())))
         }
         Err(temp_err) => {
+            let _ = temp_err;
             log::warn!(
-                "[DB-UTILS] Failed to open temporary fallback database: {:?}. Using in-memory database.",
-                temp_err
+                "[DB-UTILS] Failed to open temporary fallback database. Using in-memory database."
+            );
+            diag_warn(
+                "db_utils",
+                "temp_fallback_open_failed",
+                &[field_label("mode", "memory")],
             );
             Ok((Connection::open_in_memory()?, None))
         }

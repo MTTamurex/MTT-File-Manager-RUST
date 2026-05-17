@@ -1,4 +1,5 @@
 use crate::infrastructure::app_state_db::AppStateDb;
+use crate::infrastructure::diagnostic_logger::{diag_error, field_label};
 use crate::infrastructure::directory_cache::DirectoryCache;
 use crate::infrastructure::disk_cache::ThumbnailDiskCache;
 use crate::ui::cache::CacheManager;
@@ -27,10 +28,12 @@ impl CacheState {
         let disk_cache = match ThumbnailDiskCache::new(cache_dir.clone()) {
             Ok(cache) => Arc::new(cache),
             Err(e) => {
-                log::error!(
-                    "[Cache] Fatal: failed to initialize cache state at {:?}: {:?}",
-                    cache_dir,
-                    e
+                let _ = (cache_dir, e);
+                log::error!("[Cache] Fatal: failed to initialize thumbnail disk cache state");
+                diag_error(
+                    "cache_state",
+                    "thumbnail_disk_cache_init_failed",
+                    &[field_label("scope", "temporary_cache")],
                 );
                 std::process::exit(1);
             }
@@ -40,10 +43,12 @@ impl CacheState {
         let app_state_db = match AppStateDb::new(state_dir.clone()) {
             Ok(db) => Arc::new(db),
             Err(e) => {
-                log::error!(
-                    "[State] Fatal: failed to initialize state DB at {:?}: {:?}",
-                    state_dir,
-                    e
+                let _ = (state_dir, e);
+                log::error!("[State] Fatal: failed to initialize application state database");
+                diag_error(
+                    "cache_state",
+                    "app_state_db_init_failed",
+                    &[field_label("scope", "temporary_state_db")],
                 );
                 std::process::exit(1);
             }

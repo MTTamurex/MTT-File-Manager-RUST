@@ -421,6 +421,7 @@ pub fn get_all_drives() -> Vec<(String, String)> {
         // First, get the required length
         let len = GetLogicalDriveStringsW(None);
         if len == 0 {
+            log::warn!("[DRIVE-REFRESH] GetLogicalDriveStringsW returned zero length");
             return Vec::new();
         }
 
@@ -428,6 +429,7 @@ pub fn get_all_drives() -> Vec<(String, String)> {
         let actual_len = GetLogicalDriveStringsW(Some(&mut buffer));
 
         if actual_len == 0 {
+            log::warn!("[DRIVE-REFRESH] GetLogicalDriveStringsW returned no drives");
             return Vec::new();
         }
 
@@ -488,6 +490,10 @@ pub fn get_volume_info(drive_path: &str) -> VolumeInfo {
             if !fs_str.is_empty() {
                 file_system = fs_str;
             }
+        } else {
+            log::warn!(
+                "[DRIVE-REFRESH] Failed to query drive file system metadata; using fallback label"
+            );
         }
 
         if result.is_ok() {
@@ -497,6 +503,9 @@ pub fn get_volume_info(drive_path: &str) -> VolumeInfo {
                 free_space: total_free_bytes,
             }
         } else {
+            log::warn!(
+                "[DRIVE-REFRESH] Failed to query drive capacity; using zeroed space values"
+            );
             VolumeInfo {
                 file_system,
                 total_space: 0,

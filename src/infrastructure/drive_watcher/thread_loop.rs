@@ -12,6 +12,9 @@ use windows::Win32::Storage::FileSystem::{
 use windows::Win32::System::Threading::{CreateEventW, ResetEvent, WaitForSingleObject};
 use windows::Win32::System::IO::{CancelIoEx, GetOverlappedResult, OVERLAPPED};
 
+use crate::infrastructure::diagnostic_logger::{
+    diag_error, diag_info, diag_warn, field_bool, field_i64, field_u64,
+};
 use crate::infrastructure::windows::OwnedHandle;
 
 use super::buffer_parser::{event_matches_prefix, parse_notify_buffer};
@@ -50,14 +53,17 @@ pub(super) fn watcher_thread_main(
     shutdown: Arc<AtomicBool>,
     current_prefix: Arc<Mutex<PathBuf>>,
 ) {
-    log::info!("[DRIVE-WATCHER] Thread started for drive: {:?}", drive_root);
+    log::info!("[DRIVE-WATCHER] Thread started for watched drive root");
+    diag_info(
+        "drive_watcher",
+        "thread_started",
+        &[field_bool("subtree_watch", true)],
+    );
 
     unsafe {
         let Some(handle) = OwnedHandle::new(handle) else {
-            log::error!(
-                "[DRIVE-WATCHER] Received invalid drive handle for {:?}",
-                drive_root
-            );
+            log::error!("[DRIVE-WATCHER] Received invalid drive handle");
+            diag_error("drive_watcher", "invalid_drive_handle", &[]);
             return;
         };
 
@@ -67,11 +73,17 @@ pub(super) fn watcher_thread_main(
                 Some(handle) => handle,
                 None => {
                     log::error!("[DRIVE-WATCHER] CreateEventW returned invalid handle");
+                    diag_error("drive_watcher", "create_event_invalid_handle", &[]);
                     return;
                 }
             },
             Err(e) => {
-                log::error!("[DRIVE-WATCHER] Failed to create event: {}", e);
+                log::error!("[DRIVE-WATCHER] Failed to create event handle");
+                diag_error(
+                    "drive_watcher",
+                    "create_event_failed",
+                    &[field_i64("hresult", e.code().0 as i64)],
+                );
                 return;
             }
         };
@@ -137,10 +149,14 @@ pub(super) fn watcher_thread_main(
                     None,
                 );
 
-                if result.is_err() {
+                if let Err(error) = result {
                     log::error!(
-                        "[DRIVE-WATCHER] ReadDirectoryChangesW failed (drive likely unmounted): {:?}",
-                        result.err()
+                        "[DRIVE-WATCHER] ReadDirectoryChangesW failed (drive likely unmounted)"
+                    );
+                    diag_error(
+                        "drive_watcher",
+                        "read_directory_changes_failed",
+                        &[field_i64("hresult", error.code().0 as i64)],
                     );
                     let _ = event_tx.send(vec![DriveWatcherEvent::DriveLost(drive_root.clone())]);
                     break;
@@ -160,8 +176,12 @@ pub(super) fn watcher_thread_main(
                 if let Err(e) = &result {
                     // Handle became invalid - drive was likely unmounted.
                     log::error!(
-                        "[DRIVE-WATCHER] GetOverlappedResult failed (drive likely unmounted): {}",
-                        e
+                        "[DRIVE-WATCHER] GetOverlappedResult failed (drive likely unmounted)"
+                    );
+                    diag_error(
+                        "drive_watcher",
+                        "get_overlapped_result_failed",
+                        &[field_i64("hresult", e.code().0 as i64)],
                     );
                     let _ = event_tx.send(vec![DriveWatcherEvent::DriveLost(drive_root.clone())]);
                     break;
@@ -169,10 +189,14 @@ pub(super) fn watcher_thread_main(
 
                 if bytes_returned == 0 || bytes_returned as usize >= buffer.0.len() {
                     let prefix_snapshot = current_prefix.lock().clone();
-                    log::warn!(
-                        "[DRIVE-WATCHER] Notification overflow on {:?}; invalidating {:?}",
-                        drive_root,
-                        prefix_snapshot
+                    log::warn!("[DRIVE-WATCHER] Notification overflow; invalidating watched prefix");
+                    diag_warn(
+                        "drive_watcher",
+                        "notification_overflow",
+                        &[
+                            field_u64("buffer_bytes", BUFFER_SIZE as u64),
+                            field_u64("coalesced_events", coalesced.len() as u64),
+                        ],
                     );
                     coalesced.clear();
                     let _ =

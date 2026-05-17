@@ -1,4 +1,5 @@
 use crate::domain::thumbnail::ThumbnailData;
+use crate::infrastructure::diagnostic_logger::{diag_warn, field_label};
 use crate::infrastructure::disk_cache::{ThumbnailCacheEntry, ThumbnailDiskCache};
 use crate::infrastructure::io_priority::IOPriority;
 use crate::infrastructure::onedrive::{self, IoTimeoutResult};
@@ -210,7 +211,12 @@ pub(super) fn process_thumbnail_request(
             }
             IoTimeoutResult::Timeout => {
                 mark_as_transient_failure(path.clone());
-                log::warn!("[THUMB WORKER] exists() timeout for {:?}", path);
+                log::warn!("[THUMB WORKER] exists() timeout during OneDrive availability check");
+                diag_warn(
+                    "thumbnail_worker",
+                    "exists_timeout",
+                    &[field_label("provider", "onedrive")],
+                );
             }
             IoTimeoutResult::Ok(true) => {}
             IoTimeoutResult::Err(_) => {
@@ -267,7 +273,12 @@ pub(super) fn process_thumbnail_request(
             IoTimeoutResult::Ok(metadata) => metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH),
             IoTimeoutResult::Timeout => {
                 mark_as_transient_failure(path.clone());
-                log::warn!("[THUMB WORKER] metadata() timeout for {:?}", path);
+                log::warn!("[THUMB WORKER] metadata() timeout during OneDrive metadata lookup");
+                diag_warn(
+                    "thumbnail_worker",
+                    "metadata_timeout",
+                    &[field_label("provider", "onedrive")],
+                );
                 SystemTime::UNIX_EPOCH
             }
             IoTimeoutResult::Err(_) => {

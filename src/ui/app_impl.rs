@@ -217,7 +217,6 @@ impl eframe::App for ImageViewerApp {
 
         // 11. Settings window
         if self.navigation_state.show_settings_window {
-            let diagnostic_log_path = crate::infrastructure::diagnostic_logger::log_file_path();
             let mut diagnostic_mode = self.diagnostic_mode;
             let output = crate::ui::components::settings_window::render_settings_window(
                 ctx,
@@ -230,7 +229,6 @@ impl eframe::App for ImageViewerApp {
                 &mut self.shortcut_editor,
                 &mut self.show_recycle_bin,
                 &mut diagnostic_mode,
-                &diagnostic_log_path,
             );
             self.navigation_state.show_settings_window = output.keep_open;
             if !output.keep_open {

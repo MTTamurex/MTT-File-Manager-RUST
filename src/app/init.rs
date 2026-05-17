@@ -16,6 +16,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use crate::application::ClipboardManager;
+use crate::infrastructure::diagnostic_logger::{diag_info, diag_warn, field_label};
 use crate::infrastructure::app_state_db::AppStateDb;
 use crate::infrastructure::onedrive;
 // use crate::ui::cache::CacheManager;
@@ -43,6 +44,11 @@ fn determine_initial_path(app_state_db: &AppStateDb) -> (String, bool) {
             // Restore "This PC" directly — no filesystem check needed.
             if last_folder == COMPUTER_VIEW_ID {
                 log::info!("[INIT] Restoring last folder: This PC");
+                diag_info(
+                    "startup",
+                    "restore_last_folder",
+                    &[field_label("result", "computer_view")],
+                );
                 return (COMPUTER_VIEW_ID.to_string(), true);
             }
 
@@ -55,12 +61,21 @@ fn determine_initial_path(app_state_db: &AppStateDb) -> (String, bool) {
             // folders, freezing the app at startup.
             // GetFileAttributesW reads cached attributes - no network I/O.
             if onedrive::fast_path_exists(&path_buf) && onedrive::fast_is_dir(&path_buf) {
-                log::info!("[INIT] Restoring last folder: {}", last_folder);
+                log::info!("[INIT] Restoring last folder from preferences");
+                diag_info(
+                    "startup",
+                    "restore_last_folder",
+                    &[field_label("result", "existing_directory")],
+                );
                 return (last_folder, false);
             } else {
                 log::warn!(
-                    "[INIT] Last folder no longer exists or not accessible: {}, using Este Computador",
-                    last_folder
+                    "[INIT] Last folder from preferences no longer exists or is not accessible; using Este Computador"
+                );
+                diag_warn(
+                    "startup",
+                    "restore_last_folder",
+                    &[field_label("result", "missing_or_inaccessible")],
                 );
             }
         }
@@ -68,6 +83,11 @@ fn determine_initial_path(app_state_db: &AppStateDb) -> (String, bool) {
 
     // Default to "This PC" if no valid last folder
     log::info!("[INIT] No valid last folder found, starting at Este Computador");
+    diag_info(
+        "startup",
+        "restore_last_folder",
+        &[field_label("result", "default_computer_view")],
+    );
     (COMPUTER_VIEW_ID.to_string(), true)
 }
 

@@ -11,6 +11,7 @@ use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 
+use crate::infrastructure::diagnostic_logger::{diag_error, diag_info, field_bool, field_u64};
 use rfd::FileDialog;
 
 /// Base OSC script-opts for the standalone player.
@@ -437,7 +438,9 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
 
     // SEC: Validate again in child process (defense in depth).
     if let Err(e) = validate_video_path(&path) {
-        log::error!("[VIDEO-PLAYER] path validation failed in standalone: {}", e);
+        let _ = e;
+        log::error!("[VIDEO-PLAYER] path validation failed in standalone");
+        diag_error("video_player", "path_validation_failed", &[]);
         return Ok(());
     }
 
@@ -448,13 +451,21 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
 
     let config_dir = resolve_mpv_ui_config_dir();
     if let Some(dir) = &config_dir {
-        log::info!(
-            "[VIDEO-PLAYER] Using mpv config dir: {}",
-            dir.to_string_lossy()
+        let _ = dir;
+        log::info!("[VIDEO-PLAYER] Using resolved mpv config dir");
+        diag_info(
+            "video_player",
+            "config_dir_resolved",
+            &[field_bool("present", true)],
         );
     } else {
         log::warn!(
             "[VIDEO-PLAYER] mpv_ui/portable_config not found (with scripts/modernH.lua + scripts/vsr.lua); OSC/VSR may not load"
+        );
+        diag_info(
+            "video_player",
+            "config_dir_resolved",
+            &[field_bool("present", false)],
         );
     }
 
@@ -507,7 +518,9 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
     let mut mpv = match mpv {
         Ok(m) => m,
         Err(e) => {
-            log::error!("[VIDEO-PLAYER] Failed to create mpv instance: {:?}", e);
+            let _ = e;
+            log::error!("[VIDEO-PLAYER] Failed to create mpv instance");
+            diag_error("video_player", "mpv_instance_create_failed", &[]);
             return Ok(());
         }
     };
@@ -572,15 +585,39 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
     }
 
     if let Err(e) = mpv.command("loadfile", &[&path_str]) {
-        log::error!("[VIDEO-PLAYER] Failed to load file '{}': {:?}", path_str, e);
+        let _ = (path_str, e);
+        log::error!("[VIDEO-PLAYER] Failed to load media into mpv");
+        diag_error(
+            "video_player",
+            "loadfile_failed",
+            &[
+                field_bool("is_audio", is_audio),
+                field_u64("requested_start_ms", (position.max(0.0) * 1000.0).round() as u64),
+                field_u64(
+                    "volume_percent",
+                    (volume.clamp(0.0, 1.0) * 100.0).round() as u64,
+                ),
+            ],
+        );
         return Ok(());
     }
 
     log::info!(
-        "[VIDEO-PLAYER] Playing '{}' (pos={:.1}s, vol={:.0}%)",
-        title_name,
+        "[VIDEO-PLAYER] Starting playback (pos={:.1}s, vol={:.0}%)",
         position,
         volume * 100.0
+    );
+    diag_info(
+        "video_player",
+        "playback_started",
+        &[
+            field_bool("is_audio", is_audio),
+            field_u64("requested_start_ms", (position.max(0.0) * 1000.0).round() as u64),
+            field_u64(
+                "volume_percent",
+                (volume.clamp(0.0, 1.0) * 100.0).round() as u64,
+            ),
+        ],
     );
 
     // Event loop — blocks until mpv shuts down (user closes window or presses 'q')
