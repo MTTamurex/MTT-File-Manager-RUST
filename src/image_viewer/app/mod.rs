@@ -45,6 +45,7 @@ pub struct DedicatedImageViewerApp {
     pub(super) last_error: Option<String>,
     pub(super) zoom_factor: f32,
     pub(super) zoom_percent_display: f32,
+    pub(super) rotation: u16,
     pub(super) image_resolution: Option<(u32, u32)>,
     pub(super) current_window_title: String,
     pub(super) repaint_ctx_set: bool,
@@ -118,6 +119,7 @@ impl DedicatedImageViewerApp {
             last_error: None,
             zoom_factor: 1.0,
             zoom_percent_display: 100.0,
+            rotation: 0,
             image_resolution: None,
             current_window_title: initial_window_title,
             repaint_ctx_set: false,
@@ -230,6 +232,7 @@ impl DedicatedImageViewerApp {
         self.last_error = None;
         self.zoom_factor = 1.0;
         self.zoom_percent_display = 100.0;
+        self.rotation = 0;
         self.gif_animation = None;
         self.gif_loaded_index = None;
         self.gif_decode_rx = None;
@@ -549,6 +552,7 @@ impl DedicatedImageViewerApp {
         let old_index = self.current_index;
         self.current_index = index;
         self.zoom_factor = 1.0;
+        self.rotation = 0;
         self.last_error = None;
 
         // Reset GIF animation state for the new image.
@@ -622,6 +626,47 @@ impl DedicatedImageViewerApp {
         self.navigate_to(self.current_index + 1, ctx);
     }
 
+    pub(super) fn rotate_cw(&mut self) {
+        self.rotation = (self.rotation + 90) % 360;
+    }
+
+    pub(super) fn rotate_ccw(&mut self) {
+        self.rotation = (self.rotation + 270) % 360;
+    }
+
+    /// Paint an image texture with rotation handled entirely in UV coordinates —
+    /// zero CPU pixel manipulation.
+    pub(super) fn paint_rotated_image(
+        painter: &egui::Painter,
+        rect: egui::Rect,
+        tex_id: egui::TextureId,
+        rotation: u16,
+    ) {
+        let mut mesh = egui::Mesh::with_texture(tex_id);
+        let c = egui::Color32::WHITE;
+        let p = [
+            rect.left_top(),
+            rect.right_top(),
+            rect.right_bottom(),
+            rect.left_bottom(),
+        ];
+        let uv: [(f32, f32); 4] = match rotation {
+            90 => [(0.0, 1.0), (0.0, 0.0), (1.0, 0.0), (1.0, 1.0)],
+            180 => [(1.0, 1.0), (0.0, 1.0), (0.0, 0.0), (1.0, 0.0)],
+            270 => [(1.0, 0.0), (1.0, 1.0), (0.0, 1.0), (0.0, 0.0)],
+            _ => [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)],
+        };
+        for i in 0..4 {
+            mesh.vertices.push(egui::epaint::Vertex {
+                pos: p[i],
+                uv: egui::pos2(uv[i].0, uv[i].1),
+                color: c,
+            });
+        }
+        mesh.indices = vec![0, 1, 2, 0, 2, 3];
+        painter.add(egui::Shape::mesh(mesh));
+    }
+
     fn handle_shortcuts(&mut self, ctx: &egui::Context) {
         let close = ctx.input(|i| i.key_pressed(egui::Key::Escape));
         if close {
@@ -645,6 +690,17 @@ impl DedicatedImageViewerApp {
         });
         if next {
             self.navigate_next(ctx);
+        }
+
+        let rotate_clockwise = ctx.input(|i| i.key_pressed(egui::Key::R) && !i.modifiers.ctrl && !i.modifiers.shift);
+        let rotate_counterclockwise = ctx.input(|i| {
+            i.key_pressed(egui::Key::R) && !i.modifiers.ctrl && i.modifiers.shift
+        });
+
+        if rotate_counterclockwise {
+            self.rotate_ccw();
+        } else if rotate_clockwise {
+            self.rotate_cw();
         }
     }
 

@@ -412,6 +412,8 @@ imageviewer:
   format_webp: "WebP"
   format_bmp: "BMP"
   format_tiff: "TIFF"
+  rotate_ccw: "Rotate counter-clockwise  (Shift+R)"
+  rotate_cw: "Rotate clockwise  (R)"
 pdfviewer:
   title: "PDF Viewer"
   title_with_file: "PDF Viewer - %{name}"

@@ -412,6 +412,8 @@ imageviewer:
   format_webp: "WebP"
   format_bmp: "BMP"
   format_tiff: "TIFF"
+  rotate_ccw: "Girar no sentido anti-horário  (Shift+R)"
+  rotate_cw: "Girar no sentido horário  (R)"
 pdfviewer:
   title: "Visualizador de PDF"
   title_with_file: "Visualizador de PDF - %{name}"

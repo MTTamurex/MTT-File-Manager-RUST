@@ -31,6 +31,28 @@ impl super::DedicatedImageViewerApp {
                     self.navigate_next(ctx);
                 }
 
+                ui.separator();
+
+                if ui
+                    .button("↺")
+                    .on_hover_text(t!("imageviewer.rotate_ccw"))
+                    .clicked()
+                {
+                    self.rotate_ccw();
+                }
+
+                if ui
+                    .button("↻")
+                    .on_hover_text(t!("imageviewer.rotate_cw"))
+                    .clicked()
+                {
+                    self.rotate_cw();
+                }
+
+                if self.rotation != 0 {
+                    ui.label(format!("{}°", self.rotation));
+                }
+
                 ui.add_enabled_ui(
                     !self.sequence.entries.is_empty() && !self.conversion_in_progress,
                     |ui| {
@@ -134,8 +156,16 @@ impl super::DedicatedImageViewerApp {
                 // egui layout works in points, while texture size is in pixels.
                 // Convert first to avoid implicit upscale on high-DPI monitors.
                 let pixels_per_point = ui.ctx().pixels_per_point().max(f32::EPSILON);
-                let tex_size = tex.size_vec2() / pixels_per_point;
+                let tex_size_raw = tex.size_vec2() / pixels_per_point;
                 let viewport_size = ui.available_size();
+
+                // Swap width/height for 90/270 rotation so fit-to-window
+                // uses the post-rotation display dimensions.
+                let tex_size = if self.rotation == 90 || self.rotation == 270 {
+                    egui::vec2(tex_size_raw.y, tex_size_raw.x)
+                } else {
+                    tex_size_raw
+                };
 
                 // Fit-to-window only downscales; 100% remains the native image
                 // size, which keeps the reported zoom intuitive.
@@ -172,12 +202,28 @@ impl super::DedicatedImageViewerApp {
                         let (canvas_rect, _) =
                             ui.allocate_at_least(canvas_size, egui::Sense::hover());
 
-                        let image = egui::Image::new(&tex)
-                            .fit_to_exact_size(draw_size)
-                            .sense(egui::Sense::click());
                         let image_rect =
                             egui::Rect::from_center_size(canvas_rect.center(), draw_size);
-                        let response = ui.put(image_rect, image);
+
+                        let response = if self.rotation != 0 {
+                            let resp = ui.interact(
+                                image_rect,
+                                ui.id().with("image_viewer_rotated"),
+                                egui::Sense::click(),
+                            );
+                            Self::paint_rotated_image(
+                                ui.painter(),
+                                image_rect,
+                                tex.id(),
+                                self.rotation,
+                            );
+                            resp
+                        } else {
+                            let image = egui::Image::new(&tex)
+                                .fit_to_exact_size(draw_size)
+                                .sense(egui::Sense::click());
+                            ui.put(image_rect, image)
+                        };
 
                         if response.hovered() {
                             let wheel_delta = ui.input(|i| i.raw_scroll_delta.y);
