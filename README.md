@@ -11,6 +11,8 @@
 <img width="1920" height="2062" alt="light dark" src="https://github.com/user-attachments/assets/5055525c-c8a1-4767-8f18-eafe510d4584" />
 
 - **Dual panel (split view)** — Side-by-side file browsing with independent left and right panels; toggle via the toolbar button. Each panel maintains its own navigation history, sort order, view mode, and selection. File copy/move operations default to the opposite panel as the destination
+<img width="3840" height="2060" alt="dual" src="https://github.com/user-attachments/assets/fc4a98a7-8c5e-490d-8ad6-5993c02369d5" />
+
 - **Tabbed navigation** — Multiple tabs with independent history
 - **Grid and List views** — Adjustable thumbnail sizes
 - **Smart address bar** — Direct path input with breadcrumbs
