@@ -512,6 +512,31 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
             log::warn!("[VIDEO-PLAYER] Failed to set script-opts: {:?}", e);
         }
 
+        // force-window must be set at init time so the mpv window exists
+        // when modernH.lua initializes — setting it as a runtime property
+        // causes the window to appear AFTER script init, which leaves the OSC
+        // show/hide key bindings in an inconsistent state (disabled during idle,
+        // not reliably re-enabled on file load).
+        if let Err(e) = init.set_option("force-window", true) {
+            log::warn!("[VIDEO-PLAYER] Failed to set force-window=yes: {:?}", e);
+        }
+
+        // Window sizing — set at init time so the VO uses the correct dimensions
+        // from the start; setting autofit as a runtime property is silently
+        // ignored by mpv for the initial window.
+        if let Err(e) = init.set_option("autofit", "55%x55%") {
+            log::warn!("[VIDEO-PLAYER] Failed to set autofit: {:?}", e);
+        }
+        if let Err(e) = init.set_option("autofit-larger", "90%x90%") {
+            log::warn!("[VIDEO-PLAYER] Failed to set autofit-larger: {:?}", e);
+        }
+
+        // keep-open keeps the window visible after EOF so the user can interact
+        // with the OSC (close button, seek bar, etc.).
+        if let Err(e) = init.set_option("keep-open", "always") {
+            log::warn!("[VIDEO-PLAYER] Failed to set keep-open=always: {:?}", e);
+        }
+
         Ok(())
     });
 
@@ -537,12 +562,10 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
     let _ = mpv.set_property("hwdec", "d3d11va");
 
     // Playback stability
-    let _ = mpv.set_property("force-window", true);
     let _ = mpv.set_property("video-sync", "audio");
     let _ = mpv.set_property("interpolation", false);
     let _ = mpv.set_property("tscale", "linear");
     let _ = mpv.set_property("framedrop", "vo");
-    let _ = mpv.set_property("keep-open", "always");
 
     // Cache/demuxer settings
     let _ = mpv.set_property("cache", "yes");
@@ -557,9 +580,7 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
     // Window title (shown in taskbar for borderless window)
     let _ = mpv.set_property("title", format!("Media Player — {}", title_name).as_str());
 
-    // Initial window size — use percentage to respect display scaling on HiDPI screens
-    let _ = mpv.set_property("autofit", "55%x55%");
-    let _ = mpv.set_property("autofit-larger", "90%x90%");
+    // HiDPI and window resize settings (runtime properties are fine for these)
     let _ = mpv.set_property("hidpi-window-scale", true);
 
     // Prevent mpv from auto-resizing the window when the d3d11vpp (RTX VSR)
@@ -639,6 +660,15 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
                 // Set our app icon on the mpv window (replaces default mpv icon)
                 #[cfg(target_os = "windows")]
                 set_mpv_window_icon(&mpv);
+
+                // Force the custom OSC (modernH.lua) to show.  Avoids a race
+                // where the show/hide key bindings can be stuck in the "disabled"
+                // state after the idle → playing transition.  Sending
+                // osc-visibility "always" then "auto" forces the script to
+                // re-enable input bindings and immediately display the OSC,
+                // after which it auto-hides normally.
+                let _ = mpv.command("script-message", &["osc-visibility", "always", "1"]);
+                let _ = mpv.command("script-message", &["osc-visibility", "auto", "1"]);
 
                 // Log effective GPU pipeline for VSR debugging
                 let vo = mpv.get_property::<String>("vo").unwrap_or_default();
