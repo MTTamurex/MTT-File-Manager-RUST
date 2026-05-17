@@ -8,6 +8,7 @@
 
 ### Interface & Navigation
 - **Dark / Light theme** — Toggle between dark and light mode in Settings > Appearance; persisted in SQLite, applied to all windows including image, PDF, and text viewers with native title bar support via DWM
+<img width="1920" height="2062" alt="light dark" src="https://github.com/user-attachments/assets/5055525c-c8a1-4767-8f18-eafe510d4584" />
 - **Dual panel (split view)** — Side-by-side file browsing with independent left and right panels; toggle via the toolbar button. Each panel maintains its own navigation history, sort order, view mode, and selection. File copy/move operations default to the opposite panel as the destination
 - **Tabbed navigation** — Multiple tabs with independent history
 - **Grid and List views** — Adjustable thumbnail sizes
