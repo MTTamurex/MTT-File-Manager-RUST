@@ -189,7 +189,9 @@ pub(super) fn watcher_thread_main(
 
                 if bytes_returned == 0 || bytes_returned as usize >= buffer.0.len() {
                     let prefix_snapshot = current_prefix.lock().clone();
-                    log::warn!("[DRIVE-WATCHER] Notification overflow; invalidating watched prefix");
+                    log::warn!(
+                        "[DRIVE-WATCHER] Notification overflow; invalidating watched prefix"
+                    );
                     diag_warn(
                         "drive_watcher",
                         "notification_overflow",

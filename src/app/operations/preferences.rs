@@ -288,7 +288,9 @@ impl ImageViewerApp {
         }
 
         if enabled {
-            let enabled_since = self.diagnostic_mode_enabled_at.unwrap_or_else(SystemTime::now);
+            let enabled_since = self
+                .diagnostic_mode_enabled_at
+                .unwrap_or_else(SystemTime::now);
             match diagnostic_logger::enable_file_logging_with_since(enabled_since) {
                 Ok(_) => {
                     self.diagnostic_mode = true;
@@ -303,7 +305,10 @@ impl ImageViewerApp {
                 Err(error) => {
                     self.diagnostic_mode = false;
                     self.diagnostic_mode_enabled_at = None;
-                    log::error!("[DIAGNOSTIC] Failed to enable diagnostic logging: {}", error);
+                    log::error!(
+                        "[DIAGNOSTIC] Failed to enable diagnostic logging: {}",
+                        error
+                    );
                 }
             }
         } else {
@@ -329,8 +334,10 @@ impl ImageViewerApp {
             return;
         }
 
-        if diagnostic_logger::is_preference_expired(self.diagnostic_mode_enabled_at, SystemTime::now())
-        {
+        if diagnostic_logger::is_preference_expired(
+            self.diagnostic_mode_enabled_at,
+            SystemTime::now(),
+        ) {
             log::info!("[DIAGNOSTIC] Auto-disabling diagnostic mode after 24 hours");
             self.set_diagnostic_mode_with_reason(false, "expired_24h");
         }
@@ -339,7 +346,10 @@ impl ImageViewerApp {
     pub fn open_diagnostic_log_folder(&mut self) {
         if let Err(error) = diagnostic_logger::open_log_folder() {
             diagnostic_logger::diag_warn("diagnostic_mode", "open_log_folder_failed", &[]);
-            log::warn!("[DIAGNOSTIC] Failed to open diagnostic log folder: {}", error);
+            log::warn!(
+                "[DIAGNOSTIC] Failed to open diagnostic log folder: {}",
+                error
+            );
             self.notifications.warning(error);
         }
     }

@@ -295,8 +295,7 @@ impl ImageViewerApp {
             .record_request_path(&path);
 
         if self.cache_manager.is_folder_preview_loading(&path) {
-            self.suppress_next_folder_preview_invalidation
-                .insert(path);
+            self.suppress_next_folder_preview_invalidation.insert(path);
             return;
         }
 

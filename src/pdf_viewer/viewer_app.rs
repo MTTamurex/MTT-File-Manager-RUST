@@ -199,8 +199,8 @@ impl PdfViewerApp {
                         prompt.focus_requested = true;
                     }
 
-                    let submit_with_enter = resp.lost_focus()
-                        && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    let submit_with_enter =
+                        resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
 
                     ui.add_space(4.0);
                     ui.horizontal(|ui| {

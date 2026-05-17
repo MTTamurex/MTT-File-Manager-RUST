@@ -263,8 +263,14 @@ mod tests {
             image_sized_fast_path_target(Path::new("clip.mp4"), Some(256)),
             None
         );
-        assert_eq!(image_sized_fast_path_target(Path::new("anim.gif"), Some(256)), None);
-        assert_eq!(image_sized_fast_path_target(Path::new("photo.jpg"), None), None);
+        assert_eq!(
+            image_sized_fast_path_target(Path::new("anim.gif"), Some(256)),
+            None
+        );
+        assert_eq!(
+            image_sized_fast_path_target(Path::new("photo.jpg"), None),
+            None
+        );
     }
 
     #[test]
@@ -281,6 +287,9 @@ mod tests {
             embedded_exif_thumbnail_target(Path::new("photo.png"), Some(256)),
             None
         );
-        assert_eq!(embedded_exif_thumbnail_target(Path::new("photo.jpg"), None), None);
+        assert_eq!(
+            embedded_exif_thumbnail_target(Path::new("photo.jpg"), None),
+            None
+        );
     }
 }

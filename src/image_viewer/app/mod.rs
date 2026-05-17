@@ -692,10 +692,10 @@ impl DedicatedImageViewerApp {
             self.navigate_next(ctx);
         }
 
-        let rotate_clockwise = ctx.input(|i| i.key_pressed(egui::Key::R) && !i.modifiers.ctrl && !i.modifiers.shift);
-        let rotate_counterclockwise = ctx.input(|i| {
-            i.key_pressed(egui::Key::R) && !i.modifiers.ctrl && i.modifiers.shift
-        });
+        let rotate_clockwise =
+            ctx.input(|i| i.key_pressed(egui::Key::R) && !i.modifiers.ctrl && !i.modifiers.shift);
+        let rotate_counterclockwise =
+            ctx.input(|i| i.key_pressed(egui::Key::R) && !i.modifiers.ctrl && i.modifiers.shift);
 
         if rotate_counterclockwise {
             self.rotate_ccw();

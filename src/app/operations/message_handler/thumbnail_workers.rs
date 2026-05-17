@@ -206,10 +206,14 @@ impl ImageViewerApp {
                                         egui::TextureOptions::LINEAR,
                                     );
                                     if need_jumbo {
-                                        self.item_icon_loader.extension_cache.put(ext_key_jumbo, texture.clone());
+                                        self.item_icon_loader
+                                            .extension_cache
+                                            .put(ext_key_jumbo, texture.clone());
                                     }
                                     if need_large {
-                                        self.item_icon_loader.extension_cache.put(ext_key_large, texture);
+                                        self.item_icon_loader
+                                            .extension_cache
+                                            .put(ext_key_large, texture);
                                     }
                                     prewarm_uploads += 1;
                                 }
@@ -308,10 +312,14 @@ impl ImageViewerApp {
                                     egui::TextureOptions::LINEAR,
                                 );
                                 if need_jumbo {
-                                    self.item_icon_loader.extension_cache.put(ext_key_jumbo, texture.clone());
+                                    self.item_icon_loader
+                                        .extension_cache
+                                        .put(ext_key_jumbo, texture.clone());
                                 }
                                 if need_large {
-                                    self.item_icon_loader.extension_cache.put(ext_key_large, texture);
+                                    self.item_icon_loader
+                                        .extension_cache
+                                        .put(ext_key_large, texture);
                                 }
                             }
                         }

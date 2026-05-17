@@ -88,18 +88,16 @@ impl PdfRenderer {
     /// encrypted and the given password (or `None`) is insufficient.
     pub fn open(path: &Path, password: Option<&str>) -> Result<Self, PdfOpenError> {
         let pdfium = pdfium().map_err(PdfOpenError::Other)?;
-        let document = pdfium
-            .load_pdf_from_file(path, password)
-            .map_err(|e| {
-                if matches!(
-                    e,
-                    PdfiumError::PdfiumLibraryInternalError(PdfiumInternalError::PasswordError)
-                ) {
-                    PdfOpenError::PasswordRequired
-                } else {
-                    PdfOpenError::Other(format!("LoadPdf: {e}"))
-                }
-            })?;
+        let document = pdfium.load_pdf_from_file(path, password).map_err(|e| {
+            if matches!(
+                e,
+                PdfiumError::PdfiumLibraryInternalError(PdfiumInternalError::PasswordError)
+            ) {
+                PdfOpenError::PasswordRequired
+            } else {
+                PdfOpenError::Other(format!("LoadPdf: {e}"))
+            }
+        })?;
 
         let page_count = document.pages().len();
         let mut page_sizes = Vec::with_capacity(page_count as usize);

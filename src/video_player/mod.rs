@@ -613,7 +613,10 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
             "loadfile_failed",
             &[
                 field_bool("is_audio", is_audio),
-                field_u64("requested_start_ms", (position.max(0.0) * 1000.0).round() as u64),
+                field_u64(
+                    "requested_start_ms",
+                    (position.max(0.0) * 1000.0).round() as u64,
+                ),
                 field_u64(
                     "volume_percent",
                     (volume.clamp(0.0, 1.0) * 100.0).round() as u64,
@@ -633,7 +636,10 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
         "playback_started",
         &[
             field_bool("is_audio", is_audio),
-            field_u64("requested_start_ms", (position.max(0.0) * 1000.0).round() as u64),
+            field_u64(
+                "requested_start_ms",
+                (position.max(0.0) * 1000.0).round() as u64,
+            ),
             field_u64(
                 "volume_percent",
                 (volume.clamp(0.0, 1.0) * 100.0).round() as u64,

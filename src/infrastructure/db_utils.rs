@@ -3,8 +3,8 @@
 //! Extracted from `disk_cache.rs` so both `ThumbnailDiskCache` and `AppStateDb`
 //! can reuse the ACL hardening and connection setup logic.
 
-use rusqlite::Connection;
 use crate::infrastructure::diagnostic_logger::{diag_warn, field_i64, field_label};
+use rusqlite::Connection;
 use std::ffi::OsStr;
 use std::os::windows::ffi::OsStrExt;
 use std::path::Path;

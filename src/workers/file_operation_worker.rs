@@ -7,11 +7,11 @@ use windows::Win32::Foundation::HWND;
 
 mod handlers;
 
+use crate::infrastructure::diagnostic_logger::{diag_error, field_label};
 use crate::infrastructure::security::{
     classify_shell_namespace_path, sanitize_path_with_local_drive_fallback, sanitize_unc_path,
     SecurityConfig,
 };
-use crate::infrastructure::diagnostic_logger::{diag_error, field_label};
 use crate::infrastructure::windows::ComScope;
 
 pub enum FileOperationResult {

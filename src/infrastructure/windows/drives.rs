@@ -503,9 +503,7 @@ pub fn get_volume_info(drive_path: &str) -> VolumeInfo {
                 free_space: total_free_bytes,
             }
         } else {
-            log::warn!(
-                "[DRIVE-REFRESH] Failed to query drive capacity; using zeroed space values"
-            );
+            log::warn!("[DRIVE-REFRESH] Failed to query drive capacity; using zeroed space values");
             VolumeInfo {
                 file_system,
                 total_space: 0,

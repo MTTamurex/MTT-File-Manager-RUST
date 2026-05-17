@@ -148,7 +148,6 @@ impl DiagnosticFile {
         self.writer = BufWriter::new(file);
         Ok(())
     }
-
 }
 
 impl DiagnosticLogger {
@@ -295,7 +294,10 @@ pub fn disable_file_logging() {
 }
 
 pub fn is_enabled() -> bool {
-    LOGGER.get().map(|logger| logger.is_enabled()).unwrap_or(false)
+    LOGGER
+        .get()
+        .map(|logger| logger.is_enabled())
+        .unwrap_or(false)
 }
 
 pub fn enabled_since() -> Option<SystemTime> {
@@ -413,7 +415,10 @@ fn truncate_if_oversized(path: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-fn write_session_header<W: Write>(writer: &mut W, enabled_since: SystemTime) -> std::io::Result<()> {
+fn write_session_header<W: Write>(
+    writer: &mut W,
+    enabled_since: SystemTime,
+) -> std::io::Result<()> {
     let fields = [
         field_label("schema", DIAGNOSTIC_SCHEMA_VERSION),
         field_u64("enabled_since_epoch_s", unix_secs(enabled_since)),
@@ -573,7 +578,10 @@ fn is_sensitive_key(key: &str) -> bool {
 
 fn looks_sensitive_fragment(fragment: &str) -> bool {
     let trimmed = fragment.trim_matches(|c: char| {
-        matches!(c, '\'' | '"' | '(' | ')' | '[' | ']' | '{' | '}' | ',' | ';')
+        matches!(
+            c,
+            '\'' | '"' | '(' | ')' | '[' | ']' | '{' | '}' | ',' | ';'
+        )
     });
 
     if trimmed.is_empty() || trimmed == "<redacted>" {
@@ -711,7 +719,9 @@ mod tests {
         assert!(contents.contains("component=runtime_log"));
         assert!(contents.contains("event=warn_log"));
         assert!(contents.contains("target=\"mtt_file_manager::global_search\""));
-        assert!(contents.contains("message=\"[GLOBAL-SEARCH] Error for <redacted>: Failed to read <redacted>\""));
+        assert!(contents.contains(
+            "message=\"[GLOBAL-SEARCH] Error for <redacted>: Failed to read <redacted>\""
+        ));
         assert!(!contents.contains("budget 2026"));
         assert!(!contents.contains("C:\\Users\\Alice"));
         assert!(!contents.contains("taxes.xlsx"));
@@ -773,8 +783,13 @@ mod tests {
 
         let mut file = open_diagnostic_file(&path);
         let fields = [field_label("result", "overflow")];
-        file.write_event(Level::Info, "diagnostic_mode", "size_cap_reapplied", &fields)
-            .unwrap();
+        file.write_event(
+            Level::Info,
+            "diagnostic_mode",
+            "size_cap_reapplied",
+            &fields,
+        )
+        .unwrap();
         file.writer.flush().unwrap();
 
         let contents = fs::read(&path).unwrap();

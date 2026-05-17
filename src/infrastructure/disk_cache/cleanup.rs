@@ -3,7 +3,10 @@ use std::path::Path;
 
 fn normalize_cache_path(path: &Path) -> String {
     let path_str = path.to_string_lossy();
-    path_str.strip_prefix(r"\\?\").unwrap_or(&path_str).to_string()
+    path_str
+        .strip_prefix(r"\\?\")
+        .unwrap_or(&path_str)
+        .to_string()
 }
 
 impl ThumbnailDiskCache {

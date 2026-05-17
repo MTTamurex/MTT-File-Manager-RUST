@@ -152,13 +152,14 @@ fn main() -> eframe::Result<()> {
     .as_deref()
     .map(|value| value == "true")
     .unwrap_or(false);
-    let diagnostic_enabled_at = mtt_file_manager::infrastructure::diagnostic_logger::parse_enabled_at_preference(
-        read_early_preference(
-            mtt_file_manager::infrastructure::diagnostic_logger::DIAGNOSTIC_MODE_ENABLED_AT_KEY,
+    let diagnostic_enabled_at =
+        mtt_file_manager::infrastructure::diagnostic_logger::parse_enabled_at_preference(
+            read_early_preference(
+                mtt_file_manager::infrastructure::diagnostic_logger::DIAGNOSTIC_MODE_ENABLED_AT_KEY,
+            )
+            .as_deref(),
         )
-        .as_deref(),
-    )
-    .or_else(|| diagnostic_mode_requested.then_some(SystemTime::now()));
+        .or_else(|| diagnostic_mode_requested.then_some(SystemTime::now()));
     let diagnostic_mode_active = diagnostic_mode_requested
         && !mtt_file_manager::infrastructure::diagnostic_logger::is_preference_expired(
             diagnostic_enabled_at,

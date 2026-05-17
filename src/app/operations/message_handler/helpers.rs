@@ -587,9 +587,8 @@ impl ImageViewerApp {
             }
         }
 
-        self.ui_ctx.request_repaint_after(
-            FOLDER_COVER_REFRESH_DEBOUNCE + Duration::from_millis(500),
-        );
+        self.ui_ctx
+            .request_repaint_after(FOLDER_COVER_REFRESH_DEBOUNCE + Duration::from_millis(500));
     }
 
     pub(super) fn process_pending_folder_cover_refreshes(&mut self) {

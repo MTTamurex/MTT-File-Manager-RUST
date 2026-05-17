@@ -660,6 +660,9 @@ mod tests {
     fn directory_cache_time_read_failure_is_stale() {
         let err = UNIX_EPOCH.duration_since(SystemTime::now()).unwrap_err();
 
-        assert!(!directory_cache_is_recent_from_duration_since_epoch(1_000, Err(err)));
+        assert!(!directory_cache_is_recent_from_duration_since_epoch(
+            1_000,
+            Err(err)
+        ));
     }
 }
