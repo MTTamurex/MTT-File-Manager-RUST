@@ -99,6 +99,8 @@ pub(in crate::app) fn build_drive_state(
         drive_info_rx,
         drive_info_tx,
         drive_info_cache: std::collections::HashMap::new(),
+        drive_info_refresh_pending: false,
+        last_drive_info_refresh: std::time::Instant::now(),
     }
 }
 

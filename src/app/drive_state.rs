@@ -13,4 +13,7 @@ pub struct DriveState {
     pub drive_info_rx: Receiver<Vec<(String, DriveInfo)>>,
     pub drive_info_tx: Sender<Vec<(String, DriveInfo)>>,
     pub drive_info_cache: HashMap<String, DriveInfo>,
+    /// Guards concurrent background volume-info refreshes.
+    pub drive_info_refresh_pending: bool,
+    pub last_drive_info_refresh: Instant,
 }

@@ -5,6 +5,7 @@ impl ImageViewerApp {
     pub fn trigger_manual_refresh(&mut self) {
         if self.navigation_state.is_computer_view {
             self.reload_drive_list_async();
+            self.refresh_drive_info_async();
             self.drive_state.last_drive_refresh = Instant::now();
         } else if self.navigation_state.is_recycle_bin_view {
             self.setup_recycle_bin_view();

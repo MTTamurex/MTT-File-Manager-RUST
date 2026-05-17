@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::app::state::ImageViewerApp;
-use crate::domain::file_entry::FileEntry;
+use crate::domain::file_entry::{DriveInfo, FileEntry};
 use crate::domain::special_paths::{COMPUTER_VIEW_ID, RECYCLE_BIN_VIEW_ID};
 use crate::infrastructure::windows as windows_infra;
 
@@ -20,6 +20,11 @@ const DRIVE_REFRESH_INTERVAL_MS: u64 = 30000;
 // Fast bitmask check interval for virtual/mapped drives that don't fire WM_DEVICECHANGE.
 // GetLogicalDrives() is instantaneous (kernel cache, no disk I/O).
 const DRIVE_BITMASK_CHECK_INTERVAL_MS: u64 = 3000;
+
+// Interval for re-reading volume info (free/total space) while the user
+// stays in the "This PC" view. 5s is conservative and avoids hammering
+// network drives while still feeling responsive for local changes.
+const DRIVE_INFO_REFRESH_INTERVAL_MS: u64 = 5000;
 
 impl ImageViewerApp {
     pub fn setup_recycle_bin_view(&mut self) {
@@ -161,8 +166,6 @@ impl ImageViewerApp {
         // Populate items with drives using FAST-ONLY calls (no I/O blocking)
         // detect_drive_type uses GetDriveTypeW which is cached and < 1ms
         // get_volume_info is deferred to background thread
-        use crate::domain::file_entry::DriveInfo;
-
         let mut computer_items = Vec::new();
         for (path, label) in &self.drive_state.disks {
             let drive_type = windows_infra::detect_drive_type(path);
@@ -220,6 +223,8 @@ impl ImageViewerApp {
         self.is_loading_folder = false;
 
         // Launch background thread for volume info (total/free space, file_system)
+        self.drive_state.drive_info_refresh_pending = true;
+        self.drive_state.last_drive_info_refresh = Instant::now();
         let disks_snapshot: Vec<String> = self
             .drive_state
             .disks
@@ -260,6 +265,44 @@ impl ImageViewerApp {
         std::thread::spawn(move || {
             let new_disks = crate::infrastructure::windows::get_all_drives();
             let _ = tx.send(new_disks);
+            ctx.request_repaint();
+        });
+    }
+
+    /// Launches a background thread to refresh volume info for all current drives.
+    /// Non-blocking; guarded by drive_info_refresh_pending to avoid duplicates.
+    pub fn refresh_drive_info_async(&mut self) {
+        if self.drive_state.drive_info_refresh_pending {
+            return;
+        }
+        self.drive_state.drive_info_refresh_pending = true;
+        self.drive_state.last_drive_info_refresh = Instant::now();
+
+        let disks_snapshot: Vec<String> = self
+            .drive_state
+            .disks
+            .iter()
+            .map(|(p, _)| p.clone())
+            .collect();
+        let tx = self.drive_state.drive_info_tx.clone();
+        let ctx = self.ui_ctx.clone();
+        std::thread::spawn(move || {
+            use crate::infrastructure::windows::get_volume_info;
+            let mut results = Vec::new();
+            for path in &disks_snapshot {
+                let vol = get_volume_info(path);
+                let drive_type = crate::infrastructure::windows::detect_drive_type(path);
+                results.push((
+                    path.clone(),
+                    DriveInfo {
+                        file_system: vol.file_system,
+                        total_space: vol.total_space,
+                        free_space: vol.free_space,
+                        drive_type,
+                    },
+                ));
+            }
+            let _ = tx.send(results);
             ctx.request_repaint();
         });
     }
@@ -379,12 +422,24 @@ impl ImageViewerApp {
                 self.reload_drive_list_async();
             }
         }
+
+        // While in computer view, periodically refresh volume info (free/total space)
+        // so drive slots update without requiring the user to leave and re-enter.
+        if self.navigation_state.is_computer_view
+            && !self.drive_state.drive_info_refresh_pending
+            && self.drive_state.last_drive_info_refresh.elapsed()
+                >= Duration::from_millis(DRIVE_INFO_REFRESH_INTERVAL_MS)
+        {
+            self.refresh_drive_info_async();
+        }
     }
 
     /// Poll for completed background volume info scans. Called once per frame.
     /// Updates drive_info (total_space, free_space, file_system) in existing items.
     pub fn poll_drive_info(&mut self) {
-        if let Ok(results) = self.drive_state.drive_info_rx.try_recv() {
+        let mut any_received = false;
+        while let Ok(results) = self.drive_state.drive_info_rx.try_recv() {
+            any_received = true;
             // Always persist drive info in the dedicated cache so it survives
             // navigation away from computer view (used by details panel).
             for (path, info) in &results {
@@ -393,19 +448,19 @@ impl ImageViewerApp {
                     .insert(path.clone(), info.clone());
             }
 
-            if !self.navigation_state.is_computer_view {
-                return; // Only update all_items if still in computer view
-            }
-
-            // Update all_items with the received drive info
-            for item in self.all_items_mut().iter_mut() {
-                let item_path = item.path.to_string_lossy();
-                if let Some((_, info)) = results.iter().find(|(p, _)| p == item_path.as_ref()) {
-                    item.drive_info = Some(info.clone());
+            if self.navigation_state.is_computer_view {
+                // Update all_items with the received drive info
+                for item in self.all_items_mut().iter_mut() {
+                    let item_path = item.path.to_string_lossy();
+                    if let Some((_, info)) = results.iter().find(|(p, _)| p == item_path.as_ref()) {
+                        item.drive_info = Some(info.clone());
+                    }
                 }
+                self.share_visible_items_from_all_items();
             }
-
-            self.share_visible_items_from_all_items();
+        }
+        if any_received {
+            self.drive_state.drive_info_refresh_pending = false;
         }
     }
 }
