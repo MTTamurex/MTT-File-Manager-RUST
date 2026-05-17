@@ -14,6 +14,8 @@
 <img width="3840" height="2060" alt="dual" src="https://github.com/user-attachments/assets/fc4a98a7-8c5e-490d-8ad6-5993c02369d5" />
 
 - **Tabbed navigation** — Multiple tabs with independent history
+<img width="1352" height="162" alt="tabs" src="https://github.com/user-attachments/assets/84054461-d7b7-4f63-986f-ca8b4e3f2e97" />
+
 - **Grid and List views** — Adjustable thumbnail sizes
 - **Smart address bar** — Direct path input with breadcrumbs
 - **Sidebar** — Quick access to drives, libraries, OneDrive, and Recycle Bin
