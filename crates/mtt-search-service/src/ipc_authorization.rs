@@ -6,8 +6,9 @@ use windows::core::PCWSTR;
 use windows::Win32::Foundation::{CloseHandle, HANDLE};
 use windows::Win32::Security::RevertToSelf;
 use windows::Win32::Storage::FileSystem::{
-    CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_FLAGS_AND_ATTRIBUTES, FILE_FLAG_BACKUP_SEMANTICS,
-    FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
+    CreateFileW, GetFileAttributesW, FILE_ATTRIBUTE_NORMAL, FILE_FLAGS_AND_ATTRIBUTES,
+    FILE_FLAG_BACKUP_SEMANTICS, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+    INVALID_FILE_ATTRIBUTES, OPEN_EXISTING,
 };
 use windows::Win32::System::Pipes::GetNamedPipeClientProcessId;
 use windows::Win32::System::Pipes::ImpersonateNamedPipeClient;
@@ -94,6 +95,16 @@ pub(crate) fn current_client_can_read_path(full_path: &str) -> bool {
             }
         }
     }
+}
+
+#[inline]
+fn exact_path_exists(full_path: &str) -> bool {
+    let wide_path: Vec<u16> = OsStr::new(full_path)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+
+    unsafe { GetFileAttributesW(PCWSTR(wide_path.as_ptr())) != INVALID_FILE_ATTRIBUTES }
 }
 
 pub(crate) fn trusted_file_manager_client(pipe: HANDLE) -> Result<(), String> {
@@ -225,62 +236,43 @@ fn ensure_client_connected(pipe: HANDLE) -> Result<(), String> {
     Ok(())
 }
 
-pub fn collect_authorized_search_page(
-    pipe: HANDLE,
-    indices: &SharedVolumeIndices,
-    query: &str,
+fn collect_existing_authorized_page<I, FPathExists, FParentAuthorized, FPathAuthorized, FProgress>(
+    raw_items: I,
+    raw_has_more: bool,
     offset: usize,
     limit: usize,
-) -> Result<AuthorizedSearchPage, String> {
-    if limit == 0 || query.is_empty() {
-        return Ok(AuthorizedSearchPage {
-            items: Vec::new(),
-            has_more: false,
-            total_matches: Some(0),
-        });
-    }
-
-    // All filesystem access checks below execute in the caller's security context.
-    let _impersonation = PipeImpersonationGuard::new(pipe)?;
-
+    mut path_exists: FPathExists,
+    mut parent_authorized: FParentAuthorized,
+    mut path_authorized: FPathAuthorized,
+    mut should_continue: FProgress,
+) -> Result<AuthorizedSearchPage, String>
+where
+    I: IntoIterator<Item = file_index::SearchResult>,
+    FPathExists: FnMut(&str) -> bool,
+    FParentAuthorized: FnMut(&str) -> bool,
+    FPathAuthorized: FnMut(&str) -> bool,
+    FProgress: FnMut(usize) -> Result<bool, String>,
+{
     let mut authorized_items: Vec<SearchResultItem> = Vec::with_capacity(limit.min(1024));
     let mut authorized_total_seen = 0usize;
     let mut has_more_authorized = false;
-
-    // Cache authorization results by parent directory to avoid redundant
-    // CreateFileW calls for files in the same folder (common in search results).
-    let mut dir_auth_cache: HashMap<String, bool> = HashMap::with_capacity(64);
-    let response_deadline = std::time::Instant::now() + AUTHZ_RESPONSE_DEADLINE;
     let mut deadline_exceeded = false;
 
-    ensure_client_connected(pipe)?;
-    let raw_scan_limit = AUTHZ_RAW_BATCH_SIZE.saturating_mul(AUTHZ_MAX_BATCHES);
+    for (result_index, result) in raw_items.into_iter().enumerate() {
+        if result_index.is_multiple_of(CLIENT_CONNECTION_CHECK_INTERVAL)
+            && !should_continue(result_index)?
+        {
+            deadline_exceeded = true;
+            break;
+        }
 
-    // Snapshot per-volume handles once and scan the raw index once for this
-    // client request. The previous loop restarted `search_page` from record 0
-    // for every raw batch and paid O(index * batches) under read locks before
-    // authorization began.
-    let raw_page = {
-        let handles = volume_indices::snapshot_handles(indices);
-        file_index::search_page(&handles, query, 0, raw_scan_limit)
-    };
-    let raw_has_more = raw_page.has_more;
-
-    // Authorization runs WITHOUT the index lock held — CreateFileW, ACL
-    // checks, and path resolution can now take arbitrarily long without
-    // blocking writers (USN journal incremental updates).
-    for (result_index, result) in raw_page.items.into_iter().enumerate() {
-        if result_index.is_multiple_of(CLIENT_CONNECTION_CHECK_INTERVAL) {
-            ensure_client_connected(pipe)?;
-            if std::time::Instant::now() >= response_deadline {
-                deadline_exceeded = true;
-                break;
-            }
+        if !path_exists(&result.full_path) {
+            continue;
         }
 
         let authorized = match parent_dir_of(&result.full_path) {
-            Some(parent) => is_parent_authorized(&mut dir_auth_cache, parent),
-            None => current_client_can_read_path(&result.full_path),
+            Some(parent) => parent_authorized(parent),
+            None => path_authorized(&result.full_path),
         };
 
         if !authorized {
@@ -289,7 +281,7 @@ pub fn collect_authorized_search_page(
 
         authorized_total_seen = authorized_total_seen.saturating_add(1);
 
-        // Offset is applied to AUTHORIZED results, not raw index results.
+        // Offset is applied to existing authorized results, not raw index results.
         if authorized_total_seen <= offset {
             continue;
         }
@@ -332,6 +324,64 @@ pub fn collect_authorized_search_page(
     })
 }
 
+pub fn collect_authorized_search_page(
+    pipe: HANDLE,
+    indices: &SharedVolumeIndices,
+    query: &str,
+    offset: usize,
+    limit: usize,
+) -> Result<AuthorizedSearchPage, String> {
+    if limit == 0 || query.is_empty() {
+        return Ok(AuthorizedSearchPage {
+            items: Vec::new(),
+            has_more: false,
+            total_matches: Some(0),
+        });
+    }
+
+    // All filesystem access checks below execute in the caller's security context.
+    let _impersonation = PipeImpersonationGuard::new(pipe)?;
+
+    // Cache authorization results by parent directory to avoid redundant
+    // CreateFileW calls for files in the same folder (common in search results).
+    let mut dir_auth_cache: HashMap<String, bool> = HashMap::with_capacity(64);
+    let response_deadline = std::time::Instant::now() + AUTHZ_RESPONSE_DEADLINE;
+
+    ensure_client_connected(pipe)?;
+    let raw_scan_limit = AUTHZ_RAW_BATCH_SIZE.saturating_mul(AUTHZ_MAX_BATCHES);
+
+    // Snapshot per-volume handles once and scan the raw index once for this
+    // client request. The previous loop restarted `search_page` from record 0
+    // for every raw batch and paid O(index * batches) under read locks before
+    // authorization began.
+    let raw_page = {
+        let handles = volume_indices::snapshot_handles(indices);
+        file_index::search_page(&handles, query, 0, raw_scan_limit)
+    };
+    let raw_has_more = raw_page.has_more;
+
+    // Authorization runs WITHOUT the index lock held — CreateFileW, ACL
+    // checks, and path resolution can now take arbitrarily long without
+    // blocking writers (USN journal incremental updates).
+    collect_existing_authorized_page(
+        raw_page.items,
+        raw_has_more,
+        offset,
+        limit,
+        exact_path_exists,
+        |parent| is_parent_authorized(&mut dir_auth_cache, parent),
+        current_client_can_read_path,
+        |_| {
+            ensure_client_connected(pipe)?;
+            if std::time::Instant::now() >= response_deadline {
+                return Ok(false);
+            }
+
+            Ok(true)
+        },
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -358,6 +408,80 @@ mod tests {
         assert!(res_empty_query.items.is_empty());
         assert!(!res_empty_query.has_more);
         assert_eq!(res_empty_query.total_matches, Some(0));
+    }
+
+    #[test]
+    fn filters_missing_exact_paths_before_parent_authorization() {
+        let raw_items = vec![
+            SearchResult {
+                name: "file.txt".to_string(),
+                full_path: r"C:\A\file.txt".to_string(),
+                is_dir: false,
+            },
+            SearchResult {
+                name: "file.txt".to_string(),
+                full_path: r"C:\B\file.txt".to_string(),
+                is_dir: false,
+            },
+        ];
+
+        let mut checked_parents = Vec::new();
+        let page = collect_existing_authorized_page(
+            raw_items,
+            false,
+            0,
+            10,
+            |path| path != r"C:\A\file.txt",
+            |parent| {
+                checked_parents.push(parent.to_string());
+                true
+            },
+            |_| true,
+            |_| Ok(true),
+        )
+        .expect("filtering should succeed");
+
+        assert_eq!(page.items.len(), 1);
+        assert_eq!(page.items[0].full_path, r"C:\B\file.txt");
+        assert_eq!(page.total_matches, Some(1));
+        assert_eq!(checked_parents, vec![r"C:\B".to_string()]);
+    }
+
+    #[test]
+    fn applies_offset_after_filtering_missing_exact_paths() {
+        let raw_items = vec![
+            SearchResult {
+                name: "file.txt".to_string(),
+                full_path: r"C:\A\file.txt".to_string(),
+                is_dir: false,
+            },
+            SearchResult {
+                name: "file.txt".to_string(),
+                full_path: r"C:\B\file.txt".to_string(),
+                is_dir: false,
+            },
+            SearchResult {
+                name: "file.txt".to_string(),
+                full_path: r"C:\C\file.txt".to_string(),
+                is_dir: false,
+            },
+        ];
+
+        let page = collect_existing_authorized_page(
+            raw_items,
+            false,
+            1,
+            10,
+            |path| path != r"C:\A\file.txt",
+            |_| true,
+            |_| true,
+            |_| Ok(true),
+        )
+        .expect("filtering should succeed");
+
+        assert_eq!(page.items.len(), 1);
+        assert_eq!(page.items[0].full_path, r"C:\C\file.txt");
+        assert_eq!(page.total_matches, Some(2));
     }
 
     #[test]
