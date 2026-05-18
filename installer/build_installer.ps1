@@ -43,6 +43,7 @@ Write-Host "`n[2/3] Validating required files and directories..." -ForegroundCol
 $requiredDirectories = @(
     "$RepoRoot\mpv_ui\portable_config\scripts",
     "$RepoRoot\mpv_ui\portable_config\script-opts",
+    "$RepoRoot\mpv_ui\portable_config\fonts",
     "$RepoRoot\third_party_licenses",
     "$RepoRoot\third_party_licenses\pdfium-win-x64",
     "$RepoRoot\third_party_licenses\pdfium-win-x64\licenses"
@@ -89,7 +90,8 @@ $requiredFiles = @(
     "$RepoRoot\mpv_ui\portable_config\scripts\autoload.lua",
     "$RepoRoot\mpv_ui\portable_config\scripts\modernH.lua",
     "$RepoRoot\mpv_ui\portable_config\scripts\vsr.lua",
-    "$RepoRoot\mpv_ui\portable_config\script-opts\osc.conf"
+    "$RepoRoot\mpv_ui\portable_config\script-opts\osc.conf",
+    "$RepoRoot\mpv_ui\portable_config\fonts\Material-Design-Iconic-Font.ttf"
 )
 
 foreach ($dir in $requiredDirectories) {
