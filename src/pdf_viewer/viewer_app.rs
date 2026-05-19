@@ -649,6 +649,7 @@ impl eframe::App for PdfViewerApp {
             if let Ok(handle) = frame.window_handle() {
                 if let raw_window_handle::RawWindowHandle::Win32(wh) = handle.as_raw() {
                     let hwnd = windows::Win32::Foundation::HWND(wh.hwnd.get() as _);
+                    crate::infrastructure::windows::center_window_on_primary_monitor(hwnd);
                     crate::infrastructure::windows::window_corners::apply_dark_title_bar(
                         hwnd, dark,
                     );
