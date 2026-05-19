@@ -26,6 +26,7 @@ pub mod shell_operations;
 pub mod system_info;
 pub mod window_corners;
 pub mod window_focus;
+pub mod window_placement;
 pub mod window_subclass;
 
 // Re-export for convenience
@@ -56,4 +57,5 @@ pub use shell_operations::*;
 pub use system_info::*;
 pub use window_corners::*;
 pub use window_focus::*;
+pub use window_placement::center_window_on_primary_monitor;
 pub use window_subclass::*;

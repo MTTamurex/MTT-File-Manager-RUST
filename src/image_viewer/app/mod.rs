@@ -796,6 +796,7 @@ impl eframe::App for DedicatedImageViewerApp {
                                 | SWP_HIDEWINDOW,
                         );
                     }
+                    crate::infrastructure::windows::center_window_on_primary_monitor(hwnd);
                     crate::infrastructure::windows::window_corners::disable_window_transitions(
                         hwnd,
                     );
