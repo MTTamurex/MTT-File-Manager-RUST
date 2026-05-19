@@ -8,6 +8,7 @@ use std::io;
 use std::io::BufReader;
 use std::io::BufWriter;
 use std::io::Cursor;
+use exif::{In, Reader as ExifReader, Tag};
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -252,13 +253,17 @@ pub fn decode_full_frame_with_priority(
                 Some(DISPLAY_CACHE_MAX_SIDE),
             )
         {
-            return Ok(DecodedFrame {
+            let mut frame = DecodedFrame {
                 rgba,
                 width: w,
                 height: h,
                 original_width: original_w,
                 original_height: original_h,
-            });
+            };
+            if let Some(orientation) = read_exif_orientation(path) {
+                frame = apply_orientation_to_frame(frame, orientation);
+            }
+            return Ok(frame);
         }
     }
 
@@ -291,13 +296,17 @@ pub fn decode_preview_frame_with_priority(
                 Some(max_side),
             )
         {
-            return Ok(DecodedFrame {
+            let mut frame = DecodedFrame {
                 rgba,
                 width: w,
                 height: h,
                 original_width: original_w,
                 original_height: original_h,
-            });
+            };
+            if let Some(orientation) = read_exif_orientation(path) {
+                frame = apply_orientation_to_frame(frame, orientation);
+            }
+            return Ok(frame);
         }
     }
 
@@ -514,7 +523,11 @@ fn decode_dynamic(path: &Path, priority: DecodePriority) -> io::Result<DynamicIm
             if let Some(buffer) =
                 image::ImageBuffer::<image::Rgba<u8>, Vec<u8>>::from_raw(w, h, rgba)
             {
-                return Ok(DynamicImage::ImageRgba8(buffer));
+                let mut img = DynamicImage::ImageRgba8(buffer);
+                if let Some(orientation) = read_exif_orientation(path) {
+                    img = apply_orientation(img, orientation);
+                }
+                return Ok(img);
             }
         }
     }
@@ -534,7 +547,11 @@ fn decode_dynamic(path: &Path, priority: DecodePriority) -> io::Result<DynamicIm
                     if let Some(buffer) =
                         image::ImageBuffer::<image::Rgba<u8>, Vec<u8>>::from_raw(w, h, rgba)
                     {
-                        return Ok(DynamicImage::ImageRgba8(buffer));
+                        let mut img = DynamicImage::ImageRgba8(buffer);
+                        if let Some(orientation) = read_exif_orientation(path) {
+                            img = apply_orientation(img, orientation);
+                        }
+                        return Ok(img);
                     }
                 }
             }
@@ -653,6 +670,72 @@ fn apply_orientation(img: DynamicImage, orientation: image::metadata::Orientatio
         Rotate90FlipH => img.rotate90().fliph(),
         Rotate270 => img.rotate270(),
         Rotate270FlipH => img.rotate270().fliph(),
+    }
+}
+
+fn read_exif_orientation(path: &Path) -> Option<image::metadata::Orientation> {
+    let file = File::open(path).ok()?;
+    let mut reader = BufReader::new(file);
+    let exif = ExifReader::new().read_from_container(&mut reader).ok()?;
+    let raw = exif
+        .get_field(Tag::Orientation, In::PRIMARY)
+        .and_then(|field| field.value.get_uint(0));
+    Some(map_exif_orientation(raw))
+}
+
+fn map_exif_orientation(raw: Option<u32>) -> image::metadata::Orientation {
+    use image::metadata::Orientation;
+    match raw {
+        Some(2) => Orientation::FlipHorizontal,
+        Some(3) => Orientation::Rotate180,
+        Some(4) => Orientation::FlipVertical,
+        Some(5) => Orientation::Rotate90FlipH,
+        Some(6) => Orientation::Rotate90,
+        Some(7) => Orientation::Rotate270FlipH,
+        Some(8) => Orientation::Rotate270,
+        _ => Orientation::NoTransforms,
+    }
+}
+
+fn apply_orientation_to_frame(
+    mut frame: DecodedFrame,
+    orientation: image::metadata::Orientation,
+) -> DecodedFrame {
+    if orientation == image::metadata::Orientation::NoTransforms {
+        return frame;
+    }
+    let Some(buffer) = image::ImageBuffer::<image::Rgba<u8>, Vec<u8>>::from_raw(
+        frame.width,
+        frame.height,
+        std::mem::take(&mut frame.rgba),
+    ) else {
+        return frame;
+    };
+    let img = apply_orientation(DynamicImage::ImageRgba8(buffer), orientation);
+    let rgba = img.to_rgba8();
+    let (ow, oh) =
+        swap_dimensions_if_rotated(frame.original_width, frame.original_height, orientation);
+    DecodedFrame {
+        width: rgba.width(),
+        height: rgba.height(),
+        original_width: ow,
+        original_height: oh,
+        rgba: rgba.into_raw(),
+    }
+}
+
+fn swap_dimensions_if_rotated(
+    width: u32,
+    height: u32,
+    orientation: image::metadata::Orientation,
+) -> (u32, u32) {
+    use image::metadata::Orientation;
+    match orientation {
+        Orientation::Rotate90
+        | Orientation::Rotate270
+        | Orientation::Rotate90FlipH
+        | Orientation::Rotate270FlipH => (height, width),
+        _ => (width, height),
     }
 }
 
