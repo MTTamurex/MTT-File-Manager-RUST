@@ -284,6 +284,7 @@ fn main() -> eframe::Result<()> {
         .with_visible(false) // Start hidden
         .with_maximized(false) // NOT maximized at creation
         .with_inner_size([800.0, 600.0]) // Small initial size (will be maximized in update)
+        .with_min_inner_size([800.0, 520.0])
         .with_title("MTT File Manager")
         .with_app_id(APP_ID)
         .with_decorations(false) // Borderless window - resize handled by native subclass

@@ -119,7 +119,15 @@ pub(crate) fn render_tab_bar_layer(
                     ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!is_maximized));
                 }
                 TabBarAction::Minimize => {
-                    ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
+                    crate::infrastructure::windows::window_subclass::freeze_layout(
+                        app.layout.sidebar_left_width,
+                        app.layout.sidebar_right_width,
+                    );
+                    if let Some(hwnd) = app.native_hwnd {
+                        crate::infrastructure::windows::taskbar_minimize::request_minimize_with_real_preview(
+                            hwnd,
+                        );
+                    }
                 }
                 TabBarAction::None => {}
             }

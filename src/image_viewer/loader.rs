@@ -1,3 +1,4 @@
+use exif::{In, Reader as ExifReader, Tag};
 use image::imageops::FilterType;
 use image::DynamicImage;
 use image::ImageDecoder;
@@ -8,7 +9,6 @@ use std::io;
 use std::io::BufReader;
 use std::io::BufWriter;
 use std::io::Cursor;
-use exif::{In, Reader as ExifReader, Tag};
 use std::path::Path;
 use std::path::PathBuf;
 

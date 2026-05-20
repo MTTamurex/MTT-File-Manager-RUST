@@ -73,50 +73,70 @@ pub fn handle_startup_sequence(app: &mut ImageViewerApp, ctx: &egui::Context) {
 
 pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
     use crate::infrastructure::windows::window_subclass::{
-        freeze_layout, layout_phase, WindowLayoutPhase,
+        freeze_layout, layout_phase, try_unfreeze_layout, WindowLayoutPhase,
     };
 
-    let (size_changed, maximized_changed, fullscreen_changed, is_minimized, minimized_changed) =
-        ctx.input(|i| {
-            let mut size_changed = false;
-            let mut maximized_changed = false;
+    let (
+        size_changed,
+        maximized_changed,
+        fullscreen_changed,
+        is_minimized,
+        minimized_changed,
+        valid_inner_size,
+    ) = ctx.input(|i| {
+        let mut size_changed = false;
+        let mut maximized_changed = false;
 
-            // Detect if window is minimized
-            let minimized = i.viewport().minimized.unwrap_or(false);
-            let prev_minimized = app.layout.saved_is_minimized;
-            let minimized_changed = minimized != prev_minimized;
-
-            if let Some(rect) = i.viewport().inner_rect {
-                // Only save size when NOT maximized
-                if !i.viewport().maximized.unwrap_or(false) {
-                    if (app.layout.saved_window_width - rect.width()).abs() > 1.0
-                        || (app.layout.saved_window_height - rect.height()).abs() > 1.0
-                    {
-                        size_changed = true;
-                    }
-                    app.layout.saved_window_width = rect.width();
-                    app.layout.saved_window_height = rect.height();
-                }
-            }
-
-            let new_maximized = i.viewport().maximized.unwrap_or(false);
-            if new_maximized != app.layout.saved_is_maximized {
-                maximized_changed = true;
-            }
-            app.layout.saved_is_maximized = new_maximized;
-
-            let new_fullscreen = i.viewport().fullscreen.unwrap_or(false);
-            let fullscreen_changed = new_fullscreen != app.layout.saved_is_fullscreen;
-            app.layout.saved_is_fullscreen = new_fullscreen;
-
-            (
-                size_changed,
-                maximized_changed,
-                fullscreen_changed,
-                minimized,
-                minimized_changed,
-            )
+        // Detect if window is minimized
+        let viewport = i.viewport();
+        let minimized = viewport.minimized.unwrap_or(false);
+        let prev_minimized = app.layout.saved_is_minimized;
+        let minimized_changed = minimized != prev_minimized;
+        let is_maximized = viewport.maximized.unwrap_or(false);
+        let valid_inner_size = viewport.inner_rect.and_then(|rect| {
+            let width = rect.width();
+            let height = rect.height();
+            (width.is_finite() && height.is_finite() && width > 100.0 && height > 100.0)
+                .then(|| rect.size())
         });
+
+        if let Some(size) = valid_inner_size {
+            // Only save size when the window is visible, valid, and not maximized.
+            if !minimized && !is_maximized {
+                if (app.layout.saved_window_width - size.x).abs() > 1.0
+                    || (app.layout.saved_window_height - size.y).abs() > 1.0
+                {
+                    size_changed = true;
+                }
+                app.layout.saved_window_width = size.x;
+                app.layout.saved_window_height = size.y;
+            }
+        }
+
+        if is_maximized != app.layout.saved_is_maximized {
+            maximized_changed = true;
+        }
+        app.layout.saved_is_maximized = is_maximized;
+
+        let new_fullscreen = viewport.fullscreen.unwrap_or(false);
+        let fullscreen_changed = new_fullscreen != app.layout.saved_is_fullscreen;
+        app.layout.saved_is_fullscreen = new_fullscreen;
+
+        (
+            size_changed,
+            maximized_changed,
+            fullscreen_changed,
+            minimized,
+            minimized_changed,
+            valid_inner_size,
+        )
+    });
+
+    if !is_minimized {
+        if let Some(size) = valid_inner_size {
+            try_unfreeze_layout(size.x, size.y);
+        }
+    }
 
     // Detect background→foreground transitions (window regains focus after being unfocused)
     // This catches the case where the app was NOT minimized but simply behind other windows,
@@ -205,7 +225,7 @@ pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
 
     // LAYOUT FREEZE: Capture sidebar widths before minimize
     // This happens when egui reports minimized but we haven't frozen yet
-    if is_minimized && layout_phase() == WindowLayoutPhase::Normal {
+    if is_minimized && (minimized_changed || layout_phase() == WindowLayoutPhase::Normal) {
         // Freeze layout with current sidebar widths
         freeze_layout(
             app.layout.sidebar_left_width,

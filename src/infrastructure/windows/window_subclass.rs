@@ -19,12 +19,16 @@
 
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU8, Ordering};
 use std::sync::Mutex;
+
+use crate::infrastructure::windows::taskbar_minimize;
+
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::{
     GetClientRect, IsIconic, IsZoomed, HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT, HTCAPTION, HTCLIENT,
-    HTLEFT, HTRIGHT, HTTOP, HTTOPLEFT, HTTOPRIGHT, WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE,
-    WM_NCACTIVATE, WM_NCHITTEST, WM_SIZE,
+    HTLEFT, HTRIGHT, HTTOP, HTTOPLEFT, HTTOPRIGHT, MINMAXINFO, SWP_NOSIZE, WINDOWPOS,
+    WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE, WM_GETMINMAXINFO, WM_NCACTIVATE, WM_NCHITTEST, WM_SIZE,
+    WM_SYSCOMMAND, WM_WINDOWPOSCHANGING,
 };
 
 /// SIZE_MINIMIZED constant (wParam for WM_SIZE when window is minimized)
@@ -33,6 +37,11 @@ const SIZE_MINIMIZED: usize = 1;
 const SIZE_RESTORED: usize = 0;
 /// SIZE_MAXIMIZED constant (wParam for WM_SIZE when window is maximized)
 const SIZE_MAXIMIZED: usize = 2;
+const SC_COMMAND_MASK: usize = 0xFFF0;
+const SC_MINIMIZE_CMD: usize = 0xF020;
+const SC_RESTORE_CMD: usize = 0xF120;
+const MIN_TRACK_WIDTH_PX: i32 = 800;
+const MIN_TRACK_HEIGHT_PX: i32 = 520;
 
 /// Resize border width in pixels (scaled by DPI at runtime if needed)
 const RESIZE_BORDER_WIDTH: i32 = 8;
@@ -214,6 +223,17 @@ pub fn try_unfreeze_layout(available_width: f32, available_height: f32) -> bool 
     current_phase == WindowLayoutPhase::Normal as u8
 }
 
+fn mark_layout_minimized() {
+    LAYOUT_PHASE.store(WindowLayoutPhase::Minimized as u8, Ordering::SeqCst);
+}
+
+fn mark_layout_restoring() {
+    let current = LAYOUT_PHASE.load(Ordering::Relaxed);
+    if current == WindowLayoutPhase::Minimized as u8 {
+        LAYOUT_PHASE.store(WindowLayoutPhase::Restoring as u8, Ordering::SeqCst);
+    }
+}
+
 /// Install the borderless window subclass on the given HWND.
 ///
 /// This intercepts WM_NCHITTEST to provide resize borders.
@@ -260,11 +280,12 @@ pub fn remove_borderless_subclass(hwnd: HWND) {
         return;
     }
 
+    taskbar_minimize::set_iconic_preview_enabled(hwnd, false);
+
     // SAFETY: HWND is valid, we're removing our own subclass.
     unsafe {
         let _ = RemoveWindowSubclass(hwnd, Some(borderless_subclass_proc), BORDERLESS_SUBCLASS_ID);
     }
-
     SUBCLASS_INSTALLED.store(false, Ordering::SeqCst);
 }
 
@@ -290,6 +311,58 @@ extern "system" fn borderless_subclass_proc(
         IS_IN_SIZE_MOVE.store(false, Ordering::SeqCst);
     }
 
+    if msg == taskbar_minimize::SAFE_MINIMIZE_MESSAGE {
+        taskbar_minimize::perform_safe_minimize(hwnd, mark_layout_minimized);
+        return LRESULT(0);
+    }
+
+    if taskbar_minimize::handle_dwm_iconic_message(hwnd, msg, lparam) {
+        return LRESULT(0);
+    }
+
+    if msg == WM_GETMINMAXINFO {
+        let minmax = lparam.0 as *mut MINMAXINFO;
+        if !minmax.is_null() {
+            unsafe {
+                (*minmax).ptMinTrackSize.x = (*minmax).ptMinTrackSize.x.max(MIN_TRACK_WIDTH_PX);
+                (*minmax).ptMinTrackSize.y = (*minmax).ptMinTrackSize.y.max(MIN_TRACK_HEIGHT_PX);
+            }
+            return LRESULT(0);
+        }
+    }
+
+    if msg == WM_WINDOWPOSCHANGING && !unsafe { IsIconic(hwnd).as_bool() } {
+        let window_pos = lparam.0 as *mut WINDOWPOS;
+        if !window_pos.is_null() {
+            unsafe {
+                if (*window_pos).flags & SWP_NOSIZE
+                    == windows::Win32::UI::WindowsAndMessaging::SET_WINDOW_POS_FLAGS(0)
+                {
+                    (*window_pos).cx = (*window_pos).cx.max(MIN_TRACK_WIDTH_PX);
+                    (*window_pos).cy = (*window_pos).cy.max(MIN_TRACK_HEIGHT_PX);
+                }
+            }
+        }
+    }
+
+    if msg == WM_SYSCOMMAND {
+        match wparam.0 & SC_COMMAND_MASK {
+            SC_MINIMIZE_CMD => {
+                if taskbar_minimize::consume_allowed_native_minimize() {
+                    mark_layout_minimized();
+                } else {
+                    taskbar_minimize::request_minimize_with_real_preview(hwnd);
+                    return LRESULT(0);
+                }
+            }
+            SC_RESTORE_CMD => {
+                taskbar_minimize::set_iconic_preview_enabled(hwnd, false);
+                mark_layout_restoring();
+            }
+            _ => {}
+        }
+    }
+
     // Handle layout phase transitions for minimize/restore
     // NOTE: The freeze_layout() now happens in the UI layer (before minimize)
     // to capture current sidebar widths. Here we only handle phase transitions.
@@ -299,18 +372,13 @@ extern "system" fn borderless_subclass_proc(
             // Transition to Minimized phase
             // Note: freeze_layout() should be called by UI layer before this
             // to capture sidebar widths. If not yet frozen, do it now with defaults.
-            let current = LAYOUT_PHASE.load(Ordering::Relaxed);
-            if current == WindowLayoutPhase::Normal as u8 {
-                // UI didn't freeze - shouldn't happen but handle gracefully
-                LAYOUT_PHASE.store(WindowLayoutPhase::Minimized as u8, Ordering::SeqCst);
-            }
+            mark_layout_minimized();
+            return unsafe { DefSubclassProc(hwnd, msg, wparam, LPARAM(0)) };
         } else if size_type == SIZE_RESTORED || size_type == SIZE_MAXIMIZED {
             // Transition from Minimized to Restoring (not directly to Normal)
             // The UI layer must call try_unfreeze_layout() to complete transition
-            let current = LAYOUT_PHASE.load(Ordering::Relaxed);
-            if current == WindowLayoutPhase::Minimized as u8 {
-                LAYOUT_PHASE.store(WindowLayoutPhase::Restoring as u8, Ordering::SeqCst);
-            }
+            taskbar_minimize::set_iconic_preview_enabled(hwnd, false);
+            mark_layout_restoring();
         }
     }
 

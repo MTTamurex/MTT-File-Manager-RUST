@@ -84,6 +84,7 @@ impl eframe::App for ImageViewerApp {
 
         // 3. Infrastructure updates (throttle heavy processing during interactive move/resize)
         self.ensure_window_handle(frame);
+        handle_taskbar_minimize_preview(self, ctx);
         if !is_in_size_move {
             // PERF TIMING: Detect slow frames after inactivity
             let t0 = std::time::Instant::now();
@@ -322,5 +323,41 @@ impl eframe::App for ImageViewerApp {
 
     fn persist_egui_memory(&self) -> bool {
         false
+    }
+}
+
+fn handle_taskbar_minimize_preview(app: &mut ImageViewerApp, ctx: &egui::Context) {
+    use crate::infrastructure::windows::taskbar_minimize;
+
+    let screenshot_ready = ctx.input(|i| {
+        i.events.iter().any(|event| {
+            if let egui::Event::Screenshot {
+                user_data, image, ..
+            } = event
+            {
+                taskbar_minimize::handle_screenshot_event(user_data, image.as_ref())
+            } else {
+                false
+            }
+        })
+    });
+
+    if screenshot_ready {
+        if let Some(hwnd) = taskbar_minimize::take_minimize_hwnd_after_screenshot() {
+            taskbar_minimize::post_safe_minimize_after_present(hwnd);
+        }
+    }
+
+    if taskbar_minimize::take_screenshot_request() {
+        if taskbar_minimize::is_minimize_after_screenshot_pending() {
+            crate::infrastructure::windows::window_subclass::freeze_layout(
+                app.layout.sidebar_left_width,
+                app.layout.sidebar_right_width,
+            );
+        }
+        ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(
+            taskbar_minimize::screenshot_user_data(),
+        ));
+        ctx.request_repaint();
     }
 }
