@@ -720,6 +720,27 @@ impl ImageViewerApp {
             {
                 for path in self.folder_size_state.take_expired_revalidations(now) {
                     self.folder_size_state.pending_revalidation.remove(&path);
+                    let is_current_folder_panel = self.selected_file.is_none()
+                        && path == PathBuf::from(&self.navigation_state.current_path);
+                    if is_current_folder_panel {
+                        if let Some(summary) = self.folder_size_state.cache.peek(&path).copied() {
+                            self.folder_size_state
+                                .preserve_panel_summary_for_deferred_revalidation(
+                                    path.clone(),
+                                    summary,
+                                    now,
+                                );
+                        } else {
+                            self.folder_size_state
+                                .reschedule_panel_revalidation_if_stale(&path, now);
+                        }
+                        if self.folder_size_state.panel_stale_cache.contains(&path) {
+                            self.ui_ctx.request_repaint_after(
+                                crate::app::folder_size_state::PANEL_STALE_REVALIDATION_DELAY
+                                    + Duration::from_millis(25),
+                            );
+                        }
+                    }
                     self.folder_size_state.batch_cache.pop(&path);
                     self.folder_size_state.batch_loading.remove(&path);
                     self.folder_size_state.cache.pop(&path);

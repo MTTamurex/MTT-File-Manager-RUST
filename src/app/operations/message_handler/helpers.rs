@@ -384,16 +384,30 @@ impl ImageViewerApp {
         let folder_path = folder.to_path_buf();
         let now = std::time::Instant::now();
         if schedule_revalidation {
-            if let Some(summary) = self.folder_size_state.cache.peek(&folder_path).copied() {
-                self.folder_size_state
-                    .preserve_panel_summary_for_deferred_revalidation(
-                        folder_path.clone(),
-                        summary,
-                        now,
-                    );
-            } else {
-                self.folder_size_state
-                    .reschedule_panel_revalidation_if_stale(&folder_path, now);
+            let wake_panel_revalidation =
+                if let Some(summary) = self.folder_size_state.cache.peek(&folder_path).copied() {
+                    let has_counts = summary.has_counts();
+                    self.folder_size_state
+                        .preserve_panel_summary_for_deferred_revalidation(
+                            folder_path.clone(),
+                            summary,
+                            now,
+                        );
+                    has_counts
+                } else {
+                    let has_stale = self
+                        .folder_size_state
+                        .panel_stale_cache
+                        .contains(&folder_path);
+                    self.folder_size_state
+                        .reschedule_panel_revalidation_if_stale(&folder_path, now);
+                    has_stale
+                };
+            if wake_panel_revalidation {
+                self.ui_ctx.request_repaint_after(
+                    crate::app::folder_size_state::PANEL_STALE_REVALIDATION_DELAY
+                        + std::time::Duration::from_millis(25),
+                );
             }
         }
         let was_loading = self.folder_size_state.loading.remove(&folder_path);

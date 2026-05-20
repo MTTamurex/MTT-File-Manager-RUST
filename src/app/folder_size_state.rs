@@ -11,7 +11,7 @@ const PENDING_REVALIDATION_PRUNE_INTERVAL: Duration = Duration::from_millis(250)
 const PENDING_REVALIDATION_PRUNE_THRESHOLD: usize = 500;
 const INVALIDATION_EPOCH_PRUNE_INTERVAL: Duration = Duration::from_secs(2);
 const INVALIDATION_EPOCH_PRUNE_THRESHOLD: usize = 1_024;
-const PANEL_STALE_REVALIDATION_DELAY: Duration = Duration::from_secs(5);
+pub(crate) const PANEL_STALE_REVALIDATION_DELAY: Duration = Duration::from_millis(500);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FolderContentSummary {
