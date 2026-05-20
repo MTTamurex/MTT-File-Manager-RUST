@@ -528,6 +528,44 @@ impl ImageViewerApp {
         }
     }
 
+    fn process_deferred_panel_folder_size_revalidation(&mut self, now: Instant) -> bool {
+        if self.selected_file.is_some()
+            || self.navigation_state.is_computer_view
+            || self.navigation_state.is_recycle_bin_view
+            || self.file_operation_state.file_ops_in_progress > 0
+            || self.is_loading_folder
+            || self.frame_time_peak_ms > 25.0
+        {
+            return false;
+        }
+
+        let current_path = PathBuf::from(&self.navigation_state.current_path);
+        if self.folder_size_state.loading.contains(&current_path) {
+            return false;
+        }
+        if self
+            .folder_size_state
+            .cache
+            .peek(&current_path)
+            .is_some_and(|summary| summary.has_counts())
+        {
+            self.folder_size_state
+                .clear_panel_stale_summary(&current_path);
+            return false;
+        }
+
+        let Some(path) = self
+            .folder_size_state
+            .take_due_panel_revalidation(now, &current_path)
+        else {
+            return false;
+        };
+
+        self.folder_size_state.loading.insert(path.clone());
+        let _ = self.folder_size_state.req_sender.send(path);
+        true
+    }
+
     pub(super) fn process_folder_size_results(&mut self) -> bool {
         const MAX_FOLDER_SIZE_MSGS_PER_FRAME: usize = 96;
 
@@ -576,6 +614,8 @@ impl ImageViewerApp {
                 } => {
                     progress_updates.remove(&folder_path);
                     self.folder_size_state.loading.remove(&folder_path);
+                    self.folder_size_state
+                        .clear_panel_stale_summary(&folder_path);
                     self.folder_size_state.cache.put(folder_path, summary);
                     received_any = true;
                 }
@@ -583,6 +623,8 @@ impl ImageViewerApp {
                     progress_updates.remove(&folder_path);
                     self.folder_size_state.loading.remove(&folder_path);
                     self.folder_size_state.cache.pop(&folder_path);
+                    self.folder_size_state
+                        .reschedule_panel_revalidation_if_stale(&folder_path, Instant::now());
                     received_any = true;
                 }
             }
@@ -695,6 +737,8 @@ impl ImageViewerApp {
             if self.folder_size_state.should_prune_invalidation_epochs(now) {
                 self.folder_size_state.prune_stale_invalidation_epochs(now);
             }
+
+            received_any |= self.process_deferred_panel_folder_size_revalidation(now);
         }
 
         received_any || has_more

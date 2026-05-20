@@ -80,13 +80,14 @@ pub(super) fn render_preview_panel_layout(
                                     }
                                 });
 
-                            let folder_summary = if file.is_dir {
-                                app.folder_size_state.cache.peek(&file.path).copied()
+                            let is_current_folder_panel =
+                                is_current_folder_panel_target(app, &file);
+                            let (folder_summary, is_folder_size_loading) = if file.is_dir {
+                                app.folder_size_state
+                                    .summary_for_panel_render(&file.path, is_current_folder_panel)
                             } else {
-                                None
+                                (None, false)
                             };
-                            let is_folder_size_loading =
-                                app.folder_size_state.loading.contains(&file.path);
 
                             let is_owner = app.media_preview_owner_tab_id == Some(tab_id);
 
@@ -395,6 +396,14 @@ fn calculate_effective_file(app: &ImageViewerApp) -> Option<FileEntry> {
         });
         Some(entry)
     }
+}
+
+fn is_current_folder_panel_target(app: &ImageViewerApp, file: &FileEntry) -> bool {
+    app.selected_file.is_none()
+        && !app.navigation_state.is_computer_view
+        && !app.navigation_state.is_recycle_bin_view
+        && file.is_dir
+        && file.path == PathBuf::from(&app.navigation_state.current_path)
 }
 
 pub(super) fn render_central_panel_layout(app: &mut ImageViewerApp, ctx: &egui::Context) {

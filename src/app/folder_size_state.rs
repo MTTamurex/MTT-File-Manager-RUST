@@ -11,6 +11,7 @@ const PENDING_REVALIDATION_PRUNE_INTERVAL: Duration = Duration::from_millis(250)
 const PENDING_REVALIDATION_PRUNE_THRESHOLD: usize = 500;
 const INVALIDATION_EPOCH_PRUNE_INTERVAL: Duration = Duration::from_secs(2);
 const INVALIDATION_EPOCH_PRUNE_THRESHOLD: usize = 1_024;
+const PANEL_STALE_REVALIDATION_DELAY: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FolderContentSummary {
@@ -82,6 +83,9 @@ pub struct FolderSizeState {
     pub cancel: Arc<AtomicBool>,
     pub cache: LruCache<PathBuf, FolderContentSummary>,
     pub loading: FxHashSet<PathBuf>,
+    /// Last complete values shown in the details panel after invalidation.
+    pub panel_stale_cache: LruCache<PathBuf, FolderContentSummary>,
+    pub panel_deferred_revalidation: HashMap<PathBuf, Instant>,
 
     // ── Batch worker for list-view folder sizes ──
     /// Sender for background batch requests.
@@ -112,6 +116,87 @@ pub struct FolderSizeState {
 }
 
 impl FolderSizeState {
+    pub fn preserve_panel_summary_for_deferred_revalidation(
+        &mut self,
+        folder_path: PathBuf,
+        summary: FolderContentSummary,
+        now: Instant,
+    ) {
+        if !summary.has_counts() {
+            return;
+        }
+
+        self.panel_stale_cache.put(folder_path.clone(), summary);
+        self.panel_deferred_revalidation
+            .insert(folder_path, now + PANEL_STALE_REVALIDATION_DELAY);
+        self.prune_panel_revalidations_without_stale();
+    }
+
+    pub fn reschedule_panel_revalidation_if_stale(&mut self, folder_path: &PathBuf, now: Instant) {
+        if self.panel_stale_cache.contains(folder_path) {
+            self.panel_deferred_revalidation
+                .insert(folder_path.clone(), now + PANEL_STALE_REVALIDATION_DELAY);
+        }
+    }
+
+    pub fn clear_panel_stale_summary(&mut self, folder_path: &PathBuf) {
+        self.panel_stale_cache.pop(folder_path);
+        self.panel_deferred_revalidation.remove(folder_path);
+    }
+
+    pub fn summary_for_panel_render(
+        &mut self,
+        folder_path: &PathBuf,
+        allow_stale: bool,
+    ) -> (Option<FolderContentSummary>, bool) {
+        let live_summary = self.cache.peek(folder_path).copied();
+        let stale_summary = if allow_stale {
+            self.panel_stale_cache.peek(folder_path).copied()
+        } else {
+            None
+        };
+        let use_stale = stale_summary.is_some()
+            && match live_summary {
+                Some(summary) => !summary.has_counts(),
+                None => true,
+            };
+
+        let summary = if use_stale {
+            stale_summary
+        } else {
+            live_summary
+        };
+        let loading = self.loading.contains(folder_path) && !use_stale;
+        (summary, loading)
+    }
+
+    pub fn take_due_panel_revalidation(
+        &mut self,
+        now: Instant,
+        current_path: &PathBuf,
+    ) -> Option<PathBuf> {
+        let deadline = self
+            .panel_deferred_revalidation
+            .get(current_path)
+            .copied()?;
+        if deadline > now {
+            return None;
+        }
+
+        self.panel_deferred_revalidation.remove(current_path);
+        if self.panel_stale_cache.contains(current_path) {
+            Some(current_path.clone())
+        } else {
+            None
+        }
+    }
+
+    fn prune_panel_revalidations_without_stale(&mut self) {
+        let panel_stale_cache = &self.panel_stale_cache;
+        self.panel_deferred_revalidation
+            .retain(|path, _| panel_stale_cache.contains(path));
+    }
+
     /// Cancel all pending batch work and drain stale results.
     ///
     /// Call on every navigation or List→Grid switch to stop orphan
@@ -189,5 +274,116 @@ impl FolderSizeState {
                 || batch_cache.contains(path)
                 || pending_revalidation.contains_key(path)
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::num::NonZeroUsize;
+
+    fn test_state() -> FolderSizeState {
+        let (req_sender, _req_receiver) = std::sync::mpsc::channel();
+        let (_res_sender, res_receiver) = std::sync::mpsc::channel();
+        let (batch_req_sender, _batch_req_receiver) = std::sync::mpsc::channel();
+        let (_batch_res_sender, batch_res_receiver) = std::sync::mpsc::channel();
+
+        FolderSizeState {
+            req_sender,
+            res_receiver,
+            cancel: Arc::new(AtomicBool::new(false)),
+            cache: LruCache::new(NonZeroUsize::new(8).unwrap()),
+            loading: FxHashSet::default(),
+            panel_stale_cache: LruCache::new(NonZeroUsize::new(8).unwrap()),
+            panel_deferred_revalidation: HashMap::new(),
+            batch_req_sender,
+            batch_res_receiver,
+            batch_cancel: Arc::new(AtomicBool::new(false)),
+            batch_generation: Arc::new(AtomicU64::new(0)),
+            batch_loading: FxHashSet::default(),
+            batch_cache: LruCache::new(NonZeroUsize::new(8).unwrap()),
+            pending_revalidation: HashMap::new(),
+            pending_revalidation_last_prune: Instant::now(),
+            batch_invalidation_epoch: HashMap::new(),
+            batch_invalidation_last_prune: Instant::now(),
+        }
+    }
+
+    #[test]
+    fn panel_stale_summary_requires_complete_counts() {
+        let mut state = test_state();
+        let path = PathBuf::from(r"C:\data");
+        let now = Instant::now();
+
+        state.preserve_panel_summary_for_deferred_revalidation(
+            path.clone(),
+            FolderContentSummary::size_only(10),
+            now,
+        );
+        assert!(state.panel_stale_cache.peek(&path).is_none());
+
+        let summary = FolderContentSummary::complete(10, 2, 1);
+        state.preserve_panel_summary_for_deferred_revalidation(path.clone(), summary, now);
+        assert_eq!(state.panel_stale_cache.peek(&path).copied(), Some(summary));
+    }
+
+    #[test]
+    fn panel_render_uses_stale_summary_without_loading_state() {
+        let mut state = test_state();
+        let path = PathBuf::from(r"C:\data");
+        let stale = FolderContentSummary::complete(100, 12, 3);
+        state.preserve_panel_summary_for_deferred_revalidation(path.clone(), stale, Instant::now());
+        state
+            .cache
+            .put(path.clone(), FolderContentSummary::size_only(50));
+        state.loading.insert(path.clone());
+
+        let (summary, loading) = state.summary_for_panel_render(&path, true);
+
+        assert_eq!(summary, Some(stale));
+        assert!(!loading);
+    }
+
+    #[test]
+    fn panel_deferred_revalidation_waits_for_deadline() {
+        let mut state = test_state();
+        let path = PathBuf::from(r"C:\data");
+        let other = PathBuf::from(r"C:\other");
+        let now = Instant::now();
+
+        state.preserve_panel_summary_for_deferred_revalidation(
+            path.clone(),
+            FolderContentSummary::complete(100, 12, 3),
+            now,
+        );
+
+        assert_eq!(
+            state.take_due_panel_revalidation(
+                now + PANEL_STALE_REVALIDATION_DELAY - Duration::from_millis(1),
+                &path,
+            ),
+            None
+        );
+        assert_eq!(
+            state.take_due_panel_revalidation(
+                now + PANEL_STALE_REVALIDATION_DELAY + Duration::from_millis(1),
+                &other,
+            ),
+            None
+        );
+        assert_eq!(
+            state.take_due_panel_revalidation(
+                now + PANEL_STALE_REVALIDATION_DELAY + Duration::from_millis(1),
+                &path,
+            ),
+            Some(path.clone())
+        );
+        assert_eq!(
+            state.take_due_panel_revalidation(
+                now + PANEL_STALE_REVALIDATION_DELAY + Duration::from_millis(2),
+                &path,
+            ),
+            None
+        );
     }
 }

@@ -121,6 +121,10 @@ pub(in crate::app) fn build_folder_size_state(
             NonZeroUsize::new(500).expect("folder_size cache size must be non-zero"),
         ),
         loading: FxHashSet::default(),
+        panel_stale_cache: LruCache::new(
+            NonZeroUsize::new(64).expect("folder_size panel stale cache size must be non-zero"),
+        ),
+        panel_deferred_revalidation: std::collections::HashMap::new(),
         batch_req_sender,
         batch_res_receiver,
         batch_cancel,

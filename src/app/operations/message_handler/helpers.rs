@@ -382,6 +382,20 @@ impl ImageViewerApp {
         schedule_revalidation: bool,
     ) {
         let folder_path = folder.to_path_buf();
+        let now = std::time::Instant::now();
+        if schedule_revalidation {
+            if let Some(summary) = self.folder_size_state.cache.peek(&folder_path).copied() {
+                self.folder_size_state
+                    .preserve_panel_summary_for_deferred_revalidation(
+                        folder_path.clone(),
+                        summary,
+                        now,
+                    );
+            } else {
+                self.folder_size_state
+                    .reschedule_panel_revalidation_if_stale(&folder_path, now);
+            }
+        }
         let was_loading = self.folder_size_state.loading.remove(&folder_path);
         self.folder_size_state.cache.pop(&folder_path);
         // Also clear the batch (list-view) cache so the next render re-fetches.
@@ -403,10 +417,9 @@ impl ImageViewerApp {
             // batch worker re-fetches before the service processes the deletion,
             // it will permanently cache a stale value.  The re-invalidation
             // clears it so the next render gets the updated size.
-            self.folder_size_state.pending_revalidation.insert(
-                folder_path,
-                std::time::Instant::now() + std::time::Duration::from_secs(3),
-            );
+            self.folder_size_state
+                .pending_revalidation
+                .insert(folder_path, now + std::time::Duration::from_secs(3));
         }
 
         if was_loading {
