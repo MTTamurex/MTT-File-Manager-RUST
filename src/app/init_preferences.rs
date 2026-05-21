@@ -166,10 +166,16 @@ impl StartupPreferences {
             .map(|s| s != "false")
             .unwrap_or(true);
 
-        let language = prefs
-            .get("language")
-            .cloned()
-            .unwrap_or_else(|| "pt-BR".to_string());
+        let language = if let Some(saved) = prefs.get("language").cloned() {
+            saved
+        } else if let Some(installer_lang) =
+            crate::infrastructure::windows::read_installer_language()
+        {
+            app_state_db.set_preference("language", &installer_lang);
+            installer_lang
+        } else {
+            "pt-BR".to_string()
+        };
 
         let theme_mode = prefs
             .get("theme_mode")

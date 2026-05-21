@@ -139,6 +139,27 @@ procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssInstall then
     StopSearchServiceIfRunning;
+
+  // Persist the language selected during installation so the app can
+  // start in the same language on first launch. The app reads this key
+  // from HKLM (read-only, no admin required) and persists it to SQLite.
+  // Cleanup happens in CurUninstallStepChanged.
+  if CurStep = ssPostInstall then
+  begin
+    if ActiveLanguage = 'english' then
+      RegWriteStringValue(HKLM, 'SOFTWARE\MTT-File-Manager', 'InstallerLanguage', 'en')
+    else if ActiveLanguage = 'portuguese' then
+      RegWriteStringValue(HKLM, 'SOFTWARE\MTT-File-Manager', 'InstallerLanguage', 'pt-BR');
+  end;
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usPostUninstall then
+  begin
+    RegDeleteValue(HKLM, 'SOFTWARE\MTT-File-Manager', 'InstallerLanguage');
+    RegDeleteKeyIncludingSubkeys(HKLM, 'SOFTWARE\MTT-File-Manager');
+  end;
 end;
 
 procedure CurPageChanged(CurPageID: Integer);

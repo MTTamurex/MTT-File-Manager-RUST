@@ -13,6 +13,7 @@ pub mod folder_size;
 pub mod formatting;
 pub mod hdd_directory_reader;
 pub mod icons;
+pub mod installer_language;
 pub mod iso_mount;
 pub mod key_state;
 pub mod media_foundation;
@@ -45,6 +46,7 @@ pub use file_type::{
 pub use formatting::*;
 pub use hdd_directory_reader::*;
 pub use icons::*;
+pub use installer_language::*;
 pub use iso_mount::*;
 pub use key_state::*;
 pub use media_foundation::*;
