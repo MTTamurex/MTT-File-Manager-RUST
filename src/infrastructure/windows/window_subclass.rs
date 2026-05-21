@@ -373,6 +373,10 @@ extern "system" fn borderless_subclass_proc(
             // Note: freeze_layout() should be called by UI layer before this
             // to capture sidebar widths. If not yet frozen, do it now with defaults.
             mark_layout_minimized();
+            // Force iconic representation AFTER the minimize animation completes,
+            // so DWM uses our screenshot for the taskbar thumbnail instead of
+            // the (now unavailable) wgpu composited surface.
+            taskbar_minimize::enable_force_iconic_representation(hwnd);
             return unsafe { DefSubclassProc(hwnd, msg, wparam, LPARAM(0)) };
         } else if size_type == SIZE_RESTORED || size_type == SIZE_MAXIMIZED {
             // Transition from Minimized to Restoring (not directly to Normal)

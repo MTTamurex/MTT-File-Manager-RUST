@@ -14,9 +14,9 @@ use windows::Win32::Graphics::Dwm::{
     DwmSetWindowAttribute, DWMWA_FORCE_ICONIC_REPRESENTATION, DWMWA_HAS_ICONIC_BITMAP,
 };
 use windows::Win32::Graphics::Gdi::{
-    BitBlt, CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, GetDC, InvalidateRect,
-    ReleaseDC, SelectObject, StretchBlt, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, CAPTUREBLT,
-    DIB_RGB_COLORS, HGDIOBJ, SRCCOPY,
+    BitBlt, CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, GetDC, ReleaseDC,
+    SelectObject, StretchBlt, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HGDIOBJ,
+    SRCCOPY,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     GetWindowRect, IsIconic, PostMessageW, ShowWindow, SW_MINIMIZE, WM_APP,
@@ -157,7 +157,24 @@ pub fn perform_safe_minimize(hwnd: HWND, before_minimize: fn()) {
         return;
     }
 
-    set_iconic_preview_enabled(hwnd, true);
+    // Proactively provide the iconic bitmaps to DWM before forcing iconic
+    // representation. Without this, DWM would show a black frame because it
+    // doesn't have the bitmaps yet when FORCE_ICONIC_REPRESENTATION is enabled.
+    // We also MUST NOT call DwmInvalidateIconicBitmaps after setting FORCE,
+    // because that would discard the bitmaps we just provided.
+    proactive_set_iconic_bitmaps(hwnd);
+    set_has_iconic_bitmap(hwnd, true);
+    if !ICONIC_PREVIEW_ENABLED.swap(true, Ordering::AcqRel) {
+        let value: i32 = 1;
+        unsafe {
+            let _ = DwmSetWindowAttribute(
+                hwnd,
+                DWMWA_FORCE_ICONIC_REPRESENTATION,
+                &value as *const _ as *const core::ffi::c_void,
+                core::mem::size_of::<i32>() as u32,
+            );
+        }
+    }
     before_minimize();
 
     ALLOW_NEXT_NATIVE_MINIMIZE.store(true, Ordering::Release);
@@ -191,6 +208,38 @@ pub fn set_iconic_preview_enabled(hwnd: HWND, enabled: bool) {
             core::mem::size_of::<i32>() as u32,
         );
         let _ = DwmInvalidateIconicBitmaps(hwnd);
+    }
+}
+
+pub fn enable_force_iconic_representation(hwnd: HWND) {
+    if hwnd.is_invalid() || ICONIC_PREVIEW_ENABLED.swap(true, Ordering::AcqRel) {
+        return;
+    }
+
+    let value: i32 = 1;
+    unsafe {
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_FORCE_ICONIC_REPRESENTATION,
+            &value as *const _ as *const core::ffi::c_void,
+            core::mem::size_of::<i32>() as u32,
+        );
+    }
+}
+
+fn set_has_iconic_bitmap(hwnd: HWND, enabled: bool) {
+    if hwnd.is_invalid() {
+        return;
+    }
+
+    let value: i32 = if enabled { 1 } else { 0 };
+    unsafe {
+        let _ = DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_HAS_ICONIC_BITMAP,
+            &value as *const _ as *const core::ffi::c_void,
+            core::mem::size_of::<i32>() as u32,
+        );
     }
 }
 
@@ -229,7 +278,6 @@ fn request_screenshot(hwnd: HWND, force: bool) -> Option<u64> {
     SCREENSHOT_REQUESTED.store(true, Ordering::Release);
 
     unsafe {
-        let _ = InvalidateRect(Some(hwnd), None, false);
         if PostMessageW(Some(hwnd), WM_NULL, WPARAM(0), LPARAM(0)).is_err() {
             let _ = SCREENSHOT_IN_FLIGHT_ID.compare_exchange(
                 request_id,
@@ -352,7 +400,7 @@ fn capture_visible_window_pixels(hwnd: HWND) -> Option<(usize, usize, Vec<u32>)>
         }
 
         let previous_bitmap = SelectObject(mem_dc, HGDIOBJ::from(bitmap));
-        let rop = SRCCOPY | CAPTUREBLT;
+        let rop = SRCCOPY;
         let blit_ok = if capture_width == source_width && capture_height == source_height {
             BitBlt(
                 mem_dc,
@@ -403,6 +451,32 @@ fn has_screenshot() -> bool {
     LAST_FRAME
         .lock()
         .is_ok_and(|frame| frame.as_ref().is_some_and(|f| !f.pixels.is_empty()))
+}
+
+fn proactive_set_iconic_bitmaps(hwnd: HWND) {
+    let Some(frame) = LAST_FRAME
+        .lock()
+        .ok()
+        .and_then(|frame| frame.clone())
+    else {
+        return;
+    };
+
+    let (tw, th) = fit_inside(frame.width as i32, frame.height as i32, 400, 300);
+    if let Some(bitmap) = create_preview_bitmap_from_frame(&frame, tw, th) {
+        unsafe {
+            let _ = DwmSetIconicThumbnail(hwnd, bitmap, 0);
+            let _ = DeleteObject(HGDIOBJ::from(bitmap));
+        }
+    }
+
+    let (lw, lh) = fit_inside(frame.width as i32, frame.height as i32, 1600, 1000);
+    if let Some(bitmap) = create_preview_bitmap_from_frame(&frame, lw, lh) {
+        unsafe {
+            let _ = DwmSetIconicLivePreviewBitmap(hwnd, bitmap, None, 0);
+            let _ = DeleteObject(HGDIOBJ::from(bitmap));
+        }
+    }
 }
 
 fn set_iconic_thumbnail(hwnd: HWND, max_width: i32, max_height: i32) -> bool {
