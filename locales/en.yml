@@ -372,6 +372,14 @@ secondary_toolbar:
 drag_drop:
   copy: "Copy"
   move: "Move"
+  confirm_move_title: "Confirm move"
+  confirm_move_summary_one: "Move 1 item to the other panel?"
+  confirm_move_summary_many: "Move %{count} items to the other panel?"
+  confirm_move_destination: "Destination:"
+  confirm_move_items: "Items:"
+  confirm_move_more: "and %{count} more"
+  confirm_move_cancel: "Cancel"
+  confirm_move_confirm: "Move"
 panels:
   loading: "Loading..."
   empty_folder: "Empty folder"

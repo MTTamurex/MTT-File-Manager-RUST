@@ -26,38 +26,7 @@ impl ImageViewerApp {
     }
 
     pub(crate) fn is_valid_drop_target(&self, target: &Path) -> bool {
-        if self.drag_payload_paths.is_empty() {
-            return false;
-        }
-
-        let target_norm = normalize_path_for_compare(target);
-
-        for source in &self.drag_payload_paths {
-            let source_norm = normalize_path_for_compare(source);
-
-            // Can't drop onto itself.
-            if source_norm == target_norm {
-                return false;
-            }
-
-            // Can't drop a folder into itself/descendant.
-            let source_prefix = format!("{source_norm}\\");
-            if target_norm.starts_with(&source_prefix) {
-                return false;
-            }
-        }
-
-        // No-op: reject if ALL sources are already direct children of the target folder.
-        let all_already_in_target = self.drag_payload_paths.iter().all(|source| {
-            source
-                .parent()
-                .is_some_and(|p| normalize_path_for_compare(p) == target_norm)
-        });
-        if all_already_in_target {
-            return false;
-        }
-
-        true
+        is_valid_drop_target_for_paths(&self.drag_payload_paths, target)
     }
 
     pub(super) fn resolve_drag_operation(
@@ -87,6 +56,40 @@ impl ImageViewerApp {
     }
 }
 
+pub(super) fn is_valid_drop_target_for_paths(paths: &[PathBuf], target: &Path) -> bool {
+    if paths.is_empty() {
+        return false;
+    }
+
+    let target_norm = normalize_path_for_compare(target);
+
+    for source in paths {
+        let source_norm = normalize_path_for_compare(source);
+
+        if source_norm == target_norm {
+            return false;
+        }
+
+        let source_prefix = format!("{source_norm}\\");
+        if target_norm.starts_with(&source_prefix) {
+            return false;
+        }
+    }
+
+    !paths.iter().all(|source| {
+        source
+            .parent()
+            .is_some_and(|p| normalize_path_for_compare(p) == target_norm)
+    })
+}
+
+pub(super) fn should_confirm_cross_panel_move(
+    is_cross_panel_drop: bool,
+    operation: DragDropOperation,
+) -> bool {
+    is_cross_panel_drop && matches!(operation, DragDropOperation::Move)
+}
+
 pub(super) fn normalize_path_for_compare(path: &Path) -> String {
     let lower = path.to_string_lossy().to_ascii_lowercase();
     if let Some(stripped) = lower.strip_prefix(r"\\?\") {
@@ -103,4 +106,79 @@ fn volume_key(path: &Path) -> Option<String> {
         }
         _ => None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        is_valid_drop_target_for_paths, should_confirm_cross_panel_move, DragDropOperation,
+    };
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn cross_panel_move_requires_confirmation() {
+        assert!(should_confirm_cross_panel_move(
+            true,
+            DragDropOperation::Move
+        ));
+    }
+
+    #[test]
+    fn cross_panel_copy_does_not_require_confirmation() {
+        assert!(!should_confirm_cross_panel_move(
+            true,
+            DragDropOperation::Copy
+        ));
+    }
+
+    #[test]
+    fn intra_panel_move_does_not_require_confirmation() {
+        assert!(!should_confirm_cross_panel_move(
+            false,
+            DragDropOperation::Move
+        ));
+    }
+
+    #[test]
+    fn drop_target_rejects_source_itself() {
+        let paths = vec![PathBuf::from(r"C:\Source\Folder")];
+
+        assert!(!is_valid_drop_target_for_paths(
+            &paths,
+            Path::new(r"C:\Source\Folder")
+        ));
+    }
+
+    #[test]
+    fn drop_target_rejects_source_descendant() {
+        let paths = vec![PathBuf::from(r"C:\Source\Folder")];
+
+        assert!(!is_valid_drop_target_for_paths(
+            &paths,
+            Path::new(r"C:\Source\Folder\Child")
+        ));
+    }
+
+    #[test]
+    fn drop_target_rejects_when_all_sources_are_already_children() {
+        let paths = vec![
+            PathBuf::from(r"C:\Source\a.txt"),
+            PathBuf::from(r"C:\Source\b.txt"),
+        ];
+
+        assert!(!is_valid_drop_target_for_paths(
+            &paths,
+            Path::new(r"C:\Source")
+        ));
+    }
+
+    #[test]
+    fn drop_target_accepts_different_folder() {
+        let paths = vec![PathBuf::from(r"C:\Source\a.txt")];
+
+        assert!(is_valid_drop_target_for_paths(
+            &paths,
+            Path::new(r"C:\Dest")
+        ));
+    }
 }

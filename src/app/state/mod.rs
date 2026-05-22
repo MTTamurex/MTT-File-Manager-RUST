@@ -24,6 +24,7 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
 use std::time::{Instant, SystemTime};
 
+use crate::app::drag_drop_state::PendingDragMoveConfirmation;
 use crate::app::drive_state::DriveState;
 use crate::app::dual_panel::{ActivePanel, PanelSnapshot};
 use crate::app::file_operation_state::FileOperationState;
@@ -169,6 +170,8 @@ pub struct ImageViewerApp {
     /// Cross-panel drop target: set by render_dual_panel when dragging over the inactive panel.
     /// Used as fallback in complete_item_drag when drag_target_folder is None.
     pub drag_cross_panel_target: Option<PathBuf>,
+    pub drag_drop_cross_panel_context: bool,
+    pub pending_drag_move_confirmation: Option<PendingDragMoveConfirmation>,
     /// Icon pre-loaded when drag starts â€” avoids blocking Shell calls in the render loop.
     pub drag_icon_cache: Option<egui::TextureHandle>,
     pub selected_thumbnail: Option<egui::TextureHandle>, // Persistent thumbnail for preview panel

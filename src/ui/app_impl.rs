@@ -299,6 +299,12 @@ impl eframe::App for ImageViewerApp {
             }
         }
 
+        if self.pending_drag_move_confirmation.is_some() {
+            crate::ui::components::drag_move_confirmation_modal::render_drag_move_confirmation_modal(
+                self, ctx,
+            );
+        }
+
         if is_in_size_move {
             // Ensure continuous redraw while the OS is in the modal move/resize loop.
             ctx.request_repaint();

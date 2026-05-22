@@ -652,6 +652,7 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
         // through the active generation so the shared workers accept them.
         app_with_inactive.use_active_generation_for_thumbnail_requests = true;
         app_with_inactive.suppress_file_panel_keyboard = true;
+        app_with_inactive.drag_drop_cross_panel_context = app_with_inactive.is_item_dragging;
         ui.allocate_new_ui(
             egui::UiBuilder::new().max_rect(inactive_content_rect),
             |ui| {
@@ -661,6 +662,7 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
                 });
             },
         );
+        app_with_inactive.drag_drop_cross_panel_context = false;
         app_with_inactive.use_active_generation_for_thumbnail_requests = false;
         app_with_inactive.suppress_file_panel_keyboard = false;
     });

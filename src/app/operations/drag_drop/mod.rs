@@ -9,9 +9,12 @@ mod rendering;
 mod validation;
 
 use crate::app::state::ImageViewerApp;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use validation::{normalize_path_for_compare, DragDropOperation};
+use validation::{
+    is_valid_drop_target_for_paths, normalize_path_for_compare, should_confirm_cross_panel_move,
+    DragDropOperation,
+};
 
 impl ImageViewerApp {
     /// Starts an item drag operation from the given index.
@@ -147,11 +150,10 @@ impl ImageViewerApp {
             return;
         }
 
-        let Some(dest_folder) = self
-            .drag_target_folder
-            .clone()
-            .or_else(|| self.drag_cross_panel_target.take())
-        else {
+        let cross_panel_target = self.drag_cross_panel_target.clone();
+        let is_cross_panel_drop =
+            cross_panel_target.is_some() || self.drag_drop_cross_panel_context;
+        let Some(dest_folder) = self.drag_target_folder.clone().or(cross_panel_target) else {
             self.cancel_item_drag();
             return;
         };
@@ -167,8 +169,24 @@ impl ImageViewerApp {
             return;
         }
 
+        let operation = self.resolve_drag_operation(&dest_folder, ctrl_pressed, shift_pressed);
+        let source_folder = self.drag_source_folder.clone();
+
+        if should_confirm_cross_panel_move(is_cross_panel_drop, operation) {
+            self.pending_drag_move_confirmation = Some(
+                crate::app::drag_drop_state::PendingDragMoveConfirmation::new(
+                    paths,
+                    dest_folder,
+                    source_folder,
+                ),
+            );
+            self.cancel_item_drag();
+            self.ui_ctx.request_repaint();
+            return;
+        }
+
         let hwnd = self.shell_op_hwnd();
-        let request = match self.resolve_drag_operation(&dest_folder, ctrl_pressed, shift_pressed) {
+        let request = match operation {
             DragDropOperation::Copy => {
                 crate::workers::file_operation_worker::FileOperationRequest::copy_batch(
                     paths,
@@ -185,6 +203,42 @@ impl ImageViewerApp {
             }
         };
 
+        self.dispatch_drag_file_operation(request);
+        self.clear_selection_after_drag_file_operation(source_folder.as_deref());
+
+        self.ui_ctx.request_repaint();
+    }
+
+    pub fn confirm_pending_drag_move(&mut self) {
+        let Some(pending) = self.pending_drag_move_confirmation.take() else {
+            return;
+        };
+
+        if !is_valid_drop_target_for_paths(&pending.paths, &pending.dest_folder) {
+            self.ui_ctx.request_repaint();
+            return;
+        }
+
+        let hwnd = self.shell_op_hwnd();
+        let request = crate::workers::file_operation_worker::FileOperationRequest::move_batch(
+            pending.paths,
+            pending.dest_folder,
+            hwnd,
+        );
+        self.dispatch_drag_file_operation(request);
+        self.clear_selection_after_drag_file_operation(pending.source_folder.as_deref());
+        self.ui_ctx.request_repaint();
+    }
+
+    pub fn cancel_pending_drag_move(&mut self) {
+        self.pending_drag_move_confirmation = None;
+        self.ui_ctx.request_repaint();
+    }
+
+    fn dispatch_drag_file_operation(
+        &mut self,
+        request: crate::workers::file_operation_worker::FileOperationRequest,
+    ) {
         self.file_operation_state.file_ops_in_progress += 1;
         if self
             .file_operation_state
@@ -197,13 +251,15 @@ impl ImageViewerApp {
                 .file_ops_in_progress
                 .saturating_sub(1);
         }
+    }
 
-        // Clear drag state
+    fn clear_selection_after_drag_file_operation(&mut self, source_folder: Option<&Path>) {
         self.is_item_dragging = false;
         self.drag_payload_is_single_directory = false;
         self.drag_target_folder = None;
         self.drag_hovered_folder = None;
         self.drag_cross_panel_target = None;
+        self.drag_drop_cross_panel_context = false;
         self.drag_icon_cache = None;
 
         // Clear selection so the detail panel updates to show folder info
@@ -217,7 +273,7 @@ impl ImageViewerApp {
         // Also clear selection in the source tab's saved state.
         // After a tab switch the source tab's selection was persisted via sync_to_tab,
         // so clearing only the current (destination) app state isn't enough.
-        if let Some(ref src) = self.drag_source_folder {
+        if let Some(src) = source_folder {
             let src_norm = normalize_path_for_compare(src);
             let active_idx = self.tab_manager.active_tab;
             for (i, tab) in self.tab_manager.tabs.iter_mut().enumerate() {
@@ -233,8 +289,6 @@ impl ImageViewerApp {
             }
         }
         self.drag_source_folder = None;
-
-        self.ui_ctx.request_repaint();
     }
 
     /// Cancels any active drag state.
@@ -246,6 +300,7 @@ impl ImageViewerApp {
         self.drag_target_folder = None;
         self.drag_hovered_folder = None;
         self.drag_cross_panel_target = None;
+        self.drag_drop_cross_panel_context = false;
         self.drag_icon_cache = None;
     }
 }

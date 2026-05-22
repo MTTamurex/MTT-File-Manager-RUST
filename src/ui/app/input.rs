@@ -140,6 +140,7 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
         && app.sidebar_renaming.is_none()
         && !app.is_address_editing
         && app.batch_rename_state.is_none()
+        && app.pending_drag_move_confirmation.is_none()
     {
         if app.shortcut_editor.is_capturing() {
             user_active = ctx.input(|i| {
@@ -413,6 +414,8 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
             if app.batch_rename_state.is_some() {
                 app.batch_rename_state = None;
+            } else if app.pending_drag_move_confirmation.is_some() {
+                app.cancel_pending_drag_move();
             } else {
                 app.renaming_state = None;
                 app.focus_rename = false;

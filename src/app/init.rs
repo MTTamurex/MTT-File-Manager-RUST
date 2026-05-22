@@ -314,6 +314,8 @@ impl ImageViewerApp {
             drag_target_folder: None,
             drag_hovered_folder: None,
             drag_cross_panel_target: None,
+            drag_drop_cross_panel_context: false,
+            pending_drag_move_confirmation: None,
             drag_icon_cache: None,
             total_items: 0,
             // Search & Navigation (NEW)
