@@ -84,10 +84,12 @@ pub(super) fn is_valid_drop_target_for_paths(paths: &[PathBuf], target: &Path) -
 }
 
 pub(super) fn should_confirm_cross_panel_move(
-    is_cross_panel_drop: bool,
+    source_cross_panel_context: bool,
+    target_cross_panel_context: bool,
     operation: DragDropOperation,
 ) -> bool {
-    is_cross_panel_drop && matches!(operation, DragDropOperation::Move)
+    source_cross_panel_context != target_cross_panel_context
+        && matches!(operation, DragDropOperation::Move)
 }
 
 pub(super) fn normalize_path_for_compare(path: &Path) -> String {
@@ -116,25 +118,46 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     #[test]
-    fn cross_panel_move_requires_confirmation() {
+    fn active_to_inactive_move_requires_confirmation() {
         assert!(should_confirm_cross_panel_move(
+            false,
             true,
             DragDropOperation::Move
         ));
     }
 
     #[test]
-    fn cross_panel_copy_does_not_require_confirmation() {
+    fn inactive_to_active_move_requires_confirmation() {
+        assert!(should_confirm_cross_panel_move(
+            true,
+            false,
+            DragDropOperation::Move
+        ));
+    }
+
+    #[test]
+    fn active_to_inactive_copy_does_not_require_confirmation() {
         assert!(!should_confirm_cross_panel_move(
+            false,
             true,
             DragDropOperation::Copy
         ));
     }
 
     #[test]
-    fn intra_panel_move_does_not_require_confirmation() {
+    fn active_to_active_move_does_not_require_confirmation() {
         assert!(!should_confirm_cross_panel_move(
             false,
+            false,
+            DragDropOperation::Move
+        ));
+    }
+
+    #[test]
+    fn inactive_to_inactive_move_does_not_require_confirmation() {
+        assert!(!should_confirm_cross_panel_move(
+            true,
+            true,
             DragDropOperation::Move
         ));
     }

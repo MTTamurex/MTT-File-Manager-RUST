@@ -167,6 +167,7 @@ pub struct ImageViewerApp {
     pub drag_source_folder: Option<PathBuf>,
     pub drag_target_folder: Option<PathBuf>,
     pub drag_hovered_folder: Option<PathBuf>,
+    pub drag_source_cross_panel_context: bool,
     /// Cross-panel drop target: set by render_dual_panel when dragging over the inactive panel.
     /// Used as fallback in complete_item_drag when drag_target_folder is None.
     pub drag_cross_panel_target: Option<PathBuf>,

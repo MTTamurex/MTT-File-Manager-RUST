@@ -313,6 +313,7 @@ impl ImageViewerApp {
             drag_source_folder: None,
             drag_target_folder: None,
             drag_hovered_folder: None,
+            drag_source_cross_panel_context: false,
             drag_cross_panel_target: None,
             drag_drop_cross_panel_context: false,
             pending_drag_move_confirmation: None,

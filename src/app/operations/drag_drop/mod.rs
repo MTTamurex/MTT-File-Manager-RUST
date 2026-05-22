@@ -72,6 +72,7 @@ impl ImageViewerApp {
         self.drag_payload_paths = payload;
         self.drag_payload_is_single_directory = payload_is_single_directory;
         self.drag_source_folder = Some(PathBuf::from(&self.navigation_state.current_path));
+        self.drag_source_cross_panel_context = self.drag_drop_cross_panel_context;
         self.drag_target_folder = None;
         self.drag_hovered_folder = None;
 
@@ -151,7 +152,7 @@ impl ImageViewerApp {
         }
 
         let cross_panel_target = self.drag_cross_panel_target.clone();
-        let is_cross_panel_drop =
+        let target_cross_panel_context =
             cross_panel_target.is_some() || self.drag_drop_cross_panel_context;
         let Some(dest_folder) = self.drag_target_folder.clone().or(cross_panel_target) else {
             self.cancel_item_drag();
@@ -172,7 +173,11 @@ impl ImageViewerApp {
         let operation = self.resolve_drag_operation(&dest_folder, ctrl_pressed, shift_pressed);
         let source_folder = self.drag_source_folder.clone();
 
-        if should_confirm_cross_panel_move(is_cross_panel_drop, operation) {
+        if should_confirm_cross_panel_move(
+            self.drag_source_cross_panel_context,
+            target_cross_panel_context,
+            operation,
+        ) {
             self.pending_drag_move_confirmation = Some(
                 crate::app::drag_drop_state::PendingDragMoveConfirmation::new(
                     paths,
@@ -258,6 +263,7 @@ impl ImageViewerApp {
         self.drag_payload_is_single_directory = false;
         self.drag_target_folder = None;
         self.drag_hovered_folder = None;
+        self.drag_source_cross_panel_context = false;
         self.drag_cross_panel_target = None;
         self.drag_drop_cross_panel_context = false;
         self.drag_icon_cache = None;
@@ -299,6 +305,7 @@ impl ImageViewerApp {
         self.drag_source_folder = None;
         self.drag_target_folder = None;
         self.drag_hovered_folder = None;
+        self.drag_source_cross_panel_context = false;
         self.drag_cross_panel_target = None;
         self.drag_drop_cross_panel_context = false;
         self.drag_icon_cache = None;
