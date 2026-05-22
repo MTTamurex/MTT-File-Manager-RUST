@@ -83,7 +83,7 @@ pub fn render_drag_move_confirmation_modal(app: &mut ImageViewerApp, ctx: &egui:
         h += 12.0; // space
         if !item_names.is_empty() {
             h += 16.0; // "Items:" label
-            h += 4.0;  // space
+            h += 4.0; // space
             for _ in &item_names {
                 h += 18.0; // each item line
             }
@@ -92,7 +92,7 @@ pub fn render_drag_move_confirmation_modal(app: &mut ImageViewerApp, ctx: &egui:
             }
             h += 8.0; // space
         }
-        h += 8.0;  // space before buttons
+        h += 8.0; // space before buttons
         h += 34.0; // buttons
         h += 36.0; // inner margins top+bottom
         h
@@ -156,7 +156,9 @@ pub fn render_drag_move_confirmation_modal(app: &mut ImageViewerApp, ctx: &egui:
                         t!("drag_drop.confirm_move_summary_many", count = count).to_string()
                     };
                     ui.label(
-                        RichText::new(summary).size(14.0).color(theme::text_color(dark_mode)),
+                        RichText::new(summary)
+                            .size(14.0)
+                            .color(theme::text_color(dark_mode)),
                     );
 
                     ui.add_space(12.0);
@@ -200,13 +202,18 @@ pub fn render_drag_move_confirmation_modal(app: &mut ImageViewerApp, ctx: &egui:
                         for name in &item_names {
                             ui.horizontal(|ui| {
                                 ui.label(RichText::new("•").size(12.0).color(theme::COLOR_ACCENT));
-                                ui.label(RichText::new(name).size(12.0).color(theme::text_color(dark_mode)));
+                                ui.label(
+                                    RichText::new(name)
+                                        .size(12.0)
+                                        .color(theme::text_color(dark_mode)),
+                                );
                             });
                         }
                         if remaining_count > 0 {
                             ui.label(
                                 RichText::new(
-                                    t!("drag_drop.confirm_move_more", count = remaining_count).to_string(),
+                                    t!("drag_drop.confirm_move_more", count = remaining_count)
+                                        .to_string(),
                                 )
                                 .size(12.0)
                                 .color(theme::secondary_text_color(dark_mode))
@@ -246,8 +253,11 @@ pub fn render_drag_move_confirmation_modal(app: &mut ImageViewerApp, ctx: &egui:
                                         .size(14.0)
                                         .color(theme::secondary_text_color(dark_mode)),
                                 )
-                            .fill(Color32::TRANSPARENT)
-                            .stroke(egui::Stroke::new(1.0, theme::secondary_text_color(dark_mode))),
+                                .fill(Color32::TRANSPARENT)
+                                .stroke(egui::Stroke::new(
+                                    1.0,
+                                    theme::secondary_text_color(dark_mode),
+                                )),
                             )
                             .clicked()
                         {

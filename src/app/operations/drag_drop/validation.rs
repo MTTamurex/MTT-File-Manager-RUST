@@ -92,6 +92,12 @@ pub(super) fn should_confirm_cross_panel_move(
         && matches!(operation, DragDropOperation::Move)
 }
 
+pub(super) fn should_block_file_panel_input_for_pending_confirmation(
+    has_pending_confirmation: bool,
+) -> bool {
+    has_pending_confirmation
+}
+
 pub(super) fn normalize_path_for_compare(path: &Path) -> String {
     let lower = path.to_string_lossy().to_ascii_lowercase();
     if let Some(stripped) = lower.strip_prefix(r"\\?\") {
@@ -113,7 +119,8 @@ fn volume_key(path: &Path) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        is_valid_drop_target_for_paths, should_confirm_cross_panel_move, DragDropOperation,
+        is_valid_drop_target_for_paths, should_block_file_panel_input_for_pending_confirmation,
+        should_confirm_cross_panel_move, DragDropOperation,
     };
     use std::path::{Path, PathBuf};
 
@@ -141,6 +148,18 @@ mod tests {
             false,
             true,
             DragDropOperation::Copy
+        ));
+    }
+
+    #[test]
+    fn pending_confirmation_blocks_file_panel_input() {
+        assert!(should_block_file_panel_input_for_pending_confirmation(true));
+    }
+
+    #[test]
+    fn missing_confirmation_does_not_block_file_panel_input() {
+        assert!(!should_block_file_panel_input_for_pending_confirmation(
+            false
         ));
     }
 

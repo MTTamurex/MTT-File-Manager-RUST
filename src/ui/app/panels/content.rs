@@ -608,7 +608,8 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
     // ── Cross-panel drag target: pre-set before rendering so the active
     //    panel's bridge code doesn't cancel the drag when mouse is over
     //    the inactive panel. ──
-    if app.is_item_dragging {
+    let file_panel_input_blocked = app.file_panel_input_blocked_by_drag_move_confirmation();
+    if app.is_item_dragging && !file_panel_input_blocked {
         let hover_pos = ui.input(|i| i.pointer.hover_pos());
         if let Some(pos) = hover_pos {
             let inactive_header = match active {
@@ -627,6 +628,8 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
         } else {
             app.drag_cross_panel_target = None;
         }
+    } else {
+        app.drag_cross_panel_target = None;
     }
 
     // ── Render ACTIVE panel content with unique ID scope ──
@@ -676,7 +679,7 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
     // so without this guard clicks on the overlay would switch panel focus.
     let (pointer_pos, primary_clicked) =
         ui.input(|i| (i.pointer.hover_pos(), i.pointer.primary_clicked()));
-    if primary_clicked && !app.global_search.active {
+    if primary_clicked && !app.global_search.active && !file_panel_input_blocked {
         if let Some(pos) = pointer_pos {
             // Switch focus when clicking in the inactive panel area.
             let inactive_header = match active {
@@ -695,6 +698,8 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
 fn render_single_panel_content(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
     use crate::domain::file_entry::ViewMode;
 
+    let file_panel_input_blocked = app.file_panel_input_blocked_by_drag_move_confirmation();
+
     if app.is_loading_folder && app.items.is_empty() {
         ui.centered_and_justified(|ui| {
             ui.label(rust_i18n::t!("panels.loading"));
@@ -702,7 +707,7 @@ fn render_single_panel_content(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
 
         // During loading, still update drag target so cursor feedback
         // isn't stale from the previous tab's hovered folder.
-        if app.is_item_dragging {
+        if app.is_item_dragging && !file_panel_input_blocked {
             app.update_item_drag_target_from_hover(None);
             let (ctrl, shift, primary_released) = ui.input(|i| {
                 (
@@ -725,7 +730,7 @@ fn render_single_panel_content(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
 
         // During an active drag, update the drop target to the current folder
         // even though there are no items to hover over.
-        if app.is_item_dragging {
+        if app.is_item_dragging && !file_panel_input_blocked {
             app.update_item_drag_target_from_hover(None);
             let (ctrl, shift, primary_released) = ui.input(|i| {
                 (
@@ -748,7 +753,10 @@ fn render_single_panel_content(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
             )
             .on_hover_cursor(egui::CursorIcon::Default);
 
-        if interact_response.secondary_clicked() && app.can_open_empty_area_context_menu() {
+        if !file_panel_input_blocked
+            && interact_response.secondary_clicked()
+            && app.can_open_empty_area_context_menu()
+        {
             app.context_menu.target_paths.clear();
 
             // Use current path for shell menu

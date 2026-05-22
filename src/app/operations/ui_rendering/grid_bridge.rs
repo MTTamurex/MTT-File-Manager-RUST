@@ -345,139 +345,146 @@ impl ImageViewerApp {
         // Always consume focus_rename after one frame (cursor selection applied once)
         self.focus_rename = false;
 
-        let suppress_rectangle_start = drag_started_item.is_some();
-        self.handle_rectangle_selection_frame(
-            ui,
-            &rectangle_selection_frame,
-            suppress_rectangle_start,
-        );
+        let file_panel_input_blocked = self.file_panel_input_blocked_by_drag_move_confirmation();
+        if file_panel_input_blocked {
+            self.cancel_rectangle_selection();
+        } else {
+            let suppress_rectangle_start = drag_started_item.is_some();
+            self.handle_rectangle_selection_frame(
+                ui,
+                &rectangle_selection_frame,
+                suppress_rectangle_start,
+            );
+        }
 
         // Process actions (blocked during renaming, except click on item itself)
         let is_renaming = self.renaming_state.is_some();
-        match action {
-            Some(grid_view::GridViewAction::Click(idx)) if !is_renaming => {
-                if let Some(item) = self.items.get(idx) {
-                    let ctrl = ui.input(|i| i.modifiers.ctrl);
-                    let shift = ui.input(|i| i.modifiers.shift);
+        if !file_panel_input_blocked {
+            match action {
+                Some(grid_view::GridViewAction::Click(idx)) if !is_renaming => {
+                    if let Some(item) = self.items.get(idx) {
+                        let ctrl = ui.input(|i| i.modifiers.ctrl);
+                        let shift = ui.input(|i| i.modifiers.shift);
 
-                    if ctrl {
-                        // Ctrl + Click: Toggle and set focus/anchor
-                        if self.multi_selection.contains(&item.path) {
-                            self.multi_selection.remove(&item.path);
-                        } else {
-                            self.multi_selection.insert(item.path.clone());
-                        }
-                        self.selected_item = Some(idx);
-                        self.selection_anchor = Some(idx);
-                        self.selected_file = Some(item.clone());
-                    } else if shift {
-                        // Shift + Click: Range between anchor and click
-                        if let Some(anchor) = self.selection_anchor {
-                            let (start, end) = if anchor < idx {
-                                (anchor, idx)
+                        if ctrl {
+                            // Ctrl + Click: Toggle and set focus/anchor
+                            if self.multi_selection.contains(&item.path) {
+                                self.multi_selection.remove(&item.path);
                             } else {
-                                (idx, anchor)
-                            };
-                            for i in start..=end {
-                                if let Some(it) = self.items.get(i) {
-                                    self.multi_selection.insert(it.path.clone());
-                                }
+                                self.multi_selection.insert(item.path.clone());
                             }
                             self.selected_item = Some(idx);
+                            self.selection_anchor = Some(idx);
                             self.selected_file = Some(item.clone());
+                        } else if shift {
+                            // Shift + Click: Range between anchor and click
+                            if let Some(anchor) = self.selection_anchor {
+                                let (start, end) = if anchor < idx {
+                                    (anchor, idx)
+                                } else {
+                                    (idx, anchor)
+                                };
+                                for i in start..=end {
+                                    if let Some(it) = self.items.get(i) {
+                                        self.multi_selection.insert(it.path.clone());
+                                    }
+                                }
+                                self.selected_item = Some(idx);
+                                self.selected_file = Some(item.clone());
+                            } else {
+                                // Fallback
+                                self.multi_selection.insert(item.path.clone());
+                                self.selected_item = Some(idx);
+                                self.selection_anchor = Some(idx);
+                                self.selected_file = Some(item.clone());
+                            }
                         } else {
-                            // Fallback
+                            // Simple Click: Reset selection and set focus/anchor
+                            self.multi_selection.clear();
                             self.multi_selection.insert(item.path.clone());
                             self.selected_item = Some(idx);
                             self.selection_anchor = Some(idx);
                             self.selected_file = Some(item.clone());
                         }
-                    } else {
-                        // Simple Click: Reset selection and set focus/anchor
-                        self.multi_selection.clear();
-                        self.multi_selection.insert(item.path.clone());
-                        self.selected_item = Some(idx);
-                        self.selection_anchor = Some(idx);
-                        self.selected_file = Some(item.clone());
-                    }
 
-                    self.update_selected_thumbnail();
+                        self.update_selected_thumbnail();
+                    }
                 }
-            }
-            Some(grid_view::GridViewAction::DoubleClick(idx)) if !is_renaming => {
-                let mut path_to_navigate = None;
-                if let Some(item) = self.items.get(idx) {
-                    if item.is_dir {
-                        if !self.navigation_state.is_recycle_bin_view {
-                            path_to_navigate = Some(item.path.clone());
-                        }
-                    } else {
-                        let path = item.path.clone();
-                        let extension = path
-                            .extension()
-                            .and_then(|e| e.to_str())
-                            .unwrap_or("")
-                            .to_lowercase();
-                        if extension == "iso" {
-                            self.mount_and_navigate_iso(path);
+                Some(grid_view::GridViewAction::DoubleClick(idx)) if !is_renaming => {
+                    let mut path_to_navigate = None;
+                    if let Some(item) = self.items.get(idx) {
+                        if item.is_dir {
+                            if !self.navigation_state.is_recycle_bin_view {
+                                path_to_navigate = Some(item.path.clone());
+                            }
                         } else {
-                            open_with_shell(self, &path);
+                            let path = item.path.clone();
+                            let extension = path
+                                .extension()
+                                .and_then(|e| e.to_str())
+                                .unwrap_or("")
+                                .to_lowercase();
+                            if extension == "iso" {
+                                self.mount_and_navigate_iso(path);
+                            } else {
+                                open_with_shell(self, &path);
+                            }
                         }
                     }
-                }
 
-                if let Some(path) = path_to_navigate {
-                    self.navigate_to(&path.to_string_lossy());
-                }
-            }
-            Some(grid_view::GridViewAction::SecondaryClick(idx)) if !is_renaming => {
-                if let Some(item) = self.items.get(idx) {
-                    // Update selection logic for right-click
-                    if !self.multi_selection.contains(&item.path) {
-                        self.multi_selection.clear();
-                        self.multi_selection.insert(item.path.clone());
-                        self.selected_item = Some(idx);
-                        self.selected_file = Some(item.clone());
-                    } else {
-                        self.selected_item = Some(idx);
-                        self.selected_file = Some(item.clone());
+                    if let Some(path) = path_to_navigate {
+                        self.navigate_to(&path.to_string_lossy());
                     }
+                }
+                Some(grid_view::GridViewAction::SecondaryClick(idx)) if !is_renaming => {
+                    if let Some(item) = self.items.get(idx) {
+                        // Update selection logic for right-click
+                        if !self.multi_selection.contains(&item.path) {
+                            self.multi_selection.clear();
+                            self.multi_selection.insert(item.path.clone());
+                            self.selected_item = Some(idx);
+                            self.selected_file = Some(item.clone());
+                        } else {
+                            self.selected_item = Some(idx);
+                            self.selected_file = Some(item.clone());
+                        }
 
-                    // Collect all selected paths
-                    let selected_paths: Vec<PathBuf> =
-                        self.multi_selection.iter().cloned().collect();
+                        // Collect all selected paths
+                        let selected_paths: Vec<PathBuf> =
+                            self.multi_selection.iter().cloned().collect();
 
-                    // Use the new styled menu system
+                        // Use the new styled menu system
+                        let pointer_pos = ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO);
+                        let right_bound = ui.available_rect_before_wrap().right();
+
+                        self.populate_context_menu(ui.ctx(), &selected_paths, false, Some(idx));
+                        self.context_menu.open(
+                            pointer_pos,
+                            right_bound,
+                            Some(idx),
+                            selected_paths,
+                            false,
+                        );
+                    }
+                }
+                Some(grid_view::GridViewAction::EmptyAreaSecondaryClick)
+                    if !is_renaming && self.can_open_empty_area_context_menu() =>
+                {
+                    let path = PathBuf::from(&self.navigation_state.current_path);
                     let pointer_pos = ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO);
                     let right_bound = ui.available_rect_before_wrap().right();
-
-                    self.populate_context_menu(ui.ctx(), &selected_paths, false, Some(idx));
-                    self.context_menu.open(
-                        pointer_pos,
-                        right_bound,
-                        Some(idx),
-                        selected_paths,
-                        false,
-                    );
+                    self.populate_context_menu(ui.ctx(), std::slice::from_ref(&path), true, None);
+                    self.context_menu
+                        .open(pointer_pos, right_bound, None, vec![path], true);
                 }
+                Some(grid_view::GridViewAction::EmptyAreaClick) if !is_renaming => {
+                    self.clear_file_view_selection();
+                }
+                _ => {}
             }
-            Some(grid_view::GridViewAction::EmptyAreaSecondaryClick)
-                if !is_renaming && self.can_open_empty_area_context_menu() =>
-            {
-                let path = PathBuf::from(&self.navigation_state.current_path);
-                let pointer_pos = ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO);
-                let right_bound = ui.available_rect_before_wrap().right();
-                self.populate_context_menu(ui.ctx(), std::slice::from_ref(&path), true, None);
-                self.context_menu
-                    .open(pointer_pos, right_bound, None, vec![path], true);
-            }
-            Some(grid_view::GridViewAction::EmptyAreaClick) if !is_renaming => {
-                self.clear_file_view_selection();
-            }
-            _ => {}
         }
 
-        if !is_renaming && self.rectangle_selection_state.is_none() {
+        if !file_panel_input_blocked && !is_renaming && self.rectangle_selection_state.is_none() {
             if let Some(start_idx) = drag_started_item {
                 self.begin_item_drag(start_idx);
             }

@@ -12,13 +12,18 @@ use crate::app::state::ImageViewerApp;
 use std::path::{Path, PathBuf};
 
 use validation::{
-    is_valid_drop_target_for_paths, normalize_path_for_compare, should_confirm_cross_panel_move,
+    is_valid_drop_target_for_paths, normalize_path_for_compare,
+    should_block_file_panel_input_for_pending_confirmation, should_confirm_cross_panel_move,
     DragDropOperation,
 };
 
 impl ImageViewerApp {
     /// Starts an item drag operation from the given index.
     pub fn begin_item_drag(&mut self, item_idx: usize) {
+        if self.file_panel_input_blocked_by_drag_move_confirmation() {
+            return;
+        }
+
         // Already dragging – don't restart (avoids resetting target/hover every frame)
         if self.is_item_dragging {
             return;
@@ -75,6 +80,7 @@ impl ImageViewerApp {
         self.drag_source_cross_panel_context = self.drag_drop_cross_panel_context;
         self.drag_target_folder = None;
         self.drag_hovered_folder = None;
+        self.drag_cross_panel_target = None;
 
         // Pre-cache the drag icon once — avoids blocking Shell calls every frame in render.
         let ui_ctx = self.ui_ctx.clone();
@@ -111,9 +117,17 @@ impl ImageViewerApp {
 
     /// Updates the current drop target based on hovered item index.
     pub fn update_item_drag_target_from_hover(&mut self, hovered_idx: Option<usize>) {
+        if self.file_panel_input_blocked_by_drag_move_confirmation() {
+            self.drag_target_folder = None;
+            self.drag_hovered_folder = None;
+            self.drag_cross_panel_target = None;
+            return;
+        }
+
         if !self.is_item_dragging {
             self.drag_target_folder = None;
             self.drag_hovered_folder = None;
+            self.drag_cross_panel_target = None;
             return;
         }
 
@@ -147,6 +161,11 @@ impl ImageViewerApp {
 
     /// Completes an in-progress drag operation (drop).
     pub fn complete_item_drag(&mut self, ctrl_pressed: bool, shift_pressed: bool) {
+        if self.file_panel_input_blocked_by_drag_move_confirmation() {
+            self.cancel_item_drag();
+            return;
+        }
+
         if !self.is_item_dragging {
             return;
         }
@@ -171,7 +190,10 @@ impl ImageViewerApp {
         }
 
         let operation = self.resolve_drag_operation(&dest_folder, ctrl_pressed, shift_pressed);
-        let source_folder = self.drag_source_folder.clone();
+        let Some(source_folder) = self.drag_source_folder.clone() else {
+            self.cancel_item_drag();
+            return;
+        };
 
         if should_confirm_cross_panel_move(
             self.drag_source_cross_panel_context,
@@ -182,7 +204,7 @@ impl ImageViewerApp {
                 crate::app::drag_drop_state::PendingDragMoveConfirmation::new(
                     paths,
                     dest_folder,
-                    source_folder,
+                    Some(source_folder.clone()),
                 ),
             );
             self.cancel_item_drag();
@@ -209,7 +231,7 @@ impl ImageViewerApp {
         };
 
         self.dispatch_drag_file_operation(request);
-        self.clear_selection_after_drag_file_operation(source_folder.as_deref());
+        self.clear_selection_after_drag_file_operation(Some(source_folder.as_path()));
 
         self.ui_ctx.request_repaint();
     }
@@ -218,6 +240,7 @@ impl ImageViewerApp {
         let Some(pending) = self.pending_drag_move_confirmation.take() else {
             return;
         };
+        self.cancel_item_drag();
 
         if !is_valid_drop_target_for_paths(&pending.paths, &pending.dest_folder) {
             self.ui_ctx.request_repaint();
@@ -237,7 +260,14 @@ impl ImageViewerApp {
 
     pub fn cancel_pending_drag_move(&mut self) {
         self.pending_drag_move_confirmation = None;
+        self.cancel_item_drag();
         self.ui_ctx.request_repaint();
+    }
+
+    pub fn file_panel_input_blocked_by_drag_move_confirmation(&self) -> bool {
+        should_block_file_panel_input_for_pending_confirmation(
+            self.pending_drag_move_confirmation.is_some(),
+        )
     }
 
     fn dispatch_drag_file_operation(
@@ -260,6 +290,7 @@ impl ImageViewerApp {
 
     fn clear_selection_after_drag_file_operation(&mut self, source_folder: Option<&Path>) {
         self.is_item_dragging = false;
+        self.drag_payload_paths.clear();
         self.drag_payload_is_single_directory = false;
         self.drag_target_folder = None;
         self.drag_hovered_folder = None;

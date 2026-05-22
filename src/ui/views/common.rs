@@ -2,10 +2,12 @@
 //! Follows .cursorrules: single responsibility, < 300 lines
 
 use crate::domain::file_entry::{archive_type_label, FileEntry};
+use eframe::egui;
 use rust_i18n::t;
 
 /// Delay (in seconds) before showing a tooltip on hover.
 pub const TOOLTIP_DELAY_SECS: f32 = 0.3;
+pub const ITEM_DRAG_START_THRESHOLD: f32 = 5.0;
 
 /// Gets file type string for display
 pub fn get_file_type_string(item: &FileEntry) -> String {
@@ -34,6 +36,27 @@ pub fn format_date(timestamp: u64) -> String {
 /// Formats size for display
 pub fn format_size(size: u64) -> String {
     crate::infrastructure::windows::format_size(size)
+}
+
+pub fn should_start_item_drag(
+    response_drag_started: bool,
+    response_dragged: bool,
+    pointer_button_down_on_item: bool,
+    press_origin: Option<egui::Pos2>,
+    pointer_pos: Option<egui::Pos2>,
+) -> bool {
+    if response_drag_started || response_dragged {
+        return true;
+    }
+
+    if !pointer_button_down_on_item {
+        return false;
+    }
+
+    match (press_origin, pointer_pos) {
+        (Some(origin), Some(pos)) => origin.distance(pos) >= ITEM_DRAG_START_THRESHOLD,
+        _ => false,
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -73,5 +96,50 @@ impl ViewportTracker {
 impl Default for ViewportTracker {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_start_item_drag;
+    use eframe::egui;
+
+    #[test]
+    fn explicit_drag_response_starts_item_drag() {
+        assert!(should_start_item_drag(true, false, false, None, None));
+        assert!(should_start_item_drag(false, true, false, None, None));
+    }
+
+    #[test]
+    fn simple_click_jitter_does_not_start_item_drag() {
+        assert!(!should_start_item_drag(
+            false,
+            false,
+            true,
+            Some(egui::pos2(10.0, 10.0)),
+            Some(egui::pos2(13.0, 12.0)),
+        ));
+    }
+
+    #[test]
+    fn pointer_movement_past_threshold_starts_item_drag() {
+        assert!(should_start_item_drag(
+            false,
+            false,
+            true,
+            Some(egui::pos2(10.0, 10.0)),
+            Some(egui::pos2(16.0, 10.0)),
+        ));
+    }
+
+    #[test]
+    fn movement_without_button_down_does_not_start_item_drag() {
+        assert!(!should_start_item_drag(
+            false,
+            false,
+            false,
+            Some(egui::pos2(10.0, 10.0)),
+            Some(egui::pos2(30.0, 10.0)),
+        ));
     }
 }

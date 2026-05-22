@@ -326,7 +326,7 @@ fn handle_sidebar_action(app: &mut ImageViewerApp, action: SidebarAction) {
             app.collapse_network_drives = !app.collapse_network_drives;
         }
         SidebarAction::DropItemsTo(path) => {
-            if app.is_item_dragging {
+            if app.is_item_dragging && !app.file_panel_input_blocked_by_drag_move_confirmation() {
                 let target = std::path::PathBuf::from(&path);
                 if app.is_valid_drop_target(&target) {
                     app.drag_target_folder = Some(target);

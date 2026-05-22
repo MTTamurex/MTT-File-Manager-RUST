@@ -70,10 +70,15 @@ pub(super) fn render_list_item(
         if response.secondary_clicked() {
             *secondary_clicked_item = Some(i);
         }
-        let pointer_moved = ui.input(|i| i.pointer.delta() != egui::Vec2::ZERO);
-        let drag_candidate = response.drag_started()
-            || response.dragged()
-            || (response.is_pointer_button_down_on() && pointer_moved);
+        let (press_origin, pointer_pos) =
+            ui.input(|i| (i.pointer.press_origin(), i.pointer.hover_pos()));
+        let drag_candidate = crate::ui::views::common::should_start_item_drag(
+            response.drag_started(),
+            response.dragged(),
+            response.is_pointer_button_down_on(),
+            press_origin,
+            pointer_pos,
+        );
         let rectangle_select_active = ctx.rectangle_selection_state.is_some();
         if drag_candidate && !rectangle_select_active {
             if ctx.is_computer_view {

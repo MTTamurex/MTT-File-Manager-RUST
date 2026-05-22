@@ -283,8 +283,12 @@ impl eframe::App for ImageViewerApp {
         // 13. Global Search Overlay (on top of everything)
         crate::ui::global_search_overlay::render_global_search_overlay(self, ctx);
 
+        if self.pending_drag_move_confirmation.is_some() && self.is_item_dragging {
+            self.cancel_item_drag();
+        }
+
         // Keep drag feedback on top and avoid cursor override by later widgets.
-        if self.is_item_dragging {
+        if self.is_item_dragging && !self.file_panel_input_blocked_by_drag_move_confirmation() {
             let (ctrl, shift, primary_released) = ctx.input(|i| {
                 (
                     i.modifiers.ctrl,
