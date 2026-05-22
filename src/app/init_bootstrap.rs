@@ -223,8 +223,8 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
     let icon_disk_cache = Arc::new(IconDiskCache::new(&base_dir));
     let (icon_req_tx, icon_res_rx) = spawn_icon_worker(ctx, shared_gen.clone(), icon_disk_cache);
 
-    let tokio_runtime = tokio::runtime::Runtime::new()
-        .expect("Failed to create tokio runtime for metadata worker");
+    let tokio_runtime =
+        tokio::runtime::Runtime::new().expect("Failed to create tokio runtime for metadata worker");
     let (meta_req_tx, meta_res_rx) = spawn_metadata_worker(&tokio_runtime, ctx);
     let (live_size_req_tx, live_size_res_rx) = spawn_live_file_size_worker(ctx);
     let folder_composer = Arc::new(FolderComposer::new());

@@ -454,11 +454,7 @@ fn has_screenshot() -> bool {
 }
 
 fn proactive_set_iconic_bitmaps(hwnd: HWND) {
-    let Some(frame) = LAST_FRAME
-        .lock()
-        .ok()
-        .and_then(|frame| frame.clone())
-    else {
+    let Some(frame) = LAST_FRAME.lock().ok().and_then(|frame| frame.clone()) else {
         return;
     };
 
