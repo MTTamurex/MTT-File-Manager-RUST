@@ -177,6 +177,7 @@ pub struct ImageViewerApp {
     pub drag_icon_cache: Option<egui::TextureHandle>,
     pub selected_thumbnail: Option<egui::TextureHandle>, // Persistent thumbnail for preview panel
     pub selected_gif: Option<crate::ui::components::media_preview::GifPlayer>, // Local GIF for preview panel
+    pub defer_preview_work_after_selection: bool,
     pub media_preview: Option<MediaPreview>, // Global media preview (video/image)
     pub media_preview_owner_tab_id: Option<usize>, // Tab that owns the current media preview
     pub video_player_process: Option<std::process::Child>, // Standalone video player process handle

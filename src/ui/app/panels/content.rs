@@ -19,6 +19,12 @@ pub(super) fn render_preview_panel_layout(
     frame: &eframe::Frame,
 ) {
     if app.show_preview_panel {
+        let defer_preview_work = app.defer_preview_work_after_selection;
+        if defer_preview_work {
+            app.defer_preview_work_after_selection = false;
+            ctx.request_repaint();
+        }
+
         // M-2: Only call refresh_selected_metadata when the selection actually changed.
         // The function has its own early-return for same-path, but this skips the call
         // entirely (avoiding closure + field reads) on the common no-change frame.
@@ -28,7 +34,7 @@ pub(super) fn render_preview_panel_layout(
             (Some(_), None) => true, // watcher cleared last_metadata_path to force re-fetch
             (None, _) => false,
         };
-        if needs_metadata_refresh {
+        if !defer_preview_work && needs_metadata_refresh {
             app.refresh_selected_metadata();
         }
 
@@ -68,7 +74,9 @@ pub(super) fn render_preview_panel_layout(
                         let effective_file = calculate_effective_file(app);
 
                         if let Some(file) = effective_file {
-                            app.ensure_detail_panel_thumbnail_for_file(&file);
+                            if !defer_preview_work {
+                                app.prepare_selected_preview_for_file(&file);
+                            }
 
                             let tab_id = app.tab_manager.active().id;
                             let selected_metadata =

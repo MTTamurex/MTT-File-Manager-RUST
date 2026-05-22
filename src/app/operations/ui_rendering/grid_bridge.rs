@@ -408,6 +408,7 @@ impl ImageViewerApp {
                         }
 
                         self.update_selected_thumbnail();
+                        ui.ctx().request_repaint();
                     }
                 }
                 Some(grid_view::GridViewAction::DoubleClick(idx)) if !is_renaming => {

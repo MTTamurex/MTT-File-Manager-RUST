@@ -7,7 +7,6 @@
 
 use crate::app::state::ImageViewerApp;
 use crate::domain::file_entry::FileEntry;
-use crate::infrastructure::onedrive;
 
 enum SelectedPreviewOverlayAction {
     None,
@@ -304,74 +303,67 @@ impl ImageViewerApp {
         self.selected_thumbnail = None;
         self.selected_gif = None;
 
-        if let Some(selected) = &self.selected_file {
-            let path = selected.path.clone();
-            let modified = selected.modified;
-            let is_media = selected.is_media();
-            // Validate path exists before trying to load thumbnail
-            // Skip this check for virtual paths (files inside ZIP archives)
-            let is_virtual_path =
-                crate::infrastructure::windows::shell_folder::is_shell_navigation_path(
-                    &path, false,
-                );
-            // CRITICAL FIX: Use fast_path_exists() instead of path.exists()
-            // path.exists() uses CreateFileW which triggers OneDrive file recall,
-            // blocking the UI thread for 30-60s on cloud-only files.
-            // GetFileAttributesW reads cached attributes — no network I/O.
-            if !is_virtual_path && !onedrive::fast_path_exists(&path) {
-                self.selected_file = None;
-                self.gif_manager.unload_all();
-                self.update_video_visibility(); // Sync visibility after clearing selection
-                return;
-            }
+        if self.selected_file.is_some() {
+            self.defer_preview_work_after_selection = true;
+            self.update_video_visibility();
+            self.ui_ctx.request_repaint();
+            return;
+        }
 
-            self.ensure_detail_panel_thumbnail_request(path.clone(), modified, is_media);
+        self.defer_preview_work_after_selection = false;
 
-            let active_tab_id = self.tab_manager.active().id;
+        // No selection -> if owner, clear media.
+        self.gif_manager.unload_all();
 
-            // SPECIAL CASE: GIF Autoplay logic
-            let is_gif = path
-                .extension()
-                .and_then(|ext| ext.to_str())
-                .map(|ext| ext.to_lowercase() == "gif")
-                .unwrap_or(false);
+        let active_tab_id = self.tab_manager.active().id;
+        if self.media_preview_owner_tab_id == Some(active_tab_id) {
+            self.destroy_media_preview();
+        }
 
-            // CLEANUP LOGIC: If we are the owner of a VIDEO, and focus changed to a DIFFERENT file, stop the player.
-            // This must run regardless of whether the new selection is a GIF or any other type.
-            let is_owner = self.media_preview_owner_tab_id == Some(active_tab_id);
-            if is_owner {
-                use crate::ui::components::media_preview::MediaPreview;
-                let should_stop = match &mut self.media_preview {
-                    Some(MediaPreview::Video(player)) => player.path != path,
-                    _ => false,
-                };
+        // CRITICAL: Sync visibility whenever selection changes
+        self.update_video_visibility();
+    }
 
-                if should_stop {
-                    self.destroy_media_preview();
-                }
-            }
+    pub fn prepare_selected_preview_for_file(&mut self, file: &FileEntry) {
+        if self
+            .selected_file
+            .as_ref()
+            .is_none_or(|selected| selected.path != file.path)
+        {
+            return;
+        }
 
-            if is_gif {
-                // Initialize async GIF player
-                use crate::ui::components::media_preview::GifPlayer;
-                self.gif_manager.unload_except(Some(&path));
-                let data = self.gif_manager.request_load(&path);
-                self.selected_gif = Some(GifPlayer::new(path.clone(), data));
-            } else {
-                self.gif_manager.unload_all();
-            }
-        } else {
-            // No selection -> if owner, clear media
-            // Also cleanup ALL GIFs immediately as there's no active preview
-            self.gif_manager.unload_all();
+        let path = file.path.clone();
+        self.ensure_detail_panel_thumbnail_request(path.clone(), file.modified, file.is_media());
 
-            let active_tab_id = self.tab_manager.active().id;
-            if self.media_preview_owner_tab_id == Some(active_tab_id) {
+        let active_tab_id = self.tab_manager.active().id;
+        let is_owner = self.media_preview_owner_tab_id == Some(active_tab_id);
+        if is_owner {
+            use crate::ui::components::media_preview::MediaPreview;
+            let should_stop = match &mut self.media_preview {
+                Some(MediaPreview::Video(player)) => player.path != path,
+                _ => false,
+            };
+
+            if should_stop {
                 self.destroy_media_preview();
             }
         }
 
-        // CRITICAL: Sync visibility whenever selection changes
+        let is_gif = path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("gif"));
+
+        if is_gif {
+            use crate::ui::components::media_preview::GifPlayer;
+            self.gif_manager.unload_except(Some(&path));
+            let data = self.gif_manager.request_load(&path);
+            self.selected_gif = Some(GifPlayer::new(path.clone(), data));
+        } else {
+            self.gif_manager.unload_all();
+        }
+
         self.update_video_visibility();
     }
 

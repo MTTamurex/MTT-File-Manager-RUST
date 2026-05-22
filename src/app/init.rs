@@ -285,6 +285,7 @@ impl ImageViewerApp {
             selected_file: None,
             selected_thumbnail: None,
             selected_gif: None,
+            defer_preview_work_after_selection: false,
             media_preview: None,
             media_preview_owner_tab_id: None,
             video_player_process: None,

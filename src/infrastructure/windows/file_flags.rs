@@ -336,6 +336,27 @@ fn now_minus_elapsed(elapsed: Duration) -> Option<Instant> {
     Instant::now().checked_sub(elapsed)
 }
 
+fn cached_write_activity_baseline(path: &Path) -> Option<Instant> {
+    if !is_media_file(path) {
+        return None;
+    }
+
+    let now = Instant::now();
+    let mut cache = get_file_write_activity_cache().lock();
+    if cache.len() > WRITE_ACTIVITY_STATE_CAP {
+        cache.retain(|_, seen_at| now.duration_since(*seen_at) <= WRITE_ACTIVITY_STATE_TTL);
+    }
+
+    match cache.get(path).copied() {
+        Some(seen_at) if now.duration_since(seen_at) <= WRITE_ACTIVITY_STATE_TTL => Some(seen_at),
+        Some(_) => {
+            cache.remove(path);
+            None
+        }
+        None => None,
+    }
+}
+
 fn recent_write_activity_baseline(path: &Path) -> Option<Instant> {
     if !is_media_file(path) {
         return None;
@@ -371,7 +392,7 @@ fn recent_write_activity_baseline(path: &Path) -> Option<Instant> {
 }
 
 fn has_recent_write_activity(path: &Path, max_age: Duration) -> bool {
-    recent_write_activity_baseline(path)
+    cached_write_activity_baseline(path)
         .is_some_and(|baseline| Instant::now().duration_since(baseline) < max_age)
 }
 
@@ -572,9 +593,9 @@ pub fn is_file_unsafe_to_read(path: &Path) -> bool {
 
 /// Lightweight version of [`is_file_unsafe_to_read`] safe for the UI thread.
 ///
-/// Only performs cheap checks (extension + short recent-mtime window), skipping
-/// the `CreateFileW` write-lock probe and stability delay which can block on
-/// network/virtual drives.
+/// Only performs cheap checks (extension + cached watcher activity), skipping
+/// filesystem metadata, the `CreateFileW` write-lock probe, and stability delay
+/// which can block on network/virtual drives.
 /// This is sufficient for UI-thread decisions (watcher events, metadata requests)
 /// because the full check will still be performed on the worker thread before any
 /// file I/O occurs.
@@ -593,7 +614,7 @@ pub fn is_file_unsafe_to_read_fast(path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Read;
+    use std::io::{Read, Write};
 
     #[test]
     fn test_open_sequential() {
@@ -610,5 +631,38 @@ mod tests {
     fn test_open_random_access() {
         let result = open_random_access(Path::new("C:\\Windows\\System32\\ntdll.dll"));
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn fast_read_safety_flags_incomplete_download_extensions() {
+        assert!(is_file_unsafe_to_read_fast(Path::new(
+            "video.mp4.crdownload"
+        )));
+    }
+
+    #[test]
+    fn fast_read_safety_uses_cached_write_activity() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("video.mp4");
+
+        clear_write_activity_for_path(&path);
+        assert!(!is_file_unsafe_to_read_fast(&path));
+
+        mark_recent_write_activity(&path);
+        assert!(is_file_unsafe_to_read_fast(&path));
+
+        clear_write_activity_for_path(&path);
+    }
+
+    #[test]
+    fn fast_read_safety_does_not_probe_recent_media_mtime() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("recent.mp4");
+        let mut file = std::fs::File::create(&path).expect("create media file");
+        file.write_all(b"not real media").expect("write media file");
+
+        clear_write_activity_for_path(&path);
+
+        assert!(!is_file_unsafe_to_read_fast(&path));
     }
 }

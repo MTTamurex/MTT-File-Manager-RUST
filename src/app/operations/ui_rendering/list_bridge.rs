@@ -445,6 +445,7 @@ impl ImageViewerApp {
 
                         // Common updates
                         self.update_selected_thumbnail();
+                        ui.ctx().request_repaint();
                     }
                 }
                 Some(list_view::ListViewAction::DoubleClick(idx)) if !is_renaming => {

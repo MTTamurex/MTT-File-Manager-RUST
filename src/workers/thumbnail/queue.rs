@@ -131,7 +131,12 @@ impl PriorityThumbnailQueue {
             let state = self.state.lock();
             state.drive_is_ssd.get(&drive).copied()
         };
-        let detected_is_ssd = cached_is_ssd.unwrap_or_else(|| io_priority::is_ssd(&path));
+        // Queue pushes can be triggered from UI selection/preview paths. Avoid
+        // synchronous disk-profile probing here; unknown drives use HDD ordering
+        // until a background path populates the shared drive profile cache.
+        let detected_is_ssd = cached_is_ssd
+            .or_else(|| io_priority::try_is_ssd(&path))
+            .unwrap_or(false);
 
         {
             let mut state = self.state.lock();
