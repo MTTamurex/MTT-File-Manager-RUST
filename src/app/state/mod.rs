@@ -181,7 +181,6 @@ pub struct ImageViewerApp {
     pub media_preview_owner_tab_id: Option<usize>, // Tab that owns the current media preview
     pub video_player_process: Option<std::process::Child>, // Standalone video player process handle
     pub selected_metadata: Option<(PathBuf, windows_infra::MediaMetadata)>,
-    pub tokio_runtime: tokio::runtime::Runtime,
     pub metadata_req_sender: Sender<(PathBuf, u64)>,
     pub metadata_res_receiver: Receiver<(PathBuf, u64, windows_infra::MediaMetadata)>,
     pub metadata_cache: LruCache<PathBuf, (u64, windows_infra::MediaMetadata)>,

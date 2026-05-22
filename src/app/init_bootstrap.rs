@@ -61,7 +61,6 @@ pub(in crate::app) struct AppBootstrap {
 
     pub(in crate::app) icon_req_tx: mpsc::Sender<(PathBuf, usize)>,
     pub(in crate::app) icon_res_rx: mpsc::Receiver<(PathBuf, usize, Vec<u8>, u32, u32)>,
-    pub(in crate::app) tokio_runtime: tokio::runtime::Runtime,
     pub(in crate::app) meta_req_tx: mpsc::Sender<(PathBuf, u64)>,
     pub(in crate::app) meta_res_rx: mpsc::Receiver<(PathBuf, u64, windows_infra::MediaMetadata)>,
     pub(in crate::app) live_size_req_tx: mpsc::Sender<super::live_file_size::LiveFileSizeRequest>,
@@ -223,9 +222,7 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
     let icon_disk_cache = Arc::new(IconDiskCache::new(&base_dir));
     let (icon_req_tx, icon_res_rx) = spawn_icon_worker(ctx, shared_gen.clone(), icon_disk_cache);
 
-    let tokio_runtime =
-        tokio::runtime::Runtime::new().expect("Failed to create tokio runtime for metadata worker");
-    let (meta_req_tx, meta_res_rx) = spawn_metadata_worker(&tokio_runtime, ctx);
+    let (meta_req_tx, meta_res_rx) = spawn_metadata_worker(ctx);
     let (live_size_req_tx, live_size_res_rx) = spawn_live_file_size_worker(ctx);
     let folder_composer = Arc::new(FolderComposer::new());
     let folder_preview_trace =
@@ -291,7 +288,6 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
         font_rx,
         icon_req_tx,
         icon_res_rx,
-        tokio_runtime,
         meta_req_tx,
         meta_res_rx,
         live_size_req_tx,

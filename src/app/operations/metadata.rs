@@ -18,6 +18,8 @@ impl ImageViewerApp {
 
         match current_file_info {
             Some((path, file_mtime)) => {
+                self.metadata_loading.retain(|p| p == &path);
+
                 // EVENT-DRIVEN: If same file and already loaded, trust the cache.
                 // DriveWatcher clears last_metadata_path when the file changes,
                 // which triggers a re-fetch on the next frame. No polling needed.
@@ -66,6 +68,7 @@ impl ImageViewerApp {
             None => {
                 self.selected_metadata = None;
                 self.last_metadata_path = None;
+                self.metadata_loading.clear();
             }
         }
     }

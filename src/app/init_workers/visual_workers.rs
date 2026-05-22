@@ -300,33 +300,53 @@ pub(in crate::app) fn spawn_icon_worker(
 }
 
 pub(in crate::app) fn spawn_metadata_worker(
-    runtime: &tokio::runtime::Runtime,
     ctx: &egui::Context,
 ) -> (
     mpsc::Sender<MetadataRequest>,
     mpsc::Receiver<MetadataResponse>,
 ) {
     let (meta_req_tx, meta_req_rx) = mpsc::channel::<MetadataRequest>();
+    let (latest_req_tx, latest_req_rx) = crossbeam_channel::bounded::<MetadataRequest>(1);
+    let latest_req_rx_for_replace = latest_req_rx.clone();
     let (meta_res_tx, meta_res_rx) = mpsc::channel();
     let meta_ctx = ctx.clone();
-    let handle = runtime.handle().clone();
 
-    std::thread::spawn(move || {
-        crate::infrastructure::io_priority::set_thread_priority(
-            crate::infrastructure::io_priority::IOPriority::Background,
-        );
-
-        while let Ok((path, mtime)) = meta_req_rx.recv() {
-            let meta_res_tx = meta_res_tx.clone();
-            let meta_ctx = meta_ctx.clone();
-            handle.spawn_blocking(move || {
-                let meta = windows_infra::extract_media_metadata(&path);
-                if meta_res_tx.send((path, mtime, meta)).is_ok() {
-                    meta_ctx.request_repaint();
+    let _ = std::thread::Builder::new()
+        .name("metadata-dispatcher".to_owned())
+        .spawn(move || {
+            while let Ok(mut latest) = meta_req_rx.recv() {
+                while let Ok(next) = meta_req_rx.try_recv() {
+                    latest = next;
                 }
-            });
-        }
-    });
+
+                loop {
+                    match latest_req_tx.try_send(latest) {
+                        Ok(()) => break,
+                        Err(crossbeam_channel::TrySendError::Full(returned)) => {
+                            let _ = latest_req_rx_for_replace.try_recv();
+                            latest = returned;
+                        }
+                        Err(crossbeam_channel::TrySendError::Disconnected(_)) => return,
+                    }
+                }
+            }
+        });
+
+    let _ = std::thread::Builder::new()
+        .name("metadata-worker".to_owned())
+        .spawn(move || {
+            crate::infrastructure::io_priority::set_thread_priority(
+                crate::infrastructure::io_priority::IOPriority::Background,
+            );
+
+            while let Ok((path, mtime)) = latest_req_rx.recv() {
+                let meta = windows_infra::extract_media_metadata(&path);
+                if meta_res_tx.send((path, mtime, meta)).is_err() {
+                    break;
+                }
+                meta_ctx.request_repaint();
+            }
+        });
 
     (meta_req_tx, meta_res_rx)
 }
