@@ -300,6 +300,7 @@ pub(in crate::app) fn spawn_icon_worker(
 }
 
 pub(in crate::app) fn spawn_metadata_worker(
+    runtime: &tokio::runtime::Runtime,
     ctx: &egui::Context,
 ) -> (
     mpsc::Sender<MetadataRequest>,
@@ -308,6 +309,7 @@ pub(in crate::app) fn spawn_metadata_worker(
     let (meta_req_tx, meta_req_rx) = mpsc::channel::<MetadataRequest>();
     let (meta_res_tx, meta_res_rx) = mpsc::channel();
     let meta_ctx = ctx.clone();
+    let handle = runtime.handle().clone();
 
     std::thread::spawn(move || {
         crate::infrastructure::io_priority::set_thread_priority(
@@ -315,9 +317,14 @@ pub(in crate::app) fn spawn_metadata_worker(
         );
 
         while let Ok((path, mtime)) = meta_req_rx.recv() {
-            let meta = windows_infra::extract_media_metadata(&path);
-            let _ = meta_res_tx.send((path, mtime, meta));
-            meta_ctx.request_repaint();
+            let meta_res_tx = meta_res_tx.clone();
+            let meta_ctx = meta_ctx.clone();
+            handle.spawn_blocking(move || {
+                let meta = windows_infra::extract_media_metadata(&path);
+                if meta_res_tx.send((path, mtime, meta)).is_ok() {
+                    meta_ctx.request_repaint();
+                }
+            });
         }
     });
 

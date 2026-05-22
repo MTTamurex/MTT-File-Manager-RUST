@@ -126,6 +126,7 @@ impl ImageViewerApp {
             font_rx,
             icon_req_tx,
             icon_res_rx,
+            tokio_runtime,
             meta_req_tx,
             meta_res_rx,
             live_size_req_tx,
@@ -443,7 +444,8 @@ impl ImageViewerApp {
                 sidebar_right_width,
             ),
 
-            // METADATA ASYNC
+            // METADATA ASYNC (tokio)
+            tokio_runtime,
             metadata_req_sender: meta_req_tx,
             metadata_res_receiver: meta_res_rx,
             metadata_cache: LruCache::new(

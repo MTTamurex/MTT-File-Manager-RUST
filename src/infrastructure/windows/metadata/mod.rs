@@ -106,14 +106,13 @@ pub fn extract_media_metadata(path: &Path) -> MediaMetadata {
         return MediaMetadata::default();
     }
 
-    // For OneDrive paths, wrap the entire extraction in a timeout.
-    // Even "locally available" files can block on Property Store COM calls,
-    // Media Foundation source reader, or codec sniffing I/O.
-    if onedrive::is_onedrive_path(path) {
+    // Apply timeout to video files (MPEG-TS etc. can block indefinitely in
+    // Media Foundation), and to all OneDrive paths (cloud filter driver can block).
+    if is_video || onedrive::is_onedrive_path(path) {
         return extract_media_metadata_with_timeout(path, is_image, is_audio);
     }
 
-    // Non-OneDrive: extract directly (no timeout overhead)
+    // Non-video, non-OneDrive: extract directly (no timeout overhead)
     extract_media_metadata_inner(path, is_image, is_audio)
 }
 
@@ -128,7 +127,7 @@ fn extract_media_metadata_inner(path: &Path, is_image: bool, is_audio: bool) -> 
     }
 }
 
-/// Timeout-protected metadata extraction for OneDrive files.
+/// Timeout-protected metadata extraction for video and OneDrive files.
 ///
 /// CRITICAL FIX: Previously this function spawned a new `std::thread::spawn` per file
 /// and abandoned the thread on timeout (dropping the `JoinHandle` without joining).
@@ -136,7 +135,7 @@ fn extract_media_metadata_inner(path: &Path, is_image: bool, is_audio: bool) -> 
 /// filter driver I/O. Over prolonged use, these leaked threads accumulated and
 /// congested the cloud filter driver, causing system-wide unresponsiveness.
 ///
-/// Now uses the bounded OneDrive I/O pool (`onedrive_io_pool().execute()`), which:
+/// Now uses the bounded I/O pool (`onedrive_io_pool().execute()`), which:
 /// 1. Reuses a fixed set of worker threads (no unbounded thread creation)
 /// 2. Has a capped overflow mechanism (max 24 temporary workers)
 /// 3. Jobs that block in the pool don't create new kernel threads per call
