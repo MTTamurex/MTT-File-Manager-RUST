@@ -1855,13 +1855,13 @@ local UI_OFFSET_Y = -30
     lo = new_element('volumebarbg', 'box')
     lo.visible = (osc_param.playresx >= 750) and user_opts.volumecontrol
     lo = add_layout('volumebarbg')
-    lo.geometry = {x = 155, y = refY - 40 + UI_OFFSET_Y, an = 4, w = 80, h = 2}
+    lo.geometry = {x = 305, y = refY - 40 + UI_OFFSET_Y, an = 4, w = 50, h = 2}
     lo.layer = 13
     lo.style = osc_styles.VolumebarBg
 
-    
+
     lo = add_layout('volumebar')
-    lo.geometry = {x = 155, y = refY - 40 + UI_OFFSET_Y, an = 4, w = 80, h = 8}
+    lo.geometry = {x = 305, y = refY - 40 + UI_OFFSET_Y, an = 4, w = 50, h = 8}
     lo.style = osc_styles.VolumebarFg
     lo.slider.gap = 3
     lo.slider.tooltip_style = osc_styles.Tooltip
@@ -1932,23 +1932,23 @@ local UI_OFFSET_Y = -30
     lo.visible = (osc_param.playresx >= 650)
 
     lo = add_layout('vol_ctrl')
-    lo.geometry = {x = 183, y = refY - 40 + UI_OFFSET_Y, an = 5, w = 24, h = 24}
+    lo.geometry = {x = 285, y = refY - 40 + UI_OFFSET_Y, an = 5, w = 24, h = 24}
     lo.style = osc_styles.Ctrl3
-    lo.visible = (osc_param.playresx >= 700)
+    lo.visible = (osc_param.playresx >= 700) and user_opts.volumecontrol
 
 	lo = add_layout('tog_fs')
     lo.geometry = {x = osc_geo.w - 37, y = refY - 40 + UI_OFFSET_Y, an = 5, w = 24, h = 24}
     lo.style = osc_styles.Ctrl3
-    lo.visible = (osc_param.playresx >= 540)    
+    lo.visible = (osc_param.playresx >= 540)
 
 	lo = add_layout('tog_info')
     lo.geometry = {x = osc_geo.w - 87, y = refY - 40 + UI_OFFSET_Y, an = 5, w = 24, h = 24}
     lo.style = osc_styles.Ctrl3
     lo.visible = (osc_param.playresx >= 600)
 
-    -- tog_playlist: left side, after vol_ctrl
+    -- tog_playlist: left side, before vol_ctrl
     lo = add_layout('tog_playlist')
-    lo.geometry = {x = 233, y = refY - 40 + UI_OFFSET_Y, an = 5, w = 24, h = 24}
+    lo.geometry = {x = 215, y = refY - 40 + UI_OFFSET_Y, an = 5, w = 24, h = 24}
     lo.style = osc_styles.Ctrl3
     lo.visible = (osc_param.playresx >= 750)
 
@@ -2294,7 +2294,7 @@ function osc_init()
     -- vol_ctrl
     ne = new_element('vol_ctrl', 'button')
     ne.enabled = (get_track('audio')>0)
-    ne.visible = false  -- hidden: tog_playlist now occupies this slot
+    ne.visible = user_opts.volumecontrol
     ne.content = function ()
         if (state.mute) then
             return (icons.volume_mute)
@@ -2554,7 +2554,7 @@ end
 
     --volumebar
     ne = new_element('volumebar', 'slider')
-    ne.visible = false  -- hidden with vol_ctrl
+    ne.visible = user_opts.volumecontrol
     ne.enabled = (get_track('audio')>0)
     ne.slider.markerF = function ()
         return {}
