@@ -1853,7 +1853,7 @@ local UI_OFFSET_Y = -30
     -- Volumebar
     --
     lo = new_element('volumebarbg', 'box')
-    lo.visible = (osc_param.playresx >= 750) and user_opts.volumecontrol
+    lo.visible = (osc_param.playresx >= 900) and user_opts.volumecontrol
     lo = add_layout('volumebarbg')
     lo.geometry = {x = 305, y = refY - 40 + UI_OFFSET_Y, an = 4, w = 50, h = 2}
     lo.layer = 13
@@ -1946,7 +1946,7 @@ local UI_OFFSET_Y = -30
     lo.style = osc_styles.Ctrl3
     lo.visible = (osc_param.playresx >= 600)
 
-    -- tog_playlist: left side, before vol_ctrl
+    -- tog_playlist: left side, after vol_ctrl
     lo = add_layout('tog_playlist')
     lo.geometry = {x = 215, y = refY - 40 + UI_OFFSET_Y, an = 5, w = 24, h = 24}
     lo.style = osc_styles.Ctrl3
@@ -2294,7 +2294,7 @@ function osc_init()
     -- vol_ctrl
     ne = new_element('vol_ctrl', 'button')
     ne.enabled = (get_track('audio')>0)
-    ne.visible = user_opts.volumecontrol
+    ne.visible = (osc_param.playresx >= 850) and user_opts.volumecontrol
     ne.content = function ()
         if (state.mute) then
             return (icons.volume_mute)
@@ -2554,7 +2554,7 @@ end
 
     --volumebar
     ne = new_element('volumebar', 'slider')
-    ne.visible = user_opts.volumecontrol
+    ne.visible = (osc_param.playresx >= 900) and user_opts.volumecontrol
     ne.enabled = (get_track('audio')>0)
     ne.slider.markerF = function ()
         return {}
