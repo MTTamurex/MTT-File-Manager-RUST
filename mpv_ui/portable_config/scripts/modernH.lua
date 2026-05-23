@@ -1855,13 +1855,13 @@ local UI_OFFSET_Y = -30
     lo = new_element('volumebarbg', 'box')
     lo.visible = (osc_param.playresx >= 900) and user_opts.volumecontrol
     lo = add_layout('volumebarbg')
-    lo.geometry = {x = 305, y = refY - 40 + UI_OFFSET_Y, an = 4, w = 50, h = 2}
+    lo.geometry = {x = 230, y = refY - 40 + UI_OFFSET_Y, an = 4, w = 50, h = 2}
     lo.layer = 13
     lo.style = osc_styles.VolumebarBg
 
 
     lo = add_layout('volumebar')
-    lo.geometry = {x = 305, y = refY - 40 + UI_OFFSET_Y, an = 4, w = 50, h = 8}
+    lo.geometry = {x = 230, y = refY - 40 + UI_OFFSET_Y, an = 4, w = 50, h = 8}
     lo.style = osc_styles.VolumebarFg
     lo.slider.gap = 3
     lo.slider.tooltip_style = osc_styles.Tooltip
@@ -1927,12 +1927,12 @@ local UI_OFFSET_Y = -30
 
     -- Open subtitle file (next to cy_sub)
     lo = add_layout('open_sub')
-    lo.geometry = {x = 133, y = refY - 40 + UI_OFFSET_Y, an = 5, w = 36, h = 24}
+    lo.geometry = {x = 115, y = refY - 40 + UI_OFFSET_Y, an = 5, w = 24, h = 24}
     lo.style = osc_styles.CtrlText
     lo.visible = (osc_param.playresx >= 650)
 
     lo = add_layout('vol_ctrl')
-    lo.geometry = {x = 285, y = refY - 40 + UI_OFFSET_Y, an = 5, w = 24, h = 24}
+    lo.geometry = {x = 210, y = refY - 40 + UI_OFFSET_Y, an = 5, w = 24, h = 24}
     lo.style = osc_styles.Ctrl3
     lo.visible = (osc_param.playresx >= 700) and user_opts.volumecontrol
 
@@ -1948,7 +1948,7 @@ local UI_OFFSET_Y = -30
 
     -- tog_playlist: left side, after vol_ctrl
     lo = add_layout('tog_playlist')
-    lo.geometry = {x = 215, y = refY - 40 + UI_OFFSET_Y, an = 5, w = 24, h = 24}
+    lo.geometry = {x = 150, y = refY - 40 + UI_OFFSET_Y, an = 5, w = 24, h = 24}
     lo.style = osc_styles.Ctrl3
     lo.visible = (osc_param.playresx >= 750)
 
@@ -2398,7 +2398,7 @@ function osc_init()
         return texts.open_subtitle
     end
     ne.content = function ()
-        return '{\\fs14}' .. texts.open_subtitle_short
+        return '{\\fs14}+'
     end
     ne.eventresponder['mbtn_left_up'] =
         function () open_external_subtitle_file() end
