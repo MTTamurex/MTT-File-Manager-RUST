@@ -3,7 +3,6 @@ use image::imageops::FilterType;
 use image::DynamicImage;
 use image::ImageDecoder;
 use image::ImageReader;
-use once_cell::sync::Lazy;
 use std::fs::File;
 use std::io;
 use std::io::BufReader;
@@ -46,25 +45,6 @@ impl Drop for ComInitGuard {
         }
     }
 }
-
-static VIEWER_THUMBNAIL_CACHE: Lazy<Option<crate::infrastructure::disk_cache::ThumbnailDiskCache>> =
-    Lazy::new(|| {
-        let cache_dir = dirs::data_local_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("MTT-File-Manager")
-            .join("thumbnails");
-
-        match crate::infrastructure::disk_cache::ThumbnailDiskCache::new(cache_dir) {
-            Ok(cache) => Some(cache),
-            Err(err) => {
-                log::warn!(
-                    "[IMAGE-VIEWER] failed to open thumbnail cache for fast preview path: {}",
-                    err
-                );
-                None
-            }
-        }
-    });
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DecodePriority {
@@ -371,20 +351,17 @@ pub fn encode_frame_to_path(
 /// Try to load a fast preview from the on-disk thumbnail cache.
 /// This is orders of magnitude faster than full decode for large images
 /// because the cached WebP is already downscaled (typically 256 px).
-/// Used to show an instant placeholder while the full-resolution image
-/// decodes in the background.
+/// Used by cache-first preview paths that should avoid touching the source file
+/// when a persisted thumbnail already exists.
 pub fn try_fast_preview_from_disk_cache(path: &Path, max_side: u32) -> Option<DecodedFrame> {
-    let cache = VIEWER_THUMBNAIL_CACHE.as_ref()?;
-    let entry = cache.get_latest(path)?;
+    crate::image_viewer::thumbnail_cache::try_fast_preview_from_disk_cache(path, max_side)
+}
 
-    let image = image::load_from_memory_with_format(&entry.data, image::ImageFormat::WebP).ok()?;
-    let image = if image.width() > max_side || image.height() > max_side {
-        image.resize(max_side, max_side, FilterType::Triangle)
-    } else {
-        image
-    };
-
-    Some(frame_from_dynamic(image))
+pub fn try_fast_previews_from_disk_cache(
+    paths: &[PathBuf],
+    max_side: u32,
+) -> Vec<Option<DecodedFrame>> {
+    crate::image_viewer::thumbnail_cache::try_fast_previews_from_disk_cache(paths, max_side)
 }
 
 fn decode_preview_from_thumbnail_cache(path: &Path, max_side: u32) -> Option<DecodedFrame> {

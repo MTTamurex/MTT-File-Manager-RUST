@@ -76,15 +76,20 @@ fn collect_image_entries(dir: &Path) -> io::Result<Vec<PathBuf>> {
         };
 
         let path = entry.path();
-        if !path.is_file() {
+        if !is_supported_image(&path) {
             continue;
         }
 
-        if is_supported_image(&path) {
-            paths.push(path);
-            if paths.len() >= MAX_IMAGE_ENTRIES {
-                break;
-            }
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if !file_type.is_file() {
+            continue;
+        }
+
+        paths.push(path);
+        if paths.len() >= MAX_IMAGE_ENTRIES {
+            break;
         }
     }
 
@@ -107,4 +112,60 @@ fn is_supported_image(path: &Path) -> bool {
 fn paths_eq_case_insensitive(a: &Path, b: &Path) -> bool {
     a.to_string_lossy()
         .eq_ignore_ascii_case(&b.to_string_lossy())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::tempdir;
+
+    fn touch(path: &Path) {
+        fs::write(path, b"test").expect("write test file");
+    }
+
+    fn file_names(sequence: &ImageSequence) -> Vec<String> {
+        sequence
+            .entries
+            .iter()
+            .map(|path| {
+                path.file_name()
+                    .expect("file name")
+                    .to_string_lossy()
+                    .to_string()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn image_sequence_ignores_non_images_and_image_named_directories() {
+        let dir = tempdir().expect("create temp dir");
+        touch(&dir.path().join("b.png"));
+        touch(&dir.path().join("a.jpg"));
+        touch(&dir.path().join("notes.txt"));
+        fs::create_dir(dir.path().join("folder.jpg")).expect("create image-named dir");
+
+        let entries = collect_image_entries(dir.path()).expect("collect entries");
+        let names: Vec<String> = entries
+            .iter()
+            .map(|path| path.file_name().unwrap().to_string_lossy().to_string())
+            .collect();
+
+        assert_eq!(names, vec!["a.jpg", "b.png"]);
+    }
+
+    #[test]
+    fn image_sequence_preserves_natural_sort_and_current_index() {
+        let dir = tempdir().expect("create temp dir");
+        let image_10 = dir.path().join("image10.jpg");
+
+        touch(&image_10);
+        touch(&dir.path().join("image2.jpg"));
+        touch(&dir.path().join("image1.jpg"));
+
+        let sequence = build_sequence(&image_10).expect("build image sequence");
+
+        assert_eq!(file_names(&sequence), vec!["image1.jpg", "image2.jpg", "image10.jpg"]);
+        assert_eq!(sequence.current_index, 2);
+    }
 }

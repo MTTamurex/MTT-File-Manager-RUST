@@ -4,6 +4,7 @@ use eframe::egui;
 use eframe::egui::scroll_area::ScrollBarVisibility;
 use eframe::egui::{Rect, Sense};
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::time::Duration;
 
 // Filmstrip constants
@@ -93,26 +94,7 @@ impl super::DedicatedImageViewerApp {
         let start = center.saturating_sub(half_visible);
         let end = (center + half_visible).min(total - 1);
 
-        for idx in start..=end {
-            if self.filmstrip.thumbnails.contains_key(&idx)
-                || self.filmstrip.pending.contains(&idx)
-                || self.filmstrip.cache_misses.contains(&idx)
-                || self.filmstrip.pending.len() >= FILMSTRIP_MAX_IN_FLIGHT
-            {
-                continue;
-            }
-            if let Some(path) = self.sequence.entries.get(idx).cloned() {
-                let tx = self.filmstrip.result_tx.clone();
-                let gen = self.filmstrip.generation;
-                self.filmstrip.pending.insert(idx);
-                rayon::spawn(move || {
-                    let frame =
-                        loader::try_fast_preview_from_disk_cache(&path, FILMSTRIP_DECODE_MAX_SIDE)
-                            .unwrap_or_else(empty_decoded_frame);
-                    let _ = tx.try_send((idx, gen, frame));
-                });
-            }
-        }
+        self.request_filmstrip_thumbnails(start..=end);
     }
 
     pub(super) fn evict_filmstrip_textures(&mut self) {
@@ -174,13 +156,14 @@ impl super::DedicatedImageViewerApp {
                             ui.scroll_to_rect(current_rect, Some(egui::Align::Center));
                         }
 
+                        self.request_filmstrip_thumbnails(start..end);
+
                         for idx in start..end {
                             let rect = Rect::from_min_size(
                                 egui::pos2(content_left + idx as f32 * item_w, top),
                                 egui::vec2(FILMSTRIP_THUMB_SIZE, FILMSTRIP_THUMB_SIZE),
                             );
 
-                            self.request_filmstrip_thumbnail(idx);
                             let response = ui.interact(
                                 rect,
                                 ui.id().with(("filmstrip_item", idx)),
@@ -203,26 +186,47 @@ impl super::DedicatedImageViewerApp {
             });
     }
 
-    fn request_filmstrip_thumbnail(&mut self, idx: usize) {
-        if self.filmstrip.thumbnails.contains_key(&idx)
-            || self.filmstrip.pending.contains(&idx)
-            || self.filmstrip.cache_misses.contains(&idx)
-            || self.filmstrip.pending.len() >= FILMSTRIP_MAX_IN_FLIGHT
-        {
+    fn request_filmstrip_thumbnails<I>(&mut self, indices: I)
+    where
+        I: IntoIterator<Item = usize>,
+    {
+        let available_slots = FILMSTRIP_MAX_IN_FLIGHT.saturating_sub(self.filmstrip.pending.len());
+        if available_slots == 0 {
             return;
         }
 
-        let Some(path) = self.sequence.entries.get(idx).cloned() else {
+        let mut requests: Vec<(usize, PathBuf)> = Vec::with_capacity(available_slots);
+        for idx in indices {
+            if requests.len() >= available_slots {
+                break;
+            }
+            if self.filmstrip.thumbnails.contains_key(&idx)
+                || self.filmstrip.pending.contains(&idx)
+                || self.filmstrip.cache_misses.contains(&idx)
+            {
+                continue;
+            }
+            if let Some(path) = self.sequence.entries.get(idx).cloned() {
+                self.filmstrip.pending.insert(idx);
+                requests.push((idx, path));
+            }
+        }
+
+        if requests.is_empty() {
             return;
-        };
+        }
 
         let tx = self.filmstrip.result_tx.clone();
         let gen = self.filmstrip.generation;
-        self.filmstrip.pending.insert(idx);
         rayon::spawn(move || {
-            let frame = loader::try_fast_preview_from_disk_cache(&path, FILMSTRIP_DECODE_MAX_SIDE)
-                .unwrap_or_else(empty_decoded_frame);
-            let _ = tx.try_send((idx, gen, frame));
+            let paths: Vec<PathBuf> = requests.iter().map(|(_, path)| path.clone()).collect();
+            let frames =
+                loader::try_fast_previews_from_disk_cache(&paths, FILMSTRIP_DECODE_MAX_SIDE);
+
+            for ((idx, _path), frame) in requests.into_iter().zip(frames) {
+                let frame = frame.unwrap_or_else(empty_decoded_frame);
+                let _ = tx.try_send((idx, gen, frame));
+            }
         });
     }
 
@@ -262,14 +266,6 @@ impl super::DedicatedImageViewerApp {
                 Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
                 egui::Color32::WHITE,
             );
-        } else {
-            let placeholder_color = if ui.visuals().dark_mode {
-                egui::Color32::from_gray(40)
-            } else {
-                egui::Color32::from_gray(200)
-            };
-            ui.painter()
-                .rect_filled(rect.shrink(4.0), 2.0, placeholder_color);
         }
 
         if is_current {

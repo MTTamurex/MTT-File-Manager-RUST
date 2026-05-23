@@ -1,8 +1,11 @@
 use super::{ThumbnailCacheEntry, ThumbnailDiskCache};
 use image::{DynamicImage, ImageBuffer, Rgba};
 use rusqlite::params;
-use std::path::Path;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+const GET_LATEST_BATCH_CHUNK_SIZE: usize = 500;
 
 impl ThumbnailDiskCache {
     /// Generates a stable, collision-resistant hash for a file path.
@@ -50,20 +53,6 @@ impl ThumbnailDiskCache {
         let id = Self::hash_path(path);
         let db = self.reader.lock().ok()?;
 
-        // DEBUG: Check total row count for this id
-        let count: i64 = db
-            .prepare_cached("SELECT COUNT(*) FROM thumbnails WHERE id = ?")
-            .ok()
-            .and_then(|mut s| s.query_row(params![id], |r| r.get(0)).ok())
-            .unwrap_or(-1);
-        if count == 0 {
-            log::trace!(
-                "[DB-MISS] get_latest: id={} path={:?} -> 0 rows in DB",
-                &id[..8],
-                path.file_name()
-            );
-        }
-
         let mut stmt = db
             .prepare_cached(
                 "SELECT data, width, height, requested_size, modified_at
@@ -82,6 +71,67 @@ impl ThumbnailDiskCache {
             })
         })
         .ok()
+    }
+
+    /// Retrieves the latest thumbnail entries for paths, preserving input order.
+    /// Duplicate input paths produce duplicate output entries.
+    /// [READER] concurrency friendly
+    pub fn get_latest_batch(&self, paths: &[PathBuf]) -> Vec<Option<ThumbnailCacheEntry>> {
+        if paths.is_empty() {
+            return Vec::new();
+        }
+
+        let ids: Vec<String> = paths.iter().map(|path| Self::hash_path(path)).collect();
+        let db = match self.reader.lock() {
+            Ok(db) => db,
+            Err(_) => return vec![None; paths.len()],
+        };
+
+        let mut entries_by_id: HashMap<String, ThumbnailCacheEntry> =
+            HashMap::with_capacity(ids.len());
+
+        for chunk in ids.chunks(GET_LATEST_BATCH_CHUNK_SIZE) {
+            if chunk.is_empty() {
+                continue;
+            }
+
+            let placeholders = std::iter::repeat_n("?", chunk.len())
+                .collect::<Vec<_>>()
+                .join(",");
+            let sql = format!(
+                "SELECT id, data, width, height, requested_size, modified_at
+                 FROM thumbnails
+                 WHERE id IN ({})",
+                placeholders
+            );
+
+            let Ok(mut stmt) = db.prepare(&sql) else {
+                continue;
+            };
+            let Ok(rows) = stmt.query_map(rusqlite::params_from_iter(chunk.iter()), |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    ThumbnailCacheEntry {
+                        data: row.get(1)?,
+                        width: row.get::<_, i64>(2)? as u32,
+                        height: row.get::<_, i64>(3)? as u32,
+                        requested_size: row.get::<_, i64>(4)? as u32,
+                        modified_at: row.get::<_, i64>(5)? as u64,
+                    },
+                ))
+            }) else {
+                continue;
+            };
+
+            for row in rows.flatten() {
+                let (id, entry) = row;
+                entries_by_id.insert(id, entry);
+            }
+        }
+
+        ids.iter()
+            .map(|id| entries_by_id.get(id).cloned())
+            .collect()
     }
 
     /// Saves a thumbnail to SQLite with optimized compression
@@ -171,5 +221,68 @@ impl ThumbnailDiskCache {
         );
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+    use tempfile::tempdir;
+
+    fn rgba(width: u32, height: u32, color: [u8; 4]) -> Vec<u8> {
+        let mut out = Vec::with_capacity((width * height * 4) as usize);
+        for _ in 0..(width * height) {
+            out.extend_from_slice(&color);
+        }
+        out
+    }
+
+    #[test]
+    fn get_latest_batch_preserves_order_hits_misses_and_duplicates() {
+        let dir = tempdir().expect("create temp dir");
+        let cache =
+            ThumbnailDiskCache::new(dir.path().to_path_buf()).expect("create thumbnail cache");
+        let modified = UNIX_EPOCH + Duration::from_secs(10);
+
+        let path_a = dir.path().join("a.jpg");
+        let path_b = dir.path().join("b.jpg");
+        let missing = dir.path().join("missing.jpg");
+
+        cache
+            .put(&path_a, modified, 128, &rgba(2, 2, [255, 0, 0, 255]), 2, 2)
+            .expect("put first thumbnail");
+        cache
+            .put(&path_b, modified, 256, &rgba(3, 1, [0, 255, 0, 255]), 3, 1)
+            .expect("put second thumbnail");
+
+        let results = cache.get_latest_batch(&[
+            missing.clone(),
+            path_b.clone(),
+            path_a.clone(),
+            path_b.clone(),
+        ]);
+
+        assert_eq!(results.len(), 4);
+        assert!(results[0].is_none());
+        assert_eq!(
+            results[1]
+                .as_ref()
+                .map(|entry| (entry.width, entry.height, entry.requested_size)),
+            Some((3, 1, 256))
+        );
+        assert_eq!(
+            results[2]
+                .as_ref()
+                .map(|entry| (entry.width, entry.height, entry.requested_size)),
+            Some((2, 2, 128))
+        );
+        assert_eq!(
+            results[3]
+                .as_ref()
+                .map(|entry| (entry.width, entry.height, entry.requested_size)),
+            Some((3, 1, 256))
+        );
+        assert!(results[1].as_ref().is_some_and(|entry| !entry.data.is_empty()));
     }
 }
