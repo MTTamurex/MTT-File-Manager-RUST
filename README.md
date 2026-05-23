@@ -47,6 +47,30 @@
 - **UI virtualization** — Efficient rendering of large directories
 - **Per-folder monitoring** — Default `notify` crate watcher with opt-in drive-wide `ReadDirectoryChangesW`
 
+## Usage
+
+### Keyboard Shortcuts
+Some app-level shortcuts are configurable in Settings > Keyboard Shortcuts. Standard file and folder shortcuts remain fixed.
+
+| Shortcut | Action |
+|----------|--------|
+| Ctrl+T | New tab |
+| Ctrl+W | Close tab |
+| Ctrl+Tab | Next tab |
+| Ctrl+Shift+Tab | Previous tab |
+| Ctrl+C / Ctrl+V | Copy / Paste |
+| Ctrl+X | Cut |
+| Delete | Move to Recycle Bin |
+| Shift+Delete | Permanent delete |
+| F2 | Rename (single file) / Batch Rename modal (2+ files selected) |
+| F5 | Reload folder |
+| Ctrl+Shift+F | Global search |
+| Ctrl+L | Focus address bar |
+| Ctrl+Shift+N | New folder |
+| Ctrl+Mouse Wheel | Adjust thumbnail size |
+| Alt+Enter | Properties |
+| Space | Video Preview / Open file with internal viewer (Images,PDF,Text)|
+
 ## Technologies
 
 | Category | Technology | Version | Purpose |
@@ -70,30 +94,6 @@
 - **libmpv-2.dll** — Required for video playback
 - **pdfium.dll** — Required for PDF viewer
 - **Video codecs** — Required for video thumbnail extraction (see [Video Thumbnail Codecs](#video-thumbnail-codecs) below)
-
-## Usage
-
-### Keyboard Shortcuts
-Some app-level shortcuts are configurable in Settings > Keyboard Shortcuts. Standard file and folder shortcuts remain fixed.
-
-| Shortcut | Action |
-|----------|--------|
-| Ctrl+T | New tab |
-| Ctrl+W | Close tab |
-| Ctrl+Tab | Next tab |
-| Ctrl+Shift+Tab | Previous tab |
-| Ctrl+C / Ctrl+V | Copy / Paste |
-| Ctrl+X | Cut |
-| Delete | Move to Recycle Bin |
-| Shift+Delete | Permanent delete |
-| F2 | Rename (single file) / Batch Rename modal (2+ files selected) |
-| F5 | Reload folder |
-| Ctrl+Shift+F | Global search |
-| Ctrl+L | Focus address bar |
-| Ctrl+Shift+N | New folder |
-| Ctrl+Mouse Wheel | Adjust thumbnail size |
-| Alt+Enter | Properties |
-| Space | Open file with internal viewer |
 
 ## Diagnostic Mode Privacy Notes
 
