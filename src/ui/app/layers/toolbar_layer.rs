@@ -94,10 +94,7 @@ pub(crate) fn render_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context
                     ToolbarAction::TogglePreviewPanel => {
                         app.show_preview_panel = !app.show_preview_panel;
                         app.tab_manager.active_mut().show_preview_panel = app.show_preview_panel;
-                        if app.show_preview_panel
-                            && app.selected_file.is_some()
-                            && app.selected_thumbnail.is_none()
-                        {
+                        if app.show_preview_panel && app.needs_selected_preview_preparation() {
                             app.update_selected_thumbnail();
                         }
                         app.update_video_visibility();

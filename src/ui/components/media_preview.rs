@@ -68,6 +68,7 @@ impl GifPlayer {
 
         if self.texture.is_none() {
             // Initial texture creation — read directly from reference (no clone)
+            let frame_count = data.frames.len();
             let color_image = egui::ColorImage::from_rgba_unmultiplied(
                 [frame.width as usize, frame.height as usize],
                 &frame.rgba,
@@ -78,6 +79,10 @@ impl GifPlayer {
                 color_image,
                 Default::default(),
             ));
+            self.last_update = Instant::now();
+            if frame_count > 1 {
+                ctx.request_repaint_after(Duration::from_millis(delay_ms));
+            }
         } else if self.last_update.elapsed() >= Duration::from_millis(delay_ms) {
             // Advance to next frame — read directly from reference (no clone)
             self.current_frame += 1;

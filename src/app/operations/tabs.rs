@@ -186,10 +186,7 @@ impl ImageViewerApp {
         // would reset them to global "normal" defaults, discarding tab state).
         self.apply_folder_lock_on_tab_restore();
 
-        if self.show_preview_panel
-            && self.selected_file.is_some()
-            && self.selected_thumbnail.is_none()
-        {
+        if self.show_preview_panel && self.needs_selected_preview_preparation() {
             self.update_selected_thumbnail();
         }
 

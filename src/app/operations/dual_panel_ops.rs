@@ -101,10 +101,7 @@ impl ImageViewerApp {
             self.update_video_visibility();
         }
 
-        if self.show_preview_panel
-            && self.selected_file.is_some()
-            && self.selected_thumbnail.is_none()
-        {
+        if self.show_preview_panel && self.needs_selected_preview_preparation() {
             self.update_selected_thumbnail();
         }
 

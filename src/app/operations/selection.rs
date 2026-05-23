@@ -324,6 +324,13 @@ impl ImageViewerApp {
         self.update_video_visibility();
     }
 
+    pub fn needs_selected_preview_preparation(&self) -> bool {
+        self.selected_file.is_some()
+            && self.selected_thumbnail.is_none()
+            && self.selected_gif.is_none()
+            && !self.defer_preview_work_after_selection
+    }
+
     pub fn prepare_selected_preview_for_file(&mut self, file: &FileEntry) {
         if self
             .selected_file
@@ -358,9 +365,16 @@ impl ImageViewerApp {
         if is_gif {
             use crate::ui::components::media_preview::GifPlayer;
             self.gif_manager.unload_except(Some(&path));
-            let data = self.gif_manager.request_load(&path);
-            self.selected_gif = Some(GifPlayer::new(path.clone(), data));
+            let needs_player = self
+                .selected_gif
+                .as_ref()
+                .is_none_or(|player| player.path != path);
+            if needs_player {
+                let data = self.gif_manager.request_load(&path);
+                self.selected_gif = Some(GifPlayer::new(path.clone(), data));
+            }
         } else {
+            self.selected_gif = None;
             self.gif_manager.unload_all();
         }
 
