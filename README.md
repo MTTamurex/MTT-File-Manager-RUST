@@ -33,6 +33,8 @@
 - **Spotlight-style overlay** — Activated by Ctrl+Shift+F
 - **Paginated results** — Offset/limit pagination with incremental loading
 
+> **Disclaimer:** The Global Search feature reads the NTFS/ReFS USN Journal and MFT to build its index. Because accessing these system structures requires elevated privileges, the installer registers a dedicated Windows Service that runs with administrative rights. This is the **only** component of MTT File Manager that requires elevated installation privileges.
+
 ### File Operations
 - **Core operations** — Copy, cut, paste, rename, delete
 - **Batch rename** — Select 2+ files and press F2 to open the batch rename modal; configure a shared base name, number position (suffix/prefix), separator style (parentheses, underscore, dash, space, or none), and start/step/padding; drag-to-reorder; live preview table with per-row conflict detection
