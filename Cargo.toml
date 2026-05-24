@@ -17,7 +17,7 @@ eframe = { version = "0.31", features = ["persistence", "wgpu", "glow"] }
 rayon = "1.10"
 walkdir = "2.5"
 rfd = "0.15"
-lru = "0.12"
+lru = "0.16.3"
 notify = { version = "6.1.1", optional = true }
 natord = "1.0"
 dirs = "5.0"
