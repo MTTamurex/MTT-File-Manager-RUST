@@ -389,6 +389,7 @@ panels:
   refreshing_preview: "Refreshing folder preview..."
   refreshing_thumbnail: "Refreshing thumbnail..."
   folder_removed: "Folder removed from Quick Access (not found): %{name}"
+  close_panel: "Close panel"
 search_results:
   folder: "Folder"
   file_ext: "%{ext} File"

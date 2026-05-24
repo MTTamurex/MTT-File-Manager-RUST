@@ -6,7 +6,7 @@
 //! - Selected items
 //! - Sort preferences
 
-use crate::app::dual_panel::{ActivePanel, PanelSnapshot};
+use crate::app::dual_panel::{ActivePanel, PanelListColumnWidths, PanelSnapshot};
 use crate::application::navigation::NavigationHistory;
 use crate::domain::file_entry::{FileEntry, FoldersPosition, SortMode, ViewMode};
 use crate::domain::special_paths::{COMPUTER_VIEW_ID, RECYCLE_BIN_VIEW_ID};
@@ -96,6 +96,8 @@ pub struct TabState {
     pub dual_panel_enabled: bool,
     pub dual_panel_active: ActivePanel,
     pub dual_panel_inactive_state: Option<PanelSnapshot>,
+    pub dual_panel_split_ratio: f32,
+    pub dual_panel_active_list_column_widths: Option<PanelListColumnWidths>,
 }
 
 impl TabState {
@@ -139,6 +141,8 @@ impl TabState {
             dual_panel_enabled: false,
             dual_panel_active: ActivePanel::Left,
             dual_panel_inactive_state: None,
+            dual_panel_split_ratio: 0.5,
+            dual_panel_active_list_column_widths: None,
         }
     }
 
@@ -184,6 +188,8 @@ impl TabState {
             dual_panel_enabled: false,
             dual_panel_active: ActivePanel::Left,
             dual_panel_inactive_state: None,
+            dual_panel_split_ratio: 0.5,
+            dual_panel_active_list_column_widths: None,
         }
     }
 
@@ -294,6 +300,8 @@ impl TabState {
         self.collapse_network_drives = false;
         self.dual_panel_enabled = false;
         self.dual_panel_inactive_state = None;
+        self.dual_panel_split_ratio = 0.5;
+        self.dual_panel_active_list_column_widths = None;
         self
     }
 }

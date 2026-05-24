@@ -444,7 +444,17 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
 
     let separator_width = 3.0_f32.min(total_rect.width());
     let content_width = (total_rect.width() - separator_width).max(0.0);
-    let left_width = (content_width / 2.0).floor();
+    if content_width <= 1.0 {
+        return;
+    }
+    let min_panel_width = 120.0_f32.min(content_width * 0.5);
+    let min_split_ratio = min_panel_width / content_width;
+    let max_split_ratio = 1.0 - min_split_ratio;
+    let ratio = app
+        .layout
+        .dual_panel_split_ratio
+        .clamp(min_split_ratio, max_split_ratio);
+    let left_width = (content_width * ratio).floor();
     let right_width = content_width - left_width;
 
     let left_rect =
@@ -471,6 +481,21 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
             egui::Color32::from_rgb(200, 200, 200)
         },
     );
+
+    // ── Draggable separator ──
+    let sep_hover_rect = sep_rect.expand(3.0);
+    let sep_response = ui.allocate_rect(sep_hover_rect, egui::Sense::drag());
+    if sep_response.hovered() || sep_response.dragged() {
+        ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+    }
+    if sep_response.dragged() {
+        if let Some(pointer_pos) = ui.input(|i| i.pointer.interact_pos()) {
+            let left_width = (pointer_pos.x - total_rect.left() - separator_width * 0.5)
+                .clamp(min_panel_width, content_width - min_panel_width);
+            app.layout.dual_panel_split_ratio =
+                (left_width / content_width).clamp(min_split_ratio, max_split_ratio);
+        }
+    }
 
     // Determine which panel is active vs inactive
     let active = app.dual_panel_active;
@@ -564,39 +589,69 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
         egui::Color32::from_rgb(30, 30, 30)
     };
 
-    // Left path label
-    ui.allocate_new_ui(
-        egui::UiBuilder::new().max_rect(left_header_rect.shrink2(egui::vec2(6.0, 2.0))),
-        |ui| {
-            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                ui.add(
-                    egui::Label::new(
-                        egui::RichText::new(&left_path)
-                            .size(11.0)
-                            .color(header_text_color),
-                    )
-                    .truncate(),
-                );
-            });
-        },
-    );
+    let render_header_contents = |ui: &mut egui::Ui,
+                                  header_rect: egui::Rect,
+                                  path: &str,
+                                  header_text_color: egui::Color32|
+     -> bool {
+        let inner_rect = header_rect.shrink2(egui::vec2(6.0, 2.0));
+        let close_size = egui::vec2(18.0, 18.0);
+        let close_rect = egui::Rect::from_center_size(
+            egui::pos2(
+                inner_rect.right() - close_size.x * 0.5,
+                inner_rect.center().y,
+            ),
+            close_size,
+        );
+        let label_rect = egui::Rect::from_min_max(
+            inner_rect.min,
+            egui::pos2(
+                (close_rect.left() - 4.0).max(inner_rect.left()),
+                inner_rect.max.y,
+            ),
+        );
 
-    // Right path label
-    ui.allocate_new_ui(
-        egui::UiBuilder::new().max_rect(right_header_rect.shrink2(egui::vec2(6.0, 2.0))),
-        |ui| {
+        ui.allocate_new_ui(egui::UiBuilder::new().max_rect(label_rect), |ui| {
             ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                 ui.add(
                     egui::Label::new(
-                        egui::RichText::new(&right_path)
+                        egui::RichText::new(path)
                             .size(11.0)
                             .color(header_text_color),
                     )
                     .truncate(),
                 );
             });
-        },
-    );
+        });
+
+        let mut clicked = false;
+        ui.allocate_new_ui(egui::UiBuilder::new().max_rect(close_rect), |ui| {
+            let btn =
+                egui::Button::new(egui::RichText::new("X").size(12.0).color(header_text_color))
+                    .min_size(close_size)
+                    .frame(false);
+            clicked = ui
+                .add(btn)
+                .on_hover_text(t!("panels.close_panel"))
+                .clicked();
+        });
+
+        clicked
+    };
+
+    // ── Close button tracking ──
+    let mut close_panel = None;
+
+    // Left path label + close button
+    if render_header_contents(ui, left_header_rect, &left_path, header_text_color) {
+        close_panel = Some(ActivePanel::Left);
+    }
+
+    // Right path label + close button
+    if render_header_contents(ui, right_header_rect, &right_path, header_text_color) {
+        close_panel = Some(ActivePanel::Right);
+    }
+    let close_clicked = close_panel.is_some();
 
     // ── Content areas (below header) ──
     let left_content_rect = egui::Rect::from_min_max(
@@ -687,7 +742,7 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
     // so without this guard clicks on the overlay would switch panel focus.
     let (pointer_pos, primary_clicked) =
         ui.input(|i| (i.pointer.hover_pos(), i.pointer.primary_clicked()));
-    if primary_clicked && !app.global_search.active && !file_panel_input_blocked {
+    if primary_clicked && !app.global_search.active && !file_panel_input_blocked && !close_clicked {
         if let Some(pos) = pointer_pos {
             // Switch focus when clicking in the inactive panel area.
             let inactive_header = match active {
@@ -698,6 +753,14 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
                 app.dual_panel_switch_active();
             }
         }
+    }
+
+    // Close the clicked physical panel and let the remaining panel occupy the view.
+    if let Some(panel_to_close) = close_panel {
+        if panel_to_close == app.dual_panel_active {
+            app.dual_panel_switch_active();
+        }
+        app.dual_panel_disable();
     }
 }
 
@@ -728,8 +791,7 @@ fn render_single_panel_content(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
             // defer to the inactive panel's handler so drag_target_folder
             // is resolved from the inactive panel's items (subfolder support).
             if primary_released
-                && (app.drag_cross_panel_target.is_none()
-                    || app.drag_drop_cross_panel_context)
+                && (app.drag_cross_panel_target.is_none() || app.drag_drop_cross_panel_context)
             {
                 app.complete_item_drag(ctrl, shift);
             }
@@ -757,8 +819,7 @@ fn render_single_panel_content(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
             // defer to the inactive panel's handler so drag_target_folder
             // is resolved from the inactive panel's items (subfolder support).
             if primary_released
-                && (app.drag_cross_panel_target.is_none()
-                    || app.drag_drop_cross_panel_context)
+                && (app.drag_cross_panel_target.is_none() || app.drag_drop_cross_panel_context)
             {
                 app.complete_item_drag(ctrl, shift);
             }

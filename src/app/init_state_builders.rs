@@ -79,6 +79,7 @@ pub(in crate::app) fn build_layout_state(
             "list_col_computer_free_width",
             120.0,
         ),
+        dual_panel_split_ratio: 0.5,
     }
 }
 

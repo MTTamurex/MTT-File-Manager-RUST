@@ -2,6 +2,7 @@
 //!
 //! This module handles syncing state between the active tab and the main application state.
 
+use crate::app::dual_panel::PanelListColumnWidths;
 use crate::app::state::ImageViewerApp;
 use crate::domain::special_paths::COMPUTER_VIEW_ID;
 use std::path::Path;
@@ -54,6 +55,10 @@ impl ImageViewerApp {
         // Save dual panel state per-tab
         active.dual_panel_enabled = self.dual_panel_enabled;
         active.dual_panel_active = self.dual_panel_active;
+        active.dual_panel_split_ratio = self.layout.dual_panel_split_ratio;
+        active.dual_panel_active_list_column_widths = self
+            .dual_panel_enabled
+            .then(|| PanelListColumnWidths::from_layout(&self.layout));
         active.dual_panel_inactive_state =
             self.dual_panel_inactive_state.clone().map(|mut snapshot| {
                 snapshot.compact_for_storage();
@@ -161,6 +166,12 @@ impl ImageViewerApp {
             // Restore dual panel state from tab
             self.dual_panel_enabled = active.dual_panel_enabled;
             self.dual_panel_active = active.dual_panel_active;
+            self.layout.dual_panel_split_ratio = active.dual_panel_split_ratio;
+            if active.dual_panel_enabled {
+                if let Some(widths) = active.dual_panel_active_list_column_widths {
+                    widths.apply_to_layout(&mut self.layout);
+                }
+            }
             self.dual_panel_inactive_state =
                 active.dual_panel_inactive_state.take().map(|mut snapshot| {
                     snapshot.restore_from_storage();

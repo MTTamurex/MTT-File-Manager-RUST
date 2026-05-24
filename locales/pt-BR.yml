@@ -389,6 +389,7 @@ panels:
   refreshing_preview: "Recarregando preview da pasta..."
   refreshing_thumbnail: "Recarregando thumbnail..."
   folder_removed: "Pasta removida do Acesso Rápido (não encontrada): %{name}"
+  close_panel: "Fechar painel"
 search_results:
   folder: "Pasta"
   file_ext: "Arquivo %{ext}"

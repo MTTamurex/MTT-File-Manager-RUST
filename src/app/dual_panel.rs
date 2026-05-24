@@ -14,6 +14,8 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 use std::time::Instant;
 
+use super::layout_state::LayoutState;
+
 /// Which panel is currently active (receives keyboard/sidebar input).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ActivePanel {
@@ -28,6 +30,100 @@ impl ActivePanel {
             Self::Left => Self::Right,
             Self::Right => Self::Left,
         }
+    }
+}
+
+/// Per-panel list-view column widths.
+///
+/// `ImageViewerApp::layout` stores the active panel widths. Dual-panel snapshots
+/// keep a copy for the inactive panel so resizing a list column in one panel
+/// does not mutate the other panel.
+#[derive(Clone, Copy)]
+pub struct PanelListColumnWidths {
+    pub name: f32,
+    pub date: f32,
+    pub type_col: f32,
+    pub size: f32,
+    pub onedrive_name: f32,
+    pub onedrive_date: f32,
+    pub onedrive_type: f32,
+    pub onedrive_size: f32,
+    pub onedrive_status: f32,
+    pub computer_name: f32,
+    pub computer_total: f32,
+    pub computer_free: f32,
+}
+
+impl PanelListColumnWidths {
+    pub(crate) fn from_layout(layout: &LayoutState) -> Self {
+        Self {
+            name: layout.list_col_name_width,
+            date: layout.list_col_date_width,
+            type_col: layout.list_col_type_width,
+            size: layout.list_col_size_width,
+            onedrive_name: layout.list_col_onedrive_name_width,
+            onedrive_date: layout.list_col_onedrive_date_width,
+            onedrive_type: layout.list_col_onedrive_type_width,
+            onedrive_size: layout.list_col_onedrive_size_width,
+            onedrive_status: layout.list_col_onedrive_status_width,
+            computer_name: layout.list_col_computer_name_width,
+            computer_total: layout.list_col_computer_total_width,
+            computer_free: layout.list_col_computer_free_width,
+        }
+    }
+
+    pub(crate) fn apply_to_layout(self, layout: &mut LayoutState) {
+        layout.list_col_name_width = self.name;
+        layout.list_col_date_width = self.date;
+        layout.list_col_type_width = self.type_col;
+        layout.list_col_size_width = self.size;
+        layout.list_col_onedrive_name_width = self.onedrive_name;
+        layout.list_col_onedrive_date_width = self.onedrive_date;
+        layout.list_col_onedrive_type_width = self.onedrive_type;
+        layout.list_col_onedrive_size_width = self.onedrive_size;
+        layout.list_col_onedrive_status_width = self.onedrive_status;
+        layout.list_col_computer_name_width = self.computer_name;
+        layout.list_col_computer_total_width = self.computer_total;
+        layout.list_col_computer_free_width = self.computer_free;
+    }
+
+    fn swap_with_layout(&mut self, layout: &mut LayoutState) {
+        std::mem::swap(&mut self.name, &mut layout.list_col_name_width);
+        std::mem::swap(&mut self.date, &mut layout.list_col_date_width);
+        std::mem::swap(&mut self.type_col, &mut layout.list_col_type_width);
+        std::mem::swap(&mut self.size, &mut layout.list_col_size_width);
+        std::mem::swap(
+            &mut self.onedrive_name,
+            &mut layout.list_col_onedrive_name_width,
+        );
+        std::mem::swap(
+            &mut self.onedrive_date,
+            &mut layout.list_col_onedrive_date_width,
+        );
+        std::mem::swap(
+            &mut self.onedrive_type,
+            &mut layout.list_col_onedrive_type_width,
+        );
+        std::mem::swap(
+            &mut self.onedrive_size,
+            &mut layout.list_col_onedrive_size_width,
+        );
+        std::mem::swap(
+            &mut self.onedrive_status,
+            &mut layout.list_col_onedrive_status_width,
+        );
+        std::mem::swap(
+            &mut self.computer_name,
+            &mut layout.list_col_computer_name_width,
+        );
+        std::mem::swap(
+            &mut self.computer_total,
+            &mut layout.list_col_computer_total_width,
+        );
+        std::mem::swap(
+            &mut self.computer_free,
+            &mut layout.list_col_computer_free_width,
+        );
     }
 }
 
@@ -65,6 +161,7 @@ pub struct PanelSnapshot {
     pub sort_mode: SortMode,
     pub sort_descending: bool,
     pub folders_position: FoldersPosition,
+    pub list_column_widths: PanelListColumnWidths,
 
     // Scroll
     pub scroll_offset_y: f32,
@@ -156,6 +253,7 @@ impl PanelSnapshot {
             sort_mode: app.sort_mode,
             sort_descending: app.sort_descending,
             folders_position: app.folders_position,
+            list_column_widths: PanelListColumnWidths::from_layout(&app.layout),
             scroll_offset_y: app.scroll_offset_y,
             scroll_to_selected: app.scroll_to_selected,
             visible_index_range: app.visible_index_range,
@@ -200,6 +298,7 @@ impl PanelSnapshot {
         app.sort_mode = self.sort_mode;
         app.sort_descending = self.sort_descending;
         app.folders_position = self.folders_position;
+        self.list_column_widths.apply_to_layout(&mut app.layout);
         app.scroll_offset_y = self.scroll_offset_y;
         app.scroll_to_selected = self.scroll_to_selected;
         app.visible_index_range = self.visible_index_range;
@@ -253,6 +352,7 @@ impl PanelSnapshot {
         std::mem::swap(&mut self.sort_mode, &mut app.sort_mode);
         std::mem::swap(&mut self.sort_descending, &mut app.sort_descending);
         std::mem::swap(&mut self.folders_position, &mut app.folders_position);
+        self.list_column_widths.swap_with_layout(&mut app.layout);
         std::mem::swap(&mut self.scroll_offset_y, &mut app.scroll_offset_y);
         std::mem::swap(&mut self.scroll_to_selected, &mut app.scroll_to_selected);
         std::mem::swap(&mut self.visible_index_range, &mut app.visible_index_range);

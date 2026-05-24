@@ -283,6 +283,8 @@ mod tests {
                 .map(|entry| (entry.width, entry.height, entry.requested_size)),
             Some((3, 1, 256))
         );
-        assert!(results[1].as_ref().is_some_and(|entry| !entry.data.is_empty()));
+        assert!(results[1]
+            .as_ref()
+            .is_some_and(|entry| !entry.data.is_empty()));
     }
 }

@@ -165,7 +165,10 @@ mod tests {
 
         let sequence = build_sequence(&image_10).expect("build image sequence");
 
-        assert_eq!(file_names(&sequence), vec!["image1.jpg", "image2.jpg", "image10.jpg"]);
+        assert_eq!(
+            file_names(&sequence),
+            vec!["image1.jpg", "image2.jpg", "image10.jpg"]
+        );
         assert_eq!(sequence.current_index, 2);
     }
 }

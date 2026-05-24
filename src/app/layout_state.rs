@@ -29,6 +29,9 @@ pub struct LayoutState {
     pub list_col_computer_name_width: f32,
     pub list_col_computer_total_width: f32,
     pub list_col_computer_free_width: f32,
+
+    // Dual panel split ratio (default 0.5 for equal split)
+    pub dual_panel_split_ratio: f32,
 }
 
 impl Default for LayoutState {
@@ -53,6 +56,7 @@ impl Default for LayoutState {
             list_col_computer_name_width: 300.0,
             list_col_computer_total_width: 120.0,
             list_col_computer_free_width: 120.0,
+            dual_panel_split_ratio: 0.5,
         }
     }
 }
