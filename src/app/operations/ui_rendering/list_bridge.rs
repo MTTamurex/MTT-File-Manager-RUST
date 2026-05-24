@@ -557,7 +557,13 @@ impl ImageViewerApp {
                     )
                 });
 
-                if primary_released {
+                // When the mouse is over the inactive panel (cross-panel drag),
+                // defer to the inactive panel's bridge so drag_target_folder
+                // is resolved from the inactive panel's items (subfolder support).
+                if primary_released
+                    && (self.drag_cross_panel_target.is_none()
+                        || self.drag_drop_cross_panel_context)
+                {
                     self.complete_item_drag(ctrl, shift);
                 }
             }

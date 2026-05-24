@@ -724,7 +724,13 @@ fn render_single_panel_content(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
                     i.pointer.primary_released(),
                 )
             });
-            if primary_released {
+            // When the mouse is over the inactive panel (cross-panel drag),
+            // defer to the inactive panel's handler so drag_target_folder
+            // is resolved from the inactive panel's items (subfolder support).
+            if primary_released
+                && (app.drag_cross_panel_target.is_none()
+                    || app.drag_drop_cross_panel_context)
+            {
                 app.complete_item_drag(ctrl, shift);
             }
         }
@@ -747,7 +753,13 @@ fn render_single_panel_content(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
                     i.pointer.primary_released(),
                 )
             });
-            if primary_released {
+            // When the mouse is over the inactive panel (cross-panel drag),
+            // defer to the inactive panel's handler so drag_target_folder
+            // is resolved from the inactive panel's items (subfolder support).
+            if primary_released
+                && (app.drag_cross_panel_target.is_none()
+                    || app.drag_drop_cross_panel_context)
+            {
                 app.complete_item_drag(ctrl, shift);
             }
         }
