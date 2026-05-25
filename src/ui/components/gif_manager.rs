@@ -13,7 +13,8 @@ use std::time::{Duration, Instant};
 /// Maximum number of concurrent GIF decode workers.
 /// Prevents unbounded thread creation when many GIFs are visible simultaneously.
 const GIF_DECODE_WORKERS: usize = 3;
-const GIF_MAX_MEMORY_BYTES: usize = 150 * 1024 * 1024;
+const GIF_MAX_MEMORY_BYTES: usize = 64 * 1024 * 1024;
+const GIF_PREVIEW_MAX_DIMENSION: u32 = 384;
 const GIF_MAX_FRAMES: usize = 500;
 
 /// Job sent to a GIF decode worker thread.
@@ -31,9 +32,11 @@ struct GifDecodeJob {
 /// A single decoded frame of a GIF
 #[derive(Clone)]
 pub struct DecodedFrame {
-    pub rgba: Vec<u8>,
+    pub rgba: Option<Vec<u8>>,
     pub width: u32,
     pub height: u32,
+    pub original_width: u32,
+    pub original_height: u32,
     pub delay_ms: u64,
 }
 
@@ -43,21 +46,42 @@ pub struct GifData {
     pub is_complete: bool,
     pub generation: usize,
     pub cancelled: Arc<AtomicBool>,
+    /// CPU-side RGBA staging bytes that have not yet been uploaded to GPU.
     pub total_bytes: usize,
+    /// Estimated texture footprint for decoded frames. This does not decrease
+    /// after upload and keeps pathological GIFs from moving OOM risk to VRAM.
+    pub retained_frame_bytes: usize,
     pub last_used: Instant,
+    running_total: Arc<AtomicUsize>,
 }
 
 impl GifData {
-    fn new(generation: usize) -> Self {
+    fn new(generation: usize, running_total: Arc<AtomicUsize>) -> Self {
         Self {
             frames: Vec::new(),
             is_complete: false,
             generation,
             cancelled: Arc::new(AtomicBool::new(false)),
             total_bytes: 0,
+            retained_frame_bytes: 0,
             last_used: Instant::now(),
+            running_total,
         }
     }
+
+    pub fn take_frame_rgba(&mut self, frame_index: usize) -> Option<Vec<u8>> {
+        let rgba = self.frames.get_mut(frame_index)?.rgba.take()?;
+        let bytes = rgba.len();
+        self.total_bytes = self.total_bytes.saturating_sub(bytes);
+        atomic_saturating_sub(&self.running_total, bytes);
+        Some(rgba)
+    }
+}
+
+fn atomic_saturating_sub(value: &AtomicUsize, amount: usize) {
+    let _ = value.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |current| {
+        Some(current.saturating_sub(amount))
+    });
 }
 
 pub struct GifManager {
@@ -118,22 +142,30 @@ impl GifManager {
             {
                 let mut d = data.lock();
                 d.last_used = Instant::now();
+                if d.frames.iter().any(|frame| frame.rgba.is_none()) {
+                    d.cancelled.store(true, Ordering::SeqCst);
+                    let remaining_staging_bytes = d.total_bytes;
+                    drop(d);
+                    self.cache.pop(path);
+                    atomic_saturating_sub(&self.running_total_bytes, remaining_staging_bytes);
+                } else {
+                    return d_clone;
+                }
             }
-            return d_clone;
         }
 
         // Cleanup before adding new
         self.cleanup(false);
 
         let generation = self.current_generation.fetch_add(1, Ordering::SeqCst);
-        let data = Arc::new(Mutex::new(GifData::new(generation)));
+        let running_total = self.running_total_bytes.clone();
+        let data = Arc::new(Mutex::new(GifData::new(generation, running_total.clone())));
         self.cache.put(path.to_path_buf(), data.clone());
 
         let path_buf = path.to_path_buf();
         let data_clone = data.clone();
         let current_gen = self.current_generation.clone();
         let ui_ctx = self.ui_ctx.clone();
-        let running_total = self.running_total_bytes.clone();
         let max_memory_bytes = self.max_memory_bytes;
 
         // Send to bounded worker pool instead of spawning unbounded threads.
@@ -177,8 +209,7 @@ impl GifManager {
         }
 
         if total_removed > 0 {
-            self.running_total_bytes
-                .fetch_sub(total_removed, Ordering::SeqCst);
+            atomic_saturating_sub(&self.running_total_bytes, total_removed);
         }
     }
 
@@ -223,7 +254,7 @@ impl GifManager {
         }
         for (path, bytes) in to_remove {
             self.cache.pop(&path);
-            self.running_total_bytes.fetch_sub(bytes, Ordering::SeqCst);
+            atomic_saturating_sub(&self.running_total_bytes, bytes);
         }
 
         // 2. Memory-based LRU Cleanup - O(1) check using running total
@@ -255,8 +286,7 @@ impl GifManager {
                 if let Some(data) = self.cache.pop(&path) {
                     let d = data.lock();
                     d.cancelled.store(true, Ordering::SeqCst);
-                    self.running_total_bytes
-                        .fetch_sub(d.total_bytes, Ordering::SeqCst);
+                    atomic_saturating_sub(&self.running_total_bytes, d.total_bytes);
                     evicted_any = true;
                 }
             }
@@ -310,10 +340,13 @@ impl GifManager {
             let buffer = frame.into_buffer();
             let (orig_w, orig_h) = buffer.dimensions();
 
-            // Resize if too large (max 512px)
-            let (w, h, rgba) = if orig_w > 512 || orig_h > 512 {
+            // Sidebar previews are at most 240px high, so keeping 512px RGBA
+            // frames in RAM is wasteful for animated GIFs.
+            let (w, h, rgba) = if orig_w > GIF_PREVIEW_MAX_DIMENSION
+                || orig_h > GIF_PREVIEW_MAX_DIMENSION
+            {
                 let img = image::DynamicImage::ImageRgba8(buffer);
-                let resized = img.thumbnail(512, 512);
+                let resized = img.thumbnail(GIF_PREVIEW_MAX_DIMENSION, GIF_PREVIEW_MAX_DIMENSION);
                 let rb = resized.to_rgba8();
                 (rb.width(), rb.height(), rb.into_raw())
             } else {
@@ -332,7 +365,7 @@ impl GifManager {
 
                 let has_visible_frames = !d.frames.is_empty();
                 let exceeds_per_gif_budget =
-                    d.total_bytes.saturating_add(frame_bytes) > max_gif_bytes;
+                    d.retained_frame_bytes.saturating_add(frame_bytes) > max_gif_bytes;
                 let exceeds_global_budget =
                     running_total_before.saturating_add(frame_bytes) > max_memory_bytes;
 
@@ -343,7 +376,7 @@ impl GifManager {
                         "[GIF] Truncated decode for {:?}: frames={} total_bytes={} next_frame={} global_total={} exceeds_per_gif={} exceeds_global={}",
                         path,
                         d.frames.len(),
-                        d.total_bytes,
+                        d.retained_frame_bytes,
                         frame_bytes,
                         running_total_before,
                         exceeds_per_gif_budget,
@@ -353,12 +386,15 @@ impl GifManager {
                 }
 
                 d.total_bytes += frame_bytes;
+                d.retained_frame_bytes += frame_bytes;
                 // PERFORMANCE: Update running total atomically for O(1) memory tracking
                 running_total.fetch_add(frame_bytes, Ordering::SeqCst);
                 d.frames.push(DecodedFrame {
-                    rgba,
+                    rgba: Some(rgba),
                     width: w,
                     height: h,
+                    original_width: orig_w,
+                    original_height: orig_h,
                     delay_ms,
                 });
 

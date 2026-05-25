@@ -23,6 +23,7 @@ impl ImageViewerApp {
             file.path.clone(),
             file.modified,
             file.is_media(),
+            512,
         );
     }
 
@@ -31,6 +32,7 @@ impl ImageViewerApp {
         path: std::path::PathBuf,
         modified: u64,
         is_media: bool,
+        size: u32,
     ) {
         if !is_media || self.cache_manager.is_failed(&path) {
             return;
@@ -45,13 +47,13 @@ impl ImageViewerApp {
                 self.selected_thumbnail = Some(tex.clone());
             }
             let tex_size = tex.size();
-            (tex_size[0].max(tex_size[1]) as u32) >= 512
+            (tex_size[0].max(tex_size[1]) as u32) >= size
         } else {
             false
         };
 
         let required_preview_bucket = crate::workers::thumbnail::processing::get_bucket_size(
-            self.effective_thumbnail_request_size_px(512),
+            self.effective_thumbnail_request_size_px(size),
         );
         let has_required_request = self
             .cache_manager
@@ -63,7 +65,7 @@ impl ImageViewerApp {
 
         if !has_required_texture && !required_request_in_flight {
             self.cache_manager.loading_set.insert(path.clone());
-            self.request_thumbnail_load_with_modified(path, 512, modified);
+            self.request_thumbnail_load_with_modified(path, size, modified);
         }
     }
 
@@ -341,7 +343,18 @@ impl ImageViewerApp {
         }
 
         let path = file.path.clone();
-        self.ensure_detail_panel_thumbnail_request(path.clone(), file.modified, file.is_media());
+        let is_gif = path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("gif"));
+
+        let thumbnail_size = if is_gif { 256 } else { 512 };
+        self.ensure_detail_panel_thumbnail_request(
+            path.clone(),
+            file.modified,
+            file.is_media(),
+            thumbnail_size,
+        );
 
         let active_tab_id = self.tab_manager.active().id;
         let is_owner = self.media_preview_owner_tab_id == Some(active_tab_id);
@@ -356,11 +369,6 @@ impl ImageViewerApp {
                 self.destroy_media_preview();
             }
         }
-
-        let is_gif = path
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("gif"));
 
         if is_gif {
             use crate::ui::components::media_preview::GifPlayer;

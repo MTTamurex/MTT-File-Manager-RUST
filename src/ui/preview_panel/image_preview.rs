@@ -97,18 +97,17 @@ pub fn render_gif_preview(
     ui: &mut egui::Ui,
     file: &crate::domain::file_entry::FileEntry,
     gif_player: &mut crate::ui::components::media_preview::GifPlayer,
+    fallback_texture: Option<&egui::TextureHandle>,
     svg_manager: &mut SvgIconManager,
 ) {
     gif_player.update(ui.ctx());
     if let Some(texture) = gif_player.texture() {
-        let max_preview_width = ui.available_width() - 16.0;
+        let max_preview_width = (ui.available_width() - 16.0).max(0.0);
         let max_preview_height = PREVIEW_MAX_HEIGHT;
         let max_preview_size = egui::vec2(max_preview_width, max_preview_height);
 
         let image_resp = ui.add(
-            egui::Image::new(texture)
-                .max_size(max_preview_size)
-                .shrink_to_fit(),
+            egui::Image::new(texture).fit_to_exact_size(gif_player.display_size(max_preview_size)),
         );
 
         let media_rect = image_resp.rect;
@@ -131,6 +130,8 @@ pub fn render_gif_preview(
         {
             crate::image_viewer::open_image_viewer(file.path.clone());
         }
+    } else if let Some(texture) = fallback_texture {
+        let _ = render_texture_with_overlay(ui, file, texture, svg_manager);
     } else {
         let reserve = egui::vec2((ui.available_width() - 16.0).max(0.0), PREVIEW_MAX_HEIGHT);
         ui.allocate_response(reserve, egui::Sense::hover());
