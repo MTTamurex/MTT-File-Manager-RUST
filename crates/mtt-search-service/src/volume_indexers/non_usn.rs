@@ -76,6 +76,7 @@ pub(crate) fn index_non_ntfs_volume(
         cached_index.state = file_index::IndexState::Ready;
 
         handle = Some(volume_indices::upsert(&indices, cached_index));
+        crate::memory_trim::trim_working_set(&format!("{}:\\ fallback cache load", drive_letter));
         eprintln!(
             "[SCAN] {}:\\ Loaded {} cached records for fallback index",
             drive_letter, cached_count
@@ -152,6 +153,7 @@ pub(crate) fn index_non_ntfs_volume(
                 let records = stats.records_indexed;
                 handle = Some(volume_indices::upsert(&indices, scanned_index));
                 indexing_progress.clear(drive_letter);
+                crate::memory_trim::trim_working_set(&format!("{}:\\ fallback scan", drive_letter));
 
                 // Adaptive backoff based on whether record count changed.
                 let changed = prev_record_count.map_or(true, |prev| prev != records);

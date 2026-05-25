@@ -559,6 +559,9 @@ pub(crate) fn index_volume(
     // never blocked by this thread.
     let handle: VolumeIndexHandle = volume_indices::upsert(&indices, index);
     indexing_progress.clear(drive_letter);
+    if sizes_already_loaded {
+        crate::memory_trim::trim_working_set(&format!("{}:\\ index ready", drive_letter));
+    }
 
     // Background file size extraction — only needed when loaded from a cache
     // that doesn't have sizes (old binary format or SQLite fallback).
@@ -580,16 +583,15 @@ pub(crate) fn index_volume(
             };
 
             eprintln!(
-                "[MFT-SIZE] {}:\\ Background size extraction via bulk MFT read...",
+                "[MFT-SIZE] {}:\\ Background size extraction via sizes-only MFT read...",
                 drive_letter,
             );
             let start = std::time::Instant::now();
 
-            // Use the bulk MFT reader to extract ALL sizes in a single
-            // sequential I/O pass — much faster and more complete than the
-            // old per-file FSCTL_GET_NTFS_FILE_RECORD approach.
+            // Extract only size updates in a single sequential I/O pass. This
+            // avoids building a second full VolumeIndex just to copy sizes.
             let bulk_result =
-                crate::mft_reader::read_mft_bulk(bg_volume, drive_letter, |done, total| {
+                crate::mft_reader::read_mft_sizes_bulk(bg_volume, drive_letter, |done, total| {
                     indexing_progress.update(
                         drive_letter,
                         "scanning",
@@ -603,19 +605,20 @@ pub(crate) fn index_volume(
             usn_journal::close_volume(bg_volume);
 
             match bulk_result {
-                Ok(bulk_index) => {
-                    // Apply sizes from the bulk index to the live index.
+                Ok(size_updates) => {
+                    // Apply sizes from the MFT pass to the live index.
                     let mut applied = 0u64;
                     let mut sizes_marked = false;
                     if let Some(mut vol) =
                         bg_handle.try_write_for(std::time::Duration::from_secs(10))
                     {
                         let mut changed = false;
-                        for (&frn, bulk_rec) in &bulk_index.records {
-                            if bulk_rec.size > 0 {
-                                if let Some(rec) = vol.records.get_mut(&frn) {
-                                    if rec.size != bulk_rec.size {
-                                        rec.size = bulk_rec.size;
+                        for (frn, size) in &size_updates {
+                            if *size > 0 {
+                                if let Some(rec) = vol.records.get_mut(frn) {
+                                    let new_size = rec.size.max(*size);
+                                    if rec.size != new_size {
+                                        rec.size = new_size;
                                         applied += 1;
                                         changed = true;
                                     }
@@ -637,11 +640,12 @@ pub(crate) fn index_volume(
                                 bg_handle.try_write_for(std::time::Duration::from_millis(250))
                             {
                                 let mut changed = false;
-                                for (&frn, bulk_rec) in &bulk_index.records {
-                                    if bulk_rec.size > 0 {
-                                        if let Some(rec) = vol.records.get_mut(&frn) {
-                                            if rec.size != bulk_rec.size {
-                                                rec.size = bulk_rec.size;
+                                for (frn, size) in &size_updates {
+                                    if *size > 0 {
+                                        if let Some(rec) = vol.records.get_mut(frn) {
+                                            let new_size = rec.size.max(*size);
+                                            if rec.size != new_size {
+                                                rec.size = new_size;
                                                 applied += 1;
                                                 changed = true;
                                             }
@@ -673,6 +677,10 @@ pub(crate) fn index_volume(
                 }
             }
 
+            crate::memory_trim::trim_working_set(&format!(
+                "{}:\\ background size extraction",
+                drive_letter
+            ));
             indexing_progress.clear(drive_letter);
         });
     }

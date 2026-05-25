@@ -489,7 +489,7 @@ impl IndexDb {
         for row in rows {
             let (frn, name, parent_ref, is_dir, is_reparse) =
                 row.map_err(|e| format!("decode file_records row: {}", e))?;
-            if !index.insert_record(frn, &name, parent_ref, is_dir, is_reparse) {
+            if !index.insert_record_untracked(frn, &name, parent_ref, is_dir, is_reparse) {
                 return Err("name arena full while loading file_records".to_string());
             }
             count += 1;

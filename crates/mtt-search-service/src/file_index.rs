@@ -260,13 +260,14 @@ impl VolumeIndex {
     /// parent, the old parent's children entry is kept (the file appears under
     /// both parents).  This matches Explorer's behaviour of counting hardlinked
     /// files in every directory that references them.
-    pub fn insert_record(
+    fn insert_record_internal(
         &mut self,
         frn: u64,
         name: &str,
         parent_ref: u64,
         is_dir: bool,
         is_reparse: bool,
+        track_pending: bool,
     ) -> bool {
         let nr = match self.names.insert(name) {
             Some(nr) => nr,
@@ -318,11 +319,38 @@ impl VolumeIndex {
             }
         }
 
-        // Track for incremental SQLite persistence.
-        self.pending_removals.remove(&frn);
-        self.pending_additions.insert(frn);
-        self.binary_dirty = true;
+        if track_pending {
+            // Track for incremental SQLite persistence.
+            self.pending_removals.remove(&frn);
+            self.pending_additions.insert(frn);
+            self.binary_dirty = true;
+        }
         true
+    }
+
+    pub fn insert_record(
+        &mut self,
+        frn: u64,
+        name: &str,
+        parent_ref: u64,
+        is_dir: bool,
+        is_reparse: bool,
+    ) -> bool {
+        self.insert_record_internal(frn, name, parent_ref, is_dir, is_reparse, true)
+    }
+
+    /// Insert a record while building a complete snapshot from MFT/SQLite/FS scan.
+    /// Bulk snapshots are persisted explicitly, so per-record pending tracking
+    /// would only inflate peak RAM without adding durability.
+    pub fn insert_record_untracked(
+        &mut self,
+        frn: u64,
+        name: &str,
+        parent_ref: u64,
+        is_dir: bool,
+        is_reparse: bool,
+    ) -> bool {
+        self.insert_record_internal(frn, name, parent_ref, is_dir, is_reparse, false)
     }
 
     /// Remove a file record from the index.
@@ -447,9 +475,6 @@ impl VolumeIndex {
             record.name_len = nr.len;
         }
         self.names = new_arena;
-
-        // Rebuild reverse children index after compaction.
-        self.rebuild_children();
         self.shrink_to_fit();
     }
 
@@ -962,6 +987,39 @@ mod tests {
         assert_eq!(page.total_matches, Some(1));
         assert_eq!(page.items.len(), 1);
         assert_eq!(page.items[0].name, "Relatório Café.txt");
+    }
+
+    #[test]
+    fn untracked_insert_preserves_index_without_pending_growth() {
+        let mut index = VolumeIndex::empty('C');
+
+        assert!(index.insert_record_untracked(10, "folder", 5, true, false));
+        assert!(index.insert_record_untracked(20, "file.bin", 10, false, false));
+
+        assert!(index.pending_additions.is_empty());
+        assert!(index.pending_removals.is_empty());
+        assert!(!index.binary_dirty);
+        assert_eq!(index.resolve_path_to_frn(r"C:\folder"), Some(10));
+        assert_eq!(index.folder_tree_summary(10).1, 1);
+    }
+
+    #[test]
+    fn compact_arena_preserves_children_and_hardlinks() {
+        let mut index = VolumeIndex::empty('C');
+
+        assert!(index.insert_record(10, "folder", 5, true, false));
+        assert!(index.insert_record(11, "other", 5, true, false));
+        assert!(index.insert_record(20, "file.bin", 10, false, false));
+        index.records.get_mut(&20).unwrap().size = 7;
+        assert!(index.insert_record(20, "file.bin", 11, false, false));
+        index.records.get_mut(&20).unwrap().size = 7;
+
+        index.compact_arena();
+
+        let folder_summary = index.folder_tree_summary(10);
+        let other_summary = index.folder_tree_summary(11);
+        assert_eq!((folder_summary.0, folder_summary.1), (7, 1));
+        assert_eq!((other_summary.0, other_summary.1), (7, 1));
     }
 
     #[test]

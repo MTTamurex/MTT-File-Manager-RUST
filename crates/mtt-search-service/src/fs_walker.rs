@@ -98,7 +98,7 @@ where
             let is_dir = file_type.is_dir();
             let is_reparse = file_type.is_symlink()
                 || (metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
-            if !index.insert_record(entry_ref, &name, parent_ref, is_dir, is_reparse) {
+            if !index.insert_record_untracked(entry_ref, &name, parent_ref, is_dir, is_reparse) {
                 eprintln!("[FS-WALKER] Name arena full — stopping scan");
                 break;
             }

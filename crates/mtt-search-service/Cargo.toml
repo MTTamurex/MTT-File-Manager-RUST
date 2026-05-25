@@ -26,6 +26,7 @@ features = [
     "Win32_System_Ioctl",
     "Win32_System_IO",
     "Win32_System_LibraryLoader",
+    "Win32_System_Memory",
     "Win32_System_Pipes",
     "Win32_Security",
     "Win32_Security_Authorization",

@@ -365,10 +365,6 @@ pub fn start_global_search_worker(
         let mut session_index =
             crate::infrastructure::user_session_search::UserSessionSearchIndex::new();
 
-        // Warm the service's in-memory index so paged-out memory is brought back to RAM
-        // before the user opens global search.
-        let _ = crate::infrastructure::global_search::warm_index();
-
         // Prime status push at worker startup.
         refresh_and_send_status(
             &sender,

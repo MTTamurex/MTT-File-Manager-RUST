@@ -4,6 +4,7 @@ mod index_db;
 mod indexing_progress;
 mod ipc_authorization;
 mod ipc_server;
+mod memory_trim;
 mod mft_reader;
 mod name_arena;
 mod path_resolver;

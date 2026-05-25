@@ -1168,7 +1168,7 @@ fn parse_mft_record_bulk(
 
     // Insert if we found a valid name.
     if let Some((name, parent_frn, _)) = best_name {
-        if !index.insert_record(frn, &name, parent_frn, is_dir, is_skip_reparse) {
+        if !index.insert_record_untracked(frn, &name, parent_frn, is_dir, is_skip_reparse) {
             return; // Arena full.
         }
         if file_size > 0 {
@@ -1258,6 +1258,324 @@ where
     crate::usn_journal::close_volume(read_handle);
 
     result
+}
+
+/// Read only file sizes from the MFT and return `(FRN, size)` updates.
+///
+/// This is used when an existing cached index is structurally complete but was
+/// loaded from an older cache without sizes. It avoids building a second full
+/// `VolumeIndex` solely to copy the `size` field into the live index.
+pub fn read_mft_sizes_bulk<F>(
+    volume: HANDLE,
+    drive_letter: char,
+    mut on_progress: F,
+) -> Result<Vec<(u64, u64)>, String>
+where
+    F: FnMut(u64, u64),
+{
+    let geo = query_mft_geometry(volume)?;
+    let record_size = geo.bytes_per_file_record as usize;
+    let cluster_size = geo.bytes_per_cluster as usize;
+    let total_mft_bytes = geo.mft_valid_data_length as u64;
+    let total_records = total_mft_bytes / record_size as u64;
+
+    eprintln!(
+        "[MFT-SIZE] {}:\\ MFT geometry: record={}B, sector={}B, cluster={}B, \
+         mft_start_lcn={}, valid_data={:.1}MB, ~{} records",
+        drive_letter,
+        record_size,
+        geo.bytes_per_sector,
+        cluster_size,
+        geo.mft_start_lcn,
+        total_mft_bytes as f64 / 1_048_576.0,
+        total_records
+    );
+
+    let data_runs = get_mft_data_runs(volume, &geo)?;
+    let total_clusters: u64 = data_runs.iter().map(|(_, c)| *c).sum();
+    eprintln!(
+        "[MFT-SIZE] {}:\\ MFT has {} data runs, {} total clusters ({:.1} MB)",
+        drive_letter,
+        data_runs.len(),
+        total_clusters,
+        total_clusters as f64 * cluster_size as f64 / 1_048_576.0
+    );
+
+    let read_handle = crate::usn_journal::open_volume(drive_letter)?;
+    let result = read_mft_size_data(
+        read_handle,
+        drive_letter,
+        &geo,
+        &data_runs,
+        total_records,
+        &mut on_progress,
+    );
+    crate::usn_journal::close_volume(read_handle);
+
+    result
+}
+
+fn parse_mft_record_size_bulk(
+    record: &[u8],
+    record_size: usize,
+    frn: u64,
+    size_updates: &mut Vec<(u64, u64)>,
+    extension_sizes: &mut HashMap<u64, u64>,
+    size_recheck_candidates: &mut Vec<u64>,
+) {
+    if record.len() < record_size || record_size < 0x30 {
+        return;
+    }
+    if record[0..4] != FILE_SIGNATURE {
+        return;
+    }
+
+    let Some(flags) = read_u16_le(record, 0x16) else {
+        return;
+    };
+    if flags & MFT_RECORD_IN_USE == 0 || flags & MFT_RECORD_IS_DIRECTORY != 0 {
+        return;
+    }
+
+    let Some(base_ref) = read_frn_le(record, 0x20) else {
+        return;
+    };
+    let Some(first_attr) = read_u16_le(record, 0x14).map(|value| value as usize) else {
+        return;
+    };
+    if first_attr >= record_size || first_attr < 0x30 {
+        return;
+    }
+
+    if base_ref != 0 {
+        let mut offset = first_attr;
+        while offset + 16 <= record_size {
+            let Some((attr_type, attr_len)) = read_attr_header(record, offset) else {
+                break;
+            };
+            if attr_type == ATTR_TYPE_END {
+                break;
+            }
+            if attr_len == 0 || offset + attr_len > record_size {
+                break;
+            }
+            if attr_type == ATTR_TYPE_DATA {
+                if let Some(size) = extract_data_size_at(record, offset, record_size) {
+                    extension_sizes
+                        .entry(base_ref)
+                        .and_modify(|existing| *existing = (*existing).max(size))
+                        .or_insert(size);
+                }
+            }
+            offset += attr_len;
+        }
+        return;
+    }
+
+    let mut file_size = 0u64;
+    let mut saw_default_data_attr = false;
+    let mut has_attr_list = false;
+
+    let mut offset = first_attr;
+    while offset + 16 <= record_size {
+        let Some((attr_type, attr_len)) = read_attr_header(record, offset) else {
+            break;
+        };
+        if attr_type == ATTR_TYPE_END {
+            break;
+        }
+        if attr_len == 0 || offset + attr_len > record_size {
+            break;
+        }
+
+        match attr_type {
+            ATTR_TYPE_ATTRIBUTE_LIST => {
+                has_attr_list = true;
+            }
+            ATTR_TYPE_DATA => {
+                if let Some(size) = extract_data_size_at(record, offset, record_size) {
+                    saw_default_data_attr = true;
+                    file_size = size;
+                }
+            }
+            _ => {}
+        }
+
+        offset += attr_len;
+    }
+
+    if file_size > 0 {
+        size_updates.push((frn, file_size));
+    } else if has_attr_list || !saw_default_data_attr {
+        size_recheck_candidates.push(frn);
+    }
+}
+
+fn read_mft_size_data<F>(
+    handle: HANDLE,
+    drive_letter: char,
+    geo: &MftGeometry,
+    data_runs: &[(i64, u64)],
+    total_records: u64,
+    on_progress: &mut F,
+) -> Result<Vec<(u64, u64)>, String>
+where
+    F: FnMut(u64, u64),
+{
+    let record_size = geo.bytes_per_file_record as usize;
+    let cluster_size = geo.bytes_per_cluster as usize;
+
+    let mut size_updates: Vec<(u64, u64)> = Vec::with_capacity(8192);
+    let mut extension_sizes: HashMap<u64, u64> = HashMap::new();
+    let mut size_recheck_candidates: Vec<u64> = Vec::new();
+
+    let chunk_records = (16 * 1024 * 1024) / record_size;
+    let chunk_bytes = chunk_records * record_size;
+    let chunk_bytes = (chunk_bytes / cluster_size) * cluster_size;
+    let mut read_buf = vec![0u8; chunk_bytes];
+
+    let mut frn: u64 = 0;
+    let start = std::time::Instant::now();
+    let mut last_progress = std::time::Instant::now();
+
+    on_progress(0, total_records);
+
+    for &(lcn, cluster_count) in data_runs {
+        let run_byte_offset = lcn as u64 * cluster_size as u64;
+        let run_bytes = cluster_count * cluster_size as u64;
+
+        let seek_result =
+            unsafe { SetFilePointerEx(handle, run_byte_offset as i64, None, FILE_BEGIN) };
+        if seek_result.is_err() {
+            eprintln!(
+                "[MFT-SIZE] {}:\\ Seek to LCN {} (offset {}) failed, skipping run",
+                drive_letter, lcn, run_byte_offset
+            );
+            frn += run_bytes / record_size as u64;
+            continue;
+        }
+
+        let mut bytes_remaining = run_bytes;
+        while bytes_remaining > 0 && frn < total_records {
+            let to_read = (bytes_remaining as usize).min(chunk_bytes);
+            let to_read = (to_read / cluster_size) * cluster_size;
+            if to_read == 0 {
+                break;
+            }
+
+            let mut bytes_read_out: u32 = 0;
+            let read_result = unsafe {
+                ReadFile(
+                    handle,
+                    Some(&mut read_buf[..to_read]),
+                    Some(&mut bytes_read_out),
+                    None,
+                )
+            };
+
+            if read_result.is_err() || bytes_read_out == 0 {
+                let skip_records = bytes_remaining / record_size as u64;
+                frn += skip_records;
+                eprintln!(
+                    "[MFT-SIZE] {}:\\ ReadFile failed at FRN {}, skipping {} records",
+                    drive_letter, frn, skip_records
+                );
+                break;
+            }
+
+            let bytes_read = bytes_read_out as usize;
+            let usable_bytes = (bytes_read / record_size) * record_size;
+
+            let mut buf_offset = 0;
+            while buf_offset + record_size <= usable_bytes && frn < total_records {
+                let record_data = &mut read_buf[buf_offset..buf_offset + record_size];
+                if apply_fixup(record_data) {
+                    parse_mft_record_size_bulk(
+                        record_data,
+                        record_size,
+                        frn,
+                        &mut size_updates,
+                        &mut extension_sizes,
+                        &mut size_recheck_candidates,
+                    );
+                }
+
+                frn += 1;
+                buf_offset += record_size;
+            }
+
+            bytes_remaining -= bytes_read as u64;
+
+            if last_progress.elapsed() >= std::time::Duration::from_millis(200) {
+                on_progress(frn, total_records);
+                last_progress = std::time::Instant::now();
+            }
+        }
+    }
+
+    let mut ext_applied = 0u64;
+    for (base_frn, size) in extension_sizes {
+        if size > 0 {
+            size_updates.push((base_frn, size));
+            ext_applied += 1;
+        }
+    }
+
+    let mut precise_fixed = 0u64;
+    let mut precise_direct = 0u64;
+    let mut precise_attr_list = 0u64;
+    let mut precise_file_id = 0u64;
+    let mut precise_unresolved = 0u64;
+    if !size_recheck_candidates.is_empty() {
+        let mut output_buffer = vec![0u8; OUTPUT_HEADER + record_size];
+        for frn in size_recheck_candidates {
+            let resolved = match resolve_file_size(handle, frn, record_size, &mut output_buffer) {
+                SizeResolution::Direct(size) => {
+                    precise_direct += 1;
+                    Some(size)
+                }
+                SizeResolution::ViaAttrList(size) => {
+                    precise_attr_list += 1;
+                    Some(size)
+                }
+                SizeResolution::None => {
+                    if let Some(size) = size_by_file_id(handle, frn) {
+                        precise_file_id += 1;
+                        Some(size)
+                    } else {
+                        precise_unresolved += 1;
+                        None
+                    }
+                }
+            };
+
+            if let Some(size) = resolved {
+                if size > 0 {
+                    size_updates.push((frn, size));
+                    precise_fixed += 1;
+                }
+            }
+        }
+    }
+
+    on_progress(frn, total_records);
+
+    let elapsed = start.elapsed();
+    eprintln!(
+        "[MFT-SIZE] {}:\\ Read {} MFT records in {:.2}s: {} size updates, {} ext sizes, {} precise rechecks (direct={}, attr_list={}, file_id={}, unresolved={})",
+        drive_letter,
+        frn,
+        elapsed.as_secs_f64(),
+        size_updates.len(),
+        ext_applied,
+        precise_fixed,
+        precise_direct,
+        precise_attr_list,
+        precise_file_id,
+        precise_unresolved,
+    );
+
+    Ok(size_updates)
 }
 
 /// Inner function that performs the sequential MFT read and record parsing.
