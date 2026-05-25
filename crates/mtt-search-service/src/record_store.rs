@@ -37,6 +37,18 @@ impl RecordStore {
         }
     }
 
+    /// Create a store optimized for bulk input that arrives in strictly
+    /// increasing FRN order, such as a raw sequential MFT scan.
+    pub fn with_sorted_capacity(capacity: usize) -> Self {
+        Self {
+            base_frns: Vec::with_capacity(capacity),
+            base_records: Vec::with_capacity(capacity),
+            overlay: HashMap::new(),
+            removed: HashSet::new(),
+            live_len: 0,
+        }
+    }
+
     pub fn from_sorted_parts(
         base_frns: Vec<u64>,
         base_records: Vec<FileRecord>,
@@ -116,6 +128,22 @@ impl RecordStore {
         old
     }
 
+    /// Append a new record when the caller can guarantee increasing FRNs.
+    /// Returns the record back to the caller if the fast path cannot be used.
+    pub fn push_sorted(&mut self, frn: u64, record: FileRecord) -> Result<(), FileRecord> {
+        if !self.overlay.is_empty() || !self.removed.is_empty() {
+            return Err(record);
+        }
+        if self.base_frns.last().is_some_and(|last| *last >= frn) {
+            return Err(record);
+        }
+
+        self.base_frns.push(frn);
+        self.base_records.push(record);
+        self.live_len += 1;
+        Ok(())
+    }
+
     pub fn remove(&mut self, frn: &u64) -> Option<FileRecord> {
         if let Some(record) = self.overlay.remove(frn) {
             self.live_len -= 1;
@@ -174,6 +202,14 @@ impl RecordStore {
             return;
         }
 
+        if self.overlay.is_empty()
+            && self.removed.is_empty()
+            && self.live_len == self.base_frns.len()
+            && self.base_frns.len() == self.base_records.len()
+        {
+            return;
+        }
+
         let mut pairs: Vec<(u64, FileRecord)> =
             if self.base_frns.is_empty() && self.removed.is_empty() {
                 self.overlay.drain().collect()
@@ -205,6 +241,19 @@ impl RecordStore {
         self.base_records.shrink_to_fit();
         self.overlay.shrink_to_fit();
         self.removed.shrink_to_fit();
+    }
+
+    /// Return sorted compact storage when there are no overlay/tombstone deltas.
+    pub fn compact_sorted_slices(&self) -> Option<(&[u64], &[FileRecord])> {
+        if self.overlay.is_empty()
+            && self.removed.is_empty()
+            && self.live_len == self.base_frns.len()
+            && self.base_frns.len() == self.base_records.len()
+        {
+            Some((&self.base_frns, &self.base_records))
+        } else {
+            None
+        }
     }
 
     pub fn estimated_heap_bytes(&self) -> usize {

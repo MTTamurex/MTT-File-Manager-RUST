@@ -108,7 +108,7 @@ pub struct VolumeIndex {
 }
 
 impl VolumeIndex {
-    const DEFAULT_NAME_BYTES_PER_RECORD: usize = 25;
+    pub(crate) const DEFAULT_NAME_BYTES_PER_RECORD: usize = 25;
 
     #[inline]
     fn estimated_child_bucket_capacity(estimated_records: usize) -> usize {
@@ -151,6 +151,38 @@ impl VolumeIndex {
         Self {
             drive_letter,
             records: RecordStore::with_capacity(estimated_records),
+            children: HashMap::with_capacity(child_capacity),
+            names: NameArena::with_capacity(estimated_name_bytes),
+            last_usn: 0,
+            journal_id: 0,
+            state: IndexState::NotStarted,
+            sizes_loaded: false,
+            binary_dirty: false,
+            pending_additions: HashSet::new(),
+            pending_removals: HashSet::new(),
+            dir_modified_at: HashMap::new(),
+            pending_size_refresh: HashSet::new(),
+            hardlink_parents: HashMap::new(),
+            reparse_points: HashSet::new(),
+            hardlink_data_complete: false,
+            reparse_data_complete: false,
+        }
+    }
+
+    pub fn with_sorted_record_capacity(
+        drive_letter: char,
+        estimated_records: usize,
+        estimated_name_bytes: usize,
+    ) -> Self {
+        let child_capacity = if estimated_records == 0 {
+            0
+        } else {
+            estimated_records.saturating_div(8).max(1024)
+        };
+
+        Self {
+            drive_letter,
+            records: RecordStore::with_sorted_capacity(estimated_records),
             children: HashMap::with_capacity(child_capacity),
             names: NameArena::with_capacity(estimated_name_bytes),
             last_usn: 0,
@@ -351,6 +383,64 @@ impl VolumeIndex {
         is_reparse: bool,
     ) -> bool {
         self.insert_record_internal(frn, name, parent_ref, is_dir, is_reparse, false)
+    }
+
+    /// Insert a new untracked record while reading sorted MFT records.
+    /// This avoids the large mutable HashMap overlay used by incremental paths.
+    pub fn insert_sorted_record_untracked(
+        &mut self,
+        frn: u64,
+        name: &str,
+        parent_ref: u64,
+        is_dir: bool,
+        is_reparse: bool,
+        size: u64,
+    ) -> bool {
+        let nr = match self.names.insert(name) {
+            Some(nr) => nr,
+            None => return false,
+        };
+
+        let record = FileRecord {
+            parent_ref,
+            size,
+            name_offset: nr.offset,
+            name_len: nr.len,
+            is_dir,
+            _pad: 0,
+        };
+
+        match self.records.push_sorted(frn, record) {
+            Ok(()) => {
+                self.set_reparse_state(frn, is_reparse);
+                self.add_child_edge(parent_ref, frn);
+                true
+            }
+            Err(record) => {
+                let old = self.records.get(&frn).map(|r| (r.parent_ref, r.size));
+                let mut record = record;
+                if record.size == 0 {
+                    record.size = old.map_or(0, |(_, old_size)| old_size);
+                }
+                self.records.insert(frn, record);
+                self.set_reparse_state(frn, is_reparse);
+
+                match old {
+                    Some((old_parent, _)) if old_parent == parent_ref => {}
+                    Some((old_parent, _)) => {
+                        let extras = self.hardlink_parents.entry(frn).or_default();
+                        if !extras.contains(&old_parent) {
+                            extras.push(old_parent);
+                        }
+                        extras.retain(|&p| p != parent_ref);
+                        self.sanitize_hardlink_entry(frn);
+                        self.add_child_edge(parent_ref, frn);
+                    }
+                    None => self.add_child_edge(parent_ref, frn),
+                }
+                true
+            }
+        }
     }
 
     /// Remove a file record from the index.
@@ -659,6 +749,14 @@ impl VolumeIndex {
         let arena_cap = self.names.capacity();
         let records_est = self.records.estimated_heap_bytes();
         (arena_used, arena_cap, records_est)
+    }
+
+    /// Bytes in the name arena that are still referenced by live records.
+    pub fn referenced_name_bytes(&self) -> usize {
+        self.records
+            .iter()
+            .map(|(_, record)| record.name_len as usize)
+            .sum()
     }
 
     /// Resolve a filesystem path (e.g., `C:\Users\foo`) to the FRN of the
@@ -1001,6 +1099,20 @@ mod tests {
         assert!(!index.binary_dirty);
         assert_eq!(index.resolve_path_to_frn(r"C:\folder"), Some(10));
         assert_eq!(index.folder_tree_summary(10).1, 1);
+    }
+
+    #[test]
+    fn sorted_untracked_insert_builds_compact_store_without_pending_growth() {
+        let mut index = VolumeIndex::with_sorted_record_capacity('C', 2, 64);
+
+        assert!(index.insert_sorted_record_untracked(10, "folder", 5, true, false, 0));
+        assert!(index.insert_sorted_record_untracked(20, "file.bin", 10, false, false, 42));
+
+        assert!(index.pending_additions.is_empty());
+        assert!(index.pending_removals.is_empty());
+        assert!(!index.binary_dirty);
+        assert!(index.records.compact_sorted_slices().is_some());
+        assert_eq!(index.folder_tree_summary(10).0, 42);
     }
 
     #[test]

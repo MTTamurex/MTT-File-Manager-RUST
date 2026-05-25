@@ -581,22 +581,34 @@ pub fn folder_size_for_service(index: &VolumeIndex, dir_frn: u64) -> (u64, u64, 
     let (raw_total, raw_count, raw_folder_count, raw_zero_count) =
         index.folder_tree_summary(dir_frn);
 
-    let (uniq_total, uniq_count, dup_hits) = index.folder_size_sum_unique_files(dir_frn);
-    if dup_hits > 0 || raw_total != uniq_total {
-        eprintln!(
-            "[FOLDER-SIZE-DIAG] frn={} raw={:.2}GB({} files, {} folders) unique={:.2}GB({} files) dup_hits={} delta={:.2}MB",
-            dir_frn,
-            raw_total as f64 / 1_073_741_824.0,
-            raw_count,
-            raw_folder_count,
-            uniq_total as f64 / 1_073_741_824.0,
-            uniq_count,
-            dup_hits,
-            (raw_total as i128 - uniq_total as i128) as f64 / 1_048_576.0,
-        );
+    if folder_size_diag_enabled() {
+        let (uniq_total, uniq_count, dup_hits) = index.folder_size_sum_unique_files(dir_frn);
+        if dup_hits > 0 || raw_total != uniq_total {
+            eprintln!(
+                "[FOLDER-SIZE-DIAG] frn={} raw={:.2}GB({} files, {} folders) unique={:.2}GB({} files) dup_hits={} delta={:.2}MB",
+                dir_frn,
+                raw_total as f64 / 1_073_741_824.0,
+                raw_count,
+                raw_folder_count,
+                uniq_total as f64 / 1_073_741_824.0,
+                uniq_count,
+                dup_hits,
+                (raw_total as i128 - uniq_total as i128) as f64 / 1_048_576.0,
+            );
+        }
     }
 
     (raw_total, raw_count, raw_folder_count, raw_zero_count)
+}
+
+fn folder_size_diag_enabled() -> bool {
+    match std::env::var("MTT_SEARCH_FOLDER_SIZE_DIAG") {
+        Ok(value) => matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        ),
+        Err(_) => false,
+    }
 }
 
 fn resolve_file_size_with_fallbacks(
@@ -1168,13 +1180,15 @@ fn parse_mft_record_bulk(
 
     // Insert if we found a valid name.
     if let Some((name, parent_frn, _)) = best_name {
-        if !index.insert_record_untracked(frn, &name, parent_frn, is_dir, is_skip_reparse) {
+        if !index.insert_sorted_record_untracked(
+            frn,
+            &name,
+            parent_frn,
+            is_dir,
+            is_skip_reparse,
+            file_size,
+        ) {
             return; // Arena full.
-        }
-        if file_size > 0 {
-            if let Some(rec) = index.records.get_mut(&frn) {
-                rec.size = file_size;
-            }
         }
         // Register extra hardlink parents.
         if all_parents.len() > 1 {
@@ -1594,7 +1608,12 @@ where
     let cluster_size = geo.bytes_per_cluster as usize;
 
     let estimated_records = total_records.min(usize::MAX as u64) as usize;
-    let mut index = VolumeIndex::with_estimated_records(drive_letter, estimated_records);
+    let initial_record_capacity = estimated_records.min(1_000_000);
+    let mut index = VolumeIndex::with_sorted_record_capacity(
+        drive_letter,
+        initial_record_capacity,
+        initial_record_capacity.saturating_mul(VolumeIndex::DEFAULT_NAME_BYTES_PER_RECORD),
+    );
     let mut extension_sizes: HashMap<u64, u64> = HashMap::new();
     let mut extension_parents: HashMap<u64, Vec<u64>> = HashMap::new();
     let mut size_recheck_candidates: Vec<u64> = Vec::new();

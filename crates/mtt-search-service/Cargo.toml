@@ -15,6 +15,7 @@ bincode = { workspace = true }
 parking_lot = "0.12"
 memchr = "2"
 mimalloc = { version = "0.1", default-features = false }
+libmimalloc-sys = { version = "0.1", features = ["extended"] }
 memmap2 = "0.9"
 
 [dependencies.windows]

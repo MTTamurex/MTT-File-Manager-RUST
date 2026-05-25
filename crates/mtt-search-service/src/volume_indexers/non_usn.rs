@@ -77,6 +77,10 @@ pub(crate) fn index_non_ntfs_volume(
 
         handle = Some(volume_indices::upsert(&indices, cached_index));
         crate::memory_trim::trim_working_set(&format!("{}:\\ fallback cache load", drive_letter));
+        crate::memory_trim::trim_working_set_delayed(
+            format!("{}:\\ fallback cache load delayed", drive_letter),
+            std::time::Duration::from_secs(10),
+        );
         eprintln!(
             "[SCAN] {}:\\ Loaded {} cached records for fallback index",
             drive_letter, cached_count
@@ -154,6 +158,10 @@ pub(crate) fn index_non_ntfs_volume(
                 handle = Some(volume_indices::upsert(&indices, scanned_index));
                 indexing_progress.clear(drive_letter);
                 crate::memory_trim::trim_working_set(&format!("{}:\\ fallback scan", drive_letter));
+                crate::memory_trim::trim_working_set_delayed(
+                    format!("{}:\\ fallback scan delayed", drive_letter),
+                    std::time::Duration::from_secs(10),
+                );
 
                 // Adaptive backoff based on whether record count changed.
                 let changed = prev_record_count.map_or(true, |prev| prev != records);

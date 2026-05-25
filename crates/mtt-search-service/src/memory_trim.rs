@@ -8,6 +8,10 @@ pub(crate) fn trim_working_set(reason: &str) {
         return;
     }
 
+    unsafe {
+        libmimalloc_sys::mi_collect(true);
+    }
+
     #[cfg(target_os = "windows")]
     unsafe {
         use windows::Win32::System::Memory::{
@@ -25,6 +29,23 @@ pub(crate) fn trim_working_set(reason: &str) {
             Ok(()) => eprintln!("[MEM] Trimmed working set after {}", reason),
             Err(error) => eprintln!("[MEM] Working set trim failed after {}: {}", reason, error),
         }
+    }
+}
+
+pub(crate) fn trim_working_set_delayed(reason: String, delay: std::time::Duration) {
+    if trim_disabled() {
+        return;
+    }
+
+    let spawn_result = std::thread::Builder::new()
+        .name("working-set-trim".to_string())
+        .spawn(move || {
+            std::thread::sleep(delay);
+            trim_working_set(&reason);
+        });
+
+    if let Err(error) = spawn_result {
+        eprintln!("[MEM] Failed to spawn delayed working set trim: {}", error);
     }
 }
 

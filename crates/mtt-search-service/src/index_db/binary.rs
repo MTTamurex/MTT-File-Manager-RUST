@@ -254,19 +254,31 @@ pub fn save(index: &VolumeIndex) -> Result<(), String> {
         .names
         .try_for_each_slice(|slice| write_authenticated_chunk(&mut writer, &mut hmac, slice))?;
 
-    // Write Records (sorted by FRN for deterministic output).
-    let mut sorted_frns: Vec<u64> = index.records.keys().copied().collect();
-    sorted_frns.sort_unstable();
-    for &frn in &sorted_frns {
-        let rec = index
-            .records
-            .get(&frn)
-            .ok_or_else(|| format!("Record FRN {} disappeared during binary save", frn))?;
-        write_authenticated_chunk(&mut writer, &mut hmac, &frn.to_le_bytes())?;
-        let rec_bytes: &[u8] = unsafe {
-            std::slice::from_raw_parts(rec as *const FileRecord as *const u8, FILE_RECORD_SIZE)
-        };
-        write_authenticated_chunk(&mut writer, &mut hmac, rec_bytes)?;
+    // Write Records (sorted by FRN for deterministic output). Most steady-state
+    // saves happen after RecordStore compaction, so stream the compact sorted
+    // slices directly and avoid an extra all-FRN Vec allocation.
+    if let Some((frns, records)) = index.records.compact_sorted_slices() {
+        for (&frn, rec) in frns.iter().zip(records.iter()) {
+            write_authenticated_chunk(&mut writer, &mut hmac, &frn.to_le_bytes())?;
+            let rec_bytes: &[u8] = unsafe {
+                std::slice::from_raw_parts(rec as *const FileRecord as *const u8, FILE_RECORD_SIZE)
+            };
+            write_authenticated_chunk(&mut writer, &mut hmac, rec_bytes)?;
+        }
+    } else {
+        let mut sorted_frns: Vec<u64> = index.records.keys().copied().collect();
+        sorted_frns.sort_unstable();
+        for &frn in &sorted_frns {
+            let rec = index
+                .records
+                .get(&frn)
+                .ok_or_else(|| format!("Record FRN {} disappeared during binary save", frn))?;
+            write_authenticated_chunk(&mut writer, &mut hmac, &frn.to_le_bytes())?;
+            let rec_bytes: &[u8] = unsafe {
+                std::slice::from_raw_parts(rec as *const FileRecord as *const u8, FILE_RECORD_SIZE)
+            };
+            write_authenticated_chunk(&mut writer, &mut hmac, rec_bytes)?;
+        }
     }
 
     // Write Hardlink pairs.

@@ -110,22 +110,30 @@ fn persist_pending_snapshot(
 }
 
 fn flush_binary_snapshot_if_dirty(handle: &VolumeIndexHandle, drive_letter: char) {
-    let mut vol = handle.write();
-    if !vol.binary_dirty || !vol.sizes_loaded {
-        return;
-    }
+    let should_trim = {
+        let mut vol = handle.write();
+        if !vol.binary_dirty || !vol.sizes_loaded {
+            return;
+        }
 
-    match crate::index_db::binary::save(&vol) {
-        Ok(()) => {
-            vol.binary_dirty = false;
+        match crate::index_db::binary::save(&vol) {
+            Ok(()) => {
+                vol.binary_dirty = false;
+                true
+            }
+            Err(e) => {
+                eprintln!(
+                    "[USN] {}:\\ Binary snapshot flush failed: {}",
+                    drive_letter,
+                    crate::redact_paths(&e)
+                );
+                false
+            }
         }
-        Err(e) => {
-            eprintln!(
-                "[USN] {}:\\ Binary snapshot flush failed: {}",
-                drive_letter,
-                crate::redact_paths(&e)
-            );
-        }
+    };
+
+    if should_trim {
+        crate::memory_trim::trim_working_set(&format!("{}:\\ binary snapshot flush", drive_letter));
     }
 }
 
@@ -453,15 +461,28 @@ pub(crate) fn index_volume(
                     elapsed.as_secs_f64()
                 );
 
-                // Compact arena: eliminate dead space from duplicate MFT names.
+                // Compact arena only when it would reclaim meaningful dead
+                // name bytes. Current MFT parsing selects one display name per
+                // FRN, so most full scans have little/no dead arena space; an
+                // unconditional compact would briefly allocate a second arena.
+                const MIN_ARENA_COMPACTION_SAVINGS: usize = 8 * 1024 * 1024;
                 let arena_before = new_index.names.len();
-                new_index.compact_arena();
+                let referenced_name_bytes = new_index.referenced_name_bytes();
+                let dead_name_bytes = arena_before.saturating_sub(referenced_name_bytes);
+                let arena_compacted = dead_name_bytes >= MIN_ARENA_COMPACTION_SAVINGS;
+                if arena_compacted {
+                    new_index.compact_arena();
+                } else {
+                    new_index.shrink_to_fit();
+                }
                 let (arena_used, arena_cap, records_est) = new_index.memory_usage();
                 eprintln!(
-                    "[USN] {}:\\ Arena compacted: {:.1} MB -> {:.1} MB, records ~{:.1} MB, total ~{:.1} MB",
+                    "[USN] {}:\\ Arena {}: {:.1} MB -> {:.1} MB, dead {:.1} MB, records ~{:.1} MB, total ~{:.1} MB",
                     drive_letter,
+                    if arena_compacted { "compacted" } else { "shrink-only" },
                     arena_before as f64 / 1_048_576.0,
                     arena_used as f64 / 1_048_576.0,
+                    dead_name_bytes as f64 / 1_048_576.0,
                     records_est as f64 / 1_048_576.0,
                     (arena_cap + records_est) as f64 / 1_048_576.0
                 );
@@ -561,6 +582,14 @@ pub(crate) fn index_volume(
     indexing_progress.clear(drive_letter);
     if sizes_already_loaded {
         crate::memory_trim::trim_working_set(&format!("{}:\\ index ready", drive_letter));
+        crate::memory_trim::trim_working_set_delayed(
+            format!("{}:\\ index ready delayed", drive_letter),
+            std::time::Duration::from_secs(10),
+        );
+        crate::memory_trim::trim_working_set_delayed(
+            format!("{}:\\ index ready idle", drive_letter),
+            std::time::Duration::from_secs(60),
+        );
     }
 
     // Background file size extraction — only needed when loaded from a cache
@@ -681,6 +710,10 @@ pub(crate) fn index_volume(
                 "{}:\\ background size extraction",
                 drive_letter
             ));
+            crate::memory_trim::trim_working_set_delayed(
+                format!("{}:\\ background size extraction delayed", drive_letter),
+                std::time::Duration::from_secs(10),
+            );
             indexing_progress.clear(drive_letter);
         });
     }
