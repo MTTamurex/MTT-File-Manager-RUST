@@ -536,14 +536,16 @@ impl ImageViewerApp {
             let texture_keep = self.current_dynamic_texture_keep_count();
             let texture_count = self.cache_manager.texture_cache.len();
             let texture_cap = self.cache_manager.texture_cache.cap().get();
-            // Only trim when the cache holds significantly more entries than
-            // the current view needs.  The 2× factor avoids thrashing during
-            // normal scrolling where the cache is intentionally oversized for
-            // scroll-ahead.
-            let excess_threshold = texture_keep.saturating_mul(3).max(MIN_DYNAMIC_TEXTURE_CACHE_ITEMS);
+            // Trim when cache holds more than ~1.5× what the current view
+            // needs.  After navigation, cap is reset to the minimum and grows
+            // via retune; during normal scrolling it overshoots by ~1.5× for
+            // scroll-ahead.  Trimming back to 1.25× releases excess without
+            // causing visible flashing.
+            let excess_threshold = (texture_keep + (texture_keep / 2))
+                .max(MIN_DYNAMIC_TEXTURE_CACHE_ITEMS);
             if texture_count > excess_threshold || texture_cap > excess_threshold {
                 let target = texture_keep
-                    .saturating_mul(2)
+                    .saturating_add(texture_keep / 4)
                     .max(MIN_DYNAMIC_TEXTURE_CACHE_ITEMS);
                 let mut visible_for_proactive = self.visible_grid_paths_snapshot();
                 if let Some(detail_panel_paths) = self.detail_panel_folder_preview_paths_for_trim() {

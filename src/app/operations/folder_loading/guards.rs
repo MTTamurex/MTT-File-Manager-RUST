@@ -1,4 +1,8 @@
 use crate::app::state::ImageViewerApp;
+use crate::ui::cache::{
+    MIN_DYNAMIC_FOLDER_PREVIEW_ITEMS, MIN_DYNAMIC_TEXTURE_CACHE_ITEMS,
+    MIN_RGBA_BUDGET_BYTES,
+};
 use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 use std::sync::Arc;
 use std::time::Instant;
@@ -96,6 +100,27 @@ impl ImageViewerApp {
         self.loading_extensions.clear(); // Clear extension dedup tracking
         self.failed_icons.clear(); // Retry icon extraction in the new folder generation
         self.scanned_folders.clear();
+
+        // Proactively downsize texture caches on navigation.  Stale textures
+        // from the previous folder waste RAM/VRAM until natural LRU eviction
+        // catches up, which can take many seconds at the old adaptive shrink
+        // rate (delta/3 per 900 ms cycle).  Shrinking the cap to the minimum
+        // forces immediate eviction of most old entries; the retune logic on
+        // the next frame will grow the cap back to match the new folder's needs.
+        let old_tex_cap = self.cache_manager.texture_cache.cap().get();
+        let old_fp_cap = self.cache_manager.folder_preview_cache.cap().get();
+        if old_tex_cap > MIN_DYNAMIC_TEXTURE_CACHE_ITEMS {
+            self.cache_manager
+                .retune_texture_cache_capacity(MIN_DYNAMIC_TEXTURE_CACHE_ITEMS);
+        }
+        if old_fp_cap > MIN_DYNAMIC_FOLDER_PREVIEW_ITEMS {
+            self.cache_manager
+                .retune_folder_preview_cache_capacity(MIN_DYNAMIC_FOLDER_PREVIEW_ITEMS);
+        }
+        self.cache_manager
+            .retune_rgba_cache_capacity(32);
+        self.cache_manager.retune_rgba_budget(MIN_RGBA_BUDGET_BYTES);
+
         // Force immediate cache retune on the next frame so stale textures from
         // the previous folder are released quickly instead of lingering for
         // multiple retune cycles (each limited by the adaptive shrink rate).
