@@ -290,7 +290,6 @@ pub trait ListViewOperations {
         modified: u64,
     );
     fn request_icon_load(&mut self, path: PathBuf);
-    fn notify_idle_visible_items(&mut self, items: Vec<PathBuf>);
 }
 
 /// Renders the list view

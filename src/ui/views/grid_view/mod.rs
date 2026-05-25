@@ -224,7 +224,6 @@ pub trait GridViewOperations {
     );
     fn request_icon_load(&mut self, path: PathBuf);
     fn rename_with_shell(&mut self, idx: usize);
-    fn notify_idle_visible_items(&mut self, items: Vec<PathBuf>);
 }
 
 /// Action returned by grid view

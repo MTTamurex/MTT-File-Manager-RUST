@@ -83,6 +83,11 @@ impl DirectoryCache {
     /// `folder_cover` is stripped here (once at write time) instead of on
     /// every read, since covers are resolved separately via the cover pipeline.
     /// No fs::metadata() syscall — DriveWatcher handles invalidation.
+    ///
+    /// If this folder alone exceeds the global item budget
+    /// (MAX_TOTAL_CACHED_ITEMS), the entry is NOT cached — it would dominate
+    /// RAM with a single huge listing. Any previously cached copy for this
+    /// path is removed.
     pub fn put(&self, path: PathBuf, mut entries: Vec<FileEntry>) {
         let mut cache = self.inner.lock();
         for entry in &mut entries {
@@ -92,6 +97,14 @@ impl DirectoryCache {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64;
+
+        if entries.len() > MAX_TOTAL_CACHED_ITEMS {
+            cache.entries.pop(&path);
+            cache.ordered_keys.remove(&path);
+            cache.sync_ordered_keys();
+            return;
+        }
+
         cache.entries.put(
             path,
             CachedFolder {
@@ -193,16 +206,31 @@ mod tests {
     }
 
     #[test]
+    fn put_rejects_oversized_folder() {
+        let cache = DirectoryCache::new();
+
+        let huge_path = PathBuf::from(r"C:\huge");
+
+        let huge_entries: Vec<FileEntry> = (0..MAX_TOTAL_CACHED_ITEMS + 1)
+            .map(|idx| sample_entry(&format!(r"C:\huge\item{}", idx)))
+            .collect();
+
+        cache.put(huge_path.clone(), huge_entries);
+
+        assert!(cache.get(&huge_path).is_none());
+    }
+
+    #[test]
     fn put_evicts_older_large_folders_when_total_item_budget_is_exceeded() {
         let cache = DirectoryCache::new();
 
         let older_path = PathBuf::from(r"C:\older");
         let newer_path = PathBuf::from(r"C:\newer");
 
-        let older_entries: Vec<FileEntry> = (0..30_000)
+        let older_entries: Vec<FileEntry> = (0..12_000)
             .map(|idx| sample_entry(&format!(r"C:\older\item{}", idx)))
             .collect();
-        let newer_entries: Vec<FileEntry> = (0..30_000)
+        let newer_entries: Vec<FileEntry> = (0..12_000)
             .map(|idx| sample_entry(&format!(r"C:\newer\item{}", idx)))
             .collect();
 
@@ -211,7 +239,7 @@ mod tests {
 
         let (folders, total_items) = cache.stats();
         assert_eq!(folders, 1);
-        assert_eq!(total_items, 30_000);
+        assert_eq!(total_items, 12_000);
         assert!(cache.get(&older_path).is_none());
         assert!(cache.get(&newer_path).is_some());
     }

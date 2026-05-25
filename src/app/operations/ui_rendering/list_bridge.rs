@@ -28,7 +28,6 @@ pub enum ListAction {
     RequestFolderPreviewLoad(PathBuf),
     RenameWithShell(usize),
     RequestThumbnailPrefetchWithIndex(PathBuf, u32, usize, u64),
-    NotifyIdleVisibleItems(Vec<PathBuf>),
     RequestIconLoad(PathBuf),
 }
 
@@ -84,10 +83,6 @@ impl<'a> ListViewOperations for ListOps<'a> {
                 directory_index,
                 modified,
             ));
-    }
-
-    fn notify_idle_visible_items(&mut self, items: Vec<PathBuf>) {
-        self.actions.push(ListAction::NotifyIdleVisibleItems(items));
     }
 
     fn request_icon_load(&mut self, path: PathBuf) {
@@ -595,12 +590,6 @@ impl ImageViewerApp {
                     .request_thumbnail_prefetch_with_index_and_modified(
                         path, size, index, modified,
                     ),
-                ListAction::NotifyIdleVisibleItems(items) => {
-                    let _ = self
-                        .file_operation_state
-                        .idle_warmup_sender
-                        .send(crate::workers::idle_warmup::IdleWarmupMessage::VisibleItems(items));
-                }
                 ListAction::RequestIconLoad(path) => self.request_icon_load(path),
             }
         }

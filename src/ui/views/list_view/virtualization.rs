@@ -507,7 +507,7 @@ fn render_scrollbar(
 /// Handles prefetch of thumbnails for items near the viewport
 fn handle_prefetch(
     ctx: &mut ListViewContext,
-    ops: &mut dyn ListViewOperations,
+    _ops: &mut dyn ListViewOperations,
     current_scroll: f32,
     viewport_h: f32,
     row_height: f32,
@@ -521,15 +521,4 @@ fn handle_prefetch(
 
     // Export visible range for GPU upload prioritization
     *ctx.visible_index_range = Some((first_visible_index, last_visible_index));
-
-    let mut idle_visible_items = Vec::new();
-    for index in first_visible_index..=last_visible_index {
-        let item = &ctx.items[index];
-        if !item.is_dir {
-            idle_visible_items.push(item.path.clone());
-        }
-    }
-    if !idle_visible_items.is_empty() {
-        ops.notify_idle_visible_items(idle_visible_items);
-    }
 }

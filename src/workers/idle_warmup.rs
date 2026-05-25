@@ -10,14 +10,12 @@ use crate::workers::thumbnail::PriorityThumbnailQueue;
 pub enum IdleWarmupMessage {
     UserActive,
     CurrentDirectory(PathBuf),
-    VisibleItems(Vec<PathBuf>),
     Shutdown,
 }
 
 pub struct IdleWarmupWorker {
     last_activity: Instant,
     current_directory: Option<PathBuf>,
-    pending_thumbnails: Vec<PathBuf>,
     is_warming: bool,
 }
 
@@ -26,7 +24,6 @@ impl IdleWarmupWorker {
         Self {
             last_activity: Instant::now(),
             current_directory: None,
-            pending_thumbnails: Vec::new(),
             is_warming: false,
         }
     }
@@ -63,10 +60,6 @@ pub fn spawn_idle_warmup_worker(
                 }
                 Ok(IdleWarmupMessage::CurrentDirectory(path)) => {
                     worker.current_directory = Some(path);
-                    continue;
-                }
-                Ok(IdleWarmupMessage::VisibleItems(items)) => {
-                    worker.pending_thumbnails = items;
                     continue;
                 }
                 Ok(IdleWarmupMessage::Shutdown) => {

@@ -324,11 +324,13 @@ impl ImageViewerApp {
         let drag_payload_n = self.drag_payload_paths.len();
         let pinned_n = self.pinned_folders.len();
         let dirty_registry_n = self.directory_dirty_registry.len();
+        let eviction_skips_n = self.thumbnail_eviction_skips.len();
+        let attempted_bucket_n = self.cache_manager.attempted_thumbnail_bucket.len();
         let folder_preview_trace = self.cache_manager.folder_preview_trace.take_snapshot();
         let thumbnail_trace = self.cache_manager.thumbnail_trace.take_snapshot();
 
         log::info!(
-            "[MEM-TRACE:{label}] ws={:.1}MB private={:.1}MB items={} all_items={} tabs={} dir_cache={}/{} visible_items={} textures={}/{} texture_target={} folder_tex={}/{} folder_target={} rgba_items={} rgba={:.1}/{:.1}MB pending={} pending_rgba={:.1}MB pending_set={} loading={} folder_loading={} failed_thumbs={} queue={} img_rx={} vram_est={:.1}MB icons={} ext_icons={} drive_icons={} failed_drive_icons={} loading_drive_icons={} gifs={} gif_rgba={:.1}MB visible={:?} thumb_bucket={} folder_bucket={} frame_avg={:.1}ms frame_peak={:.1}ms upload_budget={:.1}ms fs_size={}/{} fs_batch={}/{} fs_reval={} fs_inval_ep={} live_size={}/{} meta={}/{} scanned={} failed_ico={} loading_ico={} del_date={} vis_paths={} mtime_re={} multisel={} drag={} pinned={} dirty_reg={} fp_req={} fp_dup={} fp_dbnc={} fp_inval={} fp_upl={} fp_upl_none={} fp_upl_diff={} fp_evict={} fp_db_w={} fp_comp={} fp_sample={:?} th_req={} th_dupL={} th_dupP={} th_pdel={} th_ram={} th_disp={} th_upl={} th_upl_dup={} th_evict={} th_uniq={} th_top={:?} th_req_sample={:?} th_upl_sample={:?}",
+            "[MEM-TRACE:{label}] ws={:.1}MB private={:.1}MB items={} all_items={} tabs={} dir_cache={}/{} visible_items={} textures={}/{} texture_target={} folder_tex={}/{} folder_target={} rgba_items={} rgba={:.1}/{:.1}MB pending={} pending_rgba={:.1}MB pending_set={} loading={} folder_loading={} failed_thumbs={} queue={} img_rx={} vram_est={:.1}MB icons={} ext_icons={} drive_icons={} failed_drive_icons={} loading_drive_icons={} gifs={} gif_rgba={:.1}MB visible={:?} thumb_bucket={} folder_bucket={} frame_avg={:.1}ms frame_peak={:.1}ms upload_budget={:.1}ms eviction_skips={} attempted_bucket={} fs_size={}/{} fs_batch={}/{} fs_reval={} fs_inval_ep={} live_size={}/{} meta={}/{} scanned={} failed_ico={} loading_ico={} del_date={} vis_paths={} mtime_re={} multisel={} drag={} pinned={} dirty_reg={} fp_req={} fp_dup={} fp_dbnc={} fp_inval={} fp_upl={} fp_upl_none={} fp_upl_diff={} fp_evict={} fp_db_w={} fp_comp={} fp_sample={:?} th_req={} th_dupL={} th_dupP={} th_pdel={} th_ram={} th_disp={} th_upl={} th_upl_dup={} th_evict={} th_uniq={} th_top={:?} th_req_sample={:?} th_upl_sample={:?}",
             bytes_to_mb(process.working_set_bytes),
             bytes_to_mb(process.private_usage_bytes),
             self.items.len(),
@@ -368,6 +370,8 @@ impl ImageViewerApp {
             self.frame_time_avg_ms,
             self.frame_time_peak_ms,
             self.upload_budget_ms,
+            eviction_skips_n,
+            attempted_bucket_n,
             fs_size_cache,
             fs_size_loading,
             fs_batch_cache,
@@ -500,6 +504,9 @@ impl ImageViewerApp {
                     visible_for_trim.as_ref(),
                 );
 
+            self.cache_manager.attempted_thumbnail_bucket.clear();
+            self.cache_manager.attempted_thumbnail_bucket.shrink_to_fit();
+
             if textures_removed > 0
                 || rgba_removed > 0
                 || folder_previews_removed > 0
@@ -590,19 +597,42 @@ impl ImageViewerApp {
             self.directory_cache.clear();
             self.visible_paths_cache.clear();
             self.visible_range_cached = None;
+            self.thumbnail_eviction_skips.clear();
+            self.cache_manager.attempted_thumbnail_bucket.clear();
+        } else if self.thumbnail_eviction_skips.len() > 256 {
+            self.thumbnail_eviction_skips.retain(|_, count| *count > 0);
+            self.thumbnail_eviction_skips.shrink_to_fit();
+            if self.cache_manager.attempted_thumbnail_bucket.len()
+                > MAX_DYNAMIC_TEXTURE_CACHE_ITEMS
+            {
+                self.cache_manager.attempted_thumbnail_bucket.clear();
+            }
         }
 
         // Reuse existing GIF cleanup policy (TTL + bounded memory) without forcing visible preview drop.
         self.gif_manager.cleanup(false);
 
-        if textures_removed > 0 || rgba_removed > 0 || folder_previews_removed > 0 {
+        // Trim per-path icon and extension caches.  These LRU caches hold GPU
+        // texture handles (each ~16–256 KB RGBA) and are never trimmed by the
+        // thumbnail pipeline.  Under memory pressure we cap them at half their
+        // maximum capacity; in soft mode we keep the full capacity.
+        let (icon_cap, ext_cap) = if aggressive {
+            (128, 128)
+        } else {
+            (256, 256)
+        };
+        let (icon_evicted, ext_evicted) = self.item_icon_loader.trim_icon_caches(icon_cap, ext_cap);
+
+        if textures_removed > 0 || rgba_removed > 0 || folder_previews_removed > 0 || icon_evicted > 0 || ext_evicted > 0 {
             log::debug!(
-                "[MEMORY] RAM {:.1}MB -> trimmed textures={} rgba={} folder_previews={} pending={} mode={}",
+                "[MEMORY] RAM {:.1}MB -> trimmed textures={} rgba={} folder_previews={} pending={} icons={} ext_icons={} mode={}",
                 working_set_bytes as f64 / 1024.0 / 1024.0,
                 textures_removed,
                 rgba_removed,
                 folder_previews_removed,
                 max_pending,
+                icon_evicted,
+                ext_evicted,
                 if aggressive { "hard" } else { "soft" }
             );
         }
@@ -734,12 +764,13 @@ impl ImageViewerApp {
         }
     }
 
-    pub(crate) fn visible_grid_paths_snapshot(&self) -> Option<FxHashSet<std::path::PathBuf>> {
-        let mut visible_paths = FxHashSet::default();
+    pub(crate) fn visible_grid_paths_snapshot(&mut self) -> Option<FxHashSet<std::path::PathBuf>> {
+        self.visible_paths_cache.clear();
+        self.visible_range_cached = self.visible_index_range;
 
         if matches!(self.view_mode, ViewMode::Grid) {
             insert_visible_paths_from_range(
-                &mut visible_paths,
+                &mut self.visible_paths_cache,
                 self.items.as_ref().as_slice(),
                 self.visible_index_range,
             );
@@ -749,7 +780,7 @@ impl ImageViewerApp {
             if let Some(snapshot) = self.dual_panel_inactive_state.as_ref() {
                 if matches!(snapshot.view_mode, ViewMode::Grid) {
                     insert_visible_paths_from_range(
-                        &mut visible_paths,
+                        &mut self.visible_paths_cache,
                         visible_items_for_snapshot(snapshot),
                         snapshot.visible_index_range,
                     );
@@ -759,17 +790,21 @@ impl ImageViewerApp {
 
         if self.show_preview_panel && self.multi_selection.len() <= 1 {
             if let Some(selected) = self.selected_file.as_ref() {
-                visible_paths.insert(selected.path.clone());
+                self.visible_paths_cache.insert(selected.path.clone());
             } else if !self.navigation_state.is_computer_view
                 && !self.navigation_state.is_recycle_bin_view
             {
-                visible_paths.insert(std::path::PathBuf::from(
+                self.visible_paths_cache.insert(std::path::PathBuf::from(
                     &self.navigation_state.current_path,
                 ));
             }
         }
 
-        (!visible_paths.is_empty()).then_some(visible_paths)
+        if self.visible_paths_cache.is_empty() {
+            None
+        } else {
+            Some(std::mem::take(&mut self.visible_paths_cache))
+        }
     }
 }
 

@@ -31,7 +31,6 @@ pub enum GridAction {
     RequestThumbnailPrefetchWithIndex(PathBuf, u32, usize, u64),
     RequestIconLoad(PathBuf),
     RenameWithShell(usize),
-    NotifyIdleVisibleItems(Vec<PathBuf>),
 }
 
 /// Operations handler for grid view
@@ -104,10 +103,6 @@ impl<'a> GridViewOperations for GridOps<'a> {
 
     fn rename_with_shell(&mut self, idx: usize) {
         self.actions.push(GridAction::RenameWithShell(idx));
-    }
-
-    fn notify_idle_visible_items(&mut self, items: Vec<PathBuf>) {
-        self.actions.push(GridAction::NotifyIdleVisibleItems(items));
     }
 }
 
@@ -237,6 +232,12 @@ impl ImageViewerApp {
         let folder_icon_texture = self.cache_manager.folder_icon_texture.clone();
         let computer_icon = self.cache_manager.computer_icon.clone();
 
+        let shared_visible_paths = if self.dual_panel_enabled {
+            self.visible_grid_paths_snapshot()
+        } else {
+            None
+        };
+
         // Create context with separate mutable references
         let scroll_to_selected = self.scroll_to_selected;
         let multi_selection = &self.multi_selection;
@@ -262,11 +263,6 @@ impl ImageViewerApp {
             .rectangle_selection_state
             .as_ref()
             .filter(|state| state.view == RectangleSelectionView::Grid);
-        let shared_visible_paths = if self.dual_panel_enabled {
-            self.visible_grid_paths_snapshot()
-        } else {
-            None
-        };
 
         let mut ctx = GridViewContext {
             items: &items,
@@ -545,12 +541,6 @@ impl ImageViewerApp {
                     ),
                 GridAction::RequestIconLoad(path) => self.request_icon_load(path),
                 GridAction::RenameWithShell(idx) => self.rename_with_shell(idx),
-                GridAction::NotifyIdleVisibleItems(items) => {
-                    let _ = self
-                        .file_operation_state
-                        .idle_warmup_sender
-                        .send(crate::workers::idle_warmup::IdleWarmupMessage::VisibleItems(items));
-                }
             }
         }
 

@@ -193,6 +193,28 @@ impl IconLoader {
         )
     }
 
+    /// Trims per-path icon cache and extension icon cache to the given item
+    /// limits, evicting least-recently-used entries first.  Drive icons,
+    /// failed-drive icons, and the folder/computer singletons are not trimmed.
+    /// Returns `(per_path_evicted, extension_evicted)`.
+    pub fn trim_icon_caches(
+        &mut self,
+        max_per_path_items: usize,
+        max_extension_items: usize,
+    ) -> (usize, usize) {
+        let mut per_path_evicted = 0;
+        while self.icon_cache.len() > max_per_path_items {
+            self.icon_cache.pop_lru();
+            per_path_evicted += 1;
+        }
+        let mut extension_evicted = 0;
+        while self.extension_cache.len() > max_extension_items {
+            self.extension_cache.pop_lru();
+            extension_evicted += 1;
+        }
+        (per_path_evicted, extension_evicted)
+    }
+
     /// Set of Jumbo icon cache keys currently being loaded in background.
     /// Tracks file icon Jumbo extractions (separate from drive/folder icons).
     pub fn is_jumbo_icon_loading(&self, cache_key: &str) -> bool {
