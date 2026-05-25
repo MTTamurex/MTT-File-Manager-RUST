@@ -816,6 +816,11 @@ impl ImageViewerApp {
                 self.cache_manager.finish_folder_preview_loading(&data.path);
                 let force_replace = self.pending_folder_preview_replace.remove(&data.path);
 
+                if !self.is_folder_preview_result_relevant(&data.path) {
+                    folder_uploads += 1;
+                    continue;
+                }
+
                 if !data.rgba_data.is_empty() {
                     let cached_size = self
                         .cache_manager
@@ -870,5 +875,34 @@ impl ImageViewerApp {
         {
             ctx.request_repaint();
         }
+    }
+
+    fn is_folder_preview_result_relevant(&self, path: &PathBuf) -> bool {
+        if self.items.iter().any(|item| &item.path == path) {
+            return true;
+        }
+
+        if self.all_items.iter().any(|item| &item.path == path) {
+            return true;
+        }
+
+        if self
+            .selected_file
+            .as_ref()
+            .is_some_and(|selected| &selected.path == path)
+        {
+            return true;
+        }
+
+        self.dual_panel_inactive_state
+            .as_ref()
+            .is_some_and(|snapshot| {
+                let items = if snapshot.items_snapshot_compact {
+                    snapshot.all_items.as_ref()
+                } else {
+                    snapshot.items.as_ref()
+                };
+                items.iter().any(|item| &item.path == path)
+            })
     }
 }

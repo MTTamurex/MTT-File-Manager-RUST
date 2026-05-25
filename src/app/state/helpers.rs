@@ -21,6 +21,7 @@ const IDLE_THUMBNAIL_TEXTURE_KEEP: usize = 8;
 const IDLE_FOLDER_PREVIEW_KEEP: usize = 0;
 const IDLE_RGBA_BUDGET_BYTES: usize = 4 * 1024 * 1024;
 const IDLE_PENDING_THUMBNAILS: usize = 1;
+const NAVIGATION_RGBA_CACHE_ITEMS: usize = 32;
 
 #[derive(Clone, Copy, Debug)]
 struct ProcessMemorySnapshot {
@@ -474,6 +475,84 @@ impl ImageViewerApp {
     /// Runs memory maintenance immediately, bypassing normal periodic throttle.
     pub fn run_memory_maintenance_now(&mut self) {
         self.run_memory_maintenance_impl(true);
+    }
+
+    /// Drops thumbnail work and aggressively downsizes thumbnail caches when
+    /// the visible folder/view changes. This is intentionally separate from
+    /// memory-pressure maintenance: stale thumbnail textures and queued RGBA
+    /// payloads from the previous folder should be released even when total
+    /// process RAM is below the soft limit.
+    pub(crate) fn discard_thumbnail_pipeline_for_navigation(&mut self, reason: &str) {
+        let queued_removed = self.thumbnail_queue.clear_pending();
+
+        let mut receiver_drained = 0usize;
+        while let Ok(thumbnail_data) = self.image_receiver.try_recv() {
+            self.cache_manager.finish_loading(&thumbnail_data.path);
+            self.cache_manager
+                .finish_pending_upload(&thumbnail_data.path);
+            receiver_drained += 1;
+        }
+
+        let mut folder_preview_receiver_drained = 0usize;
+        while let Ok(preview_data) = self.folder_preview_receiver.try_recv() {
+            self.cache_manager
+                .finish_folder_preview_loading(&preview_data.path);
+            folder_preview_receiver_drained += 1;
+        }
+
+        self.cache_manager.loading_set.clear();
+        self.cache_manager.folder_preview_loading.clear();
+        self.cache_manager.pending_upload_set.clear();
+        self.cache_manager.attempted_thumbnail_bucket.clear();
+        self.cache_manager.attempted_thumbnail_bucket.shrink_to_fit();
+        self.pending_thumbnails.clear();
+        self.thumbnail_eviction_skips.clear();
+
+        let old_textures = self.cache_manager.texture_cache.len();
+        let old_texture_cap = self.cache_manager.texture_cache.cap().get();
+        let old_folder_previews = self.cache_manager.folder_preview_cache.len();
+        let old_folder_preview_cap = self.cache_manager.folder_preview_cache.cap().get();
+        let old_rgba_bytes = self.cache_manager.estimate_ram_cache_usage();
+
+        self.cache_manager
+            .retune_texture_cache_capacity(MIN_DYNAMIC_TEXTURE_CACHE_ITEMS);
+        self.cache_manager
+            .retune_folder_preview_cache_capacity(MIN_DYNAMIC_FOLDER_PREVIEW_ITEMS);
+        self.cache_manager
+            .retune_rgba_cache_capacity(NAVIGATION_RGBA_CACHE_ITEMS);
+        self.cache_manager.retune_rgba_budget(MIN_RGBA_BUDGET_BYTES);
+        self.cache_manager.trim_thumbnail_caches(
+            MIN_DYNAMIC_TEXTURE_CACHE_ITEMS,
+            MIN_RGBA_BUDGET_BYTES,
+            MIN_DYNAMIC_FOLDER_PREVIEW_ITEMS,
+            None,
+        );
+
+        self.last_texture_cache_retune = Instant::now()
+            .checked_sub(Duration::from_secs(10))
+            .unwrap_or_else(Instant::now);
+        self.ui_ctx.request_repaint();
+
+        if old_textures > MIN_DYNAMIC_TEXTURE_CACHE_ITEMS
+            || old_folder_previews > MIN_DYNAMIC_FOLDER_PREVIEW_ITEMS
+            || old_rgba_bytes > MIN_RGBA_BUDGET_BYTES
+            || queued_removed > 0
+            || receiver_drained > 0
+            || folder_preview_receiver_drained > 0
+        {
+            log::debug!(
+                "[MEMORY] navigation trim reason={} textures={}/{} folder_previews={}/{} rgba={:.1}MB queued={} receiver={} fp_receiver={}",
+                reason,
+                old_textures,
+                old_texture_cap,
+                old_folder_previews,
+                old_folder_preview_cap,
+                old_rgba_bytes as f64 / 1024.0 / 1024.0,
+                queued_removed,
+                receiver_drained,
+                folder_preview_receiver_drained,
+            );
+        }
     }
 
     fn run_memory_maintenance_impl(&mut self, force: bool) {

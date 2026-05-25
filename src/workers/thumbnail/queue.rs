@@ -64,6 +64,19 @@ impl PriorityThumbnailQueue {
         self.state.lock().pending.len()
     }
 
+    /// Clears all pending thumbnail requests without touching drive profiling
+    /// state. Used on navigation after the UI generation changes: queued
+    /// requests for the previous folder would only produce stale RGBA payloads
+    /// that the UI must later drain and discard.
+    pub fn clear_pending(&self) -> usize {
+        let mut state = self.state.lock();
+        let removed = state.pending.len();
+        state.by_directory.clear();
+        state.pending.clear();
+        state.current_directory = None;
+        removed
+    }
+
     /// Push a thumbnail request with the new IOPriority system
     pub fn push(
         &self,
