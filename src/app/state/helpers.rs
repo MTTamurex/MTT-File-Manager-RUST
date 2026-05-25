@@ -527,6 +527,46 @@ impl ImageViewerApp {
         };
         let working_set_bytes = process_memory.working_set_bytes;
 
+        // Proactive cache trim: even below the soft memory limit, excess
+        // texture/RAM cache entries from a previous folder should not linger
+        // indefinitely.  When the cache is much larger than the current
+        // visible grid requires, trim it down to a modest overshoot (2×)
+        // so memory is released promptly after navigation.
+        if !self.is_in_restore_burst() && thumbnails_active {
+            let texture_keep = self.current_dynamic_texture_keep_count();
+            let texture_count = self.cache_manager.texture_cache.len();
+            let texture_cap = self.cache_manager.texture_cache.cap().get();
+            // Only trim when the cache holds significantly more entries than
+            // the current view needs.  The 2× factor avoids thrashing during
+            // normal scrolling where the cache is intentionally oversized for
+            // scroll-ahead.
+            let excess_threshold = texture_keep.saturating_mul(3).max(MIN_DYNAMIC_TEXTURE_CACHE_ITEMS);
+            if texture_count > excess_threshold || texture_cap > excess_threshold {
+                let target = texture_keep
+                    .saturating_mul(2)
+                    .max(MIN_DYNAMIC_TEXTURE_CACHE_ITEMS);
+                let mut visible_for_proactive = self.visible_grid_paths_snapshot();
+                if let Some(detail_panel_paths) = self.detail_panel_folder_preview_paths_for_trim() {
+                    visible_for_proactive
+                        .get_or_insert_with(FxHashSet::default)
+                        .extend(detail_panel_paths);
+                }
+                self.cache_manager.trim_thumbnail_caches(
+                    target,
+                    self.current_dynamic_rgba_budget_bytes(DEFAULT_DYNAMIC_RGBA_BUDGET_BYTES),
+                    self.current_dynamic_folder_preview_keep_count(),
+                    visible_for_proactive.as_ref(),
+                );
+                log::debug!(
+                    "[MEMORY] proactive trim: textures={}/{} target={} visible_keep={}",
+                    texture_count,
+                    texture_cap,
+                    target,
+                    texture_keep,
+                );
+            }
+        }
+
         const SOFT_LIMIT_BYTES: u64 = 550 * 1024 * 1024;
         const HARD_LIMIT_BYTES: u64 = 700 * 1024 * 1024;
 

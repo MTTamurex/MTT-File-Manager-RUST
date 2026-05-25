@@ -86,12 +86,22 @@ impl ImageViewerApp {
         self.cache_manager.loading_set.clear(); // Clear only pending requests, keep texture cache
         self.cache_manager.folder_preview_loading.clear(); // Clear folder preview loading
         self.cache_manager.pending_upload_set.clear(); // Clear thumbnails awaiting GPU upload
+        // Stale bucket-request data from the previous folder is no longer valid —
+        // keeping it prevents higher-resolution re-requests for paths that no
+        // longer exist in the current view.
+        self.cache_manager.attempted_thumbnail_bucket.clear();
         self.pending_thumbnails.clear(); // Clear pending thumbnails buffer
         self.thumbnail_eviction_skips.clear(); // Generation change makes per-path skips obsolete
         self.loading_icons.clear(); // Clear icon loading requests
         self.loading_extensions.clear(); // Clear extension dedup tracking
         self.failed_icons.clear(); // Retry icon extraction in the new folder generation
         self.scanned_folders.clear();
+        // Force immediate cache retune on the next frame so stale textures from
+        // the previous folder are released quickly instead of lingering for
+        // multiple retune cycles (each limited by the adaptive shrink rate).
+        self.last_texture_cache_retune = Instant::now()
+            .checked_sub(std::time::Duration::from_secs(10))
+            .unwrap_or(Instant::now());
         self.selected_item = None;
         self.is_loading_folder = true;
         self.loading_started_at = Instant::now(); // Track loading start for timeout

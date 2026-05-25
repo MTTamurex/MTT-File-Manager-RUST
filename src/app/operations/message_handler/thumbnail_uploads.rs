@@ -15,7 +15,6 @@ const MAX_INCOMING_THUMBNAIL_BUDGET_MS: u64 = 4;
 const MIN_INCOMING_THUMBNAIL_BUDGET_MS: u64 = 2;
 const TEXTURE_CACHE_RETUNE_INTERVAL_MS: u64 = 900;
 const TEXTURE_CACHE_RETUNE_MIN_DELTA_ITEMS: usize = 16;
-const MAX_TEXTURE_CACHE_SHRINK_PER_RETUNE: usize = 8;
 
 fn live_frame_pressure_ms(app: &ImageViewerApp) -> f32 {
     app.last_actual_frame_ms.max(app.frame_time_avg_ms)
@@ -372,8 +371,16 @@ impl ImageViewerApp {
                 >= TEXTURE_CACHE_RETUNE_MIN_DELTA_ITEMS
             {
                 let retune_texture_items = if target_texture_items < current_texture_items {
+                    let delta = current_texture_items - target_texture_items;
+                    let shrink = if delta > 200 {
+                        (delta / 3).max(64)
+                    } else if delta > 64 {
+                        (delta / 4).max(32)
+                    } else {
+                        16
+                    };
                     current_texture_items
-                        .saturating_sub(MAX_TEXTURE_CACHE_SHRINK_PER_RETUNE)
+                        .saturating_sub(shrink)
                         .max(target_texture_items)
                 } else {
                     target_texture_items
