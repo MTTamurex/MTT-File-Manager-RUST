@@ -66,6 +66,7 @@ impl ImageViewerApp {
                 pending_upload_set: &mut self.cache_manager.pending_upload_set,
                 is_dense_mode: false,
                 is_scrolling: false,
+                allow_thumbnail_requests: true,
                 thumbnail_requests_this_frame: &mut thumbnail_requests_counter,
             };
 

@@ -1,4 +1,4 @@
-use super::{item_renderer, GridViewContext};
+use super::{item_renderer, GridViewContext, ScrollDirection};
 use crate::ui::cache::FxHashSet;
 use eframe::egui::{self, Rect, Ui};
 use rust_i18n::t;
@@ -92,6 +92,8 @@ pub(super) fn render_virtualized_grid(
             count,
             loop_min_row,
             loop_max_row,
+            vis_min_row,
+            vis_max_row,
             is_scrolling,
             clicked_item,
             double_clicked_item,
@@ -295,6 +297,7 @@ fn render_section_indices(
                     double_clicked_item,
                     secondary_clicked_item,
                     is_scrolling,
+                    true,
                 );
             }
         }
@@ -317,6 +320,8 @@ fn render_standard_grid(
     count: usize,
     loop_min_row: usize,
     loop_max_row: usize,
+    vis_min_row: usize,
+    vis_max_row: usize,
     is_scrolling: bool,
     clicked_item: &mut Option<usize>,
     double_clicked_item: &mut Option<usize>,
@@ -324,55 +329,94 @@ fn render_standard_grid(
 ) {
     let t_start = std::time::Instant::now();
     let mut rendered_items = 0usize;
-    let mut slow_items: Vec<(usize, &str, bool, u128)> = Vec::new();
-    for row in loop_min_row..loop_max_row {
-        for col in 0..cols {
-            let index = row * cols + col;
-            if index >= count {
-                break;
-            }
+    let mut slow_items: Vec<(usize, String, bool, u128)> = Vec::new();
 
-            let x_pos = col as f32 * (item_w + padding) + padding;
-            let y_pos = content_min.y + row as f32 * virtual_cell_h + padding - current_scroll;
+    let visible_start = vis_min_row.max(loop_min_row);
+    let visible_end = vis_max_row.min(loop_max_row);
 
-            let item_rect = Rect::from_min_size(
-                egui::pos2(content_min.x + x_pos, y_pos),
-                egui::vec2(item_w, item_h),
-            );
+    // Render visible rows before overscan rows so visible thumbnails get the
+    // per-frame request budget first. This avoids a top-left pop-in pattern
+    // after cache flush/restore where off-screen rows above the viewport could
+    // consume the request cap while the first visible cells briefly showed the
+    // generic file icon.
+    let first_visible_index = (visible_start * cols).min(count.saturating_sub(1));
+    let last_visible_index = (visible_end * cols).min(count).saturating_sub(1);
+    if count > 0 {
+        ctx.scroll_predictor
+            .update(first_visible_index, last_visible_index);
+    }
+    let visible_bottom_first = matches!(ctx.scroll_predictor.direction(), ScrollDirection::Down);
 
-            let t_item = std::time::Instant::now();
-            item_renderer::render_grid_item(
-                ui,
-                index,
-                &ctx.items[index],
-                item_rect,
-                ctx,
-                clicked_item,
-                double_clicked_item,
-                secondary_clicked_item,
-                is_scrolling,
-            );
-            let item_ms = t_item.elapsed().as_millis();
-            if item_ms > 5 {
-                slow_items.push((
+    {
+        let mut render_row = |row: usize, allow_thumbnail_requests: bool| {
+            for col in 0..cols {
+                let index = row * cols + col;
+                if index >= count {
+                    return;
+                }
+
+                let x_pos = col as f32 * (item_w + padding) + padding;
+                let y_pos = content_min.y + row as f32 * virtual_cell_h + padding - current_scroll;
+
+                let item_rect = Rect::from_min_size(
+                    egui::pos2(content_min.x + x_pos, y_pos),
+                    egui::vec2(item_w, item_h),
+                );
+
+                let t_item = std::time::Instant::now();
+                item_renderer::render_grid_item(
+                    ui,
                     index,
-                    &ctx.items[index].name,
-                    ctx.items[index].is_dir,
-                    item_ms,
-                ));
+                    &ctx.items[index],
+                    item_rect,
+                    ctx,
+                    clicked_item,
+                    double_clicked_item,
+                    secondary_clicked_item,
+                    is_scrolling,
+                    allow_thumbnail_requests,
+                );
+                let item_ms = t_item.elapsed().as_millis();
+                if item_ms > 5 {
+                    slow_items.push((
+                        index,
+                        ctx.items[index].name.clone(),
+                        ctx.items[index].is_dir,
+                        item_ms,
+                    ));
+                }
+                rendered_items += 1;
             }
-            rendered_items += 1;
+        };
+
+        let row_batches = [
+            (visible_start, visible_end, true, visible_bottom_first),
+            (loop_min_row, visible_start, false, false),
+            (visible_end, loop_max_row, false, false),
+        ];
+        for (start_row, end_row, allow_thumbnail_requests, reverse_rows) in row_batches {
+            if reverse_rows {
+                for row in (start_row..end_row).rev() {
+                    render_row(row, allow_thumbnail_requests);
+                }
+            } else {
+                for row in start_row..end_row {
+                    render_row(row, allow_thumbnail_requests);
+                }
+            }
         }
     }
 
     let elapsed_ms = t_start.elapsed().as_millis();
     if elapsed_ms > 120 {
         log::warn!(
-            "[PERF-GRID-ITEMS] total={}ms rendered_items={} row_range={}..{} cols={} scrolling={} slow_items={}",
+            "[PERF-GRID-ITEMS] total={}ms rendered_items={} row_range={}..{} visible_rows={}..{} cols={} scrolling={} slow_items={}",
             elapsed_ms,
             rendered_items,
             loop_min_row,
             loop_max_row,
+            visible_start,
+            visible_end,
             cols,
             is_scrolling,
             slow_items.len(),

@@ -86,6 +86,10 @@ impl ScrollPredictor {
             }
         }
     }
+
+    pub fn direction(&self) -> ScrollDirection {
+        self.scroll_direction
+    }
 }
 
 impl Default for ScrollPredictor {

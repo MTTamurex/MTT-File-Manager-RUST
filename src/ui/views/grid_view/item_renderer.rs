@@ -94,6 +94,7 @@ pub(super) fn render_grid_item(
     double_clicked_item: &mut Option<usize>,
     secondary_clicked_item: &mut Option<usize>,
     is_scrolling: bool,
+    allow_thumbnail_requests: bool,
 ) {
     let response = ui.interact(rect, ui.id().with(index), Sense::click_and_drag());
     if response.clicked() {
@@ -291,7 +292,15 @@ pub(super) fn render_grid_item(
     }
 
     let inner_rect = rect.shrink(3.0);
-    render_item_slot_for_grid(ui, inner_rect, index, item, ctx, is_scrolling);
+    render_item_slot_for_grid(
+        ui,
+        inner_rect,
+        index,
+        item,
+        ctx,
+        is_scrolling,
+        allow_thumbnail_requests,
+    );
 }
 
 pub(super) fn render_section_header(ui: &mut Ui, title: &str) {
@@ -312,6 +321,7 @@ fn render_item_slot_for_grid(
     item: &FileEntry,
     ctx: &mut GridViewContext,
     is_scrolling: bool,
+    allow_thumbnail_requests: bool,
 ) {
     use crate::ui::components::item_slot::{render_item_slot, ItemSlotContext};
 
@@ -348,6 +358,7 @@ fn render_item_slot_for_grid(
             pending_upload_set: ctx.pending_upload_set,
             is_dense_mode: false,
             is_scrolling,
+            allow_thumbnail_requests,
             thumbnail_requests_this_frame: &mut ctx.thumbnail_requests_this_frame,
         };
 

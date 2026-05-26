@@ -45,6 +45,7 @@ pub(super) fn render_file_slot<O: ItemSlotOperations>(
         // (2s) prevents the upload->evict->re-request feedback loop after the
         // texture cache is at capacity.
         if (!has_texture || needs_bucket_refresh)
+            && ctx.allow_thumbnail_requests
             && !is_loading
             && !is_failed
             && !is_pending_upload

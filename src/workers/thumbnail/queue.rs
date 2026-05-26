@@ -459,7 +459,6 @@ impl PriorityThumbnailQueue {
 
     /// Pop highest priority item from a specific directory
     fn pop_from_directory(state: &mut QueueState, dir: &PathBuf) -> Option<ThumbnailRequest> {
-        let is_ssd = Self::is_directory_ssd(state, dir);
         let items = state.by_directory.get_mut(dir)?;
 
         if items.is_empty() {
@@ -467,32 +466,25 @@ impl PriorityThumbnailQueue {
             return None;
         }
 
-        let best_idx = if is_ssd {
-            items
-                .iter()
-                .enumerate()
-                .min_by(|(idx_a, a), (idx_b, b)| match a.priority.cmp(&b.priority) {
-                    std::cmp::Ordering::Equal => idx_b.cmp(idx_a),
-                    other => other,
-                })
-                .map(|(idx, _)| idx)?
-        } else {
-            items
-                .iter()
-                .enumerate()
-                .min_by(|(idx_a, a), (idx_b, b)| match a.priority.cmp(&b.priority) {
-                    std::cmp::Ordering::Equal => {
-                        let a_index = a.directory_index.unwrap_or(usize::MAX);
-                        let b_index = b.directory_index.unwrap_or(usize::MAX);
-                        match a_index.cmp(&b_index) {
-                            std::cmp::Ordering::Equal => idx_b.cmp(idx_a),
-                            other => other,
-                        }
+        let best_idx = items
+            .iter()
+            .enumerate()
+            .min_by(|(idx_a, a), (idx_b, b)| match a.priority.cmp(&b.priority) {
+                std::cmp::Ordering::Equal => {
+                    let a_index = a.directory_index.unwrap_or(usize::MAX);
+                    let b_index = b.directory_index.unwrap_or(usize::MAX);
+                    match a_index.cmp(&b_index) {
+                        // Preserve request order for equally-prioritized,
+                        // non-indexed work. Using LIFO here made the grid's
+                        // leftmost visible cells load last on SSD because the
+                        // renderer queues requests left-to-right.
+                        std::cmp::Ordering::Equal => idx_a.cmp(idx_b),
+                        other => other,
                     }
-                    other => other,
-                })
-                .map(|(idx, _)| idx)?
-        };
+                }
+                other => other,
+            })
+            .map(|(idx, _)| idx)?;
 
         let request = items.swap_remove(best_idx);
 

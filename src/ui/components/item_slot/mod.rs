@@ -98,6 +98,10 @@ pub struct ItemSlotContext<'a> {
     pub pending_upload_set: &'a mut FxHashSet<std::path::PathBuf>,
     pub is_dense_mode: bool,
     pub is_scrolling: bool,
+    /// Whether this slot may enqueue thumbnail work. Grid overscan rows are
+    /// rendered for smooth scrolling, but visible slots must get request
+    /// budget first to avoid top-left pop-in after cache flush/restore.
+    pub allow_thumbnail_requests: bool,
     /// Per-frame cap to prevent burst of thumbnail requests on folder entry
     pub thumbnail_requests_this_frame: &'a mut usize,
 }
