@@ -504,7 +504,9 @@ impl ImageViewerApp {
         self.cache_manager.folder_preview_loading.clear();
         self.cache_manager.pending_upload_set.clear();
         self.cache_manager.attempted_thumbnail_bucket.clear();
-        self.cache_manager.attempted_thumbnail_bucket.shrink_to_fit();
+        self.cache_manager
+            .attempted_thumbnail_bucket
+            .shrink_to_fit();
         self.pending_folder_preview_replace.clear();
         self.suppress_next_folder_preview_invalidation.clear();
         self.pending_thumbnails.clear();
@@ -591,7 +593,9 @@ impl ImageViewerApp {
                 );
 
             self.cache_manager.attempted_thumbnail_bucket.clear();
-            self.cache_manager.attempted_thumbnail_bucket.shrink_to_fit();
+            self.cache_manager
+                .attempted_thumbnail_bucket
+                .shrink_to_fit();
 
             if textures_removed > 0
                 || rgba_removed > 0
@@ -627,14 +631,15 @@ impl ImageViewerApp {
             // via retune; during normal scrolling it overshoots by ~1.5× for
             // scroll-ahead.  Trimming back to 1.25× releases excess without
             // causing visible flashing.
-            let excess_threshold = (texture_keep + (texture_keep / 2))
-                .max(MIN_DYNAMIC_TEXTURE_CACHE_ITEMS);
+            let excess_threshold =
+                (texture_keep + (texture_keep / 2)).max(MIN_DYNAMIC_TEXTURE_CACHE_ITEMS);
             if texture_count > excess_threshold || texture_cap > excess_threshold {
                 let target = texture_keep
                     .saturating_add(texture_keep / 4)
                     .max(MIN_DYNAMIC_TEXTURE_CACHE_ITEMS);
                 let mut visible_for_proactive = self.visible_grid_paths_snapshot();
-                if let Some(detail_panel_paths) = self.detail_panel_folder_preview_paths_for_trim() {
+                if let Some(detail_panel_paths) = self.detail_panel_folder_preview_paths_for_trim()
+                {
                     visible_for_proactive
                         .get_or_insert_with(FxHashSet::default)
                         .extend(detail_panel_paths);
@@ -730,8 +735,7 @@ impl ImageViewerApp {
         } else if self.thumbnail_eviction_skips.len() > 256 {
             self.thumbnail_eviction_skips.retain(|_, count| *count > 0);
             self.thumbnail_eviction_skips.shrink_to_fit();
-            if self.cache_manager.attempted_thumbnail_bucket.len()
-                > MAX_DYNAMIC_TEXTURE_CACHE_ITEMS
+            if self.cache_manager.attempted_thumbnail_bucket.len() > MAX_DYNAMIC_TEXTURE_CACHE_ITEMS
             {
                 self.cache_manager.attempted_thumbnail_bucket.clear();
             }
@@ -744,14 +748,15 @@ impl ImageViewerApp {
         // texture handles (each ~16–256 KB RGBA) and are never trimmed by the
         // thumbnail pipeline.  Under memory pressure we cap them at half their
         // maximum capacity; in soft mode we keep the full capacity.
-        let (icon_cap, ext_cap) = if aggressive {
-            (128, 128)
-        } else {
-            (256, 256)
-        };
+        let (icon_cap, ext_cap) = if aggressive { (128, 128) } else { (256, 256) };
         let (icon_evicted, ext_evicted) = self.item_icon_loader.trim_icon_caches(icon_cap, ext_cap);
 
-        if textures_removed > 0 || rgba_removed > 0 || folder_previews_removed > 0 || icon_evicted > 0 || ext_evicted > 0 {
+        if textures_removed > 0
+            || rgba_removed > 0
+            || folder_previews_removed > 0
+            || icon_evicted > 0
+            || ext_evicted > 0
+        {
             log::debug!(
                 "[MEMORY] RAM {:.1}MB -> trimmed textures={} rgba={} folder_previews={} pending={} icons={} ext_icons={} mode={}",
                 working_set_bytes as f64 / 1024.0 / 1024.0,

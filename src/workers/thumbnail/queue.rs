@@ -486,7 +486,7 @@ impl PriorityThumbnailQueue {
             })
             .map(|(idx, _)| idx)?;
 
-        let request = items.swap_remove(best_idx);
+        let request = items.remove(best_idx);
 
         // Clean up empty directories
         if items.is_empty() {
@@ -526,6 +526,35 @@ mod tests {
 
         let (path, _, _, _, _, _, _) = queue.pop().unwrap();
         assert_eq!(path, path_b);
+    }
+
+    #[test]
+    fn equal_priority_non_indexed_requests_preserve_fifo_order() {
+        let dir = tempdir().unwrap();
+        let parent = dir.path().join("dir");
+        std::fs::create_dir(&parent).unwrap();
+        let path_a = parent.join("a.png");
+        let path_b = parent.join("b.png");
+        let path_c = parent.join("c.png");
+
+        let queue = PriorityThumbnailQueue::new();
+        {
+            let mut state = queue.state.lock();
+            state
+                .drive_is_ssd
+                .insert(PriorityThumbnailQueue::drive_key(&path_a), true);
+        }
+
+        queue.push(path_a.clone(), 1, 64, IOPriority::Prefetch, 0);
+        queue.push(path_b.clone(), 1, 64, IOPriority::Prefetch, 0);
+        queue.push(path_c.clone(), 1, 64, IOPriority::Prefetch, 0);
+
+        let (path, _, _, _, _, _, _) = queue.pop().unwrap();
+        assert_eq!(path, path_a);
+        let (path, _, _, _, _, _, _) = queue.pop().unwrap();
+        assert_eq!(path, path_b);
+        let (path, _, _, _, _, _, _) = queue.pop().unwrap();
+        assert_eq!(path, path_c);
     }
 
     #[test]
