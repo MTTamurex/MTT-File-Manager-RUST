@@ -233,6 +233,14 @@ fn deferred_retry_loop(queue: Arc<PriorityThumbnailQueue>, gen_tracker: Arc<Atom
         let current_gen = gen_tracker.load(Ordering::Relaxed);
 
         for (path, entry) in entries {
+            if entry.req_generation != current_gen {
+                log::debug!(
+                    "[THUMB-RETRY] Dropping stale deferred entry: {:?}",
+                    path.file_name()
+                );
+                continue;
+            }
+
             // Drop stale entries that have been waiting too long.
             if deferred_entry_expired(&entry) {
                 log::debug!(

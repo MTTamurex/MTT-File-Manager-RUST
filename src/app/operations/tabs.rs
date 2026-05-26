@@ -84,6 +84,9 @@ impl ImageViewerApp {
     pub fn sync_from_tab(&mut self) {
         let sync_start = std::time::Instant::now();
         self.invalidate_active_items_rebuild();
+        let previous_path = self.navigation_state.current_path.clone();
+        let previous_is_computer_view = self.navigation_state.is_computer_view;
+        let previous_is_recycle_bin_view = self.navigation_state.is_recycle_bin_view;
         let source_tab_id = self.tab_manager.active().id;
         let source_tab_items_len = self.tab_manager.active().visible_items_len();
         let source_tab_all_items_len = self.tab_manager.active().all_items.len();
@@ -181,6 +184,13 @@ impl ImageViewerApp {
 
         self.current_generation
             .store(self.generation, AtomicOrdering::Relaxed);
+
+        if self.navigation_state.current_path != previous_path
+            || self.navigation_state.is_computer_view != previous_is_computer_view
+            || self.navigation_state.is_recycle_bin_view != previous_is_recycle_bin_view
+        {
+            self.discard_thumbnail_pipeline_for_navigation("tab-switch");
+        }
 
         // Restore per-tab sidebar state (expanded nodes + scroll position)
         {

@@ -161,7 +161,7 @@ pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
             // still valid and clearing them just forces unnecessary re-uploads
             // that cause visible stutter.
             if idle_secs >= 60.0 {
-                flush_gpu_textures_for_reupload(app);
+                flush_gpu_textures_for_reupload(app, "focus-restore");
             }
             // Burst window: short and proportional.  The purpose is only to
             // let the upload pipeline run at full speed while the first few
@@ -200,7 +200,7 @@ pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
             app.last_restore_time = std::time::Instant::now();
             app.frame_time_peak_ms = app.frame_time_avg_ms.max(16.0);
             if minimized_secs >= 60.0 {
-                flush_gpu_textures_for_reupload(app);
+                flush_gpu_textures_for_reupload(app, "minimize-restore");
             }
             if minimized_secs > 5.0 {
                 let burst_secs = (2.0 + minimized_secs / 120.0).min(5.0);
@@ -256,11 +256,12 @@ pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
 /// Only the VRAM layer is cleared — the RGBA RAM cache (Layer 2) is kept intact,
 /// so re-uploads are fast (no disk I/O).  Icons and folder previews are also
 /// flushed since they suffer from the same paging effect.
-fn flush_gpu_textures_for_reupload(app: &mut ImageViewerApp) {
+fn flush_gpu_textures_for_reupload(app: &mut ImageViewerApp, reason: &str) {
     let textures = app.cache_manager.texture_cache.len();
     let folder_previews = app.cache_manager.folder_preview_cache.len();
     let icons = app.cache_manager.icon_cache.len();
 
+    app.discard_thumbnail_pipeline_for_navigation(reason);
     app.cache_manager.texture_cache.clear();
     app.cache_manager.folder_preview_cache.clear();
     app.cache_manager.folder_preview_loading.clear();
@@ -273,8 +274,8 @@ fn flush_gpu_textures_for_reupload(app: &mut ImageViewerApp) {
     app.pending_thumbnails.clear();
 
     log::info!(
-        "[LIFECYCLE] Flushed GPU textures for re-upload: {} thumbnails, {} folder previews, {} icons",
-        textures, folder_previews, icons
+        "[LIFECYCLE] Flushed thumbnail pipeline after prolonged inactivity reason={}: {} thumbnails, {} folder previews, {} icons",
+        reason, textures, folder_previews, icons
     );
 }
 

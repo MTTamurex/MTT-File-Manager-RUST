@@ -505,6 +505,8 @@ impl ImageViewerApp {
         self.cache_manager.pending_upload_set.clear();
         self.cache_manager.attempted_thumbnail_bucket.clear();
         self.cache_manager.attempted_thumbnail_bucket.shrink_to_fit();
+        self.pending_folder_preview_replace.clear();
+        self.suppress_next_folder_preview_invalidation.clear();
         self.pending_thumbnails.clear();
         self.thumbnail_eviction_skips.clear();
 
@@ -527,6 +529,7 @@ impl ImageViewerApp {
             MIN_DYNAMIC_FOLDER_PREVIEW_ITEMS,
             None,
         );
+        let (icon_evicted, ext_icon_evicted) = self.item_icon_loader.trim_icon_caches(128, 128);
 
         self.last_texture_cache_retune = Instant::now()
             .checked_sub(Duration::from_secs(10))
@@ -539,9 +542,11 @@ impl ImageViewerApp {
             || queued_removed > 0
             || receiver_drained > 0
             || folder_preview_receiver_drained > 0
+            || icon_evicted > 0
+            || ext_icon_evicted > 0
         {
             log::debug!(
-                "[MEMORY] navigation trim reason={} textures={}/{} folder_previews={}/{} rgba={:.1}MB queued={} receiver={} fp_receiver={}",
+                "[MEMORY] navigation trim reason={} textures={}/{} folder_previews={}/{} rgba={:.1}MB queued={} receiver={} fp_receiver={} icons={} ext_icons={}",
                 reason,
                 old_textures,
                 old_texture_cap,
@@ -551,6 +556,8 @@ impl ImageViewerApp {
                 queued_removed,
                 receiver_drained,
                 folder_preview_receiver_drained,
+                icon_evicted,
+                ext_icon_evicted,
             );
         }
     }
