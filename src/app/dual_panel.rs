@@ -161,6 +161,7 @@ pub struct PanelSnapshot {
     pub sort_mode: SortMode,
     pub sort_descending: bool,
     pub folders_position: FoldersPosition,
+    pub current_folder_locked: bool,
     pub list_column_widths: PanelListColumnWidths,
 
     // Scroll
@@ -253,6 +254,7 @@ impl PanelSnapshot {
             sort_mode: app.sort_mode,
             sort_descending: app.sort_descending,
             folders_position: app.folders_position,
+            current_folder_locked: app.current_folder_locked,
             list_column_widths: PanelListColumnWidths::from_layout(&app.layout),
             scroll_offset_y: app.scroll_offset_y,
             scroll_to_selected: app.scroll_to_selected,
@@ -298,6 +300,7 @@ impl PanelSnapshot {
         app.sort_mode = self.sort_mode;
         app.sort_descending = self.sort_descending;
         app.folders_position = self.folders_position;
+        app.current_folder_locked = self.current_folder_locked;
         self.list_column_widths.apply_to_layout(&mut app.layout);
         app.scroll_offset_y = self.scroll_offset_y;
         app.scroll_to_selected = self.scroll_to_selected;
@@ -352,6 +355,10 @@ impl PanelSnapshot {
         std::mem::swap(&mut self.sort_mode, &mut app.sort_mode);
         std::mem::swap(&mut self.sort_descending, &mut app.sort_descending);
         std::mem::swap(&mut self.folders_position, &mut app.folders_position);
+        std::mem::swap(
+            &mut self.current_folder_locked,
+            &mut app.current_folder_locked,
+        );
         self.list_column_widths.swap_with_layout(&mut app.layout);
         std::mem::swap(&mut self.scroll_offset_y, &mut app.scroll_offset_y);
         std::mem::swap(&mut self.scroll_to_selected, &mut app.scroll_to_selected);

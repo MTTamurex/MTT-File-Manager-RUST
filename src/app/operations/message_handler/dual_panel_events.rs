@@ -170,6 +170,7 @@ impl ImageViewerApp {
                 app.navigation_state.path_input = parent_path;
                 app.navigation_state.is_computer_view = false;
                 app.navigation_state.is_recycle_bin_view = false;
+                app.apply_folder_lock_if_present();
                 app.load_folder_for_inactive();
             } else {
                 app.navigation_state

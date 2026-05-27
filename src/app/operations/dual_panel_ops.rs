@@ -85,6 +85,9 @@ impl ImageViewerApp {
 
         // Zero-alloc swap: active ↔ inactive
         snapshot.swap_with_app(self);
+        // Re-evaluate the restored panel's folder lock without resetting
+        // saved unlocked view settings from its panel snapshot.
+        self.apply_folder_lock_on_tab_restore();
         self.dual_panel_inactive_state = Some(snapshot);
         self.dual_panel_active = self.dual_panel_active.other();
         self.invalidate_active_items_rebuild();
