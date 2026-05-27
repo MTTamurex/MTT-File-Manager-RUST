@@ -28,6 +28,7 @@ impl ImageViewerApp {
                     folders_position,
                 );
                 self.share_visible_items_from_all_items();
+                self.rebuild_computer_view_indices();
             }
         }
         self.total_items = self.items.len();
@@ -69,5 +70,26 @@ impl ImageViewerApp {
             );
         }
         self.reconcile_visible_selection_index();
+        self.rebuild_computer_view_indices();
+    }
+
+    fn rebuild_computer_view_indices(&mut self) {
+        if !self.navigation_state.is_computer_view {
+            return;
+        }
+        self.navigation_state.computer_view_local_indices.clear();
+        self.navigation_state.computer_view_network_indices.clear();
+        for (i, item) in self.items.iter().enumerate() {
+            let is_remote = item.drive_info.as_ref().is_some_and(|di| {
+                di.drive_type == crate::infrastructure::windows::DriveType::Remote
+            });
+            if is_remote {
+                self.navigation_state
+                    .computer_view_network_indices
+                    .push(i);
+            } else {
+                self.navigation_state.computer_view_local_indices.push(i);
+            }
+        }
     }
 }
