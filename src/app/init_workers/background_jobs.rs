@@ -1,5 +1,6 @@
 use crate::infrastructure::app_state_db::AppStateDb;
 use crate::infrastructure::disk_cache::ThumbnailDiskCache;
+use crate::infrastructure::icon_disk_cache::IconDiskCache;
 use eframe::egui;
 use std::sync::atomic::Ordering;
 use std::sync::{mpsc, Arc};
@@ -94,6 +95,40 @@ pub(in crate::app) fn spawn_incremental_gc_worker(
                 GC_IDLE_INTERVAL_SECS
             } else {
                 GC_ACTIVE_INTERVAL_SECS
+            };
+            if !sleep_until_next_cycle(sleep_secs) {
+                break;
+            }
+        }
+    });
+}
+
+pub(in crate::app) fn spawn_file_icon_cache_gc_worker(icon_disk_cache: Arc<IconDiskCache>) {
+    std::thread::spawn(move || {
+        const INITIAL_DELAY_SECS: u64 = 30;
+        const ACTIVE_INTERVAL_SECS: u64 = 300;
+        const IDLE_INTERVAL_SECS: u64 = 60;
+
+        fn sleep_until_next_cycle(total_secs: u64) -> bool {
+            for _ in 0..total_secs {
+                if !GC_WORKER_RUNNING.load(Ordering::Relaxed) {
+                    return false;
+                }
+                std::thread::sleep(std::time::Duration::from_secs(1));
+            }
+            GC_WORKER_RUNNING.load(Ordering::Relaxed)
+        }
+
+        if !sleep_until_next_cycle(INITIAL_DELAY_SECS) {
+            return;
+        }
+
+        while GC_WORKER_RUNNING.load(Ordering::Relaxed) {
+            let _ = icon_disk_cache.garbage_collect_file_icons();
+            let sleep_secs = if crate::infrastructure::onedrive::is_app_minimized() {
+                IDLE_INTERVAL_SECS
+            } else {
+                ACTIVE_INTERVAL_SECS
             };
             if !sleep_until_next_cycle(sleep_secs) {
                 break;

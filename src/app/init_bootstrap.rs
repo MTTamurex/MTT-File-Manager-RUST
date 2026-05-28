@@ -22,10 +22,11 @@ use super::folder_size_state::FolderSizeMessage;
 use super::init_preferences::StartupPreferences;
 use super::init_workers::{
     spawn_async_font_loader, spawn_consistency_probe_worker, spawn_cover_worker,
-    spawn_disk_cache_invalidation_worker, spawn_file_operation_worker,
-    spawn_folder_preview_workers, spawn_folder_size_batch_worker, spawn_folder_size_worker,
-    spawn_global_search_worker, spawn_icon_worker, spawn_live_file_size_worker,
-    spawn_metadata_worker, spawn_prefetching_workers, PrefetchWorkerHandles,
+    spawn_disk_cache_invalidation_worker, spawn_file_icon_cache_gc_worker,
+    spawn_file_operation_worker, spawn_folder_preview_workers, spawn_folder_size_batch_worker,
+    spawn_folder_size_worker, spawn_global_search_worker, spawn_icon_worker,
+    spawn_live_file_size_worker, spawn_metadata_worker, spawn_prefetching_workers,
+    PrefetchWorkerHandles,
 };
 use super::state::ItemsRebuildResult;
 
@@ -220,6 +221,7 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
     );
 
     let icon_disk_cache = Arc::new(IconDiskCache::new(&base_dir));
+    spawn_file_icon_cache_gc_worker(icon_disk_cache.clone());
     let (icon_req_tx, icon_res_rx) = spawn_icon_worker(ctx, shared_gen.clone(), icon_disk_cache);
 
     let (meta_req_tx, meta_res_rx) = spawn_metadata_worker(ctx);

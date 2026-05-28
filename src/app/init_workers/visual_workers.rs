@@ -232,7 +232,19 @@ pub(in crate::app) fn spawn_icon_worker(
                     let icon_result = if is_virtual_archive_path {
                         extract_shell_icon(&path, IconSize::Jumbo)
                     } else if per_file_icon {
-                        extract_file_icon_by_path(&path, IconSize::Jumbo)
+                        if let Some(cache_key) = disk_cache.file_icon_cache_key(&path, IconSize::Jumbo) {
+                            if let Some(cached) = disk_cache.load_file_icon(&cache_key) {
+                                Ok(cached)
+                            } else {
+                                let result = extract_file_icon_by_path(&path, IconSize::Jumbo);
+                                if let Ok((pixels, width, height)) = &result {
+                                    disk_cache.save_file_icon(&cache_key, pixels, *width, *height);
+                                }
+                                result
+                            }
+                        } else {
+                            extract_file_icon_by_path(&path, IconSize::Jumbo)
+                        }
                     } else {
                         let ext_raw = ext_lower.as_deref().unwrap_or("");
                         let ext_str = crate::infrastructure::windows::icons::canonical_icon_ext(ext_raw);

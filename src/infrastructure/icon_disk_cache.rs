@@ -1,12 +1,18 @@
-//! Persistent disk cache for extension-based file icons.
+//! Persistent disk cache for shell icons.
 //!
 //! Stores raw RGBA pixel data per extension so that subsequent app launches
 //! can hydrate the `extension_cache` lazily without calling `SHGetFileInfoW`.
+//! Unique per-file icons are stored separately in SQLite as lossless PNG blobs.
 //!
 //! File format per extension: `{ext}.rgba`
 //!   [width: u32 LE][height: u32 LE][rgba_pixels...]
 
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+
+mod file_icons;
+pub use file_icons::FileIconCacheKey;
+use rusqlite::Connection;
 
 const RGBA_HEADER_LEN: usize = 8;
 const RGBA_BYTES_PER_PIXEL: usize = 4;
@@ -15,7 +21,7 @@ const MAX_ICON_RGBA_BYTES: usize =
     (MAX_ICON_DIMENSION as usize) * (MAX_ICON_DIMENSION as usize) * RGBA_BYTES_PER_PIXEL;
 const MAX_ICON_CACHE_FILE_BYTES: u64 = (RGBA_HEADER_LEN + MAX_ICON_RGBA_BYTES) as u64;
 
-fn expected_rgba_len(width: u32, height: u32) -> Option<usize> {
+pub(super) fn expected_rgba_len(width: u32, height: u32) -> Option<usize> {
     if width == 0 || height == 0 || width > MAX_ICON_DIMENSION || height > MAX_ICON_DIMENSION {
         return None;
     }
@@ -57,19 +63,32 @@ fn parse_cached_icon(mut data: Vec<u8>) -> Option<(Vec<u8>, u32, u32)> {
     Some((data, width, height))
 }
 
-/// On-disk cache for extension → RGBA icon data.
+/// On-disk cache for extension → RGBA icon data and per-file unique icons.
 pub struct IconDiskCache {
-    dir: PathBuf,
+    extension_dir: PathBuf,
+    pub(super) file_icon_db: Mutex<Connection>,
+    pub(super) file_icon_trim_lock: Mutex<()>,
 }
 
 impl IconDiskCache {
     /// Create (or open) the icon disk cache directory.
     pub fn new(app_data_dir: &Path) -> Self {
-        let dir = app_data_dir.join("extension_icons");
-        if let Err(e) = std::fs::create_dir_all(&dir) {
-            log::warn!("[IconDiskCache] Failed to create dir {:?}: {}", dir, e);
+        let extension_dir = app_data_dir.join("extension_icons");
+        if let Err(e) = std::fs::create_dir_all(&extension_dir) {
+            log::warn!(
+                "[IconDiskCache] Failed to create dir {:?}: {}",
+                extension_dir,
+                e
+            );
         }
-        Self { dir }
+
+        let file_icon_db = file_icons::open_file_icon_db(app_data_dir);
+
+        Self {
+            extension_dir,
+            file_icon_db: Mutex::new(file_icon_db),
+            file_icon_trim_lock: Mutex::new(()),
+        }
     }
 
     /// Lazily load a single extension's cached icon from disk on demand.
@@ -90,12 +109,14 @@ impl IconDiskCache {
         let ext_lower = ext.to_lowercase();
         let canonical = crate::infrastructure::windows::icons::canonical_icon_ext(&ext_lower);
         if canonical != ext_lower {
-            let _ = std::fs::remove_file(self.dir.join(format!("{}.rgba", ext_lower)));
+            let _ = std::fs::remove_file(self.extension_dir.join(format!("{}.rgba", ext_lower)));
         }
         if crate::infrastructure::windows::icons::requires_real_file_for_shared_icon(canonical) {
             return None;
         }
-        let path = self.dir.join(format!("{}.rgba", canonical.to_lowercase()));
+        let path = self
+            .extension_dir
+            .join(format!("{}.rgba", canonical.to_lowercase()));
         let Some((pixels, width, height)) = read_cache_file(&path).and_then(parse_cached_icon)
         else {
             let _ = std::fs::remove_file(&path);
@@ -119,7 +140,9 @@ impl IconDiskCache {
         if crate::infrastructure::windows::icons::requires_real_file_for_shared_icon(canonical) {
             return;
         }
-        let path = self.dir.join(format!("{}.rgba", canonical.to_lowercase()));
+        let path = self
+            .extension_dir
+            .join(format!("{}.rgba", canonical.to_lowercase()));
         // Don't overwrite if already exists (another worker may have written it).
         if path.exists() {
             return;
