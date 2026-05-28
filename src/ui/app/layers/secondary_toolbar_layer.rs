@@ -53,7 +53,7 @@ pub(crate) fn render_secondary_toolbar_layer(app: &mut ImageViewerApp, ctx: &egu
                     ui,
                     &mut app.svg_icon_manager,
                     "sidebar_left_panel",
-                    !app.show_left_sidebar,
+                    app.show_left_sidebar,
                     &sidebar_tooltip,
                     toggle_icon_size,
                     toggle_padding,
