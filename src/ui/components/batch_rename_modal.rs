@@ -5,7 +5,8 @@ use crate::app::batch_rename::{
     BatchRenameState, DragState, NumberPosition, NumberSeparator, PreviewRow,
 };
 use crate::app::state::ImageViewerApp;
-use eframe::egui::{self, Color32, RichText, Sense, Stroke};
+use crate::ui::theme;
+use eframe::egui::{self, Color32, Margin, RichText, Sense, Stroke, Vec2};
 use rust_i18n::t;
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -13,6 +14,7 @@ use rust_i18n::t;
 const ROW_HEIGHT: f32 = 22.0;
 const HANDLE_WIDTH: f32 = 24.0;
 const NUM_WIDTH: f32 = 28.0;
+const BACKDROP_ALPHA: u8 = 72;
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 
@@ -26,8 +28,79 @@ pub fn render_batch_rename_modal(app: &mut ImageViewerApp, ctx: &egui::Context) 
     let title = t!("batch_rename.title", count = state.sources.len()).to_string();
     let mut open = true;
 
-    egui::Window::new(title)
+    let screen_rect = ctx.screen_rect();
+
+    // ── Backdrop (blocks interaction outside the modal) ──────────────────────
+    let mut close_from_backdrop = false;
+    egui::Area::new(egui::Id::from("batch_rename_backdrop"))
+        .fixed_pos(screen_rect.min)
+        .order(egui::Order::Middle)
+        .show(ctx, |ui| {
+            ui.set_min_size(screen_rect.size());
+            let backdrop_rect = ui.max_rect();
+            let backdrop_resp = ui.interact(
+                backdrop_rect,
+                ui.id().with("batch_rename_backdrop_interact"),
+                egui::Sense::click(),
+            );
+            ui.painter().rect_filled(
+                backdrop_rect,
+                0.0,
+                Color32::from_black_alpha(BACKDROP_ALPHA),
+            );
+            if backdrop_resp.clicked() {
+                close_from_backdrop = true;
+            }
+        });
+
+    if close_from_backdrop {
+        app.batch_rename_state = None;
+        return;
+    }
+
+    // ESC cancels
+    if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+        app.batch_rename_state = None;
+        return;
+    }
+
+    let dark_mode = ctx.style().visuals.dark_mode;
+    let bg_color = if dark_mode {
+        Color32::from_rgb(50, 50, 50)
+    } else {
+        Color32::from_rgb(250, 250, 250)
+    };
+
+    let frame = egui::Frame::new()
+        .inner_margin(Margin {
+            left: 24,
+            right: 24,
+            top: 20,
+            bottom: 16,
+        })
+        .corner_radius(10.0)
+        .fill(bg_color)
+        .stroke(Stroke::new(
+            1.0,
+            if dark_mode {
+                Color32::from_gray(70)
+            } else {
+                Color32::from_gray(220)
+            },
+        ))
+        .shadow(egui::epaint::Shadow {
+            spread: 4,
+            blur: 12,
+            color: Color32::from_black_alpha(25),
+            offset: [0, 3],
+        });
+
+    let mut do_apply = false;
+    let mut do_cancel = false;
+
+    egui::Window::new("")
         .open(&mut open)
+        .title_bar(false)
         .collapsible(false)
         .resizable(true)
         .default_width(600.0)
@@ -36,12 +109,22 @@ pub fn render_batch_rename_modal(app: &mut ImageViewerApp, ctx: &egui::Context) 
         .min_height(380.0)
         .max_height(800.0)
         .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+        .frame(frame)
         .show(ctx, |ui| {
             // We take ownership of the state for the frame, then put it back.
-            // This avoids borrow-checker issues when calling mutable methods.
             let mut state = app.batch_rename_state.take().unwrap();
 
-            render_controls(ui, &mut state);
+            // Header
+            ui.label(
+                RichText::new(&title)
+                    .size(18.0)
+                    .strong()
+                    .color(theme::text_color(dark_mode)),
+            );
+
+            ui.add_space(14.0);
+
+            render_controls(ui, &mut state, dark_mode);
 
             ui.add_space(6.0);
             ui.separator();
@@ -55,14 +138,22 @@ pub fn render_batch_rename_modal(app: &mut ImageViewerApp, ctx: &egui::Context) 
             // where available_height() grows with the window, causing infinite expansion.
             let half = 140.0_f32;
 
-            ui.label(RichText::new(t!("batch_rename.rename_order")).strong());
+            ui.label(
+                RichText::new(t!("batch_rename.rename_order"))
+                    .strong()
+                    .color(theme::text_color(dark_mode)),
+            );
             ui.add_space(2.0);
-            render_reorderable_list(ui, &mut state, &preview, half);
+            render_reorderable_list(ui, &mut state, &preview, half, dark_mode);
 
             ui.add_space(6.0);
-            ui.label(RichText::new(t!("batch_rename.preview")).strong());
+            ui.label(
+                RichText::new(t!("batch_rename.preview"))
+                    .strong()
+                    .color(theme::text_color(dark_mode)),
+            );
             ui.add_space(2.0);
-            render_preview_table(ui, &preview, half);
+            render_preview_table(ui, &preview, half, dark_mode);
 
             // Conflict warning banner
             let conflict_count = preview.iter().filter(|r| r.conflict).count();
@@ -80,21 +171,47 @@ pub fn render_batch_rename_modal(app: &mut ImageViewerApp, ctx: &egui::Context) 
             ui.separator();
             ui.add_space(4.0);
 
-            // ── Button row ────────────────────────────────────────────────────
-            let mut do_apply = false;
-            let mut do_cancel = false;
+            // ── Button row (right-aligned) ───────────────────────────────────
+            let apply_enabled = !state.name_template.is_empty() && valid_count > 0;
+            let apply_label = t!("batch_rename.btn_rename", count = valid_count).to_string();
 
-            ui.horizontal(|ui| {
-                let apply_enabled = !state.name_template.is_empty() && valid_count > 0;
-                let apply_label = t!("batch_rename.btn_rename", count = valid_count).to_string();
-
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.add_enabled_ui(apply_enabled, |ui| {
-                    if ui.button(apply_label).clicked() {
+                    if ui
+                        .add_sized(
+                            Vec2::new(140.0, 34.0),
+                            egui::Button::new(
+                                RichText::new(apply_label)
+                                    .size(14.0)
+                                    .strong()
+                                    .color(Color32::WHITE),
+                            )
+                            .fill(theme::COLOR_ACCENT),
+                        )
+                        .clicked()
+                    {
                         do_apply = true;
                     }
                 });
 
-                if ui.button(t!("batch_rename.btn_cancel")).clicked() {
+                ui.add_space(12.0);
+
+                if ui
+                    .add_sized(
+                        Vec2::new(90.0, 34.0),
+                        egui::Button::new(
+                            RichText::new(t!("batch_rename.btn_cancel"))
+                                .size(14.0)
+                                .color(theme::secondary_text_color(dark_mode)),
+                        )
+                        .fill(Color32::TRANSPARENT)
+                        .stroke(Stroke::new(
+                            1.0,
+                            theme::secondary_text_color(dark_mode),
+                        )),
+                    )
+                    .clicked()
+                {
                     do_cancel = true;
                 }
             });
@@ -109,7 +226,8 @@ pub fn render_batch_rename_modal(app: &mut ImageViewerApp, ctx: &egui::Context) 
             }
         });
 
-    // If the user closed the window via the X button
+    // If the user closed the window via the X button (title_bar is false, so this
+    // only fires if something else sets open = false).
     if !open {
         app.batch_rename_state = None;
     }
@@ -117,13 +235,15 @@ pub fn render_batch_rename_modal(app: &mut ImageViewerApp, ctx: &egui::Context) 
 
 // ── Controls row ─────────────────────────────────────────────────────────────
 
-fn render_controls(ui: &mut egui::Ui, state: &mut BatchRenameState) {
+fn render_controls(ui: &mut egui::Ui, state: &mut BatchRenameState, dark_mode: bool) {
     egui::Grid::new("batch_rename_controls")
         .num_columns(2)
         .spacing([12.0, 6.0])
         .show(ui, |ui| {
             // Row 1 — Name template
-            ui.label(t!("batch_rename.base_name"));
+            ui.label(
+                RichText::new(t!("batch_rename.base_name")).color(theme::text_color(dark_mode)),
+            );
             ui.add(
                 egui::TextEdit::singleline(&mut state.name_template)
                     .desired_width(f32::INFINITY)
@@ -132,7 +252,9 @@ fn render_controls(ui: &mut egui::Ui, state: &mut BatchRenameState) {
             ui.end_row();
 
             // Row 2 — Position + Separator
-            ui.label(t!("batch_rename.position"));
+            ui.label(
+                RichText::new(t!("batch_rename.position")).color(theme::text_color(dark_mode)),
+            );
             ui.horizontal(|ui| {
                 egui::ComboBox::from_id_salt("batch_pos")
                     .selected_text(state.position.display_name())
@@ -150,7 +272,10 @@ fn render_controls(ui: &mut egui::Ui, state: &mut BatchRenameState) {
                         );
                     });
 
-                ui.label(t!("batch_rename.separator"));
+                ui.label(
+                    RichText::new(t!("batch_rename.separator"))
+                        .color(theme::text_color(dark_mode)),
+                );
                 egui::ComboBox::from_id_salt("batch_sep")
                     .selected_text(state.separator.display_name())
                     .width(200.0)
@@ -170,17 +295,26 @@ fn render_controls(ui: &mut egui::Ui, state: &mut BatchRenameState) {
             ui.end_row();
 
             // Row 3 — Start, Step, Padding
-            ui.label(t!("batch_rename.numbering"));
+            ui.label(
+                RichText::new(t!("batch_rename.numbering")).color(theme::text_color(dark_mode)),
+            );
             ui.horizontal(|ui| {
-                ui.label(t!("batch_rename.start"));
+                ui.label(
+                    RichText::new(t!("batch_rename.start"))
+                        .color(theme::text_color(dark_mode)),
+                );
                 ui.add(egui::DragValue::new(&mut state.start).range(0..=99999));
 
                 ui.add_space(8.0);
-                ui.label(t!("batch_rename.step"));
+                ui.label(
+                    RichText::new(t!("batch_rename.step")).color(theme::text_color(dark_mode)),
+                );
                 ui.add(egui::DragValue::new(&mut state.step).range(1..=9999));
 
                 ui.add_space(8.0);
-                ui.label(t!("batch_rename.padding"));
+                ui.label(
+                    RichText::new(t!("batch_rename.padding")).color(theme::text_color(dark_mode)),
+                );
                 ui.add(
                     egui::DragValue::new(&mut state.padding)
                         .range(0..=6)
@@ -198,6 +332,7 @@ fn render_reorderable_list(
     state: &mut BatchRenameState,
     preview: &[PreviewRow],
     height: f32,
+    dark_mode: bool,
 ) {
     // Collect filenames before borrowing state mutably
     let filenames: Vec<String> = state
@@ -253,11 +388,10 @@ fn render_reorderable_list(
                         }
 
                         // Paint the braille grid glyph centred in the handle rect
-                        let visuals = ui.visuals();
                         let glyph_color = if handle.hovered() || handle.dragged() {
-                            visuals.widgets.active.fg_stroke.color
+                            ui.visuals().widgets.active.fg_stroke.color
                         } else {
-                            visuals.weak_text_color()
+                            ui.visuals().weak_text_color()
                         };
                         ui.painter().text(
                             handle_rect.center(),
@@ -270,14 +404,18 @@ fn render_reorderable_list(
                         // Row number
                         ui.add_sized(
                             [NUM_WIDTH, ROW_HEIGHT],
-                            egui::Label::new(RichText::new(format!("{}.", i + 1)).weak()),
+                            egui::Label::new(
+                                RichText::new(format!("{}.", i + 1))
+                                    .weak()
+                                    .color(theme::secondary_text_color(dark_mode)),
+                            ),
                         );
 
                         // Filename (conflict highlighted)
                         let name_text = if has_conflict {
                             RichText::new(&filenames[i]).color(Color32::from_rgb(220, 80, 80))
                         } else {
-                            RichText::new(&filenames[i])
+                            RichText::new(&filenames[i]).color(theme::text_color(dark_mode))
                         };
                         ui.label(name_text);
 
@@ -359,7 +497,12 @@ fn render_reorderable_list(
 
 // ── Preview table ─────────────────────────────────────────────────────────────
 
-fn render_preview_table(ui: &mut egui::Ui, preview: &[PreviewRow], height: f32) {
+fn render_preview_table(
+    ui: &mut egui::Ui,
+    preview: &[PreviewRow],
+    height: f32,
+    dark_mode: bool,
+) {
     egui::ScrollArea::vertical()
         .id_salt("batch_preview_scroll")
         .max_height(height)
@@ -371,14 +514,32 @@ fn render_preview_table(ui: &mut egui::Ui, preview: &[PreviewRow], height: f32) 
                 .spacing([8.0, 2.0])
                 .show(ui, |ui| {
                     // Header
-                    ui.label(RichText::new(t!("batch_rename.col_num")).strong());
-                    ui.label(RichText::new(t!("batch_rename.col_original")).strong());
-                    ui.label(RichText::new(t!("batch_rename.col_new")).strong());
+                    ui.label(
+                        RichText::new(t!("batch_rename.col_num"))
+                            .strong()
+                            .color(theme::text_color(dark_mode)),
+                    );
+                    ui.label(
+                        RichText::new(t!("batch_rename.col_original"))
+                            .strong()
+                            .color(theme::text_color(dark_mode)),
+                    );
+                    ui.label(
+                        RichText::new(t!("batch_rename.col_new"))
+                            .strong()
+                            .color(theme::text_color(dark_mode)),
+                    );
                     ui.end_row();
 
                     for (i, row) in preview.iter().enumerate() {
-                        ui.label(RichText::new(format!("{}.", i + 1)).weak());
-                        ui.label(&row.old_name);
+                        ui.label(
+                            RichText::new(format!("{}.", i + 1))
+                                .weak()
+                                .color(theme::secondary_text_color(dark_mode)),
+                        );
+                        ui.label(
+                            RichText::new(&row.old_name).color(theme::text_color(dark_mode)),
+                        );
 
                         if row.conflict {
                             ui.colored_label(
@@ -386,7 +547,9 @@ fn render_preview_table(ui: &mut egui::Ui, preview: &[PreviewRow], height: f32) 
                                 format!("{}{}", row.new_name, t!("batch_rename.conflict_suffix")),
                             );
                         } else {
-                            ui.label(&row.new_name);
+                            ui.label(
+                                RichText::new(&row.new_name).color(theme::text_color(dark_mode)),
+                            );
                         }
                         ui.end_row();
                     }
