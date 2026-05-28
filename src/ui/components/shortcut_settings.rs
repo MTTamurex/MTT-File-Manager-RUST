@@ -2,7 +2,8 @@ use crate::app::shortcuts::{
     capture_shortcut, ShortcutAction, ShortcutBindings, ShortcutCapture, ShortcutEditorState,
     ShortcutValidationError,
 };
-use eframe::egui;
+use crate::ui::theme;
+use eframe::egui::{self, RichText};
 use rust_i18n::t;
 
 pub fn render_shortcut_settings_section(
@@ -32,11 +33,26 @@ pub fn render_shortcut_settings_section(
         }
     }
 
-    ui.heading(t!("settings.shortcuts"));
+    let dark_mode = ui.visuals().dark_mode;
+
+    ui.label(
+        RichText::new(t!("settings.shortcuts"))
+            .size(16.0)
+            .strong()
+            .color(theme::text_color(dark_mode)),
+    );
+    ui.add_space(4.0);
+    ui.label(
+        RichText::new(t!("settings.shortcuts_description"))
+            .size(13.0)
+            .color(theme::secondary_text_color(dark_mode)),
+    );
     ui.add_space(8.0);
-    ui.label(t!("settings.shortcuts_description"));
-    ui.add_space(8.0);
-    ui.label(egui::RichText::new(t!("settings.shortcuts_reserved_note").to_string()).small());
+    ui.label(
+        RichText::new(t!("settings.shortcuts_reserved_note"))
+            .size(12.0)
+            .color(theme::secondary_text_color(dark_mode)),
+    );
     ui.add_space(12.0);
 
     if ui
@@ -68,12 +84,14 @@ pub fn render_shortcut_settings_section(
                     shortcuts.label(action)
                 };
 
-                ui.label(action_label(action));
+                ui.label(
+                    RichText::new(action_label(action)).color(theme::text_color(dark_mode)),
+                );
 
                 let button_text = if is_capturing {
-                    egui::RichText::new(button_text).strong()
+                    RichText::new(button_text).strong()
                 } else {
-                    egui::RichText::new(button_text)
+                    RichText::new(button_text)
                 };
                 if ui
                     .add_sized([220.0, 28.0], egui::Button::new(button_text))
@@ -101,10 +119,9 @@ pub fn render_shortcut_settings_section(
                 if is_capturing {
                     ui.label("");
                     ui.label(
-                        egui::RichText::new(
-                            t!("settings.shortcuts_press_binding_hint").to_string(),
-                        )
-                        .small(),
+                        RichText::new(t!("settings.shortcuts_press_binding_hint"))
+                            .size(12.0)
+                            .color(theme::secondary_text_color(dark_mode)),
                     );
                     ui.label("");
                     ui.end_row();

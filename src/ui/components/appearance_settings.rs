@@ -1,13 +1,24 @@
 use crate::app::navigation_state::ThemeMode;
-use eframe::egui;
+use crate::ui::theme;
+use eframe::egui::{self, RichText};
 use rust_i18n::t;
 
 pub fn render_appearance_settings_section(ui: &mut egui::Ui, theme_mode: &mut ThemeMode) -> bool {
     let mut changed = false;
+    let dark_mode = ui.visuals().dark_mode;
 
-    ui.label(egui::RichText::new(t!("settings.appearance").to_string()).strong());
+    ui.label(
+        RichText::new(t!("settings.appearance"))
+            .size(14.0)
+            .strong()
+            .color(theme::text_color(dark_mode)),
+    );
     ui.add_space(4.0);
-    ui.label(t!("settings.appearance_description"));
+    ui.label(
+        RichText::new(t!("settings.appearance_description"))
+            .size(13.0)
+            .color(theme::secondary_text_color(dark_mode)),
+    );
     ui.add_space(12.0);
 
     let modes: &[(ThemeMode, &str)] = &[
@@ -24,7 +35,11 @@ pub fn render_appearance_settings_section(ui: &mut egui::Ui, theme_mode: &mut Th
     }
 
     ui.add_space(12.0);
-    ui.label(egui::RichText::new(t!("settings.theme_apply_immediately").to_string()).small());
+    ui.label(
+        RichText::new(t!("settings.theme_apply_immediately"))
+            .size(12.0)
+            .color(theme::secondary_text_color(dark_mode)),
+    );
     ui.add_space(8.0);
     ui.separator();
 

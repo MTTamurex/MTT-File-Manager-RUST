@@ -1,6 +1,7 @@
 //! Language settings modal for switching the application language
 
-use eframe::egui;
+use crate::ui::theme;
+use eframe::egui::{self, RichText};
 use rust_i18n::t;
 
 /// Available languages with their locale codes and display names
@@ -8,15 +9,34 @@ const LANGUAGES: &[(&str, &str)] = &[("pt-BR", "Português (Brasil)"), ("en", "E
 
 pub fn render_language_settings_section(ui: &mut egui::Ui) -> bool {
     let mut language_changed = false;
+    let dark_mode = ui.visuals().dark_mode;
 
-    ui.heading(t!("settings.general"));
-    ui.add_space(8.0);
-    ui.label(t!("settings.general_description"));
+    ui.label(
+        RichText::new(t!("settings.general"))
+            .size(16.0)
+            .strong()
+            .color(theme::text_color(dark_mode)),
+    );
+    ui.add_space(4.0);
+    ui.label(
+        RichText::new(t!("settings.general_description"))
+            .size(13.0)
+            .color(theme::secondary_text_color(dark_mode)),
+    );
     ui.add_space(16.0);
 
-    ui.label(egui::RichText::new(t!("settings.language").to_string()).strong());
+    ui.label(
+        RichText::new(t!("settings.language"))
+            .size(14.0)
+            .strong()
+            .color(theme::text_color(dark_mode)),
+    );
     ui.add_space(4.0);
-    ui.label(t!("settings.language_description"));
+    ui.label(
+        RichText::new(t!("settings.language_description"))
+            .size(13.0)
+            .color(theme::secondary_text_color(dark_mode)),
+    );
     ui.add_space(12.0);
 
     let current_locale = rust_i18n::locale();
@@ -30,7 +50,11 @@ pub fn render_language_settings_section(ui: &mut egui::Ui) -> bool {
     }
 
     ui.add_space(12.0);
-    ui.label(egui::RichText::new(t!("settings.language_apply_immediately").to_string()).small());
+    ui.label(
+        RichText::new(t!("settings.language_apply_immediately"))
+            .size(12.0)
+            .color(theme::secondary_text_color(dark_mode)),
+    );
     ui.add_space(8.0);
     ui.separator();
 

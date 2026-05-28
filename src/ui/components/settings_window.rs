@@ -1,7 +1,10 @@
 use crate::app::navigation_state::{SettingsSection, ThemeMode};
 use crate::app::shortcuts::{ShortcutBindings, ShortcutEditorState};
-use eframe::egui;
+use crate::ui::theme;
+use eframe::egui::{self, Color32, Margin, RichText, Stroke};
 use rust_i18n::t;
+
+const BACKDROP_ALPHA: u8 = 72;
 
 pub struct SettingsWindowOutput {
     pub keep_open: bool,
@@ -35,6 +38,71 @@ pub fn render_settings_window(
     let mut diagnostic_mode_changed = false;
     let mut open_diagnostic_folder = false;
 
+    let screen_rect = ctx.screen_rect();
+
+    // ── Backdrop (blocks interaction outside the modal) ──────────────────────
+    let mut close_from_backdrop = false;
+    egui::Area::new(egui::Id::from("settings_window_backdrop"))
+        .fixed_pos(screen_rect.min)
+        .order(egui::Order::Middle)
+        .show(ctx, |ui| {
+            ui.set_min_size(screen_rect.size());
+            let backdrop_rect = ui.max_rect();
+            let backdrop_resp = ui.interact(
+                backdrop_rect,
+                ui.id().with("settings_window_backdrop_interact"),
+                egui::Sense::click(),
+            );
+            ui.painter().rect_filled(
+                backdrop_rect,
+                0.0,
+                Color32::from_black_alpha(BACKDROP_ALPHA),
+            );
+            if backdrop_resp.clicked() {
+                close_from_backdrop = true;
+            }
+        });
+
+    if close_from_backdrop {
+        keep_open = false;
+    }
+
+    // ESC closes
+    if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+        keep_open = false;
+    }
+
+    let dark_mode = ctx.style().visuals.dark_mode;
+    let bg_color = if dark_mode {
+        Color32::from_rgb(50, 50, 50)
+    } else {
+        Color32::from_rgb(250, 250, 250)
+    };
+
+    let frame = egui::Frame::new()
+        .inner_margin(Margin {
+            left: 16,
+            right: 16,
+            top: 8,
+            bottom: 12,
+        })
+        .corner_radius(10.0)
+        .fill(bg_color)
+        .stroke(Stroke::new(
+            1.0,
+            if dark_mode {
+                Color32::from_gray(70)
+            } else {
+                Color32::from_gray(220)
+            },
+        ))
+        .shadow(egui::epaint::Shadow {
+            spread: 4,
+            blur: 12,
+            color: Color32::from_black_alpha(25),
+            offset: [0, 3],
+        });
+
     egui::Window::new(t!("settings.window_title"))
         .id(egui::Id::new("settings_window"))
         .open(&mut keep_open)
@@ -44,6 +112,7 @@ pub fn render_settings_window(
         .default_height(480.0)
         .min_width(700.0)
         .min_height(420.0)
+        .frame(frame)
         .show(ctx, |ui| {
             ui.set_min_size(egui::vec2(700.0, 420.0));
             let content_height = ui.available_height();
@@ -53,7 +122,7 @@ pub fn render_settings_window(
                 ui.allocate_ui_with_layout(
                     egui::vec2(180.0, panel_height),
                     egui::Layout::top_down(egui::Align::Min),
-                    |ui| render_settings_sidebar(ui, active_section),
+                    |ui| render_settings_sidebar(ui, active_section, dark_mode),
                 );
 
                 if *active_section != SettingsSection::Shortcuts && shortcut_editor.is_capturing() {
@@ -78,25 +147,26 @@ pub fn render_settings_window(
                                     ui.add_space(16.0);
                                     backend_changed |= crate::ui::components::backend_settings::render_backend_settings_section(ui, active_gpu_backend, gpu_backend_preference);
                                     ui.add_space(16.0);
-                                    ui.label(egui::RichText::new(t!("settings.show_recycle_bin").to_string()).strong());
+                                    ui.label(RichText::new(t!("settings.show_recycle_bin").to_string()).strong().color(theme::text_color(dark_mode)));
                                     ui.add_space(4.0);
-                                    if ui.checkbox(show_recycle_bin, t!("settings.show_recycle_bin")).changed() {
+                                    if ui.checkbox(show_recycle_bin, RichText::new(t!("settings.show_recycle_bin")).color(theme::text_color(dark_mode))).changed() {
                                         recycle_bin_changed = true;
                                     }
                                 }
                                 SettingsSection::Diagnostics => {
-                                    ui.add_space(16.0);
                                     ui.label(
-                                        egui::RichText::new(t!("settings.diagnostics").to_string())
-                                            .strong(),
+                                        RichText::new(t!("settings.diagnostics").to_string())
+                                            .size(16.0)
+                                            .strong()
+                                            .color(theme::text_color(dark_mode)),
                                     );
                                     ui.add_space(4.0);
-                                    ui.label(t!("settings.diagnostics_description"));
+                                    ui.label(RichText::new(t!("settings.diagnostics_description")).size(13.0).color(theme::secondary_text_color(dark_mode)));
                                     ui.add_space(8.0);
                                     if ui
                                         .checkbox(
                                             diagnostic_mode,
-                                            t!("settings.diagnostics_enable"),
+                                            RichText::new(t!("settings.diagnostics_enable")).color(theme::text_color(dark_mode)),
                                         )
                                         .changed()
                                     {
@@ -110,20 +180,21 @@ pub fn render_settings_window(
                                     ui.group(|ui| {
                                         ui.set_width(ui.available_width());
                                         ui.label(
-                                            egui::RichText::new(
+                                            RichText::new(
                                                 t!("settings.diagnostics_privacy_title").to_string(),
                                             )
-                                            .strong(),
+                                            .strong()
+                                            .color(theme::text_color(dark_mode)),
                                         );
                                         ui.add_space(4.0);
-                                        ui.small(t!("settings.diagnostics_privacy_scope"));
+                                        ui.small(RichText::new(t!("settings.diagnostics_privacy_scope")).color(theme::secondary_text_color(dark_mode)));
                                         ui.add_space(4.0);
-                                        ui.small(t!("settings.diagnostics_privacy_excludes"));
+                                        ui.small(RichText::new(t!("settings.diagnostics_privacy_excludes")).color(theme::secondary_text_color(dark_mode)));
                                         ui.add_space(4.0);
-                                        ui.small(t!("settings.diagnostics_privacy_transmission"));
+                                        ui.small(RichText::new(t!("settings.diagnostics_privacy_transmission")).color(theme::secondary_text_color(dark_mode)));
                                     });
                                     ui.add_space(6.0);
-                                    ui.small(t!("settings.diagnostics_note"));
+                                    ui.small(RichText::new(t!("settings.diagnostics_note")).color(theme::secondary_text_color(dark_mode)));
                                 }
                                 SettingsSection::Shortcuts => {
                                     shortcuts_changed |= crate::ui::components::shortcut_settings::render_shortcut_settings_section(
@@ -156,34 +227,38 @@ pub fn render_settings_window(
     }
 }
 
-fn render_settings_sidebar(ui: &mut egui::Ui, active_section: &mut SettingsSection) {
+fn render_settings_sidebar(ui: &mut egui::Ui, active_section: &mut SettingsSection, dark_mode: bool) {
     ui.spacing_mut().item_spacing.y = 8.0;
-    ui.label(egui::RichText::new(t!("settings.categories").to_string()).strong());
+    ui.label(
+        RichText::new(t!("settings.categories").to_string())
+            .strong()
+            .color(theme::text_color(dark_mode)),
+    );
     ui.add_space(4.0);
 
     ui.selectable_value(
         active_section,
         SettingsSection::General,
-        &*t!("settings.general"),
+        RichText::new(t!("settings.general")).color(theme::text_color(dark_mode)),
     );
     ui.selectable_value(
         active_section,
         SettingsSection::Diagnostics,
-        &*t!("settings.diagnostics"),
+        RichText::new(t!("settings.diagnostics")).color(theme::text_color(dark_mode)),
     );
     ui.selectable_value(
         active_section,
         SettingsSection::Shortcuts,
-        &*t!("settings.shortcuts"),
+        RichText::new(t!("settings.shortcuts")).color(theme::text_color(dark_mode)),
     );
     ui.selectable_value(
         active_section,
         SettingsSection::VirtualDrives,
-        &*t!("settings.virtual_drives"),
+        RichText::new(t!("settings.virtual_drives")).color(theme::text_color(dark_mode)),
     );
     ui.selectable_value(
         active_section,
         SettingsSection::About,
-        &*t!("settings.about"),
+        RichText::new(t!("settings.about")).color(theme::text_color(dark_mode)),
     );
 }
