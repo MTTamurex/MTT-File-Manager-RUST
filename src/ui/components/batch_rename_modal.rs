@@ -109,6 +109,7 @@ pub fn render_batch_rename_modal(app: &mut ImageViewerApp, ctx: &egui::Context) 
         .min_height(380.0)
         .max_height(800.0)
         .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+        .order(egui::Order::Foreground)
         .frame(frame)
         .show(ctx, |ui| {
             // We take ownership of the state for the frame, then put it back.

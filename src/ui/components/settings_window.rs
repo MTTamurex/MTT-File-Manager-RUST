@@ -113,6 +113,7 @@ pub fn render_settings_window(
         .min_width(700.0)
         .min_height(420.0)
         .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+        .order(egui::Order::Foreground)
         .frame(frame)
         .show(ctx, |ui| {
             ui.set_min_size(egui::vec2(700.0, 420.0));
