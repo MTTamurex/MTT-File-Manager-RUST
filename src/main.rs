@@ -17,6 +17,8 @@ use mtt_file_manager::app::ImageViewerApp;
 use std::path::PathBuf;
 use std::time::SystemTime;
 
+mod gpu_backend;
+
 const APP_ID: &str = "mtt-file-manager";
 
 fn cleanup_eframe_storage(app_id: &str) {
@@ -95,16 +97,6 @@ fn read_early_preference(key: &str) -> Option<String> {
         |row| row.get(0),
     )
     .ok()
-}
-
-/// Convert a stored backend preference string into wgpu::Backends flags.
-fn parse_gpu_backend_preference(pref: Option<&str>) -> eframe::wgpu::Backends {
-    match pref {
-        Some("dx12") => eframe::wgpu::Backends::DX12,
-        Some("vulkan") => eframe::wgpu::Backends::VULKAN,
-        Some("gl") => eframe::wgpu::Backends::GL,
-        _ => eframe::wgpu::Backends::PRIMARY | eframe::wgpu::Backends::GL, // "auto"
-    }
 }
 
 fn main() -> eframe::Result<()> {
@@ -297,7 +289,8 @@ fn main() -> eframe::Result<()> {
 
     // Read user's preferred GPU backend from persisted preferences (before eframe init).
     let gpu_backend_pref = read_early_preference("gpu_backend");
-    let selected_backends = parse_gpu_backend_preference(gpu_backend_pref.as_deref());
+    let selected_backends = gpu_backend::parse_gpu_backend_preference(gpu_backend_pref.as_deref());
+    let native_adapter_selector = gpu_backend::adapter_selector(gpu_backend_pref.as_deref());
     log::info!(
         "[STARTUP] GPU backend preference: {:?} -> backends: {:?}",
         gpu_backend_pref.as_deref().unwrap_or("auto"),
@@ -320,6 +313,7 @@ fn main() -> eframe::Result<()> {
                         ..Default::default()
                     },
                     power_preference: eframe::wgpu::PowerPreference::HighPerformance,
+                    native_adapter_selector,
                     // Override the default device descriptor so the wgpu/DX12 backend
                     // requests smaller, on-demand heap allocations instead of the
                     // large-block strategy used by `MemoryHints::Performance` (the
@@ -339,7 +333,8 @@ fn main() -> eframe::Result<()> {
                             label: Some("mtt-file-manager wgpu device"),
                             required_features: eframe::wgpu::Features::default(),
                             required_limits: eframe::wgpu::Limits {
-                                max_texture_dimension_2d: 8192,
+                                max_texture_dimension_2d:
+                                    gpu_backend::WGPU_REQUIRED_MAX_TEXTURE_DIMENSION_2D,
                                 ..base_limits
                             },
                             memory_hints: eframe::wgpu::MemoryHints::MemoryUsage,

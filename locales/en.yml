@@ -55,7 +55,7 @@ status_bar:
   settings: "Open application settings"
   thumbnail_size: "Thumbnail size"
   vdrive_settings: "Configure virtual drive optimization"
-  bulk_thumbnails: "Generate thumbnails for all subfolders"
+  bulk_thumbnails: "Generate high-res thumbnails for current and subfolder items"
   bulk_thumbnails_extracting: "Extracting thumbnails"
   bulk_thumbnails_complete: "Bulk thumbnail extraction complete! (%{count} files)"
   reload_thumbnail: "Reload Thumbnail"
