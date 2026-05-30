@@ -1,4 +1,4 @@
-//! Persistent SQLite cache for thumbnails, folder previews, and shell icons.
+//! Persistent SQLite cache for thumbnails and folder previews.
 //!
 //! Connection management, ACL hardening, and PRAGMA setup are delegated to
 //! `crate::infrastructure::db_utils`.
@@ -13,7 +13,6 @@ use super::db_utils;
 mod cleanup;
 mod folder_previews;
 mod gc;
-mod shell_icons;
 mod thumbnails_repo;
 
 /// Allowed table targets for batch-delete operations.
@@ -237,18 +236,11 @@ impl ThumbnailDiskCache {
             [],
         );
 
-        // Shell icon cache (special folders, drives, computer, recycle bin)
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS shell_icons (
-                key TEXT PRIMARY KEY,
-                data BLOB NOT NULL,
-                width INTEGER NOT NULL,
-                height INTEGER NOT NULL,
-                created_at INTEGER NOT NULL
-            )",
-            [],
-        )
-        .unwrap_or(0);
+        // Legacy shell icon cache. Shell namespace, drive, special folder, and
+        // shared extension icons must follow the current Windows Shell state;
+        // only unique per-file icons are persisted in `file_icons.db`.
+        conn.execute("DROP TABLE IF EXISTS shell_icons", [])
+            .unwrap_or(0);
     }
 
     /// Migration utility: removes old folder-based cache

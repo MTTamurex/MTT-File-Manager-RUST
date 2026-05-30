@@ -372,9 +372,9 @@ impl ImageViewerApp {
             shell_menu_loading: false,
             shell_menu_request_id: 0,
 
-            // PERSISTENT ICON LOADER
+            // SESSION ICON LOADER
             item_icon_loader: {
-                let mut loader = IconLoader::new(Some(disk_cache.clone()));
+                let mut loader = IconLoader::new();
                 // Pre-set custom composed folder icon (back+front+paper_sheet).
                 {
                     let (ref pixels, width, height) = custom_folder_icon;

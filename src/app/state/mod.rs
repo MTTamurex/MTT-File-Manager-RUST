@@ -299,7 +299,7 @@ pub struct ImageViewerApp {
     /// Monotonic id used to discard stale async shell-menu responses.
     pub shell_menu_request_id: u64,
 
-    // PERSISTENT ICON LOADER (avoids creating a new one each frame)
+    // SESSION ICON LOADER (avoids creating a new one each frame)
     pub item_icon_loader: IconLoader,
 
     // OPTIMIZED GIF MANAGER

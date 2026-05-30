@@ -136,16 +136,10 @@ pub(in crate::app) fn spawn_icon_worker(
         }
     });
 
-    // Shared extension icon cache across all workers.
-    //
-    // MEMORY: the cache starts EMPTY. The persistent on-disk RGBA blobs are
-    // pulled lazily via `IconDiskCache::load_one` the first time a worker is
-    // asked for an extension that isn't in the GPU texture cache. Eager-seeding
-    // every disk-cached icon here used to retain ~20 MB of RGBA permanently
-    // (256x256 Jumbo × ~80 extensions) for entries the user might never view.
-    //
-    // DashMap allows concurrent reads without blocking, eliminating contention
-    // across the icon workers.
+    // Shared extension icon cache across all workers. This is session-only:
+    // persistent icon caching is reserved for per-file icons whose pixels vary
+    // by source file (programs, shortcuts, .ico, etc.). Shared extension icons
+    // should always follow the current Windows Shell state on a fresh launch.
     let shared_ext_cache: Arc<dashmap::DashMap<String, (Vec<u8>, u32, u32)>> =
         Arc::new(dashmap::DashMap::with_capacity(32));
 
@@ -259,9 +253,6 @@ pub(in crate::app) fn spawn_icon_worker(
                             .map(|entry| entry.value().clone())
                         {
                             Ok(cached)
-                        } else if let Some(cached) = disk_cache.load_one(&format!("{}_Jumbo", ext_str)) {
-                            ext_cache.insert(jumbo_dot_ext, cached.clone());
-                            Ok(cached)
                         } else {
                             // Try Jumbo extraction via IShellItemImageFactory on the real file.
                             // Falls back to SHGetFileInfoW (48×48) if IShellItemImageFactory fails.
@@ -274,7 +265,6 @@ pub(in crate::app) fn spawn_icon_worker(
                             };
                             if let Ok(ref data) = r {
                                 ext_cache.insert(jumbo_dot_ext, data.clone());
-                                disk_cache.save(&format!("{}_Jumbo", ext_str), &data.0, data.1, data.2);
                             }
                             r
                         }

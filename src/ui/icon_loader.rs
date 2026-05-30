@@ -4,7 +4,7 @@
 
 use std::collections::HashSet;
 use std::num::NonZeroUsize;
-use std::sync::{mpsc, Arc};
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use eframe::egui;
@@ -13,7 +13,6 @@ use lru::LruCache;
 extern crate windows as windows_crate;
 
 use crate::domain::file_entry::IconSize;
-use crate::infrastructure::disk_cache::ThumbnailDiskCache;
 use crate::infrastructure::windows;
 
 mod async_ops;
@@ -115,23 +114,17 @@ pub struct IconLoader {
     sync_icon_budget_window_start: Instant,
     sync_icon_budget_elapsed: Duration,
     sync_icon_budget_calls: usize,
-    /// Optional SQLite disk cache for persisting shell icons across sessions.
-    disk_cache: Option<Arc<ThumbnailDiskCache>>,
 }
 
 impl Default for IconLoader {
     fn default() -> Self {
-        Self::new(None)
+        Self::new()
     }
 }
 
 impl IconLoader {
     /// Creates a new icon loader.
-    ///
-    /// When `disk_cache` is provided, shell icons (special folders, drives,
-    /// computer, recycle bin) will be persisted to SQLite and loaded
-    /// instantly on subsequent launches.
-    pub fn new(disk_cache: Option<Arc<ThumbnailDiskCache>>) -> Self {
+    pub fn new() -> Self {
         let (tx, rx) = mpsc::channel();
         Self {
             icon_cache: LruCache::new(
@@ -158,7 +151,6 @@ impl IconLoader {
             sync_icon_budget_window_start: Instant::now(),
             sync_icon_budget_elapsed: Duration::ZERO,
             sync_icon_budget_calls: 0,
-            disk_cache,
         }
     }
 
