@@ -38,14 +38,48 @@ pub(super) fn render_list_item(
     if !item.is_dir && !ctx.is_recycle_bin_view {
         // PERFORMANCE: Use is_media() method to avoid registry lookups
         if item.is_media()
-            && !ctx.texture_cache.contains(&item.path)
-            && !ctx.loading_set.contains(&item.path)
             && !ctx.failed_thumbnails.contains(&item.path)
-            && !ctx.pending_upload_set.contains(&item.path)
             && ctx.loading_set.len() < crate::ui::cache::MAX_THUMBNAIL_LOADING_SET_ITEMS
         {
-            ctx.loading_set.insert(item.path.clone());
-            ops.request_thumbnail_load(item.path.clone(), i, item.modified);
+            let is_loading = ctx.loading_set.contains(&item.path);
+            let is_pending = ctx.pending_upload_set.contains(&item.path);
+            let has_texture = ctx.texture_cache.peek(&item.path).is_some();
+
+            // When the preview panel is open, request the detail-panel resolution so
+            // the thumbnail is warm when the user selects the item. When the panel is
+            // closed, fall back to a minimal 64 px request (the list itself does not
+            // display media thumbnails — only the icon column is shown).
+            let request_size: u32 = if ctx.show_preview_panel {
+                crate::domain::thumbnail::detail_preview_size(&item.path)
+            } else {
+                64
+            };
+
+            let effective_size_px =
+                (request_size as f32 * ui.ctx().pixels_per_point().max(1.0)).ceil() as u32;
+            let desired_bucket =
+                crate::workers::thumbnail::processing::get_bucket_size(effective_size_px);
+            let attempted_bucket = ctx.attempted_thumbnail_bucket.get(&item.path).copied();
+            let needs_bucket_refresh = match attempted_bucket {
+                Some(b) => b < desired_bucket,
+                None => false,
+            };
+
+            let can_request = (!has_texture || needs_bucket_refresh)
+                && !is_loading
+                && !is_pending
+                && ctx.thumbnail_requests_this_frame < 24;
+
+            if can_request {
+                ctx.thumbnail_requests_this_frame += 1;
+                ctx.loading_set.insert(item.path.clone());
+                ops.request_thumbnail_load_with_size(
+                    item.path.clone(),
+                    request_size,
+                    i,
+                    item.modified,
+                );
+            }
         }
     }
 

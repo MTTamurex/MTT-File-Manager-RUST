@@ -56,6 +56,21 @@ impl<'a> ListViewOperations for ListOps<'a> {
         ));
     }
 
+    fn request_thumbnail_load_with_size(
+        &mut self,
+        path: PathBuf,
+        size: u32,
+        directory_index: usize,
+        modified: u64,
+    ) {
+        self.actions.push(ListAction::RequestThumbnailLoad(
+            path,
+            size,
+            directory_index,
+            modified,
+        ));
+    }
+
     fn request_folder_scan(&mut self, path: PathBuf) {
         self.actions.push(ListAction::RequestFolderScan(path));
     }
@@ -314,6 +329,8 @@ impl ImageViewerApp {
             live_file_size_cache: &mut self.live_file_size_cache,
             live_file_size_loading: &mut self.live_file_size_loading,
             live_file_size_req_sender: &self.live_file_size_req_sender,
+            show_preview_panel: self.show_preview_panel,
+            thumbnail_requests_this_frame: 0,
             folder_size_cache: &self.folder_size_state.batch_cache,
             folder_size_batch_loading: &self.folder_size_state.batch_loading,
             folder_size_requests: &mut folder_size_requests,

@@ -123,6 +123,9 @@ impl ImageViewerApp {
         };
         let effective_priority = priority;
 
+        let desired_bucket =
+            crate::workers::thumbnail::processing::get_bucket_size(effective_size_px);
+
         // Skip files pending deletion to avoid wasteful extraction
         if self
             .file_operation_state
@@ -152,7 +155,16 @@ impl ImageViewerApp {
         // allocate it — producing a steady working-set leak even when the
         // texture cache cap is technically large enough to hold every visible
         // path. Mirrors the same fix applied to folder previews.
-        if self.cache_manager.should_throttle_thumbnail_request(&path) {
+        //
+        // EXCEPTION: allow bucket upgrades to bypass the throttle. A detail-panel
+        // request for 512 px should not be blocked just because a 64 px list
+        // request was dispatched moments ago.
+        let is_bucket_upgrade = self
+            .cache_manager
+            .attempted_thumbnail_bucket_for(&path)
+            .is_some_and(|previous| desired_bucket > previous);
+
+        if !is_bucket_upgrade && self.cache_manager.should_throttle_thumbnail_request(&path) {
             // Caller (file_slot/list_view) inserted into loading_set BEFORE
             // queueing the deferred action. Remove it so the next frame's
             // slot guard does not see is_loading=true forever.
@@ -171,10 +183,8 @@ impl ImageViewerApp {
 
             // Only reuse RAM cache if it meets or exceeds the requested size
             if cached_max_dim >= effective_size_px {
-                let attempted_bucket =
-                    crate::workers::thumbnail::processing::get_bucket_size(effective_size_px);
                 self.cache_manager
-                    .note_attempted_thumbnail_bucket(&path, attempted_bucket);
+                    .note_attempted_thumbnail_bucket(&path, desired_bucket);
                 self.cache_manager.thumbnail_trace.record_ram_cache_hit();
                 // Data is in RAM cache - add directly to pending_thumbnails for GPU upload
                 // No disk I/O needed!
@@ -204,10 +214,8 @@ impl ImageViewerApp {
         // Now all thumbnails are loaded, but with intelligent prioritization
 
         // Not in RAM cache - send to worker (will read from disk cache or generate)
-        let attempted_bucket =
-            crate::workers::thumbnail::processing::get_bucket_size(effective_size_px);
         self.cache_manager
-            .note_attempted_thumbnail_bucket(&path, attempted_bucket);
+            .note_attempted_thumbnail_bucket(&path, desired_bucket);
         self.cache_manager.thumbnail_trace.record_worker_dispatch();
         self.cache_manager.note_thumbnail_request_sent(&path);
         if let Some(index) = directory_index {

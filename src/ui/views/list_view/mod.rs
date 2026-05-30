@@ -249,19 +249,16 @@ pub struct ListViewContext<'a> {
     pub live_file_size_loading: &'a mut FxHashSet<PathBuf>,
     pub live_file_size_req_sender:
         &'a std::sync::mpsc::Sender<crate::app::live_file_size::LiveFileSizeRequest>,
-    // ── Folder size for list-view directories ──
-    /// Read-only peek into the batch folder-size cache.
+    pub show_preview_panel: bool,
+    pub thumbnail_requests_this_frame: usize,
     pub folder_size_cache: &'a lru::LruCache<PathBuf, u64>,
-    /// Paths already sent to the batch worker.
     pub folder_size_batch_loading: &'a FxHashSet<PathBuf>,
-    /// Output: visible folder paths whose size is not yet cached.
     pub folder_size_requests: &'a mut Vec<PathBuf>,
-    // Resizable column widths
     pub col_name_width: &'a mut f32,
     pub col_date_width: &'a mut f32,
     pub col_type_width: &'a mut f32,
     pub col_size_width: &'a mut f32,
-    pub col_status_width: &'a mut f32, // OneDrive only
+    pub col_status_width: &'a mut f32,
 }
 
 /// Action returned by list view
@@ -279,6 +276,13 @@ pub trait ListViewOperations {
     fn navigate_to(&mut self, path: &str);
     fn open_with_shell(&mut self, path: &Path);
     fn request_thumbnail_load(&mut self, path: PathBuf, directory_index: usize, modified: u64);
+    fn request_thumbnail_load_with_size(
+        &mut self,
+        path: PathBuf,
+        size: u32,
+        directory_index: usize,
+        modified: u64,
+    );
     fn request_folder_scan(&mut self, path: PathBuf);
     fn request_folder_preview_load(&mut self, path: PathBuf);
     fn rename_with_shell(&mut self, idx: usize);

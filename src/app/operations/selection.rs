@@ -23,7 +23,7 @@ impl ImageViewerApp {
             file.path.clone(),
             file.modified,
             file.is_media(),
-            512,
+            crate::domain::thumbnail::detail_preview_size(&file.path),
         );
     }
 
@@ -39,15 +39,20 @@ impl ImageViewerApp {
         }
 
         let has_required_texture = if let Some(tex) = self.cache_manager.texture_cache.peek(&path) {
-            if self
-                .selected_file
-                .as_ref()
-                .is_some_and(|selected| selected.path == path)
+            let tex_size = tex.size();
+            let large_enough = (tex_size[0].max(tex_size[1]) as u32) >= size;
+            // Only promote a cached texture into selected_thumbnail when it meets the
+            // resolution required by the preview panel, otherwise the user sees a
+            // low-res thumbnail briefly before the high-res version arrives.
+            if large_enough
+                && self
+                    .selected_file
+                    .as_ref()
+                    .is_some_and(|selected| selected.path == path)
             {
                 self.selected_thumbnail = Some(tex.clone());
             }
-            let tex_size = tex.size();
-            (tex_size[0].max(tex_size[1]) as u32) >= size
+            large_enough
         } else {
             false
         };
@@ -343,12 +348,7 @@ impl ImageViewerApp {
         }
 
         let path = file.path.clone();
-        let is_gif = path
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("gif"));
-
-        let thumbnail_size = if is_gif { 256 } else { 512 };
+        let thumbnail_size = crate::domain::thumbnail::detail_preview_size(&path);
         self.ensure_detail_panel_thumbnail_request(
             path.clone(),
             file.modified,
@@ -370,7 +370,9 @@ impl ImageViewerApp {
             }
         }
 
-        if is_gif {
+        if crate::domain::thumbnail::detail_preview_size(&path)
+            == crate::domain::thumbnail::DETAIL_PREVIEW_GIF_SIZE
+        {
             use crate::ui::components::media_preview::GifPlayer;
             self.gif_manager.unload_except(Some(&path));
             let needs_player = self

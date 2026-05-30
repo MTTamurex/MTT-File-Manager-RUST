@@ -632,6 +632,13 @@ impl ImageViewerApp {
                     .as_ref()
                     .is_some_and(|selected_file| selected_file.path == path);
 
+                // Compute preview minimum size before `path` is moved into cache operations.
+                let preview_min_size_for_selected: u32 = if is_selected {
+                    crate::domain::thumbnail::detail_preview_size(&path)
+                } else {
+                    0
+                };
+
                 let is_visible_or_selected = is_interactive
                     || is_selected
                     || eviction_visible
@@ -689,7 +696,14 @@ impl ImageViewerApp {
                 }
 
                 if is_selected {
-                    self.selected_thumbnail = Some(texture);
+                    let tex_dim = width.max(height);
+                    // Only promote to selected_thumbnail when the uploaded texture
+                    // meets the resolution the detail panel requires; otherwise a
+                    // low-res upload from a smaller request can replace a pending
+                    // high-res placeholder with a blurry thumbnail.
+                    if tex_dim >= preview_min_size_for_selected {
+                        self.selected_thumbnail = Some(texture);
+                    }
                 }
 
                 uploads_this_frame += 1;
