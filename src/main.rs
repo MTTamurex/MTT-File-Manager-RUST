@@ -287,68 +287,66 @@ fn main() -> eframe::Result<()> {
         viewport = viewport.with_icon(icon);
     }
 
-    // Read user's preferred GPU backend from persisted preferences (before eframe init).
+    // Read user's GPU backend preference (before eframe init).
     let gpu_backend_pref = read_early_preference("gpu_backend");
-    let selected_backends = gpu_backend::parse_gpu_backend_preference(gpu_backend_pref.as_deref());
-    let native_adapter_selector = gpu_backend::adapter_selector(gpu_backend_pref.as_deref());
-    log::info!(
-        "[STARTUP] GPU backend preference: {:?} -> backends: {:?}",
-        gpu_backend_pref.as_deref().unwrap_or("auto"),
-        selected_backends
-    );
+    let use_glow = match gpu_backend_pref.as_deref() {
+        Some("dx12") | Some("vulkan") => false,
+        _ => true, // default: Glow (OpenGL)
+    };
 
-    let options = eframe::NativeOptions {
-        viewport,
-        renderer: eframe::Renderer::Wgpu,
-        persist_window: false, // Disable eframe persistence - we control manually
-        wgpu_options: eframe::egui_wgpu::WgpuConfiguration {
-            // Request the discrete GPU on hybrid-GPU systems (e.g. laptop with
-            // Intel + NVIDIA/AMD).  Without this, the driver may route the app
-            // to the integrated GPU, causing slower texture uploads and lower
-            // throughput — especially noticeable after returning from idle.
-            wgpu_setup: eframe::egui_wgpu::WgpuSetup::CreateNew(
-                eframe::egui_wgpu::WgpuSetupCreateNew {
-                    instance_descriptor: eframe::wgpu::InstanceDescriptor {
-                        backends: selected_backends,
+    let options = if use_glow {
+        log::info!("[STARTUP] Using Glow (OpenGL) renderer");
+        eframe::NativeOptions {
+            viewport,
+            renderer: eframe::Renderer::Glow,
+            persist_window: false,
+            ..Default::default()
+        }
+    } else {
+        let selected_backends = gpu_backend::parse_gpu_backend_preference(gpu_backend_pref.as_deref());
+        let native_adapter_selector = gpu_backend::adapter_selector(gpu_backend_pref.as_deref());
+        log::info!(
+            "[STARTUP] Using Wgpu renderer. Backend preference: {:?} -> backends: {:?}",
+            gpu_backend_pref.as_deref().unwrap_or("auto"),
+            selected_backends
+        );
+        eframe::NativeOptions {
+            viewport,
+            renderer: eframe::Renderer::Wgpu,
+            persist_window: false,
+            wgpu_options: eframe::egui_wgpu::WgpuConfiguration {
+                wgpu_setup: eframe::egui_wgpu::WgpuSetup::CreateNew(
+                    eframe::egui_wgpu::WgpuSetupCreateNew {
+                        instance_descriptor: eframe::wgpu::InstanceDescriptor {
+                            backends: selected_backends,
+                            ..Default::default()
+                        },
+                        power_preference: eframe::wgpu::PowerPreference::HighPerformance,
+                        native_adapter_selector,
+                        device_descriptor: std::sync::Arc::new(|adapter| {
+                            let base_limits = if adapter.get_info().backend == eframe::wgpu::Backend::Gl {
+                                eframe::wgpu::Limits::downlevel_webgl2_defaults()
+                            } else {
+                                eframe::wgpu::Limits::default()
+                            };
+                            eframe::wgpu::DeviceDescriptor {
+                                label: Some("mtt-file-manager wgpu device"),
+                                required_features: eframe::wgpu::Features::default(),
+                                required_limits: eframe::wgpu::Limits {
+                                    max_texture_dimension_2d: gpu_backend::WGPU_REQUIRED_MAX_TEXTURE_DIMENSION_2D,
+                                    ..base_limits
+                                },
+                                memory_hints: eframe::wgpu::MemoryHints::MemoryUsage,
+                            }
+                        }),
                         ..Default::default()
                     },
-                    power_preference: eframe::wgpu::PowerPreference::HighPerformance,
-                    native_adapter_selector,
-                    // Override the default device descriptor so the wgpu/DX12 backend
-                    // requests smaller, on-demand heap allocations instead of the
-                    // large-block strategy used by `MemoryHints::Performance` (the
-                    // egui-wgpu default). For a file manager UI — even one that
-                    // uploads many thumbnail textures — the steady-state texture
-                    // working set is small and bursty, so smaller heaps trade a
-                    // negligible upload-throughput penalty for a meaningfully
-                    // smaller process baseline (driver heaps + GPU mirror copies).
-                    device_descriptor: std::sync::Arc::new(|adapter| {
-                        let base_limits = if adapter.get_info().backend == eframe::wgpu::Backend::Gl
-                        {
-                            eframe::wgpu::Limits::downlevel_webgl2_defaults()
-                        } else {
-                            eframe::wgpu::Limits::default()
-                        };
-                        eframe::wgpu::DeviceDescriptor {
-                            label: Some("mtt-file-manager wgpu device"),
-                            required_features: eframe::wgpu::Features::default(),
-                            required_limits: eframe::wgpu::Limits {
-                                max_texture_dimension_2d:
-                                    gpu_backend::WGPU_REQUIRED_MAX_TEXTURE_DIMENSION_2D,
-                                ..base_limits
-                            },
-                            memory_hints: eframe::wgpu::MemoryHints::MemoryUsage,
-                        }
-                    }),
-                    ..Default::default()
-                },
-            ),
-            // Low-latency presentation: queue only 1 frame ahead so the
-            // compositor shows our content sooner after texture re-uploads.
-            desired_maximum_frame_latency: Some(1),
+                ),
+                desired_maximum_frame_latency: Some(1),
+                ..Default::default()
+            },
             ..Default::default()
-        },
-        ..Default::default()
+        }
     };
 
     let result = eframe::run_native(

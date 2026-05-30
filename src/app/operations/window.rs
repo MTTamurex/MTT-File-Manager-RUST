@@ -6,7 +6,6 @@
 use crate::app::state::ImageViewerApp;
 use crate::infrastructure::shell_menu_worker::ShellMenuRequest;
 use crate::infrastructure::windows::window_corners::apply_window_corner_preference;
-use crate::infrastructure::windows::window_corners::disable_window_transitions;
 use crate::infrastructure::windows::window_subclass::install_borderless_subclass;
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::HWND;
@@ -109,12 +108,6 @@ impl ImageViewerApp {
 
                     // Keep rounded corners in windowed mode (Windows 11 DWM).
                     apply_window_corner_preference(hwnd, self.layout.saved_is_maximized);
-
-                    // Disable DWM transitions (show/hide/minimize animations).
-                    // The wgpu swapchain becomes unavailable during minimize, causing
-                    // DWM to show a black frame during the minimize animation. By
-                    // disabling transitions, the window minimizes instantly.
-                    disable_window_transitions(hwnd);
 
                     // Warm shell extensions on the managed STA worker thread.
                     // This restores first-open context menu UX without spawning

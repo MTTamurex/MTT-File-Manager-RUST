@@ -10,8 +10,8 @@ use std::sync::Mutex;
 use eframe::egui;
 use windows::Win32::Foundation::{HWND, LPARAM, RECT, WPARAM};
 use windows::Win32::Graphics::Dwm::{
-    DwmInvalidateIconicBitmaps, DwmSetIconicLivePreviewBitmap, DwmSetIconicThumbnail,
-    DwmSetWindowAttribute, DWMWA_FORCE_ICONIC_REPRESENTATION, DWMWA_HAS_ICONIC_BITMAP,
+    DwmSetIconicLivePreviewBitmap, DwmSetIconicThumbnail, DwmSetWindowAttribute,
+    DWMWA_HAS_ICONIC_BITMAP,
 };
 use windows::Win32::Graphics::Gdi::{
     BitBlt, CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, GetDC, ReleaseDC,
@@ -28,7 +28,7 @@ pub const SAFE_MINIMIZE_MESSAGE: u32 = WM_APP + 0x054D;
 static ALLOW_NEXT_NATIVE_MINIMIZE: AtomicBool = AtomicBool::new(false);
 static SAFE_MINIMIZE_POSTED: AtomicBool = AtomicBool::new(false);
 static SCREENSHOT_REQUESTED: AtomicBool = AtomicBool::new(false);
-static ICONIC_PREVIEW_ENABLED: AtomicBool = AtomicBool::new(false);
+
 static NEXT_SCREENSHOT_ID: AtomicU64 = AtomicU64::new(1);
 static PENDING_SCREENSHOT_ID: AtomicU64 = AtomicU64::new(0);
 static SCREENSHOT_IN_FLIGHT_ID: AtomicU64 = AtomicU64::new(0);
@@ -103,7 +103,7 @@ pub fn handle_screenshot_event(user_data: &egui::UserData, image: &egui::ColorIm
     }
 
     let minimize_pending = MINIMIZE_AFTER_SCREENSHOT_ID.load(Ordering::Acquire) == request_id;
-    if minimize_pending || !ICONIC_PREVIEW_ENABLED.load(Ordering::Acquire) {
+    if minimize_pending {
         if !store_screenshot(image) {
             return false;
         }
@@ -157,24 +157,10 @@ pub fn perform_safe_minimize(hwnd: HWND, before_minimize: fn()) {
         return;
     }
 
-    // Proactively provide the iconic bitmaps to DWM before forcing iconic
-    // representation. Without this, DWM would show a black frame because it
-    // doesn't have the bitmaps yet when FORCE_ICONIC_REPRESENTATION is enabled.
-    // We also MUST NOT call DwmInvalidateIconicBitmaps after setting FORCE,
-    // because that would discard the bitmaps we just provided.
+    // Provide iconic bitmaps to DWM so it can show a thumbnail for the
+    // taskbar preview while the wgpu surface is unavailable during minimize.
     proactive_set_iconic_bitmaps(hwnd);
     set_has_iconic_bitmap(hwnd, true);
-    if !ICONIC_PREVIEW_ENABLED.swap(true, Ordering::AcqRel) {
-        let value: i32 = 1;
-        unsafe {
-            let _ = DwmSetWindowAttribute(
-                hwnd,
-                DWMWA_FORCE_ICONIC_REPRESENTATION,
-                &value as *const _ as *const core::ffi::c_void,
-                core::mem::size_of::<i32>() as u32,
-            );
-        }
-    }
     before_minimize();
 
     ALLOW_NEXT_NATIVE_MINIMIZE.store(true, Ordering::Release);
@@ -182,49 +168,6 @@ pub fn perform_safe_minimize(hwnd: HWND, before_minimize: fn()) {
         let _ = ShowWindow(hwnd, SW_MINIMIZE);
     }
     ALLOW_NEXT_NATIVE_MINIMIZE.store(false, Ordering::Release);
-}
-
-pub fn set_iconic_preview_enabled(hwnd: HWND, enabled: bool) {
-    if hwnd.is_invalid() {
-        return;
-    }
-
-    if ICONIC_PREVIEW_ENABLED.swap(enabled, Ordering::AcqRel) == enabled {
-        return;
-    }
-
-    let value: i32 = if enabled { 1 } else { 0 };
-    unsafe {
-        let _ = DwmSetWindowAttribute(
-            hwnd,
-            DWMWA_FORCE_ICONIC_REPRESENTATION,
-            &value as *const _ as *const core::ffi::c_void,
-            core::mem::size_of::<i32>() as u32,
-        );
-        let _ = DwmSetWindowAttribute(
-            hwnd,
-            DWMWA_HAS_ICONIC_BITMAP,
-            &value as *const _ as *const core::ffi::c_void,
-            core::mem::size_of::<i32>() as u32,
-        );
-        let _ = DwmInvalidateIconicBitmaps(hwnd);
-    }
-}
-
-pub fn enable_force_iconic_representation(hwnd: HWND) {
-    if hwnd.is_invalid() || ICONIC_PREVIEW_ENABLED.swap(true, Ordering::AcqRel) {
-        return;
-    }
-
-    let value: i32 = 1;
-    unsafe {
-        let _ = DwmSetWindowAttribute(
-            hwnd,
-            DWMWA_FORCE_ICONIC_REPRESENTATION,
-            &value as *const _ as *const core::ffi::c_void,
-            core::mem::size_of::<i32>() as u32,
-        );
-    }
 }
 
 fn set_has_iconic_bitmap(hwnd: HWND, enabled: bool) {

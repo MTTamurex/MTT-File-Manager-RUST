@@ -58,25 +58,4 @@ pub fn apply_dark_title_bar(hwnd: HWND, dark: bool) {
     }
 }
 
-/// Disable native DWM show/hide transitions for a window.
-///
-/// This is useful for viewers that must appear instantly without composition
-/// animations that can look like rapid extra window opens/closes.
-pub fn disable_window_transitions(hwnd: HWND) {
-    if hwnd.is_invalid() {
-        return;
-    }
 
-    // DWMWA_TRANSITIONS_FORCEDISABLED = 3
-    const DWMWA_TRANSITIONS_FORCEDISABLED: DWMWINDOWATTRIBUTE = DWMWINDOWATTRIBUTE(3);
-    let value: i32 = 1;
-
-    unsafe {
-        let _ = DwmSetWindowAttribute(
-            hwnd,
-            DWMWA_TRANSITIONS_FORCEDISABLED,
-            &value as *const _ as *const core::ffi::c_void,
-            core::mem::size_of::<i32>() as u32,
-        );
-    }
-}

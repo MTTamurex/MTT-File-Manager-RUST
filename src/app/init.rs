@@ -658,6 +658,8 @@ impl ImageViewerApp {
                 std::time::SystemTime::now(),
             );
             log::info!("[GPU] {}", diag.trim());
+        } else {
+            app.active_gpu_backend = "glow".to_string();
         }
 
         app

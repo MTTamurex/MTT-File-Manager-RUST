@@ -280,8 +280,6 @@ pub fn remove_borderless_subclass(hwnd: HWND) {
         return;
     }
 
-    taskbar_minimize::set_iconic_preview_enabled(hwnd, false);
-
     // SAFETY: HWND is valid, we're removing our own subclass.
     unsafe {
         let _ = RemoveWindowSubclass(hwnd, Some(borderless_subclass_proc), BORDERLESS_SUBCLASS_ID);
@@ -356,7 +354,6 @@ extern "system" fn borderless_subclass_proc(
                 }
             }
             SC_RESTORE_CMD => {
-                taskbar_minimize::set_iconic_preview_enabled(hwnd, false);
                 mark_layout_restoring();
             }
             _ => {}
@@ -373,15 +370,10 @@ extern "system" fn borderless_subclass_proc(
             // Note: freeze_layout() should be called by UI layer before this
             // to capture sidebar widths. If not yet frozen, do it now with defaults.
             mark_layout_minimized();
-            // Force iconic representation AFTER the minimize animation completes,
-            // so DWM uses our screenshot for the taskbar thumbnail instead of
-            // the (now unavailable) wgpu composited surface.
-            taskbar_minimize::enable_force_iconic_representation(hwnd);
             return unsafe { DefSubclassProc(hwnd, msg, wparam, LPARAM(0)) };
         } else if size_type == SIZE_RESTORED || size_type == SIZE_MAXIMIZED {
             // Transition from Minimized to Restoring (not directly to Normal)
             // The UI layer must call try_unfreeze_layout() to complete transition
-            taskbar_minimize::set_iconic_preview_enabled(hwnd, false);
             mark_layout_restoring();
         }
     }
