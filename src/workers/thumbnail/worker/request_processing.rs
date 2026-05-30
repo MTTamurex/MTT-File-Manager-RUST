@@ -1,5 +1,5 @@
 use crate::domain::thumbnail::ThumbnailData;
-use crate::infrastructure::diagnostic_logger::{diag_warn, field_label};
+use crate::infrastructure::diagnostic_logger::{diag_info, diag_warn, field_label, field_u64};
 use crate::infrastructure::disk_cache::{ThumbnailCacheEntry, ThumbnailDiskCache};
 use crate::infrastructure::io_priority::IOPriority;
 use crate::infrastructure::onedrive::{self, IoTimeoutResult};
@@ -347,6 +347,16 @@ pub(super) fn process_thumbnail_request(
                         );
                     }
 
+                    diag_info(
+                        "thumbnail_extraction",
+                        "success",
+                        &[
+                            field_u64("result_w", resized.1 as u64),
+                            field_u64("result_h", resized.2 as u64),
+                            field_u64("req_bucket", bucket_size as u64),
+                        ],
+                    );
+
                     final_result = Some(resized);
                     clear_transient_failure(path);
                 }
@@ -381,6 +391,7 @@ pub(super) fn process_thumbnail_request(
                     // visit.  The user can press F5 to retry after installing
                     // a codec pack.
                     mark_as_failed(path.clone());
+                    diag_warn("thumbnail_extraction", "permanent_failure", &[]);
                 }
             }
         }

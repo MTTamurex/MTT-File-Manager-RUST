@@ -106,6 +106,22 @@ pub(super) fn render_preview_panel_layout(
                                 .map(|item| item.size)
                                 .sum();
 
+// Resolution guard for preview panel: accept textures that are
+                            // large enough for the detail panel, OR that are the best available
+                            // when we've already attempted the required quality bucket (some
+                            // video thumbnails can't be extracted at higher resolutions).
+                            let preview_min_size = crate::domain::thumbnail::detail_preview_size(&file.path);
+                            let required_preview_bucket = crate::workers::thumbnail::processing::get_bucket_size(
+                                app.effective_thumbnail_request_size_px(preview_min_size),
+                            );
+                            let attempted_bucket = app.cache_manager.attempted_thumbnail_bucket_for(&file.path);
+                            let texture_cache_peek = app.cache_manager.texture_cache.peek(&file.path).cloned().filter(|tex| {
+                                let s = tex.size();
+                                let large_enough = s[0].max(s[1]) as u32 >= preview_min_size;
+                                let best_effort = attempted_bucket.is_some_and(|bucket| bucket >= required_preview_bucket);
+                                large_enough || best_effort
+                            });
+
                             let action = render_preview_panel(
                                 ui,
                                 &file,
@@ -115,15 +131,7 @@ pub(super) fn render_preview_panel_layout(
                                 app.selected_gif.as_mut(),
                                 app.media_preview.as_mut(), // Always pass mut if it exists, visibility is controlled by HWND
                                 selected_metadata,
-                                // Same resolution guard used in ensure_detail_panel_thumbnail_request:
-                                // avoid showing a low-res cached thumbnail in the preview panel.
-                                {
-                                    let preview_min_size = crate::domain::thumbnail::detail_preview_size(&file.path);
-                                    app.cache_manager.texture_cache.peek(&file.path).cloned().filter(|tex| {
-                                        let s = tex.size();
-                                        s[0].max(s[1]) as u32 >= preview_min_size
-                                    })
-                                },
+                                texture_cache_peek,
                                 app.cache_manager
                                     .folder_preview_cache
                                     .get(&file.path)

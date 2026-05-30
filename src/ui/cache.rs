@@ -225,6 +225,9 @@ pub struct CacheManager {
     /// (e.g. a 256x256 PNG when the UI wants 512: worker keeps returning 256,
     /// slot keeps re-requesting). Bounded to MAX_DYNAMIC_TEXTURE_CACHE_ITEMS.
     pub attempted_thumbnail_bucket: rustc_hash::FxHashMap<PathBuf, u32>,
+    /// Tracks paths that have already emitted a "best_effort_accepted" diagnostic
+    /// event, so we don't spam the diagnostic log every frame for the same file.
+    pub best_effort_notified: rustc_hash::FxHashSet<PathBuf>,
     /// PERFORMANCE: RAM cache for decoded RGBA data (Layer 2 - larger than VRAM cache)
     /// When a texture is evicted from VRAM, the RGBA data remains here for fast re-upload
     /// without needing disk I/O. This is critical for HDD performance during video playback.
@@ -277,6 +280,7 @@ impl CacheManager {
             folder_preview_trace,
             thumbnail_trace: ThumbnailTraceCounters::default(),
             attempted_thumbnail_bucket: rustc_hash::FxHashMap::default(),
+            best_effort_notified: rustc_hash::FxHashSet::default(),
             rgba_data_cache: LruCache::new(nz_cache_size(
                 DEFAULT_RGBA_CACHE_ITEMS,
                 "rgba_data_cache",
@@ -334,6 +338,7 @@ impl CacheManager {
             folder_preview_trace,
             thumbnail_trace: ThumbnailTraceCounters::default(),
             attempted_thumbnail_bucket: rustc_hash::FxHashMap::default(),
+            best_effort_notified: rustc_hash::FxHashSet::default(),
             rgba_data_cache: LruCache::new(nz_cache_size(rgba_cache_items, "rgba_data_cache")),
             rgba_data_bytes: 0,
             max_rgba_data_bytes: rgba_budget_bytes,
@@ -467,6 +472,7 @@ impl CacheManager {
     pub fn forget_attempted_thumbnail_bucket(&mut self, path: &PathBuf) {
         self.attempted_thumbnail_bucket.remove(path);
         self.thumbnail_request_debounce.pop(path);
+        self.best_effort_notified.remove(path);
     }
 
     /// Touches all currently visible thumbnail-related entries so LRU eviction

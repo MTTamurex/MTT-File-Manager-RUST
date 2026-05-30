@@ -7,6 +7,7 @@
 
 use crate::app::state::ImageViewerApp;
 use crate::domain::file_entry::FileEntry;
+use crate::infrastructure::diagnostic_logger::{diag_info, field_u64};
 
 enum SelectedPreviewOverlayAction {
     None,
@@ -38,39 +39,67 @@ impl ImageViewerApp {
             return;
         }
 
-        let has_required_texture = if let Some(tex) = self.cache_manager.texture_cache.peek(&path) {
-            let tex_size = tex.size();
-            let large_enough = (tex_size[0].max(tex_size[1]) as u32) >= size;
-            // Only promote a cached texture into selected_thumbnail when it meets the
-            // resolution required by the preview panel, otherwise the user sees a
-            // low-res thumbnail briefly before the high-res version arrives.
-            if large_enough
-                && self
-                    .selected_file
-                    .as_ref()
-                    .is_some_and(|selected| selected.path == path)
-            {
-                self.selected_thumbnail = Some(tex.clone());
-            }
-            large_enough
-        } else {
-            false
-        };
-
+        let effective_req_size = self.effective_thumbnail_request_size_px(size);
         let required_preview_bucket = crate::workers::thumbnail::processing::get_bucket_size(
-            self.effective_thumbnail_request_size_px(size),
+            effective_req_size,
         );
-        let has_required_request = self
-            .cache_manager
-            .attempted_thumbnail_bucket_for(&path)
-            .is_some_and(|bucket| bucket >= required_preview_bucket);
-        let required_request_in_flight = has_required_request
-            && (self.cache_manager.is_loading(&path)
-                || self.cache_manager.is_pending_upload(&path));
 
-        if !has_required_texture && !required_request_in_flight {
-            self.cache_manager.loading_set.insert(path.clone());
-            self.request_thumbnail_load_with_modified(path, size, modified);
+        let attempted_bucket = self.cache_manager.attempted_thumbnail_bucket_for(&path);
+        // True when we've already requested at the detail panel's required quality.
+        // Some media files (notably videos) cannot produce thumbnails at higher
+        // resolutions than their native frame size.  Once we've attempted the
+        // top bucket, whatever is in the texture cache is the best available.
+        let already_attempted_max_quality =
+            attempted_bucket.is_some_and(|bucket| bucket >= required_preview_bucket);
+
+        let tex_in_cache = self.cache_manager.texture_cache.peek(&path);
+        let has_required_texture = tex_in_cache.as_ref().is_some_and(|tex| {
+            let tex_size = tex.size();
+            (tex_size[0].max(tex_size[1]) as u32) >= size
+        });
+
+        // Best-effort promotion: when we've already attempted at the required
+        // quality bucket and the result is smaller than ideal, accept it as the
+        // best available rather than falling back to a generic icon.
+        let request_in_flight = self.cache_manager.is_loading(&path)
+            || self.cache_manager.is_pending_upload(&path);
+        let promote_best_effort = already_attempted_max_quality && !request_in_flight;
+
+        if let Some(tex) = tex_in_cache {
+            if self
+                .selected_file
+                .as_ref()
+                .is_some_and(|selected| selected.path == path)
+            {
+                if has_required_texture || promote_best_effort {
+                    self.selected_thumbnail = Some(tex.clone());
+                }
+            }
+        }
+
+        if !has_required_texture {
+            if already_attempted_max_quality {
+                // Already tried at max quality; the best available texture is
+                // in cache.  No further requests needed.
+                if !self.cache_manager.best_effort_notified.contains(&path) {
+                    self.cache_manager.best_effort_notified.insert(path.clone());
+                    diag_info(
+                        "preview_thumbnail",
+                        "best_effort_accepted",
+                        &[
+                            field_u64("logical_req_size", size as u64),
+                            field_u64("effective_req_size", effective_req_size as u64),
+                            field_u64("attempted_bucket", attempted_bucket.unwrap_or(0) as u64),
+                            field_u64("required_bucket", required_preview_bucket as u64),
+                        ],
+                    );
+                }
+            } else if request_in_flight {
+                // A request is already in flight; wait for its result.
+            } else {
+                self.cache_manager.loading_set.insert(path.clone());
+                self.request_thumbnail_load_with_modified(path, size, modified);
+            }
         }
     }
 

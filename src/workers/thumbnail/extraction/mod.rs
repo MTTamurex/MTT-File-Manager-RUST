@@ -17,6 +17,7 @@ pub mod stage3_shell_api;
 pub mod stage4_force_extract;
 pub mod stage5_media_foundation;
 
+use crate::infrastructure::diagnostic_logger::diag_warn;
 use crate::infrastructure::io_priority::IOPriority;
 use crate::infrastructure::onedrive;
 use std::path::Path;
@@ -209,6 +210,7 @@ pub fn generate_thumbnail_hybrid_detailed_with_target(
         return ThumbnailExtractionOutcome::Success(result);
     } else {
         log::warn!("[Thumbnail] ALL STAGES FAILED for: {:?}", path.file_name());
+        diag_warn("thumbnail_extraction", "all_stages_failed", &[]);
     }
     ThumbnailExtractionOutcome::Failed
 }

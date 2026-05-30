@@ -1,4 +1,5 @@
 use crate::app::state::ImageViewerApp;
+use crate::infrastructure::diagnostic_logger::{diag_info, field_u64};
 use crate::ui::cache::{
     DEFAULT_DYNAMIC_RGBA_BUDGET_BYTES, MAX_DYNAMIC_TEXTURE_CACHE_ITEMS,
     MIN_DYNAMIC_TEXTURE_CACHE_ITEMS,
@@ -687,12 +688,12 @@ impl ImageViewerApp {
                 if let Some(visible_paths) = eviction_visible.as_ref() {
                     self.cache_manager.promote_visible(visible_paths);
                     self.cache_manager.put_thumbnail_preserving_visible(
-                        path,
+                        path.clone(),
                         texture.clone(),
                         visible_paths,
                     );
                 } else {
-                    self.cache_manager.put_thumbnail(path, texture.clone());
+                    self.cache_manager.put_thumbnail(path.clone(), texture.clone());
                 }
 
                 if is_selected {
@@ -703,6 +704,35 @@ impl ImageViewerApp {
                     // high-res placeholder with a blurry thumbnail.
                     if tex_dim >= preview_min_size_for_selected {
                         self.selected_thumbnail = Some(texture);
+                    } else if preview_min_size_for_selected > 0 {
+                        // Best-effort: if we've already attempted the required quality
+                        // bucket and the result is still smaller than ideal, accept it
+                        // as the best available.  This happens with video files whose
+                        // thumbnails cannot be extracted at higher resolutions.
+                        let effective_req_size = self.effective_thumbnail_request_size_px(preview_min_size_for_selected);
+                        let required_bucket = crate::workers::thumbnail::processing::get_bucket_size(
+                            effective_req_size,
+                        );
+                        if self
+                            .cache_manager
+                            .attempted_thumbnail_bucket_for(&path)
+                            .is_some_and(|bucket| bucket >= required_bucket)
+                        {
+                            if !self.cache_manager.best_effort_notified.contains(&path) {
+                                self.cache_manager.best_effort_notified.insert(path.clone());
+                                diag_info(
+                                    "thumbnail_upload",
+                                    "selected_best_effort",
+                                    &[
+                                        field_u64("tex_dim", tex_dim as u64),
+                                        field_u64("logical_req_size", preview_min_size_for_selected as u64),
+                                        field_u64("effective_req_size", effective_req_size as u64),
+                                        field_u64("required_bucket", required_bucket as u64),
+                                    ],
+                                );
+                            }
+                            self.selected_thumbnail = Some(texture);
+                        }
                     }
                 }
 
