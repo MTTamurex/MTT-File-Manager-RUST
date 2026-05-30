@@ -84,9 +84,7 @@ pub fn render_shortcut_settings_section(
                     shortcuts.label(action)
                 };
 
-                ui.label(
-                    RichText::new(action_label(action)).color(theme::text_color(dark_mode)),
-                );
+                ui.label(RichText::new(action_label(action)).color(theme::text_color(dark_mode)));
 
                 let button_text = if is_capturing {
                     RichText::new(button_text).strong()

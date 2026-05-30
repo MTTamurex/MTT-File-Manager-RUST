@@ -29,4 +29,9 @@ pub struct ThumbnailRequest {
     pub modified: u64,
     pub source: ThumbnailRequestSource,
     pub track_bulk_progress: bool,
+    /// Original priority assigned by the bulk scan. When the same path is
+    /// promoted to a visible request and later survives a navigation cleanup,
+    /// this lets the queue restore the bulk work to its initial priority.
+    pub bulk_priority: Option<IOPriority>,
+    pub bulk_session: Option<u64>,
 }

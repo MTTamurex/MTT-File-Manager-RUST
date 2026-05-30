@@ -206,10 +206,7 @@ pub fn render_batch_rename_modal(app: &mut ImageViewerApp, ctx: &egui::Context) 
                                 .color(theme::secondary_text_color(dark_mode)),
                         )
                         .fill(Color32::TRANSPARENT)
-                        .stroke(Stroke::new(
-                            1.0,
-                            theme::secondary_text_color(dark_mode),
-                        )),
+                        .stroke(Stroke::new(1.0, theme::secondary_text_color(dark_mode))),
                     )
                     .clicked()
                 {
@@ -274,8 +271,7 @@ fn render_controls(ui: &mut egui::Ui, state: &mut BatchRenameState, dark_mode: b
                     });
 
                 ui.label(
-                    RichText::new(t!("batch_rename.separator"))
-                        .color(theme::text_color(dark_mode)),
+                    RichText::new(t!("batch_rename.separator")).color(theme::text_color(dark_mode)),
                 );
                 egui::ComboBox::from_id_salt("batch_sep")
                     .selected_text(state.separator.display_name())
@@ -301,8 +297,7 @@ fn render_controls(ui: &mut egui::Ui, state: &mut BatchRenameState, dark_mode: b
             );
             ui.horizontal(|ui| {
                 ui.label(
-                    RichText::new(t!("batch_rename.start"))
-                        .color(theme::text_color(dark_mode)),
+                    RichText::new(t!("batch_rename.start")).color(theme::text_color(dark_mode)),
                 );
                 ui.add(egui::DragValue::new(&mut state.start).range(0..=99999));
 
@@ -498,12 +493,7 @@ fn render_reorderable_list(
 
 // ── Preview table ─────────────────────────────────────────────────────────────
 
-fn render_preview_table(
-    ui: &mut egui::Ui,
-    preview: &[PreviewRow],
-    height: f32,
-    dark_mode: bool,
-) {
+fn render_preview_table(ui: &mut egui::Ui, preview: &[PreviewRow], height: f32, dark_mode: bool) {
     egui::ScrollArea::vertical()
         .id_salt("batch_preview_scroll")
         .max_height(height)
@@ -538,9 +528,7 @@ fn render_preview_table(
                                 .weak()
                                 .color(theme::secondary_text_color(dark_mode)),
                         );
-                        ui.label(
-                            RichText::new(&row.old_name).color(theme::text_color(dark_mode)),
-                        );
+                        ui.label(RichText::new(&row.old_name).color(theme::text_color(dark_mode)));
 
                         if row.conflict {
                             ui.colored_label(

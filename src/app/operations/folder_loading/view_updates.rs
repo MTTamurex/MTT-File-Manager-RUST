@@ -84,9 +84,7 @@ impl ImageViewerApp {
                 di.drive_type == crate::infrastructure::windows::DriveType::Remote
             });
             if is_remote {
-                self.navigation_state
-                    .computer_view_network_indices
-                    .push(i);
+                self.navigation_state.computer_view_network_indices.push(i);
             } else {
                 self.navigation_state.computer_view_local_indices.push(i);
             }

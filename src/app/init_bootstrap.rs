@@ -58,6 +58,7 @@ pub(in crate::app) struct AppBootstrap {
     pub(in crate::app) bulk_thumbnail_scanning: Arc<AtomicBool>,
     pub(in crate::app) bulk_thumbnail_total: Arc<AtomicUsize>,
     pub(in crate::app) bulk_thumbnail_completed: Arc<AtomicUsize>,
+    pub(in crate::app) bulk_thumbnail_session: Arc<AtomicU64>,
     pub(in crate::app) font_rx: mpsc::Receiver<egui::FontDefinitions>,
 
     pub(in crate::app) icon_req_tx: mpsc::Sender<(PathBuf, usize)>,
@@ -202,6 +203,7 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
     let bulk_thumbnail_scanning = Arc::new(AtomicBool::new(false));
     let bulk_thumbnail_total = Arc::new(AtomicUsize::new(0));
     let bulk_thumbnail_completed = Arc::new(AtomicUsize::new(0));
+    let bulk_thumbnail_session = Arc::new(AtomicU64::new(0));
 
     onedrive::init_onedrive_paths();
     let directory_cache = Arc::new(DirectoryCache::new());
@@ -218,6 +220,7 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
         pending_deletions.clone(),
         bulk_thumbnail_progress.clone(),
         bulk_thumbnail_completed.clone(),
+        bulk_thumbnail_session.clone(),
     );
 
     let icon_disk_cache = Arc::new(IconDiskCache::new(&base_dir));
@@ -287,6 +290,7 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
         bulk_thumbnail_scanning,
         bulk_thumbnail_total,
         bulk_thumbnail_completed,
+        bulk_thumbnail_session,
         font_rx,
         icon_req_tx,
         icon_res_rx,

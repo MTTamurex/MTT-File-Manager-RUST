@@ -19,7 +19,7 @@ use std::collections::VecDeque;
 use std::path::PathBuf;
 // PERFORMANCE: FxHashSet uses faster hashing for PathBuf keys
 use crate::ui::cache::FxHashSet;
-use std::sync::atomic::{AtomicBool, AtomicUsize};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
 use std::time::{Instant, SystemTime};
@@ -478,6 +478,7 @@ pub struct ImageViewerApp {
     pub bulk_thumbnail_was_scanning: bool,
     pub bulk_thumbnail_total: Arc<AtomicUsize>,
     pub bulk_thumbnail_completed: Arc<AtomicUsize>,
+    pub bulk_thumbnail_session: Arc<AtomicU64>,
     pub bulk_thumbnail_progress: crate::workers::thumbnail::SharedBulkThumbnailProgress,
 
     // Media keyboard debounce

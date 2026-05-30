@@ -102,9 +102,7 @@ pub fn render_virtual_drive_settings_section(ui: &mut egui::Ui) {
     ui.add_space(16.0);
     ui.separator();
     ui.add_space(8.0);
-    ui.label(
-        RichText::new(t!("vdrive_settings.config_info")).color(theme::text_color(dark_mode)),
-    );
+    ui.label(RichText::new(t!("vdrive_settings.config_info")).color(theme::text_color(dark_mode)));
 }
 
 /// Detect all virtual drives in the system

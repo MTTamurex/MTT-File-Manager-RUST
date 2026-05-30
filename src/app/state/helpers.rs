@@ -477,11 +477,11 @@ impl ImageViewerApp {
         self.run_memory_maintenance_impl(true);
     }
 
-    /// Drops thumbnail work and aggressively downsizes thumbnail caches when
-    /// the visible folder/view changes. This is intentionally separate from
-    /// memory-pressure maintenance: stale thumbnail textures and queued RGBA
-    /// payloads from the previous folder should be released even when total
-    /// process RAM is below the soft limit.
+    /// Drops stale visible thumbnail work and aggressively downsizes thumbnail
+    /// caches when the visible folder/view changes. This is intentionally
+    /// separate from memory-pressure maintenance: stale thumbnail textures and
+    /// queued RGBA payloads from the previous folder should be released even
+    /// when total process RAM is below the soft limit.
     pub(crate) fn discard_thumbnail_pipeline_for_navigation(&mut self, reason: &str) {
         let queued_removed = self.thumbnail_queue.clear_pending();
 

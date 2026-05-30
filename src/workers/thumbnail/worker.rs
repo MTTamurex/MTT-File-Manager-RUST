@@ -14,7 +14,7 @@ use crate::workers::thumbnail::SharedBulkThumbnailProgress;
 use crossbeam_channel::Sender;
 use eframe::egui;
 use parking_lot::{Condvar, Mutex};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 use windows::Win32::Media::MediaFoundation::{MFShutdown, MFStartup, MFSTARTUP_NOSOCKET};
@@ -112,6 +112,7 @@ pub fn spawn_thumbnail_workers(
     pending_deletions: Arc<dashmap::DashMap<std::path::PathBuf, ()>>,
     bulk_thumbnail_progress: SharedBulkThumbnailProgress,
     bulk_thumbnail_completed: Arc<AtomicUsize>,
+    bulk_thumbnail_session: Arc<AtomicU64>,
 ) {
     let cpu_count = available_cpu_count();
     let worker_count = compute_thumbnail_worker_count(cpu_count);
@@ -143,6 +144,7 @@ pub fn spawn_thumbnail_workers(
         let pending_deletions = pending_deletions.clone();
         let bulk_thumbnail_progress = bulk_thumbnail_progress.clone();
         let bulk_thumbnail_completed = bulk_thumbnail_completed.clone();
+        let bulk_thumbnail_session = bulk_thumbnail_session.clone();
 
         let spawn_result = std::thread::Builder::new()
             .name(format!("thumb-worker-{}", worker_id))
@@ -159,6 +161,7 @@ pub fn spawn_thumbnail_workers(
                     pending_deletions,
                     bulk_thumbnail_progress,
                     bulk_thumbnail_completed,
+                    bulk_thumbnail_session,
                 );
             });
 
@@ -315,6 +318,7 @@ fn thumbnail_worker_loop(
     pending_deletions: Arc<dashmap::DashMap<std::path::PathBuf, ()>>,
     bulk_thumbnail_progress: SharedBulkThumbnailProgress,
     bulk_thumbnail_completed: Arc<AtomicUsize>,
+    bulk_thumbnail_session: Arc<AtomicU64>,
 ) {
     let mut last_repaint = Instant::now();
 
@@ -352,9 +356,23 @@ fn thumbnail_worker_loop(
         req_modified,
         req_source,
         track_bulk_progress,
+        req_bulk_session,
     )) = queue.pop()
     {
-        let participates_in_bulk_scan = track_bulk_progress;
+        let active_bulk_session = if track_bulk_progress {
+            req_bulk_session
+                .filter(|session| *session == bulk_thumbnail_session.load(Ordering::Relaxed))
+        } else {
+            None
+        };
+        let participates_in_bulk_scan = active_bulk_session.is_some();
+
+        if track_bulk_progress
+            && !participates_in_bulk_scan
+            && matches!(req_source, ThumbnailRequestSource::BulkScan)
+        {
+            continue;
+        }
 
         // Check generation match - skip stale requests
         if !participates_in_bulk_scan && req_gen != gen_tracker.load(Ordering::Relaxed) {
@@ -365,6 +383,7 @@ fn thumbnail_worker_loop(
             crate::workers::thumbnail::set_bulk_thumbnail_current_file(
                 &bulk_thumbnail_progress,
                 &path,
+                active_bulk_session.unwrap(),
             );
         }
 
@@ -412,8 +431,10 @@ fn thumbnail_worker_loop(
         }
 
         if participates_in_bulk_scan {
-            bulk_thumbnail_completed.fetch_add(1, Ordering::Relaxed);
-            ctx.request_repaint();
+            if active_bulk_session.unwrap() == bulk_thumbnail_session.load(Ordering::Relaxed) {
+                bulk_thumbnail_completed.fetch_add(1, Ordering::Relaxed);
+                ctx.request_repaint();
+            }
         }
     }
     // _mf and _com dropped here — MFShutdown() then CoUninitialize() guaranteed

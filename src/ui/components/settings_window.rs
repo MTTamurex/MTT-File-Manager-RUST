@@ -229,7 +229,11 @@ pub fn render_settings_window(
     }
 }
 
-fn render_settings_sidebar(ui: &mut egui::Ui, active_section: &mut SettingsSection, dark_mode: bool) {
+fn render_settings_sidebar(
+    ui: &mut egui::Ui,
+    active_section: &mut SettingsSection,
+    dark_mode: bool,
+) {
     ui.spacing_mut().item_spacing.y = 8.0;
     ui.label(
         RichText::new(t!("settings.categories").to_string())

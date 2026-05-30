@@ -16,8 +16,8 @@ pub mod worker;
 
 pub use progress::{
     begin_bulk_thumbnail_progress, clear_bulk_thumbnail_progress,
-    new_shared_bulk_thumbnail_progress, set_bulk_thumbnail_current_file, BulkThumbnailProgress,
-    SharedBulkThumbnailProgress,
+    clear_bulk_thumbnail_progress_for_session, new_shared_bulk_thumbnail_progress,
+    set_bulk_thumbnail_current_file, BulkThumbnailProgress, SharedBulkThumbnailProgress,
 };
 pub use queue::PriorityThumbnailQueue;
 pub use types::{ThumbnailPriority, ThumbnailRequest};

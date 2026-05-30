@@ -13,10 +13,25 @@ pub(crate) fn render_status_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Cont
     let bulk_completed = app
         .bulk_thumbnail_completed
         .load(std::sync::atomic::Ordering::Relaxed);
-    let bulk_active = is_scanning || (bulk_total > 0 && bulk_completed < bulk_total);
+    let active_bulk_session = app
+        .bulk_thumbnail_session
+        .load(std::sync::atomic::Ordering::Relaxed);
+    let bulk_progress_active = app
+        .bulk_thumbnail_progress
+        .lock()
+        .ok()
+        .and_then(|guard| {
+            guard
+                .as_ref()
+                .map(|progress| progress.session == active_bulk_session)
+        })
+        .unwrap_or(false);
+    let bulk_active =
+        is_scanning || (bulk_progress_active && bulk_total > 0 && bulk_completed < bulk_total);
 
     if app.bulk_thumbnail_was_scanning
         && !is_scanning
+        && bulk_progress_active
         && bulk_total > 0
         && bulk_completed >= bulk_total
     {
@@ -32,7 +47,12 @@ pub(crate) fn render_status_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Cont
             .store(0, std::sync::atomic::Ordering::Relaxed);
         crate::workers::thumbnail::clear_bulk_thumbnail_progress(&app.bulk_thumbnail_progress);
         app.bulk_thumbnail_was_scanning = false;
-    } else if app.bulk_thumbnail_was_scanning && !is_scanning && bulk_total == 0 {
+    } else if app.bulk_thumbnail_was_scanning
+        && !is_scanning
+        && (!bulk_progress_active || bulk_total == 0)
+    {
+        app.bulk_thumbnail_total
+            .store(0, std::sync::atomic::Ordering::Relaxed);
         app.bulk_thumbnail_completed
             .store(0, std::sync::atomic::Ordering::Relaxed);
         crate::workers::thumbnail::clear_bulk_thumbnail_progress(&app.bulk_thumbnail_progress);
@@ -82,9 +102,13 @@ pub(crate) fn render_status_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Cont
                     let scanning_flag = app.bulk_thumbnail_scanning.clone();
                     let total_flag = app.bulk_thumbnail_total.clone();
                     let completed_flag = app.bulk_thumbnail_completed.clone();
+                    let session_flag = app.bulk_thumbnail_session.clone();
                     let progress_state = app.bulk_thumbnail_progress.clone();
                     let ctx_clone = app.ui_ctx.clone();
                     let disk_cache = app.disk_cache.clone();
+                    let bulk_session = session_flag
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                        .wrapping_add(1);
                     let is_virtual_drive =
                         crate::infrastructure::io_priority::is_virtual_drive_path(&root);
 
@@ -94,6 +118,7 @@ pub(crate) fn render_status_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Cont
                     crate::workers::thumbnail::begin_bulk_thumbnail_progress(
                         &progress_state,
                         &root,
+                        bulk_session,
                     );
                     ctx.request_repaint();
 
@@ -112,7 +137,10 @@ pub(crate) fn render_status_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Cont
                                 .into_iter()
                                 .filter_map(|e| e.ok())
                             {
-                                if !scanning_flag.load(std::sync::atomic::Ordering::Relaxed) {
+                                if session_flag.load(std::sync::atomic::Ordering::Relaxed)
+                                    != bulk_session
+                                    || !scanning_flag.load(std::sync::atomic::Ordering::Relaxed)
+                                {
                                     break; // Cancelled
                                 }
                                 if !entry.file_type().is_file() {
@@ -140,18 +168,25 @@ pub(crate) fn render_status_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Cont
                                 }
 
                                 while queue.pending_count() >= MAX_BULK_THUMBNAIL_PENDING {
-                                    if !scanning_flag.load(std::sync::atomic::Ordering::Relaxed) {
+                                    if session_flag.load(std::sync::atomic::Ordering::Relaxed)
+                                        != bulk_session
+                                        || !scanning_flag.load(std::sync::atomic::Ordering::Relaxed)
+                                    {
                                         break;
                                     }
                                     std::thread::sleep(BULK_THUMBNAIL_BACKPRESSURE_SLEEP);
                                 }
-                                if !scanning_flag.load(std::sync::atomic::Ordering::Relaxed) {
+                                if session_flag.load(std::sync::atomic::Ordering::Relaxed)
+                                    != bulk_session
+                                    || !scanning_flag.load(std::sync::atomic::Ordering::Relaxed)
+                                {
                                     break;
                                 }
 
                                 crate::workers::thumbnail::set_bulk_thumbnail_current_file(
                                     &progress_state,
                                     path,
+                                    bulk_session,
                                 );
                                 queue.push_bulk_scan(
                                     path.to_path_buf(),
@@ -162,7 +197,15 @@ pub(crate) fn render_status_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Cont
                                         .duration_since(std::time::SystemTime::UNIX_EPOCH)
                                         .unwrap_or_default()
                                         .as_secs(),
+                                    bulk_session,
                                 );
+                                if session_flag.load(std::sync::atomic::Ordering::Relaxed)
+                                    != bulk_session
+                                    || !scanning_flag.load(std::sync::atomic::Ordering::Relaxed)
+                                {
+                                    queue.cancel_bulk_scan_session(bulk_session);
+                                    break;
+                                }
                                 total_flag.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                                 // Throttle traversal on virtual drives (Cryptomator/WinFsp)
                                 // to reduce metadata I/O pressure on the FUSE driver.
@@ -170,7 +213,11 @@ pub(crate) fn render_status_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Cont
                                     std::thread::sleep(std::time::Duration::from_millis(2));
                                 }
                             }
-                            scanning_flag.store(false, std::sync::atomic::Ordering::Relaxed);
+                            if session_flag.load(std::sync::atomic::Ordering::Relaxed)
+                                == bulk_session
+                            {
+                                scanning_flag.store(false, std::sync::atomic::Ordering::Relaxed);
+                            }
                             let final_total = total_flag.load(std::sync::atomic::Ordering::Relaxed);
                             log::info!(
                                 "Bulk thumbnail scan complete: {} files queued from {:?}",

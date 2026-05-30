@@ -123,6 +123,7 @@ impl ImageViewerApp {
             bulk_thumbnail_scanning,
             bulk_thumbnail_total,
             bulk_thumbnail_completed,
+            bulk_thumbnail_session,
             font_rx,
             icon_req_tx,
             icon_res_rx,
@@ -579,6 +580,7 @@ impl ImageViewerApp {
             bulk_thumbnail_was_scanning: false,
             bulk_thumbnail_total,
             bulk_thumbnail_completed,
+            bulk_thumbnail_session,
             bulk_thumbnail_progress,
 
             // Media keyboard debounce

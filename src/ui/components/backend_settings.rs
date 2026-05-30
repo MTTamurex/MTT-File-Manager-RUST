@@ -33,9 +33,7 @@ pub fn render_backend_settings_section(
 
     // Show currently active backend
     ui.horizontal(|ui| {
-        ui.label(
-            RichText::new(t!("settings.backend_active")).color(theme::text_color(dark_mode)),
-        );
+        ui.label(RichText::new(t!("settings.backend_active")).color(theme::text_color(dark_mode)));
         ui.label(
             RichText::new(active_backend)
                 .strong()
@@ -45,9 +43,7 @@ pub fn render_backend_settings_section(
     ui.add_space(12.0);
 
     // Backend selector
-    ui.label(
-        RichText::new(t!("settings.backend_select")).color(theme::text_color(dark_mode)),
-    );
+    ui.label(RichText::new(t!("settings.backend_select")).color(theme::text_color(dark_mode)));
     ui.add_space(4.0);
 
     for &(value, display_name) in BACKENDS {

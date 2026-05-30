@@ -61,7 +61,13 @@ fn render_progress_toast(
                 accent,
             );
 
-            let title = truncate_text_to_fit(&title, max_text_width, &title_font, ui);
+            let text_max_width = if show_cancel {
+                (max_text_width - 28.0).max(32.0)
+            } else {
+                max_text_width
+            };
+
+            let title = truncate_text_to_fit(&title, text_max_width, &title_font, ui);
             let title_galley = ui.painter().layout_no_wrap(
                 title,
                 title_font,
@@ -74,7 +80,7 @@ fn render_progress_toast(
             );
 
             if let Some(subtitle) = subtitle.filter(|text| !text.is_empty()) {
-                let subtitle = truncate_text_to_fit(&subtitle, max_text_width, &subtitle_font, ui);
+                let subtitle = truncate_text_to_fit(&subtitle, text_max_width, &subtitle_font, ui);
                 let subtitle_galley = ui.painter().layout_no_wrap(
                     subtitle,
                     subtitle_font,
@@ -271,7 +277,13 @@ pub fn render_notifications(app: &mut ImageViewerApp, ctx: &egui::Context) {
         .bulk_thumbnail_progress
         .lock()
         .ok()
-        .and_then(|g| g.clone());
+        .and_then(|g| g.clone())
+        .filter(|progress| {
+            progress.session
+                == app
+                    .bulk_thumbnail_session
+                    .load(std::sync::atomic::Ordering::Relaxed)
+        });
     let bulk_is_scanning = app
         .bulk_thumbnail_scanning
         .load(std::sync::atomic::Ordering::Relaxed);
@@ -308,7 +320,7 @@ pub fn render_notifications(app: &mut ImageViewerApp, ctx: &egui::Context) {
             )
         };
 
-        render_progress_toast(
+        let cancelled = render_progress_toast(
             ctx,
             egui::Id::new("bulk_thumbnail_progress_toast"),
             egui::pos2(base_x, toast_y),
@@ -328,8 +340,34 @@ pub fn render_notifications(app: &mut ImageViewerApp, ctx: &egui::Context) {
             } else {
                 None
             },
-            false,
+            true,
         );
+
+        if cancelled {
+            let cancelled_session = progress.session;
+            app.bulk_thumbnail_scanning
+                .store(false, std::sync::atomic::Ordering::Relaxed);
+            app.bulk_thumbnail_session
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let removed = app
+                .thumbnail_queue
+                .cancel_bulk_scan_session(cancelled_session);
+            app.bulk_thumbnail_total
+                .store(0, std::sync::atomic::Ordering::Relaxed);
+            app.bulk_thumbnail_completed
+                .store(0, std::sync::atomic::Ordering::Relaxed);
+            crate::workers::thumbnail::clear_bulk_thumbnail_progress_for_session(
+                &app.bulk_thumbnail_progress,
+                cancelled_session,
+            );
+            app.bulk_thumbnail_was_scanning = false;
+            log::info!(
+                "Bulk thumbnail scan cancelled: session={} queued_removed={}",
+                cancelled_session,
+                removed
+            );
+            ctx.request_repaint();
+        }
     }
 
     if !app.notifications.is_empty() {
