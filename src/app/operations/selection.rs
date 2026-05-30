@@ -133,23 +133,43 @@ impl ImageViewerApp {
     }
 
     /// Kill the standalone video player process if one is running.
+    /// Reloads volume from the database because the standalone player persists
+    /// volume changes immediately on each adjustment.
     pub fn kill_video_player_process(&mut self) {
         if let Some(mut child) = self.video_player_process.take() {
             log::debug!("[VIDEO-PLAYER] Killing standalone video player process");
             let _ = child.kill();
             // Don't block on child.wait() — TerminateProcess is immediate on
             // Windows and process::exit will reap any zombies.
+
+            // The standalone player saves volume to DB on every change,
+            // so reload now so the next video uses the latest volume.
+            if let Some(vol_str) = self.app_state_db.get_preference("media_volume") {
+                if let Ok(vol) = vol_str.parse::<f32>() {
+                    self.session_volume = vol.clamp(0.0, 1.0);
+                }
+            }
         }
     }
 
     /// Reap the standalone video player process if it has exited naturally.
     /// Called periodically from the update loop to detect when the user closes the player window.
+    /// When the player exits, reloads volume from the database so that volume changes
+    /// made in the standalone player are reflected in the main app.
     pub fn reap_video_player_process(&mut self) {
         if let Some(child) = &mut self.video_player_process {
             match child.try_wait() {
                 Ok(Some(_status)) => {
                     log::debug!("[VIDEO-PLAYER] Standalone player exited");
                     self.video_player_process = None;
+
+                    // The standalone player persists volume changes to the database.
+                    // Reload session_volume so the next video opens at the correct level.
+                    if let Some(vol_str) = self.app_state_db.get_preference("media_volume") {
+                        if let Ok(vol) = vol_str.parse::<f32>() {
+                            self.session_volume = vol.clamp(0.0, 1.0);
+                        }
+                    }
                 }
                 Ok(None) => {} // Still running
                 Err(e) => {

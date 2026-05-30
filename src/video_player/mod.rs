@@ -34,6 +34,21 @@ fn apply_saved_locale() {
     }
 }
 
+fn save_volume_to_db(volume_fraction: f32) {
+    let state_dir = dirs::data_local_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("MTT-File-Manager")
+        .join("state");
+
+    if let Ok(db) = crate::infrastructure::app_state_db::AppStateDb::new(state_dir) {
+        db.set_preference("media_volume", &volume_fraction.clamp(0.0, 1.0).to_string());
+        log::debug!(
+            "[VIDEO-PLAYER] Saved volume {:.0}% to preferences",
+            volume_fraction * 100.0
+        );
+    }
+}
+
 pub(crate) fn current_mpv_osc_language() -> &'static str {
     match &*rust_i18n::locale() {
         "pt-BR" | "pt" | "ptbr" => "pt-BR",
@@ -577,6 +592,10 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
     // Volume (mpv uses 0-100 scale)
     let _ = mpv.set_property("volume", ((volume * 100.0) as i64).clamp(0, 100));
 
+    // Observe volume property changes so the final volume can be persisted
+    // to the app database when the standalone player exits.
+    let _ = mpv.observe_property("volume", mpv::Format::Double, 0);
+
     // Window title (shown in taskbar for borderless window)
     let _ = mpv.set_property("title", format!("Media Player — {}", title_name).as_str());
 
@@ -650,6 +669,7 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
     // Event loop — blocks until mpv shuts down (user closes window or presses 'q')
     let mut seek_applied = false;
     let mut eof_reached = false;
+    let mut last_known_volume_pct = (volume * 100.0).clamp(0.0, 100.0);
     loop {
         let event = mpv.wait_event(1.0);
         // Log every non-None event at debug level so we can trace what fires
@@ -721,6 +741,14 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
                     }
                 }
             }
+            Some(Ok(mpv::events::Event::PropertyChange { name, change, .. })) => {
+                if name == "volume" {
+                    if let mpv::events::PropertyData::Double(vol) = change {
+                        last_known_volume_pct = vol.clamp(0.0, 100.0) as f32;
+                        save_volume_to_db((last_known_volume_pct / 100.0) as f32);
+                    }
+                }
+            }
             Some(Ok(mpv::events::Event::EndFile(reason))) => {
                 log::debug!("[VIDEO-PLAYER] EndFile reason={}", reason);
 
@@ -770,5 +798,8 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
     }
 
     log::debug!("[VIDEO-PLAYER] Exiting standalone player");
+
+    save_volume_to_db((last_known_volume_pct / 100.0) as f32);
+
     Ok(())
 }
