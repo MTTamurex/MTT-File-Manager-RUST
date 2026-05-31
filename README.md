@@ -62,7 +62,7 @@ The app supports two rendering backends, selectable in **Settings > General > GP
 - May show occasional micro-stutter during fast grid scrolling because OpenGL texture uploads are synchronous on the CPU thread
 
 ### Wgpu — DirectX 12 / Vulkan / OpenGL (Opt-in)
-- **For users who prefer maximum scroll smoothness**
+- **For users who prefer better scroll smoothness**
 - Asynchronous GPU texture uploads eliminate scroll stutter
 - Uses the wgpu abstraction layer with DX12 (Windows), Vulkan, or OpenGL
 - **Known limitation**: because wgpu creates the swapchain with `FLIP_DISCARD`, a brief black frame may flash during the minimize animation on Windows. This is a documented behavior of the wgpu DX12 backend and does not affect functionality.
