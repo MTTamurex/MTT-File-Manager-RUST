@@ -873,7 +873,8 @@ impl ImageViewerApp {
                         .map(|existing| existing.size());
                     match cached_size {
                         Some(size)
-                            if size == [data.width as usize, data.height as usize]
+                            if size[0] >= data.width as usize
+                                && size[1] >= data.height as usize
                                 && !force_replace =>
                         {
                             folder_uploads += 1;

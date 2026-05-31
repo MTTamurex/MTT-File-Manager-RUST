@@ -114,20 +114,14 @@ impl ImageViewerApp {
 
         let t_items = Instant::now();
 
-        // Trigger thumbnail loads / cleanup once per updated folder.
+        // Trigger cleanup once per updated folder. Folder previews compose from
+        // the thumbnail disk cache directly, so loading raw cover textures here
+        // only creates a redundant post-preview upload wave.
         let mut none_count = 0usize;
-        let mut load_count = 0usize;
         let mut folders_to_invalidate: Vec<std::path::PathBuf> = Vec::new();
         for (folder_path, cover_opt) in &cover_updates {
             match cover_opt {
-                Some(cover) => {
-                    if !self.cache_manager.has_thumbnail(cover)
-                        && self.cache_manager.start_loading(cover.clone())
-                    {
-                        self.request_thumbnail_load(cover.clone(), 256);
-                        load_count += 1;
-                    }
-                }
+                Some(_) => {}
                 None => {
                     folders_to_invalidate.push(folder_path.clone());
                     none_count += 1;
@@ -141,13 +135,12 @@ impl ImageViewerApp {
         let total_ms = t0.elapsed().as_millis();
         if total_ms > 20 {
             log::warn!(
-                "[PERF-COVERS] recv={}ms all_items={}ms arc_items={}ms trigger={}ms (updates={} loads={} removes={} all_items_len={} items_len={})",
+                "[PERF-COVERS] recv={}ms all_items={}ms arc_items={}ms trigger={}ms (updates={} removes={} all_items_len={} items_len={})",
                 t_recv.duration_since(t0).as_millis(),
                 t_all_items.duration_since(t_recv).as_millis(),
                 t_items.duration_since(t_all_items).as_millis(),
                 t_trigger.duration_since(t_items).as_millis(),
                 cover_updates.len(),
-                load_count,
                 none_count,
                 self.all_items.len(),
                 self.items.len(),

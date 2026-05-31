@@ -45,17 +45,8 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
             ops.request_folder_scan(item.path.clone());
         }
 
-        // If HAS cover (from SQLite or recent discovery) BUT texture not loaded: Load!
-        if let Some(ref cover_path) = item.folder_cover {
-            if !ctx.texture_cache.contains(cover_path)
-                && !ctx.loading_set.contains(cover_path)
-                && !ctx.failed_thumbnails.contains(cover_path)
-                && ctx.loading_set.len() < crate::ui::cache::MAX_THUMBNAIL_LOADING_SET_ITEMS
-            {
-                ctx.loading_set.insert(cover_path.clone());
-                ops.request_thumbnail_load(cover_path.clone(), ctx.thumbnail_size as u32, None, 0);
-            }
-        }
+        // Folder previews are composed and cached separately. Do not enqueue the
+        // raw cover thumbnail here, or every folder creates a second upload wave.
     }
 
     // GEOMETRY - Increased to 0.85 for larger folder preview
