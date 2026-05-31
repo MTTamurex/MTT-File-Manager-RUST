@@ -24,11 +24,22 @@ pub(super) fn render_file_slot<O: ItemSlotOperations>(
         // a higher bucket than internal actually did — every frame the slot saw
         // attempted < desired and re-issued the request, producing an infinite extraction
         // loop and continuous `ctx.load_texture` calls that leak GPU staging memory.
-        let request_size_px = (ctx.thumbnail_size as u32).max(1);
-        let effective_size_px =
-            ((request_size_px as f32) * ui.ctx().pixels_per_point().max(1.0)).ceil() as u32;
+        //
+        // OPTIMIZATION: Always extract at bucket 512 minimum so zooming in never
+        // triggers re-extraction.  Slower first load, but eliminates stutter when
+        // the user zooms.
+        let ppp = ui.ctx().pixels_per_point().max(1.0);
+        let display_request_size_px = (ctx.thumbnail_size as u32).max(1);
+        let display_effective_size_px =
+            ((display_request_size_px as f32) * ppp).ceil() as u32;
+        let display_bucket =
+            crate::workers::thumbnail::processing::get_bucket_size(display_effective_size_px);
         let desired_thumbnail_bucket =
-            crate::workers::thumbnail::processing::get_bucket_size(effective_size_px);
+            display_bucket.max(crate::ui::theme::MIN_GRID_THUMBNAIL_BUCKET);
+        // Minimum request_size that yields at least bucket 512 after ppp scaling.
+        // get_bucket_size needs effective_size_px >= 257 for bucket 512.
+        let min_size_for_bucket_512 = ((257.0_f32) / ppp).ceil() as u32;
+        let request_size_px = display_request_size_px.max(min_size_for_bucket_512);
         let has_texture = ctx.texture_cache.peek(&item.path).is_some();
         let attempted_bucket = ctx.attempted_thumbnail_bucket.get(&item.path).copied();
         let needs_bucket_refresh = match attempted_bucket {
@@ -57,7 +68,7 @@ pub(super) fn render_file_slot<O: ItemSlotOperations>(
             ctx.loading_set.insert(item.path.clone());
             ops.request_thumbnail_load(
                 item.path.clone(),
-                ctx.thumbnail_size as u32,
+                request_size_px,
                 Some(ctx.idx),
                 ctx.item.modified,
             );

@@ -14,6 +14,7 @@ pub const ICON_SIZE_LG: f32 = 24.0;
 pub const THUMBNAIL_MIN: f32 = 96.0;
 pub const THUMBNAIL_MAX: f32 = 512.0;
 pub const THUMBNAIL_DEFAULT: f32 = 128.0;
+pub const MIN_GRID_THUMBNAIL_BUCKET: u32 = 512;
 
 // === COLORS (Light Mode) ===
 pub const COLOR_SELECTION: Color32 = Color32::from_rgb(200, 220, 240);

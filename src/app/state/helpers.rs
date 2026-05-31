@@ -169,7 +169,9 @@ impl ImageViewerApp {
     pub(crate) fn effective_folder_preview_request_size_px(&self) -> u32 {
         let scale = self.ui_ctx.pixels_per_point().max(1.0);
         let logical_size = self.thumbnail_size.max(crate::ui::theme::THUMBNAIL_MIN) * 0.85;
-        ((logical_size.max(1.0)) * scale).ceil() as u32
+        let display_size = ((logical_size.max(1.0)) * scale).ceil() as u32;
+        // Ensure at least bucket 512 to avoid re-extraction when zooming
+        display_size.max(257)
     }
 
     pub(crate) fn current_folder_preview_bucket_size(&self) -> u32 {
