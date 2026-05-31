@@ -54,8 +54,7 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
     let folder_w = ctx.thumbnail_size * 0.85;
     let folder_h = folder_w * 0.85;
     let ppp = ui.ctx().pixels_per_point().max(1.0);
-    let display_effective_px =
-        (folder_w.max(1.0) * ppp).ceil() as u32;
+    let display_effective_px = (folder_w.max(1.0) * ppp).ceil() as u32;
     let display_preview_bucket =
         crate::workers::thumbnail::processing::get_bucket_size(display_effective_px);
     let desired_preview_bucket =

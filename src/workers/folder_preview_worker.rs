@@ -203,7 +203,8 @@ pub fn spawn_folder_preview_worker(
                 let bucket_size = get_bucket_size(request.size_px);
 
                 if crate::infrastructure::windows::is_windows_system_path(&path.to_string_lossy()) {
-                    let (mut rgba_data, width, height) = composer.compose_empty_for_size(bucket_size);
+                    let (mut rgba_data, width, height) =
+                        composer.compose_empty_for_size(bucket_size);
                     crate::domain::thumbnail::premultiply_rgba_in_place(&mut rgba_data);
                     let _ = tx.send(FolderPreviewData {
                         path,

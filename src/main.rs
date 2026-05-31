@@ -303,7 +303,8 @@ fn main() -> eframe::Result<()> {
             ..Default::default()
         }
     } else {
-        let selected_backends = gpu_backend::parse_gpu_backend_preference(gpu_backend_pref.as_deref());
+        let selected_backends =
+            gpu_backend::parse_gpu_backend_preference(gpu_backend_pref.as_deref());
         let native_adapter_selector = gpu_backend::adapter_selector(gpu_backend_pref.as_deref());
         log::info!(
             "[STARTUP] Using Wgpu renderer. Backend preference: {:?} -> backends: {:?}",
@@ -324,16 +325,18 @@ fn main() -> eframe::Result<()> {
                         power_preference: eframe::wgpu::PowerPreference::HighPerformance,
                         native_adapter_selector,
                         device_descriptor: std::sync::Arc::new(|adapter| {
-                            let base_limits = if adapter.get_info().backend == eframe::wgpu::Backend::Gl {
-                                eframe::wgpu::Limits::downlevel_webgl2_defaults()
-                            } else {
-                                eframe::wgpu::Limits::default()
-                            };
+                            let base_limits =
+                                if adapter.get_info().backend == eframe::wgpu::Backend::Gl {
+                                    eframe::wgpu::Limits::downlevel_webgl2_defaults()
+                                } else {
+                                    eframe::wgpu::Limits::default()
+                                };
                             eframe::wgpu::DeviceDescriptor {
                                 label: Some("mtt-file-manager wgpu device"),
                                 required_features: eframe::wgpu::Features::default(),
                                 required_limits: eframe::wgpu::Limits {
-                                    max_texture_dimension_2d: gpu_backend::WGPU_REQUIRED_MAX_TEXTURE_DIMENSION_2D,
+                                    max_texture_dimension_2d:
+                                        gpu_backend::WGPU_REQUIRED_MAX_TEXTURE_DIMENSION_2D,
                                     ..base_limits
                                 },
                                 memory_hints: eframe::wgpu::MemoryHints::MemoryUsage,

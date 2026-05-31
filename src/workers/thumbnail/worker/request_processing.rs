@@ -442,7 +442,11 @@ pub(super) fn process_thumbnail_request(
     throttle_repaint_with_priority(ctx, last_repaint, req_priority);
 }
 
-fn send_thumbnail_result(tx: &Sender<ThumbnailData>, priority: IOPriority, mut data: ThumbnailData) {
+fn send_thumbnail_result(
+    tx: &Sender<ThumbnailData>,
+    priority: IOPriority,
+    mut data: ThumbnailData,
+) {
     // Premultiply alpha off the UI thread so the main thread can use
     // ColorImage::from_rgba_premultiplied (a simple memory copy) instead
     // of ColorImage::from_rgba_unmultiplied (per-pixel alpha multiplication).

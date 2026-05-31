@@ -40,9 +40,8 @@ impl ImageViewerApp {
         }
 
         let effective_req_size = self.effective_thumbnail_request_size_px(size);
-        let required_preview_bucket = crate::workers::thumbnail::processing::get_bucket_size(
-            effective_req_size,
-        );
+        let required_preview_bucket =
+            crate::workers::thumbnail::processing::get_bucket_size(effective_req_size);
 
         let attempted_bucket = self.cache_manager.attempted_thumbnail_bucket_for(&path);
         // True when we've already requested at the detail panel's required quality.
@@ -61,8 +60,8 @@ impl ImageViewerApp {
         // Best-effort promotion: when we've already attempted at the required
         // quality bucket and the result is smaller than ideal, accept it as the
         // best available rather than falling back to a generic icon.
-        let request_in_flight = self.cache_manager.is_loading(&path)
-            || self.cache_manager.is_pending_upload(&path);
+        let request_in_flight =
+            self.cache_manager.is_loading(&path) || self.cache_manager.is_pending_upload(&path);
         let promote_best_effort = already_attempted_max_quality && !request_in_flight;
 
         if let Some(tex) = tex_in_cache {

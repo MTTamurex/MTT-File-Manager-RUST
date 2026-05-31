@@ -447,24 +447,59 @@ impl ImageViewerApp {
         // (5-15 ms per thumbnail).  Apply more conservative per-frame caps to
         // prevent UI freezes and frame drops.
         let base_max_uploads = if is_burst {
-            if is_opengl { 16 } else { 48 }
+            if is_opengl {
+                16
+            } else {
+                48
+            }
         } else if is_performance_critical {
             1
         } else if is_performance_severe {
-            if is_opengl { 1 } else { 2 }
+            if is_opengl {
+                1
+            } else {
+                2
+            }
         } else if is_video_playing && is_scrolling {
-            if is_opengl { 2 } else { 4 }
+            if is_opengl {
+                2
+            } else {
+                4
+            }
         } else if is_scrolling {
-            if is_opengl { 3 } else { 6 }
+            if is_opengl {
+                3
+            } else {
+                6
+            }
         } else if is_video_playing {
-            if is_opengl { 3 } else { 5 }
+            if is_opengl {
+                3
+            } else {
+                5
+            }
         } else {
-            if is_opengl { 4 } else { 12 }
+            if is_opengl {
+                4
+            } else {
+                12
+            }
         };
 
         let base_max_uploads = ((base_max_uploads as f32) * tab_upload_boost)
             .round()
-            .clamp(1.0, if is_burst { if is_opengl { 24.0 } else { 64.0 } } else { 20.0 }) as usize;
+            .clamp(
+                1.0,
+                if is_burst {
+                    if is_opengl {
+                        24.0
+                    } else {
+                        64.0
+                    }
+                } else {
+                    20.0
+                },
+            ) as usize;
 
         let perf_scale = if is_burst {
             // During burst the frame_time_avg is inflated by OS paging; don't penalise.
@@ -694,11 +729,8 @@ impl ImageViewerApp {
                     )
                 };
 
-                let texture = ctx.load_texture(
-                    texture_name,
-                    color_image,
-                    egui::TextureOptions::LINEAR,
-                );
+                let texture =
+                    ctx.load_texture(texture_name, color_image, egui::TextureOptions::LINEAR);
 
                 self.cache_manager.thumbnail_trace.record_upload(&path);
                 self.cache_manager.finish_pending_upload(&path);
@@ -712,7 +744,8 @@ impl ImageViewerApp {
                         visible_paths,
                     );
                 } else {
-                    self.cache_manager.put_thumbnail(path.clone(), texture.clone());
+                    self.cache_manager
+                        .put_thumbnail(path.clone(), texture.clone());
                 }
 
                 if is_selected {
@@ -728,10 +761,12 @@ impl ImageViewerApp {
                         // bucket and the result is still smaller than ideal, accept it
                         // as the best available.  This happens with video files whose
                         // thumbnails cannot be extracted at higher resolutions.
-                        let effective_req_size = self.effective_thumbnail_request_size_px(preview_min_size_for_selected);
-                        let required_bucket = crate::workers::thumbnail::processing::get_bucket_size(
-                            effective_req_size,
-                        );
+                        let effective_req_size =
+                            self.effective_thumbnail_request_size_px(preview_min_size_for_selected);
+                        let required_bucket =
+                            crate::workers::thumbnail::processing::get_bucket_size(
+                                effective_req_size,
+                            );
                         if self
                             .cache_manager
                             .attempted_thumbnail_bucket_for(&path)
@@ -744,7 +779,10 @@ impl ImageViewerApp {
                                     "selected_best_effort",
                                     &[
                                         field_u64("tex_dim", tex_dim as u64),
-                                        field_u64("logical_req_size", preview_min_size_for_selected as u64),
+                                        field_u64(
+                                            "logical_req_size",
+                                            preview_min_size_for_selected as u64,
+                                        ),
                                         field_u64("effective_req_size", effective_req_size as u64),
                                         field_u64("required_bucket", required_bucket as u64),
                                     ],
@@ -858,9 +896,17 @@ impl ImageViewerApp {
         let is_opengl = self.is_opengl_backend();
 
         let max_folder_uploads = if is_performance_critical {
-            if is_opengl { 1 } else { 2 }
+            if is_opengl {
+                1
+            } else {
+                2
+            }
         } else if is_video_playing {
-            if is_opengl { 3 } else { 6 }
+            if is_opengl {
+                3
+            } else {
+                6
+            }
         } else if is_opengl {
             6
         } else {
@@ -937,11 +983,8 @@ impl ImageViewerApp {
                             &data.rgba_data,
                         )
                     };
-                    let texture = ctx.load_texture(
-                        texture_name,
-                        color_image,
-                        egui::TextureOptions::LINEAR,
-                    );
+                    let texture =
+                        ctx.load_texture(texture_name, color_image, egui::TextureOptions::LINEAR);
 
                     if let Some(visible_paths) = visible_paths.as_ref() {
                         self.cache_manager.promote_visible(visible_paths);

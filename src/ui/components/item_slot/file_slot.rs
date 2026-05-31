@@ -30,8 +30,7 @@ pub(super) fn render_file_slot<O: ItemSlotOperations>(
         // the user zooms.
         let ppp = ui.ctx().pixels_per_point().max(1.0);
         let display_request_size_px = (ctx.thumbnail_size as u32).max(1);
-        let display_effective_size_px =
-            ((display_request_size_px as f32) * ppp).ceil() as u32;
+        let display_effective_size_px = ((display_request_size_px as f32) * ppp).ceil() as u32;
         let display_bucket =
             crate::workers::thumbnail::processing::get_bucket_size(display_effective_size_px);
         let desired_thumbnail_bucket =
