@@ -621,6 +621,7 @@ impl ImageViewerApp {
                 let width = thumbnail_data.width;
                 let height = thumbnail_data.height;
                 let rgba_data = thumbnail_data.image_data;
+                let premultiplied = thumbnail_data.premultiplied;
                 let is_interactive = matches!(
                     thumbnail_data.priority,
                     crate::infrastructure::io_priority::IOPriority::Interactive
@@ -681,12 +682,21 @@ impl ImageViewerApp {
 
                 let texture_name = path.to_string_lossy().into_owned();
 
-                let texture = ctx.load_texture(
-                    texture_name,
+                let color_image = if premultiplied {
+                    egui::ColorImage::from_rgba_premultiplied(
+                        [width as usize, height as usize],
+                        &rgba_data,
+                    )
+                } else {
                     egui::ColorImage::from_rgba_unmultiplied(
                         [width as usize, height as usize],
                         &rgba_data,
-                    ),
+                    )
+                };
+
+                let texture = ctx.load_texture(
+                    texture_name,
+                    color_image,
                     egui::TextureOptions::LINEAR,
                 );
 
@@ -916,12 +926,20 @@ impl ImageViewerApp {
                     let mut texture_name = String::from("folder_preview_");
                     texture_name.push_str(data.path.to_string_lossy().as_ref());
                     self.cache_manager.folder_preview_trace.record_upload();
-                    let texture = ctx.load_texture(
-                        texture_name,
+                    let color_image = if data.premultiplied {
+                        egui::ColorImage::from_rgba_premultiplied(
+                            [data.width as usize, data.height as usize],
+                            &data.rgba_data,
+                        )
+                    } else {
                         egui::ColorImage::from_rgba_unmultiplied(
                             [data.width as usize, data.height as usize],
                             &data.rgba_data,
-                        ),
+                        )
+                    };
+                    let texture = ctx.load_texture(
+                        texture_name,
+                        color_image,
                         egui::TextureOptions::LINEAR,
                     );
 

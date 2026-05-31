@@ -135,6 +135,9 @@ pub struct FolderPreviewData {
     pub rgba_data: Vec<u8>,
     pub width: u32,
     pub height: u32,
+    /// When `true`, `rgba_data` contains premultiplied-alpha pixels
+    /// and should be uploaded with `ColorImage::from_rgba_premultiplied`.
+    pub premultiplied: bool,
 }
 
 #[derive(Clone)]
@@ -200,12 +203,14 @@ pub fn spawn_folder_preview_worker(
                 let bucket_size = get_bucket_size(request.size_px);
 
                 if crate::infrastructure::windows::is_windows_system_path(&path.to_string_lossy()) {
-                    let (rgba_data, width, height) = composer.compose_empty_for_size(bucket_size);
+                    let (mut rgba_data, width, height) = composer.compose_empty_for_size(bucket_size);
+                    crate::domain::thumbnail::premultiply_rgba_in_place(&mut rgba_data);
                     let _ = tx.send(FolderPreviewData {
                         path,
                         rgba_data,
                         width,
                         height,
+                        premultiplied: true,
                     });
                     throttle_repaint(&ctx, &mut last_repaint);
                     continue;
@@ -231,6 +236,7 @@ pub fn spawn_folder_preview_worker(
                         rgba_data: Vec::new(),
                         width: 0,
                         height: 0,
+                        premultiplied: false,
                     });
                     throttle_repaint(&ctx, &mut last_repaint);
                     continue;
@@ -258,11 +264,14 @@ pub fn spawn_folder_preview_worker(
                             height,
                             cache_start.elapsed().as_secs_f64() * 1000.0
                         );
+                        // Disk cache already stores premultiplied data — no need
+                        // to premultiply again.  Send as-is with premultiplied=true.
                         let _ = tx.send(FolderPreviewData {
                             path,
                             rgba_data,
                             width,
                             height,
+                            premultiplied: true,
                         });
                         throttle_repaint(&ctx, &mut last_repaint);
                         continue;
@@ -302,7 +311,7 @@ pub fn spawn_folder_preview_worker(
                     io_priority,
                     &empty_deletions,
                 );
-                let (rgba_data, width, height, should_cache) = match compose_result {
+                let (mut rgba_data, width, height, should_cache) = match compose_result {
                     ComposeOutcome::Success(data) => (data.0, data.1, data.2, true),
                     ComposeOutcome::NoMedia => {
                         let empty = composer.compose_empty_for_size(bucket_size);
@@ -313,6 +322,8 @@ pub fn spawn_folder_preview_worker(
                         (empty.0, empty.1, empty.2, false) // Do NOT persist placeholder
                     }
                 };
+
+                crate::domain::thumbnail::premultiply_rgba_in_place(&mut rgba_data);
 
                 if should_cache {
                     trace.record_db_write();
@@ -329,6 +340,7 @@ pub fn spawn_folder_preview_worker(
                     rgba_data,
                     width,
                     height,
+                    premultiplied: true,
                 });
                 throttle_repaint(&ctx, &mut last_repaint);
             }

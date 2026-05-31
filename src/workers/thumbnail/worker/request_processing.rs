@@ -89,6 +89,7 @@ pub(super) fn process_thumbnail_request(
                     generation: req_gen,
                     priority: req_priority,
                     not_found: true,
+                    premultiplied: false,
                 },
             );
             throttle_repaint_with_priority(ctx, last_repaint, req_priority);
@@ -120,7 +121,8 @@ pub(super) fn process_thumbnail_request(
                     height: 0,
                     generation: req_gen,
                     priority: req_priority,
-                    not_found: is_permanent_failure(path),
+                    not_found: true,
+                    premultiplied: false,
                 },
             );
             throttle_repaint_with_priority(ctx, last_repaint, req_priority);
@@ -180,6 +182,7 @@ pub(super) fn process_thumbnail_request(
                 generation: req_gen,
                 priority: req_priority,
                 not_found: false,
+                premultiplied: false,
             },
         );
         throttle_repaint_with_priority(ctx, last_repaint, req_priority);
@@ -204,6 +207,7 @@ pub(super) fn process_thumbnail_request(
                         generation: req_gen,
                         priority: req_priority,
                         not_found: true,
+                        premultiplied: false,
                     },
                 );
                 throttle_repaint_with_priority(ctx, last_repaint, req_priority);
@@ -232,6 +236,7 @@ pub(super) fn process_thumbnail_request(
                         generation: req_gen,
                         priority: req_priority,
                         not_found: false,
+                        premultiplied: false,
                     },
                 );
                 throttle_repaint_with_priority(ctx, last_repaint, req_priority);
@@ -257,6 +262,7 @@ pub(super) fn process_thumbnail_request(
                     generation: req_gen,
                     priority: req_priority,
                     not_found: true,
+                    premultiplied: false,
                 },
             );
             throttle_repaint_with_priority(ctx, last_repaint, req_priority);
@@ -305,6 +311,7 @@ pub(super) fn process_thumbnail_request(
                     generation: req_gen,
                     priority: req_priority,
                     not_found: false,
+                    premultiplied: false,
                 },
             );
             throttle_repaint_with_priority(ctx, last_repaint, req_priority);
@@ -429,12 +436,23 @@ pub(super) fn process_thumbnail_request(
             generation: req_gen,
             priority: req_priority,
             not_found: permanently_failed,
+            premultiplied: false,
         },
     );
     throttle_repaint_with_priority(ctx, last_repaint, req_priority);
 }
 
-fn send_thumbnail_result(tx: &Sender<ThumbnailData>, priority: IOPriority, data: ThumbnailData) {
+fn send_thumbnail_result(tx: &Sender<ThumbnailData>, priority: IOPriority, mut data: ThumbnailData) {
+    // Premultiply alpha off the UI thread so the main thread can use
+    // ColorImage::from_rgba_premultiplied (a simple memory copy) instead
+    // of ColorImage::from_rgba_unmultiplied (per-pixel alpha multiplication).
+    // This reduces UI stall on every thumbnail upload, especially on OpenGL
+    // backends where load_texture blocks the CPU thread synchronously.
+    if !data.image_data.is_empty() && !data.not_found {
+        crate::domain::thumbnail::premultiply_rgba_in_place(&mut data.image_data);
+        data.premultiplied = true;
+    }
+
     if matches!(priority, IOPriority::Interactive) {
         let _ = tx.send(data);
         return;

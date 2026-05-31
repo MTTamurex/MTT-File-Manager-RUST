@@ -204,6 +204,7 @@ impl ImageViewerApp {
                     generation: effective_gen,
                     priority: effective_priority,
                     not_found: false,
+                    premultiplied: true, // RAM cache stores worker-premultiplied data
                 });
                 self.trim_pending_thumbnail_uploads_to_limit();
                 return;
