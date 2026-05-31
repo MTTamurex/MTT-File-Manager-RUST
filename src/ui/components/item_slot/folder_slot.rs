@@ -110,7 +110,7 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
         let is_loading =
             !ctx.is_recycle_bin_view && ctx.folder_preview_loading.contains(&item.path);
         let needs_bucket_refresh =
-            native_preview.is_some_and(|tex| tex.size()[0] as u32 != desired_preview_bucket);
+            native_preview.is_some_and(|tex| (tex.size()[0] as u32) < desired_preview_bucket);
 
         if needs_bucket_refresh && !is_loading {
             ops.request_folder_preview_load(item.path.clone());

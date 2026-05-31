@@ -10,11 +10,14 @@
 //! PERFORMANCE: Checks SQLite disk cache first (NVMe fast path, ~1ms).
 //! Custom composition ~2ms vs Shell API 20-200ms.
 
+mod content_thumbnail_cache;
+
 use crate::infrastructure::disk_cache::ThumbnailDiskCache;
 use crate::infrastructure::folder_compose::FolderComposer;
-use crate::workers::thumbnail::processing::get_bucket_size;
+use crate::workers::thumbnail::processing::{get_bucket_size, resize_to_bucket};
+use content_thumbnail_cache::try_cached_content_thumbnail;
 use eframe::egui;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
@@ -294,6 +297,7 @@ pub fn spawn_folder_preview_worker(
                 let compose_result = try_custom_compose(
                     &path,
                     &composer,
+                    &disk_cache,
                     bucket_size,
                     io_priority,
                     &empty_deletions,
@@ -356,8 +360,9 @@ enum ComposeOutcome {
 /// PRIMARY: Find a media file inside the folder, extract its thumbnail via the
 /// 5-stage pipeline, then compose with folder back/front layers.
 fn try_custom_compose(
-    folder_path: &std::path::Path,
+    folder_path: &Path,
     composer: &FolderComposer,
+    disk_cache: &ThumbnailDiskCache,
     bucket_size: u32,
     priority: crate::infrastructure::io_priority::IOPriority,
     empty_deletions: &dashmap::DashMap<PathBuf, ()>,
@@ -369,6 +374,27 @@ fn try_custom_compose(
         Some(p) => p,
         None => return ComposeOutcome::NoMedia,
     };
+
+    let media_modified = std::fs::metadata(&media_path)
+        .and_then(|metadata| metadata.modified())
+        .ok();
+
+    if let Some((content_rgba, content_w, content_h)) =
+        try_cached_content_thumbnail(disk_cache, &media_path, media_modified, bucket_size)
+    {
+        return match composer.compose_for_size(&content_rgba, content_w, content_h, bucket_size) {
+            Some(result) => {
+                log::debug!(
+                    "[FOLDER PREVIEW] Custom compose CACHE HIT {:?} via {:?} ({:.1}ms)",
+                    folder_path.file_name().unwrap_or_default(),
+                    media_path.file_name().unwrap_or_default(),
+                    compose_start.elapsed().as_secs_f64() * 1000.0
+                );
+                ComposeOutcome::Success(result)
+            }
+            None => ComposeOutcome::NoMedia,
+        };
+    }
 
     // 2. Extract content thumbnail using the 5-stage hybrid pipeline.
     //    Use the _detailed variant so we can distinguish UnsafeToRead from
@@ -399,6 +425,24 @@ fn try_custom_compose(
             return ComposeOutcome::NoMedia;
         }
     };
+
+    let (content_rgba, content_w, content_h) =
+        resize_to_bucket(content_rgba, content_w, content_h, bucket_size);
+
+    if let Err(err) = disk_cache.put(
+        &media_path,
+        media_modified.unwrap_or(UNIX_EPOCH),
+        bucket_size,
+        &content_rgba,
+        content_w,
+        content_h,
+    ) {
+        log::debug!(
+            "[FOLDER PREVIEW] Failed to cache cover thumbnail {:?}: {:?}",
+            media_path.file_name().unwrap_or_default(),
+            err
+        );
+    }
 
     // 3. Compose: back → content → front
     match composer.compose_for_size(&content_rgba, content_w, content_h, bucket_size) {
