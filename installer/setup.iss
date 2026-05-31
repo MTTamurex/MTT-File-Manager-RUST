@@ -6,7 +6,7 @@
 ; ==========================================================================
 
 #define MyAppName      "MTT File Manager"
-#define MyAppVersion   "0.1.0-beta.6"
+#define MyAppVersion   "0.1.0-beta.7"
 #define MyAppPublisher "MTT"
 #define MyAppExeName   "mtt-file-manager.exe"
 #define MySearchSvc    "mtt-search-service.exe"
