@@ -68,7 +68,6 @@ pub fn generate_thumbnail_hybrid_detailed_with_target(
     image_target_max_side: Option<u32>,
 ) -> ThumbnailExtractionOutcome {
     // DEFENSE IN DEPTH: Early exit for non-media files
-    // This catches any requests that slipped through UI-level filtering (e.g., .exe, .dll)
     if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
         if !crate::infrastructure::windows::is_media_extension(ext) {
             log::trace!(
@@ -78,40 +77,28 @@ pub fn generate_thumbnail_hybrid_detailed_with_target(
             return ThumbnailExtractionOutcome::Failed;
         }
     } else {
-        // No extension = skip
         return ThumbnailExtractionOutcome::Failed;
     }
 
-    log::trace!(
-        "[Thumbnail] Starting extraction pipeline for: {:?}",
-        path.file_name()
-    );
+    let pipeline_start = std::time::Instant::now();
 
     // Skip if file is pending deletion or no longer exists
-    // Use fast_path_exists (GetFileAttributesW) instead of path.exists() (CreateFileW)
-    // to avoid triggering OneDrive downloads and reduce HDD seek overhead
     if pending_deletions.contains_key(path) || !onedrive::fast_path_exists(path) {
         return ThumbnailExtractionOutcome::Failed;
     }
 
     // DEFENSE: Skip files that are still being downloaded or written to.
-    // Reading them can interrupt active downloads (sharing violation) or
-    // produce corrupt/partial thumbnails from incomplete data.
     let read_safety = crate::infrastructure::windows::file_flags::classify_file_read_safety(path);
     if read_safety != crate::infrastructure::windows::file_flags::FileReadSafety::Safe {
         return ThumbnailExtractionOutcome::UnsafeToRead(read_safety);
     }
 
     if let Some(max_side) = embedded_exif_thumbnail_target(path, image_target_max_side) {
-        log::trace!(
-            "[Thumbnail] Trying Stage EXIF (embedded JPEG thumbnail, {}px)...",
-            max_side
-        );
+        let t0 = std::time::Instant::now();
         if let Some(result) = stage0_embedded_exif_thumbnail::extract(path, priority, max_side) {
-            log::trace!("[Thumbnail] Stage EXIF SUCCESS for: {:?}", path.file_name());
+            log_extraction_perf(path, "stage0_exif", t0, &result);
             return ThumbnailExtractionOutcome::Success(result);
         }
-        log::trace!("[Thumbnail] Stage EXIF unavailable or too small, trying Stage 0...");
 
         if pending_deletions.contains_key(path) || !onedrive::fast_path_exists(path) {
             return ThumbnailExtractionOutcome::Failed;
@@ -119,15 +106,11 @@ pub fn generate_thumbnail_hybrid_detailed_with_target(
     }
 
     if let Some(max_side) = image_sized_fast_path_target(path, image_target_max_side) {
-        log::trace!(
-            "[Thumbnail] Trying Stage 0 (WIC sized image fast path, {}px)...",
-            max_side
-        );
-        if let Some(result) = stage2_wic::extract_to_size(path, Some(max_side)) {
-            log::trace!("[Thumbnail] Stage 0 SUCCESS for: {:?}", path.file_name());
+        let t0 = std::time::Instant::now();
+        if let Some(result) = stage2_wic::extract_to_size_fast(path, Some(max_side)) {
+            log_extraction_perf(path, "stage0_wic_sized", t0, &result);
             return ThumbnailExtractionOutcome::Success(result);
         }
-        log::trace!("[Thumbnail] Stage 0 failed, trying Stage 1...");
 
         if pending_deletions.contains_key(path) || !onedrive::fast_path_exists(path) {
             return ThumbnailExtractionOutcome::Failed;
@@ -135,84 +118,106 @@ pub fn generate_thumbnail_hybrid_detailed_with_target(
     }
 
     // Stage 1: image crate (Fast Path)
-    log::trace!("[Thumbnail] Trying Stage 1 (image crate)...");
-    if let Some(result) = stage1_image_crate::extract(path, priority) {
-        log::trace!("[Thumbnail] Stage 1 SUCCESS for: {:?}", path.file_name());
-        return ThumbnailExtractionOutcome::Success(result);
+    {
+        let t0 = std::time::Instant::now();
+        if let Some(result) = stage1_image_crate::extract(path, priority) {
+            log_extraction_perf(path, "stage1_image_crate", t0, &result);
+            return ThumbnailExtractionOutcome::Success(result);
+        }
     }
-    log::trace!("[Thumbnail] Stage 1 failed, trying Stage 2...");
 
-    // Abort if file was deleted or marked for deletion during Stage 1
     if pending_deletions.contains_key(path) || !onedrive::fast_path_exists(path) {
         return ThumbnailExtractionOutcome::Failed;
     }
 
     // Stage 2: WIC (Robust Fallback for JPEGs/CMYK)
-    log::trace!("[Thumbnail] Trying Stage 2 (WIC)...");
-    if let Some(result) = stage2_wic::extract(path) {
-        log::trace!("[Thumbnail] Stage 2 SUCCESS for: {:?}", path.file_name());
-        return ThumbnailExtractionOutcome::Success(result);
+    {
+        let t0 = std::time::Instant::now();
+        if let Some(result) = stage2_wic::extract(path) {
+            log_extraction_perf(path, "stage2_wic", t0, &result);
+            return ThumbnailExtractionOutcome::Success(result);
+        }
     }
-    log::trace!("[Thumbnail] Stage 2 failed, trying Stage 3...");
 
-    // Abort if file was deleted or marked for deletion during Stage 2
     if pending_deletions.contains_key(path) || !onedrive::fast_path_exists(path) {
         return ThumbnailExtractionOutcome::Failed;
     }
 
     // Stage 3: Shell API (Universal/Video)
-    log::trace!("[Thumbnail] Trying Stage 3 (Shell API)...");
-    match stage3_shell_api::extract(path) {
-        Ok(result) => {
-            log::trace!("[Thumbnail] Stage 3 SUCCESS for: {:?}", path.file_name());
-            return ThumbnailExtractionOutcome::Success(result);
-        }
-        Err(e) => {
-            let err_str = e.to_string();
-            // Don't log "File Not Found" errors as they are expected for recently deleted files
-            if !err_str.contains("0x80070002") {
-                log::trace!(
-                    "[Thumbnail] Stage 3 failed for {:?}: {}",
-                    path.file_name(),
-                    e
-                );
+    {
+        let t0 = std::time::Instant::now();
+        match stage3_shell_api::extract(path) {
+            Ok(result) => {
+                log_extraction_perf(path, "stage3_shell", t0, &result);
+                return ThumbnailExtractionOutcome::Success(result);
+            }
+            Err(e) => {
+                let err_str = e.to_string();
+                if !err_str.contains("0x80070002") {
+                    log::trace!(
+                        "[Thumbnail] Stage 3 failed for {:?}: {}",
+                        path.file_name(),
+                        e
+                    );
+                }
             }
         }
     }
 
-    // Stage 4: IThumbnailCache with WTS_FORCEEXTRACTION (bypasses Windows cache)
-    // Useful when Windows cache returned an icon instead of the actual thumbnail
-    // Single attempt - if fails, Stage 5 takes over
-    log::trace!("[Thumbnail] Trying Stage 4 (Force Extract)...");
-    match stage4_force_extract::extract(path) {
-        Ok(result) => {
-            log::trace!("[Thumbnail] Stage 4 SUCCESS for: {:?}", path.file_name());
-            return ThumbnailExtractionOutcome::Success(result);
-        }
-        Err(e) => {
-            let err_str = e.to_string();
-            // Don't log "File Not Found" errors as they are expected for recently deleted files
-            if !err_str.contains("0x80070002") {
-                log::trace!(
-                    "[Thumbnail] Stage 4 (force) failed for {:?}: {}",
-                    path.file_name(),
-                    e
-                );
+    // Stage 4: IThumbnailCache with WTS_FORCEEXTRACTION
+    {
+        let t0 = std::time::Instant::now();
+        match stage4_force_extract::extract(path) {
+            Ok(result) => {
+                log_extraction_perf(path, "stage4_force", t0, &result);
+                return ThumbnailExtractionOutcome::Success(result);
+            }
+            Err(e) => {
+                let err_str = e.to_string();
+                if !err_str.contains("0x80070002") {
+                    log::trace!(
+                        "[Thumbnail] Stage 4 (force) failed for {:?}: {}",
+                        path.file_name(),
+                        e
+                    );
+                }
             }
         }
     }
 
-    // Stage 5: Media Foundation direct frame extraction (bypasses Windows thumbnail service)
-    // This is the nuclear option - extracts a raw video frame when all else fails
-    log::trace!("[Thumbnail] Trying Stage 5 (Media Foundation)...");
-    if let Some(result) = stage5_media_foundation::extract(path) {
-        log::trace!("[Thumbnail] Stage 5 SUCCESS for: {:?}", path.file_name());
-        return ThumbnailExtractionOutcome::Success(result);
-    } else {
-        log::warn!("[Thumbnail] ALL STAGES FAILED for: {:?}", path.file_name());
-        diag_warn("thumbnail_extraction", "all_stages_failed", &[]);
+    // Stage 5: Media Foundation direct frame extraction
+    {
+        let t0 = std::time::Instant::now();
+        if let Some(result) = stage5_media_foundation::extract(path) {
+            log_extraction_perf(path, "stage5_mf", t0, &result);
+            return ThumbnailExtractionOutcome::Success(result);
+        }
     }
+
+    let total_ms = pipeline_start.elapsed().as_millis();
+    log::warn!(
+        "[Thumbnail] ALL STAGES FAILED for {:?} ({:.1}ms)",
+        path.file_name(),
+        total_ms as f64
+    );
+    diag_warn("thumbnail_extraction", "permanent_failure", &[]);
     ThumbnailExtractionOutcome::Failed
+}
+
+fn log_extraction_perf(path: &Path, stage: &str, start: std::time::Instant, result: &(Vec<u8>, u32, u32)) {
+    let elapsed_ms = start.elapsed().as_millis();
+    if elapsed_ms >= 25 {
+        let (data, w, h) = result;
+        log::info!(
+            "[THUMB-PERF] {} {:?} {}x{} {}B {:.1}ms",
+            stage,
+            path.file_name(),
+            w,
+            h,
+            data.len(),
+            elapsed_ms as f64
+        );
+    }
 }
 
 fn image_sized_fast_path_target(path: &Path, requested_max_side: Option<u32>) -> Option<u32> {

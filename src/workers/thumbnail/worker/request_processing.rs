@@ -326,6 +326,7 @@ pub(super) fn process_thumbnail_request(
 
         if final_result.is_none() {
             let bucket_size = get_bucket_size(req_size);
+            let extract_start = std::time::Instant::now();
             match generate_thumbnail_hybrid_detailed_with_target(
                 path,
                 req_priority,
@@ -333,10 +334,14 @@ pub(super) fn process_thumbnail_request(
                 Some(bucket_size),
             ) {
                 ThumbnailExtractionOutcome::Success((raw_data, w, h)) => {
+                    let extract_ms = extract_start.elapsed().as_millis();
                     // Resize to bucket (frees RAM and optimizes GPU upload).
+                    let resize_start = std::time::Instant::now();
                     let resized = resize_to_bucket(raw_data, w, h, bucket_size);
+                    let resize_ms = resize_start.elapsed().as_millis();
 
                     // Save optimized version to SQLite.
+                    let cache_start = std::time::Instant::now();
                     if let Err(e) =
                         disk_cache.put(path, modified, req_size, &resized.0, resized.1, resized.2)
                     {
@@ -344,6 +349,19 @@ pub(super) fn process_thumbnail_request(
                             "[Thumbnail-CACHE] PUT FAILED for {:?}: {:?}",
                             path.file_name(),
                             e
+                        );
+                    }
+                    let cache_ms = cache_start.elapsed().as_millis();
+
+                    if extract_ms >= 25 || cache_ms >= 10 {
+                        log::info!(
+                            "[THUMB-PERF] extract={:.1}ms resize={:.1}ms cache={:.1}ms total={:.1}ms {:?} {}x{}→{}x{} bucket={}",
+                            extract_ms as f64,
+                            resize_ms as f64,
+                            cache_ms as f64,
+                            (extract_ms + resize_ms + cache_ms) as f64,
+                            path.file_name(),
+                            w, h, resized.1, resized.2, bucket_size
                         );
                     }
 

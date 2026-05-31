@@ -155,7 +155,7 @@ impl ThumbnailDiskCache {
             .unwrap_or_default()
             .as_secs() as i64;
 
-        // STEP 1: Process Image (Resize + Strip)
+        // Validate dimensions match data length
         let expected_len = (width as usize)
             .checked_mul(height as usize)
             .and_then(|n| n.checked_mul(4));
@@ -163,35 +163,40 @@ impl ThumbnailDiskCache {
             return Err("Invalid RGBA data length".into());
         }
 
-        let img: ImageBuffer<Rgba<u8>, Vec<u8>> =
-            ImageBuffer::from_raw(width, height, rgba_data.to_vec())
-                .ok_or("Failed to create image buffer")?;
-        let dynamic_img = DynamicImage::ImageRgba8(img);
-
-        let resized = if width > 1024 || height > 1024 {
-            dynamic_img.resize(1024, 1024, image::imageops::FilterType::CatmullRom)
+        // Fast path: when dimensions ≤ 1024, skip DynamicImage creation and
+        // resize entirely. Encode directly from the provided RGBA buffer.
+        let (final_width, final_height, webp_data) = if width <= 1024 && height <= 1024 {
+            let has_real_alpha = rgba_has_non_opaque_pixels(rgba_data);
+            if has_real_alpha {
+                let encoder = webp::Encoder::from_rgba(rgba_data, width, height);
+                (width, height, encoder.encode(85.0))
+            } else {
+                let rgb_data = rgba_to_rgb(rgba_data);
+                let encoder = webp::Encoder::from_rgb(&rgb_data, width, height);
+                (width, height, encoder.encode(85.0))
+            }
         } else {
-            dynamic_img
+            // Slow path: resize from high-resolution source
+            let img: ImageBuffer<Rgba<u8>, Vec<u8>> =
+                ImageBuffer::from_raw(width, height, rgba_data.to_vec())
+                    .ok_or("Failed to create image buffer")?;
+            let dynamic_img = DynamicImage::ImageRgba8(img);
+            let resized = dynamic_img.resize(1024, 1024, image::imageops::FilterType::CatmullRom);
+            let (fw, fh) = (resized.width(), resized.height());
+            let has_real_alpha = rgba_has_non_opaque_pixels_nonstandard(&resized);
+            let webp_data = if has_real_alpha {
+                let rgba_img = resized.to_rgba8();
+                let encoder = webp::Encoder::from_rgba(&rgba_img, fw, fh);
+                encoder.encode(85.0)
+            } else {
+                let rgb_img = resized.to_rgb8();
+                let encoder = webp::Encoder::from_rgb(&rgb_img, fw, fh);
+                encoder.encode(85.0)
+            };
+            (fw, fh, webp_data)
         };
 
-        // STEP 2: Encode to WebP Lossy (preserve alpha channel for transparent images)
-        let (final_width, final_height) = (resized.width(), resized.height());
-
-        // Check if image has transparency (non-opaque alpha values)
-        let has_alpha = resized.color().has_alpha();
-        let webp_data = if has_alpha {
-            // Preserve alpha channel for transparent images (PNG, SVG, etc.)
-            let rgba_img = resized.to_rgba8();
-            let encoder = webp::Encoder::from_rgba(&rgba_img, final_width, final_height);
-            encoder.encode(85.0)
-        } else {
-            // Use RGB for opaque images (slightly smaller file size)
-            let rgb_img = resized.to_rgb8();
-            let encoder = webp::Encoder::from_rgb(&rgb_img, final_width, final_height);
-            encoder.encode(85.0)
-        };
-
-        // STEP 3: Save to SQLite (Writer)
+        // Save to SQLite
         let db = self.writer.lock().map_err(|_| "Database lock failed")?;
         let path_str = path.to_string_lossy().to_string();
 
@@ -222,6 +227,36 @@ impl ThumbnailDiskCache {
 
         Ok(())
     }
+}
+
+/// Check if any pixel in the RGBA buffer has a non-opaque alpha channel.
+/// Sampling every 4th byte (the alpha channel) provides an approximate
+/// check that is much faster than scanning every pixel for large images.
+fn rgba_has_non_opaque_pixels(data: &[u8]) -> bool {
+    // Alpha bytes are at offsets 3, 7, 11, ...
+    data.iter().skip(3).step_by(4).any(|&a| a != 255)
+}
+
+/// Check if a DynamicImage has real transparency (non-opaque alpha).
+/// Used for the resize path where we already have a DynamicImage.
+fn rgba_has_non_opaque_pixels_nonstandard(img: &DynamicImage) -> bool {
+    if !img.color().has_alpha() {
+        return false;
+    }
+    let rgba = img.to_rgba8();
+    rgba.pixels().any(|p| p.0[3] != 255)
+}
+
+/// Convert RGBA buffer to RGB by stripping the alpha channel.
+/// More memory-efficient than creating a DynamicImage for the common case
+/// of opaque thumbnails.
+fn rgba_to_rgb(rgba: &[u8]) -> Vec<u8> {
+    let pixel_count = rgba.len() / 4;
+    let mut rgb = Vec::with_capacity(pixel_count * 3);
+    for chunk in rgba.chunks_exact(4) {
+        rgb.extend_from_slice(&chunk[..3]);
+    }
+    rgb
 }
 
 #[cfg(test)]

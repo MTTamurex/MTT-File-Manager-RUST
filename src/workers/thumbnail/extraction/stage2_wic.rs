@@ -71,7 +71,15 @@ pub fn extract(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
 /// When `max_side` is `None`, the native image resolution is returned
 /// (behaviour identical to the old `extract`).
 pub fn extract_to_size(path: &Path, max_side: Option<u32>) -> Option<(Vec<u8>, u32, u32)> {
-    extract_to_size_with_original_size(path, max_side)
+    extract_to_size_impl(path, max_side, WICBitmapInterpolationModeHighQualityCubic)
+        .map(|(buffer, width, height, _, _)| (buffer, width, height))
+}
+
+/// Fast variant for thumbnail extraction (bucket ≤ 512).
+/// Uses `WICBitmapInterpolationModeLinear` for significantly faster downscaling
+/// at thumbnail resolutions where the visual difference is negligible.
+pub fn extract_to_size_fast(path: &Path, max_side: Option<u32>) -> Option<(Vec<u8>, u32, u32)> {
+    extract_to_size_impl(path, max_side, WICBitmapInterpolationModeLinear)
         .map(|(buffer, width, height, _, _)| (buffer, width, height))
 }
 
@@ -80,6 +88,14 @@ pub fn extract_to_size(path: &Path, max_side: Option<u32>) -> Option<(Vec<u8>, u
 pub fn extract_to_size_with_original_size(
     path: &Path,
     max_side: Option<u32>,
+) -> Option<(Vec<u8>, u32, u32, u32, u32)> {
+    extract_to_size_impl(path, max_side, WICBitmapInterpolationModeHighQualityCubic)
+}
+
+fn extract_to_size_impl(
+    path: &Path,
+    max_side: Option<u32>,
+    interpolation: WICBitmapInterpolationMode,
 ) -> Option<(Vec<u8>, u32, u32, u32, u32)> {
     // WIC is for image files only - videos should go directly to Shell API (Stage 3)
     let ext = path.extension()?.to_string_lossy().to_lowercase();
@@ -124,12 +140,7 @@ pub fn extract_to_size_with_original_size(
 
                 let scaler = factory.CreateBitmapScaler().ok()?;
                 scaler
-                    .Initialize(
-                        &frame,
-                        out_width,
-                        out_height,
-                        WICBitmapInterpolationModeHighQualityCubic,
-                    )
+                    .Initialize(&frame, out_width, out_height, interpolation)
                     .ok()?;
                 converter
                     .Initialize(
