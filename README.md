@@ -61,10 +61,10 @@ The app supports two rendering backends, selectable in **Settings > General > GP
 - Lower baseline memory usage
 - May show occasional micro-stutter during fast grid scrolling because OpenGL texture uploads are synchronous on the CPU thread
 
-### Wgpu — DirectX 12 / Vulkan (Opt-in)
+### Wgpu — DirectX 12 / Vulkan / OpenGL (Opt-in)
 - **For users who prefer maximum scroll smoothness**
 - Asynchronous GPU texture uploads eliminate scroll stutter
-- Uses the wgpu abstraction layer with DX12 (Windows) or Vulkan (optional)
+- Uses the wgpu abstraction layer with DX12 (Windows), Vulkan, or OpenGL
 - **Known limitation**: because wgpu creates the swapchain with `FLIP_DISCARD`, a brief black frame may flash during the minimize animation on Windows. This is a documented behavior of the wgpu DX12 backend and does not affect functionality.
 - Higher baseline memory usage due to wgpu/DX12 runtime overhead
 
@@ -107,8 +107,8 @@ Some app-level shortcuts are configurable in Settings > Keyboard Shortcuts. Stan
 |----------|-----------|---------|---------|
 | **Language** | Rust | Edition 2021 | Performance and safety |
 | **GUI** | eframe/egui | 0.31 | Modern immediate-mode GUI (features: `persistence`, `wgpu`, `glow`) |
-| **GPU Backend (Default)** | glow (OpenGL) via eframe | via eframe | Main window uses **Glow** by default for best DWM compatibility; Wgpu (DX12/Vulkan) available as opt-in |
-| **GPU Backend (Opt-in)** | wgpu via eframe | 24.x | DirectX 12 or Vulkan for users who prefer the wgpu rendering path |
+| **GPU Backend (Default)** | glow (OpenGL) via eframe | via eframe | Main window uses **Glow** by default for best DWM compatibility; Wgpu (DX12/Vulkan/OpenGL) available as opt-in |
+| **GPU Backend (Opt-in)** | wgpu via eframe | 24.x | DirectX 12, Vulkan, or OpenGL for users who prefer the wgpu rendering path |
 | **Windows API** | windows-rs | 0.61.0 | Native Windows integration |
 | **Video** | libmpv2 | 5.0.3 | High-performance video playback |
 | **PDF** | pdfium (pdfium-render) | 0.8.37 | Native PDF rendering (requires pdfium.dll) |

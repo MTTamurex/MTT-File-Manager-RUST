@@ -290,7 +290,7 @@ fn main() -> eframe::Result<()> {
     // Read user's GPU backend preference (before eframe init).
     let gpu_backend_pref = read_early_preference("gpu_backend");
     let use_glow = match gpu_backend_pref.as_deref() {
-        Some("dx12") | Some("vulkan") => false,
+        Some("dx12") | Some("vulkan") | Some("gl") => false,
         _ => true, // default: Glow (OpenGL)
     };
 

@@ -6,6 +6,7 @@ const BACKENDS: &[(&str, &str)] = &[
     ("glow", "Glow - OpenGL"),
     ("dx12", "Wgpu - DirectX 12"),
     ("vulkan", "Wgpu - Vulkan"),
+    ("gl", "Wgpu - OpenGL"),
 ];
 
 pub fn render_backend_settings_section(
