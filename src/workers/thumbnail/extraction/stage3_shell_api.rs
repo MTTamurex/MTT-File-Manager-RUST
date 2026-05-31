@@ -20,6 +20,13 @@ use windows::{
 /// This is the universal fallback that works for most file types.
 /// For videos, uses THUMBNAILONLY to fail if only an icon is available.
 pub fn extract(path: &Path) -> Result<(Vec<u8>, u32, u32), Box<dyn std::error::Error>> {
+    extract_with_size(path, None)
+}
+
+pub fn extract_with_size(
+    path: &Path,
+    requested_size: Option<u32>,
+) -> Result<(Vec<u8>, u32, u32), Box<dyn std::error::Error>> {
     // Determine size based on file type - use centralized extension check
     // Videos: 512px (high quality for preview panel)
     // Others: 1024px (high-res system icons, executables, etc.)
@@ -29,7 +36,8 @@ pub fn extract(path: &Path) -> Result<(Vec<u8>, u32, u32), Box<dyn std::error::E
         .map(|ext| is_video_extension(&ext.to_lowercase()))
         .unwrap_or(false);
 
-    let size_px = if is_video { 512 } else { 1024 };
+    let default_size_px = if is_video { 512 } else { 1024 };
+    let size_px = requested_size_px(requested_size, default_size_px) as i32;
 
     unsafe {
         // SAFETY: Raw pointers from `path_wide` are valid for the call.
@@ -60,6 +68,12 @@ pub fn extract(path: &Path) -> Result<(Vec<u8>, u32, u32), Box<dyn std::error::E
 
         Ok((rgba_data, width, height))
     }
+}
+
+fn requested_size_px(requested_size: Option<u32>, default_size_px: u32) -> u32 {
+    requested_size
+        .unwrap_or(default_size_px)
+        .clamp(1, default_size_px.max(1))
 }
 
 /// Convert Windows HBITMAP to RGBA byte array
@@ -112,5 +126,17 @@ fn hbitmap_to_rgba(
         }
 
         Ok((buffer, width as u32, height as u32))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::requested_size_px;
+
+    #[test]
+    fn requested_size_px_uses_target_when_available() {
+        assert_eq!(requested_size_px(Some(512), 1024), 512);
+        assert_eq!(requested_size_px(Some(2048), 1024), 1024);
+        assert_eq!(requested_size_px(None, 1024), 1024);
     }
 }

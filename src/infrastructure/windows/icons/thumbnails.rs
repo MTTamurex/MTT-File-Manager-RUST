@@ -154,6 +154,13 @@ pub fn force_extract_folder_preview(
 pub fn force_extract_thumbnail(
     path: &Path,
 ) -> std::result::Result<(Vec<u8>, u32, u32), Box<dyn std::error::Error>> {
+    force_extract_thumbnail_with_size(path, None)
+}
+
+pub fn force_extract_thumbnail_with_size(
+    path: &Path,
+    requested_size: Option<u32>,
+) -> std::result::Result<(Vec<u8>, u32, u32), Box<dyn std::error::Error>> {
     use windows::Win32::UI::Shell::{
         ISharedBitmap, IThumbnailCache, LocalThumbnailCache, WTS_CACHEFLAGS, WTS_FORCEEXTRACTION,
         WTS_SCALETOREQUESTEDSIZE,
@@ -178,7 +185,7 @@ pub fn force_extract_thumbnail(
         // WTS_FORCEEXTRACTION = 0x8 - Forces extraction even if cached
         // WTS_SCALETOREQUESTEDSIZE = 0x100 - Scales to requested size
         let flags = WTS_FORCEEXTRACTION | WTS_SCALETOREQUESTEDSIZE;
-        let requested_size: u32 = 512; // Good balance for preview panel
+        let requested_size = requested_size.unwrap_or(512).clamp(1, 1024);
 
         // Single attempt - no retries. Stage 5 (Media Foundation) handles failures.
         let mut shared_bitmap: Option<ISharedBitmap> = None;

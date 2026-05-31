@@ -34,7 +34,9 @@ pub fn extract(path: &Path, priority: IOPriority) -> Option<(Vec<u8>, u32, u32)>
     match image::load(reader, format) {
         Ok(img) => {
             let rgba = img.to_rgba8();
-            Some((rgba.to_vec(), rgba.width(), rgba.height()))
+            let width = rgba.width();
+            let height = rgba.height();
+            Some((rgba.into_vec(), width, height))
         }
         Err(_) => None,
     }

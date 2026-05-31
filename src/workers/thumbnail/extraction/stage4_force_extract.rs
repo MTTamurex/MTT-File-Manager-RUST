@@ -12,3 +12,10 @@ use std::path::Path;
 pub fn extract(path: &Path) -> Result<(Vec<u8>, u32, u32), Box<dyn std::error::Error>> {
     crate::infrastructure::windows::icons::force_extract_thumbnail(path)
 }
+
+pub fn extract_with_size(
+    path: &Path,
+    requested_size: Option<u32>,
+) -> Result<(Vec<u8>, u32, u32), Box<dyn std::error::Error>> {
+    crate::infrastructure::windows::icons::force_extract_thumbnail_with_size(path, requested_size)
+}

@@ -459,7 +459,12 @@ fn decode_cache_entry(entry: ThumbnailCacheEntry, req_size: u32) -> Option<(Vec<
     let width = rgba.width();
     let height = rgba.height();
     let bucket_size = get_bucket_size(req_size);
-    Some(resize_to_bucket(rgba.to_vec(), width, height, bucket_size))
+    Some(resize_to_bucket(
+        rgba.into_vec(),
+        width,
+        height,
+        bucket_size,
+    ))
 }
 
 pub(super) fn cache_entry_satisfies_request(entry: &ThumbnailCacheEntry, req_size: u32) -> bool {

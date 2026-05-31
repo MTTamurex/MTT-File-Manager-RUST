@@ -10,6 +10,7 @@
 //! 5. **Force Extraction** - IThumbnailCache with WTS_FORCEEXTRACTION flag
 //! 6. **Media Foundation** (Nuclear Option) - Direct video frame extraction
 
+pub mod orientation;
 pub mod stage0_embedded_exif_thumbnail;
 pub mod stage1_image_crate;
 pub mod stage2_wic;
@@ -108,6 +109,7 @@ pub fn generate_thumbnail_hybrid_detailed_with_target(
     if let Some(max_side) = image_sized_fast_path_target(path, image_target_max_side) {
         let t0 = std::time::Instant::now();
         if let Some(result) = stage2_wic::extract_to_size_fast(path, Some(max_side)) {
+            let result = orientation::apply_exif_orientation_to_thumbnail(path, priority, result);
             log_extraction_perf(path, "stage0_wic_sized", t0, &result);
             return ThumbnailExtractionOutcome::Success(result);
         }
@@ -121,6 +123,7 @@ pub fn generate_thumbnail_hybrid_detailed_with_target(
     {
         let t0 = std::time::Instant::now();
         if let Some(result) = stage1_image_crate::extract(path, priority) {
+            let result = orientation::apply_exif_orientation_to_thumbnail(path, priority, result);
             log_extraction_perf(path, "stage1_image_crate", t0, &result);
             return ThumbnailExtractionOutcome::Success(result);
         }
@@ -134,6 +137,7 @@ pub fn generate_thumbnail_hybrid_detailed_with_target(
     {
         let t0 = std::time::Instant::now();
         if let Some(result) = stage2_wic::extract(path) {
+            let result = orientation::apply_exif_orientation_to_thumbnail(path, priority, result);
             log_extraction_perf(path, "stage2_wic", t0, &result);
             return ThumbnailExtractionOutcome::Success(result);
         }
@@ -146,7 +150,7 @@ pub fn generate_thumbnail_hybrid_detailed_with_target(
     // Stage 3: Shell API (Universal/Video)
     {
         let t0 = std::time::Instant::now();
-        match stage3_shell_api::extract(path) {
+        match stage3_shell_api::extract_with_size(path, image_target_max_side) {
             Ok(result) => {
                 log_extraction_perf(path, "stage3_shell", t0, &result);
                 return ThumbnailExtractionOutcome::Success(result);
@@ -167,7 +171,7 @@ pub fn generate_thumbnail_hybrid_detailed_with_target(
     // Stage 4: IThumbnailCache with WTS_FORCEEXTRACTION
     {
         let t0 = std::time::Instant::now();
-        match stage4_force_extract::extract(path) {
+        match stage4_force_extract::extract_with_size(path, image_target_max_side) {
             Ok(result) => {
                 log_extraction_perf(path, "stage4_force", t0, &result);
                 return ThumbnailExtractionOutcome::Success(result);
@@ -204,7 +208,12 @@ pub fn generate_thumbnail_hybrid_detailed_with_target(
     ThumbnailExtractionOutcome::Failed
 }
 
-fn log_extraction_perf(path: &Path, stage: &str, start: std::time::Instant, result: &(Vec<u8>, u32, u32)) {
+fn log_extraction_perf(
+    path: &Path,
+    stage: &str,
+    start: std::time::Instant,
+    result: &(Vec<u8>, u32, u32),
+) {
     let elapsed_ms = start.elapsed().as_millis();
     if elapsed_ms >= 25 {
         let (data, w, h) = result;

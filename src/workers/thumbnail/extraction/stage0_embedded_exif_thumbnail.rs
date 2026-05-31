@@ -8,9 +8,9 @@ use crate::infrastructure::io_priority::IOPriority;
 use crate::infrastructure::windows::file_flags::{
     open_sequential, open_sequential_background, open_sequential_low_priority,
 };
+use crate::workers::thumbnail::extraction::orientation::{apply_orientation, map_exif_orientation};
 use exif::{In, Reader as ExifReader, Tag};
-use image::metadata::Orientation;
-use image::{DynamicImage, ImageFormat};
+use image::ImageFormat;
 use std::io::BufReader;
 use std::path::Path;
 
@@ -82,36 +82,9 @@ fn slice_embedded_thumbnail(buf: &[u8], offset: usize, len: usize) -> Option<&[u
     buf.get(offset..end)
 }
 
-fn map_exif_orientation(raw: Option<u32>) -> Orientation {
-    match raw {
-        Some(2) => Orientation::FlipHorizontal,
-        Some(3) => Orientation::Rotate180,
-        Some(4) => Orientation::FlipVertical,
-        Some(5) => Orientation::Rotate90FlipH,
-        Some(6) => Orientation::Rotate90,
-        Some(7) => Orientation::Rotate270FlipH,
-        Some(8) => Orientation::Rotate270,
-        _ => Orientation::NoTransforms,
-    }
-}
-
-fn apply_orientation(img: DynamicImage, orientation: Orientation) -> DynamicImage {
-    match orientation {
-        Orientation::NoTransforms => img,
-        Orientation::FlipHorizontal => img.fliph(),
-        Orientation::Rotate180 => img.rotate180(),
-        Orientation::FlipVertical => img.flipv(),
-        Orientation::Rotate90 => img.rotate90(),
-        Orientation::Rotate90FlipH => img.rotate90().fliph(),
-        Orientation::Rotate270 => img.rotate270(),
-        Orientation::Rotate270FlipH => img.rotate270().fliph(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{map_exif_orientation, slice_embedded_thumbnail};
-    use image::metadata::Orientation;
+    use super::slice_embedded_thumbnail;
 
     #[test]
     fn slice_embedded_thumbnail_rejects_invalid_ranges() {
@@ -119,14 +92,5 @@ mod tests {
         assert_eq!(slice_embedded_thumbnail(&buf, 0, 0), None);
         assert_eq!(slice_embedded_thumbnail(&buf, 4, 1), None);
         assert_eq!(slice_embedded_thumbnail(&buf, usize::MAX, 1), None);
-    }
-
-    #[test]
-    fn map_exif_orientation_matches_expected_transforms() {
-        assert_eq!(map_exif_orientation(Some(1)), Orientation::NoTransforms);
-        assert_eq!(map_exif_orientation(Some(6)), Orientation::Rotate90);
-        assert_eq!(map_exif_orientation(Some(8)), Orientation::Rotate270);
-        assert_eq!(map_exif_orientation(Some(999)), Orientation::NoTransforms);
-        assert_eq!(map_exif_orientation(None), Orientation::NoTransforms);
     }
 }
