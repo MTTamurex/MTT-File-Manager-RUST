@@ -86,6 +86,7 @@ impl ImageViewerApp {
         let mut incoming_count = 0usize;
         let mut has_more_incoming = false;
         let is_burst = self.is_in_restore_burst();
+        let is_opengl = self.is_opengl_backend();
         let frame_pressure_ms = live_frame_pressure_ms(self);
         // During burst, ignore frame pressure for intake — the slow frames are caused
         // by OS paging, not by actual rendering load.  A generous budget lets us
@@ -439,25 +440,31 @@ impl ImageViewerApp {
         // not by rendering complexity.  Restricting uploads only prolongs the
         // blank-tile period.  We allow up to 48 uploads/frame (clamped by the
         // generous time budget below) which fills the visible grid in ~2-3 seconds.
+        //
+        // On OpenGL (Glow / wgpu-GL) each `ctx.load_texture` call is synchronous
+        // on the CPU thread.  Unlike DX12/Vulkan where wgpu queues the upload
+        // asynchronously, OpenGL blocks until the driver finishes the transfer
+        // (5-15 ms per thumbnail).  Apply more conservative per-frame caps to
+        // prevent UI freezes and frame drops.
         let base_max_uploads = if is_burst {
-            48
+            if is_opengl { 16 } else { 48 }
         } else if is_performance_critical {
             1
         } else if is_performance_severe {
-            2
+            if is_opengl { 1 } else { 2 }
         } else if is_video_playing && is_scrolling {
-            4
+            if is_opengl { 2 } else { 4 }
         } else if is_scrolling {
-            6
+            if is_opengl { 3 } else { 6 }
         } else if is_video_playing {
-            5
+            if is_opengl { 3 } else { 5 }
         } else {
-            12
+            if is_opengl { 4 } else { 12 }
         };
 
         let base_max_uploads = ((base_max_uploads as f32) * tab_upload_boost)
             .round()
-            .clamp(1.0, if is_burst { 64.0 } else { 20.0 }) as usize;
+            .clamp(1.0, if is_burst { if is_opengl { 24.0 } else { 64.0 } } else { 20.0 }) as usize;
 
         let perf_scale = if is_burst {
             // During burst the frame_time_avg is inflated by OS paging; don't penalise.
@@ -558,6 +565,8 @@ impl ImageViewerApp {
             if is_performance_critical {
                 0
             } else if is_performance_severe {
+                1
+            } else if is_opengl {
                 1
             } else {
                 2
@@ -836,9 +845,13 @@ impl ImageViewerApp {
         is_performance_critical: bool,
         is_video_playing: bool,
     ) {
+        let is_opengl = self.is_opengl_backend();
+
         let max_folder_uploads = if is_performance_critical {
-            2
+            if is_opengl { 1 } else { 2 }
         } else if is_video_playing {
+            if is_opengl { 3 } else { 6 }
+        } else if is_opengl {
             6
         } else {
             20
@@ -847,7 +860,15 @@ impl ImageViewerApp {
         // Time-budget folder preview uploads to avoid frame spikes.
         // Each ctx.load_texture() can take 5-15ms, so uncapped uploads
         // of 20 previews/frame could stall the UI for up to 300ms.
-        let budget = Duration::from_millis(if is_performance_critical { 3 } else { 8 });
+        // On OpenGL, each upload is synchronous and blocks the CPU thread,
+        // so use a tighter budget to keep frames responsive.
+        let budget = Duration::from_millis(if is_performance_critical {
+            2
+        } else if is_opengl {
+            4
+        } else {
+            8
+        });
         let start = Instant::now();
 
         let mut folder_uploads = 0;

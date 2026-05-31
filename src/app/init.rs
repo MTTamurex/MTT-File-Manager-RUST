@@ -662,6 +662,12 @@ impl ImageViewerApp {
             app.active_gpu_backend = "glow".to_string();
         }
 
+        if app.is_opengl_backend() {
+            log::info!(
+                "[GPU] OpenGL backend detected — applying conservative upload throttling to prevent UI freezes (synchronous texture uploads)"
+            );
+        }
+
         app
     }
 }

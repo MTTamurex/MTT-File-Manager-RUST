@@ -134,6 +134,17 @@ impl ImageViewerApp {
             .is_some_and(|deadline| Instant::now() < deadline)
     }
 
+    /// Returns `true` when the active GPU backend is OpenGL-based.
+    ///
+    /// OpenGL uploads are synchronous on the CPU thread (each `ctx.load_texture`
+    /// blocks until the driver finishes the transfer), unlike DX12/Vulkan where
+    /// wgpu queues the upload asynchronously.  This method is used to apply more
+    /// conservative per-frame upload limits that prevent UI freezes on OpenGL
+    /// backends (Glow and Wgpu-GL).
+    pub fn is_opengl_backend(&self) -> bool {
+        matches!(self.active_gpu_backend.as_str(), "Gl" | "glow")
+    }
+
     /// Check if a video is actively playing in docked mode (preview panel)
     /// Used to throttle disk I/O from thumbnails to prevent stutter during video playback
     pub fn is_video_playing_docked(&self) -> bool {
