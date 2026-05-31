@@ -610,6 +610,9 @@ impl ImageViewerApp {
             usize::MAX
         };
         let mut offscreen_uploads = 0usize;
+        let discard_offscreen_pending = is_opengl && is_scrolling;
+        let max_offscreen_discards = max_uploads_per_frame.saturating_mul(8).max(8);
+        let mut offscreen_discards = 0usize;
 
         while uploads_this_frame < max_uploads_per_frame {
             if let Some(thumbnail_data) = self.pending_thumbnails.pop_front() {
@@ -639,6 +642,16 @@ impl ImageViewerApp {
 
                 if let Some(vis) = visible_paths {
                     if !vis.contains(&thumbnail_data.path) {
+                        if discard_offscreen_pending {
+                            self.cache_manager
+                                .finish_pending_upload(&thumbnail_data.path);
+                            offscreen_discards += 1;
+                            if offscreen_discards >= max_offscreen_discards {
+                                break;
+                            }
+                            continue;
+                        }
+
                         if offscreen_uploads >= offscreen_upload_budget {
                             self.pending_thumbnails.push_back(thumbnail_data);
                             deferred_count += 1;

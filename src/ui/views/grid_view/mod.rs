@@ -198,6 +198,9 @@ pub struct GridViewContext<'a> {
     pub computer_network_indices: &'a [usize],
     /// PERFORMANCE: Peak frame time for adaptive overscan after inactivity wake
     pub frame_time_peak_ms: f32,
+    /// OpenGL-specific LOD: request smaller thumbnails while the grid is moving,
+    /// then upgrade visible cells after scrolling stops.
+    pub low_res_thumbnails_while_scrolling: bool,
     /// Per-frame counter to rate-limit thumbnail requests on folder entry
     pub thumbnail_requests_this_frame: usize,
     /// Folder generation counter — scopes scroll state to current folder

@@ -263,6 +263,7 @@ impl ImageViewerApp {
             .rectangle_selection_state
             .as_ref()
             .filter(|state| state.view == RectangleSelectionView::Grid);
+        let low_res_thumbnails_while_scrolling = self.is_opengl_backend();
 
         let mut ctx = GridViewContext {
             items: &items,
@@ -315,6 +316,7 @@ impl ImageViewerApp {
             computer_local_indices: &self.navigation_state.computer_view_local_indices,
             computer_network_indices: &self.navigation_state.computer_view_network_indices,
             frame_time_peak_ms: self.frame_time_peak_ms,
+            low_res_thumbnails_while_scrolling,
             thumbnail_requests_this_frame: 0,
             generation: self.generation,
         };

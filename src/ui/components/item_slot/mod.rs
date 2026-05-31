@@ -98,6 +98,9 @@ pub struct ItemSlotContext<'a> {
     pub pending_upload_set: &'a mut FxHashSet<std::path::PathBuf>,
     pub is_dense_mode: bool,
     pub is_scrolling: bool,
+    /// Use a lower thumbnail bucket while scrolling. Intended for OpenGL,
+    /// where texture uploads block the UI thread more aggressively.
+    pub low_res_thumbnails_while_scrolling: bool,
     /// Whether this slot may enqueue thumbnail work. Grid overscan rows are
     /// rendered for smooth scrolling, but visible slots must get request
     /// budget first to avoid top-left pop-in after cache flush/restore.

@@ -358,6 +358,7 @@ fn render_item_slot_for_grid(
             pending_upload_set: ctx.pending_upload_set,
             is_dense_mode: false,
             is_scrolling,
+            low_res_thumbnails_while_scrolling: ctx.low_res_thumbnails_while_scrolling,
             allow_thumbnail_requests,
             thumbnail_requests_this_frame: &mut ctx.thumbnail_requests_this_frame,
         };
