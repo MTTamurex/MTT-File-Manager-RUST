@@ -12,13 +12,21 @@ mod view_updates;
 
 impl ImageViewerApp {
     pub fn load_folder(&mut self, force_refresh: bool) {
+        self.load_folder_with_icon_trim(force_refresh, true);
+    }
+
+    pub fn reload_current_folder_preserving_icon_cache(&mut self) {
+        self.load_folder_with_icon_trim(false, false);
+    }
+
+    fn load_folder_with_icon_trim(&mut self, force_refresh: bool, trim_icons: bool) {
         if self.should_skip_folder_load(force_refresh) {
             return;
         }
         self.mark_folder_load_started(force_refresh);
         self.bump_folder_load_generation();
 
-        self.reset_folder_loading_state(force_refresh);
+        self.reset_folder_loading_state(force_refresh, trim_icons);
 
         self.start_folder_load_pipeline(force_refresh, true);
     }

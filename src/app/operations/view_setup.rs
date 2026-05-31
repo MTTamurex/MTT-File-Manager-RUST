@@ -49,7 +49,7 @@ impl ImageViewerApp {
         self.generation += 1;
         self.current_generation
             .store(self.generation, AtomicOrdering::Relaxed);
-        self.discard_thumbnail_pipeline_for_navigation("recycle-bin");
+        self.discard_thumbnail_pipeline_for_navigation("recycle-bin", true);
 
         let my_gen = self.generation;
         let gen_clone = self.current_generation.clone();
@@ -147,7 +147,7 @@ impl ImageViewerApp {
         self.current_generation
             .store(self.generation, AtomicOrdering::Relaxed);
         self.invalidate_active_items_rebuild();
-        self.discard_thumbnail_pipeline_for_navigation("computer-view");
+        self.discard_thumbnail_pipeline_for_navigation("computer-view", true);
 
         // Set computer view
         self.navigation_state.current_path = COMPUTER_VIEW_ID.to_string();

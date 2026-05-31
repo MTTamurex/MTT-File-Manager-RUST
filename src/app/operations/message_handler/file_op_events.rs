@@ -332,7 +332,7 @@ impl ImageViewerApp {
 
         if should_reload_current {
             self.loaded_path.clear();
-            self.load_folder(false);
+            self.reload_current_folder_preserving_icon_cache();
         }
     }
 
@@ -451,7 +451,7 @@ impl ImageViewerApp {
                 self.navigation_state.current_path
             );
             self.loaded_path.clear();
-            self.load_folder(false);
+            self.reload_current_folder_preserving_icon_cache();
         }
 
         // Reload inactive dual panel if it shows the destination folder
@@ -487,7 +487,7 @@ impl ImageViewerApp {
                 self.navigation_state.current_path
             );
             self.loaded_path.clear();
-            self.load_folder(false);
+            self.reload_current_folder_preserving_icon_cache();
         }
 
         if current_path_norm == dest_str {
@@ -497,7 +497,7 @@ impl ImageViewerApp {
                 self.navigation_state.current_path
             );
             self.loaded_path.clear();
-            self.load_folder(false);
+            self.reload_current_folder_preserving_icon_cache();
         }
 
         // Reload inactive dual panel if it shows source or destination
@@ -563,7 +563,7 @@ impl ImageViewerApp {
 
         if should_reload_source_view {
             self.loaded_path.clear();
-            self.load_folder(false);
+            self.reload_current_folder_preserving_icon_cache();
         }
 
         if current_path_norm == dest_str {
@@ -573,7 +573,7 @@ impl ImageViewerApp {
                 self.navigation_state.current_path
             );
             self.loaded_path.clear();
-            self.load_folder(false);
+            self.reload_current_folder_preserving_icon_cache();
         }
 
         // Reload inactive dual panel if it shows any affected folder
@@ -647,7 +647,7 @@ impl ImageViewerApp {
                 }
 
                 self.loaded_path.clear();
-                self.load_folder(false);
+                self.reload_current_folder_preserving_icon_cache();
 
                 // Also reload the inactive dual panel if it exists
                 // (its folder may have been affected by the operation)

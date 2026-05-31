@@ -62,7 +62,7 @@ impl ImageViewerApp {
             .store(self.generation, AtomicOrdering::Relaxed); // Sync with workers
     }
 
-    pub(super) fn reset_folder_loading_state(&mut self, force_refresh: bool) {
+    pub(super) fn reset_folder_loading_state(&mut self, force_refresh: bool, trim_icons: bool) {
         // 1. State Cleanup (UI Thread)
         if force_refresh {
             self.cache_manager.texture_cache.clear();
@@ -83,7 +83,9 @@ impl ImageViewerApp {
             // first batch of the new generation arrives.
             self.pending_all_items_clear = true;
         }
-        self.discard_thumbnail_pipeline_for_navigation("folder-load");
+        // Soft reloads of the same folder can preserve icon caches to avoid a
+        // per-file icon re-extraction storm for executables (.exe/.lnk/.ico).
+        self.discard_thumbnail_pipeline_for_navigation("folder-load", trim_icons);
         self.loading_icons.clear(); // Clear icon loading requests
         self.loading_extensions.clear(); // Clear extension dedup tracking
         self.failed_icons.clear(); // Retry icon extraction in the new folder generation

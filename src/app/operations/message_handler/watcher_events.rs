@@ -478,7 +478,7 @@ impl ImageViewerApp {
                     self.navigation_state.current_path
                 );
                 self.loaded_path.clear();
-                self.load_folder(false);
+                self.reload_current_folder_preserving_icon_cache();
                 self.last_auto_reload = Instant::now();
                 self.pending_auto_reload = false;
             } else {

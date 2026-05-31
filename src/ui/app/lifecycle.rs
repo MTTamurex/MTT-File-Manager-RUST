@@ -261,7 +261,7 @@ fn flush_gpu_textures_for_reupload(app: &mut ImageViewerApp, reason: &str) {
     let folder_previews = app.cache_manager.folder_preview_cache.len();
     let icons = app.cache_manager.icon_cache.len();
 
-    app.discard_thumbnail_pipeline_for_navigation(reason);
+    app.discard_thumbnail_pipeline_for_navigation(reason, true);
     app.cache_manager.texture_cache.clear();
     app.cache_manager.folder_preview_cache.clear();
     app.cache_manager.folder_preview_loading.clear();

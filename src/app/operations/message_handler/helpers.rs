@@ -272,6 +272,70 @@ impl ImageViewerApp {
         true
     }
 
+    /// Batch variant of try_remove_deleted_path_from_ui: removes multiple paths
+    /// from all_items/items in a single O(n) pass instead of O(n*m) per-path scans.
+    ///
+    /// Used by the watcher during REMOVE event floods to avoid repeated linear
+    /// searches when deleting many files at once.
+    pub(super) fn batch_remove_deleted_paths_from_ui(&mut self, paths: &[PathBuf]) -> bool {
+        if paths.is_empty() {
+            return false;
+        }
+
+        let norms: std::collections::HashSet<String> =
+            paths.iter().map(|p| Self::normalize_for_match(p)).collect();
+
+        for path in paths {
+            if self.file_operation_state.pending_deletions.len() < 10_000 {
+                self.file_operation_state
+                    .pending_deletions
+                    .insert(path.clone(), ());
+            }
+            self.evict_stale_path_caches(path);
+        }
+        self.enqueue_disk_cache_invalidations_forced(paths.to_vec());
+
+        let had_any = self
+            .all_items
+            .iter()
+            .any(|item| norms.contains(&Self::normalize_for_match(&item.path)));
+
+        if !had_any {
+            return false;
+        }
+
+        self.all_items_mut()
+            .retain(|item| !norms.contains(&Self::normalize_for_match(&item.path)));
+
+        let items = Arc::make_mut(&mut self.items);
+        items.retain(|item| !norms.contains(&Self::normalize_for_match(&item.path)));
+
+        self.total_items = self.items.len();
+        self.multi_selection
+            .retain(|selected_path| !norms.contains(&Self::normalize_for_match(selected_path)));
+
+        if self
+            .selected_file
+            .as_ref()
+            .is_some_and(|selected| norms.contains(&Self::normalize_for_match(&selected.path)))
+        {
+            self.selected_file = None;
+            self.selected_thumbnail = None;
+            self.selected_metadata = None;
+        }
+
+        if let Some(selected) = self.selected_item {
+            if selected >= self.items.len() && !self.items.is_empty() {
+                self.selected_item = Some(self.items.len() - 1);
+            } else if self.items.is_empty() {
+                self.selected_item = None;
+                self.selected_file = None;
+            }
+        }
+
+        true
+    }
+
     pub(super) fn try_add_created_path_to_ui(&mut self, path: &Path) -> bool {
         let cleaned = Self::clean_path(path);
         let cleaned_norm = Self::normalize_for_match(&cleaned);

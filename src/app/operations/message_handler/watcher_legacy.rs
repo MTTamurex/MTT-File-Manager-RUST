@@ -109,6 +109,9 @@ impl ImageViewerApp {
         let mut has_more_events = false;
 
         let mut folders_with_changed_contents: HashSet<PathBuf> = HashSet::new();
+        let mut paths_to_remove_from_ui: Vec<PathBuf> = Vec::new();
+        let mut remove_parents_invalidated: HashSet<PathBuf> = HashSet::new();
+        let mut batched_remove_events = 0usize;
 
         while processed_events < max_events_individual {
             if start.elapsed() >= budget {
@@ -131,6 +134,8 @@ impl ImageViewerApp {
                     let is_name_change = notify_event_is_name_change(&evt);
 
                     if matches!(evt.kind, notify::EventKind::Remove(_)) {
+                        batched_remove_events += 1;
+
                         for path in &evt.paths {
                             if self.should_ignore_watcher_path(
                                 path,
@@ -142,22 +147,38 @@ impl ImageViewerApp {
                             meaningful_change = true;
 
                             let cleaned = Self::clean_path(path);
+
+                            // Skip watcher REMOVE events for app-initiated deletions.
+                            // The file-op handler already performed cache/UI cleanup;
+                            // reprocessing here only adds redundant invalidation work.
+                            if self.file_operation_state.file_ops_in_progress > 0
+                                && self
+                                    .file_operation_state
+                                    .pending_deletions
+                                    .contains_key(&cleaned)
+                            {
+                                #[cfg(debug_assertions)]
+                                log::trace!(
+                                    "[FS-WATCH-LEGACY] Skipping app-initiated REMOVE: {:?}",
+                                    cleaned.file_name().unwrap_or_default()
+                                );
+                                continue;
+                            }
+
                             self.register_changed_folder_for_path(
                                 &cleaned,
                                 &mut folders_with_changed_contents,
                             );
                             if let Some(parent) = cleaned.parent() {
-                                self.invalidate_directory_listing_caches(parent);
+                                let parent_buf = parent.to_path_buf();
+                                // Deduplicate: invalidate each parent only once.
+                                if remove_parents_invalidated.insert(parent_buf) {
+                                    self.invalidate_directory_listing_caches(parent);
+                                }
 
                                 let parent_norm = Self::normalize_for_match(parent);
                                 if parent_norm == current_path_norm {
-                                    if self.try_remove_deleted_path_from_ui(&cleaned) {
-                                        #[cfg(debug_assertions)]
-                                        log::debug!(
-                                            "[FS-WATCH-LEGACY] SMART DELETE: Removed from UI without reload"
-                                        );
-                                        self.skip_next_auto_reload = true;
-                                    }
+                                    paths_to_remove_from_ui.push(cleaned.clone());
                                 }
                             }
                             self.directory_cache.invalidate_children(&cleaned);
@@ -359,6 +380,19 @@ impl ImageViewerApp {
                         ) {
                             continue;
                         }
+
+                        if matches!(evt.kind, notify::EventKind::Remove(_)) {
+                            let cleaned = Self::clean_path(path);
+                            if self.file_operation_state.file_ops_in_progress > 0
+                                && self
+                                    .file_operation_state
+                                    .pending_deletions
+                                    .contains_key(&cleaned)
+                            {
+                                continue;
+                            }
+                        }
+
                         meaningful_change = true;
 
                         if matches!(evt.kind, notify::EventKind::Create(_)) {
@@ -456,10 +490,25 @@ impl ImageViewerApp {
             }
         }
 
-        if processed_events >= max_events_individual {
+        // Batch-remove all paths from the current folder in a single O(n)
+        // retain pass instead of one O(n) pass per notify event.
+        if !paths_to_remove_from_ui.is_empty() {
+            if self.batch_remove_deleted_paths_from_ui(&paths_to_remove_from_ui) {
+                #[cfg(debug_assertions)]
+                log::debug!(
+                    "[FS-WATCH-LEGACY] SMART DELETE: Batch-removed {} path(s) from UI",
+                    paths_to_remove_from_ui.len()
+                );
+                self.skip_next_auto_reload = true;
+            }
+        }
+
+        let unbatched_events = processed_events.saturating_sub(batched_remove_events);
+        if processed_events >= max_events_individual && unbatched_events >= max_events_individual {
             has_more_events = true;
             log::warn!(
-                "[FS-WATCH-LEGACY] Event flood detected (processed {} in one frame). Triggering full reload.",
+                "[FS-WATCH-LEGACY] Event flood detected (processed {} unbatched / {} total in one frame). Triggering full reload.",
+                unbatched_events,
                 processed_events
             );
             self.directory_cache.clear();
@@ -469,6 +518,8 @@ impl ImageViewerApp {
                 self.invalidate_folder_size_cache(current_path.as_path());
                 self.request_watcher_auto_reload();
             }
+        } else if processed_events >= max_events_individual {
+            has_more_events = true;
         }
 
         for folder_path in &folders_with_changed_contents {

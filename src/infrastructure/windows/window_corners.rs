@@ -35,6 +35,8 @@ pub fn apply_window_corner_preference(hwnd: HWND, is_maximized: bool) {
     }
 }
 
+
+
 /// Apply or remove the immersive dark-mode flag on the native title bar.
 ///
 /// Uses `DWMWA_USE_IMMERSIVE_DARK_MODE` (attribute 20). Requires
@@ -57,5 +59,3 @@ pub fn apply_dark_title_bar(hwnd: HWND, dark: bool) {
         );
     }
 }
-
-

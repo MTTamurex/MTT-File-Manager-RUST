@@ -482,7 +482,11 @@ impl ImageViewerApp {
     /// separate from memory-pressure maintenance: stale thumbnail textures and
     /// queued RGBA payloads from the previous folder should be released even
     /// when total process RAM is below the soft limit.
-    pub(crate) fn discard_thumbnail_pipeline_for_navigation(&mut self, reason: &str) {
+    pub(crate) fn discard_thumbnail_pipeline_for_navigation(
+        &mut self,
+        reason: &str,
+        trim_icons: bool,
+    ) {
         let queued_removed = self.thumbnail_queue.clear_pending();
 
         let mut receiver_drained = 0usize;
@@ -531,7 +535,11 @@ impl ImageViewerApp {
             MIN_DYNAMIC_FOLDER_PREVIEW_ITEMS,
             None,
         );
-        let (icon_evicted, ext_icon_evicted) = self.item_icon_loader.trim_icon_caches(128, 128);
+        let (icon_evicted, ext_icon_evicted) = if trim_icons {
+            self.item_icon_loader.trim_icon_caches(128, 128)
+        } else {
+            (0, 0)
+        };
 
         self.last_texture_cache_retune = Instant::now()
             .checked_sub(Duration::from_secs(10))
