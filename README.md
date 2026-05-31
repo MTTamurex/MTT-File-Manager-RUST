@@ -49,6 +49,25 @@
 - **UI virtualization** — Efficient rendering of large directories
 - **Per-folder monitoring** — Default `notify` crate watcher with opt-in drive-wide `ReadDirectoryChangesW`
 
+## Graphics Backend
+
+The app supports two rendering backends, selectable in **Settings > General > GPU Backend** (requires app restart):
+
+### Glow — OpenGL (Default)
+- **Recommended for most users**
+- Best compatibility with Windows DWM (Desktop Window Manager)
+- Native minimize/restore animations work correctly
+- Taskbar thumbnail previews (Aero Peek) display properly
+- Lower baseline memory usage
+- May show occasional micro-stutter during fast grid scrolling because OpenGL texture uploads are synchronous on the CPU thread
+
+### Wgpu — DirectX 12 / Vulkan (Opt-in)
+- **For users who prefer maximum scroll smoothness**
+- Asynchronous GPU texture uploads eliminate scroll stutter
+- Uses the wgpu abstraction layer with DX12 (Windows) or Vulkan (optional)
+- **Known limitation**: because wgpu creates the swapchain with `FLIP_DISCARD`, a brief black frame may flash during the minimize animation on Windows. This is a documented behavior of the wgpu DX12 backend and does not affect functionality.
+- Higher baseline memory usage due to wgpu/DX12 runtime overhead
+
 ## Prerequisites
 
 - **Windows 10 or newer, 64-bit** — The installer targets x64-compatible Windows systems.
@@ -88,7 +107,8 @@ Some app-level shortcuts are configurable in Settings > Keyboard Shortcuts. Stan
 |----------|-----------|---------|---------|
 | **Language** | Rust | Edition 2021 | Performance and safety |
 | **GUI** | eframe/egui | 0.31 | Modern immediate-mode GUI (features: `persistence`, `wgpu`, `glow`) |
-| **GPU Backend** | wgpu + glow (via eframe) | 24.x / via eframe | Main window uses `wgpu` with HighPerformance preference; image/PDF/text viewers use the lighter `glow` path |
+| **GPU Backend (Default)** | glow (OpenGL) via eframe | via eframe | Main window uses **Glow** by default for best DWM compatibility; Wgpu (DX12/Vulkan) available as opt-in |
+| **GPU Backend (Opt-in)** | wgpu via eframe | 24.x | DirectX 12 or Vulkan for users who prefer the wgpu rendering path |
 | **Windows API** | windows-rs | 0.61.0 | Native Windows integration |
 | **Video** | libmpv2 | 5.0.3 | High-performance video playback |
 | **PDF** | pdfium (pdfium-render) | 0.8.37 | Native PDF rendering (requires pdfium.dll) |
