@@ -26,6 +26,9 @@ mod viewer_app;
 /// Maximum PDF file size accepted by the viewer (512 MB).
 const MAX_PDF_FILE_SIZE: u64 = 512 * 1024 * 1024;
 
+/// Scroll speed for physical mouse-wheel line events in the PDF viewer.
+const PDF_VIEWER_LINE_SCROLL_SPEED: f32 = 120.0;
+
 // ── Path validation ───────────────────────────────────────────────────────────────
 
 /// Validate and sanitize the PDF path before any file I/O.
@@ -187,15 +190,18 @@ pub fn run_standalone(path: PathBuf) -> eframe::Result<()> {
     eframe::run_native(
         &rust_i18n::t!("pdfviewer.title"),
         options,
-        Box::new(
-            move |_cc| match viewer_app::PdfViewerApp::new(path, dark_mode) {
+        Box::new(move |cc| {
+            cc.egui_ctx
+                .options_mut(|options| options.line_scroll_speed = PDF_VIEWER_LINE_SCROLL_SPEED);
+
+            match viewer_app::PdfViewerApp::new(path, dark_mode) {
                 Ok(app) => Ok(Box::new(app)),
                 Err(e) => {
                     log::error!("[PDF-VIEWER] failed to open PDF: {}", e);
                     Ok(Box::new(viewer_app::ErrorApp { message: e }))
                 }
-            },
-        ),
+            }
+        }),
     )
 }
 
