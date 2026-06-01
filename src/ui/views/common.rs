@@ -9,6 +9,19 @@ use rust_i18n::t;
 pub const TOOLTIP_DELAY_SECS: f32 = 0.3;
 pub const ITEM_DRAG_START_THRESHOLD: f32 = 5.0;
 
+/// Aligns a paint rect to physical pixels to avoid shimmer on thin icon details
+/// during smooth, subpixel scrolling.
+pub fn snap_rect_to_physical_pixels(ctx: &egui::Context, rect: egui::Rect) -> egui::Rect {
+    let pixels_per_point = ctx.pixels_per_point().max(1.0);
+    let snap = |value: f32| (value * pixels_per_point).round() / pixels_per_point;
+    let snap_size = |value: f32| (value * pixels_per_point).round().max(1.0) / pixels_per_point;
+
+    egui::Rect::from_min_size(
+        egui::pos2(snap(rect.min.x), snap(rect.min.y)),
+        egui::vec2(snap_size(rect.width()), snap_size(rect.height())),
+    )
+}
+
 /// Gets file type string for display
 pub fn get_file_type_string(item: &FileEntry) -> String {
     if let Some(label) = archive_type_label(&item.name) {

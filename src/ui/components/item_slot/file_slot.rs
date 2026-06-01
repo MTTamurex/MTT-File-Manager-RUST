@@ -153,8 +153,10 @@ pub(super) fn render_file_slot<O: ItemSlotOperations>(
         // No grey rect: if the icon hasn't loaded yet the space is left empty (no placeholder).
         if let Some(icon_texture) = file_icon {
             let icon_size = thumb_size * 0.5;
-            let icon_rect =
-                egui::Rect::from_center_size(thumb_rect.center(), egui::vec2(icon_size, icon_size));
+            let icon_rect = crate::ui::views::common::snap_rect_to_physical_pixels(
+                ui.ctx(),
+                egui::Rect::from_center_size(thumb_rect.center(), egui::vec2(icon_size, icon_size)),
+            );
             ui.painter().image(
                 icon_texture.id(),
                 icon_rect,

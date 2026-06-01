@@ -86,7 +86,7 @@ fn render_drive_tooltip(ui: &mut Ui, item: &FileEntry) {
 }
 
 // PERFORMANCE: Tooltip debounce to avoid creation/destruction during scroll
-use super::super::common::TOOLTIP_DELAY_SECS;
+use super::super::common::{snap_rect_to_physical_pixels, TOOLTIP_DELAY_SECS};
 
 /// Renders tooltip with debounce for a list item
 pub(super) fn render_item_tooltip(
@@ -213,9 +213,12 @@ pub(super) fn render_item_icon(
     tint: Color32,
 ) {
     let icon_size_px = 16.0;
-    let icon_rect = Rect::from_min_size(
-        rect.min + egui::vec2(4.0, 4.0),
-        egui::vec2(icon_size_px, icon_size_px),
+    let icon_rect = snap_rect_to_physical_pixels(
+        ui.ctx(),
+        Rect::from_min_size(
+            rect.min + egui::vec2(4.0, 4.0),
+            egui::vec2(icon_size_px, icon_size_px),
+        ),
     );
 
     if item.drive_info.is_some() {
