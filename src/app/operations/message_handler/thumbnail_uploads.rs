@@ -453,7 +453,11 @@ impl ImageViewerApp {
         // prevent UI freezes and frame drops.
         let base_max_uploads = if is_burst {
             if is_opengl {
-                16
+                if is_scrolling {
+                    2
+                } else {
+                    8
+                }
             } else {
                 48
             }
@@ -497,7 +501,11 @@ impl ImageViewerApp {
                 1.0,
                 if is_burst {
                     if is_opengl {
-                        24.0
+                        if is_scrolling {
+                            2.0
+                        } else {
+                            12.0
+                        }
                     } else {
                         64.0
                     }
@@ -559,7 +567,15 @@ impl ImageViewerApp {
         let base_budget_ms = if is_burst {
             // Generous time budget during burst — worth spending frame time now
             // to avoid many more slow frames with blank tiles.
-            16.0
+            if is_opengl {
+                if is_scrolling {
+                    3.0
+                } else {
+                    8.0
+                }
+            } else {
+                16.0
+            }
         } else if is_video_playing && is_scrolling {
             self.upload_budget_ms * 0.6
         } else if is_video_playing {
@@ -844,7 +860,13 @@ impl ImageViewerApp {
             );
         }
 
-        self.process_folder_preview_uploads(ctx, is_performance_critical, is_video_playing);
+        self.process_folder_preview_uploads(
+            ctx,
+            is_performance_critical,
+            is_video_playing,
+            is_burst,
+            is_scrolling,
+        );
         received_any
     }
 
@@ -914,10 +936,16 @@ impl ImageViewerApp {
         ctx: &egui::Context,
         is_performance_critical: bool,
         is_video_playing: bool,
+        is_burst: bool,
+        is_scrolling: bool,
     ) {
         let is_opengl = self.is_opengl_backend();
 
-        let max_folder_uploads = if is_performance_critical {
+        let max_folder_uploads = if is_burst && is_opengl && is_scrolling {
+            1
+        } else if is_burst && is_opengl {
+            3
+        } else if is_performance_critical {
             if is_opengl {
                 1
             } else {
@@ -940,7 +968,11 @@ impl ImageViewerApp {
         // of 20 previews/frame could stall the UI for up to 300ms.
         // On OpenGL, each upload is synchronous and blocks the CPU thread,
         // so use a tighter budget to keep frames responsive.
-        let budget = Duration::from_millis(if is_performance_critical {
+        let budget = Duration::from_millis(if is_burst && is_opengl && is_scrolling {
+            2
+        } else if is_burst && is_opengl {
+            3
+        } else if is_performance_critical {
             2
         } else if is_opengl {
             4

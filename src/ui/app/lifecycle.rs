@@ -257,6 +257,11 @@ pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
 /// so re-uploads are fast (no disk I/O).  Icons and folder previews are also
 /// flushed since they suffer from the same paging effect.
 fn flush_gpu_textures_for_reupload(app: &mut ImageViewerApp, reason: &str) {
+    if app.is_opengl_backend() {
+        flush_opengl_gpu_textures_for_reupload(app, reason);
+        return;
+    }
+
     let textures = app.cache_manager.texture_cache.len();
     let folder_previews = app.cache_manager.folder_preview_cache.len();
     let icons = app.cache_manager.icon_cache.len();
@@ -276,6 +281,62 @@ fn flush_gpu_textures_for_reupload(app: &mut ImageViewerApp, reason: &str) {
     log::info!(
         "[LIFECYCLE] Flushed thumbnail pipeline after prolonged inactivity reason={}: {} thumbnails, {} folder previews, {} icons",
         reason, textures, folder_previews, icons
+    );
+}
+
+fn flush_opengl_gpu_textures_for_reupload(app: &mut ImageViewerApp, reason: &str) {
+    let queued_removed = app.thumbnail_queue.clear_pending();
+    let textures = app.cache_manager.texture_cache.len();
+    let folder_previews = app.cache_manager.folder_preview_cache.len();
+    let icons = app.cache_manager.icon_cache.len();
+
+    while let Ok(thumbnail_data) = app.image_receiver.try_recv() {
+        app.cache_manager.finish_loading(&thumbnail_data.path);
+        app.cache_manager
+            .finish_pending_upload(&thumbnail_data.path);
+    }
+    while let Ok(preview_data) = app.folder_preview_receiver.try_recv() {
+        app.cache_manager
+            .finish_folder_preview_loading(&preview_data.path);
+    }
+
+    app.cache_manager.texture_cache.clear();
+    app.cache_manager.folder_preview_cache.clear();
+    app.cache_manager.icon_cache.clear();
+    app.cache_manager.loading_set.clear();
+    app.cache_manager.folder_preview_loading.clear();
+    app.cache_manager.pending_upload_set.clear();
+    app.pending_thumbnails.clear();
+    app.pending_folder_preview_replace.clear();
+    app.suppress_next_folder_preview_invalidation.clear();
+    app.thumbnail_eviction_skips.clear();
+
+    let visible_keep = app.current_dynamic_texture_keep_count();
+    if app.cache_manager.texture_cache.cap().get() < visible_keep {
+        app.cache_manager
+            .retune_texture_cache_capacity(visible_keep);
+    }
+    if app.cache_manager.rgba_data_cache.cap().get() < visible_keep {
+        app.cache_manager.retune_rgba_cache_capacity(visible_keep);
+    }
+    let folder_preview_keep = app.current_dynamic_folder_preview_keep_count();
+    if app.cache_manager.folder_preview_cache.cap().get() < folder_preview_keep {
+        app.cache_manager
+            .retune_folder_preview_cache_capacity(folder_preview_keep);
+    }
+
+    app.last_texture_cache_retune = std::time::Instant::now()
+        .checked_sub(std::time::Duration::from_secs(10))
+        .unwrap_or_else(std::time::Instant::now);
+    app.ui_ctx.request_repaint();
+
+    log::info!(
+        "[LIFECYCLE] OpenGL restore flushed GPU textures without trimming RGBA reason={}: {} thumbnails, {} folder previews, {} icons, queued={}",
+        reason,
+        textures,
+        folder_previews,
+        icons,
+        queued_removed,
     );
 }
 
