@@ -166,19 +166,31 @@ impl GifPlayer {
         let delay = Duration::from_millis(delay_ms);
 
         if frame_count > 1 && self.last_update.elapsed() >= delay {
-            let next_idx = (self.current_frame + 1) % frame_count;
-            if let Some(texture) = self.textures[next_idx].as_ref() {
-                self.current_frame = next_idx;
-                self.texture = Some(texture.clone());
-                self.active_texture_frame = next_idx;
-                self.last_update = Instant::now();
-
-                let next_delay = self
-                    .frame_info
-                    .get(next_idx)
-                    .map_or(100, |info| info.delay_ms);
-                ctx.request_repaint_after(Duration::from_millis(next_delay));
+            let next_idx = if self.current_frame + 1 < frame_count {
+                Some(self.current_frame + 1)
+            } else if is_complete {
+                Some(0)
             } else {
+                None
+            };
+
+            if let Some(next_idx) = next_idx {
+                if let Some(texture) = self.textures[next_idx].as_ref() {
+                    self.current_frame = next_idx;
+                    self.texture = Some(texture.clone());
+                    self.active_texture_frame = next_idx;
+                    self.last_update = Instant::now();
+
+                    let next_delay = self
+                        .frame_info
+                        .get(next_idx)
+                        .map_or(100, |info| info.delay_ms);
+                    ctx.request_repaint_after(Duration::from_millis(next_delay));
+                } else {
+                    ctx.request_repaint_after(Duration::from_millis(16));
+                }
+            } else {
+                // Avoid looping over only the frames decoded so far on first load.
                 ctx.request_repaint_after(Duration::from_millis(16));
             }
         } else {
