@@ -1,5 +1,6 @@
 use crate::infrastructure::io_priority::IOPriority;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 /// Convert un-premultiplied RGBA data to premultiplied RGBA in place.
 ///
@@ -31,7 +32,7 @@ pub fn premultiply_rgba_in_place(rgba: &mut [u8]) {
 #[derive(Clone)]
 pub struct ThumbnailData {
     pub path: PathBuf,
-    pub image_data: Vec<u8>,
+    pub image_data: Arc<Vec<u8>>,
     pub width: u32,
     pub height: u32,
     pub generation: usize,

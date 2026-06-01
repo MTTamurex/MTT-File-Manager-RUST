@@ -2,6 +2,22 @@ use std::path::Path;
 
 use super::*;
 
+/// Build extension cache key in a stack buffer to avoid heap allocation on the hot path.
+/// Returns a `&str` valid for the lifetime of `buf`.
+#[inline]
+fn ext_key_stack<'a>(buf: &'a mut [u8; 32], ext_str: &str, size: IconSize) -> &'a str {
+    let suffix = match size {
+        IconSize::Small => "_Small",
+        IconSize::Large => "_Large",
+        IconSize::Jumbo => "_Jumbo",
+    };
+    let len = ext_str.len() + suffix.len();
+    debug_assert!(len <= 32, "ext key too long for stack buffer");
+    buf[..ext_str.len()].copy_from_slice(ext_str.as_bytes());
+    buf[ext_str.len()..len].copy_from_slice(suffix.as_bytes());
+    std::str::from_utf8(&buf[..len]).unwrap()
+}
+
 /// Build a cache key for icon_cache without per-call allocation on the hot path.
 /// Only called when we actually need to access icon_cache (cache miss on extension_cache).
 #[inline]
@@ -149,8 +165,9 @@ impl IconLoader {
                 {
                     let canonical_ext =
                         crate::infrastructure::windows::icons::canonical_icon_ext(ext);
-                    let ext_key = format!("{}_{:?}", canonical_ext, size);
-                    if let Some(texture) = self.extension_cache.get(&ext_key) {
+                    let mut key_buf = [0u8; 32];
+                    let ext_key = ext_key_stack(&mut key_buf, &canonical_ext, size);
+                    if let Some(texture) = self.extension_cache.get(ext_key) {
                         return Some(texture.clone());
                     }
 
@@ -171,8 +188,9 @@ impl IconLoader {
                             egui::TextureOptions::LINEAR,
                         );
                         let cloned = texture.clone();
-                        if self.extension_cache.peek(&ext_key).is_none() {
-                            self.extension_cache.put(ext_key, texture.clone());
+                        if self.extension_cache.peek(ext_key).is_none() {
+                            self.extension_cache
+                                .put(ext_key.to_string(), texture.clone());
                         }
                         self.icon_cache.put(cache_key, texture);
                         return Some(cloned);
@@ -226,22 +244,25 @@ impl IconLoader {
                 let ext_raw = ext.to_string_lossy().to_lowercase();
                 // Map extensions that share the same shell icon (sys→dll etc.)
                 let ext_str = crate::infrastructure::windows::icons::canonical_icon_ext(&ext_raw);
-                let ext_key = format!("{}_{:?}", ext_str, size);
+                let mut key_buf = [0u8; 32];
+                let ext_key = ext_key_stack(&mut key_buf, &ext_str, size);
 
-                if let Some(texture) = self.extension_cache.get(&ext_key) {
+                if let Some(texture) = self.extension_cache.get(ext_key) {
                     return Some(texture.clone());
                 }
 
                 // Cross-size fallback: if Jumbo isn't cached yet but Large is, use Large.
                 // If Large isn't cached but Jumbo is, use Jumbo (higher res, downscales well).
                 if size == IconSize::Jumbo {
-                    let large_key = format!("{}_Large", ext_str);
-                    if let Some(texture) = self.extension_cache.get(&large_key) {
+                    let mut fallback_buf = [0u8; 32];
+                    let large_key = ext_key_stack(&mut fallback_buf, &ext_str, IconSize::Large);
+                    if let Some(texture) = self.extension_cache.get(large_key) {
                         return Some(texture.clone());
                     }
                 } else if size == IconSize::Large {
-                    let jumbo_key = format!("{}_Jumbo", ext_str);
-                    if let Some(texture) = self.extension_cache.get(&jumbo_key) {
+                    let mut fallback_buf = [0u8; 32];
+                    let jumbo_key = ext_key_stack(&mut fallback_buf, &ext_str, IconSize::Jumbo);
+                    if let Some(texture) = self.extension_cache.get(jumbo_key) {
                         return Some(texture.clone());
                     }
                 }

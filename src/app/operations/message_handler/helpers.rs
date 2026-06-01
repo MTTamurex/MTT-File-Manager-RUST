@@ -348,6 +348,20 @@ impl ImageViewerApp {
 
         self.file_operation_state.pending_deletions.remove(&cleaned);
         self.evict_stale_path_caches(&cleaned);
+
+        // FIX: evict_stale_path_caches increments thumbnail_eviction_skips to skip
+        // stale in-flight results (for rename/delete). But for CREATE events, there's
+        // no stale result - it's a brand new file. Decrement the counter so the new
+        // thumbnail isn't incorrectly rejected.
+        if let Some(count) = self.thumbnail_eviction_skips.get_mut(&cleaned) {
+            if *count > 0 {
+                *count -= 1;
+                if *count == 0 {
+                    self.thumbnail_eviction_skips.remove(&cleaned);
+                }
+            }
+        }
+
         self.enqueue_disk_cache_invalidations_forced(vec![cleaned.clone()]);
 
         let is_dir = match std::fs::metadata(&cleaned) {

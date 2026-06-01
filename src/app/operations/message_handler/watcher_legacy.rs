@@ -450,7 +450,15 @@ impl ImageViewerApp {
                         );
                         let preserve_media_thumb =
                             should_preserve_onedrive_media_thumbnail(&cleaned);
-                        if !preserve_media_thumb {
+                        // FIX: Don't pop texture cache for files still being written
+                        // (active copy/download). The thumbnail was just extracted and
+                        // is still valid. Popping it causes the thumbnail to disappear
+                        // until the copy finishes and a new one is extracted.
+                        let is_unsafe =
+                            crate::infrastructure::windows::file_flags::is_file_unsafe_to_read_fast(
+                                &cleaned,
+                            );
+                        if !preserve_media_thumb && !is_unsafe {
                             self.cache_manager.texture_cache.pop(&cleaned);
                         }
                         self.cache_manager.failed_thumbnails.pop(&cleaned);
@@ -458,9 +466,7 @@ impl ImageViewerApp {
                         // DON'T clear failure cache for files still being written
                         // (active downloads).
                         // Uses _fast variant to avoid blocking UI thread.
-                        if !crate::infrastructure::windows::file_flags::is_file_unsafe_to_read_fast(
-                            &cleaned,
-                        ) {
+                        if !is_unsafe {
                             crate::workers::thumbnail::clear_failure_cache(&cleaned);
                         }
                     }

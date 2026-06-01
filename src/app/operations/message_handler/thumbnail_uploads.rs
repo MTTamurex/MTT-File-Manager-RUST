@@ -191,6 +191,11 @@ impl ImageViewerApp {
                 continue;
             }
 
+            self.cache_manager
+                .failed_thumbnails
+                .pop(&thumbnail_data.path);
+            crate::workers::thumbnail::clear_failure_cache(&thumbnail_data.path);
+
             if let Some(existing) = self
                 .pending_thumbnails
                 .iter_mut()
@@ -747,8 +752,12 @@ impl ImageViewerApp {
 
                 self.cache_manager.thumbnail_trace.record_upload(&path);
                 self.cache_manager.finish_pending_upload(&path);
-                self.cache_manager
-                    .put_rgba_data(path.clone(), rgba_data, width, height);
+                self.cache_manager.put_rgba_data(
+                    path.clone(),
+                    std::sync::Arc::clone(&rgba_data),
+                    width,
+                    height,
+                );
                 if let Some(visible_paths) = eviction_visible.as_ref() {
                     self.cache_manager.promote_visible(visible_paths);
                     self.cache_manager.put_thumbnail_preserving_visible(

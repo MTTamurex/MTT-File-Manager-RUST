@@ -83,7 +83,7 @@ pub(super) fn process_thumbnail_request(
                 req_priority,
                 ThumbnailData {
                     path: path.clone(),
-                    image_data: Vec::new(),
+                    image_data: std::sync::Arc::new(Vec::new()),
                     width: 0,
                     height: 0,
                     generation: req_gen,
@@ -111,17 +111,18 @@ pub(super) fn process_thumbnail_request(
         if can_retry_now {
             clear_failure_cache(path);
         } else {
+            let not_found = is_permanent_failure(path);
             send_thumbnail_result(
                 tx,
                 req_priority,
                 ThumbnailData {
                     path: path.clone(),
-                    image_data: Vec::new(),
+                    image_data: std::sync::Arc::new(Vec::new()),
                     width: 0,
                     height: 0,
                     generation: req_gen,
                     priority: req_priority,
-                    not_found: true,
+                    not_found,
                     premultiplied: false,
                 },
             );
@@ -176,7 +177,7 @@ pub(super) fn process_thumbnail_request(
             req_priority,
             ThumbnailData {
                 path: path.clone(),
-                image_data: data,
+                image_data: std::sync::Arc::new(data),
                 width: w,
                 height: h,
                 generation: req_gen,
@@ -201,7 +202,7 @@ pub(super) fn process_thumbnail_request(
                     req_priority,
                     ThumbnailData {
                         path: path.clone(),
-                        image_data: Vec::new(),
+                        image_data: std::sync::Arc::new(Vec::new()),
                         width: 0,
                         height: 0,
                         generation: req_gen,
@@ -230,7 +231,7 @@ pub(super) fn process_thumbnail_request(
                     req_priority,
                     ThumbnailData {
                         path: path.clone(),
-                        image_data: Vec::new(),
+                        image_data: std::sync::Arc::new(Vec::new()),
                         width: 0,
                         height: 0,
                         generation: req_gen,
@@ -256,7 +257,7 @@ pub(super) fn process_thumbnail_request(
                 req_priority,
                 ThumbnailData {
                     path: path.clone(),
-                    image_data: Vec::new(),
+                    image_data: std::sync::Arc::new(Vec::new()),
                     width: 0,
                     height: 0,
                     generation: req_gen,
@@ -305,7 +306,7 @@ pub(super) fn process_thumbnail_request(
                 req_priority,
                 ThumbnailData {
                     path: path.clone(),
-                    image_data: Vec::new(),
+                    image_data: std::sync::Arc::new(Vec::new()),
                     width: 0,
                     height: 0,
                     generation: req_gen,
@@ -430,7 +431,7 @@ pub(super) fn process_thumbnail_request(
         req_priority,
         ThumbnailData {
             path: path.clone(),
-            image_data: data,
+            image_data: std::sync::Arc::new(data),
             width: w,
             height: h,
             generation: req_gen,
@@ -453,7 +454,10 @@ fn send_thumbnail_result(
     // This reduces UI stall on every thumbnail upload, especially on OpenGL
     // backends where load_texture blocks the CPU thread synchronously.
     if !data.image_data.is_empty() && !data.not_found {
-        crate::domain::thumbnail::premultiply_rgba_in_place(&mut data.image_data);
+        // Need mutable access to the inner Vec for in-place premultiplication.
+        // If the Arc has multiple references, we need to clone it first.
+        let rgba = std::sync::Arc::make_mut(&mut data.image_data);
+        crate::domain::thumbnail::premultiply_rgba_in_place(rgba);
         data.premultiplied = true;
     }
 

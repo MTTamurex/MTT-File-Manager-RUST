@@ -222,7 +222,6 @@ impl ImageViewerApp {
         let t_after_nav = Instant::now();
 
         // Extract data to avoid multiple borrows
-        let items = self.items.clone();
         let selected_item = self.selected_item;
         let selected_file = self.selected_file.clone();
         let thumbnail_size = self.thumbnail_size;
@@ -266,7 +265,7 @@ impl ImageViewerApp {
         let low_res_thumbnails_while_scrolling = self.is_opengl_backend();
 
         let mut ctx = GridViewContext {
-            items: &items,
+            items: &self.items,
             selected_item,
             selected_file: selected_file.as_ref(),
             multi_selection,

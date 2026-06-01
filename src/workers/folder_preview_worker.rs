@@ -132,7 +132,7 @@ impl FolderPreviewTraceCounters {
 /// Data returned from folder preview worker
 pub struct FolderPreviewData {
     pub path: PathBuf,
-    pub rgba_data: Vec<u8>,
+    pub rgba_data: std::sync::Arc<Vec<u8>>,
     pub width: u32,
     pub height: u32,
     /// When `true`, `rgba_data` contains premultiplied-alpha pixels
@@ -208,7 +208,7 @@ pub fn spawn_folder_preview_worker(
                     crate::domain::thumbnail::premultiply_rgba_in_place(&mut rgba_data);
                     let _ = tx.send(FolderPreviewData {
                         path,
-                        rgba_data,
+                        rgba_data: std::sync::Arc::new(rgba_data),
                         width,
                         height,
                         premultiplied: true,
@@ -234,7 +234,7 @@ pub fn spawn_folder_preview_worker(
                 {
                     let _ = tx.send(FolderPreviewData {
                         path,
-                        rgba_data: Vec::new(),
+                        rgba_data: std::sync::Arc::new(Vec::new()),
                         width: 0,
                         height: 0,
                         premultiplied: false,
@@ -269,7 +269,7 @@ pub fn spawn_folder_preview_worker(
                         // to premultiply again.  Send as-is with premultiplied=true.
                         let _ = tx.send(FolderPreviewData {
                             path,
-                            rgba_data,
+                            rgba_data: std::sync::Arc::new(rgba_data),
                             width,
                             height,
                             premultiplied: true,
@@ -338,7 +338,7 @@ pub fn spawn_folder_preview_worker(
                 }
                 let _ = tx.send(FolderPreviewData {
                     path,
-                    rgba_data,
+                    rgba_data: std::sync::Arc::new(rgba_data),
                     width,
                     height,
                     premultiplied: true,

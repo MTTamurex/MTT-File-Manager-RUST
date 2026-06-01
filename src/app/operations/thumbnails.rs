@@ -177,7 +177,7 @@ impl ImageViewerApp {
         if let Some((rgba_data, width, height)) = self
             .cache_manager
             .get_rgba_data(&path)
-            .map(|(d, w, h)| (d.clone(), *w, *h))
+            .map(|(d, w, h)| (std::sync::Arc::clone(d), *w, *h))
         {
             let cached_max_dim = width.max(height);
 
@@ -198,7 +198,7 @@ impl ImageViewerApp {
                 self.cache_manager.note_thumbnail_request_sent(&path);
                 self.pending_thumbnails.push_back(ThumbnailData {
                     path,
-                    image_data: rgba_data,
+                    image_data: std::sync::Arc::clone(&rgba_data),
                     width,
                     height,
                     generation: effective_gen,

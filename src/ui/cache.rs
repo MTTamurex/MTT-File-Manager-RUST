@@ -231,7 +231,8 @@ pub struct CacheManager {
     /// PERFORMANCE: RAM cache for decoded RGBA data (Layer 2 - larger than VRAM cache)
     /// When a texture is evicted from VRAM, the RGBA data remains here for fast re-upload
     /// without needing disk I/O. This is critical for HDD performance during video playback.
-    pub rgba_data_cache: LruCache<PathBuf, (Vec<u8>, u32, u32)>,
+    /// Uses `Arc<Vec<u8>>` so cloning from cache to pending queue is O(1) instead of O(pixels).
+    pub rgba_data_cache: LruCache<PathBuf, (Arc<Vec<u8>>, u32, u32)>,
     rgba_data_bytes: usize,
     max_rgba_data_bytes: usize,
 
@@ -631,12 +632,12 @@ impl CacheManager {
     }
 
     /// Gets RGBA data from the RAM cache
-    pub fn get_rgba_data(&mut self, path: &PathBuf) -> Option<&(Vec<u8>, u32, u32)> {
+    pub fn get_rgba_data(&mut self, path: &PathBuf) -> Option<&(Arc<Vec<u8>>, u32, u32)> {
         self.rgba_data_cache.get(path)
     }
 
     /// Stores RGBA data in the RAM cache
-    pub fn put_rgba_data(&mut self, path: PathBuf, data: Vec<u8>, width: u32, height: u32) {
+    pub fn put_rgba_data(&mut self, path: PathBuf, data: Arc<Vec<u8>>, width: u32, height: u32) {
         let new_bytes = data.len();
 
         if let Some((old_data, _, _)) = self.rgba_data_cache.pop(&path) {
@@ -653,7 +654,7 @@ impl CacheManager {
     }
 
     /// Removes RGBA data for a specific path and updates memory accounting.
-    pub fn pop_rgba_data(&mut self, path: &PathBuf) -> Option<(Vec<u8>, u32, u32)> {
+    pub fn pop_rgba_data(&mut self, path: &PathBuf) -> Option<(Arc<Vec<u8>>, u32, u32)> {
         if let Some((data, width, height)) = self.rgba_data_cache.pop(path) {
             self.rgba_data_bytes = self.rgba_data_bytes.saturating_sub(data.len());
             Some((data, width, height))
@@ -1055,10 +1056,10 @@ mod tests {
         let mut cache = CacheManager::new();
         let path = PathBuf::from("img.webp");
 
-        cache.put_rgba_data(path.clone(), vec![1; 16], 2, 2);
+        cache.put_rgba_data(path.clone(), Arc::new(vec![1; 16]), 2, 2);
         assert_eq!(cache.estimate_ram_cache_usage(), 16);
 
-        cache.put_rgba_data(path.clone(), vec![2; 8], 2, 1);
+        cache.put_rgba_data(path.clone(), Arc::new(vec![2; 8]), 2, 1);
         assert_eq!(cache.estimate_ram_cache_usage(), 8);
 
         let _ = cache.pop_rgba_data(&path);
@@ -1070,7 +1071,12 @@ mod tests {
         let mut cache = CacheManager::new();
 
         for idx in 0..=DEFAULT_RGBA_CACHE_ITEMS {
-            cache.put_rgba_data(PathBuf::from(format!("img_{idx}.webp")), vec![1; 4], 1, 1);
+            cache.put_rgba_data(
+                PathBuf::from(format!("img_{idx}.webp")),
+                Arc::new(vec![1; 4]),
+                1,
+                1,
+            );
         }
 
         assert_eq!(cache.rgba_data_cache.len(), DEFAULT_RGBA_CACHE_ITEMS);
@@ -1086,7 +1092,12 @@ mod tests {
         cache.retune_rgba_cache_capacity(100);
 
         for idx in 0..100 {
-            cache.put_rgba_data(PathBuf::from(format!("img_{idx}.webp")), vec![1; 4], 1, 1);
+            cache.put_rgba_data(
+                PathBuf::from(format!("img_{idx}.webp")),
+                Arc::new(vec![1; 4]),
+                1,
+                1,
+            );
         }
 
         assert_eq!(cache.estimate_ram_cache_usage(), 400);

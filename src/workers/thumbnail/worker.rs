@@ -374,8 +374,22 @@ fn thumbnail_worker_loop(
             continue;
         }
 
-        // Check generation match - skip stale requests
+        // Check generation match. If stale, still notify the UI so any
+        // caller-side loading_set marker for this path is cleared; otherwise a
+        // request dropped during a dual-panel generation race can block retries
+        // until a manual refresh.
         if !participates_in_bulk_scan && req_gen != gen_tracker.load(Ordering::Relaxed) {
+            let _ = tx.send(ThumbnailData {
+                path: path.clone(),
+                image_data: std::sync::Arc::new(Vec::new()),
+                width: 0,
+                height: 0,
+                generation: req_gen,
+                priority: req_priority,
+                not_found: false,
+                premultiplied: false,
+            });
+            ctx.request_repaint();
             continue;
         }
 
