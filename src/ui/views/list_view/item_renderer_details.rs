@@ -98,10 +98,10 @@ pub(super) fn render_item_tooltip(
 ) {
     if response.hovered() {
         let current_time = ui.input(|i| i.time);
-        // PERF FIX: Use path-based hover ID so the tooltip timer resets when
-        // navigating to a different folder (prevents stale timer triggering
-        // immediate tooltip with blocking metadata call on cold cache).
-        let hover_id = egui::Id::new("list_hover_start").with(&item.path);
+        // PERF FIX: Scope hover timing by widget and path so dual-panel
+        // duplicates do not reset each other, while navigation still resets
+        // stale timers for reused item indices.
+        let hover_id = response.id.with("list_hover_start").with(&item.path);
 
         // Track hover start time using egui's memory
         let hover_start_time = ui
@@ -198,7 +198,7 @@ pub(super) fn render_item_tooltip(
         }
     } else {
         // Clear hover time when not hovering
-        let hover_id = egui::Id::new("list_hover_start").with(&item.path);
+        let hover_id = response.id.with("list_hover_start").with(&item.path);
         ui.ctx().data_mut(|d| d.remove::<f64>(hover_id));
     }
 }

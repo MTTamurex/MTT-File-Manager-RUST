@@ -192,11 +192,10 @@ pub(super) fn render_grid_item(
 
     if response.hovered() && !ctx.is_item_dragging && !rectangle_select_active {
         let current_time = ui.input(|i| i.time);
-        // PERF FIX: Use path-based hover ID so the tooltip timer resets when
-        // navigating to a different folder (prevents stale timer from the
-        // previous folder's item at the same index triggering an immediate
-        // tooltip with a blocking std::fs::metadata call on cold cache).
-        let hover_id = egui::Id::new("grid_hover_start").with(&item.path);
+        // PERF FIX: Scope hover timing by widget and path so dual-panel
+        // duplicates do not reset each other, while navigation still resets
+        // stale timers for reused item indices.
+        let hover_id = response.id.with("grid_hover_start").with(&item.path);
         let hover_start_time = ui
             .ctx()
             .data_mut(|d| *d.get_temp_mut_or_insert_with(hover_id, || current_time));
@@ -287,7 +286,7 @@ pub(super) fn render_grid_item(
             } // if let Some(mouse_pos)
         }
     } else {
-        let hover_id = egui::Id::new("grid_hover_start").with(&item.path);
+        let hover_id = response.id.with("grid_hover_start").with(&item.path);
         ui.ctx().data_mut(|d| d.remove::<f64>(hover_id));
     }
 
