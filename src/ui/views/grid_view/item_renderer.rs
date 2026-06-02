@@ -383,8 +383,8 @@ fn render_item_slot_for_grid(
             fn request_folder_scan(&mut self, path: std::path::PathBuf) {
                 self.pending_ops.folder_scans.push(path);
             }
-            fn request_folder_preview_load(&mut self, path: std::path::PathBuf) {
-                self.pending_ops.folder_preview_loads.push(path);
+            fn request_folder_preview_load(&mut self, path: std::path::PathBuf, size_px: u32) {
+                self.pending_ops.folder_preview_loads.push((path, size_px));
             }
             fn request_icon_load(&mut self, path: std::path::PathBuf) {
                 self.pending_ops.icon_loads.push(path);

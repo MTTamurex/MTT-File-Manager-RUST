@@ -47,7 +47,7 @@ pub trait ItemSlotOperations {
     /// Requests folder scan
     fn request_folder_scan(&mut self, path: std::path::PathBuf);
     /// Requests native folder preview loading (sandwich effect)
-    fn request_folder_preview_load(&mut self, path: std::path::PathBuf);
+    fn request_folder_preview_load(&mut self, path: std::path::PathBuf, size_px: u32);
     /// Requests async icon loading (e.g.: .exe)
     fn request_icon_load(&mut self, path: std::path::PathBuf);
     /// Executes rename

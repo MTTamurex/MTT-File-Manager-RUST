@@ -356,8 +356,10 @@ impl ImageViewerApp {
 
         let open_tabs = self.tab_manager.count().max(1);
 
-        if self.last_texture_cache_retune.elapsed()
-            >= Duration::from_millis(TEXTURE_CACHE_RETUNE_INTERVAL_MS)
+        let freeze_cache_retune = is_opengl && is_burst && is_scrolling;
+        if !freeze_cache_retune
+            && self.last_texture_cache_retune.elapsed()
+                >= Duration::from_millis(TEXTURE_CACHE_RETUNE_INTERVAL_MS)
         {
             let queue_pending = self.thumbnail_queue.pending_count();
             let upload_pending = self.pending_thumbnails.len();
@@ -610,12 +612,11 @@ impl ImageViewerApp {
             }
         }
 
-        let upload_visible_paths = if is_scrolling {
-            self.visible_grid_paths_snapshot()
+        let visible_paths = if is_scrolling {
+            eviction_visible.as_ref()
         } else {
             None
         };
-        let visible_paths = upload_visible_paths.as_ref();
         let mut deferred_count = 0;
         let offscreen_upload_budget = if is_scrolling {
             if is_performance_critical {
@@ -866,6 +867,7 @@ impl ImageViewerApp {
             is_video_playing,
             is_burst,
             is_scrolling,
+            eviction_visible.as_ref(),
         );
         received_any
     }
@@ -938,10 +940,11 @@ impl ImageViewerApp {
         is_video_playing: bool,
         is_burst: bool,
         is_scrolling: bool,
+        visible_paths: Option<&crate::ui::cache::FxHashSet<PathBuf>>,
     ) {
         let is_opengl = self.is_opengl_backend();
 
-        let max_folder_uploads = if is_burst && is_opengl && is_scrolling {
+        let max_folder_uploads: usize = if is_burst && is_opengl && is_scrolling {
             1
         } else if is_burst && is_opengl {
             3
@@ -951,6 +954,8 @@ impl ImageViewerApp {
             } else {
                 2
             }
+        } else if is_opengl && is_scrolling {
+            1
         } else if is_video_playing {
             if is_opengl {
                 3
@@ -974,6 +979,8 @@ impl ImageViewerApp {
             3
         } else if is_performance_critical {
             2
+        } else if is_opengl && is_scrolling {
+            2
         } else if is_opengl {
             4
         } else {
@@ -982,17 +989,31 @@ impl ImageViewerApp {
         let start = Instant::now();
 
         let mut folder_uploads = 0;
-        let visible_paths = self.visible_grid_paths_snapshot();
-        while folder_uploads < max_folder_uploads {
+        let max_folder_results = if is_opengl && is_scrolling {
+            max_folder_uploads.saturating_mul(8).max(8)
+        } else {
+            max_folder_uploads
+        };
+        let mut processed_results = 0usize;
+
+        while folder_uploads < max_folder_uploads && processed_results < max_folder_results {
             if folder_uploads > 0 && start.elapsed() >= budget {
                 break;
             }
             if let Ok(data) = self.folder_preview_receiver.try_recv() {
+                processed_results += 1;
                 self.cache_manager.finish_folder_preview_loading(&data.path);
                 let force_replace = self.pending_folder_preview_replace.remove(&data.path);
 
                 if !self.is_folder_preview_result_relevant(&data.path) {
-                    folder_uploads += 1;
+                    continue;
+                }
+
+                let offscreen_during_opengl_scroll = is_opengl
+                    && is_scrolling
+                    && !force_replace
+                    && visible_paths.is_some_and(|visible| !visible.contains(&data.path));
+                if offscreen_during_opengl_scroll {
                     continue;
                 }
 
@@ -1008,7 +1029,6 @@ impl ImageViewerApp {
                                 && size[1] >= data.height as usize
                                 && !force_replace =>
                         {
-                            folder_uploads += 1;
                             continue;
                         }
                         Some(_) => {
@@ -1040,19 +1060,20 @@ impl ImageViewerApp {
                     let texture =
                         ctx.load_texture(texture_name, color_image, egui::TextureOptions::LINEAR);
 
-                    if let Some(visible_paths) = visible_paths.as_ref() {
+                    if let Some(visible_paths) = visible_paths {
                         self.cache_manager.promote_visible(visible_paths);
                     }
                     self.cache_manager.put_folder_preview(data.path, texture);
+                    folder_uploads += 1;
                 }
-
-                folder_uploads += 1;
             } else {
                 break;
             }
         }
 
-        if folder_uploads >= max_folder_uploads || (folder_uploads > 0 && start.elapsed() >= budget)
+        if folder_uploads >= max_folder_uploads
+            || processed_results >= max_folder_results
+            || (folder_uploads > 0 && start.elapsed() >= budget)
         {
             ctx.request_repaint();
         }

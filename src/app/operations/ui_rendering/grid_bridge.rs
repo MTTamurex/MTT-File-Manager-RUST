@@ -26,7 +26,7 @@ pub enum GridAction {
     RequestThumbnailLoad(PathBuf, u32, u64),
     RequestThumbnailLoadWithIndex(PathBuf, u32, usize, u64),
     RequestFolderScan(PathBuf),
-    RequestFolderPreviewLoad(PathBuf),
+    RequestFolderPreviewLoad(PathBuf, u32),
     RequestThumbnailPrefetch(PathBuf, u32, u64),
     RequestThumbnailPrefetchWithIndex(PathBuf, u32, usize, u64),
     RequestIconLoad(PathBuf),
@@ -71,9 +71,9 @@ impl<'a> GridViewOperations for GridOps<'a> {
     fn request_folder_scan(&mut self, path: PathBuf) {
         self.actions.push(GridAction::RequestFolderScan(path));
     }
-    fn request_folder_preview_load(&mut self, path: PathBuf) {
+    fn request_folder_preview_load(&mut self, path: PathBuf, size_px: u32) {
         self.actions
-            .push(GridAction::RequestFolderPreviewLoad(path));
+            .push(GridAction::RequestFolderPreviewLoad(path, size_px));
     }
 
     fn request_thumbnail_prefetch(&mut self, path: PathBuf, size: u32, modified: u64) {
@@ -530,8 +530,8 @@ impl ImageViewerApp {
                     self.request_thumbnail_load_with_index_and_modified(path, size, index, modified)
                 }
                 GridAction::RequestFolderScan(path) => folder_scan_paths.push(path),
-                GridAction::RequestFolderPreviewLoad(path) => {
-                    self.request_folder_preview_load(path)
+                GridAction::RequestFolderPreviewLoad(path, size_px) => {
+                    self.request_folder_preview_load_with_size(path, size_px)
                 }
                 GridAction::RequestThumbnailPrefetch(path, size, modified) => {
                     self.request_thumbnail_prefetch_with_index_and_modified(path, size, 0, modified)

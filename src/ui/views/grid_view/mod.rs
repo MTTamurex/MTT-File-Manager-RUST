@@ -103,7 +103,7 @@ impl Default for ScrollPredictor {
 pub struct PendingOperations {
     pub thumbnail_loads: Vec<(PathBuf, u32, Option<usize>, u64)>,
     pub folder_scans: Vec<PathBuf>,
-    pub folder_preview_loads: Vec<PathBuf>,
+    pub folder_preview_loads: Vec<(PathBuf, u32)>,
     pub icon_loads: Vec<PathBuf>,
     pub renames: Vec<usize>,
 }
@@ -220,7 +220,7 @@ pub trait GridViewOperations {
         modified: u64,
     );
     fn request_folder_scan(&mut self, path: PathBuf);
-    fn request_folder_preview_load(&mut self, path: PathBuf);
+    fn request_folder_preview_load(&mut self, path: PathBuf, size_px: u32);
     fn request_thumbnail_prefetch(&mut self, path: PathBuf, size: u32, modified: u64);
     fn request_thumbnail_prefetch_with_index(
         &mut self,

@@ -37,7 +37,7 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
     ops: &mut O,
 ) {
     let item = ctx.item;
-    if !ctx.is_recycle_bin_view && !ctx.skip_folder_media_reads {
+    if ctx.allow_thumbnail_requests && !ctx.is_recycle_bin_view && !ctx.skip_folder_media_reads {
         // --- LAZY LOAD TRIGGER ---
         // If no cover AND not yet scanned: Trigger Scan.
         if item.folder_cover.is_none() && ctx.scanned_folders.peek(&item.path).is_none() {
@@ -57,8 +57,19 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
     let display_effective_px = (folder_w.max(1.0) * ppp).ceil() as u32;
     let display_preview_bucket =
         crate::workers::thumbnail::processing::get_bucket_size(display_effective_px);
-    let desired_preview_bucket =
-        display_preview_bucket.max(crate::ui::theme::MIN_GRID_THUMBNAIL_BUCKET);
+    let min_preview_bucket = if ctx.low_res_thumbnails_while_scrolling && ctx.is_scrolling {
+        256
+    } else {
+        crate::ui::theme::MIN_GRID_THUMBNAIL_BUCKET
+    };
+    let desired_preview_bucket = display_preview_bucket.max(min_preview_bucket);
+    let min_effective_size_for_bucket = match desired_preview_bucket {
+        0..=128 => 1,
+        129..=256 => 129,
+        257..=512 => 257,
+        _ => 513,
+    };
+    let preview_request_size_px = display_effective_px.max(min_effective_size_for_bucket);
     let text_height = 18.0;
     let content_h = folder_h + text_height;
     let vertical_margin = ((available_h - content_h) / 2.0).max(2.0);
@@ -106,8 +117,8 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
         let needs_bucket_refresh =
             native_preview.is_some_and(|tex| (tex.size()[0] as u32) < desired_preview_bucket);
 
-        if needs_bucket_refresh && !is_loading {
-            ops.request_folder_preview_load(item.path.clone());
+        if needs_bucket_refresh && ctx.allow_thumbnail_requests && !is_loading {
+            ops.request_folder_preview_load(item.path.clone(), preview_request_size_px);
         }
 
         if let Some(tex) = native_preview {
@@ -148,8 +159,8 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
             } else {
                 // NORMAL FOLDER: Always request our custom composed preview.
                 // Worker produces back+front+thumbnail (or back+front only if no media).
-                if !is_loading {
-                    ops.request_folder_preview_load(item.path.clone());
+                if ctx.allow_thumbnail_requests && !is_loading {
+                    ops.request_folder_preview_load(item.path.clone(), preview_request_size_px);
                 }
 
                 // While preview is loading: show generic folder icon as placeholder.

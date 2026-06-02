@@ -28,8 +28,8 @@ impl ItemSlotOperations for ImageViewerApp {
         ImageViewerApp::request_folder_scan(self, path);
     }
 
-    fn request_folder_preview_load(&mut self, path: std::path::PathBuf) {
-        ImageViewerApp::request_folder_preview_load(self, path);
+    fn request_folder_preview_load(&mut self, path: std::path::PathBuf, size_px: u32) {
+        ImageViewerApp::request_folder_preview_load_with_size(self, path, size_px);
     }
 
     fn request_icon_load(&mut self, path: std::path::PathBuf) {

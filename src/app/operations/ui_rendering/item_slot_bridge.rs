@@ -25,7 +25,7 @@ impl ImageViewerApp {
         let mut pending_thumbnail_loads: Vec<(std::path::PathBuf, u32, Option<usize>, u64)> =
             Vec::new();
         let mut pending_folder_scans: Vec<std::path::PathBuf> = Vec::new();
-        let mut pending_folder_preview_loads: Vec<std::path::PathBuf> = Vec::new();
+        let mut pending_folder_preview_loads: Vec<(std::path::PathBuf, u32)> = Vec::new();
         let mut pending_icon_loads: Vec<std::path::PathBuf> = Vec::new();
         let mut pending_rename: Option<usize> = None;
         let mut thumbnail_requests_counter: usize = 0;
@@ -75,7 +75,7 @@ impl ImageViewerApp {
             struct SimpleOps<'a> {
                 thumbnail_loads: &'a mut Vec<(std::path::PathBuf, u32, Option<usize>, u64)>,
                 folder_scans: &'a mut Vec<std::path::PathBuf>,
-                folder_preview_loads: &'a mut Vec<std::path::PathBuf>,
+                folder_preview_loads: &'a mut Vec<(std::path::PathBuf, u32)>,
                 icon_loads: &'a mut Vec<std::path::PathBuf>,
                 pending_rename: &'a mut Option<usize>,
             }
@@ -96,8 +96,8 @@ impl ImageViewerApp {
                     self.folder_scans.push(path);
                 }
 
-                fn request_folder_preview_load(&mut self, path: std::path::PathBuf) {
-                    self.folder_preview_loads.push(path);
+                fn request_folder_preview_load(&mut self, path: std::path::PathBuf, size_px: u32) {
+                    self.folder_preview_loads.push((path, size_px));
                 }
 
                 fn request_icon_load(&mut self, path: std::path::PathBuf) {
@@ -145,8 +145,8 @@ impl ImageViewerApp {
             self.request_folder_scans_batch(pending_folder_scans);
         }
 
-        for path in pending_folder_preview_loads {
-            self.request_folder_preview_load(path);
+        for (path, size_px) in pending_folder_preview_loads {
+            self.request_folder_preview_load_with_size(path, size_px);
         }
 
         for path in pending_icon_loads {

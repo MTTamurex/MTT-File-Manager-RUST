@@ -240,10 +240,27 @@ impl ImageViewerApp {
     }
 
     pub fn request_folder_preview_load(&mut self, path: PathBuf) {
+        self.request_folder_preview_load_with_size(
+            path,
+            self.effective_folder_preview_request_size_px(),
+        );
+    }
+
+    pub(crate) fn request_folder_preview_load_with_size(&mut self, path: PathBuf, size_px: u32) {
         self.cache_manager.folder_preview_trace.record_request();
         self.cache_manager
             .folder_preview_trace
             .record_request_path(&path);
+
+        let desired_bucket = crate::workers::thumbnail::processing::get_bucket_size(size_px);
+        let is_bucket_upgrade = self
+            .cache_manager
+            .folder_preview_cache
+            .peek(&path)
+            .is_some_and(|texture| {
+                let size = texture.size();
+                (size[0].max(size[1]) as u32) < desired_bucket
+            });
 
         // Already in flight: dedup without poisoning the debounce timestamp.
         if self.cache_manager.is_folder_preview_loading(&path) {
@@ -257,9 +274,10 @@ impl ImageViewerApp {
         // cap is smaller than the directory's folder set. Without this, an
         // evicted preview is re-requested every frame and each upload leaks
         // GPU staging memory.
-        if self
-            .cache_manager
-            .should_throttle_folder_preview_request(&path)
+        if !is_bucket_upgrade
+            && self
+                .cache_manager
+                .should_throttle_folder_preview_request(&path)
         {
             self.cache_manager
                 .folder_preview_trace
@@ -278,7 +296,7 @@ impl ImageViewerApp {
 
         let request = crate::workers::folder_preview_worker::FolderPreviewRequest {
             path: path.clone(),
-            size_px: self.effective_folder_preview_request_size_px(),
+            size_px,
         };
         match self.folder_preview_sender.try_send(request) {
             Ok(()) => {
