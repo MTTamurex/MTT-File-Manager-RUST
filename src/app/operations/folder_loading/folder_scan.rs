@@ -223,7 +223,7 @@ impl ImageViewerApp {
         // 3. Apply resolved covers to items (single pass through all_items)
         let apply_start = Instant::now();
         let mut any_updated = false;
-        let mut thumb_loads: Vec<PathBuf> = Vec::new();
+        let mut cover_thumbnail_probes: Vec<PathBuf> = Vec::new();
         if !resolved.is_empty() {
             // Build a lookup map for O(1) access
             let resolve_map: std::collections::HashMap<&PathBuf, &PathBuf> =
@@ -235,7 +235,7 @@ impl ImageViewerApp {
                         item.folder_cover = Some((*cover).clone());
                         any_updated = true;
                     }
-                    thumb_loads.push((*cover).clone());
+                    cover_thumbnail_probes.push((*cover).clone());
                 }
             }
 
@@ -249,10 +249,13 @@ impl ImageViewerApp {
         }
         let apply_ms = apply_start.elapsed().as_millis();
 
-        // Request thumbnail loads (collected to avoid borrow conflicts)
+        // Probe cover thumbnails to keep the worker retry/defer path alive for
+        // unsafe media and to warm SQLite for folder preview composition. The UI
+        // upload pipeline discards these cover-only results before `load_texture`,
+        // so this no longer creates a second visible GPU upload wave.
         let thumbs_start = Instant::now();
         let mut thumb_requests = 0usize;
-        for cover in thumb_loads {
+        for cover in cover_thumbnail_probes {
             if !self.cache_manager.has_thumbnail(&cover)
                 && self.cache_manager.start_loading(cover.clone())
             {

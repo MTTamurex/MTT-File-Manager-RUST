@@ -196,6 +196,12 @@ impl ImageViewerApp {
                 .pop(&thumbnail_data.path);
             crate::workers::thumbnail::clear_failure_cache(&thumbnail_data.path);
 
+            if self.should_skip_folder_cover_thumbnail_upload(&thumbnail_data.path) {
+                successful_thumb_paths.push(thumbnail_data.path.clone());
+                received_any = true;
+                continue;
+            }
+
             if let Some(existing) = self
                 .pending_thumbnails
                 .iter_mut()
@@ -870,6 +876,65 @@ impl ImageViewerApp {
             eviction_visible.as_ref(),
         );
         received_any
+    }
+
+    fn should_skip_folder_cover_thumbnail_upload(&self, path: &PathBuf) -> bool {
+        // Folder previews compose from the thumbnail disk cache directly.  The raw
+        // cover thumbnail request is still useful as a readiness/retry signal for
+        // unsafe media, but uploading that cover as its own grid texture creates a
+        // redundant GPU upload wave in folders with many previewed subfolders.
+        if self
+            .selected_file
+            .as_ref()
+            .is_some_and(|selected| &selected.path == path)
+        {
+            return false;
+        }
+
+        if self.items.iter().any(|item| &item.path == path)
+            || self.all_items.iter().any(|item| &item.path == path)
+        {
+            return false;
+        }
+
+        if self
+            .dual_panel_inactive_state
+            .as_ref()
+            .is_some_and(|snapshot| {
+                let items = if snapshot.items_snapshot_compact {
+                    snapshot.all_items.as_ref()
+                } else {
+                    snapshot.items.as_ref()
+                };
+                items.iter().any(|item| &item.path == path)
+            })
+        {
+            return false;
+        }
+
+        self.all_items.iter().any(|item| {
+            item.is_dir
+                && item
+                    .folder_cover
+                    .as_ref()
+                    .is_some_and(|cover| cover == path)
+        }) || self
+            .dual_panel_inactive_state
+            .as_ref()
+            .is_some_and(|snapshot| {
+                let items = if snapshot.items_snapshot_compact {
+                    snapshot.all_items.as_ref()
+                } else {
+                    snapshot.items.as_ref()
+                };
+                items.iter().any(|item| {
+                    item.is_dir
+                        && item
+                            .folder_cover
+                            .as_ref()
+                            .is_some_and(|cover| cover == path)
+                })
+            })
     }
 
     fn handle_missing_cover_sources(&mut self, missing_paths: Vec<PathBuf>) -> bool {
