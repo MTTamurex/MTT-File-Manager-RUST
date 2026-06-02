@@ -54,18 +54,17 @@
 The app supports two rendering backends, selectable in **Settings > General > GPU Backend** (requires app restart):
 
 ### Glow — OpenGL (Default)
-- **Recommended for most users**
 - Best compatibility with Windows DWM (Desktop Window Manager)
 - Native minimize/restore animations work correctly
 - Taskbar thumbnail previews (Aero Peek) display properly
 - Lower baseline memory usage
-- May show occasional micro-stutter during fast grid scrolling because OpenGL texture uploads are synchronous on the CPU thread
+- May show occasional stutter during grid scrolling because OpenGL texture uploads are synchronous on the CPU thread
 
 ### Wgpu — DirectX 12 / Vulkan / OpenGL (Opt-in)
 - **For users who prefer better scroll smoothness**
 - Asynchronous GPU texture uploads eliminate scroll stutter
 - Uses the wgpu abstraction layer with DX12 (Windows), Vulkan, or OpenGL
-- **Known limitation**: because wgpu creates the swapchain with `FLIP_DISCARD`, a brief black frame may flash during the minimize animation on Windows. This is a documented behavior of the wgpu DX12 backend and does not affect functionality.
+- **Known limitation DX12**: because wgpu creates the swapchain with `FLIP_DISCARD`, a brief black frame may flash during the minimize animation on Windows. This is a documented behavior of the wgpu DX12 backend and does not affect functionality.
 - Higher baseline memory usage due to wgpu/DX12 runtime overhead
 
 ## Prerequisites
