@@ -54,18 +54,17 @@
 The app supports two rendering backends, selectable in **Settings > General > GPU Backend** (requires app restart):
 
 ### Glow — OpenGL (Default)
-- **Recommended for most users**
 - Best compatibility with Windows DWM (Desktop Window Manager)
 - Native minimize/restore animations work correctly
 - Taskbar thumbnail previews (Aero Peek) display properly
 - Lower baseline memory usage
-- May show occasional micro-stutter during fast grid scrolling because OpenGL texture uploads are synchronous on the CPU thread
+- May show occasional stutter during grid scrolling because OpenGL texture uploads are synchronous on the CPU thread
 
 ### Wgpu — DirectX 12 / Vulkan / OpenGL (Opt-in)
 - **For users who prefer better scroll smoothness**
 - Asynchronous GPU texture uploads eliminate scroll stutter
 - Uses the wgpu abstraction layer with DX12 (Windows), Vulkan, or OpenGL
-- **Known limitation**: because wgpu creates the swapchain with `FLIP_DISCARD`, a brief black frame may flash during the minimize animation on Windows. This is a documented behavior of the wgpu DX12 backend and does not affect functionality.
+- **Known limitation DX12**: because wgpu creates the swapchain with `FLIP_DISCARD`, a brief black frame may flash during the minimize animation on Windows. This is a documented behavior of the wgpu DX12 backend and does not affect functionality.
 - Higher baseline memory usage due to wgpu/DX12 runtime overhead
 
 ## Prerequisites
@@ -130,7 +129,7 @@ Some app-level shortcuts are configurable in Settings > Keyboard Shortcuts. Stan
 
 - `Settings > Diagnostics` writes a privacy-filtered diagnostic file intended for technical troubleshooting with data minimization by design.
 - The diagnostic file is meant to keep only technical information relevant to application behavior.
-- File names, folder names, full paths, search text, and other sensitive or private user identifiers should not be exposed in this artifact.
+- File names, folder names, full paths, search text, and other sensitive or private user identifiers should not be exposed in this artifact. The log file is in plain text, so you can check it yourself to see all info collected and decied for yourself if you want to share or not.
 - Nothing is sent automatically outside the application. The diagnostic file stays local unless the user chooses to share it.
 - The feature auto-disables after 24 hours and keeps only the latest 10 MiB of filtered diagnostic events.
 - This is a technical privacy measure for minimization and safer troubleshooting. It is not a standalone legal certification of LGPD or any other regulatory compliance.
