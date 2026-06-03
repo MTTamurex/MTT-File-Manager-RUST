@@ -624,12 +624,22 @@ impl ImageViewerApp {
         } else if is_video_playing {
             self.upload_budget_ms * 0.75
         } else if is_scrolling {
-            self.upload_budget_ms * 0.85
+            if is_opengl {
+                // Ultra-aggressive budget on OpenGL scroll: each load_texture
+                // costs 5-15ms synchronously, so 1-2ms effectively allows
+                // 0-1 uploads per frame, minimizing stutter.
+                1.5
+            } else {
+                self.upload_budget_ms * 0.85
+            }
         } else {
             self.upload_budget_ms
         };
         let upload_budget_ms = if is_burst {
             base_budget_ms
+        } else if is_opengl && is_scrolling {
+            // Allow sub-2ms budget for OpenGL scroll to effectively limit to 0-1 uploads.
+            (base_budget_ms * perf_scale).clamp(1.0, 10.0)
         } else {
             (base_budget_ms * perf_scale).clamp(2.0, 10.0)
         };
