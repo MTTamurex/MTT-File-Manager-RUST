@@ -7,6 +7,9 @@ use crate::workers::thumbnail::types::{ThumbnailRequest, ThumbnailRequestSource}
 use parking_lot::{Condvar, Mutex};
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
+
+const SLOW_QUEUE_WAIT_THRESHOLD: Duration = Duration::from_secs(2);
 
 /// Queue state with directory-grouped requests for HDD optimization
 struct QueueState {
@@ -212,6 +215,7 @@ impl PriorityThumbnailQueue {
                 bulk_priority: matches!(source, ThumbnailRequestSource::BulkScan)
                     .then_some(priority),
                 bulk_session,
+                queued_at: Instant::now(),
             };
 
             let mut needs_enqueue = true;
@@ -444,6 +448,7 @@ impl PriorityThumbnailQueue {
             // Try to get next item
             if let Some(request) = Self::pop_next_request(&mut state) {
                 state.pending.remove(&request.path);
+                log_slow_queue_wait(&request);
 
                 // Adjust thread priority based on request priority
                 io_priority::set_thread_priority(request.priority);
@@ -631,6 +636,45 @@ impl PriorityThumbnailQueue {
 
         Some(request)
     }
+}
+
+fn log_slow_queue_wait(request: &ThumbnailRequest) {
+    let queue_wait = request.queued_at.elapsed();
+    if queue_wait < SLOW_QUEUE_WAIT_THRESHOLD {
+        return;
+    }
+
+    let priority = match request.priority {
+        IOPriority::Interactive => "interactive",
+        IOPriority::Prefetch => "prefetch",
+        IOPriority::Background => "background",
+    };
+    let source = match request.source {
+        ThumbnailRequestSource::Normal => "normal",
+        ThumbnailRequestSource::BulkScan => "bulk",
+    };
+
+    log::info!(
+        "[THUMB-QUEUE] slow wait {:.1}ms source={} priority={} {:?}",
+        queue_wait.as_millis() as f64,
+        source,
+        priority,
+        request.path.file_name()
+    );
+
+    crate::infrastructure::diagnostic_logger::diag_info(
+        "thumbnail_queue",
+        "slow_wait",
+        &[
+            crate::infrastructure::diagnostic_logger::field_duration_ms("wait", queue_wait),
+            crate::infrastructure::diagnostic_logger::field_label("source", source),
+            crate::infrastructure::diagnostic_logger::field_label("priority", priority),
+            crate::infrastructure::diagnostic_logger::field_bool(
+                "bulk",
+                matches!(request.source, ThumbnailRequestSource::BulkScan),
+            ),
+        ],
+    );
 }
 
 #[cfg(test)]

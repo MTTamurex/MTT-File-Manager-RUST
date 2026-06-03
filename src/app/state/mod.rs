@@ -64,6 +64,12 @@ pub struct WatcherFsProbeCacheEntry {
     pub probed_at: Instant,
 }
 
+#[cfg(feature = "notify-watcher")]
+pub struct TimestampedNotifyEvent {
+    pub received_at: Instant,
+    pub result: notify::Result<notify::Event>,
+}
+
 pub struct ImageViewerApp {
     pub navigation_state: NavigationState,
     /// Last known modified timestamp for the currently browsed folder.
@@ -238,9 +244,9 @@ pub struct ImageViewerApp {
     #[cfg(feature = "notify-watcher")]
     pub notify_watcher_setup_request_id: u64,
     #[cfg(feature = "notify-watcher")]
-    pub fs_event_receiver: Receiver<notify::Result<notify::Event>>,
+    pub fs_event_receiver: Receiver<TimestampedNotifyEvent>,
     #[cfg(feature = "notify-watcher")]
-    pub fs_event_sender: Sender<notify::Result<notify::Event>>,
+    pub fs_event_sender: Sender<TimestampedNotifyEvent>,
     pub device_event_receiver: Receiver<()>,
     pub last_auto_reload: Instant,
     pub pending_auto_reload: bool,

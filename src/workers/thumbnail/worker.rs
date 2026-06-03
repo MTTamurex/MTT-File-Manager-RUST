@@ -14,9 +14,10 @@ use crate::workers::thumbnail::SharedBulkThumbnailProgress;
 use crossbeam_channel::Sender;
 use eframe::egui;
 use parking_lot::{Condvar, Mutex};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Instant, SystemTime};
 use windows::Win32::Media::MediaFoundation::{MFShutdown, MFStartup, MFSTARTUP_NOSOCKET};
 use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED};
 
@@ -25,6 +26,16 @@ mod request_processing;
 /// Hard RAM safety cap for concurrent decode operations.
 /// Each decode can temporarily use tens of MB, so keep bounded even on high-core CPUs.
 const MAX_CONCURRENT_DECODES_HARD_CAP: usize = 4;
+const CACHE_WRITE_QUEUE_CAP: usize = 1024;
+
+pub(super) struct ThumbnailCacheWriteRequest {
+    path: PathBuf,
+    modified: SystemTime,
+    requested_size: u32,
+    data: Vec<u8>,
+    width: u32,
+    height: u32,
+}
 
 /// Semaphore to limit concurrent resource usage
 pub struct Semaphore {
@@ -91,15 +102,10 @@ fn compute_thumbnail_worker_count(cpu_count: usize) -> usize {
 }
 
 fn compute_decode_limit(worker_count: usize) -> usize {
-    // Decode parallelism must stay tighter than worker count to cap peak RAM use.
-    let limit = if worker_count >= 7 {
-        4
-    } else if worker_count >= 5 {
-        3
-    } else {
-        2
-    };
-    limit.clamp(2, MAX_CONCURRENT_DECODES_HARD_CAP)
+    // Decode parallelism is already bounded by MAX_CONCURRENT_DECODES_HARD_CAP.
+    // The old thresholds never exceeded 2 because worker_count is capped at 4,
+    // which made slow video folders advance in visible 2-item batches.
+    worker_count.clamp(1, MAX_CONCURRENT_DECODES_HARD_CAP)
 }
 
 /// Spawns thumbnail worker threads with concurrency limiting
@@ -132,6 +138,20 @@ pub fn spawn_thumbnail_workers(
         cpu_count
     );
 
+    let (cache_write_tx, cache_write_rx) =
+        crossbeam_channel::bounded::<ThumbnailCacheWriteRequest>(CACHE_WRITE_QUEUE_CAP);
+    {
+        let disk_cache = disk_cache.clone();
+        let spawn_result = std::thread::Builder::new()
+            .name("thumb-cache-writer".to_string())
+            .stack_size(256 * 1024)
+            .spawn(move || thumbnail_cache_writer_loop(disk_cache, cache_write_rx));
+
+        if let Err(e) = spawn_result {
+            log::warn!("[THUMB-PIPELINE] Failed to spawn cache writer thread: {e}");
+        }
+    }
+
     // Adaptive worker count based on available CPU resources.
     for worker_id in 0..worker_count {
         let queue = queue.clone();
@@ -145,6 +165,7 @@ pub fn spawn_thumbnail_workers(
         let bulk_thumbnail_progress = bulk_thumbnail_progress.clone();
         let bulk_thumbnail_completed = bulk_thumbnail_completed.clone();
         let bulk_thumbnail_session = bulk_thumbnail_session.clone();
+        let cache_write_tx = cache_write_tx.clone();
 
         let spawn_result = std::thread::Builder::new()
             .name(format!("thumb-worker-{}", worker_id))
@@ -162,6 +183,7 @@ pub fn spawn_thumbnail_workers(
                     bulk_thumbnail_progress,
                     bulk_thumbnail_completed,
                     bulk_thumbnail_session,
+                    cache_write_tx,
                 );
             });
 
@@ -195,6 +217,42 @@ pub fn spawn_thumbnail_workers(
             log::warn!(
                 "[THUMB-PIPELINE] Failed to spawn deferred-retry thread: {}",
                 e
+            );
+        }
+    }
+}
+
+fn thumbnail_cache_writer_loop(
+    disk_cache: Arc<ThumbnailDiskCache>,
+    cache_write_rx: crossbeam_channel::Receiver<ThumbnailCacheWriteRequest>,
+) {
+    let _priority_guard = io_priority::ThreadPriorityGuard::new(IOPriority::Background);
+
+    while let Ok(request) = cache_write_rx.recv() {
+        let cache_start = std::time::Instant::now();
+        if let Err(e) = disk_cache.put(
+            &request.path,
+            request.modified,
+            request.requested_size,
+            &request.data,
+            request.width,
+            request.height,
+        ) {
+            log::error!(
+                "[Thumbnail-CACHE] PUT FAILED for {:?}: {:?}",
+                request.path.file_name(),
+                e
+            );
+        }
+
+        let cache_ms = cache_start.elapsed().as_millis();
+        if cache_ms >= 25 {
+            log::info!(
+                "[THUMB-CACHE-WRITER] put={:.1}ms {:?} {}x{}",
+                cache_ms as f64,
+                request.path.file_name(),
+                request.width,
+                request.height
             );
         }
     }
@@ -319,6 +377,7 @@ fn thumbnail_worker_loop(
     bulk_thumbnail_progress: SharedBulkThumbnailProgress,
     bulk_thumbnail_completed: Arc<AtomicUsize>,
     bulk_thumbnail_session: Arc<AtomicU64>,
+    cache_write_tx: Sender<ThumbnailCacheWriteRequest>,
 ) {
     let mut last_repaint = Instant::now();
 
@@ -422,6 +481,7 @@ fn thumbnail_worker_loop(
                 &semaphore,
                 &pending_deletions,
                 &mut last_repaint,
+                &cache_write_tx,
             );
 
             if is_virtual_bulk_scan {
@@ -468,6 +528,15 @@ mod tests {
         assert_eq!(compute_thumbnail_worker_count(3), 3);
         assert_eq!(compute_thumbnail_worker_count(4), 4);
         assert_eq!(compute_thumbnail_worker_count(16), 4);
+    }
+
+    #[test]
+    fn test_compute_decode_limit_tracks_worker_count_up_to_hard_cap() {
+        assert_eq!(compute_decode_limit(1), 1);
+        assert_eq!(compute_decode_limit(2), 2);
+        assert_eq!(compute_decode_limit(3), 3);
+        assert_eq!(compute_decode_limit(4), 4);
+        assert_eq!(compute_decode_limit(16), MAX_CONCURRENT_DECODES_HARD_CAP);
     }
 
     #[test]

@@ -45,7 +45,7 @@ pub enum FileOperationResult {
     /// Copy operation completed - dest folder needs reload if active
     CopyCompleted {
         dest_folder: PathBuf,
-        /// Known exact destination file paths (for write-activity cache clearing).
+        /// Known exact destination files/folders (for write-activity cache clearing).
         copied_dests: Vec<PathBuf>,
     },
     RenameCompleted {

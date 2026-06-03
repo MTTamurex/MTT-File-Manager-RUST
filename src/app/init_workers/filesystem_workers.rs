@@ -168,10 +168,19 @@ pub(in crate::app) fn spawn_disk_cache_invalidation_worker(
     if let Err(e) = std::thread::Builder::new()
         .name("disk-cache-invalidation".into())
         .spawn(move || {
-        while let Ok(entries) = disk_cache_invalidation_rx.recv() {
-            let mut unique_paths = std::collections::HashSet::with_capacity(entries.len());
-            for entry in entries {
-                if unique_paths.insert(entry.path.clone()) {
+            while let Ok(mut entries) = disk_cache_invalidation_rx.recv() {
+                while let Ok(mut more) = disk_cache_invalidation_rx.try_recv() {
+                    entries.append(&mut more);
+                }
+
+                let mut unique_paths = std::collections::HashSet::with_capacity(entries.len());
+                let mut skipped_existing_files = 0usize;
+
+                for entry in entries {
+                    if !unique_paths.insert(entry.path.clone()) {
+                        continue;
+                    }
+
                     if let Some(new_path) = entry.rename_to {
                         // Rename: migrate the disk-cache row to the new path
                         // so thumbnails survive rename without re-extraction.
@@ -203,6 +212,11 @@ pub(in crate::app) fn spawn_disk_cache_invalidation_worker(
                             entry.path.file_name().unwrap_or_default()
                         );
                     } else if crate::infrastructure::onedrive::fast_path_exists(entry.path.as_path()) {
+                        if !crate::infrastructure::onedrive::fast_is_dir(entry.path.as_path()) {
+                            skipped_existing_files += 1;
+                            continue;
+                        }
+
                         // Guard: if the path still exists on disk, the DELETE
                         // event was transient (common on FUSE/WinFsp drivers
                         // like Cryptomator that emit DELETE+CREATE during
@@ -220,8 +234,14 @@ pub(in crate::app) fn spawn_disk_cache_invalidation_worker(
                         app_state_for_invalidation.remove_covers_for_path(&entry.path);
                     }
                 }
+
+                if skipped_existing_files > 0 {
+                    log::debug!(
+                        "[CACHE-INVALIDATION] Skipped {} existing file invalidation(s)",
+                        skipped_existing_files
+                    );
+                }
             }
-        }
         })
     {
         log::error!("[CACHE-INVALIDATION] Failed to spawn worker thread: {e}. Cache invalidation disabled.");

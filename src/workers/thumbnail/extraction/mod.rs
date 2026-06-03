@@ -8,7 +8,7 @@
 //! 3. **WIC** (Robust Fallback) - Windows Imaging Component for CMYK/problematic images
 //! 4. **Shell API** (Universal) - IShellItemImageFactory for most file types
 //! 5. **Force Extraction** - IThumbnailCache with WTS_FORCEEXTRACTION flag
-//! 6. **Media Foundation** (Nuclear Option) - Direct video frame extraction
+//! 6. **Media Foundation** (Fallback only) - Direct video frame extraction
 
 pub mod orientation;
 pub mod stage0_embedded_exif_thumbnail;
@@ -18,13 +18,18 @@ pub mod stage3_shell_api;
 pub mod stage4_force_extract;
 pub mod stage5_media_foundation;
 
-use crate::infrastructure::diagnostic_logger::diag_warn;
+use crate::infrastructure::diagnostic_logger::{
+    diag_info, diag_warn, field_bool, field_duration_ms, field_label, field_u64,
+};
 use crate::infrastructure::io_priority::IOPriority;
 use crate::infrastructure::onedrive;
+use crate::infrastructure::windows::file_type::is_video_extension;
 use std::path::Path;
+use std::time::Duration;
 
 const SIZED_WIC_FAST_PATH_EXTENSIONS: &[&str] =
     &["jpg", "jpeg", "png", "bmp", "tiff", "tif", "webp"];
+const DIAG_SLOW_STAGE_THRESHOLD: Duration = Duration::from_millis(250);
 
 #[derive(Debug)]
 pub enum ThumbnailExtractionOutcome {
@@ -33,13 +38,13 @@ pub enum ThumbnailExtractionOutcome {
     Failed,
 }
 
-/// The 5-Step Hybrid Pipeline
+/// Hybrid thumbnail extraction pipeline
 ///
 /// Attempts extraction in order of speed/reliability:
 /// - Stages 1-2: Fast paths for images
 /// - Stage 3: Universal fallback
 /// - Stage 4: Force bypass Windows cache
-/// - Stage 5: Direct video frame extraction
+/// - Stage 5: Direct video frame extraction when Windows thumbnail providers fail
 ///
 /// `pending_deletions` is checked between stages to abort early if the file
 /// was marked for deletion while extraction was in progress.
@@ -147,7 +152,7 @@ pub fn generate_thumbnail_hybrid_detailed_with_target(
         return ThumbnailExtractionOutcome::Failed;
     }
 
-    // Stage 3: Shell API (Universal/Video)
+    // Shell API fallback (Universal/Video)
     {
         let t0 = std::time::Instant::now();
         match stage3_shell_api::extract_with_size(path, image_target_max_side) {
@@ -156,6 +161,7 @@ pub fn generate_thumbnail_hybrid_detailed_with_target(
                 return ThumbnailExtractionOutcome::Success(result);
             }
             Err(e) => {
+                log_extraction_stage_failure(path, "stage3_shell", t0);
                 let err_str = e.to_string();
                 if !err_str.contains("0x80070002") {
                     log::trace!(
@@ -168,7 +174,7 @@ pub fn generate_thumbnail_hybrid_detailed_with_target(
         }
     }
 
-    // Stage 4: IThumbnailCache with WTS_FORCEEXTRACTION
+    // IThumbnailCache fallback with WTS_FORCEEXTRACTION
     {
         let t0 = std::time::Instant::now();
         match stage4_force_extract::extract_with_size(path, image_target_max_side) {
@@ -177,6 +183,7 @@ pub fn generate_thumbnail_hybrid_detailed_with_target(
                 return ThumbnailExtractionOutcome::Success(result);
             }
             Err(e) => {
+                log_extraction_stage_failure(path, "stage4_force", t0);
                 let err_str = e.to_string();
                 if !err_str.contains("0x80070002") {
                     log::trace!(
@@ -189,13 +196,15 @@ pub fn generate_thumbnail_hybrid_detailed_with_target(
         }
     }
 
-    // Stage 5: Media Foundation direct frame extraction
+    // Media Foundation fallback only. It can return a technically valid but poor
+    // thumbnail frame (black/wrong frame), so keep it behind Windows providers.
     {
         let t0 = std::time::Instant::now();
         if let Some(result) = stage5_media_foundation::extract(path) {
             log_extraction_perf(path, "stage5_mf", t0, &result);
             return ThumbnailExtractionOutcome::Success(result);
         }
+        log_extraction_stage_failure(path, "stage5_mf", t0);
     }
 
     let total_ms = pipeline_start.elapsed().as_millis();
@@ -210,11 +219,12 @@ pub fn generate_thumbnail_hybrid_detailed_with_target(
 
 fn log_extraction_perf(
     path: &Path,
-    stage: &str,
+    stage: &'static str,
     start: std::time::Instant,
     result: &(Vec<u8>, u32, u32),
 ) {
-    let elapsed_ms = start.elapsed().as_millis();
+    let elapsed = start.elapsed();
+    let elapsed_ms = elapsed.as_millis();
     if elapsed_ms >= 25 {
         let (data, w, h) = result;
         log::info!(
@@ -227,6 +237,46 @@ fn log_extraction_perf(
             elapsed_ms as f64
         );
     }
+
+    if elapsed >= DIAG_SLOW_STAGE_THRESHOLD {
+        let (data, w, h) = result;
+        diag_info(
+            "thumbnail_extraction",
+            "slow_stage_success",
+            &[
+                field_label("stage", stage),
+                field_duration_ms("elapsed", elapsed),
+                field_bool("video", is_video_path(path)),
+                field_u64("width", *w as u64),
+                field_u64("height", *h as u64),
+                field_u64("bytes", data.len() as u64),
+            ],
+        );
+    }
+}
+
+fn log_extraction_stage_failure(path: &Path, stage: &'static str, start: std::time::Instant) {
+    let elapsed = start.elapsed();
+    if elapsed < DIAG_SLOW_STAGE_THRESHOLD {
+        return;
+    }
+
+    log::info!(
+        "[THUMB-PERF] {} failed {:?} {:.1}ms",
+        stage,
+        path.file_name(),
+        elapsed.as_millis() as f64
+    );
+
+    diag_info(
+        "thumbnail_extraction",
+        "slow_stage_failed",
+        &[
+            field_label("stage", stage),
+            field_duration_ms("elapsed", elapsed),
+            field_bool("video", is_video_path(path)),
+        ],
+    );
 }
 
 fn image_sized_fast_path_target(path: &Path, requested_max_side: Option<u32>) -> Option<u32> {
@@ -252,9 +302,15 @@ fn embedded_exif_thumbnail_target(path: &Path, requested_max_side: Option<u32>) 
     }
 }
 
+fn is_video_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| is_video_extension(&ext.to_ascii_lowercase()))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{embedded_exif_thumbnail_target, image_sized_fast_path_target};
+    use super::{embedded_exif_thumbnail_target, image_sized_fast_path_target, is_video_path};
     use std::path::Path;
 
     #[test]
@@ -307,5 +363,12 @@ mod tests {
             embedded_exif_thumbnail_target(Path::new("photo.jpg"), None),
             None
         );
+    }
+
+    #[test]
+    fn is_video_path_matches_video_extensions_only() {
+        assert!(is_video_path(Path::new("clip.mp4")));
+        assert!(is_video_path(Path::new("clip.MKV")));
+        assert!(!is_video_path(Path::new("photo.jpg")));
     }
 }

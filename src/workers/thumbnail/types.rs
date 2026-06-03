@@ -4,6 +4,7 @@
 
 use crate::infrastructure::io_priority::IOPriority;
 use std::path::PathBuf;
+use std::time::Instant;
 
 /// Legacy alias for backwards compatibility with old ThumbnailPriority enum
 /// High -> Interactive, Low -> Prefetch
@@ -34,4 +35,5 @@ pub struct ThumbnailRequest {
     /// this lets the queue restore the bulk work to its initial priority.
     pub bulk_priority: Option<IOPriority>,
     pub bulk_session: Option<u64>,
+    pub queued_at: Instant,
 }

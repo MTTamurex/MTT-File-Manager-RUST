@@ -128,13 +128,14 @@ impl ImageViewerApp {
                 break;
             }
 
-            let event = match self.fs_event_receiver.try_recv() {
+            let timestamped_event = match self.fs_event_receiver.try_recv() {
                 Ok(event) => event,
                 Err(_) => break,
             };
+            let received_at = timestamped_event.received_at;
             processed_events += 1;
 
-            match event {
+            match timestamped_event.result {
                 Ok(evt) => {
                     let mut meaningful_change = false;
                     let mut needs_reload = false;
@@ -244,8 +245,9 @@ impl ImageViewerApp {
 
                             meaningful_change = true;
                             let cleaned = Self::clean_path(path);
-                            crate::infrastructure::windows::file_flags::mark_recent_write_activity(
+                            crate::infrastructure::windows::file_flags::mark_recent_write_activity_at(
                                 &cleaned,
+                                received_at,
                             );
                             self.register_changed_folder_for_path(
                                 &cleaned,
@@ -287,8 +289,9 @@ impl ImageViewerApp {
 
                             let cleaned_old = Self::clean_path(old_path);
                             let cleaned_new = Self::clean_path(new_path);
-                            crate::infrastructure::windows::file_flags::mark_recent_write_activity(
+                            crate::infrastructure::windows::file_flags::mark_recent_write_activity_at(
                                 &cleaned_new,
+                                received_at,
                             );
                             self.register_changed_folder_for_path(
                                 &cleaned_old,
@@ -467,8 +470,9 @@ impl ImageViewerApp {
                         }
 
                         let cleaned = Self::clean_path(path);
-                        crate::infrastructure::windows::file_flags::mark_recent_write_activity(
+                        crate::infrastructure::windows::file_flags::mark_recent_write_activity_at(
                             &cleaned,
+                            received_at,
                         );
                         self.register_changed_folder_for_path(
                             &cleaned,

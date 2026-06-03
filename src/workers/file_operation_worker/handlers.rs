@@ -72,7 +72,7 @@ fn is_invalid_rename_target(new_name: &str) -> bool {
         || crate::infrastructure::security::is_windows_reserved_name(base_name)
 }
 
-fn known_exact_new_file_copy_dests(
+fn known_exact_new_copy_dests(
     paths: &[PathBuf],
     dest_folder: &Path,
     contains_virtual_path: bool,
@@ -86,7 +86,7 @@ fn known_exact_new_file_copy_dests(
     let mut exact_dests = Vec::new();
 
     for path in paths {
-        if !path.is_file() {
+        if !path.is_file() && !path.is_dir() {
             continue;
         }
 
@@ -266,11 +266,8 @@ pub(super) fn handle_copy(
                 native_ok
             );
 
-            let mut copied_dests = known_exact_new_file_copy_dests(
-                std::slice::from_ref(&path),
-                &dest_folder,
-                is_virtual,
-            );
+            let copied_dests =
+                known_exact_new_copy_dests(std::slice::from_ref(&path), &dest_folder, is_virtual);
 
             let success = if is_virtual && native_ok {
                 log::debug!(
@@ -286,7 +283,6 @@ pub(super) fn handle_copy(
             log::debug!("[FileOps] handle_copy result: success={}", success);
 
             if success {
-                copied_dests.retain(|dest| dest.is_file());
                 let _ = result_sender.send(FileOperationResult::CopyCompleted {
                     dest_folder,
                     copied_dests,
@@ -392,8 +388,7 @@ pub(super) fn handle_copy_batch(
                 log::debug!("[FileOps]   batch path: {}", p.display());
             }
 
-            let mut copied_dests =
-                known_exact_new_file_copy_dests(&paths, &dest_folder, has_virtual_path);
+            let copied_dests = known_exact_new_copy_dests(&paths, &dest_folder, has_virtual_path);
 
             let success = if has_virtual_path && native_ok {
                 log::debug!(
@@ -409,7 +404,6 @@ pub(super) fn handle_copy_batch(
             log::debug!("[FileOps] handle_copy_batch result: success={}", success);
 
             if success {
-                copied_dests.retain(|dest| dest.is_file());
                 let _ = result_sender.send(FileOperationResult::CopyCompleted {
                     dest_folder,
                     copied_dests,
@@ -575,5 +569,40 @@ pub(super) fn handle_show_properties(paths: Vec<std::path::PathBuf>, hwnd: SendH
                 e
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn known_exact_new_copy_dests_includes_new_folder_dest() {
+        let src_parent = tempfile::tempdir().expect("create source parent");
+        let dest_parent = tempfile::tempdir().expect("create dest parent");
+        let src_folder = src_parent.path().join("videos");
+        std::fs::create_dir(&src_folder).expect("create source folder");
+
+        let dests = known_exact_new_copy_dests(
+            std::slice::from_ref(&src_folder),
+            dest_parent.path(),
+            false,
+        );
+
+        assert_eq!(dests, vec![dest_parent.path().join("videos")]);
+    }
+
+    #[test]
+    fn known_exact_new_copy_dests_skips_existing_dest() {
+        let src_parent = tempfile::tempdir().expect("create source parent");
+        let dest_parent = tempfile::tempdir().expect("create dest parent");
+        let src_folder = src_parent.path().join("videos");
+        let existing_dest = dest_parent.path().join("videos");
+        std::fs::create_dir(&src_folder).expect("create source folder");
+        std::fs::create_dir(&existing_dest).expect("create existing dest folder");
+
+        let dests = known_exact_new_copy_dests(&[src_folder], dest_parent.path(), false);
+
+        assert!(dests.is_empty());
     }
 }

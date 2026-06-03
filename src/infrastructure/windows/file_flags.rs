@@ -128,36 +128,25 @@ const INCOMPLETE_DOWNLOAD_EXTENSIONS: &[&str] = &[
     "crswap",     // Chrome swap file
 ];
 
-/// Fallback write-activity window for media files when no watcher event exists.
-///
-/// The preferred signal is a real CREATE/MODIFY/RENAME event from the watcher.
-/// This metadata-based fallback only covers cases where the app enters a folder
-/// after the write finished and therefore did not observe the live events.
-const RECENT_WRITE_ACTIVITY_FALLBACK_SECS: u64 = 300;
-
 /// UI-thread fast guard window.
 ///
 /// Keeps short-term protection right after MODIFY events, while avoiding long
 /// post-download delays from fixed multi-minute cooldowns.
 const FAST_RECENT_GUARD_SECS: u64 = 5;
 
-/// Minimum continuous stability time required before treating a recently
-/// changing media file as safe to read.
-const MIN_STABLE_MEDIA_DURATION: Duration = Duration::from_secs(12);
-
 /// Reduced stability window when the watcher has observed live write events.
 ///
 /// The file system watcher (notify/ReadDirectoryChangesW) fires a Modify event
 /// for every block qBittorrent (or any other writer) commits.  When those events
 /// are the baseline, 3 s of silence reliably signals that writing has stopped.
-/// The full 12 s window (`MIN_STABLE_MEDIA_DURATION`) is kept as a fallback for
-/// the "entered the folder mid-download without observing the Create event" case.
 const STABLE_AFTER_ACTIVITY_SECS: Duration = Duration::from_secs(3);
 
 const STABILITY_STATE_CAP: usize = 8192;
 const STABILITY_STATE_TTL: Duration = Duration::from_secs(15 * 60);
 const WRITE_ACTIVITY_STATE_CAP: usize = 8192;
 const WRITE_ACTIVITY_STATE_TTL: Duration = Duration::from_secs(2 * 60);
+const COMPLETED_WRITE_STATE_CAP: usize = 2048;
+const COMPLETED_WRITE_STATE_TTL: Duration = Duration::from_secs(5 * 60);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileReadSafety {
@@ -181,11 +170,20 @@ struct FileStabilityState {
     last_seen: Instant,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct CompletedWriteState {
+    completed_at_system: SystemTime,
+    recorded_at: Instant,
+}
+
 static FILE_STABILITY_CACHE: OnceLock<
     Mutex<std::collections::HashMap<PathBuf, FileStabilityState>>,
 > = OnceLock::new();
 static FILE_WRITE_ACTIVITY_CACHE: OnceLock<Mutex<std::collections::HashMap<PathBuf, Instant>>> =
     OnceLock::new();
+static FILE_COMPLETED_WRITE_CACHE: OnceLock<
+    Mutex<std::collections::HashMap<PathBuf, CompletedWriteState>>,
+> = OnceLock::new();
 
 fn get_file_stability_cache(
 ) -> &'static Mutex<std::collections::HashMap<PathBuf, FileStabilityState>> {
@@ -196,8 +194,100 @@ fn get_file_write_activity_cache() -> &'static Mutex<std::collections::HashMap<P
     FILE_WRITE_ACTIVITY_CACHE.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
 }
 
+fn get_file_completed_write_cache(
+) -> &'static Mutex<std::collections::HashMap<PathBuf, CompletedWriteState>> {
+    FILE_COMPLETED_WRITE_CACHE.get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+}
+
+fn is_path_or_descendant(path: &Path, root: &Path) -> bool {
+    path == root || path.starts_with(root)
+}
+
+fn remove_cached_paths_under_roots<T>(
+    cache: &mut std::collections::HashMap<PathBuf, T>,
+    roots: &[PathBuf],
+) {
+    cache.retain(|path, _| {
+        !roots
+            .iter()
+            .any(|root| is_path_or_descendant(path, root.as_path()))
+    });
+}
+
+fn remember_completed_write_roots(paths: &[PathBuf]) {
+    if paths.is_empty() {
+        return;
+    }
+
+    let now = Instant::now();
+    let completed_at_system = SystemTime::now();
+    let mut cache = get_file_completed_write_cache().lock();
+
+    if cache.len() > COMPLETED_WRITE_STATE_CAP {
+        cache.retain(|_, state| now.duration_since(state.recorded_at) <= COMPLETED_WRITE_STATE_TTL);
+    }
+
+    for path in paths {
+        cache.insert(
+            path.clone(),
+            CompletedWriteState {
+                completed_at_system,
+                recorded_at: now,
+            },
+        );
+    }
+}
+
+fn completed_write_covers_modified_path(path: &Path, modified: SystemTime) -> bool {
+    let now = Instant::now();
+    let mut cache = get_file_completed_write_cache().lock();
+
+    if cache.len() > COMPLETED_WRITE_STATE_CAP {
+        cache.retain(|_, state| now.duration_since(state.recorded_at) <= COMPLETED_WRITE_STATE_TTL);
+    }
+
+    cache.iter().any(|(root, state)| {
+        now.duration_since(state.recorded_at) <= COMPLETED_WRITE_STATE_TTL
+            && is_path_or_descendant(path, root.as_path())
+            && modified <= state.completed_at_system
+    })
+}
+
+fn completed_write_root_contains_path(path: &Path) -> bool {
+    let now = Instant::now();
+    let mut cache = get_file_completed_write_cache().lock();
+
+    if cache.len() > COMPLETED_WRITE_STATE_CAP {
+        cache.retain(|_, state| now.duration_since(state.recorded_at) <= COMPLETED_WRITE_STATE_TTL);
+    }
+
+    cache.iter().any(|(root, state)| {
+        now.duration_since(state.recorded_at) <= COMPLETED_WRITE_STATE_TTL
+            && is_path_or_descendant(path, root.as_path())
+    })
+}
+
+fn completed_write_covers_current_path(path: &Path) -> bool {
+    std::fs::metadata(path)
+        .and_then(|metadata| metadata.modified())
+        .is_ok_and(|modified| completed_write_covers_modified_path(path, modified))
+}
+
 pub fn mark_recent_write_activity(path: &Path) {
+    mark_recent_write_activity_at(path, Instant::now());
+}
+
+pub fn mark_recent_write_activity_at(path: &Path, seen_at: Instant) {
     if !is_media_file(path) {
+        return;
+    }
+
+    // After Shell reports a copy/move complete, notify can still deliver the
+    // backlog of old Create/Modify events. Treating those as fresh writes makes
+    // copied folders unlock in slow batches. The worker-side classifier still
+    // checks mtime/lock state before extraction, so real post-copy writes remain
+    // guarded without letting stale watcher events renew the cooldown.
+    if completed_write_root_contains_path(path) {
         return;
     }
 
@@ -208,44 +298,41 @@ pub fn mark_recent_write_activity(path: &Path) {
         cache.retain(|_, seen_at| now.duration_since(*seen_at) <= WRITE_ACTIVITY_STATE_TTL);
     }
 
-    cache.insert(path.to_path_buf(), now);
+    cache.insert(path.to_path_buf(), seen_at.min(now));
 }
 
-/// Remove a file from the write-activity and stability caches so that
+/// Remove a file/folder from the write-activity and stability caches so that
 /// `classify_file_read_safety` no longer considers it "recently changing".
-///
-/// Call this after our own app's file operation (copy/move) completes for
-/// a destination path.  The operation was done by Windows Shell — the file
-/// is fully written and safe to read immediately.  Without this, the
-/// `MIN_STABLE_MEDIA_DURATION` (12 s) guard would delay thumbnail extraction
-/// for every freshly-copied or freshly-moved media file.
 pub fn clear_write_activity_for_path(path: &Path) {
-    {
-        let mut cache = get_file_write_activity_cache().lock();
-        cache.remove(path);
-    }
-    // Also reset stability tracking so the 12-second window isn't ticking
-    // from the original create-event baseline.
-    {
-        let mut cache = get_file_stability_cache().lock();
-        cache.remove(path);
-    }
+    clear_write_activity_for_paths(&[path.to_path_buf()]);
 }
 
 /// Batch variant of [`clear_write_activity_for_path`].
 pub fn clear_write_activity_for_paths(paths: &[std::path::PathBuf]) {
+    if paths.is_empty() {
+        return;
+    }
+
     {
         let mut act = get_file_write_activity_cache().lock();
-        for p in paths {
-            act.remove(p.as_path());
-        }
+        remove_cached_paths_under_roots(&mut act, paths);
     }
+    // Also reset stability tracking so the stability window isn't ticking
+    // from the original create-event baseline.
     {
         let mut stab = get_file_stability_cache().lock();
-        for p in paths {
-            stab.remove(p.as_path());
-        }
+        remove_cached_paths_under_roots(&mut stab, paths);
     }
+}
+
+/// Clear write-activity state after Shell reports that a copy/move finished.
+///
+/// Files with mtimes at or before completion are fully written and safe to read
+/// immediately. Remembering the completed root also prevents delayed notify
+/// events from the just-finished copy from renewing the write cooldown.
+pub fn clear_write_activity_after_completed_file_operation(paths: &[std::path::PathBuf]) {
+    clear_write_activity_for_paths(paths);
+    remember_completed_write_roots(paths);
 }
 
 /// Returns `true` if the file extension indicates an incomplete download.
@@ -318,24 +405,6 @@ fn is_media_file(path: &Path) -> bool {
         || crate::infrastructure::windows::file_type::is_image_extension(&lower)
 }
 
-fn recent_modified_baseline(path: &Path, max_age_secs: u64) -> Option<Instant> {
-    if !is_media_file(path) {
-        return None;
-    }
-
-    match std::fs::metadata(path).and_then(|m| m.modified()) {
-        Ok(mtime) => match mtime.elapsed() {
-            Ok(elapsed) if elapsed.as_secs() < max_age_secs => now_minus_elapsed(elapsed),
-            _ => None,
-        },
-        Err(_) => None,
-    }
-}
-
-fn now_minus_elapsed(elapsed: Duration) -> Option<Instant> {
-    Instant::now().checked_sub(elapsed)
-}
-
 fn cached_write_activity_baseline(path: &Path) -> Option<Instant> {
     if !is_media_file(path) {
         return None;
@@ -381,14 +450,7 @@ fn recent_write_activity_baseline(path: &Path) -> Option<Instant> {
         }
     };
 
-    // Only fall back to filesystem metadata when the watcher-event cache
-    // has no entry.  Calling std::fs::metadata here would otherwise hit
-    // the kernel on every probe — including OneDrive/network paths where
-    // the minifilter driver can block indefinitely.
-    match event_baseline {
-        Some(baseline) => Some(baseline),
-        None => recent_modified_baseline(path, RECENT_WRITE_ACTIVITY_FALLBACK_SECS),
-    }
+    event_baseline
 }
 
 fn has_recent_write_activity(path: &Path, max_age: Duration) -> bool {
@@ -481,9 +543,7 @@ fn is_stable_enough_with_duration(
 ///   2. Watcher-event activity check.
 ///      • If activity is present → pure mtime/size stability via `std::fs::metadata`
 ///        (always uses share-all flags; safe for active writers).  The stability
-///        window is `STABLE_AFTER_ACTIVITY_SECS` (3 s) when the event baseline is
-///        trusted, `MIN_STABLE_MEDIA_DURATION` (12 s) when it comes from the mtime
-///        fallback alone.
+///        window is `STABLE_AFTER_ACTIVITY_SECS` (3 s).
 ///      • If no activity at all → the lock probe runs as a last-resort fallback to
 ///        catch external writers whose `Create` event we may have missed (e.g. the
 ///        file existed before the watcher started).  This path is narrow: any file
@@ -504,35 +564,21 @@ pub fn classify_file_read_safety(path: &Path) -> FileReadSafety {
             None => return FileReadSafety::RecentlyChanging,
         };
 
-        // Decide which stability window to apply:
-        //   • Event-driven baseline (from watcher cache, age < WRITE_ACTIVITY_STATE_TTL):
-        //     3 s is enough — the watcher fires on every committed block, so 3 s of
-        //     silence reliably means the writer has paused or finished.
-        //   • mtime-only fallback (no cached event, pure filesystem age):
-        //     Keep the conservative 12 s window to ride out multi-second inter-block
-        //     gaps on slow HDDs or throttled torrent clients.
-        let has_event_baseline = {
-            let cache = get_file_write_activity_cache().lock();
-            cache.contains_key(path)
-        };
-        let required_stability = if has_event_baseline {
-            STABLE_AFTER_ACTIVITY_SECS
-        } else {
-            MIN_STABLE_MEDIA_DURATION
-        };
-
-        // We need is_stable_enough_across_attempts to use our chosen window.
-        // That function internally uses MIN_STABLE_MEDIA_DURATION; supply the
-        // effective required duration and compare against elapsed since stable_since.
+        // Watcher activity is the only baseline here. Do not use mtime recency
+        // as a write signal: copied media often has fresh mtimes after restart.
         if !is_stable_enough_with_duration(
             path,
             snapshot,
             recent_write_baseline,
-            required_stability,
+            STABLE_AFTER_ACTIVITY_SECS,
         ) {
             return FileReadSafety::RecentlyChanging;
         }
 
+        return FileReadSafety::Safe;
+    }
+
+    if completed_write_covers_current_path(path) {
         return FileReadSafety::Safe;
     }
 
@@ -664,5 +710,50 @@ mod tests {
         clear_write_activity_for_path(&path);
 
         assert!(!is_file_unsafe_to_read_fast(&path));
+    }
+
+    #[test]
+    fn clear_write_activity_for_folder_clears_descendant_activity() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let root = dir.path().join("copied");
+        let path = root.join("nested").join("video.mp4");
+
+        mark_recent_write_activity(&path);
+        assert!(is_file_unsafe_to_read_fast(&path));
+
+        clear_write_activity_for_path(&root);
+        assert!(!is_file_unsafe_to_read_fast(&path));
+    }
+
+    #[test]
+    fn recent_mtime_without_watcher_event_does_not_block_media() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let root = dir.path().join("copied");
+        std::fs::create_dir_all(&root).expect("create copied folder");
+        let path = root.join("video.mp4");
+        {
+            let mut file = std::fs::File::create(&path).expect("create media file");
+            file.write_all(b"not real media").expect("write media file");
+        }
+
+        assert_eq!(classify_file_read_safety(&path), FileReadSafety::Safe);
+    }
+
+    #[test]
+    fn completed_copy_root_ignores_delayed_watcher_write_activity() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let root = dir.path().join("copied");
+        std::fs::create_dir_all(&root).expect("create copied folder");
+        let path = root.join("video.mp4");
+        {
+            let mut file = std::fs::File::create(&path).expect("create media file");
+            file.write_all(b"not real media").expect("write media file");
+        }
+
+        clear_write_activity_after_completed_file_operation(&[root]);
+        mark_recent_write_activity(&path);
+
+        assert!(!is_file_unsafe_to_read_fast(&path));
+        assert_eq!(classify_file_read_safety(&path), FileReadSafety::Safe);
     }
 }

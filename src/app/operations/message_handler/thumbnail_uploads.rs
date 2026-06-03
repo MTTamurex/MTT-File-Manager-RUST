@@ -1,5 +1,7 @@
 use crate::app::state::ImageViewerApp;
-use crate::infrastructure::diagnostic_logger::{diag_info, field_u64};
+use crate::infrastructure::diagnostic_logger::{
+    diag_info, field_bool, field_duration_ms, field_label, field_u64,
+};
 use crate::ui::cache::{
     DEFAULT_DYNAMIC_RGBA_BUDGET_BYTES, MAX_DYNAMIC_TEXTURE_CACHE_ITEMS,
     MIN_DYNAMIC_TEXTURE_CACHE_ITEMS,
@@ -16,6 +18,7 @@ const MAX_INCOMING_THUMBNAIL_BUDGET_MS: u64 = 4;
 const MIN_INCOMING_THUMBNAIL_BUDGET_MS: u64 = 2;
 const TEXTURE_CACHE_RETUNE_INTERVAL_MS: u64 = 900;
 const TEXTURE_CACHE_RETUNE_MIN_DELTA_ITEMS: usize = 16;
+const DIAG_SLOW_TEXTURE_UPLOAD_THRESHOLD: Duration = Duration::from_millis(8);
 
 fn live_frame_pressure_ms(app: &ImageViewerApp) -> f32 {
     app.last_actual_frame_ms.max(app.frame_time_avg_ms)
@@ -78,6 +81,30 @@ fn compute_texture_cache_target_items(
         MIN_DYNAMIC_TEXTURE_CACHE_ITEMS as i32,
         MAX_DYNAMIC_TEXTURE_CACHE_ITEMS as i32,
     ) as usize
+}
+
+fn log_slow_texture_upload(
+    kind: &'static str,
+    elapsed: Duration,
+    width: u32,
+    height: u32,
+    is_opengl: bool,
+) {
+    if elapsed < DIAG_SLOW_TEXTURE_UPLOAD_THRESHOLD {
+        return;
+    }
+
+    diag_info(
+        "thumbnail_upload",
+        "slow_load_texture",
+        &[
+            field_label("kind", kind),
+            field_duration_ms("elapsed", elapsed),
+            field_u64("width", width as u64),
+            field_u64("height", height as u64),
+            field_bool("opengl", is_opengl),
+        ],
+    );
 }
 
 impl ImageViewerApp {
@@ -770,8 +797,16 @@ impl ImageViewerApp {
                     )
                 };
 
+                let texture_upload_start = Instant::now();
                 let texture =
                     ctx.load_texture(texture_name, color_image, egui::TextureOptions::LINEAR);
+                log_slow_texture_upload(
+                    "thumbnail",
+                    texture_upload_start.elapsed(),
+                    width,
+                    height,
+                    is_opengl,
+                );
 
                 self.cache_manager.thumbnail_trace.record_upload(&path);
                 self.cache_manager.finish_pending_upload(&path);
@@ -1122,8 +1157,16 @@ impl ImageViewerApp {
                             &data.rgba_data,
                         )
                     };
+                    let texture_upload_start = Instant::now();
                     let texture =
                         ctx.load_texture(texture_name, color_image, egui::TextureOptions::LINEAR);
+                    log_slow_texture_upload(
+                        "folder_preview",
+                        texture_upload_start.elapsed(),
+                        data.width,
+                        data.height,
+                        is_opengl,
+                    );
 
                     if let Some(visible_paths) = visible_paths {
                         self.cache_manager.promote_visible(visible_paths);

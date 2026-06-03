@@ -344,29 +344,59 @@ impl ImageViewerApp {
             return false;
         }
 
-        self.file_operation_state.pending_deletions.remove(&cleaned);
-        self.evict_stale_path_caches(&cleaned);
-
-        // FIX: evict_stale_path_caches increments thumbnail_eviction_skips to skip
-        // stale in-flight results (for rename/delete). But for CREATE events, there's
-        // no stale result - it's a brand new file. Decrement the counter so the new
-        // thumbnail isn't incorrectly rejected.
-        if let Some(count) = self.thumbnail_eviction_skips.get_mut(&cleaned) {
-            if *count > 0 {
-                *count -= 1;
-                if *count == 0 {
-                    self.thumbnail_eviction_skips.remove(&cleaned);
-                }
-            }
+        if !crate::infrastructure::onedrive::fast_path_exists(&cleaned) {
+            return false;
         }
 
-        self.enqueue_disk_cache_invalidations_forced(vec![cleaned.clone()]);
+        let path_norm = Self::normalize_for_match(&cleaned);
+        if self
+            .all_items
+            .iter()
+            .any(|item| Self::path_matches_normalized(&item.path, &path_norm))
+        {
+            return true;
+        }
+
+        self.file_operation_state.pending_deletions.remove(&cleaned);
+        self.thumbnail_queue
+            .remove_paths(std::slice::from_ref(&cleaned));
+        self.cache_manager.texture_cache.pop(&cleaned);
+        self.cache_manager
+            .forget_attempted_thumbnail_bucket(&cleaned);
+        self.cache_manager.loading_set.remove(&cleaned);
+        self.cache_manager.pop_rgba_data(&cleaned);
+        self.cache_manager.failed_thumbnails.pop(&cleaned);
+        self.metadata_cache.pop(&cleaned);
+        self.live_file_size_cache.pop(&cleaned);
+        self.pending_thumbnails.retain(|t| t.path != cleaned);
+        self.cache_manager.finish_pending_upload(&cleaned);
+        crate::workers::thumbnail::clear_failure_cache(&cleaned);
+
+        let is_dir = crate::infrastructure::onedrive::fast_is_dir(&cleaned);
+        let entry = crate::domain::file_entry::FileEntry::from_path(cleaned.clone(), is_dir);
+
+        self.all_items_mut().push(entry.clone());
+
+        let should_show = self.search_query.is_empty()
+            || entry
+                .name
+                .to_lowercase()
+                .contains(&self.search_query.to_lowercase());
+
+        if should_show {
+            Arc::make_mut(&mut self.items).push(entry);
+            self.total_items = self.items.len();
+        }
+
+        self.pending_items_rebuild = true;
+        self.pending_items_count = self.pending_items_count.saturating_add(1);
+        self.ui_ctx.request_repaint();
 
         log::debug!(
-            "[FS-WATCH] Deferring created-path UI insert to async reload: {:?}",
+            "[FS-WATCH] Added created path to UI incrementally: {:?}",
             cleaned
         );
-        false
+        true
     }
 
     pub(super) fn try_apply_rename_to_ui(&mut self, old_path: &Path, new_path: &Path) -> bool {

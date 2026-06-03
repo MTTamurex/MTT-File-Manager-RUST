@@ -435,11 +435,11 @@ impl ImageViewerApp {
         self.cache_manager.clear_failed();
         crate::workers::thumbnail::clear_all_failures();
 
-        // Clear write-activity markers for the files we just copied so the
-        // stability guard does not delay thumbnail generation for 12 seconds.
-        // These files were fully written by Windows Shell — they are safe to read.
+        // Clear write-activity markers for the files/folders we just copied so the
+        // stability guard does not delay thumbnail generation after Shell completes.
+        // These paths were fully written by Windows Shell — they are safe to read.
         if !copied_dests.is_empty() {
-            crate::infrastructure::windows::file_flags::clear_write_activity_for_paths(
+            crate::infrastructure::windows::file_flags::clear_write_activity_after_completed_file_operation(
                 &copied_dests,
             );
         }
@@ -477,7 +477,7 @@ impl ImageViewerApp {
         // Clear write-activity markers for the moved file so thumbnail generation
         // is not delayed by the stability guard.
         if let Some(dest_path) = moved_dest {
-            crate::infrastructure::windows::file_flags::clear_write_activity_for_path(&dest_path);
+            crate::infrastructure::windows::file_flags::clear_write_activity_after_completed_file_operation(&[dest_path]);
         }
 
         if current_path_norm == source_str {
@@ -524,7 +524,7 @@ impl ImageViewerApp {
             .filter_map(|p| p.file_name().map(|n| dest_folder.join(n)))
             .collect();
         if !moved_dests.is_empty() {
-            crate::infrastructure::windows::file_flags::clear_write_activity_for_paths(
+            crate::infrastructure::windows::file_flags::clear_write_activity_after_completed_file_operation(
                 &moved_dests,
             );
         }

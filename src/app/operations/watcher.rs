@@ -216,7 +216,10 @@ impl ImageViewerApp {
                                 log::error!("[NOTIFY-WATCHER] Event error: {}", e);
                             }
                         }
-                        let _ = tx.send(res);
+                        let _ = tx.send(crate::app::state::TimestampedNotifyEvent {
+                            received_at: std::time::Instant::now(),
+                            result: res,
+                        });
                         ctx_for_events.request_repaint();
                     });
 

@@ -47,9 +47,9 @@ pub(in crate::app) struct AppBootstrap {
     pub(in crate::app) cover_req_tx: mpsc::Sender<PathBuf>,
     pub(in crate::app) cover_res_rx: mpsc::Receiver<(PathBuf, Option<PathBuf>)>,
     #[cfg(feature = "notify-watcher")]
-    pub(in crate::app) fs_tx: mpsc::Sender<notify::Result<notify::Event>>,
+    pub(in crate::app) fs_tx: mpsc::Sender<crate::app::state::TimestampedNotifyEvent>,
     #[cfg(feature = "notify-watcher")]
-    pub(in crate::app) fs_rx: mpsc::Receiver<notify::Result<notify::Event>>,
+    pub(in crate::app) fs_rx: mpsc::Receiver<crate::app::state::TimestampedNotifyEvent>,
     pub(in crate::app) device_event_receiver: mpsc::Receiver<()>,
 
     pub(in crate::app) thumbnail_queue: Arc<PriorityThumbnailQueue>,

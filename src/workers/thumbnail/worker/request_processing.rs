@@ -1,5 +1,7 @@
 use crate::domain::thumbnail::ThumbnailData;
-use crate::infrastructure::diagnostic_logger::{diag_info, diag_warn, field_label, field_u64};
+use crate::infrastructure::diagnostic_logger::{
+    diag_info, diag_warn, field_duration_ms, field_label, field_u64,
+};
 use crate::infrastructure::disk_cache::{ThumbnailCacheEntry, ThumbnailDiskCache};
 use crate::infrastructure::io_priority::IOPriority;
 use crate::infrastructure::onedrive::{self, IoTimeoutResult};
@@ -11,9 +13,11 @@ use crate::workers::thumbnail::processing::resize::{get_bucket_size, resize_to_b
 use crossbeam_channel::Sender;
 use eframe::egui;
 use image::ImageFormat;
-use std::time::{Instant, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
-use super::Semaphore;
+use super::{Semaphore, ThumbnailCacheWriteRequest};
+
+const SLOW_WORKER_REQUEST_THRESHOLD: Duration = Duration::from_secs(2);
 
 fn try_decode_latest_cache_entry(
     disk_cache: &ThumbnailDiskCache,
@@ -62,7 +66,10 @@ pub(super) fn process_thumbnail_request(
     semaphore: &Semaphore,
     pending_deletions: &dashmap::DashMap<std::path::PathBuf, ()>,
     last_repaint: &mut Instant,
+    cache_write_tx: &Sender<ThumbnailCacheWriteRequest>,
 ) {
+    let request_start = Instant::now();
+
     use crate::workers::thumbnail::{
         clear_failure_cache, clear_transient_failure, defer_unsafe_thumbnail, is_known_failure,
         is_permanent_failure, mark_as_failed, mark_as_temporarily_blocked,
@@ -93,6 +100,7 @@ pub(super) fn process_thumbnail_request(
                 },
             );
             throttle_repaint_with_priority(ctx, last_repaint, req_priority);
+            log_slow_worker_request(path, req_priority, request_start, "not_video_ts");
             return;
         }
     }
@@ -127,6 +135,7 @@ pub(super) fn process_thumbnail_request(
                 },
             );
             throttle_repaint_with_priority(ctx, last_repaint, req_priority);
+            log_slow_worker_request(path, req_priority, request_start, "known_failure");
             return;
         }
     }
@@ -187,10 +196,13 @@ pub(super) fn process_thumbnail_request(
             },
         );
         throttle_repaint_with_priority(ctx, last_repaint, req_priority);
+        log_slow_worker_request(path, req_priority, request_start, "cache_hit");
         return;
     }
 
     // --- CACHE MISS PATH: now we need to access the source file ---
+    let mut cache_write_request = None;
+    let mut generated_thumbnail_perf = None;
 
     // EARLY EXIT 2: skip files that no longer exist.
     if onedrive::is_onedrive_path(path) {
@@ -212,6 +224,7 @@ pub(super) fn process_thumbnail_request(
                     },
                 );
                 throttle_repaint_with_priority(ctx, last_repaint, req_priority);
+                log_slow_worker_request(path, req_priority, request_start, "missing");
                 return;
             }
             IoTimeoutResult::Timeout => {
@@ -241,6 +254,7 @@ pub(super) fn process_thumbnail_request(
                     },
                 );
                 throttle_repaint_with_priority(ctx, last_repaint, req_priority);
+                log_slow_worker_request(path, req_priority, request_start, "onedrive_error");
                 return;
             }
         }
@@ -267,9 +281,12 @@ pub(super) fn process_thumbnail_request(
                 },
             );
             throttle_repaint_with_priority(ctx, last_repaint, req_priority);
+            log_slow_worker_request(path, req_priority, request_start, "missing");
             return;
         }
     }
+
+    let mut request_outcome = "empty";
 
     // Use modification time from folder enumeration when available.
     let modified = if req_modified > 0 {
@@ -316,6 +333,7 @@ pub(super) fn process_thumbnail_request(
                 },
             );
             throttle_repaint_with_priority(ctx, last_repaint, req_priority);
+            log_slow_worker_request(path, req_priority, request_start, "pending_deletion");
             return;
         }
 
@@ -330,6 +348,10 @@ pub(super) fn process_thumbnail_request(
             try_decode_latest_cache_entry(disk_cache, path, req_modified, req_size)
         {
             final_result = Some(decoded);
+        }
+
+        if final_result.is_some() {
+            request_outcome = "cache_hit_after_wait";
         }
 
         if final_result.is_none() {
@@ -348,31 +370,6 @@ pub(super) fn process_thumbnail_request(
                     let resized = resize_to_bucket(raw_data, w, h, bucket_size);
                     let resize_ms = resize_start.elapsed().as_millis();
 
-                    // Save optimized version to SQLite.
-                    let cache_start = std::time::Instant::now();
-                    if let Err(e) =
-                        disk_cache.put(path, modified, req_size, &resized.0, resized.1, resized.2)
-                    {
-                        log::error!(
-                            "[Thumbnail-CACHE] PUT FAILED for {:?}: {:?}",
-                            path.file_name(),
-                            e
-                        );
-                    }
-                    let cache_ms = cache_start.elapsed().as_millis();
-
-                    if extract_ms >= 25 || cache_ms >= 10 {
-                        log::info!(
-                            "[THUMB-PERF] extract={:.1}ms resize={:.1}ms cache={:.1}ms total={:.1}ms {:?} {}x{}→{}x{} bucket={}",
-                            extract_ms as f64,
-                            resize_ms as f64,
-                            cache_ms as f64,
-                            (extract_ms + resize_ms + cache_ms) as f64,
-                            path.file_name(),
-                            w, h, resized.1, resized.2, bucket_size
-                        );
-                    }
-
                     diag_info(
                         "thumbnail_extraction",
                         "success",
@@ -383,10 +380,21 @@ pub(super) fn process_thumbnail_request(
                         ],
                     );
 
+                    generated_thumbnail_perf = Some((extract_ms, resize_ms, w, h, bucket_size));
+                    cache_write_request = Some(ThumbnailCacheWriteRequest {
+                        path: path.clone(),
+                        modified,
+                        requested_size: req_size,
+                        data: resized.0.clone(),
+                        width: resized.1,
+                        height: resized.2,
+                    });
                     final_result = Some(resized);
+                    request_outcome = "extracted";
                     clear_transient_failure(path);
                 }
                 ThumbnailExtractionOutcome::UnsafeToRead(reason) => {
+                    request_outcome = file_read_safety_label(reason);
                     // Active writes/downloads are transient by nature; do not
                     // escalate to permanent failure due to repeated retries.
                     log::debug!(
@@ -410,6 +418,7 @@ pub(super) fn process_thumbnail_request(
                     );
                 }
                 ThumbnailExtractionOutcome::Failed => {
+                    request_outcome = "permanent_failure";
                     // All 5 extraction stages failed — the system likely lacks
                     // the required codec (e.g., HEVC/MKV without K-Lite).
                     // Mark as permanent failure immediately so neither the
@@ -424,6 +433,9 @@ pub(super) fn process_thumbnail_request(
     }
 
     let permanently_failed = final_result.is_none() && is_permanent_failure(path);
+    if permanently_failed {
+        request_outcome = "permanent_failure";
+    }
     let (data, w, h) = final_result.unwrap_or_else(|| (Vec::new(), 0, 0));
 
     send_thumbnail_result(
@@ -441,6 +453,95 @@ pub(super) fn process_thumbnail_request(
         },
     );
     throttle_repaint_with_priority(ctx, last_repaint, req_priority);
+
+    if let Some(request) = cache_write_request {
+        let width = request.width;
+        let height = request.height;
+        let enqueue_result = cache_write_tx.try_send(request);
+
+        if let Some((extract_ms, resize_ms, source_w, source_h, bucket_size)) =
+            generated_thumbnail_perf
+        {
+            if extract_ms >= 25 {
+                log::info!(
+                    "[THUMB-PERF] extract={:.1}ms resize={:.1}ms {:?} {}x{}→{}x{} bucket={}",
+                    extract_ms as f64,
+                    resize_ms as f64,
+                    path.file_name(),
+                    source_w,
+                    source_h,
+                    width,
+                    height,
+                    bucket_size
+                );
+            }
+        }
+
+        if matches!(
+            enqueue_result,
+            Err(crossbeam_channel::TrySendError::Full(_))
+        ) {
+            log::debug!(
+                "[THUMB-CACHE-WRITER] queue full, skipped cache persist for {:?}",
+                path.file_name()
+            );
+        }
+    }
+
+    log_slow_worker_request(path, req_priority, request_start, request_outcome);
+}
+
+fn file_read_safety_label(
+    reason: crate::infrastructure::windows::file_flags::FileReadSafety,
+) -> &'static str {
+    match reason {
+        crate::infrastructure::windows::file_flags::FileReadSafety::Safe => "safe",
+        crate::infrastructure::windows::file_flags::FileReadSafety::IncompleteDownload => {
+            "unsafe_incomplete_download"
+        }
+        crate::infrastructure::windows::file_flags::FileReadSafety::WriteLocked => {
+            "unsafe_write_locked"
+        }
+        crate::infrastructure::windows::file_flags::FileReadSafety::RecentlyChanging => {
+            "unsafe_recently_changing"
+        }
+    }
+}
+
+fn log_slow_worker_request(
+    path: &std::path::Path,
+    priority: IOPriority,
+    start: Instant,
+    outcome: &'static str,
+) {
+    let elapsed = start.elapsed();
+    if elapsed < SLOW_WORKER_REQUEST_THRESHOLD {
+        return;
+    }
+
+    let priority = match priority {
+        IOPriority::Interactive => "interactive",
+        IOPriority::Prefetch => "prefetch",
+        IOPriority::Background => "background",
+    };
+
+    log::info!(
+        "[THUMB-WORKER] slow request {:.1}ms outcome={} priority={} {:?}",
+        elapsed.as_millis() as f64,
+        outcome,
+        priority,
+        path.file_name()
+    );
+
+    diag_info(
+        "thumbnail_worker",
+        "slow_request",
+        &[
+            field_duration_ms("elapsed", elapsed),
+            field_label("outcome", outcome),
+            field_label("priority", priority),
+        ],
+    );
 }
 
 fn send_thumbnail_result(
