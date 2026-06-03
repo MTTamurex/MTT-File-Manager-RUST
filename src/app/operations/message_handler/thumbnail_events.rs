@@ -14,6 +14,10 @@ impl ImageViewerApp {
         // 1. STREAMING: Receive incremental batches of FileEntry (filtered by generation)
         // BLOCKING: Process all available file entries in batch
 
+        if self.process_folder_load_failures(ctx) {
+            return Instant::now();
+        }
+
         // SAFETY TIMEOUT: Clear is_loading_folder if stuck for more than 30 seconds
         // This prevents infinite spinner if the loading thread fails silently
         if self.is_loading_folder && self.loading_started_at.elapsed().as_secs() > 30 {
@@ -179,6 +183,35 @@ impl ImageViewerApp {
         }
 
         t_sizes
+    }
+
+    fn process_folder_load_failures(&mut self, ctx: &egui::Context) -> bool {
+        let mut handled_current = false;
+
+        while let Ok((gen_id, failed_path)) = self.folder_load_failure_receiver.try_recv() {
+            if gen_id != self.generation {
+                continue;
+            }
+
+            let current_path = std::path::PathBuf::from(&self.navigation_state.current_path);
+            if Self::normalize_for_match(&failed_path) != Self::normalize_for_match(&current_path) {
+                continue;
+            }
+
+            log::warn!(
+                "[FOLDER-LOADING] Current folder load failed because path vanished: {:?}",
+                failed_path
+            );
+            self.is_loading_folder = false;
+            self.pending_all_items_clear = false;
+            self.pending_auto_reload = false;
+            self.skip_next_auto_reload = false;
+            self.navigate_to_nearest_valid_ancestor();
+            ctx.request_repaint();
+            handled_current = true;
+        }
+
+        handled_current
     }
 
     /// Apply collected batches to the inactive panel via state swap.

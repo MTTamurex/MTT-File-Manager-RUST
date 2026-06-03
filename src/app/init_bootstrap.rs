@@ -33,6 +33,8 @@ use super::state::ItemsRebuildResult;
 pub(in crate::app) struct AppBootstrap {
     pub(in crate::app) file_entry_sender: mpsc::Sender<(usize, Vec<FileEntry>)>,
     pub(in crate::app) file_entry_receiver: mpsc::Receiver<(usize, Vec<FileEntry>)>,
+    pub(in crate::app) folder_load_failure_sender: mpsc::Sender<(usize, PathBuf)>,
+    pub(in crate::app) folder_load_failure_receiver: mpsc::Receiver<(usize, PathBuf)>,
     pub(in crate::app) items_rebuild_sender: mpsc::Sender<ItemsRebuildResult>,
     pub(in crate::app) items_rebuild_receiver: mpsc::Receiver<ItemsRebuildResult>,
 
@@ -133,6 +135,8 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
     }
 
     let (file_entry_sender, file_entry_receiver) = mpsc::channel::<(usize, Vec<FileEntry>)>();
+    let (folder_load_failure_sender, folder_load_failure_receiver) =
+        mpsc::channel::<(usize, PathBuf)>();
     let (items_rebuild_sender, items_rebuild_receiver) = mpsc::channel::<ItemsRebuildResult>();
 
     let cache_dir = dirs::data_local_dir()
@@ -268,6 +272,8 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
     AppBootstrap {
         file_entry_sender,
         file_entry_receiver,
+        folder_load_failure_sender,
+        folder_load_failure_receiver,
         items_rebuild_sender,
         items_rebuild_receiver,
         disk_cache,

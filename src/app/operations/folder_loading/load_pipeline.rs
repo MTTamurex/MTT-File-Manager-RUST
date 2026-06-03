@@ -23,6 +23,7 @@ impl ImageViewerApp {
         };
         let current_path = self.navigation_state.current_path.clone();
         let file_entry_sender = self.file_entry_sender.clone();
+        let folder_load_failure_sender = self.folder_load_failure_sender.clone();
         let ctx = self.ui_ctx.clone();
         let disk_cache = self.disk_cache.clone();
         let app_state_db = self.app_state_db.clone();
@@ -141,6 +142,7 @@ impl ImageViewerApp {
                     &mut batch,
                     &mut all_entries_disk,
                     &file_entry_sender,
+                    &folder_load_failure_sender,
                     &ctx,
                     &disk_cache,
                     &app_state_db,

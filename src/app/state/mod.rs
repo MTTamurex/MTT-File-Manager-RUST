@@ -95,6 +95,8 @@ pub struct ImageViewerApp {
     // Async loading (prevents UI freeze when reading metadata)
     pub file_entry_receiver: Receiver<(usize, Vec<FileEntry>)>,
     pub file_entry_sender: Sender<(usize, Vec<FileEntry>)>,
+    pub folder_load_failure_receiver: Receiver<(usize, PathBuf)>,
+    pub folder_load_failure_sender: Sender<(usize, PathBuf)>,
     pub is_loading_folder: bool,
     pub loading_started_at: Instant, // Track when loading started for timeout safety
 
@@ -230,6 +232,12 @@ pub struct ImageViewerApp {
     #[cfg(feature = "notify-watcher")]
     pub watcher: Option<RecommendedWatcher>,
     #[cfg(feature = "notify-watcher")]
+    pub notify_watcher_setup_sender: Sender<(u64, Option<RecommendedWatcher>)>,
+    #[cfg(feature = "notify-watcher")]
+    pub notify_watcher_setup_receiver: Receiver<(u64, Option<RecommendedWatcher>)>,
+    #[cfg(feature = "notify-watcher")]
+    pub notify_watcher_setup_request_id: u64,
+    #[cfg(feature = "notify-watcher")]
     pub fs_event_receiver: Receiver<notify::Result<notify::Event>>,
     #[cfg(feature = "notify-watcher")]
     pub fs_event_sender: Sender<notify::Result<notify::Event>>,
@@ -282,6 +290,8 @@ pub struct ImageViewerApp {
         Sender<super::init_workers::consistency_probe_worker::ConsistencyProbeRequest>,
     pub consistency_probe_rx:
         Receiver<super::init_workers::consistency_probe_worker::ConsistencyProbeResult>,
+    pub current_folder_liveness_probe_pending: Option<PathBuf>,
+    pub current_folder_liveness_reload_if_alive: bool,
 
     // CLIPBOARD (Copy/Cut/Paste)
     pub clipboard: ClipboardManager,

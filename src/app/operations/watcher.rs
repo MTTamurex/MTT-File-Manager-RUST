@@ -32,44 +32,13 @@ impl ImageViewerApp {
                 if entry.probed_at.elapsed() <= WATCHER_FS_PROBE_CACHE_TTL {
                     (entry.file_system, entry.is_usn, true)
                 } else {
-                    let fs_name = crate::infrastructure::windows::get_file_system_for_path(path);
-                    let is_usn = fs_name
-                        .as_deref()
-                        .map(crate::infrastructure::windows::is_usn_filesystem)
-                        .unwrap_or(true); // unknown FS → assume reliable
-                    self.watcher_fs_probe_cache.insert(
-                        dl,
-                        WatcherFsProbeCacheEntry {
-                            file_system: fs_name.clone(),
-                            is_usn,
-                            probed_at: Instant::now(),
-                        },
-                    );
-                    (fs_name, is_usn, false)
+                    self.cached_file_system_for_drive(path, dl)
                 }
             } else {
-                let fs_name = crate::infrastructure::windows::get_file_system_for_path(path);
-                let is_usn = fs_name
-                    .as_deref()
-                    .map(crate::infrastructure::windows::is_usn_filesystem)
-                    .unwrap_or(true); // unknown FS → assume reliable
-                self.watcher_fs_probe_cache.insert(
-                    dl,
-                    WatcherFsProbeCacheEntry {
-                        file_system: fs_name.clone(),
-                        is_usn,
-                        probed_at: Instant::now(),
-                    },
-                );
-                (fs_name, is_usn, false)
+                self.cached_file_system_for_drive(path, dl)
             }
         } else {
-            let fs_name = crate::infrastructure::windows::get_file_system_for_path(path);
-            let is_usn = fs_name
-                .as_deref()
-                .map(crate::infrastructure::windows::is_usn_filesystem)
-                .unwrap_or(true); // unknown FS → assume reliable
-            (fs_name, is_usn, false)
+            (None, false, false)
         };
 
         let fs_probe_ms = fs_probe_start.elapsed().as_millis();
@@ -114,6 +83,42 @@ impl ImageViewerApp {
         (fs_probe_ms, fs_probe_cache_hit, drive_letter)
     }
 
+    fn cached_file_system_for_drive(
+        &mut self,
+        path: &Path,
+        drive_letter: char,
+    ) -> (Option<String>, bool, bool) {
+        let drive_root = format!("{}:\\", drive_letter);
+        let fs_name = self
+            .drive_state
+            .drive_info_cache
+            .get(&drive_root)
+            .and_then(|info| (!info.file_system.is_empty()).then(|| info.file_system.clone()));
+        let is_usn = fs_name
+            .as_deref()
+            .map(crate::infrastructure::windows::is_usn_filesystem)
+            .unwrap_or(false);
+
+        if fs_name.is_some() {
+            self.watcher_fs_probe_cache.insert(
+                drive_letter,
+                WatcherFsProbeCacheEntry {
+                    file_system: fs_name.clone(),
+                    is_usn,
+                    probed_at: Instant::now(),
+                },
+            );
+        } else {
+            self.watcher_fs_probe_cache.remove(&drive_letter);
+            log::debug!(
+                "[WATCHER] Filesystem metadata unavailable in cache for {:?}; using non-blocking fallback probing",
+                path
+            );
+        }
+
+        (fs_name, is_usn, false)
+    }
+
     /// Sets up monitoring for the current folder using per-folder notify-watcher.
     ///
     /// The consistency probe (background worker) provides additional drift detection
@@ -139,7 +144,7 @@ impl ImageViewerApp {
 
         // Use per-folder notify-watcher
         #[cfg(feature = "notify-watcher")]
-        self.setup_notify_watcher();
+        self.queue_notify_watcher_setup();
 
         let total_ms = watch_start.elapsed().as_millis();
         if total_ms > 20 {
@@ -157,22 +162,17 @@ impl ImageViewerApp {
 
     /// Setup legacy notify-based watcher (fallback)
     #[cfg(feature = "notify-watcher")]
-    fn setup_notify_watcher(&mut self) {
+    fn queue_notify_watcher_setup(&mut self) {
         let current_path = self.navigation_state.current_path.clone();
         let mut paths_to_watch = Vec::new();
         let mut seen_paths = HashSet::new();
 
         let mut push_watch_path = |path: String, label: &str| {
-            let path_to_watch = if let Ok(p) = Path::new(&path).canonicalize() {
-                log::debug!("[NOTIFY-WATCHER] Canonicalized {label} path: {:?}", p);
-                p
-            } else {
-                log::warn!("[NOTIFY-WATCHER] Using original {label} path (canonicalize failed)");
-                PathBuf::from(&path)
-            };
+            let path_to_watch = PathBuf::from(&path);
 
             let normalized = normalize_watch_path(&path_to_watch);
             if seen_paths.insert(normalized) {
+                log::debug!("[NOTIFY-WATCHER] Queued {label} path: {:?}", path_to_watch);
                 paths_to_watch.push(path_to_watch);
             }
         };
@@ -187,63 +187,90 @@ impl ImageViewerApp {
             }
         }
 
-        // Drop the previous watcher if it exists
-        if self.watcher.is_some() {
-            log::debug!("[NOTIFY-WATCHER] Dropping previous watcher");
+        if paths_to_watch.is_empty() {
             self.watcher = None;
+            return;
         }
 
-        // Create or recreate the watcher
+        self.notify_watcher_setup_request_id = self.notify_watcher_setup_request_id.wrapping_add(1);
+        let request_id = self.notify_watcher_setup_request_id;
+        let setup_tx = self.notify_watcher_setup_sender.clone();
         let tx = self.fs_event_sender.clone();
-        let ctx_clone = self.ui_ctx.clone();
+        let ctx_for_events = self.ui_ctx.clone();
+        let ctx_for_setup = self.ui_ctx.clone();
 
-        let watcher_result =
-            notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
-                match &res {
-                    Ok(event) => {
-                        log::trace!(
-                            "[NOTIFY-WATCHER] Event received: kind={:?}, paths={:?}",
-                            event.kind,
-                            event.paths
-                        );
+        let spawn_result = std::thread::Builder::new()
+            .name("notify-watcher-setup".to_string())
+            .spawn(move || {
+                let watcher_result =
+                    notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+                        match &res {
+                            Ok(event) => {
+                                log::trace!(
+                                    "[NOTIFY-WATCHER] Event received: kind={:?}, paths={:?}",
+                                    event.kind,
+                                    event.paths
+                                );
+                            }
+                            Err(e) => {
+                                log::error!("[NOTIFY-WATCHER] Event error: {}", e);
+                            }
+                        }
+                        let _ = tx.send(res);
+                        ctx_for_events.request_repaint();
+                    });
+
+                let watcher_to_install = match watcher_result {
+                    Ok(mut watcher) => {
+                        let mut watched_any = false;
+                        for path_to_watch in &paths_to_watch {
+                            match watcher.watch(path_to_watch, RecursiveMode::NonRecursive) {
+                                Ok(_) => {
+                                    watched_any = true;
+                                    log::debug!(
+                                        "[NOTIFY-WATCHER] Successfully watching: {:?}",
+                                        path_to_watch
+                                    );
+                                }
+                                Err(e) => {
+                                    log::error!(
+                                        "[NOTIFY-WATCHER] Failed to watch path: {:?} - Error: {}",
+                                        path_to_watch,
+                                        e
+                                    );
+                                }
+                            }
+                        }
+
+                        watched_any.then_some(watcher)
                     }
                     Err(e) => {
-                        log::error!("[NOTIFY-WATCHER] Event error: {}", e);
+                        log::error!("[NOTIFY-WATCHER] Failed to create watcher: {}", e);
+                        None
                     }
-                }
-                let _ = tx.send(res);
-                ctx_clone.request_repaint();
+                };
+
+                let _ = setup_tx.send((request_id, watcher_to_install));
+                ctx_for_setup.request_repaint();
             });
 
-        match watcher_result {
-            Ok(mut watcher) => {
-                let mut watched_any = false;
-                for path_to_watch in &paths_to_watch {
-                    match watcher.watch(path_to_watch, RecursiveMode::NonRecursive) {
-                        Ok(_) => {
-                            watched_any = true;
-                            log::debug!(
-                                "[NOTIFY-WATCHER] Successfully watching: {:?}",
-                                path_to_watch
-                            );
-                        }
-                        Err(e) => {
-                            log::error!(
-                                "[NOTIFY-WATCHER] Failed to watch path: {:?} - Error: {}",
-                                path_to_watch,
-                                e
-                            );
-                        }
-                    }
-                }
+        if let Err(error) = spawn_result {
+            log::error!("[NOTIFY-WATCHER] Failed to spawn setup thread: {}", error);
+        }
+    }
 
-                if watched_any {
-                    self.watcher = Some(watcher);
-                }
+    #[cfg(feature = "notify-watcher")]
+    pub(crate) fn poll_notify_watcher_setup(&mut self) {
+        while let Ok((request_id, watcher)) = self.notify_watcher_setup_receiver.try_recv() {
+            if request_id != self.notify_watcher_setup_request_id {
+                log::debug!(
+                    "[NOTIFY-WATCHER] Dropping stale watcher setup result request_id={}",
+                    request_id
+                );
+                continue;
             }
-            Err(e) => {
-                log::error!("[NOTIFY-WATCHER] Failed to create watcher: {}", e);
-            }
+
+            self.watcher = watcher;
         }
     }
 }

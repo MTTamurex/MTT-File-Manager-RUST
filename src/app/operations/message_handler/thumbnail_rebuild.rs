@@ -89,23 +89,11 @@ impl ImageViewerApp {
         }
 
         let current_path = PathBuf::from(&self.navigation_state.current_path);
-        let Ok(meta) = std::fs::metadata(&current_path) else {
-            return;
-        };
-        let Ok(modified_time) = meta.modified() else {
-            return;
-        };
-        let Ok(duration) = modified_time.duration_since(std::time::UNIX_EPOCH) else {
-            return;
-        };
-
-        let secs = duration.as_secs();
-        if secs == 0 {
-            return;
+        if let Some(modified) = self.folder_modified_hints.peek(&current_path).copied() {
+            if modified > 0 {
+                self.current_folder_modified_hint = Some((current_path, modified));
+            }
         }
-
-        self.current_folder_modified_hint = Some((current_path.clone(), secs));
-        self.folder_modified_hints.put(current_path, secs);
     }
 
     fn build_sorted_items_snapshot(&self) -> Vec<crate::domain::file_entry::FileEntry> {

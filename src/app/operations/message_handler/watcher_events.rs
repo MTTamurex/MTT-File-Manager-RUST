@@ -287,23 +287,52 @@ impl ImageViewerApp {
     /// worker thread. This covers NTFS/ReFS cases where ReadDirectoryChangesW
     /// does not report deletion of the directory handle being watched.
     pub(crate) fn request_current_folder_liveness_probe(&mut self, reason: &str) {
+        self.request_current_folder_liveness_probe_with_options(reason, false);
+    }
+
+    pub(crate) fn request_current_folder_liveness_probe_reloading_if_alive(
+        &mut self,
+        reason: &str,
+    ) {
+        self.request_current_folder_liveness_probe_with_options(reason, true);
+    }
+
+    fn request_current_folder_liveness_probe_with_options(
+        &mut self,
+        reason: &str,
+        reload_if_alive: bool,
+    ) {
         let active_is_filesystem =
             !self.navigation_state.is_computer_view && !self.navigation_state.is_recycle_bin_view;
         let current_path = PathBuf::from(&self.navigation_state.current_path);
         if active_is_filesystem {
-            let is_onedrive = crate::infrastructure::onedrive::is_onedrive_path(&current_path);
-            let request = ConsistencyProbeRequest {
-                path: current_path.clone(),
-                is_onedrive,
-                ui_signature: 0,
-                show_hidden_files: self.show_hidden_files,
-                mode: ConsistencyProbeMode::PathLiveness,
-                modified_threshold_secs: 0,
-                folder_cover_states: Vec::new(),
-            };
+            let should_send_active_probe =
+                if self.current_folder_liveness_probe_pending.as_ref() == Some(&current_path) {
+                    self.current_folder_liveness_reload_if_alive |= reload_if_alive;
+                    false
+                } else {
+                    self.current_folder_liveness_probe_pending = Some(current_path.clone());
+                    self.current_folder_liveness_reload_if_alive = reload_if_alive;
+                    true
+                };
 
-            if self.consistency_probe_tx.send(request).is_ok() {
-                log::debug!("[FS-WATCH-LIVENESS] Queued current-folder probe: {reason}");
+            if should_send_active_probe {
+                let is_onedrive = crate::infrastructure::onedrive::is_onedrive_path(&current_path);
+                let request = ConsistencyProbeRequest {
+                    path: current_path.clone(),
+                    is_onedrive,
+                    ui_signature: 0,
+                    show_hidden_files: self.show_hidden_files,
+                    mode: ConsistencyProbeMode::PathLiveness,
+                    modified_threshold_secs: 0,
+                    folder_cover_states: Vec::new(),
+                };
+
+                if self.consistency_probe_tx.send(request).is_ok() {
+                    log::debug!("[FS-WATCH-LIVENESS] Queued current-folder probe: {reason}");
+                }
+            } else {
+                log::debug!("[FS-WATCH-LIVENESS] Current-folder probe already pending: {reason}");
             }
         }
 
@@ -337,6 +366,79 @@ impl ImageViewerApp {
         }
     }
 
+    #[cfg(feature = "notify-watcher")]
+    pub(super) fn drain_pending_notify_events_after_folder_vanished(&mut self) {
+        let mut drained = 0usize;
+        while self.fs_event_receiver.try_recv().is_ok() {
+            drained = drained.saturating_add(1);
+        }
+        if drained > 0 {
+            log::debug!(
+                "[FS-WATCH-LIVENESS] Drained {} stale notify event(s) after current folder vanished",
+                drained
+            );
+        }
+    }
+
+    #[cfg(not(feature = "notify-watcher"))]
+    pub(super) fn drain_pending_notify_events_after_folder_vanished(&mut self) {}
+
+    fn handle_current_liveness_probe_result(&mut self, result: ConsistencyProbeResult) -> bool {
+        let current_path = PathBuf::from(&self.navigation_state.current_path);
+        let result_matches_current =
+            Self::normalize_for_match(&result.path) == Self::normalize_for_match(&current_path);
+
+        if !result_matches_current {
+            if result.path_vanished
+                && self.navigate_inactive_panel_to_parent_after_vanished(&result.path)
+            {
+                self.ui_ctx.request_repaint();
+            }
+            return true;
+        }
+
+        let reload_if_alive = self.current_folder_liveness_reload_if_alive;
+        self.current_folder_liveness_probe_pending = None;
+        self.current_folder_liveness_reload_if_alive = false;
+
+        if result.path_vanished {
+            log::warn!(
+                "[FS-WATCH-FALLBACK] Current folder vanished: {:?} - navigating up",
+                result.path
+            );
+            self.drain_pending_notify_events_after_folder_vanished();
+            if let Some(parent) = result.path.parent() {
+                let parent_path = parent.to_path_buf();
+                self.reload_inactive_panel_if_matches(&[&parent_path]);
+            }
+            self.navigate_inactive_panel_to_parent_after_vanished(&result.path);
+            self.navigate_to_nearest_valid_ancestor();
+            return true;
+        }
+
+        if reload_if_alive
+            && !self.is_loading_folder
+            && self.file_operation_state.file_ops_in_progress == 0
+            && !self.navigation_state.is_computer_view
+            && !self.navigation_state.is_recycle_bin_view
+        {
+            log::info!(
+                "[FS-WATCH-LIVENESS] Current folder still exists after remove event; reloading asynchronously: {:?}",
+                result.path
+            );
+            self.directory_dirty_registry.mark_dirty(&current_path);
+            self.directory_cache.invalidate(&current_path);
+            if let Some(di) = &self.directory_index {
+                let _ = di.invalidate(&current_path);
+            }
+            self.loaded_path.clear();
+            self.reload_current_folder_preserving_icon_cache();
+            self.ui_ctx.request_repaint();
+        }
+
+        false
+    }
+
     /// Processes results from the async consistency probe worker.
     /// Handles drift detection, cache invalidation, stale covers, and folder-vanished scenarios.
     fn process_consistency_probe_results(
@@ -344,6 +446,13 @@ impl ImageViewerApp {
         pending_disk_cache_invalidations: &mut Vec<PathBuf>,
     ) {
         while let Ok(result) = self.consistency_probe_rx.try_recv() {
+            if result.mode == ConsistencyProbeMode::PathLiveness {
+                if self.handle_current_liveness_probe_result(result) {
+                    continue;
+                }
+                return;
+            }
+
             let current_path = PathBuf::from(&self.navigation_state.current_path);
             let result_matches_current =
                 Self::normalize_for_match(&result.path) == Self::normalize_for_match(&current_path);
@@ -505,6 +614,9 @@ impl ImageViewerApp {
         let mut pending_disk_cache_invalidations: Vec<PathBuf> = Vec::new();
 
         let drive_events_done = Instant::now();
+
+        #[cfg(feature = "notify-watcher")]
+        self.poll_notify_watcher_setup();
 
         #[cfg(feature = "notify-watcher")]
         self.process_legacy_notify_events(

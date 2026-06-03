@@ -259,33 +259,17 @@ impl ImageViewerApp {
                     }
                     Err(e) => {
                         log::debug!(
-                            "[TAB] Search service check_paths_modified failed, falling back to mtime: {}",
+                            "[TAB] Search service check_paths_modified failed; skipping UI-thread mtime fallback: {}",
                             e
                         );
-                        // Fall through to mtime check
-                        if let Some(cached_at_ms) = self.directory_cache.cached_at_ms(&tab_path) {
-                            let dir_mtime_ms = std::fs::metadata(&tab_path)
-                                .ok()
-                                .and_then(|m| m.modified().ok())
-                                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                                .map(|d| d.as_millis() as u64)
-                                .unwrap_or(0);
-                            dir_mtime_ms > cached_at_ms
-                        } else {
-                            false
-                        }
+                        false
                     }
                 }
-            } else if let Some(cached_at_ms) = self.directory_cache.cached_at_ms(&tab_path) {
-                // Fallback: compare directory mtime against cache timestamp.
-                // Skip for OneDrive paths where metadata calls may block on cloud hydration.
-                let dir_mtime_ms = std::fs::metadata(&tab_path)
-                    .ok()
-                    .and_then(|m| m.modified().ok())
-                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                    .map(|d| d.as_millis() as u64)
-                    .unwrap_or(0);
-                dir_mtime_ms > cached_at_ms
+            } else if self.directory_cache.cached_at_ms(&tab_path).is_some() {
+                // Never call std::fs::metadata() on the UI thread here. If the
+                // tab path was deleted or the disk is waking up, metadata can
+                // stall the whole app; watcher/consistency probes will catch up.
+                false
             } else {
                 // No cache entry at all — load_folder will handle it
                 false

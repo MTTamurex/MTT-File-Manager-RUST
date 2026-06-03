@@ -101,6 +101,8 @@ impl ImageViewerApp {
         let AppBootstrap {
             file_entry_sender,
             file_entry_receiver,
+            folder_load_failure_sender,
+            folder_load_failure_receiver,
             items_rebuild_sender,
             items_rebuild_receiver,
             disk_cache,
@@ -213,6 +215,10 @@ impl ImageViewerApp {
         let (shell_menu_req_tx, shell_menu_res_rx) =
             crate::infrastructure::shell_menu_worker::start_shell_menu_worker();
 
+        #[cfg(feature = "notify-watcher")]
+        let (notify_watcher_setup_sender, notify_watcher_setup_receiver) =
+            std::sync::mpsc::channel();
+
         // Create tab manager with the initial path
         let mut tab_manager = if is_computer_view_initial {
             crate::tabs::TabManager::new()
@@ -241,6 +247,8 @@ impl ImageViewerApp {
             // Async loading
             file_entry_receiver,
             file_entry_sender,
+            folder_load_failure_receiver,
+            folder_load_failure_sender,
             is_loading_folder: false,
             loading_started_at: Instant::now(),
             items_rebuild_sender,
@@ -340,6 +348,12 @@ impl ImageViewerApp {
             #[cfg(feature = "notify-watcher")]
             watcher: None,
             #[cfg(feature = "notify-watcher")]
+            notify_watcher_setup_sender,
+            #[cfg(feature = "notify-watcher")]
+            notify_watcher_setup_receiver,
+            #[cfg(feature = "notify-watcher")]
+            notify_watcher_setup_request_id: 0,
+            #[cfg(feature = "notify-watcher")]
             fs_event_receiver: fs_rx,
             #[cfg(feature = "notify-watcher")]
             fs_event_sender: fs_tx,
@@ -361,6 +375,8 @@ impl ImageViewerApp {
             watcher_fs_probe_cache: std::collections::HashMap::new(),
             consistency_probe_tx,
             consistency_probe_rx,
+            current_folder_liveness_probe_pending: None,
+            current_folder_liveness_reload_if_alive: false,
 
             // CLIPBOARD
             clipboard: ClipboardManager::new(),

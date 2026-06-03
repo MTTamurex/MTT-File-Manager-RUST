@@ -1,5 +1,4 @@
 use crate::app::state::ImageViewerApp;
-use crate::domain::file_entry::FileEntry;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -338,7 +337,6 @@ impl ImageViewerApp {
 
     pub(super) fn try_add_created_path_to_ui(&mut self, path: &Path) -> bool {
         let cleaned = Self::clean_path(path);
-        let cleaned_norm = Self::normalize_for_match(&cleaned);
 
         if crate::infrastructure::onedrive::is_onedrive_path(&cleaned)
             || crate::infrastructure::io_priority::is_network_or_virtual(&cleaned)
@@ -364,29 +362,11 @@ impl ImageViewerApp {
 
         self.enqueue_disk_cache_invalidations_forced(vec![cleaned.clone()]);
 
-        let is_dir = match std::fs::metadata(&cleaned) {
-            Ok(metadata) => metadata.is_dir(),
-            Err(_) => return false,
-        };
-
-        let new_entry = FileEntry::from_path(cleaned.clone(), is_dir);
-
-        if let Some(idx) = self
-            .all_items
-            .iter()
-            .position(|item| Self::path_matches_normalized(&item.path, &cleaned_norm))
-        {
-            self.all_items_mut()[idx] = new_entry;
-        } else {
-            self.all_items_mut().push(new_entry);
-        }
-
-        self.filter_items();
-        if is_dir {
-            self.request_folder_scan(cleaned.clone());
-        }
-        self.ui_ctx.request_repaint();
-        true
+        log::debug!(
+            "[FS-WATCH] Deferring created-path UI insert to async reload: {:?}",
+            cleaned
+        );
+        false
     }
 
     pub(super) fn try_apply_rename_to_ui(&mut self, old_path: &Path, new_path: &Path) -> bool {
@@ -784,7 +764,7 @@ impl ImageViewerApp {
         }
 
         log::info!(
-            "[MTIME-CHECK] Processing {} due folder mtime rechecks (pending={}, cooldown_ok)",
+            "[MTIME-CHECK] Processing {} due folder mtime rechecks via async folder reload (pending={}, cooldown_ok)",
             due_entries.len(),
             self.pending_folder_mtime_recheck.len()
         );
@@ -792,105 +772,24 @@ impl ImageViewerApp {
         self.pending_folder_mtime_recheck
             .retain(|(_, recheck_at)| now < *recheck_at);
 
-        let mut folder_mtime_updated = false;
-
-        for folder_path in &due_entries {
-            let new_modified = match std::fs::metadata(folder_path) {
-                Ok(meta) if meta.is_dir() => meta
-                    .modified()
-                    .ok()
-                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                    .map(|d| d.as_secs())
-                    .unwrap_or(0),
-                Ok(_) => {
-                    log::info!(
-                        "[MTIME-CHECK] Path is not a directory, skipping: {:?}",
-                        folder_path
-                    );
-                    continue;
-                }
-                Err(e) => {
-                    log::info!(
-                        "[MTIME-CHECK] metadata() failed for {:?}: {}",
-                        folder_path,
-                        e
-                    );
-                    continue;
-                }
-            };
-
-            if new_modified == 0 {
-                log::info!(
-                    "[MTIME-CHECK] mtime=0 for {:?}, skipping",
-                    folder_path.file_name().unwrap_or_default()
-                );
-                continue;
-            }
-
-            let folder_norm = Self::normalize_for_match(folder_path);
-            let mut this_updated = false;
-
-            let old_modified = self
-                .all_items
-                .iter()
-                .find(|item| {
-                    item.is_dir
-                        && (item.path == *folder_path
-                            || Self::normalize_for_match(&item.path) == folder_norm)
-                })
-                .map(|item| item.modified)
-                .unwrap_or(0);
-
-            if old_modified == new_modified {
-                log::info!(
-                    "[MTIME-CHECK] mtime unchanged for {:?}: {} == {}",
-                    folder_path.file_name().unwrap_or_default(),
-                    old_modified,
-                    new_modified
-                );
-                continue;
-            }
-
-            for item in self.all_items_mut().iter_mut() {
-                if item.is_dir
-                    && (item.path == *folder_path
-                        || Self::normalize_for_match(&item.path) == folder_norm)
-                {
-                    item.modified = new_modified;
-                    this_updated = true;
-                    break;
-                }
-            }
-
-            if this_updated {
-                let items = Arc::make_mut(&mut self.items);
-                for item in items.iter_mut() {
-                    if item.is_dir
-                        && (item.path == *folder_path
-                            || Self::normalize_for_match(&item.path) == folder_norm)
-                    {
-                        item.modified = new_modified;
-                        break;
-                    }
-                }
-                folder_mtime_updated = true;
-                log::info!(
-                    "[MTIME-CHECK] Updated folder mtime: {:?} {} → {}",
-                    folder_path.file_name().unwrap_or_default(),
-                    old_modified,
-                    new_modified
-                );
-            }
-        }
-
-        if folder_mtime_updated {
-            self.sort_items();
-            self.ui_ctx.request_repaint();
-            self.last_folder_mtime_sort = now;
-            log::info!("[MTIME-CHECK] Re-sorted items after folder mtime update");
-
+        if !due_entries.is_empty()
+            && !self.is_loading_folder
+            && !self.navigation_state.is_computer_view
+            && !self.navigation_state.is_recycle_bin_view
+        {
             let current_path_buf = PathBuf::from(&self.navigation_state.current_path);
+            self.directory_dirty_registry.mark_dirty(&current_path_buf);
             self.directory_cache.invalidate(&current_path_buf);
+            if let Some(di) = &self.directory_index {
+                let _ = di.invalidate(&current_path_buf);
+            }
+            self.loaded_path.clear();
+            self.reload_current_folder_preserving_icon_cache();
+            self.last_folder_mtime_sort = now;
+            self.ui_ctx.request_repaint();
+            log::info!(
+                "[MTIME-CHECK] Reloaded current folder asynchronously after deferred mtime event"
+            );
         }
 
         if !self.pending_folder_mtime_recheck.is_empty() {

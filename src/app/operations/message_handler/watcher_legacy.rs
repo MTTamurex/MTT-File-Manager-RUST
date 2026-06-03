@@ -51,6 +51,14 @@ fn notify_event_removes_current_folder(event: &notify::Event, current_path_norm:
 }
 
 #[cfg(feature = "notify-watcher")]
+fn watcher_path_is_inside_current_folder(path: &std::path::Path, current_path_norm: &str) -> bool {
+    let cleaned = ImageViewerApp::clean_path(path);
+    let cleaned_norm = ImageViewerApp::normalize_for_match(&cleaned);
+    let current_prefix = format!("{}\\", current_path_norm.trim_end_matches(['\\', '/']));
+    cleaned_norm.starts_with(&current_prefix)
+}
+
+#[cfg(feature = "notify-watcher")]
 fn notify_error_implies_current_folder_removed(
     error: &notify::Error,
     current_path_norm: &str,
@@ -82,6 +90,7 @@ impl ImageViewerApp {
         log::warn!("{}: {}", reason, self.navigation_state.current_path);
         self.pending_auto_reload = false;
         self.skip_next_auto_reload = false;
+        self.drain_pending_notify_events_after_folder_vanished();
         self.navigate_to_nearest_valid_ancestor();
     }
 
@@ -134,6 +143,23 @@ impl ImageViewerApp {
                     let is_name_change = notify_event_is_name_change(&evt);
 
                     if matches!(evt.kind, notify::EventKind::Remove(_)) {
+                        if !current_folder_removed
+                            && self.file_operation_state.file_ops_in_progress == 0
+                            && evt.paths.iter().any(|path| {
+                                !self.should_ignore_watcher_path(
+                                    path,
+                                    internal_cache_root_norm,
+                                    internal_cache_root_prefix,
+                                ) && watcher_path_is_inside_current_folder(path, current_path_norm)
+                            })
+                        {
+                            self.request_current_folder_liveness_probe_reloading_if_alive(
+                                "remove event inside current folder",
+                            );
+                            self.ui_ctx.request_repaint();
+                            return;
+                        }
+
                         batched_remove_events += 1;
 
                         for path in &evt.paths {

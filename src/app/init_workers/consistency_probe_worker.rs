@@ -27,6 +27,7 @@ pub struct ConsistencyProbeRequest {
 
 pub struct ConsistencyProbeResult {
     pub path: PathBuf,
+    pub mode: ConsistencyProbeMode,
     pub disk_signature: u64,
     pub path_vanished: bool,
     /// Folder paths whose effective folder cover changed (None->Some, Some->None, Some->Some(new)).
@@ -82,16 +83,16 @@ pub fn spawn_consistency_probe_worker(
                 let ui_signature = latest.ui_signature;
 
                 if latest.mode == ConsistencyProbeMode::PathLiveness {
-                    if directory_is_confirmed_gone(path.as_path()) {
-                        let _ = res_tx.send(ConsistencyProbeResult {
-                            path,
-                            disk_signature: 0,
-                            path_vanished: true,
-                            changed_folder_covers: Vec::new(),
-                            changed_folder_contents: Vec::new(),
-                        });
-                        ctx.request_repaint();
-                    }
+                    let path_vanished = directory_is_confirmed_gone(path.as_path());
+                    let _ = res_tx.send(ConsistencyProbeResult {
+                        path,
+                        mode: latest.mode,
+                        disk_signature: 0,
+                        path_vanished,
+                        changed_folder_covers: Vec::new(),
+                        changed_folder_contents: Vec::new(),
+                    });
+                    ctx.request_repaint();
                     continue;
                 }
 
@@ -106,6 +107,7 @@ pub fn spawn_consistency_probe_worker(
                         if directory_is_confirmed_gone(path.as_path()) {
                             let _ = res_tx.send(ConsistencyProbeResult {
                                 path,
+                                mode: latest.mode,
                                 disk_signature: 0,
                                 path_vanished: true,
                                 changed_folder_covers: Vec::new(),
@@ -195,6 +197,7 @@ pub fn spawn_consistency_probe_worker(
                 if signature_changed || has_cover_changes || has_folder_content_changes {
                     let _ = res_tx.send(ConsistencyProbeResult {
                         path,
+                        mode: latest.mode,
                         disk_signature,
                         path_vanished: false,
                         changed_folder_covers,

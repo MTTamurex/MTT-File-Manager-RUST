@@ -30,6 +30,7 @@ pub(super) fn run_tier3_fallback(
     batch: &mut Vec<FileEntry>,
     all_entries_disk: &mut Vec<FileEntry>,
     file_entry_sender: &Sender<(usize, Vec<FileEntry>)>,
+    folder_load_failure_sender: &Sender<(usize, PathBuf)>,
     ctx: &egui::Context,
     _disk_cache: &Arc<ThumbnailDiskCache>,
     app_state_db: &Arc<AppStateDb>,
@@ -303,6 +304,16 @@ pub(super) fn run_tier3_fallback(
                 }
             }
             let _ = FindClose(handle);
+        } else {
+            let base_path_buf = PathBuf::from(base_path);
+            if !crate::infrastructure::onedrive::fast_is_dir(&base_path_buf) {
+                log::warn!(
+                    "[FOLDER-LOADING] Directory vanished during load: {:?}",
+                    base_path_buf
+                );
+                let _ = folder_load_failure_sender.send((my_gen, base_path_buf));
+                ctx.request_repaint();
+            }
         }
     }
 
