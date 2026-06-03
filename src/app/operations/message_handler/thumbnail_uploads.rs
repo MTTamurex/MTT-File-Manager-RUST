@@ -119,7 +119,11 @@ impl ImageViewerApp {
         // by OS paging, not by actual rendering load.  A generous budget lets us
         // drain the worker channel and queue items for upload faster.
         let incoming_budget = if is_burst {
-            Duration::from_millis(8)
+            if is_opengl {
+                Duration::from_millis(4)
+            } else {
+                Duration::from_millis(8)
+            }
         } else if frame_pressure_ms > CRITICAL_FRAME_TIME_MS {
             Duration::from_millis(MIN_INCOMING_THUMBNAIL_BUDGET_MS)
         } else {
@@ -157,7 +161,11 @@ impl ImageViewerApp {
         // GPU upload work across more frames and prevent frame-time spikes.
         // During burst mode, skip the throttle — we want to fill the queue fast.
         let effective_incoming_cap = if is_burst {
-            MAX_INCOMING_THUMBNAIL_MSGS_PER_FRAME
+            if is_opengl {
+                48
+            } else {
+                MAX_INCOMING_THUMBNAIL_MSGS_PER_FRAME
+            }
         } else if self.pending_thumbnails.len() > dynamic_pending_limit / 2 {
             48
         } else {
@@ -389,7 +397,7 @@ impl ImageViewerApp {
 
         let open_tabs = self.tab_manager.count().max(1);
 
-        let freeze_cache_retune = is_opengl && is_burst && is_scrolling;
+        let freeze_cache_retune = is_opengl && is_burst;
         if !freeze_cache_retune
             && self.last_texture_cache_retune.elapsed()
                 >= Duration::from_millis(TEXTURE_CACHE_RETUNE_INTERVAL_MS)
@@ -491,7 +499,7 @@ impl ImageViewerApp {
                 if is_scrolling {
                     2
                 } else {
-                    8
+                    4
                 }
             } else {
                 48
@@ -512,7 +520,7 @@ impl ImageViewerApp {
             }
         } else if is_scrolling {
             if is_opengl {
-                3
+                2
             } else {
                 6
             }
@@ -539,7 +547,7 @@ impl ImageViewerApp {
                         if is_scrolling {
                             2.0
                         } else {
-                            12.0
+                            6.0
                         }
                     } else {
                         64.0
@@ -606,7 +614,7 @@ impl ImageViewerApp {
                 if is_scrolling {
                     3.0
                 } else {
-                    8.0
+                    5.0
                 }
             } else {
                 16.0
@@ -1047,7 +1055,7 @@ impl ImageViewerApp {
         let max_folder_uploads: usize = if is_burst && is_opengl && is_scrolling {
             1
         } else if is_burst && is_opengl {
-            3
+            2
         } else if is_performance_critical {
             if is_opengl {
                 1
@@ -1076,7 +1084,7 @@ impl ImageViewerApp {
         let budget = Duration::from_millis(if is_burst && is_opengl && is_scrolling {
             2
         } else if is_burst && is_opengl {
-            3
+            2
         } else if is_performance_critical {
             2
         } else if is_opengl && is_scrolling {
