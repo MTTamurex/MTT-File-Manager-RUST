@@ -331,9 +331,10 @@ pub fn render_toolbar(
                 action = Some(ToolbarAction::Search(search_query.clone()));
             }
 
+            let search_escape_pressed = search_ui.input(|i| i.key_pressed(egui::Key::Escape));
             if has_text
-                && text_resp.has_focus()
-                && search_ui.input(|i| i.key_pressed(egui::Key::Escape))
+                && search_escape_pressed
+                && (text_resp.has_focus() || text_resp.lost_focus())
             {
                 search_query.clear();
                 action = Some(ToolbarAction::Search(String::new()));
