@@ -268,7 +268,7 @@ settings:
   theme_apply_immediately: "As alterações de tema são aplicadas imediatamente."
   show_recycle_bin: "Mostrar Lixeira no Acesso Rápido"
   backend_title: "Backend Gráfico"
-  backend_description: "Selecione o backend de renderização gráfica utilizado pelo aplicativo."
+  backend_description: "Selecione o backend de renderização gráfica. O modo Auto usa Vulkan por padrão e tenta fallback para OpenGL/DX12 quando necessário."
   backend_active: "Backend ativo:"
   backend_select: "Backend preferido:"
   backend_restart_warning: "⚠ Alterações no backend gráfico requerem reiniciar o aplicativo para entrar em vigor."

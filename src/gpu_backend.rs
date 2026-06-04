@@ -17,7 +17,7 @@ pub(crate) fn parse_gpu_backend_preference(pref: Option<&str>) -> wgpu::Backends
 
 #[cfg(target_os = "windows")]
 fn auto_gpu_backends() -> wgpu::Backends {
-    wgpu::Backends::DX12 | wgpu::Backends::VULKAN | wgpu::Backends::GL
+    wgpu::Backends::VULKAN | wgpu::Backends::GL | wgpu::Backends::DX12
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -45,9 +45,9 @@ pub(crate) fn adapter_selector(
 
 #[cfg(target_os = "windows")]
 const AUTO_BACKEND_PRIORITY: &[wgpu::Backend] = &[
-    wgpu::Backend::Dx12,
     wgpu::Backend::Vulkan,
     wgpu::Backend::Gl,
+    wgpu::Backend::Dx12,
 ];
 
 #[cfg(target_os = "windows")]
