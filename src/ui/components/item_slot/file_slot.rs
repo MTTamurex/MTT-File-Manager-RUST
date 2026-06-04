@@ -33,12 +33,12 @@ pub(super) fn render_file_slot<O: ItemSlotOperations>(
         let display_effective_size_px = ((display_request_size_px as f32) * ppp).ceil() as u32;
         let display_bucket =
             crate::workers::thumbnail::processing::get_bucket_size(display_effective_size_px);
-        let min_bucket = if ctx.low_res_thumbnails_while_scrolling && ctx.is_scrolling {
-            256
+        let opengl_scroll_lod = ctx.low_res_thumbnails_while_scrolling && ctx.is_scrolling;
+        let desired_thumbnail_bucket = if opengl_scroll_lod {
+            display_bucket.min(256)
         } else {
-            crate::ui::theme::MIN_GRID_THUMBNAIL_BUCKET
+            display_bucket.max(crate::ui::theme::MIN_GRID_THUMBNAIL_BUCKET)
         };
-        let desired_thumbnail_bucket = display_bucket.max(min_bucket);
         let min_effective_size_for_bucket = match desired_thumbnail_bucket {
             0..=128 => 1,
             129..=256 => 129,
@@ -47,7 +47,11 @@ pub(super) fn render_file_slot<O: ItemSlotOperations>(
         };
         let min_request_size_for_bucket =
             ((min_effective_size_for_bucket as f32) / ppp).ceil() as u32;
-        let request_size_px = display_request_size_px.max(min_request_size_for_bucket);
+        let request_size_px = if opengl_scroll_lod {
+            min_request_size_for_bucket
+        } else {
+            display_request_size_px.max(min_request_size_for_bucket)
+        };
         let has_texture = ctx.texture_cache.peek(&item.path).is_some();
         let attempted_bucket = ctx.attempted_thumbnail_bucket.get(&item.path).copied();
         let needs_bucket_refresh = match attempted_bucket {
@@ -60,7 +64,7 @@ pub(super) fn render_file_slot<O: ItemSlotOperations>(
 
         const MAX_THUMBNAIL_REQUESTS_PER_FRAME: usize = 24;
         const MAX_OPENGL_SCROLL_THUMBNAIL_REQUESTS_PER_FRAME: usize = 12;
-        let max_thumbnail_requests = if ctx.low_res_thumbnails_while_scrolling && ctx.is_scrolling {
+        let max_thumbnail_requests = if opengl_scroll_lod {
             MAX_OPENGL_SCROLL_THUMBNAIL_REQUESTS_PER_FRAME
         } else {
             MAX_THUMBNAIL_REQUESTS_PER_FRAME

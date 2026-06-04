@@ -57,19 +57,23 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
     let display_effective_px = (folder_w.max(1.0) * ppp).ceil() as u32;
     let display_preview_bucket =
         crate::workers::thumbnail::processing::get_bucket_size(display_effective_px);
-    let min_preview_bucket = if ctx.low_res_thumbnails_while_scrolling && ctx.is_scrolling {
-        256
+    let opengl_scroll_lod = ctx.low_res_thumbnails_while_scrolling && ctx.is_scrolling;
+    let desired_preview_bucket = if opengl_scroll_lod {
+        display_preview_bucket.min(256)
     } else {
-        crate::ui::theme::MIN_GRID_THUMBNAIL_BUCKET
+        display_preview_bucket.max(crate::ui::theme::MIN_GRID_THUMBNAIL_BUCKET)
     };
-    let desired_preview_bucket = display_preview_bucket.max(min_preview_bucket);
     let min_effective_size_for_bucket = match desired_preview_bucket {
         0..=128 => 1,
         129..=256 => 129,
         257..=512 => 257,
         _ => 513,
     };
-    let preview_request_size_px = display_effective_px.max(min_effective_size_for_bucket);
+    let preview_request_size_px = if opengl_scroll_lod {
+        min_effective_size_for_bucket
+    } else {
+        display_effective_px.max(min_effective_size_for_bucket)
+    };
     let text_height = 18.0;
     let content_h = folder_h + text_height;
     let vertical_margin = ((available_h - content_h) / 2.0).max(2.0);
@@ -118,8 +122,14 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
             native_preview.is_some_and(|tex| (tex.size()[0] as u32) < desired_preview_bucket);
 
         if needs_bucket_refresh && ctx.allow_thumbnail_requests && !is_loading {
-            // During OpenGL scroll, skip folder preview requests to eliminate stutter.
-            if !(ctx.low_res_thumbnails_while_scrolling && ctx.is_scrolling) {
+            const MAX_OPENGL_SCROLL_FOLDER_PREVIEW_REQUESTS_PER_FRAME: usize = 3;
+            if !opengl_scroll_lod
+                || *ctx.folder_preview_requests_this_frame
+                    < MAX_OPENGL_SCROLL_FOLDER_PREVIEW_REQUESTS_PER_FRAME
+            {
+                if opengl_scroll_lod {
+                    *ctx.folder_preview_requests_this_frame += 1;
+                }
                 ops.request_folder_preview_load(item.path.clone(), preview_request_size_px);
             }
         }
@@ -162,9 +172,15 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
             } else {
                 // NORMAL FOLDER: Always request our custom composed preview.
                 // Worker produces back+front+thumbnail (or back+front only if no media).
-                // During OpenGL scroll, skip requests to eliminate stutter.
                 if ctx.allow_thumbnail_requests && !is_loading {
-                    if !(ctx.low_res_thumbnails_while_scrolling && ctx.is_scrolling) {
+                    const MAX_OPENGL_SCROLL_FOLDER_PREVIEW_REQUESTS_PER_FRAME: usize = 3;
+                    if !opengl_scroll_lod
+                        || *ctx.folder_preview_requests_this_frame
+                            < MAX_OPENGL_SCROLL_FOLDER_PREVIEW_REQUESTS_PER_FRAME
+                    {
+                        if opengl_scroll_lod {
+                            *ctx.folder_preview_requests_this_frame += 1;
+                        }
                         ops.request_folder_preview_load(item.path.clone(), preview_request_size_px);
                     }
                 }

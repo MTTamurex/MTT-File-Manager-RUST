@@ -29,6 +29,7 @@ impl ImageViewerApp {
         let mut pending_icon_loads: Vec<std::path::PathBuf> = Vec::new();
         let mut pending_rename: Option<usize> = None;
         let mut thumbnail_requests_counter: usize = 0;
+        let mut folder_preview_requests_counter: usize = 0;
 
         // Rename text needs to be handled separately
         let mut renaming_text_clone = if is_renaming {
@@ -69,6 +70,7 @@ impl ImageViewerApp {
                 low_res_thumbnails_while_scrolling: false,
                 allow_thumbnail_requests: true,
                 thumbnail_requests_this_frame: &mut thumbnail_requests_counter,
+                folder_preview_requests_this_frame: &mut folder_preview_requests_counter,
             };
 
             // Create simple ops struct that collects operations

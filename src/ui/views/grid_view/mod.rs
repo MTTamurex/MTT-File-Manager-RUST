@@ -203,6 +203,8 @@ pub struct GridViewContext<'a> {
     pub low_res_thumbnails_while_scrolling: bool,
     /// Per-frame counter to rate-limit thumbnail requests on folder entry
     pub thumbnail_requests_this_frame: usize,
+    /// Per-frame counter to rate-limit heavier folder preview requests
+    pub folder_preview_requests_this_frame: usize,
     /// Folder generation counter — scopes scroll state to current folder
     pub generation: usize,
 }

@@ -317,6 +317,7 @@ impl ImageViewerApp {
             frame_time_peak_ms: self.frame_time_peak_ms,
             low_res_thumbnails_while_scrolling,
             thumbnail_requests_this_frame: 0,
+            folder_preview_requests_this_frame: 0,
             generation: self.generation,
         };
 

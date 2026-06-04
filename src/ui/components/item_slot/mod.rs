@@ -107,6 +107,8 @@ pub struct ItemSlotContext<'a> {
     pub allow_thumbnail_requests: bool,
     /// Per-frame cap to prevent burst of thumbnail requests on folder entry
     pub thumbnail_requests_this_frame: &'a mut usize,
+    /// Per-frame cap for heavier folder preview requests
+    pub folder_preview_requests_this_frame: &'a mut usize,
 }
 
 /// Renders an item slot for grid view
