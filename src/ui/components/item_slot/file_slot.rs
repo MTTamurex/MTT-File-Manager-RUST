@@ -59,6 +59,13 @@ pub(super) fn render_file_slot<O: ItemSlotOperations>(
         let is_pending_upload = ctx.pending_upload_set.contains(&item.path);
 
         const MAX_THUMBNAIL_REQUESTS_PER_FRAME: usize = 24;
+        const MAX_OPENGL_SCROLL_THUMBNAIL_REQUESTS_PER_FRAME: usize = 12;
+        let max_thumbnail_requests = if ctx.low_res_thumbnails_while_scrolling && ctx.is_scrolling {
+            MAX_OPENGL_SCROLL_THUMBNAIL_REQUESTS_PER_FRAME
+        } else {
+            MAX_THUMBNAIL_REQUESTS_PER_FRAME
+        };
+
         // Allow a request whenever the texture is missing or the cached bucket
         // is too small. Per-path cooldown in `should_throttle_thumbnail_request`
         // (2s) prevents the upload->evict->re-request feedback loop after the
@@ -69,7 +76,7 @@ pub(super) fn render_file_slot<O: ItemSlotOperations>(
             && !is_failed
             && !is_pending_upload
             && ctx.loading_set.len() < crate::ui::cache::MAX_THUMBNAIL_LOADING_SET_ITEMS
-            && *ctx.thumbnail_requests_this_frame < MAX_THUMBNAIL_REQUESTS_PER_FRAME
+            && *ctx.thumbnail_requests_this_frame < max_thumbnail_requests
         {
             // MAX_CONCURRENT_LOADS (increased for performance - stale entries are cleaned by grid_view)
             *ctx.thumbnail_requests_this_frame += 1;

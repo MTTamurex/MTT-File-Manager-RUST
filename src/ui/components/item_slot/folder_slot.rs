@@ -118,7 +118,10 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
             native_preview.is_some_and(|tex| (tex.size()[0] as u32) < desired_preview_bucket);
 
         if needs_bucket_refresh && ctx.allow_thumbnail_requests && !is_loading {
-            ops.request_folder_preview_load(item.path.clone(), preview_request_size_px);
+            // During OpenGL scroll, skip folder preview requests to eliminate stutter.
+            if !(ctx.low_res_thumbnails_while_scrolling && ctx.is_scrolling) {
+                ops.request_folder_preview_load(item.path.clone(), preview_request_size_px);
+            }
         }
 
         if let Some(tex) = native_preview {
@@ -159,8 +162,11 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
             } else {
                 // NORMAL FOLDER: Always request our custom composed preview.
                 // Worker produces back+front+thumbnail (or back+front only if no media).
+                // During OpenGL scroll, skip requests to eliminate stutter.
                 if ctx.allow_thumbnail_requests && !is_loading {
-                    ops.request_folder_preview_load(item.path.clone(), preview_request_size_px);
+                    if !(ctx.low_res_thumbnails_while_scrolling && ctx.is_scrolling) {
+                        ops.request_folder_preview_load(item.path.clone(), preview_request_size_px);
+                    }
                 }
 
                 // While preview is loading: show generic folder icon as placeholder.

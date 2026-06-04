@@ -115,6 +115,7 @@ impl ImageViewerApp {
         let is_burst = self.is_in_restore_burst();
         let is_opengl = self.is_opengl_backend();
         let frame_pressure_ms = live_frame_pressure_ms(self);
+        let is_scrolling = self.last_scroll_time.elapsed() < Duration::from_millis(180);
         // During burst, ignore frame pressure for intake — the slow frames are caused
         // by OS paging, not by actual rendering load.  A generous budget lets us
         // drain the worker channel and queue items for upload faster.
@@ -132,8 +133,8 @@ impl ImageViewerApp {
         let incoming_start = Instant::now();
         let mut not_found_failures: Vec<PathBuf> = Vec::new();
         let mut successful_thumb_paths: Vec<PathBuf> = Vec::new();
-        let eviction_visible = self.visible_grid_paths_snapshot();
 
+        let eviction_visible = self.visible_grid_paths_snapshot();
         let visible_texture_keep = self.current_dynamic_texture_keep_count();
         if let Some(visible_paths) = eviction_visible.as_ref() {
             self.cache_manager.promote_visible(visible_paths);
@@ -160,7 +161,9 @@ impl ImageViewerApp {
         // Reduce intake when pending queue is already backlogged to spread
         // GPU upload work across more frames and prevent frame-time spikes.
         // During burst mode, skip the throttle — we want to fill the queue fast.
-        let effective_incoming_cap = if is_burst {
+        let effective_incoming_cap = if is_opengl && is_scrolling {
+            24
+        } else if is_burst {
             if is_opengl {
                 48
             } else {
@@ -388,7 +391,6 @@ impl ImageViewerApp {
         // With smooth visual lerp enabled, the grid can still be moving after the
         // last input event; releasing heavy thumbnail work too early causes
         // intermittent frame drops in the middle of scroll sequences.
-        let is_scrolling = self.last_scroll_time.elapsed() < Duration::from_millis(180);
         let is_video_playing = self.is_video_playing_docked();
         // During burst, suppress pressure flags so the upload loop doesn't defer
         // off-screen items or reduce visible-only mode.
@@ -532,7 +534,7 @@ impl ImageViewerApp {
             }
         } else {
             if is_opengl {
-                4
+                8
             } else {
                 12
             }
@@ -547,13 +549,13 @@ impl ImageViewerApp {
                         if is_scrolling {
                             2.0
                         } else {
-                            6.0
+                            12.0
                         }
                     } else {
                         64.0
                     }
                 } else {
-                    20.0
+                    16.0
                 },
             ) as usize;
 
@@ -608,11 +610,9 @@ impl ImageViewerApp {
         }
 
         let base_budget_ms = if is_burst {
-            // Generous time budget during burst — worth spending frame time now
-            // to avoid many more slow frames with blank tiles.
             if is_opengl {
                 if is_scrolling {
-                    3.0
+                    2.0
                 } else {
                     5.0
                 }
@@ -625,10 +625,7 @@ impl ImageViewerApp {
             self.upload_budget_ms * 0.75
         } else if is_scrolling {
             if is_opengl {
-                // Ultra-aggressive budget on OpenGL scroll: each load_texture
-                // costs 5-15ms synchronously, so 1-2ms effectively allows
-                // 0-1 uploads per frame, minimizing stutter.
-                1.5
+                2.0
             } else {
                 self.upload_budget_ms * 0.85
             }
@@ -637,9 +634,6 @@ impl ImageViewerApp {
         };
         let upload_budget_ms = if is_burst {
             base_budget_ms
-        } else if is_opengl && is_scrolling {
-            // Allow sub-2ms budget for OpenGL scroll to effectively limit to 0-1 uploads.
-            (base_budget_ms * perf_scale).clamp(1.0, 10.0)
         } else {
             (base_budget_ms * perf_scale).clamp(2.0, 10.0)
         };
