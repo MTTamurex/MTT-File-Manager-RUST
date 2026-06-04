@@ -26,15 +26,15 @@ pub(super) fn render_file_slot<O: ItemSlotOperations>(
         // loop and continuous `ctx.load_texture` calls that leak GPU staging memory.
         //
         // OPTIMIZATION: Normally extract at bucket 512 minimum so zooming in never
-        // triggers re-extraction. On OpenGL while scrolling, use bucket 256 first
-        // and upgrade after scrolling stops to avoid synchronous upload stalls.
+        // triggers re-extraction. On memory-sensitive backends while scrolling,
+        // use bucket 256 first and upgrade after scrolling stops.
         let ppp = ui.ctx().pixels_per_point().max(1.0);
         let display_request_size_px = (ctx.thumbnail_size as u32).max(1);
         let display_effective_size_px = ((display_request_size_px as f32) * ppp).ceil() as u32;
         let display_bucket =
             crate::workers::thumbnail::processing::get_bucket_size(display_effective_size_px);
-        let opengl_scroll_lod = ctx.low_res_thumbnails_while_scrolling && ctx.is_scrolling;
-        let desired_thumbnail_bucket = if opengl_scroll_lod {
+        let scroll_lod = ctx.low_res_thumbnails_while_scrolling && ctx.is_scrolling;
+        let desired_thumbnail_bucket = if scroll_lod {
             display_bucket.min(256)
         } else {
             display_bucket.max(crate::ui::theme::MIN_GRID_THUMBNAIL_BUCKET)
@@ -47,7 +47,7 @@ pub(super) fn render_file_slot<O: ItemSlotOperations>(
         };
         let min_request_size_for_bucket =
             ((min_effective_size_for_bucket as f32) / ppp).ceil() as u32;
-        let request_size_px = if opengl_scroll_lod {
+        let request_size_px = if scroll_lod {
             min_request_size_for_bucket
         } else {
             display_request_size_px.max(min_request_size_for_bucket)
@@ -63,9 +63,9 @@ pub(super) fn render_file_slot<O: ItemSlotOperations>(
         let is_pending_upload = ctx.pending_upload_set.contains(&item.path);
 
         const MAX_THUMBNAIL_REQUESTS_PER_FRAME: usize = 24;
-        const MAX_OPENGL_SCROLL_THUMBNAIL_REQUESTS_PER_FRAME: usize = 12;
-        let max_thumbnail_requests = if opengl_scroll_lod {
-            MAX_OPENGL_SCROLL_THUMBNAIL_REQUESTS_PER_FRAME
+        const MAX_SCROLL_LOD_THUMBNAIL_REQUESTS_PER_FRAME: usize = 12;
+        let max_thumbnail_requests = if scroll_lod {
+            MAX_SCROLL_LOD_THUMBNAIL_REQUESTS_PER_FRAME
         } else {
             MAX_THUMBNAIL_REQUESTS_PER_FRAME
         };

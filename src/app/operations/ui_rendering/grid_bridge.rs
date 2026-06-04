@@ -254,7 +254,11 @@ impl ImageViewerApp {
         // Unknown drives fall back to HDD behavior to avoid UI stalls.
         let is_ssd = io_priority::try_is_ssd(Path::new(&self.navigation_state.current_path))
             .unwrap_or(false);
-        let prefetch_rows = if is_ssd { 1 } else { 3 };
+        let prefetch_rows = if self.is_vulkan_backend() || is_ssd {
+            1
+        } else {
+            3
+        };
         let mut drag_started_item = None;
         let mut drag_hovered_item = None;
         let mut rectangle_selection_frame = RectangleSelectionFrame::default();
@@ -262,7 +266,8 @@ impl ImageViewerApp {
             .rectangle_selection_state
             .as_ref()
             .filter(|state| state.view == RectangleSelectionView::Grid);
-        let low_res_thumbnails_while_scrolling = self.is_opengl_backend();
+        let low_res_thumbnails_while_scrolling =
+            self.is_opengl_backend() || self.is_vulkan_backend();
 
         let mut ctx = GridViewContext {
             items: &self.items,

@@ -3,8 +3,8 @@ use crate::infrastructure::diagnostic_logger::{
     diag_info, field_bool, field_duration_ms, field_label, field_u64,
 };
 use crate::ui::cache::{
-    DEFAULT_DYNAMIC_RGBA_BUDGET_BYTES, MAX_DYNAMIC_TEXTURE_CACHE_ITEMS,
-    MIN_DYNAMIC_TEXTURE_CACHE_ITEMS,
+    MAX_DYNAMIC_TEXTURE_CACHE_ITEMS, MIN_DYNAMIC_TEXTURE_CACHE_ITEMS,
+    VULKAN_MAX_DYNAMIC_TEXTURE_CACHE_ITEMS,
 };
 use eframe::egui;
 use std::collections::HashSet;
@@ -19,6 +19,7 @@ const MIN_INCOMING_THUMBNAIL_BUDGET_MS: u64 = 2;
 const TEXTURE_CACHE_RETUNE_INTERVAL_MS: u64 = 900;
 const TEXTURE_CACHE_RETUNE_MIN_DELTA_ITEMS: usize = 16;
 const DIAG_SLOW_TEXTURE_UPLOAD_THRESHOLD: Duration = Duration::from_millis(8);
+const VULKAN_MAX_INCOMING_THUMBNAIL_MSGS_PER_FRAME: usize = 48;
 
 fn live_frame_pressure_ms(app: &ImageViewerApp) -> f32 {
     app.last_actual_frame_ms.max(app.frame_time_avg_ms)
@@ -77,9 +78,17 @@ fn compute_texture_cache_target_items(
             - frame_penalty
             - activity_penalty;
 
+    let max_texture_items = if app.is_vulkan_backend() {
+        VULKAN_MAX_DYNAMIC_TEXTURE_CACHE_ITEMS
+            .max(visible_base as usize)
+            .min(MAX_DYNAMIC_TEXTURE_CACHE_ITEMS)
+    } else {
+        MAX_DYNAMIC_TEXTURE_CACHE_ITEMS
+    };
+
     raw_target.clamp(
         MIN_DYNAMIC_TEXTURE_CACHE_ITEMS as i32,
-        MAX_DYNAMIC_TEXTURE_CACHE_ITEMS as i32,
+        max_texture_items as i32,
     ) as usize
 }
 
@@ -89,6 +98,7 @@ fn log_slow_texture_upload(
     width: u32,
     height: u32,
     is_opengl: bool,
+    is_vulkan: bool,
 ) {
     if elapsed < DIAG_SLOW_TEXTURE_UPLOAD_THRESHOLD {
         return;
@@ -103,6 +113,7 @@ fn log_slow_texture_upload(
             field_u64("width", width as u64),
             field_u64("height", height as u64),
             field_bool("opengl", is_opengl),
+            field_bool("vulkan", is_vulkan),
         ],
     );
 }
@@ -114,6 +125,7 @@ impl ImageViewerApp {
         let mut has_more_incoming = false;
         let is_burst = self.is_in_restore_burst();
         let is_opengl = self.is_opengl_backend();
+        let is_vulkan = self.is_vulkan_backend();
         let frame_pressure_ms = live_frame_pressure_ms(self);
         let is_scrolling = self.last_scroll_time.elapsed() < Duration::from_millis(180);
         // During burst, ignore frame pressure for intake — the slow frames are caused
@@ -150,8 +162,7 @@ impl ImageViewerApp {
                 .retune_folder_preview_cache_capacity(visible_folder_preview_keep);
         }
 
-        let visible_rgba_budget =
-            self.current_dynamic_rgba_budget_bytes(DEFAULT_DYNAMIC_RGBA_BUDGET_BYTES);
+        let visible_rgba_budget = self.current_thumbnail_rgba_budget_bytes();
         self.cache_manager.retune_rgba_budget(visible_rgba_budget);
         self.cache_manager
             .retune_rgba_cache_capacity(visible_texture_keep);
@@ -163,14 +174,24 @@ impl ImageViewerApp {
         // During burst mode, skip the throttle — we want to fill the queue fast.
         let effective_incoming_cap = if is_opengl && is_scrolling {
             24
+        } else if is_vulkan && is_scrolling {
+            32
         } else if is_burst {
             if is_opengl {
                 48
+            } else if is_vulkan {
+                VULKAN_MAX_INCOMING_THUMBNAIL_MSGS_PER_FRAME
             } else {
                 MAX_INCOMING_THUMBNAIL_MSGS_PER_FRAME
             }
         } else if self.pending_thumbnails.len() > dynamic_pending_limit / 2 {
-            48
+            if is_vulkan {
+                24
+            } else {
+                48
+            }
+        } else if is_vulkan {
+            VULKAN_MAX_INCOMING_THUMBNAIL_MSGS_PER_FRAME
         } else {
             MAX_INCOMING_THUMBNAIL_MSGS_PER_FRAME
         };
@@ -253,6 +274,7 @@ impl ImageViewerApp {
                 if incoming_dim > existing_dim {
                     *existing = thumbnail_data;
                 }
+                self.trim_pending_thumbnail_uploads_to_limit();
                 continue;
             }
 
@@ -303,6 +325,7 @@ impl ImageViewerApp {
                 .start_pending_upload(thumbnail_data.path.clone());
             successful_thumb_paths.push(thumbnail_data.path.clone());
             self.pending_thumbnails.push_back(thumbnail_data);
+            self.trim_pending_thumbnail_uploads_to_limit();
             received_any = true;
         }
 
@@ -467,8 +490,7 @@ impl ImageViewerApp {
                     .retune_folder_preview_cache_capacity(target_folder_preview_items);
             }
 
-            let target_rgba_budget =
-                self.current_dynamic_rgba_budget_bytes(DEFAULT_DYNAMIC_RGBA_BUDGET_BYTES);
+            let target_rgba_budget = self.current_thumbnail_rgba_budget_bytes();
             self.cache_manager.retune_rgba_budget(target_rgba_budget);
             self.cache_manager
                 .retune_rgba_cache_capacity(target_texture_items);
@@ -503,6 +525,12 @@ impl ImageViewerApp {
                 } else {
                     4
                 }
+            } else if is_vulkan {
+                if is_scrolling {
+                    6
+                } else {
+                    16
+                }
             } else {
                 48
             }
@@ -517,23 +545,31 @@ impl ImageViewerApp {
         } else if is_video_playing && is_scrolling {
             if is_opengl {
                 2
+            } else if is_vulkan {
+                3
             } else {
                 4
             }
         } else if is_scrolling {
             if is_opengl {
                 2
+            } else if is_vulkan {
+                3
             } else {
                 6
             }
         } else if is_video_playing {
             if is_opengl {
                 3
+            } else if is_vulkan {
+                4
             } else {
                 5
             }
         } else {
             if is_opengl {
+                8
+            } else if is_vulkan {
                 8
             } else {
                 12
@@ -552,10 +588,18 @@ impl ImageViewerApp {
                             12.0
                         }
                     } else {
-                        64.0
+                        if is_vulkan {
+                            16.0
+                        } else {
+                            64.0
+                        }
                     }
                 } else {
-                    16.0
+                    if is_vulkan {
+                        12.0
+                    } else {
+                        16.0
+                    }
                 },
             ) as usize;
 
@@ -577,9 +621,10 @@ impl ImageViewerApp {
             // Burst: don't reduce through perf_scale; use the burst cap directly.
             base_max_uploads
         } else {
+            let max_uploads = if is_vulkan { 12.0 } else { 20.0 };
             ((base_max_uploads as f32) * perf_scale)
                 .round()
-                .clamp(1.0, 20.0) as usize
+                .clamp(1.0, max_uploads) as usize
         };
 
         let mut uploads_this_frame = 0;
@@ -616,6 +661,12 @@ impl ImageViewerApp {
                 } else {
                     5.0
                 }
+            } else if is_vulkan {
+                if is_scrolling {
+                    4.0
+                } else {
+                    6.0
+                }
             } else {
                 16.0
             }
@@ -626,16 +677,23 @@ impl ImageViewerApp {
         } else if is_scrolling {
             if is_opengl {
                 2.0
+            } else if is_vulkan {
+                4.0
             } else {
                 self.upload_budget_ms * 0.85
             }
         } else {
-            self.upload_budget_ms
+            if is_vulkan {
+                self.upload_budget_ms.min(6.0)
+            } else {
+                self.upload_budget_ms
+            }
         };
         let upload_budget_ms = if is_burst {
             base_budget_ms
         } else {
-            (base_budget_ms * perf_scale).clamp(2.0, 10.0)
+            let max_budget_ms = if is_vulkan { 6.0 } else { 10.0 };
+            (base_budget_ms * perf_scale).clamp(2.0, max_budget_ms)
         };
         let upload_budget = Duration::from_millis(upload_budget_ms.round() as u64);
 
@@ -677,7 +735,7 @@ impl ImageViewerApp {
             usize::MAX
         };
         let mut offscreen_uploads = 0usize;
-        let discard_offscreen_pending = is_opengl && is_scrolling;
+        let discard_offscreen_pending = (is_opengl || is_vulkan) && is_scrolling;
         let max_offscreen_discards = max_uploads_per_frame.saturating_mul(8).max(8);
         let mut offscreen_discards = 0usize;
 
@@ -818,16 +876,24 @@ impl ImageViewerApp {
                     width,
                     height,
                     is_opengl,
+                    is_vulkan,
                 );
 
                 self.cache_manager.thumbnail_trace.record_upload(&path);
                 self.cache_manager.finish_pending_upload(&path);
-                self.cache_manager.put_rgba_data(
-                    path.clone(),
-                    std::sync::Arc::clone(&rgba_data),
-                    width,
-                    height,
-                );
+                let should_cache_rgba = !is_vulkan
+                    || is_selected
+                    || eviction_visible
+                        .as_ref()
+                        .is_none_or(|visible_paths| visible_paths.contains(&path));
+                if should_cache_rgba {
+                    self.cache_manager.put_rgba_data(
+                        path.clone(),
+                        std::sync::Arc::clone(&rgba_data),
+                        width,
+                        height,
+                    );
+                }
                 if let Some(visible_paths) = eviction_visible.as_ref() {
                     self.cache_manager.promote_visible(visible_paths);
                     self.cache_manager.put_thumbnail_preserving_visible(
@@ -1055,26 +1121,41 @@ impl ImageViewerApp {
         visible_paths: Option<&crate::ui::cache::FxHashSet<PathBuf>>,
     ) {
         let is_opengl = self.is_opengl_backend();
+        let is_vulkan = self.is_vulkan_backend();
 
         let max_folder_uploads: usize = if is_burst && is_opengl && is_scrolling {
             1
         } else if is_burst && is_opengl {
             2
+        } else if is_burst && is_vulkan {
+            if is_scrolling {
+                2
+            } else {
+                6
+            }
         } else if is_performance_critical {
             if is_opengl {
+                1
+            } else if is_vulkan {
                 1
             } else {
                 2
             }
         } else if is_opengl && is_scrolling {
             1
+        } else if is_vulkan && is_scrolling {
+            2
         } else if is_video_playing {
             if is_opengl {
                 3
+            } else if is_vulkan {
+                4
             } else {
                 6
             }
         } else if is_opengl {
+            6
+        } else if is_vulkan {
             6
         } else {
             20
@@ -1089,11 +1170,17 @@ impl ImageViewerApp {
             2
         } else if is_burst && is_opengl {
             2
+        } else if is_burst && is_vulkan {
+            4
         } else if is_performance_critical {
             2
         } else if is_opengl && is_scrolling {
             2
+        } else if is_vulkan && is_scrolling {
+            3
         } else if is_opengl {
+            4
+        } else if is_vulkan {
             4
         } else {
             8
@@ -1101,7 +1188,7 @@ impl ImageViewerApp {
         let start = Instant::now();
 
         let mut folder_uploads = 0;
-        let max_folder_results = if is_opengl && is_scrolling {
+        let max_folder_results = if (is_opengl || is_vulkan) && is_scrolling {
             max_folder_uploads.saturating_mul(8).max(8)
         } else {
             max_folder_uploads
@@ -1121,11 +1208,11 @@ impl ImageViewerApp {
                     continue;
                 }
 
-                let offscreen_during_opengl_scroll = is_opengl
+                let offscreen_during_scroll_lod = (is_opengl || is_vulkan)
                     && is_scrolling
                     && !force_replace
                     && visible_paths.is_some_and(|visible| !visible.contains(&data.path));
-                if offscreen_during_opengl_scroll {
+                if offscreen_during_scroll_lod {
                     continue;
                 }
 
@@ -1178,6 +1265,7 @@ impl ImageViewerApp {
                         data.width,
                         data.height,
                         is_opengl,
+                        is_vulkan,
                     );
 
                     if let Some(visible_paths) = visible_paths {

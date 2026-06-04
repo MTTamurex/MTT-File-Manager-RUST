@@ -1,6 +1,6 @@
 use super::{GridViewContext, GridViewOperations};
 
-const OPENGL_IDLE_PREFETCH_MAX_PER_FRAME: usize = 8;
+const SCROLL_LOD_IDLE_PREFETCH_MAX_PER_FRAME: usize = 8;
 const MAX_THUMBNAIL_REQUESTS_PER_FRAME: usize = 24;
 
 pub(super) fn flush_pending_operations(
@@ -43,12 +43,12 @@ pub(super) fn process_visible_range_prefetch(
 
             *ctx.visible_index_range = Some((first_visible_index, last_visible_index));
 
-            warm_opengl_adjacent_rows_when_idle(ctx, cols, vis_min, vis_max, is_scrolling, ops);
+            warm_scroll_lod_adjacent_rows_when_idle(ctx, cols, vis_min, vis_max, is_scrolling, ops);
         }
     }
 }
 
-fn warm_opengl_adjacent_rows_when_idle(
+fn warm_scroll_lod_adjacent_rows_when_idle(
     ctx: &mut GridViewContext,
     cols: usize,
     vis_min: usize,
@@ -86,7 +86,7 @@ fn warm_opengl_adjacent_rows_when_idle(
             }
             let end = start.saturating_add(cols).min(count);
             for idx in start..end {
-                if requested >= OPENGL_IDLE_PREFETCH_MAX_PER_FRAME {
+                if requested >= SCROLL_LOD_IDLE_PREFETCH_MAX_PER_FRAME {
                     return;
                 }
                 if ctx.thumbnail_requests_this_frame >= MAX_THUMBNAIL_REQUESTS_PER_FRAME {

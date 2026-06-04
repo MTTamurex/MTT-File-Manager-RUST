@@ -1,4 +1,4 @@
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use crate::domain::file_entry::FileEntry;
@@ -7,6 +7,7 @@ use crate::ui::cache::{
     FxHashSet, DEFAULT_DYNAMIC_RGBA_BUDGET_BYTES, MAX_DYNAMIC_FOLDER_PREVIEW_ITEMS,
     MAX_DYNAMIC_TEXTURE_CACHE_ITEMS, MAX_RGBA_BUDGET_BYTES, MIN_DYNAMIC_FOLDER_PREVIEW_ITEMS,
     MIN_DYNAMIC_TEXTURE_CACHE_ITEMS, MIN_RGBA_BUDGET_BYTES,
+    VULKAN_MAX_DYNAMIC_FOLDER_PREVIEW_ITEMS, VULKAN_MAX_DYNAMIC_TEXTURE_CACHE_ITEMS,
 };
 use crate::workers::thumbnail::processing::get_bucket_size;
 
@@ -16,12 +17,18 @@ const BASE_PENDING_THUMBNAILS: usize = 64;
 const MIN_DYNAMIC_PENDING_THUMBNAILS: usize = 16;
 const MAX_DYNAMIC_PENDING_THUMBNAILS: usize = 1024;
 const MAX_PENDING_THUMBNAIL_RGBA_BYTES: usize = 64 * 1024 * 1024;
+const VULKAN_MAX_PENDING_THUMBNAIL_RGBA_BYTES: usize = 16 * 1024 * 1024;
+const VULKAN_RGBA_BUDGET_FLOOR_BYTES: usize = MIN_RGBA_BUDGET_BYTES;
+const VULKAN_MAX_RGBA_BUDGET_BYTES: usize = 8 * 1024 * 1024;
 const MEMORY_TRACE_INTERVAL: Duration = Duration::from_secs(5);
 const IDLE_THUMBNAIL_TEXTURE_KEEP: usize = 8;
 const IDLE_FOLDER_PREVIEW_KEEP: usize = 0;
 const IDLE_RGBA_BUDGET_BYTES: usize = 4 * 1024 * 1024;
 const IDLE_PENDING_THUMBNAILS: usize = 1;
 const NAVIGATION_RGBA_CACHE_ITEMS: usize = 32;
+const INACTIVE_THUMBNAIL_CACHE_ITEMS: usize = 1;
+const WORKING_SET_TRIM_DELAY: Duration = Duration::from_millis(750);
+const WORKING_SET_TRIM_MIN_INTERVAL: Duration = Duration::from_secs(10);
 
 #[derive(Clone, Copy, Debug)]
 struct ProcessMemorySnapshot {
@@ -145,6 +152,13 @@ impl ImageViewerApp {
         matches!(self.active_gpu_backend.as_str(), "Gl" | "glow")
     }
 
+    /// Returns `true` when the active wgpu backend is Vulkan.
+    /// Vulkan has the best throughput in this app, but queued texture uploads can
+    /// hold staging/RGBA memory longer than the generic wgpu path expects.
+    pub fn is_vulkan_backend(&self) -> bool {
+        self.active_gpu_backend == "Vulkan"
+    }
+
     /// Check if a video is actively playing in docked mode (preview panel)
     /// Used to throttle disk I/O from thumbnails to prevent stutter during video playback
     pub fn is_video_playing_docked(&self) -> bool {
@@ -194,7 +208,16 @@ impl ImageViewerApp {
             return IDLE_THUMBNAIL_TEXTURE_KEEP;
         }
 
-        dynamic_texture_keep_count(self.visible_grid_items_for_cache())
+        let visible_items = self.visible_grid_items_for_cache();
+        let target = dynamic_texture_keep_count(visible_items);
+        if self.is_vulkan_backend() {
+            let cap = VULKAN_MAX_DYNAMIC_TEXTURE_CACHE_ITEMS
+                .max(visible_items)
+                .min(MAX_DYNAMIC_TEXTURE_CACHE_ITEMS);
+            target.min(cap).max(MIN_DYNAMIC_TEXTURE_CACHE_ITEMS)
+        } else {
+            target
+        }
     }
 
     pub(crate) fn current_dynamic_folder_preview_keep_count(&self) -> usize {
@@ -202,10 +225,22 @@ impl ImageViewerApp {
             return IDLE_FOLDER_PREVIEW_KEEP;
         }
 
-        dynamic_folder_preview_keep_count(
-            self.visible_grid_items_for_cache(),
-            self.current_directory_folder_count(),
-        )
+        let visible_items = self.visible_grid_items_for_cache();
+        let target = if self.is_vulkan_backend() {
+            // Vulkan reloads previews quickly; prefer releasing offscreen folders
+            // over holding every folder in large directories.
+            dynamic_texture_keep_count(visible_items)
+        } else {
+            dynamic_folder_preview_keep_count(visible_items, self.current_directory_folder_count())
+        };
+        if self.is_vulkan_backend() {
+            let cap = VULKAN_MAX_DYNAMIC_FOLDER_PREVIEW_ITEMS
+                .max(visible_items)
+                .min(MAX_DYNAMIC_FOLDER_PREVIEW_ITEMS);
+            target.min(cap).max(MIN_DYNAMIC_FOLDER_PREVIEW_ITEMS)
+        } else {
+            target
+        }
     }
 
     pub(crate) fn current_dynamic_rgba_budget_bytes(&self, floor_bytes: usize) -> usize {
@@ -220,6 +255,43 @@ impl ImageViewerApp {
         )
     }
 
+    pub(crate) fn current_thumbnail_rgba_budget_bytes(&self) -> usize {
+        let floor_bytes = if self.is_vulkan_backend() {
+            VULKAN_RGBA_BUDGET_FLOOR_BYTES
+        } else {
+            DEFAULT_DYNAMIC_RGBA_BUDGET_BYTES
+        };
+        let budget = self.current_dynamic_rgba_budget_bytes(floor_bytes);
+
+        if self.is_vulkan_backend() && self.thumbnail_caches_active() {
+            budget
+                .min(VULKAN_MAX_RGBA_BUDGET_BYTES)
+                .max(MIN_RGBA_BUDGET_BYTES)
+        } else {
+            budget
+        }
+    }
+
+    pub(crate) fn current_pending_thumbnail_upload_byte_limit(&self) -> usize {
+        let bucket_size = self.current_thumbnail_bucket_size() as usize;
+        let bucket_bytes = bucket_size
+            .saturating_mul(bucket_size)
+            .saturating_mul(4)
+            .max(1);
+
+        if !self.thumbnail_caches_active() {
+            return bucket_bytes
+                .saturating_mul(IDLE_PENDING_THUMBNAILS)
+                .max(MIN_RGBA_BUDGET_BYTES);
+        }
+
+        if self.is_vulkan_backend() {
+            VULKAN_MAX_PENDING_THUMBNAIL_RGBA_BYTES
+        } else {
+            MAX_PENDING_THUMBNAIL_RGBA_BYTES
+        }
+    }
+
     pub(crate) fn current_pending_thumbnail_upload_limit(&self) -> usize {
         if !self.thumbnail_caches_active() {
             return IDLE_PENDING_THUMBNAILS;
@@ -230,8 +302,9 @@ impl ImageViewerApp {
             .saturating_mul(bucket_size)
             .saturating_mul(4)
             .max(1);
-        let byte_limited_items =
-            (MAX_PENDING_THUMBNAIL_RGBA_BYTES / bucket_bytes).max(MIN_DYNAMIC_PENDING_THUMBNAILS);
+        let byte_limited_items = (self.current_pending_thumbnail_upload_byte_limit()
+            / bucket_bytes)
+            .max(MIN_DYNAMIC_PENDING_THUMBNAILS);
 
         self.current_dynamic_texture_keep_count()
             .max(BASE_PENDING_THUMBNAILS)
@@ -239,45 +312,51 @@ impl ImageViewerApp {
             .min(byte_limited_items)
     }
 
+    fn pending_thumbnail_rgba_bytes(&self) -> usize {
+        self.pending_thumbnails
+            .iter()
+            .map(|thumbnail| thumbnail.image_data.len())
+            .sum()
+    }
+
     pub(crate) fn trim_pending_thumbnail_uploads_to_limit(&mut self) {
         let max_pending = self.current_pending_thumbnail_upload_limit();
-        if self.pending_thumbnails.len() <= max_pending {
+        let max_pending_bytes = self.current_pending_thumbnail_upload_byte_limit();
+        let mut pending_bytes = self.pending_thumbnail_rgba_bytes();
+        if self.pending_thumbnails.len() <= max_pending && pending_bytes <= max_pending_bytes {
             return;
         }
 
         let visible_paths = self.visible_grid_paths_snapshot();
-        while self.pending_thumbnails.len() > max_pending {
-            let evict_idx = visible_paths.as_ref().and_then(|visible_paths| {
-                self.pending_thumbnails
-                    .iter()
-                    .position(|thumb| !visible_paths.contains(&thumb.path))
+        let selected_path = self.selected_file.as_ref().map(|file| file.path.clone());
+        while self.pending_thumbnails.len() > max_pending || pending_bytes > max_pending_bytes {
+            let evict_idx = self.pending_thumbnails.iter().position(|thumb| {
+                let is_selected = selected_path.as_ref() == Some(&thumb.path);
+                let is_visible = visible_paths
+                    .as_ref()
+                    .is_some_and(|visible_paths| visible_paths.contains(&thumb.path));
+
+                !is_selected && !is_visible
             });
 
             let old = if let Some(evict_idx) = evict_idx {
                 self.pending_thumbnails.remove(evict_idx)
+            } else if visible_paths.is_none() {
+                self.pending_thumbnails
+                    .iter()
+                    .position(|thumb| selected_path.as_ref() != Some(&thumb.path))
+                    .and_then(|idx| self.pending_thumbnails.remove(idx))
             } else {
-                self.pending_thumbnails.pop_front()
+                None
             };
 
             if let Some(old) = old {
+                pending_bytes = pending_bytes.saturating_sub(old.image_data.len());
                 self.cache_manager.finish_pending_upload(&old.path);
             } else {
                 break;
             }
         }
-    }
-
-    fn trim_pending_thumbnail_uploads_to_count(&mut self, max_pending: usize) -> usize {
-        let mut removed = 0usize;
-        while self.pending_thumbnails.len() > max_pending {
-            if let Some(old) = self.pending_thumbnails.pop_front() {
-                self.cache_manager.finish_pending_upload(&old.path);
-                removed += 1;
-            } else {
-                break;
-            }
-        }
-        removed
     }
 
     pub fn log_memory_snapshot(&mut self, label: &str) {
@@ -294,6 +373,8 @@ impl ImageViewerApp {
             .iter()
             .map(|thumbnail| thumbnail.image_data.len())
             .sum();
+        let pending_thumbnail_limit = self.current_pending_thumbnail_upload_limit();
+        let pending_thumbnail_byte_limit = self.current_pending_thumbnail_upload_byte_limit();
         let (directory_cache_folders, directory_cache_items) = self.directory_cache.stats();
         let (gif_entries, gif_bytes) = self.gif_manager.stats();
         let (
@@ -313,7 +394,7 @@ impl ImageViewerApp {
         let visible_grid_items = self.visible_grid_items_for_cache();
         let texture_target = self.current_dynamic_texture_keep_count();
         let folder_preview_target = self.current_dynamic_folder_preview_keep_count();
-        let rgba_target = self.current_dynamic_rgba_budget_bytes(DEFAULT_DYNAMIC_RGBA_BUDGET_BYTES);
+        let rgba_target = self.current_thumbnail_rgba_budget_bytes();
 
         // Extra diagnostics — coleções não cobertas pelos campos principais.
         // Mantidas em variáveis locais para evitar custo se MTT_MEMORY_TRACE estiver off
@@ -344,7 +425,8 @@ impl ImageViewerApp {
         let thumbnail_trace = self.cache_manager.thumbnail_trace.take_snapshot();
 
         log::info!(
-            "[MEM-TRACE:{label}] ws={:.1}MB private={:.1}MB items={} all_items={} tabs={} dir_cache={}/{} visible_items={} textures={}/{} texture_target={} folder_tex={}/{} folder_target={} rgba_items={} rgba={:.1}/{:.1}MB pending={} pending_rgba={:.1}MB pending_set={} loading={} folder_loading={} failed_thumbs={} queue={} img_rx={} vram_est={:.1}MB icons={} ext_icons={} drive_icons={} failed_drive_icons={} loading_drive_icons={} gifs={} gif_rgba={:.1}MB visible={:?} thumb_bucket={} folder_bucket={} frame_avg={:.1}ms frame_peak={:.1}ms upload_budget={:.1}ms eviction_skips={} attempted_bucket={} fs_size={}/{} fs_batch={}/{} fs_reval={} fs_inval_ep={} live_size={}/{} meta={}/{} scanned={} failed_ico={} loading_ico={} del_date={} vis_paths={} mtime_re={} multisel={} drag={} pinned={} dirty_reg={} fp_req={} fp_dup={} fp_dbnc={} fp_inval={} fp_upl={} fp_upl_none={} fp_upl_diff={} fp_evict={} fp_db_w={} fp_comp={} fp_sample={:?} th_req={} th_dupL={} th_dupP={} th_pdel={} th_ram={} th_disp={} th_upl={} th_upl_dup={} th_evict={} th_uniq={} th_top={:?} th_req_sample={:?} th_upl_sample={:?}",
+            "[MEM-TRACE:{label}] backend={} ws={:.1}MB private={:.1}MB items={} all_items={} tabs={} dir_cache={}/{} visible_items={} textures={}/{} texture_target={} folder_tex={}/{} folder_target={} rgba_items={} rgba={:.1}/{:.1}MB pending={}/{} pending_rgba={:.1}/{:.1}MB pending_set={} loading={} folder_loading={} failed_thumbs={} queue={} img_rx={} vram_est={:.1}MB icons={} ext_icons={} drive_icons={} failed_drive_icons={} loading_drive_icons={} gifs={} gif_rgba={:.1}MB visible={:?} thumb_bucket={} folder_bucket={} frame_avg={:.1}ms frame_peak={:.1}ms upload_budget={:.1}ms eviction_skips={} attempted_bucket={} fs_size={}/{} fs_batch={}/{} fs_reval={} fs_inval_ep={} live_size={}/{} meta={}/{} scanned={} failed_ico={} loading_ico={} del_date={} vis_paths={} mtime_re={} multisel={} drag={} pinned={} dirty_reg={} fp_req={} fp_dup={} fp_dbnc={} fp_inval={} fp_upl={} fp_upl_none={} fp_upl_diff={} fp_evict={} fp_db_w={} fp_comp={} fp_sample={:?} th_req={} th_dupL={} th_dupP={} th_pdel={} th_ram={} th_disp={} th_upl={} th_upl_dup={} th_evict={} th_uniq={} th_top={:?} th_req_sample={:?} th_upl_sample={:?}",
+            self.active_gpu_backend.as_str(),
             bytes_to_mb(process.working_set_bytes),
             bytes_to_mb(process.private_usage_bytes),
             self.items.len(),
@@ -363,7 +445,9 @@ impl ImageViewerApp {
             bytes_to_mb(rgba_bytes as u64),
             bytes_to_mb(rgba_target as u64),
             self.pending_thumbnails.len(),
+            pending_thumbnail_limit,
             bytes_to_mb(pending_thumbnail_bytes as u64),
+            bytes_to_mb(pending_thumbnail_byte_limit as u64),
             self.cache_manager.pending_upload_set.len(),
             self.cache_manager.loading_set.len(),
             self.cache_manager.folder_preview_loading.len(),
@@ -527,7 +611,9 @@ impl ImageViewerApp {
         self.pending_folder_preview_replace.clear();
         self.suppress_next_folder_preview_invalidation.clear();
         self.pending_thumbnails.clear();
+        self.pending_thumbnails.shrink_to_fit();
         self.thumbnail_eviction_skips.clear();
+        self.thumbnail_eviction_skips.shrink_to_fit();
 
         let old_textures = self.cache_manager.texture_cache.len();
         let old_texture_cap = self.cache_manager.texture_cache.cap().get();
@@ -535,19 +621,31 @@ impl ImageViewerApp {
         let old_folder_preview_cap = self.cache_manager.folder_preview_cache.cap().get();
         let old_rgba_bytes = self.cache_manager.estimate_ram_cache_usage();
 
-        self.cache_manager
-            .retune_texture_cache_capacity(MIN_DYNAMIC_TEXTURE_CACHE_ITEMS);
-        self.cache_manager
-            .retune_folder_preview_cache_capacity(MIN_DYNAMIC_FOLDER_PREVIEW_ITEMS);
-        self.cache_manager
-            .retune_rgba_cache_capacity(NAVIGATION_RGBA_CACHE_ITEMS);
-        self.cache_manager.retune_rgba_budget(MIN_RGBA_BUDGET_BYTES);
-        self.cache_manager.trim_thumbnail_caches(
-            MIN_DYNAMIC_TEXTURE_CACHE_ITEMS,
-            MIN_RGBA_BUDGET_BYTES,
-            MIN_DYNAMIC_FOLDER_PREVIEW_ITEMS,
-            None,
-        );
+        let (released_textures, released_rgba, released_folder_previews, released_rgba_bytes) =
+            if self.is_vulkan_backend() {
+                self.cache_manager.release_thumbnail_caches_for_idle(
+                    INACTIVE_THUMBNAIL_CACHE_ITEMS,
+                    INACTIVE_THUMBNAIL_CACHE_ITEMS,
+                    INACTIVE_THUMBNAIL_CACHE_ITEMS,
+                    0,
+                )
+            } else {
+                self.cache_manager
+                    .retune_texture_cache_capacity(MIN_DYNAMIC_TEXTURE_CACHE_ITEMS);
+                self.cache_manager
+                    .retune_folder_preview_cache_capacity(MIN_DYNAMIC_FOLDER_PREVIEW_ITEMS);
+                self.cache_manager
+                    .retune_rgba_cache_capacity(NAVIGATION_RGBA_CACHE_ITEMS);
+                self.cache_manager.retune_rgba_budget(MIN_RGBA_BUDGET_BYTES);
+                let (textures_removed, rgba_removed, folder_previews_removed) =
+                    self.cache_manager.trim_thumbnail_caches(
+                        MIN_DYNAMIC_TEXTURE_CACHE_ITEMS,
+                        MIN_RGBA_BUDGET_BYTES,
+                        MIN_DYNAMIC_FOLDER_PREVIEW_ITEMS,
+                        None,
+                    );
+                (textures_removed, rgba_removed, folder_previews_removed, 0)
+            };
         let (icon_evicted, ext_icon_evicted) = if trim_icons {
             self.item_icon_loader.trim_icon_caches(128, 128)
         } else {
@@ -569,18 +667,141 @@ impl ImageViewerApp {
             || ext_icon_evicted > 0
         {
             log::debug!(
-                "[MEMORY] navigation trim reason={} textures={}/{} folder_previews={}/{} rgba={:.1}MB queued={} receiver={} fp_receiver={} icons={} ext_icons={}",
+                "[MEMORY] navigation trim reason={} backend={} textures={}/{} released_textures={} folder_previews={}/{} released_folder_previews={} rgba={:.1}MB released_rgba_items={} released_rgba={:.1}MB queued={} receiver={} fp_receiver={} icons={} ext_icons={}",
                 reason,
+                self.active_gpu_backend,
                 old_textures,
                 old_texture_cap,
+                released_textures,
                 old_folder_previews,
                 old_folder_preview_cap,
+                released_folder_previews,
                 old_rgba_bytes as f64 / 1024.0 / 1024.0,
+                released_rgba,
+                released_rgba_bytes as f64 / 1024.0 / 1024.0,
                 queued_removed,
                 receiver_drained,
                 folder_preview_receiver_drained,
                 icon_evicted,
                 ext_icon_evicted,
+            );
+
+            if self.is_vulkan_backend() {
+                request_process_working_set_trim(
+                    format!("vulkan thumbnail navigation ({reason})"),
+                    WORKING_SET_TRIM_DELAY,
+                );
+            }
+        }
+    }
+
+    /// Fully releases thumbnail memory when the destination view cannot render
+    /// thumbnails at all. This is intentionally stronger than navigation trim:
+    /// no warm thumbnail/folder-preview/RGBA cache is useful in This PC or the
+    /// Recycle Bin, and keeping those LRUs alive makes Task Manager memory look
+    /// permanently elevated after browsing media-heavy folders.
+    pub(crate) fn release_thumbnail_pipeline_for_inactive_view(
+        &mut self,
+        reason: &str,
+        trim_icons: bool,
+    ) {
+        let queued_removed = self.thumbnail_queue.clear_pending();
+
+        let mut receiver_drained = 0usize;
+        let mut receiver_rgba_bytes = 0usize;
+        while let Ok(thumbnail_data) = self.image_receiver.try_recv() {
+            receiver_rgba_bytes =
+                receiver_rgba_bytes.saturating_add(thumbnail_data.image_data.len());
+            self.cache_manager.finish_loading(&thumbnail_data.path);
+            self.cache_manager
+                .finish_pending_upload(&thumbnail_data.path);
+            receiver_drained += 1;
+        }
+
+        let mut folder_preview_receiver_drained = 0usize;
+        let mut folder_preview_rgba_bytes = 0usize;
+        while let Ok(preview_data) = self.folder_preview_receiver.try_recv() {
+            folder_preview_rgba_bytes =
+                folder_preview_rgba_bytes.saturating_add(preview_data.rgba_data.len());
+            self.cache_manager
+                .finish_folder_preview_loading(&preview_data.path);
+            folder_preview_receiver_drained += 1;
+        }
+
+        let pending_removed = self.pending_thumbnails.len();
+        let pending_rgba_bytes = self.pending_thumbnail_rgba_bytes();
+        self.pending_thumbnails.clear();
+        self.pending_thumbnails.shrink_to_fit();
+
+        self.thumbnail_eviction_skips.clear();
+        self.thumbnail_eviction_skips.shrink_to_fit();
+        self.pending_folder_preview_replace.clear();
+        self.pending_folder_preview_replace.shrink_to_fit();
+        self.suppress_next_folder_preview_invalidation.clear();
+        self.suppress_next_folder_preview_invalidation
+            .shrink_to_fit();
+        self.selected_thumbnail = None;
+
+        let old_texture_cap = self.cache_manager.texture_cache.cap().get();
+        let old_folder_preview_cap = self.cache_manager.folder_preview_cache.cap().get();
+        let (textures_removed, rgba_removed, folder_previews_removed, rgba_bytes_removed) =
+            self.cache_manager.release_thumbnail_caches_for_idle(
+                INACTIVE_THUMBNAIL_CACHE_ITEMS,
+                INACTIVE_THUMBNAIL_CACHE_ITEMS,
+                INACTIVE_THUMBNAIL_CACHE_ITEMS,
+                0,
+            );
+
+        let (icon_evicted, ext_icon_evicted) = if trim_icons {
+            self.item_icon_loader.trim_icon_caches(128, 128)
+        } else {
+            (0, 0)
+        };
+
+        self.last_texture_cache_retune = Instant::now()
+            .checked_sub(Duration::from_secs(10))
+            .unwrap_or_else(Instant::now);
+        self.ui_ctx.request_repaint();
+
+        let released_rgba_bytes = rgba_bytes_removed
+            .saturating_add(pending_rgba_bytes)
+            .saturating_add(receiver_rgba_bytes)
+            .saturating_add(folder_preview_rgba_bytes);
+        let released_any = textures_removed > 0
+            || folder_previews_removed > 0
+            || rgba_removed > 0
+            || released_rgba_bytes > 0
+            || pending_removed > 0
+            || queued_removed > 0
+            || receiver_drained > 0
+            || folder_preview_receiver_drained > 0
+            || icon_evicted > 0
+            || ext_icon_evicted > 0;
+
+        if released_any {
+            log::debug!(
+                "[MEMORY] inactive thumbnail release reason={} textures={}/{} folder_previews={}/{} rgba_items={} rgba={:.1}MB pending={} pending_rgba={:.1}MB queued={} receiver={} receiver_rgba={:.1}MB fp_receiver={} fp_receiver_rgba={:.1}MB icons={} ext_icons={}",
+                reason,
+                textures_removed,
+                old_texture_cap,
+                folder_previews_removed,
+                old_folder_preview_cap,
+                rgba_removed,
+                rgba_bytes_removed as f64 / 1024.0 / 1024.0,
+                pending_removed,
+                pending_rgba_bytes as f64 / 1024.0 / 1024.0,
+                queued_removed,
+                receiver_drained,
+                receiver_rgba_bytes as f64 / 1024.0 / 1024.0,
+                folder_preview_receiver_drained,
+                folder_preview_rgba_bytes as f64 / 1024.0 / 1024.0,
+                icon_evicted,
+                ext_icon_evicted,
+            );
+
+            request_process_working_set_trim(
+                format!("thumbnail inactive view ({reason})"),
+                WORKING_SET_TRIM_DELAY,
             );
         }
     }
@@ -593,44 +814,7 @@ impl ImageViewerApp {
 
         let thumbnails_active = self.thumbnail_caches_active();
         if !thumbnails_active && !self.is_in_restore_burst() {
-            let pending_removed = self.trim_pending_thumbnail_uploads_to_count(0);
-
-            let folder_preview_keep = self
-                .idle_folder_preview_keep_count()
-                .max(IDLE_FOLDER_PREVIEW_KEEP);
-            let mut visible_for_trim = self.visible_grid_paths_snapshot();
-            if let Some(detail_panel_paths) = self.detail_panel_folder_preview_paths_for_trim() {
-                visible_for_trim
-                    .get_or_insert_with(FxHashSet::default)
-                    .extend(detail_panel_paths);
-            }
-
-            let (textures_removed, rgba_removed, folder_previews_removed) =
-                self.cache_manager.trim_thumbnail_caches(
-                    IDLE_THUMBNAIL_TEXTURE_KEEP,
-                    IDLE_RGBA_BUDGET_BYTES,
-                    folder_preview_keep,
-                    visible_for_trim.as_ref(),
-                );
-
-            self.cache_manager.attempted_thumbnail_bucket.clear();
-            self.cache_manager
-                .attempted_thumbnail_bucket
-                .shrink_to_fit();
-
-            if textures_removed > 0
-                || rgba_removed > 0
-                || folder_previews_removed > 0
-                || pending_removed > 0
-            {
-                log::debug!(
-                    "[MEMORY] idle thumbnail trim textures={} rgba={} folder_previews={} pending={}",
-                    textures_removed,
-                    rgba_removed,
-                    folder_previews_removed,
-                    pending_removed,
-                );
-            }
+            self.release_thumbnail_pipeline_for_inactive_view("inactive-maintenance", false);
         }
 
         let Some(process_memory) = current_process_memory_snapshot() else {
@@ -667,7 +851,7 @@ impl ImageViewerApp {
                 }
                 self.cache_manager.trim_thumbnail_caches(
                     target,
-                    self.current_dynamic_rgba_budget_bytes(DEFAULT_DYNAMIC_RGBA_BUDGET_BYTES),
+                    self.current_thumbnail_rgba_budget_bytes(),
                     self.current_dynamic_folder_preview_keep_count(),
                     visible_for_proactive.as_ref(),
                 );
@@ -690,6 +874,7 @@ impl ImageViewerApp {
 
         let aggressive = working_set_bytes >= HARD_LIMIT_BYTES;
         let is_burst = self.is_in_restore_burst();
+        self.trim_pending_thumbnail_uploads_to_limit();
         let visible_grid_items = self.visible_grid_items_for_cache();
         let mut visible_paths = self.visible_grid_paths_snapshot();
         if let Some(detail_panel_paths) = self.detail_panel_folder_preview_paths_for_trim() {
@@ -701,41 +886,35 @@ impl ImageViewerApp {
         let folder_preview_keep = self
             .current_dynamic_folder_preview_keep_count()
             .max(self.idle_folder_preview_keep_count());
-        let rgba_budget = self.current_dynamic_rgba_budget_bytes(DEFAULT_DYNAMIC_RGBA_BUDGET_BYTES);
+        let rgba_budget = self.current_thumbnail_rgba_budget_bytes();
         let max_pending = self.current_pending_thumbnail_upload_limit();
-
-        while self.pending_thumbnails.len() > max_pending {
-            let evict_idx = visible_paths.as_ref().and_then(|visible_paths| {
-                self.pending_thumbnails
-                    .iter()
-                    .position(|thumb| !visible_paths.contains(&thumb.path))
-            });
-
-            let old = if let Some(evict_idx) = evict_idx {
-                self.pending_thumbnails.remove(evict_idx)
-            } else {
-                self.pending_thumbnails.pop_front()
-            };
-
-            if let Some(old) = old {
-                self.cache_manager.finish_pending_upload(&old.path);
-            } else {
-                break;
-            }
-        }
 
         let (textures_removed, rgba_removed, folder_previews_removed) = if is_burst && !aggressive {
             // Skip texture/RGBA trimming during burst — we need the caches full.
             (0, 0, 0)
         } else if aggressive {
+            let texture_keep = if self.is_vulkan_backend() {
+                texture_keep
+            } else {
+                texture_keep.max(96)
+            };
+            let folder_preview_keep = if self.is_vulkan_backend() {
+                folder_preview_keep
+            } else {
+                folder_preview_keep.max(72)
+            };
             self.cache_manager.trim_thumbnail_caches(
-                texture_keep.max(96),
-                dynamic_rgba_budget_bytes(
-                    visible_grid_items,
-                    self.current_thumbnail_bucket_size(),
-                    MIN_RGBA_BUDGET_BYTES,
-                ),
-                folder_preview_keep.max(72),
+                texture_keep,
+                if self.is_vulkan_backend() {
+                    MIN_RGBA_BUDGET_BYTES
+                } else {
+                    dynamic_rgba_budget_bytes(
+                        visible_grid_items,
+                        self.current_thumbnail_bucket_size(),
+                        MIN_RGBA_BUDGET_BYTES,
+                    )
+                },
+                folder_preview_keep,
                 visible_paths.as_ref(),
             )
         } else {
@@ -1003,6 +1182,71 @@ pub(crate) fn dynamic_rgba_budget_bytes(
 
     target.clamp(floor_bytes, MAX_RGBA_BUDGET_BYTES)
 }
+
+fn request_process_working_set_trim(reason: String, delay: Duration) {
+    if process_working_set_trim_disabled() {
+        return;
+    }
+
+    static LAST_TRIM: OnceLock<Mutex<Option<Instant>>> = OnceLock::new();
+    let now = Instant::now();
+    if let Ok(mut last_trim) = LAST_TRIM.get_or_init(|| Mutex::new(None)).lock() {
+        if last_trim
+            .as_ref()
+            .is_some_and(|last| now.duration_since(*last) < WORKING_SET_TRIM_MIN_INTERVAL)
+        {
+            return;
+        }
+        *last_trim = Some(now);
+    }
+
+    let spawn_result = std::thread::Builder::new()
+        .name("mtt-working-set-trim".to_string())
+        .stack_size(128 * 1024)
+        .spawn(move || {
+            std::thread::sleep(delay);
+            trim_process_working_set(&reason);
+        });
+
+    if let Err(error) = spawn_result {
+        log::debug!("[MEMORY] failed to spawn working-set trim: {error}");
+    }
+}
+
+fn process_working_set_trim_disabled() -> bool {
+    std::env::var("MTT_DISABLE_WS_TRIM")
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(false)
+}
+
+#[cfg(target_os = "windows")]
+fn trim_process_working_set(reason: &str) {
+    unsafe {
+        use windows::Win32::System::Memory::{
+            SetProcessWorkingSetSizeEx, SETPROCESSWORKINGSETSIZEEX_FLAGS,
+        };
+        use windows::Win32::System::Threading::GetCurrentProcess;
+
+        let process = GetCurrentProcess();
+        match SetProcessWorkingSetSizeEx(
+            process,
+            usize::MAX,
+            usize::MAX,
+            SETPROCESSWORKINGSETSIZEEX_FLAGS(0),
+        ) {
+            Ok(()) => log::debug!("[MEMORY] trimmed working set after {reason}"),
+            Err(error) => log::debug!("[MEMORY] working-set trim failed after {reason}: {error}"),
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn trim_process_working_set(_reason: &str) {}
 
 #[cfg(target_os = "windows")]
 fn current_process_memory_snapshot() -> Option<ProcessMemorySnapshot> {

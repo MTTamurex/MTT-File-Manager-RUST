@@ -57,8 +57,8 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
     let display_effective_px = (folder_w.max(1.0) * ppp).ceil() as u32;
     let display_preview_bucket =
         crate::workers::thumbnail::processing::get_bucket_size(display_effective_px);
-    let opengl_scroll_lod = ctx.low_res_thumbnails_while_scrolling && ctx.is_scrolling;
-    let desired_preview_bucket = if opengl_scroll_lod {
+    let scroll_lod = ctx.low_res_thumbnails_while_scrolling && ctx.is_scrolling;
+    let desired_preview_bucket = if scroll_lod {
         display_preview_bucket.min(256)
     } else {
         display_preview_bucket.max(crate::ui::theme::MIN_GRID_THUMBNAIL_BUCKET)
@@ -69,7 +69,7 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
         257..=512 => 257,
         _ => 513,
     };
-    let preview_request_size_px = if opengl_scroll_lod {
+    let preview_request_size_px = if scroll_lod {
         min_effective_size_for_bucket
     } else {
         display_effective_px.max(min_effective_size_for_bucket)
@@ -122,12 +122,12 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
             native_preview.is_some_and(|tex| (tex.size()[0] as u32) < desired_preview_bucket);
 
         if needs_bucket_refresh && ctx.allow_thumbnail_requests && !is_loading {
-            const MAX_OPENGL_SCROLL_FOLDER_PREVIEW_REQUESTS_PER_FRAME: usize = 3;
-            if !opengl_scroll_lod
+            const MAX_SCROLL_LOD_FOLDER_PREVIEW_REQUESTS_PER_FRAME: usize = 3;
+            if !scroll_lod
                 || *ctx.folder_preview_requests_this_frame
-                    < MAX_OPENGL_SCROLL_FOLDER_PREVIEW_REQUESTS_PER_FRAME
+                    < MAX_SCROLL_LOD_FOLDER_PREVIEW_REQUESTS_PER_FRAME
             {
-                if opengl_scroll_lod {
+                if scroll_lod {
                     *ctx.folder_preview_requests_this_frame += 1;
                 }
                 ops.request_folder_preview_load(item.path.clone(), preview_request_size_px);
@@ -173,12 +173,12 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
                 // NORMAL FOLDER: Always request our custom composed preview.
                 // Worker produces back+front+thumbnail (or back+front only if no media).
                 if ctx.allow_thumbnail_requests && !is_loading {
-                    const MAX_OPENGL_SCROLL_FOLDER_PREVIEW_REQUESTS_PER_FRAME: usize = 3;
-                    if !opengl_scroll_lod
+                    const MAX_SCROLL_LOD_FOLDER_PREVIEW_REQUESTS_PER_FRAME: usize = 3;
+                    if !scroll_lod
                         || *ctx.folder_preview_requests_this_frame
-                            < MAX_OPENGL_SCROLL_FOLDER_PREVIEW_REQUESTS_PER_FRAME
+                            < MAX_SCROLL_LOD_FOLDER_PREVIEW_REQUESTS_PER_FRAME
                     {
-                        if opengl_scroll_lod {
+                        if scroll_lod {
                             *ctx.folder_preview_requests_this_frame += 1;
                         }
                         ops.request_folder_preview_load(item.path.clone(), preview_request_size_px);

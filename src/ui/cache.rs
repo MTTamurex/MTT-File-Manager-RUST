@@ -21,8 +21,10 @@ const DEFAULT_MAX_CONCURRENT_LOADS: usize = 80;
 const DEFAULT_RGBA_BUDGET_BYTES: usize = 32 * 1024 * 1024;
 pub(crate) const MIN_DYNAMIC_TEXTURE_CACHE_ITEMS: usize = 48;
 pub(crate) const MAX_DYNAMIC_TEXTURE_CACHE_ITEMS: usize = 1500;
+pub(crate) const VULKAN_MAX_DYNAMIC_TEXTURE_CACHE_ITEMS: usize = 384;
 pub(crate) const MIN_DYNAMIC_FOLDER_PREVIEW_ITEMS: usize = 32;
 pub(crate) const MAX_DYNAMIC_FOLDER_PREVIEW_ITEMS: usize = 1500;
+pub(crate) const VULKAN_MAX_DYNAMIC_FOLDER_PREVIEW_ITEMS: usize = 256;
 pub(crate) const MIN_RGBA_BUDGET_BYTES: usize = 4 * 1024 * 1024;
 pub(crate) const DEFAULT_DYNAMIC_RGBA_BUDGET_BYTES: usize = 24 * 1024 * 1024;
 pub(crate) const MAX_RGBA_BUDGET_BYTES: usize = 64 * 1024 * 1024;
@@ -622,6 +624,58 @@ impl CacheManager {
         self.thumbnail_request_debounce.clear();
         self.folder_preview_request_debounce.clear();
         // Note: folder_icon_texture and computer_icon are kept as they're singletons
+    }
+
+    /// Releases thumbnail-only state when the current view cannot display
+    /// thumbnails at all (This PC, Recycle Bin, etc.). Unlike the normal trim
+    /// path, this recreates the LRUs so their internal allocations and old
+    /// TextureHandles are dropped immediately.
+    pub fn release_thumbnail_caches_for_idle(
+        &mut self,
+        texture_capacity: usize,
+        folder_preview_capacity: usize,
+        rgba_capacity: usize,
+        rgba_budget_bytes: usize,
+    ) -> (usize, usize, usize, usize) {
+        let textures_removed = self.texture_cache.len();
+        let folder_previews_removed = self.folder_preview_cache.len();
+        let rgba_removed = self.rgba_data_cache.len();
+        let rgba_bytes_removed = self.rgba_data_bytes;
+
+        self.texture_cache = LruCache::new(nz_cache_size(texture_capacity, "texture_cache(idle)"));
+        self.folder_preview_cache = LruCache::new(nz_cache_size(
+            folder_preview_capacity,
+            "folder_preview_cache(idle)",
+        ));
+        self.rgba_data_cache = LruCache::new(nz_cache_size(rgba_capacity, "rgba_data_cache(idle)"));
+        self.rgba_data_bytes = 0;
+        self.max_rgba_data_bytes = rgba_budget_bytes;
+
+        self.loading_set.clear();
+        self.loading_set.shrink_to_fit();
+        self.folder_preview_loading.clear();
+        self.folder_preview_loading.shrink_to_fit();
+        self.pending_upload_set.clear();
+        self.pending_upload_set.shrink_to_fit();
+        self.attempted_thumbnail_bucket.clear();
+        self.attempted_thumbnail_bucket.shrink_to_fit();
+        self.best_effort_notified.clear();
+        self.best_effort_notified.shrink_to_fit();
+        self.thumbnail_request_debounce = LruCache::new(nz_cache_size(
+            THUMBNAIL_DEBOUNCE_CAPACITY,
+            "thumbnail_request_debounce(idle)",
+        ));
+        self.folder_preview_request_debounce = LruCache::new(nz_cache_size(
+            FOLDER_PREVIEW_DEBOUNCE_CAPACITY,
+            "folder_preview_request_debounce(idle)",
+        ));
+
+        (
+            textures_removed,
+            rgba_removed,
+            folder_previews_removed,
+            rgba_bytes_removed,
+        )
     }
 
     // ========== RAM Cache Methods (Layer 2 - RGBA Data) ==========
