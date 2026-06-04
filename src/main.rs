@@ -288,7 +288,13 @@ fn main() -> eframe::Result<()> {
     }
 
     // Read user's GPU backend preference (before eframe init).
-    let gpu_backend_pref = read_early_preference("gpu_backend");
+    let gpu_backend_pref = read_early_preference("gpu_backend").map(|pref| {
+        if pref == "vulkan" {
+            "auto".to_string()
+        } else {
+            pref
+        }
+    });
     let use_glow = match gpu_backend_pref.as_deref() {
         Some("glow") => true,
         _ => false, // default/auto: Wgpu with Vulkan priority

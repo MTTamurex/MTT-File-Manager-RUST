@@ -187,7 +187,14 @@ impl StartupPreferences {
 
         let gpu_backend_preference = prefs
             .get("gpu_backend")
-            .cloned()
+            .map(|backend| {
+                if backend == "vulkan" {
+                    app_state_db.set_preference("gpu_backend", "auto");
+                    "auto".to_string()
+                } else {
+                    backend.clone()
+                }
+            })
             .unwrap_or_else(|| "auto".to_string());
 
         let diagnostic_mode_requested = prefs

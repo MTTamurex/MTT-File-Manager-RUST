@@ -331,6 +331,14 @@ pub fn render_toolbar(
                 action = Some(ToolbarAction::Search(search_query.clone()));
             }
 
+            if has_text
+                && text_resp.has_focus()
+                && search_ui.input(|i| i.key_pressed(egui::Key::Escape))
+            {
+                search_query.clear();
+                action = Some(ToolbarAction::Search(String::new()));
+            }
+
             // Clear Button (X)
             if has_text {
                 if search_ui

@@ -4,7 +4,6 @@ use rust_i18n::t;
 
 const BACKENDS: &[(&str, &str)] = &[
     ("auto", "Auto - Vulkan (default, with fallback)"),
-    ("vulkan", "Wgpu - Vulkan"),
     ("gl", "Wgpu - OpenGL (experimental fallback)"),
     ("dx12", "Wgpu - DirectX 12 (experimental)"),
     ("glow", "Glow - OpenGL (experimental legacy)"),
