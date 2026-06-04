@@ -27,8 +27,14 @@ const IDLE_RGBA_BUDGET_BYTES: usize = 4 * 1024 * 1024;
 const IDLE_PENDING_THUMBNAILS: usize = 1;
 const NAVIGATION_RGBA_CACHE_ITEMS: usize = 32;
 const INACTIVE_THUMBNAIL_CACHE_ITEMS: usize = 1;
-const WORKING_SET_TRIM_DELAY: Duration = Duration::from_millis(750);
+const WORKING_SET_TRIM_FOLLOW_UP_DELAYS: &[Duration] = &[
+    Duration::from_millis(750),
+    Duration::from_millis(2500),
+    Duration::from_millis(6000),
+];
 const WORKING_SET_TRIM_MIN_INTERVAL: Duration = Duration::from_secs(10);
+const VULKAN_IDLE_WS_TRIM_AFTER: Duration = Duration::from_secs(8);
+const VULKAN_IDLE_WS_TRIM_MIN_BYTES: u64 = 24 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug)]
 struct ProcessMemorySnapshot {
@@ -687,9 +693,9 @@ impl ImageViewerApp {
             );
 
             if self.is_vulkan_backend() {
-                request_process_working_set_trim(
+                request_process_working_set_trim_series(
                     format!("vulkan thumbnail navigation ({reason})"),
-                    WORKING_SET_TRIM_DELAY,
+                    WORKING_SET_TRIM_FOLLOW_UP_DELAYS,
                 );
             }
         }
@@ -799,9 +805,9 @@ impl ImageViewerApp {
                 ext_icon_evicted,
             );
 
-            request_process_working_set_trim(
+            request_process_working_set_trim_series(
                 format!("thumbnail inactive view ({reason})"),
-                WORKING_SET_TRIM_DELAY,
+                WORKING_SET_TRIM_FOLLOW_UP_DELAYS,
             );
         }
     }
@@ -821,6 +827,7 @@ impl ImageViewerApp {
             return;
         };
         let working_set_bytes = process_memory.working_set_bytes;
+        self.run_vulkan_idle_working_set_trim(working_set_bytes);
 
         // Proactive cache trim: even below the soft memory limit, excess
         // texture/RAM cache entries from a previous folder should not linger
@@ -969,6 +976,41 @@ impl ImageViewerApp {
                 if aggressive { "hard" } else { "soft" }
             );
         }
+    }
+
+    fn run_vulkan_idle_working_set_trim(&mut self, working_set_bytes: u64) {
+        if !self.is_vulkan_backend()
+            || self.is_in_restore_burst()
+            || self.last_user_activity.elapsed() < VULKAN_IDLE_WS_TRIM_AFTER
+            || working_set_bytes < VULKAN_IDLE_WS_TRIM_MIN_BYTES
+            || self.is_loading_folder
+            || self.is_item_dragging
+            || self.pending_drag_move_confirmation.is_some()
+            || self.shell_menu_loading
+            || self.is_video_playing_docked()
+        {
+            return;
+        }
+
+        let thumbnail_pipeline_idle = self.thumbnail_queue.pending_count() == 0
+            && self.pending_thumbnails.is_empty()
+            && self.image_receiver.len() == 0
+            && self.cache_manager.loading_set.is_empty()
+            && self.cache_manager.folder_preview_loading.is_empty()
+            && self.cache_manager.pending_upload_set.is_empty();
+
+        if !thumbnail_pipeline_idle {
+            return;
+        }
+
+        request_process_working_set_trim_series(
+            format!(
+                "vulkan idle ws={:.1}MB path={}",
+                working_set_bytes as f64 / 1024.0 / 1024.0,
+                self.navigation_state.current_path
+            ),
+            WORKING_SET_TRIM_FOLLOW_UP_DELAYS,
+        );
     }
 
     pub(crate) fn estimated_visible_grid_items(&self) -> usize {
@@ -1183,8 +1225,11 @@ pub(crate) fn dynamic_rgba_budget_bytes(
     target.clamp(floor_bytes, MAX_RGBA_BUDGET_BYTES)
 }
 
-fn request_process_working_set_trim(reason: String, delay: Duration) {
+fn request_process_working_set_trim_series(reason: String, delays: &'static [Duration]) {
     if process_working_set_trim_disabled() {
+        return;
+    }
+    if delays.is_empty() {
         return;
     }
 
@@ -1204,8 +1249,14 @@ fn request_process_working_set_trim(reason: String, delay: Duration) {
         .name("mtt-working-set-trim".to_string())
         .stack_size(128 * 1024)
         .spawn(move || {
-            std::thread::sleep(delay);
-            trim_process_working_set(&reason);
+            let mut elapsed = Duration::ZERO;
+            for delay in delays {
+                if *delay > elapsed {
+                    std::thread::sleep(*delay - elapsed);
+                    elapsed = *delay;
+                }
+                trim_process_working_set(&reason);
+            }
         });
 
     if let Err(error) = spawn_result {

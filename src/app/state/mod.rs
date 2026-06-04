@@ -436,6 +436,7 @@ pub struct ImageViewerApp {
     pub last_memory_maintenance: Instant,
     pub last_memory_trace_log: Instant,
     pub last_texture_cache_retune: Instant,
+    pub last_user_activity: Instant,
 
     // INACTIVITY RECOVERY: Track when app was restored from minimized state
     // Used to throttle heavy operations (watcher events, thumbnail loads) for a few frames

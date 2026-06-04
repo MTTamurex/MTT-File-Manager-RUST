@@ -151,6 +151,7 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
             });
 
             if user_active {
+                app.last_user_activity = std::time::Instant::now();
                 let _ = app
                     .file_operation_state
                     .idle_warmup_sender
@@ -185,6 +186,7 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
             }
 
             if user_active {
+                app.last_user_activity = std::time::Instant::now();
                 let _ = app
                     .file_operation_state
                     .idle_warmup_sender
@@ -424,6 +426,7 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
         }
     }
     if user_active {
+        app.last_user_activity = std::time::Instant::now();
         let _ = app
             .file_operation_state
             .idle_warmup_sender
