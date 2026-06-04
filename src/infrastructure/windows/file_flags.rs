@@ -253,20 +253,6 @@ fn completed_write_covers_modified_path(path: &Path, modified: SystemTime) -> bo
     })
 }
 
-fn completed_write_root_contains_path(path: &Path) -> bool {
-    let now = Instant::now();
-    let mut cache = get_file_completed_write_cache().lock();
-
-    if cache.len() > COMPLETED_WRITE_STATE_CAP {
-        cache.retain(|_, state| now.duration_since(state.recorded_at) <= COMPLETED_WRITE_STATE_TTL);
-    }
-
-    cache.iter().any(|(root, state)| {
-        now.duration_since(state.recorded_at) <= COMPLETED_WRITE_STATE_TTL
-            && is_path_or_descendant(path, root.as_path())
-    })
-}
-
 fn completed_write_covers_current_path(path: &Path) -> bool {
     std::fs::metadata(path)
         .and_then(|metadata| metadata.modified())
@@ -282,12 +268,10 @@ pub fn mark_recent_write_activity_at(path: &Path, seen_at: Instant) {
         return;
     }
 
-    // After Shell reports a copy/move complete, notify can still deliver the
-    // backlog of old Create/Modify events. Treating those as fresh writes makes
-    // copied folders unlock in slow batches. The worker-side classifier still
-    // checks mtime/lock state before extraction, so real post-copy writes remain
-    // guarded without letting stale watcher events renew the cooldown.
-    if completed_write_root_contains_path(path) {
+    // After Shell reports a copy/move complete, notify can still deliver old
+    // Create/Modify events. Ignore only events for files whose current mtime is
+    // covered by that completed operation; newer writes must remain guarded.
+    if completed_write_covers_current_path(path) {
         return;
     }
 
@@ -755,5 +739,46 @@ mod tests {
 
         assert!(!is_file_unsafe_to_read_fast(&path));
         assert_eq!(classify_file_read_safety(&path), FileReadSafety::Safe);
+    }
+
+    #[test]
+    fn completed_copy_root_records_post_completion_write_activity() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let root = dir.path().join("copied");
+        std::fs::create_dir_all(&root).expect("create copied folder");
+        let path = root.join("video.mp4");
+        {
+            let mut file = std::fs::File::create(&path).expect("create media file");
+            file.write_all(b"not real media").expect("write media file");
+        }
+
+        clear_write_activity_after_completed_file_operation(&[root.clone()]);
+
+        {
+            let mut cache = get_file_completed_write_cache().lock();
+            cache
+                .get_mut(&root)
+                .expect("completed root is remembered")
+                .completed_at_system = SystemTime::UNIX_EPOCH;
+        }
+
+        {
+            let mut file = std::fs::OpenOptions::new()
+                .append(true)
+                .open(&path)
+                .expect("open media file");
+            file.write_all(b"new bytes").expect("append media file");
+        }
+
+        mark_recent_write_activity(&path);
+
+        assert!(is_file_unsafe_to_read_fast(&path));
+        assert_eq!(
+            classify_file_read_safety(&path),
+            FileReadSafety::RecentlyChanging
+        );
+
+        clear_write_activity_for_path(&root);
+        get_file_completed_write_cache().lock().remove(&root);
     }
 }
