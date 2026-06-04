@@ -1,4 +1,6 @@
 use crate::app::state::ImageViewerApp;
+use crate::domain::file_entry::{FileEntry, ViewMode};
+use crate::domain::thumbnail::ThumbnailData;
 use crate::infrastructure::diagnostic_logger::{
     diag_info, field_bool, field_duration_ms, field_label, field_u64,
 };
@@ -7,7 +9,9 @@ use crate::ui::cache::{
     VULKAN_MAX_DYNAMIC_TEXTURE_CACHE_ITEMS,
 };
 use eframe::egui;
+use rustc_hash::FxHashMap;
 use std::collections::HashSet;
+use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -116,6 +120,100 @@ fn log_slow_texture_upload(
             field_bool("vulkan", is_vulkan),
         ],
     );
+}
+
+fn insert_visible_upload_ranks(
+    ranks: &mut FxHashMap<PathBuf, usize>,
+    items: &[FileEntry],
+    visible_index_range: Option<(usize, usize)>,
+    base_rank: usize,
+) -> usize {
+    let Some((min_idx, max_idx)) = visible_index_range else {
+        return 0;
+    };
+    if items.is_empty() {
+        return 0;
+    }
+
+    let max_idx = max_idx.min(items.len().saturating_sub(1));
+    if min_idx > max_idx {
+        return 0;
+    }
+
+    let mut inserted = 0usize;
+    for idx in min_idx..=max_idx {
+        ranks
+            .entry(items[idx].path.clone())
+            .or_insert(base_rank + inserted);
+        inserted += 1;
+    }
+
+    inserted
+}
+
+fn snapshot_items_for_upload_rank(
+    snapshot: &crate::app::dual_panel::PanelSnapshot,
+) -> &[FileEntry] {
+    if snapshot.items_snapshot_compact && snapshot.items.is_empty() {
+        snapshot.all_items.as_ref().as_slice()
+    } else {
+        snapshot.items.as_ref().as_slice()
+    }
+}
+
+fn visible_thumbnail_upload_ranks(app: &ImageViewerApp) -> FxHashMap<PathBuf, usize> {
+    let mut ranks = FxHashMap::default();
+    let mut next_rank = 0usize;
+
+    if matches!(app.view_mode, ViewMode::Grid | ViewMode::List) {
+        next_rank += insert_visible_upload_ranks(
+            &mut ranks,
+            app.items.as_ref().as_slice(),
+            app.visible_index_range,
+            next_rank,
+        );
+    }
+
+    if app.dual_panel_enabled {
+        if let Some(snapshot) = app.dual_panel_inactive_state.as_ref() {
+            if matches!(snapshot.view_mode, ViewMode::Grid | ViewMode::List) {
+                insert_visible_upload_ranks(
+                    &mut ranks,
+                    snapshot_items_for_upload_rank(snapshot),
+                    snapshot.visible_index_range,
+                    next_rank,
+                );
+            }
+        }
+    }
+
+    ranks
+}
+
+fn next_thumbnail_upload_index(
+    pending_thumbnails: &VecDeque<ThumbnailData>,
+    selected_path: Option<&PathBuf>,
+    visible_ranks: &FxHashMap<PathBuf, usize>,
+) -> Option<usize> {
+    if let Some(selected_path) = selected_path {
+        let selected_can_preempt =
+            visible_ranks.is_empty() || visible_ranks.contains_key(selected_path);
+        if let Some(pos) = pending_thumbnails
+            .iter()
+            .position(|thumb| &thumb.path == selected_path)
+            .filter(|_| selected_can_preempt)
+        {
+            return Some(pos);
+        }
+    }
+
+    pending_thumbnails
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, thumb)| visible_ranks.get(&thumb.path).map(|rank| (idx, *rank)))
+        .min_by_key(|(_, rank)| *rank)
+        .map(|(idx, _)| idx)
+        .or_else(|| (!pending_thumbnails.is_empty()).then_some(0))
 }
 
 impl ImageViewerApp {
@@ -294,10 +392,12 @@ impl ImageViewerApp {
                 continue;
             }
 
+            let incoming_visible = eviction_visible
+                .as_ref()
+                .is_some_and(|visible| visible.contains(&thumbnail_data.path));
+            let mut drop_incoming = false;
             while self.pending_thumbnails.len() >= dynamic_pending_limit {
-                // Prefer removing off-screen items to keep visible ones alive. If every
-                // pending item is visible, still fall back to FIFO so the decoded RGBA
-                // queue remains bounded by the byte-aware cap.
+                // Prefer removing off-screen items to keep visible ones alive.
                 let evict_idx = eviction_visible.as_ref().and_then(|visible| {
                     // Find first off-screen item in the deque
                     self.pending_thumbnails
@@ -312,13 +412,29 @@ impl ImageViewerApp {
                         }
                     }
                     None => {
-                        if let Some(old) = self.pending_thumbnails.pop_front() {
+                        if eviction_visible.is_some() {
+                            if incoming_visible {
+                                // All pending items are visible. Allow the visible upload
+                                // queue to temporarily exceed the byte cap instead of
+                                // dropping one visible tile and showing its fallback icon.
+                                break;
+                            } else {
+                                drop_incoming = true;
+                                break;
+                            }
+                        } else if let Some(old) = self.pending_thumbnails.pop_front() {
                             self.cache_manager.finish_pending_upload(&old.path);
                         } else {
                             break;
                         }
                     }
                 }
+            }
+
+            if drop_incoming {
+                self.cache_manager
+                    .finish_pending_upload(&thumbnail_data.path);
+                continue;
             }
 
             self.cache_manager
@@ -570,7 +686,7 @@ impl ImageViewerApp {
             if is_opengl {
                 8
             } else if is_vulkan {
-                8
+                12
             } else {
                 12
             }
@@ -621,7 +737,7 @@ impl ImageViewerApp {
             // Burst: don't reduce through perf_scale; use the burst cap directly.
             base_max_uploads
         } else {
-            let max_uploads = if is_vulkan { 12.0 } else { 20.0 };
+            let max_uploads = if is_vulkan { 16.0 } else { 20.0 };
             ((base_max_uploads as f32) * perf_scale)
                 .round()
                 .clamp(1.0, max_uploads) as usize
@@ -684,7 +800,7 @@ impl ImageViewerApp {
             }
         } else {
             if is_vulkan {
-                self.upload_budget_ms.min(6.0)
+                self.upload_budget_ms.min(8.0)
             } else {
                 self.upload_budget_ms
             }
@@ -692,28 +808,13 @@ impl ImageViewerApp {
         let upload_budget_ms = if is_burst {
             base_budget_ms
         } else {
-            let max_budget_ms = if is_vulkan { 6.0 } else { 10.0 };
+            let max_budget_ms = if is_vulkan { 8.0 } else { 10.0 };
             (base_budget_ms * perf_scale).clamp(2.0, max_budget_ms)
         };
         let upload_budget = Duration::from_millis(upload_budget_ms.round() as u64);
 
-        let mut prioritized_path: Option<PathBuf> = None;
-        if let Some(selected_file) = &self.selected_file {
-            prioritized_path = Some(selected_file.path.clone());
-        }
-        if let Some(path) = prioritized_path {
-            if let Some(pos) = self
-                .pending_thumbnails
-                .iter()
-                .position(|thumb| thumb.path == path)
-            {
-                if pos > 0 {
-                    if let Some(selected_thumb) = self.pending_thumbnails.remove(pos) {
-                        self.pending_thumbnails.push_front(selected_thumb);
-                    }
-                }
-            }
-        }
+        let selected_upload_path = self.selected_file.as_ref().map(|file| file.path.clone());
+        let visible_upload_ranks = visible_thumbnail_upload_ranks(self);
 
         let visible_paths = if is_scrolling {
             eviction_visible.as_ref()
@@ -740,11 +841,23 @@ impl ImageViewerApp {
         let mut offscreen_discards = 0usize;
 
         while uploads_this_frame < max_uploads_per_frame {
-            if let Some(thumbnail_data) = self.pending_thumbnails.pop_front() {
-                if upload_start.elapsed() >= upload_budget {
-                    self.pending_thumbnails.push_front(thumbnail_data);
+            if upload_start.elapsed() >= upload_budget {
+                break;
+            }
+
+            if let Some(next_upload_idx) = next_thumbnail_upload_index(
+                &self.pending_thumbnails,
+                selected_upload_path.as_ref(),
+                &visible_upload_ranks,
+            ) {
+                let thumbnail_data = if next_upload_idx == 0 {
+                    self.pending_thumbnails.pop_front()
+                } else {
+                    self.pending_thumbnails.remove(next_upload_idx)
+                };
+                let Some(thumbnail_data) = thumbnail_data else {
                     break;
-                }
+                };
 
                 if thumbnail_data.generation != self.generation {
                     self.cache_manager

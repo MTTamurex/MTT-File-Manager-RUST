@@ -65,10 +65,12 @@ pub(super) fn render_list_item(
                 None => false,
             };
 
+            const MAX_THUMBNAIL_REQUESTS_PER_FRAME: usize = 96;
+
             let can_request = (!has_texture || needs_bucket_refresh)
                 && !is_loading
                 && !is_pending
-                && ctx.thumbnail_requests_this_frame < 24;
+                && ctx.thumbnail_requests_this_frame < MAX_THUMBNAIL_REQUESTS_PER_FRAME;
 
             if can_request {
                 ctx.thumbnail_requests_this_frame += 1;

@@ -1,4 +1,4 @@
-use super::{item_renderer, GridViewContext, ScrollDirection};
+use super::{item_renderer, GridViewContext};
 use crate::ui::cache::FxHashSet;
 use eframe::egui::{self, Rect, Ui};
 use rust_i18n::t;
@@ -345,8 +345,6 @@ fn render_standard_grid(
         ctx.scroll_predictor
             .update(first_visible_index, last_visible_index);
     }
-    let visible_bottom_first = matches!(ctx.scroll_predictor.direction(), ScrollDirection::Down);
-
     {
         let mut render_row = |row: usize, allow_thumbnail_requests: bool| {
             for col in 0..cols {
@@ -390,7 +388,7 @@ fn render_standard_grid(
         };
 
         let row_batches = [
-            (visible_start, visible_end, true, visible_bottom_first),
+            (visible_start, visible_end, true, false),
             (loop_min_row, visible_start, false, false),
             (visible_end, loop_max_row, false, false),
         ];

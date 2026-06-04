@@ -62,8 +62,10 @@ pub(super) fn render_file_slot<O: ItemSlotOperations>(
         let is_failed = ctx.failed_thumbnails.contains(&item.path);
         let is_pending_upload = ctx.pending_upload_set.contains(&item.path);
 
-        const MAX_THUMBNAIL_REQUESTS_PER_FRAME: usize = 24;
-        const MAX_SCROLL_LOD_THUMBNAIL_REQUESTS_PER_FRAME: usize = 12;
+        // Queue all visible cache hits quickly; worker decode and GPU upload remain
+        // separately throttled, so this does not increase per-frame upload cost.
+        const MAX_THUMBNAIL_REQUESTS_PER_FRAME: usize = 96;
+        const MAX_SCROLL_LOD_THUMBNAIL_REQUESTS_PER_FRAME: usize = 48;
         let max_thumbnail_requests = if scroll_lod {
             MAX_SCROLL_LOD_THUMBNAIL_REQUESTS_PER_FRAME
         } else {
