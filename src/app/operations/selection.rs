@@ -128,6 +128,17 @@ impl ImageViewerApp {
         if resolved_index.is_none() {
             self.scroll_to_selected = false;
             self.scroll_request = crate::app::state::ScrollRequest::None;
+
+            // When the selected file is not in the visible items but we have
+            // data (all_items non-empty), the file was filtered out by search.
+            // Clear the selection so the preview panel shows "no selection"
+            // instead of stale data from the previously selected file.
+            if self.selected_file.is_some() && !self.all_items.is_empty() {
+                self.selected_file = None;
+                self.selected_thumbnail = None;
+                self.selected_metadata = None;
+                self.multi_selection.clear();
+            }
         }
     }
 
