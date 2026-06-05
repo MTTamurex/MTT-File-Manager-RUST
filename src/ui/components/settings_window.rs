@@ -147,8 +147,6 @@ pub fn render_settings_window(
                                     ui.add_space(16.0);
                                     theme_changed |= crate::ui::components::appearance_settings::render_appearance_settings_section(ui, theme_mode);
                                     ui.add_space(16.0);
-                                    backend_changed |= crate::ui::components::backend_settings::render_backend_settings_section(ui, active_gpu_backend, gpu_backend_preference);
-                                    ui.add_space(16.0);
                                     ui.label(RichText::new(t!("settings.show_recycle_bin").to_string()).strong().color(theme::text_color(dark_mode)));
                                     ui.add_space(4.0);
                                     if ui.checkbox(show_recycle_bin, RichText::new(t!("settings.show_recycle_bin")).color(theme::text_color(dark_mode))).changed() {
@@ -197,6 +195,9 @@ pub fn render_settings_window(
                                     });
                                     ui.add_space(6.0);
                                     ui.small(RichText::new(t!("settings.diagnostics_note")).color(theme::secondary_text_color(dark_mode)));
+                                }
+                                SettingsSection::Graphics => {
+                                    backend_changed |= crate::ui::components::backend_settings::render_backend_settings_section(ui, active_gpu_backend, gpu_backend_preference);
                                 }
                                 SettingsSection::Shortcuts => {
                                     shortcuts_changed |= crate::ui::components::shortcut_settings::render_shortcut_settings_section(
@@ -251,6 +252,11 @@ fn render_settings_sidebar(
         active_section,
         SettingsSection::Diagnostics,
         RichText::new(t!("settings.diagnostics")).color(theme::text_color(dark_mode)),
+    );
+    ui.selectable_value(
+        active_section,
+        SettingsSection::Graphics,
+        RichText::new(t!("settings.graphics")).color(theme::text_color(dark_mode)),
     );
     ui.selectable_value(
         active_section,

@@ -10,6 +10,7 @@ pub enum ThemeMode {
 pub enum SettingsSection {
     General,
     Diagnostics,
+    Graphics,
     Shortcuts,
     VirtualDrives,
     About,

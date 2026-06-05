@@ -276,6 +276,8 @@ settings:
   diagnostics_privacy_excludes: "No file name, folder name, full path, or other sensitive user data should be exposed in this log."
   diagnostics_privacy_transmission: "Nothing is sent automatically outside the application. The file stays local and is intended only for technical diagnostics."
   diagnostics_note: "Auto-disables after 24 hours. The file keeps the latest 10 MiB and records only minimized technical data."
+  graphics: "Graphics"
+  graphics_description: "Configure the graphics rendering backend."
   backend_title: "Graphics Backend"
   backend_description: "Select the graphics rendering backend. Auto uses Vulkan by default and falls back to OpenGL/DX12 when needed."
   backend_active: "Active backend:"

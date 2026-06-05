@@ -18,6 +18,20 @@ pub fn render_backend_settings_section(
     let dark_mode = ui.visuals().dark_mode;
 
     ui.label(
+        RichText::new(t!("settings.graphics"))
+            .size(16.0)
+            .strong()
+            .color(theme::text_color(dark_mode)),
+    );
+    ui.add_space(4.0);
+    ui.label(
+        RichText::new(t!("settings.graphics_description"))
+            .size(13.0)
+            .color(theme::secondary_text_color(dark_mode)),
+    );
+    ui.add_space(16.0);
+
+    ui.label(
         RichText::new(t!("settings.backend_title"))
             .size(14.0)
             .strong()
