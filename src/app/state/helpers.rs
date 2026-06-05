@@ -987,7 +987,6 @@ impl ImageViewerApp {
             || self.is_item_dragging
             || self.pending_drag_move_confirmation.is_some()
             || self.shell_menu_loading
-            || self.is_video_playing_docked()
         {
             return;
         }

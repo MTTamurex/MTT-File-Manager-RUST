@@ -244,7 +244,12 @@ impl ImageViewerApp {
         let mut not_found_failures: Vec<PathBuf> = Vec::new();
         let mut successful_thumb_paths: Vec<PathBuf> = Vec::new();
 
-        let eviction_visible = self.visible_grid_paths_snapshot();
+        let mut eviction_visible = self.visible_grid_paths_snapshot();
+        if let Some(detail_path) = self.detail_panel_folder_preview_path() {
+            eviction_visible
+                .get_or_insert_with(crate::ui::cache::FxHashSet::default)
+                .insert(detail_path);
+        }
         let visible_texture_keep = self.current_dynamic_texture_keep_count();
         if let Some(visible_paths) = eviction_visible.as_ref() {
             self.cache_manager.promote_visible(visible_paths);
@@ -1413,6 +1418,13 @@ impl ImageViewerApp {
             .selected_file
             .as_ref()
             .is_some_and(|selected| &selected.path == path)
+        {
+            return true;
+        }
+
+        if self
+            .detail_panel_folder_preview_path()
+            .is_some_and(|detail_path| detail_path.as_path() == path.as_path())
         {
             return true;
         }

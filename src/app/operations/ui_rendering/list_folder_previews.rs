@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::app::state::ImageViewerApp;
 use crate::domain::file_entry::FileEntry;
@@ -34,7 +34,7 @@ impl ImageViewerApp {
         self.request_folder_preview_load(path);
     }
 
-    fn detail_panel_folder_preview_path(&self) -> Option<PathBuf> {
+    pub(crate) fn detail_panel_folder_preview_path(&self) -> Option<PathBuf> {
         if !self.show_preview_panel
             || self.multi_selection.len() > 1
             || self.navigation_state.is_computer_view
@@ -46,8 +46,12 @@ impl ImageViewerApp {
             return None;
         }
 
-        let selected = self.selected_file.as_ref()?;
-        should_use_composed_folder_preview(selected).then(|| selected.path.clone())
+        if let Some(selected) = self.selected_file.as_ref() {
+            return should_use_composed_folder_preview(selected).then(|| selected.path.clone());
+        }
+
+        let path = PathBuf::from(&self.navigation_state.current_path);
+        should_use_composed_folder_preview_path(&path, true).then_some(path)
     }
 }
 
@@ -56,11 +60,12 @@ fn should_use_composed_folder_preview(item: &FileEntry) -> bool {
         return false;
     }
 
-    let path_text = item.path.to_string_lossy();
+    should_use_composed_folder_preview_path(&item.path, item.is_dir)
+}
+
+fn should_use_composed_folder_preview_path(path: &Path, is_dir: bool) -> bool {
+    let path_text = path.to_string_lossy();
     !crate::infrastructure::windows::is_windows_system_path(path_text.as_ref())
-        && !crate::infrastructure::windows::shell_folder::is_shell_navigation_path(
-            &item.path,
-            item.is_dir,
-        )
-        && !crate::infrastructure::onedrive::is_special_icon_folder(&item.path)
+        && !crate::infrastructure::windows::shell_folder::is_shell_navigation_path(path, is_dir)
+        && !crate::infrastructure::onedrive::is_special_icon_folder(path)
 }

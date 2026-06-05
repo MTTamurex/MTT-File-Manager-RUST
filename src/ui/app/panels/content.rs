@@ -38,6 +38,10 @@ pub(super) fn render_preview_panel_layout(
             app.refresh_selected_metadata();
         }
 
+        if !defer_preview_work {
+            app.warm_detail_panel_folder_preview();
+        }
+
         // Clamp width to valid range BEFORE using it
         let target_width = app
             .layout
