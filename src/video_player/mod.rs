@@ -18,6 +18,13 @@ use rfd::FileDialog;
 const STANDALONE_OSC_BASE_SCRIPT_OPTS: &str =
     "osc-scalewindowed=1,osc-scalefullscreen=1,osc-scaleforcedwindow=1,osc-windowcontrols=yes";
 
+/// OSD/OSC libass cache limits. These mpv options were added after reports of
+/// OSC/OSD memory growth caused by refreshable ASS overlays.
+pub(crate) const MPV_OSD_PRUNE_DELAY_SECS: f64 = 0.0;
+pub(crate) const MPV_OSD_GLYPH_LIMIT: i64 = 128;
+pub(crate) const MPV_OSD_BITMAP_MAX_SIZE_MB: i64 = 4;
+pub(crate) const MPV_OSD_SHAPER: &str = "simple";
+
 /// Maximum file size for the video player (50 GB).
 const MAX_VIDEO_FILE_SIZE: u64 = 50 * 1024 * 1024 * 1024;
 
@@ -499,6 +506,21 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
         // Borderless window — OSC provides the window controls
         if let Err(e) = init.set_option("border", false) {
             log::warn!("[VIDEO-PLAYER] Failed to set border=no: {:?}", e);
+        }
+
+        // Limit libass caches used by the OSC/OSD. Unsupported on older mpv
+        // builds; failures are non-fatal and only reduce this mitigation.
+        if let Err(e) = init.set_option("osd-prune-delay", MPV_OSD_PRUNE_DELAY_SECS) {
+            log::warn!("[VIDEO-PLAYER] Failed to set osd-prune-delay: {:?}", e);
+        }
+        if let Err(e) = init.set_option("osd-glyph-limit", MPV_OSD_GLYPH_LIMIT) {
+            log::warn!("[VIDEO-PLAYER] Failed to set osd-glyph-limit: {:?}", e);
+        }
+        if let Err(e) = init.set_option("osd-bitmap-max-size", MPV_OSD_BITMAP_MAX_SIZE_MB) {
+            log::warn!("[VIDEO-PLAYER] Failed to set osd-bitmap-max-size: {:?}", e);
+        }
+        if let Err(e) = init.set_option("osd-shaper", MPV_OSD_SHAPER) {
+            log::warn!("[VIDEO-PLAYER] Failed to set osd-shaper: {:?}", e);
         }
 
         // Load custom OSC script

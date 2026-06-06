@@ -195,6 +195,30 @@ impl MpvPreview {
                 if let Err(e) = init.set_option("cursor-autohide", 1000_i64) {
                     log::warn!("[MpvPreview] Failed to set cursor-autohide=1000: {:?}", e);
                 }
+
+                // Limit libass caches used by the custom OSC/OSD. Older mpv
+                // builds may not support these options; keep playback working.
+                if let Err(e) = init.set_option(
+                    "osd-prune-delay",
+                    crate::video_player::MPV_OSD_PRUNE_DELAY_SECS,
+                ) {
+                    log::warn!("[MpvPreview] Failed to set osd-prune-delay: {:?}", e);
+                }
+                if let Err(e) =
+                    init.set_option("osd-glyph-limit", crate::video_player::MPV_OSD_GLYPH_LIMIT)
+                {
+                    log::warn!("[MpvPreview] Failed to set osd-glyph-limit: {:?}", e);
+                }
+                if let Err(e) = init.set_option(
+                    "osd-bitmap-max-size",
+                    crate::video_player::MPV_OSD_BITMAP_MAX_SIZE_MB,
+                ) {
+                    log::warn!("[MpvPreview] Failed to set osd-bitmap-max-size: {:?}", e);
+                }
+                if let Err(e) = init.set_option("osd-shaper", crate::video_player::MPV_OSD_SHAPER) {
+                    log::warn!("[MpvPreview] Failed to set osd-shaper: {:?}", e);
+                }
+
                 if let Err(e) = init.set_option("script-opts", osc_script_opts.as_str()) {
                     log::warn!(
                         "[MpvPreview] Failed to set script-opts={} : {:?}",
