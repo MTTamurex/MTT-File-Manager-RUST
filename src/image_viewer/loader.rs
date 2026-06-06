@@ -253,7 +253,11 @@ pub fn decode_full_frame_with_priority(
     let longest = original_w.max(original_h);
 
     let scaled = if longest > DISPLAY_CACHE_MAX_SIDE {
-        image.resize(DISPLAY_CACHE_MAX_SIDE, DISPLAY_CACHE_MAX_SIDE, FilterType::Triangle)
+        image.resize(
+            DISPLAY_CACHE_MAX_SIDE,
+            DISPLAY_CACHE_MAX_SIDE,
+            FilterType::Triangle,
+        )
     } else {
         image
     };
@@ -280,8 +284,7 @@ pub fn decode_export_frame(path: &Path) -> io::Result<DecodedFrame> {
     {
         if let Some((rgba, w, h, original_w, original_h)) =
             crate::workers::thumbnail::extraction::stage2_wic::extract_to_size_with_original_size(
-                path,
-                None,
+                path, None,
             )
         {
             let mut frame = DecodedFrame {
@@ -604,7 +607,6 @@ fn frame_from_dynamic(image: DynamicImage) -> DecodedFrame {
         rgba: rgba.into_raw(),
     }
 }
-
 
 fn read_file_fast(path: &Path, priority: DecodePriority) -> io::Result<Vec<u8>> {
     #[cfg(target_os = "windows")]

@@ -202,13 +202,19 @@ impl ImageViewerApp {
                     .enabled(can_create_folder),
             );
             items.push(ContextMenuItem::new(-80, t!("context_menu.open_terminal")));
-            items.push(ContextMenuItem::new(-81, t!("context_menu.open_terminal_admin")));
+            items.push(ContextMenuItem::new(
+                -81,
+                t!("context_menu.open_terminal_admin"),
+            ));
         } else {
             items.push(ContextMenuItem::separator());
             items.push(ContextMenuItem::new(-20, t!("context_menu.open")));
             items.push(ContextMenuItem::new(-21, t!("context_menu.open_new_tab")));
             items.push(ContextMenuItem::new(-80, t!("context_menu.open_terminal")));
-            items.push(ContextMenuItem::new(-81, t!("context_menu.open_terminal_admin")));
+            items.push(ContextMenuItem::new(
+                -81,
+                t!("context_menu.open_terminal_admin"),
+            ));
             items.push(ContextMenuItem::separator());
             items.push(
                 ContextMenuItem::new(-30, t!("context_menu.cut"))

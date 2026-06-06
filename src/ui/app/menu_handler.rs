@@ -7,9 +7,7 @@ use windows::{
     core::PCWSTR,
     Win32::{
         Foundation::HWND,
-        UI::Shell::{
-            ShellExecuteExW, SHELLEXECUTEINFOW, SEE_MASK_FLAG_NO_UI,
-        },
+        UI::Shell::{ShellExecuteExW, SEE_MASK_FLAG_NO_UI, SHELLEXECUTEINFOW},
         UI::WindowsAndMessaging::SW_SHOWNORMAL,
     },
 };
@@ -49,7 +47,7 @@ fn elevated_spawn(program: &str, args: &[&str]) -> bool {
         .iter()
         .map(|a| {
             if a.contains(' ') {
-                format!("\"{}\"" , a)
+                format!("\"{}\"", a)
             } else {
                 (*a).to_string()
             }
