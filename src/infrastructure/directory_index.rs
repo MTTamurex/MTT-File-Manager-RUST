@@ -1,6 +1,6 @@
+use parking_lot::Mutex;
 use rusqlite::{params, Connection};
 use std::path::Path;
-use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone)]
@@ -64,7 +64,7 @@ impl DirectoryIndex {
     }
 
     pub fn get_directory(&self, dir_path: &Path) -> Option<(DirectoryMeta, Vec<IndexedFile>)> {
-        let conn = self.conn.lock().ok()?;
+        let conn = self.conn.lock();
         let dir_str = dir_path.to_string_lossy();
 
         let meta: DirectoryMeta = conn
@@ -109,10 +109,7 @@ impl DirectoryIndex {
     /// Non-blocking variant for UI-thread callers.
     /// Returns `None` immediately if the connection lock is held by a writer.
     pub fn try_get_directory(&self, dir_path: &Path) -> Option<(DirectoryMeta, Vec<IndexedFile>)> {
-        let conn = match self.conn.try_lock() {
-            Ok(c) => c,
-            Err(_) => return None, // Writer busy — treat as cache miss
-        };
+        let conn = self.conn.try_lock()?;
         let dir_str = dir_path.to_string_lossy();
 
         let meta: DirectoryMeta = conn
@@ -160,12 +157,7 @@ impl DirectoryIndex {
         files: &[IndexedFile],
         scan_duration_ms: u64,
     ) -> rusqlite::Result<()> {
-        let mut conn = self.conn.lock().map_err(|_| {
-            rusqlite::Error::SqliteFailure(
-                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_ERROR),
-                Some("Lock poisoned".to_string()),
-            )
-        })?;
+        let mut conn = self.conn.lock();
 
         let dir_str_cow = dir_path.to_string_lossy();
         let dir_str: &str = &dir_str_cow;
@@ -215,12 +207,7 @@ impl DirectoryIndex {
     }
 
     pub fn invalidate(&self, dir_path: &Path) -> rusqlite::Result<()> {
-        let conn = self.conn.lock().map_err(|_| {
-            rusqlite::Error::SqliteFailure(
-                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_ERROR),
-                Some("Lock poisoned".to_string()),
-            )
-        })?;
+        let conn = self.conn.lock();
 
         let dir_str = dir_path.to_string_lossy();
 
@@ -231,12 +218,7 @@ impl DirectoryIndex {
     }
 
     pub fn invalidate_recursive(&self, parent: &Path) -> rusqlite::Result<()> {
-        let conn = self.conn.lock().map_err(|_| {
-            rusqlite::Error::SqliteFailure(
-                rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_ERROR),
-                Some("Lock poisoned".to_string()),
-            )
-        })?;
+        let conn = self.conn.lock();
 
         let parent_str = format!("{}%", parent.to_string_lossy());
 
@@ -253,7 +235,7 @@ impl DirectoryIndex {
     }
 
     pub fn stats(&self) -> Option<(usize, usize)> {
-        let conn = self.conn.lock().ok()?;
+        let conn = self.conn.lock();
 
         let dir_count: i64 = conn
             .query_row("SELECT COUNT(*) FROM directory_index", [], |row| row.get(0))

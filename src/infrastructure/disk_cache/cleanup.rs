@@ -15,35 +15,34 @@ impl ThumbnailDiskCache {
     pub fn remove_cache_for_path(&self, path: &Path) {
         let path_str = normalize_cache_path(path);
 
-        if let Ok(mut db) = self.writer.lock() {
-            let pattern = format!("{}\\%", path_str.trim_end_matches('\\'));
+        let mut db = self.writer.lock();
+        let pattern = format!("{}\\%", path_str.trim_end_matches('\\'));
 
-            // M-16: wrap all DELETEs in a single transaction — one fsync instead of multiple
-            if let Ok(tx) = db.transaction() {
-                let _ = tx.execute("DELETE FROM thumbnails WHERE path = ?", [&path_str]);
-                let deleted = tx
-                    .execute("DELETE FROM thumbnails WHERE path LIKE ?", [&pattern])
-                    .unwrap_or(0);
+        // M-16: wrap all DELETEs in a single transaction — one fsync instead of multiple
+        if let Ok(tx) = db.transaction() {
+            let _ = tx.execute("DELETE FROM thumbnails WHERE path = ?", [&path_str]);
+            let deleted = tx
+                .execute("DELETE FROM thumbnails WHERE path LIKE ?", [&pattern])
+                .unwrap_or(0);
 
-                // Remove folder preview cache entries
-                let _ = tx.execute(
-                    "DELETE FROM folder_previews WHERE folder_path = ?",
-                    [&path_str],
-                );
-                let _ = tx.execute(
-                    "DELETE FROM folder_previews WHERE folder_path LIKE ?",
-                    [&pattern],
-                );
+            // Remove folder preview cache entries
+            let _ = tx.execute(
+                "DELETE FROM folder_previews WHERE folder_path = ?",
+                [&path_str],
+            );
+            let _ = tx.execute(
+                "DELETE FROM folder_previews WHERE folder_path LIKE ?",
+                [&pattern],
+            );
 
-                let _ = tx.commit();
+            let _ = tx.commit();
 
-                // Log cleanup (VACUUM is not called here to avoid UI thread blocking;
-                // it runs during garbage_collect() which is called at controlled times)
-                if deleted > 0 {
-                    log::debug!("[Cache] Cleaned {} entries for: {}", deleted, path_str);
-                }
+            // Log cleanup (VACUUM is not called here to avoid UI thread blocking;
+            // it runs during garbage_collect() which is called at controlled times)
+            if deleted > 0 {
+                log::debug!("[Cache] Cleaned {} entries for: {}", deleted, path_str);
             }
-        }
+        };
     }
 
     /// Rename a thumbnail cache entry from `old_path` to `new_path`.
@@ -57,24 +56,23 @@ impl ThumbnailDiskCache {
         let new_id = Self::hash_path(new_path);
         let new_path_str = normalize_cache_path(new_path);
 
-        if let Ok(db) = self.writer.lock() {
-            // If a stale entry already exists under new_id (e.g. from a
-            // previous run with the same name), remove it first to avoid a
-            // UNIQUE constraint violation.
-            let _ = db.execute("DELETE FROM thumbnails WHERE id = ?", [&new_id]);
-            let updated = db
-                .execute(
-                    "UPDATE thumbnails SET id = ?, path = ? WHERE id = ?",
-                    rusqlite::params![new_id, new_path_str, old_id],
-                )
-                .unwrap_or(0);
-            if updated > 0 {
-                log::debug!(
-                    "[Cache] Renamed disk cache entry {:?} -> {:?}",
-                    old_path.file_name().unwrap_or_default(),
-                    new_path.file_name().unwrap_or_default()
-                );
-            }
+        let db = self.writer.lock();
+        // If a stale entry already exists under new_id (e.g. from a
+        // previous run with the same name), remove it first to avoid a
+        // UNIQUE constraint violation.
+        let _ = db.execute("DELETE FROM thumbnails WHERE id = ?", [&new_id]);
+        let updated = db
+            .execute(
+                "UPDATE thumbnails SET id = ?, path = ? WHERE id = ?",
+                rusqlite::params![new_id, new_path_str, old_id],
+            )
+            .unwrap_or(0);
+        if updated > 0 {
+            log::debug!(
+                "[Cache] Renamed disk cache entry {:?} -> {:?}",
+                old_path.file_name().unwrap_or_default(),
+                new_path.file_name().unwrap_or_default()
+            );
         }
     }
 }

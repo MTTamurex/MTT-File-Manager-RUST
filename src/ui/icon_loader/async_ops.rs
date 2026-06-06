@@ -66,16 +66,43 @@ impl IconLoader {
             return None;
         }
 
-        // Spawn background extraction (non-blocking)
+        // Spawn background extraction (non-blocking, bounded)
         let key = drive_path.to_string();
-        self.loading_drive_icons.insert(key.clone());
         let tx = self.icon_result_tx.clone();
-        std::thread::spawn(move || {
-            let data = windows::extract_drive_icon(&key, IconSize::Jumbo)
-                .map_err(|e| log::trace!("[Icon] Drive icon extraction failed for {}: {}", key, e))
-                .ok();
-            let _ = tx.send(AsyncIconResult { key, data });
-        });
+        let active = self.auxiliary_icon_threads.clone();
+
+        if !super::try_reserve_auxiliary_icon_thread(&active) {
+            return None;
+        }
+
+        self.loading_drive_icons.insert(key.clone());
+        let thread_key = key.clone();
+        let extraction_key = key.clone();
+        let thread_active = active.clone();
+        let spawn_result = std::thread::Builder::new()
+            .name("drive-icon-worker".to_string())
+            .spawn(move || {
+                let _guard = super::ThreadCountGuard(thread_active);
+                let data = windows::extract_drive_icon(&extraction_key, IconSize::Jumbo)
+                    .map_err(|e| {
+                        log::trace!(
+                            "[Icon] Drive icon extraction failed for {}: {}",
+                            extraction_key,
+                            e
+                        )
+                    })
+                    .ok();
+                let _ = tx.send(AsyncIconResult {
+                    key: thread_key,
+                    data,
+                });
+            });
+
+        if let Err(error) = spawn_result {
+            active.fetch_sub(1, Ordering::Relaxed);
+            self.loading_drive_icons.remove(&key);
+            log::error!("[Icon] Failed to spawn drive-icon-worker: {}", error);
+        }
 
         None
     }
@@ -104,25 +131,42 @@ impl IconLoader {
             return None;
         }
 
-        // Spawn background extraction (non-blocking)
-        self.loading_drive_icons.insert(cache_key.clone());
+        // Spawn background extraction (non-blocking, bounded)
         let tx = self.icon_result_tx.clone();
         let path_owned = folder_path.to_string();
-        std::thread::spawn(move || {
-            let data = windows::extract_drive_icon(&path_owned, IconSize::Jumbo)
-                .map_err(|e| {
-                    log::trace!(
-                        "[Icon] Folder icon extraction failed for {}: {}",
-                        path_owned,
-                        e
-                    )
-                })
-                .ok();
-            let _ = tx.send(AsyncIconResult {
-                key: cache_key,
-                data,
+        let active = self.auxiliary_icon_threads.clone();
+
+        if !super::try_reserve_auxiliary_icon_thread(&active) {
+            return None;
+        }
+
+        self.loading_drive_icons.insert(cache_key.clone());
+        let thread_cache_key = cache_key.clone();
+        let thread_active = active.clone();
+        let spawn_result = std::thread::Builder::new()
+            .name("folder-path-icon-worker".to_string())
+            .spawn(move || {
+                let _guard = super::ThreadCountGuard(thread_active);
+                let data = windows::extract_drive_icon(&path_owned, IconSize::Jumbo)
+                    .map_err(|e| {
+                        log::trace!(
+                            "[Icon] Folder icon extraction failed for {}: {}",
+                            path_owned,
+                            e
+                        )
+                    })
+                    .ok();
+                let _ = tx.send(AsyncIconResult {
+                    key: thread_cache_key,
+                    data,
+                });
             });
-        });
+
+        if let Err(error) = spawn_result {
+            active.fetch_sub(1, Ordering::Relaxed);
+            self.loading_drive_icons.remove(&cache_key);
+            log::error!("[Icon] Failed to spawn folder-path-icon-worker: {}", error);
+        }
 
         None
     }
@@ -144,27 +188,40 @@ impl IconLoader {
 
         // Background thread extracts ALL icons via COM.
         let tx = self.icon_result_tx.clone();
-        std::thread::spawn(move || {
-            #[cfg(target_os = "windows")]
-            let _com_guard = super::ComStaGuard::new();
+        let failed_paths = paths.clone();
+        let spawn_result = std::thread::Builder::new()
+            .name("special-folder-icon-worker".to_string())
+            .spawn(move || {
+                #[cfg(target_os = "windows")]
+                let _com_guard = super::ComStaGuard::new();
 
-            for path in &paths {
-                let fresh = windows::extract_drive_icon(path, IconSize::Jumbo)
-                    .map_err(|e| {
-                        log::trace!(
-                            "[Icon] Special folder icon extraction failed for {}: {}",
-                            path,
-                            e
-                        )
-                    })
-                    .ok();
+                for path in &paths {
+                    let fresh = windows::extract_drive_icon(path, IconSize::Jumbo)
+                        .map_err(|e| {
+                            log::trace!(
+                                "[Icon] Special folder icon extraction failed for {}: {}",
+                                path,
+                                e
+                            )
+                        })
+                        .ok();
 
-                let _ = tx.send(AsyncIconResult {
-                    key: path.clone(),
-                    data: fresh,
-                });
+                    let _ = tx.send(AsyncIconResult {
+                        key: path.clone(),
+                        data: fresh,
+                    });
+                }
+                // ComStaGuard drops here, balancing CoUninitialize automatically.
+            });
+
+        if let Err(error) = spawn_result {
+            for path in failed_paths {
+                self.loading_drive_icons.remove(&path);
             }
-            // ComStaGuard drops here, balancing CoUninitialize automatically.
-        });
+            log::error!(
+                "[Icon] Failed to spawn special-folder-icon-worker: {}",
+                error
+            );
+        }
     }
 }

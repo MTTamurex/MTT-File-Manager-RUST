@@ -4,7 +4,9 @@
 
 use std::collections::HashSet;
 use std::num::NonZeroUsize;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use eframe::egui;
@@ -78,6 +80,24 @@ impl Drop for ComStaGuard {
     }
 }
 
+/// RAII guard that decrements an atomic counter on drop.
+/// Used to track active auxiliary icon extraction threads.
+struct ThreadCountGuard(Arc<AtomicUsize>);
+
+impl Drop for ThreadCountGuard {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
+fn try_reserve_auxiliary_icon_thread(active: &Arc<AtomicUsize>) -> bool {
+    active
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |count| {
+            (count < MAX_AUXILIARY_ICON_THREADS).then_some(count + 1)
+        })
+        .is_ok()
+}
+
 /// Result from a background icon extraction thread.
 struct AsyncIconResult {
     key: String,
@@ -87,6 +107,10 @@ struct AsyncIconResult {
 const DRIVE_ICON_CACHE_CAPACITY: usize = 64;
 const FAILED_DRIVE_ICON_CAPACITY: usize = 256;
 const EXTENSION_ICON_CACHE_CAPACITY: usize = 512;
+/// Maximum concurrent auxiliary icon extraction threads (drive/folder/jumbo).
+const MAX_AUXILIARY_ICON_THREADS: usize = 4;
+/// Bounded channel capacity for async icon results.
+const ICON_RESULT_CHANNEL_CAPACITY: usize = 256;
 
 /// Manages loading and caching of Windows shell icons.
 pub struct IconLoader {
@@ -109,7 +133,9 @@ pub struct IconLoader {
     /// Channel to receive completed icon extractions from background threads
     icon_result_rx: mpsc::Receiver<AsyncIconResult>,
     /// Sender cloned into background threads
-    icon_result_tx: mpsc::Sender<AsyncIconResult>,
+    icon_result_tx: mpsc::SyncSender<AsyncIconResult>,
+    /// Counts currently active auxiliary icon extraction threads.
+    auxiliary_icon_threads: Arc<AtomicUsize>,
     /// Per-frame budget guard for non-blocking icon lookups that still hit Windows Shell.
     sync_icon_budget_window_start: Instant,
     sync_icon_budget_elapsed: Duration,
@@ -125,7 +151,7 @@ impl Default for IconLoader {
 impl IconLoader {
     /// Creates a new icon loader.
     pub fn new() -> Self {
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = mpsc::sync_channel(ICON_RESULT_CHANNEL_CAPACITY);
         Self {
             icon_cache: LruCache::new(
                 NonZeroUsize::new(512).expect("icon cache size must be non-zero"),
@@ -148,6 +174,7 @@ impl IconLoader {
             loading_drive_icons: HashSet::new(),
             icon_result_rx: rx,
             icon_result_tx: tx,
+            auxiliary_icon_threads: Arc::new(AtomicUsize::new(0)),
             sync_icon_budget_window_start: Instant::now(),
             sync_icon_budget_elapsed: Duration::ZERO,
             sync_icon_budget_calls: 0,
@@ -229,42 +256,59 @@ impl IconLoader {
             return;
         }
 
-        self.loading_drive_icons.insert(cache_key.clone());
         let path_owned = path.to_path_buf();
         let tx = self.icon_result_tx.clone();
-        std::thread::spawn(move || {
-            // STA COM is required for SHParseDisplayName / IShellItemImageFactory
-            // to correctly resolve PIDL-based icons (especially ZIP virtual paths).
-            // Without explicit init, Shell API may auto-init as MTA and return
-            // generic icons. The guard logs failures and ensures balanced
-            // CoUninitialize even on panic.
-            let _com = ComStaGuard::new();
-            let data = if is_virtual {
-                windows::extract_shell_icon(&path_owned, IconSize::Jumbo)
-                    .map_err(|e| {
-                        log::trace!(
-                            "[Icon] Shell icon extraction failed for {:?}: {}",
-                            path_owned,
-                            e
-                        )
-                    })
-                    .ok()
-            } else {
-                windows::extract_file_icon_by_path(&path_owned, IconSize::Jumbo)
-                    .map_err(|e| {
-                        log::trace!(
-                            "[Icon] File icon extraction failed for {:?}: {}",
-                            path_owned,
-                            e
-                        )
-                    })
-                    .ok()
-            };
-            let _ = tx.send(AsyncIconResult {
-                key: cache_key,
-                data,
+        let active = self.auxiliary_icon_threads.clone();
+
+        if !try_reserve_auxiliary_icon_thread(&active) {
+            return;
+        }
+        self.loading_drive_icons.insert(cache_key.clone());
+
+        let thread_cache_key = cache_key.clone();
+        let thread_active = active.clone();
+        let spawn_result = std::thread::Builder::new()
+            .name("jumbo-icon-worker".to_string())
+            .spawn(move || {
+                let _guard = ThreadCountGuard(thread_active);
+                // STA COM is required for SHParseDisplayName / IShellItemImageFactory
+                // to correctly resolve PIDL-based icons (especially ZIP virtual paths).
+                // Without explicit init, Shell API may auto-init as MTA and return
+                // generic icons. The guard logs failures and ensures balanced
+                // CoUninitialize even on panic.
+                let _com = ComStaGuard::new();
+                let data = if is_virtual {
+                    windows::extract_shell_icon(&path_owned, IconSize::Jumbo)
+                        .map_err(|e| {
+                            log::trace!(
+                                "[Icon] Shell icon extraction failed for {:?}: {}",
+                                path_owned,
+                                e
+                            )
+                        })
+                        .ok()
+                } else {
+                    windows::extract_file_icon_by_path(&path_owned, IconSize::Jumbo)
+                        .map_err(|e| {
+                            log::trace!(
+                                "[Icon] File icon extraction failed for {:?}: {}",
+                                path_owned,
+                                e
+                            )
+                        })
+                        .ok()
+                };
+                let _ = tx.send(AsyncIconResult {
+                    key: thread_cache_key,
+                    data,
+                });
             });
-        });
+
+        if let Err(error) = spawn_result {
+            active.fetch_sub(1, Ordering::Relaxed);
+            self.loading_drive_icons.remove(&cache_key);
+            log::error!("[Icon] Failed to spawn jumbo-icon-worker: {}", error);
+        }
     }
 
     fn can_run_non_blocking_sync_icon_lookup(

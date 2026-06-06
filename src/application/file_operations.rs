@@ -101,54 +101,11 @@ fn sanitize_operation_path(path: &Path) -> OpResult<PathBuf> {
         .map_err(|e| e.to_string())
 }
 
-/// Deletes a file or directory using Windows Shell (Recycle Bin).
-///
-/// # Warning
-/// This is a BLOCKING operation. Do not use on the UI thread.
-/// Use `ImageViewerApp::delete_with_shell_for_paths` instead which uses a worker.
-#[deprecated(note = "Blocking operation. Use ImageViewerApp::file_op_sender instead.")]
-pub fn delete_with_shell(path: &Path, hwnd: Option<HWND>) -> OpResult<bool> {
-    let valid_path = sanitize_operation_path(path)?;
-    let hwnd = hwnd.unwrap_or(HWND(std::ptr::null_mut()));
-    let success = shell_operations::delete_item_with_shell(&valid_path, hwnd);
-    if success {
-        Ok(true)
-    } else {
-        Err(t!("operations.error_cancelled").to_string())
-    }
-}
-
 /// Opens a file with its default application.
 pub fn open_with_shell(path: &Path, _hwnd: Option<HWND>) -> OpResult<()> {
     let valid_path = sanitize_operation_path(path)?;
     shell_operations::open_with_shell(&valid_path).map_err(|e| e.to_string())?;
     Ok(())
-}
-
-/// Renames a file using Windows Shell.
-///
-/// # Warning
-/// This is a BLOCKING operation. Do not use on the UI thread.
-/// Use `ImageViewerApp::rename_with_shell` instead which uses a worker.
-#[deprecated(note = "Blocking operation. Use ImageViewerApp::file_op_sender instead.")]
-pub fn rename_with_shell(path: &Path, new_name: &str, hwnd: Option<HWND>) -> OpResult<bool> {
-    if new_name.contains('\0')
-        || new_name.contains('\\')
-        || new_name.contains('/')
-        || new_name == "."
-        || new_name == ".."
-    {
-        return Err(t!("operations.error_invalid_name").to_string());
-    }
-
-    let valid_path = sanitize_operation_path(path)?;
-    let hwnd = hwnd.unwrap_or(HWND(std::ptr::null_mut()));
-    let success = shell_operations::rename_item_with_shell(&valid_path, new_name, hwnd);
-    if success {
-        Ok(true)
-    } else {
-        Err(t!("operations.error_cancelled").to_string())
-    }
 }
 
 /// Creates a new folder with a unique name "Nova Pasta (N)".

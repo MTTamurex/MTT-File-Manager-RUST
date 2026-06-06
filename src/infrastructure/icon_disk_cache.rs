@@ -5,8 +5,8 @@
 //! extension icons intentionally remain session-only so they always follow the
 //! current Windows Shell state on the next launch.
 
+use parking_lot::Mutex;
 use std::path::Path;
-use std::sync::Mutex;
 
 mod file_icons;
 pub use file_icons::FileIconCacheKey;

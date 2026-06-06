@@ -89,13 +89,7 @@ impl ThumbnailDiskCache {
 
         {
             // M-17: Use writer connection so reader is always free for concurrent thumbnail lookups.
-            let db = match self.writer.lock() {
-                Ok(db) => db,
-                Err(_) => {
-                    log::warn!("[GC] Incremental pass skipped: writer lock failed");
-                    return 0;
-                }
-            };
+            let db = self.writer.lock();
 
             // M-15: ROWID modular sampling — O(log n) via rowid index instead of O(n log n).
             // Starts at a random rowid offset and scans forward; may return < limit near the
@@ -162,22 +156,20 @@ impl ThumbnailDiskCache {
 
         let mut removed = 0;
         // H-5: rusqlite Transaction — auto-rollback on error/panic
-        if let Ok(mut db) = self.writer.lock() {
-            if let Ok(tx) = db.transaction() {
-                if !orphan_thumbs.is_empty() {
-                    removed +=
-                        Self::execute_batch_delete(&tx, CacheTable::Thumbnails, &orphan_thumbs);
-                }
-                if !orphan_folder_previews.is_empty() {
-                    removed += Self::execute_batch_delete(
-                        &tx,
-                        CacheTable::FolderPreviews,
-                        &orphan_folder_previews,
-                    );
-                }
-                if let Err(e) = tx.commit() {
-                    log::error!("[GC] Incremental: transaction commit failed: {:?}", e);
-                }
+        let mut db = self.writer.lock();
+        if let Ok(tx) = db.transaction() {
+            if !orphan_thumbs.is_empty() {
+                removed += Self::execute_batch_delete(&tx, CacheTable::Thumbnails, &orphan_thumbs);
+            }
+            if !orphan_folder_previews.is_empty() {
+                removed += Self::execute_batch_delete(
+                    &tx,
+                    CacheTable::FolderPreviews,
+                    &orphan_folder_previews,
+                );
+            }
+            if let Err(e) = tx.commit() {
+                log::error!("[GC] Incremental: transaction commit failed: {:?}", e);
             }
         }
 
@@ -189,10 +181,7 @@ impl ThumbnailDiskCache {
 
     /// Runs VACUUM explicitly (heavy operation, call rarely).
     pub fn run_vacuum(&self) -> bool {
-        match self.writer.lock() {
-            Ok(db) => db.execute("VACUUM", []).is_ok(),
-            Err(_) => false,
-        }
+        self.writer.lock().execute("VACUUM", []).is_ok()
     }
 
     /// Full GC: scans all cache rows. Use sparingly.
@@ -204,13 +193,7 @@ impl ThumbnailDiskCache {
 
         {
             // M-17: Use writer connection so the reader stays free for thumbnail lookups.
-            let db = match self.writer.lock() {
-                Ok(db) => db,
-                Err(_) => {
-                    log::error!("[GC] Failed to acquire database lock!");
-                    return 0;
-                }
-            };
+            let db = self.writer.lock();
 
             all_entries = db
                 .prepare("SELECT id, path FROM thumbnails WHERE path IS NOT NULL")
@@ -261,22 +244,20 @@ impl ThumbnailDiskCache {
 
         let mut removed = 0;
         // H-5: rusqlite Transaction — auto-rollback on error/panic
-        if let Ok(mut db) = self.writer.lock() {
-            if let Ok(tx) = db.transaction() {
-                if !orphan_thumbs.is_empty() {
-                    removed +=
-                        Self::execute_batch_delete(&tx, CacheTable::Thumbnails, &orphan_thumbs);
-                }
-                if !orphan_folder_previews.is_empty() {
-                    removed += Self::execute_batch_delete(
-                        &tx,
-                        CacheTable::FolderPreviews,
-                        &orphan_folder_previews,
-                    );
-                }
-                if let Err(e) = tx.commit() {
-                    log::error!("[GC] Full GC: transaction commit failed: {:?}", e);
-                }
+        let mut db = self.writer.lock();
+        if let Ok(tx) = db.transaction() {
+            if !orphan_thumbs.is_empty() {
+                removed += Self::execute_batch_delete(&tx, CacheTable::Thumbnails, &orphan_thumbs);
+            }
+            if !orphan_folder_previews.is_empty() {
+                removed += Self::execute_batch_delete(
+                    &tx,
+                    CacheTable::FolderPreviews,
+                    &orphan_folder_previews,
+                );
+            }
+            if let Err(e) = tx.commit() {
+                log::error!("[GC] Full GC: transaction commit failed: {:?}", e);
             }
         }
 

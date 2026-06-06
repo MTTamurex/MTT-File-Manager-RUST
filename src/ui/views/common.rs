@@ -41,16 +41,6 @@ pub fn get_file_type_string(item: &FileEntry) -> String {
     }
 }
 
-/// Formats date for display
-pub fn format_date(timestamp: u64) -> String {
-    crate::infrastructure::windows::format_date(timestamp)
-}
-
-/// Formats size for display
-pub fn format_size(size: u64) -> String {
-    crate::infrastructure::windows::format_size(size)
-}
-
 pub fn should_start_item_drag(
     response_drag_started: bool,
     response_dragged: bool,

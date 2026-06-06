@@ -3,10 +3,11 @@
 //! Connection management, ACL hardening, and PRAGMA setup are delegated to
 //! `crate::infrastructure::db_utils`.
 
+use parking_lot::Mutex;
 use rusqlite::Connection;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use super::db_utils;
 
@@ -158,8 +159,8 @@ impl ThumbnailDiskCache {
         } else {
             // SAFETY INVARIANT: when reader == writer (same Arc), no code path
             // may hold the writer lock and then call a method that acquires the
-            // reader lock (or vice-versa), because std::sync::Mutex is NOT
-            // reentrant and will deadlock.  This fallback only activates for
+            // reader lock (or vice-versa), because the mutex is NOT reentrant
+            // and will deadlock.  This fallback only activates for
             // in-memory databases where opening a second connection is impossible.
             log::warn!(
                 "[Cache] Reader shares writer connection — nested lock calls will deadlock."

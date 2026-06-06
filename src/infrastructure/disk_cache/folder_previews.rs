@@ -44,7 +44,7 @@ impl ThumbnailDiskCache {
         folder_path: &Path,
         bucket_size: u32,
     ) -> Option<(Vec<u8>, u32, u32, i64)> {
-        let db = self.reader.lock().ok()?;
+        let db = self.reader.lock();
         let mut stmt = db
             .prepare_cached(
                 "SELECT data, width, height, bucket_size, created_at FROM folder_previews WHERE folder_path = ?",
@@ -133,64 +133,62 @@ impl ThumbnailDiskCache {
             .and_then(|mtime| mtime.duration_since(UNIX_EPOCH).ok())
             .map(|dur| dur.as_secs() as i64);
 
-        if let Ok(db) = self.writer.lock() {
-            let existing: Option<(u32, u32, i64)> = db
-                .query_row(
-                    "SELECT width, bucket_size, created_at FROM folder_previews WHERE folder_path = ?",
-                    [folder_path.to_string_lossy().to_string()],
-                    |row| {
-                        Ok((
-                            row.get::<_, i64>(0)? as u32,
-                            row.get::<_, i64>(1)? as u32,
-                            row.get::<_, i64>(2)?,
-                        ))
-                    },
-                )
-                .ok();
+        let db = self.writer.lock();
+        let existing: Option<(u32, u32, i64)> = db
+            .query_row(
+                "SELECT width, bucket_size, created_at FROM folder_previews WHERE folder_path = ?",
+                [folder_path.to_string_lossy().to_string()],
+                |row| {
+                    Ok((
+                        row.get::<_, i64>(0)? as u32,
+                        row.get::<_, i64>(1)? as u32,
+                        row.get::<_, i64>(2)?,
+                    ))
+                },
+            )
+            .ok();
 
-            if let Some((existing_width, existing_bucket, existing_created_at)) = existing {
-                let existing_capacity = existing_width.max(existing_bucket);
-                let existing_is_stale = folder_modified_at
-                    .map(|mtime| mtime > existing_created_at)
-                    .unwrap_or(false);
-                if existing_capacity >= bucket_size && !existing_is_stale {
-                    return;
-                }
+        if let Some((existing_width, existing_bucket, existing_created_at)) = existing {
+            let existing_capacity = existing_width.max(existing_bucket);
+            let existing_is_stale = folder_modified_at
+                .map(|mtime| mtime > existing_created_at)
+                .unwrap_or(false);
+            if existing_capacity >= bucket_size && !existing_is_stale {
+                return;
             }
-
-            // Encode only after downgrade checks, so zooming down does not spend
-            // CPU compressing a lower-resolution preview that will be ignored.
-            let encoder = webp::Encoder::from_rgba(rgba_data, width, height);
-            let webp_data = encoder.encode(85.0);
-            let now = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs() as i64;
-
-            let _ = db.execute(
-                "INSERT OR REPLACE INTO folder_previews (folder_path, data, width, height, bucket_size, created_at)
-                 VALUES (?, ?, ?, ?, ?, ?)",
-                params![
-                    folder_path.to_string_lossy().to_string(),
-                    webp_data.to_vec(),
-                    width as i64,
-                    height as i64,
-                    bucket_size as i64,
-                    now
-                ],
-            );
         }
+
+        // Encode only after downgrade checks, so zooming down does not spend
+        // CPU compressing a lower-resolution preview that will be ignored.
+        let encoder = webp::Encoder::from_rgba(rgba_data, width, height);
+        let webp_data = encoder.encode(85.0);
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+
+        let _ = db.execute(
+            "INSERT OR REPLACE INTO folder_previews (folder_path, data, width, height, bucket_size, created_at)
+             VALUES (?, ?, ?, ?, ?, ?)",
+            params![
+                folder_path.to_string_lossy().to_string(),
+                webp_data.to_vec(),
+                width as i64,
+                height as i64,
+                bucket_size as i64,
+                now
+            ],
+        );
     }
 
     /// Removes a cached folder preview.
     /// [WRITER]
     pub fn remove_folder_preview_cache(&self, folder_path: &Path) {
-        if let Ok(db) = self.writer.lock() {
-            let _ = db.execute(
-                "DELETE FROM folder_previews WHERE folder_path = ?",
-                [folder_path.to_string_lossy()],
-            );
-        }
+        let db = self.writer.lock();
+        let _ = db.execute(
+            "DELETE FROM folder_previews WHERE folder_path = ?",
+            [folder_path.to_string_lossy()],
+        );
     }
 }
 

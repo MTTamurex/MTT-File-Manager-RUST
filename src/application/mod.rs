@@ -19,28 +19,3 @@ pub use renaming::*;
 pub use watcher::*;
 
 pub use sorting::sort_items;
-
-/// Backward-compatible wrapper for filtering items.
-pub fn filter_items(
-    items: &[crate::domain::file_entry::FileEntry],
-    query: &str,
-) -> Vec<crate::domain::file_entry::FileEntry> {
-    sorting::filter_items(items, query)
-}
-
-/// Backward-compatible wrapper:
-/// returns full list when query is empty.
-pub fn filter_items_opt(
-    items: &[crate::domain::file_entry::FileEntry],
-    query: &str,
-) -> Vec<crate::domain::file_entry::FileEntry> {
-    sorting::filter_items_opt(items, query).unwrap_or_else(|| items.to_vec())
-}
-
-/// Compatibility alias kept for old call-sites.
-pub fn filter_items_cow(
-    items: &[crate::domain::file_entry::FileEntry],
-    query: &str,
-) -> Vec<crate::domain::file_entry::FileEntry> {
-    sorting::filter_items(items, query)
-}

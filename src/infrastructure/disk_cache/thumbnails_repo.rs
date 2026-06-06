@@ -25,7 +25,7 @@ impl ThumbnailDiskCache {
             .unwrap_or_default()
             .as_secs() as i64;
 
-        let db = self.reader.lock().ok()?;
+        let db = self.reader.lock();
         let mut stmt = db
             .prepare_cached(
                 "SELECT data, width, height, requested_size, modified_at
@@ -51,7 +51,7 @@ impl ThumbnailDiskCache {
     /// [READER] concurrency friendly
     pub fn get_latest(&self, path: &Path) -> Option<ThumbnailCacheEntry> {
         let id = Self::hash_path(path);
-        let db = self.reader.lock().ok()?;
+        let db = self.reader.lock();
 
         let mut stmt = db
             .prepare_cached(
@@ -82,10 +82,7 @@ impl ThumbnailDiskCache {
         }
 
         let ids: Vec<String> = paths.iter().map(|path| Self::hash_path(path)).collect();
-        let db = match self.reader.lock() {
-            Ok(db) => db,
-            Err(_) => return vec![None; paths.len()],
-        };
+        let db = self.reader.lock();
 
         let mut entries_by_id: HashMap<String, ThumbnailCacheEntry> =
             HashMap::with_capacity(ids.len());
@@ -197,7 +194,7 @@ impl ThumbnailDiskCache {
         };
 
         // Save to SQLite
-        let db = self.writer.lock().map_err(|_| "Database lock failed")?;
+        let db = self.writer.lock();
         let path_str = path.to_string_lossy().to_string();
 
         db.execute(

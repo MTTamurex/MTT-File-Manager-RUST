@@ -120,7 +120,7 @@ impl IconDiskCache {
     /// Load a unique per-file icon from the bounded lossless SQLite cache.
     pub fn load_file_icon(&self, key: &FileIconCacheKey) -> Option<(Vec<u8>, u32, u32)> {
         let (data, width, height): (Vec<u8>, u32, u32) = {
-            let db = self.file_icon_db.lock().ok()?;
+            let db = self.file_icon_db.lock();
             let mut stmt = db
                 .prepare_cached("SELECT data, width, height FROM file_icons WHERE id = ?")
                 .ok()?;
@@ -172,9 +172,7 @@ impl IconDiskCache {
 
         let now = current_epoch_secs();
         let inserted = {
-            let Ok(db) = self.file_icon_db.lock() else {
-                return;
-            };
+            let db = self.file_icon_db.lock();
             db.execute(
                 "INSERT OR IGNORE INTO file_icons
                  (id, source_path, data, width, height, icon_size, file_size, modified_ns,
@@ -208,9 +206,7 @@ impl IconDiskCache {
     }
 
     fn trim_file_icon_cache_if_needed(&self) -> usize {
-        let Ok(_guard) = self.file_icon_trim_lock.lock() else {
-            return 0;
-        };
+        let _guard = self.file_icon_trim_lock.lock();
 
         let mut entries = self.list_file_icon_entries();
         if entries.is_empty() {
@@ -255,9 +251,7 @@ impl IconDiskCache {
     }
 
     fn list_file_icon_entries(&self) -> Vec<FileIconEntry> {
-        let Ok(db) = self.file_icon_db.lock() else {
-            return Vec::new();
-        };
+        let db = self.file_icon_db.lock();
         let Ok(mut stmt) =
             db.prepare_cached("SELECT id, source_path, byte_len, last_accessed_at FROM file_icons")
         else {
@@ -280,9 +274,7 @@ impl IconDiskCache {
         if ids.is_empty() {
             return 0;
         }
-        let Ok(mut db) = self.file_icon_db.lock() else {
-            return 0;
-        };
+        let mut db = self.file_icon_db.lock();
         let Ok(tx) = db.transaction() else {
             return 0;
         };
@@ -303,9 +295,7 @@ impl IconDiskCache {
     }
 
     fn touch_file_icon(&self, id: &str) {
-        let Ok(db) = self.file_icon_db.lock() else {
-            return;
-        };
+        let db = self.file_icon_db.lock();
         let _ = db.execute(
             "UPDATE file_icons SET last_accessed_at = ?1 WHERE id = ?2",
             params![current_epoch_secs(), id],
