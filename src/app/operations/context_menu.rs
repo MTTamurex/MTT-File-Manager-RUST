@@ -202,11 +202,13 @@ impl ImageViewerApp {
                     .enabled(can_create_folder),
             );
             items.push(ContextMenuItem::new(-80, t!("context_menu.open_terminal")));
+            items.push(ContextMenuItem::new(-81, t!("context_menu.open_terminal_admin")));
         } else {
             items.push(ContextMenuItem::separator());
             items.push(ContextMenuItem::new(-20, t!("context_menu.open")));
             items.push(ContextMenuItem::new(-21, t!("context_menu.open_new_tab")));
             items.push(ContextMenuItem::new(-80, t!("context_menu.open_terminal")));
+            items.push(ContextMenuItem::new(-81, t!("context_menu.open_terminal_admin")));
             items.push(ContextMenuItem::separator());
             items.push(
                 ContextMenuItem::new(-30, t!("context_menu.cut"))
@@ -403,9 +405,11 @@ impl ImageViewerApp {
                 "sempre manter neste dispositivo",
                 "free up space",
                 "liberar espaço",
-                // Terminal — handled natively via Open in Terminal command (-80)
+                // Terminal — handled natively via Open in Terminal command (-80, -81)
                 "open in terminal",
                 "abrir no terminal",
+                "open in terminal (admin)",
+                "abrir no terminal (admin)",
             ];
             if BLACKLIST.iter().any(|&t| lower.contains(t)) {
                 return None;

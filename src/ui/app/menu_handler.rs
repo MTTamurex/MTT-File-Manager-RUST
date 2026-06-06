@@ -3,6 +3,16 @@ use eframe::egui;
 use rust_i18n::t;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use windows::{
+    core::PCWSTR,
+    Win32::{
+        Foundation::HWND,
+        UI::Shell::{
+            ShellExecuteExW, SHELLEXECUTEINFOW, SEE_MASK_FLAG_NO_UI,
+        },
+        UI::WindowsAndMessaging::SW_SHOWNORMAL,
+    },
+};
 
 /// Launches a terminal in the given directory.
 /// Tries Windows Terminal (`wt.exe`) first; falls back to PowerShell.
@@ -25,6 +35,58 @@ fn open_terminal_at(path: &Path) {
             .arg("-NoExit")
             .current_dir(&dir)
             .spawn();
+    }
+}
+
+/// Spawn a program elevated via UAC using `ShellExecuteExW` with the `"runas"` verb.
+/// Returns `true` if the elevated process was launched successfully.
+fn elevated_spawn(program: &str, args: &[&str]) -> bool {
+    let program_wide: Vec<u16> = program.encode_utf16().chain(std::iter::once(0)).collect();
+    let verb_wide: Vec<u16> = "runas".encode_utf16().chain(std::iter::once(0)).collect();
+
+    // Build a single parameter string, quoting each argument.
+    let params: String = args
+        .iter()
+        .map(|a| {
+            if a.contains(' ') {
+                format!("\"{}\"" , a)
+            } else {
+                (*a).to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    let params_wide: Vec<u16> = params.encode_utf16().chain(std::iter::once(0)).collect();
+
+    let mut exec_info = SHELLEXECUTEINFOW {
+        cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
+        fMask: SEE_MASK_FLAG_NO_UI,
+        hwnd: HWND::default(),
+        lpVerb: PCWSTR(verb_wide.as_ptr()),
+        lpFile: PCWSTR(program_wide.as_ptr()),
+        lpParameters: PCWSTR(params_wide.as_ptr()),
+        nShow: SW_SHOWNORMAL.0,
+        ..Default::default()
+    };
+
+    unsafe { ShellExecuteExW(&mut exec_info).is_ok() }
+}
+
+/// Launches an elevated terminal (UAC prompt) in the given directory.
+/// Tries Windows Terminal (`wt.exe`) first; falls back to PowerShell.
+fn open_terminal_admin_at(path: &Path) {
+    let dir = if path.is_dir() {
+        path.to_path_buf()
+    } else {
+        path.parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| path.to_path_buf())
+    };
+
+    let dir_str = dir.to_string_lossy();
+    if !elevated_spawn("wt.exe", &["-d", &dir_str]) {
+        let cd_cmd = format!("cd '{}'", dir.display());
+        elevated_spawn("powershell.exe", &["-NoExit", "-Command", &cd_cmd]);
     }
 }
 
@@ -342,6 +404,18 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                             .unwrap_or_else(|| PathBuf::from(&app.navigation_state.current_path))
                     };
                     open_terminal_at(&path);
+                }
+                -81 => {
+                    let path = if context_menu.is_empty_area {
+                        PathBuf::from(&app.navigation_state.current_path)
+                    } else {
+                        context_menu
+                            .target_paths
+                            .first()
+                            .cloned()
+                            .unwrap_or_else(|| PathBuf::from(&app.navigation_state.current_path))
+                    };
+                    open_terminal_admin_at(&path);
                 }
                 _ => {}
             }
