@@ -582,12 +582,13 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
     let _ = mpv.set_property("tscale", "linear");
     let _ = mpv.set_property("framedrop", "vo");
 
-    // Cache/demuxer settings
-    let _ = mpv.set_property("cache", "yes");
-    let _ = mpv.set_property("cache-secs", 12.0_f64);
-    let _ = mpv.set_property("demuxer-readahead-secs", 6.0_f64);
-    let _ = mpv.set_property("demuxer-max-bytes", 48_i64 * 1024 * 1024);
-    let _ = mpv.set_property("demuxer-max-back-bytes", 12_i64 * 1024 * 1024);
+    // Cache/demuxer settings — no unbounded cache; hard byte limits only.
+    // cache=yes with cache-secs causes RAM to grow proportionally to bitrate
+    // over time (e.g. 4K remux → 100+ MB of cached data).  demuxer-max-bytes
+    // caps the forward buffer regardless of the cache setting.
+    let _ = mpv.set_property("cache", "no");
+    let _ = mpv.set_property("demuxer-max-bytes", 8_i64 * 1024 * 1024);
+    let _ = mpv.set_property("demuxer-max-back-bytes", 2_i64 * 1024 * 1024);
 
     // Volume (mpv uses 0-100 scale)
     let _ = mpv.set_property("volume", ((volume * 100.0) as i64).clamp(0, 100));

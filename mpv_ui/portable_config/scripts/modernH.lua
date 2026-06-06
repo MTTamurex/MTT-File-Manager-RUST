@@ -395,17 +395,35 @@ end
 -- Helperfunctions
 --
 
+-- Rate-limit OSD updates to 2 FPS.  Confirmed via diagnostic that osd:update()
+-- is the sole source of unbounded RAM growth: each call rasterizes ASS glyphs
+-- into D3D11 textures that mpv never evicts until VO reinit.  2 FPS is
+-- acceptable for a seekbar + time display and cuts texture allocations by ~97%
+-- compared to the default 60 FPS.
+-- A full Lua GC cycle runs after each update to prevent heap compounding.
+local _osd_last_update = 0
+local _osd_min_interval = 0.5  -- seconds between OSD updates (2 FPS)
+
 function set_osd(res_x, res_y, text)
     if state.osd.res_x == res_x and
        state.osd.res_y == res_y and
        state.osd.data == text then
         return
     end
+    local now = mp.get_time()
+    local is_clear = (text == '' or text == nil)
+    local res_changed = (state.osd.res_x ~= res_x or state.osd.res_y ~= res_y)
+    if not is_clear and not res_changed and (now - _osd_last_update) < _osd_min_interval then
+        return
+    end
+    _osd_last_update = now
     state.osd.res_x = res_x
     state.osd.res_y = res_y
     state.osd.data = text
     state.osd.z = 1000
     state.osd:update()
+    -- Full GC after each OSD update to reclaim assdraw tables and strings
+    collectgarbage('collect')
 end
 
 -- scale factor for translating between real and virtual ASS coordinates
@@ -3227,7 +3245,10 @@ mp.observe_property('idle-active', 'bool',
     end
 )
 mp.observe_property('pause', 'bool', pause_state)
-mp.observe_property('demuxer-cache-state', 'native', cache_state)
+-- Disabled: demuxer-cache-state observer causes constant re-renders during
+-- playback even when cache is off, growing the gpu-next texture pool.
+-- Seek ranges are also disabled in osc.conf, so this data is unused.
+-- mp.observe_property('demuxer-cache-state', 'native', cache_state)
 mp.observe_property('vo-configured', 'bool', function(name, val)
     request_tick()
 end)

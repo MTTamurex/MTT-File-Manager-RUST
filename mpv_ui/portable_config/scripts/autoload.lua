@@ -32,7 +32,7 @@ ignore_patterns=^~,^bak-,%.bak$
 
 --]]
 
-local MAX_ENTRIES = 5000
+local MAX_ENTRIES = 100
 local MAX_DIR_STACK = 20
 
 local msg = require 'mp.msg'
