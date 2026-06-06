@@ -300,6 +300,8 @@ pub(crate) fn start_file_operation_worker(
                             &extraction_progress,
                             &extraction_cancel,
                         );
+                        // handle_copy_completed already reloads the destination view.
+                        return CompletionBehavior::SendFinishedNoRefresh;
                     }
                     FileOperationRequest::Move {
                         path,
@@ -314,6 +316,8 @@ pub(crate) fn start_file_operation_worker(
                             &extraction_progress,
                             &extraction_cancel,
                         );
+                        // handle_move_completed already reloads source + dest views.
+                        return CompletionBehavior::SendFinishedNoRefresh;
                     }
                     FileOperationRequest::CopyBatch {
                         paths,
@@ -328,6 +332,8 @@ pub(crate) fn start_file_operation_worker(
                             &extraction_progress,
                             &extraction_cancel,
                         );
+                        // handle_copy_completed already reloads the destination view.
+                        return CompletionBehavior::SendFinishedNoRefresh;
                     }
                     FileOperationRequest::MoveBatch {
                         paths,
@@ -342,6 +348,8 @@ pub(crate) fn start_file_operation_worker(
                             &extraction_progress,
                             &extraction_cancel,
                         );
+                        // handle_move_batch_completed already reloads source + dest views.
+                        return CompletionBehavior::SendFinishedNoRefresh;
                     }
                     FileOperationRequest::RestoreFromRecycleBin { items } => {
                         handlers::handle_restore_from_recycle_bin(items, &result_sender);
