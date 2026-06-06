@@ -24,12 +24,9 @@ pub fn extract_thumbnail(
         let size = SIZE { cx: 256, cy: 256 };
         let hbitmap: HBITMAP = image_factory.GetImage(size, SIIGBF_THUMBNAILONLY)?;
 
-        let (rgba_data, width, height) =
-            crate::infrastructure::windows::bitmap_conversion::hbitmap_to_rgba(hbitmap)?;
-
+        let result = crate::infrastructure::windows::bitmap_conversion::hbitmap_to_rgba(hbitmap);
         let _ = DeleteObject(hbitmap.into());
-
-        Ok((rgba_data, width, height))
+        Ok(result?)
     }
 }
 
@@ -62,17 +59,17 @@ pub fn get_folder_preview(
             Ok(hbitmap) => {
                 // SAFETY: hbitmap is valid, DeleteObject called after conversion
                 let result =
-                    crate::infrastructure::windows::bitmap_conversion::hbitmap_to_rgba(hbitmap)?;
+                    crate::infrastructure::windows::bitmap_conversion::hbitmap_to_rgba(hbitmap);
                 let _ = DeleteObject(hbitmap.into());
-                Ok(result)
+                Ok(result?)
             }
             Err(_) => {
                 // Fallback: Get standard folder icon without preview content
                 let hbitmap = image_factory.GetImage(size, SIIGBF_ICONONLY)?;
                 let result =
-                    crate::infrastructure::windows::bitmap_conversion::hbitmap_to_rgba(hbitmap)?;
+                    crate::infrastructure::windows::bitmap_conversion::hbitmap_to_rgba(hbitmap);
                 let _ = DeleteObject(hbitmap.into());
-                Ok(result)
+                Ok(result?)
             }
         }
     }

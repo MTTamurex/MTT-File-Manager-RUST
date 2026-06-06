@@ -99,7 +99,10 @@ impl MpvPreview {
 
         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             self.set_muted(!current_muted);
-        }));
+        }))
+        .map_err(|_| {
+            log::error!("[MpvPreview] Panic caught in toggle_mute — MPV state may be inconsistent");
+        });
     }
 
     /// Show OSD text on the video using MPV's native show-text command

@@ -608,6 +608,10 @@ impl ImageViewerApp {
             focus_lost_at: None,
         };
 
+        // Spawn tooltip background worker for async metadata/thumbnail loading (P0-02/P0-03)
+        app.global_search
+            .spawn_tooltip_worker(disk_cache.clone(), &ctx);
+
         if app.diagnostic_mode && !crate::infrastructure::diagnostic_logger::is_enabled() {
             app.set_diagnostic_mode(true);
         } else if diagnostic_mode_needs_persist {

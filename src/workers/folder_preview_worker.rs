@@ -181,7 +181,7 @@ pub fn spawn_folder_preview_worker(
     // Smaller-than-default stack: this worker only runs Shell/COM calls and a
     // few alpha-blend passes; 512 KB is comfortably enough and saves ~512 KB of
     // committed RAM per worker compared to the 1 MB default commit on Windows.
-    let _ = std::thread::Builder::new()
+    if let Err(e) = std::thread::Builder::new()
         .name("folder-preview-worker".to_string())
         .stack_size(512 * 1024)
         .spawn(move || {
@@ -352,7 +352,13 @@ pub fn spawn_folder_preview_worker(
             // on SSD detection. The reset at the end is the final cleanup. Future
             // improvement: use ThreadPriorityGuard here too, but requires refactoring
             // the per-request priority change pattern.
-        });
+        })
+    {
+        log::error!(
+            "[FolderPreview] Failed to spawn folder-preview-worker thread: {}",
+            e
+        );
+    }
 }
 
 /// Outcome of folder preview composition.

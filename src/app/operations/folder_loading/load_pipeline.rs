@@ -33,9 +33,12 @@ impl ImageViewerApp {
         let directory_index_opt = self.directory_index.clone();
         let _prefetch_sender = self.file_operation_state.prefetch_sender.clone();
         let show_hidden = self.show_hidden_files;
+        let spawn_failure_sender = folder_load_failure_sender.clone();
+        let spawn_failure_path = PathBuf::from(&current_path);
+        let spawn_failure_ctx = ctx.clone();
 
         // STREAMING BATCH LOADING: Adaptive batch size based on disk type
-        let _ = std::thread::Builder::new()
+        if let Err(e) = std::thread::Builder::new()
             .name("folder-load-pipeline".to_string())
             .spawn(move || {
                 // Immediate generation check: if a newer load was already started
@@ -163,6 +166,14 @@ impl ImageViewerApp {
                 //         let _ = prefetch_sender.send(PrefetchMessage::Prefetch(subdirs));
                 //     }
                 // }
-            });
+            })
+        {
+            log::error!(
+                "[FolderLoad] Failed to spawn folder-load-pipeline thread: {}",
+                e
+            );
+            let _ = spawn_failure_sender.send((my_gen, spawn_failure_path));
+            spawn_failure_ctx.request_repaint();
+        }
     }
 }

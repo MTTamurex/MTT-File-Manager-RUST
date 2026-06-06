@@ -102,9 +102,10 @@ impl GifManager {
         let (job_sender, job_receiver) = crossbeam_channel::bounded::<GifDecodeJob>(16);
 
         // Spawn fixed pool of decode workers
+        let mut spawned_count = 0usize;
         for worker_id in 0..GIF_DECODE_WORKERS {
             let rx = job_receiver.clone();
-            let _ = std::thread::Builder::new()
+            match std::thread::Builder::new()
                 .name(format!("gif-decode-{}", worker_id))
                 .spawn(move || {
                     while let Ok(job) = rx.recv() {
@@ -121,7 +122,19 @@ impl GifManager {
                             log::error!("GifWorker-{}: {}", worker_id, e);
                         }
                     }
-                });
+                }) {
+                Ok(_) => spawned_count += 1,
+                Err(e) => {
+                    log::error!(
+                        "[GifManager] Failed to spawn gif-decode-{} worker: {}",
+                        worker_id,
+                        e
+                    );
+                }
+            }
+        }
+        if spawned_count == 0 {
+            log::error!("[GifManager] No GIF decode workers spawned; GIF playback will not work");
         }
 
         Self {

@@ -86,9 +86,9 @@ pub fn extract_recycle_bin_icon(
                         let res =
                             crate::infrastructure::windows::bitmap_conversion::hbitmap_to_rgba(
                                 hbitmap,
-                            )?;
+                            );
                         let _ = DeleteObject(hbitmap.into());
-                        return Ok(res);
+                        return Ok(res?);
                     }
                 }
             }
@@ -158,9 +158,9 @@ pub fn extract_shell_icon(
                         let res =
                             crate::infrastructure::windows::bitmap_conversion::hbitmap_to_rgba(
                                 hbitmap,
-                            )?;
+                            );
                         let _ = DeleteObject(hbitmap.into());
-                        return Ok(res);
+                        return Ok(res?);
                     }
                 }
             }

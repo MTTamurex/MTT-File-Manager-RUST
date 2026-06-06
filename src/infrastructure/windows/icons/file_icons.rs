@@ -87,9 +87,9 @@ pub fn extract_folder_icon(
                         let res =
                             crate::infrastructure::windows::bitmap_conversion::hbitmap_to_rgba(
                                 hbitmap,
-                            )?;
+                            );
                         let _ = DeleteObject(hbitmap.into());
-                        return Ok(res);
+                        return Ok(res?);
                     }
                 }
             }
@@ -157,9 +157,9 @@ pub fn extract_file_icon_by_path(
                         let res =
                             crate::infrastructure::windows::bitmap_conversion::hbitmap_to_rgba(
                                 hbitmap,
-                            )?;
+                            );
                         let _ = DeleteObject(hbitmap.into());
-                        return Ok(res);
+                        return Ok(res?);
                     }
                 }
             }
@@ -224,12 +224,10 @@ pub fn extract_drive_icon(
 
                     let hbitmap: HBITMAP = image_factory.GetImage(size_factory, SIIGBF_ICONONLY)?;
 
-                    let (rgba_data, width, height) =
-                        crate::infrastructure::windows::bitmap_conversion::hbitmap_to_rgba(
-                            hbitmap,
-                        )?;
+                    let result =
+                        crate::infrastructure::windows::bitmap_conversion::hbitmap_to_rgba(hbitmap);
                     let _ = DeleteObject(hbitmap.into());
-                    Ok((rgba_data, width, height))
+                    Ok(result?)
                 })();
 
             if let Ok(result) = jumbo_result {

@@ -1,11 +1,40 @@
 use eframe::egui;
 use lru::LruCache;
 use rayon::prelude::*;
+use std::collections::HashSet;
 use std::num::NonZeroUsize;
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::Instant;
 
 const MAX_SORT_METADATA_PER_FRAME: usize = 32;
+
+// --- Tooltip background worker types ---
+
+/// Request sent to the tooltip background worker.
+pub enum TooltipRequest {
+    /// Read fs::metadata for size + modified timestamp.
+    Metadata(String),
+    /// Read disk cache and decode WebP to RGBA.
+    Thumbnail(String),
+}
+
+/// Response from the tooltip background worker.
+pub enum TooltipResponse {
+    Metadata {
+        path: String,
+        size: Option<u64>,
+        modified_ts: u64,
+    },
+    Thumbnail {
+        path: String,
+        rgba: Vec<u8>,
+        width: u32,
+        height: u32,
+    },
+    ThumbnailFailed {
+        path: String,
+    },
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GlobalSearchCategory {
@@ -87,6 +116,12 @@ pub struct GlobalSearchState {
     ),
     /// Incremented whenever new metadata is loaded for sorting; forces a re-sort next frame.
     sort_metadata_epoch: u64,
+
+    // --- Tooltip async worker ---
+    pub tooltip_sender: Sender<TooltipRequest>,
+    pub tooltip_receiver: Receiver<TooltipResponse>,
+    pub tooltip_metadata_inflight: HashSet<String>,
+    pub tooltip_thumbnail_inflight: HashSet<String>,
 }
 
 impl GlobalSearchState {
@@ -94,6 +129,9 @@ impl GlobalSearchState {
         sender: Sender<crate::workers::global_search_worker::GlobalSearchRequest>,
         receiver: Receiver<crate::workers::global_search_worker::GlobalSearchResponse>,
     ) -> Self {
+        // Placeholder channels — replaced by spawn_tooltip_worker() during bootstrap.
+        let (tooltip_sender, _) = std::sync::mpsc::channel::<TooltipRequest>();
+        let (_, tooltip_receiver) = std::sync::mpsc::channel::<TooltipResponse>();
         Self {
             sender,
             receiver,
@@ -149,6 +187,93 @@ impl GlobalSearchState {
                 0,
             ),
             sort_metadata_epoch: 0,
+            tooltip_sender,
+            tooltip_receiver,
+            tooltip_metadata_inflight: HashSet::new(),
+            tooltip_thumbnail_inflight: HashSet::new(),
+        }
+    }
+
+    /// Spawns the tooltip background worker thread and reconnects the channels.
+    /// Must be called once during bootstrap after the state is constructed.
+    pub fn spawn_tooltip_worker(
+        &mut self,
+        disk_cache: std::sync::Arc<crate::infrastructure::disk_cache::ThumbnailDiskCache>,
+        ctx: &egui::Context,
+    ) {
+        let (req_tx, req_rx) = std::sync::mpsc::channel::<TooltipRequest>();
+        let (resp_tx, resp_rx) = std::sync::mpsc::channel::<TooltipResponse>();
+        self.tooltip_sender = req_tx;
+        self.tooltip_receiver = resp_rx;
+
+        let ctx = ctx.clone();
+        if let Err(e) = std::thread::Builder::new()
+            .name("search-tooltip-worker".to_string())
+            .spawn(move || {
+                while let Ok(req) = req_rx.recv() {
+                    match req {
+                        TooltipRequest::Metadata(path) => {
+                            let meta = std::fs::metadata(&path).ok();
+                            let size = meta.as_ref().filter(|m| m.is_file()).map(|m| m.len());
+                            let modified_ts = meta
+                                .as_ref()
+                                .and_then(|m| m.modified().ok())
+                                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                                .map(|d| d.as_secs())
+                                .unwrap_or(0);
+                            if resp_tx
+                                .send(TooltipResponse::Metadata {
+                                    path,
+                                    size,
+                                    modified_ts,
+                                })
+                                .is_err()
+                            {
+                                break;
+                            }
+                            ctx.request_repaint();
+                        }
+                        TooltipRequest::Thumbnail(path) => {
+                            let p = std::path::PathBuf::from(&path);
+                            let decoded = disk_cache
+                                .get_latest(&p)
+                                .and_then(|entry| {
+                                    image::load_from_memory_with_format(
+                                        &entry.data,
+                                        image::ImageFormat::WebP,
+                                    )
+                                    .ok()
+                                })
+                                .map(|img| {
+                                    let rgba = img.to_rgba8();
+                                    let w = rgba.width();
+                                    let h = rgba.height();
+                                    (rgba.into_raw(), w, h)
+                                });
+                            let response = if let Some((rgba, width, height)) = decoded {
+                                TooltipResponse::Thumbnail {
+                                    path,
+                                    rgba,
+                                    width,
+                                    height,
+                                }
+                            } else {
+                                TooltipResponse::ThumbnailFailed { path }
+                            };
+
+                            if resp_tx.send(response).is_err() {
+                                break;
+                            }
+                            ctx.request_repaint();
+                        }
+                    }
+                }
+            })
+        {
+            log::error!(
+                "[GlobalSearch] Failed to spawn search-tooltip-worker thread: {}",
+                e
+            );
         }
     }
 

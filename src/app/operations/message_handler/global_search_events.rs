@@ -2,6 +2,7 @@
 
 use crate::app::state::ImageViewerApp;
 use crate::workers::global_search_worker::GlobalSearchResponse;
+use eframe::egui;
 use std::time::{Duration, Instant};
 
 impl ImageViewerApp {
@@ -130,6 +131,9 @@ impl ImageViewerApp {
             self.ui_ctx.request_repaint();
         }
 
+        // Drain tooltip worker responses (P0-02/P0-03)
+        drain_tooltip_responses(self);
+
         if self.global_search.active {
             self.ui_ctx
                 .request_repaint_after(if self.global_search.indexing_in_progress {
@@ -217,6 +221,51 @@ fn append_unique_results(
         let key = normalize_result_path(&item.full_path);
         if seen.insert(key) {
             target.push(item);
+        }
+    }
+}
+
+/// Drains responses from the tooltip background worker, updating caches
+/// and clearing inflight markers.
+fn drain_tooltip_responses(app: &mut ImageViewerApp) {
+    const MAX_TOOLTIP_MSGS_PER_FRAME: usize = 16;
+    for _ in 0..MAX_TOOLTIP_MSGS_PER_FRAME {
+        match app.global_search.tooltip_receiver.try_recv() {
+            Ok(crate::app::global_search_state::TooltipResponse::Metadata {
+                path,
+                size,
+                modified_ts,
+            }) => {
+                app.global_search.tooltip_metadata_inflight.remove(&path);
+                app.global_search
+                    .metadata_cache
+                    .put(path.clone(), modified_ts);
+                if let Some(len) = size {
+                    app.global_search.size_cache.put(path, Some(len));
+                }
+            }
+            Ok(crate::app::global_search_state::TooltipResponse::Thumbnail {
+                path,
+                rgba,
+                width,
+                height,
+            }) => {
+                app.global_search.tooltip_thumbnail_inflight.remove(&path);
+                let tex = app.ui_ctx.load_texture(
+                    format!("gs_thumb_{}", path),
+                    egui::ColorImage::from_rgba_unmultiplied(
+                        [width as usize, height as usize],
+                        &rgba,
+                    ),
+                    egui::TextureOptions::LINEAR,
+                );
+                app.global_search.tooltip_texture_cache.put(path, tex);
+            }
+            Ok(crate::app::global_search_state::TooltipResponse::ThumbnailFailed { path }) => {
+                app.global_search.tooltip_thumbnail_inflight.remove(&path);
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => break,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
         }
     }
 }

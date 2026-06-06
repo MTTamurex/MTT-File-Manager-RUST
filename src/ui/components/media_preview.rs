@@ -143,7 +143,12 @@ impl MediaPreview {
             // CRASH FIX: Wrap in catch_unwind to prevent crash propagation
             let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 player.toggle_mute();
-            }));
+            }))
+            .map_err(|_| {
+                log::error!(
+                    "[MediaPreview] Panic caught in toggle_mute — player state may be inconsistent"
+                );
+            });
         }
     }
 

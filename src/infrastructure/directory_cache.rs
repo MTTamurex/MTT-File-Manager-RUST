@@ -20,6 +20,7 @@ struct CachedFolder {
 struct DirectoryCacheInner {
     entries: LruCache<PathBuf, CachedFolder>,
     ordered_keys: BTreeSet<PathBuf>,
+    total_items: usize,
 }
 
 impl DirectoryCacheInner {
@@ -29,18 +30,12 @@ impl DirectoryCacheInner {
                 NonZeroUsize::new(CACHE_CAPACITY).expect("CACHE_CAPACITY must be non-zero"),
             ),
             ordered_keys: BTreeSet::new(),
+            total_items: 0,
         }
     }
 
-    fn sync_ordered_keys(&mut self) {
-        self.ordered_keys = self.entries.iter().map(|(path, _)| path.clone()).collect();
-    }
-
     fn total_items(&self) -> usize {
-        self.entries
-            .iter()
-            .map(|(_, cached)| cached.entries.len())
-            .sum()
+        self.total_items
     }
 }
 
@@ -98,36 +93,58 @@ impl DirectoryCache {
             .unwrap_or_default()
             .as_millis() as u64;
 
+        // Reject oversized folders and remove any previously cached copy.
         if entries.len() > MAX_TOTAL_CACHED_ITEMS {
-            cache.entries.pop(&path);
+            if let Some(old) = cache.entries.pop(&path) {
+                cache.total_items = cache.total_items.saturating_sub(old.entries.len());
+            }
             cache.ordered_keys.remove(&path);
-            cache.sync_ordered_keys();
             return;
         }
 
+        // Remove old entry first if replacing an existing key. This avoids
+        // pre-evicting an unrelated LRU entry when the cache is already full.
+        let replaced_existing = if let Some(old) = cache.entries.pop(&path) {
+            cache.total_items = cache.total_items.saturating_sub(old.entries.len());
+            true
+        } else {
+            false
+        };
+
+        // Ensure room in the LRU for new keys. Replacements already freed a slot.
+        if !replaced_existing && cache.entries.len() >= CACHE_CAPACITY {
+            if let Some((evicted_path, evicted)) = cache.entries.pop_lru() {
+                cache.total_items = cache.total_items.saturating_sub(evicted.entries.len());
+                cache.ordered_keys.remove(&evicted_path);
+            }
+        }
+
+        let new_count = entries.len();
         cache.entries.put(
-            path,
+            path.clone(),
             CachedFolder {
                 entries: Arc::new(entries),
                 cached_at_ms,
             },
         );
+        cache.ordered_keys.insert(path);
+        cache.total_items += new_count;
 
-        let mut total_items = cache.total_items();
-        while total_items > MAX_TOTAL_CACHED_ITEMS && cache.entries.len() > 1 {
+        // Evict oldest entries until we're under the global item budget.
+        while cache.total_items > MAX_TOTAL_CACHED_ITEMS && cache.entries.len() > 1 {
             let Some((evicted_path, evicted)) = cache.entries.pop_lru() else {
                 break;
             };
-            total_items = total_items.saturating_sub(evicted.entries.len());
+            cache.total_items = cache.total_items.saturating_sub(evicted.entries.len());
             cache.ordered_keys.remove(&evicted_path);
         }
-
-        cache.sync_ordered_keys();
     }
 
     pub fn invalidate(&self, path: &PathBuf) {
         let mut cache = self.inner.lock();
-        let _ = cache.entries.pop(path);
+        if let Some(old) = cache.entries.pop(path) {
+            cache.total_items = cache.total_items.saturating_sub(old.entries.len());
+        }
         cache.ordered_keys.remove(path);
     }
 
@@ -141,7 +158,9 @@ impl DirectoryCache {
             .collect();
 
         for key in keys_to_remove {
-            cache.entries.pop(&key);
+            if let Some(old) = cache.entries.pop(&key) {
+                cache.total_items = cache.total_items.saturating_sub(old.entries.len());
+            }
             cache.ordered_keys.remove(&key);
         }
     }
@@ -150,6 +169,7 @@ impl DirectoryCache {
         let mut cache = self.inner.lock();
         cache.entries.clear();
         cache.ordered_keys.clear();
+        cache.total_items = 0;
     }
 
     /// Returns the cache timestamp (Unix milliseconds) for a path without cloning entries.
@@ -242,5 +262,98 @@ mod tests {
         assert_eq!(total_items, 12_000);
         assert!(cache.get(&older_path).is_none());
         assert!(cache.get(&newer_path).is_some());
+    }
+
+    #[test]
+    fn total_items_tracks_put_and_invalidate() {
+        let cache = DirectoryCache::new();
+
+        let a = PathBuf::from(r"C:\a");
+        let b = PathBuf::from(r"C:\b");
+
+        cache.put(a.clone(), vec![sample_entry("a1"), sample_entry("a2")]);
+        cache.put(b.clone(), vec![sample_entry("b1")]);
+
+        assert_eq!(cache.stats(), (2, 3));
+
+        cache.invalidate(&a);
+        assert_eq!(cache.stats(), (1, 1));
+
+        cache.invalidate(&b);
+        assert_eq!(cache.stats(), (0, 0));
+    }
+
+    #[test]
+    fn total_items_tracks_replacement() {
+        let cache = DirectoryCache::new();
+
+        let p = PathBuf::from(r"C:\dir");
+
+        cache.put(
+            p.clone(),
+            vec![sample_entry("1"), sample_entry("2"), sample_entry("3")],
+        );
+        assert_eq!(cache.stats(), (1, 3));
+
+        // Replace with fewer entries — total_items should decrease.
+        cache.put(p.clone(), vec![sample_entry("1")]);
+        assert_eq!(cache.stats(), (1, 1));
+    }
+
+    #[test]
+    fn put_reject_oversized_removes_old_cached_copy() {
+        let cache = DirectoryCache::new();
+        let p = PathBuf::from(r"C:\dir");
+
+        // First: cache a normal folder.
+        cache.put(p.clone(), vec![sample_entry("x")]);
+        assert_eq!(cache.stats(), (1, 1));
+
+        // Second: replace with an oversized folder — old copy must be removed.
+        let huge: Vec<FileEntry> = (0..MAX_TOTAL_CACHED_ITEMS + 1)
+            .map(|i| sample_entry(&format!("item{}", i)))
+            .collect();
+        cache.put(p.clone(), huge);
+        assert!(cache.get(&p).is_none());
+        assert_eq!(cache.stats(), (0, 0));
+    }
+
+    #[test]
+    fn replacing_lru_entry_when_full_does_not_double_subtract_total_items() {
+        let cache = DirectoryCache::new();
+
+        let lru_path = PathBuf::from(r"C:\dir0");
+        for idx in 0..CACHE_CAPACITY {
+            let path = PathBuf::from(format!(r"C:\dir{}", idx));
+            cache.put(path, vec![sample_entry(&format!("item{}", idx))]);
+        }
+        assert_eq!(cache.stats(), (CACHE_CAPACITY, CACHE_CAPACITY));
+
+        cache.put(
+            lru_path.clone(),
+            vec![sample_entry("replacement1"), sample_entry("replacement2")],
+        );
+
+        assert!(cache.get(&lru_path).is_some());
+        assert_eq!(cache.stats(), (CACHE_CAPACITY, CACHE_CAPACITY + 1));
+    }
+
+    #[test]
+    fn replacing_existing_entry_when_full_does_not_evict_unrelated_lru() {
+        let cache = DirectoryCache::new();
+
+        let lru_path = PathBuf::from(r"C:\dir0");
+        let replaced_path = PathBuf::from(r"C:\dir50");
+        for idx in 0..CACHE_CAPACITY {
+            let path = PathBuf::from(format!(r"C:\dir{}", idx));
+            cache.put(path, vec![sample_entry(&format!("item{}", idx))]);
+        }
+        assert_eq!(cache.stats(), (CACHE_CAPACITY, CACHE_CAPACITY));
+
+        cache.put(replaced_path.clone(), vec![sample_entry("replacement")]);
+
+        assert!(cache.get(&lru_path).is_some());
+        assert!(cache.get(&replaced_path).is_some());
+        assert_eq!(cache.stats(), (CACHE_CAPACITY, CACHE_CAPACITY));
     }
 }

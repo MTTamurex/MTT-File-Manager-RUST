@@ -84,7 +84,7 @@ impl DirectoryIndex {
             .ok()?;
 
         let mut stmt = conn
-            .prepare(
+            .prepare_cached(
                 "SELECT file_name, file_size, modified_time, is_dir
                  FROM file_index WHERE dir_path = ?",
             )
@@ -132,7 +132,7 @@ impl DirectoryIndex {
             .ok()?;
 
         let mut stmt = conn
-            .prepare(
+            .prepare_cached(
                 "SELECT file_name, file_size, modified_time, is_dir
                  FROM file_index WHERE dir_path = ?",
             )

@@ -1,3 +1,4 @@
+use crate::app::global_search_state::TooltipRequest;
 use crate::app::state::ImageViewerApp;
 use crate::domain::file_entry::IconSize;
 use crate::ui::theme;
@@ -325,44 +326,31 @@ pub(super) fn render_result_row(
         }
 
         if hover_duration >= TOOLTIP_DELAY_SECS {
-            // When sorting is active metadata_cache may already contain the
-            // timestamp, which means the else branch below never runs and
-            // size_cache never gets warmed. Warm size_cache explicitly first.
-            if !is_dir && size == 0 && app.global_search.size_cache.get(&full_path).is_none() {
-                if let Ok(meta) = std::fs::metadata(&full_path) {
-                    app.global_search
-                        .size_cache
-                        .put(full_path.clone(), Some(meta.len()));
-                }
-            }
-
-            // Warm caches first: this reads fs::metadata and populates both
-            // metadata_cache and size_cache, ensuring resolve_result_size
-            // sees fresh data when size == 0.
+            // --- Async metadata (P0-02): request background load on cache miss ---
             let modified_ts =
                 if let Some(&cached_ts) = app.global_search.metadata_cache.get(&full_path) {
                     cached_ts
+                } else if !app
+                    .global_search
+                    .tooltip_metadata_inflight
+                    .contains(&full_path)
+                {
+                    app.global_search
+                        .tooltip_metadata_inflight
+                        .insert(full_path.clone());
+                    let _ = app
+                        .global_search
+                        .tooltip_sender
+                        .send(TooltipRequest::Metadata(full_path.clone()));
+                    0
                 } else {
-                    let meta = std::fs::metadata(&full_path).ok();
-                    let ts = meta
-                        .as_ref()
-                        .and_then(|m| m.modified().ok())
-                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                        .map(|d| d.as_secs())
-                        .unwrap_or(0);
-                    if !is_dir {
-                        if let Some(len) = meta.as_ref().map(|m| m.len()) {
-                            app.global_search
-                                .size_cache
-                                .put(full_path.clone(), Some(len));
-                        }
-                    }
-                    app.global_search.metadata_cache.put(full_path.clone(), ts);
-                    ts
+                    0
                 };
 
             let size_opt = actions::resolve_result_size(app, &full_path, is_dir, size);
             let size_text = size_opt.map(crate::infrastructure::windows::format_size);
+
+            // --- Async thumbnail (P0-03): request background decode on cache miss ---
             let thumb_tex: Option<egui::TextureHandle> = if !is_dir {
                 let p = std::path::PathBuf::from(&full_path);
                 let is_media = p
@@ -378,25 +366,19 @@ pub(super) fn render_result_row(
                         app.global_search.tooltip_texture_cache.get(&full_path)
                     {
                         Some(tex.clone())
-                    } else if let Some(entry) = app.disk_cache.get_latest(&p) {
-                        if let Ok(img) = image::load_from_memory_with_format(
-                            &entry.data,
-                            image::ImageFormat::WebP,
-                        ) {
-                            let rgba = img.to_rgba8();
-                            let size = [rgba.width() as usize, rgba.height() as usize];
-                            let tex = ui.ctx().load_texture(
-                                format!("gs_thumb_{}", full_path),
-                                egui::ColorImage::from_rgba_unmultiplied(size, &rgba),
-                                egui::TextureOptions::LINEAR,
-                            );
-                            app.global_search
-                                .tooltip_texture_cache
-                                .put(full_path.clone(), tex.clone());
-                            Some(tex)
-                        } else {
-                            None
-                        }
+                    } else if !app
+                        .global_search
+                        .tooltip_thumbnail_inflight
+                        .contains(&full_path)
+                    {
+                        app.global_search
+                            .tooltip_thumbnail_inflight
+                            .insert(full_path.clone());
+                        let _ = app
+                            .global_search
+                            .tooltip_sender
+                            .send(TooltipRequest::Thumbnail(full_path.clone()));
+                        None
                     } else {
                         None
                     }
