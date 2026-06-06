@@ -83,7 +83,7 @@ impl super::DedicatedImageViewerApp {
         let path = self
             .current_path()
             .ok_or_else(|| t!("imageviewer.convert_no_image").to_string())?;
-        loader::decode_full_frame(path).map_err(|err| err.to_string())
+        loader::decode_export_frame(path).map_err(|err| err.to_string())
     }
 
     pub(super) fn start_conversion(

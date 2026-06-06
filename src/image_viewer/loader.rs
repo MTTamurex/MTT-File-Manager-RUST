@@ -248,7 +248,58 @@ pub fn decode_full_frame_with_priority(
     }
 
     let image = decode_dynamic(path, priority)?;
-    Ok(frame_from_dynamic_capped(image, DISPLAY_CACHE_MAX_SIDE))
+    let original_w = image.width();
+    let original_h = image.height();
+    let longest = original_w.max(original_h);
+
+    let scaled = if longest > DISPLAY_CACHE_MAX_SIDE {
+        image.resize(DISPLAY_CACHE_MAX_SIDE, DISPLAY_CACHE_MAX_SIDE, FilterType::Triangle)
+    } else {
+        image
+    };
+
+    let rgba = scaled.to_rgba8();
+    Ok(DecodedFrame {
+        width: rgba.width(),
+        height: rgba.height(),
+        original_width: original_w,
+        original_height: original_h,
+        rgba: rgba.into_raw(),
+    })
+}
+
+/// Decode an image at full (original) resolution for format conversion / export.
+/// Unlike [`decode_full_frame`], this never downscales — the exported file must
+/// preserve the original pixel dimensions.
+pub fn decode_export_frame(path: &Path) -> io::Result<DecodedFrame> {
+    if is_svg_path(path) {
+        return decode_svg_frame(path, None, DecodePriority::Interactive);
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        if let Some((rgba, w, h, original_w, original_h)) =
+            crate::workers::thumbnail::extraction::stage2_wic::extract_to_size_with_original_size(
+                path,
+                None,
+            )
+        {
+            let mut frame = DecodedFrame {
+                rgba,
+                width: w,
+                height: h,
+                original_width: original_w,
+                original_height: original_h,
+            };
+            if let Some(orientation) = read_exif_orientation(path) {
+                frame = apply_orientation_to_frame(frame, orientation);
+            }
+            return Ok(frame);
+        }
+    }
+
+    let image = decode_dynamic(path, DecodePriority::Interactive)?;
+    Ok(frame_from_dynamic(image))
 }
 
 pub fn decode_preview_frame(path: &Path, max_side: u32) -> io::Result<DecodedFrame> {
@@ -554,30 +605,6 @@ fn frame_from_dynamic(image: DynamicImage) -> DecodedFrame {
     }
 }
 
-/// Like [`frame_from_dynamic`] but downscales (Triangle / fast bilinear)
-/// when the longest side exceeds `max_side`. The original dimensions are
-/// preserved on the returned [`DecodedFrame`] so the UI can still report
-/// the true resolution.
-fn frame_from_dynamic_capped(image: DynamicImage, max_side: u32) -> DecodedFrame {
-    let original_w = image.width();
-    let original_h = image.height();
-    let longest = original_w.max(original_h);
-
-    let scaled = if max_side > 0 && longest > max_side {
-        image.resize(max_side, max_side, FilterType::Triangle)
-    } else {
-        image
-    };
-
-    let rgba = scaled.to_rgba8();
-    DecodedFrame {
-        width: rgba.width(),
-        height: rgba.height(),
-        original_width: original_w,
-        original_height: original_h,
-        rgba: rgba.into_raw(),
-    }
-}
 
 fn read_file_fast(path: &Path, priority: DecodePriority) -> io::Result<Vec<u8>> {
     #[cfg(target_os = "windows")]
