@@ -21,8 +21,8 @@ const STANDALONE_OSC_BASE_SCRIPT_OPTS: &str =
 /// OSD/OSC libass cache limits. These mpv options were added after reports of
 /// OSC/OSD memory growth caused by refreshable ASS overlays.
 pub(crate) const MPV_OSD_PRUNE_DELAY_SECS: f64 = 0.0;
-pub(crate) const MPV_OSD_GLYPH_LIMIT: i64 = 128;
-pub(crate) const MPV_OSD_BITMAP_MAX_SIZE_MB: i64 = 4;
+pub(crate) const MPV_OSD_GLYPH_LIMIT: i64 = 1;
+pub(crate) const MPV_OSD_BITMAP_MAX_SIZE_MB: i64 = 1;
 pub(crate) const MPV_OSD_SHAPER: &str = "simple";
 
 /// Maximum file size for the video player (50 GB).
