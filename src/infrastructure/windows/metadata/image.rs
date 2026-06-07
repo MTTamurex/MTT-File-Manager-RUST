@@ -77,6 +77,12 @@ fn read_exif_summary(exifreader: &exif::Exif) -> ExifSummary {
             Tag::Flash if summary.flash_mode.is_none() => {
                 summary.flash_mode = Some(field.display_value().to_string());
             }
+            Tag::DateTimeOriginal if summary.date_taken.is_none() => {
+                summary.date_taken = Some(field.display_value().to_string());
+            }
+            Tag::DateTimeDigitized if summary.date_taken.is_none() => {
+                summary.date_taken = Some(field.display_value().to_string());
+            }
             Tag::DateTime if summary.date_taken.is_none() => {
                 summary.date_taken = Some(field.display_value().to_string());
             }
