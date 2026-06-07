@@ -394,15 +394,22 @@ fn render_single_item(
         Sense::click(),
     );
 
-    // Text color
-    let text_color = if item.is_enabled {
+    // Text color — loading placeholder uses a dimmed style
+    let text_color = if item.is_loading_placeholder {
+        // Dimmed "Loading…" style
+        if ui.visuals().dark_mode {
+            egui::Color32::from_gray(100)
+        } else {
+            egui::Color32::from_gray(160)
+        }
+    } else if item.is_enabled {
         ui.visuals().text_color()
     } else {
         ui.visuals().weak_text_color()
     };
 
-    // Refined hover highlight (Windows 11 style soft blue with margin)
-    if response.hovered() {
+    // Refined hover highlight (Windows 11 style soft blue with margin) — skip for loading placeholder
+    if response.hovered() && !item.is_loading_placeholder {
         let hover_color = if ui.visuals().dark_mode {
             egui::Color32::from_rgb(43, 84, 127)
         } else {
@@ -418,37 +425,39 @@ fn render_single_item(
         egui::vec2(ITEM_ICON_SIZE, ITEM_ICON_SIZE),
     );
 
-    // Try SVG icon first, then shell texture fallback
+    // Try SVG icon first, then shell texture fallback — skip for loading placeholder
     let mut icon_drawn = false;
-    if let Some(svg_name) = &item.svg_icon_name {
-        let icon_color_rgba = if item.is_enabled {
-            if ui.visuals().dark_mode {
-                [220, 220, 220, 255]
+    if !item.is_loading_placeholder {
+        if let Some(svg_name) = &item.svg_icon_name {
+            let icon_color_rgba = if item.is_enabled {
+                if ui.visuals().dark_mode {
+                    [220, 220, 220, 255]
+                } else {
+                    [60, 60, 60, 255]
+                }
             } else {
-                [60, 60, 60, 255]
+                [128, 128, 128, 180]
+            };
+            if let Some(texture) =
+                svg_icon_manager.get_icon(ui.ctx(), svg_name, ITEM_ICON_SIZE as u32, icon_color_rgba)
+            {
+                ui.painter().image(
+                    texture.id(),
+                    icon_rect,
+                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                    egui::Color32::WHITE,
+                );
+                icon_drawn = true;
             }
-        } else {
-            [128, 128, 128, 180]
-        };
-        if let Some(texture) =
-            svg_icon_manager.get_icon(ui.ctx(), svg_name, ITEM_ICON_SIZE as u32, icon_color_rgba)
-        {
-            ui.painter().image(
-                texture.id(),
-                icon_rect,
-                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                egui::Color32::WHITE,
-            );
-            icon_drawn = true;
         }
-    }
-    if !icon_drawn {
-        if let Some(icon) = &item.icon {
-            let img = egui::Image::from_texture(egui::load::SizedTexture::new(
-                icon.id(),
-                icon_rect.size(),
-            ));
-            img.paint_at(ui, icon_rect);
+        if !icon_drawn {
+            if let Some(icon) = &item.icon {
+                let img = egui::Image::from_texture(egui::load::SizedTexture::new(
+                    icon.id(),
+                    icon_rect.size(),
+                ));
+                img.paint_at(ui, icon_rect);
+            }
         }
     }
 
@@ -498,8 +507,8 @@ fn render_single_item(
         );
     }
 
-    // Handle click
-    if response.clicked() && item.is_enabled && !has_submenu {
+    // Handle click — loading placeholder is not interactive
+    if response.clicked() && item.is_enabled && !has_submenu && !item.is_loading_placeholder {
         *action = Some(item.id);
     }
 

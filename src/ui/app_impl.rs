@@ -166,6 +166,21 @@ impl eframe::App for ImageViewerApp {
                             self.notifications.warning(
                                 rust_i18n::t!("context_menu.shell_menu_error").to_string(),
                             );
+                            // Remove the loading placeholder on error so the menu doesn't
+                            // keep showing a stale "Loading…" item.
+                            self.context_menu
+                                .items
+                                .retain(|item| !item.is_loading_placeholder);
+                            // Remove any trailing separator that preceded the placeholder.
+                            while self
+                                .context_menu
+                                .items
+                                .last()
+                                .is_some_and(|item| item.is_separator)
+                            {
+                                self.context_menu.items.pop();
+                            }
+                            self.context_menu.partition_items();
                             self.shell_menu_loading = false;
                         }
                     }

@@ -172,6 +172,7 @@ context_menu:
   open_terminal_admin: "Open in Terminal (Admin)"
   show_more: "Show more options"
   shell_menu_error: "Could not load context menu for this item"
+  loading: "Loading…"
 search:
   title: "Global Search"
   placeholder: "Type to search across the entire computer..."

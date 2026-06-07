@@ -387,6 +387,7 @@ impl ImageViewerApp {
             shell_menu_res_rx,
             shell_menu_loading: false,
             shell_menu_request_id: 0,
+            shell_placeholder_count: 0,
 
             // SESSION ICON LOADER
             item_icon_loader: {

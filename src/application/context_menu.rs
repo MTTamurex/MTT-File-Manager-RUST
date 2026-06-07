@@ -32,6 +32,8 @@ pub struct ContextMenuItem {
     pub has_pending_submenu: bool,
     /// SVG icon name for secondary menu items (e.g., "cut", "copy", "delete")
     pub svg_icon_name: Option<String>,
+    /// True if this is a non-interactive placeholder shown while shell items are loading
+    pub is_loading_placeholder: bool,
 }
 
 impl Default for ContextMenuItem {
@@ -49,6 +51,7 @@ impl Default for ContextMenuItem {
             show_in_overflow: false,
             has_pending_submenu: false,
             svg_icon_name: None,
+            is_loading_placeholder: false,
         }
     }
 }

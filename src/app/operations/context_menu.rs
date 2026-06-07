@@ -338,6 +338,23 @@ impl ImageViewerApp {
                 },
             );
             self.shell_menu_loading = true;
+
+            // Add per-item loading placeholders so the menu reserves space for
+            // each expected shell item (similar to Windows Explorer).
+            // The count is cached from the previous extraction.
+            let count = self.shell_placeholder_count;
+            if count > 0 {
+                items.push(ContextMenuItem::separator());
+                for _ in 0..count {
+                    items.push(ContextMenuItem {
+                        id: -200,
+                        text: t!("context_menu.loading").to_string(),
+                        is_enabled: false,
+                        is_loading_placeholder: true,
+                        ..Default::default()
+                    });
+                }
+            }
         }
 
         self.context_menu.items = items;
@@ -415,7 +432,23 @@ impl ImageViewerApp {
                 show_in_overflow: false,
                 has_pending_submenu: item.has_submenu,
                 svg_icon_name: None,
+                is_loading_placeholder: false,
             })
+        }
+
+        // Remove all loading placeholders before adding real items.
+        // They were inserted in `populate_context_menu` to reserve space.
+        self.context_menu
+            .items
+            .retain(|item| !item.is_loading_placeholder);
+        // Remove any trailing separator(s) that preceded the placeholder block.
+        while self
+            .context_menu
+            .items
+            .last()
+            .is_some_and(|item| item.is_separator)
+        {
+            self.context_menu.items.pop();
         }
 
         let mut visible = Vec::new();
@@ -430,6 +463,13 @@ impl ImageViewerApp {
                 }
             }
         }
+
+        // Cache the number of *displayed* menu slots (not raw items) so that
+        // the next menu opening creates the correct number of placeholders.
+        // Overflow items are collapsed into a single "Show more" entry,
+        // so they count as 1 slot, not N.
+        self.shell_placeholder_count =
+            visible.len() + if overflow.is_empty() { 0 } else { 1 };
 
         let items = &mut self.context_menu.items;
 
@@ -497,6 +537,7 @@ impl ImageViewerApp {
                 show_in_overflow: false,
                 has_pending_submenu: item.has_submenu,
                 svg_icon_name: None,
+                is_loading_placeholder: false,
             }
         }
 

@@ -172,6 +172,7 @@ context_menu:
   open_terminal_admin: "Abrir no Terminal (Admin)"
   show_more: "Mostrar mais opções"
   shell_menu_error: "Não foi possível carregar o menu de contexto para este item"
+  loading: "Carregando…"
 search:
   title: "Busca Global"
   placeholder: "Digite para buscar em todo o computador..."
