@@ -25,6 +25,7 @@ impl ImageViewerApp {
                 "[FOLDER-LOADING] TIMEOUT: Loading took more than 30 seconds, clearing loading state"
             );
             self.is_loading_folder = false;
+            self.hold_visible_items_until_load_complete = false;
             self.file_operation_state.pending_deletions.clear();
         }
 
@@ -36,6 +37,7 @@ impl ImageViewerApp {
                 {
                     log::warn!("[FOLDER-LOADING] TIMEOUT: Inactive panel loading timed out");
                     snapshot.is_loading_folder = false;
+                    snapshot.hold_visible_items_until_load_complete = false;
                 }
             }
         }
@@ -204,6 +206,7 @@ impl ImageViewerApp {
             );
             self.is_loading_folder = false;
             self.pending_all_items_clear = false;
+            self.hold_visible_items_until_load_complete = false;
             self.pending_auto_reload = false;
             self.skip_next_auto_reload = false;
             self.navigate_to_nearest_valid_ancestor();
@@ -247,6 +250,7 @@ impl ImageViewerApp {
                 app.pending_items_rebuild = false;
                 app.pending_items_count = 0;
                 app.filter_items();
+                app.hold_visible_items_until_load_complete = false;
                 app.loaded_path = app.navigation_state.current_path.clone();
                 log::info!(
                     "[DualPanel] Inactive panel reload complete: {}",
@@ -267,6 +271,10 @@ impl ImageViewerApp {
         let mut rebuilt = false;
         self.with_inactive_panel(|app| {
             if !app.pending_items_rebuild {
+                return;
+            }
+
+            if app.hold_visible_items_until_load_complete && app.is_loading_folder {
                 return;
             }
 

@@ -190,6 +190,7 @@ pub struct PanelSnapshot {
     pub generation: usize,
     pub current_generation: Arc<AtomicUsize>,
     pub pending_all_items_clear: bool,
+    pub hold_visible_items_until_load_complete: bool,
     pub pending_items_rebuild: bool,
     pub pending_items_count: usize,
     pub loading_started_at: Instant,
@@ -271,6 +272,7 @@ impl PanelSnapshot {
             generation: app.generation,
             current_generation: app.current_generation.clone(),
             pending_all_items_clear: app.pending_all_items_clear,
+            hold_visible_items_until_load_complete: app.hold_visible_items_until_load_complete,
             pending_items_rebuild: app.pending_items_rebuild,
             pending_items_count: app.pending_items_count,
             loading_started_at: app.loading_started_at,
@@ -317,6 +319,7 @@ impl PanelSnapshot {
         app.generation = self.generation;
         app.current_generation = self.current_generation;
         app.pending_all_items_clear = self.pending_all_items_clear;
+        app.hold_visible_items_until_load_complete = self.hold_visible_items_until_load_complete;
         app.pending_items_rebuild = self.pending_items_rebuild;
         app.pending_items_count = self.pending_items_count;
         app.loading_started_at = self.loading_started_at;
@@ -380,6 +383,10 @@ impl PanelSnapshot {
         std::mem::swap(
             &mut self.pending_all_items_clear,
             &mut app.pending_all_items_clear,
+        );
+        std::mem::swap(
+            &mut self.hold_visible_items_until_load_complete,
+            &mut app.hold_visible_items_until_load_complete,
         );
         std::mem::swap(
             &mut self.pending_items_rebuild,

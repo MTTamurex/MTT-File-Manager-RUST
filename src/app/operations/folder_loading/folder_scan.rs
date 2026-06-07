@@ -268,7 +268,7 @@ impl ImageViewerApp {
         // 4. Single filter_items() call at the end
         let filter_start = Instant::now();
         let mut filter_ms = 0u128;
-        if any_updated {
+        if any_updated && !(self.hold_visible_items_until_load_complete && self.is_loading_folder) {
             self.filter_items();
             self.ui_ctx.request_repaint();
             filter_ms = filter_start.elapsed().as_millis();

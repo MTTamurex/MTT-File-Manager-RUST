@@ -49,6 +49,7 @@ impl ImageViewerApp {
             self.items_rebuild_in_flight = false;
             self.items = Arc::new(result.items);
             self.total_items = result.total_items;
+            self.hold_visible_items_until_load_complete = false;
 
             // After rebuild: if a pending selection was requested (e.g., after rename),
             // find the item and select + scroll to it.

@@ -103,7 +103,9 @@ fn read_exif_summary(exifreader: &exif::Exif) -> ExifSummary {
     }
 
     // Apply priority: DateTimeOriginal > DateTimeDigitized > DateTime
-    summary.date_taken = exif_date_original.or(exif_date_digitized).or(exif_date_modified);
+    summary.date_taken = exif_date_original
+        .or(exif_date_digitized)
+        .or(exif_date_modified);
 
     summary
 }

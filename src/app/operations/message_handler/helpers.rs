@@ -793,6 +793,12 @@ impl ImageViewerApp {
             return;
         }
 
+        if self.file_operation_state.file_ops_in_progress > 0 {
+            self.ui_ctx
+                .request_repaint_after(Duration::from_millis(500));
+            return;
+        }
+
         log::info!(
             "[MTIME-CHECK] Processing {} due folder mtime rechecks via async folder reload (pending={}, cooldown_ok)",
             due_entries.len(),

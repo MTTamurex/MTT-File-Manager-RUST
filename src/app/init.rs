@@ -339,6 +339,7 @@ impl ImageViewerApp {
             pending_items_rebuild: false,
             pending_items_count: 0,
             pending_all_items_clear: false,
+            hold_visible_items_until_load_complete: false,
             renaming_state: None,
             focus_rename: false,
             batch_rename_state: None,

@@ -269,7 +269,11 @@ fn render_header_bar(
             } else {
                 disabled_color
             };
-            let label_color = if item.is_enabled { text_color } else { disabled_text_color };
+            let label_color = if item.is_enabled {
+                text_color
+            } else {
+                disabled_text_color
+            };
 
             // Draw icon centered in top portion
             let icon_y = rect.min.y + 6.0 + HEADER_ICON_SIZE / 2.0;
@@ -278,12 +282,9 @@ fn render_header_bar(
                 egui::vec2(HEADER_ICON_SIZE, HEADER_ICON_SIZE),
             );
 
-            if let Some(texture) = svg_icon_manager.get_icon(
-                ui.ctx(),
-                svg_icon_name,
-                HEADER_ICON_RENDER_SIZE,
-                color,
-            ) {
+            if let Some(texture) =
+                svg_icon_manager.get_icon(ui.ctx(), svg_icon_name, HEADER_ICON_RENDER_SIZE, color)
+            {
                 ui.painter().image(
                     texture.id(),
                     icon_rect,
@@ -348,10 +349,26 @@ fn render_menu_items(
             if last_was_separator {
                 continue; // skip duplicate/leading separators
             }
-            render_single_item(ui, item, action, 0, lazy_load, right_bound, svg_icon_manager);
+            render_single_item(
+                ui,
+                item,
+                action,
+                0,
+                lazy_load,
+                right_bound,
+                svg_icon_manager,
+            );
             last_was_separator = true;
         } else {
-            render_single_item(ui, item, action, 0, lazy_load, right_bound, svg_icon_manager);
+            render_single_item(
+                ui,
+                item,
+                action,
+                0,
+                lazy_load,
+                right_bound,
+                svg_icon_manager,
+            );
             last_was_separator = false;
         }
     }
@@ -438,9 +455,12 @@ fn render_single_item(
             } else {
                 [128, 128, 128, 180]
             };
-            if let Some(texture) =
-                svg_icon_manager.get_icon(ui.ctx(), svg_name, ITEM_ICON_SIZE as u32, icon_color_rgba)
-            {
+            if let Some(texture) = svg_icon_manager.get_icon(
+                ui.ctx(),
+                svg_name,
+                ITEM_ICON_SIZE as u32,
+                icon_color_rgba,
+            ) {
                 ui.painter().image(
                     texture.id(),
                     icon_rect,
@@ -710,5 +730,13 @@ fn render_overflow_submenu(
     let overflow_item = ContextMenuItem::new(-100, rust_i18n::t!("context_menu.show_more"))
         .with_subitems(items.iter().map(|i| (*i).clone()).collect());
 
-    render_single_item(ui, &overflow_item, action, 0, lazy_load, right_bound, svg_icon_manager);
+    render_single_item(
+        ui,
+        &overflow_item,
+        action,
+        0,
+        lazy_load,
+        right_bound,
+        svg_icon_manager,
+    );
 }

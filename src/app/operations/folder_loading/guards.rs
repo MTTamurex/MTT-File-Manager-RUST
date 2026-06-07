@@ -64,6 +64,8 @@ impl ImageViewerApp {
 
     pub(super) fn reset_folder_loading_state(&mut self, force_refresh: bool, trim_icons: bool) {
         // 1. State Cleanup (UI Thread)
+        let preserve_visual_pipeline = !force_refresh && !self.items.is_empty();
+
         if force_refresh {
             self.cache_manager.texture_cache.clear();
             self.cache_manager.folder_preview_cache.clear();
@@ -77,23 +79,29 @@ impl ImageViewerApp {
             self.items = Arc::new(Vec::new());
             self.all_items_mut().clear();
             self.pending_all_items_clear = false;
+            self.hold_visible_items_until_load_complete = false;
         } else {
             // Watcher-triggered soft reload: keep old items visible to prevent
-            // a blank screen flash. They will be replaced atomically once the
-            // first batch of the new generation arrives.
+            // a blank/partial-list flash. They will be replaced atomically once
+            // the new generation reaches end-of-load.
             self.pending_all_items_clear = true;
+            self.hold_visible_items_until_load_complete = preserve_visual_pipeline;
         }
         // Soft reloads of the same folder can preserve icon caches to avoid a
         // per-file icon re-extraction storm for executables (.exe/.lnk/.ico).
-        self.discard_thumbnail_pipeline_for_navigation("folder-load", trim_icons);
-        self.loading_icons.clear(); // Clear icon loading requests
-        self.loading_extensions.clear(); // Clear extension dedup tracking
-        self.failed_icons.clear(); // Retry icon extraction in the new folder generation
-        self.scanned_folders.clear();
-        self.selected_item = None;
+        if !preserve_visual_pipeline {
+            self.discard_thumbnail_pipeline_for_navigation("folder-load", trim_icons);
+            self.loading_icons.clear(); // Clear icon loading requests
+            self.loading_extensions.clear(); // Clear extension dedup tracking
+            self.failed_icons.clear(); // Retry icon extraction in the new folder generation
+            self.scanned_folders.clear();
+        }
+        if !preserve_visual_pipeline {
+            self.selected_item = None;
+            self.total_items = 0;
+        }
         self.is_loading_folder = true;
         self.loading_started_at = Instant::now(); // Track loading start for timeout
-        self.total_items = 0;
         self.invalidate_active_items_rebuild();
     }
 }

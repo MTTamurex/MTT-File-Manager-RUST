@@ -25,6 +25,7 @@ impl ImageViewerApp {
         snapshot.rectangle_selection_state = None;
         snapshot.is_loading_folder = false;
         snapshot.pending_all_items_clear = false;
+        snapshot.hold_visible_items_until_load_complete = false;
         snapshot.pending_items_rebuild = false;
         snapshot.pending_items_count = 0;
         self.dual_panel_inactive_state = Some(snapshot);

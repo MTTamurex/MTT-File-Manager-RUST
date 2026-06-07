@@ -53,6 +53,12 @@ impl ImageViewerApp {
                     self.cache_manager.texture_cache.pop(&item.path);
                     self.cache_manager.pop_rgba_data(&item.path);
                     self.cache_manager.failed_thumbnails.pop(&item.path);
+                    self.cache_manager
+                        .forget_attempted_thumbnail_bucket(&item.path);
+                    self.cache_manager.loading_set.remove(&item.path);
+                    self.cache_manager.finish_pending_upload(&item.path);
+                    self.pending_thumbnails.retain(|t| t.path != item.path);
+                    crate::workers::thumbnail::clear_failure_cache(&item.path);
                 }
             }
         }
@@ -62,7 +68,13 @@ impl ImageViewerApp {
                 self.cache_manager.texture_cache.pop(old_path);
                 self.cache_manager.pop_rgba_data(old_path);
                 self.cache_manager.failed_thumbnails.pop(old_path);
+                self.cache_manager
+                    .forget_attempted_thumbnail_bucket(old_path);
+                self.cache_manager.loading_set.remove(old_path);
+                self.cache_manager.finish_pending_upload(old_path);
+                self.pending_thumbnails.retain(|t| t.path != *old_path);
                 self.cache_manager.invalidate_folder_preview(old_path);
+                crate::workers::thumbnail::clear_failure_cache(old_path);
             }
         }
     }
@@ -260,6 +272,7 @@ impl ImageViewerApp {
             let result_items = self.build_sorted_items_snapshot();
             self.items = Arc::new(result_items);
             self.total_items = self.items.len();
+            self.hold_visible_items_until_load_complete = false;
 
             if let Some(target_path) = self.pending_select_path.take() {
                 let _ = self.select_item_by_path(&target_path);
@@ -271,6 +284,7 @@ impl ImageViewerApp {
             );
         } else {
             self.spawn_items_rebuild_job();
+            self.hold_visible_items_until_load_complete = false;
         }
 
         self.enqueue_onedrive_eager_folder_previews();
@@ -281,6 +295,10 @@ impl ImageViewerApp {
 
     pub(super) fn maybe_schedule_stream_items_rebuild(&mut self, ctx: &egui::Context) {
         if !self.pending_items_rebuild {
+            return;
+        }
+
+        if self.hold_visible_items_until_load_complete && self.is_loading_folder {
             return;
         }
 

@@ -208,10 +208,7 @@ impl ImageViewerApp {
             );
         } else {
             items.push(ContextMenuItem::separator());
-            items.push(
-                ContextMenuItem::new(-20, t!("context_menu.open"))
-                    .with_svg_icon("folder"),
-            );
+            items.push(ContextMenuItem::new(-20, t!("context_menu.open")).with_svg_icon("folder"));
             items.push(
                 ContextMenuItem::new(-21, t!("context_menu.open_new_tab"))
                     .with_svg_icon("external-link"),
@@ -468,8 +465,7 @@ impl ImageViewerApp {
         // the next menu opening creates the correct number of placeholders.
         // Overflow items are collapsed into a single "Show more" entry,
         // so they count as 1 slot, not N.
-        self.shell_placeholder_count =
-            visible.len() + if overflow.is_empty() { 0 } else { 1 };
+        self.shell_placeholder_count = visible.len() + if overflow.is_empty() { 0 } else { 1 };
 
         let items = &mut self.context_menu.items;
 

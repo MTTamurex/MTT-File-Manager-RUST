@@ -218,8 +218,11 @@ pub struct ImageViewerApp {
     pub pending_items_count: usize,
     /// When true, `all_items` will be cleared on the first incoming batch
     /// of the current generation. This allows watcher-triggered reloads to
-    /// keep the old items visible until new data starts arriving.
+    /// keep the old items visible until the new generation is ready.
     pub pending_all_items_clear: bool,
+    /// Soft reload visual guard: keep `items` rendering the previous complete
+    /// listing until the new generation reaches end-of-load.
+    pub hold_visible_items_until_load_complete: bool,
 
     // RENAME STATE
     pub renaming_state: Option<(usize, String)>, // (Index, Editable Text)
