@@ -44,6 +44,15 @@ impl ExifSummary {
 fn read_exif_summary(exifreader: &exif::Exif) -> ExifSummary {
     let mut summary = ExifSummary::default();
 
+    // Collect EXIF date tags separately to resolve priority after iteration.
+    // DateTimeOriginal (ExifIFD) = actual capture date (preferred).
+    // DateTimeDigitized (ExifIFD) = digitization date (secondary).
+    // DateTime (IFD0) = file modification date (last resort).
+    // Iteration order is not guaranteed, so we cannot rely on match-arm order + guards.
+    let mut exif_date_original: Option<String> = None;
+    let mut exif_date_digitized: Option<String> = None;
+    let mut exif_date_modified: Option<String> = None;
+
     for field in exifreader.fields() {
         match field.tag {
             Tag::Make if summary.camera_maker.is_none() => {
@@ -77,14 +86,14 @@ fn read_exif_summary(exifreader: &exif::Exif) -> ExifSummary {
             Tag::Flash if summary.flash_mode.is_none() => {
                 summary.flash_mode = Some(field.display_value().to_string());
             }
-            Tag::DateTimeOriginal if summary.date_taken.is_none() => {
-                summary.date_taken = Some(field.display_value().to_string());
+            Tag::DateTimeOriginal if exif_date_original.is_none() => {
+                exif_date_original = Some(field.display_value().to_string());
             }
-            Tag::DateTimeDigitized if summary.date_taken.is_none() => {
-                summary.date_taken = Some(field.display_value().to_string());
+            Tag::DateTimeDigitized if exif_date_digitized.is_none() => {
+                exif_date_digitized = Some(field.display_value().to_string());
             }
-            Tag::DateTime if summary.date_taken.is_none() => {
-                summary.date_taken = Some(field.display_value().to_string());
+            Tag::DateTime if exif_date_modified.is_none() => {
+                exif_date_modified = Some(field.display_value().to_string());
             }
             Tag::ImageDescription if summary.subject.is_none() => {
                 summary.subject = Some(field.display_value().to_string());
@@ -92,6 +101,9 @@ fn read_exif_summary(exifreader: &exif::Exif) -> ExifSummary {
             _ => {}
         }
     }
+
+    // Apply priority: DateTimeOriginal > DateTimeDigitized > DateTime
+    summary.date_taken = exif_date_original.or(exif_date_digitized).or(exif_date_modified);
 
     summary
 }
