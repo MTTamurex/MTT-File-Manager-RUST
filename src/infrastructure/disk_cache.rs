@@ -16,6 +16,8 @@ mod folder_previews;
 mod gc;
 mod thumbnails_repo;
 
+const FOLDER_PREVIEW_CACHE_FORMAT_VERSION: i64 = 2;
+
 /// Allowed table targets for batch-delete operations.
 /// Using an enum instead of raw &str prevents SQL injection through
 /// table or column names.
@@ -226,6 +228,7 @@ impl ThumbnailDiskCache {
                 width INTEGER NOT NULL,
                 height INTEGER NOT NULL,
                 bucket_size INTEGER NOT NULL DEFAULT 256,
+                format_version INTEGER NOT NULL DEFAULT 0,
                 created_at INTEGER NOT NULL
             )",
             [],
@@ -234,6 +237,10 @@ impl ThumbnailDiskCache {
 
         let _ = conn.execute(
             "ALTER TABLE folder_previews ADD COLUMN bucket_size INTEGER NOT NULL DEFAULT 256",
+            [],
+        );
+        let _ = conn.execute(
+            "ALTER TABLE folder_previews ADD COLUMN format_version INTEGER NOT NULL DEFAULT 0",
             [],
         );
 

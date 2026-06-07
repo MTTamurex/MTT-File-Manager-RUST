@@ -265,8 +265,10 @@ pub fn spawn_folder_preview_worker(
                             height,
                             cache_start.elapsed().as_secs_f64() * 1000.0
                         );
-                        // Disk cache already stores premultiplied data — no need
-                        // to premultiply again.  Send as-is with premultiplied=true.
+                        // Disk cache stores straight-alpha RGBA losslessly.
+                        // Premultiply only for the GPU upload path.
+                        let mut rgba_data = rgba_data;
+                        crate::domain::thumbnail::premultiply_rgba_in_place(&mut rgba_data);
                         let _ = tx.send(FolderPreviewData {
                             path,
                             rgba_data: std::sync::Arc::new(rgba_data),
@@ -324,8 +326,6 @@ pub fn spawn_folder_preview_worker(
                     }
                 };
 
-                crate::domain::thumbnail::premultiply_rgba_in_place(&mut rgba_data);
-
                 if should_cache {
                     trace.record_db_write();
                     disk_cache.put_folder_preview_cache(
@@ -336,6 +336,7 @@ pub fn spawn_folder_preview_worker(
                         height,
                     );
                 }
+                crate::domain::thumbnail::premultiply_rgba_in_place(&mut rgba_data);
                 let _ = tx.send(FolderPreviewData {
                     path,
                     rgba_data: std::sync::Arc::new(rgba_data),
