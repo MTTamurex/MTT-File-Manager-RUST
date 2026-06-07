@@ -194,6 +194,11 @@ pub fn render_context_menu(
         should_close = true;
     }
 
+    // Close on Enter (item already opened by keyboard handler in slots)
+    if ctx.input(|i| i.key_pressed(egui::Key::Enter)) {
+        should_close = true;
+    }
+
     if should_close {
         menu_state.is_open = false;
         if action_executed.is_none() {
