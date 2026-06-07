@@ -29,14 +29,16 @@ const HEADER_ICON_SIZE: f32 = 16.0; // Display size
 const HEADER_ICON_RENDER_SIZE: u32 = 32; // Render at 2x for HiDPI quality
 const HEADER_BUTTON_SIZE: f32 = 28.0;
 const HEADER_SPACING: f32 = 4.0;
-const ITEM_HEIGHT: f32 = 24.0;
-const ITEM_ICON_SIZE: f32 = 18.0;
+const ITEM_HEIGHT: f32 = 28.0;
+const ITEM_ICON_SIZE: f32 = 16.0;
+const ICON_TEXT_GAP: f32 = 10.0;
 const MENU_ROUNDING: f32 = 6.0;
 const MENU_MIN_WIDTH: f32 = 180.0;
 const MENU_MAX_WIDTH: f32 = 400.0;
 const SUBMENU_MIN_WIDTH: f32 = 220.0;
 const SUBMENU_X_OFFSET: f32 = 6.0;
 const SHORTCUT_COLOR: egui::Color32 = egui::Color32::from_gray(128);
+const HOVER_H_MARGIN: f32 = 2.0;
 
 /// SVG icon names for header bar (matching main toolbar style)
 const SVG_ICON_CUT: &str = "cut";
@@ -140,6 +142,7 @@ pub fn render_context_menu(
                         &mut action_executed,
                         &mut pending_load_item,
                         menu_state.right_bound,
+                        svg_icon_manager,
                     );
 
                     // ========== OVERFLOW ("Show more options") ==========
@@ -150,6 +153,7 @@ pub fn render_context_menu(
                             &mut action_executed,
                             &mut pending_load_item,
                             menu_state.right_bound,
+                            svg_icon_manager,
                         );
                     }
                 });
@@ -281,6 +285,7 @@ fn render_menu_items(
     action: &mut Option<i32>,
     lazy_load: &mut Option<i32>,
     right_bound: f32,
+    svg_icon_manager: &mut SvgIconManager,
 ) {
     let mut last_was_separator = true; // collapse leading separators
 
@@ -289,10 +294,10 @@ fn render_menu_items(
             if last_was_separator {
                 continue; // skip duplicate/leading separators
             }
-            render_single_item(ui, item, action, 0, lazy_load, right_bound); // Top-level items have depth 0
+            render_single_item(ui, item, action, 0, lazy_load, right_bound, svg_icon_manager);
             last_was_separator = true;
         } else {
-            render_single_item(ui, item, action, 0, lazy_load, right_bound); // Top-level items have depth 0
+            render_single_item(ui, item, action, 0, lazy_load, right_bound, svg_icon_manager);
             last_was_separator = false;
         }
     }
@@ -306,9 +311,23 @@ fn render_single_item(
     depth: usize,
     lazy_load: &mut Option<i32>,
     right_bound: f32,
+    svg_icon_manager: &mut SvgIconManager,
 ) {
     if item.is_separator {
-        ui.separator();
+        // Custom styled separator with horizontal padding
+        let sep_rect = ui.available_rect_before_wrap();
+        let y = sep_rect.min.y + 4.0;
+        let sep_color = if ui.visuals().dark_mode {
+            egui::Color32::from_gray(60)
+        } else {
+            egui::Color32::from_gray(220)
+        };
+        ui.painter().hline(
+            sep_rect.min.x + 10.0..=sep_rect.max.x - 10.0,
+            y,
+            egui::Stroke::new(1.0, sep_color),
+        );
+        ui.allocate_exact_size(egui::vec2(ui.available_width(), 9.0), Sense::hover());
         return;
     }
 
@@ -321,31 +340,66 @@ fn render_single_item(
         Sense::click(),
     );
 
-    // Hover highlight
-    if response.hovered() {
-        ui.painter()
-            .rect_filled(rect, 3.0, ui.visuals().widgets.hovered.bg_fill);
-    }
-
-    // Icon (16x16)
-    let icon_rect = egui::Rect::from_min_size(
-        egui::pos2(rect.min.x + 8.0, rect.center().y - ITEM_ICON_SIZE / 2.0),
-        egui::vec2(ITEM_ICON_SIZE, ITEM_ICON_SIZE),
-    );
-
-    if let Some(icon) = &item.icon {
-        let img =
-            egui::Image::from_texture(egui::load::SizedTexture::new(icon.id(), icon_rect.size()));
-        img.paint_at(ui, icon_rect);
-    }
-
-    // Text with ellipsis truncation to prevent overflow
-    let text_x = icon_rect.right() + 8.0;
+    // Text color
     let text_color = if item.is_enabled {
         ui.visuals().text_color()
     } else {
         ui.visuals().weak_text_color()
     };
+
+    // Refined hover highlight (Windows 11 style soft blue with margin)
+    if response.hovered() {
+        let hover_color = if ui.visuals().dark_mode {
+            egui::Color32::from_rgb(43, 84, 127)
+        } else {
+            egui::Color32::from_rgb(230, 243, 255)
+        };
+        let hover_rect = rect.shrink2(egui::vec2(HOVER_H_MARGIN, 0.0));
+        ui.painter().rect_filled(hover_rect, 4.0, hover_color);
+    }
+
+    // Icon (16x16)
+    let icon_rect = egui::Rect::from_min_size(
+        egui::pos2(rect.min.x + 10.0, rect.center().y - ITEM_ICON_SIZE / 2.0),
+        egui::vec2(ITEM_ICON_SIZE, ITEM_ICON_SIZE),
+    );
+
+    // Try SVG icon first, then shell texture fallback
+    let mut icon_drawn = false;
+    if let Some(svg_name) = &item.svg_icon_name {
+        let icon_color_rgba = if item.is_enabled {
+            if ui.visuals().dark_mode {
+                [220, 220, 220, 255]
+            } else {
+                [60, 60, 60, 255]
+            }
+        } else {
+            [128, 128, 128, 180]
+        };
+        if let Some(texture) =
+            svg_icon_manager.get_icon(ui.ctx(), svg_name, ITEM_ICON_SIZE as u32, icon_color_rgba)
+        {
+            ui.painter().image(
+                texture.id(),
+                icon_rect,
+                egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                egui::Color32::WHITE,
+            );
+            icon_drawn = true;
+        }
+    }
+    if !icon_drawn {
+        if let Some(icon) = &item.icon {
+            let img = egui::Image::from_texture(egui::load::SizedTexture::new(
+                icon.id(),
+                icon_rect.size(),
+            ));
+            img.paint_at(ui, icon_rect);
+        }
+    }
+
+    // Text with ellipsis truncation to prevent overflow
+    let text_x = icon_rect.right() + ICON_TEXT_GAP;
 
     // Truncate very long names (like drive paths in "Send to") with ellipsis
     // Use char_indices to find proper UTF-8 boundaries (avoids panic on multi-byte chars)
@@ -539,6 +593,7 @@ fn render_single_item(
                                     depth + 1,
                                     lazy_load,
                                     right_bound,
+                                    svg_icon_manager,
                                 );
                             }
                         });
@@ -587,9 +642,10 @@ fn render_overflow_submenu(
     action: &mut Option<i32>,
     lazy_load: &mut Option<i32>,
     right_bound: f32,
+    svg_icon_manager: &mut SvgIconManager,
 ) {
     let overflow_item = ContextMenuItem::new(-100, rust_i18n::t!("context_menu.show_more"))
         .with_subitems(items.iter().map(|i| (*i).clone()).collect());
 
-    render_single_item(ui, &overflow_item, action, 0, lazy_load, right_bound); // Overflow is top-level
+    render_single_item(ui, &overflow_item, action, 0, lazy_load, right_bound, svg_icon_manager);
 }

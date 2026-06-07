@@ -77,16 +77,20 @@ impl ImageViewerApp {
         if self.navigation_state.is_recycle_bin_view && !is_empty_area {
             // Menu items for recycle bin (no primary icons)
             items.push(
-                ContextMenuItem::new(-52, t!("context_menu.restore")).with_command("restore"),
+                ContextMenuItem::new(-52, t!("context_menu.restore"))
+                    .with_command("restore")
+                    .with_svg_icon("refresh"),
             );
             items.push(
                 ContextMenuItem::new(-53, t!("context_menu.delete_permanent"))
-                    .with_command("delete_permanent"),
+                    .with_command("delete_permanent")
+                    .with_svg_icon("delete"),
             );
             items.push(ContextMenuItem::separator());
             items.push(
                 ContextMenuItem::new(-28, t!("context_menu.properties"))
                     .with_command("properties")
+                    .with_svg_icon("properties")
                     .with_shortcut(
                         self.shortcuts
                             .label(crate::app::shortcuts::ShortcutAction::Properties),
@@ -102,7 +106,8 @@ impl ImageViewerApp {
         if self.navigation_state.is_recycle_bin_view && is_empty_area {
             items.push(
                 ContextMenuItem::new(-54, t!("context_menu.empty_recycle_bin"))
-                    .with_command("empty_recycle_bin"),
+                    .with_command("empty_recycle_bin")
+                    .with_svg_icon("broom"),
             );
             self.context_menu.items = items;
             self.context_menu.partition_items(); // M-5
@@ -187,6 +192,7 @@ impl ImageViewerApp {
             items.push(
                 ContextMenuItem::new(-32, t!("context_menu.paste"))
                     .with_command("paste")
+                    .with_svg_icon("paste")
                     .with_shortcut(
                         self.shortcuts
                             .label(crate::app::shortcuts::ShortcutAction::Paste),
@@ -195,30 +201,44 @@ impl ImageViewerApp {
             );
             items.push(
                 ContextMenuItem::new(-1, t!("context_menu.create_folder"))
+                    .with_svg_icon("folder_new")
                     .with_shortcut(
                         self.shortcuts
                             .label(crate::app::shortcuts::ShortcutAction::CreateFolder),
                     )
                     .enabled(can_create_folder),
             );
-            items.push(ContextMenuItem::new(-80, t!("context_menu.open_terminal")));
-            items.push(ContextMenuItem::new(
-                -81,
-                t!("context_menu.open_terminal_admin"),
-            ));
+            items.push(
+                ContextMenuItem::new(-80, t!("context_menu.open_terminal"))
+                    .with_svg_icon("terminal"),
+            );
+            items.push(
+                ContextMenuItem::new(-81, t!("context_menu.open_terminal_admin"))
+                    .with_svg_icon("terminal"),
+            );
         } else {
             items.push(ContextMenuItem::separator());
-            items.push(ContextMenuItem::new(-20, t!("context_menu.open")));
-            items.push(ContextMenuItem::new(-21, t!("context_menu.open_new_tab")));
-            items.push(ContextMenuItem::new(-80, t!("context_menu.open_terminal")));
-            items.push(ContextMenuItem::new(
-                -81,
-                t!("context_menu.open_terminal_admin"),
-            ));
+            items.push(
+                ContextMenuItem::new(-20, t!("context_menu.open"))
+                    .with_svg_icon("folder"),
+            );
+            items.push(
+                ContextMenuItem::new(-21, t!("context_menu.open_new_tab"))
+                    .with_svg_icon("external-link"),
+            );
+            items.push(
+                ContextMenuItem::new(-80, t!("context_menu.open_terminal"))
+                    .with_svg_icon("terminal"),
+            );
+            items.push(
+                ContextMenuItem::new(-81, t!("context_menu.open_terminal_admin"))
+                    .with_svg_icon("terminal"),
+            );
             items.push(ContextMenuItem::separator());
             items.push(
                 ContextMenuItem::new(-30, t!("context_menu.cut"))
                     .with_command("cut")
+                    .with_svg_icon("cut")
                     .with_shortcut(
                         self.shortcuts
                             .label(crate::app::shortcuts::ShortcutAction::Cut),
@@ -228,6 +248,7 @@ impl ImageViewerApp {
             items.push(
                 ContextMenuItem::new(-31, t!("context_menu.copy"))
                     .with_command("copy")
+                    .with_svg_icon("copy")
                     .with_shortcut(
                         self.shortcuts
                             .label(crate::app::shortcuts::ShortcutAction::Copy),
@@ -237,6 +258,7 @@ impl ImageViewerApp {
             items.push(
                 ContextMenuItem::new(-32, t!("context_menu.paste"))
                     .with_command("paste")
+                    .with_svg_icon("paste")
                     .with_shortcut(
                         self.shortcuts
                             .label(crate::app::shortcuts::ShortcutAction::Paste),
@@ -246,6 +268,7 @@ impl ImageViewerApp {
             items.push(
                 ContextMenuItem::new(-33, t!("context_menu.rename"))
                     .with_command("rename")
+                    .with_svg_icon("rename")
                     .with_shortcut(
                         self.shortcuts
                             .label(crate::app::shortcuts::ShortcutAction::Rename),
@@ -255,6 +278,7 @@ impl ImageViewerApp {
             items.push(
                 ContextMenuItem::new(-34, t!("context_menu.delete"))
                     .with_command("delete")
+                    .with_svg_icon("delete")
                     .with_shortcut(
                         self.shortcuts
                             .label(crate::app::shortcuts::ShortcutAction::Delete),
@@ -264,12 +288,13 @@ impl ImageViewerApp {
             items.push(ContextMenuItem::separator());
             items.push(
                 ContextMenuItem::new(-24, t!("context_menu.copy_path"))
+                    .with_svg_icon("copy")
                     .with_shortcut("Ctrl+Shift+C"),
             );
-            items.push(ContextMenuItem::new(
-                -26,
-                t!("context_menu.create_shortcut"),
-            ));
+            items.push(
+                ContextMenuItem::new(-26, t!("context_menu.create_shortcut"))
+                    .with_svg_icon("external-link"),
+            );
             // Quick Access pin/unpin — only for folders (not drives)
             if !is_drive {
                 if let Some(target_path) = paths.first().and_then(|p| p.to_str()) {
@@ -289,15 +314,15 @@ impl ImageViewerApp {
                         let is_pinned = self.pinned_folders.iter().any(|pf| pf.path == target_path);
                         items.push(ContextMenuItem::separator());
                         if is_pinned {
-                            items.push(ContextMenuItem::new(
-                                -61,
-                                t!("context_menu.unpin_quick_access"),
-                            ));
+                            items.push(
+                                ContextMenuItem::new(-61, t!("context_menu.unpin_quick_access"))
+                                    .with_svg_icon("home"),
+                            );
                         } else {
-                            items.push(ContextMenuItem::new(
-                                -60,
-                                t!("context_menu.pin_quick_access"),
-                            ));
+                            items.push(
+                                ContextMenuItem::new(-60, t!("context_menu.pin_quick_access"))
+                                    .with_svg_icon("home"),
+                            );
                         }
                     }
                 }
@@ -333,13 +358,15 @@ impl ImageViewerApp {
                         if show_pin {
                             items.push(
                                 ContextMenuItem::new(-70, t!("context_menu.always_keep_on_device"))
-                                    .with_command("onedrive_pin"),
+                                    .with_command("onedrive_pin")
+                                    .with_svg_icon("lock"),
                             );
                         }
                         if show_free {
                             items.push(
                                 ContextMenuItem::new(-71, t!("context_menu.free_up_space"))
-                                    .with_command("onedrive_free"),
+                                    .with_command("onedrive_free")
+                                    .with_svg_icon("lock_open"),
                             );
                         }
                     }
@@ -350,6 +377,7 @@ impl ImageViewerApp {
             items.push(
                 ContextMenuItem::new(-28, t!("context_menu.properties"))
                     .with_command("properties")
+                    .with_svg_icon("properties")
                     .with_shortcut(
                         self.shortcuts
                             .label(crate::app::shortcuts::ShortcutAction::Properties),
@@ -447,6 +475,7 @@ impl ImageViewerApp {
                 command_string: item.command_string.clone(),
                 show_in_overflow: false,
                 has_pending_submenu: item.has_submenu,
+                svg_icon_name: None,
             })
         }
 
@@ -528,6 +557,7 @@ impl ImageViewerApp {
                 command_string: item.command_string.clone(),
                 show_in_overflow: false,
                 has_pending_submenu: item.has_submenu,
+                svg_icon_name: None,
             }
         }
 

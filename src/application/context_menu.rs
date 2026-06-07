@@ -30,6 +30,8 @@ pub struct ContextMenuItem {
     pub show_in_overflow: bool,
     /// True if this item has a pending submenu that needs on-demand loading
     pub has_pending_submenu: bool,
+    /// SVG icon name for secondary menu items (e.g., "cut", "copy", "delete")
+    pub svg_icon_name: Option<String>,
 }
 
 impl Default for ContextMenuItem {
@@ -46,6 +48,7 @@ impl Default for ContextMenuItem {
             command_string: None,
             show_in_overflow: false,
             has_pending_submenu: false,
+            svg_icon_name: None,
         }
     }
 }
@@ -115,6 +118,12 @@ impl ContextMenuItem {
         self.sub_items = items;
         self
     }
+
+    /// Builder: add SVG icon name for secondary menu items
+    pub fn with_svg_icon(mut self, name: impl Into<String>) -> Self {
+        self.svg_icon_name = Some(name.into());
+        self
+    }
 }
 
 impl std::fmt::Debug for ContextMenuItem {
@@ -126,6 +135,7 @@ impl std::fmt::Debug for ContextMenuItem {
             .field("is_separator", &self.is_separator)
             .field("is_enabled", &self.is_enabled)
             .field("is_primary", &self.is_primary)
+            .field("svg_icon_name", &self.svg_icon_name)
             .finish()
     }
 }
