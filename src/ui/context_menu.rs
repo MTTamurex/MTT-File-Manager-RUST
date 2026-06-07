@@ -89,9 +89,19 @@ pub fn render_context_menu(
         .map(|&i| &menu_state.items[i])
         .collect();
 
+    // Calculate menu width to fit header bar tightly (Windows 11 style)
+    let menu_width = if !primary_items.is_empty() {
+        let header_width = primary_items.len() as f32 * HEADER_BUTTON_WIDTH
+            + (primary_items.len().saturating_sub(1)) as f32 * HEADER_SPACING
+            + 8.0; // inner_margin * 2
+        header_width.max(MENU_MIN_WIDTH)
+    } else {
+        MENU_MIN_WIDTH
+    };
+
     // SMART ALIGNMENT: If the menu would open over the player area, shift it to the left
     let mut menu_pos = menu_state.position;
-    let expected_width = MENU_MAX_WIDTH; // Use maximum for safety or detect dynamically
+    let expected_width = menu_width;
 
     if menu_pos.x + expected_width > menu_state.right_bound {
         // If it hits the right edge, move the menu to the left of the cursor
@@ -121,8 +131,8 @@ pub fn render_context_menu(
                 .inner_margin(4.0)
                 .corner_radius(MENU_ROUNDING)
                 .show(ui, |ui| {
-                    ui.set_min_width(MENU_MIN_WIDTH); // Ensure a base width for alignment
-                    ui.set_max_width(MENU_MAX_WIDTH); // Clamp width to avoid oversized menus
+                    ui.set_min_width(menu_width); // Tight fit to header bar
+                    ui.set_max_width(menu_width); // Prevent extra empty space
                     ui.spacing_mut().item_spacing = egui::vec2(0.0, 1.0);
 
                     // ========== HEADER BAR (Primary items as icons) ==========
