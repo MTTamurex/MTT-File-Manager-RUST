@@ -190,16 +190,6 @@ impl ImageViewerApp {
         if is_empty_area {
             items.push(ContextMenuItem::separator());
             items.push(
-                ContextMenuItem::new(-32, t!("context_menu.paste"))
-                    .with_command("paste")
-                    .with_svg_icon("paste")
-                    .with_shortcut(
-                        self.shortcuts
-                            .label(crate::app::shortcuts::ShortcutAction::Paste),
-                    )
-                    .enabled(can_paste),
-            );
-            items.push(
                 ContextMenuItem::new(-1, t!("context_menu.create_folder"))
                     .with_svg_icon("folder_new")
                     .with_shortcut(
@@ -233,57 +223,6 @@ impl ImageViewerApp {
             items.push(
                 ContextMenuItem::new(-81, t!("context_menu.open_terminal_admin"))
                     .with_svg_icon("terminal"),
-            );
-            items.push(ContextMenuItem::separator());
-            items.push(
-                ContextMenuItem::new(-30, t!("context_menu.cut"))
-                    .with_command("cut")
-                    .with_svg_icon("cut")
-                    .with_shortcut(
-                        self.shortcuts
-                            .label(crate::app::shortcuts::ShortcutAction::Cut),
-                    )
-                    .enabled(!is_drive),
-            );
-            items.push(
-                ContextMenuItem::new(-31, t!("context_menu.copy"))
-                    .with_command("copy")
-                    .with_svg_icon("copy")
-                    .with_shortcut(
-                        self.shortcuts
-                            .label(crate::app::shortcuts::ShortcutAction::Copy),
-                    )
-                    .enabled(can_copy_target),
-            );
-            items.push(
-                ContextMenuItem::new(-32, t!("context_menu.paste"))
-                    .with_command("paste")
-                    .with_svg_icon("paste")
-                    .with_shortcut(
-                        self.shortcuts
-                            .label(crate::app::shortcuts::ShortcutAction::Paste),
-                    )
-                    .enabled(can_paste && !is_drive),
-            );
-            items.push(
-                ContextMenuItem::new(-33, t!("context_menu.rename"))
-                    .with_command("rename")
-                    .with_svg_icon("rename")
-                    .with_shortcut(
-                        self.shortcuts
-                            .label(crate::app::shortcuts::ShortcutAction::Rename),
-                    )
-                    .enabled(can_rename_target),
-            );
-            items.push(
-                ContextMenuItem::new(-34, t!("context_menu.delete"))
-                    .with_command("delete")
-                    .with_svg_icon("delete")
-                    .with_shortcut(
-                        self.shortcuts
-                            .label(crate::app::shortcuts::ShortcutAction::Delete),
-                    )
-                    .enabled(!is_drive),
             );
             items.push(ContextMenuItem::separator());
             items.push(

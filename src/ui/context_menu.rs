@@ -25,10 +25,11 @@ pub trait ContextMenuOperations {
 }
 
 /// Menu styling constants (matching Files app - compact)
-const HEADER_ICON_SIZE: f32 = 16.0; // Display size
-const HEADER_ICON_RENDER_SIZE: u32 = 32; // Render at 2x for HiDPI quality
-const HEADER_BUTTON_SIZE: f32 = 28.0;
-const HEADER_SPACING: f32 = 4.0;
+const HEADER_ICON_SIZE: f32 = 20.0; // Display size
+const HEADER_ICON_RENDER_SIZE: u32 = 40; // Render at 2x for HiDPI quality
+const HEADER_BUTTON_WIDTH: f32 = 56.0;
+const HEADER_BUTTON_HEIGHT: f32 = 48.0;
+const HEADER_SPACING: f32 = 8.0;
 const ITEM_HEIGHT: f32 = 28.0;
 const ITEM_ICON_SIZE: f32 = 16.0;
 const ICON_TEXT_GAP: f32 = 10.0;
@@ -101,7 +102,7 @@ pub fn render_context_menu(
     let screen_rect = ctx.screen_rect();
     let separator_count = if !primary_items.is_empty() { 1 } else { 0 }
         + if !overflow_items.is_empty() { 1 } else { 0 };
-    let expected_height = (HEADER_BUTTON_SIZE + 8.0) * (!primary_items.is_empty() as u32 as f32)
+    let expected_height = (HEADER_BUTTON_HEIGHT + 8.0) * (!primary_items.is_empty() as u32 as f32)
         + (secondary_items.len() as f32 * (ITEM_HEIGHT + 1.0))
         + (overflow_items.len().min(1) as f32 * (ITEM_HEIGHT + 1.0))
         + (separator_count as f32 * 6.0)
@@ -198,7 +199,7 @@ pub fn render_context_menu(
     false
 }
 
-/// Render the header bar with primary action icons
+/// Render the header bar with primary action icons + labels (Windows 11 style)
 fn render_header_bar(
     ui: &mut egui::Ui,
     items: &[&ContextMenuItem],
@@ -208,16 +209,33 @@ fn render_header_bar(
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing = egui::vec2(HEADER_SPACING, 0.0);
 
-        // Determine icon color based on theme
+        // Determine colors based on theme
         let icon_color = if ui.visuals().dark_mode {
             [220, 220, 220, 255]
         } else {
             [60, 60, 60, 255]
         };
         let disabled_color = [128, 128, 128, 180];
+        let text_color = if ui.visuals().dark_mode {
+            egui::Color32::from_gray(220)
+        } else {
+            egui::Color32::from_gray(60)
+        };
+        let disabled_text_color = egui::Color32::from_gray(128);
 
         for item in items {
-            let btn_size = egui::vec2(HEADER_BUTTON_SIZE, HEADER_BUTTON_SIZE);
+            let btn_size = egui::vec2(HEADER_BUTTON_WIDTH, HEADER_BUTTON_HEIGHT);
+            let (rect, response) = ui.allocate_exact_size(btn_size, Sense::click());
+
+            // Hover highlight
+            if response.hovered() {
+                let hover_bg = if ui.visuals().dark_mode {
+                    egui::Color32::from_white_alpha(20)
+                } else {
+                    egui::Color32::from_black_alpha(20)
+                };
+                ui.painter().rect_filled(rect, 4.0, hover_bg);
+            }
 
             // Get SVG icon name based on command_string
             let svg_icon_name = match item.command_string.as_deref() {
@@ -236,34 +254,55 @@ fn render_header_bar(
             } else {
                 disabled_color
             };
+            let label_color = if item.is_enabled { text_color } else { disabled_text_color };
 
-            // Try to load SVG icon at 2x resolution for HiDPI quality, fallback to text button
-            let response = if let Some(texture) = svg_icon_manager.get_icon(
+            // Draw icon centered in top portion
+            let icon_y = rect.min.y + 6.0 + HEADER_ICON_SIZE / 2.0;
+            let icon_rect = egui::Rect::from_center_size(
+                egui::pos2(rect.center().x, icon_y),
+                egui::vec2(HEADER_ICON_SIZE, HEADER_ICON_SIZE),
+            );
+
+            if let Some(texture) = svg_icon_manager.get_icon(
                 ui.ctx(),
                 svg_icon_name,
-                HEADER_ICON_RENDER_SIZE, // Render at higher resolution
+                HEADER_ICON_RENDER_SIZE,
                 color,
             ) {
-                let img = egui::Image::from_texture(egui::load::SizedTexture::new(
+                ui.painter().image(
                     texture.id(),
-                    egui::vec2(HEADER_ICON_SIZE, HEADER_ICON_SIZE),
-                ));
-                ui.add_sized(btn_size, egui::ImageButton::new(img).frame(false))
+                    icon_rect,
+                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                    egui::Color32::WHITE,
+                );
             } else if let Some(icon) = &item.icon {
-                // Use texture icon if available (from shell)
                 let img = egui::Image::from_texture(egui::load::SizedTexture::new(
                     icon.id(),
-                    egui::vec2(HEADER_ICON_SIZE, HEADER_ICON_SIZE),
+                    icon_rect.size(),
                 ));
-                ui.add_sized(btn_size, egui::ImageButton::new(img))
+                img.paint_at(ui, icon_rect);
             } else {
-                // Last resort: use first letter as fallback
                 let fallback = item.text.chars().next().unwrap_or('?').to_string();
-                let btn = egui::Button::new(egui::RichText::new(fallback).size(12.0));
-                ui.add_sized(btn_size, btn)
-            };
+                ui.painter().text(
+                    icon_rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    fallback,
+                    egui::FontId::proportional(14.0),
+                    label_color,
+                );
+            }
 
-            // Tooltip with item name and shortcut
+            // Draw label centered at bottom
+            let label_y = rect.max.y - 8.0;
+            ui.painter().text(
+                egui::pos2(rect.center().x, label_y),
+                egui::Align2::CENTER_CENTER,
+                &item.text,
+                egui::FontId::proportional(10.0),
+                label_color,
+            );
+
+            // Tooltip with shortcut
             let tooltip = if let Some(shortcut) = &item.keyboard_shortcut {
                 format!("{} ({})", item.text, shortcut)
             } else {
