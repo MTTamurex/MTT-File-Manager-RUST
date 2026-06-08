@@ -63,6 +63,7 @@ impl ImageViewerApp {
                         } => self.handle_drive_rename_failed(drive_path, error, cancelled),
                         FileOperationResult::OperationFailed { message } => {
                             self.notifications.warning(message);
+                            self.restore_app_focus();
                         }
                         FileOperationResult::RecycleBinChanged => self.handle_recycle_bin_changed(),
                         FileOperationResult::RestoreCompleted { parent_folders } => {
@@ -617,6 +618,11 @@ impl ImageViewerApp {
             if !self.is_loading_folder {
                 self.file_operation_state.pending_deletions.clear();
             }
+
+            // Shell dialogs (copy/move/delete/rename) steal focus from the app
+            // window (especially via the proxy HWND). Restore it when the last
+            // operation in the batch finishes.
+            self.restore_app_focus();
 
             if !refresh_current_view {
                 self.watcher_cooldown_until = Some(Instant::now() + Duration::from_secs(2));
