@@ -22,7 +22,9 @@ const PREFETCH_AHEAD: u32 = 1;
 
 /// Maximum total memory (in bytes) for cached page textures.
 /// When exceeded, furthest pages are evicted even if within CACHE_RADIUS.
-pub(super) const TEXTURE_MEMORY_BUDGET: usize = 128 * 1024 * 1024; // 128 MB
+/// 384 MB accommodates ~6 full-resolution pages at high zoom on HiDPI displays,
+/// preventing render-evict cycles that cause visible flickering above 195%.
+pub(super) const TEXTURE_MEMORY_BUDGET: usize = 384 * 1024 * 1024; // 384 MB
 
 /// Hard cap on the longest side of a rendered page (pixels). Without this,
 /// a heavily zoomed A0 page could allocate ~256 MB of RGBA per page; capping
@@ -112,6 +114,10 @@ pub struct PdfViewerApp {
     pub(super) worker_error: Option<String>,
     /// Whether to apply dark theme (set once at creation, applied on first frame).
     dark_mode: Option<bool>,
+    /// First currently-visible page index (updated each frame by show_pages).
+    visible_lo: Option<u32>,
+    /// Last currently-visible page index (updated each frame by show_pages).
+    visible_hi: u32,
     /// Active password prompt (present when the PDF is encrypted and no password has been confirmed yet).
     password_prompt: Option<PasswordPrompt>,
     /// The password successfully used to open this document.
@@ -147,6 +153,8 @@ impl PdfViewerApp {
             selection: None,
             worker_error: None,
             dark_mode: Some(dark_mode),
+            visible_lo: None,
+            visible_hi: 0,
             password_prompt,
             confirmed_password: None,
         })
@@ -265,6 +273,15 @@ impl PdfViewerApp {
         let results = worker.drain_results(2);
         for r in results {
             self.pending.remove(&r.page_idx);
+
+            // Free the old texture BEFORE uploading the new one to avoid
+            // momentary 2× peak memory for this page, which can push the
+            // cache over budget and trigger eviction of visible pages.
+            if let Some(old) = self.textures.remove(&r.page_idx) {
+                self.cache_bytes = self.cache_bytes.saturating_sub(old.byte_size());
+                // old TextureHandle is dropped here, freeing GPU memory.
+            }
+
             let tex = ctx.load_texture(
                 format!("pdf_p{}", r.page_idx),
                 egui::ColorImage::from_rgba_unmultiplied(
@@ -278,10 +295,6 @@ impl PdfViewerApp {
                 render_w: r.width,
                 render_h: r.height,
             };
-            // Update cache_bytes: subtract old texture size (if replacing)
-            if let Some(old) = self.textures.get(&r.page_idx) {
-                self.cache_bytes = self.cache_bytes.saturating_sub(old.byte_size());
-            }
             self.cache_bytes += new_entry.byte_size();
             self.textures.insert(r.page_idx, new_entry);
         }
@@ -360,7 +373,7 @@ impl PdfViewerApp {
 
     // ── Cache eviction ───────────────────────────────────────────────────
 
-    fn evict_distant(&mut self) {
+    fn evict_distant(&mut self, first_visible: Option<u32>, last_visible: u32) {
         let lo = self.current_page.saturating_sub(CACHE_RADIUS);
         let hi = (self.current_page + CACHE_RADIUS).min(self.total_pages.saturating_sub(1));
         self.textures.retain(|&idx, tex| {
@@ -376,16 +389,24 @@ impl PdfViewerApp {
         // during long browsing sessions on large documents.
         self.page_text.retain(|&idx, _| idx >= lo && idx <= hi);
 
-        // If still over budget, evict furthest pages from current_page first.
+        // If still over budget, evict furthest pages from current_page first,
+        // but never evict pages that are currently visible on screen — that
+        // would cause a visible placeholder flash (render-evict cycle).
         if self.cache_bytes > TEXTURE_MEMORY_BUDGET {
+            let vis_lo = first_visible.unwrap_or(self.current_page);
+            let vis_hi = if last_visible > 0 {
+                last_visible
+            } else {
+                vis_lo
+            };
             let mut pages: Vec<u32> = self.textures.keys().copied().collect();
             pages.sort_by_key(|&p| {
                 std::cmp::Reverse((p as i64 - self.current_page as i64).unsigned_abs())
             });
             while self.cache_bytes > TEXTURE_MEMORY_BUDGET {
                 if let Some(victim) = pages.pop() {
-                    // Never evict the current page
-                    if victim == self.current_page {
+                    // Never evict the current page or any currently-visible page
+                    if victim >= vis_lo && victim <= vis_hi {
                         continue;
                     }
                     if let Some(tex) = self.textures.remove(&victim) {
@@ -613,10 +634,13 @@ impl PdfViewerApp {
                 self.page_input = format!("{}", fv + 1);
             }
 
-            // Prefetch adjacent pages for smooth scrolling
+            // Prefetch adjacent pages for smooth scrolling, clamped to
+            // CACHE_RADIUS so prefetched textures are not immediately evicted.
             let scale0 = self.get_scale(fv, aw, ah);
-            let pf_lo = fv.saturating_sub(PREFETCH_AHEAD);
-            let pf_hi = (last_visible + PREFETCH_AHEAD).min(self.total_pages.saturating_sub(1));
+            let cache_lo = self.current_page.saturating_sub(CACHE_RADIUS);
+            let cache_hi = (self.current_page + CACHE_RADIUS).min(self.total_pages.saturating_sub(1));
+            let pf_lo = fv.saturating_sub(PREFETCH_AHEAD).max(cache_lo);
+            let pf_hi = (last_visible + PREFETCH_AHEAD).min(cache_hi);
             for pidx in pf_lo..=pf_hi {
                 let (nw, nh) = self.needed_render_size(pidx, scale0, ppp);
                 let needs = match self.textures.get(&pidx) {
@@ -628,6 +652,10 @@ impl PdfViewerApp {
                 }
             }
         }
+
+        // Publish visible range for eviction protection.
+        self.visible_lo = first_visible;
+        self.visible_hi = last_visible;
     }
 }
 
@@ -707,7 +735,7 @@ impl eframe::App for PdfViewerApp {
                 });
         });
 
-        self.evict_distant();
+        self.evict_distant(self.visible_lo, self.visible_hi);
     }
 }
 
