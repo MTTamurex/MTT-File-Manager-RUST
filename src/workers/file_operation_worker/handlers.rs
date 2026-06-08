@@ -3,11 +3,18 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::Sender;
 
-use crate::infrastructure::archive_extract::{
-    self, ExtractionCancelFlag, SharedExtractionProgress,
-};
+use crate::infrastructure::archive_extract;
 use crate::infrastructure::windows::recycle_bin;
 use crate::infrastructure::windows::shell_operations;
+use crate::workers::archive_extraction_worker::ArchiveExtractionRequest;
+
+/// Indicates whether a handler completed synchronously or dispatched to the archive worker.
+pub(super) enum HandlerCompletion {
+    /// The handler completed (or failed) synchronously; caller should send FinishedNoRefresh.
+    CompletedSynchronously,
+    /// The handler dispatched the job to the archive extraction worker; caller must NOT send FinishedNoRefresh.
+    DispatchedAsync,
+}
 
 pub(super) fn handle_delete(
     paths: Vec<PathBuf>,
@@ -250,9 +257,8 @@ pub(super) fn handle_copy(
     dest_folder: PathBuf,
     hwnd: SendHwnd,
     result_sender: &Sender<FileOperationResult>,
-    progress: &SharedExtractionProgress,
-    cancel: &ExtractionCancelFlag,
-) {
+    archive_extract_sender: &Sender<ArchiveExtractionRequest>,
+) -> HandlerCompletion {
     let valid_path = sanitize_operation_path(&path);
     let valid_dest = sanitize_operation_path(&dest_folder);
     match (valid_path, valid_dest) {
@@ -269,13 +275,28 @@ pub(super) fn handle_copy(
             let copied_dests =
                 known_exact_new_copy_dests(std::slice::from_ref(&path), &dest_folder, is_virtual);
 
-            let success = if is_virtual && native_ok {
+            if is_virtual && native_ok {
                 log::debug!(
-                    "[FileOps] Using native archive extraction for: {}",
+                    "[FileOps] Dispatching native archive extraction for: {}",
                     path.display()
                 );
-                archive_extract::extract_files_from_archive(&[path], &dest_folder, progress, cancel)
-            } else if is_virtual {
+                match archive_extract_sender.send(ArchiveExtractionRequest::Copy {
+                    paths: vec![path],
+                    dest_folder,
+                    copied_dests,
+                }) {
+                    Ok(()) => return HandlerCompletion::DispatchedAsync,
+                    Err(e) => {
+                        log::warn!("[FileOps] Failed to dispatch archive extraction: {}", e);
+                        let _ = result_sender.send(FileOperationResult::OperationFailed {
+                            message: rust_i18n::t!("operations.error_cancelled").to_string(),
+                        });
+                        return HandlerCompletion::CompletedSynchronously;
+                    }
+                }
+            }
+
+            let success = if is_virtual {
                 shell_operations::copy_item_with_file_op(&path, &dest_folder, hwnd.0)
             } else {
                 shell_operations::copy_item_with_shell(&path, &dest_folder, hwnd.0)
@@ -292,9 +313,11 @@ pub(super) fn handle_copy(
                     message: rust_i18n::t!("operations.error_cancelled").to_string(),
                 });
             }
+            HandlerCompletion::CompletedSynchronously
         }
         (Err(err), _) | (_, Err(err)) => {
             log::warn!("[SECURITY] Copy blocked: {}", err);
+            HandlerCompletion::CompletedSynchronously
         }
     }
 }
@@ -304,9 +327,8 @@ pub(super) fn handle_move(
     dest_folder: PathBuf,
     hwnd: SendHwnd,
     result_sender: &Sender<FileOperationResult>,
-    progress: &SharedExtractionProgress,
-    cancel: &ExtractionCancelFlag,
-) {
+    archive_extract_sender: &Sender<ArchiveExtractionRequest>,
+) -> HandlerCompletion {
     let valid_path = sanitize_operation_path(&path);
     let valid_dest = sanitize_operation_path(&dest_folder);
     match (valid_path, valid_dest) {
@@ -323,18 +345,36 @@ pub(super) fn handle_move(
                 native_ok
             );
 
-            let success = if is_virtual && native_ok {
+            if is_virtual && native_ok {
                 log::debug!(
-                    "[FileOps] Using native archive extraction (move) for: {}",
+                    "[FileOps] Dispatching native archive extraction (move) for: {}",
                     path.display()
                 );
-                archive_extract::extract_files_from_archive(
-                    &[path.clone()],
-                    &dest_folder,
-                    progress,
-                    cancel,
-                )
-            } else if is_virtual {
+                let Some(source_folder) = source_folder.clone() else {
+                    let _ = result_sender.send(FileOperationResult::OperationFailed {
+                        message: rust_i18n::t!("operations.error_cancelled").to_string(),
+                    });
+                    return HandlerCompletion::CompletedSynchronously;
+                };
+                let moved_dest = path.file_name().map(|name| dest_folder.join(name));
+                match archive_extract_sender.send(ArchiveExtractionRequest::MoveSingle {
+                    paths: vec![path],
+                    dest_folder,
+                    source_folder,
+                    moved_dest,
+                }) {
+                    Ok(()) => return HandlerCompletion::DispatchedAsync,
+                    Err(e) => {
+                        log::warn!("[FileOps] Failed to dispatch archive extraction: {}", e);
+                        let _ = result_sender.send(FileOperationResult::OperationFailed {
+                            message: rust_i18n::t!("operations.error_cancelled").to_string(),
+                        });
+                        return HandlerCompletion::CompletedSynchronously;
+                    }
+                }
+            }
+
+            let success = if is_virtual {
                 shell_operations::move_item_with_file_op(&path, &dest_folder, hwnd.0)
             } else {
                 shell_operations::move_item_with_shell(&path, &dest_folder, hwnd.0)
@@ -355,9 +395,11 @@ pub(super) fn handle_move(
                     message: rust_i18n::t!("operations.error_cancelled").to_string(),
                 });
             }
+            HandlerCompletion::CompletedSynchronously
         }
         (Err(err), _) | (_, Err(err)) => {
             log::warn!("[SECURITY] Move blocked: {}", err);
+            HandlerCompletion::CompletedSynchronously
         }
     }
 }
@@ -367,9 +409,8 @@ pub(super) fn handle_copy_batch(
     dest_folder: PathBuf,
     hwnd: SendHwnd,
     result_sender: &Sender<FileOperationResult>,
-    progress: &SharedExtractionProgress,
-    cancel: &ExtractionCancelFlag,
-) {
+    archive_extract_sender: &Sender<ArchiveExtractionRequest>,
+) -> HandlerCompletion {
     let valid_paths = sanitize_operation_paths(&paths);
     let valid_dest = sanitize_operation_path(&dest_folder);
     match (valid_paths, valid_dest) {
@@ -390,13 +431,28 @@ pub(super) fn handle_copy_batch(
 
             let copied_dests = known_exact_new_copy_dests(&paths, &dest_folder, has_virtual_path);
 
-            let success = if has_virtual_path && native_ok {
+            if has_virtual_path && native_ok {
                 log::debug!(
-                    "[FileOps] Using native archive extraction for batch copy ({} files)",
+                    "[FileOps] Dispatching native archive extraction for batch copy ({} files)",
                     paths.len()
                 );
-                archive_extract::extract_files_from_archive(&paths, &dest_folder, progress, cancel)
-            } else if has_virtual_path {
+                match archive_extract_sender.send(ArchiveExtractionRequest::Copy {
+                    paths,
+                    dest_folder,
+                    copied_dests,
+                }) {
+                    Ok(()) => return HandlerCompletion::DispatchedAsync,
+                    Err(e) => {
+                        log::warn!("[FileOps] Failed to dispatch archive extraction: {}", e);
+                        let _ = result_sender.send(FileOperationResult::OperationFailed {
+                            message: rust_i18n::t!("operations.error_cancelled").to_string(),
+                        });
+                        return HandlerCompletion::CompletedSynchronously;
+                    }
+                }
+            }
+
+            let success = if has_virtual_path {
                 shell_operations::copy_items_with_file_op(&paths, &dest_folder, hwnd.0)
             } else {
                 shell_operations::copy_items_with_shell(&paths, &dest_folder, hwnd.0)
@@ -413,9 +469,11 @@ pub(super) fn handle_copy_batch(
                     message: rust_i18n::t!("operations.error_cancelled").to_string(),
                 });
             }
+            HandlerCompletion::CompletedSynchronously
         }
         (Err(err), _) | (_, Err(err)) => {
             log::warn!("[SECURITY] Copy batch blocked: {}", err);
+            HandlerCompletion::CompletedSynchronously
         }
     }
 }
@@ -425,9 +483,8 @@ pub(super) fn handle_move_batch(
     dest_folder: PathBuf,
     hwnd: SendHwnd,
     result_sender: &Sender<FileOperationResult>,
-    progress: &SharedExtractionProgress,
-    cancel: &ExtractionCancelFlag,
-) {
+    archive_extract_sender: &Sender<ArchiveExtractionRequest>,
+) -> HandlerCompletion {
     let valid_paths = sanitize_operation_paths(&paths);
     let valid_dest = sanitize_operation_path(&dest_folder);
     match (valid_paths, valid_dest) {
@@ -451,13 +508,30 @@ pub(super) fn handle_move_batch(
                 native_ok
             );
 
-            let success = if has_virtual_path && native_ok {
+            if has_virtual_path && native_ok {
                 log::debug!(
-                    "[FileOps] Using native archive extraction for batch move ({} files)",
+                    "[FileOps] Dispatching native archive extraction for batch move ({} files)",
                     paths.len()
                 );
-                archive_extract::extract_files_from_archive(&paths, &dest_folder, progress, cancel)
-            } else if has_virtual_path {
+                let moved_files = paths.clone();
+                match archive_extract_sender.send(ArchiveExtractionRequest::MoveBatch {
+                    paths,
+                    dest_folder,
+                    source_folders: source_folders.into_iter().collect(),
+                    moved_files,
+                }) {
+                    Ok(()) => return HandlerCompletion::DispatchedAsync,
+                    Err(e) => {
+                        log::warn!("[FileOps] Failed to dispatch archive extraction: {}", e);
+                        let _ = result_sender.send(FileOperationResult::OperationFailed {
+                            message: rust_i18n::t!("operations.error_cancelled").to_string(),
+                        });
+                        return HandlerCompletion::CompletedSynchronously;
+                    }
+                }
+            }
+
+            let success = if has_virtual_path {
                 shell_operations::move_items_with_file_op(&paths, &dest_folder, hwnd.0)
             } else {
                 shell_operations::move_items_with_shell(&paths, &dest_folder, hwnd.0)
@@ -475,9 +549,11 @@ pub(super) fn handle_move_batch(
                     message: rust_i18n::t!("operations.error_cancelled").to_string(),
                 });
             }
+            HandlerCompletion::CompletedSynchronously
         }
         (Err(err), _) | (_, Err(err)) => {
             log::warn!("[SECURITY] Move batch blocked: {}", err);
+            HandlerCompletion::CompletedSynchronously
         }
     }
 }

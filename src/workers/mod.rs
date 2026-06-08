@@ -1,5 +1,6 @@
 // Background workers for async operations
 
+pub mod archive_extraction_worker;
 pub mod file_operation_worker;
 pub mod folder_preview_worker;
 pub mod global_search_worker;

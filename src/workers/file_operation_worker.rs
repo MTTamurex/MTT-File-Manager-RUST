@@ -13,6 +13,7 @@ use crate::infrastructure::security::{
     SecurityConfig,
 };
 use crate::infrastructure::windows::ComScope;
+use crate::workers::archive_extraction_worker::ArchiveExtractionRequest;
 
 pub enum FileOperationResult {
     /// Generic notification that a file operation finished
@@ -253,14 +254,11 @@ fn sanitize_operation_paths(paths: &[PathBuf]) -> Result<Vec<PathBuf>, String> {
     paths.iter().map(|p| sanitize_operation_path(p)).collect()
 }
 
-use crate::infrastructure::archive_extract::{ExtractionCancelFlag, SharedExtractionProgress};
-
 /// Starts the file operation worker thread.
 pub(crate) fn start_file_operation_worker(
     receiver: Receiver<FileOperationRequest>,
     result_sender: std::sync::mpsc::Sender<FileOperationResult>,
-    extraction_progress: SharedExtractionProgress,
-    extraction_cancel: ExtractionCancelFlag,
+    archive_extract_sender: std::sync::mpsc::Sender<ArchiveExtractionRequest>,
 ) {
     let spawn_result = crate::spawn_named("file-op-worker", move || {
         // Initialize COM as Single-Threaded Apartment (STA)
@@ -268,9 +266,6 @@ pub(crate) fn start_file_operation_worker(
         let _com = ComScope::sta();
 
         while let Ok(request) = receiver.recv() {
-            // Reset cancel flag at the start of each operation
-            extraction_cancel.store(false, std::sync::atomic::Ordering::Relaxed);
-
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 match request {
                     FileOperationRequest::Delete { paths, hwnd } => {
@@ -292,64 +287,88 @@ pub(crate) fn start_file_operation_worker(
                         dest_folder,
                         hwnd,
                     } => {
-                        handlers::handle_copy(
+                        let completion = handlers::handle_copy(
                             path,
                             dest_folder,
                             hwnd,
                             &result_sender,
-                            &extraction_progress,
-                            &extraction_cancel,
+                            &archive_extract_sender,
                         );
                         // handle_copy_completed already reloads the destination view.
-                        return CompletionBehavior::SendFinishedNoRefresh;
+                        return match completion {
+                            handlers::HandlerCompletion::CompletedSynchronously => {
+                                CompletionBehavior::SendFinishedNoRefresh
+                            }
+                            handlers::HandlerCompletion::DispatchedAsync => {
+                                CompletionBehavior::NoFinished
+                            }
+                        };
                     }
                     FileOperationRequest::Move {
                         path,
                         dest_folder,
                         hwnd,
                     } => {
-                        handlers::handle_move(
+                        let completion = handlers::handle_move(
                             path,
                             dest_folder,
                             hwnd,
                             &result_sender,
-                            &extraction_progress,
-                            &extraction_cancel,
+                            &archive_extract_sender,
                         );
                         // handle_move_completed already reloads source + dest views.
-                        return CompletionBehavior::SendFinishedNoRefresh;
+                        return match completion {
+                            handlers::HandlerCompletion::CompletedSynchronously => {
+                                CompletionBehavior::SendFinishedNoRefresh
+                            }
+                            handlers::HandlerCompletion::DispatchedAsync => {
+                                CompletionBehavior::NoFinished
+                            }
+                        };
                     }
                     FileOperationRequest::CopyBatch {
                         paths,
                         dest_folder,
                         hwnd,
                     } => {
-                        handlers::handle_copy_batch(
+                        let completion = handlers::handle_copy_batch(
                             paths,
                             dest_folder,
                             hwnd,
                             &result_sender,
-                            &extraction_progress,
-                            &extraction_cancel,
+                            &archive_extract_sender,
                         );
                         // handle_copy_completed already reloads the destination view.
-                        return CompletionBehavior::SendFinishedNoRefresh;
+                        return match completion {
+                            handlers::HandlerCompletion::CompletedSynchronously => {
+                                CompletionBehavior::SendFinishedNoRefresh
+                            }
+                            handlers::HandlerCompletion::DispatchedAsync => {
+                                CompletionBehavior::NoFinished
+                            }
+                        };
                     }
                     FileOperationRequest::MoveBatch {
                         paths,
                         dest_folder,
                         hwnd,
                     } => {
-                        handlers::handle_move_batch(
+                        let completion = handlers::handle_move_batch(
                             paths,
                             dest_folder,
                             hwnd,
                             &result_sender,
-                            &extraction_progress,
-                            &extraction_cancel,
+                            &archive_extract_sender,
                         );
                         // handle_move_batch_completed already reloads source + dest views.
-                        return CompletionBehavior::SendFinishedNoRefresh;
+                        return match completion {
+                            handlers::HandlerCompletion::CompletedSynchronously => {
+                                CompletionBehavior::SendFinishedNoRefresh
+                            }
+                            handlers::HandlerCompletion::DispatchedAsync => {
+                                CompletionBehavior::NoFinished
+                            }
+                        };
                     }
                     FileOperationRequest::RestoreFromRecycleBin { items } => {
                         handlers::handle_restore_from_recycle_bin(items, &result_sender);

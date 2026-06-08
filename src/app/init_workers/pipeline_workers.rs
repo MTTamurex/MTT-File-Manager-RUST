@@ -42,11 +42,20 @@ pub(in crate::app) fn spawn_file_operation_worker() -> (
     let (file_op_res_tx, file_op_res_rx) = mpsc::channel();
     let extraction_progress = crate::infrastructure::archive_extract::new_shared_progress();
     let extraction_cancel = crate::infrastructure::archive_extract::new_cancel_flag();
+
+    // Create archive extraction channel and start the dedicated worker.
+    let (archive_extract_tx, archive_extract_rx) = mpsc::channel();
+    crate::workers::archive_extraction_worker::start_archive_extraction_worker(
+        archive_extract_rx,
+        file_op_res_tx.clone(),
+        extraction_progress.clone(),
+        extraction_cancel.clone(),
+    );
+
     crate::workers::file_operation_worker::start_file_operation_worker(
         file_op_rx,
         file_op_res_tx,
-        extraction_progress.clone(),
-        extraction_cancel.clone(),
+        archive_extract_tx,
     );
     (
         file_op_tx,
