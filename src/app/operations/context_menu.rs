@@ -134,24 +134,27 @@ impl ImageViewerApp {
 
         // ========== PRIMARY ITEMS (Header bar) - matching Files ==========
         // These appear as icon buttons in the header
-        items.push(
-            ContextMenuItem::primary(-3, t!("context_menu.cut"))
-                .with_command("cut")
-                .with_shortcut(
-                    self.shortcuts
-                        .label(crate::app::shortcuts::ShortcutAction::Cut),
-                )
-                .enabled(!is_drive),
-        );
-        items.push(
-            ContextMenuItem::primary(-2, t!("context_menu.copy"))
-                .with_command("copy")
-                .with_shortcut(
-                    self.shortcuts
-                        .label(crate::app::shortcuts::ShortcutAction::Copy),
-                )
-                .enabled(can_copy_target),
-        );
+        // Cut/Copy only make sense when an item is selected (not empty area)
+        if !is_empty_area {
+            items.push(
+                ContextMenuItem::primary(-3, t!("context_menu.cut"))
+                    .with_command("cut")
+                    .with_shortcut(
+                        self.shortcuts
+                            .label(crate::app::shortcuts::ShortcutAction::Cut),
+                    )
+                    .enabled(!is_drive),
+            );
+            items.push(
+                ContextMenuItem::primary(-2, t!("context_menu.copy"))
+                    .with_command("copy")
+                    .with_shortcut(
+                        self.shortcuts
+                            .label(crate::app::shortcuts::ShortcutAction::Copy),
+                    )
+                    .enabled(can_copy_target),
+            );
+        }
 
         let can_paste = self.clipboard.has_content();
         items.push(
