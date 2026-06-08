@@ -252,12 +252,12 @@ impl ImageViewerApp {
                         if is_pinned {
                             items.push(
                                 ContextMenuItem::new(-61, t!("context_menu.unpin_quick_access"))
-                                    .with_svg_icon("home"),
+                                    .with_svg_icon("pin"),
                             );
                         } else {
                             items.push(
                                 ContextMenuItem::new(-60, t!("context_menu.pin_quick_access"))
-                                    .with_svg_icon("home"),
+                                    .with_svg_icon("pin"),
                             );
                         }
                     }

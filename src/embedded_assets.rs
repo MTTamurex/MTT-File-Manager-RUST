@@ -37,6 +37,7 @@ pub const ICON_NAV_UP: &[u8] = include_bytes!("../assets/icons/nav_up.svg");
 pub const ICON_PASTE: &[u8] =
     include_bytes!("../assets/icons/paste_duotone_black_blue_lighter2.svg");
 pub const ICON_PAUSE: &[u8] = include_bytes!("../assets/icons/pause.svg");
+pub const ICON_PIN: &[u8] = include_bytes!("../assets/icons/pin.svg");
 pub const ICON_PLAY: &[u8] = include_bytes!("../assets/icons/play.svg");
 pub const ICON_PROPERTIES: &[u8] = include_bytes!("../assets/icons/properties.svg");
 pub const ICON_REFRESH: &[u8] = include_bytes!("../assets/icons/refresh.svg");
@@ -80,6 +81,7 @@ pub fn get_icon(name: &str) -> Option<&'static [u8]> {
         "nav_up" => Some(ICON_NAV_UP),
         "paste" => Some(ICON_PASTE),
         "pause" => Some(ICON_PAUSE),
+        "pin" => Some(ICON_PIN),
         "play" => Some(ICON_PLAY),
         "properties" => Some(ICON_PROPERTIES),
         "refresh" => Some(ICON_REFRESH),
