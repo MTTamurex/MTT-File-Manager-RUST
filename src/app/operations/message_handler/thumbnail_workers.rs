@@ -357,11 +357,6 @@ impl ImageViewerApp {
         width: u32,
         height: u32,
     ) {
-        // Ignore stale icon results from previous folder generations.
-        if icon_generation != self.generation {
-            return;
-        }
-
         self.loading_icons.remove(&path);
         // Remove extension from loading set.
         if let Some(ext) = path.extension() {
@@ -370,6 +365,12 @@ impl ImageViewerApp {
                 let ext_key = crate::infrastructure::windows::icons::canonical_icon_ext(&ext_raw);
                 self.loading_extensions.remove(ext_key);
             }
+        }
+
+        // Ignore stale icon results from previous folder generations unless
+        // the path still belongs to the visible inactive dual-panel snapshot.
+        if icon_generation != self.generation && !self.path_belongs_to_inactive_panel(&path) {
+            return;
         }
 
         if pixels.is_empty() || width == 0 || height == 0 {

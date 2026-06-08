@@ -65,6 +65,8 @@ impl ImageViewerApp {
     pub(super) fn reset_folder_loading_state(&mut self, force_refresh: bool, trim_icons: bool) {
         // 1. State Cleanup (UI Thread)
         let preserve_visual_pipeline = !force_refresh && !self.items.is_empty();
+        let preserve_inactive_dual_panel_pipeline =
+            !force_refresh && self.should_preserve_inactive_dual_panel_thumbnail_pipeline();
 
         if force_refresh {
             self.cache_manager.texture_cache.clear();
@@ -90,11 +92,15 @@ impl ImageViewerApp {
         // Soft reloads of the same folder can preserve icon caches to avoid a
         // per-file icon re-extraction storm for executables (.exe/.lnk/.ico).
         if !preserve_visual_pipeline {
-            self.discard_thumbnail_pipeline_for_navigation("folder-load", trim_icons);
-            self.loading_icons.clear(); // Clear icon loading requests
-            self.loading_extensions.clear(); // Clear extension dedup tracking
-            self.failed_icons.clear(); // Retry icon extraction in the new folder generation
-            self.scanned_folders.clear();
+            if preserve_inactive_dual_panel_pipeline {
+                self.prune_thumbnail_pipeline_for_dual_panel_navigation("folder-load");
+            } else {
+                self.discard_thumbnail_pipeline_for_navigation("folder-load", trim_icons);
+                self.loading_icons.clear(); // Clear icon loading requests
+                self.loading_extensions.clear(); // Clear extension dedup tracking
+                self.failed_icons.clear(); // Retry icon extraction in the new folder generation
+                self.scanned_folders.clear();
+            }
         }
         if !preserve_visual_pipeline {
             self.selected_item = None;

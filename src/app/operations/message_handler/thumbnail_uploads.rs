@@ -311,7 +311,9 @@ impl ImageViewerApp {
             };
 
             incoming_count += 1;
-            if thumbnail_data.generation != self.generation {
+            if thumbnail_data.generation != self.generation
+                && !self.path_belongs_to_inactive_panel(&thumbnail_data.path)
+            {
                 self.cache_manager.finish_loading(&thumbnail_data.path);
                 self.cache_manager
                     .finish_pending_upload(&thumbnail_data.path);
@@ -864,7 +866,9 @@ impl ImageViewerApp {
                     break;
                 };
 
-                if thumbnail_data.generation != self.generation {
+                if thumbnail_data.generation != self.generation
+                    && !self.path_belongs_to_inactive_panel(&thumbnail_data.path)
+                {
                     self.cache_manager
                         .finish_pending_upload(&thumbnail_data.path);
                     continue;

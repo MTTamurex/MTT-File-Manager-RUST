@@ -71,11 +71,28 @@ impl PriorityThumbnailQueue {
     /// state. Bulk-scan requests are preserved so navigation does not strand
     /// the bulk progress counters after `total` has already been incremented.
     pub fn clear_pending(&self) -> usize {
+        self.clear_pending_except_paths_internal(None)
+    }
+
+    /// Clears stale normal thumbnail requests while preserving requests for
+    /// paths that are still visible in another panel.
+    pub fn clear_pending_except_paths(&self, keep_paths: &FxHashSet<PathBuf>) -> usize {
+        self.clear_pending_except_paths_internal(Some(keep_paths))
+    }
+
+    fn clear_pending_except_paths_internal(
+        &self,
+        keep_paths: Option<&FxHashSet<PathBuf>>,
+    ) -> usize {
         let mut state = self.state.lock();
 
         let before = state.pending.len();
         state.by_directory.retain(|_, items| {
             items.retain_mut(|request| {
+                if keep_paths.is_some_and(|paths| paths.contains(&request.path)) {
+                    return true;
+                }
+
                 if !request.track_bulk_progress {
                     return false;
                 }

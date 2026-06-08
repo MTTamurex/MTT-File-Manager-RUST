@@ -94,6 +94,14 @@ fn visible_items_for_snapshot(snapshot: &crate::app::dual_panel::PanelSnapshot) 
     }
 }
 
+fn item_references_path(item: &FileEntry, path: &std::path::PathBuf) -> bool {
+    &item.path == path
+        || item
+            .folder_cover
+            .as_ref()
+            .is_some_and(|cover| cover == path)
+}
+
 fn insert_visible_paths_from_range(
     visible_paths: &mut FxHashSet<std::path::PathBuf>,
     items: &[FileEntry],
@@ -137,6 +145,37 @@ impl ImageViewerApp {
         self.items_rebuild_in_flight = false;
         self.clear_pending_items_rebuild_flags();
         self.last_items_rebuild = Instant::now();
+    }
+
+    pub(crate) fn should_preserve_inactive_dual_panel_thumbnail_pipeline(&self) -> bool {
+        self.dual_panel_enabled
+            && self
+                .dual_panel_inactive_state
+                .as_ref()
+                .is_some_and(|snapshot| {
+                    panel_thumbnail_caches_active(
+                        snapshot.view_mode,
+                        snapshot.is_computer_view,
+                        snapshot.is_recycle_bin_view,
+                        visible_items_for_snapshot(snapshot).len(),
+                    )
+                })
+    }
+
+    pub(crate) fn path_belongs_to_inactive_panel(&self, path: &std::path::PathBuf) -> bool {
+        self.dual_panel_enabled
+            && self
+                .dual_panel_inactive_state
+                .as_ref()
+                .is_some_and(|snapshot| {
+                    snapshot
+                        .selected_file
+                        .as_ref()
+                        .is_some_and(|selected| item_references_path(selected, path))
+                        || visible_items_for_snapshot(snapshot)
+                            .iter()
+                            .any(|item| item_references_path(item, path))
+                })
     }
 
     /// Returns `true` while the post-restore burst window is active.
@@ -701,6 +740,88 @@ impl ImageViewerApp {
         }
     }
 
+    pub(crate) fn prune_thumbnail_pipeline_for_dual_panel_navigation(&mut self, reason: &str) {
+        let Some(visible_paths) = self.visible_grid_paths_snapshot() else {
+            log::debug!(
+                "[MEMORY] dual-panel navigation preserved thumbnail pipeline reason={} visible_paths=0",
+                reason
+            );
+            return;
+        };
+
+        let queued_removed = self
+            .thumbnail_queue
+            .clear_pending_except_paths(&visible_paths);
+
+        let pending_before = self.pending_thumbnails.len();
+        self.pending_thumbnails
+            .retain(|thumbnail| visible_paths.contains(&thumbnail.path));
+        let pending_removed = pending_before.saturating_sub(self.pending_thumbnails.len());
+
+        let loading_before = self.cache_manager.loading_set.len();
+        self.cache_manager.loading_set.clear();
+        let loading_removed = loading_before;
+
+        let pending_upload_before = self.cache_manager.pending_upload_set.len();
+        self.cache_manager
+            .pending_upload_set
+            .retain(|path| visible_paths.contains(path));
+        let pending_upload_removed =
+            pending_upload_before.saturating_sub(self.cache_manager.pending_upload_set.len());
+
+        let folder_loading_before = self.cache_manager.folder_preview_loading.len();
+        self.cache_manager
+            .folder_preview_loading
+            .retain(|path| visible_paths.contains(path));
+        let folder_loading_removed =
+            folder_loading_before.saturating_sub(self.cache_manager.folder_preview_loading.len());
+
+        self.pending_folder_preview_replace
+            .retain(|path| visible_paths.contains(path));
+        self.suppress_next_folder_preview_invalidation
+            .retain(|path| visible_paths.contains(path));
+        self.thumbnail_eviction_skips
+            .retain(|path, _| visible_paths.contains(path));
+        self.loading_icons
+            .retain(|path| visible_paths.contains(path));
+        self.loading_extensions.clear();
+
+        self.cache_manager.promote_visible(&visible_paths);
+        let texture_keep = self.current_dynamic_texture_keep_count();
+        if self.cache_manager.texture_cache.cap().get() < texture_keep {
+            self.cache_manager
+                .retune_texture_cache_capacity(texture_keep);
+        }
+
+        let folder_preview_keep = self.current_dynamic_folder_preview_keep_count();
+        if self.cache_manager.folder_preview_cache.cap().get() < folder_preview_keep {
+            self.cache_manager
+                .retune_folder_preview_cache_capacity(folder_preview_keep);
+        }
+
+        self.last_texture_cache_retune = Instant::now()
+            .checked_sub(Duration::from_secs(10))
+            .unwrap_or_else(Instant::now);
+
+        if queued_removed > 0
+            || pending_removed > 0
+            || loading_removed > 0
+            || pending_upload_removed > 0
+            || folder_loading_removed > 0
+        {
+            log::debug!(
+                "[MEMORY] dual-panel navigation prune reason={} preserved={} queued={} pending={} loading={} pending_upload={} folder_loading={}",
+                reason,
+                visible_paths.len(),
+                queued_removed,
+                pending_removed,
+                loading_removed,
+                pending_upload_removed,
+                folder_loading_removed,
+            );
+        }
+    }
+
     /// Fully releases thumbnail memory when the destination view cannot render
     /// thumbnails at all. This is intentionally stronger than navigation trim:
     /// no warm thumbnail/folder-preview/RGBA cache is useful in This PC or the
@@ -1142,7 +1263,7 @@ impl ImageViewerApp {
         self.visible_paths_cache.clear();
         self.visible_range_cached = self.visible_index_range;
 
-        if matches!(self.view_mode, ViewMode::Grid) {
+        if matches!(self.view_mode, ViewMode::Grid | ViewMode::List) {
             insert_visible_paths_from_range(
                 &mut self.visible_paths_cache,
                 self.items.as_ref().as_slice(),
@@ -1152,7 +1273,7 @@ impl ImageViewerApp {
 
         if self.dual_panel_enabled {
             if let Some(snapshot) = self.dual_panel_inactive_state.as_ref() {
-                if matches!(snapshot.view_mode, ViewMode::Grid) {
+                if matches!(snapshot.view_mode, ViewMode::Grid | ViewMode::List) {
                     insert_visible_paths_from_range(
                         &mut self.visible_paths_cache,
                         visible_items_for_snapshot(snapshot),
