@@ -48,6 +48,7 @@ impl ImageViewerApp {
                             self.global_search.results = items;
                             self.global_search.selected_index = None;
                             self.global_search.results_generation += 1;
+                            self.global_search.reset_sort_metadata_for_current_results();
                             self.global_search.total_matches = total_matches.map(u64::from);
                         } else if offset == self.global_search.results.len() as u32 {
                             append_unique_results(&mut self.global_search.results, items);
@@ -236,12 +237,16 @@ fn drain_tooltip_responses(app: &mut ImageViewerApp) {
                 size,
                 modified_ts,
             }) => {
-                app.global_search.tooltip_metadata_inflight.remove(&path);
-                app.global_search
-                    .metadata_cache
-                    .put(path.clone(), modified_ts);
-                if let Some(len) = size {
-                    app.global_search.size_cache.put(path, Some(len));
+                let was_tooltip_request = app.global_search.tooltip_metadata_inflight.remove(&path);
+                app.global_search.apply_sort_metadata(&path, modified_ts);
+
+                if was_tooltip_request {
+                    app.global_search
+                        .metadata_cache
+                        .put(path.clone(), modified_ts);
+                    if let Some(len) = size {
+                        app.global_search.size_cache.put(path, Some(len));
+                    }
                 }
             }
             Ok(crate::app::global_search_state::TooltipResponse::Thumbnail {

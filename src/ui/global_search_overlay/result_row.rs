@@ -327,25 +327,34 @@ pub(super) fn render_result_row(
 
         if hover_duration >= TOOLTIP_DELAY_SECS {
             // --- Async metadata (P0-02): request background load on cache miss ---
-            let modified_ts =
-                if let Some(&cached_ts) = app.global_search.metadata_cache.get(&full_path) {
-                    cached_ts
-                } else if !app
-                    .global_search
+            let modified_ts = if let Some(&cached_ts) =
+                app.global_search.metadata_cache.get(&full_path)
+            {
+                cached_ts
+            } else if let Some(cached_ts) = app.global_search.sort_modified_ts_for_index(source_idx)
+            {
+                cached_ts
+            } else if app
+                .global_search
+                .attach_tooltip_to_sort_metadata_request(&full_path)
+            {
+                0
+            } else if !app
+                .global_search
+                .tooltip_metadata_inflight
+                .contains(&full_path)
+            {
+                app.global_search
                     .tooltip_metadata_inflight
-                    .contains(&full_path)
-                {
-                    app.global_search
-                        .tooltip_metadata_inflight
-                        .insert(full_path.clone());
-                    let _ = app
-                        .global_search
-                        .tooltip_sender
-                        .send(TooltipRequest::Metadata(full_path.clone()));
-                    0
-                } else {
-                    0
-                };
+                    .insert(full_path.clone());
+                let _ = app
+                    .global_search
+                    .tooltip_sender
+                    .send(TooltipRequest::Metadata(full_path.clone()));
+                0
+            } else {
+                0
+            };
 
             let size_opt = actions::resolve_result_size(app, &full_path, is_dir, size);
             let size_text = size_opt.map(crate::infrastructure::windows::format_size);

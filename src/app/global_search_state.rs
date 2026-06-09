@@ -1,12 +1,11 @@
 use eframe::egui;
 use lru::LruCache;
-use rayon::prelude::*;
 use std::collections::HashSet;
 use std::num::NonZeroUsize;
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::Instant;
 
-const MAX_SORT_METADATA_PER_FRAME: usize = 32;
+const MAX_SORT_METADATA_IN_FLIGHT: usize = 32;
 
 // --- Tooltip background worker types ---
 
@@ -116,6 +115,10 @@ pub struct GlobalSearchState {
     ),
     /// Incremented whenever new metadata is loaded for sorting; forces a re-sort next frame.
     sort_metadata_epoch: u64,
+    /// Modified timestamps used only for date sorting, aligned with `results` indices.
+    sort_modified_cache: Vec<Option<u64>>,
+    /// Metadata requests currently queued for date sorting.
+    sort_metadata_inflight: HashSet<String>,
 
     // --- Tooltip async worker ---
     pub tooltip_sender: Sender<TooltipRequest>,
@@ -187,6 +190,8 @@ impl GlobalSearchState {
                 0,
             ),
             sort_metadata_epoch: 0,
+            sort_modified_cache: Vec::new(),
+            sort_metadata_inflight: HashSet::new(),
             tooltip_sender,
             tooltip_receiver,
             tooltip_metadata_inflight: HashSet::new(),
@@ -282,6 +287,8 @@ impl GlobalSearchState {
         self.cached_filtered_indices.clear();
         self.cached_available_drives.clear();
         self.cached_sorted_indices.clear();
+        self.sort_modified_cache.clear();
+        self.sort_metadata_inflight.clear();
         self.selected_index = None;
         self.has_more_results = false;
         self.total_matches = None;
@@ -300,7 +307,65 @@ impl GlobalSearchState {
         self.size_cache.clear();
         self.tooltip_texture_cache.clear();
         self.metadata_cache.clear();
-        self.sort_metadata_epoch = 0;
+        self.sort_modified_cache.clear();
+        self.sort_metadata_inflight.clear();
+        self.sort_metadata_epoch = self.sort_metadata_epoch.wrapping_add(1);
+        self.cached_sorted_indices.clear();
+        self.sort_cache_key.0 = u64::MAX;
+    }
+
+    pub fn reset_sort_metadata_for_current_results(&mut self) {
+        self.sort_modified_cache.clear();
+        self.sort_metadata_inflight.clear();
+        self.sort_metadata_epoch = self.sort_metadata_epoch.wrapping_add(1);
+        self.cached_sorted_indices.clear();
+        self.sort_cache_key.0 = u64::MAX;
+    }
+
+    pub fn sync_sort_metadata_len(&mut self) {
+        let len = self.results.len();
+        if self.sort_modified_cache.len() < len {
+            self.sort_modified_cache.resize(len, None);
+        } else if self.sort_modified_cache.len() > len {
+            self.sort_modified_cache.truncate(len);
+        }
+    }
+
+    pub fn sort_modified_ts_for_index(&self, idx: usize) -> Option<u64> {
+        self.sort_modified_cache.get(idx).copied().flatten()
+    }
+
+    pub fn attach_tooltip_to_sort_metadata_request(&mut self, path: &str) -> bool {
+        if !self.sort_metadata_inflight.contains(path) {
+            return false;
+        }
+
+        self.tooltip_metadata_inflight.insert(path.to_string());
+        true
+    }
+
+    pub fn apply_sort_metadata(&mut self, path: &str, modified_ts: u64) -> bool {
+        let was_sort_request = self.sort_metadata_inflight.remove(path);
+        if !was_sort_request && self.sort_mode != GlobalSearchSortMode::ModifiedDate {
+            return false;
+        }
+
+        self.sync_sort_metadata_len();
+        let mut updated = false;
+        for idx in 0..self.results.len() {
+            if self.results[idx].full_path == path
+                && self.sort_modified_cache[idx] != Some(modified_ts)
+            {
+                self.sort_modified_cache[idx] = Some(modified_ts);
+                updated = true;
+            }
+        }
+
+        if updated {
+            self.sort_metadata_epoch = self.sort_metadata_epoch.wrapping_add(1);
+        }
+
+        updated
     }
 
     /// Rebuild the cached filtered indices and available drives only when the
@@ -337,60 +402,137 @@ impl GlobalSearchState {
         if self.sort_cache_key != key {
             let mut sorted = self.cached_filtered_indices.clone();
             if self.sort_mode == GlobalSearchSortMode::ModifiedDate {
-                // Budgeted metadata loading: avoid UI stalls by reading only a few files per frame.
-                // Missing entries are fetched in parallel via rayon and cached; the epoch bump
-                // triggers a re-sort on the next frame until every item is resolved.
-                let missing: Vec<String> = sorted
-                    .iter()
-                    .filter(|&&idx| {
-                        self.metadata_cache
-                            .get(&self.results[idx].full_path)
-                            .is_none()
-                    })
-                    .take(MAX_SORT_METADATA_PER_FRAME)
-                    .map(|&idx| self.results[idx].full_path.clone())
-                    .collect();
-
-                if !missing.is_empty() {
-                    let fetched: Vec<(String, u64)> = missing
-                        .into_par_iter()
-                        .map(|path| {
-                            let ts = std::fs::metadata(&path)
-                                .ok()
-                                .and_then(|m| m.modified().ok())
-                                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                                .map(|d| d.as_secs())
-                                .unwrap_or(0);
-                            (path, ts)
-                        })
-                        .collect();
-
-                    for (path, ts) in fetched {
-                        self.metadata_cache.put(path, ts);
-                    }
-                    self.sort_metadata_epoch = self.sort_metadata_epoch.wrapping_add(1);
-                }
-
+                self.queue_missing_sort_metadata(&sorted);
+                let cache = &self.sort_modified_cache;
+                let descending = self.sort_descending;
                 sorted.sort_by(|&a, &b| {
-                    let ts_a = self
-                        .metadata_cache
-                        .get(&self.results[a].full_path)
-                        .copied()
-                        .unwrap_or(0);
-                    let ts_b = self
-                        .metadata_cache
-                        .get(&self.results[b].full_path)
-                        .copied()
-                        .unwrap_or(0);
-                    ts_a.cmp(&ts_b)
+                    let ts_a = cache.get(a).copied().flatten().unwrap_or(0);
+                    let ts_b = cache.get(b).copied().flatten().unwrap_or(0);
+                    let order = if descending {
+                        ts_b.cmp(&ts_a)
+                    } else {
+                        ts_a.cmp(&ts_b)
+                    };
+                    order.then_with(|| a.cmp(&b))
                 });
-                if self.sort_descending {
-                    sorted.reverse();
-                }
             }
             self.cached_sorted_indices = sorted;
             self.sort_cache_key = key;
         }
         &self.cached_sorted_indices
+    }
+
+    fn queue_missing_sort_metadata(&mut self, sorted: &[usize]) {
+        self.sync_sort_metadata_len();
+        let mut remaining =
+            MAX_SORT_METADATA_IN_FLIGHT.saturating_sub(self.sort_metadata_inflight.len());
+        if remaining == 0 {
+            return;
+        }
+
+        for &idx in sorted {
+            if remaining == 0 {
+                break;
+            }
+            if self
+                .sort_modified_cache
+                .get(idx)
+                .copied()
+                .flatten()
+                .is_some()
+            {
+                continue;
+            }
+
+            let Some(path) = self.results.get(idx).map(|result| result.full_path.clone()) else {
+                continue;
+            };
+            if self.sort_metadata_inflight.contains(&path) {
+                continue;
+            }
+
+            self.sort_metadata_inflight.insert(path.clone());
+            if self.tooltip_metadata_inflight.contains(&path) {
+                remaining -= 1;
+                continue;
+            }
+
+            if self
+                .tooltip_sender
+                .send(TooltipRequest::Metadata(path.clone()))
+                .is_ok()
+            {
+                remaining -= 1;
+            } else {
+                self.sort_metadata_inflight.remove(&path);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{GlobalSearchSortMode, GlobalSearchState, TooltipRequest};
+    use mtt_search_protocol::SearchResultItem;
+
+    fn state_with_tooltip_receiver(
+    ) -> (GlobalSearchState, std::sync::mpsc::Receiver<TooltipRequest>) {
+        let (search_tx, _search_rx) = std::sync::mpsc::channel();
+        let (_response_tx, response_rx) = std::sync::mpsc::channel();
+        let mut state = GlobalSearchState::new(search_tx, response_rx);
+        let (tooltip_tx, tooltip_rx) = std::sync::mpsc::channel();
+        state.tooltip_sender = tooltip_tx;
+        (state, tooltip_rx)
+    }
+
+    #[test]
+    fn date_sort_metadata_requests_progress_beyond_tooltip_lru_capacity() {
+        let (mut state, tooltip_rx) = state_with_tooltip_receiver();
+        state.sort_mode = GlobalSearchSortMode::ModifiedDate;
+        state.results = (0..600)
+            .map(|idx| SearchResultItem {
+                name: format!("file_{idx}.txt"),
+                full_path: format!(r"C:\tmp\file_{idx}.txt"),
+                is_dir: false,
+                size: 0,
+            })
+            .collect();
+        state.results_generation += 1;
+
+        let mut resolved = 0usize;
+        loop {
+            state.ensure_sorted_indices();
+            let mut batch = Vec::new();
+            while let Ok(request) = tooltip_rx.try_recv() {
+                match request {
+                    TooltipRequest::Metadata(path) => batch.push(path),
+                    TooltipRequest::Thumbnail(_) => panic!("unexpected thumbnail request"),
+                }
+            }
+
+            if batch.is_empty() {
+                break;
+            }
+
+            assert!(batch.len() <= super::MAX_SORT_METADATA_IN_FLIGHT);
+            for path in batch {
+                resolved += 1;
+                state.apply_sort_metadata(&path, resolved as u64);
+            }
+        }
+
+        assert_eq!(resolved, 600);
+        assert_eq!(
+            state
+                .sort_modified_cache
+                .iter()
+                .filter(|modified_ts| modified_ts.is_some())
+                .count(),
+            600
+        );
+        assert!(state.sort_metadata_inflight.is_empty());
+
+        state.ensure_sorted_indices();
+        assert!(tooltip_rx.try_recv().is_err());
     }
 }
