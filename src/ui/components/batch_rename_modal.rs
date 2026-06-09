@@ -15,6 +15,10 @@ const ROW_HEIGHT: f32 = 22.0;
 const HANDLE_WIDTH: f32 = 24.0;
 const NUM_WIDTH: f32 = 28.0;
 const BACKDROP_ALPHA: u8 = 72;
+/// Distance from the edge of the visible scroll area (in points) that triggers auto-scroll.
+const AUTO_SCROLL_MARGIN: f32 = 30.0;
+/// Minimum points to scroll per frame when auto-scrolling (controls speed).
+const AUTO_SCROLL_SPEED: f32 = 8.0;
 
 // ── Entry point ───────────────────────────────────────────────────────────────
 
@@ -350,7 +354,31 @@ fn render_reorderable_list(
     let mut drag_released = false;
     let mut hover_target: Option<usize> = None;
 
-    egui::ScrollArea::vertical()
+    // ── Auto-scroll: load previous frame's scroll-area viewport rect ─────────
+    let scroll_id = ui.id().with("batch_list_scroll");
+    let prev_outer_rect: Option<egui::Rect> =
+        ui.data_mut(|d| d.get_temp(scroll_id.with("outer")));
+
+    let mut auto_scroll_delta: f32 = 0.0;
+    if is_dragging {
+        if let (Some(ptr), Some(outer)) = (pointer_pos, prev_outer_rect) {
+            if ptr.x >= outer.left() && ptr.x <= outer.right() {
+                let top = outer.top();
+                let bottom = outer.bottom();
+                if ptr.y < top + AUTO_SCROLL_MARGIN {
+                    // Near top edge — scroll up (negative)
+                    auto_scroll_delta =
+                        -((top + AUTO_SCROLL_MARGIN - ptr.y).max(AUTO_SCROLL_SPEED));
+                } else if ptr.y > bottom - AUTO_SCROLL_MARGIN {
+                    // Near bottom edge — scroll down (positive)
+                    auto_scroll_delta =
+                        (ptr.y - (bottom - AUTO_SCROLL_MARGIN)).max(AUTO_SCROLL_SPEED);
+                }
+            }
+        }
+    }
+
+    let scroll_output = egui::ScrollArea::vertical()
         .id_salt("batch_list_scroll")
         .max_height(height)
         .auto_shrink([false; 2])
@@ -457,7 +485,26 @@ fn render_reorderable_list(
                     }
                 }
             }
+
+            // ── Auto-scroll: nudge the viewport when dragging near edges ─────
+            if auto_scroll_delta != 0.0 {
+                let clip = ui.clip_rect();
+                let target_y = if auto_scroll_delta < 0.0 {
+                    clip.top() + auto_scroll_delta
+                } else {
+                    clip.bottom() + auto_scroll_delta
+                };
+                let target_rect = egui::Rect::from_min_size(
+                    egui::pos2(clip.left(), target_y),
+                    egui::vec2(1.0, ROW_HEIGHT),
+                );
+                ui.scroll_to_rect(target_rect, None);
+                ui.ctx().request_repaint();
+            }
         });
+
+    // Store the visible viewport rect for next frame's edge detection
+    ui.data_mut(|d| d.insert_temp(scroll_id.with("outer"), scroll_output.inner_rect));
 
     // ── Apply drag-state changes after the loop ───────────────────────────────
 
