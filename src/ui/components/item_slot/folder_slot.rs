@@ -107,7 +107,7 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
             paint_texture_centered(ui, icon.id(), icon.size_vec2(), special_rect);
         }
     } else {
-        // All normal folders use our custom composed preview (with or without media content).
+        // Normal folders use composed previews only when a media cover was discovered.
         // We never prematurely clear loading state — the worker always returns a result.
         // For system folders (C:\Windows tree) and Recycle Bin, skip the preview cache
         // to avoid size jumps when the preview panel triggers an async compose.
@@ -118,10 +118,11 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
         };
         let is_loading =
             !ctx.is_recycle_bin_view && ctx.folder_preview_loading.contains(&item.path);
+        let has_cover = item.folder_cover.is_some();
         let needs_bucket_refresh =
             native_preview.is_some_and(|tex| (tex.size()[0] as u32) < desired_preview_bucket);
 
-        if needs_bucket_refresh && ctx.allow_thumbnail_requests && !is_loading {
+        if has_cover && needs_bucket_refresh && ctx.allow_thumbnail_requests && !is_loading {
             const MAX_SCROLL_LOD_FOLDER_PREVIEW_REQUESTS_PER_FRAME: usize = 3;
             if !scroll_lod
                 || *ctx.folder_preview_requests_this_frame
@@ -170,9 +171,9 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
                     }
                 }
             } else {
-                // NORMAL FOLDER: Always request our custom composed preview.
-                // Worker produces back+front+thumbnail (or back+front only if no media).
-                if ctx.allow_thumbnail_requests && !is_loading {
+                // NORMAL FOLDER: request composed preview only after cover discovery.
+                // Folders without media use the shared generic folder icon below.
+                if has_cover && ctx.allow_thumbnail_requests && !is_loading {
                     const MAX_SCROLL_LOD_FOLDER_PREVIEW_REQUESTS_PER_FRAME: usize = 3;
                     if !scroll_lod
                         || *ctx.folder_preview_requests_this_frame
@@ -185,7 +186,7 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
                     }
                 }
 
-                // While preview is loading: show generic folder icon as placeholder.
+                // While preview is missing/loading: show the shared generic folder icon.
                 if let Some(sys_icon) = ctx.icon_loader.folder_icon() {
                     paint_texture_centered(ui, sys_icon.id(), sys_icon.size_vec2(), folder_rect);
                 }
