@@ -635,6 +635,7 @@ fn render_filter_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
             .selected_text(match app.global_search.sort_mode {
                 GlobalSearchSortMode::Relevance => t!("search.sort_relevance").to_string(),
                 GlobalSearchSortMode::ModifiedDate => t!("search.sort_modified_date").to_string(),
+                GlobalSearchSortMode::Name => t!("search.sort_name").to_string(),
             })
             .show_ui(ui, |ui| {
                 if ui
@@ -655,6 +656,16 @@ fn render_filter_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
                     .clicked()
                 {
                     app.global_search.sort_mode = GlobalSearchSortMode::ModifiedDate;
+                    app.global_search.selected_index = None;
+                }
+                if ui
+                    .selectable_label(
+                        app.global_search.sort_mode == GlobalSearchSortMode::Name,
+                        t!("search.sort_name"),
+                    )
+                    .clicked()
+                {
+                    app.global_search.sort_mode = GlobalSearchSortMode::Name;
                     app.global_search.selected_index = None;
                 }
             });

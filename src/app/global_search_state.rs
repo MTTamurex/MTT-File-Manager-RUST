@@ -50,6 +50,7 @@ pub enum GlobalSearchCategory {
 pub enum GlobalSearchSortMode {
     Relevance,
     ModifiedDate,
+    Name,
 }
 
 pub struct GlobalSearchState {
@@ -413,6 +414,18 @@ impl GlobalSearchState {
                     } else {
                         ts_a.cmp(&ts_b)
                     };
+                    order.then_with(|| a.cmp(&b))
+                });
+            } else if self.sort_mode == GlobalSearchSortMode::Name {
+                let results = &self.results;
+                let descending = self.sort_descending;
+                sorted.sort_by(|&a, &b| {
+                    let name_a = results.get(a).map(|r| r.name.as_str()).unwrap_or("");
+                    let name_b = results.get(b).map(|r| r.name.as_str()).unwrap_or("");
+                    let mut order = name_a.to_lowercase().cmp(&name_b.to_lowercase());
+                    if descending {
+                        order = order.reverse();
+                    }
                     order.then_with(|| a.cmp(&b))
                 });
             }

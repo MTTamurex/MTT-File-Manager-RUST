@@ -214,6 +214,7 @@ search:
   sort_by: "Ordenar:"
   sort_relevance: "Relevância"
   sort_modified_date: "Data"
+  sort_name: "Nome"
   sort_ascending_hint: "Mais antigos primeiro"
   sort_descending_hint: "Mais novos primeiro"
   category_all: "Tudo"
