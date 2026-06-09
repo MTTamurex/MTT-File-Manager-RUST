@@ -8,18 +8,6 @@ use crate::workers::thumbnail::ThumbnailPriority;
 use std::path::PathBuf;
 
 impl ImageViewerApp {
-    fn folder_preview_cover_for_known_item(&self, path: &PathBuf) -> Option<Option<PathBuf>> {
-        self.items
-            .iter()
-            .find(|item| item.is_dir && !item.is_archive() && item.path.as_path() == path.as_path())
-            .or_else(|| {
-                self.all_items.iter().find(|item| {
-                    item.is_dir && !item.is_archive() && item.path.as_path() == path.as_path()
-                })
-            })
-            .map(|item| item.folder_cover.clone())
-    }
-
     pub fn request_thumbnail_load(&mut self, path: PathBuf, size_px: u32) {
         self.request_thumbnail_load_internal(
             path,
@@ -264,12 +252,6 @@ impl ImageViewerApp {
             .folder_preview_trace
             .record_request_path(&path);
 
-        let cover_path = match self.folder_preview_cover_for_known_item(&path) {
-            Some(Some(cover_path)) => Some(cover_path),
-            Some(None) => return,
-            None => None,
-        };
-
         let desired_bucket = crate::workers::thumbnail::processing::get_bucket_size(size_px);
         let is_bucket_upgrade = self
             .cache_manager
@@ -315,7 +297,6 @@ impl ImageViewerApp {
         let request = crate::workers::folder_preview_worker::FolderPreviewRequest {
             path: path.clone(),
             size_px,
-            cover_path,
         };
         match self.folder_preview_sender.try_send(request) {
             Ok(()) => {
@@ -340,12 +321,6 @@ impl ImageViewerApp {
             .folder_preview_trace
             .record_request_path(&path);
 
-        let cover_path = match self.folder_preview_cover_for_known_item(&path) {
-            Some(Some(cover_path)) => Some(cover_path),
-            Some(None) => return,
-            None => None,
-        };
-
         if self.cache_manager.is_folder_preview_loading(&path) {
             self.suppress_next_folder_preview_invalidation.insert(path);
             return;
@@ -365,7 +340,6 @@ impl ImageViewerApp {
         let request = crate::workers::folder_preview_worker::FolderPreviewRequest {
             path: path.clone(),
             size_px: self.effective_folder_preview_request_size_px(),
-            cover_path,
         };
         match self.folder_preview_sender.try_send(request) {
             Ok(()) => {

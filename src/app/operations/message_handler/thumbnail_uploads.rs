@@ -515,7 +515,6 @@ impl ImageViewerApp {
                                     crate::workers::folder_preview_worker::FolderPreviewRequest {
                                         path: item.path.clone(),
                                         size_px: self.effective_folder_preview_request_size_px(),
-                                        cover_path: Some(cover.clone()),
                                     };
                                 if let Err(err) = self.folder_preview_sender.try_send(request) {
                                     let request = err.into_inner();
