@@ -144,6 +144,7 @@ pub struct FolderPreviewData {
 pub struct FolderPreviewRequest {
     pub path: PathBuf,
     pub size_px: u32,
+    pub cover_path: Option<PathBuf>,
 }
 
 /// M-19: RAII guard — ensures `CoUninitialize` runs even if the worker panics.
@@ -199,8 +200,12 @@ pub fn spawn_folder_preview_worker(
             let mut last_ssd_state: Option<bool> = None;
 
             while let Ok(request) = rx.recv() {
-                let path = request.path;
-                let bucket_size = get_bucket_size(request.size_px);
+                let FolderPreviewRequest {
+                    path,
+                    size_px,
+                    cover_path,
+                } = request;
+                let bucket_size = get_bucket_size(size_px);
 
                 if crate::infrastructure::windows::is_windows_system_path(&path.to_string_lossy()) {
                     let (mut rgba_data, width, height) =
@@ -308,6 +313,7 @@ pub fn spawn_folder_preview_worker(
                 trace.record_compose();
                 let compose_result = try_custom_compose(
                     &path,
+                    cover_path.as_deref(),
                     &composer,
                     &disk_cache,
                     bucket_size,
@@ -323,6 +329,10 @@ pub fn spawn_folder_preview_worker(
                     ComposeOutcome::MediaUnsafe => {
                         let empty = composer.compose_empty_for_size(bucket_size);
                         (empty.0, empty.1, empty.2, false) // Do NOT persist placeholder
+                    }
+                    ComposeOutcome::KnownCoverUnavailable => {
+                        let empty = composer.compose_empty_for_size(bucket_size);
+                        (empty.0, empty.1, empty.2, false) // Cover cache may be stale; retry later.
                     }
                 };
 
@@ -364,9 +374,8 @@ pub fn spawn_folder_preview_worker(
 
 /// Outcome of folder preview composition.
 ///
-/// Distinguishes between "no media found" (safe to cache as empty) and
-/// "media exists but is currently unsafe to read" (must NOT be cached
-/// so that the next request retries with a fresh extraction).
+/// Distinguishes cacheable "no media found" from temporary/stale-cover
+/// placeholders that must not be persisted.
 enum ComposeOutcome {
     /// Composed preview with real media content.
     Success((Vec<u8>, u32, u32)),
@@ -375,12 +384,16 @@ enum ComposeOutcome {
     /// Media exists but is currently being written/downloaded (UnsafeToRead).
     /// A placeholder compose_empty() should be shown but NOT persisted to SQLite.
     MediaUnsafe,
+    /// A pre-discovered cover path failed extraction. Do not cache the empty
+    /// placeholder because the cover DB may be stale and will be revalidated.
+    KnownCoverUnavailable,
 }
 
 /// PRIMARY: Find a media file inside the folder, extract its thumbnail via the
 /// 5-stage pipeline, then compose with folder back/front layers.
 fn try_custom_compose(
     folder_path: &Path,
+    cover_path: Option<&Path>,
     composer: &FolderComposer,
     disk_cache: &ThumbnailDiskCache,
     bucket_size: u32,
@@ -389,10 +402,14 @@ fn try_custom_compose(
 ) -> ComposeOutcome {
     let compose_start = Instant::now();
 
-    // 1. Find first image/video inside the folder
-    let media_path = match crate::infrastructure::windows::find_folder_preview_item(folder_path) {
-        Some(p) => p,
-        None => return ComposeOutcome::NoMedia,
+    // 1. Use the cover already discovered by the folder-cover pipeline when available.
+    let using_known_cover = cover_path.is_some();
+    let media_path = match cover_path {
+        Some(path) => path.to_path_buf(),
+        None => match crate::infrastructure::windows::find_folder_preview_item(folder_path) {
+            Some(p) => p,
+            None => return ComposeOutcome::NoMedia,
+        },
     };
 
     let media_modified = std::fs::metadata(&media_path)
@@ -442,6 +459,9 @@ fn try_custom_compose(
                 "[FOLDER PREVIEW] Extraction failed for {:?}",
                 media_path.file_name().unwrap_or_default(),
             );
+            if using_known_cover {
+                return ComposeOutcome::KnownCoverUnavailable;
+            }
             return ComposeOutcome::NoMedia;
         }
     };
