@@ -49,6 +49,11 @@ pub(super) fn open_session_db() -> Option<rusqlite::Connection> {
         return None;
     }
 
+    // Add size column if missing (schema migration from older versions).
+    let _ = conn.execute_batch(
+        "ALTER TABLE session_items ADD COLUMN size INTEGER NOT NULL DEFAULT 0;",
+    );
+
     Some(conn)
 }
 
@@ -92,7 +97,7 @@ pub(super) fn load_all_volumes(conn: &rusqlite::Connection) -> HashMap<char, Ind
     }
 
     let mut item_stmt =
-        match conn.prepare("SELECT drive_letter, name, full_path, is_dir FROM session_items") {
+        match conn.prepare("SELECT drive_letter, name, full_path, is_dir, COALESCE(size, 0) FROM session_items") {
             Ok(s) => s,
             Err(_) => return volumes,
         };
@@ -102,13 +107,14 @@ pub(super) fn load_all_volumes(conn: &rusqlite::Connection) -> HashMap<char, Ind
         let name: String = row.get(1)?;
         let full_path: String = row.get(2)?;
         let is_dir: bool = row.get(3)?;
-        Ok((dl, name, full_path, is_dir))
+        let size: u64 = row.get(4)?;
+        Ok((dl, name, full_path, is_dir, size))
     }) {
         Ok(rows) => rows,
         Err(_) => return volumes,
     };
 
-    for (dl, name, full_path, is_dir) in item_rows.flatten() {
+    for (dl, name, full_path, is_dir, size) in item_rows.flatten() {
         let Some(letter) = dl.chars().next() else {
             continue;
         };
@@ -123,6 +129,7 @@ pub(super) fn load_all_volumes(conn: &rusqlite::Connection) -> HashMap<char, Ind
             full_path,
             path_key: path_key.clone(),
             is_dir,
+            size,
         });
         volume.live_paths.insert(path_key);
     }
@@ -146,14 +153,15 @@ pub(super) fn save_volume(conn: &rusqlite::Connection, drive_letter: char, items
     let _ = conn.execute("DELETE FROM session_items WHERE drive_letter = ?1", [&dl]);
 
     if let Ok(mut stmt) = conn.prepare(
-        "INSERT INTO session_items (drive_letter, name, full_path, is_dir) VALUES (?1, ?2, ?3, ?4)",
+        "INSERT INTO session_items (drive_letter, name, full_path, is_dir, size) VALUES (?1, ?2, ?3, ?4, ?5)",
     ) {
         for item in items {
             let _ = stmt.execute(rusqlite::params![
                 dl,
                 item.name,
                 item.full_path,
-                item.is_dir
+                item.is_dir,
+                item.size
             ]);
         }
     }

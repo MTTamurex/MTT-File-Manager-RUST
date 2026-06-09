@@ -23,6 +23,7 @@ pub enum TooltipResponse {
         path: String,
         size: Option<u64>,
         modified_ts: u64,
+        created_ts: u64,
     },
     Thumbnail {
         path: String,
@@ -53,6 +54,17 @@ pub enum GlobalSearchSortMode {
     Name,
 }
 
+/// Combined filter parameters used for cache invalidation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GlobalSearchFilters {
+    pub category: GlobalSearchCategory,
+    pub drive_filter: Option<char>,
+    pub min_size_mb: Option<u64>,
+    pub max_size_mb: Option<u64>,
+    pub created_after: Option<u64>,
+    pub created_before: Option<u64>,
+}
+
 pub struct GlobalSearchState {
     pub sender: Sender<crate::workers::global_search_worker::GlobalSearchRequest>,
     pub receiver: Receiver<crate::workers::global_search_worker::GlobalSearchResponse>,
@@ -69,6 +81,28 @@ pub struct GlobalSearchState {
     pub drive_filter: Option<char>,
     pub sort_mode: GlobalSearchSortMode,
     pub sort_descending: bool,
+
+    // --- Advanced filter fields ---
+    pub min_size_mb: Option<u64>,
+    pub max_size_mb: Option<u64>,
+    pub created_after: Option<u64>,
+    pub created_before: Option<u64>,
+    /// Created After date components (0 = not set).
+    pub created_after_month: u32,
+    pub created_after_day: u32,
+    pub created_after_year: u32,
+    /// Created After text buffers for input fields.
+    pub created_after_month_text: String,
+    pub created_after_day_text: String,
+    pub created_after_year_text: String,
+    /// Created Before date components (0 = not set).
+    pub created_before_month: u32,
+    pub created_before_day: u32,
+    pub created_before_year: u32,
+    /// Created Before text buffers for input fields.
+    pub created_before_month_text: String,
+    pub created_before_day_text: String,
+    pub created_before_year_text: String,
     pub active: bool,
     pub opened_at: Instant,
     pub loading: bool,
@@ -102,16 +136,16 @@ pub struct GlobalSearchState {
     /// Cached `available_drives` output.
     pub cached_available_drives: Vec<char>,
     /// Generation + filter params when the cache was last built.
-    filter_cache_key: (u64, GlobalSearchCategory, Option<char>),
+    filter_cache_key: (u64, GlobalSearchFilters, u64),
 
     // --- Cached sorted indices (includes filter + sort) ---
     pub cached_sorted_indices: Vec<usize>,
     sort_cache_key: (
         u64,
-        GlobalSearchCategory,
-        Option<char>,
+        GlobalSearchFilters,
         GlobalSearchSortMode,
         bool,
+        u64,
         u64,
     ),
     /// Incremented whenever new metadata is loaded for sorting; forces a re-sort next frame.
@@ -120,6 +154,14 @@ pub struct GlobalSearchState {
     sort_modified_cache: Vec<Option<u64>>,
     /// Metadata requests currently queued for date sorting.
     sort_metadata_inflight: HashSet<String>,
+
+    // --- Created-date filter metadata cache ---
+    /// Creation timestamps for date-range filtering, aligned with `results` indices.
+    created_ts_cache: Vec<Option<u64>>,
+    /// Incremented whenever created-date metadata is updated; forces filter cache rebuild.
+    created_metadata_epoch: u64,
+    /// Metadata requests currently queued for created-date filtering.
+    created_metadata_inflight: HashSet<String>,
 
     // --- Tooltip async worker ---
     pub tooltip_sender: Sender<TooltipRequest>,
@@ -156,6 +198,22 @@ impl GlobalSearchState {
             drive_filter: None,
             sort_mode: GlobalSearchSortMode::Relevance,
             sort_descending: false,
+            min_size_mb: None,
+            max_size_mb: None,
+            created_after: None,
+            created_before: None,
+            created_after_month: 0,
+            created_after_day: 0,
+            created_after_year: 0,
+            created_after_month_text: String::new(),
+            created_after_day_text: String::new(),
+            created_after_year_text: String::new(),
+            created_before_month: 0,
+            created_before_day: 0,
+            created_before_year: 0,
+            created_before_month_text: String::new(),
+            created_before_day_text: String::new(),
+            created_before_year_text: String::new(),
             active: false,
             opened_at: Instant::now(),
             loading: false,
@@ -180,19 +238,40 @@ impl GlobalSearchState {
             results_generation: 0,
             cached_filtered_indices: Vec::new(),
             cached_available_drives: Vec::new(),
-            filter_cache_key: (u64::MAX, GlobalSearchCategory::All, None),
+            filter_cache_key: (
+                u64::MAX,
+                GlobalSearchFilters {
+                    category: GlobalSearchCategory::All,
+                    drive_filter: None,
+                    min_size_mb: None,
+                    max_size_mb: None,
+                    created_after: None,
+                    created_before: None,
+                },
+                0,
+            ),
             cached_sorted_indices: Vec::new(),
             sort_cache_key: (
                 u64::MAX,
-                GlobalSearchCategory::All,
-                None,
+                GlobalSearchFilters {
+                    category: GlobalSearchCategory::All,
+                    drive_filter: None,
+                    min_size_mb: None,
+                    max_size_mb: None,
+                    created_after: None,
+                    created_before: None,
+                },
                 GlobalSearchSortMode::Relevance,
                 false,
+                0,
                 0,
             ),
             sort_metadata_epoch: 0,
             sort_modified_cache: Vec::new(),
             sort_metadata_inflight: HashSet::new(),
+            created_ts_cache: Vec::new(),
+            created_metadata_epoch: 0,
+            created_metadata_inflight: HashSet::new(),
             tooltip_sender,
             tooltip_receiver,
             tooltip_metadata_inflight: HashSet::new(),
@@ -227,11 +306,18 @@ impl GlobalSearchState {
                                 .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                                 .map(|d| d.as_secs())
                                 .unwrap_or(0);
+                            let created_ts = meta
+                                .as_ref()
+                                .and_then(|m| m.created().ok())
+                                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                                .map(|d| d.as_secs())
+                                .unwrap_or(0);
                             if resp_tx
                                 .send(TooltipResponse::Metadata {
                                     path,
                                     size,
                                     modified_ts,
+                                    created_ts,
                                 })
                                 .is_err()
                             {
@@ -290,6 +376,8 @@ impl GlobalSearchState {
         self.cached_sorted_indices.clear();
         self.sort_modified_cache.clear();
         self.sort_metadata_inflight.clear();
+        self.created_ts_cache.clear();
+        self.created_metadata_inflight.clear();
         self.selected_index = None;
         self.has_more_results = false;
         self.total_matches = None;
@@ -311,6 +399,9 @@ impl GlobalSearchState {
         self.sort_modified_cache.clear();
         self.sort_metadata_inflight.clear();
         self.sort_metadata_epoch = self.sort_metadata_epoch.wrapping_add(1);
+        self.created_ts_cache.clear();
+        self.created_metadata_inflight.clear();
+        self.created_metadata_epoch = self.created_metadata_epoch.wrapping_add(1);
         self.cached_sorted_indices.clear();
         self.sort_cache_key.0 = u64::MAX;
     }
@@ -319,6 +410,9 @@ impl GlobalSearchState {
         self.sort_modified_cache.clear();
         self.sort_metadata_inflight.clear();
         self.sort_metadata_epoch = self.sort_metadata_epoch.wrapping_add(1);
+        self.created_ts_cache.clear();
+        self.created_metadata_inflight.clear();
+        self.created_metadata_epoch = self.created_metadata_epoch.wrapping_add(1);
         self.cached_sorted_indices.clear();
         self.sort_cache_key.0 = u64::MAX;
     }
@@ -334,6 +428,10 @@ impl GlobalSearchState {
 
     pub fn sort_modified_ts_for_index(&self, idx: usize) -> Option<u64> {
         self.sort_modified_cache.get(idx).copied().flatten()
+    }
+
+    pub fn created_ts_for_index(&self, idx: usize) -> Option<u64> {
+        self.created_ts_cache.get(idx).copied().flatten()
     }
 
     pub fn attach_tooltip_to_sort_metadata_request(&mut self, path: &str) -> bool {
@@ -369,36 +467,143 @@ impl GlobalSearchState {
         updated
     }
 
+    pub fn sync_created_metadata_len(&mut self) {
+        let len = self.results.len();
+        if self.created_ts_cache.len() < len {
+            self.created_ts_cache.resize(len, None);
+        } else if self.created_ts_cache.len() > len {
+            self.created_ts_cache.truncate(len);
+        }
+    }
+
+    pub fn apply_created_metadata(&mut self, path: &str, created_ts: u64) -> bool {
+        self.created_metadata_inflight.remove(path);
+
+        self.sync_created_metadata_len();
+        let mut updated = false;
+        for idx in 0..self.results.len() {
+            if self.results[idx].full_path == path
+                && self.created_ts_cache[idx] != Some(created_ts)
+            {
+                self.created_ts_cache[idx] = Some(created_ts);
+                updated = true;
+            }
+        }
+
+        if updated {
+            self.created_metadata_epoch = self.created_metadata_epoch.wrapping_add(1);
+        }
+
+        updated
+    }
+
+    fn queue_missing_created_metadata(&mut self, filtered: &[usize]) {
+        self.sync_created_metadata_len();
+        let mut remaining =
+            MAX_SORT_METADATA_IN_FLIGHT.saturating_sub(self.created_metadata_inflight.len());
+        if remaining == 0 {
+            return;
+        }
+
+        for &idx in filtered {
+            if remaining == 0 {
+                break;
+            }
+            if self
+                .created_ts_cache
+                .get(idx)
+                .copied()
+                .flatten()
+                .is_some()
+            {
+                continue;
+            }
+
+            let Some(path) = self.results.get(idx).map(|result| result.full_path.clone()) else {
+                continue;
+            };
+            if self.created_metadata_inflight.contains(&path) {
+                continue;
+            }
+
+            self.created_metadata_inflight.insert(path.clone());
+            if self.tooltip_metadata_inflight.contains(&path) {
+                remaining -= 1;
+                continue;
+            }
+
+            if self
+                .tooltip_sender
+                .send(TooltipRequest::Metadata(path.clone()))
+                .is_ok()
+            {
+                remaining -= 1;
+            } else {
+                self.created_metadata_inflight.remove(&path);
+            }
+        }
+    }
+
     /// Rebuild the cached filtered indices and available drives only when the
-    /// inputs have changed (results generation, category, or drive filter).
+    /// inputs have changed.
     /// Returns a reference to the cached filtered indices.
     pub fn ensure_filter_cache(&mut self) -> &[usize] {
-        let key = (self.results_generation, self.category, self.drive_filter);
+        let filters = GlobalSearchFilters {
+            category: self.category,
+            drive_filter: self.drive_filter,
+            min_size_mb: self.min_size_mb,
+            max_size_mb: self.max_size_mb,
+            created_after: self.created_after,
+            created_before: self.created_before,
+        };
+        let key = (self.results_generation, filters, self.created_metadata_epoch);
         if self.filter_cache_key != key {
+            let min_size_bytes = self.min_size_mb.map(|mb| mb * 1024 * 1024);
+            let max_size_bytes = self.max_size_mb.map(|mb| mb * 1024 * 1024);
             self.cached_filtered_indices =
                 crate::ui::global_search_overlay::filters::build_filtered_indices(
                     &self.results,
                     self.category,
                     self.drive_filter,
+                    min_size_bytes,
+                    max_size_bytes,
+                    self.created_after,
+                    self.created_before,
+                    &self.created_ts_cache,
                 );
             self.cached_available_drives =
                 crate::ui::global_search_overlay::filters::available_drives(&self.results);
+
+            // Queue metadata for created-date filtering when active.
+            if self.created_after.is_some() || self.created_before.is_some() {
+                let filtered = self.cached_filtered_indices.clone();
+                self.queue_missing_created_metadata(&filtered);
+            }
+
             self.filter_cache_key = key;
         }
         &self.cached_filtered_indices
     }
 
     /// Returns filtered indices sorted according to the current sort_mode.
-    /// Uses a cache key that includes generation, category, drive_filter, sort_mode, and sort_descending.
+    /// Uses a cache key that includes generation, filters, sort_mode, and metadata epochs.
     pub fn ensure_sorted_indices(&mut self) -> &[usize] {
         self.ensure_filter_cache();
+        let filters = GlobalSearchFilters {
+            category: self.category,
+            drive_filter: self.drive_filter,
+            min_size_mb: self.min_size_mb,
+            max_size_mb: self.max_size_mb,
+            created_after: self.created_after,
+            created_before: self.created_before,
+        };
         let key = (
             self.results_generation,
-            self.category,
-            self.drive_filter,
+            filters,
             self.sort_mode,
             self.sort_descending,
             self.sort_metadata_epoch,
+            self.created_metadata_epoch,
         );
         if self.sort_cache_key != key {
             let mut sorted = self.cached_filtered_indices.clone();

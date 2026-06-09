@@ -30,6 +30,7 @@ struct IndexedItem {
     full_path: String,
     path_key: String,
     is_dir: bool,
+    size: u64,
 }
 
 struct IndexedVolume {
@@ -252,7 +253,7 @@ impl UserSessionSearchIndex {
                     name: item.name.clone(),
                     full_path: item.full_path.clone(),
                     is_dir: item.is_dir,
-                    size: 0,
+                    size: item.size,
                 });
                 matched += 1;
             }

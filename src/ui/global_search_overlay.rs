@@ -352,6 +352,22 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                         app.global_search.last_scroll_offset_y = 0.0;
                         app.global_search.in_flight_query = None;
                         app.global_search.in_flight_started_at = None;
+                        app.global_search.min_size_mb = None;
+                        app.global_search.max_size_mb = None;
+                        app.global_search.created_after = None;
+                        app.global_search.created_before = None;
+                        app.global_search.created_after_month = 0;
+                        app.global_search.created_after_day = 0;
+                        app.global_search.created_after_year = 0;
+                        app.global_search.created_after_month_text.clear();
+                        app.global_search.created_after_day_text.clear();
+                        app.global_search.created_after_year_text.clear();
+                        app.global_search.created_before_month = 0;
+                        app.global_search.created_before_day = 0;
+                        app.global_search.created_before_year = 0;
+                        app.global_search.created_before_month_text.clear();
+                        app.global_search.created_before_day_text.clear();
+                        app.global_search.created_before_year_text.clear();
                     }
 
                     if app.global_search.available && app.global_search.indexing_in_progress {
@@ -512,6 +528,31 @@ fn phase_label(phase: &str) -> String {
     }
 }
 
+/// Convert date components (month, day, year) to Unix timestamp (seconds since epoch at midnight UTC).
+/// Returns `None` if any component is 0 (not set) or out of valid range.
+fn date_components_to_unix_ts(month: u32, day: u32, year: u32) -> Option<u64> {
+    if month == 0 || day == 0 || year == 0 {
+        return None;
+    }
+    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return None;
+    }
+
+    // Days from civil date to days since epoch (algorithm by Howard Hinnant).
+    fn days_from_civil(year: u32, month: u32, day: u32) -> u64 {
+        let y = if month <= 2 { year - 1 } else { year } as u64;
+        let m = if month <= 2 { month + 9 } else { month - 3 } as u64;
+        let era = y / 400;
+        let yoe = y - era * 400;
+        let doy = (153 * m + 2) / 5 + day as u64 - 1;
+        let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+        era * 146097 + doe - 719468
+    }
+
+    let days = days_from_civil(year, month, day);
+    Some(days * 86400)
+}
+
 fn render_filter_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
     let categories = [
         GlobalSearchCategory::All,
@@ -622,12 +663,14 @@ fn render_filter_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
 
     ui.add_space(4.0);
 
-    // Row 2: sort controls
+    // Row 2: sort + extension + size controls
     ui.horizontal(|ui| {
+        let label_color = egui::Color32::from_gray(140);
+
         ui.label(
             egui::RichText::new(t!("search.sort_by"))
                 .size(10.0)
-                .color(egui::Color32::from_gray(140)),
+                .color(label_color),
         );
 
         egui::ComboBox::from_id_salt("global_search_sort_mode")
@@ -680,6 +723,163 @@ fn render_filter_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
         };
         if ui.button(dir_label).clicked() {
             app.global_search.sort_descending = !app.global_search.sort_descending;
+            app.global_search.selected_index = None;
+        }
+
+        ui.add_space(8.0);
+
+        // Min size (MB)
+        ui.label(
+            egui::RichText::new(t!("search.filter_min_size"))
+                .size(10.0)
+                .color(label_color),
+        );
+        let mut min_val: u64 = app.global_search.min_size_mb.unwrap_or(0);
+        let min_resp = ui.add(
+            egui::DragValue::new(&mut min_val)
+                .range(0..=10_000_000u64)
+                .speed(1)
+                .suffix(" MB"),
+        );
+        if min_resp.changed() {
+            app.global_search.min_size_mb = if min_val > 0 { Some(min_val) } else { None };
+            app.global_search.selected_index = None;
+        }
+
+        ui.add_space(4.0);
+
+        // Max size (MB)
+        ui.label(
+            egui::RichText::new(t!("search.filter_max_size"))
+                .size(10.0)
+                .color(label_color),
+        );
+        let mut max_val: u64 = app.global_search.max_size_mb.unwrap_or(0);
+        let max_resp = ui.add(
+            egui::DragValue::new(&mut max_val)
+                .range(0..=10_000_000u64)
+                .speed(1)
+                .suffix(" MB"),
+        );
+        if max_resp.changed() {
+            app.global_search.max_size_mb = if max_val > 0 { Some(max_val) } else { None };
+            app.global_search.selected_index = None;
+        }
+    });
+
+    ui.add_space(4.0);
+
+    // Row 3: created date filters
+    ui.horizontal(|ui| {
+        let label_color = egui::Color32::from_gray(140);
+
+        // Helper to render a compact numeric text input with placeholder,
+        // styled to match DragValue inputs (bordered frame, consistent padding).
+        fn date_component_edit(
+            ui: &mut egui::Ui,
+            text: &mut String,
+            value: &mut u32,
+            hint: &str,
+            width: f32,
+        ) -> bool {
+            let mut changed = false;
+            let widget_visuals = ui.visuals().widgets.inactive;
+            let text_color = ui.visuals().text_color();
+            egui::Frame::NONE
+                .fill(widget_visuals.bg_fill)
+                .inner_margin(egui::Margin::symmetric(4, 2))
+                .stroke(widget_visuals.bg_stroke)
+                .corner_radius(widget_visuals.corner_radius)
+                .show(ui, |ui| {
+                    let resp = ui.add(
+                        egui::TextEdit::singleline(text)
+                            .hint_text(egui::RichText::new(hint).color(text_color))
+                            .desired_width(width)
+                            .margin(egui::Vec2::ZERO)
+                            .frame(false),
+                    );
+                    if resp.changed() {
+                        *text = text.chars().filter(|c| c.is_ascii_digit()).take(4).collect();
+                        *value = text.parse().unwrap_or(0);
+                        changed = true;
+                    }
+                });
+            changed
+        }
+
+        // Created after
+        ui.label(
+            egui::RichText::new(t!("search.filter_created_after"))
+                .size(10.0)
+                .color(label_color),
+        );
+        let mut after_changed = false;
+        after_changed |= date_component_edit(
+            ui,
+            &mut app.global_search.created_after_month_text,
+            &mut app.global_search.created_after_month,
+            "MM",
+            28.0,
+        );
+        after_changed |= date_component_edit(
+            ui,
+            &mut app.global_search.created_after_day_text,
+            &mut app.global_search.created_after_day,
+            "DD",
+            28.0,
+        );
+        after_changed |= date_component_edit(
+            ui,
+            &mut app.global_search.created_after_year_text,
+            &mut app.global_search.created_after_year,
+            "YYYY",
+            40.0,
+        );
+        if after_changed {
+            app.global_search.created_after = date_components_to_unix_ts(
+                app.global_search.created_after_month,
+                app.global_search.created_after_day,
+                app.global_search.created_after_year,
+            );
+            app.global_search.selected_index = None;
+        }
+
+        ui.add_space(8.0);
+
+        // Created before
+        ui.label(
+            egui::RichText::new(t!("search.filter_created_before"))
+                .size(10.0)
+                .color(label_color),
+        );
+        let mut before_changed = false;
+        before_changed |= date_component_edit(
+            ui,
+            &mut app.global_search.created_before_month_text,
+            &mut app.global_search.created_before_month,
+            "MM",
+            28.0,
+        );
+        before_changed |= date_component_edit(
+            ui,
+            &mut app.global_search.created_before_day_text,
+            &mut app.global_search.created_before_day,
+            "DD",
+            28.0,
+        );
+        before_changed |= date_component_edit(
+            ui,
+            &mut app.global_search.created_before_year_text,
+            &mut app.global_search.created_before_year,
+            "YYYY",
+            40.0,
+        );
+        if before_changed {
+            app.global_search.created_before = date_components_to_unix_ts(
+                app.global_search.created_before_month,
+                app.global_search.created_before_day,
+                app.global_search.created_before_year,
+            );
             app.global_search.selected_index = None;
         }
     });

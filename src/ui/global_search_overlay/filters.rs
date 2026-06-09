@@ -17,19 +17,59 @@ pub(crate) fn build_filtered_indices(
     results: &[mtt_search_protocol::SearchResultItem],
     category: GlobalSearchCategory,
     drive_filter: Option<char>,
+    min_size_bytes: Option<u64>,
+    max_size_bytes: Option<u64>,
+    created_after: Option<u64>,
+    created_before: Option<u64>,
+    created_ts_cache: &[Option<u64>],
 ) -> Vec<usize> {
     let mut filtered = Vec::with_capacity(results.len());
 
     for (idx, result) in results.iter().enumerate() {
+        // Drive filter
         if let Some(drive) = drive_filter {
             if extract_drive_letter(&result.full_path) != Some(drive) {
                 continue;
             }
         }
 
-        if matches_category(result, category) {
-            filtered.push(idx);
+        // Category filter
+        if !matches_category(result, category) {
+            continue;
         }
+
+        // Size filter (directories always pass; size==0 treated as unknown — include)
+        if !result.is_dir {
+            if let Some(min) = min_size_bytes {
+                if result.size > 0 && result.size < min {
+                    continue;
+                }
+            }
+            if let Some(max) = max_size_bytes {
+                if result.size > 0 && result.size > max {
+                    continue;
+                }
+            }
+        }
+
+        // Created date filter (permissive: include items with unknown created_ts)
+        if created_after.is_some() || created_before.is_some() {
+            if let Some(cached_ts) = created_ts_cache.get(idx).copied().flatten() {
+                if let Some(after) = created_after {
+                    if cached_ts < after {
+                        continue;
+                    }
+                }
+                if let Some(before) = created_before {
+                    if cached_ts > before {
+                        continue;
+                    }
+                }
+            }
+            // If cached_ts is None, include the item (permissive filtering)
+        }
+
+        filtered.push(idx);
     }
 
     filtered
@@ -152,6 +192,10 @@ mod tests {
     use crate::app::global_search_state::GlobalSearchCategory;
     use mtt_search_protocol::SearchResultItem;
 
+    fn empty_cache() -> Vec<Option<u64>> {
+        Vec::new()
+    }
+
     #[test]
     fn extract_drive_letter_accepts_regular_windows_path() {
         assert_eq!(extract_drive_letter(r"C:\Users\foo.txt"), Some('C'));
@@ -179,7 +223,138 @@ mod tests {
             size: 0,
         }];
 
-        let filtered = build_filtered_indices(&results, GlobalSearchCategory::Videos, None);
+        let filtered = build_filtered_indices(
+            &results,
+            GlobalSearchCategory::Videos,
+            None,
+            None,
+            None,
+            None,
+            None,
+            &empty_cache(),
+        );
         assert_eq!(filtered, vec![0]);
+    }
+
+    #[test]
+    fn size_filter_min_and_max() {
+        let results = vec![
+            SearchResultItem {
+                name: "small.txt".to_string(),
+                full_path: r"C:\small.txt".to_string(),
+                is_dir: false,
+                size: 1024, // 1 KB
+            },
+            SearchResultItem {
+                name: "medium.mp4".to_string(),
+                full_path: r"C:\medium.mp4".to_string(),
+                is_dir: false,
+                size: 5 * 1024 * 1024, // 5 MB
+            },
+            SearchResultItem {
+                name: "large.bin".to_string(),
+                full_path: r"C:\large.bin".to_string(),
+                is_dir: false,
+                size: 100 * 1024 * 1024, // 100 MB
+            },
+            SearchResultItem {
+                name: "dir".to_string(),
+                full_path: r"C:\dir".to_string(),
+                is_dir: true,
+                size: 0,
+            },
+        ];
+
+        let filtered = build_filtered_indices(
+            &results,
+            GlobalSearchCategory::All,
+            None,
+            Some(2 * 1024 * 1024),  // min 2 MB
+            Some(50 * 1024 * 1024), // max 50 MB
+            None,
+            None,
+            &empty_cache(),
+        );
+        // small.txt excluded (below min), large.bin excluded (above max), dir included
+        assert_eq!(filtered, vec![1, 3]);
+    }
+
+    #[test]
+    fn size_filter_ignores_zero_size() {
+        let results = vec![SearchResultItem {
+            name: "unknown.txt".to_string(),
+            full_path: r"C:\unknown.txt".to_string(),
+            is_dir: false,
+            size: 0, // unknown size
+        }];
+
+        let filtered = build_filtered_indices(
+            &results,
+            GlobalSearchCategory::All,
+            None,
+            Some(1024 * 1024),
+            None,
+            None,
+            None,
+            &empty_cache(),
+        );
+        // size==0 treated as unknown — include
+        assert_eq!(filtered, vec![0]);
+    }
+
+    #[test]
+    fn created_date_filter_permissive_on_missing_cache() {
+        let results = vec![SearchResultItem {
+            name: "file.txt".to_string(),
+            full_path: r"C:\file.txt".to_string(),
+            is_dir: false,
+            size: 100,
+        }];
+        let cache = vec![None]; // no cached created_ts
+
+        let filtered = build_filtered_indices(
+            &results,
+            GlobalSearchCategory::All,
+            None,
+            None,
+            None,
+            Some(1000), // created after ts=1000
+            None,
+            &cache,
+        );
+        // Permissive: item with unknown created_ts is included
+        assert_eq!(filtered, vec![0]);
+    }
+
+    #[test]
+    fn created_date_filter_excludes_out_of_range() {
+        let results = vec![
+            SearchResultItem {
+                name: "old.txt".to_string(),
+                full_path: r"C:\old.txt".to_string(),
+                is_dir: false,
+                size: 100,
+            },
+            SearchResultItem {
+                name: "new.txt".to_string(),
+                full_path: r"C:\new.txt".to_string(),
+                is_dir: false,
+                size: 200,
+            },
+        ];
+        let cache = vec![Some(500), Some(2000)]; // old=500, new=2000
+
+        let filtered = build_filtered_indices(
+            &results,
+            GlobalSearchCategory::All,
+            None,
+            None,
+            None,
+            Some(1000), // created after ts=1000
+            None,
+            &cache,
+        );
+        // old (500) excluded, new (2000) included
+        assert_eq!(filtered, vec![1]);
     }
 }

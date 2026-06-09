@@ -811,6 +811,7 @@ pub struct SearchResult {
     pub name: String,
     pub full_path: String,
     pub is_dir: bool,
+    pub size: u64,
 }
 
 pub struct SearchPage {
@@ -966,6 +967,7 @@ pub fn search_page(
                         name: name.to_owned(),
                         full_path,
                         is_dir: record.is_dir,
+                        size: record.size,
                     });
                     matched_after_filters += 1;
                 }

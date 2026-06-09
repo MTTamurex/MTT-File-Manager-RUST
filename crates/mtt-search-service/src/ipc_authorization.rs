@@ -291,7 +291,7 @@ where
                 name: result.name,
                 full_path: result.full_path,
                 is_dir: result.is_dir,
-                size: 0,
+                size: result.size,
             });
             continue;
         }
@@ -417,11 +417,13 @@ mod tests {
                 name: "file.txt".to_string(),
                 full_path: r"C:\A\file.txt".to_string(),
                 is_dir: false,
+                size: 0,
             },
             SearchResult {
                 name: "file.txt".to_string(),
                 full_path: r"C:\B\file.txt".to_string(),
                 is_dir: false,
+                size: 0,
             },
         ];
 
@@ -454,16 +456,19 @@ mod tests {
                 name: "file.txt".to_string(),
                 full_path: r"C:\A\file.txt".to_string(),
                 is_dir: false,
+                size: 0,
             },
             SearchResult {
                 name: "file.txt".to_string(),
                 full_path: r"C:\B\file.txt".to_string(),
                 is_dir: false,
+                size: 0,
             },
             SearchResult {
                 name: "file.txt".to_string(),
                 full_path: r"C:\C\file.txt".to_string(),
                 is_dir: false,
+                size: 0,
             },
         ];
 
@@ -490,6 +495,7 @@ mod tests {
             name: "a.txt".to_string(),
             full_path: r"C:\temp\a.txt".to_string(),
             is_dir: false,
+            size: 0,
         };
         assert!(!sample.is_dir);
         assert!(sample.full_path.ends_with("a.txt"));

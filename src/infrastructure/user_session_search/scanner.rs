@@ -66,12 +66,18 @@ pub(super) fn scan_volume(drive_letter: char) -> Result<ScanOutcome, String> {
 
             let path_key = normalize_path_key(&path);
             let is_dir = file_type.is_dir();
+            let size = if !is_dir {
+                entry.metadata().map(|m| m.len()).unwrap_or(0)
+            } else {
+                0
+            };
             items.push(IndexedItem {
                 name_lower: name.to_lowercase(),
                 name,
                 full_path: path.to_string_lossy().into_owned(),
                 path_key: path_key.clone(),
                 is_dir,
+                size,
             });
             live_paths.insert(path_key);
 
@@ -164,12 +170,19 @@ fn upsert_path(volume: &mut IndexedVolume, path: &Path) {
     }
 
     let full_path = path.to_string_lossy().into_owned();
+    let is_dir = crate::infrastructure::onedrive::fast_is_dir(path);
+    let size = if !is_dir {
+        std::fs::metadata(path).map(|m| m.len()).unwrap_or(0)
+    } else {
+        0
+    };
     volume.items.push(IndexedItem {
         name_lower: name.to_lowercase(),
         name,
         full_path,
         path_key: key.clone(),
-        is_dir: crate::infrastructure::onedrive::fast_is_dir(path),
+        is_dir,
+        size,
     });
     volume.live_paths.insert(key);
 }

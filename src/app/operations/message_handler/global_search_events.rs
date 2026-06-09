@@ -236,9 +236,11 @@ fn drain_tooltip_responses(app: &mut ImageViewerApp) {
                 path,
                 size,
                 modified_ts,
+                created_ts,
             }) => {
                 let was_tooltip_request = app.global_search.tooltip_metadata_inflight.remove(&path);
                 app.global_search.apply_sort_metadata(&path, modified_ts);
+                app.global_search.apply_created_metadata(&path, created_ts);
 
                 if was_tooltip_request {
                     app.global_search

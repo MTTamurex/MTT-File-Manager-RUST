@@ -27,6 +27,22 @@ impl ImageViewerApp {
         self.global_search.sort_mode =
             crate::app::global_search_state::GlobalSearchSortMode::Relevance;
         self.global_search.sort_descending = false;
+        self.global_search.min_size_mb = None;
+        self.global_search.max_size_mb = None;
+        self.global_search.created_after = None;
+        self.global_search.created_before = None;
+        self.global_search.created_after_month = 0;
+        self.global_search.created_after_day = 0;
+        self.global_search.created_after_year = 0;
+        self.global_search.created_after_month_text.clear();
+        self.global_search.created_after_day_text.clear();
+        self.global_search.created_after_year_text.clear();
+        self.global_search.created_before_month = 0;
+        self.global_search.created_before_day = 0;
+        self.global_search.created_before_year = 0;
+        self.global_search.created_before_month_text.clear();
+        self.global_search.created_before_day_text.clear();
+        self.global_search.created_before_year_text.clear();
 
         if let Err(error) = self
             .global_search
