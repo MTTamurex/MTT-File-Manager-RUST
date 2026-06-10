@@ -182,6 +182,56 @@ impl PriorityThumbnailQueue {
         );
     }
 
+    pub fn promote_pending_to_interactive(
+        &self,
+        path: &Path,
+        gen: usize,
+        request_size: u32,
+        directory_index: usize,
+        modified: u64,
+    ) -> bool {
+        let parent = path.parent().unwrap_or(path).to_path_buf();
+        let promoted = {
+            let mut state = self.state.lock();
+            let is_ssd = Self::is_directory_ssd(&state, &parent);
+
+            let Some(items) = state.by_directory.get_mut(&parent) else {
+                return false;
+            };
+
+            let Some(existing) = items.iter_mut().find(|req| req.path.as_path() == path) else {
+                return false;
+            };
+
+            existing.priority = IOPriority::Interactive;
+            existing.size = existing.size.max(request_size);
+            existing.generation = existing.generation.max(gen);
+            existing.directory_index = Some(directory_index);
+            if modified > 0 && (existing.modified == 0 || modified > existing.modified) {
+                existing.modified = modified;
+            }
+            existing.source = ThumbnailRequestSource::Normal;
+            existing.track_bulk_progress = false;
+            existing.bulk_priority = None;
+            existing.bulk_session = None;
+
+            if !is_ssd {
+                items.sort_by(|a, b| match a.priority.cmp(&b.priority) {
+                    std::cmp::Ordering::Equal => a.directory_index.cmp(&b.directory_index),
+                    other => other,
+                });
+            }
+
+            true
+        };
+
+        if promoted {
+            self.condvar.notify_one();
+        }
+
+        promoted
+    }
+
     fn push_with_index_and_source(
         &self,
         path: PathBuf,
@@ -772,6 +822,53 @@ mod tests {
         assert_eq!(priority, IOPriority::Interactive);
         assert_eq!(modified, 123);
         assert_eq!(source, ThumbnailRequestSource::Normal);
+    }
+
+    #[test]
+    fn promote_pending_to_interactive_moves_selected_request_first() {
+        let dir = tempdir().unwrap();
+        let parent = dir.path().join("dir");
+        std::fs::create_dir(&parent).unwrap();
+        let earlier_path = parent.join("a.jpg");
+        let selected_path = parent.join("z.jpg");
+
+        let queue = PriorityThumbnailQueue::new();
+        {
+            let mut state = queue.state.lock();
+            state
+                .drive_is_ssd
+                .insert(PriorityThumbnailQueue::drive_key(&selected_path), true);
+        }
+
+        queue.push_with_index(
+            earlier_path.clone(),
+            1,
+            128,
+            IOPriority::Interactive,
+            Some(1),
+            0,
+        );
+        queue.push_with_index(
+            selected_path.clone(),
+            1,
+            64,
+            IOPriority::Prefetch,
+            Some(50),
+            0,
+        );
+
+        assert!(queue.promote_pending_to_interactive(&selected_path, 2, 512, 0, 123));
+
+        let (path, gen, size, priority, modified, source, track_bulk_progress, bulk_session) =
+            queue.pop().unwrap();
+        assert_eq!(path, selected_path);
+        assert_eq!(gen, 2);
+        assert_eq!(size, 512);
+        assert_eq!(priority, IOPriority::Interactive);
+        assert_eq!(modified, 123);
+        assert_eq!(source, ThumbnailRequestSource::Normal);
+        assert!(!track_bulk_progress);
+        assert_eq!(bulk_session, None);
     }
 
     #[test]

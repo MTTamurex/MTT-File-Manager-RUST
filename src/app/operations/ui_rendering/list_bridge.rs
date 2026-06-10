@@ -588,14 +588,26 @@ impl ImageViewerApp {
         // PERFORMANCE: Collect folder scans for batching (single SQLite query + single filter_items)
         let mut folder_scan_paths: Vec<PathBuf> = Vec::new();
 
+        let selected_path_for_thumbnail_priority =
+            self.selected_file.as_ref().map(|f| f.path.clone());
+
         // Execute collected actions
         for action in actions {
             match action {
                 ListAction::NavigateTo(path) => self.navigate_to(&path),
                 ListAction::OpenWithShell(path) => open_with_shell(self, &path),
                 ListAction::RequestThumbnailLoad(path, size, index, modified) => {
+                    let directory_index =
+                        if selected_path_for_thumbnail_priority.as_ref() == Some(&path) {
+                            0
+                        } else {
+                            index.saturating_add(1)
+                        };
                     self.request_thumbnail_load_with_index_and_modified(
-                        path, size, index, modified,
+                        path,
+                        size,
+                        directory_index,
+                        modified,
                     );
                 }
                 ListAction::RequestFolderScan(path) => folder_scan_paths.push(path),

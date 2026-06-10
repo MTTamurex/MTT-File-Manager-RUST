@@ -37,7 +37,18 @@ pub(super) fn render_list_item(
     // LAZY LOAD TRIGGER FOR MEDIA FILES: Proactively load thumbnail
     if !item.is_dir && !ctx.is_recycle_bin_view {
         // PERFORMANCE: Use is_media() method to avoid registry lookups
+        let is_selected_for_preview = ctx
+            .selected_file
+            .is_some_and(|selected| selected.path == item.path);
+
+        // In list mode the thumbnail is not rendered in the row. When the
+        // detail panel is open, loading every visible media file at preview
+        // resolution can put the clicked file behind dozens of hidden jobs.
+        // Let the selected item drive the detail thumbnail request instead.
+        let should_request_thumbnail = !ctx.show_preview_panel || is_selected_for_preview;
+
         if item.is_media()
+            && should_request_thumbnail
             && !ctx.failed_thumbnails.contains(&item.path)
             && ctx.loading_set.len() < crate::ui::cache::MAX_THUMBNAIL_LOADING_SET_ITEMS
         {
@@ -45,10 +56,10 @@ pub(super) fn render_list_item(
             let is_pending = ctx.pending_upload_set.contains(&item.path);
             let has_texture = ctx.texture_cache.peek(&item.path).is_some();
 
-            // When the preview panel is open, request the detail-panel resolution so
-            // the thumbnail is warm when the user selects the item. When the panel is
-            // closed, fall back to a minimal 64 px request (the list itself does not
-            // display media thumbnails — only the icon column is shown).
+            // When this row owns the preview panel, request the detail-panel
+            // resolution. Otherwise fall back to a minimal 64 px request (the
+            // list itself does not display media thumbnails — only the icon
+            // column is shown).
             let request_size: u32 = if ctx.show_preview_panel {
                 crate::domain::thumbnail::detail_preview_size(&item.path)
             } else {

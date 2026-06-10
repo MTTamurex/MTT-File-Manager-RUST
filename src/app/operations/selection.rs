@@ -77,7 +77,32 @@ impl ImageViewerApp {
         }
 
         if !has_required_texture {
-            if already_attempted_max_quality {
+            if request_in_flight {
+                // A request is already in flight. If it is still queued, move
+                // the selected file ahead of list/grid prefetch work and
+                // upgrade it to the detail-panel size.
+                if self.cache_manager.is_loading(&path)
+                    && !self.cache_manager.is_pending_upload(&path)
+                {
+                    let effective_gen = if self.use_active_generation_for_thumbnail_requests {
+                        self.current_generation
+                            .load(std::sync::atomic::Ordering::Relaxed)
+                    } else {
+                        self.generation
+                    };
+
+                    if self.thumbnail_queue.promote_pending_to_interactive(
+                        &path,
+                        effective_gen,
+                        effective_req_size,
+                        0,
+                        modified,
+                    ) {
+                        self.cache_manager
+                            .note_attempted_thumbnail_bucket(&path, required_preview_bucket);
+                    }
+                }
+            } else if already_attempted_max_quality {
                 // Already tried at max quality; the best available texture is
                 // in cache.  No further requests needed.
                 if !self.cache_manager.best_effort_notified.contains(&path) {
@@ -93,11 +118,9 @@ impl ImageViewerApp {
                         ],
                     );
                 }
-            } else if request_in_flight {
-                // A request is already in flight; wait for its result.
             } else {
                 self.cache_manager.loading_set.insert(path.clone());
-                self.request_thumbnail_load_with_modified(path, size, modified);
+                self.request_thumbnail_load_with_index_and_modified(path, size, 0, modified);
             }
         }
     }
