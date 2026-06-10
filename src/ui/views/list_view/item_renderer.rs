@@ -41,14 +41,14 @@ pub(super) fn render_list_item(
             .selected_file
             .is_some_and(|selected| selected.path == item.path);
 
-        // In list mode the thumbnail is not rendered in the row. When the
-        // detail panel is open, loading every visible media file at preview
-        // resolution can put the clicked file behind dozens of hidden jobs.
-        // Let the selected item drive the detail thumbnail request instead.
-        let should_request_thumbnail = !ctx.show_preview_panel || is_selected_for_preview;
+        // In list mode the thumbnail is not rendered in the row itself, but
+        // we still request a small 64 px thumbnail for every visible media
+        // file.  This populates the RAM cache so that when the user clicks a
+        // file, the detail panel's 512 px request can be served from the RAM
+        // cache (fast path) instead of going to the worker from scratch.
+        // The selected item upgrades to detail-panel resolution below.
 
         if item.is_media()
-            && should_request_thumbnail
             && !ctx.failed_thumbnails.contains(&item.path)
             && ctx.loading_set.len() < crate::ui::cache::MAX_THUMBNAIL_LOADING_SET_ITEMS
         {
@@ -56,11 +56,11 @@ pub(super) fn render_list_item(
             let is_pending = ctx.pending_upload_set.contains(&item.path);
             let has_texture = ctx.texture_cache.peek(&item.path).is_some();
 
-            // When this row owns the preview panel, request the detail-panel
-            // resolution. Otherwise fall back to a minimal 64 px request (the
-            // list itself does not display media thumbnails — only the icon
-            // column is shown).
-            let request_size: u32 = if ctx.show_preview_panel {
+            // The selected item (when the preview panel is open) requests the
+            // detail-panel resolution so the preview can display it at full
+            // quality.  All other visible items only need a minimal 64 px
+            // thumbnail to populate the RAM cache for fast future upgrades.
+            let request_size: u32 = if ctx.show_preview_panel && is_selected_for_preview {
                 crate::domain::thumbnail::detail_preview_size(&item.path)
             } else {
                 64
