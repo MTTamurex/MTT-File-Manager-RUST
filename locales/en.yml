@@ -152,6 +152,7 @@ operations:
   rename_drive_helper_failed: "The elevated operation failed (code %{code})"
 context_menu:
   open: "Open"
+  open_with: "Open with..."
   open_new_tab: "Open in new tab"
   cut: "Cut"
   copy: "Copy"

@@ -108,6 +108,15 @@ pub fn open_with_shell(path: &Path, _hwnd: Option<HWND>) -> OpResult<()> {
     Ok(())
 }
 
+/// Opens the Windows "Open with" dialog for the given file.
+pub fn open_with_dialog(path: &Path, hwnd: Option<HWND>) -> OpResult<()> {
+    let valid_path = sanitize_operation_path(path)?;
+    if let Some(hwnd) = hwnd {
+        shell_operations::open_with_dialog(&valid_path, hwnd).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 /// Creates a new folder with a unique name "Nova Pasta (N)".
 pub fn create_new_folder(base_path: &Path) -> OpResult<PathBuf> {
     let base_path = sanitize_operation_path(base_path)?;

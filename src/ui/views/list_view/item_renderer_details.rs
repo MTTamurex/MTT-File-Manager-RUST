@@ -96,6 +96,10 @@ pub(super) fn render_item_tooltip(
     ctx: &mut ListViewContext,
     is_recycle_bin: bool,
 ) {
+    // Suppress tooltips while the context menu is open
+    if crate::ui::context_menu::should_suppress_tooltips(ui.ctx()) {
+        return;
+    }
     if response.hovered() {
         let current_time = ui.input(|i| i.time);
         // PERF FIX: Scope hover timing by widget and path so dual-panel

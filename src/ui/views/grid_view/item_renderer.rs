@@ -191,7 +191,12 @@ pub(super) fn render_grid_item(
     }
 
     if response.hovered() && !ctx.is_item_dragging && !rectangle_select_active {
-        let current_time = ui.input(|i| i.time);
+        // Suppress tooltips while the context menu is open
+        if crate::ui::context_menu::should_suppress_tooltips(ui.ctx()) {
+            let hover_id = response.id.with("grid_hover_start").with(&item.path);
+            ui.ctx().data_mut(|d| d.remove::<f64>(hover_id));
+        } else {
+            let current_time = ui.input(|i| i.time);
         // PERF FIX: Scope hover timing by widget and path so dual-panel
         // duplicates do not reset each other, while navigation still resets
         // stale timers for reused item indices.
@@ -285,6 +290,7 @@ pub(super) fn render_grid_item(
                 );
             } // if let Some(mouse_pos)
         }
+    }
     } else {
         let hover_id = response.id.with("grid_hover_start").with(&item.path);
         ui.ctx().data_mut(|d| d.remove::<f64>(hover_id));

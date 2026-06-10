@@ -119,6 +119,16 @@ impl ImageViewerApp {
             .and_then(|idx| self.items.get(idx))
             .map(|item| item.drive_info.is_some())
             .unwrap_or_else(|| drive_target_path.is_some());
+        // Determine if the target is a file (not a folder, not a drive, not empty area)
+        let target_is_file = if is_empty_area || is_drive {
+            false
+        } else if let Some(idx) = _item_index {
+            self.items.get(idx).map(|item| !item.is_dir).unwrap_or(false)
+        } else if let Some(path) = paths.first() {
+            path.is_file()
+        } else {
+            false
+        };
         let can_copy_target = !is_drive && self.can_copy_from_current_location();
         let can_rename_target = if let Some(idx) = _item_index {
             self.can_rename_item(idx)
@@ -216,6 +226,17 @@ impl ImageViewerApp {
                 ContextMenuItem::new(-21, t!("context_menu.open_new_tab"))
                     .with_svg_icon("external-link"),
             );
+            // Open with placeholder — only for files, inserted before shell items load
+            if target_is_file {
+                items.push(ContextMenuItem {
+                    id: -201,
+                    text: t!("context_menu.open_with").to_string(),
+                    is_enabled: false,
+                    is_loading_placeholder: true,
+                    command_string: Some("openwith_placeholder".to_string()),
+                    ..Default::default()
+                });
+            }
             items.push(
                 ContextMenuItem::new(-80, t!("context_menu.open_terminal"))
                     .with_svg_icon("terminal"),
@@ -446,17 +467,52 @@ impl ImageViewerApp {
             self.context_menu.items.pop();
         }
 
+        // Determine if the target is a file so we only promote "Open with" for files
+        let target_is_file = self
+            .context_menu
+            .target_paths
+            .first()
+            .map(|p| p.is_file())
+            .unwrap_or(false);
+
+        let mut open_with_item: Option<ContextMenuItem> = None;
         let mut all_shell_items = Vec::new();
 
         for raw in &shell_items {
             if let Some(item) = convert(ctx, raw) {
-                if !item.is_separator {
+                if item.is_separator {
+                    continue;
+                }
+                // Promote "Open with" to the main menu only for files
+                if target_is_file
+                    && (item.text.to_lowercase().contains("open with")
+                        || item.text.to_lowercase().contains("abrir com"))
+                {
+                    open_with_item = Some(item);
+                } else {
                     all_shell_items.push(item);
                 }
             }
         }
 
         let items = &mut self.context_menu.items;
+
+        // Remove the Open with placeholder before inserting the real item
+        if let Some(idx) = items.iter().position(|i| {
+            i.command_string.as_deref() == Some("openwith_placeholder")
+        }) {
+            items.remove(idx);
+        }
+
+        // Insert the shell "Open with" right after "Open in new tab" (-21)
+        if let Some(open_with) = open_with_item {
+            if let Some(idx) = items.iter().position(|i| i.id == -21) {
+                items.insert(idx + 1, open_with);
+            } else {
+                // Fallback: append before the separator that precedes shell items
+                items.push(open_with);
+            }
+        }
 
         if !all_shell_items.is_empty() {
             items.push(ContextMenuItem::separator());

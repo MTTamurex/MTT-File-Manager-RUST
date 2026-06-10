@@ -213,6 +213,27 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 }
             }
 
+            // Handle "Open with" natively — ShellExecuteExW with "openas" is more
+            // reliable than IContextMenu::InvokeCommand for this specific verb.
+            let is_open_with = selected_shell_item_text.map_or(false, |text| {
+                let lower = text.to_lowercase();
+                lower.contains("open with") || lower.contains("abrir com")
+            });
+            if is_open_with {
+                if let Some(path) = context_menu.target_paths.first() {
+                    if let Some(hwnd) = app.native_hwnd {
+                        if let Err(e) =
+                            crate::application::file_operations::open_with_dialog(path, Some(hwnd))
+                        {
+                            log::warn!("Open with dialog failed for '{}': {}", path.display(), e);
+                        }
+                    }
+                }
+                context_menu.close();
+                app.context_menu = context_menu;
+                return;
+            }
+
             if let Some(hwnd) = app.native_hwnd {
                 // Dispatch to the worker thread — no blocking on the UI thread.
                 let _ = app.shell_menu_req_tx.send(

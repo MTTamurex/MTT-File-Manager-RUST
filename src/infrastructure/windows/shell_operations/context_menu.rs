@@ -3,6 +3,7 @@ use std::path::Path;
 use windows::core::*;
 use windows::Win32::Foundation::*;
 use windows::Win32::System::Com::*;
+use windows::Win32::System::Registry::HKEY;
 use windows::Win32::UI::Shell::Common::*;
 use windows::Win32::UI::Shell::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
@@ -29,6 +30,48 @@ pub fn open_with_shell(path: &Path) -> Result<()> {
                 format!(
                     "ShellExecuteW failed with code {} for path {:?}",
                     code, path
+                ),
+            ));
+        }
+
+        Ok(())
+    }
+}
+
+/// Opens the Windows "Open with" dialog for the given file path.
+/// Uses ShellExecuteExW with the "openas" verb and SEE_MASK_INVOKEIDLIST
+/// so the dialog is shown as a child of the given parent window.
+pub fn open_with_dialog(path: &Path, hwnd: HWND) -> Result<()> {
+    unsafe {
+        let path_str = path.to_string_lossy().to_string();
+        let path_wide: Vec<u16> = path_str.encode_utf16().chain(std::iter::once(0)).collect();
+        let verb: Vec<u16> = "openas".encode_utf16().chain(std::iter::once(0)).collect();
+
+        let mut exec_info = SHELLEXECUTEINFOW {
+            cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
+            fMask: SEE_MASK_INVOKEIDLIST,
+            hwnd,
+            lpVerb: PCWSTR(verb.as_ptr()),
+            lpFile: PCWSTR(path_wide.as_ptr()),
+            lpParameters: PCWSTR::null(),
+            lpDirectory: PCWSTR::null(),
+            nShow: SW_SHOWNORMAL.0 as i32,
+            hInstApp: HINSTANCE(std::ptr::null_mut()),
+            lpIDList: std::ptr::null_mut(),
+            lpClass: PCWSTR::null(),
+            hkeyClass: HKEY::default(),
+            dwHotKey: 0,
+            Anonymous: std::mem::zeroed(),
+            hProcess: HANDLE(std::ptr::null_mut()),
+        };
+
+        let success = ShellExecuteExW(&mut exec_info);
+        if !success.is_ok() {
+            return Err(Error::new(
+                E_FAIL,
+                format!(
+                    "ShellExecuteExW 'openas' failed for path {:?}",
+                    path
                 ),
             ));
         }

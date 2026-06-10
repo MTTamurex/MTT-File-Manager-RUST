@@ -14,6 +14,20 @@ thread_local! {
     static SUBMENU_HIERARCHY: RefCell<Vec<Option<i32>>> = const { RefCell::new(Vec::new()) };
 }
 
+fn suppress_tooltips_id() -> egui::Id {
+    egui::Id::new("suppress_tooltips_for_context_menu")
+}
+
+/// Sets the tooltip suppression flag so item tooltips are hidden while the menu is open.
+pub fn set_tooltip_suppression(ctx: &egui::Context, suppress: bool) {
+    ctx.data_mut(|d| d.insert_temp(suppress_tooltips_id(), suppress));
+}
+
+/// Returns true if tooltips should be suppressed (context menu is open).
+pub fn should_suppress_tooltips(ctx: &egui::Context) -> bool {
+    ctx.data(|d| d.get_temp(suppress_tooltips_id()).unwrap_or(false))
+}
+
 /// Operations that can be performed from context menu
 pub trait ContextMenuOperations {
     fn create_new_folder(&mut self);
@@ -60,8 +74,12 @@ pub fn render_context_menu(
         SUBMENU_HIERARCHY.with(|hierarchy| {
             hierarchy.borrow_mut().clear();
         });
+        set_tooltip_suppression(ctx, false);
         return false;
     }
+
+    // Suppress item tooltips while the context menu is visible
+    set_tooltip_suppression(ctx, true);
 
     let mut action_executed: Option<i32> = None;
     let mut pending_load_item: Option<i32> = None;
