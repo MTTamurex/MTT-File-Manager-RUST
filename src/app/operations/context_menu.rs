@@ -505,7 +505,9 @@ impl ImageViewerApp {
         }
 
         // Insert the shell "Open with" right after "Open in new tab" (-21)
-        if let Some(open_with) = open_with_item {
+        if let Some(mut open_with) = open_with_item {
+            // Translate the text to match the current locale
+            open_with.text = t!("context_menu.open_with").to_string();
             if let Some(idx) = items.iter().position(|i| i.id == -21) {
                 items.insert(idx + 1, open_with);
             } else {
