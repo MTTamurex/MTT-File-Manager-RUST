@@ -339,22 +339,17 @@ impl ImageViewerApp {
             );
             self.shell_menu_loading = true;
 
-            // Add per-item loading placeholders so the menu reserves space for
-            // each expected shell item (similar to Windows Explorer).
-            // The count is cached from the previous extraction.
-            let count = self.shell_placeholder_count;
-            if count > 0 {
-                items.push(ContextMenuItem::separator());
-                for _ in 0..count {
-                    items.push(ContextMenuItem {
-                        id: -200,
-                        text: t!("context_menu.loading").to_string(),
-                        is_enabled: false,
-                        is_loading_placeholder: true,
-                        ..Default::default()
-                    });
-                }
-            }
+            // Add a single loading placeholder for "Show more options".
+            // All shell items are placed inside this submenu, so only one
+            // placeholder is needed and the menu height stays stable.
+            items.push(ContextMenuItem::separator());
+            items.push(ContextMenuItem {
+                id: -200,
+                text: t!("context_menu.show_more").to_string(),
+                is_enabled: false,
+                is_loading_placeholder: true,
+                ..Default::default()
+            });
         }
 
         self.context_menu.items = items;
@@ -451,35 +446,23 @@ impl ImageViewerApp {
             self.context_menu.items.pop();
         }
 
-        let mut visible = Vec::new();
-        let mut overflow = Vec::new();
+        let mut all_shell_items = Vec::new();
 
         for raw in &shell_items {
             if let Some(item) = convert(ctx, raw) {
-                if !item.sub_items.is_empty() || item.has_pending_submenu {
-                    visible.push(item);
-                } else if !item.is_separator {
-                    overflow.push(item);
+                if !item.is_separator {
+                    all_shell_items.push(item);
                 }
             }
         }
 
-        // Cache the number of *displayed* menu slots (not raw items) so that
-        // the next menu opening creates the correct number of placeholders.
-        // Overflow items are collapsed into a single "Show more" entry,
-        // so they count as 1 slot, not N.
-        self.shell_placeholder_count = visible.len() + if overflow.is_empty() { 0 } else { 1 };
-
         let items = &mut self.context_menu.items;
 
-        if !visible.is_empty() {
-            items.push(ContextMenuItem::separator());
-            items.extend(visible);
-        }
-        if !overflow.is_empty() {
+        if !all_shell_items.is_empty() {
             items.push(ContextMenuItem::separator());
             items.push(
-                ContextMenuItem::new(-99, t!("context_menu.show_more")).with_subitems(overflow),
+                ContextMenuItem::new(-99, t!("context_menu.show_more"))
+                    .with_subitems(all_shell_items),
             );
         }
 

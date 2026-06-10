@@ -317,9 +317,6 @@ pub struct ImageViewerApp {
     pub shell_menu_loading: bool,
     /// Monotonic id used to discard stale async shell-menu responses.
     pub shell_menu_request_id: u64,
-    /// Cached count of shell items from the last extraction. Used to create
-    /// per-item loading placeholders so the menu reserves the correct space.
-    pub shell_placeholder_count: usize,
 
     // SESSION ICON LOADER (avoids creating a new one each frame)
     pub item_icon_loader: IconLoader,
