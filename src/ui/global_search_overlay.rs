@@ -904,7 +904,8 @@ fn render_filter_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
                 app.global_search.created_before_month,
                 app.global_search.created_before_day,
                 app.global_search.created_before_year,
-            );
+            )
+            .map(|ts| ts + 86399); // End of selected day (23:59:59)
             app.global_search.selected_index = None;
         }
     });

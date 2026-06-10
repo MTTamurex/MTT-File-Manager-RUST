@@ -23,7 +23,7 @@ pub enum TooltipResponse {
         path: String,
         size: Option<u64>,
         modified_ts: u64,
-        created_ts: u64,
+        created_ts: Option<u64>,
     },
     Thumbnail {
         path: String,
@@ -310,8 +310,7 @@ impl GlobalSearchState {
                                 .as_ref()
                                 .and_then(|m| m.created().ok())
                                 .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                                .map(|d| d.as_secs())
-                                .unwrap_or(0);
+                                .map(|d| d.as_secs());
                             if resp_tx
                                 .send(TooltipResponse::Metadata {
                                     path,
@@ -476,15 +475,15 @@ impl GlobalSearchState {
         }
     }
 
-    pub fn apply_created_metadata(&mut self, path: &str, created_ts: u64) -> bool {
+    pub fn apply_created_metadata(&mut self, path: &str, created_ts: Option<u64>) -> bool {
         self.created_metadata_inflight.remove(path);
 
         self.sync_created_metadata_len();
         let mut updated = false;
         for idx in 0..self.results.len() {
-            if self.results[idx].full_path == path && self.created_ts_cache[idx] != Some(created_ts)
+            if self.results[idx].full_path == path && self.created_ts_cache[idx] != created_ts
             {
-                self.created_ts_cache[idx] = Some(created_ts);
+                self.created_ts_cache[idx] = created_ts;
                 updated = true;
             }
         }
