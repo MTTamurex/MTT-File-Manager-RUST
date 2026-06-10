@@ -534,23 +534,44 @@ fn date_components_to_unix_ts(month: u32, day: u32, year: u32) -> Option<u64> {
     if month == 0 || day == 0 || year == 0 {
         return None;
     }
-    if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+    if !(1..=12).contains(&month) || day > days_in_month(year, month) {
         return None;
     }
 
     // Days from civil date to days since epoch (algorithm by Howard Hinnant).
-    fn days_from_civil(year: u32, month: u32, day: u32) -> u64 {
-        let y = if month <= 2 { year - 1 } else { year } as u64;
-        let m = if month <= 2 { month + 9 } else { month - 3 } as u64;
-        let era = y / 400;
+    fn days_from_civil(year: u32, month: u32, day: u32) -> i64 {
+        let mut y = i64::from(year);
+        let m = i64::from(month);
+        let d = i64::from(day);
+        y -= if m <= 2 { 1 } else { 0 };
+        let era = if y >= 0 { y } else { y - 399 } / 400;
         let yoe = y - era * 400;
-        let doy = (153 * m + 2) / 5 + day as u64 - 1;
+        let mp = m + if m > 2 { -3 } else { 9 };
+        let doy = (153 * mp + 2) / 5 + d - 1;
         let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
         era * 146097 + doe - 719468
     }
 
     let days = days_from_civil(year, month, day);
-    Some(days * 86400)
+    if days < 0 {
+        return None;
+    }
+
+    (days as u64).checked_mul(86400)
+}
+
+fn days_in_month(year: u32, month: u32) -> u32 {
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if is_leap_year(year) => 29,
+        2 => 28,
+        _ => 0,
+    }
+}
+
+fn is_leap_year(year: u32) -> bool {
+    (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
 }
 
 fn render_filter_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
@@ -799,7 +820,11 @@ fn render_filter_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
                             .frame(false),
                     );
                     if resp.changed() {
-                        *text = text.chars().filter(|c| c.is_ascii_digit()).take(4).collect();
+                        *text = text
+                            .chars()
+                            .filter(|c| c.is_ascii_digit())
+                            .take(4)
+                            .collect();
                         *value = text.parse().unwrap_or(0);
                         changed = true;
                     }
@@ -883,4 +908,23 @@ fn render_filter_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
             app.global_search.selected_index = None;
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::date_components_to_unix_ts;
+
+    #[test]
+    fn date_components_reject_pre_epoch_dates() {
+        assert_eq!(date_components_to_unix_ts(12, 31, 1969), None);
+        assert_eq!(date_components_to_unix_ts(1, 1, 1970), Some(0));
+    }
+
+    #[test]
+    fn date_components_reject_nonexistent_calendar_dates() {
+        assert_eq!(date_components_to_unix_ts(2, 31, 2024), None);
+        assert_eq!(date_components_to_unix_ts(4, 31, 2024), None);
+        assert_eq!(date_components_to_unix_ts(2, 29, 2023), None);
+        assert_eq!(date_components_to_unix_ts(2, 29, 2024), Some(1_709_164_800));
+    }
 }

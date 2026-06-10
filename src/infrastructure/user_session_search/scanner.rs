@@ -165,10 +165,6 @@ fn upsert_path(volume: &mut IndexedVolume, path: &Path) {
     }
 
     let key = normalize_path_key(path);
-    if volume.live_paths.contains(&key) {
-        return;
-    }
-
     let full_path = path.to_string_lossy().into_owned();
     let is_dir = crate::infrastructure::onedrive::fast_is_dir(path);
     let size = if !is_dir {
@@ -176,8 +172,20 @@ fn upsert_path(volume: &mut IndexedVolume, path: &Path) {
     } else {
         0
     };
+    let name_lower = name.to_lowercase();
+
+    if let Some(item) = volume.items.iter_mut().find(|item| item.path_key == key) {
+        item.name_lower = name_lower;
+        item.name = name;
+        item.full_path = full_path;
+        item.is_dir = is_dir;
+        item.size = size;
+        volume.live_paths.insert(key);
+        return;
+    }
+
     volume.items.push(IndexedItem {
-        name_lower: name.to_lowercase(),
+        name_lower,
         name,
         full_path,
         path_key: key.clone(),
@@ -195,5 +203,47 @@ pub(super) fn normalize_path_key(path: &Path) -> String {
         stripped.trim_end_matches('\\').to_string()
     } else {
         stripped.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+    use std::fs;
+    use std::time::Instant;
+
+    use crate::infrastructure::user_session_search::{IndexedItem, IndexedVolume};
+
+    use super::{normalize_path_key, upsert_path};
+
+    #[test]
+    fn upsert_path_refreshes_existing_file_size() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let file_path = dir.path().join("sample.txt");
+        fs::write(&file_path, b"old").expect("write initial file");
+
+        let key = normalize_path_key(&file_path);
+        let mut live_paths = HashSet::new();
+        live_paths.insert(key.clone());
+        let mut volume = IndexedVolume {
+            label: String::new(),
+            file_system: String::new(),
+            last_scan: Instant::now(),
+            items: vec![IndexedItem {
+                name: "sample.txt".to_string(),
+                name_lower: "sample.txt".to_string(),
+                full_path: file_path.to_string_lossy().into_owned(),
+                path_key: key,
+                is_dir: false,
+                size: 3,
+            }],
+            live_paths,
+        };
+
+        fs::write(&file_path, b"new content").expect("rewrite file");
+        upsert_path(&mut volume, &file_path);
+
+        assert_eq!(volume.items.len(), 1);
+        assert_eq!(volume.items[0].size, 11);
     }
 }

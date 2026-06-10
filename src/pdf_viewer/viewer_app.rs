@@ -638,7 +638,8 @@ impl PdfViewerApp {
             // CACHE_RADIUS so prefetched textures are not immediately evicted.
             let scale0 = self.get_scale(fv, aw, ah);
             let cache_lo = self.current_page.saturating_sub(CACHE_RADIUS);
-            let cache_hi = (self.current_page + CACHE_RADIUS).min(self.total_pages.saturating_sub(1));
+            let cache_hi =
+                (self.current_page + CACHE_RADIUS).min(self.total_pages.saturating_sub(1));
             let pf_lo = fv.saturating_sub(PREFETCH_AHEAD).max(cache_lo);
             let pf_hi = (last_visible + PREFETCH_AHEAD).min(cache_hi);
             for pidx in pf_lo..=pf_hi {

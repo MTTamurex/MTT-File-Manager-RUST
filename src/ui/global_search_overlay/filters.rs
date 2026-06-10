@@ -38,15 +38,15 @@ pub(crate) fn build_filtered_indices(
             continue;
         }
 
-        // Size filter (directories always pass; size==0 treated as unknown — include)
+        // Size filter (directories always pass)
         if !result.is_dir {
             if let Some(min) = min_size_bytes {
-                if result.size > 0 && result.size < min {
+                if result.size < min {
                     continue;
                 }
             }
             if let Some(max) = max_size_bytes {
-                if result.size > 0 && result.size > max {
+                if result.size > max {
                     continue;
                 }
             }
@@ -280,12 +280,12 @@ mod tests {
     }
 
     #[test]
-    fn size_filter_ignores_zero_size() {
+    fn size_filter_excludes_zero_size_below_min() {
         let results = vec![SearchResultItem {
-            name: "unknown.txt".to_string(),
-            full_path: r"C:\unknown.txt".to_string(),
+            name: "empty.txt".to_string(),
+            full_path: r"C:\empty.txt".to_string(),
             is_dir: false,
-            size: 0, // unknown size
+            size: 0,
         }];
 
         let filtered = build_filtered_indices(
@@ -298,8 +298,7 @@ mod tests {
             None,
             &empty_cache(),
         );
-        // size==0 treated as unknown — include
-        assert_eq!(filtered, vec![0]);
+        assert!(filtered.is_empty());
     }
 
     #[test]

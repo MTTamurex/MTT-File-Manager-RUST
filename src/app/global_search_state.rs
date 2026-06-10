@@ -482,8 +482,7 @@ impl GlobalSearchState {
         self.sync_created_metadata_len();
         let mut updated = false;
         for idx in 0..self.results.len() {
-            if self.results[idx].full_path == path
-                && self.created_ts_cache[idx] != Some(created_ts)
+            if self.results[idx].full_path == path && self.created_ts_cache[idx] != Some(created_ts)
             {
                 self.created_ts_cache[idx] = Some(created_ts);
                 updated = true;
@@ -509,13 +508,7 @@ impl GlobalSearchState {
             if remaining == 0 {
                 break;
             }
-            if self
-                .created_ts_cache
-                .get(idx)
-                .copied()
-                .flatten()
-                .is_some()
-            {
+            if self.created_ts_cache.get(idx).copied().flatten().is_some() {
                 continue;
             }
 
@@ -556,7 +549,11 @@ impl GlobalSearchState {
             created_after: self.created_after,
             created_before: self.created_before,
         };
-        let key = (self.results_generation, filters, self.created_metadata_epoch);
+        let key = (
+            self.results_generation,
+            filters,
+            self.created_metadata_epoch,
+        );
         if self.filter_cache_key != key {
             let min_size_bytes = self.min_size_mb.map(|mb| mb * 1024 * 1024);
             let max_size_bytes = self.max_size_mb.map(|mb| mb * 1024 * 1024);

@@ -437,10 +437,14 @@ pub(super) fn render_result_row(
                                 ui.label(t!("file_info.date_modified"));
                                 ui.label(crate::infrastructure::windows::format_date(modified_ts));
                             });
-                            if let Some(created_ts) = app.global_search.created_ts_for_index(source_idx) {
+                            if let Some(created_ts) =
+                                app.global_search.created_ts_for_index(source_idx)
+                            {
                                 ui.horizontal(|ui| {
                                     ui.label(t!("file_info.date_created"));
-                                    ui.label(crate::infrastructure::windows::format_date(created_ts));
+                                    ui.label(crate::infrastructure::windows::format_date(
+                                        created_ts,
+                                    ));
                                 });
                             }
                         });

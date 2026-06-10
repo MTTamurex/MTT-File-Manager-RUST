@@ -356,8 +356,7 @@ fn render_reorderable_list(
 
     // ── Auto-scroll: load previous frame's scroll-area viewport rect ─────────
     let scroll_id = ui.id().with("batch_list_scroll");
-    let prev_outer_rect: Option<egui::Rect> =
-        ui.data_mut(|d| d.get_temp(scroll_id.with("outer")));
+    let prev_outer_rect: Option<egui::Rect> = ui.data_mut(|d| d.get_temp(scroll_id.with("outer")));
 
     let mut auto_scroll_delta: f32 = 0.0;
     if is_dragging {

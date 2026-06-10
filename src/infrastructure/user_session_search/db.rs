@@ -50,9 +50,8 @@ pub(super) fn open_session_db() -> Option<rusqlite::Connection> {
     }
 
     // Add size column if missing (schema migration from older versions).
-    let _ = conn.execute_batch(
-        "ALTER TABLE session_items ADD COLUMN size INTEGER NOT NULL DEFAULT 0;",
-    );
+    let _ =
+        conn.execute_batch("ALTER TABLE session_items ADD COLUMN size INTEGER NOT NULL DEFAULT 0;");
 
     Some(conn)
 }
@@ -96,11 +95,12 @@ pub(super) fn load_all_volumes(conn: &rusqlite::Connection) -> HashMap<char, Ind
         return volumes;
     }
 
-    let mut item_stmt =
-        match conn.prepare("SELECT drive_letter, name, full_path, is_dir, COALESCE(size, 0) FROM session_items") {
-            Ok(s) => s,
-            Err(_) => return volumes,
-        };
+    let mut item_stmt = match conn.prepare(
+        "SELECT drive_letter, name, full_path, is_dir, COALESCE(size, 0) FROM session_items",
+    ) {
+        Ok(s) => s,
+        Err(_) => return volumes,
+    };
 
     let item_rows = match item_stmt.query_map([], |row| {
         let dl: String = row.get(0)?;
