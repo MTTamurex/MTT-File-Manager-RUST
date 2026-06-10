@@ -119,11 +119,16 @@ impl ImageViewerApp {
             .and_then(|idx| self.items.get(idx))
             .map(|item| item.drive_info.is_some())
             .unwrap_or_else(|| drive_target_path.is_some());
-        // Determine if the target is a file (not a folder, not a drive, not empty area)
+        // Determine if the target is a file (not a folder, not a drive, not empty area).
+        // Archives (.zip, .rar, .7z) have is_dir=true (they're navigable containers)
+        // but still support "Open with" as files.
         let target_is_file = if is_empty_area || is_drive {
             false
         } else if let Some(idx) = _item_index {
-            self.items.get(idx).map(|item| !item.is_dir).unwrap_or(false)
+            self.items
+                .get(idx)
+                .map(|item| !item.is_dir || item.is_archive())
+                .unwrap_or(false)
         } else if let Some(path) = paths.first() {
             path.is_file()
         } else {
