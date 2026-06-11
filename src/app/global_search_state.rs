@@ -54,6 +54,13 @@ pub enum GlobalSearchSortMode {
     Name,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CreatedMetadataState {
+    Pending,
+    Unavailable,
+    Available(u64),
+}
+
 /// Combined filter parameters used for cache invalidation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GlobalSearchFilters {
@@ -157,7 +164,7 @@ pub struct GlobalSearchState {
 
     // --- Created-date filter metadata cache ---
     /// Creation timestamps for date-range filtering, aligned with `results` indices.
-    created_ts_cache: Vec<Option<u64>>,
+    created_ts_cache: Vec<CreatedMetadataState>,
     /// Incremented whenever created-date metadata is updated; forces filter cache rebuild.
     created_metadata_epoch: u64,
     /// Metadata requests currently queued for created-date filtering.
@@ -430,7 +437,10 @@ impl GlobalSearchState {
     }
 
     pub fn created_ts_for_index(&self, idx: usize) -> Option<u64> {
-        self.created_ts_cache.get(idx).copied().flatten()
+        match self.created_ts_cache.get(idx).copied() {
+            Some(CreatedMetadataState::Available(ts)) => Some(ts),
+            _ => None,
+        }
     }
 
     pub fn attach_tooltip_to_sort_metadata_request(&mut self, path: &str) -> bool {
@@ -469,7 +479,8 @@ impl GlobalSearchState {
     pub fn sync_created_metadata_len(&mut self) {
         let len = self.results.len();
         if self.created_ts_cache.len() < len {
-            self.created_ts_cache.resize(len, None);
+            self.created_ts_cache
+                .resize(len, CreatedMetadataState::Pending);
         } else if self.created_ts_cache.len() > len {
             self.created_ts_cache.truncate(len);
         }
@@ -479,10 +490,13 @@ impl GlobalSearchState {
         self.created_metadata_inflight.remove(path);
 
         self.sync_created_metadata_len();
+        let next_state = created_ts
+            .map(CreatedMetadataState::Available)
+            .unwrap_or(CreatedMetadataState::Unavailable);
         let mut updated = false;
         for idx in 0..self.results.len() {
-            if self.results[idx].full_path == path && self.created_ts_cache[idx] != created_ts {
-                self.created_ts_cache[idx] = created_ts;
+            if self.results[idx].full_path == path && self.created_ts_cache[idx] != next_state {
+                self.created_ts_cache[idx] = next_state;
                 updated = true;
             }
         }
@@ -506,7 +520,10 @@ impl GlobalSearchState {
             if remaining == 0 {
                 break;
             }
-            if self.created_ts_cache.get(idx).copied().flatten().is_some() {
+            if !matches!(
+                self.created_ts_cache.get(idx),
+                None | Some(CreatedMetadataState::Pending)
+            ) {
                 continue;
             }
 

@@ -1,4 +1,4 @@
-use crate::app::global_search_state::GlobalSearchCategory;
+use crate::app::global_search_state::{CreatedMetadataState, GlobalSearchCategory};
 use rust_i18n::t;
 
 pub(super) fn category_label(category: GlobalSearchCategory) -> String {
@@ -21,7 +21,7 @@ pub(crate) fn build_filtered_indices(
     max_size_bytes: Option<u64>,
     created_after: Option<u64>,
     created_before: Option<u64>,
-    created_ts_cache: &[Option<u64>],
+    created_ts_cache: &[CreatedMetadataState],
 ) -> Vec<usize> {
     let mut filtered = Vec::with_capacity(results.len());
 
@@ -52,21 +52,25 @@ pub(crate) fn build_filtered_indices(
             }
         }
 
-        // Created date filter (permissive: include items with unknown created_ts)
+        // Created date filter: pending metadata remains visible until the request resolves.
         if created_after.is_some() || created_before.is_some() {
-            if let Some(cached_ts) = created_ts_cache.get(idx).copied().flatten() {
+            if let Some(CreatedMetadataState::Available(cached_ts)) = created_ts_cache.get(idx) {
                 if let Some(after) = created_after {
-                    if cached_ts < after {
+                    if *cached_ts < after {
                         continue;
                     }
                 }
                 if let Some(before) = created_before {
-                    if cached_ts > before {
+                    if *cached_ts > before {
                         continue;
                     }
                 }
+            } else if matches!(
+                created_ts_cache.get(idx),
+                Some(CreatedMetadataState::Unavailable)
+            ) {
+                continue;
             }
-            // If cached_ts is None, include the item (permissive filtering)
         }
 
         filtered.push(idx);
@@ -189,10 +193,10 @@ pub(super) fn format_exact_number(n: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::{build_filtered_indices, extract_drive_letter};
-    use crate::app::global_search_state::GlobalSearchCategory;
+    use crate::app::global_search_state::{CreatedMetadataState, GlobalSearchCategory};
     use mtt_search_protocol::SearchResultItem;
 
-    fn empty_cache() -> Vec<Option<u64>> {
+    fn empty_cache() -> Vec<CreatedMetadataState> {
         Vec::new()
     }
 
@@ -302,14 +306,14 @@ mod tests {
     }
 
     #[test]
-    fn created_date_filter_permissive_on_missing_cache() {
+    fn created_date_filter_includes_pending_metadata() {
         let results = vec![SearchResultItem {
             name: "file.txt".to_string(),
             full_path: r"C:\file.txt".to_string(),
             is_dir: false,
             size: 100,
         }];
-        let cache = vec![None]; // no cached created_ts
+        let cache = vec![CreatedMetadataState::Pending];
 
         let filtered = build_filtered_indices(
             &results,
@@ -321,8 +325,31 @@ mod tests {
             None,
             &cache,
         );
-        // Permissive: item with unknown created_ts is included
+        // Keep pending items visible while async metadata is loading.
         assert_eq!(filtered, vec![0]);
+    }
+
+    #[test]
+    fn created_date_filter_excludes_unavailable_metadata() {
+        let results = vec![SearchResultItem {
+            name: "file.txt".to_string(),
+            full_path: r"C:\file.txt".to_string(),
+            is_dir: false,
+            size: 100,
+        }];
+        let cache = vec![CreatedMetadataState::Unavailable];
+
+        let filtered = build_filtered_indices(
+            &results,
+            GlobalSearchCategory::All,
+            None,
+            None,
+            None,
+            Some(1000),
+            None,
+            &cache,
+        );
+        assert!(filtered.is_empty());
     }
 
     #[test]
@@ -341,7 +368,10 @@ mod tests {
                 size: 200,
             },
         ];
-        let cache = vec![Some(500), Some(2000)]; // old=500, new=2000
+        let cache = vec![
+            CreatedMetadataState::Available(500),
+            CreatedMetadataState::Available(2000),
+        ];
 
         let filtered = build_filtered_indices(
             &results,
