@@ -8,9 +8,9 @@ use std::cell::RefCell;
 use std::path::PathBuf;
 
 // M-12: Per-frame cache for "current folder" FileEntry (when no file is selected).
-// Keyed by (current_path, modified_hint); invalidated on navigation or folder update.
+// Keyed by (current_path, modified_hint, created_hint); invalidated on navigation or folder update.
 thread_local! {
-    static FOLDER_ENTRY_CACHE: RefCell<Option<(String, u64, FileEntry)>> = RefCell::new(None);
+    static FOLDER_ENTRY_CACHE: RefCell<Option<(String, u64, u64, FileEntry)>> = RefCell::new(None);
 }
 
 pub(super) fn render_preview_panel_layout(
@@ -323,9 +323,25 @@ fn calculate_effective_file(app: &ImageViewerApp) -> Option<FileEntry> {
                 }
             })
             .unwrap_or(0u64);
+        let created_hint = app
+            .current_folder_created_hint
+            .as_ref()
+            .and_then(|(hp, created)| {
+                if hp.to_string_lossy() == app.navigation_state.current_path.as_str()
+                    && *created > 0
+                {
+                    Some(*created)
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(0u64);
         let cache_hit = FOLDER_ENTRY_CACHE.with(|c| {
-            c.borrow().as_ref().and_then(|(cp, cm, e)| {
-                if cp == &app.navigation_state.current_path && *cm == mod_hint {
+            c.borrow().as_ref().and_then(|(cp, cm, cc, e)| {
+                if cp == &app.navigation_state.current_path
+                    && *cm == mod_hint
+                    && *cc == created_hint
+                {
                     Some(e.clone())
                 } else {
                     None
@@ -354,7 +370,7 @@ fn calculate_effective_file(app: &ImageViewerApp) -> Option<FileEntry> {
             is_dir: true,
             size: 0,
             modified: current_folder_modified,
-            created: None,
+            created: Some(created_hint).filter(|&created| created > 0),
             folder_cover: None,
             drive_info: None,
             sync_status: SyncStatus::None,
@@ -422,6 +438,7 @@ fn calculate_effective_file(app: &ImageViewerApp) -> Option<FileEntry> {
             *c.borrow_mut() = Some((
                 app.navigation_state.current_path.clone(),
                 mod_hint,
+                created_hint,
                 entry.clone(),
             ));
         });

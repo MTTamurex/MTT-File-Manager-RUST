@@ -76,10 +76,15 @@ pub struct ImageViewerApp {
     /// Filled at navigation time from the already selected/listed folder entry
     /// to avoid blocking filesystem calls in the render loop.
     pub current_folder_modified_hint: Option<(PathBuf, u64)>,
+    /// Last known creation timestamp for the currently browsed folder.
+    /// Filled alongside current_folder_modified_hint for the details panel.
+    pub current_folder_created_hint: Option<(PathBuf, u64)>,
     /// Cache of known folder modified timestamps by folder path.
     /// Used to preserve "Data modificada" in preview panel across back/forward navigation.
     /// Bounded to 500 entries via LRU eviction to prevent unbounded growth.
     pub folder_modified_hints: lru::LruCache<PathBuf, u64>,
+    /// Cache of known folder creation timestamps by folder path.
+    pub folder_created_hints: lru::LruCache<PathBuf, u64>,
     pub loaded_path: String, // Tracks the last path we actually requested (prevents spam)
 
     // --- OPTIMIZED THUMBNAIL SYSTEM ---

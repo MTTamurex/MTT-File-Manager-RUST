@@ -85,27 +85,44 @@ impl ImageViewerApp {
             || self.pending_items_count >= REBUILD_PENDING_THRESHOLD
     }
 
-    fn hydrate_current_folder_modified_hint_after_load(&mut self) {
+    fn hydrate_current_folder_timestamp_hints_after_load(&mut self) {
         if self.navigation_state.is_computer_view || self.navigation_state.is_recycle_bin_view {
             return;
         }
 
-        if self
-            .current_folder_modified_hint
-            .as_ref()
-            .is_some_and(|(path, modified)| {
-                path == &PathBuf::from(&self.navigation_state.current_path) && *modified > 0
-            })
-        {
-            return;
-        }
+        let has_modified_hint =
+            self.current_folder_modified_hint
+                .as_ref()
+                .is_some_and(|(path, modified)| {
+                    path == &PathBuf::from(&self.navigation_state.current_path) && *modified > 0
+                });
+
+        let has_created_hint =
+            self.current_folder_created_hint
+                .as_ref()
+                .is_some_and(|(path, created)| {
+                    path == &PathBuf::from(&self.navigation_state.current_path) && *created > 0
+                });
 
         let current_path = PathBuf::from(&self.navigation_state.current_path);
-        if let Some(modified) = self.folder_modified_hints.peek(&current_path).copied() {
-            if modified > 0 {
-                self.current_folder_modified_hint = Some((current_path, modified));
+        if !has_modified_hint {
+            if let Some(modified) = self.folder_modified_hints.peek(&current_path).copied() {
+                if modified > 0 {
+                    self.current_folder_modified_hint = Some((current_path.clone(), modified));
+                }
             }
         }
+        if !has_created_hint {
+            if let Some(created) = self.folder_created_hints.peek(&current_path).copied() {
+                if created > 0 {
+                    self.current_folder_created_hint = Some((current_path, created));
+                }
+            }
+        }
+    }
+
+    fn hydrate_current_folder_modified_hint_after_load(&mut self) {
+        self.hydrate_current_folder_timestamp_hints_after_load();
     }
 
     fn build_sorted_items_snapshot(&self) -> Vec<crate::domain::file_entry::FileEntry> {

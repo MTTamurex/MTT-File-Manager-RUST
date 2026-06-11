@@ -236,7 +236,9 @@ impl ImageViewerApp {
         let mut app = Self {
             navigation_state: NavigationState::new(initial_path.clone(), is_computer_view_initial),
             current_folder_modified_hint: None,
+            current_folder_created_hint: None,
             folder_modified_hints: lru::LruCache::new(std::num::NonZeroUsize::new(500).unwrap()),
+            folder_created_hints: lru::LruCache::new(std::num::NonZeroUsize::new(500).unwrap()),
             loaded_path: String::new(), // Start empty - will be set when first folder loads
             thumbnail_queue,
             image_receiver: img_rx,
@@ -641,7 +643,15 @@ impl ImageViewerApp {
                     if let Ok(duration) = modified_time.duration_since(std::time::UNIX_EPOCH) {
                         let secs = duration.as_secs();
                         if secs > 0 {
-                            app.current_folder_modified_hint = Some((dest, secs));
+                            app.current_folder_modified_hint = Some((dest.clone(), secs));
+                        }
+                    }
+                }
+                if let Ok(created_time) = meta.created() {
+                    if let Ok(duration) = created_time.duration_since(std::time::UNIX_EPOCH) {
+                        let secs = duration.as_secs();
+                        if secs > 0 {
+                            app.current_folder_created_hint = Some((dest, secs));
                         }
                     }
                 }

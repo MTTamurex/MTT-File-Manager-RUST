@@ -10,10 +10,15 @@ use crate::domain::special_paths::{COMPUTER_VIEW_ID, RECYCLE_BIN_VIEW_ID};
 use std::path::{Path, PathBuf};
 
 impl ImageViewerApp {
-    fn remember_current_folder_modified_hint(&mut self) {
+    fn remember_current_folder_timestamp_hints(&mut self) {
         if let Some((path, modified)) = self.current_folder_modified_hint.as_ref() {
             if *modified > 0 {
                 self.folder_modified_hints.put(path.clone(), *modified);
+            }
+        }
+        if let Some((path, created)) = self.current_folder_created_hint.as_ref() {
+            if *created > 0 {
+                self.folder_created_hints.put(path.clone(), *created);
             }
         }
     }
@@ -45,6 +50,36 @@ impl ImageViewerApp {
             })
     }
 
+    fn resolve_destination_folder_created_hint(
+        &self,
+        destination_path: &Path,
+    ) -> Option<(PathBuf, u64)> {
+        self.items
+            .iter()
+            .find(|item| item.is_dir && item.path == destination_path)
+            .and_then(|item| item.created.map(|created| (item.path.clone(), created)))
+            .filter(|(_, created)| *created > 0)
+            .or_else(|| {
+                self.selected_file.as_ref().and_then(|selected| {
+                    if selected.is_dir && selected.path == destination_path {
+                        selected
+                            .created
+                            .map(|created| (selected.path.clone(), created))
+                    } else {
+                        None
+                    }
+                })
+            })
+            .filter(|(_, created)| *created > 0)
+            .or_else(|| {
+                self.folder_created_hints
+                    .peek(destination_path)
+                    .copied()
+                    .filter(|created| *created > 0)
+                    .map(|created| (destination_path.to_path_buf(), created))
+            })
+    }
+
     pub fn navigate_to(&mut self, path: &str) {
         // Normalize drive root paths: ensure "Z:" always becomes "Z:\"
         // This fixes the PathBuf::join bug of not adding a backslash
@@ -68,7 +103,7 @@ impl ImageViewerApp {
             return;
         }
 
-        self.remember_current_folder_modified_hint();
+        self.remember_current_folder_timestamp_hints();
 
         // Keep the folder "Data modificada" visible in preview panel after entering a folder.
         // Reuse the timestamp already present in current list/selection instead of doing
@@ -76,6 +111,8 @@ impl ImageViewerApp {
         let destination_path = PathBuf::from(&normalized_path);
         self.current_folder_modified_hint =
             self.resolve_destination_folder_modified_hint(&destination_path);
+        self.current_folder_created_hint =
+            self.resolve_destination_folder_created_hint(&destination_path);
 
         // Fallback for pinned sidebar shortcuts pointing to never-visited folders:
         // resolve_destination_folder_modified_hint only knows about folders already seen
@@ -133,7 +170,7 @@ impl ImageViewerApp {
 
     pub fn go_back(&mut self) {
         if let Some(path) = self.navigation_state.navigation.go_back().cloned() {
-            self.remember_current_folder_modified_hint();
+            self.remember_current_folder_timestamp_hints();
 
             // Cancel pending batch folder-size calculations for the old folder.
             self.folder_size_state.cancel_batch();
@@ -160,6 +197,8 @@ impl ImageViewerApp {
                 let new_path = std::path::PathBuf::from(&path);
                 self.current_folder_modified_hint =
                     self.resolve_destination_folder_modified_hint(&new_path);
+                self.current_folder_created_hint =
+                    self.resolve_destination_folder_created_hint(&new_path);
 
                 // If we were in a subfolder of the destination, invalidate that subfolder's preview
                 if previous_path.starts_with(&new_path) && previous_path != new_path {
@@ -195,7 +234,7 @@ impl ImageViewerApp {
     /// Moves forward in history
     pub fn go_forward(&mut self) {
         if let Some(path) = self.navigation_state.navigation.go_forward().cloned() {
-            self.remember_current_folder_modified_hint();
+            self.remember_current_folder_timestamp_hints();
 
             // Cancel pending batch folder-size calculations for the old folder.
             self.folder_size_state.cancel_batch();
@@ -222,6 +261,8 @@ impl ImageViewerApp {
                 let new_path = std::path::PathBuf::from(&path);
                 self.current_folder_modified_hint =
                     self.resolve_destination_folder_modified_hint(&new_path);
+                self.current_folder_created_hint =
+                    self.resolve_destination_folder_created_hint(&new_path);
 
                 // If we were in a subfolder of the destination, invalidate that subfolder's preview
                 if previous_path.starts_with(&new_path) && previous_path != new_path {
