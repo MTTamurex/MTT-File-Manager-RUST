@@ -164,6 +164,28 @@ pub(super) fn render_item_tooltip(
                                 render_drive_tooltip(ui, item);
                                 return;
                             }
+                            // Thumbnail preview for media files
+                            if !item.is_dir && item.is_media() {
+                                if let Some(tex) = ctx.texture_cache.get(&item.path).cloned() {
+                                    let tex_size = tex.size_vec2();
+                                    let max_w = 280.0_f32;
+                                    let max_h = 180.0_f32;
+                                    let scale =
+                                        (max_w / tex_size.x).min(max_h / tex_size.y).min(1.0);
+                                    let display_size =
+                                        egui::vec2(tex_size.x * scale, tex_size.y * scale);
+                                    ui.with_layout(
+                                        egui::Layout::top_down(egui::Align::Center),
+                                        |ui| {
+                                            ui.add(
+                                                egui::Image::new(&tex)
+                                                    .fit_to_exact_size(display_size),
+                                            );
+                                        },
+                                    );
+                                    ui.add_space(4.0);
+                                }
+                            }
                             ui.horizontal(|ui| {
                                 ui.label(t!("file_info.type"));
                                 ui.label(get_file_type_string(item));
