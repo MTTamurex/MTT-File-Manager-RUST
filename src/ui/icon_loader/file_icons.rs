@@ -215,6 +215,15 @@ impl IconLoader {
                 return Some(texture.clone());
             }
 
+            // Cross-size fallback: async worker stores _Jumbo only in icon_cache.
+            // If caller requests Large (list view), the _Jumbo result still serves it.
+            if size != IconSize::Jumbo {
+                let jumbo_key = make_cache_key(path, IconSize::Jumbo);
+                if let Some(texture) = self.icon_cache.get(&jumbo_key) {
+                    return Some(texture.clone());
+                }
+            }
+
             // PERF FIX (A-4): Non-blocking callers skip Shell Namespace calls on virtual paths.
             if !allow_blocking {
                 return None;
@@ -283,6 +292,16 @@ impl IconLoader {
             let cache_key = make_cache_key(path, size);
             if let Some(texture) = self.icon_cache.get(&cache_key) {
                 return Some(texture.clone());
+            }
+
+            // Cross-size fallback: async worker stores _Jumbo only in icon_cache.
+            // Extensionless files have no extension_cache entry, so this is the
+            // only way to resolve them after async extraction completes.
+            if size != IconSize::Jumbo {
+                let jumbo_key = make_cache_key(path, IconSize::Jumbo);
+                if let Some(texture) = self.icon_cache.get(&jumbo_key) {
+                    return Some(texture.clone());
+                }
             }
 
             // Extension not cached yet. For non-blocking callers (render loop),
