@@ -69,10 +69,7 @@ pub fn open_with_dialog(path: &Path, hwnd: HWND) -> Result<()> {
         if !success.is_ok() {
             return Err(Error::new(
                 E_FAIL,
-                format!(
-                    "ShellExecuteExW 'openas' failed for path {:?}",
-                    path
-                ),
+                format!("ShellExecuteExW 'openas' failed for path {:?}", path),
             ));
         }
 

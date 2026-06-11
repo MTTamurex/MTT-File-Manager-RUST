@@ -23,17 +23,17 @@ pub struct RecycleBinMeta {
 #[derive(Clone, Debug)]
 pub struct FileEntry {
     pub path: PathBuf,
-    pub name: String,                             // Cached name for fast sorting
-    pub is_dir: bool,                             // Folders first
-    pub size: u64,                                // Size in bytes (0 for directories)
-    pub modified: u64,                            // Timestamp (seconds since UNIX_EPOCH)
+    pub name: String,  // Cached name for fast sorting
+    pub is_dir: bool,  // Folders first
+    pub size: u64,     // Size in bytes (0 for directories)
+    pub modified: u64, // Timestamp (seconds since UNIX_EPOCH)
     /// Creation timestamp (seconds since UNIX_EPOCH), if available.
     /// `None` for recycle-bin items, DirectoryIndex cached entries, and shell folder entries.
     pub created: Option<u64>,
-    pub folder_cover: Option<PathBuf>,            // First image found in the folder (for preview)
-    pub drive_info: Option<DriveInfo>,            // Drive metadata (optional)
-    pub sync_status: SyncStatus,                  // OneDrive sync status
-    pub is_hidden: bool,                          // Windows FILE_ATTRIBUTE_HIDDEN
+    pub folder_cover: Option<PathBuf>, // First image found in the folder (for preview)
+    pub drive_info: Option<DriveInfo>, // Drive metadata (optional)
+    pub sync_status: SyncStatus,       // OneDrive sync status
+    pub is_hidden: bool,               // Windows FILE_ATTRIBUTE_HIDDEN
     pub recycle_bin: Option<Box<RecycleBinMeta>>, // Recycle Bin metadata (boxed, only set for recycle items)
 }
 

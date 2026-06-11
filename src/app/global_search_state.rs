@@ -481,8 +481,7 @@ impl GlobalSearchState {
         self.sync_created_metadata_len();
         let mut updated = false;
         for idx in 0..self.results.len() {
-            if self.results[idx].full_path == path && self.created_ts_cache[idx] != created_ts
-            {
+            if self.results[idx].full_path == path && self.created_ts_cache[idx] != created_ts {
                 self.created_ts_cache[idx] = created_ts;
                 updated = true;
             }

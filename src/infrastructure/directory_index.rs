@@ -121,6 +121,14 @@ impl DirectoryIndex {
             .filter_map(|r| r.ok())
             .collect();
 
+        if has_legacy_created_metadata(&files) {
+            log::debug!(
+                "[DirectoryIndex] Ignoring legacy cache without created_time for {}",
+                dir_str
+            );
+            return None;
+        }
+
         Some((meta, files))
     }
 
@@ -166,6 +174,14 @@ impl DirectoryIndex {
             .ok()?
             .filter_map(|r| r.ok())
             .collect();
+
+        if has_legacy_created_metadata(&files) {
+            log::debug!(
+                "[DirectoryIndex] Ignoring legacy cache without created_time for {}",
+                dir_str
+            );
+            return None;
+        }
 
         Some((meta, files))
     }
@@ -266,5 +282,52 @@ impl DirectoryIndex {
             .ok()?;
 
         Some((dir_count as usize, file_count as usize))
+    }
+}
+
+fn has_legacy_created_metadata(files: &[IndexedFile]) -> bool {
+    files.iter().any(|file| file.created == 0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn indexed_file(created: u64) -> IndexedFile {
+        IndexedFile {
+            name: "file.txt".to_string(),
+            size: 10,
+            modified: 1_700_000_000,
+            is_dir: false,
+            created,
+        }
+    }
+
+    #[test]
+    fn get_directory_rejects_legacy_rows_without_created_time() {
+        let temp = tempfile::tempdir().unwrap();
+        let index = DirectoryIndex::open(&temp.path().join("directory_cache.db")).unwrap();
+        let dir = temp.path().join("folder");
+
+        index.put_directory(&dir, &[indexed_file(0)], 1).unwrap();
+
+        assert!(index.get_directory(&dir).is_none());
+        assert!(index.try_get_directory(&dir).is_none());
+    }
+
+    #[test]
+    fn get_directory_returns_rows_with_created_time() {
+        let temp = tempfile::tempdir().unwrap();
+        let index = DirectoryIndex::open(&temp.path().join("directory_cache.db")).unwrap();
+        let dir = temp.path().join("folder");
+
+        index
+            .put_directory(&dir, &[indexed_file(1_600_000_000)], 1)
+            .unwrap();
+
+        let (_, files) = index.get_directory(&dir).unwrap();
+
+        assert_eq!(files.len(), 1);
+        assert_eq!(files[0].created, 1_600_000_000);
     }
 }

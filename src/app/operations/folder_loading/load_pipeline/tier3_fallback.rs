@@ -255,9 +255,8 @@ pub(super) fn run_tier3_fallback(
                         };
 
                         let ft_created = find_data.ftCreationTime;
-                        let created_ticks =
-                            ((ft_created.dwHighDateTime as u64) << 32)
-                                | (ft_created.dwLowDateTime as u64);
+                        let created_ticks = ((ft_created.dwHighDateTime as u64) << 32)
+                            | (ft_created.dwLowDateTime as u64);
                         let created = if created_ticks > 116444736000000000 {
                             Some((created_ticks - 116444736000000000) / 10_000_000)
                                 .filter(|&c| c > 0)

@@ -61,21 +61,20 @@ pub(super) fn render_list_item(
             // resolution.  Grid view uses MIN_GRID_THUMBNAIL_BUCKET (512)
             // as the floor; list view does the same.
             let ppp = ui.ctx().pixels_per_point().max(1.0);
-            let display_request_size_px: u32 =
-                if ctx.show_preview_panel && is_selected_for_preview {
-                    crate::domain::thumbnail::detail_preview_size(&item.path)
-                } else {
-                    // List rows don't show thumbnails — the display size is
-                    // irrelevant.  Use a minimal size; the bucket floor
-                    // below will upgrade it to 512.
-                    1
-                };
-            let display_effective_size_px =
-                ((display_request_size_px as f32) * ppp).ceil() as u32;
+            let display_request_size_px: u32 = if ctx.show_preview_panel && is_selected_for_preview
+            {
+                crate::domain::thumbnail::detail_preview_size(&item.path)
+            } else {
+                // List rows don't show thumbnails — the display size is
+                // irrelevant.  Use a minimal size; the bucket floor
+                // below will upgrade it to 512.
+                1
+            };
+            let display_effective_size_px = ((display_request_size_px as f32) * ppp).ceil() as u32;
             let display_bucket =
                 crate::workers::thumbnail::processing::get_bucket_size(display_effective_size_px);
-            let desired_thumbnail_bucket = display_bucket
-                .max(crate::ui::theme::MIN_GRID_THUMBNAIL_BUCKET);
+            let desired_thumbnail_bucket =
+                display_bucket.max(crate::ui::theme::MIN_GRID_THUMBNAIL_BUCKET);
             let min_effective_size_for_bucket = match desired_thumbnail_bucket {
                 0..=128 => 1,
                 129..=256 => 129,
@@ -84,8 +83,7 @@ pub(super) fn render_list_item(
             };
             let min_request_size_for_bucket =
                 ((min_effective_size_for_bucket as f32) / ppp).ceil() as u32;
-            let request_size_px =
-                display_request_size_px.max(min_request_size_for_bucket);
+            let request_size_px = display_request_size_px.max(min_request_size_for_bucket);
 
             let attempted_bucket = ctx.attempted_thumbnail_bucket.get(&item.path).copied();
             let needs_bucket_refresh = match attempted_bucket {

@@ -503,9 +503,10 @@ impl ImageViewerApp {
         let items = &mut self.context_menu.items;
 
         // Remove the Open with placeholder before inserting the real item
-        if let Some(idx) = items.iter().position(|i| {
-            i.command_string.as_deref() == Some("openwith_placeholder")
-        }) {
+        if let Some(idx) = items
+            .iter()
+            .position(|i| i.command_string.as_deref() == Some("openwith_placeholder"))
+        {
             items.remove(idx);
         }
 
