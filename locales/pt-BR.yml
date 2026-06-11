@@ -395,6 +395,9 @@ drag_drop:
 panels:
   loading: "Carregando..."
   empty_folder: "Pasta vazia"
+  folder_access_denied: "Sem permissão para acessar esta pasta"
+  folder_not_found: "Pasta não encontrada"
+  folder_load_failed: "Não foi possível abrir esta pasta"
   updating: "Atualizando..."
   no_selection: "Nenhum item selecionado"
   select_hint: "Selecione algo para ver detalhes"

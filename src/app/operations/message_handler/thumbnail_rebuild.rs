@@ -268,6 +268,7 @@ impl ImageViewerApp {
 
     pub(super) fn handle_items_after_end_of_load(&mut self, ctx: &egui::Context) {
         self.is_loading_folder = false;
+        self.folder_load_error = None;
         self.file_operation_state.pending_deletions.clear();
         self.invalidate_active_items_rebuild();
         self.hydrate_current_folder_modified_hint_after_load();

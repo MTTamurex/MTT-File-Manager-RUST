@@ -395,6 +395,9 @@ drag_drop:
 panels:
   loading: "Loading..."
   empty_folder: "Empty folder"
+  folder_access_denied: "You don't have permission to access this folder"
+  folder_not_found: "Folder not found"
+  folder_load_failed: "Could not open this folder"
   updating: "Updating..."
   no_selection: "No item selected"
   select_hint: "Select something to see details"

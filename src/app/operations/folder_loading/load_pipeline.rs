@@ -172,7 +172,13 @@ impl ImageViewerApp {
                 "[FolderLoad] Failed to spawn folder-load-pipeline thread: {}",
                 e
             );
-            let _ = spawn_failure_sender.send((my_gen, spawn_failure_path));
+            let _ = spawn_failure_sender.send((
+                my_gen,
+                crate::app::state::FolderLoadError::other(
+                    spawn_failure_path,
+                    format!("Failed to spawn folder-load-pipeline thread: {e}"),
+                ),
+            ));
             spawn_failure_ctx.request_repaint();
         }
     }

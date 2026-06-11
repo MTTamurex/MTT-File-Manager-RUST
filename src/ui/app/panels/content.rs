@@ -808,6 +808,7 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
 /// Render a single panel's content (loading / empty / grid or list view).
 /// Extracted so it can be used by both single and dual panel modes.
 fn render_single_panel_content(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
+    use crate::app::state::FolderLoadErrorKind;
     use crate::domain::file_entry::ViewMode;
 
     let file_panel_input_blocked = app.file_panel_input_blocked_by_drag_move_confirmation();
@@ -837,6 +838,23 @@ fn render_single_panel_content(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
                 app.complete_item_drag(ctrl, shift);
             }
         }
+    } else if let Some(load_error) = &app.folder_load_error {
+        let message = match load_error.kind {
+            FolderLoadErrorKind::AccessDenied => rust_i18n::t!("panels.folder_access_denied"),
+            FolderLoadErrorKind::NotFound => rust_i18n::t!("panels.folder_not_found"),
+            FolderLoadErrorKind::Other => rust_i18n::t!("panels.folder_load_failed"),
+        };
+        ui.centered_and_justified(|ui| {
+            ui.vertical_centered(|ui| {
+                ui.label(message.to_string());
+                ui.add_space(4.0);
+                ui.label(
+                    egui::RichText::new(load_error.path.display().to_string())
+                        .size(11.0)
+                        .color(egui::Color32::from_gray(130)),
+                );
+            });
+        });
     } else if app.items.is_empty() {
         let response = ui
             .centered_and_justified(|ui| {

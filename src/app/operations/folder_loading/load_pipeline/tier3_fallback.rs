@@ -14,7 +14,23 @@ use std::sync::mpsc::Sender;
 use std::sync::Arc;
 use std::time::Instant;
 use windows::core::PCWSTR;
+use windows::Win32::Foundation::{ERROR_ACCESS_DENIED, ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND};
 use windows::Win32::Storage::FileSystem::*;
+
+fn classify_directory_open_error(
+    path: PathBuf,
+    error: windows::core::Error,
+) -> crate::app::state::FolderLoadError {
+    let code = error.code();
+    if code == ERROR_ACCESS_DENIED.to_hresult() {
+        crate::app::state::FolderLoadError::access_denied(path)
+    } else if code == ERROR_PATH_NOT_FOUND.to_hresult() || code == ERROR_FILE_NOT_FOUND.to_hresult()
+    {
+        crate::app::state::FolderLoadError::not_found(path)
+    } else {
+        crate::app::state::FolderLoadError::other(path, error.to_string())
+    }
+}
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn run_tier3_fallback(
@@ -30,7 +46,7 @@ pub(super) fn run_tier3_fallback(
     batch: &mut Vec<FileEntry>,
     all_entries_disk: &mut Vec<FileEntry>,
     file_entry_sender: &Sender<(usize, Vec<FileEntry>)>,
-    folder_load_failure_sender: &Sender<(usize, PathBuf)>,
+    folder_load_failure_sender: &Sender<(usize, crate::app::state::FolderLoadError)>,
     ctx: &egui::Context,
     _disk_cache: &Arc<ThumbnailDiskCache>,
     app_state_db: &Arc<AppStateDb>,
@@ -198,134 +214,152 @@ pub(super) fn run_tier3_fallback(
 
     unsafe {
         // SAFETY: `wide_path` is a null-terminated UTF-16 string buffer.
-        if let Ok(handle) = FindFirstFileW(PCWSTR(wide_path.as_ptr()), &mut find_data) {
-            loop {
-                if gen_clone.load(AtomicOrdering::Relaxed) != my_gen {
-                    break;
-                }
+        match FindFirstFileW(PCWSTR(wide_path.as_ptr()), &mut find_data) {
+            Ok(handle) => {
+                loop {
+                    if gen_clone.load(AtomicOrdering::Relaxed) != my_gen {
+                        break;
+                    }
 
-                let len = find_data
-                    .cFileName
-                    .iter()
-                    .position(|&c| c == 0)
-                    .unwrap_or(find_data.cFileName.len());
-                let filename = std::ffi::OsString::from_wide(&find_data.cFileName[0..len])
-                    .to_string_lossy()
-                    .into_owned();
+                    let len = find_data
+                        .cFileName
+                        .iter()
+                        .position(|&c| c == 0)
+                        .unwrap_or(find_data.cFileName.len());
+                    let filename = std::ffi::OsString::from_wide(&find_data.cFileName[0..len])
+                        .to_string_lossy()
+                        .into_owned();
 
-                if filename != "." && filename != ".." {
-                    let attrs = find_data.dwFileAttributes;
-                    let full_path = PathBuf::from(base_path).join(&filename);
-                    let extended_attrs = attrs;
+                    if filename != "." && filename != ".." {
+                        let attrs = find_data.dwFileAttributes;
+                        let full_path = PathBuf::from(base_path).join(&filename);
+                        let extended_attrs = attrs;
 
-                    let is_hidden = (extended_attrs & FILE_ATTRIBUTE_HIDDEN.0) != 0;
-                    let is_system = (extended_attrs & FILE_ATTRIBUTE_SYSTEM.0) != 0;
-                    let is_special = matches!(
-                        filename.to_lowercase().as_str(),
-                        "desktop.ini" | "thumbs.db" | "$recycle.bin" | "system volume information"
-                    );
+                        let is_hidden = (extended_attrs & FILE_ATTRIBUTE_HIDDEN.0) != 0;
+                        let is_system = (extended_attrs & FILE_ATTRIBUTE_SYSTEM.0) != 0;
+                        let is_special = matches!(
+                            filename.to_lowercase().as_str(),
+                            "desktop.ini"
+                                | "thumbs.db"
+                                | "$recycle.bin"
+                                | "system volume information"
+                        );
 
-                    if (show_hidden || !is_hidden)
-                        && !is_system
-                        && !is_special
-                        && !filename.starts_with('.')
-                    {
-                        let mut is_dir = (extended_attrs & FILE_ATTRIBUTE_DIRECTORY.0) != 0;
+                        if (show_hidden || !is_hidden)
+                            && !is_system
+                            && !is_special
+                            && !filename.starts_with('.')
+                        {
+                            let mut is_dir = (extended_attrs & FILE_ATTRIBUTE_DIRECTORY.0) != 0;
 
-                        // Treat archive files as navigable folders.
-                        let is_archive = is_archive_extension(&filename);
-                        if !is_dir && is_archive {
-                            is_dir = true;
-                        }
+                            // Treat archive files as navigable folders.
+                            let is_archive = is_archive_extension(&filename);
+                            if !is_dir && is_archive {
+                                is_dir = true;
+                            }
 
-                        let size = if is_dir && !is_archive {
-                            0
-                        } else {
-                            ((find_data.nFileSizeHigh as u64) << 32)
-                                | (find_data.nFileSizeLow as u64)
-                        };
+                            let size = if is_dir && !is_archive {
+                                0
+                            } else {
+                                ((find_data.nFileSizeHigh as u64) << 32)
+                                    | (find_data.nFileSizeLow as u64)
+                            };
 
-                        let ft = find_data.ftLastWriteTime;
-                        let windows_ticks =
-                            ((ft.dwHighDateTime as u64) << 32) | (ft.dwLowDateTime as u64);
-                        let modified = if windows_ticks > 116444736000000000 {
-                            (windows_ticks - 116444736000000000) / 10_000_000
-                        } else {
-                            0
-                        };
+                            let ft = find_data.ftLastWriteTime;
+                            let windows_ticks =
+                                ((ft.dwHighDateTime as u64) << 32) | (ft.dwLowDateTime as u64);
+                            let modified = if windows_ticks > 116444736000000000 {
+                                (windows_ticks - 116444736000000000) / 10_000_000
+                            } else {
+                                0
+                            };
 
-                        let ft_created = find_data.ftCreationTime;
-                        let created_ticks = ((ft_created.dwHighDateTime as u64) << 32)
-                            | (ft_created.dwLowDateTime as u64);
-                        let created = if created_ticks > 116444736000000000 {
-                            Some((created_ticks - 116444736000000000) / 10_000_000)
-                                .filter(|&c| c > 0)
-                        } else {
-                            None
-                        };
+                            let ft_created = find_data.ftCreationTime;
+                            let created_ticks = ((ft_created.dwHighDateTime as u64) << 32)
+                                | (ft_created.dwLowDateTime as u64);
+                            let created = if created_ticks > 116444736000000000 {
+                                Some((created_ticks - 116444736000000000) / 10_000_000)
+                                    .filter(|&c| c > 0)
+                            } else {
+                                None
+                            };
 
-                        let sync_status = onedrive::get_sync_status(extended_attrs, is_onedrive);
+                            let sync_status =
+                                onedrive::get_sync_status(extended_attrs, is_onedrive);
 
-                        let entry = FileEntry {
-                            path: full_path,
-                            name: filename,
-                            is_dir,
-                            size,
-                            modified,
-                            created,
-                            folder_cover: None,
-                            drive_info: None,
-                            sync_status,
-                            is_hidden,
-                            recycle_bin: None,
-                        };
+                            let entry = FileEntry {
+                                path: full_path,
+                                name: filename,
+                                is_dir,
+                                size,
+                                modified,
+                                created,
+                                folder_cover: None,
+                                drive_info: None,
+                                sync_status,
+                                is_hidden,
+                                recycle_bin: None,
+                            };
 
-                        all_entries_disk.push(entry.clone());
-                        batch.push(entry);
+                            all_entries_disk.push(entry.clone());
+                            batch.push(entry);
 
-                        // If batch is full, send and clear.
-                        if batch.len() >= *batch_size {
-                            let folders: Vec<PathBuf> = batch
-                                .iter()
-                                .filter(|e| e.is_dir)
-                                .map(|e| e.path.clone())
-                                .collect();
+                            // If batch is full, send and clear.
+                            if batch.len() >= *batch_size {
+                                let folders: Vec<PathBuf> = batch
+                                    .iter()
+                                    .filter(|e| e.is_dir)
+                                    .map(|e| e.path.clone())
+                                    .collect();
 
-                            if !folders.is_empty() {
-                                let covers = app_state_db.get_folder_covers(&folders);
-                                for item in batch.iter_mut() {
-                                    if item.is_dir {
-                                        if let Some(cover) = covers.get(&item.path) {
-                                            item.folder_cover = Some(cover.clone());
+                                if !folders.is_empty() {
+                                    let covers = app_state_db.get_folder_covers(&folders);
+                                    for item in batch.iter_mut() {
+                                        if item.is_dir {
+                                            if let Some(cover) = covers.get(&item.path) {
+                                                item.folder_cover = Some(cover.clone());
+                                            }
                                         }
                                     }
                                 }
-                            }
 
-                            let batch_len = batch.len();
-                            let _ = file_entry_sender.send((my_gen, std::mem::take(batch)));
-                            batch_tracker.record_batch(batch_start.elapsed(), batch_len);
-                            *batch_size = batch_tracker.batch_size();
-                            *batch_start = std::time::Instant::now();
-                            ctx.request_repaint();
+                                let batch_len = batch.len();
+                                let _ = file_entry_sender.send((my_gen, std::mem::take(batch)));
+                                batch_tracker.record_batch(batch_start.elapsed(), batch_len);
+                                *batch_size = batch_tracker.batch_size();
+                                *batch_start = std::time::Instant::now();
+                                ctx.request_repaint();
+                            }
                         }
                     }
-                }
 
-                if FindNextFileW(handle, &mut find_data).is_err() {
-                    break;
+                    if FindNextFileW(handle, &mut find_data).is_err() {
+                        break;
+                    }
                 }
+                let _ = FindClose(handle);
             }
-            let _ = FindClose(handle);
-        } else {
-            let base_path_buf = PathBuf::from(base_path);
-            if !crate::infrastructure::onedrive::fast_is_dir(&base_path_buf) {
-                log::warn!(
-                    "[FOLDER-LOADING] Directory vanished during load: {:?}",
-                    base_path_buf
-                );
-                let _ = folder_load_failure_sender.send((my_gen, base_path_buf));
+            Err(error) => {
+                let base_path_buf = PathBuf::from(base_path);
+                let failure = if !crate::infrastructure::onedrive::fast_is_dir(&base_path_buf) {
+                    log::warn!(
+                        "[FOLDER-LOADING] Directory vanished during load: {:?}",
+                        base_path_buf
+                    );
+                    crate::app::state::FolderLoadError::not_found(base_path_buf)
+                } else {
+                    let failure = classify_directory_open_error(base_path_buf, error);
+                    log::warn!(
+                        "[FOLDER-LOADING] Directory enumeration failed: kind={:?} path={} message={:?}",
+                        failure.kind,
+                        failure.path.display(),
+                        failure.message
+                    );
+                    failure
+                };
+                let _ = folder_load_failure_sender.send((my_gen, failure));
                 ctx.request_repaint();
+                return;
             }
         }
     }

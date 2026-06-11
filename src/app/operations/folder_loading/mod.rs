@@ -54,6 +54,7 @@ impl ImageViewerApp {
             self.total_items = 0;
         }
         self.is_loading_folder = true;
+        self.folder_load_error = None;
         self.loading_started_at = std::time::Instant::now();
         self.pending_items_rebuild = false;
         self.pending_items_count = 0;

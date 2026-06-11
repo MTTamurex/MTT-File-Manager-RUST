@@ -41,6 +41,7 @@ impl ImageViewerApp {
         self.current_folder_locked = false;
 
         self.is_loading_folder = true;
+        self.folder_load_error = None;
         self.items = Arc::new(Vec::new());
         self.all_items_mut().clear();
         self.total_items = 0;
@@ -227,6 +228,7 @@ impl ImageViewerApp {
         self.reset_selection_and_search();
         self.total_items = self.drive_state.disks.len();
         self.is_loading_folder = false;
+        self.folder_load_error = None;
 
         // Launch background thread for volume info (total/free space, file_system)
         self.drive_state.drive_info_refresh_pending = true;

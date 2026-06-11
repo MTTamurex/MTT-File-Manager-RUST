@@ -1,6 +1,7 @@
-use crate::app::state::ImageViewerApp;
+use crate::app::state::{FolderLoadError, FolderLoadErrorKind, ImageViewerApp};
 use crate::domain::file_entry::FileEntry;
 use eframe::egui;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 impl ImageViewerApp {
@@ -187,29 +188,84 @@ impl ImageViewerApp {
         t_sizes
     }
 
+    fn apply_folder_load_error_to_current_panel(&mut self, failure: FolderLoadError) {
+        log::warn!(
+            "[FOLDER-LOADING] Current folder load failed: kind={:?} path={} message={:?}",
+            failure.kind,
+            failure.path.display(),
+            failure.message
+        );
+
+        self.is_loading_folder = false;
+        self.pending_all_items_clear = false;
+        self.hold_visible_items_until_load_complete = false;
+        self.pending_items_rebuild = false;
+        self.pending_items_count = 0;
+        self.items = Arc::new(Vec::new());
+        self.all_items_mut().clear();
+        self.total_items = 0;
+        self.selected_item = None;
+        self.selected_file = None;
+        self.folder_load_error = Some(failure);
+    }
+
     fn process_folder_load_failures(&mut self, ctx: &egui::Context) -> bool {
         let mut handled_current = false;
 
-        while let Ok((gen_id, failed_path)) = self.folder_load_failure_receiver.try_recv() {
+        while let Ok((gen_id, failure)) = self.folder_load_failure_receiver.try_recv() {
             if gen_id != self.generation {
+                let inactive_gen = self
+                    .dual_panel_inactive_state
+                    .as_ref()
+                    .map(|snapshot| snapshot.generation);
+                if !self.dual_panel_enabled || Some(gen_id) != inactive_gen {
+                    continue;
+                }
+
+                let mut handled_inactive = false;
+                self.with_inactive_panel(|app| {
+                    let current_path = std::path::PathBuf::from(&app.navigation_state.current_path);
+                    if Self::normalize_for_match(&failure.path)
+                        == Self::normalize_for_match(&current_path)
+                    {
+                        app.apply_folder_load_error_to_current_panel(failure.clone());
+                        handled_inactive = true;
+                    }
+                });
+
+                if handled_inactive {
+                    ctx.request_repaint();
+                    handled_current = true;
+                }
                 continue;
             }
 
             let current_path = std::path::PathBuf::from(&self.navigation_state.current_path);
-            if Self::normalize_for_match(&failed_path) != Self::normalize_for_match(&current_path) {
+            if Self::normalize_for_match(&failure.path) != Self::normalize_for_match(&current_path)
+            {
                 continue;
             }
 
-            log::warn!(
-                "[FOLDER-LOADING] Current folder load failed because path vanished: {:?}",
-                failed_path
-            );
-            self.is_loading_folder = false;
-            self.pending_all_items_clear = false;
-            self.hold_visible_items_until_load_complete = false;
-            self.pending_auto_reload = false;
-            self.skip_next_auto_reload = false;
-            self.navigate_to_nearest_valid_ancestor();
+            match failure.kind {
+                FolderLoadErrorKind::NotFound => {
+                    log::warn!(
+                        "[FOLDER-LOADING] Current folder load failed because path vanished: {:?}",
+                        failure.path
+                    );
+                    self.is_loading_folder = false;
+                    self.pending_all_items_clear = false;
+                    self.hold_visible_items_until_load_complete = false;
+                    self.pending_auto_reload = false;
+                    self.skip_next_auto_reload = false;
+                    self.folder_load_error = None;
+                    self.navigate_to_nearest_valid_ancestor();
+                }
+                FolderLoadErrorKind::AccessDenied | FolderLoadErrorKind::Other => {
+                    self.pending_auto_reload = false;
+                    self.skip_next_auto_reload = false;
+                    self.apply_folder_load_error_to_current_panel(failure);
+                }
+            }
             ctx.request_repaint();
             handled_current = true;
         }

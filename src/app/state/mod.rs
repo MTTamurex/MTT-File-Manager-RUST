@@ -57,6 +57,46 @@ pub struct ItemsRebuildResult {
     pub total_items: usize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FolderLoadErrorKind {
+    AccessDenied,
+    NotFound,
+    Other,
+}
+
+#[derive(Debug, Clone)]
+pub struct FolderLoadError {
+    pub path: PathBuf,
+    pub kind: FolderLoadErrorKind,
+    pub message: Option<String>,
+}
+
+impl FolderLoadError {
+    pub fn access_denied(path: PathBuf) -> Self {
+        Self {
+            path,
+            kind: FolderLoadErrorKind::AccessDenied,
+            message: None,
+        }
+    }
+
+    pub fn not_found(path: PathBuf) -> Self {
+        Self {
+            path,
+            kind: FolderLoadErrorKind::NotFound,
+            message: None,
+        }
+    }
+
+    pub fn other(path: PathBuf, message: impl Into<String>) -> Self {
+        Self {
+            path,
+            kind: FolderLoadErrorKind::Other,
+            message: Some(message.into()),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct WatcherFsProbeCacheEntry {
     pub file_system: Option<String>,
@@ -106,8 +146,9 @@ pub struct ImageViewerApp {
     // Async loading (prevents UI freeze when reading metadata)
     pub file_entry_receiver: Receiver<(usize, Vec<FileEntry>)>,
     pub file_entry_sender: Sender<(usize, Vec<FileEntry>)>,
-    pub folder_load_failure_receiver: Receiver<(usize, PathBuf)>,
-    pub folder_load_failure_sender: Sender<(usize, PathBuf)>,
+    pub folder_load_failure_receiver: Receiver<(usize, FolderLoadError)>,
+    pub folder_load_failure_sender: Sender<(usize, FolderLoadError)>,
+    pub folder_load_error: Option<FolderLoadError>,
     pub is_loading_folder: bool,
     pub loading_started_at: Instant, // Track when loading started for timeout safety
 

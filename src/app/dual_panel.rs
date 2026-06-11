@@ -147,6 +147,7 @@ pub struct PanelSnapshot {
     pub items_snapshot_compact: bool,
     pub total_items: usize,
     pub is_loading_folder: bool,
+    pub folder_load_error: Option<crate::app::state::FolderLoadError>,
 
     // Selection
     pub selected_item: Option<usize>,
@@ -246,6 +247,7 @@ impl PanelSnapshot {
             items_snapshot_compact: false,
             total_items: app.total_items,
             is_loading_folder: app.is_loading_folder,
+            folder_load_error: app.folder_load_error.clone(),
             selected_item: app.selected_item,
             selected_file: app.selected_file.clone(),
             multi_selection: app.multi_selection.clone(),
@@ -293,6 +295,7 @@ impl PanelSnapshot {
         app.all_items = self.all_items;
         app.total_items = self.total_items;
         app.is_loading_folder = self.is_loading_folder;
+        app.folder_load_error = self.folder_load_error;
         app.selected_item = self.selected_item;
         app.selected_file = self.selected_file;
         app.multi_selection = self.multi_selection;
@@ -346,6 +349,7 @@ impl PanelSnapshot {
         std::mem::swap(&mut self.all_items, &mut app.all_items);
         std::mem::swap(&mut self.total_items, &mut app.total_items);
         std::mem::swap(&mut self.is_loading_folder, &mut app.is_loading_folder);
+        std::mem::swap(&mut self.folder_load_error, &mut app.folder_load_error);
         std::mem::swap(&mut self.selected_item, &mut app.selected_item);
         std::mem::swap(&mut self.selected_file, &mut app.selected_file);
         std::mem::swap(&mut self.multi_selection, &mut app.multi_selection);
