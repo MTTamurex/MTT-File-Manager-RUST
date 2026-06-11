@@ -164,6 +164,7 @@ pub(super) fn try_handle_optimized_tiers(
                                 size: e.size,
                                 modified: e.modified,
                                 is_dir: e.is_dir,
+                                created: e.created.unwrap_or(0),
                             })
                             .collect();
                         let _ = di.put_directory(
@@ -259,6 +260,7 @@ pub(super) fn try_handle_optimized_tiers(
                                     size: e.size,
                                     modified: e.modified,
                                     is_dir: e.is_dir,
+                                    created: e.created.unwrap_or(0),
                                 })
                                 .collect();
                             let _ = di.put_directory(

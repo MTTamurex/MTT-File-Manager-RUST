@@ -318,7 +318,7 @@ pub(super) fn try_handle_fast_paths(
                                 is_dir,
                                 size: if is_dir && !is_archive { 0 } else { f.size },
                                 modified: f.modified,
-                                created: None,
+                                created: Some(f.created).filter(|&c| c > 0),
                                 folder_cover: None,
                                 drive_info: None,
                                 sync_status: SyncStatus::None,

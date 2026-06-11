@@ -9,6 +9,7 @@ pub struct IndexedFile {
     pub size: u64,
     pub modified: u64,
     pub is_dir: bool,
+    pub created: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -58,6 +59,22 @@ impl DirectoryIndex {
             [],
         )?;
 
+        // Migration: add created_time column if it doesn't exist (v2 schema).
+        let has_created: bool = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('file_index') WHERE name = 'created_time'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap_or(0)
+            > 0;
+        if !has_created {
+            let _ = conn.execute(
+                "ALTER TABLE file_index ADD COLUMN created_time INTEGER NOT NULL DEFAULT 0",
+                [],
+            );
+        }
+
         Ok(Self {
             conn: Mutex::new(conn),
         })
@@ -85,7 +102,7 @@ impl DirectoryIndex {
 
         let mut stmt = conn
             .prepare_cached(
-                "SELECT file_name, file_size, modified_time, is_dir
+                "SELECT file_name, file_size, modified_time, is_dir, created_time
                  FROM file_index WHERE dir_path = ?",
             )
             .ok()?;
@@ -97,6 +114,7 @@ impl DirectoryIndex {
                     size: row.get::<_, i64>(1)? as u64,
                     modified: row.get::<_, i64>(2)? as u64,
                     is_dir: row.get::<_, i64>(3)? != 0,
+                    created: row.get::<_, i64>(4).unwrap_or(0) as u64,
                 })
             })
             .ok()?
@@ -130,7 +148,7 @@ impl DirectoryIndex {
 
         let mut stmt = conn
             .prepare_cached(
-                "SELECT file_name, file_size, modified_time, is_dir
+                "SELECT file_name, file_size, modified_time, is_dir, created_time
                  FROM file_index WHERE dir_path = ?",
             )
             .ok()?;
@@ -142,6 +160,7 @@ impl DirectoryIndex {
                     size: row.get::<_, i64>(1)? as u64,
                     modified: row.get::<_, i64>(2)? as u64,
                     is_dir: row.get::<_, i64>(3)? != 0,
+                    created: row.get::<_, i64>(4).unwrap_or(0) as u64,
                 })
             })
             .ok()?
@@ -174,8 +193,8 @@ impl DirectoryIndex {
 
         {
             let mut stmt = tx.prepare(
-                "INSERT INTO file_index (dir_path, file_name, file_size, modified_time, is_dir)
-                 VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO file_index (dir_path, file_name, file_size, modified_time, is_dir, created_time)
+                 VALUES (?, ?, ?, ?, ?, ?)",
             )?;
 
             for file in files {
@@ -185,6 +204,7 @@ impl DirectoryIndex {
                     file.size as i64,
                     file.modified as i64,
                     if file.is_dir { 1 } else { 0 },
+                    file.created as i64,
                 ])?;
             }
         }
