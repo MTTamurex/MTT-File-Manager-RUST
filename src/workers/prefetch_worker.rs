@@ -53,6 +53,7 @@ pub fn spawn_prefetch_worker(
                                     is_dir: e.is_dir,
                                     size: if e.is_dir { 0 } else { e.size },
                                     modified: e.modified,
+                                    created: Some(e.created).filter(|&c| c > 0),
                                     folder_cover: None,
                                     drive_info: None,
                                     sync_status: SyncStatus::None,

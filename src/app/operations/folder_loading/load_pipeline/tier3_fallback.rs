@@ -96,6 +96,7 @@ pub(super) fn run_tier3_fallback(
                             is_dir,
                             size: file_size,
                             modified,
+                            created: None,
                             folder_cover: None,
                             drive_info: None,
                             sync_status,
@@ -252,6 +253,17 @@ pub(super) fn run_tier3_fallback(
                             0
                         };
 
+                        let ft_created = find_data.ftCreationTime;
+                        let created_ticks =
+                            ((ft_created.dwHighDateTime as u64) << 32)
+                                | (ft_created.dwLowDateTime as u64);
+                        let created = if created_ticks > 116444736000000000 {
+                            Some((created_ticks - 116444736000000000) / 10_000_000)
+                                .filter(|&c| c > 0)
+                        } else {
+                            None
+                        };
+
                         let sync_status = onedrive::get_sync_status(extended_attrs, is_onedrive);
 
                         let entry = FileEntry {
@@ -260,6 +272,7 @@ pub(super) fn run_tier3_fallback(
                             is_dir,
                             size,
                             modified,
+                            created,
                             folder_cover: None,
                             drive_info: None,
                             sync_status,

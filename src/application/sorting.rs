@@ -45,6 +45,7 @@ mod tests {
             is_dir: false,
             size,
             modified,
+            created: None,
             folder_cover: None,
             drive_info: None,
             sync_status: crate::domain::file_entry::SyncStatus::None,
@@ -60,6 +61,7 @@ mod tests {
             is_dir: true,
             size: 0,
             modified,
+            created: None,
             folder_cover: None,
             drive_info: None,
             sync_status: crate::domain::file_entry::SyncStatus::None,
@@ -165,6 +167,7 @@ mod tests {
                 is_dir: false,
                 size: 100,
                 modified: 1706781600, // 2024-02-01 10:00 UTC
+                created: None,
                 folder_cover: None,
                 drive_info: None,
                 sync_status: crate::domain::file_entry::SyncStatus::None,
@@ -180,6 +183,7 @@ mod tests {
                 is_dir: false,
                 size: 200,
                 modified: 1704106200, // 2024-01-01 15:30 UTC
+                created: None,
                 folder_cover: None,
                 drive_info: None,
                 sync_status: crate::domain::file_entry::SyncStatus::None,
@@ -195,6 +199,7 @@ mod tests {
                 is_dir: false,
                 size: 300,
                 modified: 1709283900, // 2024-03-01 08:15 UTC
+                created: None,
                 folder_cover: None,
                 drive_info: None,
                 sync_status: crate::domain::file_entry::SyncStatus::None,
@@ -242,6 +247,7 @@ mod tests {
                 is_dir: false,
                 size: 1,
                 modified: 0,
+                created: None,
                 folder_cover: None,
                 drive_info: None,
                 sync_status: crate::domain::file_entry::SyncStatus::None,
@@ -257,6 +263,7 @@ mod tests {
                 is_dir: false,
                 size: 1,
                 modified: 0,
+                created: None,
                 folder_cover: None,
                 drive_info: None,
                 sync_status: crate::domain::file_entry::SyncStatus::None,
@@ -282,6 +289,7 @@ mod tests {
                 is_dir: false,
                 size: 1,
                 modified: 1_704_067_200, // 2024-01-03 UTC
+                created: None,
                 folder_cover: None,
                 drive_info: None,
                 sync_status: crate::domain::file_entry::SyncStatus::None,
@@ -297,6 +305,7 @@ mod tests {
                 is_dir: false,
                 size: 1,
                 modified: 1_704_153_600, // 2024-01-04 UTC
+                created: None,
                 folder_cover: None,
                 drive_info: None,
                 sync_status: crate::domain::file_entry::SyncStatus::None,

@@ -288,6 +288,7 @@ fn calculate_effective_file(app: &ImageViewerApp) -> Option<FileEntry> {
             is_dir: true,
             size: 0,
             modified: 0,
+            created: None,
             folder_cover: None,
             drive_info: None,
             sync_status: SyncStatus::None,
@@ -302,6 +303,7 @@ fn calculate_effective_file(app: &ImageViewerApp) -> Option<FileEntry> {
             is_dir: true,
             size: app.drive_state.disks.len() as u64, // Store drive count in size field
             modified: 0,
+            created: None,
             folder_cover: None,
             drive_info: None,
             sync_status: SyncStatus::None,
@@ -352,6 +354,7 @@ fn calculate_effective_file(app: &ImageViewerApp) -> Option<FileEntry> {
             is_dir: true,
             size: 0,
             modified: current_folder_modified,
+            created: None,
             folder_cover: None,
             drive_info: None,
             sync_status: SyncStatus::None,

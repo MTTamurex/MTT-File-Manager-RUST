@@ -285,6 +285,19 @@ pub(super) fn render_grid_item(
                                 ui.label(":");
                                 ui.label(date_val);
                             });
+                            if !is_recycle {
+                                if let Some(created) = item.created {
+                                    ui.horizontal(|ui| {
+                                        ui.label(
+                                            rust_i18n::t!("file_info.date_created").to_string(),
+                                        );
+                                        ui.label(":");
+                                        ui.label(
+                                            crate::infrastructure::windows::format_date(created),
+                                        );
+                                    });
+                                }
+                            }
                         });
                     },
                 );

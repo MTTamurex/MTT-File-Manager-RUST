@@ -233,6 +233,16 @@ pub fn render_file_info_table(
                 };
                 add_detail(ui, &date_label, date_value);
 
+                if !is_recycle_item {
+                    if let Some(created) = file.created {
+                        add_detail(
+                            ui,
+                            &t!("file_info.date_created").to_string(),
+                            crate::infrastructure::windows::format_date(created),
+                        );
+                    }
+                }
+
                 if !is_virtual_archive_folder {
                     let folder_counts_complete = folder_summary
                         .map(|summary| summary.has_counts())

@@ -38,6 +38,7 @@ pub struct DirectoryEntry {
     pub is_dir: bool,
     pub size: u64,
     pub modified: u64,
+    pub created: u64,
     pub attributes: u32,
 }
 
@@ -142,12 +143,18 @@ pub fn read_directory_fast(dir_path: &Path) -> Option<Vec<DirectoryEntry>> {
                 } else {
                     0
                 };
+                let created = if entry.creation_time > 116444736000000000 {
+                    ((entry.creation_time as u64) - 116444736000000000) / 10_000_000
+                } else {
+                    0
+                };
 
                 entries.push(DirectoryEntry {
                     name,
                     is_dir,
                     size: entry.end_of_file.max(0) as u64, // M-14: guard against negative value from corrupted NTFS metadata
                     modified,
+                    created,
                     attributes: entry.file_attributes,
                 });
             }

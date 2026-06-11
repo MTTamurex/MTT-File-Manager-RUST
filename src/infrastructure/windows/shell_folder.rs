@@ -284,6 +284,7 @@ unsafe fn process_shell_child(
         is_dir,
         size,
         modified,
+        created: None,
         folder_cover: None,
         drive_info: None,
         sync_status: SyncStatus::None,

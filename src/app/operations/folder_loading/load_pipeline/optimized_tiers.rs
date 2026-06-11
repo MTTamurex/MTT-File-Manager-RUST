@@ -93,6 +93,7 @@ pub(super) fn try_handle_optimized_tiers(
                             dir_entry.size
                         },
                         modified: dir_entry.modified,
+                        created: Some(dir_entry.created).filter(|&c| c > 0),
                         folder_cover: None,
                         drive_info: None,
                         sync_status,

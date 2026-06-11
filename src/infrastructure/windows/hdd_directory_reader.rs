@@ -307,6 +307,16 @@ fn create_file_entry(
         0
     };
 
+    // Extract creation time (Windows FILETIME to Unix timestamp)
+    let ft_created = find_data.ftCreationTime;
+    let created_ticks =
+        ((ft_created.dwHighDateTime as u64) << 32) | (ft_created.dwLowDateTime as u64);
+    let created = if created_ticks > 116444736000000000 {
+        Some((created_ticks - 116444736000000000) / 10_000_000).filter(|&c| c > 0)
+    } else {
+        None
+    };
+
     // Get sync status from attributes (OneDrive flags are already included)
     let sync_status = onedrive::get_sync_status(attributes, is_onedrive);
 
@@ -316,6 +326,7 @@ fn create_file_entry(
         is_dir,
         size,
         modified,
+        created,
         folder_cover: None, // Will be populated later if needed
         drive_info: None,
         sync_status,
@@ -353,6 +364,7 @@ mod tests {
                 is_dir: false,
                 size: 100,
                 modified: 1234567890,
+                created: None,
                 folder_cover: None,
                 drive_info: None,
                 sync_status: SyncStatus::None,

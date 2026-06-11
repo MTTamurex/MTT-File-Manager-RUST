@@ -27,6 +27,9 @@ pub struct FileEntry {
     pub is_dir: bool,                             // Folders first
     pub size: u64,                                // Size in bytes (0 for directories)
     pub modified: u64,                            // Timestamp (seconds since UNIX_EPOCH)
+    /// Creation timestamp (seconds since UNIX_EPOCH), if available.
+    /// `None` for recycle-bin items, DirectoryIndex cached entries, and shell folder entries.
+    pub created: Option<u64>,
     pub folder_cover: Option<PathBuf>,            // First image found in the folder (for preview)
     pub drive_info: Option<DriveInfo>,            // Drive metadata (optional)
     pub sync_status: SyncStatus,                  // OneDrive sync status
@@ -43,7 +46,7 @@ impl FileEntry {
             .to_string();
 
         // Try to read metadata, use defaults on error (locked files, etc.)
-        let (size, modified) = std::fs::metadata(&path)
+        let (size, modified, created) = std::fs::metadata(&path)
             .ok()
             .map(|m| {
                 let size = if is_dir { 0 } else { m.len() };
@@ -53,9 +56,14 @@ impl FileEntry {
                     .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                     .map(|d| d.as_secs())
                     .unwrap_or(0);
-                (size, modified)
+                let created = m
+                    .created()
+                    .ok()
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs());
+                (size, modified, created)
             })
-            .unwrap_or((0, 0));
+            .unwrap_or((0, 0, None));
 
         // OPTIMIZATION: Lazy loading - always None initially.
         // The scan will be triggered by request_folder_scan() when the folder becomes visible.
@@ -68,6 +76,7 @@ impl FileEntry {
             is_dir,
             size,
             modified,
+            created,
             folder_cover,
             drive_info,
             sync_status: SyncStatus::None,

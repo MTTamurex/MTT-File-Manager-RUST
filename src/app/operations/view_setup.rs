@@ -94,6 +94,7 @@ impl ImageViewerApp {
                             size: item.size,
                             // Store deletion timestamp for stable numeric sort in Recycle Bin view.
                             modified: item.date_deleted_unix,
+                            created: None,
                             folder_cover: None,
                             drive_info: None,
                             sync_status: crate::domain::file_entry::SyncStatus::None,
@@ -178,6 +179,7 @@ impl ImageViewerApp {
                 is_dir: true,
                 size: 0,
                 modified: 0,
+                created: None,
                 folder_cover: None,
                 drive_info: Some(DriveInfo {
                     file_system: String::new(),

@@ -217,6 +217,15 @@ pub(super) fn render_item_tooltip(
                                 ui.label(":");
                                 ui.label(date_val);
                             });
+                            if !is_recycle_bin {
+                                if let Some(created) = item.created {
+                                    ui.horizontal(|ui| {
+                                        ui.label(t!("file_info.date_created"));
+                                        ui.label(":");
+                                        ui.label(format_date(created));
+                                    });
+                                }
+                            }
                         });
                     },
                 );
