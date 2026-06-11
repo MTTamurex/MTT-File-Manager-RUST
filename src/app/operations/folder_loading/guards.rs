@@ -56,7 +56,7 @@ impl ImageViewerApp {
         );
     }
 
-    pub(super) fn bump_folder_load_generation(&mut self) {
+    pub(in crate::app::operations) fn bump_folder_load_generation(&mut self) {
         self.generation = next_generation(); // Globally unique generation ID
         self.current_generation
             .store(self.generation, AtomicOrdering::Relaxed); // Sync with workers

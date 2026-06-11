@@ -46,10 +46,9 @@ impl ImageViewerApp {
         self.total_items = 0;
         self.reset_selection_and_search();
 
-        // Increment generation to invalidate old thumbnails
-        self.generation += 1;
-        self.current_generation
-            .store(self.generation, AtomicOrdering::Relaxed);
+        // Use the same globally-unique generation space as folder loads so
+        // delayed dual-panel batches cannot be routed into this special view.
+        self.bump_folder_load_generation();
         self.release_thumbnail_pipeline_for_inactive_view("recycle-bin", true);
 
         let my_gen = self.generation;
@@ -142,12 +141,12 @@ impl ImageViewerApp {
 
     /// Sets up the "This PC" view without affecting history
     pub fn setup_computer_view(&mut self) {
-        // CRITICAL: Increment generation to invalidate any pending items_rebuild results
+        // CRITICAL: Advance generation to invalidate any pending items_rebuild results
         // from the previous folder load. Without this, stale rebuild results (matching
         // the old generation) arrive on the next frame and overwrite our computer view items.
-        self.generation += 1;
-        self.current_generation
-            .store(self.generation, AtomicOrdering::Relaxed);
+        // Use the same globally-unique generation space as folder loads so
+        // delayed dual-panel batches cannot be routed into this special view.
+        self.bump_folder_load_generation();
         self.invalidate_active_items_rebuild();
         self.release_thumbnail_pipeline_for_inactive_view("computer-view", true);
 
