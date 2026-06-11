@@ -384,7 +384,7 @@ impl ImageViewerApp {
         {
             *label = display_name.clone();
         }
-        self.drive_state.drive_info_cache.remove(&drive_path_str);
+        self.drive_state.remove_cached_drive_info(&drive_path_str);
 
         if self.navigation_state.is_computer_view {
             self.setup_computer_view();

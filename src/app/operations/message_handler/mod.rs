@@ -45,10 +45,15 @@ impl ImageViewerApp {
         if saw_device_event {
             // Drive was inserted/removed: clear all drive icon caches so icons are re-extracted
             self.item_icon_loader.clear_drive_icons();
+            // Mounted media can reuse the same drive letter with different capacity/filesystem.
+            // Drop cached volume info so the details panel never shows the previous ISO/DVD.
+            self.drive_state.clear_cached_drive_info();
+            self.drive_state.drive_info_refresh_pending = false;
 
             // Launch async drive scan (non-blocking)
             self.drive_state.last_drive_refresh = Instant::now();
             self.reload_drive_list_async();
+            self.refresh_drive_info_async();
 
             // Force immediate repaint without waiting for input events
             ctx.request_repaint_after(std::time::Duration::from_millis(0));

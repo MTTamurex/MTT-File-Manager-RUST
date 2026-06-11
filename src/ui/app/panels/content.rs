@@ -8,9 +8,10 @@ use std::cell::RefCell;
 use std::path::PathBuf;
 
 // M-12: Per-frame cache for "current folder" FileEntry (when no file is selected).
-// Keyed by (current_path, modified_hint, created_hint); invalidated on navigation or folder update.
+// Keyed by (current_path, modified_hint, created_hint, drive_info_epoch);
+// invalidated on navigation, folder update, or drive volume-info refresh.
 thread_local! {
-    static FOLDER_ENTRY_CACHE: RefCell<Option<(String, u64, u64, FileEntry)>> = RefCell::new(None);
+    static FOLDER_ENTRY_CACHE: RefCell<Option<(String, u64, u64, u64, FileEntry)>> = RefCell::new(None);
 }
 
 pub(super) fn render_preview_panel_layout(
@@ -337,10 +338,11 @@ fn calculate_effective_file(app: &ImageViewerApp) -> Option<FileEntry> {
             })
             .unwrap_or(0u64);
         let cache_hit = FOLDER_ENTRY_CACHE.with(|c| {
-            c.borrow().as_ref().and_then(|(cp, cm, cc, e)| {
+            c.borrow().as_ref().and_then(|(cp, cm, cc, di, e)| {
                 if cp == &app.navigation_state.current_path
                     && *cm == mod_hint
                     && *cc == created_hint
+                    && *di == app.drive_state.drive_info_cache_epoch
                 {
                     Some(e.clone())
                 } else {
@@ -408,9 +410,7 @@ fn calculate_effective_file(app: &ImageViewerApp) -> Option<FileEntry> {
                 // Fallback: persistent drive_info_cache survives navigation away from computer view
                 .or_else(|| {
                     app.drive_state
-                        .drive_info_cache
-                        .get(&app.navigation_state.current_path)
-                        .cloned()
+                        .cached_drive_info(&app.navigation_state.current_path)
                 });
 
             if let Some(info) = cached_info {
@@ -439,6 +439,7 @@ fn calculate_effective_file(app: &ImageViewerApp) -> Option<FileEntry> {
                 app.navigation_state.current_path.clone(),
                 mod_hint,
                 created_hint,
+                app.drive_state.drive_info_cache_epoch,
                 entry.clone(),
             ));
         });

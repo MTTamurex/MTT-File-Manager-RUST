@@ -466,7 +466,7 @@ pub fn get_volume_info(drive_path: &str) -> VolumeInfo {
             Some(&mut total_free_bytes),
         );
 
-        let mut file_system = "NTFS".to_string(); // Fallback seguro
+        let mut file_system = String::new();
         let mut file_system_buffer = vec![0u16; 256];
         let mut volume_serial = 0u32;
         let mut max_component_len = 0u32;
@@ -491,9 +491,7 @@ pub fn get_volume_info(drive_path: &str) -> VolumeInfo {
                 file_system = fs_str;
             }
         } else {
-            log::warn!(
-                "[DRIVE-REFRESH] Failed to query drive file system metadata; using fallback label"
-            );
+            log::warn!("[DRIVE-REFRESH] Failed to query drive file system metadata");
         }
 
         if result.is_ok() {

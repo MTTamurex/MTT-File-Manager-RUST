@@ -173,6 +173,15 @@ impl ImageViewerApp {
         let mut computer_items = Vec::new();
         for (path, label) in &self.drive_state.disks {
             let drive_type = windows_infra::detect_drive_type(path);
+            let drive_info = self
+                .drive_state
+                .cached_drive_info(path)
+                .unwrap_or(DriveInfo {
+                    file_system: String::new(),
+                    total_space: 0,
+                    free_space: 0,
+                    drive_type,
+                });
             let entry = FileEntry {
                 path: PathBuf::from(path),
                 name: label.clone(),
@@ -181,12 +190,7 @@ impl ImageViewerApp {
                 modified: 0,
                 created: None,
                 folder_cover: None,
-                drive_info: Some(DriveInfo {
-                    file_system: String::new(),
-                    total_space: 0,
-                    free_space: 0,
-                    drive_type,
-                }),
+                drive_info: Some(drive_info),
                 sync_status: crate::domain::file_entry::SyncStatus::None,
                 is_hidden: false,
                 recycle_bin: None,
@@ -199,9 +203,7 @@ impl ImageViewerApp {
         for item in &computer_items {
             if let Some(info) = &item.drive_info {
                 let path_str = item.path.to_string_lossy().to_string();
-                self.drive_state
-                    .drive_info_cache
-                    .insert(path_str, info.clone());
+                self.drive_state.cache_drive_info(&path_str, info.clone());
             }
         }
 
@@ -335,6 +337,8 @@ impl ImageViewerApp {
                 if changed {
                     // Invalidate cached drive types since drive list changed
                     crate::ui::sidebar::invalidate_drive_type_cache();
+                    self.drive_state.clear_cached_drive_info();
+                    self.drive_state.drive_info_refresh_pending = false;
 
                     // Detect removed drives: if user is browsing inside a removed drive,
                     // navigate them to "Este Computador" to avoid showing stale cached data.
@@ -400,6 +404,8 @@ impl ImageViewerApp {
 
                     if self.navigation_state.is_computer_view {
                         self.setup_computer_view();
+                    } else {
+                        self.refresh_drive_info_async();
                     }
                 }
             }
@@ -459,9 +465,7 @@ impl ImageViewerApp {
             // Always persist drive info in the dedicated cache so it survives
             // navigation away from computer view (used by details panel).
             for (path, info) in &results {
-                self.drive_state
-                    .drive_info_cache
-                    .insert(path.clone(), info.clone());
+                self.drive_state.cache_drive_info(path, info.clone());
             }
 
             if self.navigation_state.is_computer_view {

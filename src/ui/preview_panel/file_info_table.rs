@@ -449,7 +449,7 @@ pub fn render_file_info_table(
                     ui,
                     &t!("file_info.filesystem"),
                     if drive.file_system.is_empty() {
-                        "NTFS".to_string()
+                        t!("file_info.unknown_date").to_string()
                     } else {
                         drive.file_system.clone()
                     },
