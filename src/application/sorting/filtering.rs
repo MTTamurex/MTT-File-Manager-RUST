@@ -33,27 +33,46 @@ fn contains_ignore_case_precomputed(
 /// Filters items based on a query string.
 ///
 /// When query is empty, returns None to signal "use all items" without cloning.
+///
+/// Multi-word queries use token-based matching (same strategy as global search):
+/// the query is split by whitespace and every token must appear as a
+/// case-insensitive substring of the filename.
 pub(super) fn filter_items_opt(items: &[FileEntry], query: &str) -> Option<Vec<FileEntry>> {
     if query.is_empty() {
         return None;
     }
 
-    let needle_lower: Vec<char> = query.chars().flat_map(|c| c.to_lowercase()).collect();
-    let needle_ascii_lower: Option<Vec<u8>> = if needle_lower.iter().all(|c| c.is_ascii()) {
-        Some(needle_lower.iter().map(|c| *c as u8).collect())
-    } else {
-        None
-    };
+    // Split query into tokens (same strategy as global search).
+    let tokens: Vec<&str> = query.split_whitespace().collect();
+    if tokens.is_empty() {
+        return None;
+    }
+
+    // Precompute lowered representations for each token.
+    let precomputed: Vec<(Vec<char>, Option<Vec<u8>>)> = tokens
+        .iter()
+        .map(|token| {
+            let lower: Vec<char> = token.chars().flat_map(|c| c.to_lowercase()).collect();
+            let ascii = if lower.iter().all(|c| c.is_ascii()) {
+                Some(lower.iter().map(|c| *c as u8).collect())
+            } else {
+                None
+            };
+            (lower, ascii)
+        })
+        .collect();
 
     Some(
         items
             .iter()
             .filter(|item| {
-                contains_ignore_case_precomputed(
-                    &item.name,
-                    &needle_lower,
-                    needle_ascii_lower.as_deref(),
-                )
+                precomputed.iter().all(|(needle_lower, needle_ascii)| {
+                    contains_ignore_case_precomputed(
+                        &item.name,
+                        needle_lower,
+                        needle_ascii.as_deref(),
+                    )
+                })
             })
             .cloned()
             .collect(),
