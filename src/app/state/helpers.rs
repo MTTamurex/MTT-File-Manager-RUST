@@ -228,7 +228,8 @@ impl ImageViewerApp {
 
     pub(crate) fn effective_thumbnail_request_size_px(&self, logical_size_px: u32) -> u32 {
         let scale = self.ui_ctx.pixels_per_point().max(1.0);
-        ((logical_size_px.max(1) as f32) * scale).ceil() as u32
+        (((logical_size_px.max(1) as f32) * scale).ceil() as u32)
+            .min(crate::domain::thumbnail::MAX_THUMBNAIL_SIDE)
     }
 
     pub(crate) fn current_thumbnail_bucket_size(&self) -> u32 {

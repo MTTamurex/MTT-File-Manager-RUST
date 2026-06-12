@@ -4,13 +4,14 @@
 
 use image::{DynamicImage, ImageBuffer};
 
+use crate::domain::thumbnail::MAX_THUMBNAIL_SIDE;
+
 /// Get the appropriate bucket size for a requested thumbnail size
 pub fn get_bucket_size(req_size: u32) -> u32 {
     match req_size {
         0..=128 => 128,
         129..=256 => 256,
-        257..=512 => 512,
-        _ => 1024,
+        _ => MAX_THUMBNAIL_SIDE,
     }
 }
 
@@ -70,8 +71,8 @@ mod tests {
         assert_eq!(get_bucket_size(128), 128);
         assert_eq!(get_bucket_size(200), 256);
         assert_eq!(get_bucket_size(512), 512);
-        assert_eq!(get_bucket_size(1024), 1024);
-        assert_eq!(get_bucket_size(2048), 1024);
+        assert_eq!(get_bucket_size(1024), 512);
+        assert_eq!(get_bucket_size(2048), 512);
     }
 
     #[test]

@@ -1,4 +1,5 @@
 use super::{ThumbnailCacheEntry, ThumbnailDiskCache};
+use crate::domain::thumbnail::MAX_THUMBNAIL_SIDE;
 use image::{DynamicImage, ImageBuffer, Rgba};
 use rusqlite::params;
 use std::collections::HashMap;
@@ -160,38 +161,45 @@ impl ThumbnailDiskCache {
             return Err("Invalid RGBA data length".into());
         }
 
-        // Fast path: when dimensions ≤ 1024, skip DynamicImage creation and
+        let requested_size = requested_size.min(MAX_THUMBNAIL_SIDE);
+
+        // Fast path: when dimensions are already within the thumbnail cap, skip DynamicImage creation and
         // resize entirely. Encode directly from the provided RGBA buffer.
-        let (final_width, final_height, webp_data) = if width <= 1024 && height <= 1024 {
-            let has_real_alpha = rgba_has_non_opaque_pixels(rgba_data);
-            if has_real_alpha {
-                let encoder = webp::Encoder::from_rgba(rgba_data, width, height);
-                (width, height, encoder.encode(85.0))
+        let (final_width, final_height, webp_data) =
+            if width <= MAX_THUMBNAIL_SIDE && height <= MAX_THUMBNAIL_SIDE {
+                let has_real_alpha = rgba_has_non_opaque_pixels(rgba_data);
+                if has_real_alpha {
+                    let encoder = webp::Encoder::from_rgba(rgba_data, width, height);
+                    (width, height, encoder.encode(85.0))
+                } else {
+                    let rgb_data = rgba_to_rgb(rgba_data);
+                    let encoder = webp::Encoder::from_rgb(&rgb_data, width, height);
+                    (width, height, encoder.encode(85.0))
+                }
             } else {
-                let rgb_data = rgba_to_rgb(rgba_data);
-                let encoder = webp::Encoder::from_rgb(&rgb_data, width, height);
-                (width, height, encoder.encode(85.0))
-            }
-        } else {
-            // Slow path: resize from high-resolution source
-            let img: ImageBuffer<Rgba<u8>, Vec<u8>> =
-                ImageBuffer::from_raw(width, height, rgba_data.to_vec())
-                    .ok_or("Failed to create image buffer")?;
-            let dynamic_img = DynamicImage::ImageRgba8(img);
-            let resized = dynamic_img.resize(1024, 1024, image::imageops::FilterType::CatmullRom);
-            let (fw, fh) = (resized.width(), resized.height());
-            let has_real_alpha = rgba_has_non_opaque_pixels_nonstandard(&resized);
-            let webp_data = if has_real_alpha {
-                let rgba_img = resized.to_rgba8();
-                let encoder = webp::Encoder::from_rgba(&rgba_img, fw, fh);
-                encoder.encode(85.0)
-            } else {
-                let rgb_img = resized.to_rgb8();
-                let encoder = webp::Encoder::from_rgb(&rgb_img, fw, fh);
-                encoder.encode(85.0)
+                // Slow path: resize from high-resolution source
+                let img: ImageBuffer<Rgba<u8>, Vec<u8>> =
+                    ImageBuffer::from_raw(width, height, rgba_data.to_vec())
+                        .ok_or("Failed to create image buffer")?;
+                let dynamic_img = DynamicImage::ImageRgba8(img);
+                let resized = dynamic_img.resize(
+                    MAX_THUMBNAIL_SIDE,
+                    MAX_THUMBNAIL_SIDE,
+                    image::imageops::FilterType::CatmullRom,
+                );
+                let (fw, fh) = (resized.width(), resized.height());
+                let has_real_alpha = rgba_has_non_opaque_pixels_nonstandard(&resized);
+                let webp_data = if has_real_alpha {
+                    let rgba_img = resized.to_rgba8();
+                    let encoder = webp::Encoder::from_rgba(&rgba_img, fw, fh);
+                    encoder.encode(85.0)
+                } else {
+                    let rgb_img = resized.to_rgb8();
+                    let encoder = webp::Encoder::from_rgb(&rgb_img, fw, fh);
+                    encoder.encode(85.0)
+                };
+                (fw, fh, webp_data)
             };
-            (fw, fh, webp_data)
-        };
 
         // Save to SQLite
         let db = self.writer.lock();
@@ -318,5 +326,30 @@ mod tests {
         assert!(results[1]
             .as_ref()
             .is_some_and(|entry| !entry.data.is_empty()));
+    }
+
+    #[test]
+    fn put_caps_persisted_thumbnail_dimensions_to_512() {
+        let dir = tempdir().expect("create temp dir");
+        let cache =
+            ThumbnailDiskCache::new(dir.path().to_path_buf()).expect("create thumbnail cache");
+        let modified = UNIX_EPOCH + Duration::from_secs(20);
+        let path = dir.path().join("large.jpg");
+
+        cache
+            .put(
+                &path,
+                modified,
+                1024,
+                &rgba(1024, 768, [255, 0, 0, 255]),
+                1024,
+                768,
+            )
+            .expect("put large thumbnail");
+
+        let entry = cache.get_latest(&path).expect("cached thumbnail");
+        assert!(entry.width <= MAX_THUMBNAIL_SIDE);
+        assert!(entry.height <= MAX_THUMBNAIL_SIDE);
+        assert!(entry.requested_size <= MAX_THUMBNAIL_SIDE);
     }
 }

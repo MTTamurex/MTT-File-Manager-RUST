@@ -182,7 +182,9 @@ pub fn force_extract_thumbnail_with_size(
         // WTS_FORCEEXTRACTION = 0x8 - Forces extraction even if cached
         // WTS_SCALETOREQUESTEDSIZE = 0x100 - Scales to requested size
         let flags = WTS_FORCEEXTRACTION | WTS_SCALETOREQUESTEDSIZE;
-        let requested_size = requested_size.unwrap_or(512).clamp(1, 1024);
+        let requested_size = requested_size
+            .unwrap_or(crate::domain::thumbnail::MAX_THUMBNAIL_SIDE)
+            .clamp(1, crate::domain::thumbnail::MAX_THUMBNAIL_SIDE);
 
         // Single attempt - no retries. Stage 5 (Media Foundation) handles failures.
         let mut shared_bitmap: Option<ISharedBitmap> = None;

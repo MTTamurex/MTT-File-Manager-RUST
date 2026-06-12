@@ -4,6 +4,7 @@
 //! a video frame using IMFSourceReader. This works even when the thumbnail
 //! cache is broken or returns 0x8004B205 (extraction pending) indefinitely.
 
+use crate::domain::thumbnail::MAX_THUMBNAIL_SIDE;
 use crate::infrastructure::windows::file_type::is_video_extension;
 use crate::workers::thumbnail::processing::format_conversion::convert_nv12_to_rgba;
 use std::os::windows::ffi::OsStrExt;
@@ -67,13 +68,15 @@ pub fn extract(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
 
         // Get video dimensions
         let frame_size = media_type.GetUINT64(&MF_MT_FRAME_SIZE).ok()?;
-        let width = (frame_size >> 32) as u32;
-        let height = (frame_size & 0xFFFFFFFF) as u32;
+        let native_width = (frame_size >> 32) as u32;
+        let native_height = (frame_size & 0xFFFFFFFF) as u32;
 
-        if width == 0 || height == 0 {
+        if native_width == 0 || native_height == 0 {
             log::trace!("[Thumbnail] Stage 5: Invalid dimensions");
             return None;
         }
+
+        let (target_width, target_height) = fit_within_max_side(native_width, native_height);
 
         // Try RGB32 first, fallback to NV12 if not supported
         let output_type: IMFMediaType = match MFCreateMediaType() {
@@ -92,6 +95,10 @@ pub fn extract(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
 
         let _ = output_type.SetGUID(&MF_MT_MAJOR_TYPE, &mf_video_guid);
         let _ = output_type.SetGUID(&MF_MT_SUBTYPE, &rgb32_guid);
+        let _ = output_type.SetUINT64(
+            &MF_MT_FRAME_SIZE,
+            ((target_width as u64) << 32) | target_height as u64,
+        );
 
         // Try RGB32 first
         let use_nv12 = if reader
@@ -101,6 +108,10 @@ pub fn extract(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
             log::trace!("[Thumbnail] Stage 5: RGB32 not supported, falling back to NV12");
             // Fallback to NV12 (universally supported by video decoders)
             let _ = output_type.SetGUID(&MF_MT_SUBTYPE, &nv12_guid);
+            let _ = output_type.SetUINT64(
+                &MF_MT_FRAME_SIZE,
+                ((target_width as u64) << 32) | target_height as u64,
+            );
             if reader
                 .SetCurrentMediaType(0xFFFFFFFC, None, &output_type)
                 .is_err()
@@ -112,6 +123,20 @@ pub fn extract(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
         } else {
             false
         };
+
+        let current_type = reader.GetCurrentMediaType(0xFFFFFFFC).ok()?;
+        let output_frame_size = current_type.GetUINT64(&MF_MT_FRAME_SIZE).ok()?;
+        let width = (output_frame_size >> 32) as u32;
+        let height = (output_frame_size & 0xFFFFFFFF) as u32;
+
+        if width == 0 || height == 0 || width.max(height) > MAX_THUMBNAIL_SIDE {
+            log::trace!(
+                "[Thumbnail] Stage 5: decoder did not provide capped frame ({}x{})",
+                width,
+                height
+            );
+            return None;
+        }
 
         // Skip seeking for now - just read the first frame after position 0
         // This avoids complex PROPVARIANT handling
@@ -248,4 +273,17 @@ pub fn extract(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
         );
         Some((rgba_data, width, height))
     }
+}
+
+fn fit_within_max_side(width: u32, height: u32) -> (u32, u32) {
+    let longest = width.max(height);
+    if longest <= MAX_THUMBNAIL_SIDE {
+        return (width, height);
+    }
+
+    let scale = MAX_THUMBNAIL_SIDE as f64 / longest as f64;
+    (
+        ((width as f64 * scale).round() as u32).max(1),
+        ((height as f64 * scale).round() as u32).max(1),
+    )
 }

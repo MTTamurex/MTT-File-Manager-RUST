@@ -1,3 +1,4 @@
+use crate::domain::thumbnail::MAX_THUMBNAIL_SIDE;
 use crate::image_viewer::loader::DecodedFrame;
 use crate::infrastructure::disk_cache::{ThumbnailCacheEntry, ThumbnailDiskCache};
 use image::imageops::FilterType;
@@ -47,6 +48,13 @@ pub(super) fn try_fast_previews_from_disk_cache(
 }
 
 fn decode_cache_entry(entry: ThumbnailCacheEntry, max_side: u32) -> Option<DecodedFrame> {
+    if entry.width.max(entry.height) > MAX_THUMBNAIL_SIDE
+        || entry.requested_size > MAX_THUMBNAIL_SIDE
+    {
+        return None;
+    }
+
+    let max_side = max_side.min(MAX_THUMBNAIL_SIDE);
     let image = image::load_from_memory_with_format(&entry.data, image::ImageFormat::WebP).ok()?;
     let image = if max_side > 0 && (image.width() > max_side || image.height() > max_side) {
         image.resize(max_side, max_side, FilterType::Triangle)

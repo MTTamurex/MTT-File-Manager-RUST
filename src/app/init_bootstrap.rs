@@ -121,7 +121,7 @@ pub(in crate::app) struct AppBootstrap {
 
 pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
     // Worker results carry decoded RGBA buffers. At the largest thumbnail
-    // bucket (1024px), a single result can be ~4 MiB, so a large channel turns
+    // bucket (512px), a single result can be ~1 MiB, so a large channel turns
     // into hidden working-set growth outside the visible pending/RGBA caches.
     // Keep this small enough to provide backpressure to decoder workers while
     // still allowing the UI upload loop to batch a few frames worth of results.

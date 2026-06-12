@@ -45,7 +45,10 @@ pub struct ThumbnailData {
 }
 
 /// Logical pixel size requested for the detail/preview panel.
-pub const DETAIL_PREVIEW_SIZE: u32 = 512;
+pub const MAX_THUMBNAIL_SIDE: u32 = 512;
+
+/// Logical pixel size requested for the detail/preview panel.
+pub const DETAIL_PREVIEW_SIZE: u32 = MAX_THUMBNAIL_SIDE;
 
 /// Logical pixel size for GIF previews in the detail panel (lower to save memory).
 pub const DETAIL_PREVIEW_GIF_SIZE: u32 = 256;

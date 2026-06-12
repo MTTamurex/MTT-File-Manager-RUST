@@ -18,6 +18,7 @@ pub mod stage3_shell_api;
 pub mod stage4_force_extract;
 pub mod stage5_media_foundation;
 
+use crate::domain::thumbnail::MAX_THUMBNAIL_SIDE;
 use crate::infrastructure::diagnostic_logger::{
     diag_info, diag_warn, field_bool, field_duration_ms, field_label, field_u64,
 };
@@ -127,7 +128,7 @@ pub fn generate_thumbnail_hybrid_detailed_with_target(
     // Stage 1: image crate (Fast Path)
     {
         let t0 = std::time::Instant::now();
-        if let Some(result) = stage1_image_crate::extract(path, priority) {
+        if let Some(result) = stage1_image_crate::extract(path, priority, image_target_max_side) {
             let result = orientation::apply_exif_orientation_to_thumbnail(path, priority, result);
             log_extraction_perf(path, "stage1_image_crate", t0, &result);
             return ThumbnailExtractionOutcome::Success(result);
@@ -141,7 +142,7 @@ pub fn generate_thumbnail_hybrid_detailed_with_target(
     // Stage 2: WIC (Robust Fallback for JPEGs/CMYK)
     {
         let t0 = std::time::Instant::now();
-        if let Some(result) = stage2_wic::extract(path) {
+        if let Some(result) = stage2_wic::extract_to_size(path, image_target_max_side) {
             let result = orientation::apply_exif_orientation_to_thumbnail(path, priority, result);
             log_extraction_perf(path, "stage2_wic", t0, &result);
             return ThumbnailExtractionOutcome::Success(result);
@@ -280,7 +281,7 @@ fn log_extraction_stage_failure(path: &Path, stage: &'static str, start: std::ti
 }
 
 fn image_sized_fast_path_target(path: &Path, requested_max_side: Option<u32>) -> Option<u32> {
-    let max_side = requested_max_side?.max(1);
+    let max_side = requested_max_side?.clamp(1, MAX_THUMBNAIL_SIDE);
     let ext = path.extension()?.to_str()?;
     if SIZED_WIC_FAST_PATH_EXTENSIONS
         .iter()
@@ -293,7 +294,7 @@ fn image_sized_fast_path_target(path: &Path, requested_max_side: Option<u32>) ->
 }
 
 fn embedded_exif_thumbnail_target(path: &Path, requested_max_side: Option<u32>) -> Option<u32> {
-    let max_side = requested_max_side?.max(1);
+    let max_side = requested_max_side?.clamp(1, MAX_THUMBNAIL_SIDE);
     let ext = path.extension()?.to_str()?;
     if ext.eq_ignore_ascii_case("jpg") || ext.eq_ignore_ascii_case("jpeg") {
         Some(max_side)
@@ -325,7 +326,7 @@ mod tests {
         );
         assert_eq!(
             image_sized_fast_path_target(Path::new("cover.webp"), Some(1024)),
-            Some(1024)
+            Some(512)
         );
     }
 

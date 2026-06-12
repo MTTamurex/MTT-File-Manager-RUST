@@ -651,4 +651,16 @@ mod tests {
         };
         assert!(cache_entry_satisfies_request(&entry, 512));
     }
+
+    #[test]
+    fn test_cache_entry_rejects_oversized_persisted_thumbnail() {
+        let entry = ThumbnailCacheEntry {
+            data: Vec::new(),
+            width: 1024,
+            height: 768,
+            requested_size: 512,
+            modified_at: 0,
+        };
+        assert!(!cache_entry_satisfies_request(&entry, 512));
+    }
 }

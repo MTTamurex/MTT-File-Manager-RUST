@@ -3,6 +3,7 @@
 //! Uses the Windows Shell IShellItemImageFactory for universal thumbnail extraction.
 //! This works for most file types including videos, documents, and executables.
 
+use crate::domain::thumbnail::MAX_THUMBNAIL_SIDE;
 use crate::infrastructure::windows::file_type::is_video_extension;
 use std::path::Path;
 use windows::core::Interface;
@@ -27,16 +28,14 @@ pub fn extract_with_size(
     path: &Path,
     requested_size: Option<u32>,
 ) -> Result<(Vec<u8>, u32, u32), Box<dyn std::error::Error>> {
-    // Determine size based on file type - use centralized extension check
-    // Videos: 512px (high quality for preview panel)
-    // Others: 1024px (high-res system icons, executables, etc.)
+    // Thumbnail extraction is capped at 512px for every media type.
     let is_video = path
         .extension()
         .and_then(|e| e.to_str())
         .map(|ext| is_video_extension(&ext.to_lowercase()))
         .unwrap_or(false);
 
-    let default_size_px = if is_video { 512 } else { 1024 };
+    let default_size_px = MAX_THUMBNAIL_SIDE;
     let size_px = requested_size_px(requested_size, default_size_px) as i32;
 
     unsafe {
@@ -72,7 +71,7 @@ pub fn extract_with_size(
 fn requested_size_px(requested_size: Option<u32>, default_size_px: u32) -> u32 {
     requested_size
         .unwrap_or(default_size_px)
-        .clamp(1, default_size_px.max(1))
+        .clamp(1, default_size_px.min(MAX_THUMBNAIL_SIDE).max(1))
 }
 
 #[cfg(test)]
@@ -81,8 +80,8 @@ mod tests {
 
     #[test]
     fn requested_size_px_uses_target_when_available() {
-        assert_eq!(requested_size_px(Some(512), 1024), 512);
-        assert_eq!(requested_size_px(Some(2048), 1024), 1024);
-        assert_eq!(requested_size_px(None, 1024), 1024);
+        assert_eq!(requested_size_px(Some(512), 512), 512);
+        assert_eq!(requested_size_px(Some(2048), 512), 512);
+        assert_eq!(requested_size_px(None, 512), 512);
     }
 }

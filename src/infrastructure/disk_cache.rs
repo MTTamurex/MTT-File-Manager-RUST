@@ -9,6 +9,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use crate::domain::thumbnail::MAX_THUMBNAIL_SIDE;
+
 use super::db_utils;
 
 mod cleanup;
@@ -61,6 +63,11 @@ impl ThumbnailCacheEntry {
             return false;
         }
 
+        if cached_max_dim > MAX_THUMBNAIL_SIDE || self.requested_size > MAX_THUMBNAIL_SIDE {
+            return false;
+        }
+
+        let req_size = req_size.min(MAX_THUMBNAIL_SIDE);
         cached_max_dim >= req_size || self.requested_size >= req_size
     }
 }
@@ -212,6 +219,21 @@ impl ThumbnailDiskCache {
             "ALTER TABLE thumbnails ADD COLUMN requested_size INTEGER DEFAULT 0",
             [],
         );
+
+        // Enforce the thumbnail cache contract: no persisted thumbnail may exceed 512px.
+        conn.execute(
+            "DELETE FROM thumbnails
+             WHERE width > ? OR height > ? OR requested_size > ?",
+            [
+                MAX_THUMBNAIL_SIDE as i64,
+                MAX_THUMBNAIL_SIDE as i64,
+                MAX_THUMBNAIL_SIDE as i64,
+            ],
+        )
+        .unwrap_or_else(|e| {
+            log::warn!("[Cache] Failed to remove oversized thumbnails: {:?}", e);
+            0
+        });
 
         // OPTIMIZATION: Index on path to speed up directory clearing
         conn.execute(
