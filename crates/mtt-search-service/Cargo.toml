@@ -1,6 +1,6 @@
 [package]
 name = "mtt-search-service"
-version = "0.1.0-beta.9"
+version = "0.1.0"
 edition = "2021"
 
 [[bin]]
