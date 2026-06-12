@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{mpsc, Arc};
 
-use super::drive_state::DriveState;
+use super::drive_state::{DriveScanResult, DriveState};
 use super::file_operation_state::FileOperationState;
 use super::folder_size_state::{FolderSizeMessage, FolderSizeState};
 use super::layout_state::LayoutState;
@@ -85,13 +85,15 @@ pub(in crate::app) fn build_layout_state(
 
 pub(in crate::app) fn build_drive_state(
     disks: Vec<(String, String)>,
-    drive_scan_tx: mpsc::Sender<Vec<(String, String)>>,
-    drive_scan_rx: mpsc::Receiver<Vec<(String, String)>>,
+    cloud_roots: Vec<crate::domain::cloud_root::CloudRoot>,
+    drive_scan_tx: mpsc::Sender<DriveScanResult>,
+    drive_scan_rx: mpsc::Receiver<DriveScanResult>,
     drive_info_tx: mpsc::Sender<Vec<(String, DriveInfo)>>,
     drive_info_rx: mpsc::Receiver<Vec<(String, DriveInfo)>>,
 ) -> DriveState {
     DriveState {
         disks,
+        cloud_roots,
         last_drive_refresh: std::time::Instant::now(),
         last_drive_bitmask: crate::infrastructure::windows::get_logical_drives_bitmask(),
         drive_scan_pending: false,

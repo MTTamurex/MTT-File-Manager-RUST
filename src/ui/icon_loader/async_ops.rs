@@ -1,5 +1,16 @@
 use super::*;
 
+fn icon_resource_path(resource: &str) -> Option<std::path::PathBuf> {
+    let trimmed = resource.trim().trim_matches('"');
+    let path_part = trimmed
+        .rfind(',')
+        .map(|idx| &trimmed[..idx])
+        .unwrap_or(trimmed)
+        .trim()
+        .trim_matches('"');
+    (!path_part.is_empty()).then(|| std::path::PathBuf::from(path_part))
+}
+
 impl IconLoader {
     /// Poll for completed background icon extractions and upload to GPU.
     /// Call this once per frame (lightweight - just drains the channel).
@@ -166,6 +177,89 @@ impl IconLoader {
             active.fetch_sub(1, Ordering::Relaxed);
             self.loading_drive_icons.remove(&cache_key);
             log::error!("[Icon] Failed to spawn folder-path-icon-worker: {}", error);
+        }
+
+        None
+    }
+
+    /// Gets or loads a Cloud Files sync-root icon (non-blocking).
+    ///
+    /// Sync roots such as Proton Drive can expose a normal filesystem path plus
+    /// a provider icon resource registered in Explorer. Prefer the registered
+    /// provider icon so this matches Explorer's sidebar instead of the generic
+    /// folder icon for the backing filesystem path.
+    pub fn get_or_load_cloud_root_icon(
+        &mut self,
+        _ctx: &egui::Context,
+        root_path: &str,
+        icon_resource: Option<&str>,
+    ) -> Option<egui::TextureHandle> {
+        let cache_key = format!("cloud:{}", root_path);
+
+        if self.failed_drive_icons.peek(&cache_key).is_some() {
+            return None;
+        }
+
+        if let Some(icon) = self.drive_icon_cache.get(&cache_key) {
+            return Some(icon.clone());
+        }
+
+        if self.loading_drive_icons.contains(&cache_key) {
+            return None;
+        }
+
+        let tx = self.icon_result_tx.clone();
+        let path_owned = root_path.to_string();
+        let resource_path = icon_resource.and_then(icon_resource_path);
+        let active = self.auxiliary_icon_threads.clone();
+
+        if !super::try_reserve_auxiliary_icon_thread(&active) {
+            return None;
+        }
+
+        self.loading_drive_icons.insert(cache_key.clone());
+        let thread_cache_key = cache_key.clone();
+        let thread_active = active.clone();
+        let spawn_result = std::thread::Builder::new()
+            .name("cloud-root-icon-worker".to_string())
+            .spawn(move || {
+                let _guard = super::ThreadCountGuard(thread_active);
+                let _com = super::ComStaGuard::new();
+                let data = (|| {
+                    if let Some(path) = resource_path.as_ref() {
+                        if let Ok(icon) = windows::extract_file_icon_by_path(path, IconSize::Jumbo)
+                        {
+                            return Ok(icon);
+                        }
+                    }
+
+                    windows::extract_drive_icon(&path_owned, IconSize::Jumbo).or_else(|_| {
+                        resource_path
+                            .as_ref()
+                            .ok_or_else(|| "missing icon resource".into())
+                            .and_then(|path| {
+                                windows::extract_file_icon_by_path(path, IconSize::Jumbo)
+                            })
+                    })
+                })()
+                .map_err(|e| {
+                    log::trace!(
+                        "[Icon] Cloud root icon extraction failed for {}: {}",
+                        path_owned,
+                        e
+                    )
+                })
+                .ok();
+                let _ = tx.send(AsyncIconResult {
+                    key: thread_cache_key,
+                    data,
+                });
+            });
+
+        if let Err(error) = spawn_result {
+            active.fetch_sub(1, Ordering::Relaxed);
+            self.loading_drive_icons.remove(&cache_key);
+            log::error!("[Icon] Failed to spawn cloud-root-icon-worker: {}", error);
         }
 
         None

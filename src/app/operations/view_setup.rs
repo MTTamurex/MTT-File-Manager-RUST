@@ -282,8 +282,11 @@ impl ImageViewerApp {
         let tx = self.drive_state.drive_scan_tx.clone();
         let ctx = self.ui_ctx.clone();
         std::thread::spawn(move || {
-            let new_disks = crate::infrastructure::windows::get_all_drives();
-            let _ = tx.send(new_disks);
+            let scan_result = crate::app::drive_state::DriveScanResult {
+                disks: crate::infrastructure::windows::get_all_drives(),
+                cloud_roots: crate::infrastructure::windows::get_cloud_sync_roots(),
+            };
+            let _ = tx.send(scan_result);
             ctx.request_repaint();
         });
     }
@@ -329,11 +332,14 @@ impl ImageViewerApp {
     /// Poll for completed background drive scans. Called once per frame.
     pub fn poll_drive_scan(&mut self) {
         match self.drive_state.drive_scan_rx.try_recv() {
-            Ok(new_disks) => {
+            Ok(scan_result) => {
                 self.drive_state.drive_scan_pending = false;
                 let old_disks = std::mem::take(&mut self.drive_state.disks);
-                let changed = new_disks != old_disks;
-                self.drive_state.disks = new_disks;
+                let old_cloud_roots = std::mem::take(&mut self.drive_state.cloud_roots);
+                let changed =
+                    scan_result.disks != old_disks || scan_result.cloud_roots != old_cloud_roots;
+                self.drive_state.disks = scan_result.disks;
+                self.drive_state.cloud_roots = scan_result.cloud_roots;
 
                 if changed {
                     // Invalidate cached drive types since drive list changed

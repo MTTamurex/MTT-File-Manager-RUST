@@ -1,4 +1,5 @@
 use crate::app::state::sidebar_tree_state::SidebarTreeState;
+use crate::domain::cloud_root::CloudRoot;
 use crate::domain::pinned_folder::PinnedFolder;
 use crate::infrastructure::windows::{detect_drive_type, DriveType};
 use eframe::egui::{self, Color32, Pos2, Rect, Sense};
@@ -31,6 +32,7 @@ pub fn invalidate_drive_type_cache() {
 /// Context for sidebar rendering
 pub struct SidebarContext<'a> {
     pub disks: &'a [(String, String)], // (path, label)
+    pub cloud_roots: &'a [CloudRoot],
     pub current_path: &'a str,
     pub highlighted_drive_path: Option<&'a str>,
     pub is_computer_view: bool,
@@ -332,6 +334,8 @@ pub fn render_sidebar_drives(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Opt
     let t_drives = std::time::Instant::now();
     let mut local_drives = Vec::new();
     let mut network_drives = Vec::new();
+
+    crate::ui::sidebar_cloud_roots::render_cloud_roots(ui, ctx, &mut action);
 
     for (disk_path, disk_label) in ctx.disks.iter() {
         let drive_type = get_cached_drive_type(disk_path);

@@ -3,6 +3,7 @@ nav:
   recycle_bin: "Lixeira"
 sidebar:
   quick_access: "Acesso Rápido"
+  cloud_drives: "Unidades de nuvem"
   local_disks: "Discos locais"
   network_drives: "Unidades de rede"
   eject_drive: "Ejetar ISO montada"

@@ -155,6 +155,7 @@ impl ImageViewerApp {
             consistency_probe_tx,
             consistency_probe_rx,
             disks,
+            cloud_roots,
             drive_scan_tx,
             drive_scan_rx,
             drive_info_tx,
@@ -310,6 +311,7 @@ impl ImageViewerApp {
             collapse_network_drives: false,
             drive_state: build_drive_state(
                 disks,
+                cloud_roots,
                 drive_scan_tx,
                 drive_scan_rx,
                 drive_info_tx,

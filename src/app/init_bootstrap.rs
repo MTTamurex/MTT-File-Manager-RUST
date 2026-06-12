@@ -109,8 +109,9 @@ pub(in crate::app) struct AppBootstrap {
         mpsc::Receiver<super::init_workers::consistency_probe_worker::ConsistencyProbeResult>,
 
     pub(in crate::app) disks: Vec<(String, String)>,
-    pub(in crate::app) drive_scan_tx: mpsc::Sender<Vec<(String, String)>>,
-    pub(in crate::app) drive_scan_rx: mpsc::Receiver<Vec<(String, String)>>,
+    pub(in crate::app) cloud_roots: Vec<crate::domain::cloud_root::CloudRoot>,
+    pub(in crate::app) drive_scan_tx: mpsc::Sender<crate::app::drive_state::DriveScanResult>,
+    pub(in crate::app) drive_scan_rx: mpsc::Receiver<crate::app::drive_state::DriveScanResult>,
     pub(in crate::app) drive_info_tx: mpsc::Sender<Vec<(String, DriveInfo)>>,
     pub(in crate::app) drive_info_rx: mpsc::Receiver<Vec<(String, DriveInfo)>>,
 
@@ -266,6 +267,7 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
     let (consistency_probe_tx, consistency_probe_rx) = spawn_consistency_probe_worker(ctx.clone());
 
     let disks = windows_infra::get_all_drives();
+    let cloud_roots = windows_infra::get_cloud_sync_roots();
     let (drive_scan_tx, drive_scan_rx) = mpsc::channel();
     let (drive_info_tx, drive_info_rx) = mpsc::channel();
 
@@ -326,6 +328,7 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
         consistency_probe_tx,
         consistency_probe_rx,
         disks,
+        cloud_roots,
         drive_scan_tx,
         drive_scan_rx,
         drive_info_tx,

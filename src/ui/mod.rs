@@ -11,6 +11,7 @@ pub mod icon_loader;
 pub mod navigation;
 pub mod preview_panel;
 pub mod sidebar;
+pub mod sidebar_cloud_roots;
 pub mod sidebar_tree;
 pub mod status_bar;
 pub mod svg_icons;

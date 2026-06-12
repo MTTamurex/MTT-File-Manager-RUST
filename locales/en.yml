@@ -3,6 +3,7 @@ nav:
   recycle_bin: "Recycle Bin"
 sidebar:
   quick_access: "Quick Access"
+  cloud_drives: "Cloud Drives"
   local_disks: "Local Disks"
   network_drives: "Network Drives"
   eject_drive: "Eject mounted ISO"

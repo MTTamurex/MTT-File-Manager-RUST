@@ -163,6 +163,7 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) -> Option
 
             let mut sidebar_ctx = SidebarContext {
                 disks: &app.drive_state.disks,
+                cloud_roots: &app.drive_state.cloud_roots,
                 current_path: &app.navigation_state.current_path,
                 highlighted_drive_path,
                 is_computer_view,
