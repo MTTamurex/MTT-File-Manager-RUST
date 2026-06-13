@@ -65,6 +65,39 @@ pub struct MediaMetadata {
     pub year: Option<u32>,
 }
 
+impl MediaMetadata {
+    pub fn is_empty(&self) -> bool {
+        self.width.is_none()
+            && self.height.is_none()
+            && self.duration_100ns.is_none()
+            && self.frame_rate.is_none()
+            && self.bitrate.is_none()
+            && self.format.is_none()
+            && self.color_depth.is_none()
+            && self.camera_maker.is_none()
+            && self.camera_model.is_none()
+            && self.f_stop.is_none()
+            && self.exposure_time.is_none()
+            && self.iso_speed.is_none()
+            && self.focal_length.is_none()
+            && self.max_aperture.is_none()
+            && self.metering_mode.is_none()
+            && self.flash_mode.is_none()
+            && self.date_taken.is_none()
+            && self.subject.is_none()
+            && self.video_codec.is_none()
+            && self.audio_codec.is_none()
+            && self.audio_bitrate.is_none()
+            && self.audio_channels.is_none()
+            && self.audio_sample_rate.is_none()
+            && self.artist.is_none()
+            && self.album.is_none()
+            && self.track_title.is_none()
+            && self.genre.is_none()
+            && self.year.is_none()
+    }
+}
+
 /// Extracts metadata for common media types (images/videos).
 /// Returns an empty struct when the file type is unsupported or metadata cannot be read.
 ///

@@ -460,6 +460,17 @@ impl ImageViewerApp {
             };
             processed += 1;
             self.metadata_loading.remove(&path);
+            if crate::infrastructure::onedrive::is_cloud_sync_path(&path)
+                && meta.is_empty()
+                && !crate::infrastructure::onedrive::is_locally_available(&path)
+            {
+                if let Some(selected) = &self.selected_file {
+                    if selected.path == path {
+                        self.selected_metadata = None;
+                    }
+                }
+                continue;
+            }
             self.metadata_cache.put(path.clone(), (mtime, meta.clone()));
 
             if let Some(selected) = &self.selected_file {

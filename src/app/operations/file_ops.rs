@@ -6,6 +6,7 @@ use crate::app::state::ImageViewerApp;
 use crate::application::file_operations;
 use crate::domain::file_entry::FileEntry;
 use crate::infrastructure::security::classify_shell_namespace_path;
+use eframe::egui;
 use rust_i18n::t;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -45,6 +46,34 @@ fn is_cloud_sync_media_file(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
+fn open_cloud_sync_file_async(
+    path: PathBuf,
+    metadata_req_sender: std::sync::mpsc::Sender<(PathBuf, u64)>,
+    ui_ctx: egui::Context,
+) {
+    let is_media = is_cloud_sync_media_file(&path);
+    std::thread::spawn(move || {
+        let open_result = file_operations::open_with_shell(&path, None);
+        match open_result {
+            Ok(()) => {
+                if is_media {
+                    crate::workers::thumbnail::clear_failure_cache(&path);
+                    let _ = metadata_req_sender.send((path.clone(), 0));
+                }
+                ui_ctx.request_repaint();
+            }
+            Err(e) => {
+                log::warn!(
+                    "[CloudFiles] Background shell open failed for '{}': {}",
+                    path.display(),
+                    e
+                );
+                ui_ctx.request_repaint();
+            }
+        }
+    });
+}
+
 impl ImageViewerApp {
     pub fn open_with_shell_guarded(&mut self, path: &Path) {
         if is_high_risk_shell_open_source(path) {
@@ -70,6 +99,23 @@ impl ImageViewerApp {
             self.pending_shell_open_confirmation = None;
         } else {
             self.pending_shell_open_confirmation = None;
+        }
+
+        if crate::infrastructure::onedrive::is_cloud_sync_path(path) {
+            let path_buf = path.to_path_buf();
+            crate::workers::thumbnail::clear_failure_cache(&path_buf);
+            self.cache_manager.failed_thumbnails.pop(&path_buf);
+            self.metadata_cache.pop(&path_buf);
+            if self.last_metadata_path.as_ref() == Some(&path_buf) {
+                self.last_metadata_path = None;
+            }
+
+            open_cloud_sync_file_async(
+                path_buf,
+                self.metadata_req_sender.clone(),
+                self.ui_ctx.clone(),
+            );
+            return;
         }
 
         if let Err(e) = file_operations::open_with_shell(path, self.native_hwnd) {
