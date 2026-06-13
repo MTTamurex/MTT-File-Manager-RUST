@@ -266,8 +266,7 @@ impl ImageViewerApp {
             .rectangle_selection_state
             .as_ref()
             .filter(|state| state.view == RectangleSelectionView::Grid);
-        let low_res_thumbnails_while_scrolling =
-            self.is_opengl_backend() || self.is_vulkan_backend();
+        let low_res_thumbnails_while_scrolling = self.is_opengl_backend();
 
         let mut ctx = GridViewContext {
             items: &self.items,

@@ -427,10 +427,12 @@ impl PriorityThumbnailQueue {
     }
 
     /// Remove specific paths from the queue (e.g., files being deleted)
-    pub fn remove_paths(&self, paths: &[PathBuf]) {
+    pub fn remove_paths(&self, paths: &[PathBuf]) -> usize {
         let mut state = self.state.lock();
+        let mut removed = 0usize;
         for path in paths {
             if state.pending.remove(path) {
+                removed += 1;
                 // Remove from the directory-grouped map
                 if let Some(parent) = path.parent() {
                     let parent_buf = parent.to_path_buf();
@@ -443,6 +445,7 @@ impl PriorityThumbnailQueue {
                 }
             }
         }
+        removed
     }
 
     /// Cancels queued work for a bulk scan session. Pure bulk requests are

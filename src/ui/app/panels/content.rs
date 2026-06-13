@@ -209,15 +209,25 @@ pub(super) fn render_preview_panel_layout(
                                                 "[REFRESH THUMBNAIL] Starting refresh for: {:?}",
                                                 path
                                             );
-                                            // Clear all caches to allow retry
-                                            // PERF FIX (C-1): Dispatch SQLite cleanup to background worker
-                                            // FORCED: user explicitly requested refresh
-                                            app.enqueue_disk_cache_invalidations_forced(vec![path.clone()]);
+                                            // Clear all caches before retrying. This is synchronous on purpose:
+                                            // a manual refresh must not race the worker and re-use the old SQLite blob.
+                                            app.disk_cache.remove_cache_for_path(&path);
                                             log::debug!("[REFRESH THUMBNAIL] Disk cache cleared");
+                                            let was_loading = app.cache_manager.loading_set.contains(&path);
+                                            let queued_removed = app.thumbnail_queue.remove_paths(&[path.clone()]);
                                             app.cache_manager.texture_cache.pop(&path);
+                                            app.selected_thumbnail = None;
                                             app.cache_manager.forget_attempted_thumbnail_bucket(&path);
+                                            app.cache_manager.forget_thumbnail_request_cooldown(&path);
                                             log::debug!("[REFRESH THUMBNAIL] Texture cache cleared");
                                             app.cache_manager.loading_set.remove(&path);
+                                            app.cache_manager.finish_pending_upload(&path);
+                                            app.pending_thumbnails.retain(|thumb| thumb.path != path);
+                                            if was_loading && queued_removed == 0 {
+                                                *app.thumbnail_eviction_skips
+                                                    .entry(path.clone())
+                                                    .or_insert(0) += 1;
+                                            }
                                             log::debug!("[REFRESH THUMBNAIL] Loading set cleared");
                                             // CRITICAL: Also clear RAM cache (rgba_data_cache) or
                                             // request_thumbnail_load will return early without re-extracting
