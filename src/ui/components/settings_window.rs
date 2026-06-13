@@ -187,14 +187,14 @@ pub fn render_settings_window(
                                             .color(theme::text_color(dark_mode)),
                                         );
                                         ui.add_space(4.0);
-                                        ui.small(RichText::new(t!("settings.diagnostics_privacy_scope")).color(theme::secondary_text_color(dark_mode)));
+                                        ui.label(RichText::new(t!("settings.diagnostics_privacy_scope")).color(theme::secondary_text_color(dark_mode)));
                                         ui.add_space(4.0);
-                                        ui.small(RichText::new(t!("settings.diagnostics_privacy_excludes")).color(theme::secondary_text_color(dark_mode)));
+                                        ui.label(RichText::new(t!("settings.diagnostics_privacy_excludes")).color(theme::secondary_text_color(dark_mode)));
                                         ui.add_space(4.0);
-                                        ui.small(RichText::new(t!("settings.diagnostics_privacy_transmission")).color(theme::secondary_text_color(dark_mode)));
+                                        ui.label(RichText::new(t!("settings.diagnostics_privacy_transmission")).color(theme::secondary_text_color(dark_mode)));
                                     });
                                     ui.add_space(6.0);
-                                    ui.small(RichText::new(t!("settings.diagnostics_note")).color(theme::secondary_text_color(dark_mode)));
+                                    ui.label(RichText::new(t!("settings.diagnostics_note")).color(theme::secondary_text_color(dark_mode)));
                                 }
                                 SettingsSection::Graphics => {
                                     backend_changed |= crate::ui::components::backend_settings::render_backend_settings_section(ui, active_gpu_backend, gpu_backend_preference);

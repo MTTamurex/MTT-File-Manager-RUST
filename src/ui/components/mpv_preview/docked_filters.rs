@@ -109,21 +109,20 @@ impl MpvPreview {
                 let _ = m.set_property("tscale", prev);
             }
 
-            if let Some(prev) = self.docked_prev_cache.take() {
-                let _ = m.set_property("cache", prev);
-            }
-            if let Some(prev) = self.docked_prev_cache_secs.take() {
-                let _ = m.set_property("cache-secs", prev);
-            }
-            if let Some(prev) = self.docked_prev_readahead_secs.take() {
-                let _ = m.set_property("demuxer-readahead-secs", prev);
-            }
-            if let Some(prev) = self.docked_prev_demuxer_max_bytes.take() {
-                let _ = m.set_property("demuxer-max-bytes", prev);
-            }
-            if let Some(prev) = self.docked_prev_demuxer_max_back_bytes.take() {
-                let _ = m.set_property("demuxer-max-back-bytes", prev);
-            }
+            self.docked_prev_cache = None;
+            self.docked_prev_cache_secs = None;
+            self.docked_prev_readahead_secs = None;
+            self.docked_prev_demuxer_max_bytes = None;
+            self.docked_prev_demuxer_max_back_bytes = None;
+
+            let _ = m.set_property("cache", "yes");
+            let _ = m.set_property("cache-secs", MPV_DETACHED_CACHE_SECS);
+            let _ = m.set_property("demuxer-readahead-secs", MPV_DETACHED_READAHEAD_SECS);
+            let _ = m.set_property("demuxer-max-bytes", MPV_DETACHED_DEMUXER_MAX_BYTES);
+            let _ = m.set_property(
+                "demuxer-max-back-bytes",
+                MPV_DETACHED_DEMUXER_MAX_BACK_BYTES,
+            );
 
             self.docked_downscale_applied = false;
             self.docked_fps_limit_applied = false;

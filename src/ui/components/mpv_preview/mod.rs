@@ -33,6 +33,11 @@ const MPV_DOCKED_CACHE_SECS: f64 = 12.0;
 const MPV_DOCKED_READAHEAD_SECS: f64 = 6.0;
 const MPV_DOCKED_DEMUXER_MAX_BYTES: i64 = 48_i64 * 1024 * 1024;
 const MPV_DOCKED_DEMUXER_MAX_BACK_BYTES: i64 = 12_i64 * 1024 * 1024;
+
+const MPV_DETACHED_CACHE_SECS: f64 = 20.0;
+const MPV_DETACHED_READAHEAD_SECS: f64 = 10.0;
+const MPV_DETACHED_DEMUXER_MAX_BYTES: i64 = 96_i64 * 1024 * 1024;
+const MPV_DETACHED_DEMUXER_MAX_BACK_BYTES: i64 = 16_i64 * 1024 * 1024;
 const MPV_OSC_POC_ENABLED: bool = true;
 const MPV_OSC_POC_DETACHED_ONLY: bool = true;
 const MPV_OSC_POC_BASE_SCRIPT_OPTS: &str = "osc-scalewindowed=1.8,osc-scalefullscreen=2.8,osc-scaleforcedwindow=1.8,osc-idlescreen=no,osc-showonpause=no";
