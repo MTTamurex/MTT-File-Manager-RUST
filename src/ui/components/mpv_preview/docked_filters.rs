@@ -1,6 +1,61 @@
 use super::*;
 
 impl MpvPreview {
+    fn script_vsr_enabled(mpv: &mpv::Mpv) -> Option<bool> {
+        mpv.get_property::<bool>("user-data/vsr/vsr-enabled").ok()
+    }
+
+    fn script_hdr_enabled(mpv: &mpv::Mpv) -> Option<bool> {
+        mpv.get_property::<bool>("user-data/vsr/hdr-enabled").ok()
+    }
+
+    fn remove_legacy_direct_vsr_filter(mpv: &mpv::Mpv) {
+        let Ok(current_vf) = mpv.get_property::<String>("vf") else {
+            return;
+        };
+        let cleaned_vf =
+            mpv_filters::remove_vf_filter(&current_vf, mpv_filters::LEGACY_DIRECT_VSR_MARKER);
+        if cleaned_vf != current_vf {
+            let _ = mpv.set_property("vf", cleaned_vf);
+        }
+    }
+
+    fn log_vsr_pipeline(mpv: &mpv::Mpv, context: &str) {
+        let vf = mpv.get_property::<String>("vf").unwrap_or_default();
+        let vo = mpv.get_property::<String>("vo").unwrap_or_default();
+        let gpu_api = mpv.get_property::<String>("gpu-api").unwrap_or_default();
+        let hwdec = mpv
+            .get_property::<String>("hwdec-current")
+            .unwrap_or_default();
+        let src_w = mpv.get_property::<i64>("video-params/w").unwrap_or(0);
+        let src_h = mpv.get_property::<i64>("video-params/h").unwrap_or(0);
+        let out_w = mpv.get_property::<i64>("video-out-params/w").unwrap_or(0);
+        let out_h = mpv.get_property::<i64>("video-out-params/h").unwrap_or(0);
+        let script_vsr = Self::script_vsr_enabled(mpv);
+        let script_hdr = Self::script_hdr_enabled(mpv);
+
+        log::info!(
+            "[MpvPreview] VSR pipeline {}: vf='{}', vo='{}', gpu-api='{}', hwdec-current='{}', src={}x{}, out={}x{}, script_vsr={:?}, script_hdr={:?}",
+            context,
+            vf,
+            vo,
+            gpu_api,
+            hwdec,
+            src_w,
+            src_h,
+            out_w,
+            out_h,
+            script_vsr,
+            script_hdr
+        );
+    }
+
+    pub(super) fn sync_vsr_flags_from_mpv(&mut self, mpv: &mpv::Mpv) {
+        if let Some(enabled) = Self::script_vsr_enabled(mpv) {
+            self.is_vsr_enabled = enabled;
+        }
+    }
+
     /// Applies or removes docked-mode downscale and FPS limiting without restarting playback.
     /// `force_reapply` is used when external changes (e.g., VSR) replace the filter chain.
     pub(super) fn update_docked_downscale(&mut self, force_reapply: bool) {
@@ -188,10 +243,26 @@ impl MpvPreview {
     /// - hwdec=d3d11va
     pub fn enable_nvidia_vsr(&mut self) -> Result<(), String> {
         if let Some(m) = &self.mpv {
-            m.set_property("vf", "d3d11vpp=scale=2:scaling-mode=nvidia")
-                .map_err(|e| format!("Failed to enable VSR: {:?}", e))?;
+            Self::remove_legacy_direct_vsr_filter(m);
+
+            if let Some(script_enabled) = Self::script_vsr_enabled(m) {
+                if !script_enabled {
+                    m.command("script-message", &["toggle-vsr"])
+                        .map_err(|e| format!("Failed to enable VSR via script: {:?}", e))?;
+                }
+            } else {
+                let current_vf = m.get_property::<String>("vf").unwrap_or_default();
+                let new_vf = mpv_filters::append_vf_filter(
+                    &current_vf,
+                    mpv_filters::LEGACY_DIRECT_VSR_MARKER,
+                );
+                m.set_property("vf", new_vf)
+                    .map_err(|e| format!("Failed to enable VSR fallback: {:?}", e))?;
+            }
+
             self.is_vsr_enabled = true;
             log::info!("[MpvPreview] NVIDIA VSR Enabled");
+            Self::log_vsr_pipeline(m, "enable_requested");
             self.update_docked_downscale(true);
             Ok(())
         } else {
@@ -202,10 +273,18 @@ impl MpvPreview {
     /// Disables VSR by clearing the video filter chain.
     pub fn disable_vsr(&mut self) -> Result<(), String> {
         if let Some(m) = &self.mpv {
-            m.set_property("vf", "")
-                .map_err(|e| format!("Failed to disable VSR: {:?}", e))?;
+            Self::remove_legacy_direct_vsr_filter(m);
+
+            if let Some(script_enabled) = Self::script_vsr_enabled(m) {
+                if script_enabled {
+                    m.command("script-message", &["toggle-vsr"])
+                        .map_err(|e| format!("Failed to disable VSR via script: {:?}", e))?;
+                }
+            }
+
             self.is_vsr_enabled = false;
             log::info!("[MpvPreview] VSR Disabled");
+            Self::log_vsr_pipeline(m, "disable_requested");
             self.update_docked_downscale(true);
             Ok(())
         } else {

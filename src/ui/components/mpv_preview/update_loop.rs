@@ -112,6 +112,7 @@ impl MpvPreview {
         if let Some(m) = self.mpv.clone() {
             self.sync_fullscreen_from_mpv(ui, &m);
             self.sync_osc_runtime_state(&m);
+            self.sync_vsr_flags_from_mpv(&m);
         }
 
         // Load file once

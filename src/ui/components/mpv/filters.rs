@@ -11,6 +11,7 @@ pub const DEINTERLACE_FILTER: &str = "bwdif=mode=auto:parity=auto:deint=all";
 pub const DEINTERLACE_MARKER: &str = "bwdif=";
 pub const AUDIO_NORMALIZER_FILTER: &str = "dynaudnorm=f=75";
 pub const AUDIO_NORMALIZER_MARKER: &str = "dynaudnorm";
+pub const LEGACY_DIRECT_VSR_MARKER: &str = "d3d11vpp=scale=2:scaling-mode=nvidia";
 
 /// Append a video filter to the current filter chain
 pub fn append_vf_filter(current_vf: &str, filter: &str) -> String {
