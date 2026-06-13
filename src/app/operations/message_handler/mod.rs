@@ -74,6 +74,10 @@ impl ImageViewerApp {
             self.reload_current_folder_preserving_icon_cache();
         }
 
+        while let Ok(path) = self.cloud_sync_status_refresh_receiver.try_recv() {
+            self.refresh_cached_sync_status_for_path(&path);
+        }
+
         // PERFORMANCE: Precompute normalized current path once for all comparisons
         let current_path_norm =
             Self::normalize_for_match(Path::new(&self.navigation_state.current_path));

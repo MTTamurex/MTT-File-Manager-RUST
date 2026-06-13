@@ -148,6 +148,46 @@ impl ImageViewerApp {
         }
     }
 
+    pub(super) fn refresh_cached_sync_status_for_path(&mut self, path: &Path) -> bool {
+        let cleaned = Self::clean_path(path);
+        let Some(status) = crate::infrastructure::onedrive::sync_status_for_path(&cleaned) else {
+            return false;
+        };
+
+        let path_norm = Self::normalize_for_match(&cleaned);
+        let mut updated_any = false;
+
+        for item in self.all_items_mut().iter_mut() {
+            if Self::path_matches_normalized(&item.path, &path_norm) && item.sync_status != status {
+                item.sync_status = status;
+                updated_any = true;
+            }
+        }
+
+        let items = Arc::make_mut(&mut self.items);
+        for item in items.iter_mut() {
+            if Self::path_matches_normalized(&item.path, &path_norm) && item.sync_status != status {
+                item.sync_status = status;
+                updated_any = true;
+            }
+        }
+
+        if let Some(selected) = self.selected_file.as_mut() {
+            if Self::path_matches_normalized(&selected.path, &path_norm)
+                && selected.sync_status != status
+            {
+                selected.sync_status = status;
+                updated_any = true;
+            }
+        }
+
+        if updated_any {
+            self.ui_ctx.request_repaint();
+        }
+
+        updated_any
+    }
+
     pub(super) fn invalidate_folder_cover_state(&mut self, folder: &Path) {
         let folder_path = folder.to_path_buf();
 

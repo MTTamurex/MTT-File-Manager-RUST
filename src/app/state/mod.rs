@@ -241,6 +241,8 @@ pub struct ImageViewerApp {
     pub metadata_res_receiver: Receiver<(PathBuf, u64, windows_infra::MediaMetadata)>,
     pub metadata_cache: LruCache<PathBuf, (u64, windows_infra::MediaMetadata)>,
     pub metadata_loading: FxHashSet<PathBuf>,
+    pub cloud_sync_status_refresh_sender: Sender<PathBuf>,
+    pub cloud_sync_status_refresh_receiver: Receiver<PathBuf>,
     pub live_file_size_req_sender: Sender<crate::app::live_file_size::LiveFileSizeRequest>,
     pub live_file_size_res_receiver: Receiver<crate::app::live_file_size::LiveFileSizeResponse>,
     pub live_file_size_cache: LruCache<PathBuf, (u64, u64)>,

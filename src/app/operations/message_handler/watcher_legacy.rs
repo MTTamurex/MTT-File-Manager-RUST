@@ -468,6 +468,7 @@ impl ImageViewerApp {
                         }
 
                         let cleaned = Self::clean_path(path);
+                        self.refresh_cached_sync_status_for_path(&cleaned);
                         crate::infrastructure::windows::file_flags::mark_recent_write_activity_at(
                             &cleaned,
                             received_at,

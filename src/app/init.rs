@@ -216,6 +216,9 @@ impl ImageViewerApp {
         let (shell_menu_req_tx, shell_menu_res_rx) =
             crate::infrastructure::shell_menu_worker::start_shell_menu_worker();
 
+        let (cloud_sync_status_refresh_sender, cloud_sync_status_refresh_receiver) =
+            std::sync::mpsc::channel();
+
         #[cfg(feature = "notify-watcher")]
         let (notify_watcher_setup_sender, notify_watcher_setup_receiver) =
             std::sync::mpsc::channel();
@@ -479,6 +482,8 @@ impl ImageViewerApp {
                     .expect("METADATA_CACHE_SIZE.max(1) must be non-zero"),
             ),
             metadata_loading: FxHashSet::default(),
+            cloud_sync_status_refresh_sender,
+            cloud_sync_status_refresh_receiver,
             live_file_size_req_sender: live_size_req_tx,
             live_file_size_res_receiver: live_size_res_rx,
             live_file_size_cache: LruCache::new(

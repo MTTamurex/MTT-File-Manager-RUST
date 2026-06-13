@@ -92,6 +92,23 @@ pub(super) fn get_sync_status(attrs: u32, is_onedrive: bool) -> SyncStatus {
     SyncStatus::LocallyAvailable
 }
 
+pub(super) fn sync_status_for_cloud_path(path: &Path) -> Option<SyncStatus> {
+    use windows::Win32::Storage::FileSystem::{GetFileAttributesW, INVALID_FILE_ATTRIBUTES};
+
+    let path_wide: Vec<u16> = path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+
+    let attrs = unsafe { GetFileAttributesW(windows::core::PCWSTR(path_wide.as_ptr())) };
+    if attrs == INVALID_FILE_ATTRIBUTES {
+        return None;
+    }
+
+    Some(get_sync_status(attrs, true))
+}
+
 pub(super) fn is_locally_available(path: &Path) -> bool {
     use windows::Win32::Storage::FileSystem::{GetFileAttributesW, INVALID_FILE_ATTRIBUTES};
 

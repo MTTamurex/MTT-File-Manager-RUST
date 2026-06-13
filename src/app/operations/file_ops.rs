@@ -49,6 +49,7 @@ fn is_cloud_sync_media_file(path: &Path) -> bool {
 fn open_cloud_sync_file_async(
     path: PathBuf,
     metadata_req_sender: std::sync::mpsc::Sender<(PathBuf, u64)>,
+    sync_status_refresh_sender: std::sync::mpsc::Sender<PathBuf>,
     ui_ctx: egui::Context,
 ) {
     let is_media = is_cloud_sync_media_file(&path);
@@ -56,6 +57,7 @@ fn open_cloud_sync_file_async(
         let open_result = file_operations::open_with_shell(&path, None);
         match open_result {
             Ok(()) => {
+                let _ = sync_status_refresh_sender.send(path.clone());
                 if is_media {
                     crate::workers::thumbnail::clear_failure_cache(&path);
                     let _ = metadata_req_sender.send((path.clone(), 0));
@@ -113,6 +115,7 @@ impl ImageViewerApp {
             open_cloud_sync_file_async(
                 path_buf,
                 self.metadata_req_sender.clone(),
+                self.cloud_sync_status_refresh_sender.clone(),
                 self.ui_ctx.clone(),
             );
             return;

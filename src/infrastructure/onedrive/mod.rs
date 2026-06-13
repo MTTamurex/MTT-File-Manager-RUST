@@ -438,6 +438,17 @@ pub fn get_sync_status(attrs: u32, is_onedrive: bool) -> SyncStatus {
     attributes::get_sync_status(attrs, is_onedrive)
 }
 
+/// Re-read Cloud Files attributes for one path and convert them to a sync badge status.
+///
+/// Intended for watcher/open completion paths, not hot enumeration loops.
+pub fn sync_status_for_path(path: &Path) -> Option<SyncStatus> {
+    if !is_cloud_sync_path(path) {
+        return None;
+    }
+
+    attributes::sync_status_for_cloud_path(path)
+}
+
 /// Check if a file is available locally (not cloud-only).
 /// Returns true if the file data is on disk, false if it needs download.
 pub fn is_locally_available(path: &Path) -> bool {
