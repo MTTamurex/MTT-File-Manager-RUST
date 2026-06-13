@@ -2,6 +2,8 @@ use crate::app::ImageViewerApp;
 use crate::infrastructure::onedrive;
 use eframe::egui;
 
+const STARTUP_REVEAL_TICK: usize = 2;
+
 fn recover_empty_current_folder_after_restore(app: &mut ImageViewerApp, reason: &str) {
     if app.navigation_state.is_computer_view || app.navigation_state.is_recycle_bin_view {
         return;
@@ -23,7 +25,7 @@ fn recover_empty_current_folder_after_restore(app: &mut ImageViewerApp, reason: 
 }
 
 pub fn handle_startup_sequence(app: &mut ImageViewerApp, ctx: &egui::Context) {
-    if app.startup_tick < 5 {
+    if app.startup_tick < STARTUP_REVEAL_TICK {
         app.startup_tick += 1;
 
         if app.startup_tick == 1 {
@@ -49,8 +51,8 @@ pub fn handle_startup_sequence(app: &mut ImageViewerApp, ctx: &egui::Context) {
             }
         }
 
-        if app.startup_tick == 5 {
-            // Frame 5: Reveal the window
+        if app.startup_tick == STARTUP_REVEAL_TICK {
+            // Reveal after one hidden frame has applied theme and geometry.
             ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
             ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
 
@@ -64,6 +66,8 @@ pub fn handle_startup_sequence(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 app.load_folder(false);
             }
             app.sync_to_tab();
+            app.run_post_startup_jobs(ctx);
+            log::info!("[STARTUP] first visible startup frame completed");
         }
 
         // Keep the loop running fast during startup

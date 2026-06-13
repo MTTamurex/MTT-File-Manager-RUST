@@ -15,7 +15,7 @@
 use eframe::egui;
 use mtt_file_manager::app::ImageViewerApp;
 use std::path::PathBuf;
-use std::time::SystemTime;
+use std::time::{Instant, SystemTime};
 
 mod gpu_backend;
 
@@ -76,30 +76,90 @@ fn has_stderr_console() -> bool {
     h != 0 && h != usize::MAX
 }
 
-/// Read a single user preference from the SQLite database before full app init.
-/// Used to load the GPU backend preference early (before eframe starts).
-fn read_early_preference(key: &str) -> Option<String> {
-    let db_path = dirs::data_local_dir()?
+/// Read startup-critical preferences with a single SQLite open before full app init.
+fn read_early_preferences(keys: &[&str]) -> std::collections::HashMap<String, String> {
+    let mut values = std::collections::HashMap::new();
+    let Some(data_local_dir) = dirs::data_local_dir() else {
+        return values;
+    };
+    let db_path = data_local_dir
         .join("MTT-File-Manager")
         .join("state")
         .join("app_state.db");
     if !db_path.exists() {
-        return None;
+        return values;
     }
     let conn = rusqlite::Connection::open_with_flags(
         &db_path,
         rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )
-    .ok()?;
-    conn.query_row(
-        "SELECT value FROM user_preferences WHERE key = ?",
-        rusqlite::params![key],
-        |row| row.get(0),
-    )
-    .ok()
+    .ok();
+    let Some(conn) = conn else {
+        return values;
+    };
+
+    let Ok(mut stmt) = conn.prepare("SELECT value FROM user_preferences WHERE key = ?") else {
+        return values;
+    };
+    for key in keys {
+        if let Ok(value) = stmt.query_row(rusqlite::params![key], |row| row.get::<_, String>(0)) {
+            values.insert((*key).to_string(), value);
+        }
+    }
+    values
 }
 
+#[cfg(target_os = "windows")]
+fn start_temporary_startup_priority_boost() {
+    use std::time::Duration;
+    use windows::Win32::System::Threading::{
+        GetCurrentProcess, GetPriorityClass, SetPriorityClass, ABOVE_NORMAL_PRIORITY_CLASS,
+        PROCESS_CREATION_FLAGS,
+    };
+
+    const STARTUP_BOOST_DURATION: Duration = Duration::from_secs(4);
+
+    let process = unsafe { GetCurrentProcess() };
+    let original_priority = unsafe { GetPriorityClass(process) };
+    if original_priority == 0 {
+        log::warn!("[STARTUP] Failed to read process priority class; startup boost skipped");
+        return;
+    }
+
+    if let Err(error) = unsafe { SetPriorityClass(process, ABOVE_NORMAL_PRIORITY_CLASS) } {
+        log::warn!("[STARTUP] Failed to enable startup priority boost: {error}");
+        return;
+    }
+
+    log::info!(
+        "[STARTUP] Temporary process priority boost enabled duration_ms={}",
+        STARTUP_BOOST_DURATION.as_millis()
+    );
+
+    let _ = std::thread::Builder::new()
+        .name("startup-priority-restore".to_string())
+        .spawn(move || {
+            std::thread::sleep(STARTUP_BOOST_DURATION);
+            let process = unsafe { GetCurrentProcess() };
+            unsafe {
+                if let Err(error) =
+                    SetPriorityClass(process, PROCESS_CREATION_FLAGS(original_priority))
+                {
+                    log::warn!(
+                        "[STARTUP] Failed to restore process priority after startup boost: {error}"
+                    );
+                } else {
+                    log::info!("[STARTUP] Temporary process priority boost restored");
+                }
+            }
+        });
+}
+
+#[cfg(not(target_os = "windows"))]
+fn start_temporary_startup_priority_boost() {}
+
 fn main() -> eframe::Result<()> {
+    let startup_start = Instant::now();
     // SEC: Remove the current working directory from the default DLL search order.
     // Prevents DLL planting attacks (e.g. malicious pdfium.dll or libmpv-2.dll in CWD).
     #[cfg(target_os = "windows")]
@@ -124,9 +184,9 @@ fn main() -> eframe::Result<()> {
     // allocations while preserving actionable diagnostics.
     #[cfg(target_os = "windows")]
     let default_filter = if has_stderr_console() {
-        "warn,mtt_file_manager=info"
+        "warn,wgpu_hal::vulkan::conv=error,mtt_file_manager=info"
     } else {
-        "warn,mtt_file_manager=warn"
+        "warn,wgpu_hal::vulkan::conv=error,mtt_file_manager=warn"
     };
     #[cfg(not(target_os = "windows"))]
     let default_filter = "warn,mtt_file_manager=info";
@@ -137,19 +197,33 @@ fn main() -> eframe::Result<()> {
     let console_logger = log_builder.build();
     mtt_file_manager::infrastructure::diagnostic_logger::init(console_logger)
         .expect("global logger should initialize exactly once");
+    log::info!(
+        "[STARTUP] logger initialized elapsed_ms={}",
+        startup_start.elapsed().as_millis()
+    );
 
-    let diagnostic_mode_requested = read_early_preference(
+    let early_prefs_start = Instant::now();
+    let early_prefs = read_early_preferences(&[
         mtt_file_manager::infrastructure::diagnostic_logger::DIAGNOSTIC_MODE_KEY,
-    )
-    .as_deref()
-    .map(|value| value == "true")
-    .unwrap_or(false);
+        mtt_file_manager::infrastructure::diagnostic_logger::DIAGNOSTIC_MODE_ENABLED_AT_KEY,
+        "gpu_backend",
+    ]);
+    log::info!(
+        "[STARTUP] early preferences loaded count={} elapsed_ms={}",
+        early_prefs.len(),
+        early_prefs_start.elapsed().as_millis()
+    );
+
+    let diagnostic_mode_requested = early_prefs
+        .get(mtt_file_manager::infrastructure::diagnostic_logger::DIAGNOSTIC_MODE_KEY)
+        .map(String::as_str)
+        .map(|value| value == "true")
+        .unwrap_or(false);
     let diagnostic_enabled_at =
         mtt_file_manager::infrastructure::diagnostic_logger::parse_enabled_at_preference(
-            read_early_preference(
-                mtt_file_manager::infrastructure::diagnostic_logger::DIAGNOSTIC_MODE_ENABLED_AT_KEY,
-            )
-            .as_deref(),
+            early_prefs
+                .get(mtt_file_manager::infrastructure::diagnostic_logger::DIAGNOSTIC_MODE_ENABLED_AT_KEY)
+                .map(String::as_str),
         )
         .or_else(|| diagnostic_mode_requested.then_some(SystemTime::now()));
     let diagnostic_mode_active = diagnostic_mode_requested
@@ -259,12 +333,19 @@ fn main() -> eframe::Result<()> {
     }
 
     log::info!("MTT File Manager starting");
+    start_temporary_startup_priority_boost();
 
     // Initialize codec name cache (queries Windows Registry on-demand)
     mtt_file_manager::infrastructure::windows::codec_registry::init_codec_cache();
 
     // Load application icon
+    let icon_start = Instant::now();
     let icon_data = load_app_icon();
+    log::info!(
+        "[STARTUP] app icon loaded present={} elapsed_ms={}",
+        icon_data.is_some(),
+        icon_start.elapsed().as_millis()
+    );
 
     // We manage preferences ourselves and force-kill on exit to avoid the
     // OneDrive/cldflt zombie-process hang. That makes eframe's RON storage
@@ -288,7 +369,7 @@ fn main() -> eframe::Result<()> {
     }
 
     // Read user's GPU backend preference (before eframe init).
-    let gpu_backend_pref = read_early_preference("gpu_backend").map(|pref| {
+    let gpu_backend_pref = early_prefs.get("gpu_backend").cloned().map(|pref| {
         if pref == "vulkan" {
             "auto".to_string()
         } else {
@@ -358,6 +439,11 @@ fn main() -> eframe::Result<()> {
         }
     };
 
+    log::info!(
+        "[STARTUP] native options ready elapsed_ms={}",
+        startup_start.elapsed().as_millis()
+    );
+
     let result = eframe::run_native(
         "MTT File Manager",
         options,
@@ -365,8 +451,14 @@ fn main() -> eframe::Result<()> {
             // STARTUP OPTIMIZATION: Fonts are now loaded asynchronously in app/init.rs
             // This allows the window to appear immediately with default fonts.
             // When the background thread finishes, the new fonts (Segoe UI) are applied dynamically.
+            let app_new_start = Instant::now();
+            let app = ImageViewerApp::new(cc);
+            log::info!(
+                "[STARTUP] ImageViewerApp::new elapsed_ms={}",
+                app_new_start.elapsed().as_millis()
+            );
 
-            Ok(Box::new(ImageViewerApp::new(cc)))
+            Ok(Box::new(app))
         }),
     );
 

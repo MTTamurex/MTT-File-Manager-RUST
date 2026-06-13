@@ -19,6 +19,8 @@ mod gc;
 mod thumbnails_repo;
 
 const FOLDER_PREVIEW_CACHE_FORMAT_VERSION: i64 = 2;
+const ACL_HARDENED_MARKER: &str = ".acl_hardened_v1";
+const LEGACY_CLEANUP_MARKER: &str = ".legacy_cleanup_v1";
 
 /// Allowed table targets for batch-delete operations.
 /// Using an enum instead of raw &str prevents SQL injection through
@@ -92,9 +94,10 @@ impl ThumbnailDiskCache {
             );
         }
 
-        // Harden directory permissions on first creation: restrict to owner
-        // to prevent cache poisoning by other local users.
-        let primary_hardened = db_utils::harden_directory_permissions(&cache_dir);
+        // Harden directory permissions once per cache directory: restrict to owner
+        // to prevent cache poisoning by other local users without paying the
+        // SetNamedSecurityInfoW cost on every startup.
+        let primary_hardened = Self::harden_permissions_once(&cache_dir);
         if !primary_hardened {
             log::warn!(
                 "[DISK-CACHE] Primary cache directory ACL hardening failed for {:?}",
@@ -103,7 +106,7 @@ impl ThumbnailDiskCache {
         }
 
         // Clean up legacy files if they exist (Migration)
-        Self::cleanup_legacy(&cache_dir);
+        Self::cleanup_legacy_once(&cache_dir);
 
         let db_path = cache_dir.join("thumbnails.db");
         let temp_fallback_path = std::env::temp_dir()
@@ -182,6 +185,44 @@ impl ThumbnailDiskCache {
             reader,
             cache_dir,
         })
+    }
+
+    fn marker_path(cache_dir: &Path, marker_name: &str) -> PathBuf {
+        cache_dir.join(marker_name)
+    }
+
+    fn write_marker(cache_dir: &Path, marker_name: &str) {
+        let marker_path = Self::marker_path(cache_dir, marker_name);
+        if let Err(error) = fs::write(&marker_path, b"ok") {
+            log::debug!(
+                "[DISK-CACHE] Failed to write marker {:?}: {}",
+                marker_path,
+                error
+            );
+        }
+    }
+
+    fn harden_permissions_once(cache_dir: &Path) -> bool {
+        let marker_path = Self::marker_path(cache_dir, ACL_HARDENED_MARKER);
+        if marker_path.exists() {
+            return true;
+        }
+
+        let hardened = db_utils::harden_directory_permissions(cache_dir);
+        if hardened {
+            Self::write_marker(cache_dir, ACL_HARDENED_MARKER);
+        }
+        hardened
+    }
+
+    fn cleanup_legacy_once(cache_dir: &Path) {
+        let marker_path = Self::marker_path(cache_dir, LEGACY_CLEANUP_MARKER);
+        if marker_path.exists() {
+            return;
+        }
+
+        Self::cleanup_legacy(cache_dir);
+        Self::write_marker(cache_dir, LEGACY_CLEANUP_MARKER);
     }
 
     fn run_migrations(conn: &Connection) {

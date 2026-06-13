@@ -17,6 +17,7 @@ use rusqlite::Connection;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize};
 use std::sync::{mpsc, Arc};
+use std::time::Instant;
 
 use super::folder_size_state::FolderSizeMessage;
 use super::init_preferences::StartupPreferences;
@@ -121,6 +122,21 @@ pub(in crate::app) struct AppBootstrap {
 }
 
 pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
+    let bootstrap_start = Instant::now();
+    let mut last_step = bootstrap_start;
+    macro_rules! log_bootstrap_step {
+        ($label:literal) => {{
+            let now = Instant::now();
+            log::info!(
+                "[STARTUP] bootstrap {} step_ms={} total_ms={}",
+                $label,
+                now.duration_since(last_step).as_millis(),
+                now.duration_since(bootstrap_start).as_millis()
+            );
+            last_step = now;
+        }};
+    }
+
     // Worker results carry decoded RGBA buffers. At the largest thumbnail
     // bucket (512px), a single result can be ~1 MiB, so a large channel turns
     // into hidden working-set growth outside the visible pending/RGBA caches.
@@ -134,6 +150,7 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
             error
         );
     }
+    log_bootstrap_step!("virtual_drive_config");
 
     let (file_entry_sender, file_entry_receiver) = mpsc::channel::<(usize, Vec<FileEntry>)>();
     let (folder_load_failure_sender, folder_load_failure_receiver) =
@@ -162,6 +179,7 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
         }
     });
     let base_dir = cache_dir.parent().unwrap_or(&cache_dir).to_path_buf();
+    log_bootstrap_step!("thumbnail_disk_cache");
 
     let state_dir = base_dir.join("state");
     let app_state_db = Arc::new(match AppStateDb::new(state_dir.clone()) {
@@ -184,6 +202,7 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
         &cache_dir.join("thumbnails.db"),
         &state_dir.join("app_state.db"),
     );
+    log_bootstrap_step!("app_state_and_legacy_migration");
 
     let dir_cache_dir = base_dir.join("cache");
     let _ = std::fs::create_dir_all(&dir_cache_dir);
@@ -194,12 +213,14 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
             None
         }
     };
+    log_bootstrap_step!("directory_index");
 
     let (cover_req_tx, cover_res_rx) = spawn_cover_worker(app_state_db.clone());
     #[cfg(feature = "notify-watcher")]
     let (fs_tx, fs_rx) = mpsc::channel();
     let (device_event_sender, device_event_receiver) = mpsc::channel();
     windows_infra::start_device_change_listener(device_event_sender, ctx.clone());
+    log_bootstrap_step!("base_channels_and_device_listener");
 
     let (img_tx, img_rx) = crossbeam_channel::bounded(THUMBNAIL_RESULT_CHANNEL_CAPACITY);
     let thumbnail_queue = Arc::new(PriorityThumbnailQueue::new());
@@ -214,6 +235,7 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
     let directory_cache = Arc::new(DirectoryCache::new());
     let startup_preferences = StartupPreferences::load(&app_state_db);
     let font_rx = spawn_async_font_loader();
+    log_bootstrap_step!("onedrive_preferences_fonts");
 
     let pending_deletions: Arc<dashmap::DashMap<PathBuf, ()>> = Arc::new(dashmap::DashMap::new());
     spawn_thumbnail_workers(
@@ -227,6 +249,7 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
         bulk_thumbnail_completed.clone(),
         bulk_thumbnail_session.clone(),
     );
+    log_bootstrap_step!("thumbnail_workers");
 
     let icon_disk_cache = Arc::new(IconDiskCache::new(&base_dir));
     spawn_file_icon_cache_gc_worker(icon_disk_cache.clone());
@@ -249,6 +272,7 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
         spawn_folder_size_worker(ctx);
     let (batch_size_tx, batch_size_rx, batch_size_cancel, batch_size_generation) =
         spawn_folder_size_batch_worker(ctx);
+    log_bootstrap_step!("visual_and_size_workers");
 
     let PrefetchWorkerHandles {
         prefetch_sender: prefetch_tx,
@@ -265,11 +289,14 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
     let disk_cache_invalidation_tx =
         spawn_disk_cache_invalidation_worker(disk_cache.clone(), app_state_db.clone());
     let (consistency_probe_tx, consistency_probe_rx) = spawn_consistency_probe_worker(ctx.clone());
+    log_bootstrap_step!("pipeline_and_search_workers");
 
     let disks = windows_infra::get_all_drives();
     let cloud_roots = windows_infra::get_cloud_sync_roots();
     let (drive_scan_tx, drive_scan_rx) = mpsc::channel();
     let (drive_info_tx, drive_info_rx) = mpsc::channel();
+    log_bootstrap_step!("drives_and_cloud_roots");
+    let _ = last_step;
 
     AppBootstrap {
         file_entry_sender,

@@ -27,7 +27,6 @@ use crate::ui::theme;
 
 use super::global_search_state::GlobalSearchState;
 use super::init_bootstrap::{bootstrap_app, AppBootstrap};
-use super::init_post_startup::run_post_startup_jobs;
 use super::init_preferences::StartupPreferences;
 use super::init_state_builders::{
     build_drive_state, build_file_operation_state, build_folder_size_state, build_layout_state,
@@ -667,7 +666,6 @@ impl ImageViewerApp {
             }
         }
 
-        run_post_startup_jobs(&mut app, &ctx);
         app.log_memory_snapshot("post-init");
 
         // Log GPU adapter info to file for diagnostics (works without console).
