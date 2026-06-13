@@ -8,6 +8,7 @@ use rusqlite::Connection;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Instant;
 
 use crate::domain::thumbnail::MAX_THUMBNAIL_SIDE;
 
@@ -21,6 +22,7 @@ mod thumbnails_repo;
 const FOLDER_PREVIEW_CACHE_FORMAT_VERSION: i64 = 2;
 const ACL_HARDENED_MARKER: &str = ".acl_hardened_v1";
 const LEGACY_CLEANUP_MARKER: &str = ".legacy_cleanup_v1";
+const OVERSIZED_CLEANUP_MARKER: &str = ".oversized_cleanup_v1";
 
 /// Allowed table targets for batch-delete operations.
 /// Using an enum instead of raw &str prevents SQL injection through
@@ -85,6 +87,21 @@ pub struct ThumbnailDiskCache {
 impl ThumbnailDiskCache {
     /// Creates a new disk cache at the specified directory
     pub fn new(cache_dir: PathBuf) -> rusqlite::Result<Self> {
+        let startup_start = Instant::now();
+        let mut last_step = startup_start;
+        macro_rules! log_step {
+            ($label:literal) => {{
+                let now = Instant::now();
+                log::info!(
+                    "[STARTUP] thumbnail_disk_cache {} step_ms={} total_ms={}",
+                    $label,
+                    now.duration_since(last_step).as_millis(),
+                    now.duration_since(startup_start).as_millis()
+                );
+                last_step = now;
+            }};
+        }
+
         // Ensure directory exists
         if let Err(e) = fs::create_dir_all(&cache_dir) {
             log::warn!(
@@ -93,6 +110,7 @@ impl ThumbnailDiskCache {
                 e
             );
         }
+        log_step!("ensure_dir");
 
         // Harden directory permissions once per cache directory: restrict to owner
         // to prevent cache poisoning by other local users without paying the
@@ -104,9 +122,11 @@ impl ThumbnailDiskCache {
                 cache_dir
             );
         }
+        log_step!("acl_harden_once");
 
         // Clean up legacy files if they exist (Migration)
         Self::cleanup_legacy_once(&cache_dir);
+        log_step!("legacy_cleanup_once");
 
         let db_path = cache_dir.join("thumbnails.db");
         let temp_fallback_path = std::env::temp_dir()
@@ -137,10 +157,12 @@ impl ThumbnailDiskCache {
                 db_utils::open_temp_fallback_connection(&temp_fallback_path)?;
             (conn, fallback_path)
         };
+        log_step!("open_writer");
 
         // Performance Tuning: Use WAL mode for better concurrency (readers don't block writers)
         // and NORMAL synchronous for faster writes (safe in WAL mode).
         db_utils::apply_default_pragmas(&writer_conn);
+        log_step!("writer_pragmas");
 
         // 2. Open READER connection (Secondary)
         // In WAL mode, this can read while writer is busy. If reader cannot be opened,
@@ -160,13 +182,16 @@ impl ThumbnailDiskCache {
             // Writer is in-memory fallback: share writer connection to keep consistency.
             None
         };
+        log_step!("open_reader");
 
         // 3. Schema Migrations (Run on Writer)
-        Self::run_migrations(&writer_conn);
+        Self::run_migrations(&writer_conn, &cache_dir);
+        log_step!("migrations");
 
         let writer = Arc::new(Mutex::new(writer_conn));
         let reader = if let Some(reader_conn) = reader_conn {
             db_utils::apply_default_pragmas(&reader_conn);
+            log_step!("reader_pragmas");
             Arc::new(Mutex::new(reader_conn))
         } else {
             // SAFETY INVARIANT: when reader == writer (same Arc), no code path
@@ -179,6 +204,7 @@ impl ThumbnailDiskCache {
             );
             writer.clone()
         };
+        let _ = last_step;
 
         Ok(Self {
             writer,
@@ -225,7 +251,31 @@ impl ThumbnailDiskCache {
         Self::write_marker(cache_dir, LEGACY_CLEANUP_MARKER);
     }
 
-    fn run_migrations(conn: &Connection) {
+    fn cleanup_oversized_thumbnails_once(conn: &Connection, cache_dir: &Path) {
+        let marker_path = Self::marker_path(cache_dir, OVERSIZED_CLEANUP_MARKER);
+        if marker_path.exists() {
+            return;
+        }
+
+        // Enforce the thumbnail cache contract once. Running this on every
+        // startup can scan a large thumbnails table before the window appears.
+        conn.execute(
+            "DELETE FROM thumbnails
+             WHERE width > ? OR height > ? OR requested_size > ?",
+            [
+                MAX_THUMBNAIL_SIDE as i64,
+                MAX_THUMBNAIL_SIDE as i64,
+                MAX_THUMBNAIL_SIDE as i64,
+            ],
+        )
+        .unwrap_or_else(|e| {
+            log::warn!("[Cache] Failed to remove oversized thumbnails: {:?}", e);
+            0
+        });
+        Self::write_marker(cache_dir, OVERSIZED_CLEANUP_MARKER);
+    }
+
+    fn run_migrations(conn: &Connection, cache_dir: &Path) {
         // Create table (with path for GC)
         conn.execute(
             "CREATE TABLE IF NOT EXISTS thumbnails (
@@ -261,20 +311,7 @@ impl ThumbnailDiskCache {
             [],
         );
 
-        // Enforce the thumbnail cache contract: no persisted thumbnail may exceed 512px.
-        conn.execute(
-            "DELETE FROM thumbnails
-             WHERE width > ? OR height > ? OR requested_size > ?",
-            [
-                MAX_THUMBNAIL_SIDE as i64,
-                MAX_THUMBNAIL_SIDE as i64,
-                MAX_THUMBNAIL_SIDE as i64,
-            ],
-        )
-        .unwrap_or_else(|e| {
-            log::warn!("[Cache] Failed to remove oversized thumbnails: {:?}", e);
-            0
-        });
+        Self::cleanup_oversized_thumbnails_once(conn, cache_dir);
 
         // OPTIMIZATION: Index on path to speed up directory clearing
         conn.execute(
