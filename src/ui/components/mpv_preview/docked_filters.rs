@@ -9,6 +9,10 @@ impl MpvPreview {
         mpv.get_property::<bool>("user-data/vsr/hdr-enabled").ok()
     }
 
+    fn script_rtx_supported(mpv: &mpv::Mpv) -> Option<bool> {
+        mpv.get_property::<bool>("user-data/vsr/rtx-supported").ok()
+    }
+
     fn remove_legacy_direct_vsr_filter(mpv: &mpv::Mpv) {
         let Ok(current_vf) = mpv.get_property::<String>("vf") else {
             return;
@@ -33,9 +37,10 @@ impl MpvPreview {
         let out_h = mpv.get_property::<i64>("video-out-params/h").unwrap_or(0);
         let script_vsr = Self::script_vsr_enabled(mpv);
         let script_hdr = Self::script_hdr_enabled(mpv);
+        let rtx_supported = Self::script_rtx_supported(mpv);
 
         log::info!(
-            "[MpvPreview] VSR pipeline {}: vf='{}', vo='{}', gpu-api='{}', hwdec-current='{}', src={}x{}, out={}x{}, script_vsr={:?}, script_hdr={:?}",
+            "[MpvPreview] VSR pipeline {}: vf='{}', vo='{}', gpu-api='{}', hwdec-current='{}', src={}x{}, out={}x{}, script_vsr={:?}, script_hdr={:?}, rtx_supported={:?}",
             context,
             vf,
             vo,
@@ -46,13 +51,17 @@ impl MpvPreview {
             out_w,
             out_h,
             script_vsr,
-            script_hdr
+            script_hdr,
+            rtx_supported
         );
     }
 
     pub(super) fn sync_vsr_flags_from_mpv(&mut self, mpv: &mpv::Mpv) {
         if let Some(enabled) = Self::script_vsr_enabled(mpv) {
             self.is_vsr_enabled = enabled;
+        }
+        if let Some(supported) = Self::script_rtx_supported(mpv) {
+            self.is_rtx_supported = supported;
         }
     }
 
@@ -246,6 +255,10 @@ impl MpvPreview {
             Self::remove_legacy_direct_vsr_filter(m);
 
             if let Some(script_enabled) = Self::script_vsr_enabled(m) {
+                if Self::script_rtx_supported(m) == Some(false) {
+                    return Err("NVIDIA RTX GPU not detected".to_string());
+                }
+
                 if !script_enabled {
                     m.command("script-message", &["toggle-vsr"])
                         .map_err(|e| format!("Failed to enable VSR via script: {:?}", e))?;

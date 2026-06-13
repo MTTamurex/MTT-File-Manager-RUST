@@ -81,6 +81,8 @@ pub struct MpvPreview {
     pub initial_volume: f32,
     /// Tracks if NVIDIA VSR is currently enabled
     pub is_vsr_enabled: bool,
+    /// Tracks whether RTX Video features are available on this machine.
+    pub is_rtx_supported: bool,
     /// Tracks whether docked downscale is currently applied
     docked_downscale_applied: bool,
     /// Stores previous vf chain to restore on undock
@@ -286,6 +288,7 @@ impl MpvPreview {
             was_minimized: false,
             initial_volume: 1.0,
             is_vsr_enabled: false,
+            is_rtx_supported: false,
             docked_downscale_applied: false,
             docked_prev_vf: None,
             docked_fps_limit_applied: false,

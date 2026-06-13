@@ -6,6 +6,9 @@ local FORMAT_TAG = "@mtt-rtx-format"
 local state = {
     vsr_enabled = false,
     hdr_enabled = false,
+    rtx_checked = false,
+    rtx_supported = false,
+    rtx_adapter_name = "",
     chain_active = false,
     physical_display = { width = nil, height = nil },
     restore_timer = nil,
@@ -14,6 +17,9 @@ local state = {
 local function sync_ui_flags()
     mp.set_property_bool("user-data/vsr/vsr-enabled", state.vsr_enabled)
     mp.set_property_bool("user-data/vsr/hdr-enabled", state.hdr_enabled)
+    mp.set_property_bool("user-data/vsr/rtx-checked", state.rtx_checked)
+    mp.set_property_bool("user-data/vsr/rtx-supported", state.rtx_supported)
+    mp.set_property("user-data/vsr/rtx-adapter-name", state.rtx_adapter_name)
 end
 
 local function floor_to_tenth(value)
@@ -45,6 +51,38 @@ local function probe_physical_display_async()
         state.physical_display.width = tonumber(width)
         state.physical_display.height = tonumber(height)
         mp.msg.info("RTX filters: physical display " .. state.physical_display.width .. "x" .. state.physical_display.height)
+    end)
+end
+
+local function detect_rtx_compatibility_async()
+    mp.command_native_async({
+        name = "subprocess",
+        args = {
+            "powershell.exe", "-NoProfile", "-NonInteractive",
+            "-ExecutionPolicy", "Bypass", "-Command",
+            "$gpu = Get-CimInstance Win32_VideoController | Where-Object { (($_.Name -match 'NVIDIA') -or ($_.AdapterCompatibility -match 'NVIDIA')) -and ($_.Name -match 'RTX') } | Select-Object -First 1; if ($gpu) { Write-Output $gpu.Name; exit 0 } else { exit 2 }"
+        },
+        capture_stdout = true,
+        playback_only = false,
+    }, function(success, result)
+        state.rtx_checked = true
+        state.rtx_supported = false
+        state.rtx_adapter_name = ""
+
+        if success and result and result.status == 0 and result.stdout then
+            local adapter = result.stdout:gsub("^%s+", ""):gsub("%s+$", "")
+            if adapter ~= "" then
+                state.rtx_supported = true
+                state.rtx_adapter_name = adapter
+                mp.msg.info("RTX filters: compatible adapter detected: " .. adapter)
+            end
+        end
+
+        if not state.rtx_supported then
+            mp.msg.info("RTX filters: NVIDIA RTX adapter not detected; RTX controls disabled")
+        end
+
+        sync_ui_flags()
     end)
 end
 
@@ -194,7 +232,25 @@ local function show_toggle_result(label, enabled, applied)
     end
 end
 
+local function rtx_available_for_toggle()
+    if not state.rtx_checked then
+        mp.osd_message("RTX features: checking GPU compatibility", 2)
+        return false
+    end
+
+    if not state.rtx_supported then
+        mp.osd_message("RTX features unavailable: NVIDIA RTX GPU not detected", 3)
+        return false
+    end
+
+    return true
+end
+
 local function toggle_vsr()
+    if not rtx_available_for_toggle() then
+        return
+    end
+
     state.vsr_enabled = not state.vsr_enabled
     sync_ui_flags()
     local applied = apply_filter_chain()
@@ -202,6 +258,10 @@ local function toggle_vsr()
 end
 
 local function toggle_hdr()
+    if not rtx_available_for_toggle() then
+        return
+    end
+
     state.hdr_enabled = not state.hdr_enabled
     sync_ui_flags()
     local applied = apply_filter_chain()
@@ -264,6 +324,7 @@ end)
 
 sync_ui_flags()
 probe_physical_display_async()
+detect_rtx_compatibility_async()
 
 mp.add_key_binding("ctrl+shift+r", "toggle-mtt-rtx-vsr", toggle_vsr)
 mp.register_script_message("toggle-vsr", toggle_vsr)

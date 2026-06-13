@@ -87,35 +87,37 @@ pub(super) fn draw_detached_buttons(
 
         ui.add_space(4.0);
 
-        // VSR Button (NVIDIA Video Super Resolution)
-        let is_vsr = preview.is_vsr_enabled();
-        let label = if is_vsr { "VSR On" } else { "VSR Off" };
+        if preview.is_rtx_supported() {
+            // VSR Button (NVIDIA Video Super Resolution)
+            let is_vsr = preview.is_vsr_enabled();
+            let label = if is_vsr { "VSR On" } else { "VSR Off" };
 
-        // Custom style for ON state (NVIDIA Green), Standard style for OFF state
-        let btn = if is_vsr {
-            egui::Button::new(
-                egui::RichText::new(label)
-                    .strong()
-                    .size(10.0)
-                    .color(egui::Color32::WHITE),
-            )
-            .fill(egui::Color32::from_rgb(118, 185, 0))
-        } else {
-            egui::Button::new(egui::RichText::new(label).size(10.0))
-                .fill(egui::Color32::TRANSPARENT)
-        };
-
-        if ui
-            .add(btn)
-            .on_hover_text(if is_vsr {
-                "Desativar NVIDIA VSR Upscaling"
+            // Custom style for ON state (NVIDIA Green), Standard style for OFF state
+            let btn = if is_vsr {
+                egui::Button::new(
+                    egui::RichText::new(label)
+                        .strong()
+                        .size(10.0)
+                        .color(egui::Color32::WHITE),
+                )
+                .fill(egui::Color32::from_rgb(118, 185, 0))
             } else {
-                "Ativar NVIDIA VSR (AI Upscaling)"
-            })
-            .clicked()
-        {
-            if let Err(e) = preview.toggle_vsr() {
-                log::error!("toggling VSR: {}", e);
+                egui::Button::new(egui::RichText::new(label).size(10.0))
+                    .fill(egui::Color32::TRANSPARENT)
+            };
+
+            if ui
+                .add(btn)
+                .on_hover_text(if is_vsr {
+                    "Desativar NVIDIA VSR Upscaling"
+                } else {
+                    "Ativar NVIDIA VSR (AI Upscaling)"
+                })
+                .clicked()
+            {
+                if let Err(e) = preview.toggle_vsr() {
+                    log::error!("toggling VSR: {}", e);
+                }
             }
         }
     });

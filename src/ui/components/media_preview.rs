@@ -367,6 +367,15 @@ impl MediaPreview {
         }
     }
 
+    /// Check if RTX Video features are available on this machine.
+    pub fn is_rtx_supported(&self) -> bool {
+        if let MediaPreview::Video(player) = self {
+            player.is_rtx_supported
+        } else {
+            false
+        }
+    }
+
     /// Toggle NVIDIA VSR
     pub fn toggle_vsr(&mut self) -> Result<(), String> {
         if let MediaPreview::Video(player) = self {

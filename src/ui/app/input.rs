@@ -467,7 +467,7 @@ fn handle_media_hardware_input(app: &mut ImageViewerApp, ctx: &egui::Context) ->
     let u_down = is_virtual_key_down(0x55);
     let a_down = is_virtual_key_down(0x41);
 
-    if ctrl_down && shift_down && u_down {
+    if ctrl_down && shift_down && u_down && preview.is_rtx_supported() {
         match preview.toggle_vsr() {
             Ok(_) => {
                 let vsr_on = preview.is_vsr_enabled();

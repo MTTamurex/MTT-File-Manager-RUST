@@ -229,6 +229,10 @@ local language_alias = {
 local function resolve_language(code)
     return language[language_alias[code] or code] or language['eng']
 end
+
+local function rtx_features_supported()
+    return mp.get_property_bool('user-data/vsr/rtx-supported', false)
+end
 -- read options from config and command-line
 opt.read_options(user_opts, 'osc', function(list) update_options(list) end)
 -- apply lang opts
@@ -1980,13 +1984,13 @@ local UI_OFFSET_Y = -30
     lo = add_layout('tog_vsr')
     lo.geometry = {x = osc_geo.w - 200, y = refY - 40 + UI_OFFSET_Y, an = 5, w = 36, h = 24}
     lo.style = osc_styles.CtrlText
-    lo.visible = (osc_param.playresx >= 750)
+    lo.visible = (osc_param.playresx >= 750) and rtx_features_supported()
 
     -- RTX HDR toggle
     lo = add_layout('tog_hdr')
     lo.geometry = {x = osc_geo.w - 260, y = refY - 40 + UI_OFFSET_Y, an = 5, w = 36, h = 24}
     lo.style = osc_styles.CtrlText
-    lo.visible = (osc_param.playresx >= 850)
+    lo.visible = (osc_param.playresx >= 850) and rtx_features_supported()
 
     -- Audio normalizer toggle
     lo = add_layout('tog_norm')
@@ -2372,7 +2376,7 @@ function osc_init()
 
     --tog_vsr
     ne = new_element('tog_vsr', 'button')
-    ne.visible = (osc_param.playresx >= 700)
+    ne.visible = (osc_param.playresx >= 700) and rtx_features_supported()
     ne.tooltip_style = osc_styles.Tooltip
     ne.tooltipF = function ()
         local on = mp.get_property_bool('user-data/vsr/vsr-enabled', false)
@@ -2391,7 +2395,7 @@ function osc_init()
 
     --tog_hdr
     ne = new_element('tog_hdr', 'button')
-    ne.visible = (osc_param.playresx >= 750)
+    ne.visible = (osc_param.playresx >= 750) and rtx_features_supported()
     ne.tooltip_style = osc_styles.Tooltip
     ne.tooltipF = function ()
         local on = mp.get_property_bool('user-data/vsr/hdr-enabled', false)
@@ -3192,6 +3196,9 @@ mp.register_event('shutdown', shutdown)
 mp.register_event('start-file', request_init)
 mp.observe_property('track-list', nil, request_init)
 mp.observe_property('playlist', nil, request_init)
+mp.observe_property('user-data/vsr/rtx-supported', 'bool', function(_, _)
+    request_init_resize()
+end)
 mp.observe_property("chapter-list", "native", function(_, list)
     list = list or {}  -- safety, shouldn't return nil
     table.sort(list, function(a, b) return a.time < b.time end)
