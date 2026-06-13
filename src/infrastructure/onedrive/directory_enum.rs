@@ -6,7 +6,7 @@ pub(super) fn read_directory_with_timeout(
     path: &Path,
     timeout_ms: u64,
 ) -> super::IoTimeoutResult<DirectoryEntries> {
-    if !super::is_onedrive_path(path) {
+    if !super::is_cloud_sync_path(path) {
         return match read_directory_internal(path) {
             Ok(entries) => super::IoTimeoutResult::Ok(entries),
             Err(_) => super::IoTimeoutResult::Err(std::io::ErrorKind::Other),

@@ -5,9 +5,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 fn should_preserve_onedrive_media_thumbnail(path: &std::path::Path) -> bool {
-    if !crate::infrastructure::onedrive::is_onedrive_path(path)
-        && !crate::infrastructure::onedrive::path_has_cloud_attributes(path)
-    {
+    if !crate::infrastructure::onedrive::is_cloud_sync_path(path) {
         return false;
     }
 

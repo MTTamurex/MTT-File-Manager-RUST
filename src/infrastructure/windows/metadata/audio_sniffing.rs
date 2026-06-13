@@ -48,8 +48,8 @@ impl AudioCodec {
 /// Deterministic audio codec sniffer (Final Fallback)
 /// Reads up to 128KB to identify codec via container or bitstream headers.
 pub fn sniff_audio_codec(path: &Path) -> Option<AudioCodecGuess> {
-    // Skip cloud-only OneDrive files — File::open can trigger download and block
-    if crate::infrastructure::onedrive::is_onedrive_path(path)
+    // Skip cloud-only provider files — File::open can trigger download and block
+    if crate::infrastructure::onedrive::is_cloud_sync_path(path)
         && !crate::infrastructure::onedrive::is_locally_available(path)
     {
         return None;

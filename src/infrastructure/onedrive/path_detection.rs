@@ -10,17 +10,40 @@ static SPECIAL_FOLDER_PATHS: OnceLock<HashSet<String>> = OnceLock::new();
 /// Used by `special_folder_display_name()` to provide translated display names.
 static SPECIAL_FOLDER_KEYS: OnceLock<HashMap<String, &'static str>> = OnceLock::new();
 
+/// Cached Windows Cloud Files sync roots (OneDrive, Proton Drive, etc.).
+static CLOUD_SYNC_ROOTS: OnceLock<Vec<String>> = OnceLock::new();
+
 pub(super) fn init_onedrive_paths() {
     super::ONEDRIVE_ROOTS.get_or_init(|| {
         let mut roots = Vec::new();
         for var in ["OneDrive", "OneDriveConsumer", "OneDriveCommercial"] {
             if let Ok(path) = std::env::var(var) {
                 if !path.is_empty() {
-                    roots.push(path.to_lowercase());
+                    roots.push(normalize_root_for_compare(&path));
                 }
             }
         }
         log::info!("[OneDrive] Detected roots: {:?}", roots);
+        roots
+    });
+
+    CLOUD_SYNC_ROOTS.get_or_init(|| {
+        let mut roots: Vec<String> = crate::infrastructure::windows::get_cloud_sync_roots()
+            .into_iter()
+            .map(|root| normalize_root_for_compare(&root.path))
+            .collect();
+
+        if let Some(onedrive_roots) = super::ONEDRIVE_ROOTS.get() {
+            roots.extend(
+                onedrive_roots
+                    .iter()
+                    .map(|root| normalize_root_for_compare(root)),
+            );
+        }
+
+        roots.sort();
+        roots.dedup();
+        log::info!("[CloudSync] Detected roots: {:?}", roots);
         roots
     });
 
@@ -90,11 +113,40 @@ fn resolve_known_folder_paths(
 }
 
 pub(super) fn is_onedrive_path(path: &Path) -> bool {
-    let path_lower = path.to_string_lossy().to_lowercase();
+    let path_lower = normalize_root_for_compare(&path.to_string_lossy());
     super::ONEDRIVE_ROOTS
         .get()
-        .map(|roots| roots.iter().any(|r| path_lower.starts_with(r)))
+        .map(|roots| {
+            roots
+                .iter()
+                .any(|root| path_is_under_root(&path_lower, root))
+        })
         .unwrap_or(false)
+}
+
+pub(super) fn is_cloud_sync_path(path: &Path) -> bool {
+    let path_lower = normalize_root_for_compare(&path.to_string_lossy());
+    CLOUD_SYNC_ROOTS
+        .get()
+        .map(|roots| {
+            roots
+                .iter()
+                .any(|root| path_is_under_root(&path_lower, root))
+        })
+        .unwrap_or(false)
+}
+
+fn normalize_root_for_compare(path: &str) -> String {
+    path.to_lowercase()
+        .trim_end_matches(['\\', '/'])
+        .to_string()
+}
+
+fn path_is_under_root(path: &str, root: &str) -> bool {
+    path == root
+        || path
+            .strip_prefix(root)
+            .is_some_and(|rest| rest.starts_with(['\\', '/']))
 }
 
 /// Returns true if `path` matches a known Windows special folder

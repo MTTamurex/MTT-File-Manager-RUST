@@ -203,7 +203,7 @@ impl ImageViewerApp {
     fn enqueue_onedrive_eager_folder_previews(&mut self) {
         if !matches!(self.view_mode, crate::domain::file_entry::ViewMode::Grid)
             || self.navigation_state.is_recycle_bin_view
-            || !crate::infrastructure::onedrive::is_onedrive_path(&PathBuf::from(
+            || !crate::infrastructure::onedrive::is_cloud_sync_path(&PathBuf::from(
                 &self.navigation_state.current_path,
             ))
         {

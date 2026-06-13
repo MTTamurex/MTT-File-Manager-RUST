@@ -102,9 +102,9 @@ impl Drop for MFGuard {
 /// This is more reliable than Property Store for modern codecs and containers,
 /// but is slower because it opens and parses the file.
 pub fn extract_video_metadata_mf(path: &Path) -> Option<VideoMetadataMF> {
-    // Skip cloud-only OneDrive files — MFCreateSourceReaderFromURL opens the file
+    // Skip cloud-only provider files — MFCreateSourceReaderFromURL opens the file
     // and can trigger a download, blocking the thread for 30-60+ seconds.
-    if crate::infrastructure::onedrive::is_onedrive_path(path)
+    if crate::infrastructure::onedrive::is_cloud_sync_path(path)
         && !crate::infrastructure::onedrive::is_locally_available(path)
     {
         return None;

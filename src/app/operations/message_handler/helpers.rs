@@ -338,7 +338,7 @@ impl ImageViewerApp {
     pub(super) fn try_add_created_path_to_ui(&mut self, path: &Path) -> bool {
         let cleaned = Self::clean_path(path);
 
-        if crate::infrastructure::onedrive::is_onedrive_path(&cleaned)
+        if crate::infrastructure::onedrive::is_cloud_sync_path(&cleaned)
             || crate::infrastructure::io_priority::is_network_or_virtual(&cleaned)
         {
             return false;
@@ -608,8 +608,11 @@ impl ImageViewerApp {
 
         let mut scheduled_any = false;
         for folder_path in &folders_with_changed_contents {
-            if crate::infrastructure::onedrive::is_onedrive_path(folder_path) {
-                log::debug!("[MTIME-SCHED] Skipping OneDrive folder: {:?}", folder_path);
+            if crate::infrastructure::onedrive::is_cloud_sync_path(folder_path) {
+                log::debug!(
+                    "[MTIME-SCHED] Skipping cloud sync folder: {:?}",
+                    folder_path
+                );
                 continue;
             }
             if crate::infrastructure::io_priority::is_network_or_virtual(folder_path) {

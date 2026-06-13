@@ -177,6 +177,7 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) -> Option
                 dragging_path,
                 show_recycle_bin: app.show_recycle_bin,
                 collapse_quick_access: app.collapse_quick_access,
+                collapse_cloud_drives: app.collapse_cloud_drives,
                 collapse_local_disks: app.collapse_local_disks,
                 collapse_network_drives: app.collapse_network_drives,
                 sidebar_renaming: sidebar_renaming_ref,
@@ -319,6 +320,9 @@ fn handle_sidebar_action(app: &mut ImageViewerApp, action: SidebarAction) {
         }
         SidebarAction::ToggleQuickAccess => {
             app.collapse_quick_access = !app.collapse_quick_access;
+        }
+        SidebarAction::ToggleCloudDrives => {
+            app.collapse_cloud_drives = !app.collapse_cloud_drives;
         }
         SidebarAction::ToggleLocalDisks => {
             app.collapse_local_disks = !app.collapse_local_disks;

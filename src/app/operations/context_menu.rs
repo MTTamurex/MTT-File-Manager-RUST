@@ -293,12 +293,12 @@ impl ImageViewerApp {
                 }
             }
 
-            // ========== ONEDRIVE ITEMS — "Always keep on this device" / "Free up space" ==========
+            // ========== CLOUD FILES ITEMS — "Always keep on this device" / "Free up space" ==========
             // Windows shell extensions for cloud files may not expose these items
             // through IContextMenu on newer Windows 11 builds, so we add them natively.
             if !is_drive {
-                let onedrive_sync = paths.first().and_then(|p| {
-                    if !crate::infrastructure::onedrive::is_onedrive_path(p) {
+                let cloud_sync = paths.first().and_then(|p| {
+                    if !crate::infrastructure::onedrive::is_cloud_sync_path(p) {
                         return None;
                     }
                     // Use cached sync_status from already-loaded items (no I/O)
@@ -312,7 +312,7 @@ impl ImageViewerApp {
                                 .map(|it| it.sync_status)
                         })
                 });
-                if let Some(status) = onedrive_sync {
+                if let Some(status) = cloud_sync {
                     use crate::domain::file_entry::SyncStatus;
                     // Show "Always keep on this device" when NOT already pinned
                     // Show "Free up space" when NOT already cloud-only

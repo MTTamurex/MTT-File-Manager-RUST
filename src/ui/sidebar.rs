@@ -46,6 +46,7 @@ pub struct SidebarContext<'a> {
     pub dragging_path: Option<&'a str>, // Path of the folder being dragged
     pub show_recycle_bin: bool,
     pub collapse_quick_access: bool,
+    pub collapse_cloud_drives: bool,
     pub collapse_local_disks: bool,
     pub collapse_network_drives: bool,
     /// Inline drive rename: (drive_path, editable_text)
@@ -80,6 +81,8 @@ pub enum SidebarAction {
     TreeToggleExpand(std::path::PathBuf),
     /// Toggle collapse of Quick Access section
     ToggleQuickAccess,
+    /// Toggle collapse of Cloud Drives section
+    ToggleCloudDrives,
     /// Toggle collapse of Local Disks section
     ToggleLocalDisks,
     /// Toggle collapse of Network Drives section

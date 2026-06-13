@@ -155,7 +155,7 @@ impl ImageViewerApp {
         // detect cover changes even when the directory listing itself is unchanged.
         let folder_cover_states = Self::collect_folder_cover_states(&self.all_items);
 
-        let is_onedrive = crate::infrastructure::onedrive::is_onedrive_path(&current_path);
+        let is_onedrive = crate::infrastructure::onedrive::is_cloud_sync_path(&current_path);
         let _ = self.consistency_probe_tx.send(ConsistencyProbeRequest {
             path: current_path,
             is_onedrive,
@@ -204,7 +204,7 @@ impl ImageViewerApp {
 
         let ui_signature = Self::compute_entries_signature(&snapshot.all_items);
         let folder_cover_states = Self::collect_folder_cover_states(&snapshot.all_items);
-        let is_onedrive = crate::infrastructure::onedrive::is_onedrive_path(&inactive_path);
+        let is_onedrive = crate::infrastructure::onedrive::is_cloud_sync_path(&inactive_path);
 
         let _ = self.consistency_probe_tx.send(ConsistencyProbeRequest {
             path: inactive_path,
@@ -317,7 +317,8 @@ impl ImageViewerApp {
                 };
 
             if should_send_active_probe {
-                let is_onedrive = crate::infrastructure::onedrive::is_onedrive_path(&current_path);
+                let is_onedrive =
+                    crate::infrastructure::onedrive::is_cloud_sync_path(&current_path);
                 let request = ConsistencyProbeRequest {
                     path: current_path.clone(),
                     is_onedrive,
@@ -350,7 +351,7 @@ impl ImageViewerApp {
             return;
         }
 
-        let is_onedrive = crate::infrastructure::onedrive::is_onedrive_path(&inactive_path);
+        let is_onedrive = crate::infrastructure::onedrive::is_cloud_sync_path(&inactive_path);
         let request = ConsistencyProbeRequest {
             path: inactive_path,
             is_onedrive,

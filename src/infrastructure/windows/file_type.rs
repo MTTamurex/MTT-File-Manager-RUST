@@ -302,18 +302,18 @@ pub fn is_image_extension(extension: &str) -> bool {
 /// are skipped without counting. This ensures folders with many subfolders but
 /// few media files (e.g. 100 subfolders + 1 jpg) still find the media item.
 ///
-/// CRITICAL: Uses timeout-protected enumeration for OneDrive to prevent indefinite blocking.
+/// CRITICAL: Uses timeout-protected enumeration for Cloud Files providers to prevent indefinite blocking.
 const MAX_ENTRIES_SCAN: usize = 500;
 const MAX_FILES_CHECK: usize = 30;
 
 pub fn find_folder_preview_item(folder_path: &Path) -> Option<PathBuf> {
     use crate::infrastructure::onedrive::{
-        is_onedrive_path, onedrive_read_directory, IoTimeoutResult,
+        is_cloud_sync_path, onedrive_read_directory, IoTimeoutResult,
     };
 
-    // For OneDrive paths, use timeout-protected enumeration
+    // For Cloud Files paths, use timeout-protected enumeration
     // fs::read_dir() can block for 30-60s on cloud-only folders
-    if is_onedrive_path(folder_path) {
+    if is_cloud_sync_path(folder_path) {
         match onedrive_read_directory(folder_path) {
             IoTimeoutResult::Ok(entries) => {
                 let mut files_checked = 0usize;

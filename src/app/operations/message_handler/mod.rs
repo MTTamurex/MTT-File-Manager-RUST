@@ -62,7 +62,7 @@ impl ImageViewerApp {
         // Apply async rebuild results (filter/sort) from background thread
         self.process_items_rebuild_results(ctx);
 
-        // OneDrive pin completion: background attrib finished, reload for fresh sync status
+        // Cloud Files pin completion: background attrib finished, reload for fresh sync status
         if self
             .onedrive_pin_reload_pending
             .swap(false, std::sync::atomic::Ordering::Acquire)

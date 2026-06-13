@@ -42,7 +42,7 @@ fn run_attrib(args: &[String], path: &Path) -> io::Result<()> {
 pub fn set_pin_state(path: &Path, command: PinCommand) -> io::Result<()> {
     let path_str = path.to_string_lossy().to_string();
 
-    // OneDrive pin-state can be controlled via NTFS Cloud Files attributes:
+    // Cloud Files pin-state can be controlled via NTFS Cloud Files attributes:
     // +P pinned, -P unpinned, +U unpinned placeholder, -U clear unpinned.
     let (set_flag, clear_flag) = match command {
         PinCommand::AlwaysKeepOnDevice => ("+P", "-U"),

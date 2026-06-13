@@ -20,7 +20,7 @@ pub fn should_probe_live_file_size(path: &Path, modified_epoch: u64) -> bool {
         }
     }
 
-    if crate::infrastructure::onedrive::is_onedrive_path(path) {
+    if crate::infrastructure::onedrive::is_cloud_sync_path(path) {
         return false;
     }
 

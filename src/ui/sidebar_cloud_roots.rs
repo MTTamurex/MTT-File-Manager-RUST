@@ -14,6 +14,27 @@ pub fn render_cloud_roots(
 
     let (header_rect, _) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 16.0), Sense::hover());
+
+    let toggle_size = 18.0;
+    let toggle_rect = Rect::from_center_size(
+        Pos2::new(
+            header_rect.max.x - toggle_size / 2.0 - 3.0,
+            header_rect.center().y,
+        ),
+        egui::vec2(toggle_size, toggle_size),
+    );
+    let toggle_response = ui
+        .interact(
+            toggle_rect,
+            egui::Id::new("sidebar_toggle_cloud"),
+            Sense::click(),
+        )
+        .on_hover_text(if ctx.collapse_cloud_drives {
+            t!("sidebar.expand_section")
+        } else {
+            t!("sidebar.collapse_section")
+        });
+
     if ui.is_rect_visible(header_rect) {
         ui.painter().text(
             Pos2::new(header_rect.min.x + 8.0, header_rect.center().y),
@@ -22,6 +43,29 @@ pub fn render_cloud_roots(
             egui::FontId::proportional(10.0),
             Color32::from_gray(120),
         );
+
+        let toggle_icon = if ctx.collapse_cloud_drives { "v" } else { "^" };
+        let toggle_color = if toggle_response.hovered() {
+            ui.visuals().text_color()
+        } else {
+            Color32::from_gray(140)
+        };
+        ui.painter().text(
+            toggle_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            toggle_icon,
+            egui::FontId::proportional(14.0),
+            toggle_color,
+        );
+    }
+
+    if toggle_response.clicked() && action.is_none() {
+        *action = Some(SidebarAction::ToggleCloudDrives);
+    }
+
+    if ctx.collapse_cloud_drives {
+        ui.add_space(6.0);
+        return;
     }
 
     ui.add_space(4.0);

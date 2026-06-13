@@ -88,23 +88,23 @@ fn open_terminal_admin_at(path: &Path) {
     }
 }
 
-fn is_onedrive_pin_text(text: &str) -> bool {
+fn is_cloud_files_pin_text(text: &str) -> bool {
     let lower = text.trim().to_lowercase();
     lower.contains("always keep on this device")
         || lower.contains("sempre manter neste dispositivo")
 }
 
-fn is_onedrive_free_text(text: &str) -> bool {
+fn is_cloud_files_free_text(text: &str) -> bool {
     let lower = text.trim().to_lowercase();
     lower.contains("free up space") || lower.contains("liberar espaço")
 }
 
-fn onedrive_pin_command_from_text(
+fn cloud_files_pin_command_from_text(
     text: &str,
 ) -> Option<crate::infrastructure::onedrive::PinCommand> {
-    if is_onedrive_pin_text(text) {
+    if is_cloud_files_pin_text(text) {
         Some(crate::infrastructure::onedrive::PinCommand::AlwaysKeepOnDevice)
-    } else if is_onedrive_free_text(text) {
+    } else if is_cloud_files_free_text(text) {
         Some(crate::infrastructure::onedrive::PinCommand::FreeUpSpace)
     } else {
         None
@@ -128,7 +128,7 @@ fn find_menu_item_text_by_id(
     None
 }
 
-fn apply_onedrive_pin(
+fn apply_cloud_files_pin(
     app: &mut ImageViewerApp,
     target_paths: &[PathBuf],
     command: crate::infrastructure::onedrive::PinCommand,
@@ -145,7 +145,7 @@ fn apply_onedrive_pin(
         for path in &paths {
             if let Err(e) = crate::infrastructure::onedrive::set_pin_state(path, command) {
                 log::warn!(
-                    "[OneDrive] Failed to apply pin command {:?} to {:?}: {}",
+                    "[CloudFiles] Failed to apply pin command {:?} to {:?}: {}",
                     command,
                     path,
                     e
@@ -196,17 +196,17 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
             // Shell command
             let selected_shell_item_text = find_menu_item_text_by_id(&context_menu.items, id);
 
-            let direct_onedrive_pin_command =
-                selected_shell_item_text.and_then(onedrive_pin_command_from_text);
+            let direct_cloud_files_pin_command =
+                selected_shell_item_text.and_then(cloud_files_pin_command_from_text);
 
-            if let Some(command) = direct_onedrive_pin_command {
-                let is_cloud_target = context_menu.target_paths.iter().any(|path| {
-                    crate::infrastructure::onedrive::is_onedrive_path(path)
-                        || crate::infrastructure::onedrive::path_has_cloud_attributes(path)
-                });
+            if let Some(command) = direct_cloud_files_pin_command {
+                let is_cloud_target = context_menu
+                    .target_paths
+                    .iter()
+                    .any(|path| crate::infrastructure::onedrive::is_cloud_sync_path(path));
 
                 if is_cloud_target {
-                    apply_onedrive_pin(app, &context_menu.target_paths, command);
+                    apply_cloud_files_pin(app, &context_menu.target_paths, command);
                     context_menu.close();
                     app.context_menu = context_menu;
                     return;
@@ -245,11 +245,17 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                     },
                 );
 
-                // OneDrive pin fallback: apply the managed command in addition to
-                // the shell invoke (some OneDrive shell extensions fire silently).
+                // Cloud Files pin fallback: apply the managed command in addition to
+                // the shell invoke (some shell extensions fire silently).
                 if let Some(text) = selected_shell_item_text {
-                    if let Some(command) = onedrive_pin_command_from_text(text) {
-                        apply_onedrive_pin(app, &context_menu.target_paths, command);
+                    if let Some(command) = cloud_files_pin_command_from_text(text) {
+                        if context_menu
+                            .target_paths
+                            .iter()
+                            .any(|path| crate::infrastructure::onedrive::is_cloud_sync_path(path))
+                        {
+                            apply_cloud_files_pin(app, &context_menu.target_paths, command);
+                        }
                     }
                 }
             }
@@ -396,17 +402,17 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                         app.unpin_folder(&path);
                     }
                 }
-                // OneDrive: "Always keep on this device"
+                // Cloud Files: "Always keep on this device"
                 -70 => {
-                    apply_onedrive_pin(
+                    apply_cloud_files_pin(
                         app,
                         &context_menu.target_paths,
                         crate::infrastructure::onedrive::PinCommand::AlwaysKeepOnDevice,
                     );
                 }
-                // OneDrive: "Free up space"
+                // Cloud Files: "Free up space"
                 -71 => {
-                    apply_onedrive_pin(
+                    apply_cloud_files_pin(
                         app,
                         &context_menu.target_paths,
                         crate::infrastructure::onedrive::PinCommand::FreeUpSpace,

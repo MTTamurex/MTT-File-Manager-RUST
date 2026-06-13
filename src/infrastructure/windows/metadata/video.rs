@@ -9,7 +9,7 @@ pub fn is_video_extension(ext: &str) -> bool {
 }
 
 fn video_file_size_bytes(path: &Path) -> Option<u64> {
-    if crate::infrastructure::onedrive::is_onedrive_path(path) {
+    if crate::infrastructure::onedrive::is_cloud_sync_path(path) {
         crate::infrastructure::onedrive::onedrive_metadata(path)
             .ok()
             .map(|meta| meta.len())

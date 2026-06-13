@@ -69,10 +69,10 @@ impl ImageViewerApp {
 
                 // STALE-WHILE-REVALIDATE STRATEGY: Instant feedback via DirectoryCache
                 let base_path_buf = PathBuf::from(&base_path);
-                // PERFORMANCE: Only use is_onedrive_path() which is string-based (no I/O)
+                // PERFORMANCE: Only use is_cloud_sync_path() which is string-based (no I/O)
                 // path_has_cloud_attributes() was removed because GetFileAttributesW can BLOCK
-                // indefinitely on cloud-only OneDrive folders
-                let is_onedrive_base = onedrive::is_onedrive_path(&base_path_buf);
+                // indefinitely on cloud-only provider folders
+                let is_onedrive_base = onedrive::is_cloud_sync_path(&base_path_buf);
                 let prefer_reliable_scan = directory_dirty_registry
                     .is_dirty(base_path_buf.as_path())
                     || (!is_onedrive_base

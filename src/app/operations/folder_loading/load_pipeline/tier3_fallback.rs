@@ -63,7 +63,7 @@ pub(super) fn run_tier3_fallback(
     if is_onedrive {
         // Use timeout-protected directory reading for OneDrive.
         log::debug!(
-            "[FOLDER-LOADING] Using timeout-protected directory enumeration for OneDrive: {:?}",
+            "[FOLDER-LOADING] Using timeout-protected directory enumeration for cloud sync path: {:?}",
             base_path
         );
         let onedrive_enum_start = std::time::Instant::now();

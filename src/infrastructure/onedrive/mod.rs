@@ -365,6 +365,14 @@ pub fn is_onedrive_path(path: &Path) -> bool {
     path_detection::is_onedrive_path(path)
 }
 
+/// Check if a path is within a Windows Cloud Files sync root.
+///
+/// Includes OneDrive, Proton Drive, and other providers registered in
+/// Explorer's SyncRootManager. Pure string comparison after startup.
+pub fn is_cloud_sync_path(path: &Path) -> bool {
+    path_detection::is_cloud_sync_path(path)
+}
+
 /// Returns true if `path` is a direct child of a OneDrive root or the user
 /// profile directory (Documents, Pictures, Desktop, Downloads, etc.).
 /// Pure string comparison — no I/O.
@@ -438,7 +446,7 @@ pub fn is_locally_available(path: &Path) -> bool {
 
 pub use pin_state::PinCommand;
 
-/// Apply OneDrive pin-state operation using Windows `attrib` flags.
+/// Apply Cloud Files pin-state operation using Windows `attrib` flags.
 ///
 /// - [`PinCommand::AlwaysKeepOnDevice`](src/infrastructure/onedrive/pin_state.rs:7) => `+P -U`
 /// - [`PinCommand::FreeUpSpace`](src/infrastructure/onedrive/pin_state.rs:8) => `+U -P`
@@ -478,7 +486,7 @@ impl<T> IoTimeoutResult<T> {
 }
 
 /// Get file metadata with timeout protection.
-/// CRITICAL for OneDrive: prevents indefinite blocking on cloud-only files.
+/// CRITICAL for Cloud Files providers: prevents indefinite blocking on cloud-only files.
 ///
 /// Returns:
 /// - `Ok(metadata)` if successful within timeout
@@ -489,7 +497,7 @@ pub fn metadata_with_timeout(path: &Path, timeout_ms: u64) -> IoTimeoutResult<st
 }
 
 /// Check if path exists with timeout protection.
-/// CRITICAL for OneDrive: `path.exists()` can trigger download of cloud-only files.
+/// CRITICAL for Cloud Files providers: `path.exists()` can trigger download of cloud-only files.
 ///
 /// Returns:
 /// - `Ok(true/false)` if successful within timeout

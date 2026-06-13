@@ -284,8 +284,8 @@ pub(super) fn try_handle_fast_paths(
                 // Validate: Check if directory mtime is newer than last_scan
                 // CRITICAL: For OneDrive paths, skip mtime validation (can block indefinitely on cloud-only dirs)
                 // Trust the DriveWatcher and explicit invalidation instead
-                let dir_modified = if crate::infrastructure::onedrive::is_onedrive_path(&base) {
-                    0 // Skip mtime check for OneDrive - trust watcher
+                let dir_modified = if crate::infrastructure::onedrive::is_cloud_sync_path(&base) {
+                    0 // Skip mtime check for Cloud Files providers - trust watcher
                 } else {
                     std::fs::metadata(&base)
                         .ok()

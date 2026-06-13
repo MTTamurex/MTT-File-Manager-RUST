@@ -26,7 +26,7 @@ pub struct CacheInvalidationEntry {
 }
 
 fn should_skip_exists_guard(path: &std::path::Path) -> bool {
-    crate::infrastructure::onedrive::is_onedrive_path(path)
+    crate::infrastructure::onedrive::is_cloud_sync_path(path)
         || crate::infrastructure::io_priority::is_network_or_virtual(path)
 }
 
@@ -89,11 +89,11 @@ fn query_ntfs_folder_size_with_retry(
     Err(last_error)
 }
 
-fn is_onedrive_folder_size_service_lookup_error(
+fn is_cloud_sync_folder_size_service_lookup_error(
     folder_path: &std::path::Path,
     message: &str,
 ) -> bool {
-    if !crate::infrastructure::onedrive::is_onedrive_path(folder_path) {
+    if !crate::infrastructure::onedrive::is_cloud_sync_path(folder_path) {
         return false;
     }
 
@@ -101,7 +101,7 @@ fn is_onedrive_folder_size_service_lookup_error(
     lower.contains("path not found in index") || lower.contains("invalid path")
 }
 
-fn query_onedrive_folder_size_with_timeout(
+fn query_cloud_sync_folder_size_with_timeout(
     folder_path: &std::path::Path,
     cancel: &Arc<AtomicBool>,
 ) -> Result<crate::infrastructure::windows::folder_size::FolderScanResult, String> {
@@ -114,7 +114,7 @@ fn query_onedrive_folder_size_with_timeout(
             return Err("cancelled".to_string());
         }
         if depth > 256 {
-            return Err("onedrive folder-size recursion depth exceeded".to_string());
+            return Err("cloud-sync folder-size recursion depth exceeded".to_string());
         }
 
         match crate::infrastructure::onedrive::onedrive_read_directory(path) {
@@ -347,14 +347,14 @@ pub(in crate::app) fn spawn_folder_size_worker(
                             continue;
                         }
 
-                        if is_onedrive_folder_size_service_lookup_error(&folder_path, &e) {
-                            match query_onedrive_folder_size_with_timeout(
+                        if is_cloud_sync_folder_size_service_lookup_error(&folder_path, &e) {
+                            match query_cloud_sync_folder_size_with_timeout(
                                 &folder_path,
                                 &folder_size_cancel_worker,
                             ) {
                                 Ok(result) => {
                                     log::info!(
-                                        "[FOLDER-SIZE] OneDrive fallback complete path={} total_gb={:.2} files={} folders={}",
+                                        "[FOLDER-SIZE] Cloud sync fallback complete path={} total_gb={:.2} files={} folders={}",
                                         folder_path.display(),
                                         result.total_size as f64 / 1_073_741_824.0,
                                         result.file_count,
@@ -379,7 +379,7 @@ pub(in crate::app) fn spawn_folder_size_worker(
                                 }
                                 Err(fallback_error) => {
                                     log::warn!(
-                                        "[FOLDER-SIZE] OneDrive fallback failed path={} reason={}",
+                                        "[FOLDER-SIZE] Cloud sync fallback failed path={} reason={}",
                                         folder_path.display(),
                                         fallback_error,
                                     );
@@ -523,8 +523,8 @@ pub(in crate::app) fn spawn_folder_size_batch_worker(
                             continue;
                         }
                         Err(error) => {
-                            if is_onedrive_folder_size_service_lookup_error(&path, &error) {
-                                match query_onedrive_folder_size_with_timeout(&path, &cancel_worker)
+                            if is_cloud_sync_folder_size_service_lookup_error(&path, &error) {
+                                match query_cloud_sync_folder_size_with_timeout(&path, &cancel_worker)
                                 {
                                     Ok(result) => {
                                         let _ = res_tx.send(BatchSizeResult {
@@ -540,7 +540,7 @@ pub(in crate::app) fn spawn_folder_size_batch_worker(
                                     }
                                     Err(fallback_error) => {
                                         log::warn!(
-                                            "[FOLDER-SIZE] Batch OneDrive fallback failed path={} reason={}",
+                                            "[FOLDER-SIZE] Batch cloud sync fallback failed path={} reason={}",
                                             path.display(),
                                             fallback_error,
                                         );

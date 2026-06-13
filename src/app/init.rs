@@ -307,6 +307,7 @@ impl ImageViewerApp {
             show_preview_panel, // Loaded from SQLite
             show_recycle_bin,   // Loaded from SQLite
             collapse_quick_access: false,
+            collapse_cloud_drives: false,
             collapse_local_disks: false,
             collapse_network_drives: false,
             drive_state: build_drive_state(

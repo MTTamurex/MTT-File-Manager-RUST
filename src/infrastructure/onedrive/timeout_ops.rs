@@ -102,7 +102,7 @@ where
 
     let active_after = super::ACTIVE_TIMEOUT_THREADS.fetch_sub(1, Ordering::SeqCst);
     log::trace!(
-        "[ONEDRIVE] Active timeout threads: {} -> {}",
+        "[CLOUD-SYNC] Active timeout threads: {} -> {}",
         active_after,
         active_after - 1
     );
@@ -114,7 +114,7 @@ pub(super) fn metadata_with_timeout(
     path: &Path,
     timeout_ms: u64,
 ) -> IoTimeoutResult<std::fs::Metadata> {
-    if !super::is_onedrive_path(path) {
+    if !super::is_cloud_sync_path(path) {
         match std::fs::metadata(path) {
             Ok(m) => return IoTimeoutResult::Ok(m),
             Err(e) => return IoTimeoutResult::Err(e.kind()),
@@ -135,7 +135,7 @@ pub(super) fn metadata_with_timeout(
 }
 
 pub(super) fn exists_with_timeout(path: &Path, timeout_ms: u64) -> IoTimeoutResult<bool> {
-    if !super::is_onedrive_path(path) {
+    if !super::is_cloud_sync_path(path) {
         return IoTimeoutResult::Ok(super::fast_path_exists(path));
     }
 

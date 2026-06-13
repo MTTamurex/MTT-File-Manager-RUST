@@ -108,13 +108,13 @@ pub(super) fn process_thumbnail_request(
     // EARLY EXIT 1: Skip files that already failed in this session.
     // Prevents repeated slow retries on broken files (e.g., 0x8004B205).
     //
-    // OneDrive special-case:
+    // Cloud Files special-case:
     // If a file was previously cloud-only (transient failure) but is now locally available,
     // clear backoff immediately and retry in the same request so thumbnails recover without
     // requiring manual refresh.
     if is_known_failure(path) {
         let can_retry_now =
-            onedrive::is_onedrive_path(path) && onedrive::is_locally_available_safe(path);
+            onedrive::is_cloud_sync_path(path) && onedrive::is_locally_available_safe(path);
 
         if can_retry_now {
             clear_failure_cache(path);
@@ -205,7 +205,7 @@ pub(super) fn process_thumbnail_request(
     let mut generated_thumbnail_perf = None;
 
     // EARLY EXIT 2: skip files that no longer exist.
-    if onedrive::is_onedrive_path(path) {
+    if onedrive::is_cloud_sync_path(path) {
         match onedrive::onedrive_exists(path) {
             IoTimeoutResult::Ok(false) => {
                 mark_as_failed(path.clone());
@@ -229,11 +229,11 @@ pub(super) fn process_thumbnail_request(
             }
             IoTimeoutResult::Timeout => {
                 mark_as_transient_failure(path.clone());
-                log::warn!("[THUMB WORKER] exists() timeout during OneDrive availability check");
+                log::warn!("[THUMB WORKER] exists() timeout during cloud-file availability check");
                 diag_warn(
                     "thumbnail_worker",
                     "exists_timeout",
-                    &[field_label("provider", "onedrive")],
+                    &[field_label("provider", "cloud_files")],
                 );
             }
             IoTimeoutResult::Ok(true) => {}
@@ -254,16 +254,16 @@ pub(super) fn process_thumbnail_request(
                     },
                 );
                 throttle_repaint_with_priority(ctx, last_repaint, req_priority);
-                log_slow_worker_request(path, req_priority, request_start, "onedrive_error");
+                log_slow_worker_request(path, req_priority, request_start, "cloud_files_error");
                 return;
             }
         }
 
-        // NOTE: Do NOT skip cloud-only OneDrive files here.
+        // NOTE: Do NOT skip cloud-only provider files here.
         // Windows Explorer can still obtain thumbnails for placeholders via Shell/
         // thumbnail cache providers. We should attempt extraction and let the pipeline decide.
     } else {
-        // Non-OneDrive: use fast_path_exists (GetFileAttributesW).
+        // Non-cloud: use fast_path_exists (GetFileAttributesW).
         if !onedrive::fast_path_exists(path) {
             mark_as_failed(path.clone());
             send_thumbnail_result(
@@ -292,16 +292,16 @@ pub(super) fn process_thumbnail_request(
     let modified = if req_modified > 0 {
         SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(req_modified)
     } else {
-        // Timeout-protected metadata for OneDrive.
+        // Timeout-protected metadata for Cloud Files providers.
         match onedrive::onedrive_metadata(path) {
             IoTimeoutResult::Ok(metadata) => metadata.modified().unwrap_or(SystemTime::UNIX_EPOCH),
             IoTimeoutResult::Timeout => {
                 mark_as_transient_failure(path.clone());
-                log::warn!("[THUMB WORKER] metadata() timeout during OneDrive metadata lookup");
+                log::warn!("[THUMB WORKER] metadata() timeout during cloud-file metadata lookup");
                 diag_warn(
                     "thumbnail_worker",
                     "metadata_timeout",
-                    &[field_label("provider", "onedrive")],
+                    &[field_label("provider", "cloud_files")],
                 );
                 SystemTime::UNIX_EPOCH
             }

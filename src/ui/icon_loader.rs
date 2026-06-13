@@ -320,9 +320,9 @@ impl IconLoader {
             return true;
         }
 
-        // Never run sync shell icon lookups in UI for OneDrive paths.
-        // OneDrive shell/metadata calls may stall for hundreds of ms.
-        if crate::infrastructure::onedrive::is_onedrive_path(path) {
+        // Never run sync shell icon lookups in UI for Cloud Files paths.
+        // Provider shell/metadata calls may stall for hundreds of ms.
+        if crate::infrastructure::onedrive::is_cloud_sync_path(path) {
             return false;
         }
 

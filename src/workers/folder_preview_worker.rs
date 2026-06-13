@@ -233,8 +233,8 @@ pub fn spawn_folder_preview_worker(
                     last_ssd_state = Some(is_ssd);
                 }
 
-                // Skip cloud-only OneDrive folders — Shell API can block on network I/O
-                if crate::infrastructure::onedrive::is_onedrive_path(&path)
+                // Skip cloud-only sync-provider folders — Shell API can block on network I/O.
+                if crate::infrastructure::onedrive::is_cloud_sync_path(&path)
                     && !crate::infrastructure::onedrive::is_locally_available(&path)
                 {
                     let _ = tx.send(FolderPreviewData {

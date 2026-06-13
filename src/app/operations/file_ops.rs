@@ -32,9 +32,8 @@ fn is_high_risk_shell_open_source(path: &Path) -> bool {
     is_unc_path(path) || is_explicit_shell_namespace_path(path)
 }
 
-fn is_onedrive_media_file(path: &Path) -> bool {
-    let is_cloud = crate::infrastructure::onedrive::is_onedrive_path(path)
-        || crate::infrastructure::onedrive::path_has_cloud_attributes(path);
+fn is_cloud_sync_media_file(path: &Path) -> bool {
+    let is_cloud = crate::infrastructure::onedrive::is_cloud_sync_path(path);
 
     if !is_cloud {
         return false;
@@ -83,9 +82,9 @@ impl ImageViewerApp {
                 .push(crate::application::AppNotification::warning(
                     t!("operations.open_failed").to_string(),
                 ));
-        } else if is_onedrive_media_file(path) {
+        } else if is_cloud_sync_media_file(path) {
             // Hydration/open may not always emit a watcher path that triggers thumbnail retry.
-            // Force a light retry path for media files in OneDrive.
+            // Force a light retry path for media files in Cloud Files providers.
             let path_buf = path.to_path_buf();
             crate::workers::thumbnail::clear_failure_cache(&path_buf);
             self.cache_manager.failed_thumbnails.pop(&path_buf);

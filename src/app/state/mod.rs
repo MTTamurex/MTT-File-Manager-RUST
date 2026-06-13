@@ -186,6 +186,7 @@ pub struct ImageViewerApp {
     pub show_hidden_files: bool,      // Show files with FILE_ATTRIBUTE_HIDDEN
     pub show_recycle_bin: bool,       // Show Recycle Bin in Quick Access
     pub collapse_quick_access: bool,  // Collapse Quick Access section in sidebar
+    pub collapse_cloud_drives: bool,  // Collapse Cloud Drives section in sidebar
     pub collapse_local_disks: bool,   // Collapse Local Disks section in sidebar
     pub collapse_network_drives: bool, // Collapse Network Drives section in sidebar
 
@@ -301,7 +302,7 @@ pub struct ImageViewerApp {
     pub pending_auto_reload: bool,
     pub skip_next_auto_reload: bool, // SMART DELETE: Prevent reload after direct UI update
     pub watcher_cooldown_until: Option<Instant>,
-    /// Background OneDrive pin operations set this flag when attrib finishes,
+    /// Background Cloud Files pin operations set this flag when attrib finishes,
     /// so the update loop can trigger a folder reload with fresh sync status.
     pub onedrive_pin_reload_pending: Arc<AtomicBool>,
     /// Adaptive RDCW verification for non-USN filesystems.

@@ -68,14 +68,14 @@ pub struct MediaMetadata {
 /// Extracts metadata for common media types (images/videos).
 /// Returns an empty struct when the file type is unsupported or metadata cannot be read.
 ///
-/// PERFORMANCE CRITICAL: For OneDrive files, checks local availability before reading
+/// PERFORMANCE CRITICAL: For Cloud Files providers, checks local availability before reading
 /// to prevent blocking on cloud-only files. Additionally wraps the entire extraction
 /// in a timeout to catch any remaining blocking in COM/MF/sniffing calls.
 pub fn extract_media_metadata(path: &Path) -> MediaMetadata {
-    // CRITICAL FIX: Skip metadata extraction for cloud-only OneDrive files
+    // CRITICAL FIX: Skip metadata extraction for cloud-only provider files
     // Reading metadata requires file I/O which can block indefinitely on cloud-only files
-    if onedrive::is_onedrive_path(path) && !onedrive::is_locally_available(path) {
-        log::debug!("[METADATA] Skipping cloud-only OneDrive file: {:?}", path);
+    if onedrive::is_cloud_sync_path(path) && !onedrive::is_locally_available(path) {
+        log::debug!("[METADATA] Skipping cloud-only provider file: {:?}", path);
         return MediaMetadata::default();
     }
 
@@ -107,12 +107,12 @@ pub fn extract_media_metadata(path: &Path) -> MediaMetadata {
     }
 
     // Apply timeout to video files (MPEG-TS etc. can block indefinitely in
-    // Media Foundation), and to all OneDrive paths (cloud filter driver can block).
-    if is_video || onedrive::is_onedrive_path(path) {
+    // Media Foundation), and to all Cloud Files paths (cloud filter driver can block).
+    if is_video || onedrive::is_cloud_sync_path(path) {
         return extract_media_metadata_with_timeout(path, is_image, is_audio);
     }
 
-    // Non-video, non-OneDrive: extract directly (no timeout overhead)
+    // Non-video, non-cloud: extract directly (no timeout overhead)
     extract_media_metadata_inner(path, is_image, is_audio)
 }
 

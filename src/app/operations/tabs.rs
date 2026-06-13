@@ -49,6 +49,7 @@ impl ImageViewerApp {
         active.show_left_sidebar = self.show_left_sidebar;
         active.show_preview_panel = self.show_preview_panel;
         active.collapse_quick_access = self.collapse_quick_access;
+        active.collapse_cloud_drives = self.collapse_cloud_drives;
         active.collapse_local_disks = self.collapse_local_disks;
         active.collapse_network_drives = self.collapse_network_drives;
 
@@ -163,6 +164,7 @@ impl ImageViewerApp {
             self.show_left_sidebar = active.show_left_sidebar;
             self.show_preview_panel = active.show_preview_panel;
             self.collapse_quick_access = active.collapse_quick_access;
+            self.collapse_cloud_drives = active.collapse_cloud_drives;
             self.collapse_local_disks = active.collapse_local_disks;
             self.collapse_network_drives = active.collapse_network_drives;
 
@@ -242,7 +244,7 @@ impl ImageViewerApp {
             let mut service_checked = false;
             let is_stale = if is_dirty {
                 true
-            } else if crate::infrastructure::onedrive::is_onedrive_path(&tab_path) {
+            } else if crate::infrastructure::onedrive::is_cloud_sync_path(&tab_path) {
                 self.directory_cache
                     .cached_at_ms(&tab_path)
                     .map(|cached_at_ms| {
