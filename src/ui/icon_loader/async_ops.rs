@@ -11,6 +11,13 @@ fn icon_resource_path(resource: &str) -> Option<std::path::PathBuf> {
     (!path_part.is_empty()).then(|| std::path::PathBuf::from(path_part))
 }
 
+fn folder_path_icon_cache_key(folder_path: &str) -> String {
+    folder_path
+        .to_lowercase()
+        .trim_end_matches(['\\', '/'])
+        .to_string()
+}
+
 impl IconLoader {
     /// Poll for completed background icon extractions and upload to GPU.
     /// Call this once per frame (lightweight - just drains the channel).
@@ -127,7 +134,7 @@ impl IconLoader {
         _ctx: &egui::Context,
         folder_path: &str,
     ) -> Option<egui::TextureHandle> {
-        let cache_key = folder_path.to_string();
+        let cache_key = folder_path_icon_cache_key(folder_path);
 
         if self.failed_drive_icons.peek(&cache_key).is_some() {
             return None;

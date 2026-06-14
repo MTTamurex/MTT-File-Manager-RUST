@@ -1061,7 +1061,8 @@ impl ImageViewerApp {
             self.visible_range_cached = None;
             self.thumbnail_request_epochs.clear();
             self.cache_manager.attempted_thumbnail_bucket.clear();
-        } else if self.cache_manager.attempted_thumbnail_bucket.len() > MAX_DYNAMIC_TEXTURE_CACHE_ITEMS
+        } else if self.cache_manager.attempted_thumbnail_bucket.len()
+            > MAX_DYNAMIC_TEXTURE_CACHE_ITEMS
         {
             self.cache_manager.attempted_thumbnail_bucket.clear();
         }
