@@ -315,7 +315,7 @@ impl ImageViewerApp {
             collapse_network_drives: false,
             drive_state: build_drive_state(
                 disks,
-                cloud_roots,
+                cloud_roots.clone(),
                 drive_scan_tx,
                 drive_scan_rx,
                 drive_info_tx,
@@ -409,6 +409,7 @@ impl ImageViewerApp {
                 // Pre-extract special folder icons (Documents, Pictures, etc.)
                 // in a single background thread so they're ready on first render.
                 loader.preload_special_folder_icons();
+                loader.set_cloud_root_icon_resources(&cloud_roots);
                 loader
             },
 

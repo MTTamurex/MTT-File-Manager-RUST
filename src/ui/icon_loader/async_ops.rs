@@ -18,7 +18,30 @@ fn folder_path_icon_cache_key(folder_path: &str) -> String {
         .to_string()
 }
 
+fn cloud_root_icon_cache_key(root_path: &str) -> String {
+    format!("cloud:{}", folder_path_icon_cache_key(root_path))
+}
+
 impl IconLoader {
+    pub fn set_cloud_root_icon_resources(
+        &mut self,
+        roots: &[crate::domain::cloud_root::CloudRoot],
+    ) {
+        self.registered_folder_icon_resources.clear();
+
+        for root in roots {
+            let Some(resource) = root.icon_resource.as_deref() else {
+                continue;
+            };
+            if resource.trim().is_empty() {
+                continue;
+            }
+
+            self.registered_folder_icon_resources
+                .insert(folder_path_icon_cache_key(&root.path), resource.to_string());
+        }
+    }
+
     /// Poll for completed background icon extractions and upload to GPU.
     /// Call this once per frame (lightweight - just drains the channel).
     pub fn poll_async_icons(&mut self, ctx: &egui::Context) {
@@ -189,6 +212,31 @@ impl IconLoader {
         None
     }
 
+    /// Gets a provider-registered folder icon for an operational folder path.
+    ///
+    /// Used for providers such as Google Drive where the usable folder is the
+    /// shortcut target, but the correct icon lives on the `.lnk` in the virtual
+    /// drive root.
+    pub fn get_or_load_registered_folder_icon(
+        &mut self,
+        ctx: &egui::Context,
+        folder_path: &str,
+    ) -> Option<egui::TextureHandle> {
+        let cache_key = folder_path_icon_cache_key(folder_path);
+        let resource = self
+            .registered_folder_icon_resources
+            .get(&cache_key)?
+            .clone();
+
+        self.get_or_load_cloud_root_icon(ctx, folder_path, Some(&resource))
+    }
+
+    pub fn has_registered_folder_icon(&self, folder_path: &str) -> bool {
+        let cache_key = folder_path_icon_cache_key(folder_path);
+        self.registered_folder_icon_resources
+            .contains_key(&cache_key)
+    }
+
     /// Gets or loads a Cloud Files sync-root icon (non-blocking).
     ///
     /// Sync roots such as Proton Drive can expose a normal filesystem path plus
@@ -201,7 +249,7 @@ impl IconLoader {
         root_path: &str,
         icon_resource: Option<&str>,
     ) -> Option<egui::TextureHandle> {
-        let cache_key = format!("cloud:{}", root_path);
+        let cache_key = cloud_root_icon_cache_key(root_path);
 
         if self.failed_drive_icons.peek(&cache_key).is_some() {
             return None;

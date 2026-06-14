@@ -88,7 +88,16 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
 
     // Special folders (Documents, Pictures, Desktop, etc.) always use their native
     // Windows icon — skip the composed preview entirely so it doesn't replace them.
-    let is_special = crate::infrastructure::onedrive::is_special_icon_folder(&item.path);
+    let item_path_text = item.path.to_string_lossy();
+    let has_registered_folder_icon = ctx.icon_loader.has_registered_folder_icon(&item_path_text);
+    let registered_folder_icon = has_registered_folder_icon
+        .then(|| {
+            ctx.icon_loader
+                .get_or_load_registered_folder_icon(ui.ctx(), &item_path_text)
+        })
+        .flatten();
+    let is_special = has_registered_folder_icon
+        || crate::infrastructure::onedrive::is_special_icon_folder(&item.path);
 
     if is_special {
         // Special icons are square (256x256). Use a larger, square-ish rect so they
@@ -100,10 +109,12 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
         );
 
         // Icons are pre-loaded at startup — no placeholder needed.
-        if let Some(icon) = ctx
-            .icon_loader
-            .get_or_load_folder_path_icon(ui.ctx(), &item.path.to_string_lossy())
-        {
+        let icon = registered_folder_icon.or_else(|| {
+            ctx.icon_loader
+                .get_or_load_folder_path_icon(ui.ctx(), &item_path_text)
+                .or_else(|| ctx.icon_loader.folder_icon().cloned())
+        });
+        if let Some(icon) = icon {
             paint_texture_centered(ui, icon.id(), icon.size_vec2(), special_rect);
         }
     } else {

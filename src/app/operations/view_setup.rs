@@ -338,6 +338,8 @@ impl ImageViewerApp {
                 let changed = scan_result.disks != old_disks || cloud_roots_changed;
                 self.drive_state.disks = scan_result.disks;
                 self.drive_state.cloud_roots = scan_result.cloud_roots;
+                self.item_icon_loader
+                    .set_cloud_root_icon_resources(&self.drive_state.cloud_roots);
 
                 if cloud_roots_changed {
                     crate::infrastructure::onedrive::refresh_cloud_sync_roots_from_paths(

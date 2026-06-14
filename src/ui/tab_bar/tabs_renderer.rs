@@ -131,7 +131,9 @@ pub(super) fn render_tabs(
         } else if tab.path == RECYCLE_BIN_VIEW_ID {
             icon_loader.ensure_recycle_bin_icon(ui.ctx())
         } else {
-            icon_loader.get_or_load_folder_path_icon(ui.ctx(), &tab.path)
+            icon_loader
+                .get_or_load_registered_folder_icon(ui.ctx(), &tab.path)
+                .or_else(|| icon_loader.get_or_load_folder_path_icon(ui.ctx(), &tab.path))
         };
 
         if let Some(texture) = native_icon {

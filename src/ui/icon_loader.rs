@@ -2,7 +2,7 @@
 //!
 //! This module handles loading Windows shell icons for files and folders.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc;
@@ -130,6 +130,9 @@ pub struct IconLoader {
     pub extension_cache: LruCache<String, egui::TextureHandle>,
     /// Keys currently being loaded in background threads (prevents duplicate requests)
     loading_drive_icons: HashSet<String>,
+    /// Folder paths that should use a provider icon resource instead of the
+    /// generic folder icon (e.g. Google Drive target resolved from a `.lnk`).
+    registered_folder_icon_resources: HashMap<String, String>,
     /// Channel to receive completed icon extractions from background threads
     icon_result_rx: mpsc::Receiver<AsyncIconResult>,
     /// Sender cloned into background threads
@@ -172,6 +175,7 @@ impl IconLoader {
                     .expect("extension icon cache size must be non-zero"),
             ),
             loading_drive_icons: HashSet::new(),
+            registered_folder_icon_resources: HashMap::new(),
             icon_result_rx: rx,
             icon_result_tx: tx,
             auxiliary_icon_threads: Arc::new(AtomicUsize::new(0)),

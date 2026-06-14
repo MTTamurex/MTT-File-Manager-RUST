@@ -809,7 +809,11 @@ fn render_pinned_folders(
             // Native folder icon
             let folder_icon = ctx
                 .icon_loader
-                .get_or_load_folder_path_icon(ui.ctx(), &pinned.path);
+                .get_or_load_registered_folder_icon(ui.ctx(), &pinned.path)
+                .or_else(|| {
+                    ctx.icon_loader
+                        .get_or_load_folder_path_icon(ui.ctx(), &pinned.path)
+                });
             if let Some(icon) = folder_icon {
                 let icon_rect = Rect::from_center_size(
                     Pos2::new(cursor_x + 8.0, rect.center().y),

@@ -158,9 +158,22 @@ fn render_tree_node(
         cursor_x += ARROW_WIDTH;
 
         // ── Folder Icon ──
-        let folder_icon = if crate::infrastructure::onedrive::is_special_icon_folder(&node.path) {
-            ctx.icon_loader
-                .get_or_load_folder_path_icon(ui.ctx(), &node.path.to_string_lossy())
+        let node_path_text = node.path.to_string_lossy();
+        let has_registered_icon = ctx.icon_loader.has_registered_folder_icon(&node_path_text);
+        let registered_icon = has_registered_icon
+            .then(|| {
+                ctx.icon_loader
+                    .get_or_load_registered_folder_icon(ui.ctx(), &node_path_text)
+            })
+            .flatten();
+        let folder_icon = if has_registered_icon
+            || crate::infrastructure::onedrive::is_special_icon_folder(&node.path)
+        {
+            registered_icon
+                .or_else(|| {
+                    ctx.icon_loader
+                        .get_or_load_folder_path_icon(ui.ctx(), &node_path_text)
+                })
                 .or_else(|| ctx.icon_loader.folder_icon().cloned())
         } else {
             ctx.icon_loader.folder_icon().cloned()
