@@ -282,10 +282,8 @@ impl ImageViewerApp {
         let tx = self.drive_state.drive_scan_tx.clone();
         let ctx = self.ui_ctx.clone();
         std::thread::spawn(move || {
-            let scan_result = crate::app::drive_state::DriveScanResult {
-                disks: crate::infrastructure::windows::get_all_drives(),
-                cloud_roots: crate::infrastructure::windows::get_cloud_sync_roots(),
-            };
+            let (disks, cloud_roots) = crate::infrastructure::windows::get_drives_and_cloud_roots();
+            let scan_result = crate::app::drive_state::DriveScanResult { disks, cloud_roots };
             let _ = tx.send(scan_result);
             ctx.request_repaint();
         });
@@ -346,6 +344,7 @@ impl ImageViewerApp {
                         self.drive_state
                             .cloud_roots
                             .iter()
+                            .filter(|root| root.is_windows_cloud_files())
                             .map(|root| root.path.as_str()),
                     );
                 }

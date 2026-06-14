@@ -291,8 +291,7 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
     let (consistency_probe_tx, consistency_probe_rx) = spawn_consistency_probe_worker(ctx.clone());
     log_bootstrap_step!("pipeline_and_search_workers");
 
-    let disks = windows_infra::get_all_drives();
-    let cloud_roots = windows_infra::get_cloud_sync_roots();
+    let (disks, cloud_roots) = windows_infra::get_drives_and_cloud_roots();
     let (drive_scan_tx, drive_scan_rx) = mpsc::channel();
     let (drive_info_tx, drive_info_rx) = mpsc::channel();
     log_bootstrap_step!("drives_and_cloud_roots");
