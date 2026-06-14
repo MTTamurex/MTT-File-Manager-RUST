@@ -378,7 +378,7 @@ fn main() -> eframe::Result<()> {
     });
     let use_glow = match gpu_backend_pref.as_deref() {
         Some("glow") => true,
-        _ => false, // default/auto: Wgpu with Vulkan priority
+        _ => false, // default/auto: Wgpu with Vulkan priority and OpenGL fallback on Windows
     };
 
     let options = if use_glow {
