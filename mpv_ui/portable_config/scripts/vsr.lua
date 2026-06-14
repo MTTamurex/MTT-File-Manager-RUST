@@ -116,9 +116,16 @@ local function source_dimensions()
 end
 
 local function source_is_hdr()
-    local primaries = mp.get_property("video-params/primaries", "")
     local transfer = mp.get_property("video-params/gamma", "")
-    return primaries == "bt.2020" or transfer == "pq" or transfer == "hlg"
+    transfer = transfer:lower()
+
+    -- Primaries alone do not mean HDR. Some SDR/wide-gamut files use bt.2020
+    -- primaries with an SDR transfer curve; treating those as HDR skips
+    -- nvidia-true-hdr and can make RTX HDR look darker than expected.
+    return transfer == "pq"
+        or transfer == "smpte2084"
+        or transfer == "hlg"
+        or transfer == "arib-std-b67"
 end
 
 local function hevc_main10_requires_bridge(codec, pixel_format)
@@ -196,12 +203,24 @@ local function apply_filter_chain()
 
     local codec = mp.get_property("video-codec", "")
     local pixel_format = mp.get_property("video-params/pixelformat", "")
+    local primaries = mp.get_property("video-params/primaries", "")
+    local transfer = mp.get_property("video-params/gamma", "")
     if codec == "" then
         return false
     end
 
+    local is_hdr = source_is_hdr()
     local chain = build_filter_chain()
     if not chain then
+        mp.msg.info(
+            "RTX filters: no filter chain; codec=" .. codec ..
+            ", pixfmt=" .. pixel_format ..
+            ", primaries=" .. primaries ..
+            ", transfer=" .. transfer ..
+            ", source_hdr=" .. tostring(is_hdr) ..
+            ", vsr=" .. tostring(state.vsr_enabled) ..
+            ", hdr=" .. tostring(state.hdr_enabled)
+        )
         return false
     end
 
@@ -214,6 +233,15 @@ local function apply_filter_chain()
         pcall(mp.commandv, "vf", "remove", FORMAT_TAG)
         return false
     end
+
+    mp.msg.info(
+        "RTX filters: applied " .. chain ..
+        "; codec=" .. codec ..
+        ", pixfmt=" .. pixel_format ..
+        ", primaries=" .. primaries ..
+        ", transfer=" .. transfer ..
+        ", source_hdr=" .. tostring(is_hdr)
+    )
 
     state.chain_active = true
     return true
