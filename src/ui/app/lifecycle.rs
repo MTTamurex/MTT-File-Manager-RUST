@@ -313,7 +313,7 @@ fn flush_opengl_gpu_textures_for_reupload(app: &mut ImageViewerApp, reason: &str
     app.pending_thumbnails.clear();
     app.pending_folder_preview_replace.clear();
     app.suppress_next_folder_preview_invalidation.clear();
-    app.thumbnail_eviction_skips.clear();
+    app.thumbnail_request_epochs.clear();
 
     let visible_keep = app.current_dynamic_texture_keep_count();
     if app.cache_manager.texture_cache.cap().get() < visible_keep {

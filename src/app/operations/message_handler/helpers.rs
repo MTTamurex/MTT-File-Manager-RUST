@@ -113,13 +113,7 @@ impl ImageViewerApp {
         self.pending_thumbnails.retain(|t| t.path != cleaned);
         self.cache_manager.finish_pending_upload(&cleaned);
 
-        // Track that one stale in-flight result may still be in the
-        // worker-to-UI channel.  The upload pipeline will decrement
-        // this counter and discard the matching result.
-        *self
-            .thumbnail_eviction_skips
-            .entry(cleaned.clone())
-            .or_insert(0) += 1;
+        self.bump_thumbnail_request_epoch(&cleaned);
 
         if self.last_metadata_path.as_ref() == Some(&cleaned) {
             self.last_metadata_path = None;
@@ -461,7 +455,7 @@ impl ImageViewerApp {
 
         // NOTE: evict_stale_path_caches / enqueue_disk_cache_invalidations_forced
         // are called inside the sub-methods below.  Calling them here too would
-        // double-increment thumbnail_eviction_skips and queue redundant invalidations.
+        // double-bump thumbnail_request_epochs and queue redundant invalidations.
         let removed_old = self.try_remove_deleted_path_from_ui(&cleaned_old);
         let added_new = self.try_add_created_path_to_ui(&cleaned_new);
 

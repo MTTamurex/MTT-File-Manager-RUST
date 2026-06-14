@@ -22,6 +22,7 @@ pub struct ThumbnailRequest {
     pub path: PathBuf,
     pub generation: usize,
     pub size: u32,
+    pub request_epoch: u64,
     pub priority: IOPriority,
     pub directory_index: Option<usize>,
     /// File modification time (seconds since UNIX_EPOCH) from folder enumeration.

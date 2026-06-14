@@ -8,6 +8,15 @@ use crate::workers::thumbnail::ThumbnailPriority;
 use std::path::PathBuf;
 
 impl ImageViewerApp {
+    pub(crate) fn bump_thumbnail_request_epoch(&mut self, path: &PathBuf) -> u64 {
+        let epoch = self
+            .thumbnail_request_epochs
+            .entry(path.clone())
+            .or_insert(0);
+        *epoch = epoch.wrapping_add(1).max(1);
+        *epoch
+    }
+
     fn folder_preview_cover_for_known_item(&self, path: &PathBuf) -> Option<Option<PathBuf>> {
         self.items
             .iter()
@@ -134,6 +143,11 @@ impl ImageViewerApp {
             self.generation
         };
         let effective_priority = priority;
+        let request_epoch = self
+            .thumbnail_request_epochs
+            .get(&path)
+            .copied()
+            .unwrap_or(0);
 
         let desired_bucket =
             crate::workers::thumbnail::processing::get_bucket_size(effective_size_px);
@@ -214,6 +228,7 @@ impl ImageViewerApp {
                     width,
                     height,
                     generation: effective_gen,
+                    request_epoch,
                     priority: effective_priority,
                     not_found: false,
                     premultiplied: true, // RAM cache stores worker-premultiplied data
@@ -232,21 +247,23 @@ impl ImageViewerApp {
         self.cache_manager.thumbnail_trace.record_worker_dispatch();
         self.cache_manager.note_thumbnail_request_sent(&path);
         if let Some(index) = directory_index {
-            self.thumbnail_queue.push_with_index(
+            self.thumbnail_queue.push_with_index_and_epoch(
                 path,
                 effective_gen,
                 effective_size_px,
                 effective_priority,
                 Some(index),
                 modified,
+                request_epoch,
             );
         } else {
-            self.thumbnail_queue.push(
+            self.thumbnail_queue.push_with_epoch(
                 path,
                 effective_gen,
                 effective_size_px,
                 effective_priority,
                 modified,
+                request_epoch,
             );
         }
     }

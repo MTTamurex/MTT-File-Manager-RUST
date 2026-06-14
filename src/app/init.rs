@@ -217,6 +217,7 @@ impl ImageViewerApp {
 
         let (cloud_sync_status_refresh_sender, cloud_sync_status_refresh_receiver) =
             std::sync::mpsc::channel();
+        let (cloud_open_failure_sender, cloud_open_failure_receiver) = std::sync::mpsc::channel();
 
         #[cfg(feature = "notify-watcher")]
         let (notify_watcher_setup_sender, notify_watcher_setup_receiver) =
@@ -246,7 +247,7 @@ impl ImageViewerApp {
             thumbnail_queue,
             image_receiver: img_rx,
             pending_thumbnails: std::collections::VecDeque::new(),
-            thumbnail_eviction_skips: std::collections::HashMap::new(),
+            thumbnail_request_epochs: std::collections::HashMap::new(),
             stale_items_snapshot: None,
             items: Arc::new(Vec::new()),
             // Async loading
@@ -483,6 +484,8 @@ impl ImageViewerApp {
             metadata_loading: FxHashSet::default(),
             cloud_sync_status_refresh_sender,
             cloud_sync_status_refresh_receiver,
+            cloud_open_failure_sender,
+            cloud_open_failure_receiver,
             live_file_size_req_sender: live_size_req_tx,
             live_file_size_res_receiver: live_size_res_rx,
             live_file_size_cache: LruCache::new(

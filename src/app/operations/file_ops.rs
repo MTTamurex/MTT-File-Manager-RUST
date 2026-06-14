@@ -50,6 +50,7 @@ fn open_cloud_sync_file_async(
     path: PathBuf,
     metadata_req_sender: std::sync::mpsc::Sender<(PathBuf, u64)>,
     sync_status_refresh_sender: std::sync::mpsc::Sender<PathBuf>,
+    cloud_open_failure_sender: std::sync::mpsc::Sender<()>,
     ui_ctx: egui::Context,
 ) {
     let is_media = is_cloud_sync_media_file(&path);
@@ -70,6 +71,7 @@ fn open_cloud_sync_file_async(
                     path.display(),
                     e
                 );
+                let _ = cloud_open_failure_sender.send(());
                 ui_ctx.request_repaint();
             }
         }
@@ -116,6 +118,7 @@ impl ImageViewerApp {
                 path_buf,
                 self.metadata_req_sender.clone(),
                 self.cloud_sync_status_refresh_sender.clone(),
+                self.cloud_open_failure_sender.clone(),
                 self.ui_ctx.clone(),
             );
             return;

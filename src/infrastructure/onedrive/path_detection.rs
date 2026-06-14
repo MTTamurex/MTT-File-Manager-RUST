@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
-use std::sync::OnceLock;
+use std::sync::{OnceLock, RwLock};
 
 /// Cached set of known Windows special folder paths (lowercased, no trailing `\`).
 /// Populated once at startup via `SHGetKnownFolderPath`.
@@ -11,7 +11,7 @@ static SPECIAL_FOLDER_PATHS: OnceLock<HashSet<String>> = OnceLock::new();
 static SPECIAL_FOLDER_KEYS: OnceLock<HashMap<String, &'static str>> = OnceLock::new();
 
 /// Cached Windows Cloud Files sync roots (OneDrive, Proton Drive, etc.).
-static CLOUD_SYNC_ROOTS: OnceLock<Vec<String>> = OnceLock::new();
+static CLOUD_SYNC_ROOTS: OnceLock<RwLock<Vec<String>>> = OnceLock::new();
 
 pub(super) fn init_onedrive_paths() {
     super::ONEDRIVE_ROOTS.get_or_init(|| {
@@ -27,25 +27,7 @@ pub(super) fn init_onedrive_paths() {
         roots
     });
 
-    CLOUD_SYNC_ROOTS.get_or_init(|| {
-        let mut roots: Vec<String> = crate::infrastructure::windows::get_cloud_sync_roots()
-            .into_iter()
-            .map(|root| normalize_root_for_compare(&root.path))
-            .collect();
-
-        if let Some(onedrive_roots) = super::ONEDRIVE_ROOTS.get() {
-            roots.extend(
-                onedrive_roots
-                    .iter()
-                    .map(|root| normalize_root_for_compare(root)),
-            );
-        }
-
-        roots.sort();
-        roots.dedup();
-        log::info!("[CloudSync] Detected roots: {:?}", roots);
-        roots
-    });
+    cloud_sync_roots_lock();
 
     // Resolve actual special folder paths via Windows Shell API (locale-independent).
     SPECIAL_FOLDER_PATHS.get_or_init(|| {
@@ -126,14 +108,61 @@ pub(super) fn is_onedrive_path(path: &Path) -> bool {
 
 pub(super) fn is_cloud_sync_path(path: &Path) -> bool {
     let path_lower = normalize_root_for_compare(&path.to_string_lossy());
-    CLOUD_SYNC_ROOTS
-        .get()
+    cloud_sync_roots_lock()
+        .read()
         .map(|roots| {
             roots
                 .iter()
                 .any(|root| path_is_under_root(&path_lower, root))
         })
         .unwrap_or(false)
+}
+
+pub(super) fn refresh_cloud_sync_roots_from_paths<I, S>(paths: I)
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let mut roots = normalize_cloud_sync_roots(paths);
+    log::info!("[CloudSync] Refreshed roots: {:?}", roots);
+    if let Ok(mut cached) = cloud_sync_roots_lock().write() {
+        std::mem::swap(&mut *cached, &mut roots);
+    }
+}
+
+fn cloud_sync_roots_lock() -> &'static RwLock<Vec<String>> {
+    CLOUD_SYNC_ROOTS.get_or_init(|| {
+        let roots = normalize_cloud_sync_roots(
+            crate::infrastructure::windows::get_cloud_sync_roots()
+                .into_iter()
+                .map(|root| root.path),
+        );
+        log::info!("[CloudSync] Detected roots: {:?}", roots);
+        RwLock::new(roots)
+    })
+}
+
+fn normalize_cloud_sync_roots<I, S>(paths: I) -> Vec<String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    let mut roots: Vec<String> = paths
+        .into_iter()
+        .map(|root| normalize_root_for_compare(root.as_ref()))
+        .collect();
+
+    if let Some(onedrive_roots) = super::ONEDRIVE_ROOTS.get() {
+        roots.extend(
+            onedrive_roots
+                .iter()
+                .map(|root| normalize_root_for_compare(root)),
+        );
+    }
+
+    roots.sort();
+    roots.dedup();
+    roots
 }
 
 fn normalize_root_for_compare(path: &str) -> String {

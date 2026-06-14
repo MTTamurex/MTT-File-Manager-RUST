@@ -373,6 +373,14 @@ pub fn is_cloud_sync_path(path: &Path) -> bool {
     path_detection::is_cloud_sync_path(path)
 }
 
+pub fn refresh_cloud_sync_roots_from_paths<I, S>(paths: I)
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    path_detection::refresh_cloud_sync_roots_from_paths(paths);
+}
+
 /// Returns true if `path` is a direct child of a OneDrive root or the user
 /// profile directory (Documents, Pictures, Desktop, Downloads, etc.).
 /// Pure string comparison — no I/O.

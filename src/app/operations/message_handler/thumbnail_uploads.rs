@@ -320,22 +320,17 @@ impl ImageViewerApp {
                 continue;
             }
 
-            // Reject stale results that were in-flight when the path was evicted
-            // (rename/delete via watcher).  The counter was incremented by
-            // evict_stale_path_caches; decrement here and skip the data.
-            if let Some(skip_count) = self.thumbnail_eviction_skips.get_mut(&thumbnail_data.path) {
-                if *skip_count > 0 {
-                    *skip_count -= 1;
-                    if *skip_count == 0 {
-                        self.thumbnail_eviction_skips.remove(&thumbnail_data.path);
-                    }
-                    self.cache_manager.finish_loading(&thumbnail_data.path);
-                    log::debug!(
-                        "[THUMB-UPLOAD] Rejected stale in-flight thumbnail for {:?} (eviction skip)",
-                        thumbnail_data.path.file_name().unwrap_or_default()
-                    );
-                    continue;
-                }
+            if self
+                .thumbnail_request_epochs
+                .get(&thumbnail_data.path)
+                .is_some_and(|epoch| thumbnail_data.request_epoch < *epoch)
+            {
+                self.cache_manager.finish_loading(&thumbnail_data.path);
+                log::debug!(
+                    "[THUMB-UPLOAD] Rejected stale in-flight thumbnail for {:?} (request epoch)",
+                    thumbnail_data.path.file_name().unwrap_or_default()
+                );
+                continue;
             }
 
             self.cache_manager.finish_loading(&thumbnail_data.path);

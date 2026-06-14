@@ -223,10 +223,8 @@ pub(super) fn render_preview_panel_layout(
                                             app.cache_manager.loading_set.remove(&path);
                                             app.cache_manager.finish_pending_upload(&path);
                                             app.pending_thumbnails.retain(|thumb| thumb.path != path);
-                                            if was_loading && queued_removed == 0 {
-                                                *app.thumbnail_eviction_skips
-                                                    .entry(path.clone())
-                                                    .or_insert(0) += 1;
+                                            if was_loading || queued_removed > 0 {
+                                                app.bump_thumbnail_request_epoch(&path);
                                             }
                                             log::debug!("[REFRESH THUMBNAIL] Loading set cleared");
                                             // CRITICAL: Also clear RAM cache (rgba_data_cache) or

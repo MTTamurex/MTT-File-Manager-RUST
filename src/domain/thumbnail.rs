@@ -36,6 +36,7 @@ pub struct ThumbnailData {
     pub width: u32,
     pub height: u32,
     pub generation: usize,
+    pub request_epoch: u64,
     pub priority: IOPriority,
     pub not_found: bool,
     /// When `true`, `image_data` contains premultiplied-alpha RGBA pixels

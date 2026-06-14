@@ -131,9 +131,8 @@ pub struct ImageViewerApp {
     pub thumbnail_queue: Arc<PriorityThumbnailQueue>, // UI -> Worker Pool (Priority Queue)
     pub image_receiver: crossbeam_channel::Receiver<ThumbnailData>, // Worker Pool -> UI
     pub pending_thumbnails: VecDeque<ThumbnailData>,  // PERFORMANCE: Buffer for throttled uploads
-    /// Per-path counter of stale in-flight thumbnail results to skip.
-    /// Incremented on cache eviction, decremented when a stale result is drained.
-    pub thumbnail_eviction_skips: std::collections::HashMap<PathBuf, u32>,
+    /// Per-path request epoch used to reject stale in-flight thumbnail results.
+    pub thumbnail_request_epochs: std::collections::HashMap<PathBuf, u64>,
     /// Snapshot of old items' metadata (path â†’ (modified, size)) taken before
     /// a watcher-triggered reload clears `all_items`. Used after end-of-load to
     /// detect and evict stale `texture_cache` entries for items whose content
@@ -243,6 +242,8 @@ pub struct ImageViewerApp {
     pub metadata_loading: FxHashSet<PathBuf>,
     pub cloud_sync_status_refresh_sender: Sender<PathBuf>,
     pub cloud_sync_status_refresh_receiver: Receiver<PathBuf>,
+    pub cloud_open_failure_sender: Sender<()>,
+    pub cloud_open_failure_receiver: Receiver<()>,
     pub live_file_size_req_sender: Sender<crate::app::live_file_size::LiveFileSizeRequest>,
     pub live_file_size_res_receiver: Receiver<crate::app::live_file_size::LiveFileSizeResponse>,
     pub live_file_size_cache: LruCache<PathBuf, (u64, u64)>,

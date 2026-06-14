@@ -76,6 +76,21 @@ impl ImageViewerApp {
 
         while let Ok(path) = self.cloud_sync_status_refresh_receiver.try_recv() {
             self.refresh_cached_sync_status_for_path(&path);
+            if path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .is_some_and(crate::infrastructure::windows::is_media_extension)
+            {
+                crate::workers::thumbnail::clear_failure_cache(&path);
+                self.cache_manager.failed_thumbnails.pop(&path);
+                self.request_thumbnail_load_with_modified(path, self.thumbnail_size as u32, 0);
+            }
+        }
+
+        while self.cloud_open_failure_receiver.try_recv().is_ok() {
+            self.notifications
+                .warning(rust_i18n::t!("operations.open_failed").to_string());
+            self.restore_app_focus();
         }
 
         // PERFORMANCE: Precompute normalized current path once for all comparisons

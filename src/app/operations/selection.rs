@@ -90,6 +90,11 @@ impl ImageViewerApp {
                     } else {
                         self.generation
                     };
+                    let request_epoch = self
+                        .thumbnail_request_epochs
+                        .get(&path)
+                        .copied()
+                        .unwrap_or(0);
 
                     if self.thumbnail_queue.promote_pending_to_interactive(
                         &path,
@@ -97,6 +102,7 @@ impl ImageViewerApp {
                         effective_req_size,
                         0,
                         modified,
+                        request_epoch,
                     ) {
                         self.cache_manager
                             .note_attempted_thumbnail_bucket(&path, required_preview_bucket);

@@ -336,10 +336,19 @@ impl ImageViewerApp {
                 self.drive_state.drive_scan_pending = false;
                 let old_disks = std::mem::take(&mut self.drive_state.disks);
                 let old_cloud_roots = std::mem::take(&mut self.drive_state.cloud_roots);
-                let changed =
-                    scan_result.disks != old_disks || scan_result.cloud_roots != old_cloud_roots;
+                let cloud_roots_changed = scan_result.cloud_roots != old_cloud_roots;
+                let changed = scan_result.disks != old_disks || cloud_roots_changed;
                 self.drive_state.disks = scan_result.disks;
                 self.drive_state.cloud_roots = scan_result.cloud_roots;
+
+                if cloud_roots_changed {
+                    crate::infrastructure::onedrive::refresh_cloud_sync_roots_from_paths(
+                        self.drive_state
+                            .cloud_roots
+                            .iter()
+                            .map(|root| root.path.as_str()),
+                    );
+                }
 
                 if changed {
                     // Invalidate cached drive types since drive list changed

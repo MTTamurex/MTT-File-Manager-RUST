@@ -465,13 +465,13 @@ impl ImageViewerApp {
         let drag_payload_n = self.drag_payload_paths.len();
         let pinned_n = self.pinned_folders.len();
         let dirty_registry_n = self.directory_dirty_registry.len();
-        let eviction_skips_n = self.thumbnail_eviction_skips.len();
+        let request_epochs_n = self.thumbnail_request_epochs.len();
         let attempted_bucket_n = self.cache_manager.attempted_thumbnail_bucket.len();
         let folder_preview_trace = self.cache_manager.folder_preview_trace.take_snapshot();
         let thumbnail_trace = self.cache_manager.thumbnail_trace.take_snapshot();
 
         log::info!(
-            "[MEM-TRACE:{label}] backend={} ws={:.1}MB private={:.1}MB items={} all_items={} tabs={} dir_cache={}/{} visible_items={} textures={}/{} texture_target={} folder_tex={}/{} folder_target={} rgba_items={} rgba={:.1}/{:.1}MB pending={}/{} pending_rgba={:.1}/{:.1}MB pending_set={} loading={} folder_loading={} failed_thumbs={} queue={} img_rx={} vram_est={:.1}MB icons={} ext_icons={} drive_icons={} failed_drive_icons={} loading_drive_icons={} gifs={} gif_rgba={:.1}MB visible={:?} thumb_bucket={} folder_bucket={} frame_avg={:.1}ms frame_peak={:.1}ms upload_budget={:.1}ms eviction_skips={} attempted_bucket={} fs_size={}/{} fs_batch={}/{} fs_reval={} fs_inval_ep={} live_size={}/{} meta={}/{} scanned={} failed_ico={} loading_ico={} del_date={} vis_paths={} mtime_re={} multisel={} drag={} pinned={} dirty_reg={} fp_req={} fp_dup={} fp_dbnc={} fp_inval={} fp_upl={} fp_upl_none={} fp_upl_diff={} fp_evict={} fp_db_w={} fp_comp={} fp_sample={:?} th_req={} th_dupL={} th_dupP={} th_pdel={} th_ram={} th_disp={} th_upl={} th_upl_dup={} th_evict={} th_uniq={} th_top={:?} th_req_sample={:?} th_upl_sample={:?}",
+            "[MEM-TRACE:{label}] backend={} ws={:.1}MB private={:.1}MB items={} all_items={} tabs={} dir_cache={}/{} visible_items={} textures={}/{} texture_target={} folder_tex={}/{} folder_target={} rgba_items={} rgba={:.1}/{:.1}MB pending={}/{} pending_rgba={:.1}/{:.1}MB pending_set={} loading={} folder_loading={} failed_thumbs={} queue={} img_rx={} vram_est={:.1}MB icons={} ext_icons={} drive_icons={} failed_drive_icons={} loading_drive_icons={} gifs={} gif_rgba={:.1}MB visible={:?} thumb_bucket={} folder_bucket={} frame_avg={:.1}ms frame_peak={:.1}ms upload_budget={:.1}ms request_epochs={} attempted_bucket={} fs_size={}/{} fs_batch={}/{} fs_reval={} fs_inval_ep={} live_size={}/{} meta={}/{} scanned={} failed_ico={} loading_ico={} del_date={} vis_paths={} mtime_re={} multisel={} drag={} pinned={} dirty_reg={} fp_req={} fp_dup={} fp_dbnc={} fp_inval={} fp_upl={} fp_upl_none={} fp_upl_diff={} fp_evict={} fp_db_w={} fp_comp={} fp_sample={:?} th_req={} th_dupL={} th_dupP={} th_pdel={} th_ram={} th_disp={} th_upl={} th_upl_dup={} th_evict={} th_uniq={} th_top={:?} th_req_sample={:?} th_upl_sample={:?}",
             self.active_gpu_backend.as_str(),
             bytes_to_mb(process.working_set_bytes),
             bytes_to_mb(process.private_usage_bytes),
@@ -514,7 +514,7 @@ impl ImageViewerApp {
             self.frame_time_avg_ms,
             self.frame_time_peak_ms,
             self.upload_budget_ms,
-            eviction_skips_n,
+            request_epochs_n,
             attempted_bucket_n,
             fs_size_cache,
             fs_size_loading,
@@ -658,8 +658,8 @@ impl ImageViewerApp {
         self.suppress_next_folder_preview_invalidation.clear();
         self.pending_thumbnails.clear();
         self.pending_thumbnails.shrink_to_fit();
-        self.thumbnail_eviction_skips.clear();
-        self.thumbnail_eviction_skips.shrink_to_fit();
+        self.thumbnail_request_epochs.clear();
+        self.thumbnail_request_epochs.shrink_to_fit();
 
         let old_textures = self.cache_manager.texture_cache.len();
         let old_texture_cap = self.cache_manager.texture_cache.cap().get();
@@ -781,7 +781,7 @@ impl ImageViewerApp {
             .retain(|path| visible_paths.contains(path));
         self.suppress_next_folder_preview_invalidation
             .retain(|path| visible_paths.contains(path));
-        self.thumbnail_eviction_skips
+        self.thumbnail_request_epochs
             .retain(|path, _| visible_paths.contains(path));
         self.loading_icons
             .retain(|path| visible_paths.contains(path));
@@ -861,8 +861,8 @@ impl ImageViewerApp {
         self.pending_thumbnails.clear();
         self.pending_thumbnails.shrink_to_fit();
 
-        self.thumbnail_eviction_skips.clear();
-        self.thumbnail_eviction_skips.shrink_to_fit();
+        self.thumbnail_request_epochs.clear();
+        self.thumbnail_request_epochs.shrink_to_fit();
         self.pending_folder_preview_replace.clear();
         self.pending_folder_preview_replace.shrink_to_fit();
         self.suppress_next_folder_preview_invalidation.clear();
@@ -1059,15 +1059,11 @@ impl ImageViewerApp {
             self.directory_cache.clear();
             self.visible_paths_cache.clear();
             self.visible_range_cached = None;
-            self.thumbnail_eviction_skips.clear();
+            self.thumbnail_request_epochs.clear();
             self.cache_manager.attempted_thumbnail_bucket.clear();
-        } else if self.thumbnail_eviction_skips.len() > 256 {
-            self.thumbnail_eviction_skips.retain(|_, count| *count > 0);
-            self.thumbnail_eviction_skips.shrink_to_fit();
-            if self.cache_manager.attempted_thumbnail_bucket.len() > MAX_DYNAMIC_TEXTURE_CACHE_ITEMS
-            {
-                self.cache_manager.attempted_thumbnail_bucket.clear();
-            }
+        } else if self.cache_manager.attempted_thumbnail_bucket.len() > MAX_DYNAMIC_TEXTURE_CACHE_ITEMS
+        {
+            self.cache_manager.attempted_thumbnail_bucket.clear();
         }
 
         // Reuse existing GIF cleanup policy (TTL + bounded memory) without forcing visible preview drop.

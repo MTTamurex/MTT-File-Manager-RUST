@@ -237,5 +237,18 @@ pub fn render_cloud_roots(
 }
 
 fn path_starts_with_case_insensitive(path: &str, prefix: &str) -> bool {
-    path.len() >= prefix.len() && path[..prefix.len()].eq_ignore_ascii_case(prefix)
+    let path_components: Vec<String> = Path::new(path)
+        .components()
+        .map(|component| component.as_os_str().to_string_lossy().to_lowercase())
+        .collect();
+    let prefix_components: Vec<String> = Path::new(prefix)
+        .components()
+        .map(|component| component.as_os_str().to_string_lossy().to_lowercase())
+        .collect();
+
+    prefix_components.len() <= path_components.len()
+        && prefix_components
+            .iter()
+            .zip(path_components.iter())
+            .all(|(prefix, path)| prefix == path)
 }

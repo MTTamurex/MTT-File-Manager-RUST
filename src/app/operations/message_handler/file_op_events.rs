@@ -363,7 +363,7 @@ impl ImageViewerApp {
         self.handle_parent_folder_updates(parent_folders, current_path_norm);
     }
 
-    fn restore_app_focus(&self) {
+    pub(super) fn restore_app_focus(&self) {
         if let Some(hwnd) = self.native_hwnd {
             crate::infrastructure::windows::restore_window_foreground(hwnd);
         }

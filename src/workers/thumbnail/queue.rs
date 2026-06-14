@@ -137,7 +137,27 @@ impl PriorityThumbnailQueue {
         priority: IOPriority,
         modified: u64,
     ) {
-        self.push_with_index(path, gen, request_size, priority, None, modified);
+        self.push_with_epoch(path, gen, request_size, priority, modified, 0);
+    }
+
+    pub fn push_with_epoch(
+        &self,
+        path: PathBuf,
+        gen: usize,
+        request_size: u32,
+        priority: IOPriority,
+        modified: u64,
+        request_epoch: u64,
+    ) {
+        self.push_with_index_and_epoch(
+            path,
+            gen,
+            request_size,
+            priority,
+            None,
+            modified,
+            request_epoch,
+        );
     }
 
     pub fn push_with_index(
@@ -149,6 +169,27 @@ impl PriorityThumbnailQueue {
         directory_index: Option<usize>,
         modified: u64,
     ) {
+        self.push_with_index_and_epoch(
+            path,
+            gen,
+            request_size,
+            priority,
+            directory_index,
+            modified,
+            0,
+        );
+    }
+
+    pub fn push_with_index_and_epoch(
+        &self,
+        path: PathBuf,
+        gen: usize,
+        request_size: u32,
+        priority: IOPriority,
+        directory_index: Option<usize>,
+        modified: u64,
+        request_epoch: u64,
+    ) {
         self.push_with_index_and_source(
             path,
             gen,
@@ -156,6 +197,7 @@ impl PriorityThumbnailQueue {
             priority,
             directory_index,
             modified,
+            request_epoch,
             ThumbnailRequestSource::Normal,
             None,
         );
@@ -177,6 +219,7 @@ impl PriorityThumbnailQueue {
             priority,
             None,
             modified,
+            0,
             ThumbnailRequestSource::BulkScan,
             Some(bulk_session),
         );
@@ -189,6 +232,7 @@ impl PriorityThumbnailQueue {
         request_size: u32,
         directory_index: usize,
         modified: u64,
+        request_epoch: u64,
     ) -> bool {
         let parent = path.parent().unwrap_or(path).to_path_buf();
         let promoted = {
@@ -210,6 +254,7 @@ impl PriorityThumbnailQueue {
             if modified > 0 && (existing.modified == 0 || modified > existing.modified) {
                 existing.modified = modified;
             }
+            existing.request_epoch = existing.request_epoch.max(request_epoch);
             existing.source = ThumbnailRequestSource::Normal;
             existing.track_bulk_progress = false;
             existing.bulk_priority = None;
@@ -240,6 +285,7 @@ impl PriorityThumbnailQueue {
         priority: IOPriority,
         directory_index: Option<usize>,
         modified: u64,
+        request_epoch: u64,
         source: ThumbnailRequestSource,
         bulk_session: Option<u64>,
     ) {
@@ -274,6 +320,7 @@ impl PriorityThumbnailQueue {
                 path: path.clone(),
                 generation: gen,
                 size: request_size,
+                request_epoch,
                 priority,
                 directory_index,
                 modified,
@@ -361,6 +408,11 @@ impl PriorityThumbnailQueue {
                 // Keep the newest generation so stale requests do not win.
                 if incoming.generation > existing.generation {
                     existing.generation = incoming.generation;
+                    updated = true;
+                }
+
+                if incoming.request_epoch > existing.request_epoch {
+                    existing.request_epoch = incoming.request_epoch;
                     updated = true;
                 }
 
@@ -502,6 +554,7 @@ impl PriorityThumbnailQueue {
         PathBuf,
         usize,
         u32,
+        u64,
         IOPriority,
         u64,
         ThumbnailRequestSource,
@@ -527,6 +580,7 @@ impl PriorityThumbnailQueue {
                     request.path,
                     request.generation,
                     request.size,
+                    request.request_epoch,
                     request.priority,
                     request.modified,
                     request.source,
@@ -771,7 +825,7 @@ mod tests {
         queue.push_with_index(path_a.clone(), 1, 64, IOPriority::Prefetch, Some(2), 0);
         queue.push_with_index(path_b.clone(), 1, 64, IOPriority::Prefetch, Some(1), 0);
 
-        let (path, _, _, _, _, _, _, _) = queue.pop().unwrap();
+        let (path, _, _, _, _, _, _, _, _) = queue.pop().unwrap();
         assert_eq!(path, path_b);
     }
 
@@ -796,11 +850,11 @@ mod tests {
         queue.push(path_b.clone(), 1, 64, IOPriority::Prefetch, 0);
         queue.push(path_c.clone(), 1, 64, IOPriority::Prefetch, 0);
 
-        let (path, _, _, _, _, _, _, _) = queue.pop().unwrap();
+        let (path, _, _, _, _, _, _, _, _) = queue.pop().unwrap();
         assert_eq!(path, path_a);
-        let (path, _, _, _, _, _, _, _) = queue.pop().unwrap();
+        let (path, _, _, _, _, _, _, _, _) = queue.pop().unwrap();
         assert_eq!(path, path_b);
-        let (path, _, _, _, _, _, _, _) = queue.pop().unwrap();
+        let (path, _, _, _, _, _, _, _, _) = queue.pop().unwrap();
         assert_eq!(path, path_c);
     }
 
@@ -818,7 +872,7 @@ mod tests {
         // Should only get one back, with merged/upgraded fields
         let result = queue.pop();
         assert!(result.is_some());
-        let (p, g, size, priority, modified, source, _, _) = result.unwrap();
+        let (p, g, size, _, priority, modified, source, _, _) = result.unwrap();
         assert_eq!(p, path);
         assert_eq!(g, 2);
         assert_eq!(size, 256);
@@ -860,9 +914,9 @@ mod tests {
             0,
         );
 
-        assert!(queue.promote_pending_to_interactive(&selected_path, 2, 512, 0, 123));
+        assert!(queue.promote_pending_to_interactive(&selected_path, 2, 512, 0, 123, 0));
 
-        let (path, gen, size, priority, modified, source, track_bulk_progress, bulk_session) =
+        let (path, gen, size, _, priority, modified, source, track_bulk_progress, bulk_session) =
             queue.pop().unwrap();
         assert_eq!(path, selected_path);
         assert_eq!(gen, 2);
@@ -889,7 +943,7 @@ mod tests {
 
         let result = queue.pop();
         assert!(result.is_some());
-        let (p, g, size, priority, modified, source, _, _) = result.unwrap();
+        let (p, g, size, _, priority, modified, source, _, _) = result.unwrap();
         assert_eq!(p, path);
         assert_eq!(g, 3);
         assert_eq!(size, 128);
@@ -920,7 +974,7 @@ mod tests {
         assert_eq!(queue.clear_pending(), 1);
         assert_eq!(queue.pending_count(), 1);
 
-        let (path, _, size, priority, _, source, track_bulk_progress, bulk_session) =
+        let (path, _, size, _, priority, _, source, track_bulk_progress, bulk_session) =
             queue.pop().unwrap();
         assert_eq!(path, bulk_path);
         assert_eq!(size, 512);
@@ -949,7 +1003,7 @@ mod tests {
         assert_eq!(queue.clear_pending(), 0);
         assert_eq!(queue.pending_count(), 1);
 
-        let (popped_path, _, _, priority, modified, source, track_bulk_progress, bulk_session) =
+        let (popped_path, _, _, _, priority, modified, source, track_bulk_progress, bulk_session) =
             queue.pop().unwrap();
         assert_eq!(popped_path, path);
         assert_eq!(priority, IOPriority::Prefetch);
@@ -978,12 +1032,12 @@ mod tests {
         queue.push_bulk_scan(bulk_path.clone(), 1, 512, IOPriority::Prefetch, 0, 1);
         queue.push(normal_path.clone(), 2, 128, IOPriority::Prefetch, 0);
 
-        let (path, _, _, _, _, source, track_bulk_progress, _) = queue.pop().unwrap();
+        let (path, _, _, _, _, _, source, track_bulk_progress, _) = queue.pop().unwrap();
         assert_eq!(path, normal_path);
         assert_eq!(source, ThumbnailRequestSource::Normal);
         assert!(!track_bulk_progress);
 
-        let (path, _, _, priority, _, source, track_bulk_progress, bulk_session) =
+        let (path, _, _, _, priority, _, source, track_bulk_progress, bulk_session) =
             queue.pop().unwrap();
         assert_eq!(path, bulk_path);
         assert_eq!(priority, IOPriority::Prefetch);
@@ -1016,13 +1070,13 @@ mod tests {
         assert_eq!(queue.cancel_bulk_scan_session(1), 1);
         assert_eq!(queue.pending_count(), 2);
 
-        let (path, _, _, _, _, source, track_bulk_progress, bulk_session) = queue.pop().unwrap();
+        let (path, _, _, _, _, _, source, track_bulk_progress, bulk_session) = queue.pop().unwrap();
         assert_eq!(path, normal_path);
         assert_eq!(source, ThumbnailRequestSource::Normal);
         assert!(!track_bulk_progress);
         assert_eq!(bulk_session, None);
 
-        let (path, _, _, _, _, source, track_bulk_progress, bulk_session) = queue.pop().unwrap();
+        let (path, _, _, _, _, _, source, track_bulk_progress, bulk_session) = queue.pop().unwrap();
         assert_eq!(path, active_bulk);
         assert_eq!(source, ThumbnailRequestSource::BulkScan);
         assert!(track_bulk_progress);
@@ -1048,7 +1102,7 @@ mod tests {
         assert_eq!(queue.cancel_bulk_scan_session(3), 0);
         assert_eq!(queue.pending_count(), 1);
 
-        let (popped_path, _, _, priority, modified, source, track_bulk_progress, bulk_session) =
+        let (popped_path, _, _, _, priority, modified, source, track_bulk_progress, bulk_session) =
             queue.pop().unwrap();
         assert_eq!(popped_path, path);
         assert_eq!(priority, IOPriority::Interactive);
@@ -1080,19 +1134,19 @@ mod tests {
         queue.push_bulk_scan(bulk_a.clone(), 1, 512, IOPriority::Prefetch, 0, 1);
         queue.push_bulk_scan(bulk_b.clone(), 1, 512, IOPriority::Prefetch, 0, 1);
 
-        let (first_path, _, _, _, _, first_source, _, first_session) = queue.pop().unwrap();
+        let (first_path, _, _, _, _, _, first_source, _, first_session) = queue.pop().unwrap();
         assert!(first_path == bulk_a || first_path == bulk_b);
         assert_eq!(first_source, ThumbnailRequestSource::BulkScan);
         assert_eq!(first_session, Some(1));
 
         queue.push(normal_path.clone(), 2, 128, IOPriority::Background, 0);
 
-        let (path, _, _, _, _, source, track_bulk_progress, _) = queue.pop().unwrap();
+        let (path, _, _, _, _, _, source, track_bulk_progress, _) = queue.pop().unwrap();
         assert_eq!(path, normal_path);
         assert_eq!(source, ThumbnailRequestSource::Normal);
         assert!(!track_bulk_progress);
 
-        let (path, _, _, priority, _, source, track_bulk_progress, bulk_session) =
+        let (path, _, _, _, priority, _, source, track_bulk_progress, bulk_session) =
             queue.pop().unwrap();
         assert!(path == bulk_a || path == bulk_b);
         assert_eq!(priority, IOPriority::Prefetch);
