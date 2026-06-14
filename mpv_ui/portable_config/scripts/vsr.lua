@@ -1,6 +1,8 @@
 local mp = require("mp")
 
 local FILTER_TAG = "@mtt-rtx"
+local VSR_FILTER_TAG = "@mtt-rtx-vsr"
+local HDR_FILTER_TAG = "@mtt-rtx-hdr"
 local FORMAT_TAG = "@mtt-rtx-format"
 
 local state = {
@@ -141,6 +143,18 @@ local function hevc_main10_requires_bridge(codec, pixel_format)
     return pixel_format:match("p10le$") ~= nil or pixel_format == "p010"
 end
 
+local function rtx_chains_require_nv12_bridge(codec, pixel_format, chains)
+    if chains then
+        for _, chain in ipairs(chains) do
+            if chain:find("nvidia-true-hdr", 1, true) then
+                return pixel_format ~= "nv12"
+            end
+        end
+    end
+
+    return hevc_main10_requires_bridge(codec, pixel_format)
+end
+
 local function requested_scale()
     local video_width, video_height = source_dimensions()
     local display_width, display_height = current_display_size()
@@ -158,30 +172,31 @@ end
 
 local function remove_filter_chain()
     pcall(mp.commandv, "vf", "remove", FILTER_TAG)
+    pcall(mp.commandv, "vf", "remove", VSR_FILTER_TAG)
+    pcall(mp.commandv, "vf", "remove", HDR_FILTER_TAG)
     pcall(mp.commandv, "vf", "remove", FORMAT_TAG)
     state.chain_active = false
 end
 
-local function build_filter_chain()
-    local segments = {}
+local function build_filter_chains()
+    local chains = {}
 
     if state.vsr_enabled then
         local scale = requested_scale()
         if scale then
-            segments[#segments + 1] = "scaling-mode=nvidia"
-            segments[#segments + 1] = "scale=" .. scale
+            chains[#chains + 1] = VSR_FILTER_TAG .. ":d3d11vpp=scaling-mode=nvidia:scale=" .. scale
         end
     end
 
     if state.hdr_enabled and not source_is_hdr() then
-        segments[#segments + 1] = "nvidia-true-hdr"
+        chains[#chains + 1] = HDR_FILTER_TAG .. ":d3d11vpp=nvidia-true-hdr"
     end
 
-    if #segments == 0 then
+    if #chains == 0 then
         return nil
     end
 
-    return FILTER_TAG .. ":d3d11vpp=" .. table.concat(segments, ":")
+    return chains
 end
 
 local function video_context_ready()
@@ -205,18 +220,22 @@ local function apply_filter_chain()
     local pixel_format = mp.get_property("video-params/pixelformat", "")
     local primaries = mp.get_property("video-params/primaries", "")
     local transfer = mp.get_property("video-params/gamma", "")
+    local matrix = mp.get_property("video-params/colormatrix", "")
+    local levels = mp.get_property("video-params/colorlevels", "")
     if codec == "" then
         return false
     end
 
     local is_hdr = source_is_hdr()
-    local chain = build_filter_chain()
-    if not chain then
+    local chains = build_filter_chains()
+    if not chains then
         mp.msg.info(
             "RTX filters: no filter chain; codec=" .. codec ..
             ", pixfmt=" .. pixel_format ..
             ", primaries=" .. primaries ..
             ", transfer=" .. transfer ..
+            ", matrix=" .. matrix ..
+            ", levels=" .. levels ..
             ", source_hdr=" .. tostring(is_hdr) ..
             ", vsr=" .. tostring(state.vsr_enabled) ..
             ", hdr=" .. tostring(state.hdr_enabled)
@@ -224,23 +243,33 @@ local function apply_filter_chain()
         return false
     end
 
-    if hevc_main10_requires_bridge(codec, pixel_format) then
-        pcall(mp.commandv, "vf", "append", FORMAT_TAG .. ":format=nv12")
+    local chain_label = table.concat(chains, ",")
+    local format_bridge = rtx_chains_require_nv12_bridge(codec, pixel_format, chains)
+    if format_bridge then
+        local ok_format = pcall(mp.commandv, "vf", "append", FORMAT_TAG .. ":format=nv12")
+        if not ok_format then
+            return false
+        end
     end
 
-    local ok = pcall(mp.commandv, "vf", "append", chain)
-    if not ok then
-        pcall(mp.commandv, "vf", "remove", FORMAT_TAG)
-        return false
+    for _, chain in ipairs(chains) do
+        local ok = pcall(mp.commandv, "vf", "append", chain)
+        if not ok then
+            remove_filter_chain()
+            return false
+        end
     end
 
     mp.msg.info(
-        "RTX filters: applied " .. chain ..
+        "RTX filters: applied " .. chain_label ..
         "; codec=" .. codec ..
         ", pixfmt=" .. pixel_format ..
         ", primaries=" .. primaries ..
         ", transfer=" .. transfer ..
-        ", source_hdr=" .. tostring(is_hdr)
+        ", matrix=" .. matrix ..
+        ", levels=" .. levels ..
+        ", source_hdr=" .. tostring(is_hdr) ..
+        ", format_bridge=" .. tostring(format_bridge)
     )
 
     state.chain_active = true
