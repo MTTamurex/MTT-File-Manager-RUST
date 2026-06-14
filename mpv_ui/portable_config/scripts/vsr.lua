@@ -3,6 +3,7 @@ local mp = require("mp")
 local FILTER_TAG = "@mtt-rtx"
 local VSR_FILTER_TAG = "@mtt-rtx-vsr"
 local HDR_FILTER_TAG = "@mtt-rtx-hdr"
+local HDR_PEAK_FILTER_TAG = "@mtt-rtx-hdr-peak"
 local FORMAT_TAG = "@mtt-rtx-format"
 
 local state = {
@@ -12,6 +13,7 @@ local state = {
     rtx_supported = false,
     rtx_adapter_name = "",
     chain_active = false,
+    saved_hdr_options = nil,
     physical_display = { width = nil, height = nil },
     restore_timer = nil,
 }
@@ -174,22 +176,62 @@ local function remove_filter_chain()
     pcall(mp.commandv, "vf", "remove", FILTER_TAG)
     pcall(mp.commandv, "vf", "remove", VSR_FILTER_TAG)
     pcall(mp.commandv, "vf", "remove", HDR_FILTER_TAG)
+    pcall(mp.commandv, "vf", "remove", HDR_PEAK_FILTER_TAG)
     pcall(mp.commandv, "vf", "remove", FORMAT_TAG)
     state.chain_active = false
 end
 
-local function build_filter_chains()
-    local chains = {}
+local function hdr_output_max_luma()
+    local target_peak = mp.get_property_number("target-peak", 400)
+    if not target_peak or target_peak <= 0 then
+        return 400
+    end
+    return math.floor(target_peak + 0.5)
+end
 
-    if state.vsr_enabled then
-        local scale = requested_scale()
-        if scale then
-            chains[#chains + 1] = VSR_FILTER_TAG .. ":d3d11vpp=scaling-mode=nvidia:scale=" .. scale
+local function set_rtx_hdr_output_options(active)
+    if active then
+        if not state.saved_hdr_options then
+            state.saved_hdr_options = {
+                hdr_compute_peak = mp.get_property("hdr-compute-peak", "yes"),
+            }
         end
+
+        -- RTX HDR already performs dynamic SDR->HDR expansion. mpv's
+        -- hdr-compute-peak adds a second scene-adaptive pass afterwards,
+        -- which can make brightness pump darker/brighter between scenes.
+        mp.set_property("hdr-compute-peak", "no")
+        return
     end
 
-    if state.hdr_enabled and not source_is_hdr() then
+    if state.saved_hdr_options then
+        mp.set_property("hdr-compute-peak", state.saved_hdr_options.hdr_compute_peak)
+        state.saved_hdr_options = nil
+    end
+end
+
+local function build_filter_chains()
+    local chains = {}
+    local vsr_scale = nil
+
+    if state.vsr_enabled then
+        vsr_scale = requested_scale()
+    end
+
+    local hdr_active = state.hdr_enabled and not source_is_hdr()
+
+    if vsr_scale and hdr_active then
+        chains[#chains + 1] = FILTER_TAG .. ":d3d11vpp=scaling-mode=nvidia:scale=" .. vsr_scale .. ":nvidia-true-hdr"
+    elseif vsr_scale then
+        chains[#chains + 1] = VSR_FILTER_TAG .. ":d3d11vpp=scaling-mode=nvidia:scale=" .. vsr_scale
+    elseif hdr_active then
         chains[#chains + 1] = HDR_FILTER_TAG .. ":d3d11vpp=nvidia-true-hdr"
+    end
+
+    if hdr_active then
+        -- mpv's d3d11vpp currently tags NVIDIA RTX HDR output as 1000 nits by
+        -- default. Match our configured output target to avoid clipped whites.
+        chains[#chains + 1] = HDR_PEAK_FILTER_TAG .. ":format=max-luma=" .. hdr_output_max_luma()
     end
 
     if #chains == 0 then
@@ -213,6 +255,7 @@ local function apply_filter_chain()
     remove_filter_chain()
 
     if not state.vsr_enabled and not state.hdr_enabled then
+        set_rtx_hdr_output_options(false)
         return false
     end
 
@@ -228,6 +271,9 @@ local function apply_filter_chain()
 
     local is_hdr = source_is_hdr()
     local chains = build_filter_chains()
+    local rtx_hdr_active = state.hdr_enabled and not is_hdr
+    set_rtx_hdr_output_options(rtx_hdr_active)
+
     if not chains then
         mp.msg.info(
             "RTX filters: no filter chain; codec=" .. codec ..
@@ -248,6 +294,7 @@ local function apply_filter_chain()
     if format_bridge then
         local ok_format = pcall(mp.commandv, "vf", "append", FORMAT_TAG .. ":format=nv12")
         if not ok_format then
+            set_rtx_hdr_output_options(false)
             return false
         end
     end
@@ -256,6 +303,7 @@ local function apply_filter_chain()
         local ok = pcall(mp.commandv, "vf", "append", chain)
         if not ok then
             remove_filter_chain()
+            set_rtx_hdr_output_options(false)
             return false
         end
     end
@@ -269,6 +317,8 @@ local function apply_filter_chain()
         ", matrix=" .. matrix ..
         ", levels=" .. levels ..
         ", source_hdr=" .. tostring(is_hdr) ..
+        ", hdr_max_luma=" .. tostring(hdr_output_max_luma()) ..
+        ", hdr_compute_peak=" .. mp.get_property("hdr-compute-peak", "") ..
         ", format_bridge=" .. tostring(format_bridge)
     )
 
