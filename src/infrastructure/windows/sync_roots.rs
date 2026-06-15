@@ -5,7 +5,8 @@ use std::path::{Path, PathBuf};
 use windows::core::{Interface, PCWSTR, PWSTR};
 use windows::Win32::Foundation::{ERROR_NO_MORE_ITEMS, ERROR_SUCCESS};
 use windows::Win32::Storage::FileSystem::{
-    GetFileAttributesW, FILE_ATTRIBUTE_DIRECTORY, INVALID_FILE_ATTRIBUTES,
+    GetFileAttributesW, GetVolumeInformationW, QueryDosDeviceW, FILE_ATTRIBUTE_DIRECTORY,
+    INVALID_FILE_ATTRIBUTES,
 };
 use windows::Win32::System::Com::{
     CoCreateInstance, IPersistFile, CLSCTX_INPROC_SERVER, STGM_READ,
@@ -15,10 +16,11 @@ use windows::Win32::System::Registry::{
     HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, REG_VALUE_TYPE, RRF_RT_REG_EXPAND_SZ,
     RRF_RT_REG_SZ,
 };
-use windows::Win32::UI::Shell::{IShellLinkW, ShellLink, SLGP_RAWPATH};
+use windows::Win32::UI::Shell::{IShellLinkW, ShellLink, SLGP_UNCPRIORITY};
 
 const SYNC_ROOT_MANAGER_KEY: &str =
     "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\SyncRootManager";
+const FILE_SUPPORTS_REMOTE_STORAGE: u32 = 0x0000_0100;
 
 struct RegKey(HKEY);
 
@@ -111,7 +113,7 @@ fn get_google_drive_shortcut_roots(disks: &[(String, String)]) -> Vec<CloudRoot>
     let mut seen_targets = HashSet::new();
 
     for (drive_path, drive_label) in disks {
-        if !drive_label.to_lowercase().contains("google drive") {
+        if !is_google_drivefs_volume(drive_path, drive_label) {
             continue;
         }
 
@@ -121,6 +123,27 @@ fn get_google_drive_shortcut_roots(disks: &[(String, String)]) -> Vec<CloudRoot>
 
         for entry in entries.flatten() {
             let shortcut_path = entry.path();
+            let file_type = match entry.file_type() {
+                Ok(file_type) => file_type,
+                Err(_) => continue,
+            };
+
+            if file_type.is_dir() {
+                if is_hidden_or_system(&shortcut_path) {
+                    continue;
+                }
+
+                push_google_drive_root(
+                    &mut roots,
+                    &mut seen_targets,
+                    shortcut_path.clone(),
+                    entry.file_name().to_string_lossy().as_ref(),
+                    Some(shortcut_path.to_string_lossy().to_string()),
+                    drive_path.clone(),
+                );
+                continue;
+            }
+
             if !shortcut_path
                 .extension()
                 .and_then(|ext| ext.to_str())
@@ -136,30 +159,123 @@ fn get_google_drive_shortcut_roots(disks: &[(String, String)]) -> Vec<CloudRoot>
                 continue;
             }
 
-            let target_text = target
-                .to_string_lossy()
-                .trim_end_matches(['\\', '/'])
-                .to_string();
-            if target_text.is_empty() || !seen_targets.insert(target_text.to_lowercase()) {
-                continue;
-            }
-
             let shortcut_name = shortcut_path
                 .file_stem()
                 .and_then(|name| name.to_str())
                 .filter(|name| !name.trim().is_empty())
                 .unwrap_or("My Drive");
 
-            roots.push(CloudRoot::google_drive_shortcut(
-                target_text,
-                format!("Google Drive - {shortcut_name}"),
+            push_google_drive_root(
+                &mut roots,
+                &mut seen_targets,
+                target,
+                shortcut_name,
                 Some(shortcut_path.to_string_lossy().to_string()),
                 drive_path.clone(),
-            ));
+            );
         }
     }
 
     roots
+}
+
+fn push_google_drive_root(
+    roots: &mut Vec<CloudRoot>,
+    seen_targets: &mut HashSet<String>,
+    target: PathBuf,
+    name: &str,
+    icon_resource: Option<String>,
+    source_path: String,
+) {
+    let target_text = target
+        .to_string_lossy()
+        .trim_end_matches(['\\', '/'])
+        .to_string();
+    if target_text.is_empty() || !seen_targets.insert(target_text.to_lowercase()) {
+        return;
+    }
+
+    let display_name = if name.trim().is_empty() {
+        "Google Drive".to_string()
+    } else {
+        format!("Google Drive - {}", name.trim())
+    };
+
+    roots.push(CloudRoot::google_drive_shortcut(
+        target_text,
+        display_name,
+        icon_resource,
+        source_path,
+    ));
+}
+
+fn is_google_drivefs_volume(drive_path: &str, drive_label: &str) -> bool {
+    if !drive_label_is_google_drive(drive_label) {
+        return false;
+    }
+
+    let file_system = super::drives::get_volume_info(drive_path).file_system;
+    if text_mentions_drivefs(&file_system) {
+        return true;
+    }
+
+    query_dos_device(drive_path).is_some_and(|device| text_mentions_drivefs(&device))
+        || volume_supports_remote_storage(drive_path)
+}
+
+fn drive_label_is_google_drive(drive_label: &str) -> bool {
+    let label = drive_label
+        .rfind(" (")
+        .map(|idx| &drive_label[..idx])
+        .unwrap_or(drive_label)
+        .trim();
+
+    label.eq_ignore_ascii_case("Google Drive")
+}
+
+fn text_mentions_drivefs(text: &str) -> bool {
+    let normalized = text.to_lowercase();
+    normalized.contains("drivefs") || normalized.contains("google")
+}
+
+fn query_dos_device(drive_path: &str) -> Option<String> {
+    let drive_name = drive_path.trim_end_matches(['\\', '/']);
+    if drive_name.len() != 2 || !drive_name.ends_with(':') {
+        return None;
+    }
+
+    let drive_wide: Vec<u16> = drive_name
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    let mut buffer = vec![0u16; 1024];
+    let len = unsafe { QueryDosDeviceW(PCWSTR(drive_wide.as_ptr()), Some(&mut buffer)) };
+    if len == 0 {
+        return None;
+    }
+
+    Some(String::from_utf16_lossy(&buffer[..len as usize]))
+}
+
+fn volume_supports_remote_storage(drive_path: &str) -> bool {
+    let path_wide: Vec<u16> = drive_path
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    let mut file_system_flags = 0u32;
+
+    unsafe {
+        GetVolumeInformationW(
+            PCWSTR(path_wide.as_ptr()),
+            None,
+            None,
+            None,
+            Some(&mut file_system_flags),
+            None,
+        )
+        .is_ok()
+            && (file_system_flags & FILE_SUPPORTS_REMOTE_STORAGE) != 0
+    }
 }
 
 fn resolve_shortcut_target(shortcut_path: &Path) -> Option<PathBuf> {
@@ -179,7 +295,7 @@ fn resolve_shortcut_target(shortcut_path: &Path) -> Option<PathBuf> {
             .ok()?;
 
         let mut target = vec![0u16; 32_768];
-        link.GetPath(&mut target, std::ptr::null_mut(), SLGP_RAWPATH.0 as u32)
+        link.GetPath(&mut target, std::ptr::null_mut(), SLGP_UNCPRIORITY.0 as u32)
             .ok()?;
         let nul = target
             .iter()
@@ -189,8 +305,44 @@ fn resolve_shortcut_target(shortcut_path: &Path) -> Option<PathBuf> {
             return None;
         }
 
-        Some(PathBuf::from(String::from_utf16_lossy(&target[..nul])))
+        let target_text = String::from_utf16_lossy(&target[..nul]);
+        Some(PathBuf::from(expand_environment_strings(&target_text)))
     }
+}
+
+fn expand_environment_strings(text: &str) -> String {
+    if !text.contains('%') {
+        return text.to_string();
+    }
+
+    let mut output = String::with_capacity(text.len());
+    let mut rest = text;
+
+    while let Some(start) = rest.find('%') {
+        output.push_str(&rest[..start]);
+        let after_start = &rest[start + 1..];
+        let Some(end) = after_start.find('%') else {
+            output.push('%');
+            output.push_str(after_start);
+            return output;
+        };
+
+        let name = &after_start[..end];
+        if name.is_empty() {
+            output.push_str("%%");
+        } else if let Ok(value) = std::env::var(name) {
+            output.push_str(&value);
+        } else {
+            output.push('%');
+            output.push_str(name);
+            output.push('%');
+        }
+
+        rest = &after_start[end + 1..];
+    }
+
+    output.push_str(rest);
+    output
 }
 
 fn fast_is_directory(path: &Path) -> bool {
@@ -201,6 +353,20 @@ fn fast_is_directory(path: &Path) -> bool {
         .collect();
     let attrs = unsafe { GetFileAttributesW(PCWSTR(path_wide.as_ptr())) };
     attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY.0) != 0
+}
+
+fn is_hidden_or_system(path: &Path) -> bool {
+    const FILE_ATTRIBUTE_HIDDEN: u32 = 0x0000_0002;
+    const FILE_ATTRIBUTE_SYSTEM: u32 = 0x0000_0004;
+
+    let path_wide: Vec<u16> = path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    let attrs = unsafe { GetFileAttributesW(PCWSTR(path_wide.as_ptr())) };
+    attrs == INVALID_FILE_ATTRIBUTES
+        || (attrs & (FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM)) != 0
 }
 
 fn normalize_drive_root_for_compare(path: &str) -> String {
