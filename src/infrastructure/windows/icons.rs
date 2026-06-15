@@ -36,7 +36,7 @@ pub fn requires_real_file_for_shared_icon(ext: &str) -> bool {
 
 pub use file_icons::{
     extract_drive_icon, extract_file_icon, extract_file_icon_by_path, extract_folder_icon,
-    get_file_type_icon,
+    extract_icon_resource, get_file_type_icon,
 };
 pub use special::{extract_computer_icon, extract_recycle_bin_icon, extract_shell_icon};
 pub use thumbnails::{

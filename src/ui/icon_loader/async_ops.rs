@@ -11,6 +11,42 @@ fn icon_resource_path(resource: &str) -> Option<std::path::PathBuf> {
     (!path_part.is_empty()).then(|| std::path::PathBuf::from(path_part))
 }
 
+fn folder_desktop_ini_icon_resource(folder: &std::path::Path) -> Option<String> {
+    let path = folder.join("desktop.ini");
+    let bytes = std::fs::read(path).ok()?;
+
+    let text = if bytes.len() >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE {
+        let words: Vec<u16> = bytes[2..]
+            .chunks_exact(2)
+            .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
+            .collect();
+        String::from_utf16_lossy(&words)
+    } else if bytes.len() >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF {
+        let words: Vec<u16> = bytes[2..]
+            .chunks_exact(2)
+            .map(|chunk| u16::from_be_bytes([chunk[0], chunk[1]]))
+            .collect();
+        String::from_utf16_lossy(&words)
+    } else if bytes.iter().skip(1).step_by(2).take(16).any(|b| *b == 0) {
+        let words: Vec<u16> = bytes
+            .chunks_exact(2)
+            .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
+            .collect();
+        String::from_utf16_lossy(&words)
+    } else {
+        String::from_utf8_lossy(&bytes).into_owned()
+    };
+
+    text.lines().find_map(|line| {
+        let trimmed = line.trim();
+        let (key, value) = trimmed.split_once('=')?;
+        key.trim()
+            .eq_ignore_ascii_case("IconResource")
+            .then(|| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+    })
+}
+
 fn folder_path_icon_cache_key(folder_path: &str) -> String {
     folder_path
         .to_lowercase()
@@ -282,6 +318,23 @@ impl IconLoader {
                 let _com = super::ComStaGuard::new();
                 let data = (|| {
                     if let Some(path) = resource_path.as_ref() {
+                        if path.is_dir() {
+                            if let Some(resource) = folder_desktop_ini_icon_resource(path) {
+                                if let Ok(icon) =
+                                    windows::extract_icon_resource(&resource, IconSize::Jumbo)
+                                {
+                                    return Ok(icon);
+                                }
+                            }
+
+                            if let Ok(icon) = windows::extract_drive_icon(
+                                &path.to_string_lossy(),
+                                IconSize::Jumbo,
+                            ) {
+                                return Ok(icon);
+                            }
+                        }
+
                         if let Ok(icon) = windows::extract_file_icon_by_path(path, IconSize::Jumbo)
                         {
                             return Ok(icon);

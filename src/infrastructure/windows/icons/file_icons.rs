@@ -196,6 +196,76 @@ pub fn extract_file_icon_by_path(
     }
 }
 
+pub fn extract_icon_resource(
+    resource: &str,
+    size: IconSize,
+) -> std::result::Result<(Vec<u8>, u32, u32), Box<dyn std::error::Error>> {
+    let Some((path, index)) = parse_icon_resource(resource) else {
+        return Err("invalid icon resource".into());
+    };
+
+    unsafe {
+        let path_wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
+        let mut h_large = HICON::default();
+        let mut h_small = HICON::default();
+        let icon_size = match size {
+            IconSize::Small => 16u32,
+            IconSize::Large => 32u32,
+            IconSize::Jumbo => 256u32,
+        };
+        let size_param = icon_size | (icon_size << 16);
+
+        SHDefExtractIconW(
+            PCWSTR(path_wide.as_ptr()),
+            index,
+            0,
+            Some(&mut h_large),
+            Some(&mut h_small),
+            size_param,
+        )
+        .ok()?;
+
+        let hicon = if matches!(size, IconSize::Small) && !h_small.is_invalid() {
+            h_small
+        } else if !h_large.is_invalid() {
+            h_large
+        } else if !h_small.is_invalid() {
+            h_small
+        } else {
+            return Err("failed to extract icon resource".into());
+        };
+
+        let conversion_result =
+            crate::infrastructure::windows::bitmap_conversion::hicon_to_rgba(hicon);
+        let _ = DestroyIcon(hicon);
+        if h_small != hicon && !h_small.is_invalid() {
+            let _ = DestroyIcon(h_small);
+        }
+        if h_large != hicon && !h_large.is_invalid() {
+            let _ = DestroyIcon(h_large);
+        }
+
+        conversion_result
+    }
+}
+
+fn parse_icon_resource(resource: &str) -> Option<(String, i32)> {
+    let trimmed = resource.trim().trim_matches('"');
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let (path, index) = if let Some(idx) = trimmed.rfind(',') {
+        let path = trimmed[..idx].trim().trim_matches('"');
+        let index = trimmed[idx + 1..].trim().parse::<i32>().unwrap_or(0);
+        (path, index)
+    } else {
+        (trimmed, 0)
+    };
+
+    (!path.is_empty()).then(|| (path.to_string(), index))
+}
+
 /// Extracts REAL icon from a drive (C:\, D:\, etc.).
 ///
 /// Uses real path (not dummy) and WITHOUT SHGFI_USEFILEATTRIBUTES.
