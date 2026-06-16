@@ -731,27 +731,26 @@ pub fn read_single_file_size(volume: HANDLE, frn: u64, record_size: u32) -> Opti
     resolve_file_size_with_fallbacks(volume, None, frn, rs, &mut output_buffer, &mut dir_cache)
 }
 
-/// Repair known zero-size file entries already present in the in-memory index.
-/// This is a targeted healing path for stale cache entries where subtree
-/// traversal finds files but their recorded sizes are still zero.
-pub fn repair_zero_size_file_frns(
+/// Refresh recorded sizes for known file FRNs from live NTFS metadata.
+/// Returns the number of records whose size changed.
+pub fn refresh_file_sizes_for_frns(
     volume: HANDLE,
     index: &mut VolumeIndex,
     frns: &[u64],
     record_size: u32,
 ) -> usize {
     let rs = record_size as usize;
-    let mut repaired = 0usize;
+    let mut changed = 0usize;
     let mut output_buffer = vec![0u8; OUTPUT_HEADER + rs];
     let mut dir_cache = HashMap::with_capacity(256);
 
     for &frn in frns {
-        let needs_repair = index
+        let should_refresh = index
             .records
             .get(&frn)
-            .map(|record| !record.is_dir && record.size == 0)
+            .map(|record| !record.is_dir)
             .unwrap_or(false);
-        if !needs_repair {
+        if !should_refresh {
             continue;
         }
 
@@ -771,18 +770,16 @@ pub fn repair_zero_size_file_frns(
             continue;
         };
 
-        if size > 0 {
-            if let Some(record) = index.records.get_mut(&frn) {
-                if record.size != size {
-                    record.size = size;
-                    repaired += 1;
-                    index.binary_dirty = true;
-                }
+        if let Some(record) = index.records.get_mut(&frn) {
+            if record.size != size {
+                record.size = size;
+                changed += 1;
+                index.binary_dirty = true;
             }
         }
     }
 
-    repaired
+    changed
 }
 
 /// Public wrapper to query the MFT record size for a volume.

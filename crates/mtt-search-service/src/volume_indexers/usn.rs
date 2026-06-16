@@ -887,8 +887,11 @@ pub(crate) fn index_volume(
                         }
                     }
 
-                    // Apply sizes under lock.
+                    // Apply sizes under lock. If the lock is contended, keep
+                    // the FRNs pending so this best-effort refresh is retried
+                    // instead of permanently losing a size update.
                     if !size_updates.is_empty() {
+                        let mut applied_updates = false;
                         if let Some(mut vol) =
                             handle.try_write_for(INCREMENTAL_WRITE_FALLBACK_TIMEOUT)
                         {
@@ -904,6 +907,12 @@ pub(crate) fn index_volume(
                             if changed {
                                 vol.binary_dirty = true;
                             }
+                            applied_updates = true;
+                        }
+
+                        if !applied_updates {
+                            let mut vol = handle.write();
+                            vol.pending_size_refresh.extend(pending_frns);
                         }
                     }
                 }

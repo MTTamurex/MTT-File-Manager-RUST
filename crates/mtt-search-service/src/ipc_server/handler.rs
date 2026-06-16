@@ -21,6 +21,7 @@ use super::{MAX_QUERY_OFFSET, MAX_QUERY_RESULTS};
 /// Minimum seconds between WarmIndex operations to prevent DoS via repeated warm requests.
 const WARM_COOLDOWN_SECS: u64 = 60;
 const ZERO_SIZE_FOLDER_REPAIR_LIMIT: usize = 4_096;
+const LIVE_SIZE_REFRESH_FILE_LIMIT: u64 = 4_096;
 
 fn repair_suspicious_zero_folder_size(
     handle: &VolumeIndexHandle,
@@ -33,12 +34,16 @@ fn repair_suspicious_zero_folder_size(
     let (total_size, file_count, folder_count, zero_size_count) = summary;
 
     // Determine whether a repair is warranted:
-    //   (a) total=0 with files present: all sizes are missing from the index.
-    //   (b) has_pending_refreshes=true AND ≥25% of files (min 5) have zero size:
+    //   (a) Small subtrees: refresh live sizes to catch files that grew after
+    //       indexing but no longer have a pending USN refresh.
+    //   (b) total=0 with files present: all sizes are missing from the index.
+    //   (c) has_pending_refreshes=true AND >=25% of files (min 5) have zero size:
     //       post-restart race condition where USN catch-up inserted new file FRNs
     //       (size=0) before the background pending_size_refresh task ran, causing
     //       folder totals to be severely underreported (e.g. 185 KB vs 1.30 GB).
-    let needs_repair = if total_size == 0 {
+    let needs_repair = if file_count > 0 && file_count <= LIVE_SIZE_REFRESH_FILE_LIMIT {
+        true
+    } else if total_size == 0 {
         file_count > 0
     } else {
         has_pending_refreshes
@@ -54,7 +59,7 @@ fn repair_suspicious_zero_folder_size(
         Ok(handle) => handle,
         Err(error) => {
             eprintln!(
-                "[FOLDER-SIZE] zero-size repair open-volume failed path={} reason={}",
+                "[FOLDER-SIZE] live size refresh open-volume failed path={} reason={}",
                 crate::redact_paths(path),
                 crate::redact_paths(&error),
             );
@@ -67,7 +72,7 @@ fn repair_suspicious_zero_folder_size(
         Err(error) => {
             crate::usn_journal::close_volume(volume);
             eprintln!(
-                "[FOLDER-SIZE] zero-size repair geometry failed path={} reason={}",
+                "[FOLDER-SIZE] live size refresh geometry failed path={} reason={}",
                 crate::redact_paths(path),
                 crate::redact_paths(&error),
             );
@@ -75,32 +80,41 @@ fn repair_suspicious_zero_folder_size(
         }
     };
 
-    let (candidate_count, repaired_count, refreshed_summary) = {
+    let (candidate_count, changed_count, refreshed_summary) = {
         let mut vol = handle.write();
-        let candidates =
-            vol.collect_zero_size_file_frns_in_subtree(dir_frn, ZERO_SIZE_FOLDER_REPAIR_LIMIT);
+        let live_refresh_candidates = if file_count <= LIVE_SIZE_REFRESH_FILE_LIMIT {
+            vol.collect_file_frns_in_subtree_limited(dir_frn, LIVE_SIZE_REFRESH_FILE_LIMIT as usize)
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        let candidates = if live_refresh_candidates.is_empty() {
+            vol.collect_zero_size_file_frns_in_subtree(dir_frn, ZERO_SIZE_FOLDER_REPAIR_LIMIT)
+        } else {
+            live_refresh_candidates
+        };
         if candidates.is_empty() {
             (0usize, 0usize, (total_size, file_count, folder_count))
         } else {
-            let repaired = crate::mft_reader::repair_zero_size_file_frns(
+            let changed = crate::mft_reader::refresh_file_sizes_for_frns(
                 volume,
                 &mut vol,
                 &candidates,
                 record_size,
             );
             let (rt, rfc, rfoldc, _) = crate::mft_reader::folder_size_for_service(&vol, dir_frn);
-            (candidates.len(), repaired, (rt, rfc, rfoldc))
+            (candidates.len(), changed, (rt, rfc, rfoldc))
         }
     };
 
     crate::usn_journal::close_volume(volume);
 
-    if repaired_count > 0 {
+    if changed_count > 0 {
         eprintln!(
-            "[FOLDER-SIZE] repaired-zero-sizes path={} candidates={} repaired={} total_gb={:.2} files={} folders={}",
+            "[FOLDER-SIZE] refreshed-file-sizes path={} candidates={} changed={} total_gb={:.2} files={} folders={}",
             crate::redact_paths(path),
             candidate_count,
-            repaired_count,
+            changed_count,
             refreshed_summary.0 as f64 / 1_073_741_824.0,
             refreshed_summary.1,
             refreshed_summary.2,
@@ -110,7 +124,7 @@ fn repair_suspicious_zero_folder_size(
 
     if candidate_count > 0 {
         eprintln!(
-            "[FOLDER-SIZE] zero-size repair no-change path={} candidates={} total_gb={:.2} files={} folders={}",
+            "[FOLDER-SIZE] live size refresh no-change path={} candidates={} total_gb={:.2} files={} folders={}",
             crate::redact_paths(path),
             candidate_count,
             total_size as f64 / 1_073_741_824.0,
