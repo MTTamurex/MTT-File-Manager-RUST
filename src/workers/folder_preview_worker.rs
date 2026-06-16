@@ -5,7 +5,7 @@
 //! folder_back.png and folder_front.png layers for a clean preview.
 //!
 //! FALLBACK: If no media is found or composition fails, falls back to
-//! Windows Shell API (IThumbnailCache / IShellItemImageFactory).
+//! Windows Shell API (IThumbnailCache with no Explorer-cache writes).
 //!
 //! PERFORMANCE: Checks SQLite disk cache first (NVMe fast path, ~1ms).
 //! Custom composition ~2ms vs Shell API 20-200ms.

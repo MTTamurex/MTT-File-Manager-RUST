@@ -6,8 +6,8 @@
 //! 1. **WIC Sized Decode** - Decodes large still images directly to the requested bucket
 //! 2. **Image Crate** (Legacy Fast Path) - Uses `image` crate for common formats
 //! 3. **WIC** (Robust Fallback) - Windows Imaging Component for CMYK/problematic images
-//! 4. **Shell API** (Universal) - IShellItemImageFactory for most file types
-//! 5. **Force Extraction** - IThumbnailCache with WTS_FORCEEXTRACTION flag
+//! 4. **Shell API** (Universal) - IThumbnailCache with WTS_EXTRACTDONOTCACHE
+//! 5. **Force Extraction** - IThumbnailCache with WTS_EXTRACTDONOTCACHE
 //! 6. **Media Foundation** (Fallback only) - Direct video frame extraction
 
 pub mod orientation;
@@ -175,7 +175,7 @@ pub fn generate_thumbnail_hybrid_detailed_with_target(
         }
     }
 
-    // IThumbnailCache fallback with WTS_FORCEEXTRACTION
+    // IThumbnailCache fallback without populating Explorer's thumbnail cache.
     {
         let t0 = std::time::Instant::now();
         match stage4_force_extract::extract_with_size(path, image_target_max_side) {

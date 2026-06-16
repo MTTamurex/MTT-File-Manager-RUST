@@ -40,6 +40,7 @@ pub use file_icons::{
 };
 pub use special::{extract_computer_icon, extract_recycle_bin_icon, extract_shell_icon};
 pub use thumbnails::{
-    extract_thumbnail, force_extract_folder_preview, force_extract_thumbnail,
-    force_extract_thumbnail_with_size, get_folder_preview,
+    extract_thumbnail, extract_thumbnail_without_windows_cache,
+    extract_thumbnail_without_windows_cache_with_size, force_extract_folder_preview,
+    force_extract_thumbnail, force_extract_thumbnail_with_size, get_folder_preview,
 };

@@ -1,84 +1,33 @@
 use std::os::windows::ffi::OsStrExt;
 use std::path::Path;
-use windows::{
-    core::*, Win32::Foundation::*, Win32::Graphics::Gdi::*, Win32::System::Com::*,
-    Win32::UI::Shell::*,
-};
+use windows::{core::*, Win32::Graphics::Gdi::*, Win32::System::Com::*, Win32::UI::Shell::*};
 
-/// Extracts a Windows thumbnail for a file using IShellItemImageFactory.
+/// Extracts a Windows thumbnail without adding it to the Windows thumbnail cache.
 ///
 /// # Safety
-/// Uses COM interfaces (IShellItem, IShellItemImageFactory).
-/// DeleteObject is called on the returned HBITMAP.
+/// Uses COM interfaces (IShellItem, IThumbnailCache, ISharedBitmap).
 pub fn extract_thumbnail(
     path: &Path,
 ) -> std::result::Result<(Vec<u8>, u32, u32), Box<dyn std::error::Error>> {
-    unsafe {
-        let path_str = path.to_string_lossy().to_string();
-        let path_wide: Vec<u16> = path_str.encode_utf16().chain(std::iter::once(0)).collect();
-
-        let shell_item: IShellItem = SHCreateItemFromParsingName(PCWSTR(path_wide.as_ptr()), None)?;
-
-        let image_factory: IShellItemImageFactory = shell_item.cast()?;
-
-        let size = SIZE { cx: 256, cy: 256 };
-        let hbitmap: HBITMAP = image_factory.GetImage(size, SIIGBF_THUMBNAILONLY)?;
-
-        let result = crate::infrastructure::windows::bitmap_conversion::hbitmap_to_rgba(hbitmap);
-        let _ = DeleteObject(hbitmap.into());
-        Ok(result?)
-    }
+    extract_thumbnail_without_windows_cache(path)
 }
 
-/// Extracts Windows folder preview (sandwich effect) using IShellItemImageFactory.
+/// Extracts Windows folder preview without adding it to the Windows thumbnail cache.
 ///
 /// Returns the folder icon with internal content preview composed by Windows Shell.
-/// Falls back to standard folder icon if no preview content available.
 ///
 /// # Safety
-/// Uses COM interfaces (IShellItem, IShellItemImageFactory).
-/// DeleteObject is called on the returned HBITMAP.
+/// Uses COM interfaces (IShellItem, IThumbnailCache, ISharedBitmap).
 pub fn get_folder_preview(
     folder_path: &Path,
 ) -> std::result::Result<(Vec<u8>, u32, u32), Box<dyn std::error::Error>> {
-    unsafe {
-        // SAFETY: path_wide is valid for the duration of this call
-        let path_wide: Vec<u16> = folder_path
-            .as_os_str()
-            .encode_wide()
-            .chain(std::iter::once(0))
-            .collect();
-
-        let shell_item: IShellItem = SHCreateItemFromParsingName(PCWSTR(path_wide.as_ptr()), None)?;
-        let image_factory: IShellItemImageFactory = shell_item.cast()?;
-
-        // Request 256px with SIIGBF_THUMBNAILONLY to get the sandwich preview
-        let size = SIZE { cx: 256, cy: 256 };
-
-        match image_factory.GetImage(size, SIIGBF_THUMBNAILONLY) {
-            Ok(hbitmap) => {
-                // SAFETY: hbitmap is valid, DeleteObject called after conversion
-                let result =
-                    crate::infrastructure::windows::bitmap_conversion::hbitmap_to_rgba(hbitmap);
-                let _ = DeleteObject(hbitmap.into());
-                Ok(result?)
-            }
-            Err(_) => {
-                // Fallback: Get standard folder icon without preview content
-                let hbitmap = image_factory.GetImage(size, SIIGBF_ICONONLY)?;
-                let result =
-                    crate::infrastructure::windows::bitmap_conversion::hbitmap_to_rgba(hbitmap);
-                let _ = DeleteObject(hbitmap.into());
-                Ok(result?)
-            }
-        }
-    }
+    force_extract_folder_preview(folder_path)
 }
 
-/// Forces extraction of folder preview, bypassing Windows thumbnail cache.
+/// Extracts folder preview without adding it to the Windows thumbnail cache.
 ///
-/// Uses IThumbnailCache with WTS_FORCEEXTRACTION flag to ensure we get a fresh preview.
-/// This is useful when the cached folder preview has black background or is corrupted.
+/// Uses IThumbnailCache with WTS_EXTRACTDONOTCACHE so app-generated thumbnails
+/// are persisted only in the app-owned cache.
 ///
 /// # Safety
 /// Uses COM interfaces (IShellItem, IThumbnailCache, ISharedBitmap).
@@ -87,8 +36,7 @@ pub fn force_extract_folder_preview(
     folder_path: &Path,
 ) -> std::result::Result<(Vec<u8>, u32, u32), Box<dyn std::error::Error>> {
     use windows::Win32::UI::Shell::{
-        ISharedBitmap, IThumbnailCache, LocalThumbnailCache, WTS_CACHEFLAGS, WTS_FORCEEXTRACTION,
-        WTS_SCALETOREQUESTEDSIZE,
+        ISharedBitmap, IThumbnailCache, LocalThumbnailCache, WTS_CACHEFLAGS, WTS_EXTRACTDONOTCACHE,
     };
 
     unsafe {
@@ -106,8 +54,8 @@ pub fn force_extract_folder_preview(
         let thumbnail_cache: IThumbnailCache =
             CoCreateInstance(&LocalThumbnailCache, None, CLSCTX_INPROC_SERVER)?;
 
-        // Request thumbnail with FORCE EXTRACTION (ignores cache)
-        let flags = WTS_FORCEEXTRACTION | WTS_SCALETOREQUESTEDSIZE;
+        // Extract without adding the result to Explorer's thumbnail cache.
+        let flags = WTS_EXTRACTDONOTCACHE;
         let requested_size: u32 = 256;
 
         let mut shared_bitmap: Option<ISharedBitmap> = None;
@@ -138,29 +86,28 @@ pub fn force_extract_folder_preview(
     }
 }
 
-/// Forces extraction of a new thumbnail, bypassing the Windows thumbnail cache.
+/// Extracts a thumbnail without adding it to the Windows thumbnail cache.
 ///
-/// Uses IThumbnailCache::GetThumbnail with WTS_FORCEEXTRACTION flag.
-/// This is useful when the cached thumbnail is corrupted or shows an icon instead of content.
+/// Uses IThumbnailCache::GetThumbnail with WTS_EXTRACTDONOTCACHE so the app can
+/// persist the result only in its own disk cache.
 ///
 /// IMPORTANT: Single attempt only - if it fails, Stage 5 (Media Foundation) will handle it.
 ///
 /// # Safety
 /// Uses COM interfaces (IShellItem, IThumbnailCache, ISharedBitmap).
 /// All COM objects are properly released.
-pub fn force_extract_thumbnail(
+pub fn extract_thumbnail_without_windows_cache(
     path: &Path,
 ) -> std::result::Result<(Vec<u8>, u32, u32), Box<dyn std::error::Error>> {
-    force_extract_thumbnail_with_size(path, None)
+    extract_thumbnail_without_windows_cache_with_size(path, None)
 }
 
-pub fn force_extract_thumbnail_with_size(
+pub fn extract_thumbnail_without_windows_cache_with_size(
     path: &Path,
     requested_size: Option<u32>,
 ) -> std::result::Result<(Vec<u8>, u32, u32), Box<dyn std::error::Error>> {
     use windows::Win32::UI::Shell::{
-        ISharedBitmap, IThumbnailCache, LocalThumbnailCache, WTS_CACHEFLAGS, WTS_FORCEEXTRACTION,
-        WTS_SCALETOREQUESTEDSIZE,
+        ISharedBitmap, IThumbnailCache, LocalThumbnailCache, WTS_CACHEFLAGS, WTS_EXTRACTDONOTCACHE,
     };
 
     unsafe {
@@ -178,10 +125,9 @@ pub fn force_extract_thumbnail_with_size(
         let thumbnail_cache: IThumbnailCache =
             CoCreateInstance(&LocalThumbnailCache, None, CLSCTX_INPROC_SERVER)?;
 
-        // Request thumbnail with FORCE EXTRACTION (ignores cache)
-        // WTS_FORCEEXTRACTION = 0x8 - Forces extraction even if cached
-        // WTS_SCALETOREQUESTEDSIZE = 0x100 - Scales to requested size
-        let flags = WTS_FORCEEXTRACTION | WTS_SCALETOREQUESTEDSIZE;
+        // Extract without adding the result to Explorer's thumbnail cache.
+        // WTS_EXTRACTDONOTCACHE must be used by itself per the Win32 API docs.
+        let flags = WTS_EXTRACTDONOTCACHE;
         let requested_size = requested_size
             .unwrap_or(crate::domain::thumbnail::MAX_THUMBNAIL_SIDE)
             .clamp(1, crate::domain::thumbnail::MAX_THUMBNAIL_SIDE);
@@ -212,4 +158,21 @@ pub fn force_extract_thumbnail_with_size(
 
         Err("No bitmap returned from IThumbnailCache".into())
     }
+}
+
+/// Legacy name retained for existing call sites. This does not populate the
+/// Windows thumbnail cache; extracted pixels are cached only by the app.
+pub fn force_extract_thumbnail(
+    path: &Path,
+) -> std::result::Result<(Vec<u8>, u32, u32), Box<dyn std::error::Error>> {
+    extract_thumbnail_without_windows_cache(path)
+}
+
+/// Legacy name retained for existing call sites. This does not populate the
+/// Windows thumbnail cache; extracted pixels are cached only by the app.
+pub fn force_extract_thumbnail_with_size(
+    path: &Path,
+    requested_size: Option<u32>,
+) -> std::result::Result<(Vec<u8>, u32, u32), Box<dyn std::error::Error>> {
+    extract_thumbnail_without_windows_cache_with_size(path, requested_size)
 }
