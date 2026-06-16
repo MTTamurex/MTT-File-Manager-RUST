@@ -93,6 +93,9 @@ Filename: "sc.exe"; Parameters: "stop {#MySearchName}"; RunOnceId: "StopSearchSe
 Filename: "{app}\{#MySearchSvc}"; Parameters: "uninstall"; RunOnceId: "UninstallSearchService"; Flags: runhidden waituntilterminated
 
 [Code]
+const
+  ProgramDataCacheDir = 'C:\ProgramData\MTT-File-Manager';
+
 // Check if VC++ Redistributable 2015-2022 (x64) is installed
 function IsVCRedistInstalled: Boolean;
 var
@@ -105,6 +108,24 @@ begin
     Result := RegQueryStringValue(HKLM,
       'SOFTWARE\WOW6432Node\Microsoft\VisualStudio\14.0\VC\Runtimes\x64',
       'Version', Version);
+end;
+
+function IsExistingInstall: Boolean;
+begin
+  Result :=
+    FileExists(ExpandConstant('{app}\unins000.exe')) or
+    FileExists(ExpandConstant('{app}\{#MyAppExeName}')) or
+    FileExists(ExpandConstant('{app}\{#MySearchSvc}'));
+end;
+
+procedure DeleteProgramDataCache;
+begin
+  if not DirExists(ProgramDataCacheDir) then
+    Exit;
+
+  Log('Deleting MTT ProgramData cache directory: ' + ProgramDataCacheDir);
+  if not DelTree(ProgramDataCacheDir, True, True, True) then
+    Log('Failed to delete MTT ProgramData cache directory: ' + ProgramDataCacheDir);
 end;
 
 // Stop the search service and wait for it to reach the Stopped state.
@@ -138,7 +159,12 @@ end;
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssInstall then
+  begin
     StopSearchServiceIfRunning;
+
+    if IsExistingInstall then
+      DeleteProgramDataCache;
+  end;
 
   // Persist the language selected during installation so the app can
   // start in the same language on first launch. The app reads this key
@@ -157,6 +183,7 @@ procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
   if CurUninstallStep = usPostUninstall then
   begin
+    DeleteProgramDataCache;
     RegDeleteValue(HKLM, 'SOFTWARE\MTT-File-Manager', 'InstallerLanguage');
     RegDeleteKeyIncludingSubkeys(HKLM, 'SOFTWARE\MTT-File-Manager');
   end;
