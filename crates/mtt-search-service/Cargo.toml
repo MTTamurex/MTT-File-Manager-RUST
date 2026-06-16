@@ -1,6 +1,6 @@
 [package]
 name = "mtt-search-service"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 
 [[bin]]
@@ -17,6 +17,7 @@ memchr = "2"
 mimalloc = { version = "0.1", default-features = false }
 libmimalloc-sys = { version = "0.1", features = ["extended"] }
 memmap2 = "0.9"
+zstd = "0.13"
 
 [dependencies.windows]
 version = "0.61.0"

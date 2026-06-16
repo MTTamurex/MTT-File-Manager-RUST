@@ -10,6 +10,124 @@ use std::sync::OnceLock;
 
 use rusqlite::{params, Connection, OpenFlags};
 
+/// Logs the size of every file in the cache directory and the row counts of
+/// the main SQLite tables. Used to establish a baseline before optimization
+/// work and to validate improvements after deployment.
+pub fn diagnose_cache_size() {
+    let dir = data_dir();
+
+    let mut total_bytes: u64 = 0;
+    let mut file_entries: Vec<(String, u64)> = Vec::new();
+
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            let name = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("?")
+                .to_string();
+            let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+            total_bytes = total_bytes.saturating_add(size);
+            file_entries.push((name, size));
+        }
+    }
+
+    file_entries.sort_by(|a, b| b.1.cmp(&a.1));
+
+    eprintln!("[CACHE-DIAG] Directory: {}", dir.display());
+    eprintln!(
+        "[CACHE-DIAG] Total cache size: {} bytes ({:.1} MB)",
+        total_bytes,
+        total_bytes as f64 / (1024.0 * 1024.0)
+    );
+
+    for (name, size) in file_entries {
+        eprintln!(
+            "[CACHE-DIAG]   {:<32} {:>12} bytes ({:>6.1} MB)",
+            name,
+            size,
+            size as f64 / (1024.0 * 1024.0)
+        );
+    }
+
+    let db_path = dir.join("search_index.db");
+    if let Ok(conn) = Connection::open_with_flags(
+        &db_path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    ) {
+        let table_counts: Vec<(String, i64)> = vec![
+            (
+                "volume_state".to_string(),
+                count_rows(&conn, "volume_state"),
+            ),
+            (
+                "file_records".to_string(),
+                count_rows(&conn, "file_records"),
+            ),
+            (
+                "hardlink_parents".to_string(),
+                count_rows(&conn, "hardlink_parents"),
+            ),
+        ];
+
+        for (table, count) in table_counts {
+            eprintln!("[CACHE-DIAG] Table {}: {} rows", table, count);
+        }
+    } else {
+        eprintln!(
+            "[CACHE-DIAG] Could not open {} for row-count diagnostics",
+            db_path.display()
+        );
+    }
+}
+
+fn count_rows(conn: &Connection, table: &str) -> i64 {
+    let sql = format!("SELECT COUNT(*) FROM {}", table);
+    conn.query_row(&sql, [], |row| row.get(0)).unwrap_or(0)
+}
+
+/// Returns true when the `MTT_SEARCH_SKIP_SQLITE_DATA` environment variable is
+/// set to "1" or "true". When enabled, USN/NTFS indexers persist file records
+/// only to the authenticated binary index and stop writing them to SQLite.
+/// Non-NTFS volumes always use SQLite regardless of this flag.
+pub fn skip_sqlite_data_persistence() -> bool {
+    match std::env::var("MTT_SEARCH_SKIP_SQLITE_DATA") {
+        Ok(value) => {
+            let value = value.trim().to_ascii_lowercase();
+            value == "1" || value == "true"
+        }
+        Err(_) => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn skip_sqlite_data_persistence_reads_env_var() {
+        // Default is false.
+        std::env::remove_var("MTT_SEARCH_SKIP_SQLITE_DATA");
+        assert!(!skip_sqlite_data_persistence());
+
+        for value in ["1", "true", "TRUE", "True"] {
+            std::env::set_var("MTT_SEARCH_SKIP_SQLITE_DATA", value);
+            assert!(skip_sqlite_data_persistence(), "value={}", value);
+        }
+
+        for value in ["0", "false", "", "yes"] {
+            std::env::set_var("MTT_SEARCH_SKIP_SQLITE_DATA", value);
+            assert!(!skip_sqlite_data_persistence(), "value={}", value);
+        }
+
+        std::env::remove_var("MTT_SEARCH_SKIP_SQLITE_DATA");
+    }
+}
+
 /// Resolved data directory — set once at startup by `get_db_path`.
 /// Both the SQLite database *and* binary index files live under this
 /// directory so deleting it clears all caches.
@@ -32,11 +150,15 @@ pub struct PersistedVolumeState {
     pub has_reparse_point_data: bool,
 }
 
+const VACUUM_INTERVAL: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
+const VACUUM_MIN_FREE_RATIO: f64 = 0.10;
+
 /// SQLite-based persistence for the file index.
 /// Wrapped in Mutex because rusqlite::Connection is not Sync.
 pub struct IndexDb {
     db_path: PathBuf,
     conn: Mutex<Connection>,
+    last_vacuum: Mutex<std::time::Instant>,
 }
 
 /// Get the database file path.
@@ -317,7 +439,103 @@ impl IndexDb {
         Ok(Self {
             db_path: path.to_path_buf(),
             conn: Mutex::new(conn),
+            last_vacuum: Mutex::new(
+                std::time::Instant::now()
+                    .checked_sub(VACUUM_INTERVAL)
+                    .unwrap_or_else(std::time::Instant::now),
+            ),
         })
+    }
+
+    /// Run `VACUUM` if enough free pages have accumulated and enough time has
+    /// passed since the last run. This reclaims disk space left behind by
+    /// incremental USN sync without changing the schema or query behavior.
+    ///
+    /// Must be called while the caller already holds or is about to release the
+    /// writer mutex (e.g. at the end of `save_volume`). VACUUM needs exclusive
+    /// access, so running it synchronously here is safer than spawning a thread
+    /// that contends for the same mutex.
+    pub fn vacuum_if_needed(&self) {
+        let now = std::time::Instant::now();
+        {
+            let mut last = self.last_vacuum.lock();
+            if now.duration_since(*last) < VACUUM_INTERVAL {
+                return;
+            }
+            // Update timestamp before running so overlapping calls don't repeat.
+            *last = now;
+        }
+
+        let conn = self.conn.lock();
+
+        let free_list: i64 = conn
+            .query_row("PRAGMA freelist_count", [], |row| row.get(0))
+            .unwrap_or(0);
+        let page_count: i64 = conn
+            .query_row("PRAGMA page_count", [], |row| row.get(0))
+            .unwrap_or(1)
+            .max(1);
+        let page_size: i64 = conn
+            .query_row("PRAGMA page_size", [], |row| row.get(0))
+            .unwrap_or(4096)
+            .max(1);
+
+        if free_list <= 0 {
+            return;
+        }
+
+        let free_ratio = free_list as f64 / page_count as f64;
+        if free_ratio < VACUUM_MIN_FREE_RATIO {
+            return;
+        }
+
+        let free_bytes = free_list.saturating_mul(page_size) as u64;
+        eprintln!(
+            "[DB] Running VACUUM to reclaim ~{} free pages ({:.1} MB, {:.1}% of file)",
+            free_list,
+            free_bytes as f64 / (1024.0 * 1024.0),
+            free_ratio * 100.0
+        );
+
+        if let Err(e) = conn.execute_batch("VACUUM;") {
+            eprintln!("[DB] VACUUM failed: {}", e);
+        } else {
+            eprintln!("[DB] VACUUM completed");
+        }
+    }
+
+    /// Remove all file_records and hardlink_parents rows for a drive. Used when
+    /// `MTT_SEARCH_SKIP_SQLITE_DATA` is enabled and the binary index has taken
+    /// over as the authoritative store for an NTFS volume.
+    pub fn purge_volume_data(&self, drive_letter: char) {
+        let conn = self.conn.lock();
+        let drive = drive_letter.to_string();
+
+        let deleted_records = conn
+            .execute(
+                "DELETE FROM file_records WHERE drive_letter = ?1",
+                params![&drive],
+            )
+            .unwrap_or(0);
+        let deleted_hardlinks = conn
+            .execute(
+                "DELETE FROM hardlink_parents WHERE drive_letter = ?1",
+                params![&drive],
+            )
+            .unwrap_or(0);
+
+        if deleted_records > 0 || deleted_hardlinks > 0 {
+            eprintln!(
+                "[DB] {}:\\ Purged {} file_records and {} hardlink_parents rows from SQLite",
+                drive_letter, deleted_records, deleted_hardlinks
+            );
+            // Reclaim the freed pages immediately so the disk savings are visible.
+            if let Err(e) = conn.execute_batch("VACUUM;") {
+                eprintln!("[DB] VACUUM after purge failed: {}", e);
+            } else {
+                eprintln!("[DB] VACUUM after purge completed");
+            }
+        }
     }
 
     fn open_read_connection(&self) -> Result<Connection, String> {

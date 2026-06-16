@@ -23,27 +23,39 @@ use super::integrity::{self, HMAC_OUTPUT_SIZE};
 use crate::file_index::{FileRecord, VolumeIndex};
 use crate::record_store::RecordStore;
 
-const MAGIC: &[u8; 8] = b"MTTIDX02";
-const LEGACY_MAGIC: &[u8; 8] = b"MTTIDX01";
-const VERSION: u32 = 2;
+const MAGIC: &[u8; 8] = b"MTTIDX03";
+const LEGACY_MAGIC: &[u8; 8] = b"MTTIDX02";
+const VERSION: u32 = 3;
 const TRAILER_SIZE: usize = HMAC_OUTPUT_SIZE;
 const MMAP_ARENA_MIN_BYTES: usize = 64 * 1024 * 1024;
 const HMAC_STREAM_BUF_SIZE: usize = 64 * 1024;
+
+const ARENA_COMPRESSION_NONE: u8 = 0;
+const ARENA_COMPRESSION_ZSTD: u8 = 1;
+const ARENA_MIN_RECORDS_TO_COMPRESS: u64 = 50_000;
+/// Only compress if the compressed size is at most this ratio of the original.
+const ARENA_MIN_COMPRESSION_RATIO: f64 = 0.95;
+const ZSTD_COMPRESSION_LEVEL: i32 = 1;
 
 #[repr(C, packed)]
 struct Header {
     magic: [u8; 8],
     version: u32,
     drive_letter: u8,
-    _pad: [u8; 3],
+    /// 0 = raw arena, 1 = zstd-compressed arena, 2+ reserved.
+    arena_compression: u8,
+    _pad: [u8; 2],
     journal_id: u64,
     last_usn: i64,
     record_count: u64,
+    /// Uncompressed arena size in bytes.
     arena_size: u64,
     hardlink_entry_count: u64,
     reparse_count: u64,
     /// Bit 0: hardlink_data_complete, Bit 1: reparse_data_complete, Bit 2: sizes_complete
     flags: u64,
+    /// On-disk compressed arena size in bytes. Equal to arena_size when uncompressed.
+    compressed_arena_size: u64,
 }
 
 const HEADER_SIZE: usize = std::mem::size_of::<Header>();
@@ -53,11 +65,12 @@ const RECORD_SIZE: usize = FRN_SIZE + FILE_RECORD_SIZE;
 const HARDLINK_ENTRY_SIZE: usize = FRN_SIZE * 2;
 const REPARSE_ENTRY_SIZE: usize = FRN_SIZE;
 const _: () = {
-    assert!(HEADER_SIZE == 72);
+    assert!(HEADER_SIZE == 80);
     assert!(std::mem::offset_of!(Header, magic) == 0);
     assert!(std::mem::offset_of!(Header, version) == 8);
     assert!(std::mem::offset_of!(Header, drive_letter) == 12);
-    assert!(std::mem::offset_of!(Header, _pad) == 13);
+    assert!(std::mem::offset_of!(Header, arena_compression) == 13);
+    assert!(std::mem::offset_of!(Header, _pad) == 14);
     assert!(std::mem::offset_of!(Header, journal_id) == 16);
     assert!(std::mem::offset_of!(Header, last_usn) == 24);
     assert!(std::mem::offset_of!(Header, record_count) == 32);
@@ -65,6 +78,7 @@ const _: () = {
     assert!(std::mem::offset_of!(Header, hardlink_entry_count) == 48);
     assert!(std::mem::offset_of!(Header, reparse_count) == 56);
     assert!(std::mem::offset_of!(Header, flags) == 64);
+    assert!(std::mem::offset_of!(Header, compressed_arena_size) == 72);
 
     assert!(FILE_RECORD_SIZE == 24);
     assert!(std::mem::offset_of!(FileRecord, parent_ref) == 0);
@@ -180,7 +194,12 @@ fn read_authenticated_bytes<R: Read>(
     Ok(())
 }
 
-fn mmap_arena_enabled(arena_size: usize) -> bool {
+fn mmap_arena_enabled(arena_size: usize, compression: u8) -> bool {
+    // Compressed arenas must be decompressed into memory; they cannot be
+    // memory-mapped directly.
+    if compression != ARENA_COMPRESSION_NONE {
+        return false;
+    }
     if arena_size < MMAP_ARENA_MIN_BYTES {
         return false;
     }
@@ -191,6 +210,56 @@ fn mmap_arena_enabled(arena_size: usize) -> bool {
             "0" | "false" | "no" | "off"
         ),
         Err(_) => true,
+    }
+}
+
+/// Compress the raw arena bytes using zstd level 1. Returns `None` if
+/// compression fails or does not meet the minimum savings threshold.
+fn compress_arena(raw: &[u8], record_count: u64) -> Option<Vec<u8>> {
+    if record_count < ARENA_MIN_RECORDS_TO_COMPRESS {
+        return None;
+    }
+
+    let compressed = zstd::encode_all(raw, ZSTD_COMPRESSION_LEVEL).ok()?;
+    let ratio = compressed.len() as f64 / raw.len().max(1) as f64;
+    if ratio > ARENA_MIN_COMPRESSION_RATIO {
+        return None;
+    }
+
+    Some(compressed)
+}
+
+/// Decompress an arena given its compression type and expected uncompressed size.
+fn decompress_arena(
+    compressed: &[u8],
+    compression: u8,
+    expected_size: usize,
+) -> Result<Vec<u8>, String> {
+    match compression {
+        ARENA_COMPRESSION_NONE => {
+            if compressed.len() != expected_size {
+                return Err(format!(
+                    "Uncompressed arena size mismatch: expected {} got {}",
+                    expected_size,
+                    compressed.len()
+                ));
+            }
+            Ok(compressed.to_vec())
+        }
+        ARENA_COMPRESSION_ZSTD => {
+            let mut decoded = Vec::with_capacity(expected_size);
+            zstd::stream::copy_decode(compressed, &mut decoded)
+                .map_err(|e| format!("zstd decompress failed: {}", e))?;
+            if decoded.len() != expected_size {
+                return Err(format!(
+                    "Decompressed arena size mismatch: expected {} got {}",
+                    expected_size,
+                    decoded.len()
+                ));
+            }
+            Ok(decoded)
+        }
+        other => Err(format!("Unknown arena compression type: {}", other)),
     }
 }
 
@@ -218,6 +287,30 @@ pub fn save(index: &VolumeIndex) -> Result<(), String> {
 
     let hardlink_entry_count: usize = index.hardlink_parents.values().map(Vec::len).sum();
 
+    // Collect the NameArena into a contiguous buffer so we can optionally
+    // compress it. For large indexes this saves significant disk space; the
+    // temporary duplicate is freed as soon as the save finishes.
+    let arena_size = index.names.len();
+    let mut raw_arena = Vec::with_capacity(arena_size);
+    index
+        .names
+        .for_each_slice(|slice| raw_arena.extend_from_slice(slice));
+
+    let (arena_compression, arena_bytes): (u8, Vec<u8>) =
+        match compress_arena(&raw_arena, index.records.len() as u64) {
+            Some(compressed) => {
+                eprintln!(
+                    "[BINARY-IDX] {}:\\ Compressing arena {} -> {} bytes ({:.1}%)",
+                    index.drive_letter,
+                    arena_size,
+                    compressed.len(),
+                    compressed.len() as f64 / arena_size.max(1) as f64 * 100.0
+                );
+                (ARENA_COMPRESSION_ZSTD, compressed)
+            }
+            None => (ARENA_COMPRESSION_NONE, raw_arena),
+        };
+
     // Build header.
     let mut flags: u64 = 0;
     if index.hardlink_data_complete {
@@ -234,14 +327,16 @@ pub fn save(index: &VolumeIndex) -> Result<(), String> {
         magic: *MAGIC,
         version: VERSION,
         drive_letter: index.drive_letter as u8,
-        _pad: [0; 3],
+        arena_compression,
+        _pad: [0; 2],
         journal_id: index.journal_id,
         last_usn: index.last_usn,
         record_count: index.records.len() as u64,
-        arena_size: index.names.len() as u64,
+        arena_size: arena_size as u64,
         hardlink_entry_count: hardlink_entry_count as u64,
         reparse_count: index.reparse_points.len() as u64,
         flags,
+        compressed_arena_size: arena_bytes.len() as u64,
     };
 
     // Write header.
@@ -249,10 +344,8 @@ pub fn save(index: &VolumeIndex) -> Result<(), String> {
         unsafe { std::slice::from_raw_parts(&header as *const Header as *const u8, HEADER_SIZE) };
     write_authenticated_chunk(&mut writer, &mut hmac, header_bytes)?;
 
-    // Write NameArena.
-    index
-        .names
-        .try_for_each_slice(|slice| write_authenticated_chunk(&mut writer, &mut hmac, slice))?;
+    // Write NameArena (compressed or raw).
+    write_authenticated_chunk(&mut writer, &mut hmac, &arena_bytes)?;
 
     // Write Records (sorted by FRN for deterministic output). Most steady-state
     // saves happen after RecordStore compaction, so stream the compact sorted
@@ -371,8 +464,8 @@ pub fn load(drive_letter: char) -> Result<Option<(VolumeIndex, PersistedBinarySt
     // request a rebuild instead of erroring out.
     if header_bytes[..8] == *LEGACY_MAGIC {
         eprintln!(
-            "[BINARY-IDX] {}:\\ Legacy MTTIDX01 (CRC32) format detected; \
-             discarding and rebuilding under MTTIDX02 (HMAC-SHA256).",
+            "[BINARY-IDX] {}:\\ Legacy MTTIDX02 format detected; \
+             discarding and rebuilding under MTTIDX03 (compressed arena).",
             drive_letter
         );
         let _ = std::fs::remove_file(&path);
@@ -392,10 +485,12 @@ pub fn load(drive_letter: char) -> Result<Option<(VolumeIndex, PersistedBinarySt
     // Copy packed fields to aligned locals to avoid UB from unaligned references.
     let h_version = header.version;
     let h_drive_letter = header.drive_letter;
+    let h_arena_compression = header.arena_compression;
     let h_journal_id = header.journal_id;
     let h_last_usn = header.last_usn;
     let h_record_count = header.record_count;
     let h_arena_size = header.arena_size;
+    let h_compressed_arena_size = header.compressed_arena_size;
     let h_hardlink_count = header.hardlink_entry_count;
     let h_reparse_count = header.reparse_count;
     let h_flags = header.flags;
@@ -410,8 +505,18 @@ pub fn load(drive_letter: char) -> Result<Option<(VolumeIndex, PersistedBinarySt
         ));
     }
 
+    if h_arena_compression != ARENA_COMPRESSION_NONE
+        && h_arena_compression != ARENA_COMPRESSION_ZSTD
+    {
+        return Err(format!(
+            "Unsupported arena compression type: {}",
+            h_arena_compression
+        ));
+    }
+
     let record_count = h_record_count as usize;
     let arena_size = h_arena_size as usize;
+    let compressed_arena_size = h_compressed_arena_size as usize;
     let hardlink_count = h_hardlink_count as usize;
     let reparse_count = h_reparse_count as usize;
 
@@ -442,9 +547,10 @@ pub fn load(drive_letter: char) -> Result<Option<(VolumeIndex, PersistedBinarySt
 
     // SEC: Use checked arithmetic so a crafted header cannot wrap `expected`
     // back to `data.len()` and bypass the size validation. Any overflow at
-    // this stage means the header is hostile or corrupt.
+    // this stage means the header is hostile or corrupt. Use the on-disk
+    // compressed arena size for the file layout check.
     let expected = HEADER_SIZE
-        .checked_add(arena_size)
+        .checked_add(compressed_arena_size)
         .and_then(|s| s.checked_add(record_count.checked_mul(RECORD_SIZE)?))
         .and_then(|s| s.checked_add(hardlink_count.checked_mul(HARDLINK_ENTRY_SIZE)?))
         .and_then(|s| s.checked_add(reparse_count.checked_mul(REPARSE_ENTRY_SIZE)?))
@@ -462,16 +568,32 @@ pub fn load(drive_letter: char) -> Result<Option<(VolumeIndex, PersistedBinarySt
     hmac.update(&header_bytes)
         .map_err(|e| format!("HMAC update: {}", e))?;
 
-    // Authenticate NameArena. Large arenas are streamed through HMAC and then
-    // mapped read-only, avoiding a private Vec allocation while preserving the
-    // same whole-file integrity check.
-    let arena_bytes = if mmap_arena_enabled(arena_size) {
-        read_authenticated_bytes(&mut reader, &mut hmac, arena_size, "name arena")?;
-        None
-    } else {
-        let mut arena_bytes = vec![0u8; arena_size];
-        read_authenticated_chunk(&mut reader, &mut hmac, &mut arena_bytes, "name arena")?;
-        Some(arena_bytes)
+    // Authenticate NameArena. Uncompressed large arenas are streamed through
+    // HMAC and then mapped read-only. Compressed arenas are read into memory
+    // first and decompressed after the whole-file HMAC is verified.
+    enum ArenaStorage {
+        Mmap,
+        Vec(Vec<u8>),
+        Compressed(Vec<u8>),
+    }
+
+    let arena_storage = match h_arena_compression {
+        ARENA_COMPRESSION_NONE => {
+            if mmap_arena_enabled(arena_size, ARENA_COMPRESSION_NONE) {
+                read_authenticated_bytes(&mut reader, &mut hmac, arena_size, "name arena")?;
+                ArenaStorage::Mmap
+            } else {
+                let mut arena_bytes = vec![0u8; arena_size];
+                read_authenticated_chunk(&mut reader, &mut hmac, &mut arena_bytes, "name arena")?;
+                ArenaStorage::Vec(arena_bytes)
+            }
+        }
+        ARENA_COMPRESSION_ZSTD => {
+            let mut compressed = vec![0u8; compressed_arena_size];
+            read_authenticated_chunk(&mut reader, &mut hmac, &mut compressed, "name arena")?;
+            ArenaStorage::Compressed(compressed)
+        }
+        _ => unreachable!("arena_compression validated above"),
     };
 
     // Load Records. The binary writer stores records sorted by FRN, so load
@@ -524,17 +646,25 @@ pub fn load(drive_letter: char) -> Result<Option<(VolumeIndex, PersistedBinarySt
 
     // Build VolumeIndex.
     let mut index = VolumeIndex::empty(drive_letter);
-    index.names = if let Some(arena_bytes) = arena_bytes {
-        crate::name_arena::NameArena::from_vec(arena_bytes)
-    } else {
-        let mmap = unsafe {
-            MmapOptions::new()
-                .offset(HEADER_SIZE as u64)
-                .len(arena_size)
-                .map(&file)
+    index.names = match arena_storage {
+        ArenaStorage::Vec(bytes) => crate::name_arena::NameArena::from_vec(bytes),
+        ArenaStorage::Mmap => {
+            let mmap = unsafe {
+                MmapOptions::new()
+                    .offset(HEADER_SIZE as u64)
+                    .len(arena_size)
+                    .map(&file)
+            }
+            .map_err(|e| format!("Map name arena: {}", e))?;
+            crate::name_arena::NameArena::from_mmap(mmap)
         }
-        .map_err(|e| format!("Map name arena: {}", e))?;
-        crate::name_arena::NameArena::from_mmap(mmap)
+        ArenaStorage::Compressed(compressed) => {
+            let decompressed = decompress_arena(&compressed, h_arena_compression, arena_size)
+                .inspect_err(|_| {
+                    let _ = std::fs::remove_file(&path);
+                })?;
+            crate::name_arena::NameArena::from_vec(decompressed)
+        }
     };
     index.records = records;
     index.hardlink_parents = hardlink_parents;
@@ -558,11 +688,17 @@ pub fn load(drive_letter: char) -> Result<Option<(VolumeIndex, PersistedBinarySt
     };
 
     let elapsed = start.elapsed();
+    let compression_label = if h_arena_compression == ARENA_COMPRESSION_ZSTD {
+        "compressed"
+    } else {
+        "raw"
+    };
     eprintln!(
-        "[BINARY-IDX] {}:\\ Loaded {} records + {} arena bytes in {:.3}s",
+        "[BINARY-IDX] {}:\\ Loaded {} records + {} {} arena bytes in {:.3}s",
         drive_letter,
         record_count,
         arena_size,
+        compression_label,
         elapsed.as_secs_f64()
     );
 
@@ -576,4 +712,47 @@ pub struct PersistedBinaryState {
     pub files_indexed: u64,
     pub has_hardlink_parent_data: bool,
     pub has_reparse_point_data: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn arena_compression_round_trips() {
+        // File names have lots of repeated extensions/patterns, so this should
+        // compress well and exercise the threshold logic.
+        let mut raw = Vec::new();
+        for i in 0..100_000 {
+            raw.extend_from_slice(format!("file_{}.txt\0", i).as_bytes());
+        }
+
+        let compressed =
+            compress_arena(&raw, 100_000).expect("should compress large repetitive arena");
+        assert!(compressed.len() < raw.len() / 2);
+
+        let decompressed = decompress_arena(&compressed, ARENA_COMPRESSION_ZSTD, raw.len())
+            .expect("should decompress");
+        assert_eq!(decompressed, raw);
+    }
+
+    #[test]
+    fn small_arena_is_not_compressed() {
+        let raw = b"short unique names without repetition".to_vec();
+        assert!(compress_arena(&raw, 10).is_none());
+    }
+
+    #[test]
+    fn uncompressed_arena_decompresses_exactly() {
+        let raw = b"hello world".to_vec();
+        let decompressed = decompress_arena(&raw, ARENA_COMPRESSION_NONE, raw.len())
+            .expect("should pass through raw bytes");
+        assert_eq!(decompressed, raw);
+    }
+
+    #[test]
+    fn decompress_detects_size_mismatch() {
+        let raw = b"hello world".to_vec();
+        assert!(decompress_arena(&raw, ARENA_COMPRESSION_NONE, 5).is_err());
+    }
 }

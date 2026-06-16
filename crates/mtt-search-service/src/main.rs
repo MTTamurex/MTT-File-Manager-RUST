@@ -192,6 +192,9 @@ pub fn run_indexer(shutdown: Arc<AtomicBool>) {
         }
     };
 
+    // Log baseline cache sizes without delaying IPC startup.
+    std::thread::spawn(index_db::diagnose_cache_size);
+
     // Spawn volume discovery + indexing in a background thread.
     // This allows the IPC server to start listening immediately instead of
     // blocking on discover_volumes() which can take seconds if network or

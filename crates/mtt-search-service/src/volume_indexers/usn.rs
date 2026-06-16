@@ -90,7 +90,7 @@ fn persist_pending_snapshot(
         );
     }
 
-    if had_structural_changes {
+    if had_structural_changes && !crate::index_db::skip_sqlite_data_persistence() {
         if let Err(e) = db.sync_records_incremental_snapshot(
             snapshot.drive_letter,
             &snapshot.addition_rows,
@@ -526,43 +526,86 @@ pub(crate) fn index_volume(
             None,
             None,
         );
-        if let Err(e) = crate::index_db::binary::save(&index) {
-            eprintln!(
-                "[USN] {}:\\ Binary save failed: {}",
+        let binary_saved = match crate::index_db::binary::save(&index) {
+            Ok(()) => {
+                index.binary_dirty = false;
+                true
+            }
+            Err(e) => {
+                eprintln!(
+                    "[USN] {}:\\ Binary save failed: {}",
+                    drive_letter,
+                    crate::redact_paths(&e)
+                );
+                false
+            }
+        };
+        let skip_sqlite_data = crate::index_db::skip_sqlite_data_persistence();
+
+        // Persist volume state (journal_id/last_usn) to SQLite so incremental
+        // resume still works even when file_records are stored only in the
+        // binary index. Do not advance SQLite metadata in skip mode unless the
+        // matching binary snapshot was saved; otherwise a later SQLite fallback
+        // could treat stale rows as current.
+        if !skip_sqlite_data || binary_saved {
+            if let Err(e) = db.save_volume_state_snapshot(
                 drive_letter,
-                crate::redact_paths(&e)
-            );
-        } else {
-            index.binary_dirty = false;
+                index.journal_id,
+                index.last_usn,
+                index.records.len(),
+                index.hardlink_data_complete,
+                index.reparse_data_complete,
+            ) {
+                eprintln!(
+                    "[USN] {}:\\ SQLite volume state snapshot failed: {}",
+                    drive_letter,
+                    crate::redact_paths(&e)
+                );
+            }
         }
 
-        // Keep SQLite as a true full-volume fallback snapshot. Without this,
-        // losing the binary cache can resurrect a sparse incremental-only DB
-        // view after restart, which breaks search and folder-size resolution
-        // for most paths on the volume.
-        indexing_progress.update(
-            drive_letter,
-            "scanning",
-            index.records.len() as u64,
-            "persisting_sqlite",
-            None,
-            None,
-        );
-        if let Err(e) = db.save_volume(&index, |inserted, total| {
+        if skip_sqlite_data {
+            // Binary index is the authoritative store for this NTFS volume.
+            // Purge any stale SQLite file_records/hardlink_parents rows to
+            // reclaim disk space. If the binary index is later corrupted, the
+            // service will rebuild from a full scan.
+            if binary_saved {
+                db.purge_volume_data(drive_letter);
+            } else {
+                eprintln!(
+                    "[USN] {}:\\ Keeping existing SQLite data because binary save failed",
+                    drive_letter
+                );
+            }
+        } else {
+            // Keep SQLite as a true full-volume fallback snapshot. Without this,
+            // losing the binary cache can resurrect a sparse incremental-only DB
+            // view after restart, which breaks search and folder-size resolution
+            // for most paths on the volume.
             indexing_progress.update(
                 drive_letter,
                 "scanning",
-                inserted,
+                index.records.len() as u64,
                 "persisting_sqlite",
-                Some(inserted),
-                Some(total),
+                None,
+                None,
             );
-        }) {
-            eprintln!(
-                "[USN] {}:\\ SQLite full snapshot save failed: {}",
-                drive_letter,
-                crate::redact_paths(&e)
-            );
+            if let Err(e) = db.save_volume(&index, |inserted, total| {
+                indexing_progress.update(
+                    drive_letter,
+                    "scanning",
+                    inserted,
+                    "persisting_sqlite",
+                    Some(inserted),
+                    Some(total),
+                );
+            }) {
+                eprintln!(
+                    "[USN] {}:\\ SQLite full snapshot save failed: {}",
+                    drive_letter,
+                    crate::redact_paths(&e)
+                );
+            }
         }
 
         // Reset change tracking so the incremental sync starts fresh.

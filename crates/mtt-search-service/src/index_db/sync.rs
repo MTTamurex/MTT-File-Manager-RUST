@@ -162,6 +162,12 @@ impl IndexDb {
             index.records.len(),
             index.drive_letter,
         );
+
+        // Reclaim free pages left behind by incremental sync. This is a
+        // no-op when there is little free space or a VACUUM ran recently.
+        drop(conn);
+        self.vacuum_if_needed();
+
         Ok(())
     }
 
