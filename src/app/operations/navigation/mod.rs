@@ -6,7 +6,7 @@ pub mod keyboard;
 pub mod selection;
 
 use crate::app::state::ImageViewerApp;
-use crate::domain::special_paths::{COMPUTER_VIEW_ID, RECYCLE_BIN_VIEW_ID};
+use crate::domain::special_paths::{is_virtual_path, COMPUTER_VIEW_ID, RECYCLE_BIN_VIEW_ID};
 use std::path::{Path, PathBuf};
 
 impl ImageViewerApp {
@@ -80,6 +80,41 @@ impl ImageViewerApp {
             })
     }
 
+    /// Spawns a background thread to read folder metadata when no cached timestamp
+    /// exists (e.g. first visit to a Quick Access or Cloud Drive folder).
+    /// The result is sent back via `folder_meta_resolve_rx` and applied in
+    /// `process_incoming_messages` without blocking the UI thread.
+    fn spawn_folder_meta_resolve_if_needed(&self, dest_path: &Path, path_str: &str) {
+        if self.current_folder_modified_hint.is_some()
+            || is_virtual_path(path_str)
+            || crate::infrastructure::io_priority::is_network_or_virtual(dest_path)
+        {
+            return;
+        }
+        let tx = self.folder_meta_resolve_tx.clone();
+        let dest = dest_path.to_path_buf();
+        let current_path = path_str.to_string();
+        std::thread::Builder::new()
+            .name("folder-meta-resolve".into())
+            .spawn(move || {
+                if let Ok(meta) = std::fs::metadata(&dest) {
+                    let modified = meta
+                        .modified()
+                        .ok()
+                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0);
+                    let created = meta
+                        .created()
+                        .ok()
+                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                        .map(|d| d.as_secs());
+                    let _ = tx.send((PathBuf::from(current_path), modified, created));
+                }
+            })
+            .ok();
+    }
+
     pub fn navigate_to(&mut self, path: &str) {
         // Normalize drive root paths: ensure "Z:" always becomes "Z:\"
         // This fixes the PathBuf::join bug of not adding a backslash
@@ -119,9 +154,9 @@ impl ImageViewerApp {
         // in the current session. When clicking a pinned shortcut for the first time,
         // no hint exists → modified = 0 → "Desconhecido" in the preview panel.
         //
-        // We intentionally do NOT call std::fs::metadata() here because it blocks
-        // the UI thread. On a sleeping HDD this can stall for 500-2000ms (spin-up).
-        // The timestamp will resolve naturally when the folder items finish loading.
+        // Spawn a background thread to read metadata without blocking the UI thread.
+        // On a sleeping HDD this avoids a 500-2000ms stall (spin-up).
+        self.spawn_folder_meta_resolve_if_needed(&destination_path, &normalized_path);
 
         // Clear loaded_path to allow reload if navigating to same path (for consistency)
         self.loaded_path.clear();
@@ -199,6 +234,7 @@ impl ImageViewerApp {
                     self.resolve_destination_folder_modified_hint(&new_path);
                 self.current_folder_created_hint =
                     self.resolve_destination_folder_created_hint(&new_path);
+                self.spawn_folder_meta_resolve_if_needed(&new_path, &path);
 
                 // If we were in a subfolder of the destination, invalidate that subfolder's preview
                 if previous_path.starts_with(&new_path) && previous_path != new_path {
@@ -263,6 +299,7 @@ impl ImageViewerApp {
                     self.resolve_destination_folder_modified_hint(&new_path);
                 self.current_folder_created_hint =
                     self.resolve_destination_folder_created_hint(&new_path);
+                self.spawn_folder_meta_resolve_if_needed(&new_path, &path);
 
                 // If we were in a subfolder of the destination, invalidate that subfolder's preview
                 if previous_path.starts_with(&new_path) && previous_path != new_path {

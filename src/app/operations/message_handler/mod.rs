@@ -111,6 +111,22 @@ impl ImageViewerApp {
         // GLOBAL SEARCH: Process search results from worker
         self.process_global_search_events();
 
+        // FOLDER METADATA: Resolve timestamps for sidebar-navigated folders (Quick Access, Cloud Drives)
+        while let Ok((path, modified, created)) = self.folder_meta_resolve_rx.try_recv() {
+            // Only apply if user is still viewing the same folder
+            if PathBuf::from(&self.navigation_state.current_path) == path {
+                if modified > 0 {
+                    self.current_folder_modified_hint = Some((path.clone(), modified));
+                    self.folder_modified_hints.put(path.clone(), modified);
+                }
+                if let Some(c) = created.filter(|&c| c > 0) {
+                    self.current_folder_created_hint = Some((path.clone(), c));
+                    self.folder_created_hints.put(path, c);
+                }
+                ctx.request_repaint();
+            }
+        }
+
         // PERF: Log detailed breakdown when process_incoming_messages is slow
         let _t_msg_total = _t_msg_start.elapsed().as_millis();
         if _t_msg_total > 50 {

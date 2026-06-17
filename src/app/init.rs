@@ -219,6 +219,9 @@ impl ImageViewerApp {
             std::sync::mpsc::channel();
         let (cloud_open_failure_sender, cloud_open_failure_receiver) = std::sync::mpsc::channel();
 
+        // Background metadata resolution for sidebar-navigated folders (Quick Access, Cloud Drives)
+        let (folder_meta_resolve_tx, folder_meta_resolve_rx) = std::sync::mpsc::channel();
+
         #[cfg(feature = "notify-watcher")]
         let (notify_watcher_setup_sender, notify_watcher_setup_receiver) =
             std::sync::mpsc::channel();
@@ -243,6 +246,8 @@ impl ImageViewerApp {
             current_folder_created_hint: None,
             folder_modified_hints: lru::LruCache::new(std::num::NonZeroUsize::new(500).unwrap()),
             folder_created_hints: lru::LruCache::new(std::num::NonZeroUsize::new(500).unwrap()),
+            folder_meta_resolve_tx,
+            folder_meta_resolve_rx,
             loaded_path: String::new(), // Start empty - will be set when first folder loads
             thumbnail_queue,
             image_receiver: img_rx,

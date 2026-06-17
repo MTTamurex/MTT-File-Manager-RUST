@@ -125,6 +125,11 @@ pub struct ImageViewerApp {
     pub folder_modified_hints: lru::LruCache<PathBuf, u64>,
     /// Cache of known folder creation timestamps by folder path.
     pub folder_created_hints: lru::LruCache<PathBuf, u64>,
+    /// Background metadata resolution channel (sender).
+    /// Spawned when navigating to a folder with no cached timestamp (e.g. Quick Access, Cloud Drives).
+    pub folder_meta_resolve_tx: std::sync::mpsc::Sender<(PathBuf, u64, Option<u64>)>,
+    /// Background metadata resolution channel (receiver).
+    pub folder_meta_resolve_rx: std::sync::mpsc::Receiver<(PathBuf, u64, Option<u64>)>,
     pub loaded_path: String, // Tracks the last path we actually requested (prevents spam)
 
     // --- OPTIMIZED THUMBNAIL SYSTEM ---

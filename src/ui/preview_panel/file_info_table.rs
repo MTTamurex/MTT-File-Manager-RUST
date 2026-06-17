@@ -1,6 +1,6 @@
 use crate::app::folder_size_state::FolderContentSummary;
 use crate::domain::file_entry::FileEntry;
-use crate::domain::special_paths::COMPUTER_VIEW_ID;
+use crate::domain::special_paths::{COMPUTER_VIEW_ID, RECYCLE_BIN_VIEW_ID};
 use crate::infrastructure::windows::MediaMetadata;
 use crate::ui::cache::FxHashSet;
 use crate::ui::preview_panel::actions::PreviewPanelAction;
@@ -207,7 +207,10 @@ pub fn render_file_info_table(
             }
 
             // 3. File Metadata (Date/Size)
-            if file.drive_info.is_none() && file.name != COMPUTER_VIEW_ID {
+            if file.drive_info.is_none()
+                && file.name != COMPUTER_VIEW_ID
+                && file.name != RECYCLE_BIN_VIEW_ID
+            {
                 let is_recycle_item = file.is_recycle_item();
                 // Virtual folders inside archives are not real filesystem directories,
                 // so subtree metrics are not meaningful there. Archive files themselves
