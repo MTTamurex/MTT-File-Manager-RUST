@@ -621,6 +621,7 @@ impl ImageViewerApp {
                     self.folder_size_state.loading.remove(&folder_path);
                     self.folder_size_state
                         .clear_panel_stale_summary(&folder_path);
+                    self.folder_size_state.clear_failure(&folder_path);
                     self.folder_size_state.cache.put(folder_path, summary);
                     received_any = true;
                 }
@@ -630,6 +631,14 @@ impl ImageViewerApp {
                     self.folder_size_state.cache.pop(&folder_path);
                     self.folder_size_state
                         .reschedule_panel_revalidation_if_stale(&folder_path, Instant::now());
+                    received_any = true;
+                }
+                crate::app::folder_size_state::FolderSizeMessage::Failed { folder_path } => {
+                    progress_updates.remove(&folder_path);
+                    self.folder_size_state.loading.remove(&folder_path);
+                    self.folder_size_state.cache.pop(&folder_path);
+                    self.folder_size_state
+                        .record_failure(folder_path, Instant::now());
                     received_any = true;
                 }
             }
@@ -750,6 +759,7 @@ impl ImageViewerApp {
                     self.folder_size_state.batch_loading.remove(&path);
                     self.folder_size_state.cache.pop(&path);
                     self.folder_size_state.loading.remove(&path);
+                    self.folder_size_state.clear_failure(&path);
                     // Bump epoch so in-flight results from before are rejected.
                     *self
                         .folder_size_state

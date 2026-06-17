@@ -34,6 +34,7 @@ pub fn render_preview_panel(
     is_metadata_loading: bool,
     folder_summary: Option<crate::app::folder_size_state::FolderContentSummary>,
     is_folder_size_loading: bool,
+    is_folder_size_failed: bool,
     live_file_size_cache: &mut lru::LruCache<std::path::PathBuf, (u64, u64)>,
     live_file_size_loading: &mut crate::ui::cache::FxHashSet<std::path::PathBuf>,
     live_file_size_req_sender: &std::sync::mpsc::Sender<
@@ -182,6 +183,7 @@ pub fn render_preview_panel(
         metadata,
         folder_summary,
         is_folder_size_loading,
+        is_folder_size_failed,
         is_metadata_loading,
         live_file_size_cache,
         live_file_size_loading,

@@ -70,6 +70,7 @@ pub fn render_file_info_table(
     metadata: Option<&MediaMetadata>,
     folder_summary: Option<FolderContentSummary>,
     is_folder_size_loading: bool,
+    is_folder_size_failed: bool,
     is_metadata_loading: bool,
     live_file_size_cache: &mut LruCache<std::path::PathBuf, (u64, u64)>,
     live_file_size_loading: &mut FxHashSet<std::path::PathBuf>,
@@ -248,7 +249,9 @@ pub fn render_file_info_table(
                         .map(|summary| summary.has_counts())
                         .unwrap_or(false);
                     let size_str = if show_folder_aggregate_details {
-                        if let Some(summary) = folder_summary {
+                        if is_folder_size_failed {
+                            t!("file_info.unavailable").to_string()
+                        } else if let Some(summary) = folder_summary {
                             let formatted =
                                 crate::infrastructure::windows::format_size(summary.total_size);
                             if is_folder_size_loading || !summary.has_counts() {
@@ -274,22 +277,31 @@ pub fn render_file_info_table(
                     add_detail(ui, &t!("file_info.size"), size_str);
 
                     if show_folder_aggregate_details {
-                        let subfolders = folder_summary
-                            .and_then(|summary| summary.folder_count)
-                            .map(|count| count.to_string())
-                            .unwrap_or_else(|| t!("file_info.calculating").to_string());
+                        let subfolders = if is_folder_size_failed {
+                            t!("file_info.unavailable").to_string()
+                        } else {
+                            folder_summary
+                                .and_then(|summary| summary.folder_count)
+                                .map(|count| count.to_string())
+                                .unwrap_or_else(|| t!("file_info.calculating").to_string())
+                        };
                         add_detail(ui, &t!("file_info.subfolders"), subfolders);
 
-                        let files = folder_summary
-                            .and_then(|summary| summary.file_count)
-                            .map(|count| count.to_string())
-                            .unwrap_or_else(|| t!("file_info.calculating").to_string());
+                        let files = if is_folder_size_failed {
+                            t!("file_info.unavailable").to_string()
+                        } else {
+                            folder_summary
+                                .and_then(|summary| summary.file_count)
+                                .map(|count| count.to_string())
+                                .unwrap_or_else(|| t!("file_info.calculating").to_string())
+                        };
                         add_detail(ui, &t!("file_info.files"), files);
                     }
 
                     if show_folder_aggregate_details
                         && (folder_summary.is_none() || !folder_counts_complete)
                         && !is_folder_size_loading
+                        && !is_folder_size_failed
                     {
                         action = Some(PreviewPanelAction::CalculateFolderSize(file.path.clone()));
                     }

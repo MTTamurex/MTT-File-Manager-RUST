@@ -1,9 +1,17 @@
 use std::collections::BTreeMap;
+use std::ffi::OsStr;
 use std::hint::black_box;
+use std::os::windows::ffi::OsStrExt;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
-use windows::Win32::Foundation::HANDLE;
+use windows::core::PCWSTR;
+use windows::Win32::Foundation::{CloseHandle, HANDLE};
+use windows::Win32::Storage::FileSystem::{
+    CreateFileW, GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION, FILE_ATTRIBUTE_DIRECTORY,
+    FILE_FLAGS_AND_ATTRIBUTES, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
+    FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
+};
 
 use crate::file_index::IndexState;
 use crate::indexing_progress::IndexingProgress;
@@ -22,6 +30,59 @@ use super::{MAX_QUERY_OFFSET, MAX_QUERY_RESULTS};
 const WARM_COOLDOWN_SECS: u64 = 60;
 const ZERO_SIZE_FOLDER_REPAIR_LIMIT: usize = 4_096;
 const LIVE_SIZE_REFRESH_FILE_LIMIT: u64 = 4_096;
+const FRN_MASK: u64 = 0x0000_FFFF_FFFF_FFFF;
+
+#[inline]
+fn file_index_to_frn(high: u32, low: u32) -> u64 {
+    (((high as u64) << 32) | low as u64) & FRN_MASK
+}
+
+fn live_directory_frn(path: &str) -> Result<u64, String> {
+    struct HandleGuard(HANDLE);
+
+    impl Drop for HandleGuard {
+        fn drop(&mut self) {
+            unsafe {
+                let _ = CloseHandle(self.0);
+            }
+        }
+    }
+
+    const FILE_READ_ATTRIBUTES: u32 = 0x0080;
+
+    let path_wide: Vec<u16> = OsStr::new(path)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+
+    let handle = unsafe {
+        CreateFileW(
+            PCWSTR(path_wide.as_ptr()),
+            FILE_READ_ATTRIBUTES,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            None,
+            OPEN_EXISTING,
+            FILE_FLAGS_AND_ATTRIBUTES(
+                FILE_FLAG_BACKUP_SEMANTICS.0 | FILE_FLAG_OPEN_REPARSE_POINT.0,
+            ),
+            None,
+        )
+    }
+    .map_err(|error| format!("CreateFileW failed: {}", error))?;
+    let _guard = HandleGuard(handle);
+
+    let mut info = BY_HANDLE_FILE_INFORMATION::default();
+    unsafe {
+        GetFileInformationByHandle(handle, &mut info)
+            .map_err(|error| format!("GetFileInformationByHandle failed: {}", error))?;
+    }
+
+    if info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY.0 == 0 {
+        return Err("Path is not a directory".to_string());
+    }
+
+    Ok(file_index_to_frn(info.nFileIndexHigh, info.nFileIndexLow))
+}
 
 fn repair_suspicious_zero_folder_size(
     handle: &VolumeIndexHandle,
@@ -435,6 +496,44 @@ pub(super) fn handle_client(
                 (r, has_pending)
             };
 
+            let needs_live_fallback =
+                result.as_ref().err().copied() == Some("Path not found in index");
+            let result = if needs_live_fallback {
+                match live_directory_frn(&path) {
+                    Ok(frn) => {
+                        let vol = handle.read();
+                        if !matches!(vol.state, IndexState::Ready) {
+                            Err("Volume not ready")
+                        } else if !vol.sizes_loaded {
+                            Err("Sizes not loaded")
+                        } else {
+                            match vol.records.get(&frn) {
+                                Some(record) if record.is_dir => {
+                                    eprintln!(
+                                        "[FOLDER-SIZE] resolved via live FRN fallback path={} frn={}",
+                                        crate::redact_paths(&path),
+                                        frn,
+                                    );
+                                    Ok((frn, crate::mft_reader::folder_size_for_service(&vol, frn)))
+                                }
+                                Some(_) => Err("Path resolved to non-directory record"),
+                                None => Err("Path FRN not found in index"),
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        eprintln!(
+                            "[FOLDER-SIZE] live FRN fallback failed path={} reason={}",
+                            crate::redact_paths(&path),
+                            crate::redact_paths(&error),
+                        );
+                        Err("Path not found in index")
+                    }
+                }
+            } else {
+                result
+            };
+
             match result {
                 Ok((dir_frn, summary)) => {
                     let (total_size, file_count, folder_count) = repair_suspicious_zero_folder_size(
@@ -613,6 +712,14 @@ mod tests {
 
     fn make_handles(volumes: Vec<VolumeIndex>) -> Vec<VolumeIndexHandle> {
         volumes.into_iter().map(handle_from).collect()
+    }
+
+    #[test]
+    fn file_index_to_frn_strips_sequence_number() {
+        assert_eq!(
+            super::file_index_to_frn(0x1234_5678, 0x9ABC_DEF0),
+            0x0000_5678_9ABC_DEF0
+        );
     }
 
     #[test]

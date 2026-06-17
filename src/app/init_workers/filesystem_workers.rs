@@ -394,8 +394,7 @@ pub(in crate::app) fn spawn_folder_size_worker(
                             folder_path.display(),
                             e,
                         );
-                        let _ =
-                            folder_size_res_tx.send(FolderSizeMessage::Cancelled { folder_path });
+                        let _ = folder_size_res_tx.send(FolderSizeMessage::Failed { folder_path });
                         folder_size_ctx.request_repaint();
                         continue;
                     }

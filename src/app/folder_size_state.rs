@@ -11,6 +11,7 @@ const PENDING_REVALIDATION_PRUNE_INTERVAL: Duration = Duration::from_millis(250)
 const PENDING_REVALIDATION_PRUNE_THRESHOLD: usize = 500;
 const INVALIDATION_EPOCH_PRUNE_INTERVAL: Duration = Duration::from_secs(2);
 const INVALIDATION_EPOCH_PRUNE_THRESHOLD: usize = 1_024;
+const FOLDER_SIZE_FAILURE_RETRY_DELAY: Duration = Duration::from_secs(30);
 pub(crate) const PANEL_STALE_REVALIDATION_DELAY: Duration = Duration::from_millis(500);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,6 +60,9 @@ pub enum FolderSizeMessage {
     Cancelled {
         folder_path: PathBuf,
     },
+    Failed {
+        folder_path: PathBuf,
+    },
 }
 
 /// Result from the batch folder-size worker.
@@ -83,6 +87,7 @@ pub struct FolderSizeState {
     pub cancel: Arc<AtomicBool>,
     pub cache: LruCache<PathBuf, FolderContentSummary>,
     pub loading: FxHashSet<PathBuf>,
+    pub failed_until: HashMap<PathBuf, Instant>,
     /// Last complete values shown in the details panel after invalidation.
     pub panel_stale_cache: LruCache<PathBuf, FolderContentSummary>,
     pub panel_deferred_revalidation: HashMap<PathBuf, Instant>,
@@ -142,6 +147,26 @@ impl FolderSizeState {
     pub fn clear_panel_stale_summary(&mut self, folder_path: &PathBuf) {
         self.panel_stale_cache.pop(folder_path);
         self.panel_deferred_revalidation.remove(folder_path);
+    }
+
+    pub fn clear_failure(&mut self, folder_path: &PathBuf) {
+        self.failed_until.remove(folder_path);
+    }
+
+    pub fn record_failure(&mut self, folder_path: PathBuf, now: Instant) {
+        self.failed_until
+            .insert(folder_path, now + FOLDER_SIZE_FAILURE_RETRY_DELAY);
+    }
+
+    pub fn is_failure_active(&mut self, folder_path: &PathBuf, now: Instant) -> bool {
+        match self.failed_until.get(folder_path).copied() {
+            Some(deadline) if deadline > now => true,
+            Some(_) => {
+                self.failed_until.remove(folder_path);
+                false
+            }
+            None => false,
+        }
     }
 
     pub fn summary_for_panel_render(
@@ -294,6 +319,7 @@ mod tests {
             cancel: Arc::new(AtomicBool::new(false)),
             cache: LruCache::new(NonZeroUsize::new(8).unwrap()),
             loading: FxHashSet::default(),
+            failed_until: HashMap::new(),
             panel_stale_cache: LruCache::new(NonZeroUsize::new(8).unwrap()),
             panel_deferred_revalidation: HashMap::new(),
             batch_req_sender,
@@ -342,6 +368,21 @@ mod tests {
 
         assert_eq!(summary, Some(stale));
         assert!(!loading);
+    }
+
+    #[test]
+    fn folder_size_failure_expires_after_retry_delay() {
+        let mut state = test_state();
+        let path = PathBuf::from(r"C:\data");
+        let now = Instant::now();
+
+        state.record_failure(path.clone(), now);
+
+        assert!(state.is_failure_active(&path, now + Duration::from_secs(1)));
+        assert!(!state.is_failure_active(
+            &path,
+            now + FOLDER_SIZE_FAILURE_RETRY_DELAY + Duration::from_millis(1)
+        ));
     }
 
     #[test]

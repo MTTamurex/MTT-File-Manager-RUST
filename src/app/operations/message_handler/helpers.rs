@@ -534,6 +534,7 @@ impl ImageViewerApp {
         }
         let was_loading = self.folder_size_state.loading.remove(&folder_path);
         self.folder_size_state.cache.pop(&folder_path);
+        self.folder_size_state.clear_failure(&folder_path);
         // Also clear the batch (list-view) cache so the next render re-fetches.
         self.folder_size_state.batch_cache.pop(&folder_path);
         self.folder_size_state.batch_loading.remove(&folder_path);

@@ -95,11 +95,16 @@ pub(super) fn render_preview_panel_layout(
 
                             let is_current_folder_panel =
                                 is_current_folder_panel_target(app, &file);
-                            let (folder_summary, is_folder_size_loading) = if file.is_dir {
-                                app.folder_size_state
-                                    .summary_for_panel_render(&file.path, is_current_folder_panel)
+                            let (folder_summary, is_folder_size_loading, is_folder_size_failed) = if file.is_dir {
+                                let (summary, loading) = app
+                                    .folder_size_state
+                                    .summary_for_panel_render(&file.path, is_current_folder_panel);
+                                let failed = app
+                                    .folder_size_state
+                                    .is_failure_active(&file.path, std::time::Instant::now());
+                                (summary, loading, failed)
                             } else {
-                                (None, false)
+                                (None, false, false)
                             };
 
                             let is_owner = app.media_preview_owner_tab_id == Some(tab_id);
@@ -147,6 +152,7 @@ pub(super) fn render_preview_panel_layout(
                                 app.metadata_loading.contains(&file.path),
                                 folder_summary,
                                 is_folder_size_loading,
+                                is_folder_size_failed,
                                 &mut app.live_file_size_cache,
                                 &mut app.live_file_size_loading,
                                 &app.live_file_size_req_sender,
@@ -258,6 +264,7 @@ pub(super) fn render_preview_panel_layout(
                                         // Cancel any in-progress calculation before starting new one
                                         app.folder_size_state.cancel
                                             .store(true, std::sync::atomic::Ordering::Release);
+                                        app.folder_size_state.clear_failure(&path);
                                         app.folder_size_state.loading.insert(path.clone());
                                         let _ = app.folder_size_state.req_sender.send(path);
                                     }
