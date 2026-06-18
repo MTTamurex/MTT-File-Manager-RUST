@@ -7,10 +7,11 @@
 //! but only writes to disk if >1 second has passed since the last write. This prevents
 //! 20+ synchronous SQLite writes from blocking the UI thread on state changes.
 
+use crate::app::dual_panel::ActivePanel;
 use crate::app::navigation_state::ThemeMode;
 use crate::app::state::ImageViewerApp;
 use crate::domain::file_entry::{FoldersPosition, SortMode, ViewMode};
-use crate::domain::special_paths::is_virtual_path;
+use crate::domain::special_paths::{is_virtual_path, COMPUTER_VIEW_ID};
 use crate::infrastructure::diagnostic_logger;
 use std::time::SystemTime;
 
@@ -147,6 +148,44 @@ impl ImageViewerApp {
             .to_string(),
         ));
 
+        // Dual panel state persistence
+        prefs.push((
+            "dual_panel_enabled",
+            (if self.dual_panel_enabled {
+                "true"
+            } else {
+                "false"
+            })
+            .to_string(),
+        ));
+        prefs.push((
+            "dual_panel_active",
+            match self.dual_panel_active {
+                ActivePanel::Left => "left",
+                ActivePanel::Right => "right",
+            }
+            .to_string(),
+        ));
+        prefs.push((
+            "dual_panel_split_ratio",
+            self.layout.dual_panel_split_ratio.to_string(),
+        ));
+
+        // Persist inactive panel's path so it restores to its own folder.
+        // Always write the key: preference batches only upsert, so omitting it
+        // would leave an old inactive path in the database.
+        let inactive_path = self
+            .dual_panel_inactive_state
+            .as_ref()
+            .map(|snapshot| snapshot.path.as_str())
+            .filter(|path| {
+                !path.is_empty()
+                    && !path.starts_with("shell:")
+                    && (*path == COMPUTER_VIEW_ID || !is_virtual_path(path))
+            })
+            .unwrap_or_default();
+        prefs.push(("dual_panel_inactive_path", inactive_path.to_string()));
+
         // Sidebar widths persistence - only save valid values
         let left_to_save = self.layout.sidebar_left_width.max(150.0);
         let right_to_save = self.layout.sidebar_right_width.max(250.0);
@@ -154,12 +193,11 @@ impl ImageViewerApp {
         prefs.push(("sidebar_right_width", right_to_save.to_string()));
 
         // Save last active folder from current tab
-        let last_folder = self.tab_manager.active().path.clone();
+        let last_folder = self.navigation_state.current_path.clone();
         // Save if it's a real path or "This PC" (but not other virtual views or shell URIs)
         if !last_folder.is_empty()
             && !last_folder.starts_with("shell:")
-            && (last_folder == crate::domain::special_paths::COMPUTER_VIEW_ID
-                || !is_virtual_path(&last_folder))
+            && (last_folder == COMPUTER_VIEW_ID || !is_virtual_path(&last_folder))
         {
             prefs.push(("last_folder", last_folder));
         }

@@ -30,6 +30,7 @@ impl ImageViewerApp {
         snapshot.pending_items_count = 0;
         self.dual_panel_inactive_state = Some(snapshot);
         self.dual_panel_enabled = true;
+        self.save_preferences();
     }
 
     /// Disable dual panel mode.
@@ -45,6 +46,7 @@ impl ImageViewerApp {
         // Drop inactive panel state
         self.dual_panel_inactive_state = None;
         self.dual_panel_enabled = false;
+        self.save_preferences();
     }
 
     /// Toggle dual panel mode on/off.
@@ -120,6 +122,8 @@ impl ImageViewerApp {
             self.loaded_path.clear();
             self.load_folder(false);
         }
+
+        self.save_preferences();
     }
 
     /// Temporarily swap the inactive panel into app fields, run a closure, then

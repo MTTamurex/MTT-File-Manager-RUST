@@ -65,6 +65,20 @@ pub fn handle_startup_sequence(app: &mut ImageViewerApp, ctx: &egui::Context) {
             } else {
                 app.load_folder(false);
             }
+
+            // If dual panel was restored from preferences, load the inactive
+            // panel's folder now that workers are fully ready.
+            if app.dual_panel_enabled {
+                app.with_inactive_panel(|app| {
+                    if app.navigation_state.is_computer_view {
+                        app.setup_computer_view();
+                    } else {
+                        app.loaded_path.clear();
+                        app.load_folder_for_inactive();
+                    }
+                });
+            }
+
             app.sync_to_tab();
             app.run_post_startup_jobs(ctx);
             log::info!("[STARTUP] first visible startup frame completed");
@@ -345,6 +359,9 @@ fn flush_opengl_gpu_textures_for_reupload(app: &mut ImageViewerApp, reason: &str
 }
 
 pub fn handle_exit(app: &mut ImageViewerApp) {
+    // Capture the current live panel/tab state before the final blocking save.
+    app.sync_to_tab();
+
     // Stop the GC worker thread before tearing down.
     crate::app::init_workers::stop_gc_worker();
 

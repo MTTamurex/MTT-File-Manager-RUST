@@ -26,6 +26,7 @@ pub(in crate::app) fn build_layout_state(
     saved_is_maximized: bool,
     sidebar_left_width: f32,
     sidebar_right_width: f32,
+    dual_panel_split_ratio: f32,
 ) -> LayoutState {
     LayoutState {
         saved_window_width,
@@ -79,7 +80,7 @@ pub(in crate::app) fn build_layout_state(
             "list_col_computer_free_width",
             120.0,
         ),
-        dual_panel_split_ratio: 0.5,
+        dual_panel_split_ratio,
     }
 }
 

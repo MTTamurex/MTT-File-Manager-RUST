@@ -552,6 +552,9 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
                 (left_width / content_width).clamp(min_split_ratio, max_split_ratio);
         }
     }
+    if sep_response.drag_stopped() {
+        app.save_preferences();
+    }
 
     // Determine which panel is active vs inactive
     let active = app.dual_panel_active;

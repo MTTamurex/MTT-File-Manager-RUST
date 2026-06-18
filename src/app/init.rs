@@ -188,6 +188,10 @@ impl ImageViewerApp {
             diagnostic_mode_enabled_at,
             diagnostic_mode_needs_persist,
             shortcuts,
+            dual_panel_enabled: saved_dual_panel_enabled,
+            dual_panel_active: saved_dual_panel_active,
+            dual_panel_split_ratio,
+            dual_panel_inactive_path: saved_dual_panel_inactive_path,
         } = startup_preferences;
 
         // Apply saved language preference
@@ -478,6 +482,7 @@ impl ImageViewerApp {
                 saved_is_maximized,
                 sidebar_left_width,
                 sidebar_right_width,
+                dual_panel_split_ratio,
             ),
 
             // Metadata worker
@@ -648,6 +653,31 @@ impl ImageViewerApp {
 
         // Apply folder lock for the initial folder (if it has one saved)
         app.apply_folder_lock_if_present();
+
+        // Restore dual panel state (must run after full app construction)
+        if saved_dual_panel_enabled {
+            app.dual_panel_enable();
+            // dual_panel_enable() always makes Left active. If the saved active
+            // panel was Right, swap so the app fields and inactive snapshot are
+            // consistent with the persisted active panel.
+            if saved_dual_panel_active == crate::app::dual_panel::ActivePanel::Right {
+                app.dual_panel_switch_active();
+            }
+            // Restore the inactive panel's saved path so it doesn't just clone
+            // the active panel's folder. The actual folder load is deferred to
+            // handle_startup_sequence() where workers are fully ready.
+            if let Some(inactive_path) = saved_dual_panel_inactive_path {
+                app.with_inactive_panel(|app| {
+                    let is_computer =
+                        inactive_path == crate::domain::special_paths::COMPUTER_VIEW_ID;
+                    app.navigation_state.current_path = inactive_path.clone();
+                    app.navigation_state.path_input = inactive_path;
+                    app.navigation_state.is_computer_view = is_computer;
+                    app.navigation_state.is_recycle_bin_view = false;
+                    app.loaded_path.clear();
+                });
+            }
+        }
 
         // Populate the modified hint for the initial folder so the preview panel
         // shows the correct "Data modificada" immediately on startup, even if the

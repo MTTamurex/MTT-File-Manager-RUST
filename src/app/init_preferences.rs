@@ -1,3 +1,4 @@
+use crate::app::dual_panel::ActivePanel;
 use crate::app::navigation_state::ThemeMode;
 use crate::app::shortcuts::ShortcutBindings;
 use crate::domain::file_entry::{FoldersPosition, SortMode, ViewMode};
@@ -32,6 +33,10 @@ pub(super) struct StartupPreferences {
     pub(super) diagnostic_mode_enabled_at: Option<SystemTime>,
     pub(super) diagnostic_mode_needs_persist: bool,
     pub(super) shortcuts: ShortcutBindings,
+    pub(super) dual_panel_enabled: bool,
+    pub(super) dual_panel_active: ActivePanel,
+    pub(super) dual_panel_split_ratio: f32,
+    pub(super) dual_panel_inactive_path: Option<String>,
 }
 
 impl StartupPreferences {
@@ -226,6 +231,30 @@ impl StartupPreferences {
 
         let shortcuts = ShortcutBindings::from_preferences(&prefs);
 
+        let dual_panel_enabled = prefs
+            .get("dual_panel_enabled")
+            .map(|s| s == "true")
+            .unwrap_or(false);
+
+        let dual_panel_active = prefs
+            .get("dual_panel_active")
+            .map(|s| match s.as_str() {
+                "right" => ActivePanel::Right,
+                _ => ActivePanel::Left,
+            })
+            .unwrap_or(ActivePanel::Left);
+
+        let dual_panel_split_ratio = prefs
+            .get("dual_panel_split_ratio")
+            .and_then(|s| s.parse::<f32>().ok())
+            .unwrap_or(0.5)
+            .clamp(0.2, 0.8);
+
+        let dual_panel_inactive_path = prefs
+            .get("dual_panel_inactive_path")
+            .filter(|path| !path.is_empty())
+            .cloned();
+
         Self {
             sort_mode,
             sort_mode_computer,
@@ -252,6 +281,10 @@ impl StartupPreferences {
             diagnostic_mode_enabled_at,
             diagnostic_mode_needs_persist,
             shortcuts,
+            dual_panel_enabled,
+            dual_panel_active,
+            dual_panel_split_ratio,
+            dual_panel_inactive_path,
         }
     }
 }
