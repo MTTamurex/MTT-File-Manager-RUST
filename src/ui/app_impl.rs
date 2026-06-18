@@ -19,16 +19,17 @@ impl eframe::App for ImageViewerApp {
         // True while Windows is in interactive move/resize loop (WM_ENTERSIZEMOVE..EXITSIZEMOVE).
         let is_in_size_move = is_in_size_move();
 
+        // Apply asynchronously loaded fonts as soon as the worker finishes.
+        if let Some(rx) = &self.font_loader_rx {
+            if let Ok(fonts) = rx.try_recv() {
+                ctx.set_fonts(fonts);
+                self.font_loader_rx = None; // Disable loader once done
+                ctx.request_repaint(); // Force refresh with new fonts
+            }
+        }
+
         // 1. Initial validation
         if self.startup_tick == 0 {
-            // Check for loaded fonts
-            if let Some(rx) = &self.font_loader_rx {
-                if let Ok(fonts) = rx.try_recv() {
-                    ctx.set_fonts(fonts);
-                    self.font_loader_rx = None; // Disable loader once done
-                    ctx.request_repaint(); // Force refresh with new fonts
-                }
-            }
 
             // NOTE: Removed path.exists() check here because it can BLOCK indefinitely
             // on OneDrive cloud-only files, causing UI freeze. The file selection will

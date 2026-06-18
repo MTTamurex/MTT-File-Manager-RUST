@@ -428,7 +428,11 @@ impl ImageViewerApp {
         }
 
         self.loading_icons.insert(path.clone());
-        if self.icon_req_sender.send((path.clone(), effective_gen)).is_err() {
+        if self
+            .icon_req_sender
+            .send((path.clone(), effective_gen))
+            .is_err()
+        {
             self.loading_icons.remove(&path);
         }
     }

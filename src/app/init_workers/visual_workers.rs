@@ -79,13 +79,29 @@ pub(in crate::app) fn spawn_async_font_loader() -> mpsc::Receiver<egui::FontDefi
             loaded_fonts.push("segoe_ui_symbol".to_owned());
         }
 
-        // NOTE: `ARIALUNI.TTF` (~24 MB CJK fallback) used to be loaded here as a
-        // generic Unicode coverage font. It was removed because the file is huge
-        // relative to its actual usefulness for this app's languages (PT-BR / EN):
-        // its bytes stay resident in `FontData` for the entire process lifetime
-        // and inflate the egui font atlas. Latin glyphs are already covered by
-        // Segoe UI, and rare CJK names will fall back to system shaping rather
-        // than render perfectly — an acceptable trade for the RAM win.
+        // CJK fallback: Windows Explorer uses system font fallback, but egui needs
+        // explicit font files. Load one font per major CJK locale so Simplified
+        // Chinese, Traditional Chinese, Japanese, and Korean filenames render.
+        let cjk_fallback_groups = [
+            &[("ms_yahei", "msyh.ttc")][..],
+            &[("ms_jhenghei", "msjh.ttc")][..],
+            &[("yu_gothic", "YuGothR.ttc"), ("ms_gothic", "msgothic.ttc")][..],
+            &[("malgun", "malgun.ttf")][..],
+        ];
+
+        for group in cjk_fallback_groups {
+            for (key, file_name) in group {
+                let cjk_path = fonts_dir.join(file_name);
+                if let Ok(font_data) = std::fs::read(&cjk_path) {
+                    fonts.font_data.insert(
+                        key.to_string(),
+                        std::sync::Arc::new(eframe::egui::FontData::from_owned(font_data)),
+                    );
+                    loaded_fonts.push(key.to_string());
+                    break;
+                }
+            }
+        }
 
         {
             let data = crate::embedded_assets::REMIXICON_TTF.to_vec();
