@@ -420,8 +420,13 @@ fn render_single_item(
         return;
     }
 
-    // Items have submenu if they have sub_items OR a pending submenu to load
-    let has_submenu = !item.sub_items.is_empty() || item.has_pending_submenu;
+    let item_text_lower = item.text.to_lowercase();
+    let is_open_with_item =
+        item_text_lower.contains("open with") || item_text_lower.contains("abrir com");
+    let is_blocked_waiting_for_submenu =
+        is_open_with_item && item.has_pending_submenu && item.sub_items.is_empty();
+    let has_submenu =
+        !item.sub_items.is_empty() || (item.has_pending_submenu && !is_blocked_waiting_for_submenu);
 
     // Build the label with icon + text + shortcut/arrow
     let (rect, response) = ui.allocate_exact_size(
@@ -430,7 +435,7 @@ fn render_single_item(
     );
 
     // Text color — loading placeholder uses a dimmed style
-    let text_color = if item.is_loading_placeholder {
+    let text_color = if item.is_loading_placeholder || is_blocked_waiting_for_submenu {
         // Dimmed "Loading…" style
         if ui.visuals().dark_mode {
             egui::Color32::from_gray(100)
@@ -444,7 +449,7 @@ fn render_single_item(
     };
 
     // Refined hover highlight (Windows 11 style soft blue with margin) — skip for loading placeholder
-    if response.hovered() && !item.is_loading_placeholder {
+    if response.hovered() && !item.is_loading_placeholder && !is_blocked_waiting_for_submenu {
         let hover_color = if ui.visuals().dark_mode {
             egui::Color32::from_rgb(43, 84, 127)
         } else {
@@ -464,7 +469,7 @@ fn render_single_item(
     let mut icon_drawn = false;
     if !item.is_loading_placeholder {
         if let Some(svg_name) = &item.svg_icon_name {
-            let icon_color_rgba = if item.is_enabled {
+            let icon_color_rgba = if item.is_enabled && !is_blocked_waiting_for_submenu {
                 if ui.visuals().dark_mode {
                     [220, 220, 220, 255]
                 } else {
@@ -546,7 +551,12 @@ fn render_single_item(
     }
 
     // Handle click — loading placeholder is not interactive
-    if response.clicked() && item.is_enabled && !has_submenu && !item.is_loading_placeholder {
+    if response.clicked()
+        && item.is_enabled
+        && !has_submenu
+        && !item.is_loading_placeholder
+        && !is_blocked_waiting_for_submenu
+    {
         *action = Some(item.id);
     }
 

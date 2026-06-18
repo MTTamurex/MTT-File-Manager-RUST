@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::ffi::OsStr;
 use std::hint::black_box;
 use std::os::windows::ffi::OsStrExt;
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -9,8 +10,9 @@ use windows::core::PCWSTR;
 use windows::Win32::Foundation::{CloseHandle, HANDLE};
 use windows::Win32::Storage::FileSystem::{
     CreateFileW, GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION, FILE_ATTRIBUTE_DIRECTORY,
-    FILE_FLAGS_AND_ATTRIBUTES, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
-    FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
+    FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAGS_AND_ATTRIBUTES, FILE_FLAG_BACKUP_SEMANTICS,
+    FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+    OPEN_EXISTING,
 };
 
 use crate::file_index::IndexState;
@@ -45,7 +47,7 @@ fn is_absolute_drive_path(path: &str) -> bool {
         && (bytes[2] == b'\\' || bytes[2] == b'/')
 }
 
-fn live_directory_frn(path: &str) -> Result<u64, String> {
+fn live_directory_frn(path: &str) -> Result<(u64, bool), String> {
     struct HandleGuard(HANDLE);
 
     impl Drop for HandleGuard {
@@ -93,7 +95,52 @@ fn live_directory_frn(path: &str) -> Result<u64, String> {
         return Err("Path is not a directory".to_string());
     }
 
-    Ok(file_index_to_frn(info.nFileIndexHigh, info.nFileIndexLow))
+    Ok((
+        file_index_to_frn(info.nFileIndexHigh, info.nFileIndexLow),
+        info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0,
+    ))
+}
+
+fn repair_missing_live_directory_record(
+    handle: &VolumeIndexHandle,
+    path: &str,
+    frn: u64,
+    is_reparse: bool,
+) -> Result<(u64, (u64, u64, u64, u64)), &'static str> {
+    let path = Path::new(path);
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .ok_or("Path has no directory name")?;
+    let parent_path = path
+        .parent()
+        .and_then(|parent| parent.to_str())
+        .ok_or("Path parent is not valid UTF-8")?;
+
+    let mut vol = handle.write();
+    if !matches!(vol.state, IndexState::Ready) {
+        return Err("Volume not ready");
+    }
+    if !vol.sizes_loaded {
+        return Err("Sizes not loaded");
+    }
+
+    if let Some(record) = vol.records.get(&frn) {
+        if !record.is_dir {
+            return Err("Path resolved to non-directory record");
+        }
+        return Ok((frn, crate::mft_reader::folder_size_for_service(&vol, frn)));
+    }
+
+    let parent_frn = vol
+        .resolve_path_to_frn(parent_path)
+        .ok_or("Path parent not found in index")?;
+    if !vol.insert_record(frn, name, parent_frn, true, is_reparse) {
+        return Err("Name arena full");
+    }
+
+    Ok((frn, crate::mft_reader::folder_size_for_service(&vol, frn)))
 }
 
 fn repair_suspicious_zero_folder_size(
@@ -558,7 +605,7 @@ pub(super) fn handle_client(
                 result.as_ref().err().copied() == Some("Path not found in index");
             let result = if needs_live_fallback {
                 match live_directory_frn(&path) {
-                    Ok(frn) => {
+                    Ok((frn, is_reparse)) => {
                         let vol = handle.read();
                         if !matches!(vol.state, IndexState::Ready) {
                             Err("Volume not ready")
@@ -575,7 +622,22 @@ pub(super) fn handle_client(
                                     Ok((frn, crate::mft_reader::folder_size_for_service(&vol, frn)))
                                 }
                                 Some(_) => Err("Path resolved to non-directory record"),
-                                None => Err("Path FRN not found in index"),
+                                None => {
+                                    drop(vol);
+                                    match repair_missing_live_directory_record(
+                                        &handle, &path, frn, is_reparse,
+                                    ) {
+                                        Ok(repaired) => {
+                                            eprintln!(
+                                                "[FOLDER-SIZE] repaired missing live directory record path={} frn={}",
+                                                crate::redact_paths(&path),
+                                                frn,
+                                            );
+                                            Ok(repaired)
+                                        }
+                                        Err(error) => Err(error),
+                                    }
+                                }
                             }
                         }
                     }
@@ -787,6 +849,41 @@ mod tests {
         assert!(!super::is_absolute_drive_path("C:relative"));
         assert!(!super::is_absolute_drive_path(r"\\server\share"));
         assert!(!super::is_absolute_drive_path(""));
+    }
+
+    #[test]
+    fn live_directory_repair_inserts_missing_index_record() {
+        let mut index = VolumeIndex::empty('C');
+        index.state = IndexState::Ready;
+        index.sizes_loaded = true;
+        assert!(index.insert_record(10, "Users", 5, true, false));
+        assert!(index.insert_record(11, "mtamu", 10, true, false));
+        assert!(index.insert_record(12, "OneDrive", 11, true, false));
+        assert!(index.insert_record(13, "Documentos Pessoais", 12, true, false));
+        assert!(index.insert_record(101, "Config", 200, false, false));
+
+        let handle = handle_from(index);
+        let repaired = super::repair_missing_live_directory_record(
+            &handle,
+            r"C:\Users\mtamu\OneDrive\Documentos Pessoais\Diablo IV",
+            200,
+            true,
+        )
+        .expect("repair should insert the missing directory");
+
+        let (repaired_frn, (total_size, file_count, folder_count, _zero_size_count)) = repaired;
+        assert_eq!(repaired_frn, 200);
+        assert_eq!(total_size, 0);
+        assert_eq!(file_count, 1);
+        assert_eq!(folder_count, 0);
+        let vol = handle.read();
+        let record = vol.records.get(&200).expect("directory record inserted");
+        assert!(record.is_dir);
+        assert_eq!(
+            vol.resolve_path_to_frn(r"C:\Users\mtamu\OneDrive\Documentos Pessoais\Diablo IV"),
+            Some(200)
+        );
+        assert!(vol.reparse_points.contains(&200));
     }
 
     #[test]

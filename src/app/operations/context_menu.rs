@@ -518,6 +518,7 @@ impl ImageViewerApp {
             }
         }
 
+        let mut pending_open_with_submenu_load = None;
         let items = &mut self.context_menu.items;
 
         // Remove the Open with placeholder before inserting the real item
@@ -532,6 +533,9 @@ impl ImageViewerApp {
         if let Some(mut open_with) = open_with_item {
             // Translate the text to match the current locale
             open_with.text = t!("context_menu.open_with").to_string();
+            if open_with.has_pending_submenu && open_with.sub_items.is_empty() {
+                pending_open_with_submenu_load = Some(open_with.id);
+            }
             if let Some(idx) = items.iter().position(|i| i.id == -21) {
                 items.insert(idx + 1, open_with);
             } else {
@@ -546,6 +550,10 @@ impl ImageViewerApp {
                 ContextMenuItem::new(-99, t!("context_menu.show_more"))
                     .with_subitems(all_shell_items),
             );
+        }
+
+        if let Some(id) = pending_open_with_submenu_load {
+            self.context_menu.pending_load_item = Some(id);
         }
 
         self.context_menu.partition_items(); // M-5: re-partition after shell items are merged
