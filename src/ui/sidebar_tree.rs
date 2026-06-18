@@ -260,7 +260,9 @@ fn render_tree_node(
     }
 
     // ── Recurse into children (if expanded) ──
-    if is_expanded && action.is_none() {
+    // Keep rendering after an action was captured so sibling subtrees don't
+    // disappear for one frame when selecting a node above them.
+    if is_expanded {
         if is_loading && ctx.tree_state.get_children(&node.path).is_none() {
             render_loading_row(ui, depth + 1);
         } else if let Some(children) = ctx.tree_state.get_children(&node.path) {

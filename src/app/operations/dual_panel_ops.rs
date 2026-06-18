@@ -4,11 +4,7 @@ use crate::app::dual_panel::{ActivePanel, PanelSnapshot};
 use crate::app::state::ImageViewerApp;
 
 impl ImageViewerApp {
-    /// Enable dual panel mode.
-    ///
-    /// The current app state becomes the **left** panel. The right panel is
-    /// initialised as a clone of the current state (same path).
-    pub fn dual_panel_enable(&mut self) {
+    fn dual_panel_enable_impl(&mut self, persist: bool) {
         if self.dual_panel_enabled {
             return;
         }
@@ -30,39 +26,12 @@ impl ImageViewerApp {
         snapshot.pending_items_count = 0;
         self.dual_panel_inactive_state = Some(snapshot);
         self.dual_panel_enabled = true;
-        self.save_preferences();
-    }
-
-    /// Disable dual panel mode.
-    ///
-    /// The active panel's state remains in the app fields; the inactive panel
-    /// is discarded.
-    pub fn dual_panel_disable(&mut self) {
-        if !self.dual_panel_enabled {
-            return;
-        }
-        log::info!("[DualPanel] Disabling dual panel mode");
-
-        // Drop inactive panel state
-        self.dual_panel_inactive_state = None;
-        self.dual_panel_enabled = false;
-        self.save_preferences();
-    }
-
-    /// Toggle dual panel mode on/off.
-    pub fn dual_panel_toggle(&mut self) {
-        if self.dual_panel_enabled {
-            self.dual_panel_disable();
-        } else {
-            self.dual_panel_enable();
+        if persist {
+            self.save_preferences();
         }
     }
 
-    /// Switch the active panel (Left ↔ Right).
-    ///
-    /// Uses zero-allocation `swap_with_app` to exchange state between the
-    /// active panel (in app fields) and the inactive panel (in snapshot).
-    pub fn dual_panel_switch_active(&mut self) {
+    fn dual_panel_switch_active_impl(&mut self, persist: bool) {
         if !self.dual_panel_enabled {
             return;
         }
@@ -86,7 +55,7 @@ impl ImageViewerApp {
             self.destroy_media_preview();
         }
 
-        // Zero-alloc swap: active ↔ inactive
+        // Zero-alloc swap: active <-> inactive
         snapshot.swap_with_app(self);
         // Re-evaluate the restored panel's folder lock without resetting
         // saved unlocked view settings from its panel snapshot.
@@ -123,7 +92,58 @@ impl ImageViewerApp {
             self.load_folder(false);
         }
 
+        if persist {
+            self.save_preferences();
+        }
+    }
+
+    pub fn dual_panel_enable_for_restore(&mut self) {
+        self.dual_panel_enable_impl(false);
+    }
+
+    pub fn dual_panel_switch_active_for_restore(&mut self) {
+        self.dual_panel_switch_active_impl(false);
+    }
+
+    /// Enable dual panel mode.
+    ///
+    /// The current app state becomes the **left** panel. The right panel is
+    /// initialised as a clone of the current state (same path).
+    pub fn dual_panel_enable(&mut self) {
+        self.dual_panel_enable_impl(true);
+    }
+
+    /// Disable dual panel mode.
+    ///
+    /// The active panel's state remains in the app fields; the inactive panel
+    /// is discarded.
+    pub fn dual_panel_disable(&mut self) {
+        if !self.dual_panel_enabled {
+            return;
+        }
+        log::info!("[DualPanel] Disabling dual panel mode");
+
+        // Drop inactive panel state
+        self.dual_panel_inactive_state = None;
+        self.dual_panel_enabled = false;
         self.save_preferences();
+    }
+
+    /// Toggle dual panel mode on/off.
+    pub fn dual_panel_toggle(&mut self) {
+        if self.dual_panel_enabled {
+            self.dual_panel_disable();
+        } else {
+            self.dual_panel_enable();
+        }
+    }
+
+    /// Switch the active panel (Left ↔ Right).
+    ///
+    /// Uses zero-allocation `swap_with_app` to exchange state between the
+    /// active panel (in app fields) and the inactive panel (in snapshot).
+    pub fn dual_panel_switch_active(&mut self) {
+        self.dual_panel_switch_active_impl(true);
     }
 
     /// Temporarily swap the inactive panel into app fields, run a closure, then

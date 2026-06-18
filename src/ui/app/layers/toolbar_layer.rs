@@ -85,6 +85,7 @@ pub(crate) fn render_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context
                         if !app.current_folder_locked {
                             app.view_mode_normal = app.view_mode;
                         }
+                        app.save_preferences();
                         debug_log!(
                             "[VIEW-MODE] Toolbar toggle -> {:?} (tab={})",
                             app.view_mode,

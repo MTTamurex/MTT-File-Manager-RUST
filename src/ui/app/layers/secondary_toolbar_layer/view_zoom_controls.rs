@@ -7,6 +7,7 @@ use rust_i18n::t;
 
 pub(super) fn render_view_and_zoom_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
     let locked = app.current_folder_locked;
+    let mut view_mode_changed = false;
 
     ui.scope(|ui| {
         if locked {
@@ -27,6 +28,7 @@ pub(super) fn render_view_and_zoom_controls(ui: &mut egui::Ui, app: &mut ImageVi
             if !locked {
                 app.view_mode_normal = ViewMode::List;
             }
+            view_mode_changed = true;
         }
 
         if widgets::toggle_icon_button(
@@ -46,8 +48,13 @@ pub(super) fn render_view_and_zoom_controls(ui: &mut egui::Ui, app: &mut ImageVi
             // Cancel batch folder-size work — Grid mode only
             // calculates size on selection, not for all items.
             app.folder_size_state.cancel_batch();
+            view_mode_changed = true;
         }
     });
+
+    if view_mode_changed {
+        app.save_preferences();
+    }
 
     ui.separator();
 

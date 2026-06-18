@@ -60,8 +60,13 @@ impl ImageViewerApp {
                 path,
                 self.folder_locks.len()
             );
-            // Restore normal (unlocked) settings
-            self.view_mode = self.view_mode_normal;
+            // Restore normal (unlocked) settings. In dual panel mode, each
+            // panel owns its current view mode; using the global normal value
+            // here would make navigation adopt whichever panel changed view
+            // mode last.
+            if !self.dual_panel_enabled || self.current_folder_locked {
+                self.view_mode = self.view_mode_normal;
+            }
             self.sort_mode = self.sort_mode_normal;
             self.sort_descending = self.sort_descending_normal;
             self.folders_position = self.folders_position_normal;

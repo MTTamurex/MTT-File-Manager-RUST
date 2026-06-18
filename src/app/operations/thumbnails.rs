@@ -404,6 +404,13 @@ impl ImageViewerApp {
             return;
         }
 
+        let effective_gen = if self.use_active_generation_for_thumbnail_requests {
+            self.current_generation
+                .load(std::sync::atomic::Ordering::Relaxed)
+        } else {
+            self.generation
+        };
+
         // Dedup by extension: if another file with the same extension is already
         // being loaded, skip.  Once that result arrives, extension_cache is
         // populated and ALL files with that extension get the icon immediately.
@@ -421,11 +428,7 @@ impl ImageViewerApp {
         }
 
         self.loading_icons.insert(path.clone());
-        if self
-            .icon_req_sender
-            .send((path.clone(), self.generation))
-            .is_err()
-        {
+        if self.icon_req_sender.send((path.clone(), effective_gen)).is_err() {
             self.loading_icons.remove(&path);
         }
     }

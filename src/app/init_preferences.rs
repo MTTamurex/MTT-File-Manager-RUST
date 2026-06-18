@@ -37,6 +37,8 @@ pub(super) struct StartupPreferences {
     pub(super) dual_panel_active: ActivePanel,
     pub(super) dual_panel_split_ratio: f32,
     pub(super) dual_panel_inactive_path: Option<String>,
+    pub(super) dual_panel_active_view_mode: ViewMode,
+    pub(super) dual_panel_inactive_view_mode: ViewMode,
 }
 
 impl StartupPreferences {
@@ -96,13 +98,16 @@ impl StartupPreferences {
             .unwrap_or(theme::THUMBNAIL_DEFAULT)
             .clamp(theme::THUMBNAIL_MIN, theme::THUMBNAIL_MAX);
 
-        let view_mode = prefs
-            .get("view_mode")
-            .map(|s| match s.as_str() {
-                "list" => ViewMode::List,
-                _ => ViewMode::Grid,
-            })
-            .unwrap_or(ViewMode::Grid);
+        let parse_view_mode = |value: Option<&String>| {
+            value
+                .map(|s| match s.as_str() {
+                    "list" => ViewMode::List,
+                    _ => ViewMode::Grid,
+                })
+                .unwrap_or(ViewMode::Grid)
+        };
+
+        let view_mode = parse_view_mode(prefs.get("view_mode"));
 
         let show_left_sidebar = prefs
             .get("show_left_sidebar")
@@ -255,6 +260,17 @@ impl StartupPreferences {
             .filter(|path| !path.is_empty())
             .cloned();
 
+        let dual_panel_active_view_mode = parse_view_mode(
+            prefs
+                .get("dual_panel_active_view_mode")
+                .or_else(|| prefs.get("view_mode")),
+        );
+        let dual_panel_inactive_view_mode = parse_view_mode(
+            prefs
+                .get("dual_panel_inactive_view_mode")
+                .or_else(|| prefs.get("view_mode")),
+        );
+
         Self {
             sort_mode,
             sort_mode_computer,
@@ -285,6 +301,8 @@ impl StartupPreferences {
             dual_panel_active,
             dual_panel_split_ratio,
             dual_panel_inactive_path,
+            dual_panel_active_view_mode,
+            dual_panel_inactive_view_mode,
         }
     }
 }

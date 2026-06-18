@@ -15,6 +15,13 @@ use crate::domain::special_paths::{is_virtual_path, COMPUTER_VIEW_ID};
 use crate::infrastructure::diagnostic_logger;
 use std::time::SystemTime;
 
+fn view_mode_preference_value(view_mode: ViewMode) -> &'static str {
+    match view_mode {
+        ViewMode::Grid => "grid",
+        ViewMode::List => "list",
+    }
+}
+
 /// Minimum interval between actual disk writes
 const PREFERENCES_FLUSH_INTERVAL_MS: u64 = 1000;
 
@@ -48,7 +55,7 @@ impl ImageViewerApp {
     }
 
     fn collect_preferences(&self) -> Vec<(&'static str, String)> {
-        let mut prefs: Vec<(&'static str, String)> = Vec::with_capacity(48);
+        let mut prefs: Vec<(&'static str, String)> = Vec::with_capacity(50);
 
         // Always save the "normal" (unlocked) values so that locked-folder
         // overrides don't corrupt the persisted global preferences.
@@ -99,11 +106,10 @@ impl ImageViewerApp {
         // UI preferences
         prefs.push(("thumbnail_size", self.thumbnail_size.to_string()));
 
-        let view_mode_str = match self.view_mode_normal {
-            ViewMode::Grid => "grid",
-            ViewMode::List => "list",
-        };
-        prefs.push(("view_mode", view_mode_str.to_string()));
+        prefs.push((
+            "view_mode",
+            view_mode_preference_value(self.view_mode_normal).to_string(),
+        ));
 
         prefs.push((
             "show_left_sidebar",
@@ -170,6 +176,10 @@ impl ImageViewerApp {
             "dual_panel_split_ratio",
             self.layout.dual_panel_split_ratio.to_string(),
         ));
+        prefs.push((
+            "dual_panel_active_view_mode",
+            view_mode_preference_value(self.view_mode).to_string(),
+        ));
 
         // Persist inactive panel's path so it restores to its own folder.
         // Always write the key: preference batches only upsert, so omitting it
@@ -185,6 +195,15 @@ impl ImageViewerApp {
             })
             .unwrap_or_default();
         prefs.push(("dual_panel_inactive_path", inactive_path.to_string()));
+        let inactive_view_mode = self
+            .dual_panel_inactive_state
+            .as_ref()
+            .map(|snapshot| snapshot.view_mode)
+            .unwrap_or(self.view_mode);
+        prefs.push((
+            "dual_panel_inactive_view_mode",
+            view_mode_preference_value(inactive_view_mode).to_string(),
+        ));
 
         // Sidebar widths persistence - only save valid values
         let left_to_save = self.layout.sidebar_left_width.max(150.0);

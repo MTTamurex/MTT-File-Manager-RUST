@@ -192,6 +192,8 @@ impl ImageViewerApp {
             dual_panel_active: saved_dual_panel_active,
             dual_panel_split_ratio,
             dual_panel_inactive_path: saved_dual_panel_inactive_path,
+            dual_panel_active_view_mode: saved_dual_panel_active_view_mode,
+            dual_panel_inactive_view_mode: saved_dual_panel_inactive_view_mode,
         } = startup_preferences;
 
         // Apply saved language preference
@@ -656,12 +658,13 @@ impl ImageViewerApp {
 
         // Restore dual panel state (must run after full app construction)
         if saved_dual_panel_enabled {
-            app.dual_panel_enable();
+            app.view_mode = saved_dual_panel_active_view_mode;
+            app.dual_panel_enable_for_restore();
             // dual_panel_enable() always makes Left active. If the saved active
             // panel was Right, swap so the app fields and inactive snapshot are
             // consistent with the persisted active panel.
             if saved_dual_panel_active == crate::app::dual_panel::ActivePanel::Right {
-                app.dual_panel_switch_active();
+                app.dual_panel_switch_active_for_restore();
             }
             // Restore the inactive panel's saved path so it doesn't just clone
             // the active panel's folder. The actual folder load is deferred to
@@ -674,6 +677,7 @@ impl ImageViewerApp {
                     app.navigation_state.path_input = inactive_path;
                     app.navigation_state.is_computer_view = is_computer;
                     app.navigation_state.is_recycle_bin_view = false;
+                    app.view_mode = saved_dual_panel_inactive_view_mode;
                     app.loaded_path.clear();
                 });
             }
