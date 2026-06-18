@@ -158,6 +158,17 @@ pub fn is_archive_extension(name: &str) -> bool {
         .any(|ext| ends_with_ignore_case(name, ext))
 }
 
+/// Windows PE executable extensions that do not support "Open with".
+pub const EXECUTABLE_EXTENSIONS: &[&str] = &[".exe", ".msi", ".com", ".scr"];
+
+/// Checks if a filename ends with a Windows PE executable extension (case-insensitive).
+#[inline]
+pub fn is_executable_extension(name: &str) -> bool {
+    EXECUTABLE_EXTENSIONS
+        .iter()
+        .any(|ext| ends_with_ignore_case(name, ext))
+}
+
 /// Checks if a path (already in lowercase) passes through an archive file.
 /// E.g.: "C:\archive.7z\subdir\file.txt" → true
 pub fn path_contains_archive_segment(path_lower: &str) -> bool {

@@ -122,15 +122,25 @@ impl ImageViewerApp {
         // Determine if the target is a file (not a folder, not a drive, not empty area).
         // Archives (.zip, .rar, .7z) have is_dir=true (they're navigable containers)
         // but still support "Open with" as files.
+        // PE executables (.exe, .msi, .com, .scr) never show "Open with" in Windows Explorer.
         let target_is_file = if is_empty_area || is_drive {
             false
         } else if let Some(idx) = _item_index {
             self.items
                 .get(idx)
-                .map(|item| !item.is_dir || item.is_archive())
+                .map(|item| {
+                    (!item.is_dir || item.is_archive())
+                        && !crate::domain::file_entry::is_executable_extension(&item.name)
+                })
                 .unwrap_or(false)
         } else if let Some(path) = paths.first() {
             path.is_file()
+                && path.extension().map_or(true, |ext| {
+                    !crate::domain::file_entry::is_executable_extension(&format!(
+                        ".{}",
+                        ext.to_string_lossy()
+                    ))
+                })
         } else {
             false
         };
@@ -477,7 +487,15 @@ impl ImageViewerApp {
             .context_menu
             .target_paths
             .first()
-            .map(|p| p.is_file())
+            .map(|p| {
+                p.is_file()
+                    && p.extension().map_or(true, |ext| {
+                        !crate::domain::file_entry::is_executable_extension(&format!(
+                            ".{}",
+                            ext.to_string_lossy()
+                        ))
+                    })
+            })
             .unwrap_or(false);
 
         let mut open_with_item: Option<ContextMenuItem> = None;
