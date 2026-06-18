@@ -2,6 +2,7 @@
 //!
 //! This module handles setting up special views like "This PC" and "Recycle Bin".
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::atomic::Ordering as AtomicOrdering;
 use std::sync::Arc;
@@ -25,6 +26,12 @@ const DRIVE_BITMASK_CHECK_INTERVAL_MS: u64 = 3000;
 // stays in the "This PC" view. 5s is conservative and avoids hammering
 // network drives while still feeling responsive for local changes.
 const DRIVE_INFO_REFRESH_INTERVAL_MS: u64 = 5000;
+
+fn normalize_drive_root_for_compare(path: &str) -> String {
+    path.to_lowercase()
+        .trim_end_matches(['\\', '/'])
+        .to_string()
+}
 
 impl ImageViewerApp {
     pub fn setup_recycle_bin_view(&mut self) {
@@ -359,14 +366,23 @@ impl ImageViewerApp {
 
                     // Detect removed drives: if user is browsing inside a removed drive,
                     // navigate them to "Este Computador" to avoid showing stale cached data.
+                    let reclassified_drive_roots: HashSet<String> = self
+                        .drive_state
+                        .cloud_roots
+                        .iter()
+                        .filter_map(|root| root.source_path.as_deref())
+                        .map(normalize_drive_root_for_compare)
+                        .collect();
                     let removed_drives: Vec<String> = old_disks
                         .iter()
                         .filter(|(old_path, _)| {
-                            !self
-                                .drive_state
-                                .disks
-                                .iter()
-                                .any(|(new_path, _)| new_path == old_path)
+                            let old_key = normalize_drive_root_for_compare(old_path);
+                            !reclassified_drive_roots.contains(&old_key)
+                                && !self
+                                    .drive_state
+                                    .disks
+                                    .iter()
+                                    .any(|(new_path, _)| new_path == old_path)
                         })
                         .map(|(path, _)| path.clone())
                         .collect();

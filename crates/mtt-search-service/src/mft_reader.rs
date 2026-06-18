@@ -731,57 +731,6 @@ pub fn read_single_file_size(volume: HANDLE, frn: u64, record_size: u32) -> Opti
     resolve_file_size_with_fallbacks(volume, None, frn, rs, &mut output_buffer, &mut dir_cache)
 }
 
-/// Refresh recorded sizes for known file FRNs from live NTFS metadata.
-/// Returns the number of records whose size changed.
-pub fn refresh_file_sizes_for_frns(
-    volume: HANDLE,
-    index: &mut VolumeIndex,
-    frns: &[u64],
-    record_size: u32,
-) -> usize {
-    let rs = record_size as usize;
-    let mut changed = 0usize;
-    let mut output_buffer = vec![0u8; OUTPUT_HEADER + rs];
-    let mut dir_cache = HashMap::with_capacity(256);
-
-    for &frn in frns {
-        let should_refresh = index
-            .records
-            .get(&frn)
-            .map(|record| !record.is_dir)
-            .unwrap_or(false);
-        if !should_refresh {
-            continue;
-        }
-
-        let resolved_size = {
-            let index_ref: &VolumeIndex = &*index;
-            resolve_file_size_with_fallbacks(
-                volume,
-                Some(index_ref),
-                frn,
-                rs,
-                &mut output_buffer,
-                &mut dir_cache,
-            )
-        };
-
-        let Some(size) = resolved_size else {
-            continue;
-        };
-
-        if let Some(record) = index.records.get_mut(&frn) {
-            if record.size != size {
-                record.size = size;
-                changed += 1;
-                index.binary_dirty = true;
-            }
-        }
-    }
-
-    changed
-}
-
 /// Public wrapper to query the MFT record size for a volume.
 /// Returns `bytes_per_file_record` on success.
 pub fn query_mft_geometry_pub(volume: HANDLE) -> Result<u32, String> {

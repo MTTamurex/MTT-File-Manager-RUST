@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::ffi::OsStr;
 use std::hint::black_box;
 use std::os::windows::ffi::OsStrExt;
@@ -37,6 +37,14 @@ fn file_index_to_frn(high: u32, low: u32) -> u64 {
     (((high as u64) << 32) | low as u64) & FRN_MASK
 }
 
+fn is_absolute_drive_path(path: &str) -> bool {
+    let bytes = path.as_bytes();
+    bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && (bytes[2] == b'\\' || bytes[2] == b'/')
+}
+
 fn live_directory_frn(path: &str) -> Result<u64, String> {
     struct HandleGuard(HANDLE);
 
@@ -49,6 +57,10 @@ fn live_directory_frn(path: &str) -> Result<u64, String> {
     }
 
     const FILE_READ_ATTRIBUTES: u32 = 0x0080;
+
+    if !is_absolute_drive_path(path) {
+        return Err("Path is not an absolute drive path".to_string());
+    }
 
     let path_wide: Vec<u16> = OsStr::new(path)
         .encode_wide()
@@ -141,8 +153,8 @@ fn repair_suspicious_zero_folder_size(
         }
     };
 
-    let (candidate_count, changed_count, refreshed_summary) = {
-        let mut vol = handle.write();
+    let candidates: Vec<(u64, Option<String>)> = {
+        let vol = handle.read();
         let live_refresh_candidates = if file_count <= LIVE_SIZE_REFRESH_FILE_LIMIT {
             vol.collect_file_frns_in_subtree_limited(dir_frn, LIVE_SIZE_REFRESH_FILE_LIMIT as usize)
                 .unwrap_or_default()
@@ -154,17 +166,63 @@ fn repair_suspicious_zero_folder_size(
         } else {
             live_refresh_candidates
         };
-        if candidates.is_empty() {
-            (0usize, 0usize, (total_size, file_count, folder_count))
+
+        let mut dir_cache = HashMap::new();
+        candidates
+            .into_iter()
+            .map(|frn| {
+                let path = crate::path_resolver::resolve_path_cached(frn, &vol, &mut dir_cache);
+                (frn, path)
+            })
+            .collect()
+    };
+
+    let candidate_count = candidates.len();
+    let (changed_count, refreshed_summary) = if candidates.is_empty() {
+        (0usize, (total_size, file_count, folder_count))
+    } else {
+        let mut size_updates: Vec<(u64, u64)> = Vec::with_capacity(candidates.len());
+        for (frn, resolved_path) in &candidates {
+            let size =
+                crate::mft_reader::read_single_file_size(volume, *frn, record_size).or_else(|| {
+                    resolved_path.as_ref().and_then(|path| {
+                        let path = if path.starts_with("\\\\?\\") {
+                            path.clone()
+                        } else {
+                            format!(r"\\?\{}", path)
+                        };
+                        std::fs::metadata(path)
+                            .ok()
+                            .filter(|metadata| metadata.is_file())
+                            .map(|metadata| metadata.len())
+                    })
+                });
+
+            if let Some(size) = size {
+                size_updates.push((*frn, size));
+            }
+        }
+
+        if size_updates.is_empty() {
+            (0usize, (total_size, file_count, folder_count))
         } else {
-            let changed = crate::mft_reader::refresh_file_sizes_for_frns(
-                volume,
-                &mut vol,
-                &candidates,
-                record_size,
-            );
+            let mut vol = handle.write();
+            let mut changed = 0usize;
+            let mut binary_dirty = false;
+            for (frn, size) in size_updates {
+                if let Some(record) = vol.records.get_mut(&frn) {
+                    if !record.is_dir && record.size != size {
+                        record.size = size;
+                        changed += 1;
+                        binary_dirty = true;
+                    }
+                }
+            }
+            if binary_dirty {
+                vol.binary_dirty = true;
+            }
             let (rt, rfc, rfoldc, _) = crate::mft_reader::folder_size_for_service(&vol, dir_frn);
-            (candidates.len(), changed, (rt, rfc, rfoldc))
+            (changed, (rt, rfc, rfoldc))
         }
     };
 
@@ -720,6 +778,15 @@ mod tests {
             super::file_index_to_frn(0x1234_5678, 0x9ABC_DEF0),
             0x0000_5678_9ABC_DEF0
         );
+    }
+
+    #[test]
+    fn live_fallback_accepts_only_absolute_drive_paths() {
+        assert!(super::is_absolute_drive_path(r"C:\data"));
+        assert!(super::is_absolute_drive_path("d:/data"));
+        assert!(!super::is_absolute_drive_path("C:relative"));
+        assert!(!super::is_absolute_drive_path(r"\\server\share"));
+        assert!(!super::is_absolute_drive_path(""));
     }
 
     #[test]

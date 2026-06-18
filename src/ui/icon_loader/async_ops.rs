@@ -54,8 +54,17 @@ fn folder_path_icon_cache_key(folder_path: &str) -> String {
         .to_string()
 }
 
-fn cloud_root_icon_cache_key(root_path: &str) -> String {
-    format!("cloud:{}", folder_path_icon_cache_key(root_path))
+fn cloud_root_icon_cache_key(root_path: &str, icon_resource: Option<&str>) -> String {
+    let resource_key = icon_resource
+        .map(str::trim)
+        .filter(|resource| !resource.is_empty())
+        .map(|resource| resource.to_lowercase())
+        .unwrap_or_default();
+    format!(
+        "cloud:{}|{}",
+        folder_path_icon_cache_key(root_path),
+        resource_key
+    )
 }
 
 impl IconLoader {
@@ -63,7 +72,7 @@ impl IconLoader {
         &mut self,
         roots: &[crate::domain::cloud_root::CloudRoot],
     ) {
-        self.registered_folder_icon_resources.clear();
+        let mut next_resources = std::collections::HashMap::new();
 
         for root in roots {
             let Some(resource) = root.icon_resource.as_deref() else {
@@ -73,8 +82,31 @@ impl IconLoader {
                 continue;
             }
 
-            self.registered_folder_icon_resources
-                .insert(folder_path_icon_cache_key(&root.path), resource.to_string());
+            next_resources.insert(folder_path_icon_cache_key(&root.path), resource.to_string());
+        }
+
+        let mut changed_keys: Vec<(String, Option<String>, Option<String>)> = Vec::new();
+        for (key, old_resource) in &self.registered_folder_icon_resources {
+            if !next_resources.contains_key(key) {
+                changed_keys.push((key.clone(), Some(old_resource.clone()), None));
+            }
+        }
+        for (key, resource) in &next_resources {
+            let old_resource = self.registered_folder_icon_resources.get(key);
+            if old_resource != Some(resource) {
+                changed_keys.push((key.clone(), old_resource.cloned(), Some(resource.clone())));
+            }
+        }
+
+        self.registered_folder_icon_resources = next_resources;
+
+        for (key, old_resource, new_resource) in changed_keys {
+            for resource in [old_resource.as_deref(), new_resource.as_deref(), None] {
+                let cache_key = cloud_root_icon_cache_key(&key, resource);
+                self.drive_icon_cache.pop(&cache_key);
+                self.failed_drive_icons.pop(&cache_key);
+                self.loading_drive_icons.remove(&cache_key);
+            }
         }
     }
 
@@ -285,7 +317,7 @@ impl IconLoader {
         root_path: &str,
         icon_resource: Option<&str>,
     ) -> Option<egui::TextureHandle> {
-        let cache_key = cloud_root_icon_cache_key(root_path);
+        let cache_key = cloud_root_icon_cache_key(root_path, icon_resource);
 
         if self.failed_drive_icons.peek(&cache_key).is_some() {
             return None;
@@ -301,7 +333,11 @@ impl IconLoader {
 
         let tx = self.icon_result_tx.clone();
         let path_owned = root_path.to_string();
-        let resource_path = icon_resource.and_then(icon_resource_path);
+        let resource = icon_resource
+            .map(str::trim)
+            .filter(|resource| !resource.is_empty())
+            .map(str::to_string);
+        let resource_path = resource.as_deref().and_then(icon_resource_path);
         let active = self.auxiliary_icon_threads.clone();
 
         if !super::try_reserve_auxiliary_icon_thread(&active) {
@@ -317,6 +353,13 @@ impl IconLoader {
                 let _guard = super::ThreadCountGuard(thread_active);
                 let _com = super::ComStaGuard::new();
                 let data = (|| {
+                    if let Some(resource) = resource.as_ref() {
+                        if let Ok(icon) = windows::extract_icon_resource(resource, IconSize::Jumbo)
+                        {
+                            return Ok(icon);
+                        }
+                    }
+
                     if let Some(path) = resource_path.as_ref() {
                         if path.is_dir() {
                             if let Some(resource) = folder_desktop_ini_icon_resource(path) {

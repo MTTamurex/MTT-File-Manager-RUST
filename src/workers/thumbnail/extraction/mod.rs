@@ -7,15 +7,13 @@
 //! 2. **Image Crate** (Legacy Fast Path) - Uses `image` crate for common formats
 //! 3. **WIC** (Robust Fallback) - Windows Imaging Component for CMYK/problematic images
 //! 4. **Shell API** (Universal) - IThumbnailCache with WTS_EXTRACTDONOTCACHE
-//! 5. **Force Extraction** - IThumbnailCache with WTS_EXTRACTDONOTCACHE
-//! 6. **Media Foundation** (Fallback only) - Direct video frame extraction
+//! 5. **Media Foundation** (Fallback only) - Direct video frame extraction
 
 pub mod orientation;
 pub mod stage0_embedded_exif_thumbnail;
 pub mod stage1_image_crate;
 pub mod stage2_wic;
 pub mod stage3_shell_api;
-pub mod stage4_force_extract;
 pub mod stage5_media_foundation;
 
 use crate::domain::thumbnail::MAX_THUMBNAIL_SIDE;
@@ -43,8 +41,7 @@ pub enum ThumbnailExtractionOutcome {
 ///
 /// Attempts extraction in order of speed/reliability:
 /// - Stages 1-2: Fast paths for images
-/// - Stage 3: Universal fallback
-/// - Stage 4: Force bypass Windows cache
+/// - Stage 3: Universal Shell fallback without populating Explorer's cache
 /// - Stage 5: Direct video frame extraction when Windows thumbnail providers fail
 ///
 /// `pending_deletions` is checked between stages to abort early if the file
@@ -167,28 +164,6 @@ pub fn generate_thumbnail_hybrid_detailed_with_target(
                 if !err_str.contains("0x80070002") {
                     log::trace!(
                         "[Thumbnail] Stage 3 failed for {:?}: {}",
-                        path.file_name(),
-                        e
-                    );
-                }
-            }
-        }
-    }
-
-    // IThumbnailCache fallback without populating Explorer's thumbnail cache.
-    {
-        let t0 = std::time::Instant::now();
-        match stage4_force_extract::extract_with_size(path, image_target_max_side) {
-            Ok(result) => {
-                log_extraction_perf(path, "stage4_force", t0, &result);
-                return ThumbnailExtractionOutcome::Success(result);
-            }
-            Err(e) => {
-                log_extraction_stage_failure(path, "stage4_force", t0);
-                let err_str = e.to_string();
-                if !err_str.contains("0x80070002") {
-                    log::trace!(
-                        "[Thumbnail] Stage 4 (force) failed for {:?}: {}",
                         path.file_name(),
                         e
                     );

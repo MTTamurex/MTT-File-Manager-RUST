@@ -34,6 +34,19 @@ use super::init_state_builders::{
 use super::navigation_state::NavigationState;
 use super::state::{ImageViewerApp, LastInput};
 
+fn is_valid_startup_folder_path(path: &str) -> bool {
+    if path == COMPUTER_VIEW_ID {
+        return true;
+    }
+
+    if path.is_empty() || path.starts_with("shell:") || is_virtual_path(path) {
+        return false;
+    }
+
+    let path_buf = PathBuf::from(path);
+    onedrive::fast_path_exists(&path_buf) && onedrive::fast_is_dir(&path_buf)
+}
+
 /// Determines the initial path based on the last saved folder
 /// Returns (path, is_computer_view) - if the folder is unavailable, returns "This PC"
 fn determine_initial_path(app_state_db: &AppStateDb) -> (String, bool) {
@@ -51,15 +64,12 @@ fn determine_initial_path(app_state_db: &AppStateDb) -> (String, bool) {
                 return (COMPUTER_VIEW_ID.to_string(), true);
             }
 
-            // Check if path still exists and is accessible
-            let path_buf = PathBuf::from(&last_folder);
-
             // CRITICAL FIX: Use fast_path_exists() + fast_is_dir() instead of
             // path.exists() + std::fs::read_dir(). The original calls use CreateFileW
             // and FindFirstFileW which can block for 30-60s on OneDrive cloud-only
             // folders, freezing the app at startup.
             // GetFileAttributesW reads cached attributes - no network I/O.
-            if onedrive::fast_path_exists(&path_buf) && onedrive::fast_is_dir(&path_buf) {
+            if is_valid_startup_folder_path(&last_folder) {
                 log::info!("[INIT] Restoring last folder from preferences");
                 diag_info(
                     "startup",
@@ -639,13 +649,6 @@ impl ImageViewerApp {
         app.global_search
             .spawn_tooltip_worker(disk_cache.clone(), &ctx);
 
-        if app.diagnostic_mode && !crate::infrastructure::diagnostic_logger::is_enabled() {
-            app.set_diagnostic_mode(true);
-        } else if diagnostic_mode_needs_persist {
-            app.save_preferences();
-            app.force_save_preferences();
-        }
-
         // Pre-set custom composed folder icon on cache_manager (used by grid/list bridges)
         {
             let (pixels, width, height) = custom_folder_icon;
@@ -670,6 +673,11 @@ impl ImageViewerApp {
             // the active panel's folder. The actual folder load is deferred to
             // handle_startup_sequence() where workers are fully ready.
             if let Some(inactive_path) = saved_dual_panel_inactive_path {
+                let inactive_path = if is_valid_startup_folder_path(&inactive_path) {
+                    inactive_path
+                } else {
+                    COMPUTER_VIEW_ID.to_string()
+                };
                 app.with_inactive_panel(|app| {
                     let is_computer =
                         inactive_path == crate::domain::special_paths::COMPUTER_VIEW_ID;
@@ -681,6 +689,13 @@ impl ImageViewerApp {
                     app.loaded_path.clear();
                 });
             }
+        }
+
+        if app.diagnostic_mode && !crate::infrastructure::diagnostic_logger::is_enabled() {
+            app.set_diagnostic_mode(true);
+        } else if diagnostic_mode_needs_persist {
+            app.save_preferences();
+            app.force_save_preferences();
         }
 
         // Populate the modified hint for the initial folder so the preview panel

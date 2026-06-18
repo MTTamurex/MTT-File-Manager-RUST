@@ -74,6 +74,16 @@ fn persist_pending_snapshot(
     snapshot: PendingPersistSnapshot,
 ) -> bool {
     let had_structural_changes = !snapshot.additions.is_empty() || !snapshot.removals.is_empty();
+    let skip_sqlite_data = crate::index_db::skip_sqlite_data_persistence();
+
+    if skip_sqlite_data && !flush_binary_snapshot_if_dirty(handle, drive_letter) {
+        eprintln!(
+            "[USN] {}:\\ Deferring volume_state persist until binary snapshot is durable",
+            drive_letter
+        );
+        restore_pending_snapshot(handle, snapshot);
+        return false;
+    }
 
     if let Err(e) = db.save_volume_state_snapshot(
         snapshot.drive_letter,
@@ -90,7 +100,7 @@ fn persist_pending_snapshot(
         );
     }
 
-    if had_structural_changes && !crate::index_db::skip_sqlite_data_persistence() {
+    if had_structural_changes && !skip_sqlite_data {
         if let Err(e) = db.sync_records_incremental_snapshot(
             snapshot.drive_letter,
             &snapshot.addition_rows,
@@ -109,11 +119,14 @@ fn persist_pending_snapshot(
     had_structural_changes
 }
 
-fn flush_binary_snapshot_if_dirty(handle: &VolumeIndexHandle, drive_letter: char) {
+fn flush_binary_snapshot_if_dirty(handle: &VolumeIndexHandle, drive_letter: char) -> bool {
     let should_trim = {
         let mut vol = handle.write();
-        if !vol.binary_dirty || !vol.sizes_loaded {
-            return;
+        if !vol.binary_dirty {
+            return true;
+        }
+        if !vol.sizes_loaded {
+            return false;
         }
 
         match crate::index_db::binary::save(&vol) {
@@ -135,6 +148,7 @@ fn flush_binary_snapshot_if_dirty(handle: &VolumeIndexHandle, drive_letter: char
     if should_trim {
         crate::memory_trim::trim_working_set(&format!("{}:\\ binary snapshot flush", drive_letter));
     }
+    should_trim
 }
 
 fn should_prefer_sqlite_over_binary(
@@ -877,6 +891,7 @@ pub(crate) fn index_volume(
                 let geometry = crate::mft_reader::query_mft_geometry_pub(volume_handle);
                 if let Ok(record_size) = geometry {
                     let mut size_updates: Vec<(u64, u64)> = Vec::with_capacity(pending_frns.len());
+                    let mut unresolved_frns: Vec<u64> = Vec::new();
                     for &frn in &pending_frns {
                         if let Some(size) = crate::mft_reader::read_single_file_size(
                             volume_handle,
@@ -884,13 +899,15 @@ pub(crate) fn index_volume(
                             record_size,
                         ) {
                             size_updates.push((frn, size));
+                        } else {
+                            unresolved_frns.push(frn);
                         }
                     }
 
                     // Apply sizes under lock. If the lock is contended, keep
                     // the FRNs pending so this best-effort refresh is retried
                     // instead of permanently losing a size update.
-                    if !size_updates.is_empty() {
+                    if !size_updates.is_empty() || !unresolved_frns.is_empty() {
                         let mut applied_updates = false;
                         if let Some(mut vol) =
                             handle.try_write_for(INCREMENTAL_WRITE_FALLBACK_TIMEOUT)
@@ -904,6 +921,8 @@ pub(crate) fn index_volume(
                                     }
                                 }
                             }
+                            unresolved_frns.retain(|frn| vol.records.get(frn).is_some());
+                            vol.pending_size_refresh.extend(unresolved_frns);
                             if changed {
                                 vol.binary_dirty = true;
                             }
@@ -915,6 +934,9 @@ pub(crate) fn index_volume(
                             vol.pending_size_refresh.extend(pending_frns);
                         }
                     }
+                } else {
+                    let mut vol = handle.write();
+                    vol.pending_size_refresh.extend(pending_frns);
                 }
             }
         }
