@@ -190,6 +190,7 @@ fn open_image_viewer_blocking(path: &Path) {
                 child.id(),
                 path.display()
             );
+            crate::viewer_processes::register(child);
         }
         Err(err) => {
             log::error!(

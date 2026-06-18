@@ -11,6 +11,7 @@ pub mod tabs;
 pub mod text_viewer;
 pub mod ui;
 pub mod video_player;
+pub mod viewer_processes;
 pub mod viewer_runtime;
 pub mod workers;
 

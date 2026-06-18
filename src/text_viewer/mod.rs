@@ -195,12 +195,15 @@ pub fn open_text_viewer(path: PathBuf) {
         }
     };
 
-    if let Err(err) = Command::new(exe).arg("--text-viewer").arg(&path).spawn() {
-        log::error!(
-            "[TEXT-VIEWER] failed to spawn viewer for '{}': {}",
-            path.display(),
-            err
-        );
+    match Command::new(exe).arg("--text-viewer").arg(&path).spawn() {
+        Ok(child) => crate::viewer_processes::register(child),
+        Err(err) => {
+            log::error!(
+                "[TEXT-VIEWER] failed to spawn viewer for '{}': {}",
+                path.display(),
+                err
+            );
+        }
     }
 }
 

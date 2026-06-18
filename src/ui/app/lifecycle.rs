@@ -394,6 +394,7 @@ pub fn handle_exit(app: &mut ImageViewerApp) {
 
     // Kill standalone video player process if running
     app.kill_video_player_process();
+    crate::viewer_processes::terminate_all();
 
     // Persist user preferences
     app.force_save_preferences();

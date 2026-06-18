@@ -123,6 +123,7 @@ impl eframe::App for ImageViewerApp {
             self.maybe_log_memory_snapshot("frame");
             // Reap standalone video player process if it exited naturally.
             self.reap_video_player_process();
+            crate::viewer_processes::reap_exited();
             let t5 = std::time::Instant::now();
 
             let msg_ms = t1.duration_since(t0).as_secs_f32() * 1000.0;
