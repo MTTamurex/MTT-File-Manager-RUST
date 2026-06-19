@@ -799,27 +799,6 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
         app_with_inactive.suppress_file_panel_keyboard = true;
         app_with_inactive.drag_drop_cross_panel_context = true;
 
-        // Defensive: if the inactive panel is a tag view, ensure its state is
-        // consistent before rendering. A previous swap or sync may have left
-        // stale flags (e.g. is_computer_view=true) or an empty items list.
-        if let Some(tag_id) = crate::domain::special_paths::tag_id_from_view_path(
-            &app_with_inactive.navigation_state.current_path,
-        ) {
-            let needs_fix = app_with_inactive.active_tag_filter != Some(tag_id)
-                || app_with_inactive.navigation_state.is_computer_view
-                || (!app_with_inactive.is_loading_folder
-                    && app_with_inactive.items.is_empty()
-                    && !app_with_inactive.all_items.is_empty());
-            if needs_fix {
-                app_with_inactive.active_tag_filter = Some(tag_id);
-                app_with_inactive.navigation_state.is_computer_view = false;
-                app_with_inactive.navigation_state.is_recycle_bin_view = false;
-                if !app_with_inactive.is_loading_folder {
-                    app_with_inactive.filter_items();
-                }
-            }
-        }
-
         ui.allocate_new_ui(
             egui::UiBuilder::new().max_rect(inactive_content_rect),
             |ui| {

@@ -140,7 +140,6 @@ impl ImageViewerApp {
         let view_path = tag_view_path(tag_id);
         self.bump_folder_load_generation();
         self.invalidate_active_items_rebuild();
-        self.release_thumbnail_pipeline_for_inactive_view("tag-view", true);
 
         self.navigation_state.current_path = view_path.clone();
         self.navigation_state.path_input = self.tag_view_display_name(tag_id);
