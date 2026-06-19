@@ -337,8 +337,10 @@ pub fn render_sidebar_fixed_top(
     action
 }
 
-/// Renders the scrollable drives section of the sidebar (drives + folder trees).
-fn render_tags_section(
+/// Renders the Tags section (fixed at the bottom of the sidebar).
+/// Uses a caller-provided `ScrollArea` with `max_height` so many tags scroll
+/// independently without pushing drives out of view.
+pub fn render_tags_section(
     ui: &mut egui::Ui,
     ctx: &mut SidebarContext,
     action: &mut Option<SidebarAction>,
@@ -347,8 +349,13 @@ fn render_tags_section(
         return;
     }
 
-    let (header_rect, _) =
-        ui.allocate_exact_size(egui::vec2(ui.available_width(), 16.0), Sense::hover());
+    const TAG_HEADER_H: f32 = 22.0;
+    const TAG_BOTTOM_PADDING_H: f32 = 8.0;
+
+    let (header_rect, _) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), TAG_HEADER_H),
+        Sense::hover(),
+    );
     let toggle_size = 18.0;
     let toggle_rect = Rect::from_center_size(
         Pos2::new(
@@ -398,39 +405,11 @@ fn render_tags_section(
     }
 
     if ctx.collapse_tags {
-        ui.add_space(8.0);
-        ui.separator();
-        ui.add_space(8.0);
+        ui.add_space(TAG_BOTTOM_PADDING_H);
         return;
     }
 
     ui.add_space(4.0);
-
-    if ctx.active_tag_filter.is_some() {
-        let (mut rect, response) =
-            ui.allocate_exact_size(egui::vec2(ui.available_width(), 26.0), Sense::click());
-        rect.min.x = ui.clip_rect().min.x;
-        rect.max.x = ui.clip_rect().max.x;
-        if ui.is_rect_visible(rect) {
-            if response.hovered() && !ctx.is_item_dragging {
-                ui.painter().rect_filled(
-                    rect,
-                    0.0,
-                    crate::ui::theme::selection_hover_color(ui.visuals().dark_mode),
-                );
-            }
-            ui.painter().text(
-                Pos2::new(rect.min.x + 12.0, rect.center().y),
-                egui::Align2::LEFT_CENTER,
-                t!("tags.clear_filter"),
-                egui::FontId::proportional(11.5),
-                ui.visuals().text_color(),
-            );
-        }
-        if response.clicked() && !ctx.is_renaming && action.is_none() {
-            *action = Some(SidebarAction::FilterByTag(None));
-        }
-    }
 
     let mut tags: Vec<&FileTag> = ctx.tag_definitions.values().collect();
     tags.sort_by_key(|tag| (tag.position, tag.name.to_lowercase()));
@@ -489,9 +468,7 @@ fn render_tags_section(
         }
     }
 
-    ui.add_space(8.0);
-    ui.separator();
-    ui.add_space(8.0);
+    ui.add_space(TAG_BOTTOM_PADDING_H);
 }
 
 /// Renders the scrollable drives section of the sidebar (drives + folder trees).
@@ -502,8 +479,6 @@ pub fn render_sidebar_drives(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Opt
     let t_drives = std::time::Instant::now();
     let mut local_drives = Vec::new();
     let mut network_drives = Vec::new();
-
-    render_tags_section(ui, ctx, &mut action);
 
     crate::ui::sidebar_cloud_roots::render_cloud_roots(ui, ctx, &mut action);
 

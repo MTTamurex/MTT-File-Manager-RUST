@@ -101,7 +101,8 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) -> Option
         }))
         .show(ctx, |ui| {
             use crate::ui::sidebar::{
-                render_sidebar_drives, render_sidebar_fixed_top, SidebarContext,
+                render_sidebar_drives, render_sidebar_fixed_top, render_tags_section,
+                SidebarContext,
             };
 
             let is_computer_view = app.navigation_state.is_computer_view;
@@ -127,18 +128,96 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) -> Option
                 .as_ref()
                 .map(|(p, t)| (p.as_str(), t.as_str()));
 
-            // ── Smooth scroll: intercept wheel input and animate ──
-            // Must happen BEFORE sidebar_ctx borrows app.sidebar_tree
+            // ── Tags section sizing ──
+            const TAG_ROW_H: f32 = 26.0;
+            const TAG_HEADER_H: f32 = 22.0;
+            const TAG_HEADER_GAP_H: f32 = 4.0;
+            const TAG_BOTTOM_PADDING_H: f32 = 8.0;
+            const TAG_DIVIDER_H: f32 = 8.0 + 9.0 + 8.0; // space + separator + space
+            let tag_count = app.tag_definitions.len();
+            let tags_collapsed = app.collapse_tags;
+            let tags_content_h = if tag_count == 0 {
+                0.0
+            } else if tags_collapsed {
+                TAG_HEADER_H + TAG_BOTTOM_PADDING_H
+            } else {
+                TAG_HEADER_H
+                    + TAG_HEADER_GAP_H
+                    + (tag_count as f32 * TAG_ROW_H)
+                    + TAG_BOTTOM_PADDING_H
+            };
+
+            // ── Smooth scroll input ──
             const SIDEBAR_SCROLL_SPEED: f32 = 5.0;
             let scroll_delta = ui.input(|i| i.smooth_scroll_delta.y);
+            let sidebar_rect = ui.max_rect();
             let pointer_in_sidebar = ui.input(|i| {
                 i.pointer
                     .hover_pos()
-                    .map(|p| ui.max_rect().contains(p))
+                    .map(|p| sidebar_rect.contains(p))
                     .unwrap_or(false)
             });
 
-            if scroll_delta != 0.0 && pointer_in_sidebar {
+            // ── Fixed top: This PC + Quick Access (does not scroll) ──
+            let top_action = {
+                let mut sidebar_ctx = SidebarContext {
+                    disks: &app.drive_state.disks,
+                    cloud_roots: &app.drive_state.cloud_roots,
+                    current_path: &app.navigation_state.current_path,
+                    highlighted_drive_path,
+                    is_computer_view,
+                    is_recycle_bin_view: app.navigation_state.is_recycle_bin_view,
+                    computer_icon: app.cache_manager.computer_icon.as_ref(),
+                    is_renaming: app.renaming_state.is_some() || app.sidebar_renaming.is_some(),
+                    icon_loader: &mut app.item_icon_loader,
+                    pinned_folders: &app.pinned_folders,
+                    is_item_dragging: app.is_item_dragging,
+                    is_folder_dragging,
+                    dragging_path,
+                    show_recycle_bin: app.show_recycle_bin,
+                    collapse_quick_access: app.collapse_quick_access,
+                    collapse_cloud_drives: app.collapse_cloud_drives,
+                    collapse_local_disks: app.collapse_local_disks,
+                    collapse_network_drives: app.collapse_network_drives,
+                    sidebar_renaming: sidebar_renaming_ref,
+                    sidebar_rename_focus: app.sidebar_rename_focus,
+                    mounted_iso_drives: &app.file_operation_state.mounted_iso_drives,
+                    tree_state: &app.sidebar_tree,
+                    tag_definitions: &app.tag_definitions,
+                    tag_counts: &app.tag_counts,
+                    active_tag_filter: app.active_tag_filter,
+                    collapse_tags: app.collapse_tags,
+                };
+                render_sidebar_fixed_top(ui, &mut sidebar_ctx)
+            };
+
+            // ── Compute actual tags height after fixed top is rendered ──
+            let avail_after_top = ui.available_height();
+            let tags_scroll_h = if tag_count == 0 {
+                0.0
+            } else {
+                tags_content_h.min(avail_after_top * 0.35)
+            };
+            let tags_block_h = if tags_scroll_h <= 0.0 {
+                0.0
+            } else {
+                TAG_DIVIDER_H + tags_scroll_h
+            };
+            let drives_avail = (avail_after_top - tags_block_h).max(0.0);
+            let tags_top_y = ui.cursor().top() + drives_avail;
+            let pointer_over_tags = ui.input(|i| {
+                i.pointer
+                    .hover_pos()
+                    .map(|p| {
+                        p.x >= sidebar_rect.min.x
+                            && p.x <= sidebar_rect.max.x
+                            && p.y >= tags_top_y
+                            && p.y <= sidebar_rect.max.y
+                    })
+                    .unwrap_or(false)
+            });
+
+            if scroll_delta != 0.0 && pointer_in_sidebar && !pointer_over_tags {
                 app.sidebar_tree.scroll_target_y += -scroll_delta * SIDEBAR_SCROLL_SPEED;
                 if app.sidebar_tree.scroll_target_y < 0.0 {
                     app.sidebar_tree.scroll_target_y = 0.0;
@@ -190,13 +269,12 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) -> Option
                 collapse_tags: app.collapse_tags,
             };
 
-            // ── Fixed top: This PC + Quick Access (does not scroll) ──
-            let top_action = render_sidebar_fixed_top(ui, &mut sidebar_ctx);
-
-            // ── Scrollable bottom: Drives + folder trees ──
+            // ── Scrollable middle: Cloud drives + Local disks + Network + folder trees ──
             let output = egui::ScrollArea::both()
                 .id_salt("sidebar_scroll")
                 .auto_shrink([false, false])
+                .max_height(drives_avail)
+                .min_scrolled_height(0.0)
                 .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded)
                 .vertical_scroll_offset(scroll_offset)
                 .show(ui, |ui| {
@@ -204,7 +282,33 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) -> Option
                     render_sidebar_drives(ui, &mut sidebar_ctx)
                 });
 
-            // sidebar_ctx borrow released — safe to mutate sidebar_tree again
+            // ── Fixed bottom: Tags section (own scrollbar for many tags) ──
+            let tags_action = if tags_scroll_h > 0.0 {
+                ui.add_space(8.0);
+                ui.separator();
+                ui.add_space(8.0);
+
+                egui::ScrollArea::vertical()
+                    .id_salt("sidebar_tags_scroll")
+                    .auto_shrink([false, false])
+                    .max_height(tags_scroll_h)
+                    .min_scrolled_height(0.0)
+                    .scroll_bar_visibility(
+                        egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded,
+                    )
+                    .show(ui, |ui| {
+                        ui.set_min_width(ui.available_width());
+                        let mut act = None;
+                        render_tags_section(ui, &mut sidebar_ctx, &mut act);
+                        act
+                    })
+                    .inner
+            } else {
+                None
+            };
+
+            // sidebar_ctx no longer used — borrows of app released
+            drop(sidebar_ctx);
 
             // Clamp target to actual content bounds after rendering
             let max_scroll = (output.content_size.y - output.inner_rect.height()).max(0.0);
@@ -221,7 +325,11 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) -> Option
             // scroll_to_me) to pass through.
             let actual_offset = output.state.offset.y;
             let egui_native_drift = actual_offset - scroll_offset;
-            if scroll_delta != 0.0 && pointer_in_sidebar && egui_native_drift.abs() > 0.5 {
+            if scroll_delta != 0.0
+                && pointer_in_sidebar
+                && !pointer_over_tags
+                && egui_native_drift.abs() > 0.5
+            {
                 // This drift is from egui double-processing the same wheel event — ignore it.
             } else if egui_native_drift.abs() > 2.0 {
                 // Genuine external scroll (scrollbar drag, etc.) — sync to it.
@@ -229,8 +337,8 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) -> Option
                 app.sidebar_tree.scroll_visual_y = actual_offset;
             }
 
-            // Prefer fixed top action; fall back to drives action
-            top_action.or(output.inner)
+            // Prefer fixed top action; fall back to drives, then tags
+            top_action.or(output.inner).or(tags_action)
         });
 
     // Consume focus flag after rendering so it only fires once

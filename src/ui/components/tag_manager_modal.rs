@@ -44,10 +44,13 @@ pub fn render_tag_manager_modal(app: &mut ImageViewerApp, ctx: &egui::Context) {
     let mut actions = Vec::new();
 
     egui::Window::new(t!("tags.manager_title"))
+        .id(egui::Id::new("tag_manager_window"))
         .open(&mut keep_open)
         .collapsible(false)
         .resizable(true)
         .default_width(520.0)
+        .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+        .order(egui::Order::Foreground)
         .show(ctx, |ui| {
             ui.vertical(|ui| {
                 ui.heading(t!("tags.add"));

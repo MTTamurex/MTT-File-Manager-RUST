@@ -47,7 +47,7 @@ pub(super) fn seed_default_file_tags(conn: &Connection) {
         return;
     }
 
-    for (position, color) in TagColor::default_palette().into_iter().enumerate() {
+    for (position, color) in TagColor::default_palette().into_iter().take(5).enumerate() {
         let name = match color {
             TagColor::Red => "Red",
             TagColor::Orange => "Orange",
