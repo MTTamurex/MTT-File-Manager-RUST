@@ -140,6 +140,12 @@ impl ImageViewerApp {
             .to_string(),
         ));
         prefs.push(("upload_budget_ms", self.upload_budget_ms.to_string()));
+        prefs.push((
+            "active_tag_filter",
+            self.active_tag_filter
+                .map(|id| id.to_string())
+                .unwrap_or_default(),
+        ));
 
         // Window state persistence
         prefs.push(("window_width", self.layout.saved_window_width.to_string()));

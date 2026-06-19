@@ -8,11 +8,28 @@ impl ImageViewerApp {
     /// PERFORMANCE: Uses filter_items_opt() which avoids cloning when query is empty.
     /// This eliminates unnecessary allocations in 99% of use cases.
     pub fn filter_items(&mut self) {
+        let active_tag_filter = if self.navigation_state.is_computer_view
+            || self.navigation_state.is_recycle_bin_view
+        {
+            None
+        } else {
+            self.active_tag_filter
+        };
         // PERFORMANCE: filter_items_opt returns None when query is empty,
         // signaling we should use all_items directly without cloning.
-        match sorting::filter_items_opt(&self.all_items, &self.search_query) {
-            Some(filtered) => {
-                // Query present: use the filtered vector
+        match sorting::filter_items_opt_with_tags(
+            &self.all_items,
+            &self.search_query,
+            active_tag_filter,
+            &self.tag_assignments,
+        ) {
+            Some(mut filtered) => {
+                sorting::sort_items(
+                    &mut filtered,
+                    self.sort_mode,
+                    self.sort_descending,
+                    self.folders_position,
+                );
                 self.items = Arc::new(filtered);
             }
             None => {
@@ -33,11 +50,6 @@ impl ImageViewerApp {
         }
         self.total_items = self.items.len();
 
-        // If filtering was applied, we still need to sort the result
-        if !self.search_query.is_empty() {
-            self.sort_items();
-        }
-
         self.reconcile_visible_selection_index();
     }
 
@@ -47,7 +59,14 @@ impl ImageViewerApp {
     /// - Uses par_sort_by for lists >5000 items (rayon)
     /// - Uses case-insensitive comparisons without allocation (natord::compare_ignore_case)
     pub fn sort_items(&mut self) {
-        if self.search_query.is_empty() {
+        let active_tag_filter = if self.navigation_state.is_computer_view
+            || self.navigation_state.is_recycle_bin_view
+        {
+            None
+        } else {
+            self.active_tag_filter
+        };
+        if self.search_query.is_empty() && active_tag_filter.is_none() {
             let sort_mode = self.sort_mode;
             let sort_descending = self.sort_descending;
             let folders_position = self.folders_position;

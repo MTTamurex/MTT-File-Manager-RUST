@@ -71,6 +71,8 @@ impl ImageViewerApp {
                 allow_thumbnail_requests: true,
                 thumbnail_requests_this_frame: &mut thumbnail_requests_counter,
                 folder_preview_requests_this_frame: &mut folder_preview_requests_counter,
+                item_tag_ids: self.tag_assignments.get(&item.path).map(Vec::as_slice),
+                tag_definitions: &self.tag_definitions,
             };
 
             // Create simple ops struct that collects operations

@@ -1,4 +1,4 @@
-use super::badges::render_sync_badge;
+use super::badges::{render_sync_badge, render_tag_badge};
 use super::*;
 use crate::domain::file_entry::IconSize;
 
@@ -182,6 +182,7 @@ pub(super) fn render_file_slot<O: ItemSlotOperations>(
 
     // Render sync status badge (OneDrive)
     if !ctx.is_dense_mode {
+        render_tag_badge(ui, thumb_rect, ctx.item_tag_ids, ctx.tag_definitions);
         render_sync_badge(ui, thumb_rect, item.sync_status);
     }
 

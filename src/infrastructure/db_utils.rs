@@ -205,4 +205,5 @@ pub fn open_temp_fallback_connection(
 pub fn apply_default_pragmas(conn: &Connection) {
     let _ = conn.execute("PRAGMA journal_mode = WAL", []).ok();
     let _ = conn.execute("PRAGMA synchronous = NORMAL", []).ok();
+    let _ = conn.execute("PRAGMA foreign_keys = ON", []).ok();
 }

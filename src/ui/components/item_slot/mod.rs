@@ -3,10 +3,12 @@
 //! This module contains the rendering logic for individual items in grid view.
 
 use crate::domain::file_entry::{FileEntry, SyncStatus};
+use crate::domain::file_tag::FileTag;
 // PERFORMANCE: Use FxHashSet for PathBuf keys - faster hashing
 use crate::ui::cache::FxHashSet;
 use crate::ui::icon_loader::IconLoader;
 use eframe::egui;
+use rustc_hash::FxHashMap;
 
 mod badges;
 mod drive_slot;
@@ -109,6 +111,10 @@ pub struct ItemSlotContext<'a> {
     pub thumbnail_requests_this_frame: &'a mut usize,
     /// Per-frame cap for heavier folder preview requests
     pub folder_preview_requests_this_frame: &'a mut usize,
+    /// Tag IDs assigned to this item, if any.
+    pub item_tag_ids: Option<&'a [i64]>,
+    /// Tag definitions for color lookup.
+    pub tag_definitions: &'a FxHashMap<i64, FileTag>,
 }
 
 /// Renders an item slot for grid view

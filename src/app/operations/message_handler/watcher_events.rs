@@ -112,7 +112,7 @@ impl ImageViewerApp {
         if !self.watcher_fallback_polling {
             return;
         }
-        if self.navigation_state.is_computer_view || self.navigation_state.is_recycle_bin_view {
+        if crate::domain::special_paths::is_virtual_path(&self.navigation_state.current_path) {
             return;
         }
         if self.is_loading_folder
@@ -303,7 +303,7 @@ impl ImageViewerApp {
         reload_if_alive: bool,
     ) {
         let active_is_filesystem =
-            !self.navigation_state.is_computer_view && !self.navigation_state.is_recycle_bin_view;
+            !crate::domain::special_paths::is_virtual_path(&self.navigation_state.current_path);
         let current_path = PathBuf::from(&self.navigation_state.current_path);
         if active_is_filesystem {
             let should_send_active_probe =

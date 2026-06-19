@@ -35,6 +35,7 @@ fn normalize_drive_root_for_compare(path: &str) -> String {
 
 impl ImageViewerApp {
     pub fn setup_recycle_bin_view(&mut self) {
+        self.active_tag_filter = None;
         self.navigation_state.current_path = RECYCLE_BIN_VIEW_ID.to_string();
         self.navigation_state.is_computer_view = false;
         self.navigation_state.is_recycle_bin_view = true;
@@ -149,6 +150,7 @@ impl ImageViewerApp {
 
     /// Sets up the "This PC" view without affecting history
     pub fn setup_computer_view(&mut self) {
+        self.active_tag_filter = None;
         // CRITICAL: Advance generation to invalidate any pending items_rebuild results
         // from the previous folder load. Without this, stale rebuild results (matching
         // the old generation) arrive on the next frame and overwrite our computer view items.

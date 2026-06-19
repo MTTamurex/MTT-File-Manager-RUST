@@ -1,4 +1,4 @@
-use super::badges::render_sync_badge;
+use super::badges::{render_sync_badge, render_tag_badge};
 use super::*;
 
 /// Paints a texture centered within `container`, preserving aspect ratio.
@@ -207,6 +207,7 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
 
     // Render sync status badge (OneDrive) for folders
     if !ctx.is_dense_mode {
+        render_tag_badge(ui, folder_rect, ctx.item_tag_ids, ctx.tag_definitions);
         render_sync_badge(ui, folder_rect, item.sync_status);
     }
 

@@ -8,7 +8,7 @@ use eframe::egui;
 use lru::LruCache;
 use std::num::NonZeroUsize;
 // PERFORMANCE: FxHashSet uses faster hashing for PathBuf keys
-use crate::domain::special_paths::{is_virtual_path, COMPUTER_VIEW_ID};
+use crate::domain::special_paths::{is_virtual_path, tag_view_path, COMPUTER_VIEW_ID};
 use crate::ui::cache::FxHashSet;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
@@ -204,6 +204,7 @@ impl ImageViewerApp {
             dual_panel_inactive_path: saved_dual_panel_inactive_path,
             dual_panel_active_view_mode: saved_dual_panel_active_view_mode,
             dual_panel_inactive_view_mode: saved_dual_panel_inactive_view_mode,
+            active_tag_filter: saved_active_tag_filter,
         } = startup_preferences;
 
         // Apply saved language preference
@@ -224,8 +225,24 @@ impl ImageViewerApp {
         // Load Quick Access pinned folders from database
         let pinned_folders = app_state_db.get_all_pinned_folders();
 
+        // Load file tag metadata and path assignments once at startup.
+        let tag_definitions: rustc_hash::FxHashMap<_, _> = app_state_db
+            .get_all_tags()
+            .into_iter()
+            .map(|tag| (tag.id, tag))
+            .collect();
+        let tag_assignments = Arc::new(app_state_db.get_all_tag_assignments());
+        let tag_counts = app_state_db.get_tag_counts();
+        let active_tag_filter =
+            saved_active_tag_filter.filter(|id| tag_definitions.contains_key(id));
+
         // Determine initial path based on last saved folder
-        let (initial_path, is_computer_view_initial) = determine_initial_path(&app_state_db);
+        let (mut initial_path, mut is_computer_view_initial) =
+            determine_initial_path(&app_state_db);
+        if let Some(tag_id) = active_tag_filter {
+            initial_path = tag_view_path(tag_id);
+            is_computer_view_initial = false;
+        }
 
         // Start the dedicated shell menu worker (STA COM thread for async extraction).
         let (shell_menu_req_tx, shell_menu_res_rx) =
@@ -254,6 +271,7 @@ impl ImageViewerApp {
             active.view_mode = view_mode;
             active.show_left_sidebar = show_left_sidebar;
             active.show_preview_panel = show_preview_panel;
+            active.active_tag_filter = active_tag_filter;
         }
 
         let mut app = Self {
@@ -602,6 +620,17 @@ impl ImageViewerApp {
             current_folder_locked: false,
 
             pinned_folders,
+
+            tag_definitions,
+            tag_assignments,
+            tag_counts,
+            active_tag_filter,
+            collapse_tags: false,
+            show_tag_manager: false,
+            tag_manager_new_name: String::new(),
+            tag_manager_new_color: crate::domain::file_tag::TagColor::Red,
+            tag_manager_edit_names: rustc_hash::FxHashMap::default(),
+            tag_manager_delete_confirm: None,
 
             // SIDEBAR FOLDER TREE
             sidebar_tree: {

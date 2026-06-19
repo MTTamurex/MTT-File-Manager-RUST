@@ -146,6 +146,9 @@ impl ImageViewerApp {
             if self.navigation_state.current_path.is_empty() {
                 return None;
             }
+            if crate::domain::special_paths::is_virtual_path(&self.navigation_state.current_path) {
+                return None;
+            }
             let cur = PathBuf::from(&self.navigation_state.current_path);
             // Don't fall back to the source folder (items are already there)
             if let Some(ref src) = self.drag_source_folder {

@@ -76,6 +76,13 @@ pub(crate) fn render_status_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Cont
                     preview.is_video() && preview.is_player_visible() && preview.is_visible()
                 })
                 .unwrap_or(false);
+            let active_tag_filter_name = app
+                .active_tag_filter
+                .filter(|_| {
+                    !app.navigation_state.is_computer_view
+                        && !app.navigation_state.is_recycle_bin_view
+                })
+                .and_then(|id| app.tag_definitions.get(&id).map(|tag| tag.name.clone()));
             let action = render_status_bar(
                 ui,
                 &mut app.svg_icon_manager,
@@ -88,6 +95,7 @@ pub(crate) fn render_status_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Cont
                 app.view_mode,
                 &mut app.thumbnail_size,
                 video_preview_active,
+                active_tag_filter_name.as_deref(),
             );
             match action {
                 StatusBarAction::OpenSettings => {
@@ -96,6 +104,11 @@ pub(crate) fn render_status_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Cont
                         crate::app::navigation_state::SettingsSection::General;
                 }
                 StatusBarAction::BulkThumbnailScan => {
+                    if crate::domain::special_paths::is_virtual_path(
+                        &app.navigation_state.current_path,
+                    ) {
+                        return;
+                    }
                     let root = std::path::PathBuf::from(&app.navigation_state.current_path);
                     let queue = app.thumbnail_queue.clone();
                     let generation = app.generation;
@@ -231,9 +244,16 @@ pub(crate) fn render_status_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Cont
                 StatusBarAction::ShowHiddenChanged => {
                     app.save_preferences();
                     app.directory_cache.clear();
-                    app.load_folder(true);
+                    if let Some(tag_id) = crate::domain::special_paths::tag_id_from_view_path(
+                        &app.navigation_state.current_path,
+                    ) {
+                        app.setup_tag_view(tag_id);
+                    } else {
+                        app.load_folder(true);
+                    }
                     app.sidebar_tree.set_show_hidden(app.show_hidden_files);
                 }
+                StatusBarAction::ClearTagFilter => app.set_tag_filter(None),
                 _ => {}
             }
         });

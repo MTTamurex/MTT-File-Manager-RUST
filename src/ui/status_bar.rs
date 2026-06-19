@@ -236,6 +236,8 @@ pub enum StatusBarAction {
     BulkThumbnailScan,
     /// Show/hide hidden files toggled
     ShowHiddenChanged,
+    /// Clear the active tag filter
+    ClearTagFilter,
     /// No action
     None,
 }
@@ -255,6 +257,7 @@ pub fn render_status_bar(
     view_mode: ViewMode,
     thumbnail_size: &mut f32,
     video_preview_active: bool,
+    active_tag_filter_name: Option<&str>,
 ) -> StatusBarAction {
     let mut action = StatusBarAction::None;
 
@@ -384,6 +387,16 @@ pub fn render_status_bar(
                             t!("status_bar.item_many", count = total_items).to_string()
                         };
                         ui.label(item_text);
+                    }
+                    if let Some(tag_name) = active_tag_filter_name {
+                        ui.separator();
+                        if ui
+                            .button(t!("tags.filter_active", name = tag_name).to_string())
+                            .on_hover_text(t!("tags.clear_filter"))
+                            .clicked()
+                        {
+                            action = StatusBarAction::ClearTagFilter;
+                        }
                     }
                 }); // end Frame
 

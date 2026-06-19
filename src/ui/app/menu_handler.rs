@@ -128,6 +128,23 @@ fn find_menu_item_text_by_id(
     None
 }
 
+fn find_menu_item_command_by_id(
+    items: &[crate::application::context_menu::ContextMenuItem],
+    id: i32,
+) -> Option<&str> {
+    for item in items {
+        if item.id == id {
+            return item.command_string.as_deref();
+        }
+
+        if let Some(command) = find_menu_item_command_by_id(&item.sub_items, id) {
+            return Some(command);
+        }
+    }
+
+    None
+}
+
 fn apply_cloud_files_pin(
     app: &mut ImageViewerApp,
     target_paths: &[PathBuf],
@@ -262,6 +279,24 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
         } else {
             // Internal command handled via trait
             let item_idx = context_menu.item_index;
+            let selected_command = find_menu_item_command_by_id(&context_menu.items, id)
+                .map(|command| command.to_string());
+            if let Some(command) = selected_command.as_deref() {
+                if let Some(tag_id_raw) = command.strip_prefix("tag_toggle:") {
+                    if let Ok(tag_id) = tag_id_raw.parse::<i64>() {
+                        app.toggle_tag_on_paths(&context_menu.target_paths, tag_id);
+                    }
+                    context_menu.close();
+                    app.context_menu = context_menu;
+                    return;
+                }
+                if command == "tag_manage" {
+                    app.show_tag_manager = true;
+                    context_menu.close();
+                    app.context_menu = context_menu;
+                    return;
+                }
+            }
             match id {
                 -1 => app.create_new_folder(),
                 -2 | -31 => app.command_copy(item_idx),
@@ -441,6 +476,10 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                             .unwrap_or_else(|| PathBuf::from(&app.navigation_state.current_path))
                     };
                     open_terminal_admin_at(&path);
+                }
+                -90 => {}
+                -91 => {
+                    app.show_tag_manager = true;
                 }
                 _ => {}
             }

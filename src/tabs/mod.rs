@@ -93,6 +93,10 @@ pub struct TabState {
     pub collapse_cloud_drives: bool,
     pub collapse_local_disks: bool,
     pub collapse_network_drives: bool,
+    /// Active tag filter for this tab.
+    pub active_tag_filter: Option<i64>,
+    /// Tags section collapse state (per-tab).
+    pub collapse_tags: bool,
     // Dual panel state (per-tab)
     pub dual_panel_enabled: bool,
     pub dual_panel_active: ActivePanel,
@@ -140,6 +144,8 @@ impl TabState {
             collapse_cloud_drives: false,
             collapse_local_disks: false,
             collapse_network_drives: false,
+            active_tag_filter: None,
+            collapse_tags: false,
             dual_panel_enabled: false,
             dual_panel_active: ActivePanel::Left,
             dual_panel_inactive_state: None,
@@ -188,6 +194,8 @@ impl TabState {
             collapse_cloud_drives: false,
             collapse_local_disks: false,
             collapse_network_drives: false,
+            active_tag_filter: None,
+            collapse_tags: false,
             dual_panel_enabled: false,
             dual_panel_active: ActivePanel::Left,
             dual_panel_inactive_state: None,
@@ -302,6 +310,8 @@ impl TabState {
         self.collapse_cloud_drives = false;
         self.collapse_local_disks = false;
         self.collapse_network_drives = false;
+        self.active_tag_filter = None;
+        self.collapse_tags = false;
         self.dual_panel_enabled = false;
         self.dual_panel_inactive_state = None;
         self.dual_panel_split_ratio = 0.5;
@@ -367,6 +377,7 @@ impl TabManager {
         let current = self.active();
         tab.show_left_sidebar = current.show_left_sidebar;
         tab.show_preview_panel = current.show_preview_panel;
+        tab.collapse_tags = current.collapse_tags;
         self.next_id += 1;
         self.tabs.push(tab);
         self.active_tab = self.tabs.len() - 1;
@@ -378,6 +389,7 @@ impl TabManager {
         let current = self.active();
         tab.show_left_sidebar = current.show_left_sidebar;
         tab.show_preview_panel = current.show_preview_panel;
+        tab.collapse_tags = current.collapse_tags;
         self.next_id += 1;
         self.tabs.push(tab);
         self.active_tab = self.tabs.len() - 1;
@@ -412,6 +424,8 @@ impl TabManager {
         new_tab.show_preview_panel = current.show_preview_panel;
         new_tab.sidebar_expanded = current.sidebar_expanded.clone();
         new_tab.sidebar_scroll_y = current.sidebar_scroll_y;
+        new_tab.active_tag_filter = current.active_tag_filter;
+        new_tab.collapse_tags = current.collapse_tags;
 
         self.next_id += 1;
 
@@ -499,6 +513,8 @@ impl TabManager {
             reopened.show_preview_panel = tab.show_preview_panel;
             reopened.sidebar_expanded = tab.sidebar_expanded;
             reopened.sidebar_scroll_y = tab.sidebar_scroll_y;
+            reopened.active_tag_filter = tab.active_tag_filter;
+            reopened.collapse_tags = tab.collapse_tags;
 
             self.next_id += 1;
 

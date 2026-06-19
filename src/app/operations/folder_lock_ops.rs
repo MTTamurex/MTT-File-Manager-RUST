@@ -7,10 +7,7 @@ impl ImageViewerApp {
     /// If locked: remove from DB and re-enable controls.
     pub fn toggle_folder_lock(&mut self) {
         let path = self.navigation_state.current_path.clone();
-        if path.is_empty()
-            || self.navigation_state.is_computer_view
-            || self.navigation_state.is_recycle_bin_view
-        {
+        if path.is_empty() || crate::domain::special_paths::is_virtual_path(&path) {
             return;
         }
 
@@ -40,6 +37,10 @@ impl ImageViewerApp {
     pub fn apply_folder_lock_if_present(&mut self) {
         let lock_start = std::time::Instant::now();
         let path = &self.navigation_state.current_path;
+        if crate::domain::special_paths::is_virtual_path(path) {
+            self.current_folder_locked = false;
+            return;
+        }
         if let Some(lock) = self.folder_locks.get(path).cloned() {
             log::info!(
                 "[FOLDER-LOCK] Applying lock for {:?}: view={:?}, sort={:?}, desc={}, pos={:?}",
@@ -93,6 +94,10 @@ impl ImageViewerApp {
     /// exists for the current path) should win over the tab's saved state.
     pub fn apply_folder_lock_on_tab_restore(&mut self) {
         let path = &self.navigation_state.current_path;
+        if crate::domain::special_paths::is_virtual_path(path) {
+            self.current_folder_locked = false;
+            return;
+        }
         if let Some(lock) = self.folder_locks.get(path).cloned() {
             log::info!(
                 "[FOLDER-LOCK] Applying lock (tab restore) for {:?}: view={:?}, sort={:?}, desc={}, pos={:?}",

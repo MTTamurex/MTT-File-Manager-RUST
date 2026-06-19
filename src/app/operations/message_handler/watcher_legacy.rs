@@ -547,8 +547,7 @@ impl ImageViewerApp {
                 processed_events
             );
             self.directory_cache.clear();
-            if !self.navigation_state.is_computer_view && !self.navigation_state.is_recycle_bin_view
-            {
+            if !crate::domain::special_paths::is_virtual_path(&self.navigation_state.current_path) {
                 let current_path = PathBuf::from(&self.navigation_state.current_path);
                 self.invalidate_folder_size_cache(current_path.as_path());
                 self.request_watcher_auto_reload();

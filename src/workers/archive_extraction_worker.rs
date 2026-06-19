@@ -89,9 +89,14 @@ pub(crate) fn start_archive_extraction_worker(
                         &cancel,
                     );
                     if success {
+                        let source_path = paths
+                            .first()
+                            .cloned()
+                            .unwrap_or_else(|| source_folder.clone());
                         let _ = result_sender.send(FileOperationResult::MoveCompleted {
                             source_folder,
                             dest_folder,
+                            source_path,
                             moved_dest,
                         });
                     } else {

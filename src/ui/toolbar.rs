@@ -148,6 +148,7 @@ pub enum ToolbarAction {
 pub fn render_toolbar(
     ui: &mut egui::Ui,
     current_path: &str,
+    current_path_display_override: Option<&str>,
     path_input: &mut String,
     is_editing_path: &mut bool,
     show_address_history_menu: &mut bool,
@@ -524,7 +525,13 @@ pub fn render_toolbar(
             } else {
                 addr_ui.spacing_mut().item_spacing.x = 2.0;
 
-                if current_path == COMPUTER_VIEW_ID {
+                if let Some(display) = current_path_display_override {
+                    addr_ui.label(
+                        egui::RichText::new(display)
+                            .size(13.0)
+                            .color(theme::text_color(addr_ui.visuals().dark_mode)),
+                    );
+                } else if current_path == COMPUTER_VIEW_ID {
                     addr_ui.label(
                         egui::RichText::new(t!("nav.computer"))
                             .size(13.0)

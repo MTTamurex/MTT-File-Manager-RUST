@@ -89,11 +89,13 @@ impl ImageViewerApp {
                         FileOperationResult::MoveCompleted {
                             source_folder,
                             dest_folder,
+                            source_path,
                             moved_dest,
                         } => {
                             self.handle_move_completed(
                                 source_folder,
                                 dest_folder,
+                                source_path,
                                 moved_dest,
                                 current_path_norm,
                             );
@@ -245,6 +247,7 @@ impl ImageViewerApp {
         self.invalidate_folder_and_tab_caches(&parent_folder);
         let new_path =
             self.apply_rename_completed_to_memory(&path, &new_name, parent_folder.as_path());
+        self.move_tag_assignments_for_path(&path, &new_path);
 
         // Migrate the disk-cache row from old path to new path so thumbnails
         // are preserved after the in-memory caches are evicted on scroll.
@@ -359,6 +362,7 @@ impl ImageViewerApp {
         }
 
         self.navigate_inactive_panel_after_deleted_paths(&deleted_paths);
+        self.clear_tag_assignments_for_paths(&deleted_paths);
         self.enqueue_disk_cache_invalidations_forced(deleted_paths);
         self.handle_parent_folder_updates(parent_folders, current_path_norm);
     }
@@ -467,6 +471,7 @@ impl ImageViewerApp {
         &mut self,
         source_folder: PathBuf,
         dest_folder: PathBuf,
+        source_path: PathBuf,
         moved_dest: Option<PathBuf>,
         current_path_norm: &str,
     ) {
@@ -481,8 +486,11 @@ impl ImageViewerApp {
 
         // Clear write-activity markers for the moved file so thumbnail generation
         // is not delayed by the stability guard.
-        if let Some(dest_path) = moved_dest {
-            crate::infrastructure::windows::file_flags::clear_write_activity_after_completed_file_operation(&[dest_path]);
+        if let Some(dest_path) = moved_dest.as_ref() {
+            crate::infrastructure::windows::file_flags::clear_write_activity_after_completed_file_operation(
+                std::slice::from_ref(dest_path),
+            );
+            self.move_tag_assignments_for_path(&source_path, dest_path);
         }
 
         if current_path_norm == source_str {
@@ -536,6 +544,9 @@ impl ImageViewerApp {
             crate::infrastructure::windows::file_flags::clear_write_activity_after_completed_file_operation(
                 &moved_dests,
             );
+        }
+        for (source, dest) in moved_files.iter().zip(moved_dests.iter()) {
+            self.move_tag_assignments_for_path(source, dest);
         }
 
         for source_folder in &source_folders {
@@ -631,8 +642,7 @@ impl ImageViewerApp {
 
             // Watcher events were drained but not processed while ops were active.
             // Force a full reload so the view reflects the final state of the folder.
-            if !self.navigation_state.is_computer_view && !self.navigation_state.is_recycle_bin_view
-            {
+            if !crate::domain::special_paths::is_virtual_path(&self.navigation_state.current_path) {
                 if self.is_loading_folder {
                     self.watcher_cooldown_until = Some(Instant::now() + Duration::from_secs(2));
                     return;

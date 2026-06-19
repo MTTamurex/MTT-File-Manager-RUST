@@ -128,7 +128,7 @@ impl ImageViewerApp {
         let current_path = self.navigation_state.current_path.clone();
 
         // Skip virtual views that aren't real filesystem paths (e.g. "Lixeira", "Computador").
-        if self.navigation_state.is_recycle_bin_view || self.navigation_state.is_computer_view {
+        if crate::domain::special_paths::is_virtual_path(&current_path) {
             log::debug!(
                 "[WATCHER] Skipping watch for virtual view: {}",
                 current_path
@@ -181,7 +181,7 @@ impl ImageViewerApp {
 
         if self.dual_panel_enabled {
             if let Some(snapshot) = self.dual_panel_inactive_state.as_ref() {
-                if !snapshot.is_computer_view && !snapshot.is_recycle_bin_view {
+                if !crate::domain::special_paths::is_virtual_path(&snapshot.path) {
                     push_watch_path(snapshot.path.clone(), "inactive dual-panel");
                 }
             }

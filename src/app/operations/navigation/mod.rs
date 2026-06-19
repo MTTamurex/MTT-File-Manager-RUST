@@ -6,7 +6,9 @@ pub mod keyboard;
 pub mod selection;
 
 use crate::app::state::ImageViewerApp;
-use crate::domain::special_paths::{is_virtual_path, COMPUTER_VIEW_ID, RECYCLE_BIN_VIEW_ID};
+use crate::domain::special_paths::{
+    is_virtual_path, tag_id_from_view_path, COMPUTER_VIEW_ID, RECYCLE_BIN_VIEW_ID,
+};
 use std::path::{Path, PathBuf};
 
 impl ImageViewerApp {
@@ -138,6 +140,15 @@ impl ImageViewerApp {
             return;
         }
 
+        if let Some(tag_id) = tag_id_from_view_path(&normalized_path) {
+            self.set_tag_filter(Some(tag_id));
+            return;
+        }
+
+        if self.active_tag_filter.take().is_some() {
+            self.save_preferences();
+        }
+
         self.remember_current_folder_timestamp_hints();
 
         // Keep the folder "Data modificada" visible in preview panel after entering a folder.
@@ -214,6 +225,9 @@ impl ImageViewerApp {
             let previous_path = std::path::PathBuf::from(&self.navigation_state.current_path);
 
             if path == COMPUTER_VIEW_ID {
+                if self.active_tag_filter.take().is_some() {
+                    self.save_preferences();
+                }
                 // Invalidate preview of the folder we were in
                 self.cache_manager.invalidate_folder_preview(&previous_path);
 
@@ -223,12 +237,22 @@ impl ImageViewerApp {
                 self.reset_selection_and_search();
                 self.setup_computer_view();
             } else if path == RECYCLE_BIN_VIEW_ID {
+                if self.active_tag_filter.take().is_some() {
+                    self.save_preferences();
+                }
                 // Invalidate preview of the folder we were in
                 self.cache_manager.invalidate_folder_preview(&previous_path);
 
                 self.reset_selection_and_search();
                 self.setup_recycle_bin_view();
+            } else if let Some(tag_id) = tag_id_from_view_path(&path) {
+                self.reset_selection_and_search();
+                self.setup_tag_view(tag_id);
+                self.sync_to_tab();
             } else {
+                if self.active_tag_filter.take().is_some() {
+                    self.save_preferences();
+                }
                 let new_path = std::path::PathBuf::from(&path);
                 self.current_folder_modified_hint =
                     self.resolve_destination_folder_modified_hint(&new_path);
@@ -279,6 +303,9 @@ impl ImageViewerApp {
             let previous_path = std::path::PathBuf::from(&self.navigation_state.current_path);
 
             if path == COMPUTER_VIEW_ID {
+                if self.active_tag_filter.take().is_some() {
+                    self.save_preferences();
+                }
                 // Invalidate preview of the folder we were in
                 self.cache_manager.invalidate_folder_preview(&previous_path);
 
@@ -288,12 +315,22 @@ impl ImageViewerApp {
                 self.reset_selection_and_search();
                 self.setup_computer_view();
             } else if path == RECYCLE_BIN_VIEW_ID {
+                if self.active_tag_filter.take().is_some() {
+                    self.save_preferences();
+                }
                 // Invalidate preview of the folder we were in
                 self.cache_manager.invalidate_folder_preview(&previous_path);
 
                 self.reset_selection_and_search();
                 self.setup_recycle_bin_view();
+            } else if let Some(tag_id) = tag_id_from_view_path(&path) {
+                self.reset_selection_and_search();
+                self.setup_tag_view(tag_id);
+                self.sync_to_tab();
             } else {
+                if self.active_tag_filter.take().is_some() {
+                    self.save_preferences();
+                }
                 let new_path = std::path::PathBuf::from(&path);
                 self.current_folder_modified_hint =
                     self.resolve_destination_folder_modified_hint(&new_path);
@@ -338,6 +375,10 @@ impl ImageViewerApp {
             return;
         }
 
+        if self.active_tag_filter.take().is_some() {
+            self.save_preferences();
+        }
+
         // Cancel pending batch folder-size calculations.
         self.folder_size_state.cancel_batch();
 
@@ -357,6 +398,10 @@ impl ImageViewerApp {
             return;
         }
 
+        if self.active_tag_filter.take().is_some() {
+            self.save_preferences();
+        }
+
         // Cancel pending batch folder-size calculations.
         self.folder_size_state.cancel_batch();
 
@@ -374,6 +419,11 @@ impl ImageViewerApp {
     pub fn go_up_one_level(&mut self) {
         if self.navigation_state.is_computer_view {
             // Already at the top
+            return;
+        }
+
+        if is_virtual_path(&self.navigation_state.current_path) {
+            self.navigate_to_computer();
             return;
         }
 

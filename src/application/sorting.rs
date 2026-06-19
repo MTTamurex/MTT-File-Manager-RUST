@@ -25,6 +25,16 @@ pub fn filter_items_opt(items: &[FileEntry], query: &str) -> Option<Vec<FileEntr
     filtering::filter_items_opt(items, query)
 }
 
+/// Filters items by query and optional active tag filter.
+pub fn filter_items_opt_with_tags(
+    items: &[FileEntry],
+    query: &str,
+    active_tag_filter: Option<i64>,
+    tag_assignments: &rustc_hash::FxHashMap<std::path::PathBuf, Vec<i64>>,
+) -> Option<Vec<FileEntry>> {
+    filtering::filter_items_opt_with_tags(items, query, active_tag_filter, tag_assignments)
+}
+
 /// Filters items based on a query string. Returns a new Vec of matching items.
 ///
 /// DEPRECATED: Use filter_items_opt() for better performance when query is empty.

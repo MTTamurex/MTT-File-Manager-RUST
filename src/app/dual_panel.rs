@@ -174,6 +174,7 @@ pub struct PanelSnapshot {
 
     // Search
     pub search_query: String,
+    pub active_tag_filter: Option<i64>,
 
     // Preview cache
     pub selected_thumbnail: Option<egui::TextureHandle>,
@@ -265,6 +266,7 @@ impl PanelSnapshot {
             visible_paths_cache: app.visible_paths_cache.clone(),
             visible_range_cached: app.visible_range_cached,
             search_query: app.search_query.clone(),
+            active_tag_filter: app.active_tag_filter,
             selected_thumbnail: app.selected_thumbnail.clone(),
             selected_metadata: app.selected_metadata.clone(),
             selected_gif: app.selected_gif.clone(),
@@ -313,6 +315,7 @@ impl PanelSnapshot {
         app.visible_paths_cache = self.visible_paths_cache;
         app.visible_range_cached = self.visible_range_cached;
         app.search_query = self.search_query;
+        app.active_tag_filter = self.active_tag_filter;
         app.selected_thumbnail = self.selected_thumbnail;
         app.selected_metadata = self.selected_metadata;
         app.selected_gif = self.selected_gif;
@@ -376,6 +379,7 @@ impl PanelSnapshot {
             &mut app.visible_range_cached,
         );
         std::mem::swap(&mut self.search_query, &mut app.search_query);
+        std::mem::swap(&mut self.active_tag_filter, &mut app.active_tag_filter);
         std::mem::swap(&mut self.selected_thumbnail, &mut app.selected_thumbnail);
         std::mem::swap(&mut self.selected_metadata, &mut app.selected_metadata);
         std::mem::swap(&mut self.selected_gif, &mut app.selected_gif);

@@ -465,9 +465,29 @@ fn render_single_item(
         egui::vec2(ITEM_ICON_SIZE, ITEM_ICON_SIZE),
     );
 
-    // Try SVG icon first, then shell texture fallback — skip for loading placeholder
+    // Try app metadata first, then SVG icon, then shell texture fallback.
     let mut icon_drawn = false;
     if !item.is_loading_placeholder {
+        if item.is_checked {
+            ui.painter().text(
+                egui::pos2(icon_rect.left() + 5.0, rect.center().y),
+                egui::Align2::CENTER_CENTER,
+                "✓",
+                egui::FontId::proportional(12.0),
+                text_color,
+            );
+            icon_drawn = true;
+        }
+        if let Some(color) = item.leading_color {
+            let center_x = if item.is_checked {
+                icon_rect.left() + 14.0
+            } else {
+                icon_rect.center().x
+            };
+            ui.painter()
+                .circle_filled(egui::pos2(center_x, rect.center().y), 4.0, color);
+            icon_drawn = true;
+        }
         if let Some(svg_name) = &item.svg_icon_name {
             let icon_color_rgba = if item.is_enabled && !is_blocked_waiting_for_submenu {
                 if ui.visuals().dark_mode {
@@ -478,19 +498,21 @@ fn render_single_item(
             } else {
                 [128, 128, 128, 180]
             };
-            if let Some(texture) = svg_icon_manager.get_icon(
-                ui.ctx(),
-                svg_name,
-                ITEM_ICON_SIZE as u32,
-                icon_color_rgba,
-            ) {
-                ui.painter().image(
-                    texture.id(),
-                    icon_rect,
-                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                    egui::Color32::WHITE,
-                );
-                icon_drawn = true;
+            if !icon_drawn {
+                if let Some(texture) = svg_icon_manager.get_icon(
+                    ui.ctx(),
+                    svg_name,
+                    ITEM_ICON_SIZE as u32,
+                    icon_color_rgba,
+                ) {
+                    ui.painter().image(
+                        texture.id(),
+                        icon_rect,
+                        egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+                        egui::Color32::WHITE,
+                    );
+                    icon_drawn = true;
+                }
             }
         }
         if !icon_drawn {

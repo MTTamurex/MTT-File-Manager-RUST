@@ -11,6 +11,8 @@ use std::sync::Arc;
 
 impl ImageViewerApp {
     pub fn sync_to_tab(&mut self) {
+        let current_tag_title =
+            self.tag_view_display_name_for_path(&self.navigation_state.current_path);
         let active = self.tab_manager.active_mut();
         active.path = self.navigation_state.current_path.clone();
         active.path_input = self.navigation_state.path_input.clone();
@@ -52,6 +54,8 @@ impl ImageViewerApp {
         active.collapse_cloud_drives = self.collapse_cloud_drives;
         active.collapse_local_disks = self.collapse_local_disks;
         active.collapse_network_drives = self.collapse_network_drives;
+        active.active_tag_filter = self.active_tag_filter;
+        active.collapse_tags = self.collapse_tags;
 
         // Save dual panel state per-tab
         active.dual_panel_enabled = self.dual_panel_enabled;
@@ -73,6 +77,8 @@ impl ImageViewerApp {
         // On Windows, Path::new(COMPUTER_VIEW_ID).file_name() is None
         if active.is_computer_view {
             active.title = COMPUTER_VIEW_ID.to_string();
+        } else if let Some(title) = current_tag_title {
+            active.title = title;
         } else {
             active.title = Path::new(&active.path)
                 .file_name()
@@ -167,6 +173,8 @@ impl ImageViewerApp {
             self.collapse_cloud_drives = active.collapse_cloud_drives;
             self.collapse_local_disks = active.collapse_local_disks;
             self.collapse_network_drives = active.collapse_network_drives;
+            self.active_tag_filter = active.active_tag_filter;
+            self.collapse_tags = active.collapse_tags;
 
             // Restore dual panel state from tab
             self.dual_panel_enabled = active.dual_panel_enabled;
@@ -217,10 +225,22 @@ impl ImageViewerApp {
 
         // If items were cleared (by MoveCompleted event) and this is a regular folder view,
         // trigger a reload to fetch fresh content
+        let is_virtual_path =
+            crate::domain::special_paths::is_virtual_path(&self.navigation_state.current_path);
         let mut needs_reload = self.items.is_empty()
             && !self.navigation_state.is_computer_view
             && !self.navigation_state.is_recycle_bin_view
+            && !is_virtual_path
             && !self.navigation_state.current_path.is_empty();
+
+        if self.items.is_empty() {
+            if let Some(tag_id) = crate::domain::special_paths::tag_id_from_view_path(
+                &self.navigation_state.current_path,
+            ) {
+                self.setup_tag_view(tag_id);
+                needs_reload = false;
+            }
+        }
 
         // TAB-SWITCH STALENESS CHECK: Even when the tab has cached items,
         // verify the directory hasn't changed while the tab was inactive.
@@ -230,6 +250,7 @@ impl ImageViewerApp {
             && !self.items.is_empty()
             && !self.navigation_state.is_computer_view
             && !self.navigation_state.is_recycle_bin_view
+            && !is_virtual_path
             && !self.navigation_state.current_path.is_empty()
         {
             let tab_path = std::path::PathBuf::from(&self.navigation_state.current_path);

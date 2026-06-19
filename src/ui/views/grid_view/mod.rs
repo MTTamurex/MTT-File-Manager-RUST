@@ -5,6 +5,7 @@ use eframe::egui::{self, Sense, Ui};
 use std::path::{Path, PathBuf};
 
 use crate::domain::file_entry::FileEntry;
+use crate::domain::file_tag::FileTag;
 // PERFORMANCE: Use FxHashSet for PathBuf keys - faster hashing than std::collections::HashSet
 use crate::ui::cache::FxHashSet;
 use crate::ui::views::rectangle_selection::{
@@ -207,6 +208,8 @@ pub struct GridViewContext<'a> {
     pub folder_preview_requests_this_frame: usize,
     /// Folder generation counter — scopes scroll state to current folder
     pub generation: usize,
+    pub tag_assignments: &'a rustc_hash::FxHashMap<PathBuf, Vec<i64>>,
+    pub tag_definitions: &'a rustc_hash::FxHashMap<i64, FileTag>,
 }
 
 /// Operations that can be performed from grid view

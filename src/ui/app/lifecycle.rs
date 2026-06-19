@@ -5,7 +5,7 @@ use eframe::egui;
 const STARTUP_REVEAL_TICK: usize = 2;
 
 fn recover_empty_current_folder_after_restore(app: &mut ImageViewerApp, reason: &str) {
-    if app.navigation_state.is_computer_view || app.navigation_state.is_recycle_bin_view {
+    if crate::domain::special_paths::is_virtual_path(&app.navigation_state.current_path) {
         return;
     }
     if !app.search_query.is_empty() || app.is_loading_folder || app.items_rebuild_in_flight {
@@ -62,6 +62,10 @@ pub fn handle_startup_sequence(app: &mut ImageViewerApp, ctx: &egui::Context) {
             // FINAL INITIALIZATION: Now that the UI is ready, ensure the initial tab is populated
             if app.navigation_state.is_computer_view {
                 app.setup_computer_view();
+            } else if let Some(tag_id) = crate::domain::special_paths::tag_id_from_view_path(
+                &app.navigation_state.current_path,
+            ) {
+                app.setup_tag_view(tag_id);
             } else {
                 app.load_folder(false);
             }
@@ -72,6 +76,12 @@ pub fn handle_startup_sequence(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 app.with_inactive_panel(|app| {
                     if app.navigation_state.is_computer_view {
                         app.setup_computer_view();
+                    } else if let Some(tag_id) =
+                        crate::domain::special_paths::tag_id_from_view_path(
+                            &app.navigation_state.current_path,
+                        )
+                    {
+                        app.setup_tag_view(tag_id);
                     } else {
                         app.loaded_path.clear();
                         app.load_folder_for_inactive();

@@ -384,6 +384,8 @@ fn render_item_slot_for_grid(
             allow_thumbnail_requests,
             thumbnail_requests_this_frame: &mut ctx.thumbnail_requests_this_frame,
             folder_preview_requests_this_frame: &mut ctx.folder_preview_requests_this_frame,
+            item_tag_ids: ctx.tag_assignments.get(&item.path).map(Vec::as_slice),
+            tag_definitions: ctx.tag_definitions,
         };
 
         struct SimpleOps<'a> {

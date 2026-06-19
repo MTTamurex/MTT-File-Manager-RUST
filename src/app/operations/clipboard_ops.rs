@@ -49,6 +49,7 @@ impl ImageViewerApp {
         self.clipboard.has_content()
             && !self.navigation_state.is_computer_view
             && !self.navigation_state.is_recycle_bin_view
+            && !crate::domain::special_paths::is_virtual_path(&self.navigation_state.current_path)
     }
 
     pub fn command_copy(&mut self, idx: Option<usize>) {

@@ -387,6 +387,7 @@ pub(super) fn handle_move(
                     let _ = result_sender.send(FileOperationResult::MoveCompleted {
                         source_folder: src,
                         dest_folder,
+                        source_path: path,
                         moved_dest,
                     });
                 }

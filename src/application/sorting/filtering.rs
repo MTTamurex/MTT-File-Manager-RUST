@@ -1,4 +1,6 @@
 use crate::domain::file_entry::FileEntry;
+use rustc_hash::FxHashMap;
+use std::path::PathBuf;
 
 /// Check if haystack contains needle (case-insensitive) using precomputed needle.
 /// Fast path for ASCII, fallback to Unicode-aware comparison.
@@ -73,6 +75,68 @@ pub(super) fn filter_items_opt(items: &[FileEntry], query: &str) -> Option<Vec<F
                         needle_ascii.as_deref(),
                     )
                 })
+            })
+            .cloned()
+            .collect(),
+    )
+}
+
+/// Filters items by name query and optional tag assignment.
+///
+/// Returns None when both filters are inactive so callers can keep the existing
+/// no-clone fast path.
+pub(super) fn filter_items_opt_with_tags(
+    items: &[FileEntry],
+    query: &str,
+    active_tag_filter: Option<i64>,
+    tag_assignments: &FxHashMap<PathBuf, Vec<i64>>,
+) -> Option<Vec<FileEntry>> {
+    let has_tag_filter = active_tag_filter.is_some();
+    if query.is_empty() && !has_tag_filter {
+        return None;
+    }
+
+    let tokens: Vec<&str> = query.split_whitespace().collect();
+    let has_query = !tokens.is_empty();
+    if !has_query && !has_tag_filter {
+        return None;
+    }
+
+    let precomputed: Vec<(Vec<char>, Option<Vec<u8>>)> = if has_query {
+        tokens
+            .iter()
+            .map(|token| {
+                let lower: Vec<char> = token.chars().flat_map(|c| c.to_lowercase()).collect();
+                let ascii = if lower.iter().all(|c| c.is_ascii()) {
+                    Some(lower.iter().map(|c| *c as u8).collect())
+                } else {
+                    None
+                };
+                (lower, ascii)
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+
+    Some(
+        items
+            .iter()
+            .filter(|item| {
+                let name_matches = !has_query
+                    || precomputed.iter().all(|(needle_lower, needle_ascii)| {
+                        contains_ignore_case_precomputed(
+                            &item.name,
+                            needle_lower,
+                            needle_ascii.as_deref(),
+                        )
+                    });
+                let tag_matches = active_tag_filter.map_or(true, |tag_id| {
+                    tag_assignments
+                        .get(&item.path)
+                        .is_some_and(|ids| ids.contains(&tag_id))
+                });
+                name_matches && tag_matches
             })
             .cloned()
             .collect(),

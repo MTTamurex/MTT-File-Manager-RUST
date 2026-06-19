@@ -33,6 +33,8 @@ pub enum FileOperationResult {
     MoveCompleted {
         source_folder: PathBuf,
         dest_folder: PathBuf,
+        /// Original source path of the moved item.
+        source_path: PathBuf,
         /// Destination path of the moved item (for write-activity cache clearing).
         moved_dest: Option<PathBuf>,
     },

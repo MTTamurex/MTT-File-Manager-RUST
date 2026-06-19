@@ -33,10 +33,13 @@ pub(crate) fn render_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context
         .show(ctx, |ui| {
             use crate::domain::file_entry::ViewMode;
             use crate::ui::toolbar::{render_toolbar, ToolbarAction};
+            let current_path_display_override =
+                app.tag_view_display_name_for_path(&app.navigation_state.current_path);
 
             let action = render_toolbar(
                 ui,
                 &app.navigation_state.current_path,
+                current_path_display_override.as_deref(),
                 &mut app.navigation_state.path_input,
                 &mut app.is_address_editing,
                 &mut app.show_address_history_menu,
@@ -121,7 +124,11 @@ pub(crate) fn render_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context
                     ToolbarAction::Search(_query) => app.filter_items(),
                     ToolbarAction::Navigate(path) => app.navigate_to(&path),
                     ToolbarAction::StartAddressEdit => {
-                        app.navigation_state.path_input = if app.navigation_state.current_path
+                        app.navigation_state.path_input = if let Some(display) =
+                            app.tag_view_display_name_for_path(&app.navigation_state.current_path)
+                        {
+                            display
+                        } else if app.navigation_state.current_path
                             == crate::domain::special_paths::COMPUTER_VIEW_ID
                         {
                             t!("nav.computer").to_string()
@@ -136,7 +143,11 @@ pub(crate) fn render_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context
                         app.show_address_history_menu = false;
                     }
                     ToolbarAction::StartAddressEditWithHistory => {
-                        app.navigation_state.path_input = if app.navigation_state.current_path
+                        app.navigation_state.path_input = if let Some(display) =
+                            app.tag_view_display_name_for_path(&app.navigation_state.current_path)
+                        {
+                            display
+                        } else if app.navigation_state.current_path
                             == crate::domain::special_paths::COMPUTER_VIEW_ID
                         {
                             t!("nav.computer").to_string()

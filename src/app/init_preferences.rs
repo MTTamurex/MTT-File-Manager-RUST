@@ -39,6 +39,7 @@ pub(super) struct StartupPreferences {
     pub(super) dual_panel_inactive_path: Option<String>,
     pub(super) dual_panel_active_view_mode: ViewMode,
     pub(super) dual_panel_inactive_view_mode: ViewMode,
+    pub(super) active_tag_filter: Option<i64>,
 }
 
 impl StartupPreferences {
@@ -271,6 +272,11 @@ impl StartupPreferences {
                 .or_else(|| prefs.get("view_mode")),
         );
 
+        let active_tag_filter = prefs
+            .get("active_tag_filter")
+            .and_then(|s| s.parse::<i64>().ok())
+            .filter(|id| *id > 0);
+
         Self {
             sort_mode,
             sort_mode_computer,
@@ -303,6 +309,7 @@ impl StartupPreferences {
             dual_panel_inactive_path,
             dual_panel_active_view_mode,
             dual_panel_inactive_view_mode,
+            active_tag_filter,
         }
     }
 }

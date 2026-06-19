@@ -8,6 +8,13 @@ use super::{truncate_text_for_column, ColumnWidths, ListViewContext, ListViewOpe
 use crate::domain::file_entry::FileEntry;
 use crate::infrastructure::windows::{format_date, format_size};
 
+fn first_tag_color(item: &FileEntry, ctx: &ListViewContext) -> Option<Color32> {
+    ctx.tag_assignments
+        .get(&item.path)
+        .and_then(|ids| ids.iter().find_map(|id| ctx.tag_definitions.get(id)))
+        .map(|tag| tag.color.to_color32())
+}
+
 /// Renders a single list item row
 #[allow(clippy::too_many_arguments)]
 pub(super) fn render_list_item(
@@ -249,6 +256,15 @@ pub(super) fn render_list_item(
         // 1. Icon + Name
         let icon_tint = Color32::WHITE.gamma_multiply(hidden_opacity);
         render_item_icon(ui, item, ctx, ops, rect, icon_tint);
+        let tag_color = first_tag_color(item, ctx);
+        let tag_name_offset = if tag_color.is_some() { 12.0 } else { 0.0 };
+        if let Some(color) = tag_color {
+            ui.painter().circle_filled(
+                Pos2::new(rect.min.x + 27.0, rect.center().y),
+                3.2,
+                color.gamma_multiply(hidden_opacity),
+            );
+        }
 
         // RENAMING LOGIC (LIST VIEW)
         let is_renaming_this = ctx
@@ -261,8 +277,8 @@ pub(super) fn render_list_item(
             };
             let mut text = rename_text.clone();
             let name_rect = Rect::from_min_size(
-                rect.min + egui::vec2(24.0, 2.0),
-                egui::vec2(w_name - 30.0, row_height - 4.0),
+                rect.min + egui::vec2(24.0 + tag_name_offset, 2.0),
+                egui::vec2(w_name - 30.0 - tag_name_offset, row_height - 4.0),
             );
 
             ui.allocate_new_ui(egui::UiBuilder::new().max_rect(name_rect), |ui| {
@@ -312,13 +328,13 @@ pub(super) fn render_list_item(
         } else {
             // Name (truncated to fit column precisely)
             let font_id = FontId::proportional(12.0);
-            let available_name_width = w_name - 30.0; // Space for icon + padding
+            let available_name_width = w_name - 30.0 - tag_name_offset; // Space for icon + tag + padding
             let resolved_name = crate::ui::components::item_slot::display_name_for_item(item);
             let display_name =
                 truncate_text_for_column(&resolved_name, available_name_width, &font_id, ui);
 
             ui.painter().text(
-                rect.min + egui::vec2(24.0, 5.0),
+                rect.min + egui::vec2(24.0 + tag_name_offset, 5.0),
                 egui::Align2::LEFT_TOP,
                 display_name,
                 font_id,
@@ -362,12 +378,17 @@ fn list_item_content_contains_pointer(
 
     let font_id = FontId::proportional(12.0);
     let resolved_name = crate::ui::components::item_slot::display_name_for_item(item);
+    let tag_name_offset = if first_tag_color(item, ctx).is_some() {
+        12.0
+    } else {
+        0.0
+    };
     if text_content_contains(
         ui,
         resolved_name.as_ref(),
-        col_widths.name - 30.0,
+        col_widths.name - 30.0 - tag_name_offset,
         font_id.clone(),
-        rect.min + egui::vec2(24.0, 5.0),
+        rect.min + egui::vec2(24.0 + tag_name_offset, 5.0),
         row_height,
         point,
     ) {

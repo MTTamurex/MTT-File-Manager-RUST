@@ -16,6 +16,7 @@ use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 
 use crate::domain::file_entry::{FileEntry, SortMode};
+use crate::domain::file_tag::FileTag;
 // PERFORMANCE: Use FxHashSet for PathBuf keys - faster hashing than std::collections::HashSet
 use crate::ui::cache::FxHashSet;
 use crate::ui::views::rectangle_selection::{RectangleSelectionFrame, RectangleSelectionState};
@@ -259,6 +260,8 @@ pub struct ListViewContext<'a> {
     pub col_type_width: &'a mut f32,
     pub col_size_width: &'a mut f32,
     pub col_status_width: &'a mut f32,
+    pub tag_assignments: &'a rustc_hash::FxHashMap<PathBuf, Vec<i64>>,
+    pub tag_definitions: &'a rustc_hash::FxHashMap<i64, FileTag>,
 }
 
 /// Action returned by list view

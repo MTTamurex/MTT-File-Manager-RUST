@@ -75,7 +75,8 @@ pub(in crate::app) fn spawn_incremental_gc_worker(
 
             let removed = disk_cache.garbage_collect_incremental(batch);
             let removed_covers = app_state_db.garbage_collect_covers_incremental(batch);
-            let total_removed = removed + removed_covers;
+            let removed_tags = app_state_db.garbage_collect_tag_assignments_incremental(batch);
+            let total_removed = removed + removed_covers + removed_tags;
             if total_removed > 0 {
                 removed_since_vacuum = removed_since_vacuum.saturating_add(total_removed);
             }

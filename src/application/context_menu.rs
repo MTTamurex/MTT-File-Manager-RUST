@@ -34,6 +34,10 @@ pub struct ContextMenuItem {
     pub svg_icon_name: Option<String>,
     /// True if this is a non-interactive placeholder shown while shell items are loading
     pub is_loading_placeholder: bool,
+    /// Checked state for app-defined submenu items.
+    pub is_checked: bool,
+    /// Optional leading color dot for app-defined items.
+    pub leading_color: Option<egui::Color32>,
 }
 
 impl Default for ContextMenuItem {
@@ -52,6 +56,8 @@ impl Default for ContextMenuItem {
             has_pending_submenu: false,
             svg_icon_name: None,
             is_loading_placeholder: false,
+            is_checked: false,
+            leading_color: None,
         }
     }
 }
@@ -125,6 +131,18 @@ impl ContextMenuItem {
     /// Builder: add SVG icon name for secondary menu items
     pub fn with_svg_icon(mut self, name: impl Into<String>) -> Self {
         self.svg_icon_name = Some(name.into());
+        self
+    }
+
+    /// Builder: set checked state.
+    pub fn checked(mut self, checked: bool) -> Self {
+        self.is_checked = checked;
+        self
+    }
+
+    /// Builder: add a leading color dot.
+    pub fn with_leading_color(mut self, color: egui::Color32) -> Self {
+        self.leading_color = Some(color);
         self
     }
 }

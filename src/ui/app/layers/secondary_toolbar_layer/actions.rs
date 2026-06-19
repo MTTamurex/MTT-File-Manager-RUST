@@ -31,7 +31,7 @@ pub(super) fn render_action_buttons(ui: &mut egui::Ui, app: &mut ImageViewerApp)
             .is_some_and(|idx| app.can_rename_item(idx));
     let can_paste = app.can_paste_into_current_location() && !is_drive_selected;
     let can_create_folder =
-        !app.navigation_state.is_computer_view && !app.navigation_state.is_recycle_bin_view;
+        !crate::domain::special_paths::is_virtual_path(&app.navigation_state.current_path);
     let can_empty_recycle_bin = is_recycle_bin_view && !app.items.is_empty();
 
     let icon_color = if ui.visuals().dark_mode {

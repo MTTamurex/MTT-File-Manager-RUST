@@ -127,4 +127,78 @@ impl AppStateDb {
         }
         removed
     }
+
+    /// Incremental GC for file tag assignments. Removes assignments whose path no
+    /// longer exists on an accessible drive. [WRITER]
+    pub fn garbage_collect_tag_assignments_incremental(&self, max_candidates: usize) -> usize {
+        let limit = max_candidates.max(1) as i64;
+
+        let sampled_paths: Vec<String> = {
+            let db = match self.writer.lock() {
+                Ok(db) => db,
+                Err(_) => {
+                    log::warn!("[GC-State] Incremental tag pass skipped: writer lock failed");
+                    return 0;
+                }
+            };
+
+            db.prepare(
+                "SELECT file_path FROM file_tag_assignments \
+                 WHERE rowid >= (ABS(RANDOM()) % MAX((SELECT COALESCE(MAX(rowid),0)+1 FROM file_tag_assignments),1)) \
+                 LIMIT ?1",
+            )
+            .and_then(|mut stmt| {
+                stmt.query_map(params![limit], |row| row.get::<_, String>(0))
+                    .map(|rows| rows.flatten().collect())
+            })
+            .unwrap_or_default()
+        };
+
+        if sampled_paths.is_empty() {
+            return 0;
+        }
+
+        let accessible = Self::accessible_drives(sampled_paths.iter().map(|p| p.as_str()));
+        let orphans: Vec<String> = sampled_paths
+            .into_iter()
+            .filter(|path| {
+                Self::is_on_accessible_drive(path, &accessible) && !Self::path_exists_fast(path)
+            })
+            .collect();
+
+        if orphans.is_empty() {
+            return 0;
+        }
+
+        let mut removed = 0;
+        if let Ok(mut db) = self.writer.lock() {
+            if let Ok(tx) = db.transaction() {
+                const BATCH_SIZE: usize = 500;
+                for chunk in orphans.chunks(BATCH_SIZE) {
+                    let placeholders = std::iter::repeat_n("?", chunk.len())
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    let sql = format!(
+                        "DELETE FROM file_tag_assignments WHERE file_path IN ({})",
+                        placeholders
+                    );
+                    match tx.execute(&sql, rusqlite::params_from_iter(chunk.iter())) {
+                        Ok(c) => removed += c,
+                        Err(e) => log::error!("[GC-State] Failed to delete tag batch: {:?}", e),
+                    }
+                }
+                if let Err(e) = tx.commit() {
+                    log::error!("[GC-State] Incremental tags commit failed: {:?}", e);
+                }
+            }
+        }
+
+        if removed > 0 {
+            log::debug!(
+                "[GC-State] Incremental tags pass removed {} assignments",
+                removed
+            );
+        }
+        removed
+    }
 }

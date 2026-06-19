@@ -43,6 +43,10 @@ impl ImageViewerApp {
 
     pub fn can_open_empty_area_context_menu(&self) -> bool {
         !self.navigation_state.is_computer_view
+            && crate::domain::special_paths::tag_id_from_view_path(
+                &self.navigation_state.current_path,
+            )
+            .is_none()
     }
 
     pub fn populate_context_menu(
@@ -156,6 +160,18 @@ impl ImageViewerApp {
         } else {
             false
         };
+        let can_tag_targets = !is_empty_area
+            && !is_drive
+            && !self.navigation_state.is_computer_view
+            && !self.navigation_state.is_recycle_bin_view
+            && !paths.is_empty()
+            && paths.iter().all(|path| {
+                let path_text = path.to_string_lossy();
+                let path_lower = path_text.to_lowercase();
+                !path_text.starts_with("shell:")
+                    && !crate::infrastructure::windows::is_drive_root_path(path)
+                    && !crate::domain::file_entry::path_contains_archive_segment(&path_lower)
+            });
 
         // ========== PRIMARY ITEMS (Header bar) - matching Files ==========
         // These appear as icon buttons in the header
@@ -214,7 +230,7 @@ impl ImageViewerApp {
         }
         // ========== SECONDARY ITEMS (App-specific) ==========
         let can_create_folder =
-            !self.navigation_state.is_computer_view && !self.navigation_state.is_recycle_bin_view;
+            !crate::domain::special_paths::is_virtual_path(&self.navigation_state.current_path);
         if is_empty_area {
             items.push(ContextMenuItem::separator());
             items.push(
@@ -348,6 +364,28 @@ impl ImageViewerApp {
                 }
             }
 
+            if can_tag_targets && !self.tag_definitions.is_empty() {
+                let mut sub_items = Vec::new();
+                for (idx, tag) in self.sorted_tag_definitions().into_iter().enumerate() {
+                    sub_items.push(
+                        ContextMenuItem::new(-9000 - idx as i32, tag.name.clone())
+                            .with_command(format!("tag_toggle:{}", tag.id))
+                            .with_leading_color(tag.color.to_color32())
+                            .checked(self.paths_have_tag(paths, tag.id)),
+                    );
+                }
+                sub_items.push(ContextMenuItem::separator());
+                sub_items
+                    .push(ContextMenuItem::new(-91, t!("tags.manage")).with_command("tag_manage"));
+
+                items.push(ContextMenuItem::separator());
+                items.push(
+                    ContextMenuItem::new(-90, t!("tags.assign"))
+                        .with_svg_icon("pin")
+                        .with_subitems(sub_items),
+                );
+            }
+
             items.push(ContextMenuItem::separator());
             items.push(
                 ContextMenuItem::new(-28, t!("context_menu.properties"))
@@ -464,6 +502,8 @@ impl ImageViewerApp {
                 has_pending_submenu: item.has_submenu,
                 svg_icon_name: None,
                 is_loading_placeholder: false,
+                is_checked: false,
+                leading_color: None,
             })
         }
 
@@ -610,6 +650,8 @@ impl ImageViewerApp {
                 has_pending_submenu: item.has_submenu,
                 svg_icon_name: None,
                 is_loading_placeholder: false,
+                is_checked: false,
+                leading_color: None,
             }
         }
 

@@ -294,6 +294,10 @@ impl eframe::App for ImageViewerApp {
             crate::ui::components::batch_rename_modal::render_batch_rename_modal(self, ctx);
         }
 
+        if self.show_tag_manager {
+            crate::ui::components::tag_manager_modal::render_tag_manager_modal(self, ctx);
+        }
+
         // 13. Notifications
         app::notifications::render_notifications(self, ctx);
 

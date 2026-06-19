@@ -86,7 +86,7 @@ impl ImageViewerApp {
     }
 
     fn hydrate_current_folder_timestamp_hints_after_load(&mut self) {
-        if self.navigation_state.is_computer_view || self.navigation_state.is_recycle_bin_view {
+        if crate::domain::special_paths::is_virtual_path(&self.navigation_state.current_path) {
             return;
         }
 
@@ -126,9 +126,28 @@ impl ImageViewerApp {
     }
 
     fn build_sorted_items_snapshot(&self) -> Vec<crate::domain::file_entry::FileEntry> {
-        let mut result_items = match sorting::filter_items_opt(&self.all_items, &self.search_query)
+        let active_tag_filter = if self.navigation_state.is_computer_view
+            || self.navigation_state.is_recycle_bin_view
         {
-            Some(filtered) => filtered,
+            None
+        } else {
+            self.active_tag_filter
+        };
+        let result_items = match sorting::filter_items_opt_with_tags(
+            &self.all_items,
+            &self.search_query,
+            active_tag_filter,
+            &self.tag_assignments,
+        ) {
+            Some(mut filtered) => {
+                sorting::sort_items(
+                    &mut filtered,
+                    self.sort_mode,
+                    self.sort_descending,
+                    self.folders_position,
+                );
+                filtered
+            }
             None => {
                 let mut all = self.all_items.as_ref().clone();
                 sorting::sort_items(
@@ -140,14 +159,6 @@ impl ImageViewerApp {
                 all
             }
         };
-        if !self.search_query.is_empty() {
-            sorting::sort_items(
-                &mut result_items,
-                self.sort_mode,
-                self.sort_descending,
-                self.folders_position,
-            );
-        }
         result_items
     }
 
@@ -161,6 +172,14 @@ impl ImageViewerApp {
         let generation = self.generation;
         let items = self.all_items.clone();
         let query = self.search_query.clone();
+        let active_tag_filter = if self.navigation_state.is_computer_view
+            || self.navigation_state.is_recycle_bin_view
+        {
+            None
+        } else {
+            self.active_tag_filter
+        };
+        let tag_assignments = self.tag_assignments.clone();
         let sort_mode = self.sort_mode;
         let sort_descending = self.sort_descending;
         let folders_position = self.folders_position;
@@ -170,8 +189,21 @@ impl ImageViewerApp {
         self.items_rebuild_in_flight = true;
 
         std::thread::spawn(move || {
-            let mut result_items = match sorting::filter_items_opt(&items, &query) {
-                Some(filtered) => filtered,
+            let result_items = match sorting::filter_items_opt_with_tags(
+                &items,
+                &query,
+                active_tag_filter,
+                &tag_assignments,
+            ) {
+                Some(mut filtered) => {
+                    sorting::sort_items(
+                        &mut filtered,
+                        sort_mode,
+                        sort_descending,
+                        folders_position,
+                    );
+                    filtered
+                }
                 None => {
                     let mut all = match Arc::try_unwrap(items) {
                         Ok(all) => all,
@@ -181,14 +213,6 @@ impl ImageViewerApp {
                     all
                 }
             };
-            if !query.is_empty() {
-                sorting::sort_items(
-                    &mut result_items,
-                    sort_mode,
-                    sort_descending,
-                    folders_position,
-                );
-            }
             let total = result_items.len();
             let _ = sender.send(ItemsRebuildResult {
                 generation,

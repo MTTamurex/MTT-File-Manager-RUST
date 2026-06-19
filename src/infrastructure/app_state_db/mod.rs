@@ -12,6 +12,7 @@ use std::sync::{Arc, Mutex};
 use super::db_utils;
 
 mod cleanup;
+mod file_tags;
 mod folder_covers;
 mod folder_locks;
 pub(crate) mod gc;
@@ -164,5 +165,36 @@ impl AppStateDb {
             [],
         )
         .unwrap_or(0);
+
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS file_tags (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+                color TEXT NOT NULL,
+                position INTEGER NOT NULL DEFAULT 0
+            )",
+            [],
+        )
+        .unwrap_or(0);
+
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS file_tag_assignments (
+                file_path TEXT NOT NULL,
+                tag_id INTEGER NOT NULL,
+                PRIMARY KEY (file_path, tag_id),
+                FOREIGN KEY (tag_id) REFERENCES file_tags(id) ON DELETE CASCADE
+            )",
+            [],
+        )
+        .unwrap_or(0);
+
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_file_tag_assignments_tag
+             ON file_tag_assignments(tag_id)",
+            [],
+        )
+        .unwrap_or(0);
+
+        file_tags::seed_default_file_tags(conn);
     }
 }

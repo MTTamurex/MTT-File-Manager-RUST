@@ -184,6 +184,10 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) -> Option
                 sidebar_rename_focus: app.sidebar_rename_focus,
                 mounted_iso_drives: &app.file_operation_state.mounted_iso_drives,
                 tree_state: &app.sidebar_tree,
+                tag_definitions: &app.tag_definitions,
+                tag_counts: &app.tag_counts,
+                active_tag_filter: app.active_tag_filter,
+                collapse_tags: app.collapse_tags,
             };
 
             // ── Fixed top: This PC + Quick Access (does not scroll) ──
@@ -329,6 +333,12 @@ fn handle_sidebar_action(app: &mut ImageViewerApp, action: SidebarAction) {
         }
         SidebarAction::ToggleNetworkDrives => {
             app.collapse_network_drives = !app.collapse_network_drives;
+        }
+        SidebarAction::FilterByTag(tag_id) => {
+            app.set_tag_filter(tag_id);
+        }
+        SidebarAction::ToggleTags => {
+            app.collapse_tags = !app.collapse_tags;
         }
         SidebarAction::DropItemsTo(path) => {
             if app.is_item_dragging && !app.file_panel_input_blocked_by_drag_move_confirmation() {

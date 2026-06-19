@@ -326,6 +326,22 @@ fn calculate_effective_file(app: &ImageViewerApp) -> Option<FileEntry> {
             is_hidden: false,
             recycle_bin: None,
         })
+    } else if let Some(tag_name) =
+        app.tag_view_display_name_for_path(&app.navigation_state.current_path)
+    {
+        Some(FileEntry {
+            path: PathBuf::from(&app.navigation_state.current_path),
+            name: tag_name,
+            is_dir: true,
+            size: app.total_items as u64,
+            modified: 0,
+            created: None,
+            folder_cover: None,
+            drive_info: None,
+            sync_status: SyncStatus::None,
+            is_hidden: false,
+            recycle_bin: None,
+        })
     } else {
         // M-12: Check cache before rebuilding the folder entry every frame.
         let mod_hint = app
@@ -466,6 +482,7 @@ fn is_current_folder_panel_target(app: &ImageViewerApp, file: &FileEntry) -> boo
     app.selected_file.is_none()
         && !app.navigation_state.is_computer_view
         && !app.navigation_state.is_recycle_bin_view
+        && !crate::domain::special_paths::is_virtual_path(&app.navigation_state.current_path)
         && file.is_dir
         && file.path == PathBuf::from(&app.navigation_state.current_path)
 }
@@ -626,6 +643,8 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
             t!("nav.computer").to_string()
         } else if path == RECYCLE_BIN_VIEW_ID {
             t!("nav.recycle_bin").to_string()
+        } else if let Some(display) = app.tag_view_display_name_for_path(path) {
+            display
         } else {
             path.to_string()
         }
@@ -743,6 +762,7 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
                 app.drag_cross_panel_target = app
                     .dual_panel_inactive_state
                     .as_ref()
+                    .filter(|s| !crate::domain::special_paths::is_virtual_path(&s.path))
                     .map(|s| std::path::PathBuf::from(&s.path));
             } else {
                 app.drag_cross_panel_target = None;

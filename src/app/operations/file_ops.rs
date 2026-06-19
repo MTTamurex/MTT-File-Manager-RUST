@@ -242,7 +242,7 @@ impl ImageViewerApp {
     }
 
     pub fn create_new_folder(&mut self) {
-        if self.navigation_state.is_computer_view || self.navigation_state.is_recycle_bin_view {
+        if crate::domain::special_paths::is_virtual_path(&self.navigation_state.current_path) {
             return;
         }
 

@@ -339,6 +339,8 @@ impl ImageViewerApp {
             col_type_width,
             col_size_width,
             col_status_width,
+            tag_assignments: &self.tag_assignments,
+            tag_definitions: &self.tag_definitions,
         };
 
         // Use a different approach: collect actions in vectors

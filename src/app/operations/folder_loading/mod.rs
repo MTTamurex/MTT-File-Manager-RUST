@@ -20,6 +20,12 @@ impl ImageViewerApp {
     }
 
     fn load_folder_with_icon_trim(&mut self, force_refresh: bool, trim_icons: bool) {
+        if let Some(tag_id) =
+            crate::domain::special_paths::tag_id_from_view_path(&self.navigation_state.current_path)
+        {
+            self.setup_tag_view(tag_id);
+            return;
+        }
         if self.should_skip_folder_load(force_refresh) {
             return;
         }
@@ -39,6 +45,12 @@ impl ImageViewerApp {
     /// pipeline.  Clearing them would nuke in-progress thumbnail work for the
     /// active panel and cause persistent thumbnail display corruption.
     pub fn load_folder_for_inactive(&mut self) {
+        if let Some(tag_id) =
+            crate::domain::special_paths::tag_id_from_view_path(&self.navigation_state.current_path)
+        {
+            self.setup_tag_view(tag_id);
+            return;
+        }
         if self.should_skip_folder_load(false) {
             return;
         }
