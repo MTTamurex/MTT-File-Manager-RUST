@@ -2,6 +2,58 @@
 
 use crate::app::dual_panel::{ActivePanel, PanelSnapshot};
 use crate::app::state::ImageViewerApp;
+use crate::domain::special_paths::tag_id_from_view_path;
+use std::sync::Arc;
+
+fn snapshot_entry_has_tag(
+    tag_assignments: &rustc_hash::FxHashMap<std::path::PathBuf, Vec<i64>>,
+    entry: &crate::domain::file_entry::FileEntry,
+    tag_id: i64,
+) -> bool {
+    tag_assignments
+        .get(&entry.path)
+        .is_some_and(|ids| ids.contains(&tag_id))
+}
+
+fn sanitize_tag_view_snapshot(
+    snapshot: &mut PanelSnapshot,
+    tag_assignments: &rustc_hash::FxHashMap<std::path::PathBuf, Vec<i64>>,
+    tag_counts: &rustc_hash::FxHashMap<i64, usize>,
+) -> Option<i64> {
+    let tag_id = tag_id_from_view_path(&snapshot.path)?;
+
+    snapshot.active_tag_filter = Some(tag_id);
+    snapshot.is_computer_view = false;
+    snapshot.is_recycle_bin_view = false;
+
+    let original_all_len = snapshot.all_items.len();
+    let original_items_len = snapshot.items.len();
+
+    Arc::make_mut(&mut snapshot.all_items)
+        .retain(|entry| snapshot_entry_has_tag(tag_assignments, entry, tag_id));
+
+    if snapshot.items_snapshot_compact {
+        snapshot.total_items = snapshot.all_items.len();
+    } else {
+        Arc::make_mut(&mut snapshot.items)
+            .retain(|entry| snapshot_entry_has_tag(tag_assignments, entry, tag_id));
+        snapshot.total_items = snapshot.items.len();
+    }
+
+    let removed_wrong_items = snapshot.all_items.len() != original_all_len
+        || (!snapshot.items_snapshot_compact && snapshot.items.len() != original_items_len);
+    let has_loaded_items = if snapshot.items_snapshot_compact {
+        !snapshot.all_items.is_empty()
+    } else {
+        !snapshot.items.is_empty() || !snapshot.all_items.is_empty()
+    };
+    let tag_has_assignments = tag_counts.get(&tag_id).copied().unwrap_or(0) > 0;
+
+    (tag_has_assignments
+        && !snapshot.is_loading_folder
+        && (removed_wrong_items || !has_loaded_items))
+        .then_some(tag_id)
+}
 
 impl ImageViewerApp {
     fn dual_panel_enable_impl(&mut self, persist: bool) {
@@ -35,7 +87,7 @@ impl ImageViewerApp {
         if !self.dual_panel_enabled {
             return;
         }
-        let Some(mut snapshot) = self.dual_panel_inactive_state.take() else {
+        let Some(inactive_snapshot) = self.dual_panel_inactive_state.take() else {
             log::warn!("[DualPanel] switch_active called but no inactive state");
             return;
         };
@@ -55,12 +107,20 @@ impl ImageViewerApp {
             self.destroy_media_preview();
         }
 
-        // Zero-alloc swap: active <-> inactive
-        snapshot.swap_with_app(self);
+        // Capture the outgoing active panel first, then restore the incoming
+        // inactive panel explicitly. This avoids cross-contaminating virtual
+        // views (notably tag views) with the other panel's This PC snapshot.
+        let mut outgoing_active_snapshot = PanelSnapshot::from_app(self);
+        inactive_snapshot.apply_to(self);
+        let reload_inactive_tag = sanitize_tag_view_snapshot(
+            &mut outgoing_active_snapshot,
+            &self.tag_assignments,
+            &self.tag_counts,
+        );
         // Re-evaluate the restored panel's folder lock without resetting
         // saved unlocked view settings from its panel snapshot.
         self.apply_folder_lock_on_tab_restore();
-        self.dual_panel_inactive_state = Some(snapshot);
+        self.dual_panel_inactive_state = Some(outgoing_active_snapshot);
         self.dual_panel_active = self.dual_panel_active.other();
         self.invalidate_active_items_rebuild();
 
@@ -68,6 +128,10 @@ impl ImageViewerApp {
         // so thumbnail workers accept requests from the now-active panel.
         self.current_generation
             .store(self.generation, std::sync::atomic::Ordering::Relaxed);
+
+        if let Some(tag_id) = reload_inactive_tag {
+            self.with_inactive_panel(|app| app.setup_tag_view(tag_id));
+        }
 
         // Re-watch the new active folder so watcher events go to the right place
         self.watch_current_folder();

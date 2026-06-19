@@ -184,7 +184,11 @@ impl ImageViewerApp {
         let Some(snapshot) = self.dual_panel_inactive_state.as_ref() else {
             return;
         };
-        if snapshot.is_loading_folder || snapshot.is_computer_view || snapshot.is_recycle_bin_view {
+        if snapshot.is_loading_folder
+            || snapshot.is_computer_view
+            || snapshot.is_recycle_bin_view
+            || crate::domain::special_paths::is_virtual_path(&snapshot.path)
+        {
             return;
         }
 

@@ -175,7 +175,10 @@ impl ImageViewerApp {
         paths.sort_by_key(|path| path.to_string_lossy().to_lowercase());
 
         let generation = self.generation;
-        let current_generation = self.current_generation.clone();
+        // Tag views can move between active/inactive dual panels while loading.
+        // Use a load-local token so a focus switch does not cancel this worker;
+        // stale batches are still discarded by the generation router on receive.
+        let current_generation = Arc::new(std::sync::atomic::AtomicUsize::new(generation));
         let sender = self.file_entry_sender.clone();
         let ui_ctx = self.ui_ctx.clone();
         let show_hidden = self.show_hidden_files;
