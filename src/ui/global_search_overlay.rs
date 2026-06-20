@@ -370,7 +370,6 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                         app.global_search.created_before_month_text.clear();
                         app.global_search.created_before_day_text.clear();
                         app.global_search.created_before_year_text.clear();
-                        app.global_search.tag_filter = GlobalSearchTagFilter::All;
                     }
 
                     if app.global_search.available && app.global_search.indexing_in_progress {
