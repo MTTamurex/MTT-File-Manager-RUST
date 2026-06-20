@@ -617,18 +617,15 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
         ActivePanel::Right => (right_rect, left_rect),
     };
 
-    // ── Draw focus indicator (border) on the active panel ──
+    // ── Focus indicator geometry for the active panel ──
+    let focus_stroke_width = 2.0;
+    let focus_stroke_margin = 1.0;
+    let focus_border_reserved = focus_stroke_width + focus_stroke_margin;
     let focus_color = if ui.ctx().style().visuals.dark_mode {
         egui::Color32::from_rgb(80, 160, 255) // bright blue
     } else {
         egui::Color32::from_rgb(0, 100, 220)
     };
-    ui.painter().rect_stroke(
-        active_rect.shrink(1.0),
-        0.0,
-        egui::Stroke::new(2.0, focus_color),
-        egui::StrokeKind::Inside,
-    );
 
     // ── Path header for each panel ──
     let header_height = 24.0;
@@ -778,6 +775,22 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
         right_rect.max,
     );
 
+    let reserve_active_focus_border = |panel: ActivePanel, rect: egui::Rect| -> egui::Rect {
+        if panel != active {
+            return rect;
+        }
+
+        let min = egui::pos2((rect.min.x + focus_border_reserved).min(rect.max.x), rect.min.y);
+        let max = egui::pos2(
+            (rect.max.x - focus_border_reserved).max(min.x),
+            (rect.max.y - focus_border_reserved).max(rect.min.y),
+        );
+        egui::Rect::from_min_max(min, max)
+    };
+
+    let left_content_rect = reserve_active_focus_border(ActivePanel::Left, left_content_rect);
+    let right_content_rect = reserve_active_focus_border(ActivePanel::Right, right_content_rect);
+
     let (active_content_rect, inactive_content_rect) = match active {
         ActivePanel::Left => (left_content_rect, right_content_rect),
         ActivePanel::Right => (right_content_rect, left_content_rect),
@@ -850,6 +863,14 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
         app_with_inactive.use_active_generation_for_thumbnail_requests = false;
         app_with_inactive.suppress_file_panel_keyboard = false;
     });
+
+    // Draw the focus border after panel contents so thumbnails cannot paint over it.
+    ui.painter().rect_stroke(
+        active_rect.shrink(focus_stroke_margin),
+        0.0,
+        egui::Stroke::new(focus_stroke_width, focus_color),
+        egui::StrokeKind::Inside,
+    );
 
     // ── Click-to-focus: detect click AFTER rendering so item interactions
     //    are processed first. Only primary-button clicks may switch focus;
