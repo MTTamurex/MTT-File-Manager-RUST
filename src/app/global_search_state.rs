@@ -54,6 +54,17 @@ pub enum GlobalSearchSortMode {
     Name,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum GlobalSearchTagFilter {
+    /// No tag filter applied — show all results, regardless of whether they have tags.
+    #[default]
+    All,
+    /// Show only results that have at least one tag assigned (any tag).
+    Any,
+    /// Show only results that have at least one of the specified tag IDs (OR semantics).
+    Selected(Vec<i64>),
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CreatedMetadataState {
     Pending,
@@ -70,6 +81,7 @@ pub struct GlobalSearchFilters {
     pub max_size_mb: Option<u64>,
     pub created_after: Option<u64>,
     pub created_before: Option<u64>,
+    pub tag_filter: GlobalSearchTagFilter,
 }
 
 pub struct GlobalSearchState {
@@ -94,6 +106,8 @@ pub struct GlobalSearchState {
     pub max_size_mb: Option<u64>,
     pub created_after: Option<u64>,
     pub created_before: Option<u64>,
+    /// Tag filter (see `GlobalSearchTagFilter`).
+    pub tag_filter: GlobalSearchTagFilter,
     /// Created After date components (0 = not set).
     pub created_after_month: u32,
     pub created_after_day: u32,
@@ -209,6 +223,7 @@ impl GlobalSearchState {
             max_size_mb: None,
             created_after: None,
             created_before: None,
+            tag_filter: GlobalSearchTagFilter::All,
             created_after_month: 0,
             created_after_day: 0,
             created_after_year: 0,
@@ -254,6 +269,7 @@ impl GlobalSearchState {
                     max_size_mb: None,
                     created_after: None,
                     created_before: None,
+                    tag_filter: GlobalSearchTagFilter::All,
                 },
                 0,
             ),
@@ -267,6 +283,7 @@ impl GlobalSearchState {
                     max_size_mb: None,
                     created_after: None,
                     created_before: None,
+                    tag_filter: GlobalSearchTagFilter::All,
                 },
                 GlobalSearchSortMode::Relevance,
                 false,
@@ -555,7 +572,10 @@ impl GlobalSearchState {
     /// Rebuild the cached filtered indices and available drives only when the
     /// inputs have changed.
     /// Returns a reference to the cached filtered indices.
-    pub fn ensure_filter_cache(&mut self) -> &[usize] {
+    pub fn ensure_filter_cache(
+        &mut self,
+        tag_assignments: &rustc_hash::FxHashMap<std::path::PathBuf, Vec<i64>>,
+    ) -> &[usize] {
         let filters = GlobalSearchFilters {
             category: self.category,
             drive_filter: self.drive_filter,
@@ -563,6 +583,7 @@ impl GlobalSearchState {
             max_size_mb: self.max_size_mb,
             created_after: self.created_after,
             created_before: self.created_before,
+            tag_filter: self.tag_filter.clone(),
         };
         let key = (
             self.results_generation,
@@ -582,6 +603,8 @@ impl GlobalSearchState {
                     self.created_after,
                     self.created_before,
                     &self.created_ts_cache,
+                    &self.tag_filter,
+                    tag_assignments,
                 );
             self.cached_available_drives =
                 crate::ui::global_search_overlay::filters::available_drives(&self.results);
@@ -599,8 +622,11 @@ impl GlobalSearchState {
 
     /// Returns filtered indices sorted according to the current sort_mode.
     /// Uses a cache key that includes generation, filters, sort_mode, and metadata epochs.
-    pub fn ensure_sorted_indices(&mut self) -> &[usize] {
-        self.ensure_filter_cache();
+    pub fn ensure_sorted_indices(
+        &mut self,
+        tag_assignments: &rustc_hash::FxHashMap<std::path::PathBuf, Vec<i64>>,
+    ) -> &[usize] {
+        self.ensure_filter_cache(tag_assignments);
         let filters = GlobalSearchFilters {
             category: self.category,
             drive_filter: self.drive_filter,
@@ -608,6 +634,7 @@ impl GlobalSearchState {
             max_size_mb: self.max_size_mb,
             created_after: self.created_after,
             created_before: self.created_before,
+            tag_filter: self.tag_filter.clone(),
         };
         let key = (
             self.results_generation,
@@ -731,7 +758,8 @@ mod tests {
 
         let mut resolved = 0usize;
         loop {
-            state.ensure_sorted_indices();
+            let assignments = rustc_hash::FxHashMap::default();
+            state.ensure_sorted_indices(&assignments);
             let mut batch = Vec::new();
             while let Ok(request) = tooltip_rx.try_recv() {
                 match request {
@@ -762,7 +790,8 @@ mod tests {
         );
         assert!(state.sort_metadata_inflight.is_empty());
 
-        state.ensure_sorted_indices();
+        let assignments = rustc_hash::FxHashMap::default();
+        state.ensure_sorted_indices(&assignments);
         assert!(tooltip_rx.try_recv().is_err());
     }
 }

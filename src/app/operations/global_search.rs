@@ -1,3 +1,4 @@
+use crate::app::global_search_state::GlobalSearchTagFilter;
 use crate::app::state::ImageViewerApp;
 use crate::workers::global_search_worker::GlobalSearchRequest;
 
@@ -43,6 +44,7 @@ impl ImageViewerApp {
         self.global_search.created_before_month_text.clear();
         self.global_search.created_before_day_text.clear();
         self.global_search.created_before_year_text.clear();
+        self.global_search.tag_filter = GlobalSearchTagFilter::All;
 
         if let Err(error) = self
             .global_search
@@ -78,6 +80,7 @@ impl ImageViewerApp {
         self.global_search.scroll_offset_y = 0.0;
         self.global_search.last_scroll_offset_y = 0.0;
         self.global_search.session_total_indexed = 0;
+        self.global_search.tag_filter = GlobalSearchTagFilter::All;
 
         if let Err(error) = self
             .global_search

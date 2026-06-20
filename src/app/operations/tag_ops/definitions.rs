@@ -1,3 +1,4 @@
+use crate::app::global_search_state::GlobalSearchTagFilter;
 use crate::app::state::ImageViewerApp;
 use crate::domain::file_tag::{FileTag, TagColor};
 use crate::domain::special_paths::{tag_id_from_view_path, tag_view_path, COMPUTER_VIEW_ID};
@@ -74,8 +75,24 @@ impl ImageViewerApp {
             }
         }
 
+        // Drop any stale tag IDs from the active global search filter.
+        self.prune_stale_tag_filter();
+
         self.refresh_visible_items_after_tag_change();
         true
+    }
+
+    /// Remove any tag IDs from the global search tag filter that no longer
+    /// have a corresponding `FileTag` definition. If the filter was in the
+    /// `Selected` state and the pruned list becomes empty, the filter is
+    /// reset to `All` (no tag filter applied).
+    pub fn prune_stale_tag_filter(&mut self) {
+        if let GlobalSearchTagFilter::Selected(ids) = &mut self.global_search.tag_filter {
+            ids.retain(|id| self.tag_definitions.contains_key(id));
+            if ids.is_empty() {
+                self.global_search.tag_filter = GlobalSearchTagFilter::All;
+            }
+        }
     }
 
     pub fn set_tag_filter(&mut self, tag_id: Option<i64>) {

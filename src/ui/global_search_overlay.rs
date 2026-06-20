@@ -1,7 +1,7 @@
 //! Global search overlay modal (Spotlight-style).
 //! Activated via Ctrl+Shift+F or the secondary toolbar button.
 
-use crate::app::global_search_state::{GlobalSearchCategory, GlobalSearchSortMode};
+use crate::app::global_search_state::{GlobalSearchCategory, GlobalSearchSortMode, GlobalSearchTagFilter};
 use crate::app::state::ImageViewerApp;
 use crate::ui::theme;
 use date_filter::{date_components_to_unix_ts, date_components_to_unix_ts_end_of_day};
@@ -370,6 +370,7 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                         app.global_search.created_before_month_text.clear();
                         app.global_search.created_before_day_text.clear();
                         app.global_search.created_before_year_text.clear();
+                        app.global_search.tag_filter = GlobalSearchTagFilter::All;
                     }
 
                     if app.global_search.available && app.global_search.indexing_in_progress {
@@ -542,7 +543,7 @@ fn render_filter_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
     ];
 
     // Use cached drives to avoid O(N) recomputation every frame.
-    app.global_search.ensure_filter_cache();
+    app.global_search.ensure_filter_cache(&app.tag_assignments);
     let drives = app.global_search.cached_available_drives.clone();
     if app
         .global_search
@@ -640,7 +641,7 @@ fn render_filter_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
 
     ui.add_space(4.0);
 
-    // Row 2: sort + extension + size controls
+    // Row 2: sort + size + tag filter
     ui.horizontal(|ui| {
         let label_color = egui::Color32::from_gray(140);
 
@@ -742,6 +743,17 @@ fn render_filter_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
             app.global_search.max_size_mb = if max_val > 0 { Some(max_val) } else { None };
             app.global_search.selected_index = None;
         }
+
+        ui.add_space(8.0);
+
+        // Tag filter: label + button, inline after the size controls.
+        ui.label(
+            egui::RichText::new(t!("search.filter_tag"))
+                .size(10.0)
+                .color(label_color),
+        );
+        ui.add_space(4.0);
+        render_tag_filter_button(ui, app);
     });
 
     ui.add_space(4.0);
@@ -864,4 +876,266 @@ fn render_filter_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
             app.global_search.selected_index = None;
         }
     });
+}
+
+/// Fixed width of the tag filter popup (pixels).
+const TAG_FILTER_POPUP_WIDTH: f32 = 220.0;
+
+/// Renders the tag filter button (used inline within Row 2) and its popup.
+///
+/// The popup is a three-zone container:
+/// 1. global modes (`All` / `Any tag`) — radio-style selection
+/// 2. per-tag checkboxes for specific selections
+/// 3. "Clear all" button when the filter is active
+///
+/// Visual feedback (the checkmark next to each selected option) is drawn
+/// manually with `painter.text` because the global `visuals_mut()`
+/// overrides applied to the modal suppress `selectable_label`'s built-in
+/// checkmark, leaving selected options indistinguishable from the rest.
+fn render_tag_filter_button(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
+    let button_label: String = match &app.global_search.tag_filter {
+        GlobalSearchTagFilter::All => t!("search.filter_tag_all").to_string(),
+        GlobalSearchTagFilter::Any => t!("search.filter_tag_any").to_string(),
+        GlobalSearchTagFilter::Selected(ids) if ids.len() == 1 => app
+            .tag_definitions
+            .get(&ids[0])
+            .map(|tag| tag.name.clone())
+            .unwrap_or_else(|| t!("search.filter_tag_any").to_string()),
+        GlobalSearchTagFilter::Selected(ids) => format!(
+            "{} {}",
+            ids.len(),
+            t!("search.filter_tag_selected_suffix"),
+        ),
+    };
+
+    let popup_id = egui::Id::new("global_search_tag_filter_popup");
+    let mut show_popup = ui
+        .ctx()
+        .memory(|m| m.data.get_temp::<bool>(popup_id).unwrap_or(false));
+
+    let button = egui::Button::new(button_label);
+    let button_response = ui.add(button);
+    let button_rect = button_response.rect;
+
+    if button_response.clicked() {
+        show_popup = !show_popup;
+        ui.ctx()
+            .memory_mut(|m| m.data.insert_temp::<bool>(popup_id, show_popup));
+    }
+
+    if !show_popup {
+        return;
+    }
+
+    let mut close_popup = false;
+    let mut item_clicked = false;
+    let popup_pos = egui::pos2(button_rect.left(), button_rect.bottom() + 2.0);
+    let popup_response = egui::Area::new(popup_id)
+        .order(egui::Order::Foreground)
+        .fixed_pos(popup_pos)
+        .show(ui.ctx(), |ui| {
+            // Override visuals for the popup body so selectable_label's
+            // background matches the popup frame.
+            let dark_mode = ui.visuals().dark_mode;
+            let popup_fill = if dark_mode {
+                egui::Color32::from_rgb(40, 40, 44)
+            } else {
+                egui::Color32::from_rgb(245, 245, 247)
+            };
+            ui.visuals_mut().widgets.inactive.bg_fill = popup_fill;
+            ui.visuals_mut().widgets.hovered.bg_fill = if dark_mode {
+                egui::Color32::from_rgb(58, 58, 62)
+            } else {
+                egui::Color32::from_rgb(225, 225, 230)
+            };
+            ui.visuals_mut().widgets.hovered.weak_bg_fill = ui.visuals().widgets.hovered.bg_fill;
+            ui.visuals_mut().widgets.active.bg_fill = ui.visuals().widgets.hovered.bg_fill;
+            ui.visuals_mut().widgets.active.weak_bg_fill = ui.visuals().widgets.hovered.bg_fill;
+            ui.visuals_mut().selection.bg_fill = theme::selection_color(dark_mode);
+            ui.visuals_mut().selection.stroke =
+                egui::Stroke::new(1.0, theme::selection_text_color(dark_mode));
+
+            // Constrain the popup to a fixed width so it doesn't stretch
+            // across the whole modal (which previously caused click-detection
+            // issues with the Area's response rect).
+            egui::Frame::popup(ui.style())
+                .inner_margin(egui::Margin::same(4))
+                .show(ui, |ui| {
+                    ui.set_min_width(TAG_FILTER_POPUP_WIDTH);
+                    ui.set_max_width(TAG_FILTER_POPUP_WIDTH);
+                    ui.spacing_mut().item_spacing.y = 2.0;
+
+                    // --- Zone 1: global modes (radio) ---
+                    let is_all = matches!(app.global_search.tag_filter, GlobalSearchTagFilter::All);
+                    if popup_menu_item(ui, is_all, t!("search.filter_tag_all").as_ref(), None).clicked() {
+                        app.global_search.tag_filter = GlobalSearchTagFilter::All;
+                        app.global_search.selected_index = None;
+                        close_popup = true;
+                        item_clicked = true;
+                    }
+                    let is_any = matches!(app.global_search.tag_filter, GlobalSearchTagFilter::Any);
+                    if popup_menu_item(ui, is_any, t!("search.filter_tag_any").as_ref(), None).clicked() {
+                        app.global_search.tag_filter = GlobalSearchTagFilter::Any;
+                        app.global_search.selected_index = None;
+                        close_popup = true;
+                        item_clicked = true;
+                    }
+
+                    ui.separator();
+
+                    // --- Zone 2: per-tag checkboxes ---
+                    if app.tag_definitions.is_empty() {
+                        ui.add_space(2.0);
+                        ui.weak(t!("search.filter_tag_no_tags"));
+                    } else {
+                        // Snapshot selected IDs to avoid borrow issues
+                        // while iterating tag definitions.
+                        let selected_ids: Vec<i64> = match &app.global_search.tag_filter {
+                            GlobalSearchTagFilter::Selected(ids) => ids.clone(),
+                            _ => Vec::new(),
+                        };
+
+                        for tag in app.sorted_tag_definitions() {
+                            let is_selected = selected_ids.contains(&tag.id);
+                            let dot_color = Some(tag.color.to_color32());
+                            if popup_menu_item(ui, is_selected, &tag.name, dot_color).clicked() {
+                                toggle_tag_in_filter(&mut app.global_search.tag_filter, tag.id);
+                                app.global_search.selected_index = None;
+                                item_clicked = true;
+                            }
+                        }
+                    }
+
+                    // --- Zone 3: explicit clear button ---
+                    let has_active_filter = !matches!(
+                        app.global_search.tag_filter,
+                        GlobalSearchTagFilter::All
+                    );
+                    if has_active_filter {
+                        ui.separator();
+                        if ui
+                            .button(t!("search.filter_tag_clear"))
+                            .clicked()
+                        {
+                            app.global_search.tag_filter = GlobalSearchTagFilter::All;
+                            app.global_search.selected_index = None;
+                            close_popup = true;
+                            item_clicked = true;
+                        }
+                    }
+                });
+        });
+
+    if close_popup {
+        ui.ctx()
+            .memory_mut(|m| m.data.insert_temp::<bool>(popup_id, false));
+    } else if !item_clicked && ui.ctx().input(|i| i.pointer.any_pressed()) {
+        // Only run the outside-click check when no popup item consumed the
+        // click. This prevents the fragile rect-based check from closing
+        // the popup on the same frame a tag is clicked.
+        if let Some(pointer_pos) = ui.ctx().input(|i| i.pointer.press_origin()) {
+            let clicked_button = button_rect.contains(pointer_pos);
+            let clicked_popup = popup_response.response.rect.contains(pointer_pos);
+            if !clicked_button && !clicked_popup {
+                ui.ctx()
+                    .memory_mut(|m| m.data.insert_temp::<bool>(popup_id, false));
+            }
+        }
+    }
+}
+
+/// Renders a single popup menu row with a manual checkmark (✓) prefix when
+/// `selected` is `true`, plus an optional small colored dot (used for
+/// per-tag rows). The whole row is clickable; hover and selection states
+/// are painted manually for full control.
+fn popup_menu_item(
+    ui: &mut egui::Ui,
+    selected: bool,
+    label: &str,
+    leading_color: Option<egui::Color32>,
+) -> egui::Response {
+    let row_height = 22.0;
+    // Use the parent's available width but cap it to the popup's fixed width
+    // so rows don't overflow when the parent layout is wider than expected.
+    let desired_width = ui.available_width().min(TAG_FILTER_POPUP_WIDTH);
+    let (row_rect, response) = ui.allocate_exact_size(
+        egui::vec2(desired_width, row_height),
+        egui::Sense::click(),
+    );
+
+    // Background: highlight on hover or when selected.
+    if selected {
+        let fill = ui.visuals().selection.bg_fill;
+        ui.painter().rect_filled(row_rect, 4.0, fill);
+    } else if response.hovered() {
+        let fill = ui.visuals().widgets.hovered.bg_fill;
+        ui.painter().rect_filled(row_rect, 4.0, fill);
+    }
+
+    // Leading column: optional colored dot OR checkmark for selected rows.
+    let leading_size = 14.0_f32;
+    let leading_rect = egui::Rect::from_min_size(
+        egui::pos2(row_rect.left() + 6.0, row_rect.center().y - leading_size * 0.5),
+        egui::vec2(leading_size, leading_size),
+    );
+    if let Some(color) = leading_color {
+        ui.painter()
+            .circle_filled(leading_rect.center(), 4.0, color);
+    } else if selected {
+        // Draw a checkmark using the selection's text color for contrast.
+        let text_color = if ui.visuals().dark_mode {
+            egui::Color32::WHITE
+        } else {
+            egui::Color32::BLACK
+        };
+        ui.painter().text(
+            leading_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            "✓",
+            egui::FontId::proportional(12.0),
+            text_color,
+        );
+    }
+
+    // Label.
+    let text_x = row_rect.left() + 6.0 + leading_size + 6.0;
+    let text_color = if selected {
+        theme::selection_text_color(ui.visuals().dark_mode)
+    } else {
+        ui.visuals().text_color()
+    };
+    ui.painter().text(
+        egui::pos2(text_x, row_rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        label,
+        egui::FontId::proportional(12.0),
+        text_color,
+    );
+
+    response
+}
+
+/// Toggles `tag_id` membership in the given filter, transitioning between
+/// the three global states (`All` / `Any` / `Selected`) according to the
+/// state-machine rules:
+/// - From `All` or `Any` + click any tag  → `Selected([tag_id])`
+/// - From `Selected(ids)` + click new tag  → `Selected(ids + [tag_id])`
+/// - From `Selected(ids)` + click existing  → removes the tag; if `ids`
+///   becomes empty, transitions back to `All`.
+fn toggle_tag_in_filter(filter: &mut GlobalSearchTagFilter, tag_id: i64) {
+    match filter {
+        GlobalSearchTagFilter::All | GlobalSearchTagFilter::Any => {
+            *filter = GlobalSearchTagFilter::Selected(vec![tag_id]);
+        }
+        GlobalSearchTagFilter::Selected(ids) => {
+            if let Some(pos) = ids.iter().position(|id| *id == tag_id) {
+                ids.remove(pos);
+                if ids.is_empty() {
+                    *filter = GlobalSearchTagFilter::All;
+                }
+            } else {
+                ids.push(tag_id);
+            }
+        }
+    }
 }

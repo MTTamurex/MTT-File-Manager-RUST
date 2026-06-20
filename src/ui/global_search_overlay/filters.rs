@@ -1,5 +1,8 @@
-use crate::app::global_search_state::{CreatedMetadataState, GlobalSearchCategory};
+use crate::app::global_search_state::{
+    CreatedMetadataState, GlobalSearchCategory, GlobalSearchTagFilter,
+};
 use rust_i18n::t;
+use std::path::Path;
 
 pub(super) fn category_label(category: GlobalSearchCategory) -> String {
     match category {
@@ -22,6 +25,8 @@ pub(crate) fn build_filtered_indices(
     created_after: Option<u64>,
     created_before: Option<u64>,
     created_ts_cache: &[CreatedMetadataState],
+    tag_filter: &GlobalSearchTagFilter,
+    tag_assignments: &rustc_hash::FxHashMap<std::path::PathBuf, Vec<i64>>,
 ) -> Vec<usize> {
     let mut filtered = Vec::with_capacity(results.len());
 
@@ -70,6 +75,39 @@ pub(crate) fn build_filtered_indices(
                 Some(CreatedMetadataState::Unavailable)
             ) {
                 continue;
+            }
+        }
+
+        // Tag filter
+        match tag_filter {
+            GlobalSearchTagFilter::All => {
+                // No tag filter applied.
+            }
+            GlobalSearchTagFilter::Any => {
+                let path_tags = crate::domain::file_tag::tag_ids_for_path(
+                    tag_assignments,
+                    Path::new(&result.full_path),
+                );
+                let has_any = path_tags.is_some_and(|ids| !ids.is_empty());
+                if !has_any {
+                    continue;
+                }
+            }
+            GlobalSearchTagFilter::Selected(required_ids) => {
+                if required_ids.is_empty() {
+                    // Defensive: empty Selected is equivalent to All.
+                } else {
+                    let path_tags = crate::domain::file_tag::tag_ids_for_path(
+                        tag_assignments,
+                        Path::new(&result.full_path),
+                    );
+                    let has_match = path_tags.is_some_and(|ids| {
+                        required_ids.iter().any(|tag_id| ids.contains(tag_id))
+                    });
+                    if !has_match {
+                        continue;
+                    }
+                }
             }
         }
 
@@ -193,11 +231,18 @@ pub(super) fn format_exact_number(n: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::{build_filtered_indices, extract_drive_letter};
-    use crate::app::global_search_state::{CreatedMetadataState, GlobalSearchCategory};
+    use crate::app::global_search_state::{
+        CreatedMetadataState, GlobalSearchCategory, GlobalSearchTagFilter,
+    };
     use mtt_search_protocol::SearchResultItem;
+    use std::path::PathBuf;
 
     fn empty_cache() -> Vec<CreatedMetadataState> {
         Vec::new()
+    }
+
+    fn empty_assignments() -> rustc_hash::FxHashMap<PathBuf, Vec<i64>> {
+        rustc_hash::FxHashMap::default()
     }
 
     #[test]
@@ -236,6 +281,8 @@ mod tests {
             None,
             None,
             &empty_cache(),
+            &GlobalSearchTagFilter::All,
+            &empty_assignments(),
         );
         assert_eq!(filtered, vec![0]);
     }
@@ -278,6 +325,8 @@ mod tests {
             None,
             None,
             &empty_cache(),
+            &GlobalSearchTagFilter::All,
+            &empty_assignments(),
         );
         // small.txt excluded (below min), large.bin excluded (above max), dir included
         assert_eq!(filtered, vec![1, 3]);
@@ -301,6 +350,8 @@ mod tests {
             None,
             None,
             &empty_cache(),
+            &GlobalSearchTagFilter::All,
+            &empty_assignments(),
         );
         assert!(filtered.is_empty());
     }
@@ -324,6 +375,8 @@ mod tests {
             Some(1000), // created after ts=1000
             None,
             &cache,
+            &GlobalSearchTagFilter::All,
+            &empty_assignments(),
         );
         // Keep pending items visible while async metadata is loading.
         assert_eq!(filtered, vec![0]);
@@ -348,6 +401,8 @@ mod tests {
             Some(1000),
             None,
             &cache,
+            &GlobalSearchTagFilter::All,
+            &empty_assignments(),
         );
         assert!(filtered.is_empty());
     }
@@ -382,8 +437,141 @@ mod tests {
             Some(1000), // created after ts=1000
             None,
             &cache,
+            &GlobalSearchTagFilter::All,
+            &empty_assignments(),
         );
         // old (500) excluded, new (2000) included
         assert_eq!(filtered, vec![1]);
+    }
+
+    // --- Tag filter tests ---
+
+    fn sample_results() -> Vec<SearchResultItem> {
+        vec![
+            SearchResultItem {
+                name: "tagged_a.txt".to_string(),
+                full_path: r"C:\tagged_a.txt".to_string(),
+                is_dir: false,
+                size: 100,
+            },
+            SearchResultItem {
+                name: "tagged_b.txt".to_string(),
+                full_path: r"C:\tagged_b.txt".to_string(),
+                is_dir: false,
+                size: 100,
+            },
+            SearchResultItem {
+                name: "tagged_both.txt".to_string(),
+                full_path: r"C:\tagged_both.txt".to_string(),
+                is_dir: false,
+                size: 100,
+            },
+            SearchResultItem {
+                name: "untagged.txt".to_string(),
+                full_path: r"C:\untagged.txt".to_string(),
+                is_dir: false,
+                size: 100,
+            },
+        ]
+    }
+
+    fn assignments_for_sample() -> rustc_hash::FxHashMap<PathBuf, Vec<i64>> {
+        let mut map = rustc_hash::FxHashMap::default();
+        map.insert(PathBuf::from(r"C:\tagged_a.txt"), vec![1]);
+        map.insert(PathBuf::from(r"C:\tagged_b.txt"), vec![2]);
+        map.insert(PathBuf::from(r"C:\tagged_both.txt"), vec![1, 2]);
+        // untagged.txt intentionally absent
+        map
+    }
+
+    #[test]
+    fn tag_filter_all_shows_tagged_and_untagged() {
+        let filtered = build_filtered_indices(
+            &sample_results(),
+            GlobalSearchCategory::All,
+            None,
+            None,
+            None,
+            None,
+            None,
+            &empty_cache(),
+            &GlobalSearchTagFilter::All,
+            &assignments_for_sample(),
+        );
+        assert_eq!(filtered, vec![0, 1, 2, 3]);
+    }
+
+    #[test]
+    fn tag_filter_any_excludes_untagged() {
+        let filtered = build_filtered_indices(
+            &sample_results(),
+            GlobalSearchCategory::All,
+            None,
+            None,
+            None,
+            None,
+            None,
+            &empty_cache(),
+            &GlobalSearchTagFilter::Any,
+            &assignments_for_sample(),
+        );
+        // All results with at least one tag pass; untagged.txt excluded
+        assert_eq!(filtered, vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn tag_filter_selected_or_semantics() {
+        // Filter for tags 1 OR 2
+        let filtered = build_filtered_indices(
+            &sample_results(),
+            GlobalSearchCategory::All,
+            None,
+            None,
+            None,
+            None,
+            None,
+            &empty_cache(),
+            &GlobalSearchTagFilter::Selected(vec![1, 2]),
+            &assignments_for_sample(),
+        );
+        // tagged_a (has 1) passes, tagged_b (has 2) passes, tagged_both passes, untagged fails
+        assert_eq!(filtered, vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn tag_filter_selected_single_tag_narrows_results() {
+        // Filter for tag 2 only
+        let filtered = build_filtered_indices(
+            &sample_results(),
+            GlobalSearchCategory::All,
+            None,
+            None,
+            None,
+            None,
+            None,
+            &empty_cache(),
+            &GlobalSearchTagFilter::Selected(vec![2]),
+            &assignments_for_sample(),
+        );
+        // tagged_b and tagged_both pass; tagged_a and untagged fail
+        assert_eq!(filtered, vec![1, 2]);
+    }
+
+    #[test]
+    fn tag_filter_selected_no_match_returns_empty() {
+        // Filter for tag 999 (not assigned to anything)
+        let filtered = build_filtered_indices(
+            &sample_results(),
+            GlobalSearchCategory::All,
+            None,
+            None,
+            None,
+            None,
+            None,
+            &empty_cache(),
+            &GlobalSearchTagFilter::Selected(vec![999]),
+            &assignments_for_sample(),
+        );
+        assert!(filtered.is_empty());
     }
 }

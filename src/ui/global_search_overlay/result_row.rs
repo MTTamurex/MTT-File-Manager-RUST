@@ -265,9 +265,31 @@ pub(super) fn render_result_row(
         );
     }
 
+    // Tag dot (mirrors list-view behavior: first tag's color, single dot
+    // between the icon and the file name, with a 12 px name offset).
+    // Collect into owned data so the immutable borrow of `app` does not
+    // outlive this block.
+    let tag_ids: Vec<i64> = {
+        let path = std::path::Path::new(&full_path);
+        crate::domain::file_tag::tag_ids_for_path(&app.tag_assignments, path)
+            .map(|ids| ids.to_vec())
+            .unwrap_or_default()
+    };
+    let first_tag_color: Option<egui::Color32> = tag_ids
+        .iter()
+        .find_map(|id| app.tag_definitions.get(id).map(|t| t.color.to_color32()));
+    let tag_name_offset = if first_tag_color.is_some() { 12.0 } else { 0.0 };
+    if let Some(color) = first_tag_color {
+        ui.painter().circle_filled(
+            egui::pos2(icon_rect.right() + 4.0, content_rect.center().y),
+            3.2,
+            color,
+        );
+    }
+
     let name_font = egui::FontId::proportional(13.0);
     let meta_font = egui::FontId::proportional(10.0);
-    let text_left = icon_rect.right() + 8.0;
+    let text_left = icon_rect.right() + 8.0 + tag_name_offset;
     let text_right = open_button_rect.left() - 8.0;
     let text_max_w = (text_right - text_left).max(60.0);
     let display_name = crate::ui::views::list_view::truncate_text_for_column(
@@ -445,6 +467,31 @@ pub(super) fn render_result_row(
                                     ui.label(crate::infrastructure::windows::format_date(
                                         created_ts,
                                     ));
+                                });
+                            }
+                            if !tag_ids.is_empty() {
+                                ui.horizontal(|ui| {
+                                    ui.label(if tag_ids.len() == 1 {
+                                        t!("file_info.tag")
+                                    } else {
+                                        t!("file_info.tags")
+                                    });
+                                    for tag_id in &tag_ids {
+                                        if let Some(tag) = app.tag_definitions.get(tag_id) {
+                                            let color = tag.color.to_color32();
+                                            let (dot_rect, _) = ui.allocate_exact_size(
+                                                egui::vec2(10.0, 10.0),
+                                                egui::Sense::hover(),
+                                            );
+                                            ui.painter().circle_filled(
+                                                dot_rect.center(),
+                                                3.5,
+                                                color,
+                                            );
+                                            ui.label(&tag.name);
+                                            ui.add_space(6.0);
+                                        }
+                                    }
                                 });
                             }
                         });
