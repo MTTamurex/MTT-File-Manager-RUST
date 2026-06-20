@@ -8,7 +8,9 @@ use eframe::egui;
 use lru::LruCache;
 use std::num::NonZeroUsize;
 // PERFORMANCE: FxHashSet uses faster hashing for PathBuf keys
-use crate::domain::special_paths::{is_virtual_path, tag_view_path, COMPUTER_VIEW_ID};
+use crate::domain::special_paths::{
+    is_tag_view_path, is_virtual_path, tag_view_path, COMPUTER_VIEW_ID,
+};
 use crate::ui::cache::FxHashSet;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
@@ -36,6 +38,10 @@ use super::state::{ImageViewerApp, LastInput};
 
 fn is_valid_startup_folder_path(path: &str) -> bool {
     if path == COMPUTER_VIEW_ID {
+        return true;
+    }
+
+    if is_tag_view_path(path) {
         return true;
     }
 
@@ -710,10 +716,13 @@ impl ImageViewerApp {
                 app.with_inactive_panel(|app| {
                     let is_computer =
                         inactive_path == crate::domain::special_paths::COMPUTER_VIEW_ID;
+                    let inactive_tag_id =
+                        crate::domain::special_paths::tag_id_from_view_path(&inactive_path);
                     app.navigation_state.current_path = inactive_path.clone();
                     app.navigation_state.path_input = inactive_path;
                     app.navigation_state.is_computer_view = is_computer;
                     app.navigation_state.is_recycle_bin_view = false;
+                    app.active_tag_filter = inactive_tag_id;
                     app.view_mode = saved_dual_panel_inactive_view_mode;
                     app.loaded_path.clear();
                 });

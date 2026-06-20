@@ -11,7 +11,7 @@ use crate::app::dual_panel::ActivePanel;
 use crate::app::navigation_state::ThemeMode;
 use crate::app::state::ImageViewerApp;
 use crate::domain::file_entry::{FoldersPosition, SortMode, ViewMode};
-use crate::domain::special_paths::{is_virtual_path, COMPUTER_VIEW_ID};
+use crate::domain::special_paths::{is_tag_view_path, is_virtual_path, COMPUTER_VIEW_ID};
 use crate::infrastructure::diagnostic_logger;
 use std::time::SystemTime;
 
@@ -197,7 +197,9 @@ impl ImageViewerApp {
             .filter(|path| {
                 !path.is_empty()
                     && !path.starts_with("shell:")
-                    && (*path == COMPUTER_VIEW_ID || !is_virtual_path(path))
+                    && (*path == COMPUTER_VIEW_ID
+                        || is_tag_view_path(path)
+                        || !is_virtual_path(path))
             })
             .unwrap_or_default();
         prefs.push(("dual_panel_inactive_path", inactive_path.to_string()));
