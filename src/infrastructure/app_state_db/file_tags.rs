@@ -5,36 +5,24 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::{Path, PathBuf};
 
 fn normalize_path_text(path: &str) -> String {
-    path.replace('/', "\\")
-        .trim_end_matches('\\')
-        .to_lowercase()
+    path.replace('/', "\\").trim_end_matches('\\').to_string()
 }
 
-fn path_text_is_same_or_descendant(candidate: &str, root: &str) -> bool {
-    let candidate = normalize_path_text(candidate);
-    let root = normalize_path_text(root);
-    candidate == root
-        || candidate
-            .strip_prefix(&root)
-            .is_some_and(|suffix| suffix.starts_with('\\'))
+fn path_match_key(path: &str) -> String {
+    normalize_path_text(path).to_lowercase()
 }
 
-fn remap_path_text(candidate: &str, old_root: &str, new_root: &str) -> Option<String> {
-    if !path_text_is_same_or_descendant(candidate, old_root) {
-        return None;
-    }
+fn storage_path_text(path: &Path) -> Option<String> {
+    path.to_str().map(normalize_path_text)
+}
 
-    let old_root = old_root.trim_end_matches(['\\', '/']);
-    if candidate.len() <= old_root.len() {
-        return Some(new_root.to_string());
-    }
-
-    let suffix = &candidate[old_root.len()..];
-    Some(format!(
-        "{}{}",
-        new_root.trim_end_matches(['\\', '/']),
-        suffix
-    ))
+fn storage_path_texts(paths: &[PathBuf]) -> Vec<String> {
+    let mut seen = FxHashSet::default();
+    paths
+        .iter()
+        .filter_map(|path| storage_path_text(path))
+        .filter(|path| seen.insert(path.clone()))
+        .collect()
 }
 
 pub(super) fn seed_default_file_tags(conn: &Connection) {
@@ -263,147 +251,200 @@ impl AppStateDb {
         }) {
             for row in rows.flatten() {
                 let (path, tag_id) = row;
-                results.entry(PathBuf::from(path)).or_default().push(tag_id);
+                results
+                    .entry(PathBuf::from(normalize_path_text(&path)))
+                    .or_default()
+                    .push(tag_id);
             }
         }
 
         results
     }
 
-    /// Assign a tag to a path. [WRITER]
-    pub fn assign_tag(&self, path: &Path, tag_id: i64) -> bool {
-        let Some(path) = path.to_str() else {
-            return false;
-        };
-        if let Ok(db) = self.writer.lock() {
-            db.execute(
-                "INSERT OR IGNORE INTO file_tag_assignments (file_path, tag_id) VALUES (?1, ?2)",
-                params![path, tag_id],
-            )
-            .is_ok()
-        } else {
-            false
-        }
-    }
-
-    /// Remove one tag assignment from a path. [WRITER]
-    pub fn unassign_tag(&self, path: &Path, tag_id: i64) -> bool {
-        let Some(path) = path.to_str() else {
-            return false;
-        };
-        if let Ok(db) = self.writer.lock() {
-            db.execute(
-                "DELETE FROM file_tag_assignments WHERE file_path = ?1 AND tag_id = ?2",
-                params![path, tag_id],
-            )
-            .is_ok()
-        } else {
-            false
-        }
-    }
-
-    /// Delete all assignments for the given paths. [WRITER]
-    pub fn clear_tag_assignments_for_paths(&self, paths: &[PathBuf]) -> usize {
+    /// Assign a tag to many paths in a single transaction. [WRITER]
+    pub fn assign_tag_batch(&self, paths: &[PathBuf], tag_id: i64) -> bool {
+        let paths = storage_path_texts(paths);
         if paths.is_empty() {
-            return 0;
-        }
-
-        let roots: Vec<String> = paths
-            .iter()
-            .filter_map(|path| path.to_str().map(ToOwned::to_owned))
-            .collect();
-        if roots.is_empty() {
-            return 0;
+            return false;
         }
 
         let mut db = match self.writer.lock() {
             Ok(db) => db,
-            Err(_) => return 0,
+            Err(e) => {
+                log::error!(
+                    "[TAGS] Failed to acquire writer lock for assign_tag_batch: {:?}",
+                    e
+                );
+                return false;
+            }
         };
 
-        let paths_to_delete: FxHashSet<String> = db
-            .prepare("SELECT file_path FROM file_tag_assignments")
-            .and_then(|mut stmt| {
-                stmt.query_map([], |row| row.get::<_, String>(0))
-                    .map(|rows| rows.flatten().collect::<Vec<_>>())
-            })
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|file_path| {
-                roots
-                    .iter()
-                    .any(|root| path_text_is_same_or_descendant(file_path, root))
-            })
-            .collect();
-        if paths_to_delete.is_empty() {
-            return 0;
-        }
+        let result = (|| -> rusqlite::Result<()> {
+            let tx = db.transaction()?;
+            {
+                let mut stmt = tx.prepare(
+                    "INSERT OR IGNORE INTO file_tag_assignments (file_path, tag_id) VALUES (?1, ?2)",
+                )?;
+                for path in &paths {
+                    stmt.execute(params![path, tag_id])?;
+                }
+            }
+            tx.commit()
+        })();
 
-        let mut removed = 0;
-        let tx = match db.transaction() {
-            Ok(tx) => tx,
-            Err(_) => return 0,
-        };
-        for path in paths_to_delete {
-            removed += tx
-                .execute(
-                    "DELETE FROM file_tag_assignments WHERE file_path = ?1",
-                    params![path],
-                )
-                .unwrap_or(0);
+        if let Err(error) = result {
+            log::warn!("[TAGS] Failed to assign tag batch: {:?}", error);
+            return false;
         }
-        let _ = tx.commit();
-        removed
+        true
     }
 
-    /// Move assignments from one path to another. [WRITER]
-    pub fn move_tag_assignments(&self, old_path: &Path, new_path: &Path) -> bool {
-        let (Some(old_path), Some(new_path)) = (old_path.to_str(), new_path.to_str()) else {
+    /// Remove one tag assignment from many paths in a single transaction. [WRITER]
+    pub fn unassign_tag_batch(&self, paths: &[PathBuf], tag_id: i64) -> bool {
+        let paths = storage_path_texts(paths);
+        if paths.is_empty() {
             return false;
+        }
+
+        let mut db = match self.writer.lock() {
+            Ok(db) => db,
+            Err(e) => {
+                log::error!(
+                    "[TAGS] Failed to acquire writer lock for unassign_tag_batch: {:?}",
+                    e
+                );
+                return false;
+            }
         };
-        if old_path == new_path {
+
+        let result = (|| -> rusqlite::Result<()> {
+            let tx = db.transaction()?;
+            {
+                let mut stmt = tx.prepare(
+                    "DELETE FROM file_tag_assignments WHERE file_path = ?1 AND tag_id = ?2",
+                )?;
+                for path in &paths {
+                    stmt.execute(params![path, tag_id])?;
+                }
+            }
+            tx.commit()
+        })();
+
+        if let Err(error) = result {
+            log::warn!("[TAGS] Failed to unassign tag batch: {:?}", error);
+            return false;
+        }
+        true
+    }
+
+    /// Delete all assignments for exact assignment paths. [WRITER]
+    pub fn clear_tag_assignments_for_paths(&self, paths: &[PathBuf]) -> Option<usize> {
+        if paths.is_empty() {
+            return Some(0);
+        }
+
+        let paths_to_delete = storage_path_texts(paths);
+        if paths_to_delete.is_empty() {
+            return Some(0);
+        }
+
+        let mut db = match self.writer.lock() {
+            Ok(db) => db,
+            Err(e) => {
+                log::error!(
+                    "[TAGS] Failed to acquire writer lock for clear_tag_assignments_for_paths: {:?}",
+                    e
+                );
+                return None;
+            }
+        };
+
+        let result = (|| -> rusqlite::Result<usize> {
+            let tx = db.transaction()?;
+            let mut removed = 0;
+            const BATCH_SIZE: usize = 500;
+            for chunk in paths_to_delete.chunks(BATCH_SIZE) {
+                let placeholders = std::iter::repeat_n("?", chunk.len())
+                    .collect::<Vec<_>>()
+                    .join(",");
+                let sql = format!(
+                    "DELETE FROM file_tag_assignments WHERE file_path IN ({})",
+                    placeholders
+                );
+                removed += tx.execute(&sql, rusqlite::params_from_iter(chunk.iter()))?;
+            }
+            tx.commit()?;
+            Ok(removed)
+        })();
+
+        match result {
+            Ok(removed) => Some(removed),
+            Err(error) => {
+                log::warn!("[TAGS] Failed to clear tag assignments: {:?}", error);
+                None
+            }
+        }
+    }
+
+    /// Move exact assignment rows in a single transaction. [WRITER]
+    pub fn move_tag_assignments(&self, moved_assignments: &[(PathBuf, PathBuf, i64)]) -> bool {
+        if moved_assignments.is_empty() {
             return true;
         }
 
-        let mut db = match self.writer.lock() {
-            Ok(db) => db,
-            Err(_) => return false,
-        };
-
-        let remapped_rows: Vec<(String, String, i64)> = db
-            .prepare("SELECT file_path, tag_id FROM file_tag_assignments")
-            .and_then(|mut stmt| {
-                stmt.query_map([], |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-                })
-                .map(|rows| rows.flatten().collect::<Vec<(String, i64)>>())
-            })
-            .unwrap_or_default()
-            .into_iter()
-            .filter_map(|(file_path, tag_id)| {
-                remap_path_text(&file_path, old_path, new_path)
-                    .map(|new_file_path| (file_path, new_file_path, tag_id))
+        let remapped_rows: Vec<(String, String, i64)> = moved_assignments
+            .iter()
+            .filter_map(|(old_path, new_path, tag_id)| {
+                let old_path = storage_path_text(old_path)?;
+                let new_path = storage_path_text(new_path)?;
+                (old_path != new_path).then_some((old_path, new_path, *tag_id))
             })
             .collect();
         if remapped_rows.is_empty() {
             return true;
         }
 
-        let tx = match db.transaction() {
-            Ok(tx) => tx,
-            Err(_) => return false,
+        let mut db = match self.writer.lock() {
+            Ok(db) => db,
+            Err(e) => {
+                log::error!(
+                    "[TAGS] Failed to acquire writer lock for move_tag_assignments: {:?}",
+                    e
+                );
+                return false;
+            }
         };
-        for (old_file_path, new_file_path, tag_id) in remapped_rows {
-            let _ = tx.execute(
-                "INSERT OR IGNORE INTO file_tag_assignments (file_path, tag_id) VALUES (?1, ?2)",
-                params![new_file_path, tag_id],
-            );
-            let _ = tx.execute(
-                "DELETE FROM file_tag_assignments WHERE file_path = ?1 AND tag_id = ?2",
-                params![old_file_path, tag_id],
-            );
+
+        let result = (|| -> rusqlite::Result<()> {
+            let tx = db.transaction()?;
+            {
+                let mut insert_stmt = tx.prepare(
+                    "INSERT OR IGNORE INTO file_tag_assignments (file_path, tag_id) VALUES (?1, ?2)",
+                )?;
+                let mut delete_stmt = tx.prepare(
+                    "DELETE FROM file_tag_assignments WHERE file_path = ?1 AND tag_id = ?2",
+                )?;
+                let mut update_stmt = tx.prepare(
+                    "UPDATE file_tag_assignments SET file_path = ?1 WHERE file_path = ?2 AND tag_id = ?3",
+                )?;
+
+                for (old_file_path, new_file_path, tag_id) in &remapped_rows {
+                    if path_match_key(old_file_path) == path_match_key(new_file_path) {
+                        update_stmt.execute(params![new_file_path, old_file_path, tag_id])?;
+                    } else {
+                        insert_stmt.execute(params![new_file_path, tag_id])?;
+                        delete_stmt.execute(params![old_file_path, tag_id])?;
+                    }
+                }
+            }
+            tx.commit()
+        })();
+
+        if let Err(error) = result {
+            log::warn!("[TAGS] Failed to move tag assignments: {:?}", error);
+            return false;
         }
-        tx.commit().is_ok()
+        true
     }
 
     /// Counts assignments per tag. [READER]

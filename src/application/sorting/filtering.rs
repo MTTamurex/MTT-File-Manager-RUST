@@ -1,4 +1,5 @@
 use crate::domain::file_entry::FileEntry;
+use crate::domain::file_tag;
 use rustc_hash::FxHashMap;
 use std::path::PathBuf;
 
@@ -132,9 +133,7 @@ pub(super) fn filter_items_opt_with_tags(
                         )
                     });
                 let tag_matches = active_tag_filter.map_or(true, |tag_id| {
-                    tag_assignments
-                        .get(&item.path)
-                        .is_some_and(|ids| ids.contains(&tag_id))
+                    file_tag::path_has_tag(tag_assignments, &item.path, tag_id)
                 });
                 name_matches && tag_matches
             })

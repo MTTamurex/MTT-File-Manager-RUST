@@ -1,4 +1,31 @@
 use eframe::egui::Color32;
+use rustc_hash::FxHashMap;
+use std::path::{Path, PathBuf};
+
+pub fn normalize_tag_path_key(path: &Path) -> String {
+    path.to_string_lossy()
+        .replace('/', "\\")
+        .trim_end_matches('\\')
+        .to_lowercase()
+}
+
+pub fn tag_ids_for_path<'a>(
+    assignments: &'a FxHashMap<PathBuf, Vec<i64>>,
+    path: &Path,
+) -> Option<&'a [i64]> {
+    if let Some(ids) = assignments.get(path) {
+        return Some(ids.as_slice());
+    }
+
+    let path_key = normalize_tag_path_key(path);
+    assignments.iter().find_map(|(assigned_path, ids)| {
+        (normalize_tag_path_key(assigned_path) == path_key).then_some(ids.as_slice())
+    })
+}
+
+pub fn path_has_tag(assignments: &FxHashMap<PathBuf, Vec<i64>>, path: &Path, tag_id: i64) -> bool {
+    tag_ids_for_path(assignments, path).is_some_and(|ids| ids.contains(&tag_id))
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TagColor {

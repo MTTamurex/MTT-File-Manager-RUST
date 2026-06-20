@@ -257,6 +257,7 @@ impl ImageViewerApp {
         let (cloud_sync_status_refresh_sender, cloud_sync_status_refresh_receiver) =
             std::sync::mpsc::channel();
         let (cloud_open_failure_sender, cloud_open_failure_receiver) = std::sync::mpsc::channel();
+        let (tag_assignment_gc_sender, tag_assignment_gc_receiver) = std::sync::mpsc::channel();
 
         // Background metadata resolution for sidebar-navigated folders (Quick Access, Cloud Drives)
         let (folder_meta_resolve_tx, folder_meta_resolve_rx) = std::sync::mpsc::channel();
@@ -631,6 +632,8 @@ impl ImageViewerApp {
             tag_definitions,
             tag_assignments,
             tag_counts,
+            tag_assignment_gc_sender,
+            tag_assignment_gc_receiver,
             active_tag_filter,
             collapse_tags: false,
             show_tag_manager: false,

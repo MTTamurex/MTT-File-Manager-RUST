@@ -4,7 +4,7 @@
 //! Connection management, ACL hardening, and PRAGMA setup are delegated to
 //! `crate::infrastructure::db_utils`.
 
-use rusqlite::Connection;
+use rusqlite::{params, Connection};
 use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -179,7 +179,7 @@ impl AppStateDb {
 
         conn.execute(
             "CREATE TABLE IF NOT EXISTS file_tag_assignments (
-                file_path TEXT NOT NULL,
+                file_path TEXT NOT NULL COLLATE NOCASE,
                 tag_id INTEGER NOT NULL,
                 PRIMARY KEY (file_path, tag_id),
                 FOREIGN KEY (tag_id) REFERENCES file_tags(id) ON DELETE CASCADE
@@ -187,6 +187,8 @@ impl AppStateDb {
             [],
         )
         .unwrap_or(0);
+
+        Self::migrate_file_tag_assignments_to_nocase(conn);
 
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_file_tag_assignments_tag
@@ -196,5 +198,89 @@ impl AppStateDb {
         .unwrap_or(0);
 
         file_tags::seed_default_file_tags(conn);
+    }
+
+    fn migrate_file_tag_assignments_to_nocase(conn: &Connection) {
+        let create_sql = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'file_tag_assignments'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap_or_default();
+
+        if create_sql
+            .to_ascii_uppercase()
+            .contains("FILE_PATH TEXT NOT NULL COLLATE NOCASE")
+        {
+            return;
+        }
+
+        let migration = (|| -> rusqlite::Result<usize> {
+            let tx = conn.unchecked_transaction()?;
+            tx.execute(
+                "ALTER TABLE file_tag_assignments RENAME TO file_tag_assignments_old",
+                [],
+            )?;
+            tx.execute(
+                "CREATE TABLE file_tag_assignments (
+                    file_path TEXT NOT NULL COLLATE NOCASE,
+                    tag_id INTEGER NOT NULL,
+                    PRIMARY KEY (file_path, tag_id),
+                    FOREIGN KEY (tag_id) REFERENCES file_tags(id) ON DELETE CASCADE
+                )",
+                [],
+            )?;
+
+            let rows_to_insert = {
+                let mut stmt = tx.prepare(
+                    "SELECT replace(file_path, '/', '\\'), tag_id
+                     FROM file_tag_assignments_old
+                     ORDER BY rowid ASC",
+                )?;
+                let rows = stmt.query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+                })?;
+
+                let mut canonical_by_key = std::collections::HashMap::<String, String>::new();
+                let mut rows_to_insert = Vec::new();
+                for row in rows {
+                    let (path, tag_id) = row?;
+                    let key = path.to_lowercase();
+                    let canonical_path = canonical_by_key
+                        .entry(key)
+                        .or_insert_with(|| path.clone())
+                        .clone();
+                    rows_to_insert.push((canonical_path, tag_id));
+                }
+                rows_to_insert
+            };
+
+            let mut inserted = 0usize;
+            {
+                let mut insert_stmt = tx.prepare(
+                    "INSERT OR IGNORE INTO file_tag_assignments (file_path, tag_id)
+                     VALUES (?1, ?2)",
+                )?;
+                for (path, tag_id) in rows_to_insert {
+                    inserted += insert_stmt.execute(params![path, tag_id])?;
+                }
+            }
+
+            tx.execute("DROP TABLE file_tag_assignments_old", [])?;
+            tx.commit()?;
+            Ok(inserted)
+        })();
+
+        match migration {
+            Ok(inserted) => log::info!(
+                "[APP-STATE] Migrated file_tag_assignments to NOCASE path keys ({} rows)",
+                inserted
+            ),
+            Err(error) => log::error!(
+                "[APP-STATE] Failed to migrate file_tag_assignments to NOCASE path keys: {:?}",
+                error
+            ),
+        }
     }
 }

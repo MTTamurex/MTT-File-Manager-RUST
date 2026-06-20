@@ -1,6 +1,6 @@
 use super::AppStateDb;
 use rusqlite::params;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 impl AppStateDb {
     fn path_exists_fast(path: &str) -> bool {
@@ -130,7 +130,10 @@ impl AppStateDb {
 
     /// Incremental GC for file tag assignments. Removes assignments whose path no
     /// longer exists on an accessible drive. [WRITER]
-    pub fn garbage_collect_tag_assignments_incremental(&self, max_candidates: usize) -> usize {
+    pub fn garbage_collect_tag_assignments_incremental(
+        &self,
+        max_candidates: usize,
+    ) -> (usize, Vec<PathBuf>) {
         let limit = max_candidates.max(1) as i64;
 
         let sampled_paths: Vec<String> = {
@@ -138,7 +141,7 @@ impl AppStateDb {
                 Ok(db) => db,
                 Err(_) => {
                     log::warn!("[GC-State] Incremental tag pass skipped: writer lock failed");
-                    return 0;
+                    return (0, Vec::new());
                 }
             };
 
@@ -155,7 +158,7 @@ impl AppStateDb {
         };
 
         if sampled_paths.is_empty() {
-            return 0;
+            return (0, Vec::new());
         }
 
         let accessible = Self::accessible_drives(sampled_paths.iter().map(|p| p.as_str()));
@@ -167,31 +170,38 @@ impl AppStateDb {
             .collect();
 
         if orphans.is_empty() {
-            return 0;
+            return (0, Vec::new());
         }
 
-        let mut removed = 0;
-        if let Ok(mut db) = self.writer.lock() {
-            if let Ok(tx) = db.transaction() {
-                const BATCH_SIZE: usize = 500;
-                for chunk in orphans.chunks(BATCH_SIZE) {
-                    let placeholders = std::iter::repeat_n("?", chunk.len())
-                        .collect::<Vec<_>>()
-                        .join(",");
-                    let sql = format!(
-                        "DELETE FROM file_tag_assignments WHERE file_path IN ({})",
-                        placeholders
-                    );
-                    match tx.execute(&sql, rusqlite::params_from_iter(chunk.iter())) {
-                        Ok(c) => removed += c,
-                        Err(e) => log::error!("[GC-State] Failed to delete tag batch: {:?}", e),
-                    }
-                }
-                if let Err(e) = tx.commit() {
-                    log::error!("[GC-State] Incremental tags commit failed: {:?}", e);
-                }
+        let removed_result = (|| -> rusqlite::Result<usize> {
+            let mut db = self
+                .writer
+                .lock()
+                .map_err(|_| rusqlite::Error::InvalidQuery)?;
+            let tx = db.transaction()?;
+            let mut removed = 0;
+            const BATCH_SIZE: usize = 500;
+            for chunk in orphans.chunks(BATCH_SIZE) {
+                let placeholders = std::iter::repeat_n("?", chunk.len())
+                    .collect::<Vec<_>>()
+                    .join(",");
+                let sql = format!(
+                    "DELETE FROM file_tag_assignments WHERE file_path IN ({})",
+                    placeholders
+                );
+                removed += tx.execute(&sql, rusqlite::params_from_iter(chunk.iter()))?;
             }
-        }
+            tx.commit()?;
+            Ok(removed)
+        })();
+
+        let removed = match removed_result {
+            Ok(removed) => removed,
+            Err(e) => {
+                log::error!("[GC-State] Incremental tags delete failed: {:?}", e);
+                return (0, Vec::new());
+            }
+        };
 
         if removed > 0 {
             log::debug!(
@@ -199,6 +209,13 @@ impl AppStateDb {
                 removed
             );
         }
-        removed
+
+        let mut seen_paths = std::collections::HashSet::new();
+        let removed_paths = orphans
+            .into_iter()
+            .filter(|path| seen_paths.insert(path.to_lowercase()))
+            .map(PathBuf::from)
+            .collect();
+        (removed, removed_paths)
     }
 }

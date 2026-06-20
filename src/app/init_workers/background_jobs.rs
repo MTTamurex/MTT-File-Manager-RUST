@@ -41,6 +41,8 @@ pub(in crate::app) fn spawn_startup_drive_info_preload(
 pub(in crate::app) fn spawn_incremental_gc_worker(
     disk_cache: Arc<ThumbnailDiskCache>,
     app_state_db: Arc<AppStateDb>,
+    tag_gc_sender: mpsc::Sender<Vec<std::path::PathBuf>>,
+    ctx: egui::Context,
 ) {
     std::thread::spawn(move || {
         const GC_INITIAL_DELAY_SECS: u64 = 20;
@@ -75,7 +77,12 @@ pub(in crate::app) fn spawn_incremental_gc_worker(
 
             let removed = disk_cache.garbage_collect_incremental(batch);
             let removed_covers = app_state_db.garbage_collect_covers_incremental(batch);
-            let removed_tags = app_state_db.garbage_collect_tag_assignments_incremental(batch);
+            let (removed_tags, removed_tag_paths) =
+                app_state_db.garbage_collect_tag_assignments_incremental(batch);
+            if !removed_tag_paths.is_empty() {
+                let _ = tag_gc_sender.send(removed_tag_paths);
+                ctx.request_repaint();
+            }
             let total_removed = removed + removed_covers + removed_tags;
             if total_removed > 0 {
                 removed_since_vacuum = removed_since_vacuum.saturating_add(total_removed);

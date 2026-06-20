@@ -20,7 +20,12 @@ impl ImageViewerApp {
             ctx.clone(),
         );
 
-        spawn_incremental_gc_worker(self.disk_cache.clone(), self.app_state_db.clone());
+        spawn_incremental_gc_worker(
+            self.disk_cache.clone(),
+            self.app_state_db.clone(),
+            self.tag_assignment_gc_sender.clone(),
+            ctx.clone(),
+        );
         log::info!(
             "[STARTUP] post-startup jobs scheduled elapsed_ms={}",
             start.elapsed().as_millis()

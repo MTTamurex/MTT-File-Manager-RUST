@@ -100,6 +100,10 @@ impl ImageViewerApp {
         // BLOCKING: Process all available file operation results in batch
         self.process_file_operation_results(&current_path_norm, ctx);
 
+        while let Ok(paths) = self.tag_assignment_gc_receiver.try_recv() {
+            self.reconcile_garbage_collected_tag_assignments(&paths);
+        }
+
         // 2. CHECK DE AUTO-REFRESH (WATCHER)
         let watcher_perf = self.process_watcher_events_and_auto_reload(&current_path_norm);
         let _t_watcher_start = watcher_perf.watcher_start;

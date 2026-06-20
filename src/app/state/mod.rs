@@ -544,6 +544,8 @@ pub struct ImageViewerApp {
     pub tag_definitions: rustc_hash::FxHashMap<i64, crate::domain::file_tag::FileTag>,
     pub tag_assignments: Arc<rustc_hash::FxHashMap<PathBuf, Vec<i64>>>,
     pub tag_counts: rustc_hash::FxHashMap<i64, usize>,
+    pub tag_assignment_gc_sender: Sender<Vec<PathBuf>>,
+    pub tag_assignment_gc_receiver: Receiver<Vec<PathBuf>>,
     pub active_tag_filter: Option<i64>,
     pub collapse_tags: bool,
     pub show_tag_manager: bool,
