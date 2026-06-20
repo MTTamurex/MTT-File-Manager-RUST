@@ -758,11 +758,12 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
                 ActivePanel::Right => left_header_rect,
             };
             if inactive_content_rect.contains(pos) || inactive_header.contains(pos) {
-                // Mouse is over the inactive panel — set cross-panel drop target
+                // Mouse is over the inactive panel. Store its path even for
+                // virtual views so the active panel defers drop handling to the
+                // inactive renderer, where hovered real folder items are known.
                 app.drag_cross_panel_target = app
                     .dual_panel_inactive_state
                     .as_ref()
-                    .filter(|s| !crate::domain::special_paths::is_virtual_path(&s.path))
                     .map(|s| std::path::PathBuf::from(&s.path));
             } else {
                 app.drag_cross_panel_target = None;

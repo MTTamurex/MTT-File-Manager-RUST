@@ -236,6 +236,100 @@ impl ImageViewerApp {
         new_path
     }
 
+    fn remap_visual_caches_for_path(&mut self, old_path: &Path, new_path: &Path) {
+        if old_path == new_path {
+            return;
+        }
+
+        let old_path = old_path.to_path_buf();
+        let new_path = new_path.to_path_buf();
+
+        if let Some(texture) = self.cache_manager.texture_cache.pop(&old_path) {
+            self.cache_manager
+                .texture_cache
+                .put(new_path.clone(), texture);
+        }
+        if let Some((data, w, h)) = self.cache_manager.pop_rgba_data(&old_path) {
+            self.cache_manager
+                .put_rgba_data(new_path.clone(), data, w, h);
+        }
+        if let Some(bucket) = self
+            .cache_manager
+            .attempted_thumbnail_bucket
+            .remove(&old_path)
+        {
+            self.cache_manager
+                .attempted_thumbnail_bucket
+                .insert(new_path.clone(), bucket);
+        }
+
+        if let Some(folder_preview) = self.cache_manager.folder_preview_cache.pop(&old_path) {
+            self.cache_manager
+                .folder_preview_cache
+                .put(new_path.clone(), folder_preview);
+        }
+
+        let had_pending_upload = self.cache_manager.pending_upload_set.remove(&old_path);
+        let mut remapped_pending_upload = false;
+        for thumbnail in self.pending_thumbnails.iter_mut() {
+            if thumbnail.path == old_path {
+                thumbnail.path = new_path.clone();
+                remapped_pending_upload = true;
+            }
+        }
+        if had_pending_upload && remapped_pending_upload {
+            self.cache_manager
+                .pending_upload_set
+                .insert(new_path.clone());
+        }
+
+        self.thumbnail_queue
+            .remove_paths(std::slice::from_ref(&old_path));
+        self.cache_manager.loading_set.remove(&old_path);
+        self.cache_manager.failed_thumbnails.pop(&old_path);
+        self.cache_manager.failed_thumbnails.pop(&new_path);
+        self.cache_manager
+            .forget_thumbnail_request_cooldown(&old_path);
+        self.cache_manager
+            .forget_thumbnail_request_cooldown(&new_path);
+
+        self.cache_manager.folder_preview_loading.remove(&old_path);
+        self.cache_manager
+            .forget_folder_preview_request_cooldown(&old_path);
+        self.cache_manager
+            .forget_folder_preview_request_cooldown(&new_path);
+        if self.pending_folder_preview_replace.remove(&old_path) {
+            self.pending_folder_preview_replace.insert(new_path.clone());
+        }
+        if self
+            .suppress_next_folder_preview_invalidation
+            .remove(&old_path)
+        {
+            self.suppress_next_folder_preview_invalidation
+                .insert(new_path);
+        }
+    }
+
+    fn enqueue_thumbnail_cache_renames(&self, moves: &[(PathBuf, PathBuf)]) {
+        if moves.is_empty() {
+            return;
+        }
+
+        use crate::app::init_workers::CacheInvalidationEntry;
+        let entries: Vec<_> = moves
+            .iter()
+            .map(|(source, dest)| CacheInvalidationEntry {
+                path: source.clone(),
+                force: false,
+                rename_to: Some(dest.clone()),
+            })
+            .collect();
+        let _ = self
+            .file_operation_state
+            .disk_cache_invalidation_sender
+            .send(entries);
+    }
+
     fn handle_rename_completed(
         &mut self,
         path: PathBuf,
@@ -490,7 +584,10 @@ impl ImageViewerApp {
             crate::infrastructure::windows::file_flags::clear_write_activity_after_completed_file_operation(
                 std::slice::from_ref(dest_path),
             );
+            self.remap_visual_caches_for_path(&source_path, dest_path);
             self.move_tag_assignments_for_path(&source_path, dest_path);
+            self.enqueue_thumbnail_cache_renames(&[(source_path.clone(), dest_path.clone())]);
+            self.reload_visible_tag_views();
         }
 
         if current_path_norm == source_str {
@@ -545,8 +642,20 @@ impl ImageViewerApp {
                 &moved_dests,
             );
         }
+        let moved_pairs: Vec<(PathBuf, PathBuf)> = moved_files
+            .iter()
+            .cloned()
+            .zip(moved_dests.iter().cloned())
+            .collect();
+        for (source, dest) in &moved_pairs {
+            self.remap_visual_caches_for_path(source, dest);
+        }
         for (source, dest) in moved_files.iter().zip(moved_dests.iter()) {
             self.move_tag_assignments_for_path(source, dest);
+        }
+        self.enqueue_thumbnail_cache_renames(&moved_pairs);
+        if !moved_pairs.is_empty() {
+            self.reload_visible_tag_views();
         }
 
         for source_folder in &source_folders {

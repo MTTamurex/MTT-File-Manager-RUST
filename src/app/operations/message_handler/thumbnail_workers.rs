@@ -20,6 +20,34 @@ fn upsert_folder_content_summary(
     }
 }
 
+fn apply_folder_cover_updates_to_items(
+    items: &mut [crate::domain::file_entry::FileEntry],
+    cover_updates: &std::collections::HashMap<PathBuf, Option<PathBuf>>,
+    covers_changed: &mut Vec<PathBuf>,
+) -> bool {
+    let mut folder_updates = false;
+    for item in items.iter_mut() {
+        if let Some(cover_opt) = cover_updates.get(&item.path) {
+            if item.folder_cover != *cover_opt {
+                // Only invalidate composed previews when the cover path genuinely
+                // changed. None -> Some just fills metadata needed to request the
+                // first preview and should not evict an existing composed preview.
+                let cover_path_changed = match (&item.folder_cover, cover_opt) {
+                    (Some(old), Some(new)) => old != new,
+                    (Some(_), None) => true,
+                    _ => false,
+                };
+                item.folder_cover = cover_opt.clone();
+                folder_updates = true;
+                if cover_path_changed && !covers_changed.iter().any(|path| path == &item.path) {
+                    covers_changed.push(item.path.clone());
+                }
+            }
+        }
+    }
+    folder_updates
+}
+
 impl ImageViewerApp {
     pub(super) fn process_cover_worker_results(&mut self, ctx: &egui::Context) {
         let t0 = Instant::now();
@@ -60,39 +88,41 @@ impl ImageViewerApp {
         let mut folder_updates = false;
         let mut covers_changed: Vec<std::path::PathBuf> = Vec::new();
         // Apply updates in-place without building temporary full-directory path indexes.
-        for item in self.all_items_mut().iter_mut() {
-            if let Some(cover_opt) = cover_updates.get(&item.path) {
-                if item.folder_cover != *cover_opt {
-                    // Only invalidate composed preview when cover PATH genuinely
-                    // changed (Some(old) → Some(new)  or  Some(_) → None).
-                    // The transition None → Some(path) is NOT a real change —
-                    // it just fills in a field that DirectoryCache didn't have.
-                    // The preview was already composed with this cover, so
-                    // invalidating it causes a visible flash for no reason.
-                    let cover_path_changed = match (&item.folder_cover, cover_opt) {
-                        (Some(old), Some(new)) => old != new,
-                        (Some(_), None) => true,
-                        _ => false, // None→Some or None→None: not a real change
-                    };
-                    item.folder_cover = cover_opt.clone();
-                    folder_updates = true;
-                    if cover_path_changed {
-                        covers_changed.push(item.path.clone());
-                    }
-                }
-            }
-        }
+        folder_updates |= apply_folder_cover_updates_to_items(
+            self.all_items_mut().as_mut_slice(),
+            &cover_updates,
+            &mut covers_changed,
+        );
 
         let t_all_items = Instant::now();
 
         // Apply the same updates to the rendered snapshot without a second path index.
         let items = std::sync::Arc::make_mut(&mut self.items);
-        for item in items.iter_mut() {
-            if let Some(cover_opt) = cover_updates.get(&item.path) {
-                if item.folder_cover != *cover_opt {
-                    item.folder_cover = cover_opt.clone();
-                    folder_updates = true;
-                }
+        folder_updates |= apply_folder_cover_updates_to_items(
+            items.as_mut_slice(),
+            &cover_updates,
+            &mut covers_changed,
+        );
+
+        // The cover worker is shared by both visible panes. When the unfocused
+        // pane is a tag view, its FileEntry values are stored only in the
+        // inactive snapshot; without updating it here, folder previews never get
+        // requested until a focused regular folder populates the cover cache.
+        if let Some(snapshot) = self.dual_panel_inactive_state.as_mut() {
+            let inactive_all_items = std::sync::Arc::make_mut(&mut snapshot.all_items);
+            folder_updates |= apply_folder_cover_updates_to_items(
+                inactive_all_items.as_mut_slice(),
+                &cover_updates,
+                &mut covers_changed,
+            );
+
+            if !snapshot.items_snapshot_compact {
+                let inactive_items = std::sync::Arc::make_mut(&mut snapshot.items);
+                folder_updates |= apply_folder_cover_updates_to_items(
+                    inactive_items.as_mut_slice(),
+                    &cover_updates,
+                    &mut covers_changed,
+                );
             }
         }
 

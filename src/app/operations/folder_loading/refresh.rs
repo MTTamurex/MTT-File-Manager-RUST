@@ -9,10 +9,12 @@ impl ImageViewerApp {
             self.drive_state.last_drive_refresh = Instant::now();
         } else if self.navigation_state.is_recycle_bin_view {
             self.setup_recycle_bin_view();
-        } else if let Some(tag_id) =
-            crate::domain::special_paths::tag_id_from_view_path(&self.navigation_state.current_path)
+        } else if crate::domain::special_paths::tag_id_from_view_path(
+            &self.navigation_state.current_path,
+        )
+        .is_some()
         {
-            self.setup_tag_view(tag_id);
+            self.reload_visible_tag_views();
         } else {
             // Force regeneration of visible folder previews and folder sizes on
             // manual refresh. This avoids reusing stale in-memory values for

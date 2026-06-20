@@ -111,6 +111,53 @@ impl ImageViewerApp {
         self.ui_ctx.request_repaint();
     }
 
+    fn clear_cached_tag_tab_items(tab: &mut crate::tabs::TabState) {
+        tab.items = Arc::new(Vec::new());
+        tab.all_items = Arc::new(Vec::new());
+        tab.items_snapshot_compact = false;
+        tab.total_items = 0;
+        tab.selected_item = None;
+        tab.selected_file = None;
+        tab.selected_thumbnail = None;
+        tab.selected_metadata = None;
+        tab.selected_gif = None;
+        tab.multi_selection.clear();
+    }
+
+    fn clear_cached_tag_snapshot_items(snapshot: &mut crate::app::dual_panel::PanelSnapshot) {
+        snapshot.items = Arc::new(Vec::new());
+        snapshot.all_items = Arc::new(Vec::new());
+        snapshot.items_snapshot_compact = false;
+        snapshot.total_items = 0;
+        snapshot.selected_item = None;
+        snapshot.selected_file = None;
+        snapshot.selected_thumbnail = None;
+        snapshot.selected_metadata = None;
+        snapshot.selected_gif = None;
+        snapshot.multi_selection.clear();
+    }
+
+    fn invalidate_cached_tag_views_for_tags(&mut self, tag_ids: &FxHashSet<i64>) {
+        if tag_ids.is_empty() {
+            return;
+        }
+
+        let active_tab = self.tab_manager.active_tab;
+        for (index, tab) in self.tab_manager.tabs.iter_mut().enumerate() {
+            if index != active_tab
+                && tag_id_from_view_path(&tab.path).is_some_and(|id| tag_ids.contains(&id))
+            {
+                Self::clear_cached_tag_tab_items(tab);
+            }
+
+            if let Some(snapshot) = tab.dual_panel_inactive_state.as_mut() {
+                if tag_id_from_view_path(&snapshot.path).is_some_and(|id| tag_ids.contains(&id)) {
+                    Self::clear_cached_tag_snapshot_items(snapshot);
+                }
+            }
+        }
+    }
+
     pub fn sorted_tag_definitions(&self) -> Vec<FileTag> {
         let mut tags: Vec<FileTag> = self.tag_definitions.values().cloned().collect();
         tags.sort_by_key(tag_sort_key);
@@ -165,6 +212,10 @@ impl ImageViewerApp {
         self.loaded_path = view_path;
         self.reset_selection_and_search();
 
+        let assignments = self.app_state_db.get_all_tag_assignments();
+        self.tag_assignments = Arc::new(assignments);
+        self.recompute_tag_counts_from_assignments();
+
         let mut paths: Vec<PathBuf> = self
             .tag_assignments
             .iter()
@@ -213,6 +264,30 @@ impl ImageViewerApp {
             .ok();
     }
 
+    pub fn reload_visible_tag_views(&mut self) -> bool {
+        let active_tag_id = tag_id_from_view_path(&self.navigation_state.current_path);
+        let inactive_tag_id = self
+            .dual_panel_inactive_state
+            .as_ref()
+            .and_then(|snapshot| tag_id_from_view_path(&snapshot.path));
+
+        if active_tag_id.is_none() && inactive_tag_id.is_none() {
+            return false;
+        }
+
+        if let Some(tag_id) = active_tag_id {
+            self.setup_tag_view(tag_id);
+        }
+
+        if let Some(tag_id) = inactive_tag_id {
+            self.with_inactive_panel(|app| {
+                app.setup_tag_view(tag_id);
+            });
+        }
+
+        true
+    }
+
     pub fn assign_tag_to_paths(&mut self, paths: &[PathBuf], tag_id: i64) {
         if paths.is_empty() || !self.tag_definitions.contains_key(&tag_id) {
             return;
@@ -239,6 +314,9 @@ impl ImageViewerApp {
         }
 
         if changed {
+            let mut changed_tags = FxHashSet::default();
+            changed_tags.insert(tag_id);
+            self.invalidate_cached_tag_views_for_tags(&changed_tags);
             self.refresh_visible_items_after_tag_change();
         }
     }
@@ -279,6 +357,9 @@ impl ImageViewerApp {
         }
 
         if changed {
+            let mut changed_tags = FxHashSet::default();
+            changed_tags.insert(tag_id);
+            self.invalidate_cached_tag_views_for_tags(&changed_tags);
             self.refresh_visible_items_after_tag_change();
         }
     }
@@ -437,6 +518,17 @@ impl ImageViewerApp {
             return;
         }
 
+        let changed_tags: FxHashSet<i64> = self
+            .tag_assignments
+            .iter()
+            .filter(|(assigned_path, _)| {
+                paths
+                    .iter()
+                    .any(|path| path_is_same_or_descendant(assigned_path, path))
+            })
+            .flat_map(|(_, ids)| ids.iter().copied())
+            .collect();
+
         self.app_state_db.clear_tag_assignments_for_paths(paths);
         let assignments = Arc::make_mut(&mut self.tag_assignments);
         let before_len = assignments.len();
@@ -448,6 +540,7 @@ impl ImageViewerApp {
         let changed = assignments.len() != before_len;
         if changed {
             self.recompute_tag_counts_from_assignments();
+            self.invalidate_cached_tag_views_for_tags(&changed_tags);
             self.refresh_visible_items_after_tag_change();
         }
     }
@@ -467,6 +560,11 @@ impl ImageViewerApp {
             return;
         }
 
+        let changed_tags: FxHashSet<i64> = moved_assignments
+            .iter()
+            .flat_map(|(_, ids)| ids.iter().copied())
+            .collect();
+
         if !self.app_state_db.move_tag_assignments(old_path, new_path) {
             return;
         }
@@ -476,6 +574,11 @@ impl ImageViewerApp {
                 entry.path = remap_path(&entry.path, old_path, new_path);
                 if let Some(name) = entry.path.file_name() {
                     entry.name = name.to_string_lossy().to_string();
+                }
+            }
+            if let Some(cover) = entry.folder_cover.as_mut() {
+                if path_is_same_or_descendant(cover, old_path) {
+                    *cover = remap_path(cover, old_path, new_path);
                 }
             }
         };
@@ -491,6 +594,17 @@ impl ImageViewerApp {
             self.share_visible_items_from_all_items();
         }
 
+        if let Some(snapshot) = self.dual_panel_inactive_state.as_mut() {
+            for entry in Arc::make_mut(&mut snapshot.all_items).iter_mut() {
+                remap_entry(entry);
+            }
+            if !snapshot.items_snapshot_compact {
+                for entry in Arc::make_mut(&mut snapshot.items).iter_mut() {
+                    remap_entry(entry);
+                }
+            }
+        }
+
         let assignments = Arc::make_mut(&mut self.tag_assignments);
         for (old_assigned_path, ids) in moved_assignments {
             assignments.remove(&old_assigned_path);
@@ -503,6 +617,7 @@ impl ImageViewerApp {
             }
         }
         self.recompute_tag_counts_from_assignments();
+        self.invalidate_cached_tag_views_for_tags(&changed_tags);
         self.refresh_visible_items_after_tag_change();
     }
 }

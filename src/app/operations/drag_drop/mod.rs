@@ -173,9 +173,14 @@ impl ImageViewerApp {
             return;
         }
 
-        let cross_panel_target = self.drag_cross_panel_target.clone();
+        let raw_cross_panel_target = self.drag_cross_panel_target.clone();
+        let cross_panel_target = raw_cross_panel_target.clone().filter(|target| {
+            !target
+                .to_str()
+                .is_some_and(crate::domain::special_paths::is_virtual_path)
+        });
         let target_cross_panel_context =
-            cross_panel_target.is_some() || self.drag_drop_cross_panel_context;
+            raw_cross_panel_target.is_some() || self.drag_drop_cross_panel_context;
         let Some(dest_folder) = self.drag_target_folder.clone().or(cross_panel_target) else {
             self.cancel_item_drag();
             return;
