@@ -55,7 +55,8 @@ pub enum GlobalSearchResponse {
 const OFFLINE_FAILURE_THRESHOLD: u8 = 3;
 const STATUS_RETRY_COUNT: usize = 1;
 const SEARCH_RETRY_COUNT: usize = 2;
-const MIN_QUERY_LEN_FOR_SERVICE_SEARCH: usize = 2;
+const MIN_QUERY_LEN_FOR_SERVICE_SEARCH: usize = 1;
+const MIN_QUERY_LEN_FOR_EXACT_TOTAL_COUNT: usize = 2;
 const TOTAL_COUNT_PAGE_LIMIT: u32 = 1_000;
 const ACTIVE_STATUS_POLL_MS: u64 = 250;
 const IDLE_STATUS_POLL_MS: u64 = 1_000;
@@ -166,6 +167,10 @@ fn query_service_with_retry(
 
 fn should_skip_service_query(query: &str, _offset: u32) -> bool {
     query.chars().count() < MIN_QUERY_LEN_FOR_SERVICE_SEARCH
+}
+
+fn should_load_exact_total_matches(query: &str) -> bool {
+    query.chars().count() >= MIN_QUERY_LEN_FOR_EXACT_TOTAL_COUNT
 }
 
 fn load_exact_service_total_matches(
@@ -537,7 +542,10 @@ pub fn start_global_search_worker(
                             total_matches,
                         });
 
-                        if offset == 0 && total_matches.is_none() {
+                        if offset == 0
+                            && total_matches.is_none()
+                            && should_load_exact_total_matches(&query)
+                        {
                             spawn_total_count_task(
                                 sender.clone(),
                                 ctx.clone(),
@@ -606,4 +614,21 @@ pub fn start_global_search_worker(
             ctx.request_repaint();
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{should_load_exact_total_matches, should_skip_service_query};
+
+    #[test]
+    fn single_character_queries_use_global_service_without_exact_total_count() {
+        assert!(!should_skip_service_query("E", 0));
+        assert!(!should_load_exact_total_matches("E"));
+    }
+
+    #[test]
+    fn multi_character_queries_can_load_exact_total_count() {
+        assert!(!should_skip_service_query("em", 0));
+        assert!(should_load_exact_total_matches("em"));
+    }
 }

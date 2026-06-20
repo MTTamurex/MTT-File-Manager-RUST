@@ -54,7 +54,7 @@ pub enum GlobalSearchSortMode {
     Name,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub enum GlobalSearchTagFilter {
     /// No tag filter applied — show all results, regardless of whether they have tags.
     #[default]
@@ -184,6 +184,12 @@ pub struct GlobalSearchState {
     /// Metadata requests currently queued for created-date filtering.
     created_metadata_inflight: HashSet<String>,
 
+    /// Service-result count loaded for the active query. This intentionally
+    /// excludes client-side tagged result injections used by the tag filter.
+    pub service_results_loaded: u32,
+    /// Last query/tag-assignment combination used to inject tagged matches.
+    pub tagged_results_cache_key: Option<(String, GlobalSearchTagFilter, u64)>,
+
     // --- Tooltip async worker ---
     pub tooltip_sender: Sender<TooltipRequest>,
     pub tooltip_receiver: Receiver<TooltipResponse>,
@@ -296,6 +302,8 @@ impl GlobalSearchState {
             created_ts_cache: Vec::new(),
             created_metadata_epoch: 0,
             created_metadata_inflight: HashSet::new(),
+            service_results_loaded: 0,
+            tagged_results_cache_key: None,
             tooltip_sender,
             tooltip_receiver,
             tooltip_metadata_inflight: HashSet::new(),
@@ -404,6 +412,8 @@ impl GlobalSearchState {
         self.selected_index = None;
         self.has_more_results = false;
         self.total_matches = None;
+        self.service_results_loaded = 0;
+        self.tagged_results_cache_key = None;
         self.results_generation = self.results_generation.wrapping_add(1);
     }
 

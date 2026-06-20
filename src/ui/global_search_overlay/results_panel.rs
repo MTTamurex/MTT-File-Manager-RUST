@@ -1,7 +1,11 @@
+use crate::app::global_search_state::GlobalSearchTagFilter;
 use crate::app::shortcuts::ShortcutAction;
 use crate::app::state::ImageViewerApp;
 use eframe::egui;
 use rust_i18n::t;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+use std::path::Path;
 
 use super::actions::{self, ResultAction};
 use super::result_row;
@@ -13,6 +17,7 @@ const SCROLL_SENSITIVITY: f32 = 5.0;
 const RESULTS_FOOTER_HEIGHT: f32 = 32.0;
 const ACTIVE_SCROLL_WINDOW_MS: u64 = 80;
 const SCROLL_RENDER_OVERSCAN: usize = 1;
+const TAGGED_RESULTS_INJECTION_LIMIT: usize = 2_000;
 
 const RESULT_ROW_HEIGHT: f32 = result_row::ROW_HEIGHT;
 
@@ -23,17 +28,20 @@ pub(super) fn render_results_panel(
     modal_max_height: f32,
     hover_color: egui::Color32,
 ) {
+    ensure_tagged_results_for_active_filter(app);
+
     // Use cached sorted indices to avoid O(N) recomputation every frame.
     // Take ownership temporarily to avoid cloning; put back at the end.
-    app.global_search.ensure_sorted_indices(&app.tag_assignments);
+    app.global_search
+        .ensure_sorted_indices(&app.tag_assignments);
     let filtered_indices = std::mem::take(&mut app.global_search.cached_sorted_indices);
 
     let shows_load_more = !app.global_search.query.is_empty()
         && app.global_search.has_more_results
         && !app.global_search.loading
-        && (app.global_search.results.len() as u32) < MAX_RESULTS_CAP;
+        && app.global_search.service_results_loaded < MAX_RESULTS_CAP;
     let shows_max_reached = app.global_search.has_more_results
-        && (app.global_search.results.len() as u32) >= MAX_RESULTS_CAP;
+        && app.global_search.service_results_loaded >= MAX_RESULTS_CAP;
     let footer_height = if shows_load_more || shows_max_reached {
         RESULTS_FOOTER_HEIGHT
     } else {
@@ -52,6 +60,7 @@ pub(super) fn render_results_panel(
                 ui.label(t!("search.searching").to_string());
             },
         );
+        app.global_search.cached_sorted_indices = filtered_indices;
         return;
     }
 
@@ -70,21 +79,37 @@ pub(super) fn render_results_panel(
                 );
             },
         );
+        app.global_search.cached_sorted_indices = filtered_indices;
         return;
     }
 
     if !app.global_search.results.is_empty() && filtered_indices.is_empty() {
+        if !app.global_search.query.is_empty()
+            && app.global_search.has_more_results
+            && !app.global_search.loading
+            && app.global_search.service_results_loaded < MAX_RESULTS_CAP
+        {
+            let next_offset = app.global_search.service_results_loaded;
+            let next_limit = LOAD_MORE_STEP.min(MAX_RESULTS_CAP.saturating_sub(next_offset));
+            queue_load_more(app, next_offset, next_limit);
+        }
+
         ui.allocate_ui_with_layout(
             egui::vec2(ui.available_width(), results_height),
             egui::Layout::top_down(egui::Align::Center),
             |ui| {
                 ui.add_space(20.0);
+                let message = if app.global_search.loading {
+                    t!("search.searching")
+                } else {
+                    t!("search.no_results_filtered")
+                };
                 ui.label(
-                    egui::RichText::new(t!("search.no_results_filtered").to_string())
-                        .color(egui::Color32::from_gray(120)),
+                    egui::RichText::new(message.to_string()).color(egui::Color32::from_gray(120)),
                 );
             },
         );
+        app.global_search.cached_sorted_indices = filtered_indices;
         return;
     }
 
@@ -101,6 +126,7 @@ pub(super) fn render_results_panel(
                 );
             },
         );
+        app.global_search.cached_sorted_indices = filtered_indices;
         return;
     }
 
@@ -331,7 +357,7 @@ pub(super) fn render_results_panel(
     // Real pagination: request next page using offset/limit.
     if !app.global_search.query.is_empty() {
         if shows_load_more {
-            let current_loaded = app.global_search.results.len() as u32;
+            let current_loaded = app.global_search.service_results_loaded;
             let next_offset = current_loaded;
             let next_limit = LOAD_MORE_STEP.min(MAX_RESULTS_CAP.saturating_sub(current_loaded));
 
@@ -358,25 +384,7 @@ pub(super) fn render_results_panel(
                     .on_hover_text(t!("search.load_more_hint"))
                     .clicked()
                 {
-                    app.global_search.loading = true;
-                    app.global_search.in_flight_query = Some(app.global_search.query.clone());
-                    app.global_search.in_flight_started_at = Some(std::time::Instant::now());
-                    app.global_search.has_more_results = false;
-                    app.global_search.requested_offset = next_offset;
-                    app.global_search.requested_limit = next_limit;
-
-                    if let Err(e) = app.global_search.sender.send(
-                        crate::workers::global_search_worker::GlobalSearchRequest::Search {
-                            query: app.global_search.query.clone(),
-                            offset: next_offset,
-                            limit: next_limit,
-                        },
-                    ) {
-                        app.global_search.loading = false;
-                        app.global_search.in_flight_query = None;
-                        app.global_search.in_flight_started_at = None;
-                        log::error!("[GLOBAL-SEARCH] Failed to queue load-more request: {}", e);
-                    }
+                    queue_load_more(app, next_offset, next_limit);
                 }
             });
         } else if shows_max_reached {
@@ -460,5 +468,193 @@ pub(super) fn render_results_panel(
                 actions::preview_search_result(app, &full_path);
             }
         }
+    }
+}
+
+fn queue_load_more(app: &mut ImageViewerApp, next_offset: u32, next_limit: u32) {
+    app.global_search.loading = true;
+    app.global_search.in_flight_query = Some(app.global_search.query.clone());
+    app.global_search.in_flight_started_at = Some(std::time::Instant::now());
+    app.global_search.has_more_results = false;
+    app.global_search.requested_offset = next_offset;
+    app.global_search.requested_limit = next_limit;
+
+    if let Err(e) = app.global_search.sender.send(
+        crate::workers::global_search_worker::GlobalSearchRequest::Search {
+            query: app.global_search.query.clone(),
+            offset: next_offset,
+            limit: next_limit,
+        },
+    ) {
+        app.global_search.loading = false;
+        app.global_search.in_flight_query = None;
+        app.global_search.in_flight_started_at = None;
+        log::error!("[GLOBAL-SEARCH] Failed to queue load-more request: {}", e);
+    }
+}
+
+fn ensure_tagged_results_for_active_filter(app: &mut ImageViewerApp) {
+    if app.global_search.query.trim().is_empty() {
+        return;
+    }
+
+    let tag_filter = app.global_search.tag_filter.clone();
+    if !tag_filter_is_active(&tag_filter) {
+        return;
+    }
+
+    let assignments_signature = tag_assignments_signature(app.tag_assignments.as_ref());
+    let cache_key = (
+        app.global_search.query.clone(),
+        tag_filter.clone(),
+        assignments_signature,
+    );
+    if app.global_search.tagged_results_cache_key.as_ref() == Some(&cache_key) {
+        return;
+    }
+    app.global_search.tagged_results_cache_key = Some(cache_key);
+
+    let tokens: Vec<String> = app
+        .global_search
+        .query
+        .to_lowercase()
+        .split_whitespace()
+        .map(str::to_owned)
+        .collect();
+    if tokens.is_empty() {
+        return;
+    }
+
+    let mut seen_paths = std::collections::HashSet::with_capacity(app.global_search.results.len());
+    for result in &app.global_search.results {
+        seen_paths.insert(normalize_search_path_key(&result.full_path));
+    }
+
+    let mut injected = Vec::new();
+    for (path, tag_ids) in app.tag_assignments.iter() {
+        if injected.len() >= TAGGED_RESULTS_INJECTION_LIMIT {
+            break;
+        }
+        if !tag_filter_matches_ids(&tag_filter, tag_ids) || !path_name_matches_query(path, &tokens)
+        {
+            continue;
+        }
+
+        let path_text = path.to_string_lossy().to_string();
+        if !seen_paths.insert(normalize_search_path_key(&path_text)) {
+            continue;
+        }
+
+        let Ok(metadata) = std::fs::metadata(path) else {
+            continue;
+        };
+        let Some(name) = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(str::to_owned)
+        else {
+            continue;
+        };
+
+        injected.push(mtt_search_protocol::SearchResultItem {
+            name,
+            full_path: path_text,
+            is_dir: metadata.is_dir(),
+            size: metadata.is_file().then_some(metadata.len()).unwrap_or(0),
+        });
+    }
+
+    if injected.is_empty() {
+        return;
+    }
+
+    app.global_search.results.extend(injected);
+    app.global_search.results_generation = app.global_search.results_generation.wrapping_add(1);
+}
+
+fn tag_filter_is_active(tag_filter: &GlobalSearchTagFilter) -> bool {
+    match tag_filter {
+        GlobalSearchTagFilter::All => false,
+        GlobalSearchTagFilter::Any => true,
+        GlobalSearchTagFilter::Selected(ids) => !ids.is_empty(),
+    }
+}
+
+fn tag_filter_matches_ids(tag_filter: &GlobalSearchTagFilter, tag_ids: &[i64]) -> bool {
+    match tag_filter {
+        GlobalSearchTagFilter::All => true,
+        GlobalSearchTagFilter::Any => !tag_ids.is_empty(),
+        GlobalSearchTagFilter::Selected(required_ids) => required_ids
+            .iter()
+            .any(|required_id| tag_ids.contains(required_id)),
+    }
+}
+
+fn path_name_matches_query(path: &Path, tokens: &[String]) -> bool {
+    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    let name_lower = name.to_lowercase();
+    tokens.iter().all(|token| name_lower.contains(token))
+}
+
+fn tag_assignments_signature(
+    assignments: &rustc_hash::FxHashMap<std::path::PathBuf, Vec<i64>>,
+) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    assignments.len().hash(&mut hasher);
+    for (path, tag_ids) in assignments {
+        path.hash(&mut hasher);
+        tag_ids.hash(&mut hasher);
+    }
+    hasher.finish()
+}
+
+fn normalize_search_path_key(path: &str) -> String {
+    let slash_normalized = path.replace('/', "\\");
+    let stripped = slash_normalized
+        .strip_prefix(r"\\?\")
+        .or_else(|| slash_normalized.strip_prefix(r"\\.\"))
+        .unwrap_or(&slash_normalized);
+
+    if stripped.len() > 3 {
+        stripped.trim_end_matches('\\').to_lowercase()
+    } else {
+        stripped.to_lowercase()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{normalize_search_path_key, path_name_matches_query, tag_filter_matches_ids};
+    use crate::app::global_search_state::GlobalSearchTagFilter;
+    use std::path::Path;
+
+    #[test]
+    fn tag_filter_selected_matches_any_required_id() {
+        let filter = GlobalSearchTagFilter::Selected(vec![2, 5]);
+        assert!(tag_filter_matches_ids(&filter, &[1, 5]));
+        assert!(!tag_filter_matches_ids(&filter, &[1, 3]));
+    }
+
+    #[test]
+    fn tagged_path_query_uses_file_name_tokens() {
+        let tokens = vec!["emm".to_string(), "txt".to_string()];
+        assert!(path_name_matches_query(
+            Path::new(r"C:\Docs\Emma Notes.txt"),
+            &tokens
+        ));
+        assert!(!path_name_matches_query(
+            Path::new(r"C:\Emma\Notes.txt"),
+            &tokens
+        ));
+    }
+
+    #[test]
+    fn search_path_key_matches_verbatim_and_regular_paths() {
+        assert_eq!(
+            normalize_search_path_key(r"\\?\C:\Docs\Emma.txt"),
+            normalize_search_path_key(r"C:\Docs\Emma.txt")
+        );
     }
 }

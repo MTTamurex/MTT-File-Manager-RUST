@@ -45,13 +45,18 @@ impl ImageViewerApp {
                     // Only apply if the query still matches (user may have typed more)
                     if query == self.global_search.query {
                         if offset == 0 {
+                            self.global_search.service_results_loaded = items.len() as u32;
                             self.global_search.results = items;
+                            self.global_search.tagged_results_cache_key = None;
                             self.global_search.selected_index = None;
                             self.global_search.results_generation += 1;
                             self.global_search.reset_sort_metadata_for_current_results();
                             self.global_search.total_matches = total_matches.map(u64::from);
-                        } else if offset == self.global_search.results.len() as u32 {
+                        } else if offset == self.global_search.service_results_loaded {
+                            let service_items_len = items.len() as u32;
                             append_unique_results(&mut self.global_search.results, items);
+                            self.global_search.service_results_loaded =
+                                offset.saturating_add(service_items_len);
                             self.global_search.results_generation += 1;
                             if let Some(total_matches) = total_matches {
                                 self.global_search.total_matches = Some(u64::from(total_matches));
