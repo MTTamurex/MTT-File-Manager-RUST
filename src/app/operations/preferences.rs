@@ -139,6 +139,15 @@ impl ImageViewerApp {
             })
             .to_string(),
         ));
+        prefs.push((
+            "show_tags",
+            (if self.show_tags {
+                "true"
+            } else {
+                "false"
+            })
+            .to_string(),
+        ));
         prefs.push(("upload_budget_ms", self.upload_budget_ms.to_string()));
         prefs.push((
             "active_tag_filter",

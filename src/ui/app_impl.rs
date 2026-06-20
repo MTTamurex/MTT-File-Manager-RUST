@@ -235,19 +235,7 @@ impl eframe::App for ImageViewerApp {
 
         // 11. Settings window
         if self.navigation_state.show_settings_window {
-            let mut diagnostic_mode = self.diagnostic_mode;
-            let output = crate::ui::components::settings_window::render_settings_window(
-                ctx,
-                self.navigation_state.show_settings_window,
-                &mut self.navigation_state.active_settings_section,
-                &mut self.theme_mode,
-                &self.active_gpu_backend,
-                &mut self.gpu_backend_preference,
-                &mut self.shortcuts,
-                &mut self.shortcut_editor,
-                &mut self.show_recycle_bin,
-                &mut diagnostic_mode,
-            );
+            let output = crate::ui::components::settings_window::render_settings_window(ctx, self);
             self.navigation_state.show_settings_window = output.keep_open;
             if !output.keep_open {
                 self.shortcut_editor.clear();
@@ -281,8 +269,12 @@ impl eframe::App for ImageViewerApp {
                 self.save_preferences();
                 self.force_save_preferences();
             }
+            if output.tags_changed {
+                self.save_preferences();
+                self.force_save_preferences();
+            }
             if output.diagnostic_mode_changed {
-                self.set_diagnostic_mode(diagnostic_mode);
+                self.set_diagnostic_mode(self.diagnostic_mode);
             }
             if output.open_diagnostic_folder {
                 self.open_diagnostic_log_folder();

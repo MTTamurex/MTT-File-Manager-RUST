@@ -136,7 +136,8 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) -> Option
             const TAG_DIVIDER_H: f32 = 8.0 + 9.0 + 8.0; // space + separator + space
             let tag_count = app.tag_definitions.len();
             let tags_collapsed = app.collapse_tags;
-            let tags_content_h = if tag_count == 0 {
+            let tags_visible = app.show_tags && tag_count > 0;
+            let tags_content_h = if !tags_visible {
                 0.0
             } else if tags_collapsed {
                 TAG_HEADER_H + TAG_BOTTOM_PADDING_H
@@ -175,6 +176,7 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) -> Option
                     is_folder_dragging,
                     dragging_path,
                     show_recycle_bin: app.show_recycle_bin,
+                    show_tags: app.show_tags,
                     collapse_quick_access: app.collapse_quick_access,
                     collapse_cloud_drives: app.collapse_cloud_drives,
                     collapse_local_disks: app.collapse_local_disks,
@@ -255,6 +257,7 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) -> Option
                 is_folder_dragging,
                 dragging_path,
                 show_recycle_bin: app.show_recycle_bin,
+                show_tags: app.show_tags,
                 collapse_quick_access: app.collapse_quick_access,
                 collapse_cloud_drives: app.collapse_cloud_drives,
                 collapse_local_disks: app.collapse_local_disks,

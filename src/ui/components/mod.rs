@@ -13,6 +13,7 @@ pub mod mpv_preview;
 pub mod settings_window;
 pub mod shortcut_settings;
 pub mod tag_manager_modal;
+pub mod tag_settings;
 pub mod video_controls_state;
 pub mod virtual_drive_settings;
 

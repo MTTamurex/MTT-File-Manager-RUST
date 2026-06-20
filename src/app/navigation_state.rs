@@ -12,6 +12,7 @@ pub enum SettingsSection {
     Diagnostics,
     Graphics,
     Shortcuts,
+    Tags,
     VirtualDrives,
     About,
 }

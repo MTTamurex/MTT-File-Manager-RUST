@@ -26,6 +26,7 @@ pub(super) struct StartupPreferences {
     pub(super) session_volume: f32,
     pub(super) show_hidden_files: bool,
     pub(super) show_recycle_bin: bool,
+    pub(super) show_tags: bool,
     pub(super) language: String,
     pub(super) theme_mode: ThemeMode,
     pub(super) gpu_backend_preference: String,
@@ -177,6 +178,11 @@ impl StartupPreferences {
             .map(|s| s != "false")
             .unwrap_or(true);
 
+        let show_tags = prefs
+            .get("show_tags")
+            .map(|s| s != "false")
+            .unwrap_or(true);
+
         let language = if let Some(saved) = prefs.get("language").cloned() {
             saved
         } else if let Some(installer_lang) =
@@ -296,6 +302,7 @@ impl StartupPreferences {
             session_volume,
             show_hidden_files,
             show_recycle_bin,
+            show_tags,
             language,
             theme_mode,
             gpu_backend_preference,

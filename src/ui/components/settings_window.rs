@@ -1,5 +1,5 @@
-use crate::app::navigation_state::{SettingsSection, ThemeMode};
-use crate::app::shortcuts::{ShortcutBindings, ShortcutEditorState};
+use crate::app::navigation_state::SettingsSection;
+use crate::app::ImageViewerApp;
 use crate::ui::theme;
 use eframe::egui::{self, Color32, Margin, RichText, Stroke};
 use rust_i18n::t;
@@ -13,28 +13,22 @@ pub struct SettingsWindowOutput {
     pub backend_changed: bool,
     pub shortcuts_changed: bool,
     pub recycle_bin_changed: bool,
+    pub tags_changed: bool,
     pub diagnostic_mode_changed: bool,
     pub open_diagnostic_folder: bool,
 }
 
 pub fn render_settings_window(
     ctx: &egui::Context,
-    show_window: bool,
-    active_section: &mut SettingsSection,
-    theme_mode: &mut ThemeMode,
-    active_gpu_backend: &str,
-    gpu_backend_preference: &mut String,
-    shortcuts: &mut ShortcutBindings,
-    shortcut_editor: &mut ShortcutEditorState,
-    show_recycle_bin: &mut bool,
-    diagnostic_mode: &mut bool,
+    app: &mut ImageViewerApp,
 ) -> SettingsWindowOutput {
-    let mut keep_open = show_window;
+    let mut keep_open = app.navigation_state.show_settings_window;
     let mut language_changed = false;
     let mut theme_changed = false;
     let mut backend_changed = false;
     let mut shortcuts_changed = false;
     let mut recycle_bin_changed = false;
+    let mut tags_changed = false;
     let mut diagnostic_mode_changed = false;
     let mut open_diagnostic_folder = false;
 
@@ -124,11 +118,19 @@ pub fn render_settings_window(
                 ui.allocate_ui_with_layout(
                     egui::vec2(180.0, panel_height),
                     egui::Layout::top_down(egui::Align::Min),
-                    |ui| render_settings_sidebar(ui, active_section, dark_mode),
+                    |ui| {
+                        render_settings_sidebar(
+                            ui,
+                            &mut app.navigation_state.active_settings_section,
+                            dark_mode,
+                        )
+                    },
                 );
 
-                if *active_section != SettingsSection::Shortcuts && shortcut_editor.is_capturing() {
-                    shortcut_editor.clear();
+                if app.navigation_state.active_settings_section != SettingsSection::Shortcuts
+                    && app.shortcut_editor.is_capturing()
+                {
+                    app.shortcut_editor.clear();
                 }
 
                 ui.separator();
@@ -138,18 +140,19 @@ pub fn render_settings_window(
                     content_size,
                     egui::Layout::top_down(egui::Align::Min),
                     |ui| {
+                        let current_section = app.navigation_state.active_settings_section;
                         egui::ScrollArea::vertical()
                             .id_salt("settings_window_content")
                             .auto_shrink([false, false])
-                            .show(ui, |ui| match *active_section {
+                            .show(ui, |ui| match current_section {
                                 SettingsSection::General => {
                                     language_changed |= crate::ui::components::language_settings::render_language_settings_section(ui);
                                     ui.add_space(16.0);
-                                    theme_changed |= crate::ui::components::appearance_settings::render_appearance_settings_section(ui, theme_mode);
+                                    theme_changed |= crate::ui::components::appearance_settings::render_appearance_settings_section(ui, &mut app.theme_mode);
                                     ui.add_space(16.0);
                                     ui.label(RichText::new(t!("settings.show_recycle_bin").to_string()).strong().color(theme::text_color(dark_mode)));
                                     ui.add_space(4.0);
-                                    if ui.checkbox(show_recycle_bin, RichText::new(t!("settings.show_recycle_bin")).color(theme::text_color(dark_mode))).changed() {
+                                    if ui.checkbox(&mut app.show_recycle_bin, RichText::new(t!("settings.show_recycle_bin")).color(theme::text_color(dark_mode))).changed() {
                                         recycle_bin_changed = true;
                                     }
                                 }
@@ -165,7 +168,7 @@ pub fn render_settings_window(
                                     ui.add_space(8.0);
                                     if ui
                                         .checkbox(
-                                            diagnostic_mode,
+                                            &mut app.diagnostic_mode,
                                             RichText::new(t!("settings.diagnostics_enable")).color(theme::text_color(dark_mode)),
                                         )
                                         .changed()
@@ -197,14 +200,18 @@ pub fn render_settings_window(
                                     ui.label(RichText::new(t!("settings.diagnostics_note")).color(theme::secondary_text_color(dark_mode)));
                                 }
                                 SettingsSection::Graphics => {
-                                    backend_changed |= crate::ui::components::backend_settings::render_backend_settings_section(ui, active_gpu_backend, gpu_backend_preference);
+                                    backend_changed |= crate::ui::components::backend_settings::render_backend_settings_section(ui, &app.active_gpu_backend, &mut app.gpu_backend_preference);
                                 }
                                 SettingsSection::Shortcuts => {
                                     shortcuts_changed |= crate::ui::components::shortcut_settings::render_shortcut_settings_section(
                                         ui,
-                                        shortcuts,
-                                        shortcut_editor,
+                                        &mut app.shortcuts,
+                                        &mut app.shortcut_editor,
                                     );
+                                }
+                                SettingsSection::Tags => {
+                                    let tag_output = crate::ui::components::tag_settings::render_tag_settings_section(ui, app);
+                                    tags_changed |= tag_output.show_tags_changed;
                                 }
                                 SettingsSection::VirtualDrives => {
                                     crate::ui::components::virtual_drive_settings::render_virtual_drive_settings_section(ui);
@@ -225,6 +232,7 @@ pub fn render_settings_window(
         backend_changed,
         shortcuts_changed,
         recycle_bin_changed,
+        tags_changed,
         diagnostic_mode_changed,
         open_diagnostic_folder,
     }
@@ -262,6 +270,11 @@ fn render_settings_sidebar(
         active_section,
         SettingsSection::Shortcuts,
         RichText::new(t!("settings.shortcuts")).color(theme::text_color(dark_mode)),
+    );
+    ui.selectable_value(
+        active_section,
+        SettingsSection::Tags,
+        RichText::new(t!("settings.tags")).color(theme::text_color(dark_mode)),
     );
     ui.selectable_value(
         active_section,

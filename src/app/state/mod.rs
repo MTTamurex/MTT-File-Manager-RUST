@@ -189,6 +189,7 @@ pub struct ImageViewerApp {
     pub folders_position: FoldersPosition, // First, Last, Mixed
     pub show_hidden_files: bool,      // Show files with FILE_ATTRIBUTE_HIDDEN
     pub show_recycle_bin: bool,       // Show Recycle Bin in Quick Access
+    pub show_tags: bool,              // Show Tags section in sidebar
     pub collapse_quick_access: bool,  // Collapse Quick Access section in sidebar
     pub collapse_cloud_drives: bool,  // Collapse Cloud Drives section in sidebar
     pub collapse_local_disks: bool,   // Collapse Local Disks section in sidebar
