@@ -455,6 +455,10 @@ pub struct ImageViewerApp {
     /// so both visible panes can load thumbnails normally through the shared
     /// worker generation gate.
     pub use_active_generation_for_thumbnail_requests: bool,
+    /// Set while executing code against `dual_panel_inactive_state` via
+    /// `with_inactive_panel`. Folder/tag loads in that context must not update
+    /// the active panel's shared generation tracker.
+    pub in_inactive_panel_context: bool,
     /// Transient render guard set only while drawing the inactive dual panel.
     /// Mouse interactions still work there, but global keyboard navigation
     /// must remain owned by the active panel.

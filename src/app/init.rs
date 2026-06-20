@@ -556,6 +556,7 @@ impl ImageViewerApp {
             dual_panel_active: crate::app::dual_panel::ActivePanel::Left,
             dual_panel_inactive_state: None,
             use_active_generation_for_thumbnail_requests: false,
+            in_inactive_panel_context: false,
             suppress_file_panel_keyboard: false,
 
             // FOLDER SIZE CALCULATOR

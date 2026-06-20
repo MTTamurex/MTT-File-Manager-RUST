@@ -58,6 +58,9 @@ impl ImageViewerApp {
 
     pub(in crate::app::operations) fn bump_folder_load_generation(&mut self) {
         self.generation = next_generation(); // Globally unique generation ID
+        if self.in_inactive_panel_context {
+            return;
+        }
         self.current_generation
             .store(self.generation, AtomicOrdering::Relaxed); // Sync with workers
     }

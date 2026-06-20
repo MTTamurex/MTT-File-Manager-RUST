@@ -173,17 +173,17 @@ impl ImageViewerApp {
         snapshot.swap_with_app(self);
 
         // Run the closure with inactive state now in app fields
+        let previous_inactive_context = self.in_inactive_panel_context;
+        self.in_inactive_panel_context = true;
         let result = f(self);
+        self.in_inactive_panel_context = previous_inactive_context;
 
         // Swap back: restore active state into app fields
         snapshot.swap_with_app(self);
 
-        // Restore current_generation to the ACTIVE panel's generation.
-        // The closure may have called bump_folder_load_generation (via
-        // load_folder_for_inactive), which stores the inactive panel's generation into
-        // the shared current_generation Arc.  After the swap-back `self.generation` is
-        // the active panel's generation — ensure the worker sees it so it accepts
-        // thumbnail requests from the active panel.
+        // Keep current_generation aligned with the ACTIVE panel. Inactive panel
+        // folder/tag loads have their own generation for result routing, but must
+        // not cancel an active-panel folder load that may still be starting.
         self.current_generation
             .store(self.generation, std::sync::atomic::Ordering::Relaxed);
 

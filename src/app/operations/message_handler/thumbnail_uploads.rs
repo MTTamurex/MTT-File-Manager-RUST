@@ -1405,7 +1405,7 @@ impl ImageViewerApp {
         }
     }
 
-    fn is_folder_preview_result_relevant(&self, path: &PathBuf) -> bool {
+    pub(super) fn is_folder_preview_result_relevant(&self, path: &PathBuf) -> bool {
         if self.items.iter().any(|item| &item.path == path) {
             return true;
         }

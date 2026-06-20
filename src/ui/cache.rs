@@ -37,6 +37,7 @@ const MAX_PENDING_UPLOAD_SET_ITEMS: usize = 2048;
 /// each `ctx.load_texture` call accumulates GPU staging that is not freed
 /// at the same rate, producing a steady working-set leak.
 const FOLDER_PREVIEW_REQUEST_COOLDOWN: Duration = Duration::from_millis(2000);
+const FOLDER_PREVIEW_LOADING_STALE_AFTER: Duration = Duration::from_secs(15);
 /// Bounded LRU for the cooldown map; ~96B/entry → ~400KB ceiling.
 const FOLDER_PREVIEW_DEBOUNCE_CAPACITY: usize = 4096;
 
@@ -204,6 +205,7 @@ pub struct CacheManager {
     pub folder_preview_cache: LruCache<PathBuf, egui::TextureHandle>,
     /// Set of folder paths currently being loaded
     pub folder_preview_loading: FxHashSet<PathBuf>,
+    folder_preview_loading_started: LruCache<PathBuf, Instant>,
     /// Per-path debounce so an evicted folder cannot be re-requested every
     /// frame by the renderer when the LRU cap is smaller than the directory's
     /// folder set. Bounded LRU keeps memory ceiling deterministic.
@@ -270,6 +272,10 @@ impl CacheManager {
                 "folder_preview_cache",
             )),
             folder_preview_loading: FxHashSet::default(),
+            folder_preview_loading_started: LruCache::new(nz_cache_size(
+                FOLDER_PREVIEW_DEBOUNCE_CAPACITY,
+                "folder_preview_loading_started",
+            )),
             folder_preview_request_debounce: LruCache::new(nz_cache_size(
                 FOLDER_PREVIEW_DEBOUNCE_CAPACITY,
                 "folder_preview_request_debounce",
@@ -328,6 +334,10 @@ impl CacheManager {
                 "folder_preview_cache",
             )),
             folder_preview_loading: FxHashSet::default(),
+            folder_preview_loading_started: LruCache::new(nz_cache_size(
+                FOLDER_PREVIEW_DEBOUNCE_CAPACITY,
+                "folder_preview_loading_started",
+            )),
             folder_preview_request_debounce: LruCache::new(nz_cache_size(
                 FOLDER_PREVIEW_DEBOUNCE_CAPACITY,
                 "folder_preview_request_debounce",
@@ -616,6 +626,7 @@ impl CacheManager {
         self.drive_icon_cache.clear();
         self.folder_preview_cache.clear();
         self.folder_preview_loading.clear();
+        self.folder_preview_loading_started.clear();
         self.failed_thumbnails.clear();
         self.pending_upload_set.clear();
         self.rgba_data_cache.clear();
@@ -655,6 +666,7 @@ impl CacheManager {
         self.loading_set.shrink_to_fit();
         self.folder_preview_loading.clear();
         self.folder_preview_loading.shrink_to_fit();
+        self.folder_preview_loading_started.clear();
         self.pending_upload_set.clear();
         self.pending_upload_set.shrink_to_fit();
         self.attempted_thumbnail_bucket.clear();
@@ -884,7 +896,12 @@ impl CacheManager {
 
         // Allow deeper queueing so initial folders can request previews without waiting.
         if self.folder_preview_loading.len() < 120 {
-            self.folder_preview_loading.insert(path)
+            let inserted = self.folder_preview_loading.insert(path.clone());
+            if inserted {
+                self.folder_preview_loading_started
+                    .put(path, Instant::now());
+            }
+            inserted
         } else {
             false
         }
@@ -893,6 +910,31 @@ impl CacheManager {
     /// Finishes loading a folder preview
     pub fn finish_folder_preview_loading(&mut self, path: &PathBuf) {
         self.folder_preview_loading.remove(path);
+        self.folder_preview_loading_started.pop(path);
+    }
+
+    pub fn prune_stale_folder_preview_loading(&mut self) -> usize {
+        let now = Instant::now();
+        let stale_paths: Vec<PathBuf> = self
+            .folder_preview_loading
+            .iter()
+            .filter(|path| {
+                self.folder_preview_loading_started
+                    .peek(path.as_path())
+                    .is_none_or(|started| {
+                        now.duration_since(*started) >= FOLDER_PREVIEW_LOADING_STALE_AFTER
+                    })
+            })
+            .cloned()
+            .collect();
+
+        for path in &stale_paths {
+            self.folder_preview_loading.remove(path);
+            self.folder_preview_loading_started.pop(path);
+            self.forget_folder_preview_request_cooldown(path);
+        }
+
+        stale_paths.len()
     }
 
     /// Invalidates a folder preview (removes from cache and loading set)
@@ -901,6 +943,7 @@ impl CacheManager {
         self.folder_preview_trace.record_invalidation();
         self.folder_preview_cache.pop(path);
         self.folder_preview_loading.remove(path);
+        self.folder_preview_loading_started.pop(path);
         self.forget_folder_preview_request_cooldown(path);
     }
     /// Estimates VRAM usage in bytes

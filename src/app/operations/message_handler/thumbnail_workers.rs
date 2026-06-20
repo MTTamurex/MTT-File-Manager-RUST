@@ -142,6 +142,45 @@ impl ImageViewerApp {
                 .remove(folder_path);
         }
 
+        let preview_requests: Vec<_> = cover_updates
+            .iter()
+            .filter_map(|(folder_path, cover_opt)| {
+                let cover_path = cover_opt.as_ref()?;
+                if self.cache_manager.has_folder_preview(folder_path)
+                    || self.cache_manager.is_folder_preview_loading(folder_path)
+                    || !self.is_folder_preview_result_relevant(folder_path)
+                {
+                    return None;
+                }
+                Some((folder_path.clone(), cover_path.clone()))
+            })
+            .collect();
+
+        for (folder_path, cover_path) in preview_requests {
+            if !self
+                .cache_manager
+                .start_folder_preview_loading(folder_path.clone())
+            {
+                continue;
+            }
+
+            let request = crate::workers::folder_preview_worker::FolderPreviewRequest {
+                path: folder_path.clone(),
+                size_px: self.effective_folder_preview_request_size_px(),
+                cover_path: Some(cover_path),
+            };
+            match self.folder_preview_sender.try_send(request) {
+                Ok(()) => self
+                    .cache_manager
+                    .note_folder_preview_request_sent(&folder_path),
+                Err(err) => {
+                    let request = err.into_inner();
+                    self.cache_manager
+                        .finish_folder_preview_loading(&request.path);
+                }
+            }
+        }
+
         let t_items = Instant::now();
 
         // Trigger cleanup once per updated folder. Folder previews compose from

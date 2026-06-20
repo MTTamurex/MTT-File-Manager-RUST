@@ -958,6 +958,7 @@ fn render_single_panel_content(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
             app.populate_context_menu(ui.ctx(), &paths, true, None);
         }
     } else {
+        app.cache_manager.prune_stale_folder_preview_loading();
         let t_view_render = std::time::Instant::now();
         match app.view_mode {
             ViewMode::Grid => app.render_grid_view(ui),

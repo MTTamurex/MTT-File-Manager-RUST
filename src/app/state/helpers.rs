@@ -742,9 +742,9 @@ impl ImageViewerApp {
     }
 
     pub(crate) fn prune_thumbnail_pipeline_for_dual_panel_navigation(&mut self, reason: &str) {
-        let Some(visible_paths) = self.visible_grid_paths_snapshot() else {
+        let Some(visible_paths) = self.inactive_panel_visible_paths_snapshot() else {
             log::debug!(
-                "[MEMORY] dual-panel navigation preserved thumbnail pipeline reason={} visible_paths=0",
+                "[MEMORY] dual-panel navigation preserved inactive pipeline reason={} visible_paths=0",
                 reason
             );
             return;
@@ -783,6 +783,14 @@ impl ImageViewerApp {
             .retain(|path| visible_paths.contains(path));
         self.thumbnail_request_epochs
             .retain(|path, _| visible_paths.contains(path));
+        let scanned_paths_to_remove: Vec<_> = self
+            .scanned_folders
+            .iter()
+            .filter_map(|(path, _)| (!visible_paths.contains(path)).then(|| path.clone()))
+            .collect();
+        for path in scanned_paths_to_remove {
+            self.scanned_folders.pop(&path);
+        }
         self.loading_icons
             .retain(|path| visible_paths.contains(path));
         self.loading_extensions.clear();
@@ -821,6 +829,28 @@ impl ImageViewerApp {
                 folder_loading_removed,
             );
         }
+    }
+
+    fn inactive_panel_visible_paths_snapshot(&self) -> Option<FxHashSet<std::path::PathBuf>> {
+        let snapshot = self.dual_panel_inactive_state.as_ref()?;
+        let mut visible_paths = FxHashSet::default();
+
+        if matches!(snapshot.view_mode, ViewMode::Grid | ViewMode::List) {
+            insert_visible_paths_from_range(
+                &mut visible_paths,
+                visible_items_for_snapshot(snapshot),
+                snapshot.visible_index_range,
+            );
+        }
+
+        if let Some(selected) = snapshot.selected_file.as_ref() {
+            visible_paths.insert(selected.path.clone());
+            if let Some(cover) = selected.folder_cover.as_ref() {
+                visible_paths.insert(cover.clone());
+            }
+        }
+
+        (!visible_paths.is_empty()).then_some(visible_paths)
     }
 
     /// Fully releases thumbnail memory when the destination view cannot render
