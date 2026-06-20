@@ -929,6 +929,52 @@ fn render_tag_filter_button(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
     let mut close_popup = false;
     let mut item_clicked = false;
     let popup_pos = egui::pos2(button_rect.left(), button_rect.bottom() + 2.0);
+
+    // Pre-compute the optimal popup width by measuring the widest label.
+    // Each row has: 6px left pad + 14px leading column + 6px gap + text + 8px right pad.
+    let font_id = egui::FontId::proportional(12.0);
+    let leading_col = 6.0 + 14.0 + 6.0 + 8.0; // 34px fixed overhead per row
+    let opt_popup_width = ui.fonts(|fonts| {
+        let mut max_w = TAG_FILTER_POPUP_WIDTH;
+        let all_w = fonts
+            .layout_no_wrap(
+                t!("search.filter_tag_all").to_string(),
+                font_id.clone(),
+                egui::Color32::WHITE,
+            )
+            .rect
+            .width();
+        max_w = max_w.max(all_w + leading_col);
+        let any_w = fonts
+            .layout_no_wrap(
+                t!("search.filter_tag_any").to_string(),
+                font_id.clone(),
+                egui::Color32::WHITE,
+            )
+            .rect
+            .width();
+        max_w = max_w.max(any_w + leading_col);
+        for tag in app.sorted_tag_definitions() {
+            let tw = fonts
+                .layout_no_wrap(tag.name.clone(), font_id.clone(), egui::Color32::WHITE)
+                .rect
+                .width();
+            max_w = max_w.max(tw + leading_col);
+        }
+        if !matches!(app.global_search.tag_filter, GlobalSearchTagFilter::All) {
+            let cw = fonts
+                .layout_no_wrap(
+                    t!("search.filter_tag_clear").to_string(),
+                    font_id.clone(),
+                    egui::Color32::WHITE,
+                )
+                .rect
+                .width();
+            max_w = max_w.max(cw + 16.0); // button padding
+        }
+        max_w
+    });
+
     let popup_response = egui::Area::new(popup_id)
         .order(egui::Order::Foreground)
         .fixed_pos(popup_pos)
@@ -954,14 +1000,11 @@ fn render_tag_filter_button(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
             ui.visuals_mut().selection.stroke =
                 egui::Stroke::new(1.0, theme::selection_text_color(dark_mode));
 
-            // Constrain the popup to a fixed width so it doesn't stretch
-            // across the whole modal (which previously caused click-detection
-            // issues with the Area's response rect).
             egui::Frame::popup(ui.style())
                 .inner_margin(egui::Margin::same(4))
                 .show(ui, |ui| {
-                    ui.set_min_width(TAG_FILTER_POPUP_WIDTH);
-                    ui.set_max_width(TAG_FILTER_POPUP_WIDTH);
+                    ui.set_min_width(opt_popup_width);
+                    ui.set_max_width(opt_popup_width);
                     ui.spacing_mut().item_spacing.y = 2.0;
 
                     // --- Zone 1: global modes (radio) ---
@@ -1054,9 +1097,7 @@ fn popup_menu_item(
     leading_color: Option<egui::Color32>,
 ) -> egui::Response {
     let row_height = 22.0;
-    // Use the parent's available width but cap it to the popup's fixed width
-    // so rows don't overflow when the parent layout is wider than expected.
-    let desired_width = ui.available_width().min(TAG_FILTER_POPUP_WIDTH);
+    let desired_width = ui.available_width();
     let (row_rect, response) = ui.allocate_exact_size(
         egui::vec2(desired_width, row_height),
         egui::Sense::click(),
