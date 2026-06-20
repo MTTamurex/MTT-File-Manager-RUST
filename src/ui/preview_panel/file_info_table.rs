@@ -78,6 +78,8 @@ pub fn render_file_info_table(
         crate::app::live_file_size::LiveFileSizeRequest,
     >,
     svg_manager: &mut SvgIconManager,
+    tag_folder_count: Option<usize>,
+    tag_file_count: Option<usize>,
 ) -> Option<PreviewPanelAction> {
     let mut action = None;
 
@@ -168,7 +170,18 @@ pub fn render_file_info_table(
             };
 
             // 2. Type (General)
-            if file.name == COMPUTER_VIEW_ID {
+            let is_tag_view = crate::domain::special_paths::tag_id_from_view_path(&file.path.to_string_lossy()).is_some();
+            if is_tag_view {
+                add_detail(
+                    ui,
+                    &t!("file_info.type"),
+                    t!("file_info.tag_view_type").to_string(),
+                );
+                if let (Some(folders), Some(files)) = (tag_folder_count, tag_file_count) {
+                    add_detail(ui, &t!("file_info.subfolders"), folders.to_string());
+                    add_detail(ui, &t!("file_info.files"), files.to_string());
+                }
+            } else if file.name == COMPUTER_VIEW_ID {
                 add_detail(
                     ui,
                     &t!("file_info.type"),
@@ -210,6 +223,7 @@ pub fn render_file_info_table(
             if file.drive_info.is_none()
                 && file.name != COMPUTER_VIEW_ID
                 && file.name != RECYCLE_BIN_VIEW_ID
+                && !is_tag_view
             {
                 let is_recycle_item = file.is_recycle_item();
                 // Virtual folders inside archives are not real filesystem directories,

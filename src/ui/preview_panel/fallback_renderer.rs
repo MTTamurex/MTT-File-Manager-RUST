@@ -33,6 +33,17 @@ fn paint_texture_centered(
     );
 }
 
+/// Paints a colored tag badge on the top-left corner of the icon rect.
+fn paint_tag_badge(ui: &egui::Ui, icon_rect: egui::Rect, color: egui::Color32) {
+    let center = egui::pos2(icon_rect.left() + 10.0, icon_rect.top() + 10.0);
+    ui.painter().circle_filled(center, 6.0, color);
+    ui.painter().circle_stroke(
+        center,
+        6.0,
+        egui::Stroke::new(1.0, egui::Color32::from_black_alpha(80)),
+    );
+}
+
 pub fn render_fallback(
     ui: &mut egui::Ui,
     file: &FileEntry,
@@ -41,6 +52,7 @@ pub fn render_fallback(
     svg_manager: &mut SvgIconManager,
     folder_preview_peek: Option<egui::TextureHandle>,
     is_folder_preview_loading: bool,
+    tag_color: Option<egui::Color32>,
 ) -> Option<PreviewPanelAction> {
     let mut val_action = None;
     // Folder, Drive, or File without Thumbnail
@@ -86,10 +98,14 @@ pub fn render_fallback(
             )
         {
             // Recycle bin, system path, or shell navigation: simple folder icon
+            let folder_rect = ui
+                .allocate_exact_size(egui::vec2(icon_size, icon_size), egui::Sense::hover())
+                .0;
             if let Some(icon) = item_icon_loader.folder_icon() {
-                ui.add(egui::Image::new(icon).max_size(egui::vec2(icon_size, icon_size)));
-            } else {
-                ui.allocate_response(egui::vec2(icon_size, icon_size), egui::Sense::hover());
+                paint_texture_centered(ui, icon.id(), icon.size_vec2(), folder_rect);
+            }
+            if let Some(color) = tag_color {
+                paint_tag_badge(ui, folder_rect, color);
             }
         } else if item_icon_loader.has_registered_folder_icon(&file.path.to_string_lossy())
             || crate::infrastructure::onedrive::is_special_icon_folder(&file.path)
@@ -108,6 +124,9 @@ pub fn render_fallback(
             if let Some(icon) = icon {
                 paint_texture_centered(ui, icon.id(), icon.size_vec2(), folder_rect);
             }
+            if let Some(color) = tag_color {
+                paint_tag_badge(ui, folder_rect, color);
+            }
         } else {
             let folder_rect = ui
                 .allocate_exact_size(egui::vec2(icon_size, icon_size), egui::Sense::hover())
@@ -124,6 +143,9 @@ pub fn render_fallback(
                 if let Some(icon) = item_icon_loader.folder_icon() {
                     paint_texture_centered(ui, icon.id(), icon.size_vec2(), folder_rect);
                 }
+            }
+            if let Some(color) = tag_color {
+                paint_tag_badge(ui, folder_rect, color);
             }
         }
     } else {

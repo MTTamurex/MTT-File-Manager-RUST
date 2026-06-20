@@ -69,7 +69,7 @@ fn warm_scroll_lod_adjacent_rows_when_idle(
         return;
     }
 
-    let rows = ctx.prefetch_rows.min(1).max(1);
+    let rows = ctx.prefetch_rows.clamp(1, 1);
     let forward_start = vis_max;
     let forward_end = forward_start.saturating_add(rows);
     let backward_end = vis_min;

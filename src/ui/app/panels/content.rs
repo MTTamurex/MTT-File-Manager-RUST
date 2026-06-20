@@ -93,9 +93,20 @@ pub(super) fn render_preview_panel_layout(
                                     }
                                 });
 
+                            // Detect tag view for custom preview behavior
+                            let is_tag_view = crate::domain::special_paths::tag_id_from_view_path(&file.path.to_string_lossy()).is_some();
+                            let tag_id = if is_tag_view {
+                                crate::domain::special_paths::tag_id_from_view_path(&file.path.to_string_lossy())
+                            } else {
+                                None
+                            };
+
                             let is_current_folder_panel =
                                 is_current_folder_panel_target(app, &file);
-                            let (folder_summary, is_folder_size_loading, is_folder_size_failed) = if file.is_dir {
+                            let (folder_summary, is_folder_size_loading, is_folder_size_failed) = if is_tag_view {
+                                // Tag view: skip folder_size_state, use pre-computed tag counts
+                                (None, false, false)
+                            } else if file.is_dir {
                                 let (summary, loading) = app
                                     .folder_size_state
                                     .summary_for_panel_render(&file.path, is_current_folder_panel);
@@ -105,6 +116,25 @@ pub(super) fn render_preview_panel_layout(
                                 (summary, loading, failed)
                             } else {
                                 (None, false, false)
+                            };
+
+                            // Tag view specific info (color, folder/file counts)
+                            let tag_color = tag_id
+                                .and_then(|id| app.tag_definitions.get(&id))
+                                .map(|tag| tag.color.to_color32());
+                            let (tag_folder_count, tag_file_count) = if is_tag_view {
+                                let mut folders = 0usize;
+                                let mut files = 0usize;
+                                for entry in app.all_items.iter() {
+                                    if entry.is_dir {
+                                        folders += 1;
+                                    } else {
+                                        files += 1;
+                                    }
+                                }
+                                (Some(folders), Some(files))
+                            } else {
+                                (None, None)
                             };
 
                             let is_owner = app.media_preview_owner_tab_id == Some(tab_id);
@@ -162,6 +192,9 @@ pub(super) fn render_preview_panel_layout(
                                 Some(frame),
                                 is_owner,
                                 app.cache_manager.is_failed(&file.path),
+                                tag_color,
+                                tag_folder_count,
+                                tag_file_count,
                             );
 
                             if let Some(act) = action {
@@ -261,12 +294,16 @@ pub(super) fn render_preview_panel_layout(
                                         app.request_folder_preview_load(path);
                                     }
                                     PreviewPanelAction::CalculateFolderSize(path) => {
-                                        // Cancel any in-progress calculation before starting new one
-                                        app.folder_size_state.cancel
-                                            .store(true, std::sync::atomic::Ordering::Release);
-                                        app.folder_size_state.clear_failure(&path);
-                                        app.folder_size_state.loading.insert(path.clone());
-                                        let _ = app.folder_size_state.req_sender.send(path);
+                                        // Prevent CalculateFolderSize for virtual tag view paths (::tag::)
+                                        let is_tag_path = crate::domain::special_paths::tag_id_from_view_path(&path.to_string_lossy()).is_some();
+                                        if !is_tag_path {
+                                            // Cancel any in-progress calculation before starting new one
+                                            app.folder_size_state.cancel
+                                                .store(true, std::sync::atomic::Ordering::Release);
+                                            app.folder_size_state.clear_failure(&path);
+                                            app.folder_size_state.loading.insert(path.clone());
+                                            let _ = app.folder_size_state.req_sender.send(path);
+                                        }
                                     }
                                     PreviewPanelAction::VolumeChanged(vol) => {
                                         app.session_volume = vol;

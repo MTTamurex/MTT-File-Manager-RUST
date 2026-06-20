@@ -101,6 +101,7 @@ file_info:
   date_created: "Data de criação:"
   tag: "Tag:"
   tags: "Tags:"
+  tag_view_type: "Etiqueta"
   size: "Tamanho:"
   subfolders: "Subpastas:"
   files: "Arquivos:"

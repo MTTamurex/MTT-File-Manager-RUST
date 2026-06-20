@@ -101,6 +101,7 @@ file_info:
   date_created: "Date created:"
   tag: "Tag:"
   tags: "Tags:"
+  tag_view_type: "Tag"
   size: "Size:"
   subfolders: "Subfolders:"
   files: "Files:"

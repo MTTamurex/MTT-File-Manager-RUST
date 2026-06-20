@@ -46,6 +46,9 @@ pub fn render_preview_panel(
     frame: Option<&eframe::Frame>,
     is_owner: bool,
     is_failed: bool,
+    tag_color: Option<egui::Color32>,
+    tag_folder_count: Option<usize>,
+    tag_file_count: Option<usize>,
 ) -> Option<PreviewPanelAction> {
     // Metadata is processed asynchronously; when it arrives, metadata will be Some(...)
     let mut action = None;
@@ -147,6 +150,7 @@ pub fn render_preview_panel(
                         svg_manager,
                         folder_preview_peek,
                         is_folder_preview_loading,
+                        tag_color,
                     ) {
                         action = Some(act);
                     }
@@ -170,6 +174,7 @@ pub fn render_preview_panel(
             svg_manager,
             folder_preview_peek,
             is_folder_preview_loading,
+            tag_color,
         ) {
             action = Some(act);
         }
@@ -189,6 +194,8 @@ pub fn render_preview_panel(
         live_file_size_loading,
         live_file_size_req_sender,
         svg_manager,
+        tag_folder_count,
+        tag_file_count,
     ) {
         action = Some(act);
     }
