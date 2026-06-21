@@ -18,6 +18,18 @@ impl ImageViewerApp {
 
     pub(super) fn refresh_visible_items_after_tag_change(&mut self) {
         self.filter_items();
+
+        // Reload inactive panel if it's showing a tag view whose assignments changed.
+        // Without this, the inactive panel's items remain empty after
+        // invalidate_cached_tag_views_for_tags() clears them.
+        if let Some(snapshot) = self.dual_panel_inactive_state.as_ref() {
+            if let Some(tag_id) = tag_id_from_view_path(&snapshot.path) {
+                self.with_inactive_panel(|app| {
+                    app.setup_tag_view(tag_id);
+                });
+            }
+        }
+
         self.ui_ctx.request_repaint();
     }
 
