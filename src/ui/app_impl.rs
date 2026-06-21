@@ -218,6 +218,13 @@ impl eframe::App for ImageViewerApp {
         // 7b. Layout: Secondary Toolbar (Top 3) - lightweight, always render
         app::layers::render_secondary_toolbar_layer(self, ctx);
 
+        // 7c. Settings backdrop (rendered BEFORE panels to block their input)
+        let settings_close_from_backdrop = if self.navigation_state.show_settings_window {
+            crate::ui::components::settings_window::render_settings_backdrop(ctx)
+        } else {
+            false
+        };
+
         // 8. Layout: Main Panels (Sidebar, Preview, Central)
         // Keep full rendering even during move/resize so content/video stays visible and synchronized.
         let t_panels = std::time::Instant::now();
@@ -235,7 +242,7 @@ impl eframe::App for ImageViewerApp {
 
         // 11. Settings window
         if self.navigation_state.show_settings_window {
-            let output = crate::ui::components::settings_window::render_settings_window(ctx, self);
+            let output = crate::ui::components::settings_window::render_settings_window(ctx, self, settings_close_from_backdrop);
             self.navigation_state.show_settings_window = output.keep_open;
             if !output.keep_open {
                 self.shortcut_editor.clear();

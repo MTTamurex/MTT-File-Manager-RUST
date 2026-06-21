@@ -18,23 +18,10 @@ pub struct SettingsWindowOutput {
     pub open_diagnostic_folder: bool,
 }
 
-pub fn render_settings_window(
-    ctx: &egui::Context,
-    app: &mut ImageViewerApp,
-) -> SettingsWindowOutput {
-    let mut keep_open = app.navigation_state.show_settings_window;
-    let mut language_changed = false;
-    let mut theme_changed = false;
-    let mut backend_changed = false;
-    let mut shortcuts_changed = false;
-    let mut recycle_bin_changed = false;
-    let mut tags_changed = false;
-    let mut diagnostic_mode_changed = false;
-    let mut open_diagnostic_folder = false;
-
+/// Render the modal backdrop BEFORE panels to block their input.
+/// Returns true if the backdrop was clicked (should close the window).
+pub fn render_settings_backdrop(ctx: &egui::Context) -> bool {
     let screen_rect = ctx.screen_rect();
-
-    // ── Backdrop (blocks interaction outside the modal) ──────────────────────
     let mut close_from_backdrop = false;
     egui::Area::new(egui::Id::from("settings_window_backdrop"))
         .fixed_pos(screen_rect.min)
@@ -56,6 +43,23 @@ pub fn render_settings_window(
                 close_from_backdrop = true;
             }
         });
+    close_from_backdrop
+}
+
+pub fn render_settings_window(
+    ctx: &egui::Context,
+    app: &mut ImageViewerApp,
+    close_from_backdrop: bool,
+) -> SettingsWindowOutput {
+    let mut keep_open = app.navigation_state.show_settings_window;
+    let mut language_changed = false;
+    let mut theme_changed = false;
+    let mut backend_changed = false;
+    let mut shortcuts_changed = false;
+    let mut recycle_bin_changed = false;
+    let mut tags_changed = false;
+    let mut diagnostic_mode_changed = false;
+    let mut open_diagnostic_folder = false;
 
     if close_from_backdrop {
         keep_open = false;

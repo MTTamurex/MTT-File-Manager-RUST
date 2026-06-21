@@ -472,8 +472,14 @@ fn handle_sidebar_action(app: &mut ImageViewerApp, action: SidebarAction) {
 }
 
 fn render_resize_handles(app: &mut ImageViewerApp, ctx: &egui::Context) {
+    // Skip resize handles when a modal/overlay is active to prevent click-through
+    if app.navigation_state.show_settings_window {
+        return;
+    }
+
     let screen = ctx.screen_rect();
-    let tab_bar_height = 35.0; // Approximate tab bar height
+    // Total height of all top panels: tab bar (36) + toolbar (46) + secondary toolbar (46)
+    let top_panels_height = 36.0 + 46.0 + 46.0;
 
     if app.show_left_sidebar {
         // Left sidebar resize handle (right edge of left sidebar)
@@ -482,8 +488,8 @@ fn render_resize_handles(app: &mut ImageViewerApp, ctx: &egui::Context) {
             .sidebar_left_width
             .clamp(LEFT_SIDEBAR_MIN, LEFT_SIDEBAR_MAX);
         let left_handle_rect = egui::Rect::from_min_size(
-            egui::pos2(left_width - RESIZE_HANDLE_WIDTH / 2.0, tab_bar_height),
-            egui::vec2(RESIZE_HANDLE_WIDTH, screen.height() - tab_bar_height),
+            egui::pos2(left_width - RESIZE_HANDLE_WIDTH / 2.0, top_panels_height),
+            egui::vec2(RESIZE_HANDLE_WIDTH, screen.height() - top_panels_height),
         );
 
         egui::Area::new(egui::Id::new("left_sidebar_resize"))
@@ -514,8 +520,8 @@ fn render_resize_handles(app: &mut ImageViewerApp, ctx: &egui::Context) {
             .clamp(RIGHT_SIDEBAR_MIN, RIGHT_SIDEBAR_MAX);
         let right_handle_x = screen.width() - right_width - RESIZE_HANDLE_WIDTH / 2.0;
         let right_handle_rect = egui::Rect::from_min_size(
-            egui::pos2(right_handle_x, tab_bar_height),
-            egui::vec2(RESIZE_HANDLE_WIDTH, screen.height() - tab_bar_height),
+            egui::pos2(right_handle_x, top_panels_height),
+            egui::vec2(RESIZE_HANDLE_WIDTH, screen.height() - top_panels_height),
         );
 
         egui::Area::new(egui::Id::new("right_sidebar_resize"))
