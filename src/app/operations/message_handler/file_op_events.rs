@@ -541,6 +541,7 @@ impl ImageViewerApp {
             crate::infrastructure::windows::file_flags::clear_write_activity_after_completed_file_operation(
                 &copied_dests,
             );
+            self.clear_tag_assignments_for_copied_paths(&copied_dests);
         }
 
         if dest_str == current_path_norm {

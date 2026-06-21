@@ -195,8 +195,74 @@ impl ImageViewerApp {
         }
     }
 
+    pub fn clear_tag_assignments_for_copied_paths(&mut self, paths: &[PathBuf]) {
+        if paths.is_empty() {
+            return;
+        }
+
+        let affected_assignments: Vec<(PathBuf, Vec<i64>)> = self
+            .tag_assignments
+            .iter()
+            .filter(|(assigned_path, _)| {
+                paths
+                    .iter()
+                    .any(|path| path_is_same_or_descendant(assigned_path, path))
+            })
+            .map(|(assigned_path, ids)| (assigned_path.clone(), ids.clone()))
+            .collect();
+
+        let changed_tags: FxHashSet<i64> = affected_assignments
+            .iter()
+            .flat_map(|(_, ids)| ids.iter().copied())
+            .collect();
+        let affected_paths: Vec<PathBuf> = if affected_assignments.is_empty() {
+            paths.to_vec()
+        } else {
+            affected_assignments
+                .iter()
+                .map(|(path, _)| path.clone())
+                .collect()
+        };
+
+        let Some(removed_from_db) = self
+            .app_state_db
+            .clear_tag_assignments_for_paths(&affected_paths)
+        else {
+            return;
+        };
+
+        let assignments = Arc::make_mut(&mut self.tag_assignments);
+        let before_len = assignments.len();
+        assignments.retain(|assigned_path, _| {
+            !paths
+                .iter()
+                .any(|path| path_is_same_or_descendant(assigned_path, path))
+        });
+        let memory_changed = assignments.len() != before_len;
+
+        if memory_changed {
+            self.recompute_tag_counts_from_assignments();
+            self.invalidate_cached_tag_views_for_tags(&changed_tags);
+            self.refresh_visible_items_after_tag_change();
+        } else if removed_from_db > 0 {
+            self.tag_assignments = Arc::new(self.app_state_db.get_all_tag_assignments());
+            self.recompute_tag_counts_from_assignments();
+            self.reload_visible_tag_views();
+            self.ui_ctx.request_repaint();
+        }
+    }
+
     pub fn move_tag_assignments_for_path(&mut self, old_path: &Path, new_path: &Path) {
         if old_path == new_path {
+            return;
+        }
+
+        if normalize_path_text(old_path) != normalize_path_text(new_path) && old_path.exists() {
+            log::warn!(
+                "[TAGS] Skipping tag assignment move because source still exists: {} -> {}",
+                old_path.display(),
+                new_path.display()
+            );
             return;
         }
 

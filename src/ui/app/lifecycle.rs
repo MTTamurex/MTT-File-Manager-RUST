@@ -206,6 +206,7 @@ pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
 
         restored_from_background = true;
         app.request_current_folder_liveness_probe("window focus restored");
+        app.purge_missing_files_from_tag_views();
     }
     if !is_focused && app.was_focused {
         app.focus_lost_at = Some(std::time::Instant::now());
