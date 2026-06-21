@@ -5,52 +5,12 @@
 
 use crate::app::state::ImageViewerApp;
 use crate::infrastructure::shell_menu_worker::ShellMenuRequest;
+use crate::infrastructure::windows::shell_operations::create_shell_op_proxy_window;
 use crate::infrastructure::windows::window_corners::apply_window_corner_preference;
 use crate::infrastructure::windows::window_subclass::install_borderless_subclass;
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::HWND;
-use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, FindWindowW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_POPUP,
-};
-
-/// Creates a hidden, unowned top-level popup window used as the owner for Shell
-/// file-operation progress dialogs (copy, move, delete).
-///
-/// By giving Shell dialogs this invisible proxy as their owner instead of the
-/// real app window, we prevent the Shell from disabling the app window while a
-/// long operation (e.g. a large move/copy) is running or being cancelled.
-/// The proxy has no owner (`hwndParent = None`), so disabling it does not
-/// cascade to the app window.
-///
-/// The window is 0×0, never shown, and excluded from the taskbar/Alt+Tab
-/// via `WS_EX_TOOLWINDOW`. It lives for the entire process lifetime.
-fn create_shell_op_proxy_window() -> Option<HWND> {
-    // "STATIC" is a built-in Windows class that requires no prior registration.
-    let class_name: Vec<u16> = "STATIC\0".encode_utf16().collect();
-
-    // SAFETY: CreateWindowExW is called with a valid null-terminated class name,
-    // WS_POPUP style, zero size/position, and no owner/parent. The returned HWND
-    // is valid for the entire process lifetime.
-    unsafe {
-        match CreateWindowExW(
-            WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW,
-            PCWSTR(class_name.as_ptr()),
-            PCWSTR::null(),
-            WS_POPUP,
-            0,
-            0,
-            0,
-            0,
-            None, // no owner — Shell only disables this window, not the app
-            None,
-            None,
-            None,
-        ) {
-            Ok(h) if !h.is_invalid() => Some(h),
-            _ => None,
-        }
-    }
-}
+use windows::Win32::UI::WindowsAndMessaging::FindWindowW;
 
 impl ImageViewerApp {
     /// Returns the HWND to use as owner for Shell file-operation dialogs

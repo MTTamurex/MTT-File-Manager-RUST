@@ -193,6 +193,74 @@ impl FileOperationRequest {
             hwnd: SendHwnd(hwnd),
         }
     }
+
+    /// Replaces the HWND in all variants that carry one.
+    /// Used by the worker thread to substitute the UI-thread HWND with a
+    /// worker-thread proxy HWND, ensuring Shell progress dialogs are owned by
+    /// a window on the SAME thread as the `SHFileOperationW` call.
+    /// This avoids cross-thread `SendMessage` marshaling that can cause
+    /// UI thread starvation and total app freeze during long file operations.
+    fn substitute_hwnd(self, hwnd: SendHwnd) -> Self {
+        match self {
+            Self::Delete { paths, .. } => Self::Delete { paths, hwnd },
+            Self::Rename {
+                path,
+                new_name,
+                ..
+            } => Self::Rename {
+                path,
+                new_name,
+                hwnd,
+            },
+            Self::RenameBatch { renames, .. } => Self::RenameBatch { renames, hwnd },
+            Self::Copy {
+                path,
+                dest_folder,
+                ..
+            } => Self::Copy {
+                path,
+                dest_folder,
+                hwnd,
+            },
+            Self::Move {
+                path,
+                dest_folder,
+                ..
+            } => Self::Move {
+                path,
+                dest_folder,
+                hwnd,
+            },
+            Self::CopyBatch {
+                paths,
+                dest_folder,
+                ..
+            } => Self::CopyBatch {
+                paths,
+                dest_folder,
+                hwnd,
+            },
+            Self::MoveBatch {
+                paths,
+                dest_folder,
+                ..
+            } => Self::MoveBatch {
+                paths,
+                dest_folder,
+                hwnd,
+            },
+            Self::RestoreFromRecycleBin { items } => Self::RestoreFromRecycleBin { items },
+            Self::DeletePermanently {
+                physical_paths,
+                ..
+            } => Self::DeletePermanently {
+                physical_paths,
+                hwnd,
+            },
+            Self::EmptyRecycleBin { .. } => Self::EmptyRecycleBin { hwnd },
+            Self::ShowProperties { paths, .. } => Self::ShowProperties { paths, hwnd },
+        }
+    }
 }
 
 fn operation_security_config() -> SecurityConfig {
@@ -267,7 +335,39 @@ pub(crate) fn start_file_operation_worker(
         // RAII guard ensures CoUninitialize even on panic.
         let _com = ComScope::sta();
 
+        // Create a proxy HWND ON THE WORKER THREAD so that Shell progress
+        // dialogs (shown by SHFileOperationW / IFileOperation) are owned by a
+        // window on the SAME thread as the blocking call.
+        //
+        // Previously the proxy HWND was created on the UI thread and passed
+        // to the worker.  When SHFileOperationW disabled that cross-thread
+        // owner via EnableWindow(), Windows marshaled the WM_ENABLE message
+        // to the UI thread with SendMessage.  If the UI thread was busy
+        // rendering, the worker blocked — but more critically, the Shell's
+        // internal modal message loop could re-enter the UI thread's message
+        // pump and cause the entire window to freeze (total UI lockup for
+        // the duration of the file operation).
+        //
+        // With a same-thread proxy, EnableWindow is a direct call (no
+        // cross-thread marshaling) and the Shell's modal loop stays entirely
+        // on the worker thread.
+        let worker_proxy_hwnd =
+            crate::infrastructure::windows::shell_operations::create_shell_op_proxy_window();
+        if worker_proxy_hwnd.is_none() {
+            log::warn!(
+                "[FileOpWorker] Proxy window creation failed on worker thread; \
+                 falling back to caller-provided HWND (may cause UI freeze)"
+            );
+        }
+
         while let Ok(request) = receiver.recv() {
+            // Substitute the UI-thread HWND with the worker-thread proxy.
+            // Falls back to the original HWND if proxy creation failed.
+            let request = match worker_proxy_hwnd {
+                Some(proxy) => request.substitute_hwnd(SendHwnd(proxy)),
+                None => request,
+            };
+
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 match request {
                     FileOperationRequest::Delete { paths, hwnd } => {

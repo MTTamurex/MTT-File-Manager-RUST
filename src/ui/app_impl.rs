@@ -98,6 +98,13 @@ impl eframe::App for ImageViewerApp {
             // without waiting for user input or the 1-second idle timer.
             if self.is_in_restore_burst() {
                 ctx.request_repaint();
+            } else if self.file_operation_state.file_ops_in_progress > 0 {
+                // File operations run on a background STA worker thread, but
+                // we need frequent repaints to (a) poll the result channel
+                // promptly and (b) keep the UI feeling responsive while the
+                // Shell progress dialog is visible.  100ms is a good balance
+                // between responsiveness and CPU usage.
+                ctx.request_repaint_after(std::time::Duration::from_millis(100));
             } else {
                 ctx.request_repaint_after(std::time::Duration::from_millis(
                     DRIVE_BITMASK_REPAINT_MS,
