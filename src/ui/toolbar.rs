@@ -1,4 +1,3 @@
-use crate::application::navigation::NavigationHistory;
 use crate::domain::file_entry::{SortMode, ViewMode};
 use crate::domain::special_paths::{COMPUTER_VIEW_ID, RECYCLE_BIN_VIEW_ID};
 use crate::ui::preview_panel::utils::truncate_text_to_fit;
@@ -154,7 +153,9 @@ pub fn render_toolbar(
     show_address_history_menu: &mut bool,
     address_bar_focus_request: &mut bool,
     search_query: &mut String,
-    navigation: &NavigationHistory,
+    recent_paths: &[(String, String)],
+    can_go_back: bool,
+    can_go_forward: bool,
     _view_mode: ViewMode,
     _sort_mode: SortMode,
     _sort_descending: bool,
@@ -165,27 +166,12 @@ pub fn render_toolbar(
     svg_manager: &mut SvgIconManager,
 ) -> Option<ToolbarAction> {
     let mut action = None;
-    let recent_paths: Vec<(String, String)> = navigation
-        .recent_paths(5)
-        .into_iter()
-        .filter(|path| !path.is_empty())
-        .map(|path| {
-            let display = if path == COMPUTER_VIEW_ID {
-                t!("nav.computer").to_string()
-            } else if path == RECYCLE_BIN_VIEW_ID {
-                t!("nav.recycle_bin").to_string()
-            } else {
-                path.clone()
-            };
-            (display, path)
-        })
-        .collect();
 
     ui.horizontal(|ui| {
         ui.style_mut().spacing.item_spacing.x = 8.0;
 
         // 1. NAVIGATION (LEFT) - Blocked during renaming
-        let can_back = navigation.can_go_back() && !_is_renaming;
+        let can_back = can_go_back && !_is_renaming;
         if widgets::icon_button(
             ui,
             svg_manager,
@@ -199,7 +185,7 @@ pub fn render_toolbar(
             action = Some(ToolbarAction::GoBack);
         }
 
-        let can_forward = navigation.can_go_forward() && !_is_renaming;
+        let can_forward = can_go_forward && !_is_renaming;
         if widgets::icon_button(
             ui,
             svg_manager,
@@ -466,7 +452,7 @@ pub fn render_toolbar(
                                 ui.set_max_width(addr_rect.width());
                                 ui.spacing_mut().item_spacing.y = 0.0;
 
-                                for (display, actual_path) in &recent_paths {
+                                for (display, actual_path) in recent_paths {
                                     let item_size = egui::vec2(addr_rect.width() - 8.0, 28.0);
                                     let (item_rect, response) =
                                         ui.allocate_exact_size(item_size, egui::Sense::click());

@@ -1,7 +1,9 @@
 //! Global search overlay modal (Spotlight-style).
 //! Activated via Ctrl+Shift+F or the secondary toolbar button.
 
-use crate::app::global_search_state::{GlobalSearchCategory, GlobalSearchSortMode, GlobalSearchTagFilter};
+use crate::app::global_search_state::{
+    GlobalSearchCategory, GlobalSearchSortMode, GlobalSearchTagFilter,
+};
 use crate::app::state::ImageViewerApp;
 use crate::ui::theme;
 use date_filter::{date_components_to_unix_ts, date_components_to_unix_ts_end_of_day};
@@ -902,11 +904,9 @@ fn render_tag_filter_button(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
             .get(&ids[0])
             .map(|tag| tag.name.clone())
             .unwrap_or_else(|| t!("search.filter_tag_any").to_string()),
-        GlobalSearchTagFilter::Selected(ids) => format!(
-            "{} {}",
-            ids.len(),
-            t!("search.filter_tag_selected_suffix"),
-        ),
+        GlobalSearchTagFilter::Selected(ids) => {
+            format!("{} {}", ids.len(), t!("search.filter_tag_selected_suffix"),)
+        }
     };
 
     let popup_id = egui::Id::new("global_search_tag_filter_popup");
@@ -1011,14 +1011,18 @@ fn render_tag_filter_button(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
 
                     // --- Zone 1: global modes (radio) ---
                     let is_all = matches!(app.global_search.tag_filter, GlobalSearchTagFilter::All);
-                    if popup_menu_item(ui, is_all, t!("search.filter_tag_all").as_ref(), None).clicked() {
+                    if popup_menu_item(ui, is_all, t!("search.filter_tag_all").as_ref(), None)
+                        .clicked()
+                    {
                         app.global_search.tag_filter = GlobalSearchTagFilter::All;
                         app.global_search.selected_index = None;
                         close_popup = true;
                         item_clicked = true;
                     }
                     let is_any = matches!(app.global_search.tag_filter, GlobalSearchTagFilter::Any);
-                    if popup_menu_item(ui, is_any, t!("search.filter_tag_any").as_ref(), None).clicked() {
+                    if popup_menu_item(ui, is_any, t!("search.filter_tag_any").as_ref(), None)
+                        .clicked()
+                    {
                         app.global_search.tag_filter = GlobalSearchTagFilter::Any;
                         app.global_search.selected_index = None;
                         close_popup = true;
@@ -1051,16 +1055,11 @@ fn render_tag_filter_button(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
                     }
 
                     // --- Zone 3: explicit clear button ---
-                    let has_active_filter = !matches!(
-                        app.global_search.tag_filter,
-                        GlobalSearchTagFilter::All
-                    );
+                    let has_active_filter =
+                        !matches!(app.global_search.tag_filter, GlobalSearchTagFilter::All);
                     if has_active_filter {
                         ui.separator();
-                        if ui
-                            .button(t!("search.filter_tag_clear"))
-                            .clicked()
-                        {
+                        if ui.button(t!("search.filter_tag_clear")).clicked() {
                             app.global_search.tag_filter = GlobalSearchTagFilter::All;
                             app.global_search.selected_index = None;
                             close_popup = true;
@@ -1100,10 +1099,8 @@ fn popup_menu_item(
 ) -> egui::Response {
     let row_height = 22.0;
     let desired_width = ui.available_width();
-    let (row_rect, response) = ui.allocate_exact_size(
-        egui::vec2(desired_width, row_height),
-        egui::Sense::click(),
-    );
+    let (row_rect, response) =
+        ui.allocate_exact_size(egui::vec2(desired_width, row_height), egui::Sense::click());
 
     // Background: highlight on hover or when selected.
     if selected {
@@ -1117,7 +1114,10 @@ fn popup_menu_item(
     // Leading column: optional colored dot OR checkmark for selected rows.
     let leading_size = 14.0_f32;
     let leading_rect = egui::Rect::from_min_size(
-        egui::pos2(row_rect.left() + 6.0, row_rect.center().y - leading_size * 0.5),
+        egui::pos2(
+            row_rect.left() + 6.0,
+            row_rect.center().y - leading_size * 0.5,
+        ),
         egui::vec2(leading_size, leading_size),
     );
     if let Some(color) = leading_color {

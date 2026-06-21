@@ -780,7 +780,10 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
             return rect;
         }
 
-        let min = egui::pos2((rect.min.x + focus_border_reserved).min(rect.max.x), rect.min.y);
+        let min = egui::pos2(
+            (rect.min.x + focus_border_reserved).min(rect.max.x),
+            rect.min.y,
+        );
         let max = egui::pos2(
             (rect.max.x - focus_border_reserved).max(min.x),
             (rect.max.y - focus_border_reserved).max(rect.min.y),

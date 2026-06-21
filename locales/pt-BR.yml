@@ -1,6 +1,7 @@
 nav:
   computer: "Este Computador"
   recycle_bin: "Lixeira"
+  tag: "Tag"
 sidebar:
   quick_access: "Acesso Rápido"
   cloud_drives: "Unidades de nuvem"

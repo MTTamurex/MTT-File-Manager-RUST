@@ -178,10 +178,7 @@ impl StartupPreferences {
             .map(|s| s != "false")
             .unwrap_or(true);
 
-        let show_tags = prefs
-            .get("show_tags")
-            .map(|s| s != "false")
-            .unwrap_or(true);
+        let show_tags = prefs.get("show_tags").map(|s| s != "false").unwrap_or(true);
 
         let language = if let Some(saved) = prefs.get("language").cloned() {
             saved

@@ -32,9 +32,33 @@ pub(crate) fn render_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context
         })
         .show(ctx, |ui| {
             use crate::domain::file_entry::ViewMode;
+            use crate::domain::special_paths::{
+                COMPUTER_VIEW_ID, RECYCLE_BIN_VIEW_ID, TAG_VIEW_PREFIX,
+            };
             use crate::ui::toolbar::{render_toolbar, ToolbarAction};
             let current_path_display_override =
                 app.tag_view_display_name_for_path(&app.navigation_state.current_path);
+
+            let recent_paths_displayed: Vec<(String, String)> = app
+                .navigation_state
+                .navigation
+                .recent_paths(5)
+                .into_iter()
+                .filter(|path| !path.is_empty())
+                .map(|path| {
+                    let display = if path == COMPUTER_VIEW_ID {
+                        t!("nav.computer").to_string()
+                    } else if path == RECYCLE_BIN_VIEW_ID {
+                        t!("nav.recycle_bin").to_string()
+                    } else if path.starts_with(TAG_VIEW_PREFIX) {
+                        app.tag_view_display_name_for_path(&path)
+                            .unwrap_or_else(|| t!("nav.tag").to_string())
+                    } else {
+                        path.clone()
+                    };
+                    (display, path)
+                })
+                .collect();
 
             let action = render_toolbar(
                 ui,
@@ -45,7 +69,9 @@ pub(crate) fn render_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context
                 &mut app.show_address_history_menu,
                 &mut app.address_bar_focus_request,
                 &mut app.search_query,
-                &app.navigation_state.navigation,
+                &recent_paths_displayed,
+                app.navigation_state.navigation.can_go_back(),
+                app.navigation_state.navigation.can_go_forward(),
                 app.view_mode,
                 app.sort_mode,
                 app.sort_descending,

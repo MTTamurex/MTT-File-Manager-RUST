@@ -37,8 +37,7 @@ pub fn render_tag_settings_section(
     if ui
         .checkbox(
             &mut app.show_tags,
-            RichText::new(t!("settings.show_tags_sidebar"))
-                .color(theme::text_color(dark_mode)),
+            RichText::new(t!("settings.show_tags_sidebar")).color(theme::text_color(dark_mode)),
         )
         .changed()
     {

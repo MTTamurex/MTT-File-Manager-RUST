@@ -101,9 +101,8 @@ pub(crate) fn build_filtered_indices(
                         tag_assignments,
                         Path::new(&result.full_path),
                     );
-                    let has_match = path_tags.is_some_and(|ids| {
-                        required_ids.iter().any(|tag_id| ids.contains(tag_id))
-                    });
+                    let has_match = path_tags
+                        .is_some_and(|ids| required_ids.iter().any(|tag_id| ids.contains(tag_id)));
                     if !has_match {
                         continue;
                     }

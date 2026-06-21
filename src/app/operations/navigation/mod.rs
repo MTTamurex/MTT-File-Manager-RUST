@@ -118,9 +118,15 @@ impl ImageViewerApp {
     }
 
     pub fn navigate_to(&mut self, path: &str) {
-        // Normalize drive root paths: ensure "Z:" always becomes "Z:\"
-        // This fixes the PathBuf::join bug of not adding a backslash
-        let normalized_path = if path.len() >= 2 && path.chars().nth(1) == Some(':') {
+        // Virtual paths (::computer::, ::recycle_bin::, ::tag::N) must skip
+        // the drive-letter normalization below — its heuristic "second char
+        // is ':'" misinterprets "::tag::9" as a drive path and rewrites it
+        // to "::\\tag::9", which then fails tag_id_from_view_path and
+        // silently falls through to the real-folder flow → load_folder
+        // fails → navigate_to_nearest_valid_ancestor → navigate_to_computer.
+        let normalized_path = if is_virtual_path(path) {
+            path.to_string()
+        } else if path.len() >= 2 && path.chars().nth(1) == Some(':') {
             // It's a Windows path with a drive letter
             if path.len() == 2 {
                 // Just "Z:" -> "Z:\"

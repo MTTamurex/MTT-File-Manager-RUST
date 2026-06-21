@@ -170,7 +170,9 @@ pub fn render_file_info_table(
             };
 
             // 2. Type (General)
-            let is_tag_view = crate::domain::special_paths::tag_id_from_view_path(&file.path.to_string_lossy()).is_some();
+            let is_tag_view =
+                crate::domain::special_paths::tag_id_from_view_path(&file.path.to_string_lossy())
+                    .is_some();
             if is_tag_view {
                 add_detail(
                     ui,

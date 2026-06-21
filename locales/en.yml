@@ -1,6 +1,7 @@
 nav:
   computer: "This PC"
   recycle_bin: "Recycle Bin"
+  tag: "Tag"
 sidebar:
   quick_access: "Quick Access"
   cloud_drives: "Cloud Drives"
