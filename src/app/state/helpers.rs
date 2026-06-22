@@ -120,8 +120,8 @@ fn insert_visible_paths_from_range(
     }
 
     visible_paths.reserve(max_idx.saturating_sub(min_idx).saturating_add(1));
-    for idx in min_idx..=max_idx {
-        visible_paths.insert(items[idx].path.clone());
+    for item in items.iter().skip(min_idx).take(max_idx - min_idx + 1) {
+        visible_paths.insert(item.path.clone());
     }
 }
 
@@ -310,9 +310,7 @@ impl ImageViewerApp {
         let budget = self.current_dynamic_rgba_budget_bytes(floor_bytes);
 
         if self.is_vulkan_backend() && self.thumbnail_caches_active() {
-            budget
-                .min(VULKAN_MAX_RGBA_BUDGET_BYTES)
-                .max(MIN_RGBA_BUDGET_BYTES)
+            budget.clamp(MIN_RGBA_BUDGET_BYTES, VULKAN_MAX_RGBA_BUDGET_BYTES)
         } else {
             budget
         }
@@ -353,8 +351,7 @@ impl ImageViewerApp {
             .max(MIN_DYNAMIC_PENDING_THUMBNAILS);
 
         self.current_dynamic_texture_keep_count()
-            .max(BASE_PENDING_THUMBNAILS)
-            .min(MAX_DYNAMIC_PENDING_THUMBNAILS)
+            .clamp(BASE_PENDING_THUMBNAILS, MAX_DYNAMIC_PENDING_THUMBNAILS)
             .min(byte_limited_items)
     }
 
@@ -783,6 +780,7 @@ impl ImageViewerApp {
             .retain(|path| visible_paths.contains(path));
         self.thumbnail_request_epochs
             .retain(|path, _| visible_paths.contains(path));
+        #[allow(clippy::filter_map_bool_then)]
         let scanned_paths_to_remove: Vec<_> = self
             .scanned_folders
             .iter()
@@ -1142,7 +1140,7 @@ impl ImageViewerApp {
 
         let thumbnail_pipeline_idle = self.thumbnail_queue.pending_count() == 0
             && self.pending_thumbnails.is_empty()
-            && self.image_receiver.len() == 0
+            && self.image_receiver.is_empty()
             && self.cache_manager.loading_set.is_empty()
             && self.cache_manager.folder_preview_loading.is_empty()
             && self.cache_manager.pending_upload_set.is_empty();
@@ -1334,9 +1332,10 @@ impl ImageViewerApp {
 pub(crate) fn dynamic_texture_keep_count(visible_grid_items: usize) -> usize {
     let target = visible_grid_items.saturating_mul(3).saturating_add(1) / 2;
 
-    target
-        .max(MIN_DYNAMIC_TEXTURE_CACHE_ITEMS)
-        .min(MAX_DYNAMIC_TEXTURE_CACHE_ITEMS)
+    target.clamp(
+        MIN_DYNAMIC_TEXTURE_CACHE_ITEMS,
+        MAX_DYNAMIC_TEXTURE_CACHE_ITEMS,
+    )
 }
 
 pub(crate) fn dynamic_folder_preview_keep_count(
@@ -1350,10 +1349,10 @@ pub(crate) fn dynamic_folder_preview_keep_count(
     // them. Otherwise every upload evicts a path that is re-requested in the
     // following frame, producing a constant `ctx.load_texture` storm and a
     // steady GPU staging-buffer leak.
-    viewport_target
-        .max(directory_folder_items)
-        .max(MIN_DYNAMIC_FOLDER_PREVIEW_ITEMS)
-        .min(MAX_DYNAMIC_FOLDER_PREVIEW_ITEMS)
+    viewport_target.max(directory_folder_items).clamp(
+        MIN_DYNAMIC_FOLDER_PREVIEW_ITEMS,
+        MAX_DYNAMIC_FOLDER_PREVIEW_ITEMS,
+    )
 }
 
 pub(crate) fn dynamic_rgba_budget_bytes(

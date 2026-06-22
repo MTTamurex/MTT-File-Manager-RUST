@@ -164,7 +164,7 @@ pub fn open_temp_fallback_connection(
 
     let temp_parent_hardened = temp_fallback_path
         .parent()
-        .map(|p| harden_directory_permissions(p))
+        .map(harden_directory_permissions)
         .unwrap_or(false);
 
     if !temp_parent_hardened {

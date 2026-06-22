@@ -59,22 +59,13 @@ impl PageTexture {
 
 // ── Password prompt ─────────────────────────────────────────────────────────
 
+#[derive(Default)]
 struct PasswordPrompt {
     input: String,
     /// Set to `true` after the user submits an incorrect password.
     wrong: bool,
     /// Only request focus once; re-requesting every frame breaks Enter handling.
     focus_requested: bool,
-}
-
-impl Default for PasswordPrompt {
-    fn default() -> Self {
-        Self {
-            input: String::new(),
-            wrong: false,
-            focus_requested: false,
-        }
-    }
 }
 
 // ── App ──────────────────────────────────────────────────────────────────────
@@ -328,7 +319,7 @@ impl PdfViewerApp {
 
     pub(super) fn get_scale(&self, page_idx: u32, aw: f32, ah: f32) -> f32 {
         let (nw, nh) = self.page_sizes[page_idx as usize];
-        let (rw, rh) = if self.rotation % 180 != 0 {
+        let (rw, rh) = if !self.rotation.is_multiple_of(180) {
             (nh, nw)
         } else {
             (nw, nh)
@@ -342,7 +333,7 @@ impl PdfViewerApp {
 
     fn display_size(&self, page_idx: u32, scale: f32) -> (f32, f32) {
         let (nw, nh) = self.page_sizes[page_idx as usize];
-        let (rw, rh) = if self.rotation % 180 != 0 {
+        let (rw, rh) = if !self.rotation.is_multiple_of(180) {
             (nh, nw)
         } else {
             (nw, nh)
@@ -354,8 +345,8 @@ impl PdfViewerApp {
     fn needed_render_size(&self, page_idx: u32, scale: f32, ppp: f32) -> (u32, u32) {
         let (nw, nh) = self.page_sizes[page_idx as usize];
         (
-            (nw * scale * ppp).max(1.0).min(MAX_RENDER_SIDE) as u32,
-            (nh * scale * ppp).max(1.0).min(MAX_RENDER_SIDE) as u32,
+            (nw * scale * ppp).clamp(1.0, MAX_RENDER_SIDE) as u32,
+            (nh * scale * ppp).clamp(1.0, MAX_RENDER_SIDE) as u32,
         )
     }
 
@@ -368,7 +359,7 @@ impl PdfViewerApp {
         }
         let rw = cached.render_w as f32 / need_w as f32;
         let rh = cached.render_h as f32 / need_h as f32;
-        rw >= 0.9 && rw <= 2.0 && rh >= 0.9 && rh <= 2.0
+        (0.9..=2.0).contains(&rw) && (0.9..=2.0).contains(&rh)
     }
 
     // ── Cache eviction ───────────────────────────────────────────────────

@@ -44,6 +44,7 @@ fn paint_tag_badge(ui: &egui::Ui, icon_rect: egui::Rect, color: egui::Color32) {
     );
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn render_fallback(
     ui: &mut egui::Ui,
     file: &FileEntry,

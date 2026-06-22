@@ -164,11 +164,11 @@ impl BatchRenameState {
         pending
             .into_iter()
             .map(|row| {
-                let conflict = row.dest.as_ref().map_or(false, |dest| {
+                let conflict = row.dest.as_ref().is_some_and(|dest| {
                     dest.exists()
                         || dest_counts
                             .get(&destination_key(dest))
-                            .map_or(false, |count| *count > 1)
+                            .is_some_and(|count| *count > 1)
                 });
 
                 PreviewRow {

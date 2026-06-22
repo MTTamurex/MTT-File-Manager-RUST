@@ -222,8 +222,7 @@ pub(super) fn render_tabs(
         } else {
             // M-4: reuse already-computed galley — no re-layout inside painter.text()
             let paint_rect = egui::Align2::LEFT_CENTER.anchor_size(draw_pos, galley.size());
-            ui.painter()
-                .galley(paint_rect.min, galley.into(), title_color);
+            ui.painter().galley(paint_rect.min, galley, title_color);
         }
 
         if has_speaker {

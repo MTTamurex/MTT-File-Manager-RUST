@@ -4,7 +4,7 @@
 use eframe::egui;
 use lru::LruCache;
 use std::num::NonZeroUsize;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -123,10 +123,10 @@ impl ThumbnailTraceCounters {
     pub fn record_worker_dispatch(&mut self) {
         self.worker_dispatch = self.worker_dispatch.saturating_add(1);
     }
-    pub fn record_upload(&mut self, path: &PathBuf) {
+    pub fn record_upload(&mut self, path: &Path) {
         self.uploads = self.uploads.saturating_add(1);
         if self.sample_upload_path.is_none() {
-            self.sample_upload_path = Some(path.clone());
+            self.sample_upload_path = Some(path.to_path_buf());
         }
     }
     pub fn record_upload_already_cached(&mut self) {
@@ -847,9 +847,9 @@ impl CacheManager {
     /// Pair with [`should_throttle_folder_preview_request`] — only call once the
     /// path is committed to the worker pipeline so transient failures (channel
     /// full, loading-set rejection) don't lock the path out for 2s.
-    pub fn note_folder_preview_request_sent(&mut self, path: &PathBuf) {
+    pub fn note_folder_preview_request_sent(&mut self, path: &Path) {
         self.folder_preview_request_debounce
-            .put(path.clone(), Instant::now());
+            .put(path.to_path_buf(), Instant::now());
     }
 
     /// Clears the folder-preview cooldown entry for `path`. Explicit
@@ -876,9 +876,9 @@ impl CacheManager {
     /// (RAM-cache pending push or worker dispatch). Only call after the path
     /// is in flight so transient failures don't lock the path out for the
     /// thumbnail request cooldown.
-    pub fn note_thumbnail_request_sent(&mut self, path: &PathBuf) {
+    pub fn note_thumbnail_request_sent(&mut self, path: &Path) {
         self.thumbnail_request_debounce
-            .put(path.clone(), Instant::now());
+            .put(path.to_path_buf(), Instant::now());
     }
 
     /// Clears the cooldown entry for `path`. Callers MUST invoke this when the

@@ -131,7 +131,7 @@ pub(super) fn filter_items_opt_with_tags(
                             needle_ascii.as_deref(),
                         )
                     });
-                let tag_matches = active_tag_filter.map_or(true, |tag_id| {
+                let tag_matches = active_tag_filter.is_none_or(|tag_id| {
                     file_tag::path_has_tag(tag_assignments, &item.path, tag_id)
                 });
                 name_matches && tag_matches

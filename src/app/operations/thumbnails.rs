@@ -5,26 +5,26 @@
 use crate::app::state::ImageViewerApp;
 use crate::domain::thumbnail::ThumbnailData;
 use crate::workers::thumbnail::ThumbnailPriority;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 impl ImageViewerApp {
-    pub(crate) fn bump_thumbnail_request_epoch(&mut self, path: &PathBuf) -> u64 {
+    pub(crate) fn bump_thumbnail_request_epoch(&mut self, path: &Path) -> u64 {
         let epoch = self
             .thumbnail_request_epochs
-            .entry(path.clone())
+            .entry(path.to_path_buf())
             .or_insert(0);
         *epoch = epoch.wrapping_add(1).max(1);
         *epoch
     }
 
-    fn folder_preview_cover_for_known_item(&self, path: &PathBuf) -> Option<Option<PathBuf>> {
+    fn folder_preview_cover_for_known_item(&self, path: &Path) -> Option<Option<PathBuf>> {
         self.items
             .iter()
-            .find(|item| item.is_dir && !item.is_archive() && item.path.as_path() == path.as_path())
+            .find(|item| item.is_dir && !item.is_archive() && item.path.as_path() == path)
             .or_else(|| {
-                self.all_items.iter().find(|item| {
-                    item.is_dir && !item.is_archive() && item.path.as_path() == path.as_path()
-                })
+                self.all_items
+                    .iter()
+                    .find(|item| item.is_dir && !item.is_archive() && item.path.as_path() == path)
             })
             .map(|item| item.folder_cover.clone())
     }
@@ -135,10 +135,8 @@ impl ImageViewerApp {
         // When rendering the unfocused dual-panel pane, use the active generation
         // accepted by the shared thumbnail workers while preserving caller priority.
         let effective_gen = if self.use_active_generation_for_thumbnail_requests {
-            let active_gen = self
-                .current_generation
-                .load(std::sync::atomic::Ordering::Relaxed);
-            active_gen
+            self.current_generation
+                .load(std::sync::atomic::Ordering::Relaxed)
         } else {
             self.generation
         };

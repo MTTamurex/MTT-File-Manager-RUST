@@ -55,7 +55,7 @@ pub fn open_with_dialog(path: &Path, hwnd: HWND) -> Result<()> {
             lpFile: PCWSTR(path_wide.as_ptr()),
             lpParameters: PCWSTR::null(),
             lpDirectory: PCWSTR::null(),
-            nShow: SW_SHOWNORMAL.0 as i32,
+            nShow: SW_SHOWNORMAL.0,
             hInstApp: HINSTANCE(std::ptr::null_mut()),
             lpIDList: std::ptr::null_mut(),
             lpClass: PCWSTR::null(),
@@ -66,7 +66,7 @@ pub fn open_with_dialog(path: &Path, hwnd: HWND) -> Result<()> {
         };
 
         let success = ShellExecuteExW(&mut exec_info);
-        if !success.is_ok() {
+        if success.is_err() {
             return Err(Error::new(
                 E_FAIL,
                 format!("ShellExecuteExW 'openas' failed for path {:?}", path),

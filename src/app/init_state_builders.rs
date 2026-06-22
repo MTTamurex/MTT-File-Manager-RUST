@@ -146,6 +146,7 @@ pub(in crate::app) fn build_folder_size_state(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(in crate::app) fn build_file_operation_state(
     file_op_sender: mpsc::Sender<crate::workers::file_operation_worker::FileOperationRequest>,
     file_op_res_receiver: mpsc::Receiver<

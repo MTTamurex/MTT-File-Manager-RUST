@@ -525,13 +525,15 @@ fn is_stable_enough_with_duration(
 /// New order:
 ///   1. Extension blacklist (zero cost, no handle).
 ///   2. Watcher-event activity check.
-///      • If activity is present → pure mtime/size stability via `std::fs::metadata`
+///      • If activity is present → pure mtime/size stability via `std::fs::metadata`.
+///
 ///        (always uses share-all flags; safe for active writers).  The stability
 ///        window is `STABLE_AFTER_ACTIVITY_SECS` (3 s).
 ///      • If no activity at all → the lock probe runs as a last-resort fallback to
 ///        catch external writers whose `Create` event we may have missed (e.g. the
 ///        file existed before the watcher started).  This path is narrow: any file
 ///        touched after the watcher started will be in the activity cache.
+#[allow(clippy::doc_lazy_continuation, clippy::doc_overindented_list_items)]
 pub fn classify_file_read_safety(path: &Path) -> FileReadSafety {
     if is_incomplete_download(path) {
         return FileReadSafety::IncompleteDownload;

@@ -156,6 +156,7 @@ pub(in crate::app) fn spawn_icon_worker(
     // persistent icon caching is reserved for per-file icons whose pixels vary
     // by source file (programs, shortcuts, .ico, etc.). Shared extension icons
     // should always follow the current Windows Shell state on a fresh launch.
+    #[allow(clippy::type_complexity)]
     let shared_ext_cache: Arc<dashmap::DashMap<String, (Vec<u8>, u32, u32)>> =
         Arc::new(dashmap::DashMap::with_capacity(32));
 

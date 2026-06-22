@@ -326,7 +326,7 @@ fn buffer_len(stride: u32, height: u32) -> Option<usize> {
 }
 
 fn rgb24_to_rgba(source: &[u8], bgr: bool) -> Option<Vec<u8>> {
-    if source.len() % 3 != 0 {
+    if !source.len().is_multiple_of(3) {
         return None;
     }
 
@@ -343,7 +343,7 @@ fn rgb24_to_rgba(source: &[u8], bgr: bool) -> Option<Vec<u8>> {
 }
 
 fn bgr32_to_rgba(source: &[u8], has_alpha: bool) -> Option<Vec<u8>> {
-    if source.len() % 4 != 0 {
+    if !source.len().is_multiple_of(4) {
         return None;
     }
 

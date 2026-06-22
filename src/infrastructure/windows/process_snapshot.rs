@@ -25,7 +25,7 @@ extern "system" {
 pub fn get_current_process_kernel_resources() -> ProcessKernelResources {
     unsafe {
         let process = GetCurrentProcess();
-        let handle_ptr = process.0 as *mut core::ffi::c_void;
+        let handle_ptr = process.0;
         let gdi = GetGuiResources(handle_ptr, GR_GDIOBJECTS);
         let user = GetGuiResources(handle_ptr, GR_USEROBJECTS);
 

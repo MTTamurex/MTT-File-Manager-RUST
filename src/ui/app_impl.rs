@@ -249,7 +249,11 @@ impl eframe::App for ImageViewerApp {
 
         // 11. Settings window
         if self.navigation_state.show_settings_window {
-            let output = crate::ui::components::settings_window::render_settings_window(ctx, self, settings_close_from_backdrop);
+            let output = crate::ui::components::settings_window::render_settings_window(
+                ctx,
+                self,
+                settings_close_from_backdrop,
+            );
             self.navigation_state.show_settings_window = output.keep_open;
             if !output.keep_open {
                 self.shortcut_editor.clear();

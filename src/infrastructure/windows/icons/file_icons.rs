@@ -89,7 +89,7 @@ pub fn extract_folder_icon(
                                 hbitmap,
                             );
                         let _ = DeleteObject(hbitmap.into());
-                        return Ok(res?);
+                        return res;
                     }
                 }
             }
@@ -159,7 +159,7 @@ pub fn extract_file_icon_by_path(
                                 hbitmap,
                             );
                         let _ = DeleteObject(hbitmap.into());
-                        return Ok(res?);
+                        return res;
                     }
                 }
             }
@@ -297,7 +297,7 @@ pub fn extract_drive_icon(
                     let result =
                         crate::infrastructure::windows::bitmap_conversion::hbitmap_to_rgba(hbitmap);
                     let _ = DeleteObject(hbitmap.into());
-                    Ok(result?)
+                    result
                 })();
 
             if let Ok(result) = jumbo_result {

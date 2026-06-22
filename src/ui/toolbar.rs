@@ -13,7 +13,7 @@ use std::path::Component;
 // Each entry is (display_label, navigation_target).
 thread_local! {
     static BREADCRUMB_CACHE: RefCell<(String, Vec<(String, String)>)> =
-        RefCell::new((String::new(), Vec::new()));
+        const { RefCell::new((String::new(), Vec::new())) };
 }
 
 // Returns the pre-split breadcrumb segments for `current_path`.
@@ -262,7 +262,7 @@ pub fn render_toolbar(
 
             // Search
             let input_height = 26.0;
-            let search_width = (ui.available_width() * 0.45).min(250.0).max(120.0);
+            let search_width = (ui.available_width() * 0.45).clamp(120.0, 250.0);
             // Creates a container visually similar to an input, but manual to contain the button
             let (search_rect, search_resp) = ui.allocate_exact_size(
                 egui::vec2(search_width, input_height),
@@ -621,8 +621,14 @@ pub fn render_toolbar(
                                     }
                                 }
                                 let start = seg_count - vis;
-                                for i in start..seg_count {
-                                    let (display, target_path) = segments[i].clone();
+                                for (i, (display, target_path)) in segments
+                                    .iter()
+                                    .enumerate()
+                                    .skip(start)
+                                    .take(seg_count - start)
+                                {
+                                    let (display, target_path) =
+                                        (display.clone(), target_path.clone());
                                     render_breadcrumb_button(
                                         &mut addr_ui,
                                         &display,
@@ -718,9 +724,14 @@ pub fn render_toolbar(
                                                     ui.set_min_width(180.0);
                                                     ui.spacing_mut().item_spacing.y = 0.0;
 
-                                                    for i in 1..last_visible_start {
+                                                    for (_, (display, actual_path)) in segments
+                                                        .iter()
+                                                        .enumerate()
+                                                        .take(last_visible_start)
+                                                        .skip(1)
+                                                    {
                                                         let (display, actual_path) =
-                                                            segments[i].clone();
+                                                            (display.clone(), actual_path.clone());
                                                         let item_size = egui::vec2(400.0, 28.0);
                                                         let (item_rect, response) = ui
                                                             .allocate_exact_size(
@@ -808,8 +819,14 @@ pub fn render_toolbar(
 
                                 // Render last visible_end_count segments
                                 let start = seg_count - visible_end_count;
-                                for i in start..seg_count {
-                                    let (display, target_path) = segments[i].clone();
+                                for (i, (display, target_path)) in segments
+                                    .iter()
+                                    .enumerate()
+                                    .skip(start)
+                                    .take(seg_count - start)
+                                {
+                                    let (display, target_path) =
+                                        (display.clone(), target_path.clone());
                                     render_breadcrumb_button(
                                         &mut addr_ui,
                                         &display,

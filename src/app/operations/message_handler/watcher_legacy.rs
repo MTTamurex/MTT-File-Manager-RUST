@@ -256,10 +256,10 @@ impl ImageViewerApp {
                                 self.invalidate_directory_listing_caches(parent);
 
                                 let parent_norm = Self::normalize_for_match(parent);
-                                if parent_norm == current_path_norm {
-                                    if !self.try_add_created_path_to_ui(&cleaned) {
-                                        needs_reload = true;
-                                    }
+                                if parent_norm == current_path_norm
+                                    && !self.try_add_created_path_to_ui(&cleaned)
+                                {
+                                    needs_reload = true;
                                 }
                             }
 
@@ -327,10 +327,10 @@ impl ImageViewerApp {
                                 })
                                 .unwrap_or(false);
 
-                            if old_in_current || new_in_current {
-                                if !self.try_apply_rename_to_ui(&cleaned_old, &cleaned_new) {
-                                    needs_reload = true;
-                                }
+                            if (old_in_current || new_in_current)
+                                && !self.try_apply_rename_to_ui(&cleaned_old, &cleaned_new)
+                            {
+                                needs_reload = true;
                             }
 
                             if current_folder_removed {
@@ -500,10 +500,8 @@ impl ImageViewerApp {
                         }
                     }
 
-                    if meaningful_change {
-                        if needs_reload {
-                            self.request_watcher_auto_reload();
-                        }
+                    if meaningful_change && needs_reload {
+                        self.request_watcher_auto_reload();
                     }
                 }
                 Err(err) => {
@@ -527,15 +525,15 @@ impl ImageViewerApp {
 
         // Batch-remove all paths from the current folder in a single O(n)
         // retain pass instead of one O(n) pass per notify event.
-        if !paths_to_remove_from_ui.is_empty() {
-            if self.batch_remove_deleted_paths_from_ui(&paths_to_remove_from_ui) {
-                #[cfg(debug_assertions)]
-                log::debug!(
-                    "[FS-WATCH-LEGACY] SMART DELETE: Batch-removed {} path(s) from UI",
-                    paths_to_remove_from_ui.len()
-                );
-                self.skip_next_auto_reload = true;
-            }
+        if !paths_to_remove_from_ui.is_empty()
+            && self.batch_remove_deleted_paths_from_ui(&paths_to_remove_from_ui)
+        {
+            #[cfg(debug_assertions)]
+            log::debug!(
+                "[FS-WATCH-LEGACY] SMART DELETE: Batch-removed {} path(s) from UI",
+                paths_to_remove_from_ui.len()
+            );
+            self.skip_next_auto_reload = true;
         }
 
         let unbatched_events = processed_events.saturating_sub(batched_remove_events);

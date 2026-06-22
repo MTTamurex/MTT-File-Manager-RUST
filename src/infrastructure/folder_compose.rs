@@ -59,6 +59,12 @@ pub struct FolderComposer {
     layers: Mutex<HashMap<u32, Arc<FolderCompositionLayers>>>,
 }
 
+impl Default for FolderComposer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FolderComposer {
     /// Decodes the embedded folder PNG layers. Bucket scaling happens on demand.
     ///

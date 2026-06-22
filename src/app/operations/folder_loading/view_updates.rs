@@ -17,7 +17,7 @@ impl ImageViewerApp {
         };
         // PERFORMANCE: filter_items_opt returns None when query is empty,
         // signaling we should use all_items directly without cloning.
-match sorting::filter_items_opt_with_tags(
+        match sorting::filter_items_opt_with_tags(
             &self.all_items,
             &self.search_query,
             active_tag_filter,

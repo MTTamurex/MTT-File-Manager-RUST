@@ -168,7 +168,7 @@ impl IconLoader {
                     let canonical_ext =
                         crate::infrastructure::windows::icons::canonical_icon_ext(ext);
                     let mut key_buf = [0u8; 32];
-                    if let Some(ext_key) = ext_key_stack(&mut key_buf, &canonical_ext, size) {
+                    if let Some(ext_key) = ext_key_stack(&mut key_buf, canonical_ext, size) {
                         if let Some(texture) = self.extension_cache.get(ext_key) {
                             return Some(texture.clone());
                         }
@@ -257,7 +257,7 @@ impl IconLoader {
                 // Map extensions that share the same shell icon (sys→dll etc.)
                 let ext_str = crate::infrastructure::windows::icons::canonical_icon_ext(&ext_raw);
                 let mut key_buf = [0u8; 32];
-                if let Some(ext_key) = ext_key_stack(&mut key_buf, &ext_str, size) {
+                if let Some(ext_key) = ext_key_stack(&mut key_buf, ext_str, size) {
                     if let Some(texture) = self.extension_cache.get(ext_key) {
                         return Some(texture.clone());
                     }
@@ -267,7 +267,7 @@ impl IconLoader {
                     if size == IconSize::Jumbo {
                         let mut fallback_buf = [0u8; 32];
                         if let Some(large_key) =
-                            ext_key_stack(&mut fallback_buf, &ext_str, IconSize::Large)
+                            ext_key_stack(&mut fallback_buf, ext_str, IconSize::Large)
                         {
                             if let Some(texture) = self.extension_cache.get(large_key) {
                                 return Some(texture.clone());
@@ -276,7 +276,7 @@ impl IconLoader {
                     } else if size == IconSize::Large {
                         let mut fallback_buf = [0u8; 32];
                         if let Some(jumbo_key) =
-                            ext_key_stack(&mut fallback_buf, &ext_str, IconSize::Jumbo)
+                            ext_key_stack(&mut fallback_buf, ext_str, IconSize::Jumbo)
                         {
                             if let Some(texture) = self.extension_cache.get(jumbo_key) {
                                 return Some(texture.clone());

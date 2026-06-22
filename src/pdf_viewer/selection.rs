@@ -278,7 +278,7 @@ impl PdfViewerApp {
         }
 
         let (natural_w, natural_h) = self.page_sizes[page_idx as usize];
-        let (rotated_w, rotated_h) = if self.rotation % 180 != 0 {
+        let (rotated_w, rotated_h) = if !self.rotation.is_multiple_of(180) {
             (natural_h, natural_w)
         } else {
             (natural_w, natural_h)

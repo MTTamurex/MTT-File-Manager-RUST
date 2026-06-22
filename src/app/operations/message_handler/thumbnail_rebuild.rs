@@ -63,7 +63,7 @@ impl ImageViewerApp {
             }
         }
 
-        for (old_path, _) in &old_snapshot {
+        for old_path in old_snapshot.keys() {
             if !new_paths.contains(old_path) {
                 self.cache_manager.texture_cache.pop(old_path);
                 self.cache_manager.pop_rgba_data(old_path);
@@ -133,7 +133,7 @@ impl ImageViewerApp {
         } else {
             self.active_tag_filter
         };
-let result_items = match sorting::filter_items_opt_with_tags(
+        let result_items = match sorting::filter_items_opt_with_tags(
             &self.all_items,
             &self.search_query,
             active_tag_filter,

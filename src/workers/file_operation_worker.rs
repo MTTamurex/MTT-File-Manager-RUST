@@ -203,57 +203,42 @@ impl FileOperationRequest {
     fn substitute_hwnd(self, hwnd: SendHwnd) -> Self {
         match self {
             Self::Delete { paths, .. } => Self::Delete { paths, hwnd },
-            Self::Rename {
-                path,
-                new_name,
-                ..
-            } => Self::Rename {
+            Self::Rename { path, new_name, .. } => Self::Rename {
                 path,
                 new_name,
                 hwnd,
             },
             Self::RenameBatch { renames, .. } => Self::RenameBatch { renames, hwnd },
             Self::Copy {
-                path,
-                dest_folder,
-                ..
+                path, dest_folder, ..
             } => Self::Copy {
                 path,
                 dest_folder,
                 hwnd,
             },
             Self::Move {
-                path,
-                dest_folder,
-                ..
+                path, dest_folder, ..
             } => Self::Move {
                 path,
                 dest_folder,
                 hwnd,
             },
             Self::CopyBatch {
-                paths,
-                dest_folder,
-                ..
+                paths, dest_folder, ..
             } => Self::CopyBatch {
                 paths,
                 dest_folder,
                 hwnd,
             },
             Self::MoveBatch {
-                paths,
-                dest_folder,
-                ..
+                paths, dest_folder, ..
             } => Self::MoveBatch {
                 paths,
                 dest_folder,
                 hwnd,
             },
             Self::RestoreFromRecycleBin { items } => Self::RestoreFromRecycleBin { items },
-            Self::DeletePermanently {
-                physical_paths,
-                ..
-            } => Self::DeletePermanently {
+            Self::DeletePermanently { physical_paths, .. } => Self::DeletePermanently {
                 physical_paths,
                 hwnd,
             },

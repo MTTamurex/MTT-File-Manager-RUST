@@ -122,6 +122,7 @@ fn paint_action_button(
     response
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn render_result_row(
     ui: &mut egui::Ui,
     app: &mut ImageViewerApp,

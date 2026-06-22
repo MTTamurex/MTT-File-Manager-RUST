@@ -295,11 +295,11 @@ impl PrefetchEngine {
             LoadPriority::High => self
                 .jobs_tx
                 .as_ref()
-                .map_or(false, |tx| tx.try_send(job).is_ok()),
+                .is_some_and(|tx| tx.try_send(job).is_ok()),
             LoadPriority::Normal => self
                 .bg_jobs_tx
                 .as_ref()
-                .map_or(false, |tx| tx.try_send(job).is_ok()),
+                .is_some_and(|tx| tx.try_send(job).is_ok()),
         }
     }
 

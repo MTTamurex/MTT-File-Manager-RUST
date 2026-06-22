@@ -64,6 +64,7 @@ fn resolve_live_file_size(
     resolved
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn render_file_info_table(
     ui: &mut egui::Ui,
     file: &FileEntry,
@@ -257,7 +258,7 @@ pub fn render_file_info_table(
                     if let Some(created) = file.created {
                         add_detail(
                             ui,
-                            &t!("file_info.date_created").to_string(),
+                            t!("file_info.date_created").as_ref(),
                             crate::infrastructure::windows::format_date(created),
                         );
                     }

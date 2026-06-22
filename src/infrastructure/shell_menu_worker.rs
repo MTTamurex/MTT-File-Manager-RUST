@@ -219,7 +219,7 @@ fn shell_menu_loop(rx: Receiver<ShellMenuRequest>, tx: Sender<ShellMenuResponse>
 
                 if let Some(ref ctx) = active_ctx {
                     fn find_item_mut(
-                        items: &mut Vec<crate::infrastructure::windows::native_menu::ShellMenuItem>,
+                        items: &mut [crate::infrastructure::windows::native_menu::ShellMenuItem],
                         id: u32,
                     ) -> Option<&mut crate::infrastructure::windows::native_menu::ShellMenuItem>
                     {

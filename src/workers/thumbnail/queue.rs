@@ -124,8 +124,7 @@ impl PriorityThumbnailQueue {
             state.current_directory = None;
         }
 
-        let removed = before.saturating_sub(state.pending.len());
-        removed
+        before.saturating_sub(state.pending.len())
     }
 
     /// Push a thumbnail request with the new IOPriority system
@@ -180,6 +179,7 @@ impl PriorityThumbnailQueue {
         );
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn push_with_index_and_epoch(
         &self,
         path: PathBuf,
@@ -277,6 +277,7 @@ impl PriorityThumbnailQueue {
         promoted
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn push_with_index_and_source(
         &self,
         path: PathBuf,
@@ -548,6 +549,7 @@ impl PriorityThumbnailQueue {
     }
 
     /// Pop the next request, optimizing for disk locality on HDDs
+    #[allow(clippy::type_complexity)]
     pub fn pop(
         &self,
     ) -> Option<(

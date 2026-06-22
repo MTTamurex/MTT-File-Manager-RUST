@@ -311,7 +311,7 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) -> Option
             };
 
             // sidebar_ctx no longer used — borrows of app released
-            drop(sidebar_ctx);
+            let _ = sidebar_ctx;
 
             // Clamp target to actual content bounds after rendering
             let max_scroll = (output.content_size.y - output.inner_rect.height()).max(0.0);

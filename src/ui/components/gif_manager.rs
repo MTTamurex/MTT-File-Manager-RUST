@@ -310,6 +310,7 @@ impl GifManager {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn decode_worker(
         path: PathBuf,
         data: Arc<Mutex<GifData>>,

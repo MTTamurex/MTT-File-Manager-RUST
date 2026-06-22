@@ -39,4 +39,9 @@ impl DirectoryDirtyRegistry {
     pub fn len(&self) -> usize {
         self.inner.lock().len()
     }
+
+    /// Returns `true` if no dirty entries are tracked.
+    pub fn is_empty(&self) -> bool {
+        self.inner.lock().is_empty()
+    }
 }

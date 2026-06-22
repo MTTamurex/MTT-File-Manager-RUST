@@ -560,7 +560,11 @@ fn ensure_tagged_results_for_active_filter(app: &mut ImageViewerApp) {
             name,
             full_path: path_text,
             is_dir: metadata.is_dir(),
-            size: metadata.is_file().then_some(metadata.len()).unwrap_or(0),
+            size: if metadata.is_file() {
+                metadata.len()
+            } else {
+                0
+            },
         });
     }
 

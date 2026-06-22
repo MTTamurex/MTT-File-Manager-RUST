@@ -69,10 +69,9 @@ impl ImageViewerApp {
                 .selected_file
                 .as_ref()
                 .is_some_and(|selected| selected.path == path)
+                && (has_required_texture || promote_best_effort)
             {
-                if has_required_texture || promote_best_effort {
-                    self.selected_thumbnail = Some(tex.clone());
-                }
+                self.selected_thumbnail = Some(tex.clone());
             }
         }
 

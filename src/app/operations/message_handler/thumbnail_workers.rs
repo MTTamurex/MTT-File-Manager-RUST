@@ -1,7 +1,7 @@
 use crate::app::folder_size_state::FolderContentSummary;
 use crate::app::state::ImageViewerApp;
 use eframe::egui;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 fn upsert_folder_content_summary(
@@ -804,7 +804,7 @@ impl ImageViewerApp {
                 for path in self.folder_size_state.take_expired_revalidations(now) {
                     self.folder_size_state.pending_revalidation.remove(&path);
                     let is_current_folder_panel = self.selected_file.is_none()
-                        && path == PathBuf::from(&self.navigation_state.current_path);
+                        && path.as_path() == Path::new(&self.navigation_state.current_path);
                     if is_current_folder_panel {
                         if let Some(summary) = self.folder_size_state.cache.peek(&path).copied() {
                             self.folder_size_state

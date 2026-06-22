@@ -143,6 +143,7 @@ impl RenderWorker {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn worker_loop(
     path: PathBuf,
     password: Option<String>,
@@ -256,7 +257,7 @@ fn worker_loop(
                             // Ensure segments are computed for this page.  On first
                             // visit: extract from Pdfium or run OCR.  On subsequent
                             // renders (zoom, scroll back into view): use the cache.
-                            if !segment_cache.contains_key(&page_idx) {
+                            if let std::collections::hash_map::Entry::Vacant(e) = segment_cache.entry(page_idx) {
                                 let segments = match extract_text_segments(&document, page_idx) {
                                     Ok(segs) if !segs.is_empty() => segs,
                                     Ok(_) => {
@@ -281,7 +282,7 @@ fn worker_loop(
                                     }
                                 };
                                 if !segments.is_empty() {
-                                    segment_cache.insert(page_idx, segments);
+                                    e.insert(segments);
                                 }
                             }
 
@@ -388,6 +389,7 @@ const OCR_MIN_DISPLAY_SIDE: u32 = 800;
 ///   longest side so OCR quality is independent of display zoom.
 ///
 /// Results are stored in `ocr_cache` once and never replaced.
+#[allow(clippy::too_many_arguments)]
 fn run_ocr_canonical(
     document: &pdfium_render::prelude::PdfDocument<'_>,
     page_idx: u32,

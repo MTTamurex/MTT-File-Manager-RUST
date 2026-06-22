@@ -296,25 +296,24 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                     );
 
                     // Clear button (X)
-                    if has_text {
-                        if search_ui
+                    if has_text
+                        && search_ui
                             .add(
-                                egui::Button::new("✕")
+                                egui::Button::new("\u{2715}")
                                     .frame(false)
                                     .min_size(egui::vec2(18.0, 18.0)),
                             )
                             .clicked()
-                        {
-                            app.global_search.query.clear();
-                            app.global_search.release_transient_results();
-                            app.global_search.clear_transient_caches();
-                            app.global_search.loading = false;
-                            app.global_search.scroll_offset_y = 0.0;
-                            app.global_search.last_scroll_offset_y = 0.0;
-                            app.global_search.in_flight_query = None;
-                            app.global_search.in_flight_started_at = None;
-                            search_resp.request_focus();
-                        }
+                    {
+                        app.global_search.query.clear();
+                        app.global_search.release_transient_results();
+                        app.global_search.clear_transient_caches();
+                        app.global_search.loading = false;
+                        app.global_search.scroll_offset_y = 0.0;
+                        app.global_search.last_scroll_offset_y = 0.0;
+                        app.global_search.in_flight_query = None;
+                        app.global_search.in_flight_started_at = None;
+                        search_resp.request_focus();
                     }
 
                     // Focus input when clicking empty container area

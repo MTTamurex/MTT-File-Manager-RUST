@@ -109,6 +109,7 @@ fn compute_decode_limit(worker_count: usize) -> usize {
 }
 
 /// Spawns thumbnail worker threads with concurrency limiting
+#[allow(clippy::too_many_arguments)]
 pub fn spawn_thumbnail_workers(
     queue: Arc<PriorityThumbnailQueue>,
     tx: Sender<ThumbnailData>,
@@ -365,6 +366,7 @@ impl Drop for ComMfGuard {
 }
 
 /// Main worker thread loop for thumbnail extraction
+#[allow(clippy::too_many_arguments)]
 fn thumbnail_worker_loop(
     queue: Arc<PriorityThumbnailQueue>,
     tx: Sender<ThumbnailData>,
@@ -507,11 +509,11 @@ fn thumbnail_worker_loop(
             );
         }
 
-        if participates_in_bulk_scan {
-            if active_bulk_session.unwrap() == bulk_thumbnail_session.load(Ordering::Relaxed) {
-                bulk_thumbnail_completed.fetch_add(1, Ordering::Relaxed);
-                ctx.request_repaint();
-            }
+        if participates_in_bulk_scan
+            && active_bulk_session.unwrap() == bulk_thumbnail_session.load(Ordering::Relaxed)
+        {
+            bulk_thumbnail_completed.fetch_add(1, Ordering::Relaxed);
+            ctx.request_repaint();
         }
     }
     // _mf and _com dropped here — MFShutdown() then CoUninitialize() guaranteed

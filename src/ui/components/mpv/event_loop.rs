@@ -150,15 +150,13 @@ pub fn start_event_loop(
             }
 
             // --- Slow tier (~2s): aspect ---
-            if tick_count.is_multiple_of(SLOW_TIER_TICKS) {
-                if current_duration > 0.0 {
-                    let aspect = super::playback::get_video_aspect(&mpv);
-                    if let Ok(mut s) = state.write() {
-                        if s.video_aspect != aspect {
-                            s.video_aspect = aspect;
-                            state_updated = true;
-                            significant_change = true;
-                        }
+            if tick_count.is_multiple_of(SLOW_TIER_TICKS) && current_duration > 0.0 {
+                let aspect = super::playback::get_video_aspect(&mpv);
+                if let Ok(mut s) = state.write() {
+                    if s.video_aspect != aspect {
+                        s.video_aspect = aspect;
+                        state_updated = true;
+                        significant_change = true;
                     }
                 }
             }

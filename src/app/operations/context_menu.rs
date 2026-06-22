@@ -139,7 +139,7 @@ impl ImageViewerApp {
                 .unwrap_or(false)
         } else if let Some(path) = paths.first() {
             path.is_file()
-                && path.extension().map_or(true, |ext| {
+                && path.extension().is_none_or(|ext| {
                     !crate::domain::file_entry::is_executable_extension(&format!(
                         ".{}",
                         ext.to_string_lossy()
@@ -529,7 +529,7 @@ impl ImageViewerApp {
             .first()
             .map(|p| {
                 p.is_file()
-                    && p.extension().map_or(true, |ext| {
+                    && p.extension().is_none_or(|ext| {
                         !crate::domain::file_entry::is_executable_extension(&format!(
                             ".{}",
                             ext.to_string_lossy()

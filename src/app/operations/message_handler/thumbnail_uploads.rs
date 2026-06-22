@@ -141,9 +141,9 @@ fn insert_visible_upload_ranks(
     }
 
     let mut inserted = 0usize;
-    for idx in min_idx..=max_idx {
+    for item in items.iter().skip(min_idx).take(max_idx - min_idx + 1) {
         ranks
-            .entry(items[idx].path.clone())
+            .entry(item.path.clone())
             .or_insert(base_rank + inserted);
         inserted += 1;
     }
@@ -685,14 +685,10 @@ impl ImageViewerApp {
             } else {
                 5
             }
+        } else if is_opengl {
+            8
         } else {
-            if is_opengl {
-                8
-            } else if is_vulkan {
-                12
-            } else {
-                12
-            }
+            12
         };
 
         let base_max_uploads = ((base_max_uploads as f32) * tab_upload_boost)
@@ -706,19 +702,15 @@ impl ImageViewerApp {
                         } else {
                             12.0
                         }
-                    } else {
-                        if is_vulkan {
-                            16.0
-                        } else {
-                            64.0
-                        }
-                    }
-                } else {
-                    if is_vulkan {
-                        12.0
-                    } else {
+                    } else if is_vulkan {
                         16.0
+                    } else {
+                        64.0
                     }
+                } else if is_vulkan {
+                    12.0
+                } else {
+                    16.0
                 },
             ) as usize;
 
@@ -801,12 +793,10 @@ impl ImageViewerApp {
             } else {
                 self.upload_budget_ms * 0.85
             }
+        } else if is_vulkan {
+            self.upload_budget_ms.min(8.0)
         } else {
-            if is_vulkan {
-                self.upload_budget_ms.min(8.0)
-            } else {
-                self.upload_budget_ms
-            }
+            self.upload_budget_ms
         };
         let upload_budget_ms = if is_burst {
             base_budget_ms
@@ -828,9 +818,7 @@ impl ImageViewerApp {
         let offscreen_upload_budget = if is_scrolling {
             if is_performance_critical {
                 0
-            } else if is_performance_severe {
-                1
-            } else if is_opengl {
+            } else if is_performance_severe || is_opengl {
                 1
             } else {
                 2
@@ -1252,9 +1240,7 @@ impl ImageViewerApp {
                 6
             }
         } else if is_performance_critical {
-            if is_opengl {
-                1
-            } else if is_vulkan {
+            if is_opengl || is_vulkan {
                 1
             } else {
                 2
@@ -1271,9 +1257,7 @@ impl ImageViewerApp {
             } else {
                 6
             }
-        } else if is_opengl {
-            6
-        } else if is_vulkan {
+        } else if is_opengl || is_vulkan {
             6
         } else {
             20
@@ -1284,21 +1268,19 @@ impl ImageViewerApp {
         // of 20 previews/frame could stall the UI for up to 300ms.
         // On OpenGL, each upload is synchronous and blocks the CPU thread,
         // so use a tighter budget to keep frames responsive.
-        let budget = Duration::from_millis(if is_burst && is_opengl && is_scrolling {
-            2
-        } else if is_burst && is_opengl {
+        let budget = Duration::from_millis(if is_burst && is_opengl {
             2
         } else if is_burst && is_vulkan {
             4
         } else if is_performance_critical {
             2
-        } else if is_opengl && is_scrolling {
-            2
-        } else if is_vulkan && is_scrolling {
-            3
-        } else if is_opengl {
-            4
-        } else if is_vulkan {
+        } else if (is_opengl || is_vulkan) && is_scrolling {
+            if is_vulkan {
+                3
+            } else {
+                2
+            }
+        } else if is_opengl || is_vulkan {
             4
         } else {
             8

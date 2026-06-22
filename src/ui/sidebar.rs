@@ -981,9 +981,9 @@ fn render_pinned_folders(
             ui.painter().text(
                 Pos2::new(cursor_x, rect.center().y),
                 egui::Align2::LEFT_CENTER,
-                &crate::infrastructure::onedrive::special_folder_display_name(
-                    std::path::Path::new(&pinned.path),
-                )
+                crate::infrastructure::onedrive::special_folder_display_name(std::path::Path::new(
+                    &pinned.path,
+                ))
                 .unwrap_or_else(|| pinned.display_name.clone()),
                 egui::FontId::proportional(11.5),
                 text_color,

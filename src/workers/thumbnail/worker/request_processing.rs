@@ -83,30 +83,28 @@ pub(super) fn process_thumbnail_request(
         .extension()
         .and_then(|e| e.to_str())
         .is_some_and(|ext| ext.eq_ignore_ascii_case("ts"))
+        && !is_mpeg_ts_file(path)
     {
-        if !is_mpeg_ts_file(path) {
-            mark_as_failed(path.clone());
-            send_thumbnail_result(
-                tx,
-                req_priority,
-                ThumbnailData {
-                    path: path.clone(),
-                    image_data: std::sync::Arc::new(Vec::new()),
-                    width: 0,
-                    height: 0,
-                    generation: req_gen,
-                    request_epoch: req_epoch,
-                    priority: req_priority,
-                    not_found: true,
-                    premultiplied: false,
-                },
-            );
-            throttle_repaint_with_priority(ctx, last_repaint, req_priority);
-            log_slow_worker_request(path, req_priority, request_start, "not_video_ts");
-            return;
-        }
+        mark_as_failed(path.clone());
+        send_thumbnail_result(
+            tx,
+            req_priority,
+            ThumbnailData {
+                path: path.clone(),
+                image_data: std::sync::Arc::new(Vec::new()),
+                width: 0,
+                height: 0,
+                generation: req_gen,
+                request_epoch: req_epoch,
+                priority: req_priority,
+                not_found: true,
+                premultiplied: false,
+            },
+        );
+        throttle_repaint_with_priority(ctx, last_repaint, req_priority);
+        log_slow_worker_request(path, req_priority, request_start, "not_video_ts");
+        return;
     }
-
     // EARLY EXIT 1: Skip files that already failed in this session.
     // Prevents repeated slow retries on broken files (e.g., 0x8004B205).
     //

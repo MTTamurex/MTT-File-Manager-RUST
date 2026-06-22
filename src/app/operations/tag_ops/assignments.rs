@@ -121,15 +121,17 @@ impl ImageViewerApp {
 
     pub fn paths_have_tag(&self, paths: &[PathBuf], tag_id: i64) -> bool {
         !paths.is_empty()
-            && paths
-                .iter()
-                .all(|path| file_tag::path_has_tag(self.tag_assignments_normalized.as_ref(), path, tag_id))
+            && paths.iter().all(|path| {
+                file_tag::path_has_tag(self.tag_assignments_normalized.as_ref(), path, tag_id)
+            })
     }
 
     pub fn paths_tag_ids(&self, paths: &[PathBuf]) -> Vec<i64> {
         let mut seen = FxHashSet::default();
         for path in paths {
-            if let Some(ids) = file_tag::tag_ids_for_path(self.tag_assignments_normalized.as_ref(), path) {
+            if let Some(ids) =
+                file_tag::tag_ids_for_path(self.tag_assignments_normalized.as_ref(), path)
+            {
                 for id in ids {
                     seen.insert(*id);
                 }

@@ -58,6 +58,7 @@ pub struct DedicatedImageViewerApp {
     pub(super) gif_loaded_index: Option<usize>,
     /// In-flight async GIF decode: (target_index, receiver).
     /// `None` when idle; dropped automatically if user navigates away.
+    #[allow(clippy::type_complexity)]
     pub(super) gif_decode_rx: Option<(
         usize,
         std::sync::mpsc::Receiver<Result<Vec<loader::GifAnimationFrame>, String>>,

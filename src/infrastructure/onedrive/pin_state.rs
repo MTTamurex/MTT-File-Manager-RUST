@@ -28,15 +28,12 @@ fn run_attrib(args: &[String], path: &Path) -> io::Result<()> {
     }
 
     let stderr = String::from_utf8_lossy(&output.stderr);
-    Err(io::Error::new(
-        io::ErrorKind::Other,
-        format!(
-            "attrib failed for {:?} (args: {:?}): {}",
-            path,
-            args,
-            stderr.trim()
-        ),
-    ))
+    Err(io::Error::other(format!(
+        "attrib failed for {:?} (args: {:?}): {}",
+        path,
+        args,
+        stderr.trim()
+    )))
 }
 
 pub fn set_pin_state(path: &Path, command: PinCommand) -> io::Result<()> {

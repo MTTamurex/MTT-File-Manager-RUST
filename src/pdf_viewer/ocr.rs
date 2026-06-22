@@ -139,6 +139,7 @@ fn create_software_bitmap(rgba: &[u8], w: u32, h: u32) -> windows::core::Result<
 
 /// Map a pixel-space rectangle (origin top-left, Y-down) to PDF point space
 /// (origin bottom-left, Y-up), matching Pdfium's coordinate convention.
+#[allow(clippy::too_many_arguments)]
 fn pixel_rect_to_pdf_bounds(
     px_x: f32,
     px_y: f32,

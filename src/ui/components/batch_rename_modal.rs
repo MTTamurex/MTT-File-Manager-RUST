@@ -384,16 +384,16 @@ fn render_reorderable_list(
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width());
 
-            for i in 0..n {
+            for (i, item) in filenames.iter().enumerate().take(n) {
                 let is_drag_src = state
                     .drag_state
                     .as_ref()
-                    .map_or(false, |ds| ds.dragging_idx == i);
+                    .is_some_and(|ds| ds.dragging_idx == i);
                 let is_drag_tgt = state
                     .drag_state
                     .as_ref()
-                    .map_or(false, |ds| ds.hover_idx == i && ds.dragging_idx != i);
-                let has_conflict = preview.get(i).map_or(false, |r| r.conflict);
+                    .is_some_and(|ds| ds.hover_idx == i && ds.dragging_idx != i);
+                let has_conflict = preview.get(i).is_some_and(|r| r.conflict);
 
                 let result = ui.push_id(i, |ui| {
                     let row = ui.horizontal(|ui| {
@@ -436,9 +436,9 @@ fn render_reorderable_list(
 
                         // Filename (conflict highlighted)
                         let name_text = if has_conflict {
-                            RichText::new(&filenames[i]).color(Color32::from_rgb(220, 80, 80))
+                            RichText::new(item).color(Color32::from_rgb(220, 80, 80))
                         } else {
-                            RichText::new(&filenames[i]).color(theme::text_color(dark_mode))
+                            RichText::new(item).color(theme::text_color(dark_mode))
                         };
                         ui.label(name_text);
 

@@ -464,9 +464,7 @@ fn render_scrollbar(
     }
 
     // Handle — use egui's exact scroll handle color and opacity
-    let handle_opacity = if response.dragged() {
-        scroll_style.interact_handle_opacity
-    } else if is_hovered {
+    let handle_opacity = if response.dragged() || is_hovered {
         scroll_style.interact_handle_opacity
     } else if pointer_in_viewport {
         scroll_style.active_handle_opacity

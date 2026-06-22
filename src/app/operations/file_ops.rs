@@ -297,7 +297,7 @@ impl ImageViewerApp {
         }
 
         self.items.get(idx).is_some_and(|item| {
-            item.drive_info.as_ref().map_or(true, |drive| {
+            item.drive_info.as_ref().is_none_or(|drive| {
                 crate::infrastructure::windows::drive_supports_volume_label_rename(drive.drive_type)
             })
         })

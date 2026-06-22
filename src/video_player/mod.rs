@@ -259,7 +259,7 @@ fn load_app_icons() -> Option<(isize, isize)> {
     let hicon_small = unsafe {
         LoadImageW(
             Some(hmodule.into()),
-            PCWSTR(1 as *const u16),
+            PCWSTR(std::ptr::dangling::<u16>()),
             IMAGE_ICON,
             16,
             16,
@@ -271,7 +271,7 @@ fn load_app_icons() -> Option<(isize, isize)> {
     let hicon_big = unsafe {
         LoadImageW(
             Some(hmodule.into()),
-            PCWSTR(1 as *const u16),
+            PCWSTR(std::ptr::dangling::<u16>()),
             IMAGE_ICON,
             32,
             32,
@@ -774,7 +774,7 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
                 if name == "volume" {
                     if let mpv::events::PropertyData::Double(vol) = change {
                         last_known_volume_pct = vol.clamp(0.0, 100.0) as f32;
-                        save_volume_to_db((last_known_volume_pct / 100.0) as f32);
+                        save_volume_to_db(last_known_volume_pct / 100.0);
                     }
                 }
             }
@@ -828,7 +828,7 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
 
     log::debug!("[VIDEO-PLAYER] Exiting standalone player");
 
-    save_volume_to_db((last_known_volume_pct / 100.0) as f32);
+    save_volume_to_db(last_known_volume_pct / 100.0);
 
     Ok(())
 }

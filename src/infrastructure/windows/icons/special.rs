@@ -88,7 +88,7 @@ pub fn extract_recycle_bin_icon(
                                 hbitmap,
                             );
                         let _ = DeleteObject(hbitmap.into());
-                        return Ok(res?);
+                        return res;
                     }
                 }
             }
@@ -160,7 +160,7 @@ pub fn extract_shell_icon(
                                 hbitmap,
                             );
                         let _ = DeleteObject(hbitmap.into());
-                        return Ok(res?);
+                        return res;
                     }
                 }
             }

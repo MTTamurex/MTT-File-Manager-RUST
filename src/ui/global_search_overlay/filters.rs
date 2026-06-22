@@ -16,6 +16,7 @@ pub(super) fn category_label(category: GlobalSearchCategory) -> String {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn build_filtered_indices(
     results: &[mtt_search_protocol::SearchResultItem],
     category: GlobalSearchCategory,

@@ -103,10 +103,8 @@ pub fn handle_screenshot_event(user_data: &egui::UserData, image: &egui::ColorIm
     }
 
     let minimize_pending = MINIMIZE_AFTER_SCREENSHOT_ID.load(Ordering::Acquire) == request_id;
-    if minimize_pending {
-        if !store_screenshot(image) {
-            return false;
-        }
+    if minimize_pending && !store_screenshot(image) {
+        return false;
     }
 
     if minimize_pending {
@@ -127,7 +125,7 @@ pub fn handle_screenshot_event(user_data: &egui::UserData, image: &egui::ColorIm
 
 pub fn take_minimize_hwnd_after_screenshot() -> Option<HWND> {
     let raw = READY_MINIMIZE_HWND.swap(0, Ordering::AcqRel);
-    (raw != 0).then(|| HWND(raw as *mut core::ffi::c_void))
+    (raw != 0).then_some(HWND(raw as *mut core::ffi::c_void))
 }
 
 pub fn post_safe_minimize_after_present(hwnd: HWND) {
@@ -311,17 +309,19 @@ fn capture_visible_window_pixels(hwnd: HWND) -> Option<(usize, usize, Vec<u32>)>
         }
 
         let mut bits = std::ptr::null_mut();
-        let mut info = BITMAPINFO::default();
-        info.bmiHeader = BITMAPINFOHEADER {
-            biSize: core::mem::size_of::<BITMAPINFOHEADER>() as u32,
-            biWidth: capture_width,
-            biHeight: -capture_height,
-            biPlanes: 1,
-            biBitCount: 32,
-            biCompression: BI_RGB.0,
-            biSizeImage: (width as u32)
-                .saturating_mul(height as u32)
-                .saturating_mul(4),
+        let info = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: core::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: capture_width,
+                biHeight: -capture_height,
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB.0,
+                biSizeImage: (width as u32)
+                    .saturating_mul(height as u32)
+                    .saturating_mul(4),
+                ..Default::default()
+            },
             ..Default::default()
         };
 
@@ -475,17 +475,19 @@ fn create_preview_bitmap_from_frame(
     let width = width.clamp(1, 1600);
     let height = height.clamp(1, 1000);
     let mut bits = std::ptr::null_mut();
-    let mut info = BITMAPINFO::default();
-    info.bmiHeader = BITMAPINFOHEADER {
-        biSize: core::mem::size_of::<BITMAPINFOHEADER>() as u32,
-        biWidth: width,
-        biHeight: -height,
-        biPlanes: 1,
-        biBitCount: 32,
-        biCompression: BI_RGB.0,
-        biSizeImage: (width as u32)
-            .saturating_mul(height as u32)
-            .saturating_mul(4),
+    let info = BITMAPINFO {
+        bmiHeader: BITMAPINFOHEADER {
+            biSize: core::mem::size_of::<BITMAPINFOHEADER>() as u32,
+            biWidth: width,
+            biHeight: -height,
+            biPlanes: 1,
+            biBitCount: 32,
+            biCompression: BI_RGB.0,
+            biSizeImage: (width as u32)
+                .saturating_mul(height as u32)
+                .saturating_mul(4),
+            ..Default::default()
+        },
         ..Default::default()
     };
 

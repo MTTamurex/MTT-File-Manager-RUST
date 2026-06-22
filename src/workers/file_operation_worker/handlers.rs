@@ -264,7 +264,7 @@ pub(super) fn handle_copy(
     match (valid_path, valid_dest) {
         (Ok(path), Ok(dest_folder)) => {
             let is_virtual = crate::infrastructure::windows::is_shell_navigation_path(&path, false);
-            let native_ok = archive_extract::has_native_support(&[path.clone()]);
+            let native_ok = archive_extract::has_native_support(std::slice::from_ref(&path));
             log::debug!(
                 "[FileOps] handle_copy: path={}, is_virtual={}, native_support={}",
                 path.display(),
@@ -337,7 +337,7 @@ pub(super) fn handle_move(
             let source_folder = path.parent().map(|p| p.to_path_buf());
             // Use IFileOperation for virtual paths (like items inside archives)
             let is_virtual = crate::infrastructure::windows::is_shell_navigation_path(&path, false);
-            let native_ok = archive_extract::has_native_support(&[path.clone()]);
+            let native_ok = archive_extract::has_native_support(std::slice::from_ref(&path));
             log::debug!(
                 "[FileOps] handle_move: path={}, is_virtual={}, native_support={}",
                 path.display(),

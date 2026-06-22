@@ -20,7 +20,7 @@ pub(super) fn format_result_meta(file_type: &str) -> String {
 pub(super) fn filtered_contains(filtered_indices: &[usize], source_idx: usize) -> bool {
     // Linear search: indices are no longer numerically sorted when date
     // sorting is active, so binary_search would return incorrect results.
-    filtered_indices.iter().any(|&idx| idx == source_idx)
+    filtered_indices.contains(&source_idx)
 }
 
 #[inline]

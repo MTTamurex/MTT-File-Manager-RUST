@@ -218,8 +218,9 @@ fn smoke_test_backend(backend: TranscodeBackend) -> bool {
 ///   1. The directory of the currently running executable (bundled ffmpeg).
 ///   2. The `MTT_FFMPEG_PATH` environment variable (must be an absolute path
 ///      to an existing file).
-/// PATH and CWD are NEVER consulted. Returns `None` if ffmpeg is not found,
-/// in which case hardware acceleration falls back to CPU transparently.
+///
+///      PATH and CWD are NEVER consulted. Returns `None` if ffmpeg is not found,
+///      in which case hardware acceleration falls back to CPU transparently.
 fn resolve_ffmpeg_executable() -> Option<PathBuf> {
     static CACHED: OnceLock<Option<PathBuf>> = OnceLock::new();
     CACHED

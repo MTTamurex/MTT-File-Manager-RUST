@@ -209,27 +209,24 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
             }
 
             for event in &i.events {
-                match event {
-                    egui::Event::Key { key, pressed, .. } => {
-                        // 2. Keyboard detection (Navigation keys)
-                        if *pressed {
-                            user_active = true;
-                            match key {
-                                egui::Key::ArrowDown
-                                | egui::Key::ArrowUp
-                                | egui::Key::ArrowLeft
-                                | egui::Key::ArrowRight
-                                | egui::Key::PageDown
-                                | egui::Key::PageUp
-                                | egui::Key::Home
-                                | egui::Key::End => {
-                                    app.last_input = crate::app::state::LastInput::Keyboard;
-                                }
-                                _ => {}
+                if let egui::Event::Key { key, pressed, .. } = event {
+                    // 2. Keyboard detection (Navigation keys)
+                    if *pressed {
+                        user_active = true;
+                        match key {
+                            egui::Key::ArrowDown
+                            | egui::Key::ArrowUp
+                            | egui::Key::ArrowLeft
+                            | egui::Key::ArrowRight
+                            | egui::Key::PageDown
+                            | egui::Key::PageUp
+                            | egui::Key::Home
+                            | egui::Key::End => {
+                                app.last_input = crate::app::state::LastInput::Keyboard;
                             }
+                            _ => {}
                         }
                     }
-                    _ => {}
                 }
             }
         });

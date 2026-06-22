@@ -63,7 +63,7 @@ impl super::DedicatedImageViewerApp {
     fn pick_export_path(&self, format: loader::ExportImageFormat) -> Option<std::path::PathBuf> {
         let mut dialog = FileDialog::new()
             .add_filter(format.filter_label(), &[format.extension()])
-            .set_file_name(&self.suggested_export_filename(format));
+            .set_file_name(self.suggested_export_filename(format));
 
         if let Some(current_path) = self.current_path() {
             if let Some(parent) = current_path.parent() {

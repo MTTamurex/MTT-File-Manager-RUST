@@ -11,7 +11,8 @@ use std::path::PathBuf;
 // Keyed by (current_path, modified_hint, created_hint, drive_info_epoch);
 // invalidated on navigation, folder update, or drive volume-info refresh.
 thread_local! {
-    static FOLDER_ENTRY_CACHE: RefCell<Option<(String, u64, u64, u64, FileEntry)>> = RefCell::new(None);
+    #[allow(clippy::type_complexity)]
+    static FOLDER_ENTRY_CACHE: RefCell<Option<(String, u64, u64, u64, FileEntry)>> = const { RefCell::new(None) };
 }
 
 pub(super) fn render_preview_panel_layout(
@@ -253,7 +254,7 @@ pub(super) fn render_preview_panel_layout(
                                             app.disk_cache.remove_cache_for_path(&path);
                                             log::debug!("[REFRESH THUMBNAIL] Disk cache cleared");
                                             let was_loading = app.cache_manager.loading_set.contains(&path);
-                                            let queued_removed = app.thumbnail_queue.remove_paths(&[path.clone()]);
+                                            let queued_removed = app.thumbnail_queue.remove_paths(std::slice::from_ref(&path));
                                             app.cache_manager.texture_cache.pop(&path);
                                             app.selected_thumbnail = None;
                                             app.cache_manager.forget_attempted_thumbnail_bucket(&path);
@@ -521,7 +522,7 @@ fn is_current_folder_panel_target(app: &ImageViewerApp, file: &FileEntry) -> boo
         && !app.navigation_state.is_recycle_bin_view
         && !crate::domain::special_paths::is_virtual_path(&app.navigation_state.current_path)
         && file.is_dir
-        && file.path == PathBuf::from(&app.navigation_state.current_path)
+        && file.path.as_path() == std::path::Path::new(&app.navigation_state.current_path)
 }
 
 pub(super) fn render_central_panel_layout(app: &mut ImageViewerApp, ctx: &egui::Context) {
@@ -640,12 +641,10 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
         } else {
             egui::Color32::from_rgb(210, 228, 250)
         }
+    } else if dark {
+        egui::Color32::from_rgb(50, 50, 50)
     } else {
-        if dark {
-            egui::Color32::from_rgb(50, 50, 50)
-        } else {
-            egui::Color32::from_rgb(240, 240, 240)
-        }
+        egui::Color32::from_rgb(240, 240, 240)
     };
     ui.painter()
         .rect_filled(left_header_rect, 0.0, left_header_bg);
@@ -661,12 +660,10 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
         } else {
             egui::Color32::from_rgb(210, 228, 250)
         }
+    } else if dark {
+        egui::Color32::from_rgb(50, 50, 50)
     } else {
-        if dark {
-            egui::Color32::from_rgb(50, 50, 50)
-        } else {
-            egui::Color32::from_rgb(240, 240, 240)
-        }
+        egui::Color32::from_rgb(240, 240, 240)
     };
     ui.painter()
         .rect_filled(right_header_rect, 0.0, right_header_bg);

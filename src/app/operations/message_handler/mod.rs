@@ -118,7 +118,7 @@ impl ImageViewerApp {
         // FOLDER METADATA: Resolve timestamps for sidebar-navigated folders (Quick Access, Cloud Drives)
         while let Ok((path, modified, created)) = self.folder_meta_resolve_rx.try_recv() {
             // Only apply if user is still viewing the same folder
-            if PathBuf::from(&self.navigation_state.current_path) == path {
+            if Path::new(&self.navigation_state.current_path) == path.as_path() {
                 if modified > 0 {
                     self.current_folder_modified_hint = Some((path.clone(), modified));
                     self.folder_modified_hints.put(path.clone(), modified);

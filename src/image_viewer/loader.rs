@@ -457,7 +457,7 @@ fn decode_svg_frame(
             let result = decode_svg_bytes(&bytes_vec, max_side_clone);
             let _ = tx.send(result);
         })
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        .map_err(io::Error::other)?;
 
     rx.recv_timeout(std::time::Duration::from_secs(10))
         .map_err(|_| {

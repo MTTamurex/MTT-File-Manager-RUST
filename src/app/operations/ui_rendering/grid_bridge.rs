@@ -323,7 +323,7 @@ impl ImageViewerApp {
             thumbnail_requests_this_frame: 0,
             folder_preview_requests_this_frame: 0,
             generation: self.generation,
-tag_assignments: self.tag_assignments_normalized.as_ref(),
+            tag_assignments: self.tag_assignments_normalized.as_ref(),
             tag_definitions: &self.tag_definitions,
         };
 

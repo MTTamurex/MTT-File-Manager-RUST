@@ -996,7 +996,7 @@ fn sanitize_filename(name: &str) -> String {
         .collect();
 
     // Remove trailing dots and spaces (invalid on Windows).
-    let trimmed = cleaned.trim_end_matches(|c| c == '.' || c == ' ');
+    let trimmed = cleaned.trim_end_matches(['.', ' ']);
     if trimmed.is_empty() {
         return "_extracted".to_string();
     }

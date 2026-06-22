@@ -71,7 +71,7 @@ impl ImageViewerApp {
                 allow_thumbnail_requests: true,
                 thumbnail_requests_this_frame: &mut thumbnail_requests_counter,
                 folder_preview_requests_this_frame: &mut folder_preview_requests_counter,
-item_tag_ids: crate::domain::file_tag::tag_ids_for_path(
+                item_tag_ids: crate::domain::file_tag::tag_ids_for_path(
                     self.tag_assignments_normalized.as_ref(),
                     &item.path,
                 ),
