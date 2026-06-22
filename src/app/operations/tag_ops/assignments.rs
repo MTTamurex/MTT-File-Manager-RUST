@@ -16,7 +16,7 @@ impl ImageViewerApp {
         let mut paths_to_assign = Vec::new();
         for path in paths {
             if path.to_str().is_none()
-                || file_tag::path_has_tag(&self.tag_assignments, path, tag_id)
+                || file_tag::path_has_tag(self.tag_assignments_normalized.as_ref(), path, tag_id)
             {
                 continue;
             }
@@ -50,6 +50,7 @@ impl ImageViewerApp {
         }
 
         if changed {
+            self.sync_tag_assignments_normalized();
             let mut changed_tags = FxHashSet::default();
             changed_tags.insert(tag_id);
             self.invalidate_cached_tag_views_for_tags(&changed_tags);
@@ -102,6 +103,7 @@ impl ImageViewerApp {
 
         if changed {
             self.recompute_tag_counts_from_assignments();
+            self.sync_tag_assignments_normalized();
             let mut changed_tags = FxHashSet::default();
             changed_tags.insert(tag_id);
             self.invalidate_cached_tag_views_for_tags(&changed_tags);
@@ -121,13 +123,13 @@ impl ImageViewerApp {
         !paths.is_empty()
             && paths
                 .iter()
-                .all(|path| file_tag::path_has_tag(&self.tag_assignments, path, tag_id))
+                .all(|path| file_tag::path_has_tag(self.tag_assignments_normalized.as_ref(), path, tag_id))
     }
 
     pub fn paths_tag_ids(&self, paths: &[PathBuf]) -> Vec<i64> {
         let mut seen = FxHashSet::default();
         for path in paths {
-            if let Some(ids) = file_tag::tag_ids_for_path(&self.tag_assignments, path) {
+            if let Some(ids) = file_tag::tag_ids_for_path(self.tag_assignments_normalized.as_ref(), path) {
                 for id in ids {
                     seen.insert(*id);
                 }
@@ -190,6 +192,7 @@ impl ImageViewerApp {
         let changed = assignments.len() != before_len;
         if changed {
             self.recompute_tag_counts_from_assignments();
+            self.sync_tag_assignments_normalized();
             self.invalidate_cached_tag_views_for_tags(&changed_tags);
             self.refresh_visible_items_after_tag_change();
         }
@@ -242,10 +245,11 @@ impl ImageViewerApp {
 
         if memory_changed {
             self.recompute_tag_counts_from_assignments();
+            self.sync_tag_assignments_normalized();
             self.invalidate_cached_tag_views_for_tags(&changed_tags);
             self.refresh_visible_items_after_tag_change();
         } else if removed_from_db > 0 {
-            self.tag_assignments = Arc::new(self.app_state_db.get_all_tag_assignments());
+            self.set_tag_assignments(self.app_state_db.get_all_tag_assignments());
             self.recompute_tag_counts_from_assignments();
             self.reload_visible_tag_views();
             self.ui_ctx.request_repaint();
@@ -350,6 +354,7 @@ impl ImageViewerApp {
         }
         self.recompute_tag_counts_from_assignments();
         self.invalidate_cached_tag_views_for_tags(&changed_tags);
+        self.sync_tag_assignments_normalized();
         self.refresh_visible_items_after_tag_change();
     }
 }

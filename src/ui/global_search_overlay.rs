@@ -546,7 +546,8 @@ fn render_filter_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
     ];
 
     // Use cached drives to avoid O(N) recomputation every frame.
-    app.global_search.ensure_filter_cache(&app.tag_assignments);
+    app.global_search
+        .ensure_filter_cache(app.tag_assignments_normalized.as_ref());
     let drives = app.global_search.cached_available_drives.clone();
     if app
         .global_search

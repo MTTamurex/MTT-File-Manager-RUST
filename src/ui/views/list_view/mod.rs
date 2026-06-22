@@ -260,7 +260,7 @@ pub struct ListViewContext<'a> {
     pub col_type_width: &'a mut f32,
     pub col_size_width: &'a mut f32,
     pub col_status_width: &'a mut f32,
-    pub tag_assignments: &'a rustc_hash::FxHashMap<PathBuf, Vec<i64>>,
+    pub tag_assignments: &'a rustc_hash::FxHashMap<String, Vec<i64>>,
     pub tag_definitions: &'a rustc_hash::FxHashMap<i64, FileTag>,
 }
 

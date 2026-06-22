@@ -584,7 +584,7 @@ impl GlobalSearchState {
     /// Returns a reference to the cached filtered indices.
     pub fn ensure_filter_cache(
         &mut self,
-        tag_assignments: &rustc_hash::FxHashMap<std::path::PathBuf, Vec<i64>>,
+        tag_assignments: &rustc_hash::FxHashMap<String, Vec<i64>>,
     ) -> &[usize] {
         let filters = GlobalSearchFilters {
             category: self.category,
@@ -634,7 +634,7 @@ impl GlobalSearchState {
     /// Uses a cache key that includes generation, filters, sort_mode, and metadata epochs.
     pub fn ensure_sorted_indices(
         &mut self,
-        tag_assignments: &rustc_hash::FxHashMap<std::path::PathBuf, Vec<i64>>,
+        tag_assignments: &rustc_hash::FxHashMap<String, Vec<i64>>,
     ) -> &[usize] {
         self.ensure_filter_cache(tag_assignments);
         let filters = GlobalSearchFilters {

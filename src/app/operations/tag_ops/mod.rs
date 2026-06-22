@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 mod assignments;
 mod cache;
 mod definitions;
+pub(crate) mod normalized;
 mod view;
 
 fn normalize_path_text(path: &Path) -> String {

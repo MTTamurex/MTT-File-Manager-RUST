@@ -9,8 +9,7 @@ use crate::domain::file_entry::FileEntry;
 use crate::infrastructure::windows::{format_date, format_size};
 
 fn first_tag_color(item: &FileEntry, ctx: &ListViewContext) -> Option<Color32> {
-    ctx.tag_assignments
-        .get(&item.path)
+    crate::domain::file_tag::tag_ids_for_path(ctx.tag_assignments, &item.path)
         .and_then(|ids| ids.iter().find_map(|id| ctx.tag_definitions.get(id)))
         .map(|tag| tag.color.to_color32())
 }

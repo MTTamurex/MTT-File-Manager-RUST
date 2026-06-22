@@ -30,7 +30,7 @@ pub fn filter_items_opt_with_tags(
     items: &[FileEntry],
     query: &str,
     active_tag_filter: Option<i64>,
-    tag_assignments: &rustc_hash::FxHashMap<std::path::PathBuf, Vec<i64>>,
+    tag_assignments: &rustc_hash::FxHashMap<String, Vec<i64>>,
 ) -> Option<Vec<FileEntry>> {
     filtering::filter_items_opt_with_tags(items, query, active_tag_filter, tag_assignments)
 }

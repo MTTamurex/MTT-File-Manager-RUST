@@ -110,7 +110,7 @@ impl ImageViewerApp {
         self.reset_selection_and_search();
 
         let assignments = self.app_state_db.get_all_tag_assignments();
-        self.tag_assignments = Arc::new(assignments);
+        self.set_tag_assignments(assignments);
         self.recompute_tag_counts_from_assignments();
 
         let mut paths: Vec<PathBuf> = self

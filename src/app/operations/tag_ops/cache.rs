@@ -50,7 +50,10 @@ impl ImageViewerApp {
                     });
                 } else {
                     let snapshot = self.dual_panel_inactive_state.as_mut().unwrap();
-                    Self::refilter_snapshot_tag_view(snapshot, &self.tag_assignments);
+                    Self::refilter_snapshot_tag_view(
+                        snapshot,
+                        self.tag_assignments_normalized.as_ref(),
+                    );
                 }
             }
         }
@@ -70,7 +73,7 @@ impl ImageViewerApp {
 
     fn refilter_snapshot_tag_view(
         snapshot: &mut crate::app::dual_panel::PanelSnapshot,
-        tag_assignments: &FxHashMap<PathBuf, Vec<i64>>,
+        tag_assignments: &FxHashMap<String, Vec<i64>>,
     ) {
         // When compacted, all_items holds the real data and items is empty.
         // When not compacted, all_items is the authoritative source too.
@@ -189,6 +192,7 @@ impl ImageViewerApp {
         });
         self.recompute_tag_counts_from_assignments();
         self.invalidate_cached_tag_views_for_tags(&changed_tags);
+        self.sync_tag_assignments_normalized();
         self.refresh_visible_items_after_tag_change();
     }
 

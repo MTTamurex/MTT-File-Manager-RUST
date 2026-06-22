@@ -239,6 +239,11 @@ impl ImageViewerApp {
             .map(|tag| (tag.id, tag))
             .collect();
         let tag_assignments = Arc::new(app_state_db.get_all_tag_assignments());
+        let tag_assignments_normalized = Arc::new(
+            crate::app::operations::tag_ops::normalized::build_tag_assignments_normalized(
+                tag_assignments.as_ref(),
+            ),
+        );
         let tag_counts = app_state_db.get_tag_counts();
         let active_tag_filter =
             saved_active_tag_filter.filter(|id| tag_definitions.contains_key(id));
@@ -633,6 +638,7 @@ impl ImageViewerApp {
 
             tag_definitions,
             tag_assignments,
+            tag_assignments_normalized,
             tag_counts,
             tag_assignment_gc_sender,
             tag_assignment_gc_receiver,

@@ -208,7 +208,7 @@ pub struct GridViewContext<'a> {
     pub folder_preview_requests_this_frame: usize,
     /// Folder generation counter — scopes scroll state to current folder
     pub generation: usize,
-    pub tag_assignments: &'a rustc_hash::FxHashMap<PathBuf, Vec<i64>>,
+    pub tag_assignments: &'a rustc_hash::FxHashMap<String, Vec<i64>>,
     pub tag_definitions: &'a rustc_hash::FxHashMap<i64, FileTag>,
 }
 

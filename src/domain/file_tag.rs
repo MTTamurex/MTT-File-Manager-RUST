@@ -1,6 +1,6 @@
 use eframe::egui::Color32;
 use rustc_hash::FxHashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 pub fn normalize_tag_path_key(path: &Path) -> String {
     path.to_string_lossy()
@@ -9,21 +9,25 @@ pub fn normalize_tag_path_key(path: &Path) -> String {
         .to_lowercase()
 }
 
+/// O(1) lookup of tag IDs assigned to `path`.
+///
+/// `assignments` must be a map keyed by the canonical normalized path
+/// (lowercased, `\` separators, no trailing `\`) — see
+/// [`build_tag_assignments_normalized`] and [`normalize_tag_path_key`].
+///
+/// Performs exactly one `String` allocation (the normalized key) per call,
+/// independent of the assignments size. The previous O(N) case-insensitive
+/// fallback was removed because grid view invokes this per visible item per
+/// frame, and the fallback allocated an additional `String` per comparison.
 pub fn tag_ids_for_path<'a>(
-    assignments: &'a FxHashMap<PathBuf, Vec<i64>>,
+    assignments: &'a FxHashMap<String, Vec<i64>>,
     path: &Path,
 ) -> Option<&'a [i64]> {
-    if let Some(ids) = assignments.get(path) {
-        return Some(ids.as_slice());
-    }
-
-    let path_key = normalize_tag_path_key(path);
-    assignments.iter().find_map(|(assigned_path, ids)| {
-        (normalize_tag_path_key(assigned_path) == path_key).then_some(ids.as_slice())
-    })
+    let key = normalize_tag_path_key(path);
+    assignments.get(&key).map(|v| v.as_slice())
 }
 
-pub fn path_has_tag(assignments: &FxHashMap<PathBuf, Vec<i64>>, path: &Path, tag_id: i64) -> bool {
+pub fn path_has_tag(assignments: &FxHashMap<String, Vec<i64>>, path: &Path, tag_id: i64) -> bool {
     tag_ids_for_path(assignments, path).is_some_and(|ids| ids.contains(&tag_id))
 }
 

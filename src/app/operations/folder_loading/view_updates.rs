@@ -17,11 +17,11 @@ impl ImageViewerApp {
         };
         // PERFORMANCE: filter_items_opt returns None when query is empty,
         // signaling we should use all_items directly without cloning.
-        match sorting::filter_items_opt_with_tags(
+match sorting::filter_items_opt_with_tags(
             &self.all_items,
             &self.search_query,
             active_tag_filter,
-            &self.tag_assignments,
+            self.tag_assignments_normalized.as_ref(),
         ) {
             Some(mut filtered) => {
                 sorting::sort_items(

@@ -133,11 +133,11 @@ impl ImageViewerApp {
         } else {
             self.active_tag_filter
         };
-        let result_items = match sorting::filter_items_opt_with_tags(
+let result_items = match sorting::filter_items_opt_with_tags(
             &self.all_items,
             &self.search_query,
             active_tag_filter,
-            &self.tag_assignments,
+            self.tag_assignments_normalized.as_ref(),
         ) {
             Some(mut filtered) => {
                 sorting::sort_items(
@@ -179,7 +179,7 @@ impl ImageViewerApp {
         } else {
             self.active_tag_filter
         };
-        let tag_assignments = self.tag_assignments.clone();
+        let tag_assignments = self.tag_assignments_normalized.clone();
         let sort_mode = self.sort_mode;
         let sort_descending = self.sort_descending;
         let folders_position = self.folders_position;

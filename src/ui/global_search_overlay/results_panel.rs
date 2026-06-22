@@ -33,7 +33,7 @@ pub(super) fn render_results_panel(
     // Use cached sorted indices to avoid O(N) recomputation every frame.
     // Take ownership temporarily to avoid cloning; put back at the end.
     app.global_search
-        .ensure_sorted_indices(&app.tag_assignments);
+        .ensure_sorted_indices(app.tag_assignments_normalized.as_ref());
     let filtered_indices = std::mem::take(&mut app.global_search.cached_sorted_indices);
 
     let shows_load_more = !app.global_search.query.is_empty()

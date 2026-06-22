@@ -78,6 +78,7 @@ impl ImageViewerApp {
         // Drop any stale tag IDs from the active global search filter.
         self.prune_stale_tag_filter();
 
+        self.sync_tag_assignments_normalized();
         self.refresh_visible_items_after_tag_change();
         true
     }

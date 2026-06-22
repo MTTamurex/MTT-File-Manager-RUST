@@ -339,7 +339,7 @@ impl ImageViewerApp {
             col_type_width,
             col_size_width,
             col_status_width,
-            tag_assignments: &self.tag_assignments,
+tag_assignments: self.tag_assignments_normalized.as_ref(),
             tag_definitions: &self.tag_definitions,
         };
 

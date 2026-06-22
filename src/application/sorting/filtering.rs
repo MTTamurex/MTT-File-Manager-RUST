@@ -1,7 +1,6 @@
 use crate::domain::file_entry::FileEntry;
 use crate::domain::file_tag;
 use rustc_hash::FxHashMap;
-use std::path::PathBuf;
 
 /// Check if haystack contains needle (case-insensitive) using precomputed needle.
 /// Fast path for ASCII, fallback to Unicode-aware comparison.
@@ -90,7 +89,7 @@ pub(super) fn filter_items_opt_with_tags(
     items: &[FileEntry],
     query: &str,
     active_tag_filter: Option<i64>,
-    tag_assignments: &FxHashMap<PathBuf, Vec<i64>>,
+    tag_assignments: &FxHashMap<String, Vec<i64>>,
 ) -> Option<Vec<FileEntry>> {
     let has_tag_filter = active_tag_filter.is_some();
     if query.is_empty() && !has_tag_filter {

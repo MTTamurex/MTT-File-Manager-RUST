@@ -271,7 +271,7 @@ pub(super) fn render_result_row(
     // outlive this block.
     let tag_ids: Vec<i64> = {
         let path = std::path::Path::new(&full_path);
-        crate::domain::file_tag::tag_ids_for_path(&app.tag_assignments, path)
+        crate::domain::file_tag::tag_ids_for_path(app.tag_assignments_normalized.as_ref(), path)
             .map(|ids| ids.to_vec())
             .unwrap_or_default()
     };

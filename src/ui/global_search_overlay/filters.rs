@@ -26,7 +26,7 @@ pub(crate) fn build_filtered_indices(
     created_before: Option<u64>,
     created_ts_cache: &[CreatedMetadataState],
     tag_filter: &GlobalSearchTagFilter,
-    tag_assignments: &rustc_hash::FxHashMap<std::path::PathBuf, Vec<i64>>,
+    tag_assignments: &rustc_hash::FxHashMap<String, Vec<i64>>,
 ) -> Vec<usize> {
     let mut filtered = Vec::with_capacity(results.len());
 
@@ -234,13 +234,12 @@ mod tests {
         CreatedMetadataState, GlobalSearchCategory, GlobalSearchTagFilter,
     };
     use mtt_search_protocol::SearchResultItem;
-    use std::path::PathBuf;
 
     fn empty_cache() -> Vec<CreatedMetadataState> {
         Vec::new()
     }
 
-    fn empty_assignments() -> rustc_hash::FxHashMap<PathBuf, Vec<i64>> {
+    fn empty_assignments() -> rustc_hash::FxHashMap<String, Vec<i64>> {
         rustc_hash::FxHashMap::default()
     }
 
@@ -474,11 +473,11 @@ mod tests {
         ]
     }
 
-    fn assignments_for_sample() -> rustc_hash::FxHashMap<PathBuf, Vec<i64>> {
+    fn assignments_for_sample() -> rustc_hash::FxHashMap<String, Vec<i64>> {
         let mut map = rustc_hash::FxHashMap::default();
-        map.insert(PathBuf::from(r"C:\tagged_a.txt"), vec![1]);
-        map.insert(PathBuf::from(r"C:\tagged_b.txt"), vec![2]);
-        map.insert(PathBuf::from(r"C:\tagged_both.txt"), vec![1, 2]);
+        map.insert(r"c:\tagged_a.txt".to_string(), vec![1]);
+        map.insert(r"c:\tagged_b.txt".to_string(), vec![2]);
+        map.insert(r"c:\tagged_both.txt".to_string(), vec![1, 2]);
         // untagged.txt intentionally absent
         map
     }
