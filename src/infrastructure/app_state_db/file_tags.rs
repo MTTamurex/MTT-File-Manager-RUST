@@ -261,6 +261,35 @@ impl AppStateDb {
         results
     }
 
+    /// Load paths assigned to a specific tag, using the `idx_file_tag_assignments_tag`
+    /// index for an efficient filtered lookup instead of a full table scan. [READER]
+    pub fn get_tag_assignment_paths(&self, tag_id: i64) -> Vec<PathBuf> {
+        let db = match self.reader.lock() {
+            Ok(db) => db,
+            Err(e) => {
+                log::error!("[TAGS] Failed to acquire reader lock for get_tag_assignment_paths: {:?}", e);
+                return Vec::new();
+            }
+        };
+        let mut stmt = match db.prepare(
+            "SELECT file_path FROM file_tag_assignments \
+             WHERE tag_id = ?1 ORDER BY file_path ASC",
+        ) {
+            Ok(stmt) => stmt,
+            Err(e) => {
+                log::error!("[TAGS] Failed to prepare tag paths SELECT: {:?}", e);
+                return Vec::new();
+            }
+        };
+        stmt.query_map(params![tag_id], |row| {
+            row.get::<_, String>(0)
+                .map(|s| PathBuf::from(normalize_path_text(&s)))
+        })
+        .ok()
+        .map(|rows| rows.flatten().collect())
+        .unwrap_or_default()
+    }
+
     /// Assign a tag to many paths in a single transaction. [WRITER]
     pub fn assign_tag_batch(&self, paths: &[PathBuf], tag_id: i64) -> bool {
         let paths = storage_path_texts(paths);

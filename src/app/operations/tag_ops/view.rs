@@ -3,18 +3,61 @@ use crate::app::state::{FolderLoadError, ImageViewerApp};
 use crate::domain::file_entry::FileEntry;
 use crate::domain::file_tag::FileTag;
 use crate::domain::special_paths::{tag_id_from_view_path, tag_view_path};
-use std::os::windows::fs::MetadataExt;
+use std::os::windows::ffi::OsStrExt;
 use std::path::PathBuf;
+use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
-use std::time::{Instant, UNIX_EPOCH};
+use std::time::Instant;
+use windows::core::PCWSTR;
+use windows::Win32::Storage::FileSystem::{
+    GetFileAttributesExW, GetFileExInfoStandard, INVALID_FILE_ATTRIBUTES,
+    WIN32_FILE_ATTRIBUTE_DATA,
+};
+
+/// Convert a Windows FILETIME (100-nanosecond intervals since 1601-01-01) to
+/// Unix seconds. Returns 0 for invalid/zero timestamps.
+fn filetime_to_unix_secs(ft: &windows::Win32::Foundation::FILETIME) -> u64 {
+    let ticks = ((ft.dwHighDateTime as u64) << 32) | (ft.dwLowDateTime as u64);
+    if ticks > 116444736000000000 {
+        (ticks - 116444736000000000) / 10_000_000
+    } else {
+        0
+    }
+}
 
 fn tag_view_file_entry(path: PathBuf, show_hidden: bool) -> Option<FileEntry> {
-    let metadata = std::fs::metadata(&path).ok()?;
+    // Use GetFileAttributesExW instead of std::fs::metadata().
+    // std::fs::metadata() calls CreateFileW + GetFileInformationByHandle + CloseHandle,
+    // which opens a kernel handle per file (security check, share mode check, object
+    // allocation/deallocation). On a cold NTFS cache this is 5-15ms per file on HDD.
+    //
+    // GetFileAttributesExW reads from the directory entry cache in a single kernel
+    // call — no handle, no OneDrive file recall, returns in microseconds.
+    // It returns WIN32_FILE_ATTRIBUTE_DATA with all fields we need: attributes,
+    // file size, and creation/last-write timestamps.
+    let path_wide: Vec<u16> = path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    let mut data = WIN32_FILE_ATTRIBUTE_DATA::default();
+    let result = unsafe {
+        GetFileAttributesExW(
+            PCWSTR(path_wide.as_ptr()),
+            GetFileExInfoStandard,
+            &mut data as *mut _ as *mut std::ffi::c_void,
+        )
+    };
+    if result.is_err() || data.dwFileAttributes == INVALID_FILE_ATTRIBUTES {
+        return None;
+    }
+
     let name = path.file_name()?.to_string_lossy().to_string();
     let is_archive = crate::domain::file_entry::is_archive_extension(&name);
-    let is_real_dir = metadata.is_dir();
+    let attrs = data.dwFileAttributes;
+    let is_real_dir = (attrs & 0x10) != 0; // FILE_ATTRIBUTE_DIRECTORY
     let is_dir = is_real_dir || is_archive;
-    let is_hidden = (metadata.file_attributes() & 0x2) != 0;
+    let is_hidden = (attrs & 0x2) != 0;
     if is_hidden && !show_hidden {
         return None;
     }
@@ -22,22 +65,19 @@ fn tag_view_file_entry(path: PathBuf, show_hidden: bool) -> Option<FileEntry> {
     let size = if is_real_dir && !is_archive {
         0
     } else {
-        metadata.len()
+        ((data.nFileSizeHigh as u64) << 32) | (data.nFileSizeLow as u64)
     };
-    let modified = metadata
-        .modified()
-        .ok()
-        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
-        .map(|duration| duration.as_secs())
-        .unwrap_or(0);
-    let created = metadata
-        .created()
-        .ok()
-        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
-        .map(|duration| duration.as_secs())
-        .filter(|created| *created > 0);
-    let sync_status = crate::infrastructure::onedrive::sync_status_for_path(&path)
-        .unwrap_or(crate::domain::file_entry::SyncStatus::None);
+    let modified = filetime_to_unix_secs(&data.ftLastWriteTime);
+    let created = {
+        let c = filetime_to_unix_secs(&data.ftCreationTime);
+        if c > 0 { Some(c) } else { None }
+    };
+    let is_cloud = crate::infrastructure::onedrive::is_cloud_sync_path(&path);
+    let sync_status = if is_cloud {
+        crate::infrastructure::onedrive::get_sync_status(attrs, true)
+    } else {
+        crate::domain::file_entry::SyncStatus::None
+    };
 
     Some(FileEntry {
         path,
@@ -109,45 +149,61 @@ impl ImageViewerApp {
         self.loaded_path = view_path;
         self.reset_selection_and_search();
 
-        let assignments = self.app_state_db.get_all_tag_assignments();
-        self.set_tag_assignments(assignments);
-        self.recompute_tag_counts_from_assignments();
+        // The in-memory tag_assignments map is loaded at startup (init.rs)
+        // and maintained by all tag mutation paths via sync_tag_assignments_normalized().
+        // No need to reload from DB here — the filtered path list is queried
+        // directly from SQLite in the background thread (see below).
 
-        let mut paths: Vec<PathBuf> = self
-            .tag_assignments
-            .iter()
-            .filter(|(_, ids)| ids.contains(&tag_id))
-            .map(|(path, _)| path.clone())
-            .collect();
-        paths.sort_by_key(|path| path.to_string_lossy().to_lowercase());
-
-        let generation = self.generation;
+        let my_gen = self.generation;
         let sender = self.file_entry_sender.clone();
         let ui_ctx = self.ui_ctx.clone();
         let show_hidden = self.show_hidden_files;
         let failure_path = PathBuf::from(&self.navigation_state.current_path);
+        let app_state_db = self.app_state_db.clone();
+
+        // Generation-aware cancellation: for the active panel, use the shared
+        // current_generation atomic so the thread can detect navigation away.
+        // For the inactive panel, use a local atomic that never changes
+        // (bump_folder_load_generation skips current_generation for inactive
+        // panel context, so using the shared atomic would cause immediate break).
+        let gen_tracker: Arc<AtomicUsize> = if self.in_inactive_panel_context {
+            Arc::new(AtomicUsize::new(self.generation))
+        } else {
+            self.current_generation.clone()
+        };
 
         let spawn_result = std::thread::Builder::new()
             .name("tag-view-load".into())
             .spawn(move || {
                 const BATCH_SIZE: usize = 100;
+
+                // Query only paths for this specific tag using the
+                // idx_file_tag_assignments_tag index — avoids full table scan.
+                let mut paths = app_state_db.get_tag_assignment_paths(tag_id);
+                paths.sort_by_key(|path| path.to_string_lossy().to_lowercase());
+
                 let mut batch = Vec::with_capacity(BATCH_SIZE);
 
                 for path in paths {
+                    if gen_tracker.load(std::sync::atomic::Ordering::Relaxed) != my_gen {
+                        break; // User navigated away — abort early
+                    }
                     if let Some(entry) = tag_view_file_entry(path, show_hidden) {
                         batch.push(entry);
                         if batch.len() >= BATCH_SIZE {
-                            let _ = sender.send((generation, std::mem::take(&mut batch)));
+                            let _ = sender.send((my_gen, std::mem::take(&mut batch)));
                             ui_ctx.request_repaint();
                             batch = Vec::with_capacity(BATCH_SIZE);
                         }
                     }
                 }
 
+                // Always send end-of-load sentinel, even after generation-break.
+                // The consumer discards batches from old generations, so this is safe.
                 if !batch.is_empty() {
-                    let _ = sender.send((generation, batch));
+                    let _ = sender.send((my_gen, batch));
                 }
-                let _ = sender.send((generation, Vec::new()));
+                let _ = sender.send((my_gen, Vec::new()));
                 ui_ctx.request_repaint();
             });
 
@@ -161,7 +217,7 @@ impl ImageViewerApp {
             ));
             let _ = self
                 .folder_load_failure_sender
-                .send((generation, FolderLoadError::other(failure_path, message)));
+                .send((my_gen, FolderLoadError::other(failure_path, message)));
             self.ui_ctx.request_repaint();
         }
     }
