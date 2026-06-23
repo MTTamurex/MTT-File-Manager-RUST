@@ -207,6 +207,10 @@ impl ImageViewerApp {
                                 }
                             }
                             self.directory_cache.invalidate_children(&cleaned);
+                            // Drop the cached FileEntry row so tag views do not
+                            // surface a deleted file on the next selection.
+                            self.app_state_db
+                                .invalidate_cached_file_entry(&cleaned);
                             #[cfg(debug_assertions)]
                             log::trace!(
                                 "[FS-WATCH-LEGACY] REMOVE: {:?}",
@@ -306,6 +310,13 @@ impl ImageViewerApp {
 
                             pending_disk_cache_invalidations.push(cleaned_old.clone());
                             pending_disk_cache_invalidations.push(cleaned_new.clone());
+                            // Tag views cache FileEntry rows by path; a rename
+                            // leaves a stale row under the old name and a missing
+                            // row under the new name. Move the cached row so the
+                            // new path receives the old metadata (size, mtime, etc.)
+                            // and the new stat on next tag load refreshes it.
+                            self.app_state_db
+                                .rename_cached_file_entry(&cleaned_old, &cleaned_new);
 
                             if let Some(parent) = cleaned_old.parent() {
                                 self.invalidate_directory_listing_caches(parent);

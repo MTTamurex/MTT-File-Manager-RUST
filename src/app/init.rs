@@ -642,6 +642,9 @@ impl ImageViewerApp {
             tag_counts,
             tag_assignment_gc_sender,
             tag_assignment_gc_receiver,
+            purge_worker_state: Some(
+                crate::app::operations::tag_ops::purge_worker::PurgeWorkerState::new(),
+            ),
             active_tag_filter,
             collapse_tags: false,
             show_tag_manager: false,

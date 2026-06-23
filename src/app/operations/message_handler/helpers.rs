@@ -256,6 +256,11 @@ impl ImageViewerApp {
         }
         self.evict_stale_path_caches(&path_to_remove);
         self.enqueue_disk_cache_invalidations_forced(vec![path_to_remove.clone()]);
+        // Drop the persistent FileEntry cache row so the next tag view load
+        // does not surface a deleted/missing file. Idempotent: invalidate is
+        // a DELETE so a missing row is a no-op.
+        self.app_state_db
+            .invalidate_cached_file_entry(&path_to_remove);
 
         let removed_from_all = self
             .all_items
@@ -452,6 +457,14 @@ impl ImageViewerApp {
         self.file_operation_state
             .pending_deletions
             .remove(&cleaned_new);
+
+        // Move the persistent FileEntry cache row so tag view loads after a
+        // rename serve from the renamed path without re-stat. Done BEFORE
+        // try_remove_deleted_path_from_ui so the row survives (its entry under
+        // cleaned_old is moved to cleaned_new before the delete invalidates
+        // cleaned_old).
+        self.app_state_db
+            .rename_cached_file_entry(&cleaned_old, &cleaned_new);
 
         // NOTE: evict_stale_path_caches / enqueue_disk_cache_invalidations_forced
         // are called inside the sub-methods below.  Calling them here too would

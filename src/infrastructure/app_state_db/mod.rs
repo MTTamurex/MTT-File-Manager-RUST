@@ -12,6 +12,7 @@ use std::sync::{Arc, Mutex};
 use super::db_utils;
 
 mod cleanup;
+mod file_entry_cache;
 mod file_tags;
 mod folder_covers;
 mod folder_locks;
@@ -193,6 +194,24 @@ impl AppStateDb {
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_file_tag_assignments_tag
              ON file_tag_assignments(tag_id)",
+            [],
+        )
+        .unwrap_or(0);
+
+        // File entry cache (persistent metadata for tag views).
+        // Used to skip GetFileAttributesExW syscalls on tag selection,
+        // especially on a cold NTFS cache after restart or long idle.
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS file_entry_cache (
+                file_path TEXT PRIMARY KEY COLLATE NOCASE,
+                is_dir INTEGER NOT NULL,
+                size INTEGER NOT NULL,
+                modified INTEGER NOT NULL,
+                created INTEGER,
+                is_hidden INTEGER NOT NULL,
+                sync_status INTEGER NOT NULL,
+                cached_at INTEGER NOT NULL
+            )",
             [],
         )
         .unwrap_or(0);

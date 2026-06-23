@@ -104,6 +104,10 @@ impl ImageViewerApp {
             self.reconcile_garbage_collected_tag_assignments(&paths);
         }
 
+        // Drain the focus-restore purge worker (replaces the previous
+        // synchronous scan that ran on the UI thread at lifecycle.rs).
+        crate::app::operations::tag_ops::purge_worker::process_purge_results(self);
+
         // 2. CHECK DE AUTO-REFRESH (WATCHER)
         let watcher_perf = self.process_watcher_events_and_auto_reload(&current_path_norm);
         let _t_watcher_start = watcher_perf.watcher_start;

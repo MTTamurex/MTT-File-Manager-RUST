@@ -175,36 +175,155 @@ impl ImageViewerApp {
         let spawn_result = std::thread::Builder::new()
             .name("tag-view-load".into())
             .spawn(move || {
+                // Adaptive batching: the first 2 batches are small so the user
+                // sees something quickly even on a cold NTFS cache, where each
+                // GetFileAttributesExW syscall costs 5-15ms on HDD. After that
+                // we use the full batch size for throughput.
+                const FIRST_BATCH_SIZE: usize = 20;
                 const BATCH_SIZE: usize = 100;
 
                 // Query only paths for this specific tag using the
                 // idx_file_tag_assignments_tag index — avoids full table scan.
-                let mut paths = app_state_db.get_tag_assignment_paths(tag_id);
-                paths.sort_by_key(|path| path.to_string_lossy().to_lowercase());
+                // The result is already ORDER BY file_path ASC from the SQL,
+                // so we don't re-sort on the client (avoiding per-path String
+                // allocations and the latency of the first paint).
+                let paths = app_state_db.get_tag_assignment_paths(tag_id);
+                let total = paths.len();
 
-                let mut batch = Vec::with_capacity(BATCH_SIZE);
-
-                for path in paths {
-                    if gen_tracker.load(std::sync::atomic::Ordering::Relaxed) != my_gen {
-                        break; // User navigated away — abort early
+                let started = std::time::Instant::now();
+                let mut first_batch_sent: Option<std::time::Instant> = None;
+                let mark_first = |first: &mut Option<std::time::Instant>| {
+                    if first.is_none() {
+                        *first = Some(std::time::Instant::now());
                     }
-                    if let Some(entry) = tag_view_file_entry(path, show_hidden) {
-                        batch.push(entry);
-                        if batch.len() >= BATCH_SIZE {
-                            let _ = sender.send((my_gen, std::mem::take(&mut batch)));
+                };
+
+                // 1) Cache lookup. This is a single indexed SQLite read and
+                //    lets the user see something immediately on a cold cache.
+                //    Cloud paths are excluded from the cache by design.
+                let cached: rustc_hash::FxHashMap<std::path::PathBuf, FileEntry> =
+                    app_state_db.get_cached_file_entries(&paths);
+
+                if !cached.is_empty() {
+                    // Apply the show_hidden filter on the cached entries
+                    // (matches what the cold path does via tag_view_file_entry).
+                    let mut cached_entries: Vec<FileEntry> = Vec::with_capacity(cached.len());
+                    for entry in cached.values() {
+                        if entry.is_hidden && !show_hidden {
+                            continue;
+                        }
+                        cached_entries.push(entry.clone());
+                    }
+                    if !cached_entries.is_empty() {
+                        let _ = sender.send((my_gen, cached_entries));
+                        ui_ctx.request_repaint();
+                        mark_first(&mut first_batch_sent);
+                    }
+                }
+
+                // 2) Stat misses. Detect SSD vs HDD to choose serial or
+                //    parallel work — random stat on HDD thrashes the seek
+                //    head, so the previous serial implementation was correct
+                //    for HDD; on SSD we can parallelize safely.
+                let misses: Vec<std::path::PathBuf> = paths
+                    .iter()
+                    .filter(|p| !cached.contains_key(*p))
+                    .cloned()
+                    .collect();
+
+                // Detect disk type from the first miss (or any path on the
+                // same tag). Cached at the OS-process level, so this is one
+                // DeviceIoControl per drive per session.
+                let is_ssd = misses
+                    .first()
+                    .or(paths.first())
+                    .map(|p| crate::infrastructure::io_priority::is_ssd(p))
+                    .unwrap_or(true);
+
+                let mut fresh_entries: Vec<FileEntry> = Vec::with_capacity(misses.len());
+                if is_ssd {
+                    // Parallel: process misses in chunks of BATCH_SIZE so each
+                    // chunk preserves order. Within a chunk we use rayon
+                    // par_iter for the stat loop.
+                    use rayon::prelude::*;
+                    for chunk in misses.chunks(BATCH_SIZE) {
+                        if gen_tracker.load(std::sync::atomic::Ordering::Relaxed) != my_gen {
+                            break;
+                        }
+                        let chunk_entries: Vec<FileEntry> = chunk
+                            .par_iter()
+                            .filter_map(|p| tag_view_file_entry(p.clone(), show_hidden))
+                            .collect();
+                        if !chunk_entries.is_empty() {
+                            let _ = sender.send((my_gen, chunk_entries.clone()));
                             ui_ctx.request_repaint();
-                            batch = Vec::with_capacity(BATCH_SIZE);
+                            mark_first(&mut first_batch_sent);
+                            fresh_entries.extend(chunk_entries);
                         }
                     }
+                } else {
+                    // HDD / network / USB: serial, but use the adaptive
+                    // small-batch strategy so the user sees something
+                    // quickly.
+                    let mut batch = Vec::with_capacity(FIRST_BATCH_SIZE);
+                    let mut batch_index: usize = 0;
+                    for path in &misses {
+                        if gen_tracker.load(std::sync::atomic::Ordering::Relaxed) != my_gen {
+                            break;
+                        }
+                        if let Some(entry) = tag_view_file_entry(path.clone(), show_hidden) {
+                            batch.push(entry.clone());
+                            fresh_entries.push(entry);
+                            let current_batch_size = if batch_index < 2 {
+                                FIRST_BATCH_SIZE
+                            } else {
+                                BATCH_SIZE
+                            };
+                            if batch.len() >= current_batch_size {
+                                let _ = sender.send((my_gen, std::mem::take(&mut batch)));
+                                ui_ctx.request_repaint();
+                                mark_first(&mut first_batch_sent);
+                                batch_index += 1;
+                                batch = Vec::with_capacity(if batch_index < 2 {
+                                    FIRST_BATCH_SIZE
+                                } else {
+                                    BATCH_SIZE
+                                });
+                            }
+                        }
+                    }
+                    if !batch.is_empty() {
+                        let _ = sender.send((my_gen, batch));
+                        ui_ctx.request_repaint();
+                        mark_first(&mut first_batch_sent);
+                    }
+                }
+
+                // 3) Persist fresh entries to the cache for next time.
+                if !fresh_entries.is_empty() {
+                    app_state_db.upsert_cached_file_entries(&fresh_entries);
                 }
 
                 // Always send end-of-load sentinel, even after generation-break.
                 // The consumer discards batches from old generations, so this is safe.
-                if !batch.is_empty() {
-                    let _ = sender.send((my_gen, batch));
-                }
                 let _ = sender.send((my_gen, Vec::new()));
                 ui_ctx.request_repaint();
+
+                let time_to_first_ms = first_batch_sent
+                    .map(|t| t.saturating_duration_since(started).as_millis() as i64)
+                    .unwrap_or(-1);
+                let total_ms = started.elapsed().as_millis() as i64;
+                log::info!(
+                    "[TAGS] setup_tag_view(tag_id={}) total_paths={} cache_hits={} \
+                     cache_misses={} is_ssd={} time_to_first_batch_ms={} total_ms={}",
+                    tag_id,
+                    total,
+                    cached.len(),
+                    misses.len(),
+                    is_ssd,
+                    time_to_first_ms,
+                    total_ms
+                );
             });
 
         if let Err(error) = spawn_result {

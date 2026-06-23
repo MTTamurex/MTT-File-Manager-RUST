@@ -6,6 +6,7 @@ mod assignments;
 mod cache;
 mod definitions;
 pub(crate) mod normalized;
+pub(crate) mod purge_worker;
 mod view;
 
 fn normalize_path_text(path: &Path) -> String {

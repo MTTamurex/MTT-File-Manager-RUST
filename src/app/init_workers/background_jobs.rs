@@ -45,7 +45,13 @@ pub(in crate::app) fn spawn_incremental_gc_worker(
     ctx: egui::Context,
 ) {
     std::thread::spawn(move || {
-        const GC_INITIAL_DELAY_SECS: u64 = 20;
+        // Delayed to avoid competing for a cold NTFS cache during the user's
+        // first interactions (typically selecting a tag with many items).
+        // The very first tag selection after restart / long idle is the
+        // worst case (cold OS file cache) and the GC's path_exists_fast
+        // calls would steal disk bandwidth from the GetFileAttributesExW
+        // loop in setup_tag_view, so we yield the first ~45s.
+        const GC_INITIAL_DELAY_SECS: u64 = 45;
         const GC_ACTIVE_INTERVAL_SECS: u64 = 180;
         const GC_IDLE_INTERVAL_SECS: u64 = 20;
         const GC_ACTIVE_BATCH: usize = 120;
