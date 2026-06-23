@@ -13,6 +13,8 @@ pub enum PreviewPanelAction {
         position: f64,
         volume: f32,
     },
+    /// Navigate to the clicked breadcrumb segment (a parent folder on disk).
+    NavigateTo(PathBuf),
 }
 
 pub const PREVIEW_MAX_HEIGHT: f32 = 240.0;

@@ -309,6 +309,9 @@ pub(super) fn render_preview_panel_layout(
                                     PreviewPanelAction::VolumeChanged(vol) => {
                                         app.session_volume = vol;
                                     }
+                                    PreviewPanelAction::NavigateTo(target) => {
+                                        app.navigate_to(&target.to_string_lossy());
+                                    }
                                 }
                             }
                         } else {

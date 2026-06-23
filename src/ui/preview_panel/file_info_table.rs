@@ -1,8 +1,9 @@
 use crate::app::folder_size_state::FolderContentSummary;
-use crate::domain::file_entry::FileEntry;
+use crate::domain::file_entry::{is_path_inside_archive, FileEntry};
 use crate::domain::special_paths::{COMPUTER_VIEW_ID, RECYCLE_BIN_VIEW_ID};
 use crate::infrastructure::windows::MediaMetadata;
 use crate::ui::cache::FxHashSet;
+use crate::ui::components::breadcrumb::breadcrumb_segments_for_path;
 use crate::ui::preview_panel::actions::PreviewPanelAction;
 use crate::ui::svg_icons::SvgIconManager;
 use eframe::egui;
@@ -88,6 +89,13 @@ pub fn render_file_info_table(
         ui.set_max_width(ui.available_width());
         ui.with_layout(egui::Layout::top_down(egui::Align::LEFT), |ui| {
             ui.set_max_width(ui.available_width());
+            // True when the selected entry lives inside a Tag virtual view.
+            // Computed up front because it gates both the breadcrumb and the
+            // "Type" row below.
+            let is_tag_view = crate::domain::special_paths::tag_id_from_view_path(
+                &file.path.to_string_lossy(),
+            )
+            .is_some();
             // 1. Filename Header (matches Explorer style)
             ui.add_space(10.0);
             ui.horizontal(|ui| {
@@ -152,6 +160,60 @@ pub fn render_file_info_table(
                     });
                 }
             });
+
+            // 1b. Clickable breadcrumb trail showing the parent path of the
+            // selected item (the item's own name is already displayed in the
+            // title above, so we drop the last segment to avoid duplication).
+            // Skipped for virtual views (Computer / Recycle Bin root / Tag view)
+            // and for archive-inside virtual paths. For Recycle Bin items we
+            // show the parent of the original location.
+            let path_for_breadcrumb: Option<std::path::PathBuf> = if is_tag_view
+                || file.name == COMPUTER_VIEW_ID
+                || file.name == RECYCLE_BIN_VIEW_ID
+                || file.drive_info.is_some()
+                || is_path_inside_archive(file.path())
+            {
+                None
+            } else if file.is_recycle_item() {
+                file.recycle_original_path()
+                    .and_then(|p| p.parent().map(|parent| parent.to_path_buf()))
+                    .filter(|p| !p.as_os_str().is_empty())
+            } else {
+                file.path
+                    .parent()
+                    .map(|p| p.to_path_buf())
+                    .filter(|p| !p.as_os_str().is_empty())
+            };
+            if let Some(target_path) = path_for_breadcrumb {
+                let segments = breadcrumb_segments_for_path(&target_path);
+                if !segments.is_empty() {
+                    // Visual gap so the breadcrumb reads as separate from the
+                    // bold title above.
+                    ui.add_space(6.0);
+                    // Center the trail across the panel width. We can't rely
+                    // on a centered parent layout because the inner
+                    // `horizontal_wrapped` fills the full available width.
+                    // Instead, we measure the natural width and add a
+                    // leading spacer that pushes the trail to the middle.
+                    let available_width = ui.available_width();
+                    let natural_width = crate::ui::components::breadcrumb::measure_breadcrumb_trail(
+                        ui, &segments,
+                    );
+                    let x_offset = ((available_width - natural_width) / 2.0).max(0.0);
+                    ui.horizontal(|ui| {
+                        ui.add_space(x_offset);
+                        if let Some(clicked) = crate::ui::components::breadcrumb::render_breadcrumb_trail(
+                            ui,
+                            &segments,
+                        ) {
+                            action = Some(PreviewPanelAction::NavigateTo(
+                                std::path::PathBuf::from(clicked),
+                            ));
+                        }
+                    });
+                }
+            }
+
             ui.add_space(10.0);
             ui.separator();
             ui.add_space(10.0);
@@ -171,9 +233,7 @@ pub fn render_file_info_table(
             };
 
             // 2. Type (General)
-            let is_tag_view =
-                crate::domain::special_paths::tag_id_from_view_path(&file.path.to_string_lossy())
-                    .is_some();
+            // `is_tag_view` is computed once at the top of this layout closure.
             if is_tag_view {
                 add_detail(
                     ui,
