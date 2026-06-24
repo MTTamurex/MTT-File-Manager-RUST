@@ -127,6 +127,14 @@ fn validate_video_path(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// `CREATE_BELOW_NORMAL_PRIORITY` (Windows).
+/// Spawning the standalone video player with below-normal priority keeps the
+/// OS scheduler from starving the main app's UI thread during the player's
+/// heavy init (DLL load, MPV bring-up, decoder allocation, GPU setup), which
+/// otherwise causes a multi-second scroll lag spike in the dual-panel
+/// grid view (the UI thread is already under load rendering two panels).
+const BELOW_NORMAL_PRIORITY_FLAG: u32 = 0x0000_4000;
+
 /// Spawn a standalone video player process for the given file.
 ///
 /// Returns the `Child` handle so the caller can track/kill the process.
@@ -152,17 +160,35 @@ pub fn open_video_player(path: PathBuf, position: f64, volume: f32) -> Option<Ch
         }
     };
 
-    let spawn_result = Command::new(exe)
-        .arg("--video-player")
+    let mut cmd = Command::new(exe);
+    cmd.arg("--video-player")
         .arg(&path)
         .arg("--position")
         .arg(position.to_string())
         .arg("--volume")
-        .arg(volume.to_string())
-        .spawn();
+        .arg(volume.to_string());
+
+    // Windows: run the child at below-normal priority so its startup
+    // (MPV init, decoder allocation, file load) does not preempt the
+    // main app's UI thread, which manifests as a multi-second scroll
+    // lag in dual-panel + tag view + grid mode.
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(BELOW_NORMAL_PRIORITY_FLAG);
+    }
+
+    let spawn_result = cmd.spawn();
 
     match spawn_result {
-        Ok(child) => Some(child),
+        Ok(child) => {
+            log::info!(
+                "[VIDEO-PLAYER] spawned standalone player pid={:?} path={} priority=below_normal",
+                child.id(),
+                path.display()
+            );
+            Some(child)
+        }
         Err(err) => {
             log::error!(
                 "[VIDEO-PLAYER] failed to spawn standalone player for '{}': {}",
