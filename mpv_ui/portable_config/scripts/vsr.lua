@@ -16,6 +16,7 @@ local state = {
     saved_hdr_options = nil,
     physical_display = { width = nil, height = nil },
     restore_timer = nil,
+    window_minimized = false,
 }
 
 local function sync_ui_flags()
@@ -259,6 +260,11 @@ local function apply_filter_chain()
         return false
     end
 
+    if state.window_minimized then
+        mp.msg.info("RTX filters: skipped apply (window-minimized)")
+        return false
+    end
+
     local codec = mp.get_property("video-codec", "")
     local pixel_format = mp.get_property("video-params/pixelformat", "")
     local primaries = mp.get_property("video-params/primaries", "")
@@ -383,6 +389,9 @@ local function schedule_restore(delay_seconds)
 
     state.restore_timer = mp.add_timeout(delay_seconds, function()
         state.restore_timer = nil
+        if state.window_minimized then
+            return
+        end
         if (state.vsr_enabled or state.hdr_enabled) and not mp.get_property_bool("fullscreen", false) then
             apply_filter_chain()
         end
@@ -398,8 +407,32 @@ mp.observe_property("fullscreen", "bool", function(_, is_fullscreen)
     schedule_restore(0.30)
 end)
 
+mp.observe_property("window-minimized", "bool", function(_, is_minimized)
+    state.window_minimized = is_minimized and true or false
+
+    if state.window_minimized then
+        if state.restore_timer then
+            state.restore_timer:kill()
+            state.restore_timer = nil
+        end
+        if state.chain_active then
+            mp.msg.info("RTX filters: suspending chain (window-minimized)")
+            remove_filter_chain()
+        end
+        return
+    end
+
+    if state.vsr_enabled or state.hdr_enabled then
+        schedule_restore(0.30)
+    end
+end)
+
 mp.register_event("file-loaded", function()
     if not state.vsr_enabled and not state.hdr_enabled then
+        return
+    end
+
+    if state.window_minimized then
         return
     end
 
@@ -407,6 +440,9 @@ mp.register_event("file-loaded", function()
     local max_attempts = 15
 
     local function retry_apply()
+        if state.window_minimized then
+            return
+        end
         if video_context_ready() then
             apply_filter_chain()
             return
