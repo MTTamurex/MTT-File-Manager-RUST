@@ -381,7 +381,7 @@ local function toggle_hdr()
     show_toggle_result("RTX HDR", state.hdr_enabled, applied)
 end
 
-local function schedule_restore(delay_seconds)
+local function schedule_restore(delay_seconds, allow_fullscreen)
     if state.restore_timer then
         state.restore_timer:kill()
         state.restore_timer = nil
@@ -392,7 +392,9 @@ local function schedule_restore(delay_seconds)
         if state.window_minimized then
             return
         end
-        if (state.vsr_enabled or state.hdr_enabled) and not mp.get_property_bool("fullscreen", false) then
+        if (state.vsr_enabled or state.hdr_enabled)
+            and (allow_fullscreen or not mp.get_property_bool("fullscreen", false))
+        then
             apply_filter_chain()
         end
     end)
@@ -423,7 +425,7 @@ mp.observe_property("window-minimized", "bool", function(_, is_minimized)
     end
 
     if state.vsr_enabled or state.hdr_enabled then
-        schedule_restore(0.30)
+        schedule_restore(0.30, true)
     end
 end)
 
