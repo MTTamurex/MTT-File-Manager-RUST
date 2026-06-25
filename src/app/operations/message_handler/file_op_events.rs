@@ -105,11 +105,13 @@ impl ImageViewerApp {
                             source_folders,
                             dest_folder,
                             moved_files,
+                            known_moved_pairs,
                         } => {
                             self.handle_move_batch_completed(
                                 source_folders,
                                 dest_folder,
                                 moved_files,
+                                known_moved_pairs,
                                 current_path_norm,
                             );
                             self.cleanup_deleted_pinned_folders();
@@ -624,6 +626,7 @@ impl ImageViewerApp {
         source_folders: Vec<PathBuf>,
         dest_folder: PathBuf,
         moved_files: Vec<PathBuf>,
+        known_moved_pairs: Vec<(PathBuf, PathBuf)>,
         current_path_norm: &str,
     ) {
         let dest_str = Self::normalize_for_match(dest_folder.as_path());
@@ -631,31 +634,23 @@ impl ImageViewerApp {
         self.cache_manager.clear_failed();
         crate::workers::thumbnail::clear_all_failures();
 
-        // Clear write-activity markers for the moved files so thumbnail generation
-        // is not delayed by the stability guard. moved_files are source paths;
-        // compute the destination paths (Shell preserves the original file name).
-        let moved_dests: Vec<std::path::PathBuf> = moved_files
+        let moved_dests: Vec<std::path::PathBuf> = known_moved_pairs
             .iter()
-            .filter_map(|p| p.file_name().map(|n| dest_folder.join(n)))
+            .map(|(_, dest)| dest.clone())
             .collect();
         if !moved_dests.is_empty() {
             crate::infrastructure::windows::file_flags::clear_write_activity_after_completed_file_operation(
                 &moved_dests,
             );
         }
-        let moved_pairs: Vec<(PathBuf, PathBuf)> = moved_files
-            .iter()
-            .cloned()
-            .zip(moved_dests.iter().cloned())
-            .collect();
-        for (source, dest) in &moved_pairs {
+        for (source, dest) in &known_moved_pairs {
             self.remap_visual_caches_for_path(source, dest);
         }
-        for (source, dest) in moved_files.iter().zip(moved_dests.iter()) {
+        for (source, dest) in &known_moved_pairs {
             self.move_tag_assignments_for_path(source, dest);
         }
-        self.enqueue_thumbnail_cache_renames(&moved_pairs);
-        if !moved_pairs.is_empty() {
+        self.enqueue_thumbnail_cache_renames(&known_moved_pairs);
+        if !known_moved_pairs.is_empty() {
             self.reload_visible_tag_views();
         }
 

@@ -90,8 +90,11 @@ pub fn render_fallback(
         // no async preview, no spinner, no placeholder.
         let is_system_path =
             crate::infrastructure::windows::is_windows_system_path(&file.path.to_string_lossy());
+        let is_virtual_path =
+            crate::domain::special_paths::is_virtual_path(&file.path.to_string_lossy());
 
         if is_recycle_bin_view
+            || is_virtual_path
             || is_system_path
             || crate::infrastructure::windows::shell_folder::is_shell_navigation_path(
                 &file.path,

@@ -3,10 +3,40 @@ use rustc_hash::FxHashMap;
 use std::path::Path;
 
 pub fn normalize_tag_path_key(path: &Path) -> String {
-    path.to_string_lossy()
-        .replace('/', "\\")
-        .trim_end_matches('\\')
-        .to_lowercase()
+    normalize_tag_path_text(&path.to_string_lossy()).to_lowercase()
+}
+
+pub fn normalize_tag_path_text(path: &str) -> String {
+    let mut normalized = path.replace('/', "\\");
+    let lower = normalized.to_ascii_lowercase();
+    if lower.starts_with("\\\\?\\unc\\") {
+        normalized = format!("\\\\{}", &normalized[8..]);
+    } else if lower.starts_with("\\\\?\\") || lower.starts_with("\\\\.\\") {
+        normalized = normalized[4..].to_string();
+    } else if lower.starts_with("\\??\\") {
+        normalized = normalized[4..].to_string();
+    }
+
+    while normalized.ends_with('\\')
+        && !is_drive_root(&normalized)
+        && !is_unc_share_root(&normalized)
+    {
+        normalized.pop();
+    }
+    normalized
+}
+
+fn is_drive_root(path: &str) -> bool {
+    let bytes = path.as_bytes();
+    bytes.len() == 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && bytes[2] == b'\\'
+}
+
+fn is_unc_share_root(path: &str) -> bool {
+    if !path.starts_with("\\\\") {
+        return false;
+    }
+    let mut parts = path.trim_matches('\\').split('\\');
+    parts.next().is_some() && parts.next().is_some() && parts.next().is_none()
 }
 
 /// O(1) lookup of tag IDs assigned to `path`.

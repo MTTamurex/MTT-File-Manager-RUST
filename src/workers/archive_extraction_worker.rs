@@ -31,6 +31,7 @@ pub(crate) enum ArchiveExtractionRequest {
         dest_folder: PathBuf,
         source_folders: Vec<PathBuf>,
         moved_files: Vec<PathBuf>,
+        known_moved_pairs: Vec<(PathBuf, PathBuf)>,
     },
 }
 
@@ -110,6 +111,7 @@ pub(crate) fn start_archive_extraction_worker(
                     dest_folder,
                     source_folders,
                     moved_files,
+                    known_moved_pairs,
                 } => {
                     let success = archive_extract::extract_files_from_archive(
                         &paths,
@@ -123,6 +125,7 @@ pub(crate) fn start_archive_extraction_worker(
                                 source_folders,
                                 dest_folder,
                                 moved_files,
+                                known_moved_pairs,
                             });
                         }
                     } else {

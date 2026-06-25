@@ -263,15 +263,6 @@ impl ImageViewerApp {
             return;
         }
 
-        if normalize_path_text(old_path) != normalize_path_text(new_path) && old_path.exists() {
-            log::warn!(
-                "[TAGS] Skipping tag assignment move because source still exists: {} -> {}",
-                old_path.display(),
-                new_path.display()
-            );
-            return;
-        }
-
         let moved_assignments: Vec<(PathBuf, PathBuf, Vec<i64>)> = self
             .tag_assignments
             .iter()

@@ -10,8 +10,7 @@ use std::sync::Arc;
 use std::time::Instant;
 use windows::core::PCWSTR;
 use windows::Win32::Storage::FileSystem::{
-    GetFileAttributesExW, GetFileExInfoStandard, INVALID_FILE_ATTRIBUTES,
-    WIN32_FILE_ATTRIBUTE_DATA,
+    GetFileAttributesExW, GetFileExInfoStandard, INVALID_FILE_ATTRIBUTES, WIN32_FILE_ATTRIBUTE_DATA,
 };
 
 /// Convert a Windows FILETIME (100-nanosecond intervals since 1601-01-01) to
@@ -70,7 +69,11 @@ fn tag_view_file_entry(path: PathBuf, show_hidden: bool) -> Option<FileEntry> {
     let modified = filetime_to_unix_secs(&data.ftLastWriteTime);
     let created = {
         let c = filetime_to_unix_secs(&data.ftCreationTime);
-        if c > 0 { Some(c) } else { None }
+        if c > 0 {
+            Some(c)
+        } else {
+            None
+        }
     };
     let is_cloud = crate::infrastructure::onedrive::is_cloud_sync_path(&path);
     let sync_status = if is_cloud {
@@ -160,6 +163,7 @@ impl ImageViewerApp {
         let show_hidden = self.show_hidden_files;
         let failure_path = PathBuf::from(&self.navigation_state.current_path);
         let app_state_db = self.app_state_db.clone();
+        let tag_gc_sender = self.tag_assignment_gc_sender.clone();
 
         // Generation-aware cancellation: for the active panel, use the shared
         // current_generation atomic so the thread can detect navigation away.
@@ -208,11 +212,19 @@ impl ImageViewerApp {
                     // Apply the show_hidden filter on the cached entries
                     // (matches what the cold path does via tag_view_file_entry).
                     let mut cached_entries: Vec<FileEntry> = Vec::with_capacity(cached.len());
+                    let mut missing_cached_paths: Vec<PathBuf> = Vec::new();
                     for entry in cached.values() {
+                        if !crate::infrastructure::onedrive::fast_path_exists(&entry.path) {
+                            missing_cached_paths.push(entry.path.clone());
+                            continue;
+                        }
                         if entry.is_hidden && !show_hidden {
                             continue;
                         }
                         cached_entries.push(entry.clone());
+                    }
+                    if !missing_cached_paths.is_empty() {
+                        let _ = tag_gc_sender.send(missing_cached_paths);
                     }
                     if !cached_entries.is_empty() {
                         let _ = sender.send((my_gen, cached_entries));

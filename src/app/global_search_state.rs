@@ -157,7 +157,7 @@ pub struct GlobalSearchState {
     /// Cached `available_drives` output.
     pub cached_available_drives: Vec<char>,
     /// Generation + filter params when the cache was last built.
-    filter_cache_key: (u64, GlobalSearchFilters, u64),
+    filter_cache_key: (u64, GlobalSearchFilters, u64, u64),
 
     // --- Cached sorted indices (includes filter + sort) ---
     pub cached_sorted_indices: Vec<usize>,
@@ -166,6 +166,7 @@ pub struct GlobalSearchState {
         GlobalSearchFilters,
         GlobalSearchSortMode,
         bool,
+        u64,
         u64,
         u64,
     ),
@@ -278,6 +279,7 @@ impl GlobalSearchState {
                     tag_filter: GlobalSearchTagFilter::All,
                 },
                 0,
+                0,
             ),
             cached_sorted_indices: Vec::new(),
             sort_cache_key: (
@@ -293,6 +295,7 @@ impl GlobalSearchState {
                 },
                 GlobalSearchSortMode::Relevance,
                 false,
+                0,
                 0,
                 0,
             ),
@@ -450,6 +453,20 @@ impl GlobalSearchState {
         self.sort_cache_key.0 = u64::MAX;
     }
 
+    pub fn invalidate_tag_assignment_dependent_results(&mut self) {
+        let service_len = self.service_results_loaded as usize;
+        if self.results.len() > service_len {
+            self.results.truncate(service_len);
+            self.reset_sort_metadata_for_current_results();
+        }
+        self.tagged_results_cache_key = None;
+        self.cached_filtered_indices.clear();
+        self.cached_sorted_indices.clear();
+        self.results_generation = self.results_generation.wrapping_add(1);
+        self.filter_cache_key.0 = u64::MAX;
+        self.sort_cache_key.0 = u64::MAX;
+    }
+
     pub fn sync_sort_metadata_len(&mut self) {
         let len = self.results.len();
         if self.sort_modified_cache.len() < len {
@@ -585,6 +602,7 @@ impl GlobalSearchState {
     pub fn ensure_filter_cache(
         &mut self,
         tag_assignments: &rustc_hash::FxHashMap<String, Vec<i64>>,
+        tag_assignments_epoch: u64,
     ) -> &[usize] {
         let filters = GlobalSearchFilters {
             category: self.category,
@@ -599,6 +617,7 @@ impl GlobalSearchState {
             self.results_generation,
             filters,
             self.created_metadata_epoch,
+            tag_assignments_epoch,
         );
         if self.filter_cache_key != key {
             let min_size_bytes = self.min_size_mb.map(|mb| mb * 1024 * 1024);
@@ -635,8 +654,9 @@ impl GlobalSearchState {
     pub fn ensure_sorted_indices(
         &mut self,
         tag_assignments: &rustc_hash::FxHashMap<String, Vec<i64>>,
+        tag_assignments_epoch: u64,
     ) -> &[usize] {
-        self.ensure_filter_cache(tag_assignments);
+        self.ensure_filter_cache(tag_assignments, tag_assignments_epoch);
         let filters = GlobalSearchFilters {
             category: self.category,
             drive_filter: self.drive_filter,
@@ -653,6 +673,7 @@ impl GlobalSearchState {
             self.sort_descending,
             self.sort_metadata_epoch,
             self.created_metadata_epoch,
+            tag_assignments_epoch,
         );
         if self.sort_cache_key != key {
             let mut sorted = self.cached_filtered_indices.clone();
@@ -769,7 +790,7 @@ mod tests {
         let mut resolved = 0usize;
         loop {
             let assignments = rustc_hash::FxHashMap::default();
-            state.ensure_sorted_indices(&assignments);
+            state.ensure_sorted_indices(&assignments, 0);
             let mut batch = Vec::new();
             while let Ok(request) = tooltip_rx.try_recv() {
                 match request {
@@ -801,7 +822,7 @@ mod tests {
         assert!(state.sort_metadata_inflight.is_empty());
 
         let assignments = rustc_hash::FxHashMap::default();
-        state.ensure_sorted_indices(&assignments);
+        state.ensure_sorted_indices(&assignments, 0);
         assert!(tooltip_rx.try_recv().is_err());
     }
 }

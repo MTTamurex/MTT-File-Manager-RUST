@@ -27,7 +27,36 @@ use std::path::{Path, PathBuf};
 const STORAGE_CHUNK_SIZE: usize = 500;
 
 fn normalize_path_text(path: &str) -> String {
-    path.replace('/', "\\").trim_end_matches('\\').to_string()
+    let mut normalized = path.replace('/', "\\");
+    let lower = normalized.to_ascii_lowercase();
+    if lower.starts_with("\\\\?\\unc\\") {
+        normalized = format!("\\\\{}", &normalized[8..]);
+    } else if lower.starts_with("\\\\?\\") || lower.starts_with("\\\\.\\") {
+        normalized = normalized[4..].to_string();
+    } else if lower.starts_with("\\??\\") {
+        normalized = normalized[4..].to_string();
+    }
+
+    while normalized.ends_with('\\')
+        && !is_drive_root(&normalized)
+        && !is_unc_share_root(&normalized)
+    {
+        normalized.pop();
+    }
+    normalized
+}
+
+fn is_drive_root(path: &str) -> bool {
+    let bytes = path.as_bytes();
+    bytes.len() == 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && bytes[2] == b'\\'
+}
+
+fn is_unc_share_root(path: &str) -> bool {
+    if !path.starts_with("\\\\") {
+        return false;
+    }
+    let mut parts = path.trim_matches('\\').split('\\');
+    parts.next().is_some() && parts.next().is_some() && parts.next().is_none()
 }
 
 fn storage_path_text(path: &Path) -> Option<String> {
@@ -84,10 +113,7 @@ impl AppStateDb {
     ///
     /// OneDrive cloud paths are filtered out from the result — the caller
     /// must re-stat those.
-    pub fn get_cached_file_entries(
-        &self,
-        paths: &[PathBuf],
-    ) -> FxHashMap<PathBuf, FileEntry> {
+    pub fn get_cached_file_entries(&self, paths: &[PathBuf]) -> FxHashMap<PathBuf, FileEntry> {
         if paths.is_empty() {
             return FxHashMap::default();
         }
@@ -112,10 +138,7 @@ impl AppStateDb {
         let db = match self.reader.lock() {
             Ok(db) => db,
             Err(e) => {
-                log::warn!(
-                    "[FILE-ENTRY-CACHE] Failed to acquire reader lock: {:?}",
-                    e
-                );
+                log::warn!("[FILE-ENTRY-CACHE] Failed to acquire reader lock: {:?}", e);
                 return FxHashMap::default();
             }
         };
@@ -124,8 +147,9 @@ impl AppStateDb {
         let mut result: FxHashMap<PathBuf, FileEntry> = FxHashMap::default();
 
         for chunk in keys.chunks(STORAGE_CHUNK_SIZE) {
-            let placeholders =
-                std::iter::repeat_n("?", chunk.len()).collect::<Vec<_>>().join(",");
+            let placeholders = std::iter::repeat_n("?", chunk.len())
+                .collect::<Vec<_>>()
+                .join(",");
             let sql = format!(
                 "SELECT file_path, is_dir, size, modified, created, is_hidden, sync_status \
                  FROM file_entry_cache WHERE file_path COLLATE NOCASE IN ({})",
@@ -151,11 +175,11 @@ impl AppStateDb {
             };
 
             for row in rows {
-                let (raw_path, is_dir, size, modified, created, is_hidden, sync_status) =
-                    match row {
-                        Ok(r) => r,
-                        Err(_) => continue,
-                    };
+                let (raw_path, is_dir, size, modified, created, is_hidden, sync_status) = match row
+                {
+                    Ok(r) => r,
+                    Err(_) => continue,
+                };
                 let key = normalize_path_text(&raw_path).to_lowercase();
                 let Some(original) = by_path.get(&key) else {
                     continue;
@@ -206,10 +230,7 @@ impl AppStateDb {
         let db = match self.writer.lock() {
             Ok(db) => db,
             Err(e) => {
-                log::warn!(
-                    "[FILE-ENTRY-CACHE] Failed to acquire writer lock: {:?}",
-                    e
-                );
+                log::warn!("[FILE-ENTRY-CACHE] Failed to acquire writer lock: {:?}", e);
                 return;
             }
         };
@@ -273,11 +294,12 @@ impl AppStateDb {
             Ok(db) => db,
             Err(_) => return,
         };
-        let pattern = format!("{}%", prefix_text);
+        let pattern = child_like_pattern(&prefix_text);
         let _ = db.execute(
-            "DELETE FROM file_entry_cache WHERE file_path LIKE ?1 COLLATE NOCASE \
-             ESCAPE '\\'",
-            params![escape_like(&pattern)],
+            "DELETE FROM file_entry_cache \
+             WHERE file_path = ?1 COLLATE NOCASE \
+                OR file_path LIKE ?2 COLLATE NOCASE ESCAPE '\\'",
+            params![prefix_text, pattern],
         );
     }
 
@@ -292,16 +314,35 @@ impl AppStateDb {
             Ok(db) => db,
             Err(_) => return,
         };
+        let child_pattern = child_like_pattern(&old_text);
+        let _ = db.execute(
+            "UPDATE file_entry_cache \
+             SET file_path = ?3 || substr(file_path, length(?1) + 1) \
+             WHERE file_path LIKE ?2 COLLATE NOCASE ESCAPE '\\' \
+               AND file_path <> ?1 COLLATE NOCASE",
+            params![&old_text, &child_pattern, &new_text],
+        );
         let _ = db.execute(
             "UPDATE file_entry_cache SET file_path = ?1 WHERE file_path = ?2 COLLATE NOCASE",
-            params![new_text, old_text],
+            params![&new_text, &old_text],
         );
+    }
+}
+
+fn child_like_pattern(prefix: &str) -> String {
+    let escaped = escape_like(prefix);
+    if prefix.ends_with('\\') {
+        format!("{escaped}%")
+    } else {
+        format!("{escaped}\\\\%")
     }
 }
 
 /// Escape `%` and `_` in a string for use with a SQLite `LIKE` pattern.
 fn escape_like(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_")
+    s.replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
 }
 
 #[cfg(test)]
@@ -343,6 +384,12 @@ mod tests {
     fn normalize_path_text_replaces_slashes_and_strips_trailing_sep() {
         assert_eq!(normalize_path_text("C:/foo/bar/"), r"C:\foo\bar");
         assert_eq!(normalize_path_text("C:/foo/bar"), r"C:\foo\bar");
+        assert_eq!(normalize_path_text(r"C:\"), r"C:\");
+        assert_eq!(normalize_path_text(r"\\?\C:\foo\bar\"), r"C:\foo\bar");
+        assert_eq!(
+            normalize_path_text(r"\\?\UNC\server\share\folder\"),
+            r"\\server\share\folder"
+        );
     }
 
     #[test]
@@ -357,10 +404,8 @@ mod tests {
     #[test]
     fn app_state_db_file_entry_cache_roundtrip_case_insensitive() {
         use crate::infrastructure::app_state_db::AppStateDb;
-        let tmp = std::env::temp_dir().join(format!(
-            "mtt_file_entry_cache_test_{}",
-            std::process::id()
-        ));
+        let tmp =
+            std::env::temp_dir().join(format!("mtt_file_entry_cache_test_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         let db = AppStateDb::new(tmp.clone()).expect("open AppStateDb");
 
@@ -415,11 +460,67 @@ mod tests {
         assert!(!hits.contains_key(&PathBuf::from(r"C:\Folder\old.txt")));
         assert!(hits.contains_key(&PathBuf::from(r"C:\folder\new.txt")));
         assert_eq!(
-            hits.get(&PathBuf::from(r"C:\folder\new.txt"))
-                .unwrap()
-                .size,
+            hits.get(&PathBuf::from(r"C:\folder\new.txt")).unwrap().size,
             1234
         );
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn app_state_db_file_entry_cache_invalidate_prefix_removes_descendants() {
+        use crate::infrastructure::app_state_db::AppStateDb;
+        let tmp = std::env::temp_dir().join(format!(
+            "mtt_file_entry_cache_prefix_test_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let db = AppStateDb::new(tmp.clone()).expect("open AppStateDb");
+
+        db.upsert_cached_file_entries(&[
+            sample_entry(r"C:\Folder"),
+            sample_entry(r"C:\Folder\child.txt"),
+            sample_entry(r"C:\FolderSibling\child.txt"),
+        ]);
+        db.invalidate_cached_file_entries_under(std::path::Path::new(r"C:\folder"));
+
+        let hits = db.get_cached_file_entries(&[
+            PathBuf::from(r"C:\Folder"),
+            PathBuf::from(r"C:\Folder\child.txt"),
+            PathBuf::from(r"C:\FolderSibling\child.txt"),
+        ]);
+        assert!(!hits.contains_key(&PathBuf::from(r"C:\Folder")));
+        assert!(!hits.contains_key(&PathBuf::from(r"C:\Folder\child.txt")));
+        assert!(hits.contains_key(&PathBuf::from(r"C:\FolderSibling\child.txt")));
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn app_state_db_file_entry_cache_rename_prefix_moves_descendants() {
+        use crate::infrastructure::app_state_db::AppStateDb;
+        let tmp = std::env::temp_dir().join(format!(
+            "mtt_file_entry_cache_rename_prefix_test_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let db = AppStateDb::new(tmp.clone()).expect("open AppStateDb");
+
+        db.upsert_cached_file_entries(&[
+            sample_entry(r"C:\Folder"),
+            sample_entry(r"C:\Folder\child.txt"),
+        ]);
+        db.rename_cached_file_entry(
+            std::path::Path::new(r"C:\folder"),
+            std::path::Path::new(r"D:\Renamed"),
+        );
+
+        let hits = db.get_cached_file_entries(&[
+            PathBuf::from(r"D:\Renamed"),
+            PathBuf::from(r"D:\Renamed\child.txt"),
+        ]);
+        assert!(hits.contains_key(&PathBuf::from(r"D:\Renamed")));
+        assert!(hits.contains_key(&PathBuf::from(r"D:\Renamed\child.txt")));
 
         let _ = std::fs::remove_dir_all(&tmp);
     }

@@ -356,7 +356,7 @@ pub(super) fn handle_move(
                     });
                     return HandlerCompletion::CompletedSynchronously;
                 };
-                let moved_dest = path.file_name().map(|name| dest_folder.join(name));
+                let moved_dest = known_exact_move_dest(&path, &dest_folder);
                 match archive_extract_sender.send(ArchiveExtractionRequest::MoveSingle {
                     paths: vec![path],
                     dest_folder,
@@ -374,6 +374,7 @@ pub(super) fn handle_move(
                 }
             }
 
+            let moved_dest = known_exact_move_dest(&path, &dest_folder);
             let success = if is_virtual {
                 shell_operations::move_item_with_file_op(&path, &dest_folder, hwnd.0)
             } else {
@@ -383,7 +384,6 @@ pub(super) fn handle_move(
 
             if success {
                 if let Some(src) = source_folder {
-                    let moved_dest = path.file_name().map(|name| dest_folder.join(name));
                     let _ = result_sender.send(FileOperationResult::MoveCompleted {
                         source_folder: src,
                         dest_folder,
@@ -515,11 +515,13 @@ pub(super) fn handle_move_batch(
                     paths.len()
                 );
                 let moved_files = paths.clone();
+                let known_moved_pairs = known_exact_move_pairs(&paths, &dest_folder);
                 match archive_extract_sender.send(ArchiveExtractionRequest::MoveBatch {
                     paths,
                     dest_folder,
                     source_folders: source_folders.into_iter().collect(),
                     moved_files,
+                    known_moved_pairs,
                 }) {
                     Ok(()) => return HandlerCompletion::DispatchedAsync,
                     Err(e) => {
@@ -532,6 +534,7 @@ pub(super) fn handle_move_batch(
                 }
             }
 
+            let known_moved_pairs = known_exact_move_pairs(&paths, &dest_folder);
             let success = if has_virtual_path {
                 shell_operations::move_items_with_file_op(&paths, &dest_folder, hwnd.0)
             } else {
@@ -544,6 +547,7 @@ pub(super) fn handle_move_batch(
                     source_folders: source_folders.into_iter().collect(),
                     dest_folder,
                     moved_files: paths,
+                    known_moved_pairs,
                 });
             } else if !success {
                 let _ = result_sender.send(FileOperationResult::OperationFailed {
@@ -557,6 +561,20 @@ pub(super) fn handle_move_batch(
             HandlerCompletion::CompletedSynchronously
         }
     }
+}
+
+fn known_exact_move_dest(path: &Path, dest_folder: &Path) -> Option<PathBuf> {
+    let candidate = path.file_name().map(|name| dest_folder.join(name))?;
+    (!candidate.exists()).then_some(candidate)
+}
+
+fn known_exact_move_pairs(paths: &[PathBuf], dest_folder: &Path) -> Vec<(PathBuf, PathBuf)> {
+    paths
+        .iter()
+        .filter_map(|path| {
+            known_exact_move_dest(path, dest_folder).map(|dest| (path.clone(), dest))
+        })
+        .collect()
 }
 
 pub(super) fn handle_restore_from_recycle_bin(
@@ -681,5 +699,21 @@ mod tests {
         let dests = known_exact_new_copy_dests(&[src_folder], dest_parent.path(), false);
 
         assert!(dests.is_empty());
+    }
+
+    #[test]
+    fn known_exact_move_pairs_include_only_non_existing_destinations() {
+        let src_parent = tempfile::tempdir().expect("create source parent");
+        let dest_parent = tempfile::tempdir().expect("create dest parent");
+        let src_a = src_parent.path().join("a.txt");
+        let src_b = src_parent.path().join("b.txt");
+        std::fs::write(&src_a, b"a").expect("create source a");
+        std::fs::write(&src_b, b"b").expect("create source b");
+        std::fs::write(dest_parent.path().join("b.txt"), b"existing")
+            .expect("create conflicting destination");
+
+        let pairs = known_exact_move_pairs(&[src_a.clone(), src_b], dest_parent.path());
+
+        assert_eq!(pairs, vec![(src_a, dest_parent.path().join("a.txt"))]);
     }
 }

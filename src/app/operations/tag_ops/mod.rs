@@ -10,10 +10,7 @@ pub(crate) mod purge_worker;
 mod view;
 
 fn normalize_path_text(path: &Path) -> String {
-    path.to_string_lossy()
-        .replace('/', "\\")
-        .trim_end_matches('\\')
-        .to_lowercase()
+    crate::domain::file_tag::normalize_tag_path_key(path)
 }
 
 fn path_is_same_or_descendant(candidate: &Path, root: &Path) -> bool {

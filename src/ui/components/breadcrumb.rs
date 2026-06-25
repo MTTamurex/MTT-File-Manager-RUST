@@ -138,10 +138,7 @@ fn measure_text_width(ui: &egui::Ui, text: &str, font_id: &egui::FontId) -> f32 
 /// the `item_spacing` gap that `ui.horizontal_wrapped` inserts between every
 /// pair of consecutive items. Without this, the trail ends up a few pixels
 /// wider than the budget and wraps to a second line.
-fn compute_trail_layout(
-    ui: &egui::Ui,
-    segments: &[(String, String)],
-) -> TrailLayout {
+fn compute_trail_layout(ui: &egui::Ui, segments: &[(String, String)]) -> TrailLayout {
     let total = segments.len();
     if total == 0 {
         return TrailLayout {
@@ -191,8 +188,7 @@ fn compute_trail_layout(
     if total > 2 {
         // With ellipsis: [root] › [⋯] › [last]  → 4 item_spacing gaps.
         // The two extra gaps bracket the inserted ellipsis+chevron pair.
-        let with_ellipsis =
-            needed + item_spacing + ellipsis_width + item_spacing + chevron_width;
+        let with_ellipsis = needed + item_spacing + ellipsis_width + item_spacing + chevron_width;
         if with_ellipsis <= available_width {
             needed = with_ellipsis;
             show_ellipsis = true;
@@ -270,10 +266,7 @@ fn compute_trail_layout(
 /// address bar uses is applied, and the ellipsis button opens an overflow
 /// popup listing the hidden segments. Returns the `target_path` of the
 /// clicked segment, or `None`.
-pub fn render_breadcrumb_trail(
-    ui: &mut egui::Ui,
-    segments: &[(String, String)],
-) -> Option<String> {
+pub fn render_breadcrumb_trail(ui: &mut egui::Ui, segments: &[(String, String)]) -> Option<String> {
     if segments.is_empty() {
         return None;
     }
@@ -288,7 +281,14 @@ pub fn render_breadcrumb_trail(
         ui.spacing_mut().item_spacing.x = 2.0;
 
         if layout.fallback_tail {
-            render_visible_tail(ui, segments, &layout, text_color, chevron_color, &mut action);
+            render_visible_tail(
+                ui,
+                segments,
+                &layout,
+                text_color,
+                chevron_color,
+                &mut action,
+            );
             return;
         }
 
@@ -304,9 +304,7 @@ pub fn render_breadcrumb_trail(
         let has_hidden_popup = !layout.hidden.is_empty() && layout.visible.len() >= 2;
         if has_hidden_popup {
             ui.label(egui::RichText::new("›").color(chevron_color).size(11.0));
-            if let Some(target) =
-                render_overflow_popup(ui, segments, &layout.hidden, text_color)
-            {
+            if let Some(target) = render_overflow_popup(ui, segments, &layout.hidden, text_color) {
                 action = Some(target);
             }
             ui.label(egui::RichText::new("›").color(chevron_color).size(11.0));
@@ -451,12 +449,7 @@ fn render_overflow_popup(
                     }
 
                     let text_rect = item_rect.shrink2(egui::vec2(8.0, 0.0));
-                    let truncated = truncate_text_to_fit(
-                        &display,
-                        text_rect.width(),
-                        &font_id,
-                        ui,
-                    );
+                    let truncated = truncate_text_to_fit(&display, text_rect.width(), &font_id, ui);
                     ui.painter().text(
                         egui::pos2(text_rect.left(), item_rect.center().y),
                         egui::Align2::LEFT_CENTER,

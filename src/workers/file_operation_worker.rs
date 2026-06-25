@@ -44,6 +44,8 @@ pub enum FileOperationResult {
         dest_folder: PathBuf,
         /// The actual files/folders that were moved (for folder cover invalidation)
         moved_files: Vec<PathBuf>,
+        /// Source/destination pairs whose destination was known to be unambiguous.
+        known_moved_pairs: Vec<(PathBuf, PathBuf)>,
     },
     /// Copy operation completed - dest folder needs reload if active
     CopyCompleted {
@@ -243,7 +245,7 @@ impl FileOperationRequest {
                 hwnd,
             },
             Self::EmptyRecycleBin { .. } => Self::EmptyRecycleBin { hwnd },
-            Self::ShowProperties { paths, .. } => Self::ShowProperties { paths, hwnd },
+            Self::ShowProperties { paths, hwnd } => Self::ShowProperties { paths, hwnd },
         }
     }
 }

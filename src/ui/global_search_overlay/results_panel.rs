@@ -3,8 +3,6 @@ use crate::app::shortcuts::ShortcutAction;
 use crate::app::state::ImageViewerApp;
 use eframe::egui;
 use rust_i18n::t;
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
 use std::path::Path;
 
 use super::actions::{self, ResultAction};
@@ -32,8 +30,10 @@ pub(super) fn render_results_panel(
 
     // Use cached sorted indices to avoid O(N) recomputation every frame.
     // Take ownership temporarily to avoid cloning; put back at the end.
-    app.global_search
-        .ensure_sorted_indices(app.tag_assignments_normalized.as_ref());
+    app.global_search.ensure_sorted_indices(
+        app.tag_assignments_normalized.as_ref(),
+        app.tag_assignments_epoch,
+    );
     let filtered_indices = std::mem::take(&mut app.global_search.cached_sorted_indices);
 
     let shows_load_more = !app.global_search.query.is_empty()
@@ -503,11 +503,10 @@ fn ensure_tagged_results_for_active_filter(app: &mut ImageViewerApp) {
         return;
     }
 
-    let assignments_signature = tag_assignments_signature(app.tag_assignments.as_ref());
     let cache_key = (
         app.global_search.query.clone(),
         tag_filter.clone(),
-        assignments_signature,
+        app.tag_assignments_epoch,
     );
     if app.global_search.tagged_results_cache_key.as_ref() == Some(&cache_key) {
         return;
@@ -600,18 +599,6 @@ fn path_name_matches_query(path: &Path, tokens: &[String]) -> bool {
     };
     let name_lower = name.to_lowercase();
     tokens.iter().all(|token| name_lower.contains(token))
-}
-
-fn tag_assignments_signature(
-    assignments: &rustc_hash::FxHashMap<std::path::PathBuf, Vec<i64>>,
-) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    assignments.len().hash(&mut hasher);
-    for (path, tag_ids) in assignments {
-        path.hash(&mut hasher);
-        tag_ids.hash(&mut hasher);
-    }
-    hasher.finish()
 }
 
 fn normalize_search_path_key(path: &str) -> String {

@@ -46,6 +46,10 @@ impl ImageViewerApp {
             return None;
         }
 
+        if crate::domain::special_paths::is_virtual_path(&self.navigation_state.current_path) {
+            return None;
+        }
+
         if let Some(selected) = self.selected_file.as_ref() {
             return should_use_composed_folder_preview(selected).then(|| selected.path.clone());
         }
@@ -65,7 +69,8 @@ fn should_use_composed_folder_preview(item: &FileEntry) -> bool {
 
 fn should_use_composed_folder_preview_path(path: &Path, is_dir: bool) -> bool {
     let path_text = path.to_string_lossy();
-    !crate::infrastructure::windows::is_windows_system_path(path_text.as_ref())
+    !crate::domain::special_paths::is_virtual_path(path_text.as_ref())
+        && !crate::infrastructure::windows::is_windows_system_path(path_text.as_ref())
         && !crate::infrastructure::windows::shell_folder::is_shell_navigation_path(path, is_dir)
         && !crate::infrastructure::onedrive::is_special_icon_folder(path)
 }

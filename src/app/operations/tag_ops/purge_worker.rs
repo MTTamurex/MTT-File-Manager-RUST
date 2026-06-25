@@ -117,12 +117,11 @@ impl ImageViewerApp {
     /// paths).
     fn collect_active_tag_view_paths(&self) -> Vec<PathBuf> {
         let mut paths: Vec<PathBuf> = Vec::new();
-        let mut push =
-            |all_items: &std::sync::Arc<Vec<crate::domain::file_entry::FileEntry>>| {
-                for item in all_items.iter() {
-                    paths.push(item.path.clone());
-                }
-            };
+        let mut push = |all_items: &std::sync::Arc<Vec<crate::domain::file_entry::FileEntry>>| {
+            for item in all_items.iter() {
+                paths.push(item.path.clone());
+            }
+        };
 
         if tag_id_from_view_path(&self.navigation_state.current_path).is_some() {
             push(&self.all_items);

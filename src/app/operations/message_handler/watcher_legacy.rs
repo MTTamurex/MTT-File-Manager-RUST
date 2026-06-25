@@ -209,8 +209,7 @@ impl ImageViewerApp {
                             self.directory_cache.invalidate_children(&cleaned);
                             // Drop the cached FileEntry row so tag views do not
                             // surface a deleted file on the next selection.
-                            self.app_state_db
-                                .invalidate_cached_file_entry(&cleaned);
+                            self.app_state_db.invalidate_cached_file_entry(&cleaned);
                             #[cfg(debug_assertions)]
                             log::trace!(
                                 "[FS-WATCH-LEGACY] REMOVE: {:?}",
@@ -317,6 +316,8 @@ impl ImageViewerApp {
                             // and the new stat on next tag load refreshes it.
                             self.app_state_db
                                 .rename_cached_file_entry(&cleaned_old, &cleaned_new);
+                            self.move_tag_assignments_for_path(&cleaned_old, &cleaned_new);
+                            self.reload_visible_tag_views();
 
                             if let Some(parent) = cleaned_old.parent() {
                                 self.invalidate_directory_listing_caches(parent);
@@ -545,6 +546,9 @@ impl ImageViewerApp {
                 paths_to_remove_from_ui.len()
             );
             self.skip_next_auto_reload = true;
+        }
+        if !paths_to_remove_from_ui.is_empty() {
+            self.clear_tag_assignments_for_paths(&paths_to_remove_from_ui);
         }
 
         let unbatched_events = processed_events.saturating_sub(batched_remove_events);

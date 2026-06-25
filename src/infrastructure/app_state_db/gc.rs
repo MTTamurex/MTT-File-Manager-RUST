@@ -7,17 +7,26 @@ impl AppStateDb {
         crate::infrastructure::onedrive::fast_path_exists(Path::new(path))
     }
 
-    /// Extract drive root (e.g., "X:\\") from a path string.
+    /// Extract an accessible filesystem root (e.g., "X:\\" or "\\\\server\\share").
     fn extract_drive_root(path: &str) -> Option<String> {
-        if path.len() >= 3
-            && path.as_bytes()[0].is_ascii_alphabetic()
-            && path.as_bytes()[1] == b':'
-            && (path.as_bytes()[2] == b'\\' || path.as_bytes()[2] == b'/')
+        let normalized = crate::domain::file_tag::normalize_tag_path_text(path);
+        let bytes = normalized.as_bytes();
+        if bytes.len() >= 3
+            && bytes[0].is_ascii_alphabetic()
+            && bytes[1] == b':'
+            && bytes[2] == b'\\'
         {
-            Some(format!("{}:\\", path.as_bytes()[0] as char))
-        } else {
-            None
+            return Some(format!("{}:\\", bytes[0] as char));
         }
+
+        if let Some(rest) = normalized.strip_prefix("\\\\") {
+            let mut parts = rest.split('\\');
+            let server = parts.next().filter(|part| !part.is_empty())?;
+            let share = parts.next().filter(|part| !part.is_empty())?;
+            return Some(format!("\\\\{}\\{}", server, share));
+        }
+
+        None
     }
 
     /// Build a set of drive roots that are currently accessible.
@@ -43,7 +52,7 @@ impl AppStateDb {
     fn is_on_accessible_drive(path: &str, accessible: &std::collections::HashSet<String>) -> bool {
         match Self::extract_drive_root(path) {
             Some(root) => accessible.contains(&root),
-            None => true,
+            None => false,
         }
     }
 

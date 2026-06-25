@@ -5,7 +5,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::{Path, PathBuf};
 
 fn normalize_path_text(path: &str) -> String {
-    path.replace('/', "\\").trim_end_matches('\\').to_string()
+    crate::domain::file_tag::normalize_tag_path_text(path)
 }
 
 fn path_match_key(path: &str) -> String {
@@ -267,7 +267,10 @@ impl AppStateDb {
         let db = match self.reader.lock() {
             Ok(db) => db,
             Err(e) => {
-                log::error!("[TAGS] Failed to acquire reader lock for get_tag_assignment_paths: {:?}", e);
+                log::error!(
+                    "[TAGS] Failed to acquire reader lock for get_tag_assignment_paths: {:?}",
+                    e
+                );
                 return Vec::new();
             }
         };

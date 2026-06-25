@@ -58,6 +58,7 @@ impl ImageViewerApp {
         let normalized = build_tag_assignments_normalized(&new);
         self.tag_assignments = Arc::new(new);
         self.tag_assignments_normalized = Arc::new(normalized);
+        self.mark_tag_assignments_changed();
     }
 
     /// Rebuilds `tag_assignments_normalized` from the current `tag_assignments`.
@@ -67,6 +68,13 @@ impl ImageViewerApp {
     pub(crate) fn sync_tag_assignments_normalized(&mut self) {
         let normalized = build_tag_assignments_normalized(self.tag_assignments.as_ref());
         self.tag_assignments_normalized = Arc::new(normalized);
+        self.mark_tag_assignments_changed();
+    }
+
+    fn mark_tag_assignments_changed(&mut self) {
+        self.tag_assignments_epoch = self.tag_assignments_epoch.wrapping_add(1);
+        self.global_search
+            .invalidate_tag_assignment_dependent_results();
     }
 }
 

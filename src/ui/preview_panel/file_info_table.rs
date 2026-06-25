@@ -92,10 +92,9 @@ pub fn render_file_info_table(
             // True when the selected entry lives inside a Tag virtual view.
             // Computed up front because it gates both the breadcrumb and the
             // "Type" row below.
-            let is_tag_view = crate::domain::special_paths::tag_id_from_view_path(
-                &file.path.to_string_lossy(),
-            )
-            .is_some();
+            let is_tag_view =
+                crate::domain::special_paths::tag_id_from_view_path(&file.path.to_string_lossy())
+                    .is_some();
             // 1. Filename Header (matches Explorer style)
             ui.add_space(10.0);
             ui.horizontal(|ui| {
@@ -196,16 +195,16 @@ pub fn render_file_info_table(
                     // Instead, we measure the natural width and add a
                     // leading spacer that pushes the trail to the middle.
                     let available_width = ui.available_width();
-                    let natural_width = crate::ui::components::breadcrumb::measure_breadcrumb_trail(
-                        ui, &segments,
-                    );
+                    let natural_width =
+                        crate::ui::components::breadcrumb::measure_breadcrumb_trail(ui, &segments);
                     let x_offset = ((available_width - natural_width) / 2.0).max(0.0);
                     ui.horizontal(|ui| {
                         ui.add_space(x_offset);
-                        if let Some(clicked) = crate::ui::components::breadcrumb::render_breadcrumb_trail(
-                            ui,
-                            &segments,
-                        ) {
+                        if let Some(clicked) =
+                            crate::ui::components::breadcrumb::render_breadcrumb_trail(
+                                ui, &segments,
+                            )
+                        {
                             action = Some(PreviewPanelAction::NavigateTo(
                                 std::path::PathBuf::from(clicked),
                             ));

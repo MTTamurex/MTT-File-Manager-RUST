@@ -639,6 +639,7 @@ impl ImageViewerApp {
             tag_definitions,
             tag_assignments,
             tag_assignments_normalized,
+            tag_assignments_epoch: 0,
             tag_counts,
             tag_assignment_gc_sender,
             tag_assignment_gc_receiver,
