@@ -13,7 +13,7 @@
 - **Grid and List views** — Adjustable thumbnail sizes
 - **Smart address bar** — Direct path input with breadcrumbs
 - **Sidebar** — Quick access to drives, libraries, Cloud Drives, and Recycle Bin
-- **Cloud Drives** — Detects Windows Cloud Files sync roots registered with Explorer and shows them in a dedicated sidebar section; tested with OneDrive and Proton Drive
+- **Cloud Drives** — Detects Windows Cloud Files sync roots registered with Explorer and shows them in a dedicated sidebar section; tested with OneDrive, Proton Drive and Google Drive
 - **Quick Access** — Pin folders via right-click or drag-and-drop; reorder via drag; persistent storage
 - **Archive navigation** — Open supported compressed files like folders and browse their contents directly (`.zip`, `.7z`, `.rar`, `.tar`, `.tar.gz`, `.tgz`, `.tar.bz2`, `.tbz2`, `.tar.xz`, `.txz`, `.tar.zst`, `.tzst`, `.gz`, `.gzip`)
 
