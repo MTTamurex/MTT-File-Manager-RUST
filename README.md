@@ -15,6 +15,7 @@
 - **Sidebar** — Quick access to drives, libraries, Cloud Drives, and Recycle Bin
 - **Cloud Drives** — Detects Windows Cloud Files sync roots registered with Explorer and shows them in a dedicated sidebar section; tested with OneDrive, Proton Drive and Google Drive
 - **Quick Access** — Pin folders via right-click or drag-and-drop; reorder via drag; persistent storage
+- **Tags** — Assign persistent color tags to files and folders, browse dedicated Tag views from the sidebar, and manage custom tags from Settings
 - **Archive navigation** — Open supported compressed files like folders and browse their contents directly (`.zip`, `.7z`, `.rar`, `.tar`, `.tar.gz`, `.tgz`, `.tar.bz2`, `.tbz2`, `.tar.xz`, `.txz`, `.tar.zst`, `.tzst`, `.gz`, `.gzip`)
 
 ### Media Preview
@@ -33,6 +34,7 @@
 - **Background service** — Dedicated Windows Service for continuous indexing
 - **Spotlight-style overlay** — Activated by Ctrl+Shift+F
 - **Paginated results** — Offset/limit pagination with incremental loading
+- **Tag filters** — Narrow global search results to any tagged item or to specific tags
 
 > **Disclaimer:** The Global Search feature reads the NTFS/ReFS USN Journal and MFT to build its index. Because accessing these system structures requires elevated privileges, the installer registers a dedicated Windows Service that runs with administrative rights. This is the **only** component of MTT File Manager that requires elevated installation privileges.
 
@@ -40,12 +42,14 @@
 - **Core operations** — Copy, cut, paste, rename, delete
 - **Batch rename** — Select 2+ files and press F2 to open the batch rename modal; configure a shared base name, number position (suffix/prefix), separator style (parentheses, underscore, dash, space, or none), and start/step/padding; drag-to-reorder; live preview table with per-row conflict detection
 - **Native context menu** — Full Windows Shell context menu integration
+- **Tag assignment** — Add, remove, or switch file/folder tags from the context menu; tags are preserved on supported renames/moves and cleared when files are deleted
 - **Recycle Bin** — Browse, restore, and permanently delete
 - **Cloud Files support** — Sync status badges for cloud-only, locally available, syncing, and pinned files; supports Windows Cloud Files actions such as "Always keep on this device" and "Free up space"
 - **ISO mounting** — Mount ISO files as virtual drives
 
 ### Performance & Cache
 - **Multi-level cache** — Memory, disk (SQLite), and GPU textures
+- **Tag view cache** — Persistent metadata cache and paged loading make large Tag views appear quickly without preloading thumbnails or increasing GPU texture cache limits
 - **Async workers** — Background processing keeps UI responsive
 - **UI virtualization** — Efficient rendering of large directories
 - **Per-folder monitoring** — Default `notify` crate watcher with opt-in drive-wide `ReadDirectoryChangesW`
@@ -76,6 +80,13 @@ The app supports multiple rendering backends, selectable in **Settings > General
 The main file manager does not need to run as administrator for normal file browsing and file operations. Elevated permission is needed for the search service because Global Search indexes NTFS/ReFS volumes using low-level Windows filesystem data such as the USN Journal and MFT. Access to those structures is restricted by Windows, so the installer registers a dedicated Windows Service with the required privileges instead of requiring the whole application to run elevated.
 
 ## Usage
+
+### Tags
+- **Assign tags** — Select one or more files/folders, open the context menu, and use the Tag submenu to apply or remove color tags.
+- **Browse by tag** — Use the Tags section in the sidebar to open a virtual Tag view containing every item assigned to that tag.
+- **Manage tags** — Open Settings > Tags to create, rename, recolor, delete tags, and toggle whether the Tags section is shown in the sidebar.
+- **Search with tags** — In Global Search, use the Tag filter to show all results, any tagged item, or items matching selected tags.
+- **Performance behavior** — Tag views load in pages and use cached file metadata for fast first paint while thumbnails remain loaded only for visible items.
 
 ### Keyboard Shortcuts
 Some app-level shortcuts are configurable in Settings > Keyboard Shortcuts. Standard file and folder shortcuts remain fixed.
