@@ -10,6 +10,7 @@ impl ImageViewerApp {
     pub fn filter_items(&mut self) {
         let active_tag_filter = if self.navigation_state.is_computer_view
             || self.navigation_state.is_recycle_bin_view
+            || crate::domain::special_paths::is_tag_view_path(&self.navigation_state.current_path)
         {
             None
         } else {
@@ -61,6 +62,7 @@ impl ImageViewerApp {
     pub fn sort_items(&mut self) {
         let active_tag_filter = if self.navigation_state.is_computer_view
             || self.navigation_state.is_recycle_bin_view
+            || crate::domain::special_paths::is_tag_view_path(&self.navigation_state.current_path)
         {
             None
         } else {

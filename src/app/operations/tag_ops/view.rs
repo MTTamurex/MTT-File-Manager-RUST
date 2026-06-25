@@ -179,141 +179,164 @@ impl ImageViewerApp {
         let spawn_result = std::thread::Builder::new()
             .name("tag-view-load".into())
             .spawn(move || {
-                // Adaptive batching: the first 2 batches are small so the user
-                // sees something quickly even on a cold NTFS cache, where each
-                // GetFileAttributesExW syscall costs 5-15ms on HDD. After that
-                // we use the full batch size for throughput.
+                // Keep the first page small so the UI can paint before the
+                // full tag assignment list has been materialized.
+                const FIRST_PAGE_SIZE: i64 = 64;
+                const PAGE_SIZE: i64 = 256;
+                const CACHE_BATCH_SIZE: usize = 64;
                 const FIRST_BATCH_SIZE: usize = 20;
                 const BATCH_SIZE: usize = 100;
 
-                // Query only paths for this specific tag using the
-                // idx_file_tag_assignments_tag index — avoids full table scan.
-                // The result is already ORDER BY file_path ASC from the SQL,
-                // so we don't re-sort on the client (avoiding per-path String
-                // allocations and the latency of the first paint).
-                let paths = app_state_db.get_tag_assignment_paths(tag_id);
-                let total = paths.len();
-
                 let started = std::time::Instant::now();
                 let mut first_batch_sent: Option<std::time::Instant> = None;
+                let mut total_paths = 0usize;
+                let mut total_cache_hits = 0usize;
+                let mut total_cache_misses = 0usize;
+                let mut page_size = FIRST_PAGE_SIZE;
+                let mut last_path: Option<PathBuf> = None;
+                let mut detected_is_ssd: Option<bool> = None;
                 let mark_first = |first: &mut Option<std::time::Instant>| {
                     if first.is_none() {
                         *first = Some(std::time::Instant::now());
                     }
                 };
 
-                // 1) Cache lookup. This is a single indexed SQLite read and
-                //    lets the user see something immediately on a cold cache.
-                //    Cloud paths are excluded from the cache by design.
-                let cached: rustc_hash::FxHashMap<std::path::PathBuf, FileEntry> =
-                    app_state_db.get_cached_file_entries(&paths);
-
-                if !cached.is_empty() {
-                    // Apply the show_hidden filter on the cached entries
-                    // (matches what the cold path does via tag_view_file_entry).
-                    let mut cached_entries: Vec<FileEntry> = Vec::with_capacity(cached.len());
-                    let mut missing_cached_paths: Vec<PathBuf> = Vec::new();
-                    for entry in cached.values() {
-                        if !crate::infrastructure::onedrive::fast_path_exists(&entry.path) {
-                            missing_cached_paths.push(entry.path.clone());
-                            continue;
-                        }
-                        if entry.is_hidden && !show_hidden {
-                            continue;
-                        }
-                        cached_entries.push(entry.clone());
+                loop {
+                    if gen_tracker.load(std::sync::atomic::Ordering::Relaxed) != my_gen {
+                        break;
                     }
-                    if !missing_cached_paths.is_empty() {
-                        let _ = tag_gc_sender.send(missing_cached_paths);
-                    }
-                    if !cached_entries.is_empty() {
-                        let _ = sender.send((my_gen, cached_entries));
-                        ui_ctx.request_repaint();
-                        mark_first(&mut first_batch_sent);
-                    }
-                }
 
-                // 2) Stat misses. Detect SSD vs HDD to choose serial or
-                //    parallel work — random stat on HDD thrashes the seek
-                //    head, so the previous serial implementation was correct
-                //    for HDD; on SSD we can parallelize safely.
-                let misses: Vec<std::path::PathBuf> = paths
-                    .iter()
-                    .filter(|p| !cached.contains_key(*p))
-                    .cloned()
-                    .collect();
-
-                // Detect disk type from the first miss (or any path on the
-                // same tag). Cached at the OS-process level, so this is one
-                // DeviceIoControl per drive per session.
-                let is_ssd = misses
-                    .first()
-                    .or(paths.first())
-                    .map(|p| crate::infrastructure::io_priority::is_ssd(p))
-                    .unwrap_or(true);
-
-                let mut fresh_entries: Vec<FileEntry> = Vec::with_capacity(misses.len());
-                if is_ssd {
-                    // Parallel: process misses in chunks of BATCH_SIZE so each
-                    // chunk preserves order. Within a chunk we use rayon
-                    // par_iter for the stat loop.
-                    use rayon::prelude::*;
-                    for chunk in misses.chunks(BATCH_SIZE) {
-                        if gen_tracker.load(std::sync::atomic::Ordering::Relaxed) != my_gen {
-                            break;
-                        }
-                        let chunk_entries: Vec<FileEntry> = chunk
-                            .par_iter()
-                            .filter_map(|p| tag_view_file_entry(p.clone(), show_hidden))
-                            .collect();
-                        if !chunk_entries.is_empty() {
-                            let _ = sender.send((my_gen, chunk_entries.clone()));
-                            ui_ctx.request_repaint();
-                            mark_first(&mut first_batch_sent);
-                            fresh_entries.extend(chunk_entries);
-                        }
+                    let current_page_size = page_size;
+                    let paths = app_state_db.get_tag_assignment_paths_after(
+                        tag_id,
+                        last_path.as_deref(),
+                        current_page_size,
+                    );
+                    if paths.is_empty() {
+                        break;
                     }
-                } else {
-                    // HDD / network / USB: serial, but use the adaptive
-                    // small-batch strategy so the user sees something
-                    // quickly.
-                    let mut batch = Vec::with_capacity(FIRST_BATCH_SIZE);
-                    let mut batch_index: usize = 0;
-                    for path in &misses {
-                        if gen_tracker.load(std::sync::atomic::Ordering::Relaxed) != my_gen {
-                            break;
-                        }
-                        if let Some(entry) = tag_view_file_entry(path.clone(), show_hidden) {
-                            batch.push(entry.clone());
-                            fresh_entries.push(entry);
-                            let current_batch_size = if batch_index < 2 {
-                                FIRST_BATCH_SIZE
-                            } else {
-                                BATCH_SIZE
+
+                    total_paths = total_paths.saturating_add(paths.len());
+                    last_path = paths.last().cloned();
+                    page_size = PAGE_SIZE;
+
+                    // Cache lookup for this page only. This bounds temporary
+                    // RAM and lets the first cached rows paint immediately.
+                    let cached: rustc_hash::FxHashMap<std::path::PathBuf, FileEntry> =
+                        app_state_db.get_cached_file_entries(&paths);
+                    total_cache_hits = total_cache_hits.saturating_add(cached.len());
+
+                    if !cached.is_empty() {
+                        let mut cached_batch = Vec::with_capacity(CACHE_BATCH_SIZE);
+                        let mut cached_paths_to_validate = Vec::with_capacity(cached.len());
+                        for path in &paths {
+                            let Some(entry) = cached.get(path) else {
+                                continue;
                             };
-                            if batch.len() >= current_batch_size {
-                                let _ = sender.send((my_gen, std::mem::take(&mut batch)));
+                            cached_paths_to_validate.push(entry.path.clone());
+                            if entry.is_hidden && !show_hidden {
+                                continue;
+                            }
+                            cached_batch.push(entry.clone());
+                            if cached_batch.len() >= CACHE_BATCH_SIZE {
+                                let _ = sender.send((my_gen, std::mem::take(&mut cached_batch)));
                                 ui_ctx.request_repaint();
                                 mark_first(&mut first_batch_sent);
-                                batch_index += 1;
-                                batch = Vec::with_capacity(if batch_index < 2 {
+                            }
+                        }
+                        if !cached_batch.is_empty() {
+                            let _ = sender.send((my_gen, cached_batch));
+                            ui_ctx.request_repaint();
+                            mark_first(&mut first_batch_sent);
+                        }
+
+                        // Validate stale cached paths only after they were
+                        // made available to the UI. This keeps first paint fast
+                        // and reconciles missing files asynchronously.
+                        let missing_cached_paths: Vec<PathBuf> = cached_paths_to_validate
+                            .into_iter()
+                            .filter(|path| !crate::infrastructure::onedrive::fast_path_exists(path))
+                            .collect();
+                        if !missing_cached_paths.is_empty() {
+                            let _ = tag_gc_sender.send(missing_cached_paths);
+                        }
+                    }
+
+                    let misses: Vec<std::path::PathBuf> = paths
+                        .iter()
+                        .filter(|p| !cached.contains_key(*p))
+                        .cloned()
+                        .collect();
+                    total_cache_misses = total_cache_misses.saturating_add(misses.len());
+
+                    let is_ssd = *detected_is_ssd.get_or_insert_with(|| {
+                        misses
+                            .first()
+                            .or(paths.first())
+                            .map(|p| crate::infrastructure::io_priority::is_ssd(p))
+                            .unwrap_or(true)
+                    });
+
+                    let mut fresh_entries: Vec<FileEntry> = Vec::with_capacity(misses.len());
+                    if is_ssd {
+                        use rayon::prelude::*;
+                        for chunk in misses.chunks(BATCH_SIZE) {
+                            if gen_tracker.load(std::sync::atomic::Ordering::Relaxed) != my_gen {
+                                break;
+                            }
+                            let chunk_entries: Vec<FileEntry> = chunk
+                                .par_iter()
+                                .filter_map(|p| tag_view_file_entry(p.clone(), show_hidden))
+                                .collect();
+                            if !chunk_entries.is_empty() {
+                                let _ = sender.send((my_gen, chunk_entries.clone()));
+                                ui_ctx.request_repaint();
+                                mark_first(&mut first_batch_sent);
+                                fresh_entries.extend(chunk_entries);
+                            }
+                        }
+                    } else {
+                        let mut batch = Vec::with_capacity(FIRST_BATCH_SIZE);
+                        let mut batch_index: usize = 0;
+                        for path in &misses {
+                            if gen_tracker.load(std::sync::atomic::Ordering::Relaxed) != my_gen {
+                                break;
+                            }
+                            if let Some(entry) = tag_view_file_entry(path.clone(), show_hidden) {
+                                batch.push(entry.clone());
+                                fresh_entries.push(entry);
+                                let current_batch_size = if batch_index < 2 {
                                     FIRST_BATCH_SIZE
                                 } else {
                                     BATCH_SIZE
-                                });
+                                };
+                                if batch.len() >= current_batch_size {
+                                    let _ = sender.send((my_gen, std::mem::take(&mut batch)));
+                                    ui_ctx.request_repaint();
+                                    mark_first(&mut first_batch_sent);
+                                    batch_index += 1;
+                                    batch = Vec::with_capacity(if batch_index < 2 {
+                                        FIRST_BATCH_SIZE
+                                    } else {
+                                        BATCH_SIZE
+                                    });
+                                }
                             }
                         }
+                        if !batch.is_empty() {
+                            let _ = sender.send((my_gen, batch));
+                            ui_ctx.request_repaint();
+                            mark_first(&mut first_batch_sent);
+                        }
                     }
-                    if !batch.is_empty() {
-                        let _ = sender.send((my_gen, batch));
-                        ui_ctx.request_repaint();
-                        mark_first(&mut first_batch_sent);
-                    }
-                }
 
-                // 3) Persist fresh entries to the cache for next time.
-                if !fresh_entries.is_empty() {
-                    app_state_db.upsert_cached_file_entries(&fresh_entries);
+                    if !fresh_entries.is_empty() {
+                        app_state_db.upsert_cached_file_entries(&fresh_entries);
+                    }
+
+                    if (paths.len() as i64) < current_page_size {
+                        break;
+                    }
                 }
 
                 // Always send end-of-load sentinel, even after generation-break.
@@ -329,10 +352,10 @@ impl ImageViewerApp {
                     "[TAGS] setup_tag_view(tag_id={}) total_paths={} cache_hits={} \
                      cache_misses={} is_ssd={} time_to_first_batch_ms={} total_ms={}",
                     tag_id,
-                    total,
-                    cached.len(),
-                    misses.len(),
-                    is_ssd,
+                    total_paths,
+                    total_cache_hits,
+                    total_cache_misses,
+                    detected_is_ssd.unwrap_or(true),
                     time_to_first_ms,
                     total_ms
                 );

@@ -75,6 +75,13 @@ impl ImageViewerApp {
                         if new_batch.is_empty() {
                             saw_end_of_load = true;
                         } else {
+                            let all_items_will_be_empty =
+                                self.pending_all_items_clear || self.all_items.is_empty();
+                            let rebuild_first_tag_batch_now =
+                                crate::domain::special_paths::is_tag_view_path(
+                                    &self.navigation_state.current_path,
+                                ) && self.items.is_empty()
+                                    && all_items_will_be_empty;
                             if self.pending_all_items_clear {
                                 self.capture_stale_items_snapshot();
                                 self.all_items_mut().clear();
@@ -84,6 +91,12 @@ impl ImageViewerApp {
                                 self.pending_items_count.saturating_add(new_batch.len());
                             self.pending_items_rebuild = true;
                             self.all_items_mut().extend(new_batch);
+                            if rebuild_first_tag_batch_now {
+                                self.filter_items();
+                                self.clear_pending_items_rebuild_flags();
+                                self.last_items_rebuild = Instant::now();
+                                ctx.request_repaint();
+                            }
                         }
                     } else if let Some(ig) = inactive_gen {
                         if gen_id == ig {

@@ -198,6 +198,13 @@ impl AppStateDb {
         )
         .unwrap_or(0);
 
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_file_tag_assignments_tag_path
+             ON file_tag_assignments(tag_id, file_path)",
+            [],
+        )
+        .unwrap_or(0);
+
         // File entry cache (persistent metadata for tag views).
         // Used to skip GetFileAttributesExW syscalls on tag selection,
         // especially on a cold NTFS cache after restart or long idle.

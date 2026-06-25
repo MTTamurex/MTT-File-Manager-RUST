@@ -293,6 +293,63 @@ impl AppStateDb {
         .unwrap_or_default()
     }
 
+    /// Load one ordered keyset page of paths assigned to a specific tag. [READER]
+    pub fn get_tag_assignment_paths_after(
+        &self,
+        tag_id: i64,
+        after_path: Option<&Path>,
+        limit: i64,
+    ) -> Vec<PathBuf> {
+        let db = match self.reader.lock() {
+            Ok(db) => db,
+            Err(e) => {
+                log::error!(
+                    "[TAGS] Failed to acquire reader lock for get_tag_assignment_paths: {:?}",
+                    e
+                );
+                return Vec::new();
+            }
+        };
+
+        let map_path = |s: String| PathBuf::from(normalize_path_text(&s));
+        if let Some(after_path) = after_path.and_then(storage_path_text) {
+            let mut stmt = match db.prepare(
+                "SELECT file_path FROM file_tag_assignments \
+                 WHERE tag_id = ?1 AND file_path > ?2 COLLATE NOCASE \
+                 ORDER BY file_path ASC LIMIT ?3",
+            ) {
+                Ok(stmt) => stmt,
+                Err(e) => {
+                    log::error!("[TAGS] Failed to prepare tag keyset SELECT: {:?}", e);
+                    return Vec::new();
+                }
+            };
+            stmt.query_map(params![tag_id, after_path, limit], |row| {
+                row.get::<_, String>(0).map(map_path)
+            })
+            .ok()
+            .map(|rows| rows.flatten().collect())
+            .unwrap_or_default()
+        } else {
+            let mut stmt = match db.prepare(
+                "SELECT file_path FROM file_tag_assignments \
+                 WHERE tag_id = ?1 ORDER BY file_path ASC LIMIT ?2",
+            ) {
+                Ok(stmt) => stmt,
+                Err(e) => {
+                    log::error!("[TAGS] Failed to prepare tag first-page SELECT: {:?}", e);
+                    return Vec::new();
+                }
+            };
+            stmt.query_map(params![tag_id, limit], |row| {
+                row.get::<_, String>(0).map(map_path)
+            })
+            .ok()
+            .map(|rows| rows.flatten().collect())
+            .unwrap_or_default()
+        }
+    }
+
     /// Assign a tag to many paths in a single transaction. [WRITER]
     pub fn assign_tag_batch(&self, paths: &[PathBuf], tag_id: i64) -> bool {
         let paths = storage_path_texts(paths);

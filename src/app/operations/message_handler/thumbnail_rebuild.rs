@@ -128,6 +128,7 @@ impl ImageViewerApp {
     fn build_sorted_items_snapshot(&self) -> Vec<crate::domain::file_entry::FileEntry> {
         let active_tag_filter = if self.navigation_state.is_computer_view
             || self.navigation_state.is_recycle_bin_view
+            || crate::domain::special_paths::is_tag_view_path(&self.navigation_state.current_path)
         {
             None
         } else {
@@ -174,6 +175,7 @@ impl ImageViewerApp {
         let query = self.search_query.clone();
         let active_tag_filter = if self.navigation_state.is_computer_view
             || self.navigation_state.is_recycle_bin_view
+            || crate::domain::special_paths::is_tag_view_path(&self.navigation_state.current_path)
         {
             None
         } else {
