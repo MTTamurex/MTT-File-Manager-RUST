@@ -3,11 +3,21 @@ use std::time::Instant;
 
 impl ImageViewerApp {
     pub fn trigger_manual_refresh(&mut self) {
-        if self.navigation_state.is_computer_view {
+        let inactive_computer_visible = self
+            .dual_panel_inactive_state
+            .as_ref()
+            .is_some_and(|snapshot| snapshot.is_computer_view);
+
+        if self.navigation_state.is_computer_view || inactive_computer_visible {
             self.reload_drive_list_async();
             self.refresh_drive_info_async();
             self.drive_state.last_drive_refresh = Instant::now();
-        } else if self.navigation_state.is_recycle_bin_view {
+            if self.navigation_state.is_computer_view {
+                return;
+            }
+        }
+
+        if self.navigation_state.is_recycle_bin_view {
             self.setup_recycle_bin_view();
         } else if crate::domain::special_paths::tag_id_from_view_path(
             &self.navigation_state.current_path,

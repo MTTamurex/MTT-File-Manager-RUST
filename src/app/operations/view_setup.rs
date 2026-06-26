@@ -34,6 +34,54 @@ fn normalize_drive_root_for_compare(path: &str) -> String {
 }
 
 impl ImageViewerApp {
+    fn apply_drive_info_to_current_computer_items(&mut self, results: &[(String, DriveInfo)]) {
+        if !self.navigation_state.is_computer_view {
+            return;
+        }
+
+        for item in self.all_items_mut().iter_mut() {
+            let item_path = item.path.to_string_lossy();
+            if let Some((_, info)) = results.iter().find(|(p, _)| p == item_path.as_ref()) {
+                item.drive_info = Some(info.clone());
+            }
+        }
+        self.share_visible_items_from_all_items();
+    }
+
+    fn refresh_inactive_computer_view_if_visible(&mut self) {
+        if !self.dual_panel_enabled
+            || !self
+                .dual_panel_inactive_state
+                .as_ref()
+                .is_some_and(|snapshot| snapshot.is_computer_view)
+        {
+            return;
+        }
+
+        self.with_inactive_panel(|app| {
+            if app.navigation_state.is_computer_view {
+                app.setup_computer_view();
+            }
+        });
+    }
+
+    fn refresh_visible_computer_views_after_drive_list_change(&mut self) -> bool {
+        let mut refreshed_any = false;
+
+        if self.navigation_state.is_computer_view {
+            self.setup_computer_view();
+            self.sync_to_tab();
+            refreshed_any = true;
+        }
+
+        let had_inactive_computer = self
+            .dual_panel_inactive_state
+            .as_ref()
+            .is_some_and(|snapshot| snapshot.is_computer_view);
+        self.refresh_inactive_computer_view_if_visible();
+        refreshed_any || had_inactive_computer
+    }
+
     pub fn setup_recycle_bin_view(&mut self) {
         self.active_tag_filter = None;
         self.navigation_state.current_path = RECYCLE_BIN_VIEW_ID.to_string();
@@ -409,6 +457,7 @@ impl ImageViewerApp {
                             );
                             self.directory_cache.clear();
                             self.navigate_to_computer();
+                            self.refresh_inactive_computer_view_if_visible();
                             return;
                         }
                     }
@@ -437,9 +486,7 @@ impl ImageViewerApp {
                         }
                     }
 
-                    if self.navigation_state.is_computer_view {
-                        self.setup_computer_view();
-                    } else {
+                    if !self.refresh_visible_computer_views_after_drive_list_change() {
                         self.refresh_drive_info_async();
                     }
                 }
@@ -503,15 +550,17 @@ impl ImageViewerApp {
                 self.drive_state.cache_drive_info(path, info.clone());
             }
 
-            if self.navigation_state.is_computer_view {
-                // Update all_items with the received drive info
-                for item in self.all_items_mut().iter_mut() {
-                    let item_path = item.path.to_string_lossy();
-                    if let Some((_, info)) = results.iter().find(|(p, _)| p == item_path.as_ref()) {
-                        item.drive_info = Some(info.clone());
-                    }
-                }
-                self.share_visible_items_from_all_items();
+            self.apply_drive_info_to_current_computer_items(&results);
+
+            if self.dual_panel_enabled
+                && self
+                    .dual_panel_inactive_state
+                    .as_ref()
+                    .is_some_and(|snapshot| snapshot.is_computer_view)
+            {
+                self.with_inactive_panel(|app| {
+                    app.apply_drive_info_to_current_computer_items(&results);
+                });
             }
         }
         if any_received {
