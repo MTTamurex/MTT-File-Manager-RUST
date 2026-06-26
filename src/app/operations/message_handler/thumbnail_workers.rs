@@ -602,6 +602,53 @@ impl ImageViewerApp {
         }
     }
 
+    pub(super) fn process_file_hash_worker_results(&mut self, ctx: &egui::Context) {
+        const MAX_HASH_MSGS_PER_FRAME: usize = 4;
+        let hash_budget = if self.frame_time_peak_ms > 33.33 {
+            Duration::from_millis(1)
+        } else if self.frame_time_peak_ms > 25.0 {
+            Duration::from_millis(2)
+        } else {
+            Duration::from_millis(3)
+        };
+        let start = Instant::now();
+        let mut processed = 0usize;
+        let mut updated = false;
+        let mut has_more = false;
+
+        while processed < MAX_HASH_MSGS_PER_FRAME {
+            if start.elapsed() >= hash_budget {
+                has_more = true;
+                break;
+            }
+            let Ok((path, modified, size, result)) = self.file_hash_res_receiver.try_recv() else {
+                break;
+            };
+            processed += 1;
+            self.file_hash_loading.remove(&path);
+            if let Err(msg) = &result {
+                log::debug!("[FileHash] failed for {:?}: {}", path, msg);
+            }
+
+            let is_current_selection = self.selected_file.as_ref().is_some_and(|file| {
+                file.path == path && file.modified == modified && file.size == size
+            });
+
+            if is_current_selection {
+                self.selected_file_hash = Some((path, modified, size, result));
+                updated = true;
+            }
+        }
+
+        if processed >= MAX_HASH_MSGS_PER_FRAME {
+            has_more = true;
+        }
+
+        if updated || has_more {
+            ctx.request_repaint();
+        }
+    }
+
     fn process_deferred_panel_folder_size_revalidation(&mut self, now: Instant) -> bool {
         if self.selected_file.is_some()
             || self.navigation_state.is_computer_view

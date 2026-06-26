@@ -11,6 +11,8 @@ type IconRequest = (PathBuf, usize);
 type IconResponse = (PathBuf, usize, Vec<u8>, u32, u32);
 type MetadataRequest = (PathBuf, u64);
 type MetadataResponse = (PathBuf, u64, windows_infra::MediaMetadata);
+type FileHashRequestIn = (PathBuf, u64, u64);
+type FileHashResponseIn = (PathBuf, u64, u64, Result<String, String>);
 
 pub(in crate::app) fn spawn_cover_worker(
     app_state_db: Arc<AppStateDb>,
@@ -404,4 +406,31 @@ pub(in crate::app) fn spawn_live_file_size_worker(
     });
 
     (size_req_tx, size_res_rx)
+}
+
+pub(in crate::app) fn spawn_file_hash_worker(
+    ctx: &egui::Context,
+) -> (
+    mpsc::Sender<FileHashRequestIn>,
+    mpsc::Receiver<FileHashResponseIn>,
+) {
+    let (hash_req_tx, hash_req_rx) = mpsc::channel::<FileHashRequestIn>();
+    let (hash_res_tx, hash_res_rx) = mpsc::channel::<FileHashResponseIn>();
+    let hash_ctx = ctx.clone();
+
+    std::thread::spawn(move || {
+        crate::infrastructure::io_priority::set_thread_priority(
+            crate::infrastructure::io_priority::IOPriority::Background,
+        );
+
+        while let Ok((path, modified, size)) = hash_req_rx.recv() {
+            let result = crate::app::file_hash::compute_sha256_streaming(&path);
+            if hash_res_tx.send((path, modified, size, result)).is_err() {
+                break;
+            }
+            hash_ctx.request_repaint();
+        }
+    });
+
+    (hash_req_tx, hash_res_rx)
 }

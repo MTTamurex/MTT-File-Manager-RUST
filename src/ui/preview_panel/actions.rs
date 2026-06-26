@@ -15,6 +15,8 @@ pub enum PreviewPanelAction {
     },
     /// Navigate to the clicked breadcrumb segment (a parent folder on disk).
     NavigateTo(PathBuf),
+    /// User requested an on-demand SHA-256 calculation for the selected file.
+    CalculateFileHash(PathBuf),
 }
 
 pub const PREVIEW_MAX_HEIGHT: f32 = 240.0;

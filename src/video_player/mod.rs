@@ -267,7 +267,7 @@ fn load_app_icons() -> Option<(isize, isize)> {
     let hicon_small = unsafe {
         LoadImageW(
             Some(hmodule.into()),
-            PCWSTR(1usize as *const u16),
+            PCWSTR(std::ptr::without_provenance::<u16>(1)),
             IMAGE_ICON,
             16,
             16,
@@ -279,7 +279,7 @@ fn load_app_icons() -> Option<(isize, isize)> {
     let hicon_big = unsafe {
         LoadImageW(
             Some(hmodule.into()),
-            PCWSTR(1usize as *const u16),
+            PCWSTR(std::ptr::without_provenance::<u16>(1)),
             IMAGE_ICON,
             32,
             32,

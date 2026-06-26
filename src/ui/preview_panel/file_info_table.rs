@@ -82,6 +82,8 @@ pub fn render_file_info_table(
     svg_manager: &mut SvgIconManager,
     tag_folder_count: Option<usize>,
     tag_file_count: Option<usize>,
+    file_hash_status: Option<Result<String, String>>,
+    is_file_hash_loading: bool,
 ) -> Option<PreviewPanelAction> {
     let mut action = None;
 
@@ -545,6 +547,126 @@ pub fn render_file_info_table(
                         drive.file_system.clone()
                     },
                 );
+            }
+
+            // 6. File hash (SHA-256, on-demand). Only for real on-disk files
+            // that are not part of any virtual view, archive-inside path, or
+            // recycle bin entry.
+            let show_file_hash = crate::app::file_hash::can_hash_file(file);
+
+            if show_file_hash {
+                ui.add_space(6.0);
+                ui.separator();
+                ui.add_space(6.0);
+                ui.horizontal_top(|ui| {
+                    ui.add_sized(
+                        egui::vec2(110.0, 0.0),
+                        egui::Label::new(
+                            egui::RichText::new(t!("file_info.sha256").to_string())
+                                .color(ui.visuals().weak_text_color()),
+                        ),
+                    );
+                    match file_hash_status {
+                        Some(Ok(hash)) => {
+                            let mut job = egui::text::LayoutJob::default();
+                            job.append(
+                                hash.as_str(),
+                                0.0,
+                                egui::TextFormat {
+                                    font_id: egui::FontId::monospace(11.0),
+                                    color: ui.visuals().text_color(),
+                                    ..Default::default()
+                                },
+                            );
+                            ui.vertical(|ui| {
+                                let response = ui
+                                    .add(egui::Label::new(job).wrap().sense(egui::Sense::click()))
+                                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                    .on_hover_text(t!("file_info.sha256_copy").to_string());
+                                if response.clicked() {
+                                    ui.ctx().copy_text(hash.clone());
+                                }
+
+                                let recalc_btn = egui::Button::new(
+                                    egui::RichText::new(
+                                        t!("file_info.sha256_recalculate").to_string(),
+                                    )
+                                    .color(ui.visuals().hyperlink_color),
+                                )
+                                .frame(false)
+                                .sense(egui::Sense::click());
+                                if ui
+                                    .add(recalc_btn)
+                                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                    .clicked()
+                                {
+                                    action = Some(PreviewPanelAction::CalculateFileHash(
+                                        file.path.clone(),
+                                    ));
+                                }
+                            });
+                        }
+                        Some(Err(_)) => {
+                            ui.vertical(|ui| {
+                                ui.add(
+                                    egui::Label::new(
+                                        egui::RichText::new(
+                                            t!("file_info.unavailable").to_string(),
+                                        )
+                                        .color(ui.visuals().weak_text_color()),
+                                    )
+                                    .wrap(),
+                                );
+
+                                let retry_btn = egui::Button::new(
+                                    egui::RichText::new(t!("file_info.sha256_retry").to_string())
+                                        .color(ui.visuals().hyperlink_color),
+                                )
+                                .frame(false)
+                                .sense(egui::Sense::click());
+                                if ui
+                                    .add(retry_btn)
+                                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                    .clicked()
+                                {
+                                    action = Some(PreviewPanelAction::CalculateFileHash(
+                                        file.path.clone(),
+                                    ));
+                                }
+                            });
+                        }
+                        None => {
+                            if is_file_hash_loading {
+                                ui.add(
+                                    egui::Label::new(
+                                        egui::RichText::new(
+                                            t!("file_info.calculating").to_string(),
+                                        )
+                                        .color(ui.visuals().weak_text_color()),
+                                    )
+                                    .wrap(),
+                                );
+                            } else {
+                                let label_text = t!("file_info.sha256_calculate").to_string();
+                                let calc_btn = egui::Button::new(
+                                    egui::RichText::new(label_text)
+                                        .color(ui.visuals().hyperlink_color),
+                                )
+                                .frame(false)
+                                .sense(egui::Sense::click());
+                                if ui
+                                    .add(calc_btn)
+                                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                    .clicked()
+                                {
+                                    action = Some(PreviewPanelAction::CalculateFileHash(
+                                        file.path.clone(),
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                });
             }
         });
     });

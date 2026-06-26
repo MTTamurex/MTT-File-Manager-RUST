@@ -27,6 +27,7 @@ use std::time::{Instant, SystemTime};
 use crate::app::drag_drop_state::PendingDragMoveConfirmation;
 use crate::app::drive_state::DriveState;
 use crate::app::dual_panel::{ActivePanel, PanelSnapshot};
+use crate::app::file_hash::{FileHashRequest, FileHashResponse, SelectedFileHash};
 use crate::app::file_operation_state::FileOperationState;
 use crate::app::folder_size_state::FolderSizeState;
 use crate::app::global_search_state::GlobalSearchState;
@@ -254,6 +255,11 @@ pub struct ImageViewerApp {
     pub live_file_size_res_receiver: Receiver<crate::app::live_file_size::LiveFileSizeResponse>,
     pub live_file_size_cache: LruCache<PathBuf, (u64, u64)>,
     pub live_file_size_loading: FxHashSet<PathBuf>,
+    pub file_hash_req_sender: Sender<FileHashRequest>,
+    pub file_hash_res_receiver: Receiver<FileHashResponse>,
+    pub selected_file_hash: Option<SelectedFileHash>,
+    pub last_file_hash_selection: Option<PathBuf>,
+    pub file_hash_loading: FxHashSet<PathBuf>,
     pub last_metadata_refresh: Instant,
     pub last_metadata_path: Option<PathBuf>,
     pub show_left_sidebar: bool,

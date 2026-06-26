@@ -24,6 +24,7 @@ pub mod clipboard_ops;
 pub mod context_menu;
 pub mod drag_drop;
 pub mod dual_panel_ops;
+pub mod file_hash;
 pub mod file_ops;
 pub mod folder_loading;
 pub mod folder_lock_ops;

@@ -40,6 +40,8 @@ pub fn render_preview_panel(
     live_file_size_req_sender: &std::sync::mpsc::Sender<
         crate::app::live_file_size::LiveFileSizeRequest,
     >,
+    file_hash_status: Option<Result<String, String>>,
+    is_file_hash_loading: bool,
     is_recycle_bin_view: bool,
     item_icon_loader: &mut IconLoader,
     svg_manager: &mut SvgIconManager,
@@ -196,6 +198,8 @@ pub fn render_preview_panel(
         svg_manager,
         tag_folder_count,
         tag_file_count,
+        file_hash_status,
+        is_file_hash_loading,
     ) {
         action = Some(act);
     }

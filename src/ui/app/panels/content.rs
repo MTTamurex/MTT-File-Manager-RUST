@@ -147,6 +147,33 @@ pub(super) fn render_preview_panel_layout(
                                 .map(|item| item.size)
                                 .sum();
 
+                            let can_hash_file = crate::app::file_hash::can_hash_file(&file);
+                            if can_hash_file {
+                                if app.last_file_hash_selection.as_ref() != Some(&file.path) {
+                                    app.selected_file_hash = None;
+                                    app.last_file_hash_selection = Some(file.path.clone());
+                                }
+                            } else {
+                                app.selected_file_hash = None;
+                                app.last_file_hash_selection = None;
+                            }
+
+                            let file_hash_status = if can_hash_file {
+                                let status = crate::app::file_hash::FileHashStatus {
+                                    modified: file.modified,
+                                    size: file.size,
+                                };
+                                crate::app::file_hash::selected_hash_result(
+                                    &app.selected_file_hash,
+                                    &file.path,
+                                    status,
+                                )
+                            } else {
+                                None
+                            };
+                            let is_file_hash_loading =
+                                app.file_hash_loading.contains(&file.path);
+
 // Resolution guard for preview panel: accept textures that are
                             // large enough for the detail panel, OR that are the best available
                             // when we've already attempted the required quality bucket (some
@@ -187,6 +214,8 @@ pub(super) fn render_preview_panel_layout(
                                 &mut app.live_file_size_cache,
                                 &mut app.live_file_size_loading,
                                 &app.live_file_size_req_sender,
+                                file_hash_status,
+                                is_file_hash_loading,
                                 app.navigation_state.is_recycle_bin_view,
                                 &mut app.item_icon_loader,
                                 &mut app.svg_icon_manager,
@@ -202,6 +231,9 @@ pub(super) fn render_preview_panel_layout(
                                 match act {
                                     PreviewPanelAction::RequestPlay(path) => {
                                         app.request_video_preview_playback(path);
+                                    }
+                                    PreviewPanelAction::CalculateFileHash(path) => {
+                                        app.enqueue_file_hash_for_selected(path);
                                     }
                                     PreviewPanelAction::DetachVideo { path, position, volume } => {
                                         // 1. Kill any existing standalone player

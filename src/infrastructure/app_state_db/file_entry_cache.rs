@@ -31,9 +31,10 @@ fn normalize_path_text(path: &str) -> String {
     let lower = normalized.to_ascii_lowercase();
     if lower.starts_with("\\\\?\\unc\\") {
         normalized = format!("\\\\{}", &normalized[8..]);
-    } else if lower.starts_with("\\\\?\\") || lower.starts_with("\\\\.\\") {
-        normalized = normalized[4..].to_string();
-    } else if lower.starts_with("\\??\\") {
+    } else if lower.starts_with("\\\\?\\")
+        || lower.starts_with("\\\\.\\")
+        || lower.starts_with("\\??\\")
+    {
         normalized = normalized[4..].to_string();
     }
 

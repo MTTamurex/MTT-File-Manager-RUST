@@ -168,6 +168,7 @@ impl ImageViewerApp {
         if !should_defer_low_priority {
             self.process_metadata_worker_results(ctx);
             self.process_live_file_size_worker_results(ctx);
+            self.process_file_hash_worker_results(ctx);
         }
         let t_meta = Instant::now();
 
