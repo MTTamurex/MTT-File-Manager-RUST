@@ -52,6 +52,9 @@ local user_opts = {
     volumecontrol = true,       -- whether to show mute button and volume slider
     keyboardnavigation = false, -- enable directional keyboard navigation
     chapter_fmt = default_chapter_fmt, -- chapter print format for seekbar-hover. "no" to disable
+    compactscale = true,        -- shrink OSC controls when aspect ratio leaves little horizontal room
+    compactscalemin = 0.72,     -- minimum automatic compact scale
+    compactscalethreshold = 1100, -- playresx below this starts compacting controls
 }
 
 -- Icons for jump button depending on jumpamount 
@@ -245,6 +248,7 @@ local osc_param = { -- calculated by osc_init()
     playresx = 0,                           -- canvas size X
     display_aspect = 1,
     unscaled_y = 0,
+    compact_scale = 1,
     areas = {},
 }
 
@@ -266,6 +270,52 @@ local osc_styles = {
     elementHighlight = '{\\blur1\\bord1\\1c&H0000FF&}',
     CtrlText = '{\\blur0\\bord1\\1c&HFFFFFF&\\3c&H000000&\\fn' .. user_opts.font .. '}',
 }
+
+local function clamp_value(min, max, value)
+    if value < min then return min end
+    if value > max then return max end
+    return value
+end
+
+local function compact_font_size(base, scale)
+    return tostring(math.floor(base * scale + 0.5))
+end
+
+local function calculate_compact_scale(playresx, display_aspect)
+    if not user_opts.compactscale then
+        return 1
+    end
+
+    local threshold = tonumber(user_opts.compactscalethreshold) or 1100
+    local min_scale = tonumber(user_opts.compactscalemin) or 0.72
+    threshold = math.max(threshold, 1)
+    min_scale = clamp_value(0.5, 1.0, min_scale)
+
+    local scale = 1
+    if playresx < threshold then
+        scale = playresx / threshold
+    end
+
+    -- Narrow videos (portrait / near-square) have less horizontal room even
+    -- when the native resolution is high. Apply a small extra shrink so the
+    -- bottom row does not collide in standalone windowed mode.
+    if display_aspect > 0 and display_aspect < 1.35 then
+        scale = scale * 0.94
+    end
+
+    return clamp_value(min_scale, 1.0, scale)
+end
+
+local function update_osc_styles_for_scale(scale)
+    osc_styles.Ctrl1 = '{\\blur0\\bord1\\1c&HFFFFFF&\\3c&H000000&\\fs' .. compact_font_size(52, scale) .. '\\fnmaterial-design-iconic-font}'
+    osc_styles.Ctrl2 = '{\\blur0\\bord1\\1c&HFFFFFF&\\3c&H000000&\\fs' .. compact_font_size(32, scale) .. '\\fnmaterial-design-iconic-font}'
+    osc_styles.Ctrl2Flip = '{\\blur0\\bord0\\1c&HFFFFFF&\\3c&HFFFFFF&\\fs' .. compact_font_size(24, scale) .. '\\fnmaterial-design-iconic-font\\fry180'
+    osc_styles.Ctrl3 = '{\\blur0\\bord1\\1c&HFFFFFF&\\3c&H000000&\\fs' .. compact_font_size(30, scale) .. '\\fnmaterial-design-iconic-font}'
+    osc_styles.Time = '{\\blur0\\bord0\\1c&HFFFFFF&\\3c&H000000&\\fs' .. compact_font_size(17, scale) .. '\\fn' .. user_opts.font .. '}'
+    osc_styles.Tooltip = '{\\blur1\\bord0.5\\1c&HFFFFFF&\\3c&H000000&\\fs' .. compact_font_size(18, scale) .. '\\fn' .. user_opts.font .. '}'
+    osc_styles.Title = '{\\blur1\\bord0.5\\1c&HFFFFFF&\\3c&H0\\fs' .. compact_font_size(38, scale) .. '\\q2\\fn' .. user_opts.font .. '}'
+    osc_styles.WinCtrl = '{\\blur1\\bord0.5\\1c&HFFFFFF&\\3c&H0\\fs' .. compact_font_size(20, scale) .. '\\fnmpv-osd-symbols}'
+end
 
 -- internal states, do not touch
 local state = {
@@ -1810,6 +1860,8 @@ local layouts = {}
 -- Default layout
 layouts = function ()
 local UI_OFFSET_Y = -30
+    local compact = osc_param.compact_scale or 1
+    local function c(value) return value * compact end
     local osc_geo = {w, h}
 
 	osc_geo.w = osc_param.playresx
@@ -1869,7 +1921,7 @@ local UI_OFFSET_Y = -30
     lo.slider.tooltip_an = 2
 
     local showjump = user_opts.showjump
-    local offset = showjump and 60 or 0
+    local offset = showjump and c(60) or 0
     
     --
     -- Volumebar
@@ -1877,13 +1929,13 @@ local UI_OFFSET_Y = -30
     lo = new_element('volumebarbg', 'box')
     lo.visible = (osc_param.playresx >= 900) and user_opts.volumecontrol
     lo = add_layout('volumebarbg')
-    lo.geometry = {x = 230, y = refY - 40 + UI_OFFSET_Y, an = 4, w = 50, h = 2}
+    lo.geometry = {x = 230, y = refY - 40 + UI_OFFSET_Y, an = 4, w = c(50), h = c(2)}
     lo.layer = 13
     lo.style = osc_styles.VolumebarBg
 
 
     lo = add_layout('volumebar')
-    lo.geometry = {x = 230, y = refY - 40 + UI_OFFSET_Y, an = 4, w = 50, h = 8}
+    lo.geometry = {x = 230, y = refY - 40 + UI_OFFSET_Y, an = 4, w = c(50), h = c(8)}
     lo.style = osc_styles.VolumebarFg
     lo.slider.gap = 3
     lo.slider.tooltip_style = osc_styles.Tooltip
@@ -1891,27 +1943,27 @@ local UI_OFFSET_Y = -30
 
 	-- buttons
     lo = add_layout('pl_prev')
-    lo.geometry = {x = refX - 120 - offset, y = refY - 40 + UI_OFFSET_Y, an = 5, w = 30, h = 24}
+    lo.geometry = {x = refX - c(120) - offset, y = refY - 40 + UI_OFFSET_Y, an = 5, w = c(30), h = c(24)}
     lo.style = osc_styles.Ctrl2
 
 	 lo = add_layout('skipback')
-    lo.geometry = {x = refX - 60 - offset, y = refY - 40 + UI_OFFSET_Y, an = 5, w = 30, h = 24}
+    lo.geometry = {x = refX - c(60) - offset, y = refY - 40 + UI_OFFSET_Y, an = 5, w = c(30), h = c(24)}
     lo.style = osc_styles.Ctrl2
 
 
     if showjump then
         lo = add_layout('jumpback')
-        lo.geometry = {x = refX - 60, y = refY - 40 + UI_OFFSET_Y, an = 5, w = 30, h = 24}
+        lo.geometry = {x = refX - c(60), y = refY - 40 + UI_OFFSET_Y, an = 5, w = c(30), h = c(24)}
         lo.style = osc_styles.Ctrl2
     end
 			
     lo = add_layout('playpause')
-    lo.geometry = {x = refX, y = refY - 40 + UI_OFFSET_Y, an = 5, w = 45, h = 45}
+    lo.geometry = {x = refX, y = refY - 40 + UI_OFFSET_Y, an = 5, w = c(45), h = c(45)}
     lo.style = osc_styles.Ctrl1	
 
     if showjump then
         lo = add_layout('jumpfrwd')
-        lo.geometry = {x = refX + 60, y = refY - 40 + UI_OFFSET_Y, an = 5, w = 30, h = 24}
+        lo.geometry = {x = refX + c(60), y = refY - 40 + UI_OFFSET_Y, an = 5, w = c(30), h = c(24)}
 
         -- HACK: jumpfrwd's icon must be mirrored for nonstandard # of seconds
         -- as the font only has an icon without a number for rewinding
@@ -1919,82 +1971,82 @@ local UI_OFFSET_Y = -30
     end
 
     lo = add_layout('skipfrwd')
-    lo.geometry = {x = refX + 60 + offset, y = refY - 40 + UI_OFFSET_Y, an = 5, w = 30, h = 24}
+    lo.geometry = {x = refX + c(60) + offset, y = refY - 40 + UI_OFFSET_Y, an = 5, w = c(30), h = c(24)}
     lo.style = osc_styles.Ctrl2	
 
      lo = add_layout('pl_next')
-    lo.geometry = {x = refX + 120 + offset, y = refY - 40 + UI_OFFSET_Y, an = 5, w = 30, h = 24}
+    lo.geometry = {x = refX + c(120) + offset, y = refY - 40 + UI_OFFSET_Y, an = 5, w = c(30), h = c(24)}
      lo.style = osc_styles.Ctrl2
 
 
 	-- Time
     lo = add_layout('tc_left')
-    lo.geometry = {x = 25, y = refY - 84 + UI_OFFSET_Y, an = 7, w = 64, h = 20}
+    lo.geometry = {x = 25, y = refY - 84 + UI_OFFSET_Y, an = 7, w = c(64), h = c(20)}
     lo.style = osc_styles.Time	
 	
 
     lo = add_layout('tc_right')
-    lo.geometry = {x = osc_geo.w - 25 , y = refY -84 + UI_OFFSET_Y, an = 9, w = 64, h = 20}
+    lo.geometry = {x = osc_geo.w - 25 , y = refY -84 + UI_OFFSET_Y, an = 9, w = c(64), h = c(20)}
     lo.style = osc_styles.Time	
 
     lo = add_layout('cy_audio')
-	lo.geometry = {x = 37, y = refY - 40 + UI_OFFSET_Y, an = 5, w = 24, h = 24}
+	lo.geometry = {x = 37, y = refY - 40 + UI_OFFSET_Y, an = 5, w = c(24), h = c(24)}
     lo.style = osc_styles.Ctrl3
     lo.visible = (osc_param.playresx >= 540)
 	
     lo = add_layout('cy_sub')
-    lo.geometry = {x = 87, y = refY - 40 + UI_OFFSET_Y, an = 5, w = 24, h = 24}
+    lo.geometry = {x = 87, y = refY - 40 + UI_OFFSET_Y, an = 5, w = c(24), h = c(24)}
     lo.style = osc_styles.Ctrl3
     lo.visible = (osc_param.playresx >= 600)
 
     -- Open subtitle file (next to cy_sub)
     lo = add_layout('open_sub')
-    lo.geometry = {x = 115, y = refY - 40 + UI_OFFSET_Y, an = 5, w = 24, h = 24}
+    lo.geometry = {x = 115, y = refY - 40 + UI_OFFSET_Y, an = 5, w = c(24), h = c(24)}
     lo.style = osc_styles.CtrlText
     lo.visible = (osc_param.playresx >= 650)
 
     lo = add_layout('vol_ctrl')
-    lo.geometry = {x = 210, y = refY - 40 + UI_OFFSET_Y, an = 5, w = 24, h = 24}
+    lo.geometry = {x = 210, y = refY - 40 + UI_OFFSET_Y, an = 5, w = c(24), h = c(24)}
     lo.style = osc_styles.Ctrl3
     lo.visible = (osc_param.playresx >= 700) and user_opts.volumecontrol
 
 	lo = add_layout('tog_fs')
-    lo.geometry = {x = osc_geo.w - 37, y = refY - 40 + UI_OFFSET_Y, an = 5, w = 24, h = 24}
+    lo.geometry = {x = osc_geo.w - c(37), y = refY - 40 + UI_OFFSET_Y, an = 5, w = c(24), h = c(24)}
     lo.style = osc_styles.Ctrl3
     lo.visible = (osc_param.playresx >= 540)
 
 	lo = add_layout('tog_info')
-    lo.geometry = {x = osc_geo.w - 87, y = refY - 40 + UI_OFFSET_Y, an = 5, w = 24, h = 24}
+    lo.geometry = {x = osc_geo.w - c(87), y = refY - 40 + UI_OFFSET_Y, an = 5, w = c(24), h = c(24)}
     lo.style = osc_styles.Ctrl3
     lo.visible = (osc_param.playresx >= 600)
 
     -- tog_playlist: left side, after vol_ctrl
     lo = add_layout('tog_playlist')
-    lo.geometry = {x = 150, y = refY - 40 + UI_OFFSET_Y, an = 5, w = 24, h = 24}
+    lo.geometry = {x = 150, y = refY - 40 + UI_OFFSET_Y, an = 5, w = c(24), h = c(24)}
     lo.style = osc_styles.Ctrl3
     lo.visible = (osc_param.playresx >= 750)
 
     -- tog_pip: right side, just left of tog_info (osc_geo.w - 87)
     lo = add_layout('tog_pip')
-    lo.geometry = {x = osc_geo.w - 137, y = refY - 40 + UI_OFFSET_Y, an = 5, w = 24, h = 24}
+    lo.geometry = {x = osc_geo.w - c(137), y = refY - 40 + UI_OFFSET_Y, an = 5, w = c(24), h = c(24)}
     lo.style = osc_styles.Ctrl3
     lo.visible = (osc_param.playresx >= 600)
 
     -- RTX VSR toggle
     lo = add_layout('tog_vsr')
-    lo.geometry = {x = osc_geo.w - 200, y = refY - 40 + UI_OFFSET_Y, an = 5, w = 36, h = 24}
+    lo.geometry = {x = osc_geo.w - c(200), y = refY - 40 + UI_OFFSET_Y, an = 5, w = c(36), h = c(24)}
     lo.style = osc_styles.CtrlText
     lo.visible = (osc_param.playresx >= 750) and rtx_features_supported()
 
     -- RTX HDR toggle
     lo = add_layout('tog_hdr')
-    lo.geometry = {x = osc_geo.w - 260, y = refY - 40 + UI_OFFSET_Y, an = 5, w = 36, h = 24}
+    lo.geometry = {x = osc_geo.w - c(260), y = refY - 40 + UI_OFFSET_Y, an = 5, w = c(36), h = c(24)}
     lo.style = osc_styles.CtrlText
     lo.visible = (osc_param.playresx >= 850) and rtx_features_supported()
 
     -- Audio normalizer toggle
     lo = add_layout('tog_norm')
-    lo.geometry = {x = osc_geo.w - 320, y = refY - 40 + UI_OFFSET_Y, an = 5, w = 36, h = 24}
+    lo.geometry = {x = osc_geo.w - c(320), y = refY - 40 + UI_OFFSET_Y, an = 5, w = c(36), h = c(24)}
     lo.style = osc_styles.CtrlText
     lo.visible = (osc_param.playresx >= 950)
 
@@ -2052,6 +2104,8 @@ function osc_init()
         osc_param.display_aspect = display_aspect
     end
     osc_param.playresx = osc_param.playresy * osc_param.display_aspect
+    osc_param.compact_scale = calculate_compact_scale(osc_param.playresx, osc_param.display_aspect)
+    update_osc_styles_for_scale(osc_param.compact_scale)
 
     -- stop seeking with the slider to prevent skipping files
     state.active_element = nil
@@ -2066,6 +2120,7 @@ function osc_init()
     local loop = mp.get_property('loop-playlist', 'no')
 
     local ne
+    local compact_layout = (osc_param.compact_scale or 1) < 0.95
 
     -- playlist buttons
     -- prev
@@ -2376,7 +2431,7 @@ function osc_init()
 
     --tog_vsr
     ne = new_element('tog_vsr', 'button')
-    ne.visible = (osc_param.playresx >= 700) and rtx_features_supported()
+    ne.visible = (not compact_layout) and (osc_param.playresx >= 700) and rtx_features_supported()
     ne.tooltip_style = osc_styles.Tooltip
     ne.tooltipF = function ()
         local on = mp.get_property_bool('user-data/vsr/vsr-enabled', false)
@@ -2395,7 +2450,7 @@ function osc_init()
 
     --tog_hdr
     ne = new_element('tog_hdr', 'button')
-    ne.visible = (osc_param.playresx >= 750) and rtx_features_supported()
+    ne.visible = (not compact_layout) and (osc_param.playresx >= 750) and rtx_features_supported()
     ne.tooltip_style = osc_styles.Tooltip
     ne.tooltipF = function ()
         local on = mp.get_property_bool('user-data/vsr/hdr-enabled', false)
