@@ -1,10 +1,21 @@
 use crate::app::state::ImageViewerApp;
-use std::path::{Component, Path, PathBuf};
+use crate::domain::file_entry::is_path_inside_existing_archive_file;
+use std::path::{Path, PathBuf};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum DragDropOperation {
     Copy,
     Move,
+}
+
+/// Returns true when any dragged path is a virtual entry inside an archive
+/// (e.g. `C:\foo.zip\bar\item.txt`). Such items cannot be moved by the
+/// Windows Shell, so the drag must be treated as a copy regardless of
+/// modifiers, volume or dual-panel context.
+pub(super) fn drag_payload_inside_archive(paths: &[PathBuf]) -> bool {
+    paths
+        .iter()
+        .any(|p| is_path_inside_existing_archive_file(p))
 }
 
 impl ImageViewerApp {
@@ -35,24 +46,27 @@ impl ImageViewerApp {
         ctrl_pressed: bool,
         shift_pressed: bool,
     ) -> DragDropOperation {
-        if ctrl_pressed {
-            return DragDropOperation::Copy;
-        }
-        if shift_pressed {
-            return DragDropOperation::Move;
-        }
+        resolve_drag_operation_for_paths(
+            &self.drag_payload_paths,
+            dest_folder,
+            ctrl_pressed,
+            shift_pressed,
+        )
+    }
+}
 
-        let target_volume = volume_key(dest_folder);
-        let same_volume_for_all = self.drag_payload_paths.iter().all(|source| {
-            let base = source.parent().unwrap_or(source.as_path());
-            volume_key(base) == target_volume
-        });
-
-        if same_volume_for_all {
-            DragDropOperation::Move
-        } else {
-            DragDropOperation::Copy
-        }
+fn resolve_drag_operation_for_paths(
+    paths: &[PathBuf],
+    _dest_folder: &Path,
+    _ctrl_pressed: bool,
+    _shift_pressed: bool,
+) -> DragDropOperation {
+    // Items inside archives (virtual paths like `C:\foo.zip\bar.txt`)
+    // cannot be moved by the Shell. Every other internal drag is a move.
+    if drag_payload_inside_archive(paths) {
+        DragDropOperation::Copy
+    } else {
+        DragDropOperation::Move
     }
 }
 
@@ -107,22 +121,97 @@ pub(super) fn normalize_path_for_compare(path: &Path) -> String {
     }
 }
 
-fn volume_key(path: &Path) -> Option<String> {
-    path.components().find_map(|comp| match comp {
-        Component::Prefix(prefix) => {
-            Some(prefix.as_os_str().to_string_lossy().to_ascii_uppercase())
-        }
-        _ => None,
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
-        is_valid_drop_target_for_paths, should_block_file_panel_input_for_pending_confirmation,
+        drag_payload_inside_archive, is_valid_drop_target_for_paths,
+        resolve_drag_operation_for_paths, should_block_file_panel_input_for_pending_confirmation,
         should_confirm_cross_panel_move, DragDropOperation,
     };
     use std::path::{Path, PathBuf};
+
+    #[test]
+    fn drag_payload_inside_archive_detects_virtual_paths() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let archive = dir.path().join("archive.zip");
+        std::fs::write(&archive, b"zip placeholder").expect("create archive file");
+
+        let paths = vec![archive.join("inner").join("file.txt")];
+        assert!(drag_payload_inside_archive(&paths));
+    }
+
+    #[test]
+    fn drag_payload_inside_archive_ignores_plain_files() {
+        let paths = vec![
+            PathBuf::from(r"C:\Windows\notepad.exe"),
+            PathBuf::from(r"E:\movies\trailer.mp4"),
+        ];
+        assert!(!drag_payload_inside_archive(&paths));
+    }
+
+    #[test]
+    fn drag_payload_inside_archive_does_not_treat_archive_root_as_inside() {
+        // `C:\file.zip` is the archive file itself, NOT a virtual entry inside it.
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let archive = dir.path().join("file.zip");
+        std::fs::write(&archive, b"zip placeholder").expect("create archive file");
+
+        let paths = vec![archive];
+        assert!(!drag_payload_inside_archive(&paths));
+    }
+
+    #[test]
+    fn drag_payload_inside_archive_ignores_real_directory_named_like_archive() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let archive_named_dir = dir.path().join("project.zip");
+        std::fs::create_dir(&archive_named_dir).expect("create archive-named directory");
+
+        let paths = vec![archive_named_dir.join("file.txt")];
+        assert!(!drag_payload_inside_archive(&paths));
+    }
+
+    #[test]
+    fn drag_operation_moves_regular_items() {
+        let paths = vec![PathBuf::from(r"G:\Source\file.txt")];
+
+        assert_eq!(
+            resolve_drag_operation_for_paths(&paths, Path::new(r"G:\Dest"), false, false),
+            DragDropOperation::Move
+        );
+    }
+
+    #[test]
+    fn drag_operation_moves_regular_items_across_volumes() {
+        let paths = vec![PathBuf::from(r"G:\Source\file.txt")];
+
+        assert_eq!(
+            resolve_drag_operation_for_paths(&paths, Path::new(r"E:\Dest"), false, false),
+            DragDropOperation::Move
+        );
+    }
+
+    #[test]
+    fn drag_operation_moves_regular_items_even_with_ctrl() {
+        let paths = vec![PathBuf::from(r"G:\Source\file.txt")];
+
+        assert_eq!(
+            resolve_drag_operation_for_paths(&paths, Path::new(r"E:\Dest"), true, false),
+            DragDropOperation::Move
+        );
+    }
+
+    #[test]
+    fn drag_operation_copies_archive_entries_even_with_shift() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let archive = dir.path().join("archive.zip");
+        std::fs::write(&archive, b"zip placeholder").expect("create archive file");
+        let paths = vec![archive.join("inner").join("file.txt")];
+
+        assert_eq!(
+            resolve_drag_operation_for_paths(&paths, dir.path(), false, true),
+            DragDropOperation::Copy
+        );
+    }
 
     #[test]
     fn active_to_inactive_move_requires_confirmation() {

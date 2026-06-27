@@ -3,10 +3,17 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::Sender;
 
+use crate::domain::file_entry::is_path_inside_existing_archive_file;
 use crate::infrastructure::archive_extract;
 use crate::infrastructure::windows::recycle_bin;
 use crate::infrastructure::windows::shell_operations;
 use crate::workers::archive_extraction_worker::ArchiveExtractionRequest;
+
+fn split_virtual_archive_paths(paths: Vec<PathBuf>) -> (Vec<PathBuf>, Vec<PathBuf>) {
+    paths
+        .into_iter()
+        .partition(|p| is_path_inside_existing_archive_file(p))
+}
 
 /// Indicates whether a handler completed synchronously or dispatched to the archive worker.
 pub(super) enum HandlerCompletion {
@@ -329,6 +336,21 @@ pub(super) fn handle_move(
     result_sender: &Sender<FileOperationResult>,
     archive_extract_sender: &Sender<ArchiveExtractionRequest>,
 ) -> HandlerCompletion {
+    // Items inside archives cannot be moved by the Shell. Downgrade to a copy.
+    if is_path_inside_existing_archive_file(&path) {
+        log::debug!(
+            "[FileOps] handle_move downgraded to copy (path inside archive): {}",
+            path.display()
+        );
+        return handle_copy(
+            path,
+            dest_folder,
+            hwnd,
+            result_sender,
+            archive_extract_sender,
+        );
+    }
+
     let valid_path = sanitize_operation_path(&path);
     let valid_dest = sanitize_operation_path(&dest_folder);
     match (valid_path, valid_dest) {
@@ -486,6 +508,57 @@ pub(super) fn handle_move_batch(
     result_sender: &Sender<FileOperationResult>,
     archive_extract_sender: &Sender<ArchiveExtractionRequest>,
 ) -> HandlerCompletion {
+    let (archive_paths, regular_paths) = split_virtual_archive_paths(paths);
+    if !archive_paths.is_empty() {
+        // Windows Shell cannot move items out of a compressed-folder view.
+        // Copy archive entries while preserving true move semantics for any
+        // regular filesystem items that happened to share the same batch.
+        if regular_paths.is_empty() {
+            log::debug!(
+                "[FileOps] handle_move_batch downgraded to copy (paths inside archive): {} items",
+                archive_paths.len()
+            );
+            return handle_copy_batch(
+                archive_paths,
+                dest_folder,
+                hwnd,
+                result_sender,
+                archive_extract_sender,
+            );
+        }
+
+        log::debug!(
+            "[FileOps] handle_move_batch split mixed batch: {} archive entries copied, {} regular items moved",
+            archive_paths.len(),
+            regular_paths.len()
+        );
+
+        let move_completion = handle_move_batch(
+            regular_paths,
+            dest_folder.clone(),
+            hwnd,
+            result_sender,
+            archive_extract_sender,
+        );
+        let copy_completion = handle_copy_batch(
+            archive_paths,
+            dest_folder,
+            hwnd,
+            result_sender,
+            archive_extract_sender,
+        );
+
+        return if matches!(move_completion, HandlerCompletion::DispatchedAsync)
+            || matches!(copy_completion, HandlerCompletion::DispatchedAsync)
+        {
+            HandlerCompletion::DispatchedAsync
+        } else {
+            HandlerCompletion::CompletedSynchronously
+        };
+    }
+
+    let paths = regular_paths;
+
     let valid_paths = sanitize_operation_paths(&paths);
     let valid_dest = sanitize_operation_path(&dest_folder);
     match (valid_paths, valid_dest) {
@@ -715,5 +788,52 @@ mod tests {
         let pairs = known_exact_move_pairs(&[src_a.clone(), src_b], dest_parent.path());
 
         assert_eq!(pairs, vec![(src_a, dest_parent.path().join("a.txt"))]);
+    }
+
+    #[test]
+    fn split_virtual_archive_paths_separates_archive_entries_from_regular_paths() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let archive_a_root = dir.path().join("archive.zip");
+        let archive_b_root = dir.path().join("data.7z");
+        std::fs::write(&archive_a_root, b"zip placeholder").expect("create zip file");
+        std::fs::write(&archive_b_root, b"7z placeholder").expect("create 7z file");
+
+        let archive_a = archive_a_root.join("inner").join("file.txt");
+        let archive_b = archive_b_root.join("nested").join("sub");
+        let regular_a = dir.path().join("file.zip");
+        std::fs::write(&regular_a, b"zip root placeholder").expect("create regular archive root");
+        let regular_b = PathBuf::from(r"C:\Windows\notepad.exe");
+        let paths = vec![
+            archive_a.clone(),
+            regular_a.clone(),
+            archive_b.clone(),
+            regular_b.clone(),
+        ];
+
+        let (archive_paths, regular_paths) = split_virtual_archive_paths(paths);
+
+        assert_eq!(archive_paths, vec![archive_a, archive_b]);
+        assert_eq!(regular_paths, vec![regular_a, regular_b]);
+    }
+
+    #[test]
+    fn split_virtual_archive_paths_keeps_archive_roots_with_regular_paths() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let archive_root = dir.path().join("file.zip");
+        let archive_named_dir = dir.path().join("folder.zip");
+        std::fs::write(&archive_root, b"zip placeholder").expect("create archive root");
+        std::fs::create_dir(&archive_named_dir).expect("create archive-named directory");
+
+        let paths = vec![
+            archive_root,
+            archive_named_dir.join("file.txt"),
+            PathBuf::from(r"C:\Windows\notepad.exe"),
+            PathBuf::from(r"D:\videos\movie.mp4"),
+        ];
+
+        let (archive_paths, regular_paths) = split_virtual_archive_paths(paths.clone());
+
+        assert!(archive_paths.is_empty());
+        assert_eq!(regular_paths, paths);
     }
 }

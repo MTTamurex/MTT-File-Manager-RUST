@@ -197,6 +197,13 @@ pub fn is_path_inside_archive(path: &Path) -> bool {
     path_contains_archive_segment(&path.to_string_lossy().to_ascii_lowercase())
 }
 
+/// Checks whether a path points to an entry inside an existing archive file.
+/// This avoids treating real directories named like `backup.zip` as virtual archives.
+#[inline]
+pub fn is_path_inside_existing_archive_file(path: &Path) -> bool {
+    split_archive_path(path).is_some_and(|(archive, _)| archive.is_file())
+}
+
 /// Splits a path that traverses an archive into (archive_file, internal_relative_path).
 /// E.g.: `"C:\dl\archive.zip\folder\VR.nfo"` → `Some(("C:\dl\archive.zip", "folder\VR.nfo"))`
 /// Returns `None` if the path does not contain an archive segment.
@@ -323,7 +330,7 @@ pub enum SyncStatus {
 
 #[cfg(test)]
 mod tests {
-    use super::is_path_inside_archive;
+    use super::{is_path_inside_archive, is_path_inside_existing_archive_file};
     use std::path::Path;
 
     #[test]
@@ -342,5 +349,27 @@ mod tests {
         assert!(!is_path_inside_archive(Path::new(
             r"C:\Temp\folder\file.pdf"
         )));
+    }
+
+    #[test]
+    fn existing_archive_file_entry_is_detected() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let archive = dir.path().join("archive.zip");
+        std::fs::write(&archive, b"zip placeholder").expect("create archive file");
+
+        assert!(is_path_inside_existing_archive_file(
+            &archive.join("folder").join("file.txt")
+        ));
+    }
+
+    #[test]
+    fn directory_named_like_archive_is_not_treated_as_archive() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let archive_named_dir = dir.path().join("archive.zip");
+        std::fs::create_dir(&archive_named_dir).expect("create archive-named directory");
+
+        assert!(!is_path_inside_existing_archive_file(
+            &archive_named_dir.join("folder").join("file.txt")
+        ));
     }
 }

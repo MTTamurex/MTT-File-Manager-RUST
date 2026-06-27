@@ -1,9 +1,8 @@
 //! Internal drag-and-drop for file/folder items (Explorer-like behavior).
 //!
 //! This module supports dragging selected items and dropping onto a folder item:
-//! - `Ctrl` forces copy
-//! - `Shift` forces move
-//! - Without modifiers: move on same volume, copy across volumes
+//! - items from real folders are moved
+//! - items from inside archives are copied because Shell move is not supported
 
 mod rendering;
 mod validation;
@@ -191,13 +190,14 @@ impl ImageViewerApp {
             return;
         }
 
+        let operation = self.resolve_drag_operation(&dest_folder, ctrl_pressed, shift_pressed);
+
         let paths = std::mem::take(&mut self.drag_payload_paths);
         if paths.is_empty() {
             self.cancel_item_drag();
             return;
         }
 
-        let operation = self.resolve_drag_operation(&dest_folder, ctrl_pressed, shift_pressed);
         let Some(source_folder) = self.drag_source_folder.clone() else {
             self.cancel_item_drag();
             return;
