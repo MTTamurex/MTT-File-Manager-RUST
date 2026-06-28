@@ -106,7 +106,11 @@ impl ImageViewerApp {
         // Use the same globally-unique generation space as folder loads so
         // delayed dual-panel batches cannot be routed into this special view.
         self.bump_folder_load_generation();
-        self.release_thumbnail_pipeline_for_inactive_view("recycle-bin", true);
+        if self.should_preserve_inactive_dual_panel_thumbnail_pipeline() {
+            self.prune_thumbnail_pipeline_for_dual_panel_navigation("recycle-bin");
+        } else {
+            self.release_thumbnail_pipeline_for_inactive_view("recycle-bin", true);
+        }
 
         let my_gen = self.generation;
         let gen_clone = self.current_generation.clone();
