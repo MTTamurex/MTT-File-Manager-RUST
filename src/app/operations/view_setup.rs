@@ -206,7 +206,11 @@ impl ImageViewerApp {
         // delayed dual-panel batches cannot be routed into this special view.
         self.bump_folder_load_generation();
         self.invalidate_active_items_rebuild();
-        self.release_thumbnail_pipeline_for_inactive_view("computer-view", true);
+        if self.should_preserve_inactive_dual_panel_thumbnail_pipeline() {
+            self.prune_thumbnail_pipeline_for_dual_panel_navigation("computer-view");
+        } else {
+            self.release_thumbnail_pipeline_for_inactive_view("computer-view", true);
+        }
 
         // Set computer view
         self.navigation_state.current_path = COMPUTER_VIEW_ID.to_string();
