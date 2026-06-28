@@ -11,6 +11,10 @@ use std::time::{Duration, Instant};
 
 const INACTIVE_PANEL_PROBE_INTERVAL: Duration = Duration::from_secs(3);
 
+fn is_archive_namespace_path(path: &Path) -> bool {
+    crate::domain::file_entry::is_path_inside_archive(path)
+}
+
 pub(super) struct WatcherPerfMarks {
     pub(super) watcher_start: Instant,
     pub(super) drive_events_done: Instant,
@@ -112,7 +116,9 @@ impl ImageViewerApp {
         if !self.watcher_fallback_polling {
             return;
         }
-        if crate::domain::special_paths::is_virtual_path(&self.navigation_state.current_path) {
+        if crate::domain::special_paths::is_virtual_path(&self.navigation_state.current_path)
+            || is_archive_namespace_path(Path::new(&self.navigation_state.current_path))
+        {
             return;
         }
         if self.is_loading_folder
@@ -188,6 +194,7 @@ impl ImageViewerApp {
             || snapshot.is_computer_view
             || snapshot.is_recycle_bin_view
             || crate::domain::special_paths::is_virtual_path(&snapshot.path)
+            || is_archive_namespace_path(Path::new(&snapshot.path))
         {
             return;
         }
@@ -307,7 +314,8 @@ impl ImageViewerApp {
         reload_if_alive: bool,
     ) {
         let active_is_filesystem =
-            !crate::domain::special_paths::is_virtual_path(&self.navigation_state.current_path);
+            !crate::domain::special_paths::is_virtual_path(&self.navigation_state.current_path)
+                && !is_archive_namespace_path(Path::new(&self.navigation_state.current_path));
         let current_path = PathBuf::from(&self.navigation_state.current_path);
         if active_is_filesystem {
             let should_send_active_probe =
@@ -344,7 +352,10 @@ impl ImageViewerApp {
         let Some(snapshot) = self.dual_panel_inactive_state.as_ref() else {
             return;
         };
-        if snapshot.is_computer_view || snapshot.is_recycle_bin_view {
+        if snapshot.is_computer_view
+            || snapshot.is_recycle_bin_view
+            || is_archive_namespace_path(Path::new(&snapshot.path))
+        {
             return;
         }
 

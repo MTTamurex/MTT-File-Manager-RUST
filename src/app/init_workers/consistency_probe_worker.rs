@@ -216,8 +216,22 @@ pub fn spawn_consistency_probe_worker(
 }
 
 fn directory_is_confirmed_gone(path: &std::path::Path) -> bool {
+    if let Some((archive_path, _)) = crate::domain::file_entry::split_archive_path(path) {
+        return !archive_path.exists();
+    }
+
     match std::fs::metadata(path) {
-        Ok(metadata) => !metadata.is_dir(),
+        Ok(metadata) => {
+            if metadata.is_file()
+                && path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .is_some_and(crate::domain::file_entry::is_archive_extension)
+            {
+                return false;
+            }
+            !metadata.is_dir()
+        }
         Err(error) => error.kind() == std::io::ErrorKind::NotFound,
     }
 }
@@ -288,5 +302,34 @@ mod tests {
         assert!(directory_is_confirmed_gone(&path));
 
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn liveness_check_accepts_archive_root_file() {
+        let path = unique_temp_path("archive").with_extension("zip");
+        std::fs::write(&path, b"zip placeholder").unwrap();
+
+        assert!(!directory_is_confirmed_gone(&path));
+
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn liveness_check_accepts_path_inside_existing_archive() {
+        let archive = unique_temp_path("archive_inner").with_extension("zip");
+        std::fs::write(&archive, b"zip placeholder").unwrap();
+        let inner_path = archive.join("folder");
+
+        assert!(!directory_is_confirmed_gone(&inner_path));
+
+        let _ = std::fs::remove_file(&archive);
+    }
+
+    #[test]
+    fn liveness_check_detects_path_inside_missing_archive() {
+        let archive = unique_temp_path("missing_archive").with_extension("zip");
+        let inner_path = archive.join("folder");
+
+        assert!(directory_is_confirmed_gone(&inner_path));
     }
 }
