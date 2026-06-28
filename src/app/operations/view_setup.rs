@@ -386,6 +386,27 @@ impl ImageViewerApp {
 
     /// Poll for completed background drive scans. Called once per frame.
     pub fn poll_drive_scan(&mut self) {
+        // PERF: Poll for deferred full drive/cloud detection from startup.
+        // This avoids blocking the main thread on labels, registry scans and
+        // sleeping HDD checks during cold start.
+        if let Some(rx) = &self.drive_state.cloud_root_rx {
+            match rx.try_recv() {
+                Ok(scan_result) => {
+                    self.drive_state.cloud_root_rx = None;
+                    log::info!(
+                        "[STARTUP] deferred drive/cloud scan received: {} drives, {} roots",
+                        scan_result.disks.len(),
+                        scan_result.cloud_roots.len()
+                    );
+                    let _ = self.drive_state.drive_scan_tx.send(scan_result);
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.drive_state.cloud_root_rx = None;
+                }
+            }
+        }
+
         match self.drive_state.drive_scan_rx.try_recv() {
             Ok(scan_result) => {
                 self.drive_state.drive_scan_pending = false;

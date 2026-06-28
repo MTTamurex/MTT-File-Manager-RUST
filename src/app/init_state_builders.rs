@@ -87,6 +87,7 @@ pub(in crate::app) fn build_layout_state(
 pub(in crate::app) fn build_drive_state(
     disks: Vec<(String, String)>,
     cloud_roots: Vec<crate::domain::cloud_root::CloudRoot>,
+    cloud_root_rx: mpsc::Receiver<DriveScanResult>,
     drive_scan_tx: mpsc::Sender<DriveScanResult>,
     drive_scan_rx: mpsc::Receiver<DriveScanResult>,
     drive_info_tx: mpsc::Sender<Vec<(String, DriveInfo)>>,
@@ -95,6 +96,7 @@ pub(in crate::app) fn build_drive_state(
     DriveState {
         disks,
         cloud_roots,
+        cloud_root_rx: Some(cloud_root_rx),
         last_drive_refresh: std::time::Instant::now(),
         last_drive_bitmask: crate::infrastructure::windows::get_logical_drives_bitmask(),
         drive_scan_pending: false,

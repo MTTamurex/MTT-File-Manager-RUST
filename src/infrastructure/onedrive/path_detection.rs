@@ -27,7 +27,13 @@ pub(super) fn init_onedrive_paths() {
         roots
     });
 
-    cloud_sync_roots_lock();
+    // Keep startup cheap: full SyncRootManager registry detection is deferred
+    // by the app bootstrap and later installed via refresh_cloud_sync_roots_from_paths.
+    CLOUD_SYNC_ROOTS.get_or_init(|| {
+        let roots = normalize_cloud_sync_roots(std::iter::empty::<&str>());
+        log::info!("[CloudSync] Initial roots: {:?}", roots);
+        RwLock::new(roots)
+    });
 
     // Resolve actual special folder paths via Windows Shell API (locale-independent).
     SPECIAL_FOLDER_PATHS.get_or_init(|| {

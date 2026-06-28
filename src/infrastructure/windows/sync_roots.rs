@@ -108,7 +108,7 @@ pub fn get_drives_and_cloud_roots() -> (Vec<(String, String)>, Vec<CloudRoot>) {
     (visible_disks, cloud_roots)
 }
 
-fn get_google_drive_shortcut_roots(disks: &[(String, String)]) -> Vec<CloudRoot> {
+pub fn get_google_drive_shortcut_roots(disks: &[(String, String)]) -> Vec<CloudRoot> {
     let mut roots = Vec::new();
     let mut seen_targets = HashSet::new();
 

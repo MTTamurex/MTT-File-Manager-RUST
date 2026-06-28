@@ -6,6 +6,9 @@ pub const REMIXICON_TTF: &[u8] = include_bytes!("../assets/remixicon.ttf");
 // Embed application icon (PNG)
 pub const APP_ICON_PNG: &[u8] = include_bytes!("../appicon.png");
 
+// Pre-sized 256x256 application icon for window title bar (avoids runtime resize).
+pub const APP_ICON_256_PNG: &[u8] = include_bytes!("../assets/appicon_256.png");
+
 // Embed folder composition layers (PNG, both 512px wide)
 pub const FOLDER_BACK_PNG: &[u8] = include_bytes!("../assets/folder_back_512.png");
 pub const FOLDER_FRONT_PNG: &[u8] = include_bytes!("../assets/folder_front_512.png");

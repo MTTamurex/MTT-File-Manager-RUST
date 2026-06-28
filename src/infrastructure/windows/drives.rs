@@ -444,6 +444,37 @@ pub fn get_all_drives() -> Vec<(String, String)> {
     }
 }
 
+/// Enumerates logical drive roots without Shell/volume label calls.
+///
+/// Use this on cold startup. Label extraction can touch sleeping volumes, so the
+/// full labeled list is refreshed later on a background thread.
+pub fn get_all_drives_fast() -> Vec<(String, String)> {
+    unsafe {
+        let len = GetLogicalDriveStringsW(None);
+        if len == 0 {
+            log::warn!("[DRIVE-REFRESH] GetLogicalDriveStringsW returned zero length");
+            return Vec::new();
+        }
+
+        let mut buffer = vec![0u16; len as usize];
+        let actual_len = GetLogicalDriveStringsW(Some(&mut buffer));
+
+        if actual_len == 0 {
+            log::warn!("[DRIVE-REFRESH] GetLogicalDriveStringsW returned no drives");
+            return Vec::new();
+        }
+
+        String::from_utf16_lossy(&buffer[..actual_len as usize])
+            .split('\0')
+            .filter(|s| !s.is_empty())
+            .map(|path| {
+                let label = rust_i18n::t!("drive_types.default_label").to_string();
+                (path.to_string(), format_drive_display_name(path, &label))
+            })
+            .collect()
+    }
+}
+
 /// Gets volume information (file system, total/free space).
 pub fn get_volume_info(drive_path: &str) -> VolumeInfo {
     unsafe {

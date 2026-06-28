@@ -6,7 +6,7 @@
 
 use rusqlite::{params, Connection};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use super::db_utils;
@@ -32,6 +32,12 @@ pub struct AppStateDb {
 }
 
 impl AppStateDb {
+    const ACL_HARDENED_MARKER: &'static str = ".acl_hardened";
+
+    fn acl_marker_path(state_dir: &Path) -> PathBuf {
+        state_dir.join(Self::ACL_HARDENED_MARKER)
+    }
+
     /// Creates a new app state database at the specified directory.
     pub fn new(state_dir: PathBuf) -> rusqlite::Result<Self> {
         if let Err(e) = fs::create_dir_all(&state_dir) {
@@ -42,13 +48,23 @@ impl AppStateDb {
             );
         }
 
-        let primary_hardened = db_utils::harden_directory_permissions(&state_dir);
-        if !primary_hardened {
-            log::warn!(
-                "[APP-STATE] State directory ACL hardening failed for {:?}",
-                state_dir
-            );
-        }
+        // PERF: Skip ACL hardening if marker file exists (same pattern as ThumbnailDiskCache).
+        // SetNamedSecurityInfoW is an LSASS round-trip that costs ~30-80ms on cold start.
+        let primary_hardened = if Self::acl_marker_path(&state_dir).exists() {
+            true
+        } else {
+            let hardened = db_utils::harden_directory_permissions(&state_dir);
+            if hardened {
+                let _ = fs::write(Self::acl_marker_path(&state_dir), b"1");
+            }
+            if !hardened {
+                log::warn!(
+                    "[APP-STATE] State directory ACL hardening failed for {:?}",
+                    state_dir
+                );
+            }
+            hardened
+        };
 
         let db_path = state_dir.join("app_state.db");
         let temp_fallback_path = std::env::temp_dir()

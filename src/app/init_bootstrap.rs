@@ -113,6 +113,9 @@ pub(in crate::app) struct AppBootstrap {
 
     pub(in crate::app) disks: Vec<(String, String)>,
     pub(in crate::app) cloud_roots: Vec<crate::domain::cloud_root::CloudRoot>,
+    /// Deferred full drive/cloud detection (runs on background thread to avoid
+    /// blocking on sleeping HDDs during cold start). Delivers once, then is dropped.
+    pub(in crate::app) cloud_root_rx: mpsc::Receiver<crate::app::drive_state::DriveScanResult>,
     pub(in crate::app) drive_scan_tx: mpsc::Sender<crate::app::drive_state::DriveScanResult>,
     pub(in crate::app) drive_scan_rx: mpsc::Receiver<crate::app::drive_state::DriveScanResult>,
     pub(in crate::app) drive_info_tx: mpsc::Sender<Vec<(String, DriveInfo)>>,
@@ -163,59 +166,93 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
         .unwrap_or_else(|| PathBuf::from("."))
         .join("MTT-File-Manager")
         .join("thumbnails");
-    let disk_cache = Arc::new(match ThumbnailDiskCache::new(cache_dir.clone()) {
-        Ok(cache) => cache,
-        Err(e) => {
-            log::error!(
-                "[Cache] Failed to initialize thumbnail cache at {:?}: {:?}. Retrying in-memory.",
-                cache_dir,
-                e
-            );
-            // Last-resort in-memory fallback — thumbnails won't persist but app keeps running.
-            ThumbnailDiskCache::new(std::env::temp_dir().join("mtt-cache-fallback")).unwrap_or_else(
-                |e2| {
-                    log::error!("[Cache] In-memory fallback also failed: {:?}. Exiting.", e2);
-                    std::process::exit(1);
-                },
-            )
-        }
-    });
     let base_dir = cache_dir.parent().unwrap_or(&cache_dir).to_path_buf();
-    log_bootstrap_step!("thumbnail_disk_cache");
-
     let state_dir = base_dir.join("state");
-    let app_state_db = Arc::new(match AppStateDb::new(state_dir.clone()) {
-        Ok(db) => db,
-        Err(e) => {
-            log::error!(
-                "[State] Failed to initialize app state DB at {:?}: {:?}. Retrying in-memory.",
-                state_dir,
-                e
-            );
-            AppStateDb::new(std::env::temp_dir().join("mtt-state-fallback")).unwrap_or_else(|e2| {
-                log::error!("[State] In-memory fallback also failed: {:?}. Exiting.", e2);
-                std::process::exit(1);
-            })
-        }
-    });
-
-    // One-time migration: move legacy tables from thumbnails.db → app_state.db
-    migrate_legacy_tables(
-        &cache_dir.join("thumbnails.db"),
-        &state_dir.join("app_state.db"),
-    );
-    log_bootstrap_step!("app_state_and_legacy_migration");
-
     let dir_cache_dir = base_dir.join("cache");
     let _ = std::fs::create_dir_all(&dir_cache_dir);
-    let directory_index = match DirectoryIndex::open(&dir_cache_dir.join("directory_cache.db")) {
-        Ok(index) => Some(Arc::new(index)),
-        Err(e) => {
-            log::warn!("[Cache] Failed to open directory index: {:?}", e);
-            None
-        }
-    };
-    log_bootstrap_step!("directory_index");
+
+    // PERF: Parallelize independent SQLite opens + IconDiskCache on cold start.
+    // Each opens its own DB file with no cross-dependency, so running them
+    // concurrently turns the SUM of their latencies into the MAX.
+    let mut disk_cache: Option<Arc<ThumbnailDiskCache>> = None;
+    let mut app_state_db: Option<Arc<AppStateDb>> = None;
+    let mut directory_index: Option<Arc<DirectoryIndex>> = None;
+    let mut icon_disk_cache: Option<Arc<IconDiskCache>> = None;
+    let parallel_start = Instant::now();
+    std::thread::scope(|s| {
+        let disk_cache_handle = s.spawn(|| -> rusqlite::Result<ThumbnailDiskCache> {
+            ThumbnailDiskCache::new(cache_dir.clone()).or_else(|e| {
+                log::error!(
+                    "[Cache] Failed to initialize thumbnail cache at {:?}: {:?}. Retrying in-memory.",
+                    cache_dir, e
+                );
+                ThumbnailDiskCache::new(std::env::temp_dir().join("mtt-cache-fallback"))
+            })
+        });
+
+        let app_state_handle = s.spawn(|| -> rusqlite::Result<AppStateDb> {
+            AppStateDb::new(state_dir.clone()).or_else(|e| {
+                log::error!(
+                    "[State] Failed to initialize app state DB at {:?}: {:?}. Retrying in-memory.",
+                    state_dir,
+                    e
+                );
+                AppStateDb::new(std::env::temp_dir().join("mtt-state-fallback"))
+            })
+        });
+
+        let dir_index_handle = s.spawn(|| -> rusqlite::Result<DirectoryIndex> {
+            DirectoryIndex::open(&dir_cache_dir.join("directory_cache.db"))
+        });
+
+        let icon_cache_handle = s.spawn(|| IconDiskCache::new(&base_dir));
+
+        // Migration depends on app_state.db and thumbnails.db initialization.
+        // Wait for both so migration never races ThumbnailDiskCache schema setup.
+        let app_state_raw = app_state_handle.join().unwrap();
+        let disk_cache_raw = disk_cache_handle.join().unwrap();
+        migrate_legacy_tables(
+            &cache_dir.join("thumbnails.db"),
+            &state_dir.join("app_state.db"),
+        );
+
+        // Join parallel results.
+        let disk_cache_inner = match disk_cache_raw {
+            Ok(c) => c,
+            Err(e2) => {
+                log::error!("[Cache] In-memory fallback also failed: {:?}. Exiting.", e2);
+                std::process::exit(1);
+            }
+        };
+        let app_state_inner = match app_state_raw {
+            Ok(db) => db,
+            Err(e2) => {
+                log::error!("[State] In-memory fallback also failed: {:?}. Exiting.", e2);
+                std::process::exit(1);
+            }
+        };
+        let dir_index_raw = dir_index_handle.join().unwrap();
+        let icon_cache_inner = icon_cache_handle.join().unwrap();
+
+        // Write to outer variables (scoped threads can borrow outer muts).
+        disk_cache = Some(Arc::new(disk_cache_inner));
+        app_state_db = Some(Arc::new(app_state_inner));
+        directory_index = match dir_index_raw {
+            Ok(index) => Some(Arc::new(index)),
+            Err(e) => {
+                log::warn!("[Cache] Failed to open directory index: {:?}", e);
+                None
+            }
+        };
+        icon_disk_cache = Some(Arc::new(icon_cache_inner));
+    });
+    let disk_cache = disk_cache.unwrap();
+    let app_state_db = app_state_db.unwrap();
+    let icon_disk_cache = icon_disk_cache.unwrap();
+    log::info!(
+        "[STARTUP] parallel SQLite opens + migration total_ms={}",
+        parallel_start.elapsed().as_millis()
+    );
 
     let (cover_req_tx, cover_res_rx) = spawn_cover_worker(app_state_db.clone());
     #[cfg(feature = "notify-watcher")]
@@ -223,6 +260,15 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
     let (device_event_sender, device_event_receiver) = mpsc::channel();
     windows_infra::start_device_change_listener(device_event_sender, ctx.clone());
     log_bootstrap_step!("base_channels_and_device_listener");
+
+    // PERF: Defer FolderComposer PNG decoding to a background thread.
+    // Decodes 3 embedded PNGs + composites the empty-folder icon (~30-80ms cold).
+    // Runs concurrently with worker spawning below.
+    let folder_composer_handle = std::thread::spawn(|| {
+        let composer = FolderComposer::new();
+        let empty_icon = composer.compose_empty();
+        (composer, empty_icon)
+    });
 
     let (img_tx, img_rx) = crossbeam_channel::bounded(THUMBNAIL_RESULT_CHANNEL_CAPACITY);
     let thumbnail_queue = Arc::new(PriorityThumbnailQueue::new());
@@ -253,18 +299,16 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
     );
     log_bootstrap_step!("thumbnail_workers");
 
-    let icon_disk_cache = Arc::new(IconDiskCache::new(&base_dir));
     spawn_file_icon_cache_gc_worker(icon_disk_cache.clone());
     let (icon_req_tx, icon_res_rx) = spawn_icon_worker(ctx, shared_gen.clone(), icon_disk_cache);
 
     let (meta_req_tx, meta_res_rx) = spawn_metadata_worker(ctx);
     let (live_size_req_tx, live_size_res_rx) = spawn_live_file_size_worker(ctx);
     let (file_hash_req_tx, file_hash_res_rx) = spawn_file_hash_worker(ctx);
-    let folder_composer = Arc::new(FolderComposer::new());
+    let (folder_composer_raw, custom_folder_icon) = folder_composer_handle.join().unwrap();
+    let folder_composer = Arc::new(folder_composer_raw);
     let folder_preview_trace =
         Arc::new(crate::workers::folder_preview_worker::FolderPreviewTraceCounters::default());
-    // Compose the custom empty folder icon ONCE before sharing the composer.
-    let custom_folder_icon = folder_composer.compose_empty();
     let (folder_preview_tx, folder_preview_res_rx) = spawn_folder_preview_workers(
         ctx,
         disk_cache.clone(),
@@ -294,7 +338,14 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
     let (consistency_probe_tx, consistency_probe_rx) = spawn_consistency_probe_worker(ctx.clone());
     log_bootstrap_step!("pipeline_and_search_workers");
 
-    let (disks, cloud_roots) = windows_infra::get_drives_and_cloud_roots();
+    // PERF: Start with drive roots only. Full labels/cloud roots can touch
+    // sleeping volumes, so they are refreshed on a background thread below.
+    let disks = windows_infra::get_all_drives_fast();
+    let (cloud_root_tx, cloud_root_rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let (disks, cloud_roots) = windows_infra::get_drives_and_cloud_roots();
+        let _ = cloud_root_tx.send(crate::app::drive_state::DriveScanResult { disks, cloud_roots });
+    });
     let (drive_scan_tx, drive_scan_rx) = mpsc::channel();
     let (drive_info_tx, drive_info_rx) = mpsc::channel();
     log_bootstrap_step!("drives_and_cloud_roots");
@@ -359,7 +410,8 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
         consistency_probe_tx,
         consistency_probe_rx,
         disks,
-        cloud_roots,
+        cloud_roots: Vec::new(),
+        cloud_root_rx,
         drive_scan_tx,
         drive_scan_rx,
         drive_info_tx,

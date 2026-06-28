@@ -173,6 +173,7 @@ impl ImageViewerApp {
             consistency_probe_rx,
             disks,
             cloud_roots,
+            cloud_root_rx,
             drive_scan_tx,
             drive_scan_rx,
             drive_info_tx,
@@ -371,6 +372,7 @@ impl ImageViewerApp {
             drive_state: build_drive_state(
                 disks,
                 cloud_roots.clone(),
+                cloud_root_rx,
                 drive_scan_tx,
                 drive_scan_rx,
                 drive_info_tx,

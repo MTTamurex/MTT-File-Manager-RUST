@@ -13,6 +13,8 @@ pub struct DriveScanResult {
 pub struct DriveState {
     pub disks: Vec<(String, String)>,
     pub cloud_roots: Vec<CloudRoot>,
+    /// Deferred full drive/cloud detection from startup (delivers once, then set to None).
+    pub cloud_root_rx: Option<Receiver<DriveScanResult>>,
     pub last_drive_refresh: Instant,
     pub last_drive_bitmask: u32,
     pub drive_scan_pending: bool,

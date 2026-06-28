@@ -41,20 +41,19 @@ fn cleanup_eframe_storage(app_id: &str) {
     }
 }
 
-/// Load application icon from embedded PNG bytes
+/// Load application icon from embedded pre-sized 256x256 PNG bytes.
+/// PERF: Uses a pre-sized asset to avoid the expensive CatmullRom resize at startup.
 fn load_app_icon() -> Option<egui::IconData> {
-    // Load PNG from embedded bytes using image crate
-    match image::load_from_memory(mtt_file_manager::embedded_assets::APP_ICON_PNG) {
+    match image::load_from_memory(mtt_file_manager::embedded_assets::APP_ICON_256_PNG) {
         Ok(img) => {
-            // Resize to 256x256 for optimal display (Windows icon standard)
-            let resized = img.resize_exact(256, 256, image::imageops::FilterType::CatmullRom);
-            let rgba_image = resized.to_rgba8();
+            let rgba_image = img.to_rgba8();
+            let (width, height) = (rgba_image.width(), rgba_image.height());
             let pixels = rgba_image.into_raw();
 
             Some(egui::IconData {
                 rgba: pixels,
-                width: 256,
-                height: 256,
+                width,
+                height,
             })
         }
         Err(e) => {
