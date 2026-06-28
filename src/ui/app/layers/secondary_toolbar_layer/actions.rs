@@ -24,14 +24,19 @@ pub(super) fn render_action_buttons(ui: &mut egui::Ui, app: &mut ImageViewerApp)
         .is_some_and(|f| f.drive_info.is_some());
     let has_selection =
         (app.selected_file.is_some() || !app.multi_selection.is_empty()) && !is_drive_selected;
+    let in_archive_namespace = app.current_location_is_archive_namespace();
+    let can_cut = has_selection && !in_archive_namespace;
     let can_copy = has_selection && app.can_copy_from_current_location();
     let can_rename = app.multi_selection.len() <= 1
+        && !in_archive_namespace
         && app
             .selected_item
             .is_some_and(|idx| app.can_rename_item(idx));
     let can_paste = app.can_paste_into_current_location() && !is_drive_selected;
     let can_create_folder =
-        !crate::domain::special_paths::is_virtual_path(&app.navigation_state.current_path);
+        !crate::domain::special_paths::is_virtual_path(&app.navigation_state.current_path)
+            && !in_archive_namespace;
+    let can_delete = has_selection && !in_archive_namespace;
     let can_empty_recycle_bin = is_recycle_bin_view && !app.items.is_empty();
 
     let icon_color = if ui.visuals().dark_mode {
@@ -108,7 +113,7 @@ pub(super) fn render_action_buttons(ui: &mut egui::Ui, app: &mut ImageViewerApp)
             }
         };
 
-        if render_btn("cut", has_selection, &t!("secondary_toolbar.cut")) {
+        if render_btn("cut", can_cut, &t!("secondary_toolbar.cut")) {
             action = SecAction::Cut;
         }
         if render_btn("copy", can_copy, &t!("secondary_toolbar.copy")) {
@@ -127,7 +132,7 @@ pub(super) fn render_action_buttons(ui: &mut egui::Ui, app: &mut ImageViewerApp)
         ) {
             action = SecAction::CreateFolder;
         }
-        if render_btn("delete", has_selection, &t!("secondary_toolbar.delete")) {
+        if render_btn("delete", can_delete, &t!("secondary_toolbar.delete")) {
             action = SecAction::Delete;
         }
         if is_recycle_bin_view

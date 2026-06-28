@@ -7,6 +7,23 @@ use crate::application::file_operations;
 use std::path::{Path, PathBuf};
 
 impl ImageViewerApp {
+    pub(crate) fn path_is_archive_namespace(path: &Path) -> bool {
+        if let Some((archive_path, _)) = crate::domain::file_entry::split_archive_path(path) {
+            return std::fs::metadata(&archive_path)
+                .map(|metadata| metadata.is_file())
+                .unwrap_or(true);
+        }
+
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(crate::domain::file_entry::is_archive_extension)
+            && std::fs::metadata(path).is_ok_and(|metadata| metadata.is_file())
+    }
+
+    pub(crate) fn current_location_is_archive_namespace(&self) -> bool {
+        Self::path_is_archive_namespace(Path::new(&self.navigation_state.current_path))
+    }
+
     pub(crate) fn context_target_is_directory(&self, idx: Option<usize>, path: &Path) -> bool {
         if crate::infrastructure::windows::is_drive_root_path(path) {
             return true;
@@ -50,6 +67,7 @@ impl ImageViewerApp {
             && !self.navigation_state.is_computer_view
             && !self.navigation_state.is_recycle_bin_view
             && !crate::domain::special_paths::is_virtual_path(&self.navigation_state.current_path)
+            && !self.current_location_is_archive_namespace()
     }
 
     pub fn command_copy(&mut self, idx: Option<usize>) {
@@ -90,6 +108,11 @@ impl ImageViewerApp {
 
     /// Cut: place the file on the Windows clipboard with the MOVE flag
     pub fn command_cut(&mut self, idx: Option<usize>) {
+        if self.current_location_is_archive_namespace() {
+            self.context_menu.target_paths.clear();
+            return;
+        }
+
         if idx.is_none() && !self.context_menu.target_paths.is_empty() {
             self.clipboard.cut(&self.context_menu.target_paths.clone());
             return;
@@ -154,6 +177,11 @@ impl ImageViewerApp {
         } else {
             PathBuf::from(&self.navigation_state.current_path)
         };
+
+        if Self::path_is_archive_namespace(&dest_folder) {
+            self.context_menu.target_paths.clear();
+            return;
+        }
 
         // 1. Get files and operation from clipboard via Manager
         // Optimized to use the manager's logic which checks system then internal.

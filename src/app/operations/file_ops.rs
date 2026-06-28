@@ -153,6 +153,10 @@ impl ImageViewerApp {
     }
 
     pub fn delete_permanently_for_idx(&mut self, idx: Option<usize>) {
+        if self.current_location_is_archive_namespace() {
+            return;
+        }
+
         // L-12: .into_owned() converts Cow<[PathBuf]> to Vec<PathBuf> (clone only when borrowed)
         let paths: Vec<PathBuf> = self.context_target_paths(idx).into_owned();
         if paths.is_empty() {
@@ -187,7 +191,7 @@ impl ImageViewerApp {
     }
 
     pub fn delete_with_shell_for_paths(&mut self, paths: &[PathBuf]) {
-        if paths.is_empty() {
+        if paths.is_empty() || self.current_location_is_archive_namespace() {
             return;
         }
 
@@ -242,7 +246,9 @@ impl ImageViewerApp {
     }
 
     pub fn create_new_folder(&mut self) {
-        if crate::domain::special_paths::is_virtual_path(&self.navigation_state.current_path) {
+        if crate::domain::special_paths::is_virtual_path(&self.navigation_state.current_path)
+            || self.current_location_is_archive_namespace()
+        {
             return;
         }
 
@@ -292,7 +298,8 @@ impl ImageViewerApp {
     }
 
     pub fn can_rename_item(&self, idx: usize) -> bool {
-        if self.navigation_state.is_recycle_bin_view {
+        if self.navigation_state.is_recycle_bin_view || self.current_location_is_archive_namespace()
+        {
             return false;
         }
 
@@ -383,7 +390,7 @@ impl ImageViewerApp {
     /// Collects all selected, non-drive items in display order, then opens the
     /// batch rename modal by setting `batch_rename_state`.
     pub fn begin_batch_rename(&mut self) {
-        if self.multi_selection.len() < 2 {
+        if self.multi_selection.len() < 2 || self.current_location_is_archive_namespace() {
             return;
         }
 
@@ -410,6 +417,11 @@ impl ImageViewerApp {
     /// Applies the current `batch_rename_state`, sending one aggregate rename
     /// request for all non-conflicting files to the background worker.
     pub fn apply_batch_rename(&mut self) {
+        if self.current_location_is_archive_namespace() {
+            self.batch_rename_state = None;
+            return;
+        }
+
         let Some(state): Option<crate::app::batch_rename::BatchRenameState> =
             self.batch_rename_state.take()
         else {

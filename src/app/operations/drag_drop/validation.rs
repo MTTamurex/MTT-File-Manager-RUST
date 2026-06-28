@@ -75,6 +75,10 @@ pub(super) fn is_valid_drop_target_for_paths(paths: &[PathBuf], target: &Path) -
         return false;
     }
 
+    if ImageViewerApp::path_is_archive_namespace(target) {
+        return false;
+    }
+
     let target_norm = normalize_path_for_compare(target);
 
     for source in paths {
@@ -211,6 +215,39 @@ mod tests {
             resolve_drag_operation_for_paths(&paths, dir.path(), false, true),
             DragDropOperation::Copy
         );
+    }
+
+    #[test]
+    fn drop_target_rejects_archive_root_file() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let archive = dir.path().join("archive.zip");
+        std::fs::write(&archive, b"zip placeholder").expect("create archive file");
+        let paths = vec![dir.path().join("file.txt")];
+
+        assert!(!is_valid_drop_target_for_paths(&paths, &archive));
+    }
+
+    #[test]
+    fn drop_target_rejects_path_inside_archive() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let archive = dir.path().join("archive.zip");
+        std::fs::write(&archive, b"zip placeholder").expect("create archive file");
+        let paths = vec![dir.path().join("file.txt")];
+
+        assert!(!is_valid_drop_target_for_paths(
+            &paths,
+            &archive.join("inner")
+        ));
+    }
+
+    #[test]
+    fn drop_target_allows_real_directory_named_like_archive() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let archive_named_dir = dir.path().join("project.zip");
+        std::fs::create_dir(&archive_named_dir).expect("create archive-named dir");
+        let paths = vec![dir.path().join("file.txt")];
+
+        assert!(is_valid_drop_target_for_paths(&paths, &archive_named_dir));
     }
 
     #[test]

@@ -118,6 +118,77 @@ impl ImageViewerApp {
             return;
         }
 
+        if self.current_location_is_archive_namespace() {
+            self.shell_menu_request_id = self.shell_menu_request_id.wrapping_add(1);
+            let _ = self
+                .shell_menu_req_tx
+                .send(crate::infrastructure::shell_menu_worker::ShellMenuRequest::Cancel);
+
+            if !is_empty_area {
+                items.push(
+                    ContextMenuItem::primary(-3, t!("context_menu.cut"))
+                        .with_command("cut")
+                        .with_shortcut(
+                            self.shortcuts
+                                .label(crate::app::shortcuts::ShortcutAction::Cut),
+                        )
+                        .enabled(false),
+                );
+                items.push(
+                    ContextMenuItem::primary(-2, t!("context_menu.copy"))
+                        .with_command("copy")
+                        .with_shortcut(
+                            self.shortcuts
+                                .label(crate::app::shortcuts::ShortcutAction::Copy),
+                        )
+                        .enabled(self.can_copy_from_current_location()),
+                );
+                items.push(
+                    ContextMenuItem::primary(-5, t!("context_menu.rename"))
+                        .with_command("rename")
+                        .with_shortcut(
+                            self.shortcuts
+                                .label(crate::app::shortcuts::ShortcutAction::Rename),
+                        )
+                        .enabled(false),
+                );
+                items.push(
+                    ContextMenuItem::primary(-6, t!("context_menu.delete"))
+                        .with_command("delete")
+                        .with_shortcut(
+                            self.shortcuts
+                                .label(crate::app::shortcuts::ShortcutAction::Delete),
+                        )
+                        .enabled(false),
+                );
+            } else {
+                items.push(
+                    ContextMenuItem::primary(-4, t!("context_menu.paste"))
+                        .with_command("paste")
+                        .with_shortcut(
+                            self.shortcuts
+                                .label(crate::app::shortcuts::ShortcutAction::Paste),
+                        )
+                        .enabled(false),
+                );
+                items.push(ContextMenuItem::separator());
+                items.push(
+                    ContextMenuItem::new(-1, t!("context_menu.create_folder"))
+                        .with_svg_icon("folder_new")
+                        .with_shortcut(
+                            self.shortcuts
+                                .label(crate::app::shortcuts::ShortcutAction::CreateFolder),
+                        )
+                        .enabled(false),
+                );
+            }
+
+            self.context_menu.items = items;
+            self.context_menu.partition_items();
+            self.shell_menu_loading = false;
+            return;
+        }
+
         // Check if the target item is a drive (drives don't support file operations)
         let is_drive = _item_index
             .and_then(|idx| self.items.get(idx))
@@ -160,6 +231,14 @@ impl ImageViewerApp {
         } else {
             false
         };
+        let paste_destination_is_archive = if is_empty_area {
+            self.current_location_is_archive_namespace()
+        } else {
+            paths.first().is_some_and(|path| {
+                self.context_target_is_directory(_item_index, path)
+                    && Self::path_is_archive_namespace(path)
+            })
+        };
         let can_tag_targets = !is_empty_area
             && !is_drive
             && !self.navigation_state.is_computer_view
@@ -197,7 +276,7 @@ impl ImageViewerApp {
             );
         }
 
-        let can_paste = self.clipboard.has_content();
+        let can_paste = self.can_paste_into_current_location() && !paste_destination_is_archive;
         items.push(
             ContextMenuItem::primary(-4, t!("context_menu.paste"))
                 .with_command("paste")
@@ -230,7 +309,8 @@ impl ImageViewerApp {
         }
         // ========== SECONDARY ITEMS (App-specific) ==========
         let can_create_folder =
-            !crate::domain::special_paths::is_virtual_path(&self.navigation_state.current_path);
+            !crate::domain::special_paths::is_virtual_path(&self.navigation_state.current_path)
+                && !self.current_location_is_archive_namespace();
         if is_empty_area {
             items.push(ContextMenuItem::separator());
             items.push(
