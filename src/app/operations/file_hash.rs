@@ -17,10 +17,7 @@ impl ImageViewerApp {
             return;
         };
 
-        let status = crate::app::file_hash::FileHashStatus {
-            modified: file.modified,
-            size: file.size,
-        };
+        let status = crate::app::file_hash::file_hash_status(file);
 
         // Refuse to hash files currently being downloaded / written — opening
         // them with shared-read could fight the downloader (same rationale

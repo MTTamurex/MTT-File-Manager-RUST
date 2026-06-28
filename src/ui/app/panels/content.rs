@@ -159,10 +159,7 @@ pub(super) fn render_preview_panel_layout(
                             }
 
                             let file_hash_status = if can_hash_file {
-                                let status = crate::app::file_hash::FileHashStatus {
-                                    modified: file.modified,
-                                    size: file.size,
-                                };
+                                let status = crate::app::file_hash::file_hash_status(&file);
                                 crate::app::file_hash::selected_hash_result(
                                     &app.selected_file_hash,
                                     &file.path,

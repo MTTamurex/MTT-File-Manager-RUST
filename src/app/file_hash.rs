@@ -16,14 +16,36 @@ pub struct FileHashStatus {
     pub size: u64,
 }
 
+fn is_hashable_file_entry(file: &FileEntry) -> bool {
+    !file.is_dir || (file.is_archive() && (file.size > 0 || file.path().is_file()))
+}
+
 pub fn can_hash_file(file: &FileEntry) -> bool {
-    !file.is_dir
+    is_hashable_file_entry(file)
         && file.drive_info.is_none()
         && file.name != COMPUTER_VIEW_ID
         && file.name != RECYCLE_BIN_VIEW_ID
         && !file.is_recycle_item()
         && !is_path_inside_archive(file.path())
         && tag_id_from_view_path(&file.path.to_string_lossy()).is_none()
+}
+
+pub fn file_hash_status(file: &FileEntry) -> FileHashStatus {
+    let size = if file.is_dir && file.is_archive() && file.size == 0 {
+        file.path()
+            .metadata()
+            .ok()
+            .filter(|metadata| metadata.is_file())
+            .map(|metadata| metadata.len())
+            .unwrap_or(file.size)
+    } else {
+        file.size
+    };
+
+    FileHashStatus {
+        modified: file.modified,
+        size,
+    }
 }
 
 pub fn selected_hash_result(
@@ -81,5 +103,32 @@ where
         true
     } else {
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{can_hash_file, file_hash_status};
+    use crate::domain::file_entry::FileEntry;
+
+    #[test]
+    fn allows_archive_files_marked_as_directories() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let archive = dir.path().join("sample.7z");
+        std::fs::write(&archive, b"archive bytes").expect("create archive file");
+        let entry = FileEntry::from_path(archive, true);
+
+        assert!(can_hash_file(&entry));
+        assert_eq!(file_hash_status(&entry).size, 13);
+    }
+
+    #[test]
+    fn rejects_real_directories_named_like_archives() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let archive_named_dir = dir.path().join("sample.zip");
+        std::fs::create_dir(&archive_named_dir).expect("create archive-named dir");
+        let entry = FileEntry::from_path(archive_named_dir, true);
+
+        assert!(!can_hash_file(&entry));
     }
 }
