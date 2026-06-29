@@ -1,6 +1,7 @@
 use super::*;
 use crate::app::state::ImageViewerApp;
 use crate::application::sorting;
+use crate::domain::file_tag;
 use crate::domain::special_paths::tag_id_from_view_path;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::PathBuf;
@@ -21,6 +22,7 @@ impl ImageViewerApp {
         // Check if the active panel tag view needs a full reload because a
         // newly tagged file is not in all_items yet.
         if let Some(tag_id) = tag_id_from_view_path(&self.navigation_state.current_path) {
+            self.prune_active_tag_view_items_without_tag(tag_id);
             if self.tag_view_needs_reload(tag_id) {
                 self.setup_tag_view(tag_id);
                 self.ui_ctx.request_repaint();
@@ -59,6 +61,12 @@ impl ImageViewerApp {
         }
 
         self.ui_ctx.request_repaint();
+    }
+
+    fn prune_active_tag_view_items_without_tag(&mut self, tag_id: i64) {
+        let tag_assignments = self.tag_assignments_normalized.clone();
+        self.all_items_mut()
+            .retain(|item| file_tag::path_has_tag(tag_assignments.as_ref(), &item.path, tag_id));
     }
 
     /// Returns true if a tagged file is missing from the active panel's all_items,
@@ -193,7 +201,39 @@ impl ImageViewerApp {
         self.recompute_tag_counts_from_assignments();
         self.invalidate_cached_tag_views_for_tags(&changed_tags);
         self.sync_tag_assignments_normalized();
+        self.prune_paths_from_loaded_tag_views(paths);
         self.refresh_visible_items_after_tag_change();
+    }
+
+    fn prune_paths_from_loaded_tag_views(&mut self, paths: &[PathBuf]) {
+        if tag_id_from_view_path(&self.navigation_state.current_path).is_some() {
+            self.all_items_mut().retain(|item| {
+                !paths
+                    .iter()
+                    .any(|path| tag_assignment_path_matches(&item.path, path))
+            });
+            Arc::make_mut(&mut self.items).retain(|item| {
+                !paths
+                    .iter()
+                    .any(|path| tag_assignment_path_matches(&item.path, path))
+            });
+        }
+
+        if let Some(snapshot) = self.dual_panel_inactive_state.as_mut() {
+            if tag_id_from_view_path(&snapshot.path).is_some() {
+                Arc::make_mut(&mut snapshot.all_items).retain(|item| {
+                    !paths
+                        .iter()
+                        .any(|path| tag_assignment_path_matches(&item.path, path))
+                });
+                Arc::make_mut(&mut snapshot.items).retain(|item| {
+                    !paths
+                        .iter()
+                        .any(|path| tag_assignment_path_matches(&item.path, path))
+                });
+                snapshot.total_items = snapshot.items.len();
+            }
+        }
     }
 
     /// Removes items from tag views whose files no longer exist on disk.

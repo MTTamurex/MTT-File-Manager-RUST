@@ -195,6 +195,7 @@ impl ImageViewerApp {
                 let mut page_size = FIRST_PAGE_SIZE;
                 let mut last_path: Option<PathBuf> = None;
                 let mut detected_is_ssd: Option<bool> = None;
+                let mut cached_paths_to_validate: Vec<PathBuf> = Vec::new();
                 let mark_first = |first: &mut Option<std::time::Instant>| {
                     if first.is_none() {
                         *first = Some(std::time::Instant::now());
@@ -228,7 +229,6 @@ impl ImageViewerApp {
 
                     if !cached.is_empty() {
                         let mut cached_batch = Vec::with_capacity(CACHE_BATCH_SIZE);
-                        let mut cached_paths_to_validate = Vec::with_capacity(cached.len());
                         for path in &paths {
                             let Some(entry) = cached.get(path) else {
                                 continue;
@@ -248,17 +248,6 @@ impl ImageViewerApp {
                             let _ = sender.send((my_gen, cached_batch));
                             ui_ctx.request_repaint();
                             mark_first(&mut first_batch_sent);
-                        }
-
-                        // Validate stale cached paths only after they were
-                        // made available to the UI. This keeps first paint fast
-                        // and reconciles missing files asynchronously.
-                        let missing_cached_paths: Vec<PathBuf> = cached_paths_to_validate
-                            .into_iter()
-                            .filter(|path| !crate::infrastructure::onedrive::fast_path_exists(path))
-                            .collect();
-                        if !missing_cached_paths.is_empty() {
-                            let _ = tag_gc_sender.send(missing_cached_paths);
                         }
                     }
 
@@ -359,6 +348,16 @@ impl ImageViewerApp {
                     time_to_first_ms,
                     total_ms
                 );
+
+                if !cached_paths_to_validate.is_empty() {
+                    let missing_cached_paths: Vec<PathBuf> = cached_paths_to_validate
+                        .into_iter()
+                        .filter(|path| !crate::infrastructure::onedrive::fast_path_exists(path))
+                        .collect();
+                    if !missing_cached_paths.is_empty() {
+                        let _ = tag_gc_sender.send(missing_cached_paths);
+                    }
+                }
             });
 
         if let Err(error) = spawn_result {

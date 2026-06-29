@@ -35,6 +35,29 @@ impl ImageViewerApp {
             return;
         }
 
+        let entries_to_cache = {
+            let mut pending_keys: FxHashSet<String> = paths_to_assign
+                .iter()
+                .map(|path| normalize_path_text(path))
+                .collect();
+            let mut entries = Vec::new();
+            for entry in self.all_items.iter().chain(self.items.iter()) {
+                let key = normalize_path_text(&entry.path);
+                if pending_keys.remove(&key) {
+                    entries.push(entry.clone());
+                    if pending_keys.is_empty() {
+                        break;
+                    }
+                }
+            }
+            entries
+        };
+
+        if !entries_to_cache.is_empty() {
+            self.app_state_db
+                .upsert_cached_file_entries(&entries_to_cache);
+        }
+
         let mut changed = false;
         for path in paths_to_assign {
             let assignments = Arc::make_mut(&mut self.tag_assignments);
