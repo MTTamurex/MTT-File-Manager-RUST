@@ -29,6 +29,16 @@ impl Drop for FileOpComGuard {
     }
 }
 
+fn perform_operations_succeeded(file_op: &IFileOperation) -> bool {
+    unsafe {
+        file_op.PerformOperations().is_ok()
+            && file_op
+                .GetAnyOperationsAborted()
+                .map(|aborted| !aborted.as_bool())
+                .unwrap_or(false)
+    }
+}
+
 /// Robust copy using IFileOperation (supports virtual paths like ZIP items).
 pub fn copy_item_with_file_op(path: &Path, dest_folder: &Path, hwnd: HWND) -> bool {
     let _com = FileOpComGuard::init();
@@ -68,7 +78,7 @@ pub fn copy_item_with_file_op(path: &Path, dest_folder: &Path, hwnd: HWND) -> bo
             return copy_item_with_shell(path, dest_folder, hwnd);
         }
 
-        file_op.PerformOperations().is_ok()
+        perform_operations_succeeded(&file_op)
     }
 }
 
@@ -112,21 +122,15 @@ pub fn copy_items_with_file_op(paths: &[PathBuf], dest_folder: &Path, hwnd: HWND
             let src_item: IShellItem =
                 match SHCreateItemFromParsingName(PCWSTR(src_wide.as_ptr()), None) {
                     Ok(i) => i,
-                    Err(_) => {
-                        // Fallback to shell copy for this item.
-                        if !copy_item_with_shell(path, dest_folder, hwnd) {
-                            return false;
-                        }
-                        continue;
-                    }
+                    Err(_) => return copy_items_with_shell(paths, dest_folder, hwnd),
                 };
 
             if file_op.CopyItem(&src_item, &dest_item, None, None).is_err() {
-                return false;
+                return copy_items_with_shell(paths, dest_folder, hwnd);
             }
         }
 
-        file_op.PerformOperations().is_ok()
+        perform_operations_succeeded(&file_op)
     }
 }
 
@@ -176,7 +180,7 @@ pub fn move_item_with_file_op(path: &Path, dest_folder: &Path, hwnd: HWND) -> bo
             return move_item_with_shell(path, dest_folder, hwnd);
         }
 
-        file_op.PerformOperations().is_ok()
+        perform_operations_succeeded(&file_op)
     }
 }
 
@@ -226,20 +230,14 @@ pub fn move_items_with_file_op(paths: &[PathBuf], dest_folder: &Path, hwnd: HWND
             let src_item: IShellItem =
                 match SHCreateItemFromParsingName(PCWSTR(src_wide.as_ptr()), None) {
                     Ok(i) => i,
-                    Err(_) => {
-                        // Fallback to shell move for this item.
-                        if !move_item_with_shell(path, dest_folder, hwnd) {
-                            return false;
-                        }
-                        continue;
-                    }
+                    Err(_) => return move_items_with_shell(paths, dest_folder, hwnd),
                 };
 
             if file_op.MoveItem(&src_item, &dest_item, None, None).is_err() {
-                return false;
+                return move_items_with_shell(paths, dest_folder, hwnd);
             }
         }
 
-        file_op.PerformOperations().is_ok()
+        perform_operations_succeeded(&file_op)
     }
 }

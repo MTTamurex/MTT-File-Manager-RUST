@@ -91,7 +91,9 @@ impl eframe::App for ImageViewerApp {
             let t0 = std::time::Instant::now();
             self.process_incoming_messages(ctx);
             let t1 = std::time::Instant::now();
-            self.refresh_drives_if_needed();
+            if self.file_operation_state.file_ops_in_progress == 0 {
+                self.refresh_drives_if_needed();
+            }
             // Ensure the bitmask check runs even when the app is idle (no mouse/keyboard).
             // Without this, egui won't repaint and the timer never fires.
             // During restore burst, repaint as fast as possible so textures re-populate
@@ -119,7 +121,9 @@ impl eframe::App for ImageViewerApp {
             }
             // Periodically re-enumerate expanded sidebar directories to catch
             // external changes (the per-folder notify watcher doesn't cover them).
-            self.sidebar_tree.refresh_expanded_if_stale();
+            if self.file_operation_state.file_ops_in_progress == 0 {
+                self.sidebar_tree.refresh_expanded_if_stale();
+            }
 
             let t3 = std::time::Instant::now();
             // Flush debounced preferences (max once per second)

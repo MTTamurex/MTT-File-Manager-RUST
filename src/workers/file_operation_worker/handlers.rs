@@ -303,11 +303,10 @@ pub(super) fn handle_copy(
                 }
             }
 
-            let success = if is_virtual {
-                shell_operations::copy_item_with_file_op(&path, &dest_folder, hwnd.0)
-            } else {
-                shell_operations::copy_item_with_shell(&path, &dest_folder, hwnd.0)
-            };
+            // Prefer IFileOperation for all copy/move paths. It matches modern
+            // Explorer behavior better than SHFileOperationW, especially for
+            // virtual filesystem providers such as Cryptomator.
+            let success = shell_operations::copy_item_with_file_op(&path, &dest_folder, hwnd.0);
             log::debug!("[FileOps] handle_copy result: success={}", success);
 
             if success {
@@ -397,11 +396,10 @@ pub(super) fn handle_move(
             }
 
             let moved_dest = known_exact_move_dest(&path, &dest_folder);
-            let success = if is_virtual {
-                shell_operations::move_item_with_file_op(&path, &dest_folder, hwnd.0)
-            } else {
-                shell_operations::move_item_with_shell(&path, &dest_folder, hwnd.0)
-            };
+            // Prefer IFileOperation for all copy/move paths. It matches modern
+            // Explorer behavior better than SHFileOperationW, especially for
+            // virtual filesystem providers such as Cryptomator.
+            let success = shell_operations::move_item_with_file_op(&path, &dest_folder, hwnd.0);
             log::debug!("[FileOps] handle_move result: success={}", success);
 
             if success {
@@ -475,11 +473,10 @@ pub(super) fn handle_copy_batch(
                 }
             }
 
-            let success = if has_virtual_path {
-                shell_operations::copy_items_with_file_op(&paths, &dest_folder, hwnd.0)
-            } else {
-                shell_operations::copy_items_with_shell(&paths, &dest_folder, hwnd.0)
-            };
+            // Prefer IFileOperation for all copy/move paths. It matches modern
+            // Explorer behavior better than SHFileOperationW, especially for
+            // virtual filesystem providers such as Cryptomator.
+            let success = shell_operations::copy_items_with_file_op(&paths, &dest_folder, hwnd.0);
             log::debug!("[FileOps] handle_copy_batch result: success={}", success);
 
             if success {
@@ -608,11 +605,10 @@ pub(super) fn handle_move_batch(
             }
 
             let known_moved_pairs = known_exact_move_pairs(&paths, &dest_folder);
-            let success = if has_virtual_path {
-                shell_operations::move_items_with_file_op(&paths, &dest_folder, hwnd.0)
-            } else {
-                shell_operations::move_items_with_shell(&paths, &dest_folder, hwnd.0)
-            };
+            // Prefer IFileOperation for all copy/move paths. It matches modern
+            // Explorer behavior better than SHFileOperationW, especially for
+            // virtual filesystem providers such as Cryptomator.
+            let success = shell_operations::move_items_with_file_op(&paths, &dest_folder, hwnd.0);
             log::debug!("[FileOps] handle_move_batch result: success={}", success);
 
             if success && !source_folders.is_empty() {

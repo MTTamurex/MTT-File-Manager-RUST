@@ -105,6 +105,17 @@ impl ClipboardManager {
     /// Returns files and operation type (is_move) for pasting.
     /// Does NOT perform the operation. Use this to prepare an async operation.
     pub fn get_files_to_paste(&self) -> Option<(Vec<PathBuf>, bool)> {
+        let current_sequence = windows_clipboard::clipboard_sequence_number();
+
+        // For copy/cut initiated inside the app, avoid synchronously reading
+        // CF_HDROP from the Windows clipboard on the UI thread. Some shell
+        // providers can delay-render clipboard data and stall paste startup.
+        if self.internal_sync_sequence.is_some() {
+            if let Some(files) = self.internal_files_to_paste_for_sequence(current_sequence) {
+                return Some(files);
+            }
+        }
+
         // 1. Try System Clipboard first
         if let Some(files) = windows_clipboard::get_files_from_clipboard() {
             let op = windows_clipboard::get_clipboard_operation();
@@ -113,7 +124,7 @@ impl ClipboardManager {
         }
 
         // 2. Fallback to Internal
-        self.internal_files_to_paste_for_sequence(windows_clipboard::clipboard_sequence_number())
+        self.internal_files_to_paste_for_sequence(current_sequence)
     }
 
     fn has_internal_content_for_sequence(&self, current_sequence: Option<u32>) -> bool {

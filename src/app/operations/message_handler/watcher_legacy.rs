@@ -120,6 +120,19 @@ impl ImageViewerApp {
         let mut remove_parents_invalidated: HashSet<PathBuf> = HashSet::new();
         let mut batched_remove_events = 0usize;
 
+        if self.file_operation_state.file_ops_in_progress > 0 {
+            while processed_events < max_events_individual {
+                match self.fs_event_receiver.try_recv() {
+                    Ok(_) => processed_events += 1,
+                    Err(_) => break,
+                }
+            }
+            if processed_events >= max_events_individual {
+                self.ui_ctx.request_repaint();
+            }
+            return;
+        }
+
         while processed_events < max_events_individual {
             if start.elapsed() >= budget {
                 has_more_events = true;
