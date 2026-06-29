@@ -14,6 +14,7 @@ mod ipc;
 mod loader;
 pub(crate) mod metrics;
 mod thumbnail_cache;
+mod wallpaper;
 
 use crate::viewer_runtime::{apply_saved_locale, build_viewer_native_options, is_saved_theme_dark};
 

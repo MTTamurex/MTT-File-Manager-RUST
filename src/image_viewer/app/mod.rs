@@ -9,6 +9,7 @@ use std::time::Duration;
 mod filmstrip;
 mod gif_export;
 mod rendering;
+mod wallpaper;
 
 use filmstrip::FilmstripState;
 use gif_export::{GifAnimation, GifUploadQueue, ViewerStatusMessage};
@@ -67,6 +68,8 @@ pub struct DedicatedImageViewerApp {
     pub(super) gif_upload_queue: Option<GifUploadQueue>,
     pub(super) conversion_rx: Option<std::sync::mpsc::Receiver<Result<std::path::PathBuf, String>>>,
     pub(super) conversion_in_progress: bool,
+    pub(super) wallpaper_rx: Option<std::sync::mpsc::Receiver<Result<(), String>>>,
+    pub(super) wallpaper_in_progress: bool,
     pub(super) status_message: Option<ViewerStatusMessage>,
     /// Timestamp of the last navigation action (for key-repeat throttling).
     pub(super) last_navigate_instant: std::time::Instant,
@@ -133,6 +136,8 @@ impl DedicatedImageViewerApp {
             gif_upload_queue: None,
             conversion_rx: None,
             conversion_in_progress: false,
+            wallpaper_rx: None,
+            wallpaper_in_progress: false,
             status_message: None,
             last_navigate_instant: now - Duration::from_millis(100),
             filmstrip: FilmstripState::new(),
@@ -240,6 +245,8 @@ impl DedicatedImageViewerApp {
         self.gif_upload_queue = None;
         self.conversion_rx = None;
         self.conversion_in_progress = false;
+        self.wallpaper_rx = None;
+        self.wallpaper_in_progress = false;
         self.status_message = None;
         self.last_navigate_instant = std::time::Instant::now();
         self.filmstrip.reset();
@@ -840,6 +847,7 @@ impl eframe::App for DedicatedImageViewerApp {
         self.pump_gif_upload_queue(ctx);
         self.advance_gif_frame(ctx);
         self.poll_conversion();
+        self.poll_wallpaper(ctx);
 
         self.poll_filmstrip_results(ctx);
         self.evict_filmstrip_textures();

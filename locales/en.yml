@@ -484,6 +484,10 @@ imageviewer:
   format_tiff: "TIFF"
   rotate_ccw: "Rotate counter-clockwise  (Shift+R)"
   rotate_cw: "Rotate clockwise  (R)"
+  set_wallpaper: "Set as Wallpaper"
+  wallpaper_in_progress: "Setting wallpaper..."
+  wallpaper_success: "Wallpaper set successfully"
+  wallpaper_error: "Failed to set wallpaper: %{error}"
 pdfviewer:
   title: "PDF Viewer"
   title_with_file: "PDF Viewer - %{name}"

@@ -67,6 +67,18 @@ impl super::DedicatedImageViewerApp {
                     },
                 );
 
+                if self.current_path().is_some() {
+                    let clicked = ui
+                        .add_enabled(
+                            !self.wallpaper_in_progress,
+                            egui::Button::new(&*t!("imageviewer.set_wallpaper")),
+                        )
+                        .clicked();
+                    if clicked {
+                        self.start_wallpaper(ctx);
+                    }
+                }
+
                 ui.separator();
                 if total == 0 {
                     ui.label("0 / 0");
