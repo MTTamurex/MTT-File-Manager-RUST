@@ -517,17 +517,20 @@ impl ImageViewerApp {
             return;
         };
 
+        let removed_from_ui = self.remove_drive_from_visible_lists(drive_path);
+        let previous_path = self.navigation_state.current_path.clone();
+        let was_browsing_ejected_drive = !self.navigation_state.is_computer_view
+            && self.navigation_state.current_path.starts_with(drive_path);
+        if was_browsing_ejected_drive {
+            self.directory_cache.clear();
+            self.navigate_to_computer();
+        }
+
         match detach_iso(&iso_path) {
             Ok(_) => {
                 self.file_operation_state
                     .mounted_iso_drives
                     .remove(drive_path);
-
-                if !self.navigation_state.is_computer_view
-                    && self.navigation_state.current_path.starts_with(drive_path)
-                {
-                    self.navigate_to_computer();
-                }
 
                 self.reload_drive_list_async();
                 self.notifications
@@ -543,6 +546,13 @@ impl ImageViewerApp {
                     )));
             }
             Err(e) => {
+                if removed_from_ui {
+                    self.drive_state.unhide_drive(drive_path);
+                    self.reload_drive_list_async();
+                }
+                if was_browsing_ejected_drive {
+                    self.navigate_to(&previous_path);
+                }
                 self.notifications
                     .push(crate::application::AppNotification::error(format!(
                         "{}",

@@ -82,6 +82,21 @@ impl ImageViewerApp {
         refreshed_any || had_inactive_computer
     }
 
+    pub(crate) fn remove_drive_from_visible_lists(&mut self, drive_path: &str) -> bool {
+        if !self.drive_state.hide_drive_optimistically(drive_path) {
+            return false;
+        }
+
+        crate::ui::sidebar::invalidate_drive_type_cache();
+        self.drive_state.drive_info_refresh_pending = false;
+        self.drive_state.last_drive_bitmask =
+            crate::infrastructure::windows::get_logical_drives_bitmask();
+        self.drive_state.last_drive_refresh = Instant::now();
+        self.refresh_visible_computer_views_after_drive_list_change();
+        self.ui_ctx.request_repaint();
+        true
+    }
+
     pub fn setup_recycle_bin_view(&mut self) {
         self.active_tag_filter = None;
         self.navigation_state.current_path = RECYCLE_BIN_VIEW_ID.to_string();
@@ -416,8 +431,10 @@ impl ImageViewerApp {
         }
 
         match self.drive_state.drive_scan_rx.try_recv() {
-            Ok(scan_result) => {
+            Ok(mut scan_result) => {
                 self.drive_state.drive_scan_pending = false;
+                self.drive_state
+                    .apply_optimistic_drive_filter(&mut scan_result);
                 let old_disks = std::mem::take(&mut self.drive_state.disks);
                 let old_cloud_roots = std::mem::take(&mut self.drive_state.cloud_roots);
                 let cloud_roots_changed = scan_result.cloud_roots != old_cloud_roots;
