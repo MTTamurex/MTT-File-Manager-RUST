@@ -2,7 +2,7 @@
 
 **Native Windows file manager** built in Rust with a modern UI, archive browsing, advanced media preview, and Windows integration.
 
-<img width="3840" height="2060" alt="MTT File Manager" src="https://github.com/user-attachments/assets/0873c298-c248-4d8c-b9fa-9e3068f8a4eb" />
+<img width="1920" height="1033" alt="print" src="https://github.com/user-attachments/assets/683d1fd7-cb01-4d12-af7f-952002a13df0" />
 
 ## Key Features
 
