@@ -101,13 +101,8 @@ pub(super) fn is_valid_drop_target_for_paths(paths: &[PathBuf], target: &Path) -
     })
 }
 
-pub(super) fn should_confirm_cross_panel_move(
-    source_cross_panel_context: bool,
-    target_cross_panel_context: bool,
-    operation: DragDropOperation,
-) -> bool {
-    source_cross_panel_context != target_cross_panel_context
-        && matches!(operation, DragDropOperation::Move)
+pub(super) fn should_confirm_drag_move(operation: DragDropOperation) -> bool {
+    matches!(operation, DragDropOperation::Move)
 }
 
 pub(super) fn should_block_file_panel_input_for_pending_confirmation(
@@ -130,7 +125,7 @@ mod tests {
     use super::{
         drag_payload_inside_archive, is_valid_drop_target_for_paths,
         resolve_drag_operation_for_paths, should_block_file_panel_input_for_pending_confirmation,
-        should_confirm_cross_panel_move, DragDropOperation,
+        should_confirm_drag_move, DragDropOperation,
     };
     use std::path::{Path, PathBuf};
 
@@ -251,33 +246,6 @@ mod tests {
     }
 
     #[test]
-    fn active_to_inactive_move_requires_confirmation() {
-        assert!(should_confirm_cross_panel_move(
-            false,
-            true,
-            DragDropOperation::Move
-        ));
-    }
-
-    #[test]
-    fn inactive_to_active_move_requires_confirmation() {
-        assert!(should_confirm_cross_panel_move(
-            true,
-            false,
-            DragDropOperation::Move
-        ));
-    }
-
-    #[test]
-    fn active_to_inactive_copy_does_not_require_confirmation() {
-        assert!(!should_confirm_cross_panel_move(
-            false,
-            true,
-            DragDropOperation::Copy
-        ));
-    }
-
-    #[test]
     fn pending_confirmation_blocks_file_panel_input() {
         assert!(should_block_file_panel_input_for_pending_confirmation(true));
     }
@@ -290,21 +258,13 @@ mod tests {
     }
 
     #[test]
-    fn active_to_active_move_does_not_require_confirmation() {
-        assert!(!should_confirm_cross_panel_move(
-            false,
-            false,
-            DragDropOperation::Move
-        ));
+    fn any_move_requires_confirmation() {
+        assert!(should_confirm_drag_move(DragDropOperation::Move));
     }
 
     #[test]
-    fn inactive_to_inactive_move_does_not_require_confirmation() {
-        assert!(!should_confirm_cross_panel_move(
-            true,
-            true,
-            DragDropOperation::Move
-        ));
+    fn copy_does_not_require_confirmation() {
+        assert!(!should_confirm_drag_move(DragDropOperation::Copy));
     }
 
     #[test]

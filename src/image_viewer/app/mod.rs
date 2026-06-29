@@ -68,8 +68,14 @@ pub struct DedicatedImageViewerApp {
     pub(super) gif_upload_queue: Option<GifUploadQueue>,
     pub(super) conversion_rx: Option<std::sync::mpsc::Receiver<Result<std::path::PathBuf, String>>>,
     pub(super) conversion_in_progress: bool,
-    pub(super) wallpaper_rx: Option<std::sync::mpsc::Receiver<Result<(), String>>>,
+    pub(super) wallpaper_rx:
+        Option<std::sync::mpsc::Receiver<crate::image_viewer::app::wallpaper::WallpaperOutcome>>,
     pub(super) wallpaper_in_progress: bool,
+    /// Monotonically increasing generation id for wallpaper operations.
+    /// A stale result from a previous `start_wallpaper` call (e.g. user
+    /// navigated to a new image) is dropped instead of overwriting the UI.
+    pub(super) wallpaper_token: u64,
+    pub(super) wallpaper_generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
     pub(super) status_message: Option<ViewerStatusMessage>,
     /// Timestamp of the last navigation action (for key-repeat throttling).
     pub(super) last_navigate_instant: std::time::Instant,
@@ -138,6 +144,8 @@ impl DedicatedImageViewerApp {
             conversion_in_progress: false,
             wallpaper_rx: None,
             wallpaper_in_progress: false,
+            wallpaper_token: 0,
+            wallpaper_generation: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
             status_message: None,
             last_navigate_instant: now - Duration::from_millis(100),
             filmstrip: FilmstripState::new(),
@@ -247,6 +255,10 @@ impl DedicatedImageViewerApp {
         self.conversion_in_progress = false;
         self.wallpaper_rx = None;
         self.wallpaper_in_progress = false;
+        self.wallpaper_token = self
+            .wallpaper_generation
+            .fetch_add(1, std::sync::atomic::Ordering::AcqRel)
+            .wrapping_add(1);
         self.status_message = None;
         self.last_navigate_instant = std::time::Instant::now();
         self.filmstrip.reset();

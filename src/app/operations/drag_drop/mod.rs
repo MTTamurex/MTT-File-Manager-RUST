@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 
 use validation::{
     is_valid_drop_target_for_paths, normalize_path_for_compare,
-    should_block_file_panel_input_for_pending_confirmation, should_confirm_cross_panel_move,
+    should_block_file_panel_input_for_pending_confirmation, should_confirm_drag_move,
     DragDropOperation,
 };
 
@@ -178,8 +178,6 @@ impl ImageViewerApp {
                 .to_str()
                 .is_some_and(crate::domain::special_paths::is_virtual_path)
         });
-        let target_cross_panel_context =
-            raw_cross_panel_target.is_some() || self.drag_drop_cross_panel_context;
         let Some(dest_folder) = self.drag_target_folder.clone().or(cross_panel_target) else {
             self.cancel_item_drag();
             return;
@@ -203,11 +201,7 @@ impl ImageViewerApp {
             return;
         };
 
-        if should_confirm_cross_panel_move(
-            self.drag_source_cross_panel_context,
-            target_cross_panel_context,
-            operation,
-        ) {
+        if should_confirm_drag_move(operation) {
             self.pending_drag_move_confirmation = Some(
                 crate::app::drag_drop_state::PendingDragMoveConfirmation::new(
                     paths,

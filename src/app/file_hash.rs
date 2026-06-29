@@ -131,4 +131,16 @@ mod tests {
 
         assert!(!can_hash_file(&entry));
     }
+
+    #[test]
+    fn hash_status_reports_real_size_for_archive_marked_as_directory() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let archive = dir.path().join("sample.zip");
+        std::fs::write(&archive, vec![0u8; 4096]).expect("create archive file");
+        let mut entry = FileEntry::from_path(archive, true);
+        entry.size = 0;
+
+        let status = file_hash_status(&entry);
+        assert_eq!(status.size, 4096);
+    }
 }

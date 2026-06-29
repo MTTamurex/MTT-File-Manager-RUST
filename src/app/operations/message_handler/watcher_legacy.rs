@@ -121,9 +121,19 @@ impl ImageViewerApp {
         let mut batched_remove_events = 0usize;
 
         if self.file_operation_state.file_ops_in_progress > 0 {
+            // Defer events while a file operation is in progress so external
+            // changes on unrelated folders are not silently dropped.  Cap the
+            // buffer to avoid unbounded growth on pathological workloads.
+            const MAX_DEFERRED_FS_EVENTS: usize = 2048;
             while processed_events < max_events_individual {
                 match self.fs_event_receiver.try_recv() {
-                    Ok(_) => processed_events += 1,
+                    Ok(event) => {
+                        if self.deferred_fs_events.len() >= MAX_DEFERRED_FS_EVENTS {
+                            self.deferred_fs_events.pop_front();
+                        }
+                        self.deferred_fs_events.push_back(event);
+                        processed_events += 1;
+                    }
                     Err(_) => break,
                 }
             }
@@ -139,9 +149,12 @@ impl ImageViewerApp {
                 break;
             }
 
-            let timestamped_event = match self.fs_event_receiver.try_recv() {
-                Ok(event) => event,
-                Err(_) => break,
+            let timestamped_event = match self.deferred_fs_events.pop_front() {
+                Some(event) => event,
+                None => match self.fs_event_receiver.try_recv() {
+                    Ok(event) => event,
+                    Err(_) => break,
+                },
             };
             let received_at = timestamped_event.received_at;
             processed_events += 1;

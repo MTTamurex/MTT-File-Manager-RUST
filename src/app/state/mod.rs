@@ -312,6 +312,12 @@ pub struct ImageViewerApp {
     pub fs_event_receiver: Receiver<TimestampedNotifyEvent>,
     #[cfg(feature = "notify-watcher")]
     pub fs_event_sender: Sender<TimestampedNotifyEvent>,
+    /// Events buffered while a file operation is in progress, so external
+    /// mutations on other folders are not silently dropped.  Drained once
+    /// `file_ops_in_progress` returns to zero.  Capped to avoid unbounded
+    /// growth on pathological workloads.
+    #[cfg(feature = "notify-watcher")]
+    pub deferred_fs_events: std::collections::VecDeque<TimestampedNotifyEvent>,
     pub device_event_receiver: Receiver<()>,
     pub last_auto_reload: Instant,
     pub pending_auto_reload: bool,

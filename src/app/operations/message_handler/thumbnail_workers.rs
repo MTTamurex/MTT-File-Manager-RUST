@@ -631,7 +631,8 @@ impl ImageViewerApp {
             }
 
             let is_current_selection = self.selected_file.as_ref().is_some_and(|file| {
-                file.path == path && file.modified == modified && file.size == size
+                let status = crate::app::file_hash::file_hash_status(file);
+                file.path == path && status.modified == modified && status.size == size
             });
 
             if is_current_selection {

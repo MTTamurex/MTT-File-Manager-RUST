@@ -1,5 +1,10 @@
 use super::ViewerStatusMessage;
 use eframe::egui;
+use std::sync::atomic::Ordering;
+
+/// (token, result) sent from the worker thread back to the UI. The token
+/// lets the UI drop results that belong to a previous `start_wallpaper` call.
+pub(super) type WallpaperOutcome = (u64, Result<(), String>);
 
 impl super::DedicatedImageViewerApp {
     fn reapply_viewer_theme(&self, ctx: &egui::Context) {
@@ -27,7 +32,16 @@ impl super::DedicatedImageViewerApp {
             return;
         };
 
-        let (tx, rx) = std::sync::mpsc::channel();
+        // Bump the shared generation: stale workers check it before applying
+        // the wallpaper, and `poll_wallpaper` uses the same token for UI state.
+        let token = self
+            .wallpaper_generation
+            .fetch_add(1, Ordering::AcqRel)
+            .wrapping_add(1);
+        self.wallpaper_token = token;
+        let wallpaper_generation = self.wallpaper_generation.clone();
+
+        let (tx, rx) = std::sync::mpsc::channel::<WallpaperOutcome>();
         let repaint_ctx = ctx.clone();
 
         self.wallpaper_rx = Some(rx);
@@ -40,8 +54,11 @@ impl super::DedicatedImageViewerApp {
         let spawn_result = std::thread::Builder::new()
             .name("image-wallpaper".into())
             .spawn(move || {
-                let result = crate::image_viewer::wallpaper::set_as_wallpaper(&path);
-                let _ = tx.send(result);
+                let result =
+                    crate::image_viewer::wallpaper::set_as_wallpaper_if_current(&path, || {
+                        wallpaper_generation.load(Ordering::Acquire) == token
+                    });
+                let _ = tx.send((token, result));
                 repaint_ctx.request_repaint();
             });
 
@@ -62,18 +79,24 @@ impl super::DedicatedImageViewerApp {
         };
 
         match rx.try_recv() {
-            Ok(Ok(())) => {
+            Ok((token, Ok(()))) => {
                 self.wallpaper_rx = None;
                 self.wallpaper_in_progress = false;
+                if token != self.wallpaper_token {
+                    return;
+                }
                 self.status_message = Some(ViewerStatusMessage {
                     text: rust_i18n::t!("imageviewer.wallpaper_success").to_string(),
                     is_error: false,
                 });
                 self.reapply_viewer_theme(ctx);
             }
-            Ok(Err(err)) => {
+            Ok((token, Err(err))) => {
                 self.wallpaper_rx = None;
                 self.wallpaper_in_progress = false;
+                if token != self.wallpaper_token {
+                    return;
+                }
                 self.status_message = Some(ViewerStatusMessage {
                     text: rust_i18n::t!("imageviewer.wallpaper_error", error = err).to_string(),
                     is_error: true,

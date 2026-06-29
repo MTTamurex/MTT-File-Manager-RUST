@@ -424,6 +424,8 @@ impl ImageViewerApp {
             fs_event_receiver: fs_rx,
             #[cfg(feature = "notify-watcher")]
             fs_event_sender: fs_tx,
+            #[cfg(feature = "notify-watcher")]
+            deferred_fs_events: std::collections::VecDeque::new(),
             device_event_receiver,
             last_auto_reload: Instant::now(),
             pending_auto_reload: false,

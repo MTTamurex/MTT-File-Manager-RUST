@@ -15,6 +15,10 @@ fn split_virtual_archive_paths(paths: Vec<PathBuf>) -> (Vec<PathBuf>, Vec<PathBu
         .partition(|p| is_path_inside_existing_archive_file(p))
 }
 
+fn path_requires_native_extraction(path: &Path) -> bool {
+    is_path_inside_existing_archive_file(path)
+}
+
 /// Indicates whether a handler completed synchronously or dispatched to the archive worker.
 pub(super) enum HandlerCompletion {
     /// The handler completed (or failed) synchronously; caller should send FinishedNoRefresh.
@@ -270,7 +274,7 @@ pub(super) fn handle_copy(
     let valid_dest = sanitize_operation_path(&dest_folder);
     match (valid_path, valid_dest) {
         (Ok(path), Ok(dest_folder)) => {
-            let is_virtual = crate::infrastructure::windows::is_shell_navigation_path(&path, false);
+            let is_virtual = path_requires_native_extraction(&path);
             let native_ok = archive_extract::has_native_support(std::slice::from_ref(&path));
             log::debug!(
                 "[FileOps] handle_copy: path={}, is_virtual={}, native_support={}",
@@ -357,7 +361,7 @@ pub(super) fn handle_move(
             // Capture source folder before move
             let source_folder = path.parent().map(|p| p.to_path_buf());
             // Use IFileOperation for virtual paths (like items inside archives)
-            let is_virtual = crate::infrastructure::windows::is_shell_navigation_path(&path, false);
+            let is_virtual = path_requires_native_extraction(&path);
             let native_ok = archive_extract::has_native_support(std::slice::from_ref(&path));
             log::debug!(
                 "[FileOps] handle_move: path={}, is_virtual={}, native_support={}",
@@ -436,9 +440,7 @@ pub(super) fn handle_copy_batch(
     let valid_dest = sanitize_operation_path(&dest_folder);
     match (valid_paths, valid_dest) {
         (Ok(paths), Ok(dest_folder)) => {
-            let has_virtual_path = paths
-                .iter()
-                .any(|p| crate::infrastructure::windows::is_shell_navigation_path(p, false));
+            let has_virtual_path = paths.iter().any(|p| path_requires_native_extraction(p));
             let native_ok = archive_extract::has_native_support(&paths);
             log::debug!(
                 "[FileOps] handle_copy_batch: {} paths, has_virtual={}, native_support={}",
@@ -568,9 +570,7 @@ pub(super) fn handle_move_batch(
                 }
             }
 
-            let has_virtual_path = paths
-                .iter()
-                .any(|p| crate::infrastructure::windows::is_shell_navigation_path(p, false));
+            let has_virtual_path = paths.iter().any(|p| path_requires_native_extraction(p));
             let native_ok = archive_extract::has_native_support(&paths);
             log::debug!(
                 "[FileOps] handle_move_batch: {} paths, has_virtual={}, native_support={}",
