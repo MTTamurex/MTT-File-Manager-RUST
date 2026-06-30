@@ -506,8 +506,6 @@ pdfviewer:
   thumbnail_loading: "Carregando"
   fit_width: "Ajustar à largura"
   fit_page: "Ajustar à página"
-  view_continuous: "Rolagem contínua"
-  view_continuous_short: "Cont"
   view_single: "Página única"
   view_single_short: "1 pág"
   view_two_page: "Duas páginas lado a lado"

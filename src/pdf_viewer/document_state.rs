@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use super::viewer_app::{PdfViewMode, PdfViewerApp, ZoomMode};
+use super::viewer_app::{PdfPageLayout, PdfViewerApp, ZoomMode};
 
 #[derive(Default, Serialize, Deserialize)]
 struct PdfViewerStateFile {
@@ -34,7 +34,7 @@ impl PdfViewerApp {
         self.scroll_to_page = Some(self.current_page);
         self.zoom = state.zoom.clamp(0.1, 5.0);
         self.zoom_mode = zoom_mode_from_str(&state.zoom_mode);
-        self.view_mode = view_mode_from_str(&state.view_mode);
+        self.page_layout = page_layout_from_str(&state.view_mode);
         self.rotation = state.rotation % 360;
         if !self.rotation.is_multiple_of(90) {
             self.rotation = 0;
@@ -58,7 +58,7 @@ impl PdfViewerApp {
                 page: self.current_page.min(self.total_pages.saturating_sub(1)),
                 zoom: self.zoom,
                 zoom_mode: zoom_mode_to_str(self.zoom_mode).to_string(),
-                view_mode: view_mode_to_str(self.view_mode).to_string(),
+                view_mode: page_layout_to_str(self.page_layout).to_string(),
                 rotation: self.rotation,
             },
         );
@@ -118,18 +118,16 @@ fn zoom_mode_from_str(value: &str) -> ZoomMode {
     }
 }
 
-fn view_mode_to_str(mode: PdfViewMode) -> &'static str {
-    match mode {
-        PdfViewMode::Continuous => "continuous",
-        PdfViewMode::SinglePage => "single_page",
-        PdfViewMode::TwoPage => "two_page",
+fn page_layout_to_str(layout: PdfPageLayout) -> &'static str {
+    match layout {
+        PdfPageLayout::OnePage => "one_page",
+        PdfPageLayout::TwoPage => "two_page",
     }
 }
 
-fn view_mode_from_str(value: &str) -> PdfViewMode {
+fn page_layout_from_str(value: &str) -> PdfPageLayout {
     match value {
-        "single_page" => PdfViewMode::SinglePage,
-        "two_page" => PdfViewMode::TwoPage,
-        _ => PdfViewMode::Continuous,
+        "two_page" => PdfPageLayout::TwoPage,
+        _ => PdfPageLayout::OnePage,
     }
 }

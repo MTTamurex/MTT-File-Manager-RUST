@@ -46,9 +46,8 @@ pub(super) enum ZoomMode {
 }
 
 #[derive(Clone, Copy, PartialEq)]
-pub(super) enum PdfViewMode {
-    Continuous,
-    SinglePage,
+pub(super) enum PdfPageLayout {
+    OnePage,
     TwoPage,
 }
 
@@ -90,7 +89,7 @@ pub struct PdfViewerApp {
     // View state
     pub(super) zoom: f32,
     pub(super) zoom_mode: ZoomMode,
-    pub(super) view_mode: PdfViewMode,
+    pub(super) page_layout: PdfPageLayout,
     pub(super) rotation: u16, // 0 | 90 | 180 | 270
 
     // Navigation
@@ -107,6 +106,7 @@ pub struct PdfViewerApp {
     pending: HashSet<u32>,
     pub(super) thumbnail_textures: HashMap<u32, PageTexture>,
     pub(super) thumbnail_pending: HashSet<u32>,
+    pub(super) last_sidebar_scrolled_page: Option<u32>,
     /// Current total memory used by cached textures (tracked incrementally).
     cache_bytes: usize,
 
@@ -152,7 +152,7 @@ impl PdfViewerApp {
             page_sizes,
             zoom: 1.0,
             zoom_mode: ZoomMode::FitWidth,
-            view_mode: PdfViewMode::Continuous,
+            page_layout: PdfPageLayout::OnePage,
             rotation: 0,
             current_page: 0,
             page_input: "1".into(),
@@ -162,6 +162,7 @@ impl PdfViewerApp {
             pending: HashSet::new(),
             thumbnail_textures: HashMap::new(),
             thumbnail_pending: HashSet::new(),
+            last_sidebar_scrolled_page: None,
             cache_bytes: 0,
             page_text: HashMap::new(),
             drag_selection: None,
@@ -565,9 +566,9 @@ impl PdfViewerApp {
         self.pending.clear();
     }
 
-    pub(super) fn set_view_mode(&mut self, mode: PdfViewMode) {
-        if self.view_mode != mode {
-            self.view_mode = mode;
+    pub(super) fn set_page_layout(&mut self, layout: PdfPageLayout) {
+        if self.page_layout != layout {
+            self.page_layout = layout;
             self.scroll_to_page = Some(self.current_page);
             self.on_view_changed();
         }
@@ -607,7 +608,7 @@ impl PdfViewerApp {
             return;
         }
 
-        if self.view_mode == PdfViewMode::TwoPage {
+        if self.page_layout == PdfPageLayout::TwoPage {
             let spread_start = self.current_page.saturating_sub(self.current_page % 2);
             self.go_to_page(spread_start.saturating_sub(2));
         } else {
@@ -620,7 +621,7 @@ impl PdfViewerApp {
             return;
         }
 
-        if self.view_mode == PdfViewMode::TwoPage {
+        if self.page_layout == PdfPageLayout::TwoPage {
             let spread_start = self.current_page.saturating_sub(self.current_page % 2);
             self.go_to_page((spread_start + 2).min(self.total_pages.saturating_sub(1)));
         } else {
@@ -731,8 +732,8 @@ impl PdfViewerApp {
         let mut first_visible: Option<u32> = None;
         let mut last_visible: u32 = 0;
 
-        match self.view_mode {
-            PdfViewMode::Continuous => {
+        match self.page_layout {
+            PdfPageLayout::OnePage => {
                 for idx in 0..self.total_pages {
                     self.show_vertical_page(
                         ui,
@@ -745,27 +746,27 @@ impl PdfViewerApp {
                     );
                 }
             }
-            PdfViewMode::SinglePage => {
-                let idx = self.current_page.min(self.total_pages.saturating_sub(1));
-                self.show_vertical_page(
-                    ui,
-                    idx,
-                    aw,
-                    ah,
-                    ppp,
-                    &mut first_visible,
-                    &mut last_visible,
-                );
-            }
-            PdfViewMode::TwoPage => {
-                self.show_two_page_spread(ui, aw, ah, ppp, &mut first_visible, &mut last_visible);
+            PdfPageLayout::TwoPage => {
+                let mut idx = 0;
+                while idx < self.total_pages {
+                    self.show_two_page_spread(
+                        ui,
+                        idx,
+                        aw,
+                        ah,
+                        ppp,
+                        &mut first_visible,
+                        &mut last_visible,
+                    );
+                    idx += 2;
+                }
             }
         }
 
         // Update current-page indicator from scroll position
         if let Some(fv) = first_visible {
             if self.scroll_to_page.is_none() {
-                let page = if self.view_mode == PdfViewMode::TwoPage
+                let page = if self.page_layout == PdfPageLayout::TwoPage
                     && self.current_page >= fv
                     && self.current_page <= last_visible
                 {
@@ -779,7 +780,7 @@ impl PdfViewerApp {
 
             // Prefetch adjacent pages for smooth scrolling, clamped to
             // CACHE_RADIUS so prefetched textures are not immediately evicted.
-            let prefetch_aw = if self.view_mode == PdfViewMode::TwoPage {
+            let prefetch_aw = if self.page_layout == PdfPageLayout::TwoPage {
                 ((aw - 12.0) * 0.5).max(100.0)
             } else {
                 aw
@@ -844,6 +845,7 @@ impl PdfViewerApp {
     fn show_two_page_spread(
         &mut self,
         ui: &mut egui::Ui,
+        left: u32,
         aw: f32,
         ah: f32,
         ppp: f32,
@@ -852,7 +854,6 @@ impl PdfViewerApp {
     ) {
         let gap = 12.0;
         let page_aw = ((aw - gap) * 0.5).max(100.0);
-        let left = self.current_page.saturating_sub(self.current_page % 2);
         let right = left + 1;
         let pages = if right < self.total_pages {
             vec![left, right]
@@ -970,7 +971,7 @@ impl eframe::App for PdfViewerApp {
 
             if self.total_pages > 0 {
                 let zoom_page = self.current_page.min(self.total_pages.saturating_sub(1));
-                let zoom_aw = if self.view_mode == PdfViewMode::TwoPage {
+                let zoom_aw = if self.page_layout == PdfPageLayout::TwoPage {
                     ((aw - 12.0) * 0.5).max(100.0)
                 } else {
                     aw

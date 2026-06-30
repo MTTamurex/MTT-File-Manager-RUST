@@ -45,6 +45,11 @@ impl PdfViewerApp {
                         self.go_to_page(idx);
                     }
 
+                    if is_current && self.last_sidebar_scrolled_page != Some(idx) {
+                        response.scroll_to_me(Some(egui::Align::Center));
+                        self.last_sidebar_scrolled_page = Some(idx);
+                    }
+
                     if ui.is_rect_visible(rect) {
                         self.submit_thumbnail(idx, render_w, render_h);
                         ui.painter().rect_filled(rect, 2.0, egui::Color32::WHITE);

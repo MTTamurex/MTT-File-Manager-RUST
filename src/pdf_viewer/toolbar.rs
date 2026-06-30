@@ -6,7 +6,7 @@
 use eframe::egui;
 use rust_i18n::t;
 
-use super::viewer_app::{PdfViewMode, PdfViewerApp, ZoomMode};
+use super::viewer_app::{PdfPageLayout, PdfViewerApp, ZoomMode};
 
 impl PdfViewerApp {
     /// Render the toolbar contents inside a horizontal layout.
@@ -24,8 +24,8 @@ impl PdfViewerApp {
 
             ui.separator();
 
-            // ── View mode ────────────────────────────────────────────────
-            self.toolbar_view_mode(ui);
+            // ── Page layout ──────────────────────────────────────────────
+            self.toolbar_page_layout(ui);
 
             ui.separator();
 
@@ -163,38 +163,27 @@ impl PdfViewerApp {
         }
     }
 
-    fn toolbar_view_mode(&mut self, ui: &mut egui::Ui) {
+    fn toolbar_page_layout(&mut self, ui: &mut egui::Ui) {
         if ui
             .selectable_label(
-                self.view_mode == PdfViewMode::Continuous,
-                t!("pdfviewer.view_continuous_short"),
-            )
-            .on_hover_text(t!("pdfviewer.view_continuous"))
-            .clicked()
-        {
-            self.set_view_mode(PdfViewMode::Continuous);
-        }
-
-        if ui
-            .selectable_label(
-                self.view_mode == PdfViewMode::SinglePage,
+                self.page_layout == PdfPageLayout::OnePage,
                 t!("pdfviewer.view_single_short"),
             )
             .on_hover_text(t!("pdfviewer.view_single"))
             .clicked()
         {
-            self.set_view_mode(PdfViewMode::SinglePage);
+            self.set_page_layout(PdfPageLayout::OnePage);
         }
 
         if ui
             .selectable_label(
-                self.view_mode == PdfViewMode::TwoPage,
+                self.page_layout == PdfPageLayout::TwoPage,
                 t!("pdfviewer.view_two_page_short"),
             )
             .on_hover_text(t!("pdfviewer.view_two_page"))
             .clicked()
         {
-            self.set_view_mode(PdfViewMode::TwoPage);
+            self.set_page_layout(PdfPageLayout::TwoPage);
         }
     }
 
