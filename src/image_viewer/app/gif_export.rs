@@ -46,6 +46,7 @@ impl super::DedicatedImageViewerApp {
             loader::ExportImageFormat::WebP => t!("imageviewer.format_webp").to_string(),
             loader::ExportImageFormat::Bmp => t!("imageviewer.format_bmp").to_string(),
             loader::ExportImageFormat::Tiff => t!("imageviewer.format_tiff").to_string(),
+            loader::ExportImageFormat::Pdf => t!("imageviewer.format_pdf").to_string(),
         }
     }
 

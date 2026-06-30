@@ -482,6 +482,7 @@ imageviewer:
   format_webp: "WebP"
   format_bmp: "BMP"
   format_tiff: "TIFF"
+  format_pdf: "PDF"
   rotate_ccw: "Girar no sentido anti-horário  (Shift+R)"
   rotate_cw: "Girar no sentido horário  (R)"
   set_wallpaper: "Definir como Papel de Parede"

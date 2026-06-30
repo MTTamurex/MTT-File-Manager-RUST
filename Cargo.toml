@@ -46,6 +46,7 @@ blake3 = "1.5"     # Stable 128-bit hash for cache keys (SEC-01)
 log = "0.4"        # Structured logging framework (SEC-02/PERF-04)
 env_logger = "0.11" # Logger backend with level filtering
 pdfium-render = { version = "0.8.37", features = ["thread_safe"] }
+printpdf = "0.7"  # PDF generation for image-to-PDF export
 mtt-search-protocol = { path = "crates/mtt-search-protocol" }
 bincode = { workspace = true }
 serde = { workspace = true }

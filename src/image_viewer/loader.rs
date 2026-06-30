@@ -82,10 +82,18 @@ pub enum ExportImageFormat {
     WebP,
     Bmp,
     Tiff,
+    Pdf,
 }
 
 impl ExportImageFormat {
-    pub const ALL: [Self; 5] = [Self::Png, Self::Jpeg, Self::WebP, Self::Bmp, Self::Tiff];
+    pub const ALL: [Self; 6] = [
+        Self::Png,
+        Self::Jpeg,
+        Self::WebP,
+        Self::Bmp,
+        Self::Tiff,
+        Self::Pdf,
+    ];
 
     pub fn extension(self) -> &'static str {
         match self {
@@ -94,6 +102,7 @@ impl ExportImageFormat {
             Self::WebP => "webp",
             Self::Bmp => "bmp",
             Self::Tiff => "tiff",
+            Self::Pdf => "pdf",
         }
     }
 
@@ -104,16 +113,18 @@ impl ExportImageFormat {
             Self::WebP => "WebP",
             Self::Bmp => "BMP",
             Self::Tiff => "TIFF",
+            Self::Pdf => "PDF",
         }
     }
 
-    fn image_format(self) -> image::ImageFormat {
+    fn image_format(self) -> Option<image::ImageFormat> {
         match self {
-            Self::Png => image::ImageFormat::Png,
-            Self::Jpeg => image::ImageFormat::Jpeg,
-            Self::WebP => image::ImageFormat::WebP,
-            Self::Bmp => image::ImageFormat::Bmp,
-            Self::Tiff => image::ImageFormat::Tiff,
+            Self::Png => Some(image::ImageFormat::Png),
+            Self::Jpeg => Some(image::ImageFormat::Jpeg),
+            Self::WebP => Some(image::ImageFormat::WebP),
+            Self::Bmp => Some(image::ImageFormat::Bmp),
+            Self::Tiff => Some(image::ImageFormat::Tiff),
+            Self::Pdf => None,
         }
     }
 }
@@ -394,11 +405,74 @@ pub fn encode_frame_to_path(
         ));
     };
 
+    if format == ExportImageFormat::Pdf {
+        return encode_frame_to_pdf(buffer, output_path);
+    }
+
     let image = DynamicImage::ImageRgba8(buffer);
     let file = File::create(output_path)?;
     let mut writer = BufWriter::new(file);
+    let img_fmt = format.image_format().expect("PDF handled above");
     image
-        .write_to(&mut writer, format.image_format())
+        .write_to(&mut writer, img_fmt)
+        .map_err(|err| io::Error::other(err.to_string()))
+}
+
+/// Encode an RGBA image into a single-page PDF using `printpdf`.
+/// Alpha is composited over a white background before embedding.
+fn encode_frame_to_pdf(rgba: image::RgbaImage, output_path: &Path) -> io::Result<()> {
+    use printpdf::{ColorBits, ColorSpace, ImageTransform, ImageXObject, Mm, PdfDocument, Px};
+
+    let width_px = rgba.width();
+    let height_px = rgba.height();
+
+    // Composite alpha over white background — PDF does not support transparency
+    // in the base image stream.  Integer arithmetic avoids per-pixel f32 ops.
+    let rgb_bytes: Vec<u8> = rgba
+        .pixels()
+        .flat_map(|p| {
+            let a = p[3] as u32;
+            let inv = 255 - a;
+            [
+                ((p[0] as u32 * a + 255 * inv + 128) / 255) as u8,
+                ((p[1] as u32 * a + 255 * inv + 128) / 255) as u8,
+                ((p[2] as u32 * a + 255 * inv + 128) / 255) as u8,
+            ]
+        })
+        .collect();
+
+    let image_xobject = ImageXObject {
+        width: Px(width_px as usize),
+        height: Px(height_px as usize),
+        color_space: ColorSpace::Rgb,
+        bits_per_component: ColorBits::Bit8,
+        interpolate: true,
+        image_data: rgb_bytes,
+        image_filter: None,
+        smask: None,
+        clipping_bbox: None,
+    };
+
+    // At the default 300 DPI, pixel → mm conversion:
+    //   mm = pixels × 72/300 × 0.3528  (where 0.3528 = mm per point)
+    const PX_TO_MM: f64 = 72.0 / 300.0 * 0.352_777_8;
+    let page_w = width_px as f64 * PX_TO_MM;
+    let page_h = height_px as f64 * PX_TO_MM;
+
+    let (doc, page_idx, layer_idx) = PdfDocument::new(
+        "Image export",
+        Mm(page_w as f32),
+        Mm(page_h as f32),
+        "Layer 1",
+    );
+    let current_layer = doc.get_page(page_idx).get_layer(layer_idx);
+
+    let img = printpdf::Image::from(image_xobject);
+    img.add_to_layer(current_layer, ImageTransform::default());
+
+    let file = File::create(output_path)?;
+    let mut writer = BufWriter::new(file);
+    doc.save(&mut writer)
         .map_err(|err| io::Error::other(err.to_string()))
 }
 
@@ -763,6 +837,29 @@ mod tests {
         let normalized = normalize_export_path(&path, ExportImageFormat::Jpeg);
 
         assert_eq!(normalized, PathBuf::from("sample.JPG"));
+    }
+
+    #[test]
+    fn encode_frame_to_path_writes_pdf_file() {
+        let dir = tempfile::tempdir().expect("temp dir should be created");
+        let path = dir.path().join("export.pdf");
+        let frame = DecodedFrame {
+            rgba: vec![255, 0, 0, 255, 0, 0, 255, 128],
+            width: 2,
+            height: 1,
+            original_width: 2,
+            original_height: 1,
+        };
+
+        encode_frame_to_path(frame, ExportImageFormat::Pdf, &path).expect("PDF should encode");
+
+        let bytes = std::fs::read(path).expect("PDF should be readable");
+        assert!(bytes.starts_with(b"%PDF-"));
+        assert!(
+            [b"/Subtype /Image".as_slice(), b"/Subtype/Image".as_slice(),]
+                .iter()
+                .any(|needle| bytes.windows(needle.len()).any(|window| window == *needle))
+        );
     }
 
     #[test]

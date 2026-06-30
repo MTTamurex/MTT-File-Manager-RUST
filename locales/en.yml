@@ -482,6 +482,7 @@ imageviewer:
   format_webp: "WebP"
   format_bmp: "BMP"
   format_tiff: "TIFF"
+  format_pdf: "PDF"
   rotate_ccw: "Rotate counter-clockwise  (Shift+R)"
   rotate_cw: "Rotate clockwise  (R)"
   set_wallpaper: "Set as Wallpaper"
