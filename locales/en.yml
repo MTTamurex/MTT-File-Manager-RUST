@@ -524,6 +524,18 @@ pdfviewer:
   password_hint: "Password..."
   password_submit: "Open"
   password_cancel: "Cancel"
+  search_hint: "Search  (Ctrl+F)"
+  search_button: "Search"
+  search_placeholder: "Search text…"
+  search_prev_button: "Prev"
+  search_next_button: "Next"
+  search_close_button: "Close"
+  search_prev: "Previous match  (Shift+Enter)"
+  search_next: "Next match  (Enter)"
+  search_close: "Close search  (Esc)"
+  search_searching: "Searching…"
+  search_no_results: "No matches"
+  search_result_count: "%{current} of %{total}"
 drive_slot:
   free_of: "%{free_val} %{free_unit} free of %{total_val} %{total_unit}"
 extract:

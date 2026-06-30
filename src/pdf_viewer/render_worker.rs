@@ -45,12 +45,30 @@ pub(super) struct BoundedTextResult {
     pub text: String,
 }
 
+pub(super) struct SearchRequest {
+    pub query: String,
+    pub generation: u64,
+}
+
+pub(super) struct SearchMatch {
+    pub page_idx: u32,
+    pub bounds: PdfTextBounds,
+}
+
+pub(super) struct SearchResult {
+    pub query: String,
+    pub generation: u64,
+    pub matches: Vec<SearchMatch>,
+}
+
 pub(super) struct RenderWorker {
     tx: Sender<RenderRequest>,
     rx: Receiver<RenderResult>,
     text_seg_rx: Receiver<TextSegmentResult>,
     bounded_text_tx: Sender<BoundedTextRequest>,
     bounded_text_rx: Receiver<BoundedTextResult>,
+    search_tx: Sender<SearchRequest>,
+    search_res_rx: Receiver<SearchResult>,
     /// Set by the worker thread if PDF initialisation fails.
     init_error: Arc<std::sync::Mutex<Option<String>>>,
 }
@@ -63,6 +81,8 @@ impl RenderWorker {
         let (text_seg_tx, text_seg_rx) = crossbeam_channel::bounded(64);
         let (bt_req_tx, bt_req_rx) = crossbeam_channel::bounded(8);
         let (bt_res_tx, bt_res_rx) = crossbeam_channel::bounded(8);
+        let (search_tx, search_rx) = crossbeam_channel::unbounded();
+        let (search_res_tx, search_res_rx) = crossbeam_channel::bounded(4);
         let init_error = Arc::new(std::sync::Mutex::new(None));
         let init_error_w = Arc::clone(&init_error);
 
@@ -77,6 +97,8 @@ impl RenderWorker {
                     text_seg_tx,
                     bt_req_rx,
                     bt_res_tx,
+                    search_rx,
+                    search_res_tx,
                     repaint,
                     init_error_w,
                 )
@@ -89,6 +111,8 @@ impl RenderWorker {
             text_seg_rx,
             bounded_text_tx: bt_req_tx,
             bounded_text_rx: bt_res_rx,
+            search_tx,
+            search_res_rx,
             init_error,
         }
     }
@@ -101,6 +125,11 @@ impl RenderWorker {
     /// Submit a bounded-text extraction request (for copy).
     pub fn request_bounded_text(&self, req: BoundedTextRequest) {
         let _ = self.bounded_text_tx.send(req);
+    }
+
+    /// Submit a full-document search request.
+    pub fn request_search(&self, req: SearchRequest) {
+        let _ = self.search_tx.send(req);
     }
 
     /// Drain up to `max` completed render results. Remaining results stay
@@ -137,6 +166,15 @@ impl RenderWorker {
         out
     }
 
+    /// Drain all completed search results.
+    pub fn drain_search_results(&self) -> Vec<SearchResult> {
+        let mut out = Vec::new();
+        while let Ok(r) = self.search_res_rx.try_recv() {
+            out.push(r);
+        }
+        out
+    }
+
     /// Returns the initialisation error if the worker failed to start.
     pub fn take_init_error(&self) -> Option<String> {
         self.init_error.lock().ok()?.take()
@@ -152,6 +190,8 @@ fn worker_loop(
     text_seg_tx: Sender<TextSegmentResult>,
     bt_rx: Receiver<BoundedTextRequest>,
     bt_tx: Sender<BoundedTextResult>,
+    search_rx: Receiver<SearchRequest>,
+    search_res_tx: Sender<SearchResult>,
     repaint: egui::Context,
     init_error: Arc<std::sync::Mutex<Option<String>>>,
 ) {
@@ -196,10 +236,18 @@ fn worker_loop(
     // extraction (Ctrl+C copy path).  Separate from segment_cache because it
     // carries the actual string content per word.
     let mut ocr_cache: HashMap<u32, Vec<OcrWord>> = HashMap::new();
+    let mut search_text_cache: HashMap<u32, SearchText> = HashMap::new();
 
     loop {
         // Drain high-priority bounded-text requests before blocking.
         drain_bounded_text(&document, &bt_rx, &bt_tx, &repaint, &ocr_cache);
+        drain_search_requests(
+            &document,
+            &search_rx,
+            &search_res_tx,
+            &repaint,
+            &mut search_text_cache,
+        );
 
         // Wait for either a render request or a bounded-text request.
         crossbeam_channel::select! {
@@ -219,6 +267,13 @@ fn worker_loop(
                 for (_, req) in latest {
                     // Prioritise bounded-text between page renders.
                     drain_bounded_text(&document, &bt_rx, &bt_tx, &repaint, &ocr_cache);
+                    drain_search_requests(
+                        &document,
+                        &search_rx,
+                        &search_res_tx,
+                        &repaint,
+                        &mut search_text_cache,
+                    );
 
                     let page_idx = req.page_idx;
 
@@ -313,6 +368,21 @@ fn worker_loop(
             recv(bt_rx) -> msg => {
                 if let Ok(req) = msg {
                     handle_bounded_text(&document, &req, &bt_tx, &repaint, &ocr_cache);
+                }
+            },
+            recv(search_rx) -> msg => {
+                if let Ok(first) = msg {
+                    let mut current = latest_search_request(first, &search_rx);
+                    while let Some(next) = handle_search(
+                        &document,
+                        &current,
+                        &search_rx,
+                        &search_res_tx,
+                        &repaint,
+                        &mut search_text_cache,
+                    ) {
+                        current = latest_search_request(next, &search_rx);
+                    }
                 }
             },
         }
@@ -505,4 +575,301 @@ fn extract_bounded_text(
             bounds.right,
         )),
     )
+}
+
+// ── Search ────────────────────────────────────────────────────────────────────
+
+struct SearchText {
+    chars: Vec<char>,
+    bounds: Vec<Option<PdfTextBounds>>,
+    fallback_bounds: PdfTextBounds,
+}
+
+enum SearchRun {
+    Complete(Vec<SearchMatch>),
+    Interrupted(SearchRequest),
+}
+
+fn latest_search_request(first: SearchRequest, rx: &Receiver<SearchRequest>) -> SearchRequest {
+    let mut latest = first;
+    while let Ok(r) = rx.try_recv() {
+        latest = r;
+    }
+    latest
+}
+
+fn drain_search_requests(
+    document: &pdfium_render::prelude::PdfDocument<'_>,
+    rx: &Receiver<SearchRequest>,
+    tx: &Sender<SearchResult>,
+    repaint: &egui::Context,
+    page_text_cache: &mut HashMap<u32, SearchText>,
+) {
+    while let Ok(first) = rx.try_recv() {
+        let mut current = latest_search_request(first, rx);
+        while let Some(next) = handle_search(document, &current, rx, tx, repaint, page_text_cache) {
+            current = latest_search_request(next, rx);
+        }
+    }
+}
+
+fn handle_search(
+    document: &pdfium_render::prelude::PdfDocument<'_>,
+    req: &SearchRequest,
+    rx: &Receiver<SearchRequest>,
+    tx: &Sender<SearchResult>,
+    repaint: &egui::Context,
+    page_text_cache: &mut HashMap<u32, SearchText>,
+) -> Option<SearchRequest> {
+    match perform_search(document, &req.query, rx, page_text_cache) {
+        Ok(SearchRun::Complete(matches)) => {
+            let _ = tx.send(SearchResult {
+                query: req.query.clone(),
+                generation: req.generation,
+                matches,
+            });
+            repaint.request_repaint();
+            None
+        }
+        Ok(SearchRun::Interrupted(next)) => Some(next),
+        Err(e) => {
+            log::warn!("[PDF-SEARCH] search failed: {e}");
+            let _ = tx.send(SearchResult {
+                query: req.query.clone(),
+                generation: req.generation,
+                matches: Vec::new(),
+            });
+            repaint.request_repaint();
+            None
+        }
+    }
+}
+
+fn perform_search(
+    document: &pdfium_render::prelude::PdfDocument<'_>,
+    query: &str,
+    rx: &Receiver<SearchRequest>,
+    page_text_cache: &mut HashMap<u32, SearchText>,
+) -> Result<SearchRun, String> {
+    if query.is_empty() {
+        return Ok(SearchRun::Complete(Vec::new()));
+    }
+
+    let query_lower: Vec<char> = query.chars().map(lower_search_char).collect();
+    if query_lower.is_empty() {
+        return Ok(SearchRun::Complete(Vec::new()));
+    }
+
+    let page_count = document.pages().len();
+    let mut all_matches = Vec::new();
+
+    for page_idx_u16 in 0..page_count {
+        let page_idx: u32 = page_idx_u16 as u32;
+        match page_text_cache.entry(page_idx) {
+            std::collections::hash_map::Entry::Occupied(entry) => {
+                all_matches.extend(search_indexed_text(page_idx, entry.get(), &query_lower));
+            }
+            std::collections::hash_map::Entry::Vacant(entry) => {
+                let indexed = match extract_page_search_text(document, page_idx_u16, page_idx) {
+                    Ok(indexed) => indexed,
+                    Err(e) => {
+                        log::warn!("[PDF-SEARCH] search: cannot index page {page_idx}: {e}");
+                        continue;
+                    }
+                };
+                let indexed = entry.insert(indexed);
+                all_matches.extend(search_indexed_text(page_idx, indexed, &query_lower));
+            }
+        }
+
+        if let Ok(next) = rx.try_recv() {
+            return Ok(SearchRun::Interrupted(next));
+        }
+    }
+
+    Ok(SearchRun::Complete(all_matches))
+}
+
+fn extract_page_search_text(
+    document: &pdfium_render::prelude::PdfDocument<'_>,
+    page_idx_u16: pdfium_render::prelude::PdfPageIndex,
+    page_idx: u32,
+) -> Result<SearchText, String> {
+    let page = document
+        .pages()
+        .get(page_idx_u16)
+        .map_err(|e| e.to_string())?;
+
+    let page_w = page.width().value;
+    let page_h = page.height().value;
+    let indexed = match page.text() {
+        Ok(text) => indexed_text_from_pdf_text(&text, page_w, page_h),
+        Err(_) => SearchText {
+            chars: Vec::new(),
+            bounds: Vec::new(),
+            fallback_bounds: PdfTextBounds::from_points(0.0, page_w, page_h, 0.0),
+        },
+    };
+
+    if indexed.chars.is_empty() {
+        let words = run_ocr_search_canonical(document, page_idx, page_w, page_h);
+        Ok(indexed_text_from_ocr_words(&words))
+    } else {
+        Ok(indexed)
+    }
+}
+
+fn indexed_text_from_pdf_text(
+    text: &pdfium_render::prelude::PdfPageText<'_>,
+    page_w: f32,
+    page_h: f32,
+) -> SearchText {
+    let chars = text
+        .all()
+        .chars()
+        .map(lower_search_char)
+        .collect::<Vec<_>>();
+    let mut bounds = Vec::new();
+
+    for character in text.chars().iter() {
+        let Some(unicode) = character.unicode_string() else {
+            continue;
+        };
+        let char_bounds = character
+            .loose_bounds()
+            .or_else(|_| character.tight_bounds())
+            .ok()
+            .map(super::renderer::pdfium_rect_to_bounds);
+        for _ in unicode.chars() {
+            bounds.push(char_bounds);
+        }
+    }
+
+    if bounds.len() != chars.len() {
+        bounds = vec![None; chars.len()];
+    }
+
+    SearchText {
+        chars,
+        bounds,
+        fallback_bounds: PdfTextBounds::from_points(0.0, page_w, page_h, 0.0),
+    }
+}
+
+fn indexed_text_from_ocr_words(words: &[OcrWord]) -> SearchText {
+    let mut chars = Vec::new();
+    let mut bounds = Vec::new();
+
+    for word in words {
+        let text = word.text.trim();
+        if text.is_empty() {
+            continue;
+        }
+        if !chars.is_empty() {
+            chars.push(' ');
+            bounds.push(None);
+        }
+        for ch in text.chars() {
+            chars.push(lower_search_char(ch));
+            bounds.push(Some(word.bounds));
+        }
+    }
+
+    let fallback_bounds = if words.is_empty() {
+        PdfTextBounds::from_points(0.0, 0.0, 0.0, 0.0)
+    } else {
+        let word_bounds = words.iter().map(|w| Some(w.bounds)).collect::<Vec<_>>();
+        union_bounds(&word_bounds).unwrap_or_else(|| PdfTextBounds::from_points(0.0, 0.0, 0.0, 0.0))
+    };
+
+    SearchText {
+        chars,
+        bounds,
+        fallback_bounds,
+    }
+}
+
+fn search_indexed_text(
+    page_idx: u32,
+    indexed: &SearchText,
+    query_lower: &[char],
+) -> Vec<SearchMatch> {
+    if indexed.chars.is_empty() || query_lower.is_empty() {
+        return Vec::new();
+    }
+
+    let mut matches = Vec::new();
+    let mut start = 0;
+    while start + query_lower.len() <= indexed.chars.len() {
+        if indexed.chars[start..start + query_lower.len()] == query_lower[..] {
+            let end = start + query_lower.len();
+            let bounds =
+                union_bounds(&indexed.bounds[start..end]).unwrap_or(indexed.fallback_bounds);
+            matches.push(SearchMatch { page_idx, bounds });
+            start += 1;
+        } else {
+            start += 1;
+        }
+    }
+
+    matches
+}
+
+fn run_ocr_search_canonical(
+    document: &pdfium_render::prelude::PdfDocument<'_>,
+    page_idx: u32,
+    page_w: f32,
+    page_h: f32,
+) -> Vec<OcrWord> {
+    let scale = OCR_CANONICAL_SIDE as f32 / page_w.max(page_h);
+    let ocr_w = ((page_w * scale) as u32).max(1);
+    let ocr_h = ((page_h * scale) as u32).max(1);
+
+    let result = (|| -> Result<(Vec<u8>, u32, u32), String> {
+        let page = document
+            .pages()
+            .get(page_idx as pdfium_render::prelude::PdfPageIndex)
+            .map_err(|e| e.to_string())?;
+        let bm = page
+            .render(
+                ocr_w as pdfium_render::prelude::Pixels,
+                ocr_h as pdfium_render::prelude::Pixels,
+                None,
+            )
+            .map_err(|e| format!("OCR search render: {e}"))?;
+        Ok((bm.as_rgba_bytes(), bm.width() as u32, bm.height() as u32))
+    })();
+
+    match result {
+        Ok((pixels, w, h)) => {
+            super::ocr::ocr_page_bitmap(&pixels, w, h, page_w, page_h).unwrap_or_default()
+        }
+        Err(e) => {
+            log::warn!("[PDF-SEARCH] OCR render for page {page_idx} failed: {e}");
+            Vec::new()
+        }
+    }
+}
+
+fn lower_search_char(c: char) -> char {
+    c.to_lowercase().next().unwrap_or(c)
+}
+
+fn union_bounds(bounds_slice: &[Option<PdfTextBounds>]) -> Option<PdfTextBounds> {
+    let mut min_left = f32::INFINITY;
+    let mut max_right = f32::NEG_INFINITY;
+    let mut min_bottom = f32::INFINITY;
+    let mut max_top = f32::NEG_INFINITY;
+    let mut found = false;
+    for bounds in bounds_slice {
+        let Some(b) = bounds else {
+            continue;
+        };
+        found = true;
+        min_left = min_left.min(b.left);
+        max_right = max_right.max(b.right);
+        min_bottom = min_bottom.min(b.bottom);
+        max_top = max_top.max(b.top);
+    }
+    found.then(|| PdfTextBounds::from_points(min_left, max_right, max_top, min_bottom))
 }

@@ -754,7 +754,7 @@ mod tests {
             file.write_all(b"not real media").expect("write media file");
         }
 
-        clear_write_activity_after_completed_file_operation(&[root.clone()]);
+        clear_write_activity_after_completed_file_operation(std::slice::from_ref(&root));
 
         {
             let mut cache = get_file_completed_write_cache().lock();

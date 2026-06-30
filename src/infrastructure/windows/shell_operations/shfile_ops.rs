@@ -149,36 +149,6 @@ pub fn rename_item_with_shell(path: &Path, new_name: &str, hwnd: HWND) -> bool {
     result == 0 && op.fAnyOperationsAborted.0 == 0
 }
 
-#[cfg(test)]
-mod tests {
-    use super::is_case_only_rename;
-    use std::path::Path;
-
-    #[test]
-    fn detects_case_only_rename() {
-        let current = Path::new(r"C:\Temp\teste 1.txt");
-        let renamed = Path::new(r"C:\Temp\Teste 1.txt");
-
-        assert!(is_case_only_rename(current, renamed));
-    }
-
-    #[test]
-    fn ignores_exact_same_path() {
-        let current = Path::new(r"C:\Temp\teste 1.txt");
-        let renamed = Path::new(r"C:\Temp\teste 1.txt");
-
-        assert!(!is_case_only_rename(current, renamed));
-    }
-
-    #[test]
-    fn ignores_distinct_target_path() {
-        let current = Path::new(r"C:\Temp\teste 1.txt");
-        let renamed = Path::new(r"C:\Temp\teste 2.txt");
-
-        assert!(!is_case_only_rename(current, renamed));
-    }
-}
-
 /// Copies multiple files/directories to a destination using a single Windows Shell operation.
 /// This produces a single progress dialog for all files (batch behavior).
 pub fn copy_items_with_shell(paths: &[PathBuf], dest_folder: &Path, hwnd: HWND) -> bool {
@@ -284,4 +254,34 @@ pub fn move_item_with_shell(path: &Path, dest_folder: &Path, hwnd: HWND) -> bool
     // SAFETY: op is initialized with valid double-null terminated string.
     let result = unsafe { SHFileOperationW(&mut op) };
     result == 0 && op.fAnyOperationsAborted.0 == 0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_case_only_rename;
+    use std::path::Path;
+
+    #[test]
+    fn detects_case_only_rename() {
+        let current = Path::new(r"C:\Temp\teste 1.txt");
+        let renamed = Path::new(r"C:\Temp\Teste 1.txt");
+
+        assert!(is_case_only_rename(current, renamed));
+    }
+
+    #[test]
+    fn ignores_exact_same_path() {
+        let current = Path::new(r"C:\Temp\teste 1.txt");
+        let renamed = Path::new(r"C:\Temp\teste 1.txt");
+
+        assert!(!is_case_only_rename(current, renamed));
+    }
+
+    #[test]
+    fn ignores_distinct_target_path() {
+        let current = Path::new(r"C:\Temp\teste 1.txt");
+        let renamed = Path::new(r"C:\Temp\teste 2.txt");
+
+        assert!(!is_case_only_rename(current, renamed));
+    }
 }

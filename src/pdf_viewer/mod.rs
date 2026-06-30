@@ -19,6 +19,7 @@ use crate::viewer_runtime::{apply_saved_locale, build_viewer_native_options, is_
 mod ocr;
 mod render_worker;
 mod renderer;
+mod search;
 mod selection;
 mod toolbar;
 mod viewer_app;

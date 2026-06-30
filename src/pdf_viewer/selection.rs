@@ -303,7 +303,7 @@ impl PdfViewerApp {
         })
     }
 
-    fn page_bounds_to_screen_rect(
+    pub(super) fn page_bounds_to_screen_rect(
         &self,
         page_idx: u32,
         page_rect: egui::Rect,

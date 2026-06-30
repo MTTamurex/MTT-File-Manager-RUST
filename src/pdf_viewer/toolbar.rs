@@ -31,6 +31,11 @@ impl PdfViewerApp {
 
             // ── Selection ────────────────────────────────────────────────
             self.toolbar_selection(ui);
+
+            ui.separator();
+
+            // ── Search ───────────────────────────────────────────────────
+            self.toolbar_search(ui);
         });
     }
 
@@ -168,5 +173,20 @@ impl PdfViewerApp {
         button.on_hover_text(t!("pdfviewer.copy_selection_hint"));
 
         ui.label(self.selection_summary());
+    }
+
+    fn toolbar_search(&mut self, ui: &mut egui::Ui) {
+        let label = if self.search_active {
+            t!("pdfviewer.search_close")
+        } else {
+            t!("pdfviewer.search_hint")
+        };
+        if ui
+            .button(t!("pdfviewer.search_button").to_string())
+            .on_hover_text(label.clone())
+            .clicked()
+        {
+            self.toggle_search();
+        }
     }
 }

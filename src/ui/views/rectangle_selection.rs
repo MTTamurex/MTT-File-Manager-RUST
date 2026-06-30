@@ -239,6 +239,40 @@ fn rects_intersect(a: Rect, b: Rect) -> bool {
     a.min.x < b.max.x && b.min.x < a.max.x && a.min.y < b.max.y && b.min.y < a.max.y
 }
 
+pub fn paint_overlay(
+    ui: &egui::Ui,
+    state: &RectangleSelectionState,
+    viewport_rect: Rect,
+    current_scroll_y: f32,
+) {
+    let content_rect = state.content_rect();
+    let screen_rect = Rect::from_min_max(
+        egui::pos2(
+            viewport_rect.left() + content_rect.left(),
+            viewport_rect.top() + content_rect.top() - current_scroll_y,
+        ),
+        egui::pos2(
+            viewport_rect.left() + content_rect.right(),
+            viewport_rect.top() + content_rect.bottom() - current_scroll_y,
+        ),
+    )
+    .intersect(viewport_rect);
+
+    if screen_rect.width() <= 1.0 || screen_rect.height() <= 1.0 {
+        return;
+    }
+
+    let fill = Color32::from_rgba_unmultiplied(24, 122, 255, 28);
+    let stroke = Color32::from_rgba_unmultiplied(24, 122, 255, 190);
+    ui.painter().rect_filled(screen_rect, 0.0, fill);
+    ui.painter().rect_stroke(
+        screen_rect,
+        0.0,
+        Stroke::new(1.0, stroke),
+        egui::StrokeKind::Inside,
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -282,38 +316,4 @@ mod tests {
 
         assert_eq!(sorted(indices), vec![0]);
     }
-}
-
-pub fn paint_overlay(
-    ui: &egui::Ui,
-    state: &RectangleSelectionState,
-    viewport_rect: Rect,
-    current_scroll_y: f32,
-) {
-    let content_rect = state.content_rect();
-    let screen_rect = Rect::from_min_max(
-        egui::pos2(
-            viewport_rect.left() + content_rect.left(),
-            viewport_rect.top() + content_rect.top() - current_scroll_y,
-        ),
-        egui::pos2(
-            viewport_rect.left() + content_rect.right(),
-            viewport_rect.top() + content_rect.bottom() - current_scroll_y,
-        ),
-    )
-    .intersect(viewport_rect);
-
-    if screen_rect.width() <= 1.0 || screen_rect.height() <= 1.0 {
-        return;
-    }
-
-    let fill = Color32::from_rgba_unmultiplied(24, 122, 255, 28);
-    let stroke = Color32::from_rgba_unmultiplied(24, 122, 255, 190);
-    ui.painter().rect_filled(screen_rect, 0.0, fill);
-    ui.painter().rect_stroke(
-        screen_rect,
-        0.0,
-        Stroke::new(1.0, stroke),
-        egui::StrokeKind::Inside,
-    );
 }

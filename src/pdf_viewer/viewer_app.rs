@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use eframe::egui;
 use rust_i18n::t;
 
-use super::render_worker::{RenderRequest, RenderWorker};
+use super::render_worker::{RenderRequest, RenderWorker, SearchMatch};
 use super::renderer::{PdfRenderer, PdfTextSegment};
 use super::selection::{DragSelection, PageSelection};
 
@@ -113,6 +113,15 @@ pub struct PdfViewerApp {
     password_prompt: Option<PasswordPrompt>,
     /// The password successfully used to open this document.
     confirmed_password: Option<String>,
+
+    pub(super) search_active: bool,
+    pub(super) search_query: String,
+    pub(super) search_input_focus_requested: bool,
+    pub(super) search_results: Vec<SearchMatch>,
+    pub(super) current_match_idx: usize,
+    pub(super) search_generation: u64,
+    pub(super) search_in_progress: bool,
+    pub(super) last_searched_query: String,
 }
 
 impl PdfViewerApp {
@@ -148,6 +157,14 @@ impl PdfViewerApp {
             visible_hi: 0,
             password_prompt,
             confirmed_password: None,
+            search_active: false,
+            search_query: String::new(),
+            search_input_focus_requested: false,
+            search_results: Vec::new(),
+            current_match_idx: 0,
+            search_generation: 0,
+            search_in_progress: false,
+            last_searched_query: String::new(),
         })
     }
 
@@ -299,6 +316,9 @@ impl PdfViewerApp {
         for r in worker.drain_bounded_text_results() {
             self.receive_bounded_text(r.page_idx, r.text);
         }
+
+        // Receive search results.
+        self.poll_search_results();
     }
 
     fn submit_render(&mut self, page_idx: u32, need_w: u32, need_h: u32) {
@@ -520,6 +540,9 @@ impl PdfViewerApp {
 
     fn handle_keyboard(&mut self, ctx: &egui::Context) {
         ctx.input(|i| {
+            if i.events.iter().any(|e| matches!(e, egui::Event::Text(_))) {
+                return;
+            }
             if i.modifiers.ctrl {
                 if i.key_pressed(egui::Key::Plus) || i.key_pressed(egui::Key::Equals) {
                     self.zoom_in();
@@ -611,6 +634,7 @@ impl PdfViewerApp {
                         Self::paint_placeholder(ui.painter(), rect, idx, ui.visuals().dark_mode);
                     }
 
+                    self.paint_search_highlights(ui.painter(), idx, rect);
                     self.handle_page_selection(ui, &resp, idx, rect);
                 }
             });
@@ -694,10 +718,13 @@ impl eframe::App for PdfViewerApp {
         self.poll_results(ctx);
         self.handle_keyboard(ctx);
         self.handle_selection_shortcuts(ctx);
+        self.handle_search_shortcuts(ctx);
 
         egui::TopBottomPanel::top("pdf_toolbar").show(ctx, |ui| {
             self.show_toolbar(ui);
         });
+
+        self.show_search_bar(ctx);
 
         if let Some(err) = &self.worker_error {
             egui::CentralPanel::default().show(ctx, |ui| {
