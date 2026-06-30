@@ -6,7 +6,7 @@
 use eframe::egui;
 use rust_i18n::t;
 
-use super::viewer_app::{PdfViewerApp, ZoomMode};
+use super::viewer_app::{PdfViewMode, PdfViewerApp, ZoomMode};
 
 impl PdfViewerApp {
     /// Render the toolbar contents inside a horizontal layout.
@@ -21,6 +21,11 @@ impl PdfViewerApp {
 
             // ── Zoom controls ────────────────────────────────────────────
             self.toolbar_zoom(ui);
+
+            ui.separator();
+
+            // ── View mode ────────────────────────────────────────────────
+            self.toolbar_view_mode(ui);
 
             ui.separator();
 
@@ -155,6 +160,41 @@ impl PdfViewerApp {
             .clicked()
         {
             self.rotate_cw();
+        }
+    }
+
+    fn toolbar_view_mode(&mut self, ui: &mut egui::Ui) {
+        if ui
+            .selectable_label(
+                self.view_mode == PdfViewMode::Continuous,
+                t!("pdfviewer.view_continuous_short"),
+            )
+            .on_hover_text(t!("pdfviewer.view_continuous"))
+            .clicked()
+        {
+            self.set_view_mode(PdfViewMode::Continuous);
+        }
+
+        if ui
+            .selectable_label(
+                self.view_mode == PdfViewMode::SinglePage,
+                t!("pdfviewer.view_single_short"),
+            )
+            .on_hover_text(t!("pdfviewer.view_single"))
+            .clicked()
+        {
+            self.set_view_mode(PdfViewMode::SinglePage);
+        }
+
+        if ui
+            .selectable_label(
+                self.view_mode == PdfViewMode::TwoPage,
+                t!("pdfviewer.view_two_page_short"),
+            )
+            .on_hover_text(t!("pdfviewer.view_two_page"))
+            .clicked()
+        {
+            self.set_view_mode(PdfViewMode::TwoPage);
         }
     }
 

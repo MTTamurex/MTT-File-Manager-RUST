@@ -43,6 +43,13 @@ pub(super) enum ZoomMode {
     Custom,
 }
 
+#[derive(Clone, Copy, PartialEq)]
+pub(super) enum PdfViewMode {
+    Continuous,
+    SinglePage,
+    TwoPage,
+}
+
 /// GPU-uploaded page texture with render-resolution metadata.
 struct PageTexture {
     texture: egui::TextureHandle,
@@ -71,7 +78,7 @@ struct PasswordPrompt {
 // ── App ──────────────────────────────────────────────────────────────────────
 
 pub struct PdfViewerApp {
-    worker_path: PathBuf,
+    pub(super) worker_path: PathBuf,
     pub(super) worker: Option<RenderWorker>,
 
     pub(super) total_pages: u32,
@@ -81,6 +88,7 @@ pub struct PdfViewerApp {
     // View state
     pub(super) zoom: f32,
     pub(super) zoom_mode: ZoomMode,
+    pub(super) view_mode: PdfViewMode,
     pub(super) rotation: u16, // 0 | 90 | 180 | 270
 
     // Navigation
@@ -133,13 +141,14 @@ impl PdfViewerApp {
         };
         let total_pages = page_sizes.len() as u32;
 
-        Ok(Self {
+        let mut app = Self {
             worker_path: path,
             worker: None,
             total_pages,
             page_sizes,
             zoom: 1.0,
             zoom_mode: ZoomMode::FitWidth,
+            view_mode: PdfViewMode::Continuous,
             rotation: 0,
             current_page: 0,
             page_input: "1".into(),
@@ -165,7 +174,9 @@ impl PdfViewerApp {
             search_generation: 0,
             search_in_progress: false,
             last_searched_query: String::new(),
-        })
+        };
+        app.restore_document_state();
+        Ok(app)
     }
 
     // ── Worker management ────────────────────────────────────────────────
@@ -249,6 +260,7 @@ impl PdfViewerApp {
                     self.total_pages = self.page_sizes.len() as u32;
                     self.confirmed_password = Some(pwd);
                     self.password_prompt = None;
+                    self.restore_document_state();
                 }
                 Err(e) if e.is_password_required() => {
                     if let Some(prompt) = &mut self.password_prompt {
@@ -495,6 +507,14 @@ impl PdfViewerApp {
         self.pending.clear();
     }
 
+    pub(super) fn set_view_mode(&mut self, mode: PdfViewMode) {
+        if self.view_mode != mode {
+            self.view_mode = mode;
+            self.scroll_to_page = Some(self.current_page);
+            self.on_view_changed();
+        }
+    }
+
     pub(super) fn zoom_in(&mut self) {
         self.zoom_mode = ZoomMode::Custom;
         self.zoom = (self.zoom * 1.25).min(5.0);
@@ -525,13 +545,27 @@ impl PdfViewerApp {
     }
 
     pub(super) fn prev_page(&mut self) {
-        if self.current_page > 0 {
+        if self.current_page == 0 {
+            return;
+        }
+
+        if self.view_mode == PdfViewMode::TwoPage {
+            let spread_start = self.current_page.saturating_sub(self.current_page % 2);
+            self.go_to_page(spread_start.saturating_sub(2));
+        } else {
             self.go_to_page(self.current_page - 1);
         }
     }
 
     pub(super) fn next_page(&mut self) {
-        if self.current_page + 1 < self.total_pages {
+        if self.current_page + 1 >= self.total_pages {
+            return;
+        }
+
+        if self.view_mode == PdfViewMode::TwoPage {
+            let spread_start = self.current_page.saturating_sub(self.current_page % 2);
+            self.go_to_page((spread_start + 2).min(self.total_pages.saturating_sub(1)));
+        } else {
             self.go_to_page(self.current_page + 1);
         }
     }
@@ -589,69 +623,110 @@ impl PdfViewerApp {
 
     // ── Page layout in ScrollArea ────────────────────────────────────────
 
+    #[allow(clippy::too_many_arguments)]
+    fn show_page_slot(
+        &mut self,
+        ui: &mut egui::Ui,
+        idx: u32,
+        rect: egui::Rect,
+        resp: &egui::Response,
+        scale: f32,
+        ppp: f32,
+        first_visible: &mut Option<u32>,
+        last_visible: &mut u32,
+    ) {
+        if self.scroll_to_page == Some(idx) {
+            resp.scroll_to_me(Some(egui::Align::TOP));
+            self.scroll_to_page = None;
+        }
+
+        if !ui.is_rect_visible(rect) {
+            return;
+        }
+
+        if first_visible.is_none() {
+            *first_visible = Some(idx);
+        }
+        *last_visible = idx;
+
+        let (need_w, need_h) = self.needed_render_size(idx, scale, ppp);
+        let needs_render = match self.textures.get(&idx) {
+            Some(t) => !Self::texture_adequate(t, need_w, need_h),
+            None => true,
+        };
+        if needs_render {
+            self.submit_render(idx, need_w, need_h);
+        }
+
+        if let Some(t) = self.textures.get(&idx) {
+            Self::paint_page(ui.painter(), rect, t.texture.id(), self.rotation);
+        } else {
+            Self::paint_placeholder(ui.painter(), rect, idx, ui.visuals().dark_mode);
+        }
+
+        self.paint_search_highlights(ui.painter(), idx, rect);
+        self.handle_page_selection(ui, resp, idx, rect);
+    }
+
     fn show_pages(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, aw: f32, ah: f32) {
         let ppp = ctx.pixels_per_point();
         let mut first_visible: Option<u32> = None;
         let mut last_visible: u32 = 0;
 
-        for idx in 0..self.total_pages {
-            let scale = self.get_scale(idx, aw, ah);
-            let (dw, dh) = self.display_size(idx, scale);
-
-            let indent = ((ui.available_width() - dw) / 2.0).max(0.0);
-
-            ui.horizontal(|ui| {
-                ui.add_space(indent);
-
-                let (rect, resp) =
-                    ui.allocate_exact_size(egui::vec2(dw, dh), egui::Sense::click_and_drag());
-
-                if self.scroll_to_page == Some(idx) {
-                    resp.scroll_to_me(Some(egui::Align::TOP));
-                    self.scroll_to_page = None;
+        match self.view_mode {
+            PdfViewMode::Continuous => {
+                for idx in 0..self.total_pages {
+                    self.show_vertical_page(
+                        ui,
+                        idx,
+                        aw,
+                        ah,
+                        ppp,
+                        &mut first_visible,
+                        &mut last_visible,
+                    );
                 }
-
-                if ui.is_rect_visible(rect) {
-                    if first_visible.is_none() {
-                        first_visible = Some(idx);
-                    }
-                    last_visible = idx;
-
-                    // Check if cached texture is adequate for the current scale
-                    let (need_w, need_h) = self.needed_render_size(idx, scale, ppp);
-                    let needs_render = match self.textures.get(&idx) {
-                        Some(t) => !Self::texture_adequate(t, need_w, need_h),
-                        None => true,
-                    };
-                    if needs_render {
-                        self.submit_render(idx, need_w, need_h);
-                    }
-
-                    // Paint texture (possibly stale / stretched) or placeholder
-                    if let Some(t) = self.textures.get(&idx) {
-                        Self::paint_page(ui.painter(), rect, t.texture.id(), self.rotation);
-                    } else {
-                        Self::paint_placeholder(ui.painter(), rect, idx, ui.visuals().dark_mode);
-                    }
-
-                    self.paint_search_highlights(ui.painter(), idx, rect);
-                    self.handle_page_selection(ui, &resp, idx, rect);
-                }
-            });
-
-            ui.add_space(8.0);
+            }
+            PdfViewMode::SinglePage => {
+                let idx = self.current_page.min(self.total_pages.saturating_sub(1));
+                self.show_vertical_page(
+                    ui,
+                    idx,
+                    aw,
+                    ah,
+                    ppp,
+                    &mut first_visible,
+                    &mut last_visible,
+                );
+            }
+            PdfViewMode::TwoPage => {
+                self.show_two_page_spread(ui, aw, ah, ppp, &mut first_visible, &mut last_visible);
+            }
         }
 
         // Update current-page indicator from scroll position
         if let Some(fv) = first_visible {
             if self.scroll_to_page.is_none() {
-                self.current_page = fv;
-                self.page_input = format!("{}", fv + 1);
+                let page = if self.view_mode == PdfViewMode::TwoPage
+                    && self.current_page >= fv
+                    && self.current_page <= last_visible
+                {
+                    self.current_page
+                } else {
+                    fv
+                };
+                self.current_page = page;
+                self.page_input = format!("{}", page + 1);
             }
 
             // Prefetch adjacent pages for smooth scrolling, clamped to
             // CACHE_RADIUS so prefetched textures are not immediately evicted.
-            let scale0 = self.get_scale(fv, aw, ah);
+            let prefetch_aw = if self.view_mode == PdfViewMode::TwoPage {
+                ((aw - 12.0) * 0.5).max(100.0)
+            } else {
+                aw
+            };
+            let scale0 = self.get_scale(fv, prefetch_aw, ah);
             let cache_lo = self.current_page.saturating_sub(CACHE_RADIUS);
             let cache_hi =
                 (self.current_page + CACHE_RADIUS).min(self.total_pages.saturating_sub(1));
@@ -673,11 +748,102 @@ impl PdfViewerApp {
         self.visible_lo = first_visible;
         self.visible_hi = last_visible;
     }
+
+    #[allow(clippy::too_many_arguments)]
+    fn show_vertical_page(
+        &mut self,
+        ui: &mut egui::Ui,
+        idx: u32,
+        aw: f32,
+        ah: f32,
+        ppp: f32,
+        first_visible: &mut Option<u32>,
+        last_visible: &mut u32,
+    ) {
+        let scale = self.get_scale(idx, aw, ah);
+        let (dw, dh) = self.display_size(idx, scale);
+        let indent = ((ui.available_width() - dw) / 2.0).max(0.0);
+
+        ui.horizontal(|ui| {
+            ui.add_space(indent);
+            let (rect, resp) =
+                ui.allocate_exact_size(egui::vec2(dw, dh), egui::Sense::click_and_drag());
+            self.show_page_slot(
+                ui,
+                idx,
+                rect,
+                &resp,
+                scale,
+                ppp,
+                first_visible,
+                last_visible,
+            );
+        });
+        ui.add_space(8.0);
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn show_two_page_spread(
+        &mut self,
+        ui: &mut egui::Ui,
+        aw: f32,
+        ah: f32,
+        ppp: f32,
+        first_visible: &mut Option<u32>,
+        last_visible: &mut u32,
+    ) {
+        let gap = 12.0;
+        let page_aw = ((aw - gap) * 0.5).max(100.0);
+        let left = self.current_page.saturating_sub(self.current_page % 2);
+        let right = left + 1;
+        let pages = if right < self.total_pages {
+            vec![left, right]
+        } else {
+            vec![left]
+        };
+        let layout = pages
+            .iter()
+            .map(|&idx| {
+                let scale = self.get_scale(idx, page_aw, ah);
+                let (dw, dh) = self.display_size(idx, scale);
+                (idx, scale, dw, dh)
+            })
+            .collect::<Vec<_>>();
+        let total_w = layout.iter().map(|(_, _, dw, _)| *dw).sum::<f32>()
+            + gap * layout.len().saturating_sub(1) as f32;
+        let indent = ((ui.available_width() - total_w) / 2.0).max(0.0);
+
+        ui.horizontal(|ui| {
+            ui.add_space(indent);
+            for (pos, (idx, scale, dw, dh)) in layout.iter().copied().enumerate() {
+                if pos > 0 {
+                    ui.add_space(gap);
+                }
+                let (rect, resp) =
+                    ui.allocate_exact_size(egui::vec2(dw, dh), egui::Sense::click_and_drag());
+                self.show_page_slot(
+                    ui,
+                    idx,
+                    rect,
+                    &resp,
+                    scale,
+                    ppp,
+                    first_visible,
+                    last_visible,
+                );
+            }
+        });
+        ui.add_space(8.0);
+    }
 }
 
 // ── eframe::App ──────────────────────────────────────────────────────────────
 
 impl eframe::App for PdfViewerApp {
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.save_document_state();
+    }
+
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         // Apply theme on first frame (cc.set_visuals in creator can be
         // overridden by the platform integration).
@@ -744,7 +910,13 @@ impl eframe::App for PdfViewerApp {
             let ah = ui.available_height().max(100.0);
 
             if self.total_pages > 0 {
-                self.effective_zoom_pct = self.get_scale(0, aw, ah) * 100.0;
+                let zoom_page = self.current_page.min(self.total_pages.saturating_sub(1));
+                let zoom_aw = if self.view_mode == PdfViewMode::TwoPage {
+                    ((aw - 12.0) * 0.5).max(100.0)
+                } else {
+                    aw
+                };
+                self.effective_zoom_pct = self.get_scale(zoom_page, zoom_aw, ah) * 100.0;
             }
 
             egui::ScrollArea::vertical()
