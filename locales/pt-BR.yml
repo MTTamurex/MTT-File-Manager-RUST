@@ -502,6 +502,8 @@ pdfviewer:
   zoom_out: "Diminuir zoom  (Ctrl+−)"
   zoom_in: "Aumentar zoom  (Ctrl++)"
   current_zoom: "Nível de zoom atual"
+  thumbnails_title: "Páginas"
+  thumbnail_loading: "Carregando"
   fit_width: "Ajustar à largura"
   fit_page: "Ajustar à página"
   view_continuous: "Rolagem contínua"

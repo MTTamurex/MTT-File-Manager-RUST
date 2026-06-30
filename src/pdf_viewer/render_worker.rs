@@ -30,6 +30,19 @@ pub(super) struct RenderResult {
     pub height: u32,
 }
 
+pub(super) struct ThumbnailRequest {
+    pub page_idx: u32,
+    pub width: u32,
+    pub height: u32,
+}
+
+pub(super) struct ThumbnailResult {
+    pub page_idx: u32,
+    pub pixels: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+}
+
 pub(super) struct TextSegmentResult {
     pub page_idx: u32,
     pub segments: Vec<PdfTextSegment>,
@@ -64,6 +77,8 @@ pub(super) struct SearchResult {
 pub(super) struct RenderWorker {
     tx: Sender<RenderRequest>,
     rx: Receiver<RenderResult>,
+    thumbnail_tx: Sender<ThumbnailRequest>,
+    thumbnail_rx: Receiver<ThumbnailResult>,
     text_seg_rx: Receiver<TextSegmentResult>,
     bounded_text_tx: Sender<BoundedTextRequest>,
     bounded_text_rx: Receiver<BoundedTextResult>,
@@ -78,6 +93,8 @@ impl RenderWorker {
     pub fn spawn(path: PathBuf, password: Option<String>, repaint: egui::Context) -> Self {
         let (req_tx, req_rx) = crossbeam_channel::bounded(32);
         let (res_tx, res_rx) = crossbeam_channel::bounded(64);
+        let (thumb_tx, thumb_rx) = crossbeam_channel::bounded(64);
+        let (thumb_res_tx, thumb_res_rx) = crossbeam_channel::bounded(64);
         let (text_seg_tx, text_seg_rx) = crossbeam_channel::bounded(64);
         let (bt_req_tx, bt_req_rx) = crossbeam_channel::bounded(8);
         let (bt_res_tx, bt_res_rx) = crossbeam_channel::bounded(8);
@@ -94,6 +111,8 @@ impl RenderWorker {
                     password,
                     req_rx,
                     res_tx,
+                    thumb_rx,
+                    thumb_res_tx,
                     text_seg_tx,
                     bt_req_rx,
                     bt_res_tx,
@@ -108,6 +127,8 @@ impl RenderWorker {
         Self {
             tx: req_tx,
             rx: res_rx,
+            thumbnail_tx: thumb_tx,
+            thumbnail_rx: thumb_res_rx,
             text_seg_rx,
             bounded_text_tx: bt_req_tx,
             bounded_text_rx: bt_res_rx,
@@ -120,6 +141,10 @@ impl RenderWorker {
     /// Submit a non-blocking render request.
     pub fn request(&self, req: RenderRequest) {
         let _ = self.tx.send(req);
+    }
+
+    pub fn request_thumbnail(&self, req: ThumbnailRequest) {
+        let _ = self.thumbnail_tx.try_send(req);
     }
 
     /// Submit a bounded-text extraction request (for copy).
@@ -144,6 +169,14 @@ impl RenderWorker {
                 Ok(r) => out.push(r),
                 Err(_) => break,
             }
+        }
+        out
+    }
+
+    pub fn drain_thumbnail_results(&self) -> Vec<ThumbnailResult> {
+        let mut out = Vec::new();
+        while let Ok(r) = self.thumbnail_rx.try_recv() {
+            out.push(r);
         }
         out
     }
@@ -187,6 +220,8 @@ fn worker_loop(
     password: Option<String>,
     render_rx: Receiver<RenderRequest>,
     render_tx: Sender<RenderResult>,
+    thumbnail_rx: Receiver<ThumbnailRequest>,
+    thumbnail_tx: Sender<ThumbnailResult>,
     text_seg_tx: Sender<TextSegmentResult>,
     bt_rx: Receiver<BoundedTextRequest>,
     bt_tx: Sender<BoundedTextResult>,
@@ -248,6 +283,7 @@ fn worker_loop(
             &repaint,
             &mut search_text_cache,
         );
+        drain_thumbnail_requests(&document, &thumbnail_rx, &thumbnail_tx, &repaint);
 
         // Wait for either a render request or a bounded-text request.
         crossbeam_channel::select! {
@@ -274,6 +310,7 @@ fn worker_loop(
                         &repaint,
                         &mut search_text_cache,
                     );
+                    drain_thumbnail_requests(&document, &thumbnail_rx, &thumbnail_tx, &repaint);
 
                     let page_idx = req.page_idx;
 
@@ -385,11 +422,71 @@ fn worker_loop(
                     }
                 }
             },
+            recv(thumbnail_rx) -> msg => {
+                if let Ok(first) = msg {
+                    handle_thumbnail_requests(&document, first, &thumbnail_rx, &thumbnail_tx, &repaint);
+                }
+            },
         }
     }
 }
 
 // ── Text extraction helpers ──────────────────────────────────────────────────
+
+fn drain_thumbnail_requests(
+    document: &pdfium_render::prelude::PdfDocument<'_>,
+    rx: &Receiver<ThumbnailRequest>,
+    tx: &Sender<ThumbnailResult>,
+    repaint: &egui::Context,
+) {
+    while let Ok(first) = rx.try_recv() {
+        handle_thumbnail_requests(document, first, rx, tx, repaint);
+    }
+}
+
+fn handle_thumbnail_requests(
+    document: &pdfium_render::prelude::PdfDocument<'_>,
+    first: ThumbnailRequest,
+    rx: &Receiver<ThumbnailRequest>,
+    tx: &Sender<ThumbnailResult>,
+    repaint: &egui::Context,
+) {
+    let mut latest: HashMap<u32, ThumbnailRequest> = HashMap::new();
+    latest.insert(first.page_idx, first);
+    while let Ok(r) = rx.try_recv() {
+        latest.insert(r.page_idx, r);
+    }
+
+    for (_, req) in latest {
+        let result = (|| -> Result<ThumbnailResult, String> {
+            let page = document
+                .pages()
+                .get(req.page_idx as pdfium_render::prelude::PdfPageIndex)
+                .map_err(|e| e.to_string())?;
+            let bitmap = page
+                .render(
+                    req.width as pdfium_render::prelude::Pixels,
+                    req.height as pdfium_render::prelude::Pixels,
+                    None,
+                )
+                .map_err(|e| format!("RenderThumbnail: {e}"))?;
+            Ok(ThumbnailResult {
+                page_idx: req.page_idx,
+                pixels: bitmap.as_rgba_bytes(),
+                width: bitmap.width() as u32,
+                height: bitmap.height() as u32,
+            })
+        })();
+
+        match result {
+            Ok(result) => {
+                let _ = tx.send(result);
+                repaint.request_repaint();
+            }
+            Err(e) => log::warn!("[PDF-RENDER] thumbnail {} failed: {e}", req.page_idx),
+        }
+    }
+}
 
 fn drain_bounded_text(
     document: &pdfium_render::prelude::PdfDocument<'_>,

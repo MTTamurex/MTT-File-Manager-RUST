@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use eframe::egui;
 use rust_i18n::t;
 
-use super::render_worker::{RenderRequest, RenderWorker, SearchMatch};
+use super::render_worker::{RenderRequest, RenderWorker, SearchMatch, ThumbnailRequest};
 use super::renderer::{PdfRenderer, PdfTextSegment};
 use super::selection::{DragSelection, PageSelection};
 
@@ -19,6 +19,8 @@ const CACHE_RADIUS: u32 = 3;
 
 /// Number of pages to prefetch ahead/behind the visible range.
 const PREFETCH_AHEAD: u32 = 1;
+
+const THUMBNAIL_CACHE_LIMIT: usize = 512;
 
 /// Maximum total memory (in bytes) for cached page textures.
 /// When exceeded, furthest pages are evicted even if within CACHE_RADIUS.
@@ -51,10 +53,10 @@ pub(super) enum PdfViewMode {
 }
 
 /// GPU-uploaded page texture with render-resolution metadata.
-struct PageTexture {
-    texture: egui::TextureHandle,
-    render_w: u32,
-    render_h: u32,
+pub(super) struct PageTexture {
+    pub(super) texture: egui::TextureHandle,
+    pub(super) render_w: u32,
+    pub(super) render_h: u32,
 }
 
 impl PageTexture {
@@ -103,6 +105,8 @@ pub struct PdfViewerApp {
     textures: HashMap<u32, PageTexture>,
     /// Pages with in-flight render requests.
     pending: HashSet<u32>,
+    pub(super) thumbnail_textures: HashMap<u32, PageTexture>,
+    pub(super) thumbnail_pending: HashSet<u32>,
     /// Current total memory used by cached textures (tracked incrementally).
     cache_bytes: usize,
 
@@ -156,6 +160,8 @@ impl PdfViewerApp {
             effective_zoom_pct: 100.0,
             textures: HashMap::new(),
             pending: HashSet::new(),
+            thumbnail_textures: HashMap::new(),
+            thumbnail_pending: HashSet::new(),
             cache_bytes: 0,
             page_text: HashMap::new(),
             drag_selection: None,
@@ -319,6 +325,8 @@ impl PdfViewerApp {
             self.textures.insert(r.page_idx, new_entry);
         }
 
+        let thumbnail_results = worker.drain_thumbnail_results();
+
         // Receive eagerly-extracted text segments from the worker.
         for r in worker.drain_text_segment_results() {
             self.page_text.insert(r.page_idx, r.segments);
@@ -331,6 +339,27 @@ impl PdfViewerApp {
 
         // Receive search results.
         self.poll_search_results();
+
+        for r in thumbnail_results {
+            self.thumbnail_pending.remove(&r.page_idx);
+            let tex = ctx.load_texture(
+                format!("pdf_thumb_p{}", r.page_idx),
+                egui::ColorImage::from_rgba_unmultiplied(
+                    [r.width as usize, r.height as usize],
+                    &r.pixels,
+                ),
+                egui::TextureOptions::LINEAR,
+            );
+            self.thumbnail_textures.insert(
+                r.page_idx,
+                PageTexture {
+                    texture: tex,
+                    render_w: r.width,
+                    render_h: r.height,
+                },
+            );
+            self.evict_thumbnail_cache();
+        }
     }
 
     fn submit_render(&mut self, page_idx: u32, need_w: u32, need_h: u32) {
@@ -344,6 +373,35 @@ impl PdfViewerApp {
                 height: need_h,
             });
             self.pending.insert(page_idx);
+        }
+    }
+
+    pub(super) fn submit_thumbnail(&mut self, page_idx: u32, width: u32, height: u32) {
+        if self.thumbnail_pending.contains(&page_idx)
+            || self.thumbnail_textures.contains_key(&page_idx)
+        {
+            return;
+        }
+        if let Some(w) = &self.worker {
+            w.request_thumbnail(ThumbnailRequest {
+                page_idx,
+                width,
+                height,
+            });
+            self.thumbnail_pending.insert(page_idx);
+        }
+    }
+
+    fn evict_thumbnail_cache(&mut self) {
+        if self.thumbnail_textures.len() <= THUMBNAIL_CACHE_LIMIT {
+            return;
+        }
+
+        let mut pages = self.thumbnail_textures.keys().copied().collect::<Vec<_>>();
+        pages.sort_by_key(|&p| (p as i64 - self.current_page as i64).abs());
+        while self.thumbnail_textures.len() > THUMBNAIL_CACHE_LIMIT {
+            let Some(page) = pages.pop() else { break };
+            self.thumbnail_textures.remove(&page);
         }
     }
 
@@ -447,7 +505,7 @@ impl PdfViewerApp {
 
     /// Paint a page texture with rotation handled entirely in UV coordinates —
     /// zero CPU pixel manipulation.
-    fn paint_page(
+    pub(super) fn paint_page(
         painter: &egui::Painter,
         rect: egui::Rect,
         tex_id: egui::TextureId,
@@ -891,6 +949,7 @@ impl eframe::App for PdfViewerApp {
         });
 
         self.show_search_bar(ctx);
+        self.show_sidebar(ctx);
 
         if let Some(err) = &self.worker_error {
             egui::CentralPanel::default().show(ctx, |ui| {

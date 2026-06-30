@@ -502,6 +502,8 @@ pdfviewer:
   zoom_out: "Zoom out  (Ctrl+−)"
   zoom_in: "Zoom in  (Ctrl++)"
   current_zoom: "Current zoom level"
+  thumbnails_title: "Pages"
+  thumbnail_loading: "Loading"
   fit_width: "Fit Width"
   fit_page: "Fit Page"
   view_continuous: "Continuous scrolling"

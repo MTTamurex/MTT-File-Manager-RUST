@@ -22,6 +22,7 @@ mod render_worker;
 mod renderer;
 mod search;
 mod selection;
+mod sidebar;
 mod toolbar;
 mod viewer_app;
 
