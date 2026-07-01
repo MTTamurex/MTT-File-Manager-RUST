@@ -20,7 +20,7 @@ const CACHE_RADIUS: u32 = 3;
 /// Number of pages to prefetch ahead/behind the visible range.
 const PREFETCH_AHEAD: u32 = 1;
 
-const THUMBNAIL_CACHE_LIMIT: usize = 512;
+const THUMBNAIL_CACHE_LIMIT: usize = 256;
 
 /// Maximum total memory (in bytes) for cached page textures.
 /// When exceeded, furthest pages are evicted even if within CACHE_RADIUS.
@@ -95,6 +95,7 @@ pub struct PdfViewerApp {
     // Navigation
     pub(super) current_page: u32,
     pub(super) page_input: String,
+    pub(super) page_input_has_focus: bool,
     pub(super) scroll_to_page: Option<u32>,
 
     /// Effective zoom percentage (always reflects actual scale applied).
@@ -156,6 +157,7 @@ impl PdfViewerApp {
             rotation: 0,
             current_page: 0,
             page_input: "1".into(),
+            page_input_has_focus: false,
             scroll_to_page: None,
             effective_zoom_pct: 100.0,
             textures: HashMap::new(),
@@ -297,7 +299,7 @@ impl PdfViewerApp {
             return;
         }
 
-        let results = worker.drain_results(2);
+        let results = worker.drain_results(4);
         for r in results {
             self.pending.remove(&r.page_idx);
 
@@ -326,7 +328,7 @@ impl PdfViewerApp {
             self.textures.insert(r.page_idx, new_entry);
         }
 
-        let thumbnail_results = worker.drain_thumbnail_results();
+        let thumbnail_results = worker.drain_thumbnail_results(2);
 
         // Receive eagerly-extracted text segments from the worker.
         for r in worker.drain_text_segment_results() {
@@ -384,12 +386,13 @@ impl PdfViewerApp {
             return;
         }
         if let Some(w) = &self.worker {
-            w.request_thumbnail(ThumbnailRequest {
+            if w.request_thumbnail(ThumbnailRequest {
                 page_idx,
                 width,
                 height,
-            });
-            self.thumbnail_pending.insert(page_idx);
+            }) {
+                self.thumbnail_pending.insert(page_idx);
+            }
         }
     }
 
@@ -765,7 +768,7 @@ impl PdfViewerApp {
 
         // Update current-page indicator from scroll position
         if let Some(fv) = first_visible {
-            if self.scroll_to_page.is_none() {
+            if self.scroll_to_page.is_none() && !self.page_input_has_focus {
                 let page = if self.page_layout == PdfPageLayout::TwoPage
                     && self.current_page >= fv
                     && self.current_page <= last_visible

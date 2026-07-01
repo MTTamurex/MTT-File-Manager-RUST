@@ -6,7 +6,7 @@
 use eframe::egui;
 use rust_i18n::t;
 
-use super::render_worker::SearchRequest;
+use super::render_worker::{SearchMatch, SearchRequest};
 use super::viewer_app::PdfViewerApp;
 
 impl PdfViewerApp {
@@ -89,7 +89,7 @@ impl PdfViewerApp {
                 continue;
             }
             self.search_in_progress = false;
-            self.search_results = result.matches;
+            self.search_results = dedup_search_matches(result.matches);
             if !self.search_results.is_empty() {
                 self.current_match_idx = 0;
                 let page_idx = self.search_results[0].page_idx;
@@ -293,12 +293,49 @@ impl PdfViewerApp {
             return;
         }
 
-        let all_fill = egui::Color32::from_rgba_unmultiplied(255, 230, 0, 90);
-        let all_stroke =
-            egui::Stroke::new(0.5, egui::Color32::from_rgba_unmultiplied(180, 150, 0, 200));
-        let current_fill = egui::Color32::from_rgba_unmultiplied(255, 160, 0, 130);
+        let all_fill = egui::Color32::from_rgba_unmultiplied(70, 170, 255, 34);
+        let all_stroke = egui::Stroke::new(
+            0.8,
+            egui::Color32::from_rgba_unmultiplied(20, 120, 210, 170),
+        );
+        let all_underline = egui::Stroke::new(
+            1.2,
+            egui::Color32::from_rgba_unmultiplied(20, 120, 210, 210),
+        );
+        let current_fill = egui::Color32::from_rgba_unmultiplied(255, 190, 40, 48);
         let current_stroke =
-            egui::Stroke::new(1.5, egui::Color32::from_rgba_unmultiplied(220, 110, 0, 255));
+            egui::Stroke::new(1.5, egui::Color32::from_rgba_unmultiplied(230, 105, 0, 230));
+        let current_underline =
+            egui::Stroke::new(2.0, egui::Color32::from_rgba_unmultiplied(230, 105, 0, 255));
+
+        let paint_highlight = |rect: egui::Rect,
+                               fill: egui::Color32,
+                               stroke: egui::Stroke,
+                               underline: egui::Stroke| {
+            painter.rect_filled(rect, 1.5, fill);
+            painter.rect(
+                rect,
+                1.5,
+                egui::Color32::TRANSPARENT,
+                stroke,
+                egui::StrokeKind::Outside,
+            );
+            let y = (rect.bottom() - 1.0).max(rect.top());
+            painter.line_segment(
+                [egui::pos2(rect.left(), y), egui::pos2(rect.right(), y)],
+                underline,
+            );
+        };
+
+        let same_rect = |a: egui::Rect, b: egui::Rect| {
+            (a.min.x - b.min.x).abs() < 0.5
+                && (a.min.y - b.min.y).abs() < 0.5
+                && (a.max.x - b.max.x).abs() < 0.5
+                && (a.max.y - b.max.y).abs() < 0.5
+        };
+
+        let mut painted_rects = Vec::new();
+        let mut current_rect = None;
 
         for (i, m) in self.search_results.iter().enumerate() {
             if m.page_idx != page_idx {
@@ -306,24 +343,66 @@ impl PdfViewerApp {
             }
             let rect = self.page_bounds_to_screen_rect(page_idx, page_rect, m.bounds);
             if i == self.current_match_idx {
-                painter.rect_filled(rect, 1.0, current_fill);
-                painter.rect(
-                    rect,
-                    1.0,
-                    egui::Color32::from_rgba_unmultiplied(255, 160, 0, 30),
-                    current_stroke,
-                    egui::StrokeKind::Outside,
-                );
+                current_rect = Some(rect);
             } else {
-                painter.rect_filled(rect, 1.0, all_fill);
-                painter.rect(
-                    rect,
-                    1.0,
-                    egui::Color32::from_rgba_unmultiplied(255, 230, 0, 20),
-                    all_stroke,
-                    egui::StrokeKind::Outside,
-                );
+                if painted_rects
+                    .iter()
+                    .any(|painted| same_rect(*painted, rect))
+                {
+                    continue;
+                }
+                painted_rects.push(rect);
+                paint_highlight(rect, all_fill, all_stroke, all_underline);
             }
         }
+
+        if let Some(rect) = current_rect {
+            paint_highlight(rect, current_fill, current_stroke, current_underline);
+        }
     }
+}
+
+fn dedup_search_matches(matches: Vec<SearchMatch>) -> Vec<SearchMatch> {
+    let mut unique = Vec::with_capacity(matches.len());
+
+    for search_match in matches {
+        if unique
+            .iter()
+            .any(|existing| same_search_target(existing, &search_match))
+        {
+            continue;
+        }
+        unique.push(search_match);
+    }
+
+    unique
+}
+
+fn same_search_target(a: &SearchMatch, b: &SearchMatch) -> bool {
+    if a.page_idx != b.page_idx {
+        return false;
+    }
+
+    let intersection = bounds_intersection_area(a.bounds, b.bounds);
+    if intersection <= 0.0 {
+        return false;
+    }
+
+    let smaller = bounds_area(a.bounds).min(bounds_area(b.bounds));
+    smaller > 0.0 && intersection / smaller >= 0.55
+}
+
+fn bounds_area(bounds: super::renderer::PdfTextBounds) -> f32 {
+    bounds.width().max(0.0) * bounds.height().max(0.0)
+}
+
+fn bounds_intersection_area(
+    a: super::renderer::PdfTextBounds,
+    b: super::renderer::PdfTextBounds,
+) -> f32 {
+    let left = a.left.max(b.left);
+    let right = a.right.min(b.right);
+    let bottom = a.bottom.max(b.bottom);
+    let top = a.top.min(b.top);
+    (right - left).max(0.0) * (top - bottom).max(0.0)
 }

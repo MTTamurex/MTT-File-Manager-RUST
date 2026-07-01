@@ -69,10 +69,17 @@ impl PdfViewerApp {
                 .desired_width(40.0)
                 .horizontal_align(egui::Align::Center),
         );
-        if response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-            if let Ok(page) = self.page_input.parse::<u32>() {
-                self.go_to_page(page.saturating_sub(1));
-            }
+        self.page_input_has_focus = response.has_focus();
+        if response.changed() {
+            self.page_input.retain(|ch| ch.is_ascii_digit());
+        }
+
+        let enter_pressed = ui.input(|i| i.key_pressed(egui::Key::Enter));
+        if response.has_focus() && enter_pressed {
+            self.commit_page_input();
+            response.request_focus();
+        } else if response.lost_focus() {
+            self.commit_page_input();
         }
 
         ui.label(format!("/ {}", self.total_pages));
@@ -91,6 +98,14 @@ impl PdfViewerApp {
             .clicked()
         {
             self.go_to_page(self.total_pages.saturating_sub(1));
+        }
+    }
+
+    fn commit_page_input(&mut self) {
+        if let Ok(page) = self.page_input.parse::<u32>() {
+            self.go_to_page(page.saturating_sub(1));
+        } else {
+            self.page_input = format!("{}", self.current_page + 1);
         }
     }
 

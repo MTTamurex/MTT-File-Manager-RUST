@@ -1,12 +1,12 @@
 //! Background PDF page rendering and text extraction worker.
 //!
-//! Owns a persistent Pdfium document handle and processes both render
-//! and text-extraction requests on a dedicated thread so the UI stays
-//! fluid and never contends with the `thread_safe` pdfium mutex.
+//! Owns a persistent Pdfium document handle and processes render and
+//! text-extraction requests on a dedicated thread so the UI stays fluid
+//! and never contends with the `thread_safe` pdfium mutex.
 //!
-//! Text segments are extracted eagerly alongside the first render of
-//! each page. Bounded-text requests (for clipboard copy) are handled
-//! via a separate high-priority channel.
+//! Bounded-text requests (for clipboard copy) are handled via a separate
+//! high-priority channel. Thumbnail work stays lower priority than visible
+//! page renders.
 
 use crossbeam_channel::{Receiver, Sender};
 use eframe::egui;
@@ -16,6 +16,8 @@ use std::sync::Arc;
 
 use super::ocr::OcrWord;
 use super::renderer::{PdfTextBounds, PdfTextSegment};
+
+const MAX_THUMBNAILS_PER_BATCH: usize = 8;
 
 pub(super) struct RenderRequest {
     pub page_idx: u32,
@@ -143,8 +145,8 @@ impl RenderWorker {
         let _ = self.tx.send(req);
     }
 
-    pub fn request_thumbnail(&self, req: ThumbnailRequest) {
-        let _ = self.thumbnail_tx.try_send(req);
+    pub fn request_thumbnail(&self, req: ThumbnailRequest) -> bool {
+        self.thumbnail_tx.try_send(req).is_ok()
     }
 
     /// Submit a bounded-text extraction request (for copy).
@@ -173,10 +175,13 @@ impl RenderWorker {
         out
     }
 
-    pub fn drain_thumbnail_results(&self) -> Vec<ThumbnailResult> {
-        let mut out = Vec::new();
-        while let Ok(r) = self.thumbnail_rx.try_recv() {
-            out.push(r);
+    pub fn drain_thumbnail_results(&self, max: usize) -> Vec<ThumbnailResult> {
+        let mut out = Vec::with_capacity(max.min(8));
+        for _ in 0..max {
+            match self.thumbnail_rx.try_recv() {
+                Ok(r) => out.push(r),
+                Err(_) => break,
+            }
         }
         out
     }
@@ -270,7 +275,7 @@ fn worker_loop(
     // OCR word data (with text) for scanned pages, used by bounded-text
     // extraction (Ctrl+C copy path).  Separate from segment_cache because it
     // carries the actual string content per word.
-    let mut ocr_cache: HashMap<u32, Vec<OcrWord>> = HashMap::new();
+    let ocr_cache: HashMap<u32, Vec<OcrWord>> = HashMap::new();
     let mut search_text_cache: HashMap<u32, SearchText> = HashMap::new();
 
     loop {
@@ -283,125 +288,8 @@ fn worker_loop(
             &repaint,
             &mut search_text_cache,
         );
-        drain_thumbnail_requests(&document, &thumbnail_rx, &thumbnail_tx, &repaint);
-
-        // Wait for either a render request or a bounded-text request.
-        crossbeam_channel::select! {
-            recv(render_rx) -> msg => {
-                let first = match msg {
-                    Ok(r) => r,
-                    Err(_) => return, // channel closed — exit
-                };
-
-                // Drain + dedup: keep only the latest request per page
-                let mut latest: HashMap<u32, RenderRequest> = HashMap::new();
-                latest.insert(first.page_idx, first);
-                while let Ok(r) = render_rx.try_recv() {
-                    latest.insert(r.page_idx, r);
-                }
-
-                for (_, req) in latest {
-                    // Prioritise bounded-text between page renders.
-                    drain_bounded_text(&document, &bt_rx, &bt_tx, &repaint, &ocr_cache);
-                    drain_search_requests(
-                        &document,
-                        &search_rx,
-                        &search_res_tx,
-                        &repaint,
-                        &mut search_text_cache,
-                    );
-                    drain_thumbnail_requests(&document, &thumbnail_rx, &thumbnail_tx, &repaint);
-
-                    let page_idx = req.page_idx;
-
-                    // Render page bitmap, also capturing natural page dimensions
-                    // for OCR coordinate mapping.
-                    let render_result = (|| -> Result<(super::renderer::RenderedPage, f32, f32), String> {
-                        let page = document
-                            .pages()
-                            .get(page_idx as pdfium_render::prelude::PdfPageIndex)
-                            .map_err(|e| e.to_string())?;
-
-                        let page_w = page.width().value;
-                        let page_h = page.height().value;
-
-                        let bitmap = page
-                            .render(
-                                req.width as pdfium_render::prelude::Pixels,
-                                req.height as pdfium_render::prelude::Pixels,
-                                None,
-                            )
-                            .map_err(|e| format!("RenderPage: {e}"))?;
-
-                        Ok((
-                            super::renderer::RenderedPage {
-                                width: bitmap.width() as u32,
-                                height: bitmap.height() as u32,
-                                pixels: bitmap.as_rgba_bytes(),
-                            },
-                            page_w,
-                            page_h,
-                        ))
-                    })();
-
-                    match render_result {
-                        Ok((p, page_w, page_h)) => {
-                            // Ensure segments are computed for this page.  On first
-                            // visit: extract from Pdfium or run OCR.  On subsequent
-                            // renders (zoom, scroll back into view): use the cache.
-                            if let std::collections::hash_map::Entry::Vacant(e) = segment_cache.entry(page_idx) {
-                                let segments = match extract_text_segments(&document, page_idx) {
-                                    Ok(segs) if !segs.is_empty() => segs,
-                                    Ok(_) => {
-                                        // No embedded text layer — try Windows OCR.
-                                        run_ocr_canonical(
-                                            &document,
-                                            page_idx,
-                                            &p.pixels,
-                                            p.width,
-                                            p.height,
-                                            page_w,
-                                            page_h,
-                                            &mut ocr_cache,
-                                        )
-                                    }
-                                    Err(e) => {
-                                        log::error!(
-                                            "[PDF-RENDER] text segment extraction for page \
-                                             {page_idx} failed: {e}"
-                                        );
-                                        vec![]
-                                    }
-                                };
-                                if !segments.is_empty() {
-                                    e.insert(segments);
-                                }
-                            }
-
-                            // Always re-send cached segments on every render so the
-                            // UI-side page_text is refreshed after zoom or eviction.
-                            if let Some(segments) = segment_cache.get(&page_idx) {
-                                let _ = text_seg_tx.send(TextSegmentResult {
-                                    page_idx,
-                                    segments: segments.clone(),
-                                });
-                                repaint.request_repaint();
-                            }
-
-                            let _ = render_tx.send(RenderResult {
-                                page_idx,
-                                pixels: p.pixels,
-                                width: p.width,
-                                height: p.height,
-                            });
-                            repaint.request_repaint();
-                        }
-                        Err(e) => {
-                            log::error!("[PDF-RENDER] page {page_idx} failed: {e}");
-                        }
-                    }
-                }
-            },
+        // Prefer interactive work over thumbnail generation.
+        crossbeam_channel::select_biased! {
             recv(bt_rx) -> msg => {
                 if let Ok(req) = msg {
                     handle_bounded_text(&document, &req, &bt_tx, &repaint, &ocr_cache);
@@ -422,6 +310,82 @@ fn worker_loop(
                     }
                 }
             },
+            recv(render_rx) -> msg => {
+                let first = match msg {
+                    Ok(r) => r,
+                    Err(_) => return, // channel closed — exit
+                };
+
+                // Drain + dedup: keep only the latest request per page
+                let mut latest: HashMap<u32, RenderRequest> = HashMap::new();
+                latest.insert(first.page_idx, first);
+                while let Ok(r) = render_rx.try_recv() {
+                    latest.insert(r.page_idx, r);
+                }
+
+                let latest_len = latest.len();
+                for (position, (_, req)) in latest.into_iter().enumerate() {
+                    // Prioritise bounded-text between page renders.
+                    drain_bounded_text(&document, &bt_rx, &bt_tx, &repaint, &ocr_cache);
+                    drain_search_requests(
+                        &document,
+                        &search_rx,
+                        &search_res_tx,
+                        &repaint,
+                        &mut search_text_cache,
+                    );
+
+                    let page_idx = req.page_idx;
+
+                    let render_result = (|| -> Result<super::renderer::RenderedPage, String> {
+                        let page = document
+                            .pages()
+                            .get(page_idx as pdfium_render::prelude::PdfPageIndex)
+                            .map_err(|e| e.to_string())?;
+
+                        let bitmap = page
+                            .render(
+                                req.width as pdfium_render::prelude::Pixels,
+                                req.height as pdfium_render::prelude::Pixels,
+                                None,
+                            )
+                            .map_err(|e| format!("RenderPage: {e}"))?;
+
+                        Ok(super::renderer::RenderedPage {
+                            width: bitmap.width() as u32,
+                            height: bitmap.height() as u32,
+                            pixels: bitmap.as_rgba_bytes(),
+                        })
+                    })();
+
+                    match render_result {
+                        Ok(p) => {
+                            let _ = render_tx.send(RenderResult {
+                                page_idx,
+                                pixels: p.pixels,
+                                width: p.width,
+                                height: p.height,
+                            });
+                            repaint.request_repaint();
+
+                            send_text_segments_if_ready(
+                                &document,
+                                page_idx,
+                                &render_rx,
+                                &bt_rx,
+                                &search_rx,
+                                position + 1 == latest_len,
+                                &mut segment_cache,
+                                &text_seg_tx,
+                                &repaint,
+                            );
+                        }
+                        Err(e) => {
+                            log::error!("[PDF-RENDER] page {page_idx} failed: {e}");
+                        }
+                    }
+                }
+            },
             recv(thumbnail_rx) -> msg => {
                 if let Ok(first) = msg {
                     handle_thumbnail_requests(&document, first, &thumbnail_rx, &thumbnail_tx, &repaint);
@@ -433,17 +397,6 @@ fn worker_loop(
 
 // ── Text extraction helpers ──────────────────────────────────────────────────
 
-fn drain_thumbnail_requests(
-    document: &pdfium_render::prelude::PdfDocument<'_>,
-    rx: &Receiver<ThumbnailRequest>,
-    tx: &Sender<ThumbnailResult>,
-    repaint: &egui::Context,
-) {
-    while let Ok(first) = rx.try_recv() {
-        handle_thumbnail_requests(document, first, rx, tx, repaint);
-    }
-}
-
 fn handle_thumbnail_requests(
     document: &pdfium_render::prelude::PdfDocument<'_>,
     first: ThumbnailRequest,
@@ -453,7 +406,8 @@ fn handle_thumbnail_requests(
 ) {
     let mut latest: HashMap<u32, ThumbnailRequest> = HashMap::new();
     latest.insert(first.page_idx, first);
-    while let Ok(r) = rx.try_recv() {
+    for _ in 1..MAX_THUMBNAILS_PER_BATCH {
+        let Ok(r) = rx.try_recv() else { break };
         latest.insert(r.page_idx, r);
     }
 
@@ -485,6 +439,51 @@ fn handle_thumbnail_requests(
             }
             Err(e) => log::warn!("[PDF-RENDER] thumbnail {} failed: {e}", req.page_idx),
         }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn send_text_segments_if_ready(
+    document: &pdfium_render::prelude::PdfDocument<'_>,
+    page_idx: u32,
+    render_rx: &Receiver<RenderRequest>,
+    bt_rx: &Receiver<BoundedTextRequest>,
+    search_rx: &Receiver<SearchRequest>,
+    allow_text_work: bool,
+    segment_cache: &mut HashMap<u32, Vec<PdfTextSegment>>,
+    text_seg_tx: &Sender<TextSegmentResult>,
+    repaint: &egui::Context,
+) {
+    let can_extract =
+        allow_text_work && render_rx.is_empty() && bt_rx.is_empty() && search_rx.is_empty();
+
+    if can_extract {
+        if let std::collections::hash_map::Entry::Vacant(entry) = segment_cache.entry(page_idx) {
+            match extract_text_segments(document, page_idx) {
+                Ok(segments) if !segments.is_empty() => {
+                    entry.insert(segments);
+                }
+                Ok(_) => {
+                    // Scanned-page OCR is intentionally left to explicit search.
+                    // Running it during normal navigation blocks page/thumbnail rendering.
+                }
+                Err(e) => {
+                    log::error!(
+                        "[PDF-RENDER] text segment extraction for page {page_idx} failed: {e}"
+                    );
+                }
+            }
+        }
+    }
+
+    // Re-send cached segments on every render so UI-side page_text is refreshed
+    // after zoom changes or UI-side cache eviction.
+    if let Some(segments) = segment_cache.get(&page_idx) {
+        let _ = text_seg_tx.send(TextSegmentResult {
+            page_idx,
+            segments: segments.clone(),
+        });
+        repaint.request_repaint();
     }
 }
 
@@ -544,86 +543,6 @@ fn handle_bounded_text(
 /// Canonical OCR side length (pixels).  Represents a good trade-off between
 /// recognition quality and runtime: long side ~200 DPI for a Letter page.
 const OCR_CANONICAL_SIDE: u32 = 1500;
-
-/// Minimum display-bitmap long side accepted for OCR without a re-render.
-/// Below this threshold a dedicated canonical bitmap is produced.
-const OCR_MIN_DISPLAY_SIDE: u32 = 800;
-
-/// Run Windows OCR for a page, selecting the bitmap source as follows:
-/// - If the display bitmap (already rendered) meets `OCR_MIN_DISPLAY_SIDE`,
-///   use it directly — no extra Pdfium call needed.
-/// - Otherwise render a fresh canonical bitmap at `OCR_CANONICAL_SIDE` on the
-///   longest side so OCR quality is independent of display zoom.
-///
-/// Results are stored in `ocr_cache` once and never replaced.
-#[allow(clippy::too_many_arguments)]
-fn run_ocr_canonical(
-    document: &pdfium_render::prelude::PdfDocument<'_>,
-    page_idx: u32,
-    display_pixels: &[u8],
-    display_w: u32,
-    display_h: u32,
-    page_w: f32,
-    page_h: f32,
-    ocr_cache: &mut HashMap<u32, Vec<OcrWord>>,
-) -> Vec<PdfTextSegment> {
-    let display_side = display_w.max(display_h);
-
-    // Closure that converts OcrWords into display segments and updates the cache.
-    let commit = |words: Vec<OcrWord>, cache: &mut HashMap<u32, Vec<OcrWord>>| {
-        let segs = words
-            .iter()
-            .map(|w| PdfTextSegment { bounds: w.bounds })
-            .collect::<Vec<_>>();
-        cache.insert(page_idx, words);
-        segs
-    };
-
-    if display_side >= OCR_MIN_DISPLAY_SIDE {
-        // Reuse the display bitmap — no extra render.
-        return match super::ocr::ocr_page_bitmap(
-            display_pixels,
-            display_w,
-            display_h,
-            page_w,
-            page_h,
-        ) {
-            Some(words) => commit(words, ocr_cache),
-            None => vec![],
-        };
-    }
-
-    // Display bitmap is too small — render a dedicated canonical bitmap.
-    let scale = OCR_CANONICAL_SIDE as f32 / page_w.max(page_h);
-    let ocr_w = ((page_w * scale) as u32).max(1);
-    let ocr_h = ((page_h * scale) as u32).max(1);
-
-    let canonical = (|| -> Result<(Vec<u8>, u32, u32), String> {
-        let page = document
-            .pages()
-            .get(page_idx as pdfium_render::prelude::PdfPageIndex)
-            .map_err(|e| e.to_string())?;
-        let bm = page
-            .render(
-                ocr_w as pdfium_render::prelude::Pixels,
-                ocr_h as pdfium_render::prelude::Pixels,
-                None,
-            )
-            .map_err(|e| format!("OCR render: {e}"))?;
-        Ok((bm.as_rgba_bytes(), bm.width() as u32, bm.height() as u32))
-    })();
-
-    match canonical {
-        Ok((pixels, w, h)) => match super::ocr::ocr_page_bitmap(&pixels, w, h, page_w, page_h) {
-            Some(words) => commit(words, ocr_cache),
-            None => vec![],
-        },
-        Err(e) => {
-            log::error!("[PDF-RENDER] canonical OCR render for page {page_idx} failed: {e}");
-            vec![]
-        }
-    }
-}
 
 fn extract_text_segments(
     document: &pdfium_render::prelude::PdfDocument<'_>,
@@ -809,7 +728,7 @@ fn extract_page_search_text(
     };
 
     if indexed.chars.is_empty() {
-        let words = run_ocr_search_canonical(document, page_idx, page_w, page_h);
+        let words = run_ocr_canonical_words(document, page_idx, page_w, page_h);
         Ok(indexed_text_from_ocr_words(&words))
     } else {
         Ok(indexed)
@@ -912,7 +831,7 @@ fn search_indexed_text(
     matches
 }
 
-fn run_ocr_search_canonical(
+fn run_ocr_canonical_words(
     document: &pdfium_render::prelude::PdfDocument<'_>,
     page_idx: u32,
     page_w: f32,
@@ -942,7 +861,7 @@ fn run_ocr_search_canonical(
             super::ocr::ocr_page_bitmap(&pixels, w, h, page_w, page_h).unwrap_or_default()
         }
         Err(e) => {
-            log::warn!("[PDF-SEARCH] OCR render for page {page_idx} failed: {e}");
+            log::warn!("[PDF-OCR] OCR render for page {page_idx} failed: {e}");
             Vec::new()
         }
     }
