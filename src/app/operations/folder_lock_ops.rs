@@ -1,5 +1,10 @@
 use crate::app::state::ImageViewerApp;
 use crate::domain::folder_lock::FolderLock;
+use crate::domain::special_paths::{is_tag_view_path, is_virtual_path};
+
+fn is_lockable_view_path(path: &str) -> bool {
+    !path.is_empty() && (is_tag_view_path(path) || !is_virtual_path(path))
+}
 
 impl ImageViewerApp {
     /// Toggle the lock for the current folder.
@@ -7,7 +12,7 @@ impl ImageViewerApp {
     /// If locked: remove from DB and re-enable controls.
     pub fn toggle_folder_lock(&mut self) {
         let path = self.navigation_state.current_path.clone();
-        if path.is_empty() || crate::domain::special_paths::is_virtual_path(&path) {
+        if !is_lockable_view_path(&path) {
             return;
         }
 
@@ -37,7 +42,7 @@ impl ImageViewerApp {
     pub fn apply_folder_lock_if_present(&mut self) {
         let lock_start = std::time::Instant::now();
         let path = &self.navigation_state.current_path;
-        if crate::domain::special_paths::is_virtual_path(path) {
+        if !is_lockable_view_path(path) {
             self.current_folder_locked = false;
             return;
         }
@@ -94,7 +99,7 @@ impl ImageViewerApp {
     /// exists for the current path) should win over the tab's saved state.
     pub fn apply_folder_lock_on_tab_restore(&mut self) {
         let path = &self.navigation_state.current_path;
-        if crate::domain::special_paths::is_virtual_path(path) {
+        if !is_lockable_view_path(path) {
             self.current_folder_locked = false;
             return;
         }

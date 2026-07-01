@@ -134,10 +134,7 @@ impl ImageViewerApp {
         self.navigation_state.is_recycle_bin_view = false;
         self.active_tag_filter = Some(tag_id);
 
-        self.sort_mode = self.sort_mode_normal;
-        self.sort_descending = self.sort_descending_normal;
-        self.folders_position = self.folders_position_normal;
-        self.current_folder_locked = false;
+        self.apply_folder_lock_if_present();
 
         self.items = Arc::new(Vec::new());
         self.all_items_mut().clear();
