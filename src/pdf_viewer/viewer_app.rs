@@ -982,7 +982,7 @@ impl eframe::App for PdfViewerApp {
                 self.effective_zoom_pct = self.get_scale(zoom_page, zoom_aw, ah) * 100.0;
             }
 
-            egui::ScrollArea::vertical()
+            egui::ScrollArea::both()
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
                     self.show_pages(ui, ctx, aw, ah);
