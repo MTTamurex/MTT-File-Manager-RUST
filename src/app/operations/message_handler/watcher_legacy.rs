@@ -482,11 +482,7 @@ impl ImageViewerApp {
                                     "[FS] Direct subfolder modified: {:?}",
                                     cleaned.file_name()
                                 );
-                                if is_modify_event && !is_name_change && !is_known_dir {
-                                    self.invalidate_changed_path_preview_state(&cleaned);
-                                    forced_disk_cache_invalidations.push(cleaned.clone());
-                                    needs_reload = true;
-                                } else {
+                                if !(is_modify_event && !is_name_change && !is_known_dir) {
                                     // PERF FIX (M-6): Defer SQLite writer lock to background
                                     // instead of blocking UI thread during watcher events.
                                     pending_disk_cache_invalidations.push(cleaned);
@@ -534,6 +530,21 @@ impl ImageViewerApp {
                             crate::infrastructure::windows::file_flags::is_file_unsafe_to_read_fast(
                                 &cleaned,
                             );
+                        let direct_current_file_modify = is_modify_event
+                            && !is_name_change
+                            && !self.is_known_directory_path(&cleaned)
+                            && cleaned.parent().is_some_and(|parent| {
+                                Self::normalize_for_match(parent) == current_path_norm
+                            });
+                        if direct_current_file_modify {
+                            if is_unsafe {
+                                pending_disk_cache_invalidations.push(cleaned.clone());
+                            } else {
+                                self.invalidate_changed_path_preview_state(&cleaned);
+                                forced_disk_cache_invalidations.push(cleaned.clone());
+                                needs_reload = true;
+                            }
+                        }
                         if !preserve_media_thumb && !is_unsafe {
                             self.cache_manager.texture_cache.pop(&cleaned);
                         }
