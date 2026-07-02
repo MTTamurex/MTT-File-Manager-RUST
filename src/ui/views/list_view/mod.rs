@@ -10,6 +10,7 @@ mod virtualization;
 
 use eframe::egui::{self, Color32, FontId, Ui};
 use lru::LruCache;
+use rust_i18n::t;
 use std::cell::RefCell;
 use std::hash::{Hash, Hasher};
 use std::num::NonZeroUsize;
@@ -17,6 +18,7 @@ use std::path::{Path, PathBuf};
 
 use crate::domain::file_entry::{FileEntry, SortMode};
 use crate::domain::file_tag::FileTag;
+use crate::infrastructure::windows::{format_date, format_size};
 // PERFORMANCE: Use FxHashSet for PathBuf keys - faster hashing than std::collections::HashSet
 use crate::ui::cache::FxHashSet;
 use crate::ui::views::rectangle_selection::{RectangleSelectionFrame, RectangleSelectionState};
@@ -420,5 +422,148 @@ fn scale_column_widths(
             *ctx.col_type_width = (w_type * scale).max(80.0);
             *ctx.col_size_width = (w_size * scale).max(80.0);
         }
+    }
+}
+
+/// Auto-fits list view column widths to content when transitioning from
+/// dual-panel to mono-panel mode.
+///
+/// Measures the text width of the "smaller" columns (Size, Type, Date/Last
+/// Modified) from a sample of visible items and their header labels, then
+/// assigns the remaining space to the Name column.
+///
+/// This is a one-shot operation triggered by `pending_list_column_autofit`.
+/// The existing `scale_column_widths` still runs afterward and will shrink
+/// columns if the total exceeds available space.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn auto_fit_columns(
+    ui: &Ui,
+    items: &[FileEntry],
+    is_computer_view: bool,
+    is_recycle_bin_view: bool,
+    is_onedrive_folder: bool,
+    available_w: f32,
+    col_name_width: &mut f32,
+    col_date_width: &mut f32,
+    col_type_width: &mut f32,
+    col_size_width: &mut f32,
+    col_status_width: &mut f32,
+    folder_size_cache: &LruCache<PathBuf, u64>,
+) {
+    const MAX_SAMPLE: usize = 200;
+    const CONTENT_PADDING: f32 = 16.0;
+    const HEADER_RESERVE: f32 = 30.0;
+    const MIN_COL_WIDTH: f32 = 80.0;
+    const MIN_NAME_WIDTH: f32 = 100.0;
+    const SCROLLBAR_RESERVE: f32 = 8.0;
+
+    if items.is_empty() {
+        return;
+    }
+
+    let max_total_width = (available_w - SCROLLBAR_RESERVE).max(0.0);
+    if max_total_width <= 0.0 {
+        return;
+    }
+
+    let font_id = FontId::proportional(12.0);
+    let white = Color32::WHITE;
+
+    // ── Measure content widths from a sample of items ──
+    let mut max_date_w = 0.0_f32;
+    let mut max_type_w = 0.0_f32;
+    let mut max_size_w = 0.0_f32;
+
+    for item in items.iter().take(MAX_SAMPLE) {
+        // Date / Total-Space content
+        let date_str = if is_computer_view {
+            item.drive_info
+                .as_ref()
+                .map(|di| format_size(di.total_space))
+                .unwrap_or_else(|| "-".to_string())
+        } else if is_recycle_bin_view {
+            if item.modified > 0 {
+                format_date(item.modified)
+            } else {
+                item.deletion_date()
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| "-".to_string())
+            }
+        } else {
+            format_date(item.modified)
+        };
+        max_date_w = max_date_w.max(get_cached_text_width(&date_str, &font_id, white, ui));
+
+        // Type content (not present in computer view)
+        if !is_computer_view {
+            let type_str = helpers::get_file_type_string(item);
+            max_type_w = max_type_w.max(get_cached_text_width(&type_str, &font_id, white, ui));
+        }
+
+        // Size / Free-Space content
+        let size_str = if is_computer_view {
+            item.drive_info
+                .as_ref()
+                .map(|di| format_size(di.free_space))
+                .unwrap_or_else(|| "-".to_string())
+        } else if item.is_dir && !item.is_archive() {
+            // Folder: use cached size if available; skip otherwise.
+            folder_size_cache
+                .peek(&item.path)
+                .map(|&size| format_size(size))
+                .unwrap_or_default()
+        } else {
+            format_size(item.size)
+        };
+        if !size_str.is_empty() {
+            max_size_w = max_size_w.max(get_cached_text_width(&size_str, &font_id, white, ui));
+        }
+    }
+
+    // ── Measure header labels so they aren't truncated ──
+    let header_date_w = if is_computer_view {
+        get_cached_text_width(&t!("list_view.total_space"), &font_id, white, ui)
+    } else if is_recycle_bin_view {
+        get_cached_text_width(&t!("list_view.date_deleted"), &font_id, white, ui)
+    } else {
+        get_cached_text_width(&t!("list_view.date_modified"), &font_id, white, ui)
+    };
+
+    let header_type_w = if is_computer_view {
+        0.0
+    } else {
+        get_cached_text_width(&t!("list_view.type_col"), &font_id, white, ui)
+    };
+
+    let header_size_w = if is_computer_view {
+        get_cached_text_width(&t!("list_view.free_space"), &font_id, white, ui)
+    } else {
+        get_cached_text_width(&t!("list_view.size_col"), &font_id, white, ui)
+    };
+
+    // ── Assign column widths: max(content, header, min) ──
+    *col_date_width = (max_date_w + CONTENT_PADDING)
+        .max(header_date_w + HEADER_RESERVE)
+        .max(MIN_COL_WIDTH);
+    *col_size_width = (max_size_w + CONTENT_PADDING)
+        .max(header_size_w + HEADER_RESERVE)
+        .max(MIN_COL_WIDTH);
+
+    if is_computer_view {
+        // Computer view: Name + Total (date col) + Free (size col)
+        let other_total = *col_date_width + *col_size_width;
+        *col_name_width = (max_total_width - other_total).max(MIN_NAME_WIDTH);
+    } else {
+        *col_type_width = (max_type_w + CONTENT_PADDING)
+            .max(header_type_w + HEADER_RESERVE)
+            .max(MIN_COL_WIDTH);
+
+        let other_total = *col_date_width + *col_type_width + *col_size_width;
+        let other_total = if is_onedrive_folder {
+            other_total + *col_status_width
+        } else {
+            other_total
+        };
+        *col_name_width = (max_total_width - other_total).max(MIN_NAME_WIDTH);
     }
 }

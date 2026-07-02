@@ -281,6 +281,30 @@ impl ImageViewerApp {
                 )
             };
 
+        // Auto-fit list columns when transitioning from dual-panel to mono-panel.
+        // Measures content for Size/Type/Date columns and gives remaining space to Name.
+        // Save is deferred until after ListViewContext is dropped (borrow release).
+        // If items are empty, keep the flag so auto-fit retries on the next render
+        // with actual content.
+        let needs_save_after_autofit = self.pending_list_column_autofit && !items.is_empty();
+        if self.pending_list_column_autofit && !items.is_empty() {
+            self.pending_list_column_autofit = false;
+            list_view::auto_fit_columns(
+                ui,
+                &items,
+                self.navigation_state.is_computer_view,
+                self.navigation_state.is_recycle_bin_view,
+                is_onedrive_folder,
+                ui.available_width(),
+                col_name_width,
+                col_date_width,
+                col_type_width,
+                col_size_width,
+                col_status_width,
+                &self.folder_size_state.batch_cache,
+            );
+        }
+
         let mut folder_size_requests: Vec<PathBuf> = Vec::new();
 
         let mut ctx = ListViewContext {
@@ -368,6 +392,11 @@ impl ImageViewerApp {
         self.renaming_state = renaming_state;
         // Always consume focus_rename after one frame (cursor selection applied once)
         self.focus_rename = false;
+
+        // Persist auto-fitted column widths (deferred from before ctx creation).
+        if needs_save_after_autofit {
+            self.save_preferences();
+        }
 
         let file_panel_input_blocked = self.file_panel_input_blocked_by_drag_move_confirmation();
         if file_panel_input_blocked {

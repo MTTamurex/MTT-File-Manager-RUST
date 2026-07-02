@@ -429,6 +429,7 @@ impl ImageViewerApp {
             device_event_receiver,
             last_auto_reload: Instant::now(),
             pending_auto_reload: false,
+            pending_list_column_autofit: false,
             skip_next_auto_reload: false,
             watcher_cooldown_until: None,
             onedrive_pin_reload_pending: Arc::new(AtomicBool::new(false)),
