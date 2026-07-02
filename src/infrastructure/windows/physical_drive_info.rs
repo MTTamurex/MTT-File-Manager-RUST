@@ -193,8 +193,14 @@ fn get_physical_disk_number(drive_letter: char) -> Option<u32> {
 
 /// Queries `IOCTL_STORAGE_QUERY_PROPERTY` with `StorageDeviceProperty` on
 /// `\\.\PhysicalDriveN` and parses the variable-length descriptor.
+///
+/// Also queries `StorageDeviceIdProperty` (PropertyId=1) on the same handle
+/// to extract the native EUI-64 serial for NVMe drives, which avoids the
+/// SCSI-translation artifacts (zero-padding, underscores, nibble rotation)
+/// present in the `StorageDeviceProperty` serial.
 fn query_storage_device_property(disk_number: u32) -> Option<PhysicalDriveInfo> {
     const STORAGE_DEVICE_PROPERTY: u32 = 0; // PropertyId
+    const STORAGE_DEVICE_ID_PROPERTY: u32 = 2; // PropertyId (verified from windows 0.61.3 crate)
     const PROPERTY_STANDARD_QUERY: u32 = 0; // QueryType
 
     #[repr(C)]
@@ -256,14 +262,14 @@ fn query_storage_device_property(disk_number: u32) -> Option<PhysicalDriveInfo> 
             _ => return None,
         };
 
+        // --- Query 1: StorageDeviceProperty (model, firmware, bus type, fallback serial) ---
+
         let query = StoragePropertyQuery {
             property_id: STORAGE_DEVICE_PROPERTY,
             query_type: PROPERTY_STANDARD_QUERY,
             additional_parameters: [0],
         };
 
-        // Allocate a generous buffer; the descriptor + strings typically
-        // fits in ~1KB. We use 4KB to be safe.
         const BUFFER_SIZE: u32 = 4096;
         let mut buffer = vec![0u8; BUFFER_SIZE as usize];
         let mut bytes_returned: u32 = 0;
@@ -279,14 +285,13 @@ fn query_storage_device_property(disk_number: u32) -> Option<PhysicalDriveInfo> 
             None,
         );
 
-        let _ = CloseHandle(handle);
-
         if !success.is_ok() || bytes_returned == 0 {
+            let _ = CloseHandle(handle);
             return None;
         }
 
-        // Parse the descriptor header from the start of the buffer.
         if (bytes_returned as usize) < std::mem::size_of::<StorageDeviceDescriptor>() {
+            let _ = CloseHandle(handle);
             return None;
         }
 
@@ -297,8 +302,41 @@ fn query_storage_device_property(disk_number: u32) -> Option<PhysicalDriveInfo> 
         let product = read_descriptor_string(&buffer, buf_len, descriptor.product_id_offset);
         let firmware =
             read_descriptor_string(&buffer, buf_len, descriptor.product_revision_offset);
-        let serial =
+        let fallback_serial =
             read_descriptor_string(&buffer, buf_len, descriptor.serial_number_offset);
+
+        // --- Query 2: StorageDeviceIdProperty (native EUI-64 serial for NVMe) ---
+
+        let id_query = StoragePropertyQuery {
+            property_id: STORAGE_DEVICE_ID_PROPERTY,
+            query_type: PROPERTY_STANDARD_QUERY,
+            additional_parameters: [0],
+        };
+
+        let mut id_buffer = vec![0u8; BUFFER_SIZE as usize];
+        let mut id_bytes_returned: u32 = 0;
+
+        let id_success = DeviceIoControl(
+            handle,
+            IOCTL_STORAGE_QUERY_PROPERTY,
+            Some(&id_query as *const _ as *const std::ffi::c_void),
+            std::mem::size_of::<StoragePropertyQuery>() as u32,
+            Some(id_buffer.as_mut_ptr() as *mut std::ffi::c_void),
+            BUFFER_SIZE,
+            Some(&mut id_bytes_returned),
+            None,
+        );
+
+        let _ = CloseHandle(handle);
+
+        // Try to extract the native serial from device ID descriptors.
+        // Falls back to cleaned-up StorageDeviceProperty serial if not found.
+        let serial = if id_success.is_ok() && id_bytes_returned > 0 {
+            query_device_id_serial(&id_buffer, id_bytes_returned as usize)
+                .unwrap_or_else(|| clean_fallback_serial(&fallback_serial))
+        } else {
+            clean_fallback_serial(&fallback_serial)
+        };
 
         // Combine vendor + product into a single model string.
         let model = match (vendor.as_str().trim(), product.as_str().trim()) {
@@ -310,11 +348,144 @@ fn query_storage_device_property(disk_number: u32) -> Option<PhysicalDriveInfo> 
 
         Some(PhysicalDriveInfo {
             model,
-            serial_number: serial.trim().to_string(),
+            serial_number: serial,
             firmware_revision: firmware.trim().to_string(),
             bus_type: bus_type_to_string(descriptor.bus_type),
         })
     }
+}
+
+/// Parses `STORAGE_DEVICE_ID_DESCRIPTOR` to find the native device serial.
+///
+/// Looks for EUI-64 (Type=2, binary) and SCSI Name String (Type=8, ASCII)
+/// identifiers. The EUI-64 is formatted as uppercase hex — this matches
+/// what HWINFO and other hardware tools display for NVMe drives.
+fn query_device_id_serial(buffer: &[u8], buf_len: usize) -> Option<String> {
+    // STORAGE_DEVICE_ID_DESCRIPTOR header:
+    //   offset 0: Version (u32)
+    //   offset 4: Size (u32)
+    //   offset 8: NumberOfIdentifiers (u32)
+    //   offset 12: Identifiers[] (variable-length byte array)
+    const HEADER_SIZE: usize = 12;
+
+    if buf_len < HEADER_SIZE {
+        return None;
+    }
+
+    let num_identifiers = u32::from_le_bytes([
+        buffer[8], buffer[9], buffer[10], buffer[11],
+    ]);
+
+    // Each identifier uses the STORAGE_IDENTIFIER struct layout:
+    //   offset 0:  CodeSet (i32) — 1=Binary, 2=ASCII, 3=Utf8
+    //   offset 4:  Type (i32) — 0=VendorSpecific, 1=VendorId, 2=EUI64,
+    //                          3=FCPHName, 8=SCSINameString
+    //   offset 8:  IdentifierSize (u16)
+    //   offset 10: NextOffset (u16) — 0 means last identifier
+    //   offset 12: Association (i32)
+    //   offset 16: Identifier data (IdentifierSize bytes)
+    const IDENT_HEADER_SIZE: usize = 16;
+
+    const CODE_SET_BINARY: i32 = 1;
+    const CODE_SET_ASCII: i32 = 2;
+    const CODE_SET_UTF8: i32 = 3;
+    const TYPE_EUI64: i32 = 2;
+    const TYPE_SCSI_NAME_STRING: i32 = 8;
+
+    let mut offset = HEADER_SIZE;
+    let mut scsi_name_serial: Option<String> = None;
+
+    for _ in 0..num_identifiers {
+        if offset + IDENT_HEADER_SIZE > buf_len {
+            break;
+        }
+
+        let code_set = i32::from_le_bytes([
+            buffer[offset], buffer[offset + 1], buffer[offset + 2], buffer[offset + 3],
+        ]);
+        let ident_type = i32::from_le_bytes([
+            buffer[offset + 4], buffer[offset + 5], buffer[offset + 6], buffer[offset + 7],
+        ]);
+        let ident_size = u16::from_le_bytes([buffer[offset + 8], buffer[offset + 9]]) as usize;
+        let next_offset = u16::from_le_bytes([buffer[offset + 10], buffer[offset + 11]]) as usize;
+
+        let data_start = offset + IDENT_HEADER_SIZE;
+        if data_start + ident_size > buf_len {
+            break;
+        }
+
+        let data = &buffer[data_start..data_start + ident_size];
+
+        // EUI-64: 8 bytes, binary → format as uppercase hex.
+        if ident_type == TYPE_EUI64 && code_set == CODE_SET_BINARY && ident_size >= 8 {
+            let hex: String = data[..8]
+                .iter()
+                .map(|b| format!("{:02X}", b))
+                .collect();
+            return Some(hex);
+        }
+
+        // SCSI Name String: text format.
+        // NVMe drives encode the NGUID as "eui.XXXXXXXXXXXXXXXX..." (32 hex chars).
+        // This is the 128-bit Namespace Global Unique Identifier, not the native
+        // 64-bit EUI-64 that HWINFO displays (which requires NVMe passthrough/admin).
+        // We strip leading zero pairs for a cleaner display.
+        if ident_type == TYPE_SCSI_NAME_STRING
+            && (code_set == CODE_SET_ASCII || code_set == CODE_SET_UTF8)
+            && scsi_name_serial.is_none()
+        {
+            let end = data.iter().position(|&b| b == 0).unwrap_or(data.len());
+            let s = String::from_utf8_lossy(&data[..end]).trim().to_string();
+
+            if let Some(hex) = s.strip_prefix("eui.") {
+                let cleaned = strip_leading_zero_pairs(hex.trim());
+                if !cleaned.is_empty() {
+                    scsi_name_serial = Some(cleaned);
+                }
+            } else if !s.is_empty() {
+                scsi_name_serial = Some(s);
+            }
+        }
+
+        if next_offset == 0 {
+            break;
+        }
+        offset += next_offset;
+    }
+
+    scsi_name_serial
+}
+
+/// Strips leading zero byte pairs ("00") from a hex string, keeping at
+/// least 16 characters (8 bytes) to preserve the identifier's uniqueness.
+fn strip_leading_zero_pairs(hex: &str) -> String {
+    let trimmed = hex.trim();
+
+    // Strip "00" byte pairs from the start, but stop if we'd go below 16 chars.
+    let mut result = trimmed;
+    while result.len() > 16 && result.starts_with("00") {
+        result = &result[2..];
+    }
+
+    result.to_string()
+}
+
+/// Cleans up the fallback serial from `StorageDeviceProperty`.
+///
+/// Removes underscore separators that some NVMe drivers add through the
+/// SCSI translation layer. Does NOT strip leading zeros — the SCSI-translation
+/// serial format is fundamentally different from the native EUI-64 and cannot
+/// be reliably recovered. The EUI-64 query (StorageDeviceIdProperty) is the
+/// correct source for NVMe serials; this fallback is only for SATA/USB drives
+/// where the serial is usually already clean.
+fn clean_fallback_serial(serial: &str) -> String {
+    let trimmed = serial.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    // Remove underscore separators (e.g. "0000_0026_B778_..." → "00000026B778...")
+    trimmed.replace('_', "")
 }
 
 /// Reads a NUL-terminated ASCII string from the descriptor buffer at the
