@@ -18,11 +18,12 @@ pub(in crate::app) fn spawn_startup_drive_info_preload(
 ) {
     std::thread::spawn(move || {
         use crate::domain::file_entry::DriveInfo;
-        use crate::infrastructure::windows::get_volume_info;
+        use crate::infrastructure::windows::{get_volume_info, query_hardware_fields};
         let mut results = Vec::new();
         for path in &disks_snapshot {
             let vol = get_volume_info(path);
             let drive_type = crate::infrastructure::windows::detect_drive_type(path);
+            let hw = query_hardware_fields(path, drive_type);
             results.push((
                 path.clone(),
                 DriveInfo {
@@ -30,6 +31,10 @@ pub(in crate::app) fn spawn_startup_drive_info_preload(
                     total_space: vol.total_space,
                     free_space: vol.free_space,
                     drive_type,
+                    model: hw.model,
+                    serial_number: hw.serial_number,
+                    firmware_revision: hw.firmware_revision,
+                    bus_type: hw.bus_type,
                 },
             ));
         }

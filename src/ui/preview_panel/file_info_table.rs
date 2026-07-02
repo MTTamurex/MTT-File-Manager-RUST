@@ -547,6 +547,28 @@ pub fn render_file_info_table(
                         drive.file_system.clone()
                     },
                 );
+
+                // Hardware details (only for Fixed/Removable drives with data)
+                if let Some(model) = &drive.model {
+                    if !model.is_empty() {
+                        add_detail(ui, &t!("file_info.drive_model"), model.clone());
+                    }
+                }
+                if let Some(serial) = &drive.serial_number {
+                    if !serial.is_empty() {
+                        add_detail(ui, &t!("file_info.drive_serial"), serial.clone());
+                    }
+                }
+                if let Some(firmware) = &drive.firmware_revision {
+                    if !firmware.is_empty() {
+                        add_detail(ui, &t!("file_info.drive_firmware"), firmware.clone());
+                    }
+                }
+                if let Some(bus) = &drive.bus_type {
+                    if !bus.is_empty() {
+                        add_detail(ui, &t!("file_info.drive_bus_type"), bus.clone());
+                    }
+                }
             }
 
             // 6. File hash (SHA-256, on-demand). Only for real on-disk files

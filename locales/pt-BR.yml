@@ -149,6 +149,10 @@ file_info:
   free_space: "Espaço livre:"
   total_space: "Tamanho total:"
   filesystem: "Sist. Arq:"
+  drive_model: "Modelo:"
+  drive_serial: "Nº de Série:"
+  drive_firmware: "Firmware:"
+  drive_bus_type: "Interface:"
 file_types:
   folder: "Pasta"
   archive_tar_gz: "Arquivo TAR.GZ"

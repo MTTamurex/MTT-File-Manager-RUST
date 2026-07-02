@@ -9,6 +9,10 @@ pub struct DriveInfo {
     pub total_space: u64,
     pub free_space: u64,
     pub drive_type: DriveType, // Drive type (local, network, removable, etc.)
+    pub model: Option<String>,
+    pub serial_number: Option<String>,
+    pub firmware_revision: Option<String>,
+    pub bus_type: Option<String>,
 }
 
 /// Recycle Bin metadata — boxed to avoid inflating FileEntry for the 99%+ of

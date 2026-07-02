@@ -526,6 +526,10 @@ fn calculate_effective_file(app: &ImageViewerApp) -> Option<FileEntry> {
                     total_space: 0,
                     free_space: 0,
                     drive_type,
+                    model: None,
+                    serial_number: None,
+                    firmware_revision: None,
+                    bus_type: None,
                 });
             }
         } else {

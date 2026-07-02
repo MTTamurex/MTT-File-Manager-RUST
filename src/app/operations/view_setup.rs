@@ -253,6 +253,10 @@ impl ImageViewerApp {
                     total_space: 0,
                     free_space: 0,
                     drive_type,
+                    model: None,
+                    serial_number: None,
+                    firmware_revision: None,
+                    bus_type: None,
                 });
             let entry = FileEntry {
                 path: PathBuf::from(path),
@@ -314,11 +318,12 @@ impl ImageViewerApp {
         let tx = self.drive_state.drive_info_tx.clone();
         let ctx = self.ui_ctx.clone();
         std::thread::spawn(move || {
-            use crate::infrastructure::windows::get_volume_info;
+            use crate::infrastructure::windows::{get_volume_info, query_hardware_fields};
             let mut results = Vec::new();
             for path in &disks_snapshot {
                 let vol = get_volume_info(path);
                 let drive_type = crate::infrastructure::windows::detect_drive_type(path);
+                let hw = query_hardware_fields(path, drive_type);
                 results.push((
                     path.clone(),
                     DriveInfo {
@@ -326,6 +331,10 @@ impl ImageViewerApp {
                         total_space: vol.total_space,
                         free_space: vol.free_space,
                         drive_type,
+                        model: hw.model,
+                        serial_number: hw.serial_number,
+                        firmware_revision: hw.firmware_revision,
+                        bus_type: hw.bus_type,
                     },
                 ));
             }
@@ -379,11 +388,12 @@ impl ImageViewerApp {
         let tx = self.drive_state.drive_info_tx.clone();
         let ctx = self.ui_ctx.clone();
         std::thread::spawn(move || {
-            use crate::infrastructure::windows::get_volume_info;
+            use crate::infrastructure::windows::{get_volume_info, query_hardware_fields};
             let mut results = Vec::new();
             for path in &disks_snapshot {
                 let vol = get_volume_info(path);
                 let drive_type = crate::infrastructure::windows::detect_drive_type(path);
+                let hw = query_hardware_fields(path, drive_type);
                 results.push((
                     path.clone(),
                     DriveInfo {
@@ -391,6 +401,10 @@ impl ImageViewerApp {
                         total_space: vol.total_space,
                         free_space: vol.free_space,
                         drive_type,
+                        model: hw.model,
+                        serial_number: hw.serial_number,
+                        firmware_revision: hw.firmware_revision,
+                        bus_type: hw.bus_type,
                     },
                 ));
             }
