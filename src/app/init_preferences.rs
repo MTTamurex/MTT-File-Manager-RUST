@@ -57,6 +57,7 @@ impl StartupPreferences {
                 "type" => SortMode::Type,
                 "drive_total" => SortMode::DriveTotalSpace,
                 "drive_free" => SortMode::DriveFreeSpace,
+                "drive_letter" => SortMode::DriveLetter,
                 _ => SortMode::Name,
             })
             .unwrap_or(SortMode::Name);
@@ -66,6 +67,7 @@ impl StartupPreferences {
             .map(|s| match s.as_str() {
                 "drive_total" => SortMode::DriveTotalSpace,
                 "drive_free" => SortMode::DriveFreeSpace,
+                "drive_letter" => SortMode::DriveLetter,
                 _ => SortMode::Name,
             })
             .unwrap_or(SortMode::Name);

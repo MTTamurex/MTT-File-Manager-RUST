@@ -140,6 +140,11 @@ pub(super) fn sort_items(
                 let free_b = b.drive_info.as_ref().map(|d| d.free_space).unwrap_or(0);
                 free_a.cmp(&free_b)
             }
+            SortMode::DriveLetter => {
+                let letter_a = crate::infrastructure::windows::extract_drive_letter(&a.path);
+                let letter_b = crate::infrastructure::windows::extract_drive_letter(&b.path);
+                letter_a.cmp(&letter_b)
+            }
         };
 
         // 3. Apply descending direction.

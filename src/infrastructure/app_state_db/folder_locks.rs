@@ -18,6 +18,7 @@ impl AppStateDb {
             SortMode::Type => "type",
             SortMode::DriveTotalSpace => "drive_total",
             SortMode::DriveFreeSpace => "drive_free",
+            SortMode::DriveLetter => "drive_letter",
         };
         let sort_desc_str = if lock.sort_descending {
             "true"
@@ -106,6 +107,7 @@ impl AppStateDb {
                     "type" => SortMode::Type,
                     "drive_total" => SortMode::DriveTotalSpace,
                     "drive_free" => SortMode::DriveFreeSpace,
+                    "drive_letter" => SortMode::DriveLetter,
                     _ => SortMode::Name,
                 };
                 let sort_descending = sort_desc_s == "true";

@@ -296,6 +296,8 @@ pub enum SortMode {
     DriveTotalSpace,
     /// Free drive space (Computer View only)
     DriveFreeSpace,
+    /// Drive letter (Computer View only)
+    DriveLetter,
 }
 
 /// View mode

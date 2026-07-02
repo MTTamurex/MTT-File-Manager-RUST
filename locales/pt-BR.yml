@@ -417,6 +417,7 @@ secondary_toolbar:
   sort_type: "Tipo"
   sort_total_space: "Espaço Total"
   sort_free_space: "Espaço Livre"
+  sort_drive_letter: "Letra do Drive"
   cut: "Recortar (Ctrl+X)"
   copy: "Copiar (Ctrl+C)"
   paste: "Colar (Ctrl+V)"

@@ -66,6 +66,7 @@ impl ImageViewerApp {
             SortMode::Type => "type",
             SortMode::DriveTotalSpace => "drive_total",
             SortMode::DriveFreeSpace => "drive_free",
+            SortMode::DriveLetter => "drive_letter",
         };
         prefs.push(("sort_mode", sort_mode_str.to_string()));
 
@@ -73,7 +74,8 @@ impl ImageViewerApp {
             SortMode::Name => "name",
             SortMode::DriveTotalSpace => "drive_total",
             SortMode::DriveFreeSpace => "drive_free",
-            _ => "name", // Computer view only supports these 3
+            SortMode::DriveLetter => "drive_letter",
+            _ => "name", // Computer view only supports these 4
         };
         prefs.push(("sort_mode_computer", sort_mode_computer_str.to_string()));
 

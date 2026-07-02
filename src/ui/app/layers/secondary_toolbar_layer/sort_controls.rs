@@ -88,6 +88,7 @@ pub(super) fn render_sort_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) 
                 SortMode::Type => t!("secondary_toolbar.sort_type"),
                 SortMode::DriveTotalSpace => t!("secondary_toolbar.sort_total_space"),
                 SortMode::DriveFreeSpace => t!("secondary_toolbar.sort_free_space"),
+                SortMode::DriveLetter => t!("secondary_toolbar.sort_drive_letter"),
             })
             .show_ui(ui, |ui| {
                 if ui
@@ -132,6 +133,19 @@ pub(super) fn render_sort_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) 
                     {
                         app.sort_mode = SortMode::DriveFreeSpace;
                         app.sort_mode_computer = SortMode::DriveFreeSpace;
+                        app.sort_items();
+                        app.save_preferences();
+                    }
+                    if ui
+                        .selectable_value(
+                            &mut SortMode::DriveLetter,
+                            app.sort_mode,
+                            t!("secondary_toolbar.sort_drive_letter"),
+                        )
+                        .clicked()
+                    {
+                        app.sort_mode = SortMode::DriveLetter;
+                        app.sort_mode_computer = SortMode::DriveLetter;
                         app.sort_items();
                         app.save_preferences();
                     }
