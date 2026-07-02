@@ -45,7 +45,7 @@ impl ImageViewerApp {
                 item.drive_info = Some(info.clone());
             }
         }
-        self.share_visible_items_from_all_items();
+        self.sort_items();
     }
 
     fn refresh_inactive_computer_view_if_visible(&mut self) {
@@ -237,15 +237,7 @@ impl ImageViewerApp {
         self.navigation_state.is_recycle_bin_view = false;
         self.navigation_state.path_input = COMPUTER_VIEW_ID.to_string();
 
-        // Load Computer View sort mode
-        self.sort_mode = self.sort_mode_computer;
-
-        // Restore unlocked defaults for settings that folder_lock may have overridden.
-        // "Este Computador" cannot be locked, so always clear the locked state.
-        self.sort_descending = self.sort_descending_normal;
-        self.folders_position = self.folders_position_normal;
-        self.view_mode = self.view_mode_normal;
-        self.current_folder_locked = false;
+        self.apply_folder_lock_if_present();
 
         // Populate items with drives using FAST-ONLY calls (no I/O blocking)
         // detect_drive_type uses GetDriveTypeW which is cached and < 1ms
@@ -288,7 +280,7 @@ impl ImageViewerApp {
         }
 
         self.all_items = Arc::new(computer_items);
-        self.share_visible_items_from_all_items();
+        self.sort_items();
 
         // PRE-COMPUTE SECTION INDICES (O(n) once, not per frame)
         self.navigation_state.computer_view_local_indices.clear();

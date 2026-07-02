@@ -1,9 +1,10 @@
 use crate::app::state::ImageViewerApp;
 use crate::domain::folder_lock::FolderLock;
-use crate::domain::special_paths::{is_tag_view_path, is_virtual_path};
+use crate::domain::special_paths::{is_tag_view_path, is_virtual_path, COMPUTER_VIEW_ID};
 
 fn is_lockable_view_path(path: &str) -> bool {
-    !path.is_empty() && (is_tag_view_path(path) || !is_virtual_path(path))
+    !path.is_empty()
+        && (path == COMPUTER_VIEW_ID || is_tag_view_path(path) || !is_virtual_path(path))
 }
 
 impl ImageViewerApp {
@@ -73,7 +74,11 @@ impl ImageViewerApp {
             if !self.dual_panel_enabled || self.current_folder_locked {
                 self.view_mode = self.view_mode_normal;
             }
-            self.sort_mode = self.sort_mode_normal;
+            self.sort_mode = if path == COMPUTER_VIEW_ID {
+                self.sort_mode_computer
+            } else {
+                self.sort_mode_normal
+            };
             self.sort_descending = self.sort_descending_normal;
             self.folders_position = self.folders_position_normal;
             self.current_folder_locked = false;

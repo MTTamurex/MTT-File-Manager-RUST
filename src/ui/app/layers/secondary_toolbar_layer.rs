@@ -1,4 +1,5 @@
 use crate::app::ImageViewerApp;
+use crate::domain::special_paths::{is_tag_view_path, is_virtual_path, COMPUTER_VIEW_ID};
 use crate::ui::{theme, widgets};
 use eframe::egui;
 
@@ -114,11 +115,11 @@ pub(crate) fn render_secondary_toolbar_layer(app: &mut ImageViewerApp, ctx: &egu
 /// Render the folder lock toggle button (padlock icon).
 fn render_lock_button(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
     let is_locked = app.current_folder_locked;
-    let is_special = app.navigation_state.is_computer_view
-        || app.navigation_state.is_recycle_bin_view
-        || app.navigation_state.current_path.is_empty();
+    let path = &app.navigation_state.current_path;
+    let is_lockable = !path.is_empty()
+        && (path == COMPUTER_VIEW_ID || is_tag_view_path(path) || !is_virtual_path(path));
 
-    if is_special {
+    if !is_lockable {
         // Disabled state — render a grayed-out lock icon with no interaction
         ui.scope(|ui| {
             ui.disable();
