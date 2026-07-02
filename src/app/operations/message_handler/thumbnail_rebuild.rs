@@ -311,6 +311,7 @@ impl ImageViewerApp {
         // old GPU textures for items whose content changed on disk, causing the
         // UI to show the wrong thumbnail until the texture is LRU-evicted.
         self.reconcile_stale_visual_caches();
+        self.sync_selected_file_from_all_items();
 
         if self.all_items.len() <= INLINE_REBUILD_THRESHOLD {
             let result_items = self.build_sorted_items_snapshot();
@@ -320,6 +321,8 @@ impl ImageViewerApp {
 
             if let Some(target_path) = self.pending_select_path.take() {
                 let _ = self.select_item_by_path(&target_path);
+            } else {
+                self.reconcile_visible_selection_index();
             }
 
             log::debug!(

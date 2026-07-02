@@ -55,6 +55,8 @@ impl ImageViewerApp {
             // find the item and select + scroll to it.
             if let Some(target_path) = self.pending_select_path.take() {
                 let _ = self.select_item_by_path(&target_path);
+            } else {
+                self.reconcile_visible_selection_index();
             }
 
             if self.pending_items_rebuild {

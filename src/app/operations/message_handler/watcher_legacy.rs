@@ -118,6 +118,7 @@ impl ImageViewerApp {
         let mut folders_with_changed_contents: HashSet<PathBuf> = HashSet::new();
         let mut paths_to_remove_from_ui: Vec<PathBuf> = Vec::new();
         let mut remove_parents_invalidated: HashSet<PathBuf> = HashSet::new();
+        let mut forced_disk_cache_invalidations: Vec<PathBuf> = Vec::new();
         let mut batched_remove_events = 0usize;
 
         if self.file_operation_state.file_ops_in_progress > 0 {
@@ -166,6 +167,7 @@ impl ImageViewerApp {
                     let current_folder_removed =
                         notify_event_removes_current_folder(&evt, current_path_norm);
                     let is_name_change = notify_event_is_name_change(&evt);
+                    let is_modify_event = matches!(evt.kind, notify::EventKind::Modify(_));
 
                     if matches!(evt.kind, notify::EventKind::Remove(_)) {
                         if !current_folder_removed
@@ -471,6 +473,7 @@ impl ImageViewerApp {
                             let parent_norm = Self::normalize_for_match(parent);
                             if parent_norm == current_path_norm {
                                 let cleaned = Self::clean_path(path);
+                                let is_known_dir = self.is_known_directory_path(&cleaned);
                                 if let Some(cache_parent) = cleaned.parent() {
                                     self.directory_cache.invalidate(&cache_parent.to_path_buf());
                                 }
@@ -479,9 +482,15 @@ impl ImageViewerApp {
                                     "[FS] Direct subfolder modified: {:?}",
                                     cleaned.file_name()
                                 );
-                                // PERF FIX (M-6): Defer SQLite writer lock to background
-                                // instead of blocking UI thread during watcher events.
-                                pending_disk_cache_invalidations.push(cleaned);
+                                if is_modify_event && !is_name_change && !is_known_dir {
+                                    self.invalidate_changed_path_preview_state(&cleaned);
+                                    forced_disk_cache_invalidations.push(cleaned.clone());
+                                    needs_reload = true;
+                                } else {
+                                    // PERF FIX (M-6): Defer SQLite writer lock to background
+                                    // instead of blocking UI thread during watcher events.
+                                    pending_disk_cache_invalidations.push(cleaned);
+                                }
                             }
                         }
 
@@ -608,6 +617,8 @@ impl ImageViewerApp {
                 pending_disk_cache_invalidations,
             );
         }
+
+        self.enqueue_disk_cache_invalidations_forced(forced_disk_cache_invalidations);
 
         if has_more_events {
             self.ui_ctx.request_repaint();

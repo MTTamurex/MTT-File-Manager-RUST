@@ -543,7 +543,7 @@ impl ImageViewerApp {
             self.metadata_cache.put(path.clone(), (mtime, meta.clone()));
 
             if let Some(selected) = &self.selected_file {
-                if selected.path == path {
+                if selected.path == path && (mtime == 0 || selected.modified == mtime) {
                     self.selected_metadata = Some((path.clone(), meta));
                     metadata_updated = true;
                 }

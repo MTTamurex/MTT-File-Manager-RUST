@@ -8,6 +8,7 @@
 use crate::app::state::ImageViewerApp;
 use crate::domain::file_entry::FileEntry;
 use crate::infrastructure::diagnostic_logger::{diag_info, field_u64};
+use std::path::Path;
 
 enum SelectedPreviewOverlayAction {
     None,
@@ -18,7 +19,128 @@ enum SelectedPreviewOverlayAction {
     OpenText(std::path::PathBuf),
 }
 
+fn normalize_selection_path(path: &Path) -> String {
+    let path = path.to_string_lossy().to_lowercase();
+    path.strip_prefix(r"\\?\")
+        .unwrap_or(path.as_ref())
+        .to_string()
+}
+
+fn selected_paths_match(left: &Path, right: &Path) -> bool {
+    left == right || normalize_selection_path(left) == normalize_selection_path(right)
+}
+
+fn selected_entry_content_changed(old: &FileEntry, new: &FileEntry) -> bool {
+    old.is_dir != new.is_dir
+        || old.size != new.size
+        || old.modified != new.modified
+        || old.created != new.created
+}
+
+fn selected_entry_display_changed(old: &FileEntry, new: &FileEntry) -> bool {
+    selected_entry_content_changed(old, new)
+        || old.name != new.name
+        || old.folder_cover != new.folder_cover
+        || old.sync_status != new.sync_status
+        || old.is_hidden != new.is_hidden
+}
+
 impl ImageViewerApp {
+    pub(crate) fn invalidate_changed_path_preview_state(&mut self, path: &Path) {
+        let path = path.to_path_buf();
+        let was_loading = self.cache_manager.loading_set.contains(&path);
+        let was_pending_upload = self.cache_manager.pending_upload_set.contains(&path);
+        let had_pending_thumbnail = self
+            .pending_thumbnails
+            .iter()
+            .any(|thumb| thumb.path == path);
+        let queued_removed = self
+            .thumbnail_queue
+            .remove_paths(std::slice::from_ref(&path));
+
+        self.cache_manager.texture_cache.pop(&path);
+        self.cache_manager.pop_rgba_data(&path);
+        self.cache_manager.failed_thumbnails.pop(&path);
+        self.cache_manager.forget_attempted_thumbnail_bucket(&path);
+        self.cache_manager.loading_set.remove(&path);
+        self.cache_manager.finish_pending_upload(&path);
+        self.pending_thumbnails.retain(|thumb| thumb.path != path);
+        crate::workers::thumbnail::clear_failure_cache(&path);
+
+        self.metadata_cache.pop(&path);
+        self.metadata_loading.remove(&path);
+        self.live_file_size_cache.pop(&path);
+        self.live_file_size_loading.remove(&path);
+
+        if self.last_metadata_path.as_ref() == Some(&path) {
+            self.last_metadata_path = None;
+        }
+        if matches!(self.selected_metadata.as_ref(), Some((p, _)) if *p == path) {
+            self.selected_metadata = None;
+        }
+        if self
+            .selected_file
+            .as_ref()
+            .is_some_and(|selected| selected_paths_match(&selected.path, &path))
+        {
+            self.selected_thumbnail = None;
+            self.selected_gif = None;
+            self.gif_manager.unload_all();
+        }
+        if self.last_file_hash_selection.as_ref() == Some(&path) {
+            self.selected_file_hash = None;
+            self.file_hash_loading.remove(&path);
+        }
+
+        if was_loading || was_pending_upload || had_pending_thumbnail || queued_removed > 0 {
+            self.bump_thumbnail_request_epoch(&path);
+        }
+    }
+
+    fn replace_selected_file_with_fresh_entry(&mut self, fresh_entry: FileEntry) -> bool {
+        let Some(current) = self.selected_file.as_ref() else {
+            return false;
+        };
+        if !selected_paths_match(&current.path, &fresh_entry.path) {
+            return false;
+        }
+
+        let content_changed = selected_entry_content_changed(current, &fresh_entry);
+        let display_changed = selected_entry_display_changed(current, &fresh_entry);
+        if !display_changed {
+            return false;
+        }
+
+        let fresh_path = fresh_entry.path.clone();
+        if content_changed {
+            self.invalidate_changed_path_preview_state(&fresh_path);
+            if !fresh_entry.is_dir {
+                self.enqueue_disk_cache_invalidations_forced(vec![fresh_path]);
+            }
+        }
+
+        self.selected_file = Some(fresh_entry);
+        self.update_video_visibility();
+        self.ui_ctx.request_repaint();
+        true
+    }
+
+    pub(crate) fn sync_selected_file_from_all_items(&mut self) -> bool {
+        let Some(selected_path) = self.selected_file.as_ref().map(|file| file.path.clone()) else {
+            return false;
+        };
+
+        let fresh_entry = self
+            .all_items
+            .iter()
+            .find(|item| selected_paths_match(&item.path, &selected_path))
+            .cloned();
+
+        fresh_entry
+            .map(|entry| self.replace_selected_file_with_fresh_entry(entry))
+            .unwrap_or(false)
+    }
+
     pub fn ensure_detail_panel_thumbnail_for_file(&mut self, file: &FileEntry) {
         self.ensure_detail_panel_thumbnail_request(
             file.path.clone(),
@@ -140,8 +262,14 @@ impl ImageViewerApp {
         let resolved_index = self.selected_file.as_ref().and_then(|selected| {
             self.items
                 .iter()
-                .position(|item| item.path == selected.path)
+                .position(|item| selected_paths_match(&item.path, &selected.path))
         });
+
+        if let Some(index) = resolved_index {
+            if let Some(fresh_entry) = self.items.get(index).cloned() {
+                self.replace_selected_file_with_fresh_entry(fresh_entry);
+            }
+        }
 
         if self.selected_item == resolved_index {
             return;
