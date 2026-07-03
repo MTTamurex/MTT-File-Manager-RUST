@@ -344,7 +344,7 @@ impl ImageViewerApp {
             is_on_hdd: !is_ssd,
             prefetch_rows,
             visible_index_range: &mut self.visible_index_range,
-            is_item_dragging: self.is_item_dragging,
+            is_item_dragging: self.is_item_dragging || self.external_drop_active,
             drag_target_folder: self.drag_target_folder.clone(),
             drag_started_item: &mut drag_started_item,
             drag_hovered_item: &mut drag_hovered_item,
@@ -609,6 +609,8 @@ impl ImageViewerApp {
                 {
                     self.complete_item_drag(ctrl, shift);
                 }
+            } else if self.external_drop_active {
+                self.update_external_drop_hover(drag_hovered_item);
             }
         } else if self.is_item_dragging {
             self.cancel_item_drag();

@@ -236,6 +236,8 @@ pub struct ImageViewerApp {
     pub pending_drag_move_confirmation: Option<PendingDragMoveConfirmation>,
     /// Icon pre-loaded when drag starts â€” avoids blocking Shell calls in the render loop.
     pub drag_icon_cache: Option<egui::TextureHandle>,
+    pub external_drop_active: bool,
+    pub external_drop_inactive_folder: Option<PathBuf>,
     pub selected_thumbnail: Option<egui::TextureHandle>, // Persistent thumbnail for preview panel
     pub selected_gif: Option<crate::ui::components::media_preview::GifPlayer>, // Local GIF for preview panel
     pub defer_preview_work_after_selection: bool,

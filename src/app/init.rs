@@ -393,6 +393,8 @@ impl ImageViewerApp {
             drag_drop_cross_panel_context: false,
             pending_drag_move_confirmation: None,
             drag_icon_cache: None,
+            external_drop_active: false,
+            external_drop_inactive_folder: None,
             total_items: 0,
             // Search & Navigation (NEW)
             all_items: Arc::new(Vec::new()),

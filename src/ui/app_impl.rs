@@ -2,6 +2,7 @@ use crate::app::ImageViewerApp;
 use crate::infrastructure::windows::window_subclass::is_in_size_move;
 use crate::ui::app;
 use eframe::egui;
+use std::path::{Path, PathBuf};
 
 /// Periodic repaint interval to ensure drive bitmask checks run even when idle.
 const DRIVE_BITMASK_REPAINT_MS: u64 = 1000;
@@ -212,31 +213,48 @@ impl eframe::App for ImageViewerApp {
             }
         }
 
-        // 4. Input: Keyboard shortcuts (resize borders handled by native subclass)
+        // 4. External drag-and-drop: detect hover from other applications (WinRAR, Explorer)
+        //    Must run BEFORE panels render so item renderers can show folder highlights.
+        if !self.is_item_dragging {
+            let (has_external_hover, has_external_drop) = ctx.input(|i| {
+                (
+                    !i.raw.hovered_files.is_empty(),
+                    !i.raw.dropped_files.is_empty(),
+                )
+            });
+            if has_external_hover || has_external_drop {
+                self.external_drop_active = true;
+            } else if self.external_drop_active {
+                // Hover ended without a drop (drag left window) or drop was already consumed.
+                self.reset_external_drop_state();
+            }
+        }
+
+        // 5. Input: Keyboard shortcuts (resize borders handled by native subclass)
         if !is_in_size_move {
             app::input::handle_input(self, ctx);
         }
 
-        // 5. Layout: Status Bar (Bottom) - lightweight, always render
+        // 6. Layout: Status Bar (Bottom) - lightweight, always render
         app::layers::render_status_bar_layer(self, ctx);
 
-        // 6. Layout: Tab Bar (Top 1) - lightweight, always render
+        // 7. Layout: Tab Bar (Top 1) - lightweight, always render
         app::layers::render_tab_bar_layer(self, ctx, frame);
 
-        // 7. Layout: Toolbar (Top 2) - lightweight, always render
+        // 8. Layout: Toolbar (Top 2) - lightweight, always render
         app::layers::render_toolbar_layer(self, ctx);
 
-        // 7b. Layout: Secondary Toolbar (Top 3) - lightweight, always render
+        // 8b. Layout: Secondary Toolbar (Top 3) - lightweight, always render
         app::layers::render_secondary_toolbar_layer(self, ctx);
 
-        // 7c. Settings backdrop (rendered BEFORE panels to block their input)
+        // 8c. Settings backdrop (rendered BEFORE panels to block their input)
         let settings_close_from_backdrop = if self.navigation_state.show_settings_window {
             crate::ui::components::settings_window::render_settings_backdrop(ctx)
         } else {
             false
         };
 
-        // 8. Layout: Main Panels (Sidebar, Preview, Central)
+        // 9. Layout: Main Panels (Sidebar, Preview, Central)
         // Keep full rendering even during move/resize so content/video stays visible and synchronized.
         let t_panels = std::time::Instant::now();
         app::panels::render_panels(self, ctx, frame);
@@ -245,13 +263,13 @@ impl eframe::App for ImageViewerApp {
             log::warn!("[PERF] Slow render_panels: {:.0}ms", panels_ms);
         }
 
-        // 9. Operations: Context Menu (Rendering & Actions)
+        // 10. Operations: Context Menu (Rendering & Actions)
         app::menu_handler::handle_context_menu(self, ctx);
 
-        // 10. Operations: Resize borders (on top) - REMOVED, handled by native subclass
+        // 11. Operations: Resize borders (on top) - REMOVED, handled by native subclass
         // app::input::handle_resize_borders(self, ctx);
 
-        // 11. Settings window
+        // 12. Settings window
         if self.navigation_state.show_settings_window {
             let output = crate::ui::components::settings_window::render_settings_window(
                 ctx,
@@ -303,7 +321,7 @@ impl eframe::App for ImageViewerApp {
             }
         }
 
-        // 12. Batch Rename Modal
+        // 13. Batch Rename Modal
         if self.batch_rename_state.is_some() {
             crate::ui::components::batch_rename_modal::render_batch_rename_modal(self, ctx);
         }
@@ -312,10 +330,10 @@ impl eframe::App for ImageViewerApp {
             crate::ui::components::tag_manager_modal::render_tag_manager_modal(self, ctx);
         }
 
-        // 13. Notifications
+        // 14. Notifications
         app::notifications::render_notifications(self, ctx);
 
-        // 13. Global Search Overlay (on top of everything)
+        // 15. Global Search Overlay (on top of everything)
         crate::ui::global_search_overlay::render_global_search_overlay(self, ctx);
 
         if self.pending_drag_move_confirmation.is_some() && self.is_item_dragging {
@@ -344,6 +362,58 @@ impl eframe::App for ImageViewerApp {
             );
         }
 
+        // Consume external file drops (from other applications such as WinRAR/Explorer).
+        // DroppedFile events arrive on the same frame that hovered_files is cleared.
+        // The bridge renderers already resolved drag_target_folder via
+        // update_external_drop_hover during panel rendering.
+        let dropped_files: Vec<egui::DroppedFile> =
+            ctx.input_mut(|i| std::mem::take(&mut i.raw.dropped_files));
+        if !dropped_files.is_empty() {
+            let source_paths: Vec<PathBuf> = dropped_files
+                .iter()
+                .filter_map(|f| f.path.clone())
+                .collect();
+
+            if !source_paths.is_empty() {
+                // Prefer the folder under the cursor (from bridge hover tracking),
+                // fall back to the inactive panel folder in dual-panel mode,
+                // and finally to the current directory.
+                if let Some(dest_folder) = resolve_external_drop_destination(self) {
+                    log::info!(
+                        "[ExternalDrop] Dropping {} file(s) into '{}'",
+                        source_paths.len(),
+                        dest_folder.display()
+                    );
+                    let hwnd = self.shell_op_hwnd();
+                    let request =
+                        crate::workers::file_operation_worker::FileOperationRequest::copy_batch(
+                            source_paths,
+                            dest_folder,
+                            hwnd,
+                        );
+                    self.file_operation_state.file_ops_in_progress += 1;
+                    if self
+                        .file_operation_state
+                        .file_op_sender
+                        .send(request)
+                        .is_err()
+                    {
+                        self.file_operation_state.file_ops_in_progress = self
+                            .file_operation_state
+                            .file_ops_in_progress
+                            .saturating_sub(1);
+                        log::warn!("[ExternalDrop] file operation worker channel closed");
+                    }
+                } else {
+                    log::warn!(
+                        "[ExternalDrop] No valid drop destination; ignoring {} files",
+                        source_paths.len()
+                    );
+                }
+            }
+            self.reset_external_drop_state();
+        }
+
         if is_in_size_move {
             // Ensure continuous redraw while the OS is in the modal move/resize loop.
             ctx.request_repaint();
@@ -369,6 +439,33 @@ impl eframe::App for ImageViewerApp {
     fn persist_egui_memory(&self) -> bool {
         false
     }
+}
+
+fn resolve_external_drop_destination(app: &ImageViewerApp) -> Option<PathBuf> {
+    app.drag_target_folder
+        .clone()
+        .filter(|target| is_valid_external_drop_destination(target))
+        .or_else(|| {
+            app.external_drop_inactive_folder
+                .clone()
+                .filter(|target| is_valid_external_drop_destination(target))
+        })
+        .or_else(|| {
+            if app.navigation_state.is_recycle_bin_view || app.navigation_state.is_computer_view {
+                return None;
+            }
+
+            let current = PathBuf::from(&app.navigation_state.current_path);
+            is_valid_external_drop_destination(&current).then_some(current)
+        })
+}
+
+fn is_valid_external_drop_destination(target: &Path) -> bool {
+    !target.as_os_str().is_empty()
+        && !target
+            .to_str()
+            .is_some_and(crate::domain::special_paths::is_virtual_path)
+        && !ImageViewerApp::path_is_archive_namespace(target)
 }
 
 fn handle_taskbar_minimize_preview(app: &mut ImageViewerApp, ctx: &egui::Context) {

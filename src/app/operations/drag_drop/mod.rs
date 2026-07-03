@@ -343,4 +343,54 @@ impl ImageViewerApp {
         self.drag_drop_cross_panel_context = false;
         self.drag_icon_cache = None;
     }
+
+    /// Updates drop-target tracking during an external drag (files dragged from
+    /// another application such as WinRAR or Explorer).
+    ///
+    /// Called each frame while `external_drop_active` is true. Uses the hovered
+    /// folder index from the file-panel renderers to highlight the folder under
+    /// the cursor and resolves the final drop target (fallback: current folder).
+    pub fn update_external_drop_hover(&mut self, hovered_folder_idx: Option<usize>) {
+        let hovered_folder = hovered_folder_idx
+            .and_then(|idx| self.items.get(idx))
+            .filter(|item| item.is_dir)
+            .map(|item| item.path.clone());
+
+        self.drag_hovered_folder = hovered_folder.clone();
+
+        let Some(target) = hovered_folder.or_else(|| {
+            let cur = PathBuf::from(&self.navigation_state.current_path);
+            if cur.as_os_str().is_empty()
+                || crate::domain::special_paths::is_virtual_path(
+                    &self.navigation_state.current_path,
+                )
+                || self.navigation_state.is_recycle_bin_view
+                || self.navigation_state.is_computer_view
+            {
+                return None;
+            }
+            Some(cur)
+        }) else {
+            self.drag_target_folder = None;
+            return;
+        };
+
+        if Self::path_is_archive_namespace(&target) {
+            self.drag_target_folder = None;
+            return;
+        }
+
+        self.drag_target_folder = Some(target);
+    }
+
+    /// Resets external-drop tracking state when the external drag leaves the
+    /// window or after a drop has been processed.
+    pub fn reset_external_drop_state(&mut self) {
+        self.external_drop_active = false;
+        self.external_drop_inactive_folder = None;
+        if !self.is_item_dragging {
+            self.drag_hovered_folder = None;
+            self.drag_target_folder = None;
+        }
+    }
 }
