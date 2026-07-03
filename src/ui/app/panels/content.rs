@@ -861,6 +861,27 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
         app.drag_cross_panel_target = None;
     }
 
+    // External drags are evaluated by both panel renderers. Clear stale targets
+    // before rendering, then let only the panel under the cursor update them.
+    if app.external_drop_active {
+        app.drag_target_folder = None;
+        app.drag_hovered_folder = None;
+        app.external_drop_inactive_folder = None;
+
+        if let Some(pos) = ui.input(|i| i.pointer.hover_pos()) {
+            let inactive_header = match active {
+                ActivePanel::Left => right_header_rect,
+                ActivePanel::Right => left_header_rect,
+            };
+            if inactive_content_rect.contains(pos) || inactive_header.contains(pos) {
+                app.external_drop_inactive_folder = app
+                    .dual_panel_inactive_state
+                    .as_ref()
+                    .map(|s| PathBuf::from(&s.path));
+            }
+        }
+    }
+
     // ── Render ACTIVE panel content with unique ID scope ──
     let active_id = match active {
         ActivePanel::Left => "dual_left",
@@ -899,28 +920,6 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
         app_with_inactive.use_active_generation_for_thumbnail_requests = false;
         app_with_inactive.suppress_file_panel_keyboard = false;
     });
-
-    // Track external-drop inactive-panel target: when files are dragged from
-    // another application (e.g. WinRAR) over the inactive panel, store that
-    // panel's folder path so the drop handler can copy files into it.
-    if app.external_drop_active {
-        if let Some(pos) = ui.input(|i| i.pointer.hover_pos()) {
-            let inactive_header = match active {
-                ActivePanel::Left => right_header_rect,
-                ActivePanel::Right => left_header_rect,
-            };
-            if inactive_content_rect.contains(pos) || inactive_header.contains(pos) {
-                app.external_drop_inactive_folder = app
-                    .dual_panel_inactive_state
-                    .as_ref()
-                    .map(|s| PathBuf::from(&s.path));
-            } else {
-                app.external_drop_inactive_folder = None;
-            }
-        } else {
-            app.external_drop_inactive_folder = None;
-        }
-    }
 
     // Draw the focus border after panel contents so thumbnails cannot paint over it.
     ui.painter().rect_stroke(

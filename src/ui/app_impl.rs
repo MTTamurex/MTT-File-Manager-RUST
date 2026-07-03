@@ -224,6 +224,9 @@ impl eframe::App for ImageViewerApp {
             });
             if has_external_hover || has_external_drop {
                 self.external_drop_active = true;
+                self.drag_target_folder = None;
+                self.drag_hovered_folder = None;
+                self.external_drop_inactive_folder = None;
             } else if self.external_drop_active {
                 // Hover ended without a drop (drag left window) or drop was already consumed.
                 self.reset_external_drop_state();
