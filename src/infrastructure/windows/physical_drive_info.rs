@@ -13,8 +13,8 @@ use windows::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
 use windows::Win32::Storage::FileSystem::{
     CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
 };
-use windows::Win32::System::IO::DeviceIoControl;
 use windows::Win32::System::Ioctl::IOCTL_STORAGE_QUERY_PROPERTY;
+use windows::Win32::System::IO::DeviceIoControl;
 
 use crate::infrastructure::windows::DriveType;
 
@@ -40,8 +40,7 @@ pub struct PhysicalDriveInfo {
     pub bus_type: String,
 }
 
-static PHYSICAL_DRIVE_CACHE: OnceLock<Mutex<FxHashMap<char, PhysicalDriveInfo>>> =
-    OnceLock::new();
+static PHYSICAL_DRIVE_CACHE: OnceLock<Mutex<FxHashMap<char, PhysicalDriveInfo>>> = OnceLock::new();
 
 fn get_cache() -> &'static Mutex<FxHashMap<char, PhysicalDriveInfo>> {
     PHYSICAL_DRIVE_CACHE.get_or_init(|| Mutex::new(FxHashMap::default()))
@@ -50,7 +49,9 @@ fn get_cache() -> &'static Mutex<FxHashMap<char, PhysicalDriveInfo>> {
 /// Invalidate the cached physical drive info for a drive letter.
 /// Call on device arrival/removal to force a re-query on next access.
 pub fn invalidate_physical_drive_cache(drive_letter: char) {
-    get_cache().lock().remove(&drive_letter.to_ascii_uppercase());
+    get_cache()
+        .lock()
+        .remove(&drive_letter.to_ascii_uppercase());
 }
 
 /// Query physical drive hardware info for a given drive letter.
@@ -285,7 +286,7 @@ fn query_storage_device_property(disk_number: u32) -> Option<PhysicalDriveInfo> 
             None,
         );
 
-        if !success.is_ok() || bytes_returned == 0 {
+        if success.is_err() || bytes_returned == 0 {
             let _ = CloseHandle(handle);
             return None;
         }
@@ -300,8 +301,7 @@ fn query_storage_device_property(disk_number: u32) -> Option<PhysicalDriveInfo> 
 
         let vendor = read_descriptor_string(&buffer, buf_len, descriptor.vendor_id_offset);
         let product = read_descriptor_string(&buffer, buf_len, descriptor.product_id_offset);
-        let firmware =
-            read_descriptor_string(&buffer, buf_len, descriptor.product_revision_offset);
+        let firmware = read_descriptor_string(&buffer, buf_len, descriptor.product_revision_offset);
         let fallback_serial =
             read_descriptor_string(&buffer, buf_len, descriptor.serial_number_offset);
 
@@ -372,9 +372,7 @@ fn query_device_id_serial(buffer: &[u8], buf_len: usize) -> Option<String> {
         return None;
     }
 
-    let num_identifiers = u32::from_le_bytes([
-        buffer[8], buffer[9], buffer[10], buffer[11],
-    ]);
+    let num_identifiers = u32::from_le_bytes([buffer[8], buffer[9], buffer[10], buffer[11]]);
 
     // Each identifier uses the STORAGE_IDENTIFIER struct layout:
     //   offset 0:  CodeSet (i32) — 1=Binary, 2=ASCII, 3=Utf8
@@ -401,10 +399,16 @@ fn query_device_id_serial(buffer: &[u8], buf_len: usize) -> Option<String> {
         }
 
         let code_set = i32::from_le_bytes([
-            buffer[offset], buffer[offset + 1], buffer[offset + 2], buffer[offset + 3],
+            buffer[offset],
+            buffer[offset + 1],
+            buffer[offset + 2],
+            buffer[offset + 3],
         ]);
         let ident_type = i32::from_le_bytes([
-            buffer[offset + 4], buffer[offset + 5], buffer[offset + 6], buffer[offset + 7],
+            buffer[offset + 4],
+            buffer[offset + 5],
+            buffer[offset + 6],
+            buffer[offset + 7],
         ]);
         let ident_size = u16::from_le_bytes([buffer[offset + 8], buffer[offset + 9]]) as usize;
         let next_offset = u16::from_le_bytes([buffer[offset + 10], buffer[offset + 11]]) as usize;
@@ -418,10 +422,7 @@ fn query_device_id_serial(buffer: &[u8], buf_len: usize) -> Option<String> {
 
         // EUI-64: 8 bytes, binary → format as uppercase hex.
         if ident_type == TYPE_EUI64 && code_set == CODE_SET_BINARY && ident_size >= 8 {
-            let hex: String = data[..8]
-                .iter()
-                .map(|b| format!("{:02X}", b))
-                .collect();
+            let hex: String = data[..8].iter().map(|b| format!("{:02X}", b)).collect();
             return Some(hex);
         }
 
