@@ -466,7 +466,15 @@ impl ImageViewerApp {
     }
 
     pub(super) fn restore_app_focus(&self) {
+        if self.layout.saved_is_minimized {
+            return;
+        }
+
         if let Some(hwnd) = self.native_hwnd {
+            if crate::infrastructure::windows::is_window_minimized(hwnd) {
+                return;
+            }
+
             crate::infrastructure::windows::restore_window_foreground(hwnd);
         }
         self.ui_ctx
