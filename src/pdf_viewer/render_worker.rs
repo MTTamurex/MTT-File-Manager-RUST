@@ -275,12 +275,20 @@ fn worker_loop(
     // OCR word data (with text) for scanned pages, used by bounded-text
     // extraction (Ctrl+C copy path).  Separate from segment_cache because it
     // carries the actual string content per word.
-    let ocr_cache: HashMap<u32, Vec<OcrWord>> = HashMap::new();
+    let mut ocr_cache: HashMap<u32, Vec<OcrWord>> = HashMap::new();
     let mut search_text_cache: HashMap<u32, SearchText> = HashMap::new();
 
     loop {
         // Drain high-priority bounded-text requests before blocking.
-        drain_bounded_text(&document, &bt_rx, &bt_tx, &repaint, &ocr_cache);
+        drain_bounded_text(
+            &document,
+            &bt_rx,
+            &bt_tx,
+            &text_seg_tx,
+            &repaint,
+            &mut segment_cache,
+            &mut ocr_cache,
+        );
         drain_search_requests(
             &document,
             &search_rx,
@@ -292,7 +300,15 @@ fn worker_loop(
         crossbeam_channel::select_biased! {
             recv(bt_rx) -> msg => {
                 if let Ok(req) = msg {
-                    handle_bounded_text(&document, &req, &bt_tx, &repaint, &ocr_cache);
+                    handle_bounded_text(
+                        &document,
+                        &req,
+                        &bt_tx,
+                        &text_seg_tx,
+                        &repaint,
+                        &mut segment_cache,
+                        &mut ocr_cache,
+                    );
                 }
             },
             recv(search_rx) -> msg => {
@@ -326,7 +342,15 @@ fn worker_loop(
                 let latest_len = latest.len();
                 for (position, (_, req)) in latest.into_iter().enumerate() {
                     // Prioritise bounded-text between page renders.
-                    drain_bounded_text(&document, &bt_rx, &bt_tx, &repaint, &ocr_cache);
+                    drain_bounded_text(
+                        &document,
+                        &bt_rx,
+                        &bt_tx,
+                        &text_seg_tx,
+                        &repaint,
+                        &mut segment_cache,
+                        &mut ocr_cache,
+                    );
                     drain_search_requests(
                         &document,
                         &search_rx,
@@ -491,11 +515,21 @@ fn drain_bounded_text(
     document: &pdfium_render::prelude::PdfDocument<'_>,
     rx: &Receiver<BoundedTextRequest>,
     tx: &Sender<BoundedTextResult>,
+    text_seg_tx: &Sender<TextSegmentResult>,
     repaint: &egui::Context,
-    ocr_cache: &HashMap<u32, Vec<OcrWord>>,
+    segment_cache: &mut HashMap<u32, Vec<PdfTextSegment>>,
+    ocr_cache: &mut HashMap<u32, Vec<OcrWord>>,
 ) {
     while let Ok(req) = rx.try_recv() {
-        handle_bounded_text(document, &req, tx, repaint, ocr_cache);
+        handle_bounded_text(
+            document,
+            &req,
+            tx,
+            text_seg_tx,
+            repaint,
+            segment_cache,
+            ocr_cache,
+        );
     }
 }
 
@@ -503,8 +537,10 @@ fn handle_bounded_text(
     document: &pdfium_render::prelude::PdfDocument<'_>,
     req: &BoundedTextRequest,
     tx: &Sender<BoundedTextResult>,
+    text_seg_tx: &Sender<TextSegmentResult>,
     repaint: &egui::Context,
-    ocr_cache: &HashMap<u32, Vec<OcrWord>>,
+    segment_cache: &mut HashMap<u32, Vec<PdfTextSegment>>,
+    ocr_cache: &mut HashMap<u32, Vec<OcrWord>>,
 ) {
     let pdfium_text =
         extract_bounded_text(document, req.page_idx, req.bounds).unwrap_or_else(|e| {
@@ -518,17 +554,26 @@ fn handle_bounded_text(
     // For scanned PDFs (no text layer) Pdfium returns empty; fall back to
     // words collected by Windows OCR that overlap the selection bounds.
     let text = if pdfium_text.is_empty() {
-        ocr_cache
-            .get(&req.page_idx)
-            .map(|words| {
-                words
-                    .iter()
-                    .filter(|w| w.bounds.overlaps(&req.bounds))
-                    .map(|w| w.text.as_str())
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            })
-            .unwrap_or_default()
+        let words = ensure_ocr_words(document, req.page_idx, ocr_cache);
+        if !words.is_empty() && !segment_cache.contains_key(&req.page_idx) {
+            let segments = words
+                .iter()
+                .map(|word| PdfTextSegment {
+                    bounds: word.bounds,
+                })
+                .collect::<Vec<_>>();
+            segment_cache.insert(req.page_idx, segments.clone());
+            let _ = text_seg_tx.send(TextSegmentResult {
+                page_idx: req.page_idx,
+                segments,
+            });
+        }
+        words
+            .iter()
+            .filter(|w| w.bounds.overlaps(&req.bounds))
+            .map(|w| w.text.as_str())
+            .collect::<Vec<_>>()
+            .join(" ")
     } else {
         pdfium_text
     };
@@ -538,6 +583,26 @@ fn handle_bounded_text(
         text,
     });
     repaint.request_repaint();
+}
+
+fn ensure_ocr_words<'a>(
+    document: &pdfium_render::prelude::PdfDocument<'_>,
+    page_idx: u32,
+    ocr_cache: &'a mut HashMap<u32, Vec<OcrWord>>,
+) -> &'a Vec<OcrWord> {
+    ocr_cache.entry(page_idx).or_insert_with(|| {
+        let page = match document
+            .pages()
+            .get(page_idx as pdfium_render::prelude::PdfPageIndex)
+        {
+            Ok(page) => page,
+            Err(e) => {
+                log::warn!("[PDF-OCR] cannot load page {page_idx} for selection OCR: {e}");
+                return Vec::new();
+            }
+        };
+        run_ocr_canonical_words(document, page_idx, page.width().value, page.height().value)
+    })
 }
 
 /// Canonical OCR side length (pixels).  Represents a good trade-off between

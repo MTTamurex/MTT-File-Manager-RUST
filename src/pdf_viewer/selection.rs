@@ -159,16 +159,16 @@ impl PdfViewerApp {
     fn finish_selection(&mut self, page_idx: u32, bounds: PdfTextBounds) {
         let bounds = normalized_selection_bounds(bounds);
 
-        let Some(segments) = self.ensure_text_segments(page_idx) else {
-            self.selection = None;
-            return;
-        };
+        if let Some(segments) = self.ensure_text_segments(page_idx) {
+            let has_overlap = segments
+                .iter()
+                .any(|segment| segment.bounds.overlaps(&bounds));
 
-        let has_overlap = segments
-            .iter()
-            .any(|segment| segment.bounds.overlaps(&bounds));
-
-        if !has_overlap {
+            if !has_overlap {
+                self.selection = None;
+                return;
+            }
+        } else if self.worker.is_none() {
             self.selection = None;
             return;
         }
