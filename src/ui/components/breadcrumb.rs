@@ -228,6 +228,12 @@ fn compute_trail_layout(ui: &egui::Ui, segments: &[(String, String)]) -> TrailLa
                 break;
             }
         }
+        // If not a single segment fits, force at least the last one visible.
+        // It will be truncated at render time when fallback_tail is true.
+        if vis == 0 && total > 0 {
+            vis = 1;
+            used = seg_widths[total - 1].min(available_width);
+        }
         let start = total - vis;
         return TrailLayout {
             visible: (start..total).collect(),
@@ -281,6 +287,14 @@ pub fn render_breadcrumb_trail(ui: &mut egui::Ui, segments: &[(String, String)])
         ui.spacing_mut().item_spacing.x = 2.0;
 
         if layout.fallback_tail {
+            if layout.visible.len() == 1 && !layout.hidden.is_empty() {
+                if let Some(target) =
+                    render_overflow_popup(ui, segments, &layout.hidden, text_color)
+                {
+                    action = Some(target);
+                }
+                ui.label(egui::RichText::new("›").color(chevron_color).size(11.0));
+            }
             render_visible_tail(
                 ui,
                 segments,
@@ -297,7 +311,7 @@ pub fn render_breadcrumb_trail(ui: &mut egui::Ui, segments: &[(String, String)])
         let root_label = egui::RichText::new(&segments[root_idx].0)
             .color(text_color)
             .size(11.0);
-        if breadcrumb_button_with_label(ui, root_label) {
+        if breadcrumb_button_with_label(ui, root_label).clicked() {
             action = Some(segments[root_idx].1.clone());
         }
 
@@ -330,7 +344,7 @@ pub fn render_breadcrumb_trail(ui: &mut egui::Ui, segments: &[(String, String)])
                     .color(text_color)
                     .size(11.0)
             };
-            if breadcrumb_button_with_label(ui, label) {
+            if breadcrumb_button_with_label(ui, label).clicked() {
                 action = Some(segments[seg_idx].1.clone());
             }
         }
@@ -348,23 +362,37 @@ fn render_visible_tail(
     action: &mut Option<String>,
 ) {
     let total = segments.len();
+    let font_id = egui::FontId::proportional(11.0);
+    let button_padding = ui.spacing().button_padding.x * 2.0;
     for (pos, &seg_idx) in layout.visible.iter().enumerate() {
         if pos > 0 {
             ui.label(egui::RichText::new("›").color(chevron_color).size(11.0));
         }
         let is_last_overall = seg_idx + 1 == total;
+        // In fallback-tail mode a single segment may be wider than the panel.
+        // Keep the emergency fallback compact; the full name is still shown on hover.
+        let text = if layout.fallback_tail {
+            let max_w = (ui.available_width() - button_padding - 4.0)
+                .min(180.0)
+                .max(10.0);
+            truncate_text_to_fit(&segments[seg_idx].0, max_w, &font_id, ui)
+        } else {
+            segments[seg_idx].0.clone()
+        };
         let label = if is_last_overall {
-            egui::RichText::new(&segments[seg_idx].0)
+            egui::RichText::new(&text)
                 .strong()
                 .color(text_color)
                 .size(11.0)
         } else {
-            egui::RichText::new(&segments[seg_idx].0)
-                .color(text_color)
-                .size(11.0)
+            egui::RichText::new(&text).color(text_color).size(11.0)
         };
-        if breadcrumb_button_with_label(ui, label) {
+        let resp = breadcrumb_button_with_label(ui, label);
+        if resp.clicked() {
             *action = Some(segments[seg_idx].1.clone());
+        }
+        if layout.fallback_tail && text != segments[seg_idx].0 {
+            resp.on_hover_text(&segments[seg_idx].0);
         }
     }
 }
@@ -504,9 +532,8 @@ pub fn measure_breadcrumb_trail(ui: &egui::Ui, segments: &[(String, String)]) ->
 /// Renders a single clickable breadcrumb segment using the project's
 /// breadcrumb button visuals (transparent background, hover effect). The
 /// caller passes a pre-built `RichText` so it can apply extra styling such
-/// as `strong()` for the "current" segment. Returns `true` if the button was
-/// clicked this frame.
-fn breadcrumb_button_with_label(ui: &mut egui::Ui, label: egui::RichText) -> bool {
+/// as `strong()` for the "current" segment.
+fn breadcrumb_button_with_label(ui: &mut egui::Ui, label: egui::RichText) -> egui::Response {
     let hover_color = if ui.visuals().dark_mode {
         theme::color_dark_hover()
     } else {
@@ -528,5 +555,5 @@ fn breadcrumb_button_with_label(ui: &mut egui::Ui, label: egui::RichText) -> boo
     };
     ui.visuals_mut().widgets.active.bg_stroke = egui::Stroke::NONE;
 
-    ui.button(label).clicked()
+    ui.button(label)
 }
