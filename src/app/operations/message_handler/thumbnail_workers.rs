@@ -739,6 +739,14 @@ impl ImageViewerApp {
                     self.folder_size_state
                         .clear_panel_stale_summary(&folder_path);
                     self.folder_size_state.clear_failure(&folder_path);
+                    *self
+                        .folder_size_state
+                        .batch_invalidation_epoch
+                        .entry(folder_path.clone())
+                        .or_insert(0) += 1;
+                    self.folder_size_state
+                        .batch_cache
+                        .put(folder_path.clone(), summary.total_size);
                     self.folder_size_state.cache.put(folder_path, summary);
                     received_any = true;
                 }
@@ -762,6 +770,9 @@ impl ImageViewerApp {
         }
 
         for (folder_path, summary) in progress_updates {
+            self.folder_size_state
+                .batch_cache
+                .put(folder_path.clone(), summary.total_size);
             upsert_folder_content_summary(&mut self.folder_size_state.cache, folder_path, summary);
         }
 
