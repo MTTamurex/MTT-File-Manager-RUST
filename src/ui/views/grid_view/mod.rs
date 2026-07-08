@@ -22,6 +22,7 @@ mod virtualization;
 use super::common::TOOLTIP_DELAY_SECS;
 // STRICT LIMIT: Minimum zoom allowed to prevent performance degradation
 const MIN_THUMBNAIL_SIZE: f32 = crate::ui::theme::THUMBNAIL_MIN;
+const OPENGL_POST_SCROLL_THUMBNAIL_QUIET_MS: u64 = 300;
 
 #[derive(Clone, Copy)]
 pub struct ScrollPredictor {
@@ -326,6 +327,10 @@ pub fn render_grid_view(
     }
     // Is scrolling if visual position is changing (using same threshold)
     let is_scrolling = scroll_delta > 0.5;
+    let thumbnail_work_scrolling = is_scrolling
+        || (ctx.low_res_thumbnails_while_scrolling
+            && ctx.last_scroll_time.elapsed()
+                < std::time::Duration::from_millis(OPENGL_POST_SCROLL_THUMBNAIL_QUIET_MS));
 
     // 2.5 KEYBOARD SCROLL SYNC: Ensure selected item is visible
     if ctx.scroll_to_selected {
@@ -378,7 +383,7 @@ pub fn render_grid_view(
         item_h,
         available_w,
         virtual_cell_h,
-        is_scrolling,
+        thumbnail_work_scrolling,
         &mut clicked_item,
         &mut double_clicked_item,
         &mut secondary_clicked_item,
@@ -410,7 +415,13 @@ pub fn render_grid_view(
 
     prefetch::flush_pending_operations(ctx, ops);
     let t_after_flush = std::time::Instant::now();
-    prefetch::process_visible_range_prefetch(ctx, cols, visible_rows_range, is_scrolling, ops);
+    prefetch::process_visible_range_prefetch(
+        ctx,
+        cols,
+        visible_rows_range,
+        thumbnail_work_scrolling,
+        ops,
+    );
     let t_after_prefetch = std::time::Instant::now();
 
     let total_us = t_total.elapsed().as_micros();
