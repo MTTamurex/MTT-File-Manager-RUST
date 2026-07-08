@@ -1,6 +1,6 @@
 use super::{GridViewContext, GridViewOperations};
 
-const SCROLL_LOD_IDLE_PREFETCH_MAX_PER_FRAME: usize = 8;
+const SCROLL_LOD_IDLE_PREFETCH_MAX_PER_FRAME: usize = 2;
 const MAX_THUMBNAIL_REQUESTS_PER_FRAME: usize = 96;
 
 pub(super) fn flush_pending_operations(

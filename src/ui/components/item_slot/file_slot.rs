@@ -65,9 +65,14 @@ pub(super) fn render_file_slot<O: ItemSlotOperations>(
         // Queue all visible cache hits quickly; worker decode and GPU upload remain
         // separately throttled, so this does not increase per-frame upload cost.
         const MAX_THUMBNAIL_REQUESTS_PER_FRAME: usize = 96;
-        const MAX_SCROLL_LOD_THUMBNAIL_REQUESTS_PER_FRAME: usize = 48;
-        let max_thumbnail_requests = if scroll_lod {
-            MAX_SCROLL_LOD_THUMBNAIL_REQUESTS_PER_FRAME
+        const OPENGL_MAX_THUMBNAIL_REQUESTS_PER_FRAME: usize = 32;
+        const OPENGL_MAX_SCROLL_LOD_THUMBNAIL_REQUESTS_PER_FRAME: usize = 16;
+        let max_thumbnail_requests = if ctx.low_res_thumbnails_while_scrolling {
+            if scroll_lod {
+                OPENGL_MAX_SCROLL_LOD_THUMBNAIL_REQUESTS_PER_FRAME
+            } else {
+                OPENGL_MAX_THUMBNAIL_REQUESTS_PER_FRAME
+            }
         } else {
             MAX_THUMBNAIL_REQUESTS_PER_FRAME
         };

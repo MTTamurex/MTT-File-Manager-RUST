@@ -293,6 +293,8 @@ impl ImageViewerApp {
             } else {
                 48
             }
+        } else if is_opengl {
+            48
         } else if is_vulkan {
             VULKAN_MAX_INCOMING_THUMBNAIL_MSGS_PER_FRAME
         } else {
