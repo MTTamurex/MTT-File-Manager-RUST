@@ -10,11 +10,13 @@ const MAX_SYNC_FOLDER_SCAN_BATCH_MODERATE: usize = 16;
 const MAX_SYNC_FOLDER_SCAN_BATCH_CRITICAL: usize = 8;
 const MAX_SYNC_FOLDER_SCAN_BATCH_NON_USN: usize = 18;
 const MAX_SYNC_FOLDER_SCAN_BATCH_HARD_MAX: usize = 32;
+const OPENGL_MAX_SYNC_FOLDER_SCAN_BATCH: usize = 6;
 const FOLDER_SCAN_RESOLVE_BUDGET_BASE_MS: u64 = 10;
 const FOLDER_SCAN_RESOLVE_BUDGET_MODERATE_MS: u64 = 6;
 const FOLDER_SCAN_RESOLVE_BUDGET_NON_USN_MS: u64 = 6;
 const FOLDER_SCAN_RESOLVE_BUDGET_CRITICAL_MS: u64 = 3;
 const FOLDER_SCAN_RESOLVE_BUDGET_HARD_MAX_MS: u64 = 14;
+const OPENGL_FOLDER_SCAN_RESOLVE_BUDGET_MS: u64 = 3;
 
 impl ImageViewerApp {
     /// Requests an async scan of a folder to discover the first image.
@@ -86,6 +88,11 @@ impl ImageViewerApp {
             MAX_SYNC_FOLDER_SCAN_BATCH_CRITICAL,
             MAX_SYNC_FOLDER_SCAN_BATCH_HARD_MAX,
         );
+        let sync_cap = if self.is_opengl_backend() {
+            sync_cap.min(OPENGL_MAX_SYNC_FOLDER_SCAN_BATCH)
+        } else {
+            sync_cap
+        };
 
         let base_resolve_budget_ms = if critical_pressure {
             FOLDER_SCAN_RESOLVE_BUDGET_CRITICAL_MS
@@ -96,10 +103,13 @@ impl ImageViewerApp {
         } else {
             FOLDER_SCAN_RESOLVE_BUDGET_BASE_MS
         };
-        let resolve_budget_ms = (base_resolve_budget_ms as i64 + tab_budget_adjust_ms).clamp(
+        let mut resolve_budget_ms = (base_resolve_budget_ms as i64 + tab_budget_adjust_ms).clamp(
             FOLDER_SCAN_RESOLVE_BUDGET_CRITICAL_MS as i64,
             FOLDER_SCAN_RESOLVE_BUDGET_HARD_MAX_MS as i64,
         ) as u64;
+        if self.is_opengl_backend() {
+            resolve_budget_ms = resolve_budget_ms.min(OPENGL_FOLDER_SCAN_RESOLVE_BUDGET_MS);
+        }
         let resolve_budget = Duration::from_millis(resolve_budget_ms);
 
         let mut overflow_paths = if unique_paths.len() > sync_cap {
@@ -223,6 +233,7 @@ impl ImageViewerApp {
         // 3. Apply resolved covers to items (single pass through all_items)
         let apply_start = Instant::now();
         let mut any_updated = false;
+        let warm_cover_thumbnails = !self.is_opengl_backend();
         let mut cover_thumbnail_probes: Vec<PathBuf> = Vec::new();
         if !resolved.is_empty() {
             // Build a lookup map for O(1) access
@@ -235,7 +246,9 @@ impl ImageViewerApp {
                         item.folder_cover = Some((*cover).clone());
                         any_updated = true;
                     }
-                    cover_thumbnail_probes.push((*cover).clone());
+                    if warm_cover_thumbnails {
+                        cover_thumbnail_probes.push((*cover).clone());
+                    }
                 }
             }
 

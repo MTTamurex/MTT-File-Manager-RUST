@@ -7,7 +7,8 @@ use crate::ui::cache::{
     FxHashSet, DEFAULT_DYNAMIC_RGBA_BUDGET_BYTES, MAX_DYNAMIC_FOLDER_PREVIEW_ITEMS,
     MAX_DYNAMIC_TEXTURE_CACHE_ITEMS, MAX_RGBA_BUDGET_BYTES, MIN_DYNAMIC_FOLDER_PREVIEW_ITEMS,
     MIN_DYNAMIC_TEXTURE_CACHE_ITEMS, MIN_RGBA_BUDGET_BYTES,
-    VULKAN_MAX_DYNAMIC_FOLDER_PREVIEW_ITEMS, VULKAN_MAX_DYNAMIC_TEXTURE_CACHE_ITEMS,
+    VULKAN_MAX_DYNAMIC_FOLDER_PREVIEW_ITEMS as LOW_RAM_GPU_MAX_DYNAMIC_FOLDER_PREVIEW_ITEMS,
+    VULKAN_MAX_DYNAMIC_TEXTURE_CACHE_ITEMS as LOW_RAM_GPU_MAX_DYNAMIC_TEXTURE_CACHE_ITEMS,
 };
 use crate::workers::thumbnail::processing::get_bucket_size;
 
@@ -17,9 +18,9 @@ const BASE_PENDING_THUMBNAILS: usize = 64;
 const MIN_DYNAMIC_PENDING_THUMBNAILS: usize = 16;
 const MAX_DYNAMIC_PENDING_THUMBNAILS: usize = 1024;
 const MAX_PENDING_THUMBNAIL_RGBA_BYTES: usize = 64 * 1024 * 1024;
-const VULKAN_MAX_PENDING_THUMBNAIL_RGBA_BYTES: usize = 16 * 1024 * 1024;
-const VULKAN_RGBA_BUDGET_FLOOR_BYTES: usize = MIN_RGBA_BUDGET_BYTES;
-const VULKAN_MAX_RGBA_BUDGET_BYTES: usize = 8 * 1024 * 1024;
+const LOW_RAM_GPU_MAX_PENDING_THUMBNAIL_RGBA_BYTES: usize = 16 * 1024 * 1024;
+const LOW_RAM_GPU_RGBA_BUDGET_FLOOR_BYTES: usize = MIN_RGBA_BUDGET_BYTES;
+const LOW_RAM_GPU_MAX_RGBA_BUDGET_BYTES: usize = 8 * 1024 * 1024;
 const MEMORY_TRACE_INTERVAL: Duration = Duration::from_secs(5);
 const IDLE_THUMBNAIL_TEXTURE_KEEP: usize = 8;
 const IDLE_FOLDER_PREVIEW_KEEP: usize = 0;
@@ -33,8 +34,8 @@ const WORKING_SET_TRIM_FOLLOW_UP_DELAYS: &[Duration] = &[
     Duration::from_millis(6000),
 ];
 const WORKING_SET_TRIM_MIN_INTERVAL: Duration = Duration::from_secs(10);
-const VULKAN_IDLE_WS_TRIM_AFTER: Duration = Duration::from_secs(8);
-const VULKAN_IDLE_WS_TRIM_MIN_BYTES: u64 = 24 * 1024 * 1024;
+const LOW_RAM_GPU_IDLE_WS_TRIM_AFTER: Duration = Duration::from_secs(8);
+const LOW_RAM_GPU_IDLE_WS_TRIM_MIN_BYTES: u64 = 24 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug)]
 struct ProcessMemorySnapshot {
@@ -204,6 +205,12 @@ impl ImageViewerApp {
         self.active_gpu_backend == "Vulkan"
     }
 
+    /// Returns `true` for GPU backends that should use the low-RAM thumbnail
+    /// cache profile and working-set trims.
+    pub fn uses_aggressive_gpu_memory_policy(&self) -> bool {
+        self.is_vulkan_backend() || self.is_opengl_backend()
+    }
+
     /// Check if a video is actively playing in docked mode (preview panel)
     /// Used to throttle disk I/O from thumbnails to prevent stutter during video playback
     pub fn is_video_playing_docked(&self) -> bool {
@@ -256,8 +263,8 @@ impl ImageViewerApp {
 
         let visible_items = self.visible_grid_items_for_cache();
         let target = dynamic_texture_keep_count(visible_items);
-        if self.is_vulkan_backend() {
-            let cap = VULKAN_MAX_DYNAMIC_TEXTURE_CACHE_ITEMS
+        if self.uses_aggressive_gpu_memory_policy() {
+            let cap = LOW_RAM_GPU_MAX_DYNAMIC_TEXTURE_CACHE_ITEMS
                 .max(visible_items)
                 .min(MAX_DYNAMIC_TEXTURE_CACHE_ITEMS);
             target.min(cap).max(MIN_DYNAMIC_TEXTURE_CACHE_ITEMS)
@@ -272,15 +279,15 @@ impl ImageViewerApp {
         }
 
         let visible_items = self.visible_grid_items_for_cache();
-        let target = if self.is_vulkan_backend() {
-            // Vulkan reloads previews quickly; prefer releasing offscreen folders
-            // over holding every folder in large directories.
+        let target = if self.uses_aggressive_gpu_memory_policy() {
+            // Low-RAM GPU profile: prefer releasing offscreen folders over
+            // holding every folder in large directories.
             dynamic_texture_keep_count(visible_items)
         } else {
             dynamic_folder_preview_keep_count(visible_items, self.current_directory_folder_count())
         };
-        if self.is_vulkan_backend() {
-            let cap = VULKAN_MAX_DYNAMIC_FOLDER_PREVIEW_ITEMS
+        if self.uses_aggressive_gpu_memory_policy() {
+            let cap = LOW_RAM_GPU_MAX_DYNAMIC_FOLDER_PREVIEW_ITEMS
                 .max(visible_items)
                 .min(MAX_DYNAMIC_FOLDER_PREVIEW_ITEMS);
             target.min(cap).max(MIN_DYNAMIC_FOLDER_PREVIEW_ITEMS)
@@ -302,15 +309,15 @@ impl ImageViewerApp {
     }
 
     pub(crate) fn current_thumbnail_rgba_budget_bytes(&self) -> usize {
-        let floor_bytes = if self.is_vulkan_backend() {
-            VULKAN_RGBA_BUDGET_FLOOR_BYTES
+        let floor_bytes = if self.uses_aggressive_gpu_memory_policy() {
+            LOW_RAM_GPU_RGBA_BUDGET_FLOOR_BYTES
         } else {
             DEFAULT_DYNAMIC_RGBA_BUDGET_BYTES
         };
         let budget = self.current_dynamic_rgba_budget_bytes(floor_bytes);
 
-        if self.is_vulkan_backend() && self.thumbnail_caches_active() {
-            budget.clamp(MIN_RGBA_BUDGET_BYTES, VULKAN_MAX_RGBA_BUDGET_BYTES)
+        if self.uses_aggressive_gpu_memory_policy() && self.thumbnail_caches_active() {
+            budget.clamp(MIN_RGBA_BUDGET_BYTES, LOW_RAM_GPU_MAX_RGBA_BUDGET_BYTES)
         } else {
             budget
         }
@@ -329,8 +336,8 @@ impl ImageViewerApp {
                 .max(MIN_RGBA_BUDGET_BYTES);
         }
 
-        if self.is_vulkan_backend() {
-            VULKAN_MAX_PENDING_THUMBNAIL_RGBA_BYTES
+        if self.uses_aggressive_gpu_memory_policy() {
+            LOW_RAM_GPU_MAX_PENDING_THUMBNAIL_RGBA_BYTES
         } else {
             MAX_PENDING_THUMBNAIL_RGBA_BYTES
         }
@@ -665,7 +672,7 @@ impl ImageViewerApp {
         let old_rgba_bytes = self.cache_manager.estimate_ram_cache_usage();
 
         let (released_textures, released_rgba, released_folder_previews, released_rgba_bytes) =
-            if self.is_vulkan_backend() {
+            if self.uses_aggressive_gpu_memory_policy() {
                 self.cache_manager.release_thumbnail_caches_for_idle(
                     INACTIVE_THUMBNAIL_CACHE_ITEMS,
                     INACTIVE_THUMBNAIL_CACHE_ITEMS,
@@ -729,9 +736,12 @@ impl ImageViewerApp {
                 ext_icon_evicted,
             );
 
-            if self.is_vulkan_backend() {
+            if self.uses_aggressive_gpu_memory_policy() {
                 request_process_working_set_trim_series(
-                    format!("vulkan thumbnail navigation ({reason})"),
+                    format!(
+                        "gpu thumbnail navigation backend={} ({reason})",
+                        self.active_gpu_backend
+                    ),
                     WORKING_SET_TRIM_FOLLOW_UP_DELAYS,
                 );
             }
@@ -977,7 +987,7 @@ impl ImageViewerApp {
             return;
         };
         let working_set_bytes = process_memory.working_set_bytes;
-        self.run_vulkan_idle_working_set_trim(working_set_bytes);
+        self.run_gpu_idle_working_set_trim(working_set_bytes);
 
         // Proactive cache trim: even below the soft memory limit, excess
         // texture/RAM cache entries from a previous folder should not linger
@@ -1050,19 +1060,19 @@ impl ImageViewerApp {
             // Skip texture/RGBA trimming during burst — we need the caches full.
             (0, 0, 0)
         } else if aggressive {
-            let texture_keep = if self.is_vulkan_backend() {
+            let texture_keep = if self.uses_aggressive_gpu_memory_policy() {
                 texture_keep
             } else {
                 texture_keep.max(96)
             };
-            let folder_preview_keep = if self.is_vulkan_backend() {
+            let folder_preview_keep = if self.uses_aggressive_gpu_memory_policy() {
                 folder_preview_keep
             } else {
                 folder_preview_keep.max(72)
             };
             self.cache_manager.trim_thumbnail_caches(
                 texture_keep,
-                if self.is_vulkan_backend() {
+                if self.uses_aggressive_gpu_memory_policy() {
                     MIN_RGBA_BUDGET_BYTES
                 } else {
                     dynamic_rgba_budget_bytes(
@@ -1125,11 +1135,11 @@ impl ImageViewerApp {
         }
     }
 
-    fn run_vulkan_idle_working_set_trim(&mut self, working_set_bytes: u64) {
-        if !self.is_vulkan_backend()
+    fn run_gpu_idle_working_set_trim(&mut self, working_set_bytes: u64) {
+        if !self.uses_aggressive_gpu_memory_policy()
             || self.is_in_restore_burst()
-            || self.last_user_activity.elapsed() < VULKAN_IDLE_WS_TRIM_AFTER
-            || working_set_bytes < VULKAN_IDLE_WS_TRIM_MIN_BYTES
+            || self.last_user_activity.elapsed() < LOW_RAM_GPU_IDLE_WS_TRIM_AFTER
+            || working_set_bytes < LOW_RAM_GPU_IDLE_WS_TRIM_MIN_BYTES
             || self.is_loading_folder
             || self.is_item_dragging
             || self.pending_drag_move_confirmation.is_some()
@@ -1151,7 +1161,8 @@ impl ImageViewerApp {
 
         request_process_working_set_trim_series(
             format!(
-                "vulkan idle ws={:.1}MB path={}",
+                "gpu idle backend={} ws={:.1}MB path={}",
+                self.active_gpu_backend,
                 working_set_bytes as f64 / 1024.0 / 1024.0,
                 self.navigation_state.current_path
             ),

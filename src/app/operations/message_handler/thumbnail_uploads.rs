@@ -6,7 +6,7 @@ use crate::infrastructure::diagnostic_logger::{
 };
 use crate::ui::cache::{
     MAX_DYNAMIC_TEXTURE_CACHE_ITEMS, MIN_DYNAMIC_TEXTURE_CACHE_ITEMS,
-    VULKAN_MAX_DYNAMIC_TEXTURE_CACHE_ITEMS,
+    VULKAN_MAX_DYNAMIC_TEXTURE_CACHE_ITEMS as LOW_RAM_GPU_MAX_DYNAMIC_TEXTURE_CACHE_ITEMS,
 };
 use eframe::egui;
 use rustc_hash::FxHashMap;
@@ -82,8 +82,8 @@ fn compute_texture_cache_target_items(
             - frame_penalty
             - activity_penalty;
 
-    let max_texture_items = if app.is_vulkan_backend() {
-        VULKAN_MAX_DYNAMIC_TEXTURE_CACHE_ITEMS
+    let max_texture_items = if app.uses_aggressive_gpu_memory_policy() {
+        LOW_RAM_GPU_MAX_DYNAMIC_TEXTURE_CACHE_ITEMS
             .max(visible_base as usize)
             .min(MAX_DYNAMIC_TEXTURE_CACHE_ITEMS)
     } else {
@@ -1251,13 +1251,15 @@ impl ImageViewerApp {
             2
         } else if is_video_playing {
             if is_opengl {
-                3
+                1
             } else if is_vulkan {
                 4
             } else {
                 6
             }
-        } else if is_opengl || is_vulkan {
+        } else if is_opengl {
+            2
+        } else if is_vulkan {
             6
         } else {
             20
@@ -1280,7 +1282,9 @@ impl ImageViewerApp {
             } else {
                 2
             }
-        } else if is_opengl || is_vulkan {
+        } else if is_opengl {
+            2
+        } else if is_vulkan {
             4
         } else {
             8

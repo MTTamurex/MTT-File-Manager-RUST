@@ -54,14 +54,20 @@ impl ImageViewerApp {
 
         // Cap per-frame processing to keep message handling responsive under heavy cover streams.
         const MAX_COVER_EVENTS_PER_FRAME: usize = 48;
+        const OPENGL_MAX_COVER_EVENTS_PER_FRAME: usize = 12;
+        let max_cover_events_per_frame = if self.is_opengl_backend() {
+            OPENGL_MAX_COVER_EVENTS_PER_FRAME
+        } else {
+            MAX_COVER_EVENTS_PER_FRAME
+        };
         let mut cover_updates: std::collections::HashMap<
             std::path::PathBuf,
             Option<std::path::PathBuf>,
-        > = std::collections::HashMap::with_capacity(MAX_COVER_EVENTS_PER_FRAME);
+        > = std::collections::HashMap::with_capacity(max_cover_events_per_frame);
         let mut processed = 0usize;
         let mut has_more = false;
 
-        while processed < MAX_COVER_EVENTS_PER_FRAME {
+        while processed < max_cover_events_per_frame {
             match self.cover_worker_receiver.try_recv() {
                 Ok((folder_path, cover_opt)) => {
                     cover_updates.insert(folder_path, cover_opt);
@@ -74,7 +80,7 @@ impl ImageViewerApp {
 
         let t_recv = Instant::now();
 
-        if processed >= MAX_COVER_EVENTS_PER_FRAME {
+        if processed >= max_cover_events_per_frame {
             has_more = true;
         }
 
@@ -142,19 +148,25 @@ impl ImageViewerApp {
                 .remove(folder_path);
         }
 
-        let preview_requests: Vec<_> = cover_updates
-            .iter()
-            .filter_map(|(folder_path, cover_opt)| {
-                let cover_path = cover_opt.as_ref()?;
-                if self.cache_manager.has_folder_preview(folder_path)
-                    || self.cache_manager.is_folder_preview_loading(folder_path)
-                    || !self.is_folder_preview_result_relevant(folder_path)
-                {
-                    return None;
-                }
-                Some((folder_path.clone(), cover_path.clone()))
-            })
-            .collect();
+        let preview_requests: Vec<_> = if self.is_opengl_backend() {
+            // On OpenGL, folder preview uploads are synchronous. Let visible slots
+            // request previews on demand instead of starting a background burst.
+            Vec::new()
+        } else {
+            cover_updates
+                .iter()
+                .filter_map(|(folder_path, cover_opt)| {
+                    let cover_path = cover_opt.as_ref()?;
+                    if self.cache_manager.has_folder_preview(folder_path)
+                        || self.cache_manager.is_folder_preview_loading(folder_path)
+                        || !self.is_folder_preview_result_relevant(folder_path)
+                    {
+                        return None;
+                    }
+                    Some((folder_path.clone(), cover_path.clone()))
+                })
+                .collect()
+        };
 
         for (folder_path, cover_path) in preview_requests {
             if !self
