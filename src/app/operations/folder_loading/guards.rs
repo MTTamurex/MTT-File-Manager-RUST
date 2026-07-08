@@ -104,6 +104,10 @@ impl ImageViewerApp {
                 self.failed_icons.clear(); // Retry icon extraction in the new folder generation
                 self.scanned_folders.clear();
             }
+        } else if self.is_opengl_backend() {
+            self.cache_manager.clear_folder_preview_inflight_state();
+            self.pending_folder_preview_replace.clear();
+            self.suppress_next_folder_preview_invalidation.clear();
         }
         if !preserve_visual_pipeline {
             self.selected_item = None;

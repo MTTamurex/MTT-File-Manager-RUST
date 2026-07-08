@@ -134,6 +134,13 @@ impl ImageViewerApp {
         self.navigation_state.is_recycle_bin_view = false;
         self.active_tag_filter = Some(tag_id);
 
+        if self.is_opengl_backend() {
+            self.scanned_folders.clear();
+            self.cache_manager.clear_folder_preview_inflight_state();
+            self.pending_folder_preview_replace.clear();
+            self.suppress_next_folder_preview_invalidation.clear();
+        }
+
         self.apply_folder_lock_if_present();
 
         self.items = Arc::new(Vec::new());

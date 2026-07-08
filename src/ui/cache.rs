@@ -637,6 +637,16 @@ impl CacheManager {
         // Note: folder_icon_texture and computer_icon are kept as they're singletons
     }
 
+    /// Clears transient folder-preview request state without dropping cached
+    /// preview textures. Useful when navigating while preserving the old view:
+    /// stale in-flight markers from the previous folder must not block the new
+    /// folder from requesting its previews.
+    pub fn clear_folder_preview_inflight_state(&mut self) {
+        self.folder_preview_loading.clear();
+        self.folder_preview_loading_started.clear();
+        self.folder_preview_request_debounce.clear();
+    }
+
     /// Releases thumbnail-only state when the current view cannot display
     /// thumbnails at all (This PC, Recycle Bin, etc.). Unlike the normal trim
     /// path, this recreates the LRUs so their internal allocations and old
