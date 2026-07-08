@@ -281,7 +281,7 @@ impl ImageViewerApp {
             32
         } else if is_burst {
             if is_opengl {
-                48
+                24
             } else if is_vulkan {
                 VULKAN_MAX_INCOMING_THUMBNAIL_MSGS_PER_FRAME
             } else {
@@ -641,11 +641,7 @@ impl ImageViewerApp {
         // prevent UI freezes and frame drops.
         let base_max_uploads = if is_burst {
             if is_opengl {
-                if is_scrolling {
-                    2
-                } else {
-                    4
-                }
+                2
             } else if is_vulkan {
                 if is_scrolling {
                     6
@@ -699,11 +695,7 @@ impl ImageViewerApp {
                 1.0,
                 if is_burst {
                     if is_opengl {
-                        if is_scrolling {
-                            2.0
-                        } else {
-                            12.0
-                        }
+                        4.0
                     } else if is_vulkan {
                         16.0
                     } else {
@@ -769,11 +761,7 @@ impl ImageViewerApp {
 
         let base_budget_ms = if is_burst {
             if is_opengl {
-                if is_scrolling {
-                    2.0
-                } else {
-                    5.0
-                }
+                2.0
             } else if is_vulkan {
                 if is_scrolling {
                     4.0
