@@ -71,6 +71,15 @@ pub enum TagColor {
     Blue,
     Purple,
     Gray,
+    Pink,
+    Brown,
+    Mint,
+    Teal,
+    Cyan,
+    Indigo,
+    Lime,
+    Olive,
+    Black,
 }
 
 impl TagColor {
@@ -86,6 +95,27 @@ impl TagColor {
         ]
     }
 
+    pub const fn expanded_palette() -> [TagColor; 16] {
+        [
+            TagColor::Red,
+            TagColor::Orange,
+            TagColor::Yellow,
+            TagColor::Green,
+            TagColor::Blue,
+            TagColor::Purple,
+            TagColor::Gray,
+            TagColor::Pink,
+            TagColor::Brown,
+            TagColor::Mint,
+            TagColor::Teal,
+            TagColor::Cyan,
+            TagColor::Indigo,
+            TagColor::Lime,
+            TagColor::Olive,
+            TagColor::Black,
+        ]
+    }
+
     pub const fn as_db_str(self) -> &'static str {
         match self {
             TagColor::Red => "red",
@@ -95,6 +125,15 @@ impl TagColor {
             TagColor::Blue => "blue",
             TagColor::Purple => "purple",
             TagColor::Gray => "gray",
+            TagColor::Pink => "pink",
+            TagColor::Brown => "brown",
+            TagColor::Mint => "mint",
+            TagColor::Teal => "teal",
+            TagColor::Cyan => "cyan",
+            TagColor::Indigo => "indigo",
+            TagColor::Lime => "lime",
+            TagColor::Olive => "olive",
+            TagColor::Black => "black",
         }
     }
 
@@ -107,6 +146,15 @@ impl TagColor {
             "blue" => Some(TagColor::Blue),
             "purple" => Some(TagColor::Purple),
             "gray" => Some(TagColor::Gray),
+            "pink" => Some(TagColor::Pink),
+            "brown" => Some(TagColor::Brown),
+            "mint" => Some(TagColor::Mint),
+            "teal" => Some(TagColor::Teal),
+            "cyan" => Some(TagColor::Cyan),
+            "indigo" => Some(TagColor::Indigo),
+            "lime" => Some(TagColor::Lime),
+            "olive" => Some(TagColor::Olive),
+            "black" => Some(TagColor::Black),
             _ => None,
         }
     }
@@ -120,6 +168,15 @@ impl TagColor {
             TagColor::Blue => Color32::from_rgb(0, 122, 255),
             TagColor::Purple => Color32::from_rgb(175, 82, 222),
             TagColor::Gray => Color32::from_rgb(142, 142, 147),
+            TagColor::Pink => Color32::from_rgb(255, 45, 85),
+            TagColor::Brown => Color32::from_rgb(162, 132, 94),
+            TagColor::Mint => Color32::from_rgb(0, 199, 190),
+            TagColor::Teal => Color32::from_rgb(48, 176, 199),
+            TagColor::Cyan => Color32::from_rgb(50, 173, 230),
+            TagColor::Indigo => Color32::from_rgb(88, 86, 214),
+            TagColor::Lime => Color32::from_rgb(191, 215, 48),
+            TagColor::Olive => Color32::from_rgb(128, 128, 0),
+            TagColor::Black => Color32::from_rgb(28, 28, 30),
         }
     }
 }
@@ -138,8 +195,24 @@ mod tests {
 
     #[test]
     fn tag_color_roundtrips_db_values() {
-        for color in TagColor::default_palette() {
+        for color in TagColor::expanded_palette() {
             assert_eq!(TagColor::from_db_str(color.as_db_str()), Some(color));
         }
+    }
+
+    #[test]
+    fn default_palette_keeps_original_colors() {
+        assert_eq!(
+            TagColor::default_palette(),
+            [
+                TagColor::Red,
+                TagColor::Orange,
+                TagColor::Yellow,
+                TagColor::Green,
+                TagColor::Blue,
+                TagColor::Purple,
+                TagColor::Gray,
+            ]
+        );
     }
 }

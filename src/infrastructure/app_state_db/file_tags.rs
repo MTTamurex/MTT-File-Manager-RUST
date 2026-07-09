@@ -44,6 +44,15 @@ pub(super) fn seed_default_file_tags(conn: &Connection) {
             TagColor::Blue => "Blue",
             TagColor::Purple => "Purple",
             TagColor::Gray => "Gray",
+            TagColor::Pink => "Pink",
+            TagColor::Brown => "Brown",
+            TagColor::Mint => "Mint",
+            TagColor::Teal => "Teal",
+            TagColor::Cyan => "Cyan",
+            TagColor::Indigo => "Indigo",
+            TagColor::Lime => "Lime",
+            TagColor::Olive => "Olive",
+            TagColor::Black => "Black",
         };
         let _ = conn.execute(
             "INSERT OR IGNORE INTO file_tags (name, color, position) VALUES (?1, ?2, ?3)",

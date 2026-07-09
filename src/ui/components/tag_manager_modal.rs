@@ -19,23 +19,147 @@ fn color_label(color: TagColor) -> String {
         TagColor::Blue => t!("tags.color_blue").to_string(),
         TagColor::Purple => t!("tags.color_purple").to_string(),
         TagColor::Gray => t!("tags.color_gray").to_string(),
+        TagColor::Pink => t!("tags.color_pink").to_string(),
+        TagColor::Brown => t!("tags.color_brown").to_string(),
+        TagColor::Mint => t!("tags.color_mint").to_string(),
+        TagColor::Teal => t!("tags.color_teal").to_string(),
+        TagColor::Cyan => t!("tags.color_cyan").to_string(),
+        TagColor::Indigo => t!("tags.color_indigo").to_string(),
+        TagColor::Lime => t!("tags.color_lime").to_string(),
+        TagColor::Olive => t!("tags.color_olive").to_string(),
+        TagColor::Black => t!("tags.color_black").to_string(),
     }
 }
 
-fn color_button(ui: &mut egui::Ui, color: TagColor, selected: bool) -> egui::Response {
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(22.0, 22.0), egui::Sense::click());
+fn color_picker_button(ui: &mut egui::Ui, selected: TagColor) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(42.0, 24.0), egui::Sense::click());
     if ui.is_rect_visible(rect) {
+        let visuals = ui.style().interact(&response);
+        ui.painter().rect(
+            rect,
+            4.0,
+            visuals.weak_bg_fill,
+            visuals.bg_stroke,
+            egui::StrokeKind::Inside,
+        );
+        ui.painter().circle_filled(
+            egui::pos2(rect.left() + 14.0, rect.center().y),
+            6.0,
+            selected.to_color32(),
+        );
+        ui.painter().circle_stroke(
+            egui::pos2(rect.left() + 14.0, rect.center().y),
+            6.0,
+            ui.visuals().widgets.noninteractive.bg_stroke,
+        );
+
+        ui.painter().text(
+            egui::pos2(rect.right() - 11.0, rect.center().y),
+            egui::Align2::CENTER_CENTER,
+            "v",
+            egui::TextStyle::Button.resolve(ui.style()),
+            ui.visuals().text_color(),
+        );
+    }
+    response.on_hover_text(color_label(selected))
+}
+
+fn color_swatch(ui: &mut egui::Ui, color: TagColor, selected: bool) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(28.0, 28.0), egui::Sense::click());
+    if ui.is_rect_visible(rect) {
+        let swatch_rect = rect.shrink(3.0);
         ui.painter()
-            .circle_filled(rect.center(), 7.0, color.to_color32());
+            .rect_filled(swatch_rect, 3.0, color.to_color32());
+        ui.painter().rect_stroke(
+            swatch_rect,
+            3.0,
+            ui.visuals().widgets.noninteractive.bg_stroke,
+            egui::StrokeKind::Inside,
+        );
+
         if selected || response.hovered() {
-            ui.painter().circle_stroke(
-                rect.center(),
-                9.0,
-                egui::Stroke::new(if selected { 2.0 } else { 1.0 }, ui.visuals().text_color()),
+            let stroke_width = if selected { 2.0 } else { 1.0 };
+            ui.painter().rect_stroke(
+                swatch_rect.expand(2.0),
+                4.0,
+                egui::Stroke::new(stroke_width, ui.visuals().text_color()),
+                egui::StrokeKind::Inside,
             );
         }
     }
     response.on_hover_text(color_label(color))
+}
+
+fn color_picker(ui: &mut egui::Ui, id: egui::Id, selected: TagColor) -> Option<TagColor> {
+    let popup_id = id.with("popup");
+    let mut show_popup = ui
+        .ctx()
+        .memory(|m| m.data.get_temp::<bool>(popup_id).unwrap_or(false));
+
+    let button_response = color_picker_button(ui, selected);
+    let button_rect = button_response.rect;
+
+    if button_response.clicked() {
+        show_popup = !show_popup;
+        ui.ctx()
+            .memory_mut(|m| m.data.insert_temp::<bool>(popup_id, show_popup));
+    }
+
+    if !show_popup {
+        return None;
+    }
+
+    let mut chosen = None;
+    let mut close_popup = false;
+    let popup_pos = egui::pos2(button_rect.left(), button_rect.bottom() + 2.0);
+    let popup_response = egui::Area::new(popup_id)
+        .order(egui::Order::Foreground)
+        .fixed_pos(popup_pos)
+        .show(ui.ctx(), |ui| {
+            egui::Frame::popup(ui.style())
+                .inner_margin(egui::Margin::same(6))
+                .show(ui, |ui| {
+                    ui.set_min_width(136.0);
+                    ui.set_max_width(136.0);
+                    ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
+
+                    egui::Grid::new(id.with("grid"))
+                        .num_columns(4)
+                        .spacing(egui::vec2(4.0, 4.0))
+                        .show(ui, |ui| {
+                            for (index, color) in
+                                TagColor::expanded_palette().into_iter().enumerate()
+                            {
+                                if color_swatch(ui, color, selected == color).clicked() {
+                                    chosen = Some(color);
+                                    close_popup = true;
+                                }
+                                if (index + 1) % 4 == 0 {
+                                    ui.end_row();
+                                }
+                            }
+                        });
+                });
+        });
+
+    if close_popup {
+        ui.ctx()
+            .memory_mut(|m| m.data.insert_temp::<bool>(popup_id, false));
+        return chosen;
+    }
+
+    if ui.ctx().input(|i| i.pointer.any_pressed()) {
+        if let Some(pointer_pos) = ui.ctx().input(|i| i.pointer.press_origin()) {
+            let clicked_button = button_rect.contains(pointer_pos);
+            let clicked_popup = popup_response.response.rect.contains(pointer_pos);
+            if !clicked_button && !clicked_popup {
+                ui.ctx()
+                    .memory_mut(|m| m.data.insert_temp::<bool>(popup_id, false));
+            }
+        }
+    }
+
+    chosen
 }
 
 pub fn render_tag_manager_modal(app: &mut ImageViewerApp, ctx: &egui::Context) {
@@ -67,11 +191,16 @@ pub fn render_tag_manager_content(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
         ui.heading(t!("tags.add"));
         ui.horizontal(|ui| {
             ui.label(t!("tags.name"));
-            ui.text_edit_singleline(&mut app.tag_manager_new_name);
-            for color in TagColor::default_palette() {
-                if color_button(ui, color, app.tag_manager_new_color == color).clicked() {
-                    app.tag_manager_new_color = color;
-                }
+            ui.add_sized(
+                egui::vec2(180.0, 22.0),
+                egui::TextEdit::singleline(&mut app.tag_manager_new_name),
+            );
+            if let Some(color) = color_picker(
+                ui,
+                egui::Id::new("tag_manager_new_color_picker"),
+                app.tag_manager_new_color,
+            ) {
+                app.tag_manager_new_color = color;
             }
             if ui.button(t!("tags.add")).clicked() {
                 actions.push(TagManagerAction::Create);
@@ -98,14 +227,19 @@ pub fn render_tag_manager_content(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
                     tag.color.to_color32(),
                 );
                 ui.add_space(18.0);
-                ui.text_edit_singleline(edit_name);
+                ui.add_sized(
+                    egui::vec2(160.0, 22.0),
+                    egui::TextEdit::singleline(edit_name),
+                );
                 if ui.button(t!("tags.save")).clicked() {
                     actions.push(TagManagerAction::Rename(tag.id, edit_name.clone()));
                 }
-                for color in TagColor::default_palette() {
-                    if color_button(ui, color, tag.color == color).clicked() {
-                        actions.push(TagManagerAction::Recolor(tag.id, color));
-                    }
+                if let Some(color) = color_picker(
+                    ui,
+                    egui::Id::new(("tag_manager_color_picker", tag.id)),
+                    tag.color,
+                ) {
+                    actions.push(TagManagerAction::Recolor(tag.id, color));
                 }
                 ui.label(assignment_count.to_string());
                 if ui.button(t!("tags.delete")).clicked() {
