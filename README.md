@@ -56,19 +56,23 @@
 
 ## Graphics Backend
 
-The app supports multiple rendering backends, selectable in **Settings > General > GPU Backend** (requires app restart):
+The app supports three rendering backend choices, selectable in **Settings > General > GPU Backend** (requires app restart):
 
-### Wgpu — Vulkan (Default)
+### Auto — Vulkan (Default)
 - Default backend for the main window on Windows
 - Best observed scrolling and thumbnail-upload performance in large media folders
 - Uses Vulkan through `wgpu` with aggressive thumbnail memory cleanup tuned for this backend
-- `Auto` mode prioritizes Vulkan first, then falls back to OpenGL and DirectX 12 if Vulkan is unavailable
+- `Auto` mode uses Vulkan only. If Vulkan is unavailable on the machine, select the Glow + OpenGL fallback and restart the app
 
-### Experimental Backends — OpenGL / DirectX 12
+### Glow — OpenGL (Fallback)
+- Recommended fallback when Vulkan is unavailable or unstable on the machine
+- Uses eframe's `Glow` renderer directly instead of `wgpu`'s OpenGL backend
+- OpenGL texture uploads can be synchronous on the CPU thread, so the app applies more conservative thumbnail and folder-preview upload limits on this backend
+
+### Wgpu — DirectX 12 (Experimental)
 - Available for compatibility testing from **Settings > General > GPU Backend**
-- OpenGL options are fallback/legacy paths and may show occasional stutter during grid scrolling because texture uploads can be synchronous on the CPU thread
 - **Known limitation DX12**: because wgpu creates the swapchain with `FLIP_DISCARD`, a brief black frame may flash during the minimize animation on Windows. This is a documented behavior of the wgpu DX12 backend and does not affect functionality.
-- DX12 and OpenGL are currently treated as experimental compared with the Vulkan default
+- DirectX 12 is the only backend currently treated as experimental compared with the Vulkan default and Glow + OpenGL fallback
 
 ## Prerequisites
 
@@ -116,8 +120,9 @@ Some app-level shortcuts are configurable in Settings > Keyboard Shortcuts. Stan
 |----------|-----------|---------|---------|
 | **Language** | Rust | Edition 2021 | Performance and safety |
 | **GUI** | eframe/egui | 0.31 | Modern immediate-mode GUI (features: `persistence`, `wgpu`, `glow`) |
-| **GPU Backend (Default)** | wgpu Vulkan via eframe | 24.x | Main window uses **Vulkan** by default for best thumbnail/grid performance; Auto falls back to OpenGL/DX12 if needed |
-| **GPU Backend (Experimental)** | OpenGL / DirectX 12 via eframe | via eframe / 24.x | Compatibility backends available from Settings; requires app restart |
+| **GPU Backend (Default)** | wgpu Vulkan via eframe | 24.x | Main window uses **Vulkan** by default for best thumbnail/grid performance |
+| **GPU Backend (Fallback)** | Glow OpenGL via eframe | via eframe | OpenGL fallback when Vulkan is unavailable; requires app restart |
+| **GPU Backend (Experimental)** | wgpu DirectX 12 via eframe | 24.x | Compatibility backend available from Settings; requires app restart |
 | **Windows API** | windows-rs | 0.61.0 | Native Windows integration |
 | **Video** | libmpv2 | 5.0.3 | High-performance video playback |
 | **PDF** | pdfium (pdfium-render) | 0.8.37 | Native PDF rendering (requires pdfium.dll) |
