@@ -16,7 +16,7 @@ use rfd::FileDialog;
 
 /// Base OSC script-opts for the standalone player.
 const STANDALONE_OSC_BASE_SCRIPT_OPTS: &str =
-    "osc-scalewindowed=1,osc-scalefullscreen=1,osc-scaleforcedwindow=1,osc-windowcontrols=yes";
+    "osc-scalewindowed=1,osc-scalefullscreen=1,osc-scaleforcedwindow=1,osc-windowcontrols=yes,vsr-standaloneprofile=yes";
 
 /// OSD/OSC libass cache limits. These mpv options were added after reports of
 /// OSC/OSD memory growth caused by refreshable ASS overlays.
@@ -24,6 +24,22 @@ pub(crate) const MPV_OSD_PRUNE_DELAY_SECS: f64 = 0.0;
 pub(crate) const MPV_OSD_GLYPH_LIMIT: i64 = 1;
 pub(crate) const MPV_OSD_BITMAP_MAX_SIZE_MB: i64 = 1;
 pub(crate) const MPV_OSD_SHAPER: &str = "simple";
+
+const MPV_STANDALONE_NORMAL_FRAMEDROP: &str = "vo";
+const MPV_STANDALONE_NORMAL_CACHE_SECS: f64 = 10.0;
+const MPV_STANDALONE_NORMAL_READAHEAD_SECS: f64 = 5.0;
+const MPV_STANDALONE_NORMAL_DEMUXER_MAX_BYTES: i64 = 96_i64 * 1024 * 1024;
+const MPV_STANDALONE_NORMAL_DEMUXER_MAX_BACK_BYTES: i64 = 16_i64 * 1024 * 1024;
+const MPV_STANDALONE_NORMAL_HWDEC_EXTRA_FRAMES: i64 = 1;
+const MPV_STANDALONE_NORMAL_SWAPCHAIN_DEPTH: i64 = 2;
+
+const MPV_STANDALONE_VSR_FRAMEDROP: &str = "decoder+vo";
+const MPV_STANDALONE_VSR_CACHE_SECS: f64 = 4.0;
+const MPV_STANDALONE_VSR_READAHEAD_SECS: f64 = 2.0;
+const MPV_STANDALONE_VSR_DEMUXER_MAX_BYTES: i64 = 32_i64 * 1024 * 1024;
+const MPV_STANDALONE_VSR_DEMUXER_MAX_BACK_BYTES: i64 = 8_i64 * 1024 * 1024;
+const MPV_STANDALONE_VSR_HWDEC_EXTRA_FRAMES: i64 = 1;
+const MPV_STANDALONE_VSR_SWAPCHAIN_DEPTH: i64 = 2;
 
 /// Maximum file size for the video player (50 GB).
 const MAX_VIDEO_FILE_SIZE: u64 = 50 * 1024 * 1024 * 1024;
@@ -251,6 +267,59 @@ fn load_external_subtitle_for_standalone(
     let _ = mpv.command("show-text", &[&loaded_msg, "2000"]);
 
     Ok(true)
+}
+
+fn apply_standalone_vsr_runtime_profile(mpv: &mpv::Mpv, vsr_enabled: bool) {
+    let (
+        framedrop,
+        cache_secs,
+        readahead_secs,
+        demuxer_max_bytes,
+        demuxer_max_back_bytes,
+        hwdec_extra_frames,
+        swapchain_depth,
+    ) = if vsr_enabled {
+        (
+            MPV_STANDALONE_VSR_FRAMEDROP,
+            MPV_STANDALONE_VSR_CACHE_SECS,
+            MPV_STANDALONE_VSR_READAHEAD_SECS,
+            MPV_STANDALONE_VSR_DEMUXER_MAX_BYTES,
+            MPV_STANDALONE_VSR_DEMUXER_MAX_BACK_BYTES,
+            MPV_STANDALONE_VSR_HWDEC_EXTRA_FRAMES,
+            MPV_STANDALONE_VSR_SWAPCHAIN_DEPTH,
+        )
+    } else {
+        (
+            MPV_STANDALONE_NORMAL_FRAMEDROP,
+            MPV_STANDALONE_NORMAL_CACHE_SECS,
+            MPV_STANDALONE_NORMAL_READAHEAD_SECS,
+            MPV_STANDALONE_NORMAL_DEMUXER_MAX_BYTES,
+            MPV_STANDALONE_NORMAL_DEMUXER_MAX_BACK_BYTES,
+            MPV_STANDALONE_NORMAL_HWDEC_EXTRA_FRAMES,
+            MPV_STANDALONE_NORMAL_SWAPCHAIN_DEPTH,
+        )
+    };
+
+    let _ = mpv.set_property("framedrop", framedrop);
+    let _ = mpv.set_property("cache", "yes");
+    let _ = mpv.set_property("cache-secs", cache_secs);
+    let _ = mpv.set_property("demuxer-readahead-secs", readahead_secs);
+    let _ = mpv.set_property("demuxer-max-bytes", demuxer_max_bytes);
+    let _ = mpv.set_property("demuxer-max-back-bytes", demuxer_max_back_bytes);
+    let _ = mpv.set_property("hwdec-extra-frames", hwdec_extra_frames);
+    let _ = mpv.set_property("swapchain-depth", swapchain_depth);
+
+    log::info!(
+        "[VIDEO-PLAYER] VSR runtime profile: enabled={} framedrop={} cache_secs={:.1} readahead_secs={:.1} demuxer_max_mb={} demuxer_back_mb={} hwdec_extra_frames={} swapchain_depth={}",
+        vsr_enabled,
+        framedrop,
+        cache_secs,
+        readahead_secs,
+        demuxer_max_bytes / (1024 * 1024),
+        demuxer_max_back_bytes / (1024 * 1024),
+        hwdec_extra_frames,
+        swapchain_depth
+    );
 }
 
 /// Load app icons from the current executable.
@@ -531,6 +600,20 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
             log::warn!("[VIDEO-PLAYER] Failed to set osd-shaper: {:?}", e);
         }
 
+        // Keep D3D11 decode/VO buffers deterministic before force-window can
+        // initialize the video output. The standalone player may enable RTX VSR
+        // later, and these options are not reliably downsized after surfaces
+        // already exist.
+        if let Err(e) = init.set_option(
+            "hwdec-extra-frames",
+            MPV_STANDALONE_NORMAL_HWDEC_EXTRA_FRAMES,
+        ) {
+            log::warn!("[VIDEO-PLAYER] Failed to set hwdec-extra-frames: {:?}", e);
+        }
+        if let Err(e) = init.set_option("swapchain-depth", MPV_STANDALONE_NORMAL_SWAPCHAIN_DEPTH) {
+            log::warn!("[VIDEO-PLAYER] Failed to set swapchain-depth: {:?}", e);
+        }
+
         // Load custom OSC script
         if let Err(e) = init.set_option("load-scripts", true) {
             log::warn!("[VIDEO-PLAYER] Failed to set load-scripts: {:?}", e);
@@ -616,15 +699,10 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
     let _ = mpv.set_property("video-sync", "audio");
     let _ = mpv.set_property("interpolation", false);
     let _ = mpv.set_property("tscale", "linear");
-    let _ = mpv.set_property("framedrop", "vo");
 
     // Cache/demuxer settings — enough read-ahead for high-bitrate 4K while
     // keeping hard byte limits so RAM usage remains bounded.
-    let _ = mpv.set_property("cache", "yes");
-    let _ = mpv.set_property("cache-secs", 10.0);
-    let _ = mpv.set_property("demuxer-readahead-secs", 5.0);
-    let _ = mpv.set_property("demuxer-max-bytes", 96_i64 * 1024 * 1024);
-    let _ = mpv.set_property("demuxer-max-back-bytes", 16_i64 * 1024 * 1024);
+    apply_standalone_vsr_runtime_profile(&mpv, false);
 
     // Volume (mpv uses 0-100 scale)
     let _ = mpv.set_property("volume", ((volume * 100.0) as i64).clamp(0, 100));
@@ -632,6 +710,7 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
     // Observe volume property changes so the final volume can be persisted
     // to the app database when the standalone player exits.
     let _ = mpv.observe_property("volume", mpv::Format::Double, 0);
+    let _ = mpv.observe_property("user-data/vsr/vsr-enabled", mpv::Format::Flag, 1);
 
     // Window title (shown in taskbar for borderless window)
     let _ = mpv.set_property("title", format!("Media Player — {}", title_name).as_str());
@@ -783,6 +862,10 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
                     if let mpv::events::PropertyData::Double(vol) = change {
                         last_known_volume_pct = vol.clamp(0.0, 100.0) as f32;
                         save_volume_to_db(last_known_volume_pct / 100.0);
+                    }
+                } else if name == "user-data/vsr/vsr-enabled" {
+                    if let mpv::events::PropertyData::Flag(vsr_enabled) = change {
+                        apply_standalone_vsr_runtime_profile(&mpv, vsr_enabled);
                     }
                 }
             }
