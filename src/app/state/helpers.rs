@@ -193,9 +193,9 @@ impl ImageViewerApp {
     /// blocks until the driver finishes the transfer), unlike DX12/Vulkan where
     /// wgpu queues the upload asynchronously.  This method is used to apply more
     /// conservative per-frame upload limits that prevent UI freezes on OpenGL
-    /// backends (Glow and Wgpu-GL).
+    /// backends (Glow).
     pub fn is_opengl_backend(&self) -> bool {
-        matches!(self.active_gpu_backend.as_str(), "Gl" | "glow")
+        self.active_gpu_backend == "glow"
     }
 
     /// Returns `true` when the active wgpu backend is Vulkan.

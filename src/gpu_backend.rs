@@ -10,26 +10,25 @@ pub(crate) fn parse_gpu_backend_preference(pref: Option<&str>) -> wgpu::Backends
     match pref {
         Some("dx12") => wgpu::Backends::DX12,
         Some("vulkan") => wgpu::Backends::VULKAN,
-        Some("gl") => wgpu::Backends::GL,
         _ => auto_gpu_backends(),
     }
 }
 
 #[cfg(target_os = "windows")]
 fn auto_gpu_backends() -> wgpu::Backends {
-    wgpu::Backends::VULKAN | wgpu::Backends::GL
+    wgpu::Backends::VULKAN
 }
 
 #[cfg(not(target_os = "windows"))]
 fn auto_gpu_backends() -> wgpu::Backends {
-    wgpu::Backends::PRIMARY | wgpu::Backends::GL
+    wgpu::Backends::PRIMARY
 }
 
 pub(crate) fn adapter_selector(
     pref: Option<&str>,
 ) -> Option<egui_wgpu::NativeAdapterSelectorMethod> {
     match pref {
-        Some("dx12") | Some("vulkan") | Some("gl") => None,
+        Some("dx12") | Some("vulkan") => None,
         _ => {
             #[cfg(target_os = "windows")]
             {
@@ -44,7 +43,7 @@ pub(crate) fn adapter_selector(
 }
 
 #[cfg(target_os = "windows")]
-const AUTO_BACKEND_PRIORITY: &[wgpu::Backend] = &[wgpu::Backend::Vulkan, wgpu::Backend::Gl];
+const AUTO_BACKEND_PRIORITY: &[wgpu::Backend] = &[wgpu::Backend::Vulkan];
 
 #[cfg(target_os = "windows")]
 fn backend_priority_label(order: &[wgpu::Backend]) -> String {

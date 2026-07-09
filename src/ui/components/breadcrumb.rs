@@ -372,9 +372,7 @@ fn render_visible_tail(
         // In fallback-tail mode a single segment may be wider than the panel.
         // Keep the emergency fallback compact; the full name is still shown on hover.
         let text = if layout.fallback_tail {
-            let max_w = (ui.available_width() - button_padding - 4.0)
-                .min(180.0)
-                .max(10.0);
+            let max_w = (ui.available_width() - button_padding - 4.0).clamp(10.0, 180.0);
             truncate_text_to_fit(&segments[seg_idx].0, max_w, &font_id, ui)
         } else {
             segments[seg_idx].0.clone()

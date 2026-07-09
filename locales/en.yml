@@ -339,7 +339,7 @@ settings:
   graphics: "Graphics"
   graphics_description: "Configure the graphics rendering backend."
   backend_title: "Graphics Backend"
-  backend_description: "Select the graphics rendering backend. Auto uses Vulkan by default and falls back to OpenGL/DX12 when needed."
+  backend_description: "Select the graphics rendering backend. Auto uses Vulkan by default. Use Glow + OpenGL as the fallback when Vulkan is unavailable."
   backend_active: "Active backend:"
   backend_select: "Preferred backend:"
   backend_restart_warning: "⚠ Graphics backend changes require restarting the application to take effect."

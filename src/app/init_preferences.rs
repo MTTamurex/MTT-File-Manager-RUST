@@ -203,13 +203,16 @@ impl StartupPreferences {
 
         let gpu_backend_preference = prefs
             .get("gpu_backend")
-            .map(|backend| {
-                if backend == "vulkan" {
+            .map(|backend| match backend.as_str() {
+                "vulkan" => {
                     app_state_db.set_preference("gpu_backend", "auto");
                     "auto".to_string()
-                } else {
-                    backend.clone()
                 }
+                "gl" => {
+                    app_state_db.set_preference("gpu_backend", "glow");
+                    "glow".to_string()
+                }
+                _ => backend.clone(),
             })
             .unwrap_or_else(|| "auto".to_string());
 
