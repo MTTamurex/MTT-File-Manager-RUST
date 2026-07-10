@@ -134,8 +134,12 @@ impl ImageViewerApp {
         self.navigation_state.is_recycle_bin_view = false;
         self.active_tag_filter = Some(tag_id);
 
+        // Tag-view FileEntry cache intentionally does not persist folder_cover.
+        // Reusing stale scan markers would prevent visible folders from
+        // re-discovering covers after focus-restore texture flushes or tag switches.
+        self.scanned_folders.clear();
+
         if self.is_opengl_backend() {
-            self.scanned_folders.clear();
             self.cache_manager.clear_folder_preview_inflight_state();
             self.pending_folder_preview_replace.clear();
             self.suppress_next_folder_preview_invalidation.clear();
