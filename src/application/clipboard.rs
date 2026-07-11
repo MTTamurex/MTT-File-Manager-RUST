@@ -2,12 +2,22 @@ use crate::application::file_operations;
 use crate::infrastructure::windows_clipboard;
 use std::cell::Cell;
 use std::path::PathBuf;
+use windows::Win32::Foundation::HWND;
 
 /// Clipboard operation type
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum ClipboardOp {
     Copy,
     Move,
+}
+
+fn internal_op_for_cut_write_result(
+    result: windows_clipboard::ClipboardWriteResult,
+) -> ClipboardOp {
+    match result {
+        windows_clipboard::ClipboardWriteResult::Complete => ClipboardOp::Move,
+        windows_clipboard::ClipboardWriteResult::FilesOnly => ClipboardOp::Copy,
+    }
 }
 
 /// Manages clipboard content and operations
@@ -59,13 +69,24 @@ impl ClipboardManager {
     }
 
     /// Copy files to clipboard (System + Internal)
-    pub fn copy(&mut self, paths: &[PathBuf]) {
+    pub fn copy(&mut self, paths: &[PathBuf], owner: HWND) {
         if paths.is_empty() {
             return;
         }
 
-        // 1. System Clipboard (prefer native file payload; fallback to text path)
-        let system_file_payload_written = windows_clipboard::copy_files_to_clipboard(paths).is_ok();
+        // 1. System Clipboard (fall back to text only when CF_HDROP could not be published)
+        let system_file_payload_written = match windows_clipboard::copy_files_to_clipboard(
+            paths, owner,
+        ) {
+            Ok(_) => true,
+            Err(error) => {
+                log::warn!(
+                    "[Clipboard] Failed to publish native file list for copy; using text fallback: {}",
+                    error
+                );
+                false
+            }
+        };
         if !system_file_payload_written {
             if let Some(first) = paths.first() {
                 let _ = file_operations::copy_path_to_clipboard(first);
@@ -81,13 +102,30 @@ impl ClipboardManager {
     }
 
     /// Cut files (System + Internal)
-    pub fn cut(&mut self, paths: &[PathBuf]) {
+    pub fn cut(&mut self, paths: &[PathBuf], owner: HWND) {
         if paths.is_empty() {
             return;
         }
 
-        // 1. System Clipboard (prefer native file payload; fallback to text path)
-        let system_file_payload_written = windows_clipboard::cut_files_to_clipboard(paths).is_ok();
+        // 1. System Clipboard (fall back to text only when CF_HDROP could not be published)
+        let (system_file_payload_written, internal_op) =
+            match windows_clipboard::cut_files_to_clipboard(paths, owner) {
+                Ok(result) => {
+                    if result == windows_clipboard::ClipboardWriteResult::FilesOnly {
+                        log::warn!(
+                            "[Clipboard] Cut was downgraded to copy because Preferred DropEffect could not be published"
+                        );
+                    }
+                    (true, internal_op_for_cut_write_result(result))
+                }
+                Err(error) => {
+                    log::warn!(
+                        "[Clipboard] Failed to publish native file list for move; using text fallback: {}",
+                        error
+                    );
+                    (false, ClipboardOp::Move)
+                }
+            };
         if !system_file_payload_written {
             if let Some(first) = paths.first() {
                 let _ = file_operations::copy_path_to_clipboard(first);
@@ -99,7 +137,7 @@ impl ClipboardManager {
 
         // 2. Internal State
         self.internal_files = paths.to_vec();
-        self.internal_op = Some(ClipboardOp::Move);
+        self.internal_op = Some(internal_op);
     }
 
     /// Returns files and operation type (is_move) for pasting.
@@ -171,8 +209,21 @@ impl ClipboardManager {
 
 #[cfg(test)]
 mod tests {
-    use super::{ClipboardManager, ClipboardOp};
+    use super::{internal_op_for_cut_write_result, ClipboardManager, ClipboardOp};
+    use crate::infrastructure::windows_clipboard::ClipboardWriteResult;
     use std::path::PathBuf;
+
+    #[test]
+    fn cut_downgrades_to_internal_copy_when_drop_effect_is_missing() {
+        assert_eq!(
+            internal_op_for_cut_write_result(ClipboardWriteResult::Complete),
+            ClipboardOp::Move
+        );
+        assert_eq!(
+            internal_op_for_cut_write_result(ClipboardWriteResult::FilesOnly),
+            ClipboardOp::Copy
+        );
+    }
 
     #[test]
     fn internal_fallback_is_ignored_when_clipboard_sequence_changes() {

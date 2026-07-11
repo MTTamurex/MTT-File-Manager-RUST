@@ -5,6 +5,7 @@
 
 use clipboard_win::{formats, Clipboard, Getter, Setter};
 use std::path::PathBuf;
+use windows::Win32::Foundation::HWND;
 
 /// Preferred drop effect values (from shlobj.h)
 /// Used to indicate if the clipboard operation is a Copy or Move (Cut)
@@ -18,70 +19,93 @@ pub enum ClipboardFileOp {
     Move,
 }
 
+/// Result of publishing files to the Windows clipboard.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ClipboardWriteResult {
+    /// Both CF_HDROP and Preferred DropEffect were published.
+    Complete,
+    /// CF_HDROP was published, but the preferred operation was not.
+    /// Windows Shell consumers safely treat this as Copy.
+    FilesOnly,
+}
+
 /// Copies file paths to the Windows clipboard (CF_HDROP format)
 ///
 /// # Arguments
 /// * `paths` - Slice of file paths to copy
+/// * `owner` - Application window that will own the clipboard data
 ///
 /// # Returns
-/// * `Ok(())` on success
+/// * `Ok(ClipboardWriteResult)` when CF_HDROP was published
 /// * `Err(String)` with error message on failure
-pub fn copy_files_to_clipboard(paths: &[PathBuf]) -> Result<(), String> {
-    if paths.is_empty() {
-        return Err("No files to copy".to_string());
-    }
-
-    // Convert paths to the format expected by clipboard
-    let file_list: Vec<String> = paths
-        .iter()
-        .map(|p| p.to_string_lossy().to_string())
-        .collect();
-
-    let _clip =
-        Clipboard::new_attempts(10).map_err(|e| format!("Failed to open clipboard: {:?}", e))?;
-
-    // Set files using CF_HDROP format via FileList
-    formats::FileList
-        .write_clipboard(&file_list)
-        .map_err(|e| format!("Failed to write file list to clipboard: {:?}", e))?;
-
-    // Set preferred drop effect to COPY
-    set_preferred_drop_effect(DROPEFFECT_COPY)?;
-
-    Ok(())
+pub fn copy_files_to_clipboard(
+    paths: &[PathBuf],
+    owner: HWND,
+) -> Result<ClipboardWriteResult, String> {
+    write_files_to_clipboard(paths, owner, DROPEFFECT_COPY, "copy")
 }
 
 /// Cuts file paths to the Windows clipboard (CF_HDROP format with MOVE effect)
 ///
 /// # Arguments
 /// * `paths` - Slice of file paths to cut
+/// * `owner` - Application window that will own the clipboard data
 ///
 /// # Returns
-/// * `Ok(())` on success
+/// * `Ok(ClipboardWriteResult)` when CF_HDROP was published
 /// * `Err(String)` with error message on failure
-pub fn cut_files_to_clipboard(paths: &[PathBuf]) -> Result<(), String> {
+pub fn cut_files_to_clipboard(
+    paths: &[PathBuf],
+    owner: HWND,
+) -> Result<ClipboardWriteResult, String> {
+    write_files_to_clipboard(paths, owner, DROPEFFECT_MOVE, "move")
+}
+
+/// Writes a native file payload and, when possible, its preferred Shell operation.
+///
+/// `CF_HDROP` is sufficient for Explorer and other Windows applications to paste files.
+/// A failed `Preferred DropEffect` must not turn a successfully published file list into
+/// a text-only clipboard entry; without that hint, Shell consumers safely default to Copy.
+fn write_files_to_clipboard(
+    paths: &[PathBuf],
+    owner: HWND,
+    preferred_drop_effect: u32,
+    operation_name: &str,
+) -> Result<ClipboardWriteResult, String> {
     if paths.is_empty() {
-        return Err("No files to cut".to_string());
+        return Err("No files to copy or move".to_string());
+    }
+    if owner.0.is_null() {
+        return Err("No clipboard owner window available".to_string());
     }
 
-    // Convert paths to the format expected by clipboard
     let file_list: Vec<String> = paths
         .iter()
         .map(|p| p.to_string_lossy().to_string())
         .collect();
 
-    let _clip =
-        Clipboard::new_attempts(10).map_err(|e| format!("Failed to open clipboard: {:?}", e))?;
+    let _clip = Clipboard::new_attempts_for(owner.0, 10)
+        .map_err(|e| format!("Failed to open clipboard: {:?}", e))?;
+
+    // FileList writes with NoClear. Clear explicitly so a failed effect write cannot
+    // leave a stale Copy/Move effect associated with the new file list.
+    clipboard_win::empty().map_err(|e| format!("Failed to clear clipboard: {:?}", e))?;
 
     // Set files using CF_HDROP format via FileList
     formats::FileList
         .write_clipboard(&file_list)
         .map_err(|e| format!("Failed to write file list to clipboard: {:?}", e))?;
 
-    // Set preferred drop effect to MOVE
-    set_preferred_drop_effect(DROPEFFECT_MOVE)?;
+    if let Err(error) = set_preferred_drop_effect(preferred_drop_effect) {
+        log::warn!(
+            "[Clipboard] CF_HDROP was published, but Preferred DropEffect for {} failed; preserving the native file payload: {}",
+            operation_name,
+            error
+        );
+        return Ok(ClipboardWriteResult::FilesOnly);
+    }
 
-    Ok(())
+    Ok(ClipboardWriteResult::Complete)
 }
 
 /// Gets file paths from the Windows clipboard (CF_HDROP format)

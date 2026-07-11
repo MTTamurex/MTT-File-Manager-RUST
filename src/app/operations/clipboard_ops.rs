@@ -77,7 +77,9 @@ impl ImageViewerApp {
         }
 
         if idx.is_none() && !self.context_menu.target_paths.is_empty() {
-            self.clipboard.copy(&self.context_menu.target_paths.clone());
+            let owner = self.shell_op_hwnd();
+            self.clipboard
+                .copy(&self.context_menu.target_paths.clone(), owner);
             return;
         }
 
@@ -102,7 +104,8 @@ impl ImageViewerApp {
         }
 
         if !files.is_empty() {
-            self.clipboard.copy(&files);
+            let owner = self.shell_op_hwnd();
+            self.clipboard.copy(&files, owner);
         }
     }
 
@@ -114,7 +117,9 @@ impl ImageViewerApp {
         }
 
         if idx.is_none() && !self.context_menu.target_paths.is_empty() {
-            self.clipboard.cut(&self.context_menu.target_paths.clone());
+            let owner = self.shell_op_hwnd();
+            self.clipboard
+                .cut(&self.context_menu.target_paths.clone(), owner);
             return;
         }
 
@@ -139,7 +144,8 @@ impl ImageViewerApp {
         }
 
         if !files.is_empty() {
-            self.clipboard.cut(&files);
+            let owner = self.shell_op_hwnd();
+            self.clipboard.cut(&files, owner);
         }
     }
 
