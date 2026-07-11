@@ -1,6 +1,7 @@
 use crate::domain::organizer_rule::OrganizerRule;
 use crate::infrastructure::organizer::OrganizerManager;
-use std::sync::mpsc::Sender;
+use std::collections::HashSet;
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 
 const NOTIFICATION_IDLE_DELAY: Duration = Duration::from_millis(1500);
@@ -22,6 +23,11 @@ pub struct OrganizerNotificationSummary {
     pub failed: usize,
     pub issue_details: Vec<String>,
     pub additional_issues: usize,
+}
+
+pub struct OrganizerPreviewResult {
+    pub rule_id: i64,
+    pub count: usize,
 }
 
 impl OrganizerNotificationBatch {
@@ -83,6 +89,9 @@ pub struct OrganizerState {
     pub editing_rule_id: Option<i64>,
     pub form_enabled: bool,
     pub notification_batch: OrganizerNotificationBatch,
+    preview_sender: Sender<OrganizerPreviewResult>,
+    pub preview_receiver: Receiver<OrganizerPreviewResult>,
+    previewing_rule_ids: HashSet<i64>,
 }
 
 impl OrganizerState {
@@ -91,6 +100,7 @@ impl OrganizerState {
         rules: Vec<OrganizerRule>,
         ui_ctx: eframe::egui::Context,
     ) -> Self {
+        let (preview_sender, preview_receiver) = mpsc::channel();
         Self {
             manager: OrganizerManager::start(file_operation_sender, rules.clone(), ui_ctx),
             rules,
@@ -100,6 +110,9 @@ impl OrganizerState {
             editing_rule_id: None,
             form_enabled: true,
             notification_batch: OrganizerNotificationBatch::default(),
+            preview_sender,
+            preview_receiver,
+            previewing_rule_ids: HashSet::new(),
         }
     }
 
@@ -114,6 +127,36 @@ impl OrganizerState {
     pub fn replace_rules(&mut self, rules: Vec<OrganizerRule>) {
         self.manager.set_rules(rules.clone());
         self.rules = rules;
+    }
+
+    pub fn is_previewing(&self, rule_id: i64) -> bool {
+        self.previewing_rule_ids.contains(&rule_id)
+    }
+
+    pub fn start_preview(
+        &mut self,
+        rule: OrganizerRule,
+        ui_ctx: eframe::egui::Context,
+    ) -> Result<bool, String> {
+        if !self.previewing_rule_ids.insert(rule.id) {
+            return Ok(false);
+        }
+
+        let sender = self.preview_sender.clone();
+        let rule_id = rule.id;
+        if let Err(error) = crate::spawn_named("organizer-preview", move || {
+            let count = crate::domain::organizer_rule::preview_rule(&rule).len();
+            let _ = sender.send(OrganizerPreviewResult { rule_id, count });
+            ui_ctx.request_repaint();
+        }) {
+            self.previewing_rule_ids.remove(&rule_id);
+            return Err(error.to_string());
+        }
+        Ok(true)
+    }
+
+    pub fn finish_preview(&mut self, rule_id: i64) {
+        self.previewing_rule_ids.remove(&rule_id);
     }
 }
 

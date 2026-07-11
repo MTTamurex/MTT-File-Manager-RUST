@@ -447,7 +447,7 @@ pub(super) fn handle_organizer_move(
         let _ = result_sender.send(FileOperationResult::OrganizerMoveFailed {
             rule_id,
             path,
-            message: "Caminho bloqueado pela validação de segurança".to_string(),
+            message: rust_i18n::t!("organizer.error_security_path").to_string(),
         });
         return;
     };
@@ -464,7 +464,7 @@ pub(super) fn handle_organizer_move(
         let _ = result_sender.send(FileOperationResult::OrganizerMoveFailed {
             rule_id,
             path,
-            message: "Arquivo ou pasta de destino indisponível".to_string(),
+            message: rust_i18n::t!("organizer.error_file_or_destination_unavailable").to_string(),
         });
         return;
     }
@@ -473,7 +473,7 @@ pub(super) fn handle_organizer_move(
         return;
     }
 
-    match move_file_without_replace(&path, &moved_dest) {
+    match shell_operations::move_file_without_replace(&path, &moved_dest) {
         Ok(()) => {
             let _ = result_sender.send(FileOperationResult::OrganizerMoveCompleted {
                 rule_id,
@@ -494,29 +494,6 @@ pub(super) fn handle_organizer_move(
             });
         }
     }
-}
-
-fn move_file_without_replace(source: &Path, destination: &Path) -> std::io::Result<()> {
-    use std::io::Write;
-
-    let mut input = std::fs::File::open(source)?;
-    let mut output = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(destination)?;
-    let copy_result = std::io::copy(&mut input, &mut output).and_then(|_| output.flush());
-    drop(output);
-
-    if let Err(error) = copy_result {
-        let _ = std::fs::remove_file(destination);
-        return Err(error);
-    }
-    drop(input);
-    if let Err(error) = std::fs::remove_file(source) {
-        let _ = std::fs::remove_file(destination);
-        return Err(error);
-    }
-    Ok(())
 }
 
 pub(super) fn handle_copy_batch(
@@ -885,7 +862,7 @@ mod tests {
         std::fs::write(&source, b"source").expect("create source file");
         std::fs::write(&destination, b"destination").expect("create destination file");
 
-        let result = move_file_without_replace(&source, &destination);
+        let result = shell_operations::move_file_without_replace(&source, &destination);
 
         assert!(matches!(
             result.map_err(|error| error.kind()),
@@ -899,19 +876,30 @@ mod tests {
     }
 
     #[test]
-    fn organizer_move_copies_then_removes_the_source() {
+    fn organizer_move_preserves_the_move_semantics() {
         let source_parent = tempfile::tempdir().expect("create source parent");
         let destination_parent = tempfile::tempdir().expect("create destination parent");
         let source = source_parent.path().join("report.pdf");
         let destination = destination_parent.path().join("report.pdf");
         std::fs::write(&source, b"contents").expect("create source file");
+        let created_at = std::fs::metadata(&source)
+            .expect("source metadata")
+            .created()
+            .expect("source creation time");
 
-        move_file_without_replace(&source, &destination).expect("move file");
+        shell_operations::move_file_without_replace(&source, &destination).expect("move file");
 
         assert!(!source.exists());
         assert_eq!(
-            std::fs::read(destination).expect("destination contents"),
+            std::fs::read(&destination).expect("destination contents"),
             b"contents"
+        );
+        assert_eq!(
+            std::fs::metadata(&destination)
+                .expect("destination metadata")
+                .created()
+                .expect("destination creation time"),
+            created_at
         );
     }
 

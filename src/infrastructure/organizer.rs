@@ -164,9 +164,6 @@ mod watcher {
         let mut rules_to_scan = Vec::new();
 
         for rule in rules {
-            let activation = activation_flags
-                .entry(rule.id)
-                .or_insert_with(|| Arc::new(AtomicBool::new(false)));
             let previous = previous_by_id.get(&rule.id).copied();
             let was_enabled = previous.is_some_and(|previous| previous.enabled);
             let configuration_changed = previous.is_none_or(|previous| {
@@ -175,7 +172,22 @@ mod watcher {
                     || previous.extensions != rule.extensions
             });
 
-            activation.store(rule.enabled, Ordering::Release);
+            if configuration_changed
+                || previous.is_some_and(|previous| previous.enabled != rule.enabled)
+            {
+                // Pending and already-dispatched moves retain the old token.
+                // Disable it before replacing the rule configuration so they
+                // cannot execute with stale source, extension, or destination.
+                if let Some(previous_activation) = activation_flags.get(&rule.id) {
+                    previous_activation.store(false, Ordering::Release);
+                }
+                activation_flags.insert(rule.id, Arc::new(AtomicBool::new(rule.enabled)));
+            } else {
+                activation_flags
+                    .entry(rule.id)
+                    .or_insert_with(|| Arc::new(AtomicBool::new(rule.enabled)));
+            }
+
             if rule.enabled && (!was_enabled || configuration_changed) {
                 rules_to_scan.push(rule.id);
             }
@@ -333,7 +345,7 @@ mod watcher {
                 .is_err()
             {
                 let _ = event_sender.send(OrganizerEvent::Error {
-                    message: "O worker de operações de arquivo não está disponível".to_string(),
+                    message: rust_i18n::t!("organizer.error_file_worker_unavailable").to_string(),
                 });
             }
         }
@@ -376,6 +388,21 @@ mod watcher {
 
             assert!(scan_rules.is_empty());
             assert!(!activations[&1].load(Ordering::Acquire));
+        }
+
+        #[test]
+        fn changing_a_rule_invalidates_its_previous_activation() {
+            let previous = vec![rule(1, true)];
+            let mut current = previous.clone();
+            current[0].destination_folder = PathBuf::from(r"C:\NewDestination");
+            let mut activations = activation_flags_for(&previous);
+            let previous_activation = activations[&1].clone();
+
+            let scan_rules = update_activation_flags(&previous, &current, &mut activations);
+
+            assert_eq!(scan_rules, vec![1]);
+            assert!(!previous_activation.load(Ordering::Acquire));
+            assert!(activations[&1].load(Ordering::Acquire));
         }
     }
 }

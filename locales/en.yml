@@ -668,6 +668,18 @@ organizer:
   issue_failed: "%{name}: %{reason}"
   issue_error: "Organizer error: %{reason}"
   additional_issues: "%{count} more occurrence(s)"
+  error_invalid_extensions: "Invalid extensions"
+  error_missing_extensions: "Enter at least one extension"
+  error_relative_folder: "Folders must use absolute paths"
+  error_source_missing: "The source folder does not exist"
+  error_destination_missing: "The destination folder does not exist"
+  error_same_folders: "The destination folder must differ from the source"
+  error_database_unavailable: "The organizer database is unavailable"
+  error_rule_not_found: "This organizer rule no longer exists"
+  error_database: "Unable to save organizer rule: %{reason}"
+  error_security_path: "Path blocked by security validation"
+  error_file_or_destination_unavailable: "The file or destination folder is unavailable"
+  error_file_worker_unavailable: "The file operation worker is unavailable"
 
 notifications:
   close: "Close notification"

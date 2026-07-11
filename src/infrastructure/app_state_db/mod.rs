@@ -21,6 +21,8 @@ mod organizer_rules;
 mod pinned_folders;
 mod preferences;
 
+pub use organizer_rules::OrganizerRuleDbError;
+
 /// Persistent store for user settings and metadata.
 ///
 /// Tables: user_preferences, folder_locks, pinned_folders, folder_covers.

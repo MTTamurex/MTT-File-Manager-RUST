@@ -181,6 +181,15 @@ impl ImageViewerApp {
     }
 
     pub(super) fn process_organizer_events(&mut self) {
+        while let Ok(preview) = self.organizer_state.preview_receiver.try_recv() {
+            self.organizer_state.finish_preview(preview.rule_id);
+            self.notifications.info(format!(
+                "{}: {}",
+                rust_i18n::t!("organizer.preview_result"),
+                preview.count
+            ));
+        }
+
         while let Ok(event) = self.organizer_state.manager.events.try_recv() {
             match event {
                 crate::infrastructure::organizer::OrganizerEvent::SkippedConflict { path } => {

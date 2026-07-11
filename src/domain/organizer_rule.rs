@@ -10,6 +10,16 @@ pub enum OrganizerExtensionPreset {
     Executables,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OrganizerRuleError {
+    InvalidExtensions,
+    MissingExtensions,
+    RelativeFolder,
+    SourceFolderMissing,
+    DestinationFolderMissing,
+    SameFolders,
+}
+
 impl OrganizerExtensionPreset {
     pub const ALL: [Self; 6] = [
         Self::Documents,
@@ -58,7 +68,7 @@ impl OrganizerRule {
         destination_folder: PathBuf,
         extensions: Vec<String>,
         enabled: bool,
-    ) -> Result<Self, String> {
+    ) -> Result<Self, OrganizerRuleError> {
         let extensions = normalize_extensions(&extensions)?;
         validate_folders(&source_folder, &destination_folder)?;
         Ok(Self {
@@ -78,7 +88,7 @@ impl OrganizerRule {
         destination_folder: PathBuf,
         extensions: Vec<String>,
         enabled: bool,
-    ) -> Result<Self, String> {
+    ) -> Result<Self, OrganizerRuleError> {
         Ok(Self {
             id,
             source_folder,
@@ -108,7 +118,7 @@ impl OrganizerRule {
     }
 }
 
-pub fn parse_extensions(input: &str) -> Result<Vec<String>, String> {
+pub fn parse_extensions(input: &str) -> Result<Vec<String>, OrganizerRuleError> {
     let extensions: Vec<String> = input
         .split(|character: char| character == ',' || character.is_whitespace())
         .filter(|extension| !extension.trim().is_empty())
@@ -128,14 +138,14 @@ pub fn preview_rule(rule: &OrganizerRule) -> Vec<PathBuf> {
         .collect()
 }
 
-fn normalize_extensions(extensions: &[String]) -> Result<Vec<String>, String> {
+fn normalize_extensions(extensions: &[String]) -> Result<Vec<String>, OrganizerRuleError> {
     let mut normalized = Vec::new();
     for extension in extensions {
         let extension = extension.trim().trim_start_matches('.');
         if extension.is_empty()
             || extension.contains(['\\', '/', ':', '*', '?', '"', '<', '>', '|'])
         {
-            return Err("Extensões inválidas".to_string());
+            return Err(OrganizerRuleError::InvalidExtensions);
         }
         if !normalized
             .iter()
@@ -145,23 +155,23 @@ fn normalize_extensions(extensions: &[String]) -> Result<Vec<String>, String> {
         }
     }
     if normalized.is_empty() {
-        return Err("Informe ao menos uma extensão".to_string());
+        return Err(OrganizerRuleError::MissingExtensions);
     }
     Ok(normalized)
 }
 
-fn validate_folders(source: &Path, destination: &Path) -> Result<(), String> {
+fn validate_folders(source: &Path, destination: &Path) -> Result<(), OrganizerRuleError> {
     if !source.is_absolute() || !destination.is_absolute() {
-        return Err("As pastas devem usar caminhos absolutos".to_string());
+        return Err(OrganizerRuleError::RelativeFolder);
     }
     if !source.is_dir() {
-        return Err("A pasta de origem não existe".to_string());
+        return Err(OrganizerRuleError::SourceFolderMissing);
     }
     if !destination.is_dir() {
-        return Err("A pasta de destino não existe".to_string());
+        return Err(OrganizerRuleError::DestinationFolderMissing);
     }
     if paths_equal(destination, source) {
-        return Err("A pasta de destino deve ser diferente da origem".to_string());
+        return Err(OrganizerRuleError::SameFolders);
     }
     Ok(())
 }

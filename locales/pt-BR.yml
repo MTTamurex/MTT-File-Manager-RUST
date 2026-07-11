@@ -668,6 +668,18 @@ organizer:
   issue_failed: "%{name}: %{reason}"
   issue_error: "Erro do organizador: %{reason}"
   additional_issues: "Mais %{count} ocorrência(s)"
+  error_invalid_extensions: "Extensões inválidas"
+  error_missing_extensions: "Informe ao menos uma extensão"
+  error_relative_folder: "As pastas devem usar caminhos absolutos"
+  error_source_missing: "A pasta de origem não existe"
+  error_destination_missing: "A pasta de destino não existe"
+  error_same_folders: "A pasta de destino deve ser diferente da origem"
+  error_database_unavailable: "O banco de dados do organizador não está disponível"
+  error_rule_not_found: "Esta regra do organizador não existe mais"
+  error_database: "Não foi possível salvar a regra do organizador: %{reason}"
+  error_security_path: "Caminho bloqueado pela validação de segurança"
+  error_file_or_destination_unavailable: "Arquivo ou pasta de destino indisponível"
+  error_file_worker_unavailable: "O worker de operações de arquivo não está disponível"
 
 notifications:
   close: "Fechar notificação"

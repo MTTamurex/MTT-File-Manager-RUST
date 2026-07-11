@@ -1,7 +1,8 @@
 use crate::app::ImageViewerApp;
 use crate::domain::organizer_rule::{
-    parse_extensions, preview_rule, OrganizerExtensionPreset, OrganizerRule,
+    parse_extensions, OrganizerExtensionPreset, OrganizerRule, OrganizerRuleError,
 };
+use crate::infrastructure::app_state_db::OrganizerRuleDbError;
 use crate::ui::theme;
 use eframe::egui::{self, RichText};
 use rust_i18n::t;
@@ -143,13 +144,23 @@ fn render_rules(ui: &mut egui::Ui, app: &mut ImageViewerApp, dark_mode: bool) {
                 rule.destination_folder.display()
             ));
             ui.horizontal(|ui| {
+                let previewing = app.organizer_state.is_previewing(rule.id);
                 if ui
-                    .add_enabled(rule.enabled, egui::Button::new(t!("organizer.preview")))
+                    .add_enabled(
+                        rule.enabled && !previewing,
+                        egui::Button::new(t!("organizer.preview")),
+                    )
                     .clicked()
                 {
-                    let count = preview_rule(&rule).len();
-                    app.notifications
-                        .info(format!("{}: {count}", t!("organizer.preview_result")));
+                    if let Err(error) = app
+                        .organizer_state
+                        .start_preview(rule.clone(), app.ui_ctx.clone())
+                    {
+                        app.notifications.warning(error);
+                    }
+                }
+                if previewing {
+                    ui.spinner();
                 }
                 if ui.button(t!("organizer.edit")).clicked() {
                     app.organizer_state.source_input =
@@ -161,10 +172,17 @@ fn render_rules(ui: &mut egui::Ui, app: &mut ImageViewerApp, dark_mode: bool) {
                     app.organizer_state.form_enabled = rule.enabled;
                 }
                 if ui.button(t!("organizer.delete")).clicked() {
-                    app.app_state_db.delete_organizer_rule(rule.id);
-                    reload_rules(app);
-                    app.notifications
-                        .success(t!("organizer.deleted").to_string());
+                    match app.app_state_db.delete_organizer_rule(rule.id) {
+                        Ok(()) => {
+                            if app.organizer_state.editing_rule_id == Some(rule.id) {
+                                app.organizer_state.reset_form();
+                            }
+                            reload_rules(app);
+                            app.notifications
+                                .success(t!("organizer.deleted").to_string());
+                        }
+                        Err(error) => app.notifications.warning(db_error_message(error)),
+                    }
                 }
             });
         });
@@ -176,7 +194,7 @@ fn save_form_rule(app: &mut ImageViewerApp) {
     let extensions = match parse_extensions(&app.organizer_state.extensions_input) {
         Ok(extensions) => extensions,
         Err(error) => {
-            app.notifications.warning(error);
+            app.notifications.warning(rule_error_message(error));
             return;
         }
     };
@@ -189,25 +207,59 @@ fn save_form_rule(app: &mut ImageViewerApp) {
     ) {
         Ok(rule) => rule,
         Err(error) => {
-            app.notifications.warning(error);
+            app.notifications.warning(rule_error_message(error));
             return;
         }
     };
-    persist_rule(app, &rule, t!("organizer.saved").to_string());
-    app.organizer_state.reset_form();
+    if persist_rule(app, &rule, t!("organizer.saved").to_string()) {
+        app.organizer_state.reset_form();
+    }
 }
 
-fn persist_rule(app: &mut ImageViewerApp, rule: &OrganizerRule, success_message: String) {
+fn persist_rule(app: &mut ImageViewerApp, rule: &OrganizerRule, success_message: String) -> bool {
     match app.app_state_db.save_organizer_rule(rule) {
         Ok(_) => {
             reload_rules(app);
             app.notifications.success(success_message);
+            true
         }
-        Err(error) => app.notifications.warning(error),
+        Err(error) => {
+            app.notifications.warning(db_error_message(error));
+            false
+        }
     }
 }
 
 fn reload_rules(app: &mut ImageViewerApp) {
     app.organizer_state
         .replace_rules(app.app_state_db.get_organizer_rules());
+}
+
+fn rule_error_message(error: OrganizerRuleError) -> String {
+    match error {
+        OrganizerRuleError::InvalidExtensions => {
+            t!("organizer.error_invalid_extensions").to_string()
+        }
+        OrganizerRuleError::MissingExtensions => {
+            t!("organizer.error_missing_extensions").to_string()
+        }
+        OrganizerRuleError::RelativeFolder => t!("organizer.error_relative_folder").to_string(),
+        OrganizerRuleError::SourceFolderMissing => t!("organizer.error_source_missing").to_string(),
+        OrganizerRuleError::DestinationFolderMissing => {
+            t!("organizer.error_destination_missing").to_string()
+        }
+        OrganizerRuleError::SameFolders => t!("organizer.error_same_folders").to_string(),
+    }
+}
+
+fn db_error_message(error: OrganizerRuleDbError) -> String {
+    match error {
+        OrganizerRuleDbError::DatabaseUnavailable => {
+            t!("organizer.error_database_unavailable").to_string()
+        }
+        OrganizerRuleDbError::RuleNotFound => t!("organizer.error_rule_not_found").to_string(),
+        OrganizerRuleDbError::Database(reason) => {
+            rust_i18n::t!("organizer.error_database", reason = reason).to_string()
+        }
+    }
 }
