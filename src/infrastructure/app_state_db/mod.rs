@@ -17,6 +17,7 @@ mod file_tags;
 mod folder_covers;
 mod folder_locks;
 pub(crate) mod gc;
+mod organizer_rules;
 mod pinned_folders;
 mod preferences;
 
@@ -234,6 +235,18 @@ impl AppStateDb {
                 is_hidden INTEGER NOT NULL,
                 sync_status INTEGER NOT NULL,
                 cached_at INTEGER NOT NULL
+            )",
+            [],
+        )
+        .unwrap_or(0);
+
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS organizer_rules (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_folder TEXT NOT NULL COLLATE NOCASE,
+                destination_folder TEXT NOT NULL COLLATE NOCASE,
+                extensions TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1
             )",
             [],
         )

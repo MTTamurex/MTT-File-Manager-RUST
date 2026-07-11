@@ -23,7 +23,9 @@ pub enum FileOperationResult {
     /// Specifically for Recycle Bin operations to trigger targeted refresh
     RecycleBinChanged,
     /// Restore operation completed - original folders need refresh
-    RestoreCompleted { parent_folders: Vec<PathBuf> },
+    RestoreCompleted {
+        parent_folders: Vec<PathBuf>,
+    },
     /// Delete operation completed - parent folders need refresh
     DeleteCompleted {
         parent_folders: Vec<PathBuf>,
@@ -46,6 +48,23 @@ pub enum FileOperationResult {
         moved_files: Vec<PathBuf>,
         /// Source/destination pairs whose destination was known to be unambiguous.
         known_moved_pairs: Vec<(PathBuf, PathBuf)>,
+    },
+    /// A background organizer move completed without allowing replacement of an existing file.
+    OrganizerMoveCompleted {
+        rule_id: i64,
+        source_folder: PathBuf,
+        dest_folder: PathBuf,
+        source_path: PathBuf,
+        moved_dest: PathBuf,
+    },
+    OrganizerMoveSkipped {
+        rule_id: i64,
+        path: PathBuf,
+    },
+    OrganizerMoveFailed {
+        rule_id: i64,
+        path: PathBuf,
+        message: String,
     },
     /// Copy operation completed - dest folder needs reload if active
     CopyCompleted {
@@ -77,7 +96,9 @@ pub enum FileOperationResult {
         cancelled: bool,
     },
     /// A file operation failed or was cancelled by the user.
-    OperationFailed { message: String },
+    OperationFailed {
+        message: String,
+    },
 }
 
 enum CompletionBehavior {
@@ -117,6 +138,12 @@ pub(crate) enum FileOperationRequest {
         path: PathBuf,
         dest_folder: PathBuf,
         hwnd: SendHwnd,
+    },
+    /// Move one regular file without replacing an existing destination file.
+    OrganizerMove {
+        path: PathBuf,
+        dest_folder: PathBuf,
+        rule_id: i64,
     },
     /// Batch copy: all files in a single Shell operation (single progress dialog)
     CopyBatch {
@@ -224,6 +251,15 @@ impl FileOperationRequest {
                 path,
                 dest_folder,
                 hwnd,
+            },
+            Self::OrganizerMove {
+                path,
+                dest_folder,
+                rule_id,
+            } => Self::OrganizerMove {
+                path,
+                dest_folder,
+                rule_id,
             },
             Self::CopyBatch {
                 paths, dest_folder, ..
@@ -414,6 +450,14 @@ pub(crate) fn start_file_operation_worker(
                                 CompletionBehavior::NoFinished
                             }
                         };
+                    }
+                    FileOperationRequest::OrganizerMove {
+                        path,
+                        dest_folder,
+                        rule_id,
+                    } => {
+                        handlers::handle_organizer_move(path, dest_folder, rule_id, &result_sender);
+                        return CompletionBehavior::NoFinished;
                     }
                     FileOperationRequest::CopyBatch {
                         paths,

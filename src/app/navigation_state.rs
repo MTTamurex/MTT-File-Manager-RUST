@@ -13,6 +13,7 @@ pub enum SettingsSection {
     Graphics,
     Shortcuts,
     Tags,
+    Organizer,
     VirtualDrives,
     About,
 }

@@ -25,6 +25,7 @@ pub mod layout_state;
 pub(crate) mod live_file_size;
 pub mod navigation_state;
 pub mod operations;
+pub mod organizer_state;
 pub mod shortcuts;
 pub mod state;
 pub mod ui_state;

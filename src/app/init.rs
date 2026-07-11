@@ -248,6 +248,12 @@ impl ImageViewerApp {
             ),
         );
         let tag_counts = app_state_db.get_tag_counts();
+        let organizer_rules = app_state_db.get_organizer_rules();
+        let organizer_state = crate::app::organizer_state::OrganizerState::new(
+            file_op_tx.clone(),
+            organizer_rules,
+            ctx.clone(),
+        );
         let active_tag_filter =
             saved_active_tag_filter.filter(|id| tag_definitions.contains_key(id));
 
@@ -345,6 +351,7 @@ impl ImageViewerApp {
             view_mode_normal: view_mode,
             disk_cache: disk_cache.clone(),
             app_state_db: app_state_db.clone(),
+            organizer_state,
             directory_cache: directory_cache.clone(),
             directory_dirty_registry: Arc::new(
                 crate::infrastructure::directory_dirty_registry::DirectoryDirtyRegistry::new(),

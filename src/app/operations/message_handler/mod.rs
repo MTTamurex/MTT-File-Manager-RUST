@@ -97,8 +97,11 @@ impl ImageViewerApp {
         let current_path_norm =
             Self::normalize_for_match(Path::new(&self.navigation_state.current_path));
 
+        self.process_organizer_events();
+
         // BLOCKING: Process all available file operation results in batch
         self.process_file_operation_results(&current_path_norm, ctx);
+        self.flush_organizer_notification_summary();
 
         while let Ok(paths) = self.tag_assignment_gc_receiver.try_recv() {
             self.reconcile_garbage_collected_tag_assignments(&paths);

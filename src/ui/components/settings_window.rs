@@ -217,6 +217,9 @@ pub fn render_settings_window(
                                     let tag_output = crate::ui::components::tag_settings::render_tag_settings_section(ui, app);
                                     tags_changed |= tag_output.show_tags_changed;
                                 }
+                                SettingsSection::Organizer => {
+                                    crate::ui::components::organizer_settings::render_organizer_settings_section(ui, app);
+                                }
                                 SettingsSection::VirtualDrives => {
                                     crate::ui::components::virtual_drive_settings::render_virtual_drive_settings_section(ui);
                                 }
@@ -279,6 +282,11 @@ fn render_settings_sidebar(
         active_section,
         SettingsSection::Tags,
         RichText::new(t!("settings.tags")).color(theme::text_color(dark_mode)),
+    );
+    ui.selectable_value(
+        active_section,
+        SettingsSection::Organizer,
+        RichText::new(t!("settings.organizer")).color(theme::text_color(dark_mode)),
     );
     ui.selectable_value(
         active_section,

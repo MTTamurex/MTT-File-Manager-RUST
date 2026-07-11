@@ -205,6 +205,7 @@ pub struct ImageViewerApp {
     // Persistence Layer
     pub disk_cache: Arc<ThumbnailDiskCache>,
     pub app_state_db: Arc<AppStateDb>,
+    pub organizer_state: crate::app::organizer_state::OrganizerState,
     pub directory_cache: Arc<DirectoryCache>,
     pub directory_dirty_registry:
         Arc<crate::infrastructure::directory_dirty_registry::DirectoryDirtyRegistry>,

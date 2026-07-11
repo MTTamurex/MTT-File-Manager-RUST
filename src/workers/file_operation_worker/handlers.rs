@@ -429,6 +429,92 @@ pub(super) fn handle_move(
     }
 }
 
+/// Moves a regular file using a create-new destination handle. This intentionally
+/// avoids Shell conflict dialogs and never replaces an existing destination file.
+pub(super) fn handle_organizer_move(
+    path: PathBuf,
+    dest_folder: PathBuf,
+    rule_id: i64,
+    result_sender: &Sender<FileOperationResult>,
+) {
+    let valid_path = sanitize_operation_path(&path);
+    let valid_destination = sanitize_operation_path(&dest_folder);
+    let (Ok(path), Ok(dest_folder)) = (valid_path, valid_destination) else {
+        let _ = result_sender.send(FileOperationResult::OrganizerMoveFailed {
+            rule_id,
+            path,
+            message: "Caminho bloqueado pela validação de segurança".to_string(),
+        });
+        return;
+    };
+
+    let Some(source_folder) = path.parent().map(Path::to_path_buf) else {
+        return;
+    };
+    let Some(file_name) = path.file_name() else {
+        return;
+    };
+    let moved_dest = dest_folder.join(file_name);
+
+    if !path.is_file() || !dest_folder.is_dir() {
+        let _ = result_sender.send(FileOperationResult::OrganizerMoveFailed {
+            rule_id,
+            path,
+            message: "Arquivo ou pasta de destino indisponível".to_string(),
+        });
+        return;
+    }
+    if moved_dest.exists() {
+        let _ = result_sender.send(FileOperationResult::OrganizerMoveSkipped { rule_id, path });
+        return;
+    }
+
+    match move_file_without_replace(&path, &moved_dest) {
+        Ok(()) => {
+            let _ = result_sender.send(FileOperationResult::OrganizerMoveCompleted {
+                rule_id,
+                source_folder,
+                dest_folder,
+                source_path: path,
+                moved_dest,
+            });
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            let _ = result_sender.send(FileOperationResult::OrganizerMoveSkipped { rule_id, path });
+        }
+        Err(error) => {
+            let _ = result_sender.send(FileOperationResult::OrganizerMoveFailed {
+                rule_id,
+                path,
+                message: error.to_string(),
+            });
+        }
+    }
+}
+
+fn move_file_without_replace(source: &Path, destination: &Path) -> std::io::Result<()> {
+    use std::io::Write;
+
+    let mut input = std::fs::File::open(source)?;
+    let mut output = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(destination)?;
+    let copy_result = std::io::copy(&mut input, &mut output).and_then(|_| output.flush());
+    drop(output);
+
+    if let Err(error) = copy_result {
+        let _ = std::fs::remove_file(destination);
+        return Err(error);
+    }
+    drop(input);
+    if let Err(error) = std::fs::remove_file(source) {
+        let _ = std::fs::remove_file(destination);
+        return Err(error);
+    }
+    Ok(())
+}
+
 pub(super) fn handle_copy_batch(
     paths: Vec<PathBuf>,
     dest_folder: PathBuf,
@@ -784,6 +870,45 @@ mod tests {
         let pairs = known_exact_move_pairs(&[src_a.clone(), src_b], dest_parent.path());
 
         assert_eq!(pairs, vec![(src_a, dest_parent.path().join("a.txt"))]);
+    }
+
+    #[test]
+    fn organizer_move_never_replaces_an_existing_destination() {
+        let source_parent = tempfile::tempdir().expect("create source parent");
+        let destination_parent = tempfile::tempdir().expect("create destination parent");
+        let source = source_parent.path().join("report.pdf");
+        let destination = destination_parent.path().join("report.pdf");
+        std::fs::write(&source, b"source").expect("create source file");
+        std::fs::write(&destination, b"destination").expect("create destination file");
+
+        let result = move_file_without_replace(&source, &destination);
+
+        assert!(matches!(
+            result.map_err(|error| error.kind()),
+            Err(std::io::ErrorKind::AlreadyExists)
+        ));
+        assert_eq!(std::fs::read(&source).expect("source remains"), b"source");
+        assert_eq!(
+            std::fs::read(&destination).expect("destination remains"),
+            b"destination"
+        );
+    }
+
+    #[test]
+    fn organizer_move_copies_then_removes_the_source() {
+        let source_parent = tempfile::tempdir().expect("create source parent");
+        let destination_parent = tempfile::tempdir().expect("create destination parent");
+        let source = source_parent.path().join("report.pdf");
+        let destination = destination_parent.path().join("report.pdf");
+        std::fs::write(&source, b"contents").expect("create source file");
+
+        move_file_without_replace(&source, &destination).expect("move file");
+
+        assert!(!source.exists());
+        assert_eq!(
+            std::fs::read(destination).expect("destination contents"),
+            b"contents"
+        );
     }
 
     #[test]

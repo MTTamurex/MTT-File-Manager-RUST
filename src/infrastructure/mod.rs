@@ -17,6 +17,7 @@ pub mod io_priority;
 pub mod media;
 pub mod ntfs_reader;
 pub mod onedrive;
+pub mod organizer;
 pub mod security;
 pub mod shell_menu_worker;
 pub mod threading;

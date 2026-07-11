@@ -11,6 +11,7 @@ pub mod language_settings;
 pub mod media_preview;
 pub mod mpv;
 pub mod mpv_preview;
+pub mod organizer_settings;
 pub mod settings_window;
 pub mod shortcut_settings;
 pub mod tag_manager_modal;

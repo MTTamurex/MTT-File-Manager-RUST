@@ -116,6 +116,35 @@ impl ImageViewerApp {
                             );
                             self.cleanup_deleted_pinned_folders();
                         }
+                        FileOperationResult::OrganizerMoveCompleted {
+                            rule_id: _,
+                            source_folder,
+                            dest_folder,
+                            source_path,
+                            moved_dest,
+                        } => {
+                            self.handle_move_completed(
+                                source_folder,
+                                dest_folder,
+                                source_path,
+                                Some(moved_dest.clone()),
+                                current_path_norm,
+                            );
+                            self.cleanup_deleted_pinned_folders();
+                            self.organizer_state.notification_batch.record_moved();
+                        }
+                        FileOperationResult::OrganizerMoveSkipped { rule_id: _, path } => {
+                            let _ = path;
+                            self.organizer_state.notification_batch.record_skipped();
+                        }
+                        FileOperationResult::OrganizerMoveFailed {
+                            rule_id: _,
+                            path,
+                            message,
+                        } => {
+                            let _ = (path, message);
+                            self.organizer_state.notification_batch.record_failed();
+                        }
                         FileOperationResult::Finished => self.handle_file_operation_finished(true),
                         FileOperationResult::FinishedNoRefresh => {
                             self.handle_file_operation_finished(false)
@@ -133,6 +162,47 @@ impl ImageViewerApp {
 
         if has_more {
             ctx.request_repaint();
+        }
+    }
+
+    pub(super) fn process_organizer_events(&mut self) {
+        while let Ok(event) = self.organizer_state.manager.events.try_recv() {
+            match event {
+                crate::infrastructure::organizer::OrganizerEvent::SkippedConflict { path } => {
+                    let _ = path;
+                    self.organizer_state.notification_batch.record_skipped();
+                }
+                crate::infrastructure::organizer::OrganizerEvent::Error { message } => {
+                    let _ = message;
+                    self.organizer_state.notification_batch.record_failed();
+                }
+            }
+        }
+    }
+
+    pub(super) fn flush_organizer_notification_summary(&mut self) {
+        let Some(summary) = self
+            .organizer_state
+            .notification_batch
+            .take_if_idle(Instant::now())
+        else {
+            return;
+        };
+
+        if summary.skipped == 0 && summary.failed == 0 {
+            self.notifications.success(
+                rust_i18n::t!("organizer.summary_success", count = summary.moved).to_string(),
+            );
+        } else {
+            self.notifications.warning(
+                rust_i18n::t!(
+                    "organizer.summary_with_issues",
+                    moved = summary.moved,
+                    skipped = summary.skipped,
+                    failed = summary.failed,
+                )
+                .to_string(),
+            );
         }
     }
 
