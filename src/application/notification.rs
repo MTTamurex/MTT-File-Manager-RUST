@@ -49,20 +49,26 @@ impl NotificationLevel {
 /// A single notification message
 #[derive(Clone, Debug)]
 pub struct AppNotification {
+    pub id: u64,
     pub message: String,
     pub level: NotificationLevel,
     pub created_at: Instant,
-    pub duration: Duration,
+    pub duration: Option<Duration>,
+    pub dismissible: bool,
+    key: Option<&'static str>,
 }
 
 impl AppNotification {
     /// Creates a new notification
     pub fn new(message: impl Into<String>, level: NotificationLevel) -> Self {
         Self {
+            id: 0,
             message: message.into(),
             level,
             created_at: Instant::now(),
-            duration: Duration::from_secs(6),
+            duration: Some(Duration::from_secs(6)),
+            dismissible: false,
+            key: None,
         }
     }
 
@@ -88,38 +94,61 @@ impl AppNotification {
 
     /// With custom duration
     pub fn with_duration(mut self, duration: Duration) -> Self {
-        self.duration = duration;
+        self.duration = Some(duration);
+        self
+    }
+
+    fn persistent(mut self, key: &'static str) -> Self {
+        self.duration = None;
+        self.dismissible = true;
+        self.key = Some(key);
         self
     }
 
     /// Check if the notification has expired
     pub fn is_expired(&self) -> bool {
-        self.created_at.elapsed() >= self.duration
+        self.duration
+            .is_some_and(|duration| self.created_at.elapsed() >= duration)
     }
 
     /// Get remaining time as a fraction (0.0 - 1.0)
     pub fn remaining_fraction(&self) -> f32 {
-        let elapsed = self.created_at.elapsed().as_secs_f32();
-        let total = self.duration.as_secs_f32();
-        (1.0 - (elapsed / total)).clamp(0.0, 1.0)
+        self.duration.map_or(1.0, |duration| {
+            let elapsed = self.created_at.elapsed().as_secs_f32();
+            let total = duration.as_secs_f32();
+            (1.0 - (elapsed / total)).clamp(0.0, 1.0)
+        })
+    }
+
+    pub fn needs_expiration_repaint(&self) -> bool {
+        self.duration.is_some()
     }
 }
 
 /// Notification manager for the application
-#[derive(Default)]
 pub struct NotificationManager {
     notifications: Vec<AppNotification>,
+    next_id: u64,
+}
+
+impl Default for NotificationManager {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl NotificationManager {
     pub fn new() -> Self {
         Self {
             notifications: Vec::new(),
+            next_id: 1,
         }
     }
 
     /// Add a new notification
-    pub fn push(&mut self, notification: AppNotification) {
+    pub fn push(&mut self, mut notification: AppNotification) {
+        notification.id = self.next_id;
+        self.next_id = self.next_id.wrapping_add(1).max(1);
         self.notifications.push(notification);
     }
 
@@ -143,9 +172,30 @@ impl NotificationManager {
         self.push(AppNotification::error(message));
     }
 
+    /// Replaces the existing persistent notification for a feature instead of stacking alerts.
+    pub fn persistent_warning(&mut self, key: &'static str, message: impl Into<String>) {
+        let message = message.into();
+        if let Some(notification) = self
+            .notifications
+            .iter_mut()
+            .find(|notification| notification.key == Some(key))
+        {
+            notification.message = message;
+            notification.level = NotificationLevel::Warning;
+            notification.created_at = Instant::now();
+            return;
+        }
+        self.push(AppNotification::warning(message).persistent(key));
+    }
+
     /// Remove expired notifications
     pub fn cleanup(&mut self) {
         self.notifications.retain(|n| !n.is_expired());
+    }
+
+    pub fn dismiss(&mut self, id: u64) {
+        self.notifications
+            .retain(|notification| notification.id != id);
     }
 
     /// Get active notifications (for rendering)
@@ -156,5 +206,27 @@ impl NotificationManager {
     /// Check if there are any notifications
     pub fn is_empty(&self) -> bool {
         self.notifications.is_empty()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn persistent_notification_is_replaced_and_only_closes_when_dismissed() {
+        let mut notifications = NotificationManager::new();
+        notifications.persistent_warning("organizer_issues", "first issue");
+        let id = notifications.active()[0].id;
+
+        notifications.persistent_warning("organizer_issues", "updated issue");
+
+        assert_eq!(notifications.active().len(), 1);
+        assert_eq!(notifications.active()[0].message, "updated issue");
+        assert!(!notifications.active()[0].is_expired());
+        assert!(notifications.active()[0].dismissible);
+
+        notifications.dismiss(id);
+        assert!(notifications.is_empty());
     }
 }

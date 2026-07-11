@@ -1,5 +1,46 @@
 use std::path::{Path, PathBuf};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OrganizerExtensionPreset {
+    Documents,
+    Images,
+    Videos,
+    Audio,
+    Archives,
+    Executables,
+}
+
+impl OrganizerExtensionPreset {
+    pub const ALL: [Self; 6] = [
+        Self::Documents,
+        Self::Images,
+        Self::Videos,
+        Self::Audio,
+        Self::Archives,
+        Self::Executables,
+    ];
+
+    pub fn extensions(self) -> &'static [&'static str] {
+        match self {
+            Self::Documents => &[
+                "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "md", "rtf", "odt",
+                "csv",
+            ],
+            Self::Images => &[
+                "jpg", "jpeg", "png", "gif", "bmp", "webp", "tiff", "tif", "svg", "heic", "avif",
+                "ico",
+            ],
+            Self::Videos => &[
+                "mp4", "mkv", "avi", "mov", "wmv", "webm", "flv", "m4v", "mpg", "mpeg", "3gp",
+                "ogv", "ogm", "ts", "m2ts",
+            ],
+            Self::Audio => &["mp3", "wav", "flac", "aac", "ogg", "wma", "m4a", "opus"],
+            Self::Archives => &["zip", "7z", "rar", "tar", "gz", "tgz", "bz2", "xz", "zst"],
+            Self::Executables => &["exe", "msi", "msix", "appx", "com", "scr"],
+        }
+    }
+}
+
 /// A persisted rule that moves matching files from one folder to another.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OrganizerRule {
@@ -146,6 +187,25 @@ mod tests {
             parse_extensions(".JPG, png jpg").expect("valid extensions"),
             vec!["jpg", "png"]
         );
+    }
+
+    #[test]
+    fn executable_preset_contains_common_windows_executables() {
+        assert_eq!(
+            OrganizerExtensionPreset::Executables.extensions(),
+            ["exe", "msi", "msix", "appx", "com", "scr"]
+        );
+    }
+
+    #[test]
+    fn every_preset_contains_valid_extensions() {
+        for preset in OrganizerExtensionPreset::ALL {
+            let input = preset.extensions().join(", ");
+            assert!(
+                parse_extensions(&input).is_ok(),
+                "invalid preset: {preset:?}"
+            );
+        }
     }
 
     #[test]

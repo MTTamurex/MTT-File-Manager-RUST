@@ -134,16 +134,31 @@ impl ImageViewerApp {
                             self.organizer_state.notification_batch.record_moved();
                         }
                         FileOperationResult::OrganizerMoveSkipped { rule_id: _, path } => {
-                            let _ = path;
-                            self.organizer_state.notification_batch.record_skipped();
+                            let name = path
+                                .file_name()
+                                .and_then(|name| name.to_str())
+                                .unwrap_or_default();
+                            self.organizer_state.notification_batch.record_skipped(
+                                rust_i18n::t!("organizer.issue_conflict", name = name).to_string(),
+                            );
                         }
                         FileOperationResult::OrganizerMoveFailed {
                             rule_id: _,
                             path,
                             message,
                         } => {
-                            let _ = (path, message);
-                            self.organizer_state.notification_batch.record_failed();
+                            let name = path
+                                .file_name()
+                                .and_then(|name| name.to_str())
+                                .unwrap_or_default();
+                            self.organizer_state.notification_batch.record_failed(
+                                rust_i18n::t!(
+                                    "organizer.issue_failed",
+                                    name = name,
+                                    reason = message,
+                                )
+                                .to_string(),
+                            );
                         }
                         FileOperationResult::Finished => self.handle_file_operation_finished(true),
                         FileOperationResult::FinishedNoRefresh => {
@@ -169,12 +184,18 @@ impl ImageViewerApp {
         while let Ok(event) = self.organizer_state.manager.events.try_recv() {
             match event {
                 crate::infrastructure::organizer::OrganizerEvent::SkippedConflict { path } => {
-                    let _ = path;
-                    self.organizer_state.notification_batch.record_skipped();
+                    let name = path
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .unwrap_or_default();
+                    self.organizer_state.notification_batch.record_skipped(
+                        rust_i18n::t!("organizer.issue_conflict", name = name).to_string(),
+                    );
                 }
                 crate::infrastructure::organizer::OrganizerEvent::Error { message } => {
-                    let _ = message;
-                    self.organizer_state.notification_batch.record_failed();
+                    self.organizer_state.notification_batch.record_failed(
+                        rust_i18n::t!("organizer.issue_error", reason = message).to_string(),
+                    );
                 }
             }
         }
@@ -194,15 +215,29 @@ impl ImageViewerApp {
                 rust_i18n::t!("organizer.summary_success", count = summary.moved).to_string(),
             );
         } else {
-            self.notifications.warning(
-                rust_i18n::t!(
-                    "organizer.summary_with_issues",
-                    moved = summary.moved,
-                    skipped = summary.skipped,
-                    failed = summary.failed,
-                )
-                .to_string(),
-            );
+            let mut message = rust_i18n::t!(
+                "organizer.summary_with_issues",
+                moved = summary.moved,
+                skipped = summary.skipped,
+                failed = summary.failed,
+            )
+            .to_string();
+            if !summary.issue_details.is_empty() {
+                message.push('\n');
+                message.push_str(&summary.issue_details.join("\n"));
+            }
+            if summary.additional_issues > 0 {
+                message.push('\n');
+                message.push_str(
+                    &rust_i18n::t!(
+                        "organizer.additional_issues",
+                        count = summary.additional_issues,
+                    )
+                    .to_string(),
+                );
+            }
+            self.notifications
+                .persistent_warning("organizer_issues", message);
         }
     }
 

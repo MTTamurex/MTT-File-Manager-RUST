@@ -9,7 +9,6 @@ pub enum OrganizerEvent {
 
 enum OrganizerCommand {
     SetRules(Vec<OrganizerRule>),
-    RunNow(i64),
     Shutdown,
 }
 
@@ -60,10 +59,6 @@ impl OrganizerManager {
     pub fn set_rules(&self, rules: Vec<OrganizerRule>) {
         let _ = self.command_sender.send(OrganizerCommand::SetRules(rules));
     }
-
-    pub fn run_now(&self, rule_id: i64) {
-        let _ = self.command_sender.send(OrganizerCommand::RunNow(rule_id));
-    }
 }
 
 impl Drop for OrganizerManager {
@@ -76,8 +71,12 @@ impl Drop for OrganizerManager {
 mod watcher {
     use super::*;
     use notify::{RecursiveMode, Watcher};
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
     use std::path::PathBuf;
+    use std::sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    };
     use std::time::{Duration, Instant, SystemTime};
 
     const STABILITY_DELAY: Duration = Duration::from_secs(2);
@@ -85,6 +84,7 @@ mod watcher {
     #[derive(Clone)]
     struct PendingFile {
         rule: OrganizerRule,
+        activation: Arc<AtomicBool>,
         size: u64,
         modified: Option<SystemTime>,
         stable_since: Instant,
@@ -100,13 +100,18 @@ mod watcher {
         let (watch_event_sender, watch_event_receiver) = mpsc::channel();
         let mut watcher = configure_watcher(&rules, watch_event_sender.clone(), ui_ctx.clone());
         let mut pending = HashMap::new();
+        let mut activation_flags = activation_flags_for(&rules);
+
+        for rule in rules.iter().filter(|rule| rule.enabled) {
+            queue_rule_paths(rule, &rules, &activation_flags, &mut pending);
+        }
 
         loop {
             while let Ok(event) = watch_event_receiver.try_recv() {
                 match event {
                     Ok(event) => {
                         for path in event.paths {
-                            queue_matching_path(&rules, path, &mut pending);
+                            queue_matching_path(&rules, &activation_flags, path, &mut pending);
                         }
                     }
                     Err(error) => {
@@ -121,15 +126,14 @@ mod watcher {
 
             match command_receiver.recv_timeout(Duration::from_millis(250)) {
                 Ok(OrganizerCommand::SetRules(new_rules)) => {
-                    rules = new_rules;
-                    pending.clear();
+                    let previous_rules = std::mem::replace(&mut rules, new_rules);
+                    let rules_to_scan =
+                        update_activation_flags(&previous_rules, &rules, &mut activation_flags);
+                    pending.retain(|_, pending| pending.activation.load(Ordering::Acquire));
                     watcher = configure_watcher(&rules, watch_event_sender.clone(), ui_ctx.clone());
-                }
-                Ok(OrganizerCommand::RunNow(rule_id)) => {
-                    if let Some(rule) = rules.iter().find(|rule| rule.id == rule_id && rule.enabled)
-                    {
-                        for path in preview_rule(rule) {
-                            queue_matching_path(&rules, path, &mut pending);
+                    for rule_id in rules_to_scan {
+                        if let Some(rule) = rules.iter().find(|rule| rule.id == rule_id) {
+                            queue_rule_paths(rule, &rules, &activation_flags, &mut pending);
                         }
                     }
                 }
@@ -139,6 +143,63 @@ mod watcher {
 
             // Keep the watcher alive for the lifetime of this manager loop.
             let _ = &watcher;
+        }
+    }
+
+    fn activation_flags_for(rules: &[OrganizerRule]) -> HashMap<i64, Arc<AtomicBool>> {
+        rules
+            .iter()
+            .map(|rule| (rule.id, Arc::new(AtomicBool::new(rule.enabled))))
+            .collect()
+    }
+
+    fn update_activation_flags(
+        previous_rules: &[OrganizerRule],
+        rules: &[OrganizerRule],
+        activation_flags: &mut HashMap<i64, Arc<AtomicBool>>,
+    ) -> Vec<i64> {
+        let previous_by_id: HashMap<_, _> =
+            previous_rules.iter().map(|rule| (rule.id, rule)).collect();
+        let active_rule_ids: HashSet<_> = rules.iter().map(|rule| rule.id).collect();
+        let mut rules_to_scan = Vec::new();
+
+        for rule in rules {
+            let activation = activation_flags
+                .entry(rule.id)
+                .or_insert_with(|| Arc::new(AtomicBool::new(false)));
+            let previous = previous_by_id.get(&rule.id).copied();
+            let was_enabled = previous.is_some_and(|previous| previous.enabled);
+            let configuration_changed = previous.is_none_or(|previous| {
+                previous.source_folder != rule.source_folder
+                    || previous.destination_folder != rule.destination_folder
+                    || previous.extensions != rule.extensions
+            });
+
+            activation.store(rule.enabled, Ordering::Release);
+            if rule.enabled && (!was_enabled || configuration_changed) {
+                rules_to_scan.push(rule.id);
+            }
+        }
+
+        activation_flags.retain(|rule_id, activation| {
+            let retained = active_rule_ids.contains(rule_id);
+            if !retained {
+                activation.store(false, Ordering::Release);
+            }
+            retained
+        });
+
+        rules_to_scan
+    }
+
+    fn queue_rule_paths(
+        rule: &OrganizerRule,
+        rules: &[OrganizerRule],
+        activation_flags: &HashMap<i64, Arc<AtomicBool>>,
+        pending: &mut HashMap<PathBuf, PendingFile>,
+    ) {
+        for path in preview_rule(rule) {
+            queue_matching_path(rules, activation_flags, path, pending);
         }
     }
 
@@ -172,6 +233,7 @@ mod watcher {
 
     fn queue_matching_path(
         rules: &[OrganizerRule],
+        activation_flags: &HashMap<i64, Arc<AtomicBool>>,
         path: PathBuf,
         pending: &mut HashMap<PathBuf, PendingFile>,
     ) {
@@ -179,6 +241,9 @@ mod watcher {
             .iter()
             .find(|rule| rule.enabled && rule.matches(&path))
         else {
+            return;
+        };
+        let Some(activation) = activation_flags.get(&rule.id).cloned() else {
             return;
         };
         let Ok(metadata) = std::fs::metadata(&path) else {
@@ -193,6 +258,7 @@ mod watcher {
             Some(existing) if existing.size == metadata.len() && existing.modified == modified => {}
             Some(existing) => {
                 existing.rule = rule.clone();
+                existing.activation = activation;
                 existing.size = metadata.len();
                 existing.modified = modified;
                 existing.stable_since = Instant::now();
@@ -202,6 +268,7 @@ mod watcher {
                     path,
                     PendingFile {
                         rule: rule.clone(),
+                        activation,
                         size: metadata.len(),
                         modified,
                         stable_since: Instant::now(),
@@ -230,7 +297,16 @@ mod watcher {
             if metadata.len() != pending_file.size
                 || metadata.modified().ok() != pending_file.modified
             {
-                queue_matching_path(std::slice::from_ref(&pending_file.rule), path, pending);
+                queue_matching_path(
+                    std::slice::from_ref(&pending_file.rule),
+                    &HashMap::from([(pending_file.rule.id, pending_file.activation.clone())]),
+                    path,
+                    pending,
+                );
+                continue;
+            }
+
+            if !pending_file.activation.load(Ordering::Acquire) {
                 continue;
             }
 
@@ -252,6 +328,7 @@ mod watcher {
                     path,
                     dest_folder: pending_file.rule.destination_folder,
                     rule_id: pending_file.rule.id,
+                    activation: pending_file.activation,
                 })
                 .is_err()
             {
@@ -259,6 +336,46 @@ mod watcher {
                     message: "O worker de operações de arquivo não está disponível".to_string(),
                 });
             }
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use std::path::PathBuf;
+
+        fn rule(id: i64, enabled: bool) -> OrganizerRule {
+            OrganizerRule {
+                id,
+                source_folder: PathBuf::from(r"C:\Source"),
+                destination_folder: PathBuf::from(r"C:\Destination"),
+                extensions: vec!["txt".to_string()],
+                enabled,
+            }
+        }
+
+        #[test]
+        fn enabling_a_rule_marks_it_for_a_full_scan() {
+            let previous = vec![rule(1, false)];
+            let current = vec![rule(1, true)];
+            let mut activations = activation_flags_for(&previous);
+
+            let scan_rules = update_activation_flags(&previous, &current, &mut activations);
+
+            assert_eq!(scan_rules, vec![1]);
+            assert!(activations[&1].load(Ordering::Acquire));
+        }
+
+        #[test]
+        fn disabling_a_rule_deactivates_its_pending_work() {
+            let previous = vec![rule(1, true)];
+            let current = vec![rule(1, false)];
+            let mut activations = activation_flags_for(&previous);
+
+            let scan_rules = update_activation_flags(&previous, &current, &mut activations);
+
+            assert!(scan_rules.is_empty());
+            assert!(!activations[&1].load(Ordering::Acquire));
         }
     }
 }

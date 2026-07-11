@@ -435,8 +435,12 @@ pub(super) fn handle_organizer_move(
     path: PathBuf,
     dest_folder: PathBuf,
     rule_id: i64,
+    activation: std::sync::Arc<std::sync::atomic::AtomicBool>,
     result_sender: &Sender<FileOperationResult>,
 ) {
+    if !activation.load(std::sync::atomic::Ordering::Acquire) {
+        return;
+    }
     let valid_path = sanitize_operation_path(&path);
     let valid_destination = sanitize_operation_path(&dest_folder);
     let (Ok(path), Ok(dest_folder)) = (valid_path, valid_destination) else {

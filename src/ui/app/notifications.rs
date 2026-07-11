@@ -371,18 +371,24 @@ pub fn render_notifications(app: &mut ImageViewerApp, ctx: &egui::Context) {
     }
 
     if !app.notifications.is_empty() {
-        needs_repaint = true;
+        let mut dismissed_notification_ids = Vec::new();
 
-        for (i, notification) in app.notifications.active().iter().enumerate() {
+        for notification in app.notifications.active() {
+            needs_repaint |= notification.needs_expiration_repaint();
             let fade = notification.remaining_fraction();
             let alpha = if fade < 0.2 { fade / 0.2 } else { 1.0 };
+            let notification_max_text_width = if notification.dismissible {
+                max_text_width - 24.0
+            } else {
+                max_text_width
+            };
 
             let galley = ctx.fonts(|f| {
                 f.layout(
                     notification.message.clone(),
                     egui::FontId::proportional(13.5),
                     egui::Color32::WHITE,
-                    max_text_width,
+                    notification_max_text_width,
                 )
             });
             let text_height = galley.size().y;
@@ -400,7 +406,7 @@ pub fn render_notifications(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 (alpha * 240.0) as u8,
             );
 
-            egui::Area::new(egui::Id::new(format!("toast_{}", i)))
+            egui::Area::new(egui::Id::new(format!("toast_{}", notification.id)))
                 .fixed_pos(egui::pos2(base_x, toast_y))
                 .order(egui::Order::Foreground)
                 .show(ctx, |ui| {
@@ -431,7 +437,7 @@ pub fn render_notifications(app: &mut ImageViewerApp, ctx: &egui::Context) {
                         notification.message.clone(),
                         egui::FontId::proportional(13.5),
                         text_color,
-                        max_text_width,
+                        notification_max_text_width,
                     );
                     let text_y = (toast_height - text_galley.size().y) / 2.0;
                     ui.painter().galley(
@@ -439,7 +445,39 @@ pub fn render_notifications(app: &mut ImageViewerApp, ctx: &egui::Context) {
                         text_galley,
                         egui::Color32::TRANSPARENT,
                     );
+
+                    if notification.dismissible {
+                        let button_size = 18.0;
+                        let button_rect = egui::Rect::from_min_size(
+                            egui::pos2(
+                                rect.max.x - inner_pad - button_size,
+                                rect.min.y + inner_pad / 2.0,
+                            ),
+                            egui::vec2(button_size, button_size),
+                        );
+                        let response = ui
+                            .allocate_rect(button_rect, egui::Sense::click())
+                            .on_hover_text(t!("notifications.close").to_string());
+                        ui.painter().text(
+                            button_rect.center(),
+                            egui::Align2::CENTER_CENTER,
+                            "✕",
+                            egui::FontId::proportional(14.0),
+                            if response.hovered() {
+                                egui::Color32::from_rgb(255, 190, 190)
+                            } else {
+                                text_color
+                            },
+                        );
+                        if response.clicked() {
+                            dismissed_notification_ids.push(notification.id);
+                        }
+                    }
                 });
+        }
+
+        for id in dismissed_notification_ids {
+            app.notifications.dismiss(id);
         }
     }
 

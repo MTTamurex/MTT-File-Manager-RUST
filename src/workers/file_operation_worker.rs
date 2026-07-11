@@ -144,6 +144,7 @@ pub(crate) enum FileOperationRequest {
         path: PathBuf,
         dest_folder: PathBuf,
         rule_id: i64,
+        activation: std::sync::Arc<std::sync::atomic::AtomicBool>,
     },
     /// Batch copy: all files in a single Shell operation (single progress dialog)
     CopyBatch {
@@ -256,10 +257,12 @@ impl FileOperationRequest {
                 path,
                 dest_folder,
                 rule_id,
+                activation,
             } => Self::OrganizerMove {
                 path,
                 dest_folder,
                 rule_id,
+                activation,
             },
             Self::CopyBatch {
                 paths, dest_folder, ..
@@ -455,8 +458,15 @@ pub(crate) fn start_file_operation_worker(
                         path,
                         dest_folder,
                         rule_id,
+                        activation,
                     } => {
-                        handlers::handle_organizer_move(path, dest_folder, rule_id, &result_sender);
+                        handlers::handle_organizer_move(
+                            path,
+                            dest_folder,
+                            rule_id,
+                            activation,
+                            &result_sender,
+                        );
                         return CompletionBehavior::NoFinished;
                     }
                     FileOperationRequest::CopyBatch {
