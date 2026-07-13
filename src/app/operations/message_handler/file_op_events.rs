@@ -580,7 +580,11 @@ impl ImageViewerApp {
     }
 
     pub(super) fn restore_app_focus(&self) {
-        if self.layout.saved_is_minimized {
+        use crate::infrastructure::windows::window_subclass::{layout_phase, WindowLayoutPhase};
+
+        // The native phase is updated by WM_SIZE before egui necessarily sees
+        // the minimized viewport state, closing the completion-event race.
+        if self.layout.saved_is_minimized || layout_phase() == WindowLayoutPhase::Minimized {
             return;
         }
 
