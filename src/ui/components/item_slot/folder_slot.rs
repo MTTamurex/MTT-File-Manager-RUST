@@ -57,7 +57,7 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
     let display_effective_px = (folder_w.max(1.0) * ppp).ceil() as u32;
     let display_preview_bucket =
         crate::workers::thumbnail::processing::get_bucket_size(display_effective_px);
-    let scroll_lod = ctx.low_res_thumbnails_while_scrolling && ctx.is_scrolling;
+    let scroll_lod = ctx.low_res_folder_previews_while_scrolling && ctx.is_scrolling;
     let desired_preview_bucket = if scroll_lod {
         display_preview_bucket.min(256)
     } else {

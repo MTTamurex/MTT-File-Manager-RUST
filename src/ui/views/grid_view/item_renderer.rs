@@ -381,6 +381,7 @@ fn render_item_slot_for_grid(
             is_dense_mode: false,
             is_scrolling,
             low_res_thumbnails_while_scrolling: ctx.low_res_thumbnails_while_scrolling,
+            low_res_folder_previews_while_scrolling: ctx.low_res_folder_previews_while_scrolling,
             allow_thumbnail_requests,
             thumbnail_requests_this_frame: &mut ctx.thumbnail_requests_this_frame,
             folder_preview_requests_this_frame: &mut ctx.folder_preview_requests_this_frame,

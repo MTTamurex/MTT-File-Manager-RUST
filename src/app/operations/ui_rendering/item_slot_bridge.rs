@@ -68,6 +68,7 @@ impl ImageViewerApp {
                 is_dense_mode: false,
                 is_scrolling: false,
                 low_res_thumbnails_while_scrolling: false,
+                low_res_folder_previews_while_scrolling: false,
                 allow_thumbnail_requests: true,
                 thumbnail_requests_this_frame: &mut thumbnail_requests_counter,
                 folder_preview_requests_this_frame: &mut folder_preview_requests_counter,

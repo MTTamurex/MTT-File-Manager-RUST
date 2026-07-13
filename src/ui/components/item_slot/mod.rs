@@ -103,6 +103,8 @@ pub struct ItemSlotContext<'a> {
     /// Use a lower thumbnail bucket while scrolling. Intended for OpenGL,
     /// where texture uploads block the UI thread more aggressively.
     pub low_res_thumbnails_while_scrolling: bool,
+    /// Use a lower folder-preview bucket and request cap while scrolling.
+    pub low_res_folder_previews_while_scrolling: bool,
     /// Whether this slot may enqueue thumbnail work. Grid overscan rows are
     /// rendered for smooth scrolling, but visible slots must get request
     /// budget first to avoid top-left pop-in after cache flush/restore.

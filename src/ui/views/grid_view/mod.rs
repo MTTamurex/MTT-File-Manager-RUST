@@ -203,6 +203,8 @@ pub struct GridViewContext<'a> {
     /// Backend-specific LOD: request smaller thumbnails while the grid is moving,
     /// then upgrade visible cells after scrolling stops.
     pub low_res_thumbnails_while_scrolling: bool,
+    /// Backend-specific LOD for composed folder previews while scrolling.
+    pub low_res_folder_previews_while_scrolling: bool,
     /// Per-frame counter to rate-limit thumbnail requests on folder entry
     pub thumbnail_requests_this_frame: usize,
     /// Per-frame counter to rate-limit heavier folder preview requests

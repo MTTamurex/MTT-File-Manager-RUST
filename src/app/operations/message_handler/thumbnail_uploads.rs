@@ -1218,39 +1218,28 @@ impl ImageViewerApp {
     ) {
         let is_opengl = self.is_opengl_backend();
         let is_vulkan = self.is_vulkan_backend();
+        let use_conservative_policy = self.uses_conservative_folder_preview_policy();
 
-        let max_folder_uploads: usize = if is_burst && is_opengl && is_scrolling {
+        let max_folder_uploads: usize = if is_burst && use_conservative_policy && is_scrolling {
             1
-        } else if is_burst && is_opengl {
+        } else if is_burst && use_conservative_policy {
             2
-        } else if is_burst && is_vulkan {
-            if is_scrolling {
-                2
-            } else {
-                6
-            }
         } else if is_performance_critical {
-            if is_opengl || is_vulkan {
+            if use_conservative_policy {
                 1
             } else {
                 2
             }
-        } else if is_opengl && is_scrolling {
+        } else if use_conservative_policy && is_scrolling {
             1
-        } else if is_vulkan && is_scrolling {
-            2
         } else if is_video_playing {
-            if is_opengl {
+            if use_conservative_policy {
                 1
-            } else if is_vulkan {
-                4
             } else {
                 6
             }
-        } else if is_opengl {
+        } else if use_conservative_policy {
             2
-        } else if is_vulkan {
-            6
         } else {
             20
         };
@@ -1258,24 +1247,16 @@ impl ImageViewerApp {
         // Time-budget folder preview uploads to avoid frame spikes.
         // Each ctx.load_texture() can take 5-15ms, so uncapped uploads
         // of 20 previews/frame could stall the UI for up to 300ms.
-        // On OpenGL, each upload is synchronous and blocks the CPU thread,
-        // so use a tighter budget to keep frames responsive.
-        let budget = Duration::from_millis(if is_burst && is_opengl {
+        // Keep conservative backends on a tighter budget to avoid synchronous
+        // OpenGL stalls and excessive Vulkan staging/upload pressure.
+        let budget = Duration::from_millis(if is_burst && use_conservative_policy {
             2
-        } else if is_burst && is_vulkan {
-            4
         } else if is_performance_critical {
             2
-        } else if (is_opengl || is_vulkan) && is_scrolling {
-            if is_vulkan {
-                3
-            } else {
-                2
-            }
-        } else if is_opengl {
+        } else if use_conservative_policy && is_scrolling {
             2
-        } else if is_vulkan {
-            4
+        } else if use_conservative_policy {
+            2
         } else {
             8
         });

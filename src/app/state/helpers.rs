@@ -205,6 +205,12 @@ impl ImageViewerApp {
         self.active_gpu_backend == "Vulkan"
     }
 
+    /// Returns `true` for backends that need conservative folder-preview
+    /// discovery, composition, and upload pacing.
+    pub fn uses_conservative_folder_preview_policy(&self) -> bool {
+        self.is_opengl_backend() || self.is_vulkan_backend()
+    }
+
     /// Returns `true` for GPU backends that should use the low-RAM thumbnail
     /// cache profile and working-set trims.
     pub fn uses_aggressive_gpu_memory_policy(&self) -> bool {

@@ -139,7 +139,7 @@ impl ImageViewerApp {
         // re-discovering covers after focus-restore texture flushes or tag switches.
         self.scanned_folders.clear();
 
-        if self.is_opengl_backend() {
+        if self.uses_conservative_folder_preview_policy() {
             self.cache_manager.clear_folder_preview_inflight_state();
             self.pending_folder_preview_replace.clear();
             self.suppress_next_folder_preview_invalidation.clear();

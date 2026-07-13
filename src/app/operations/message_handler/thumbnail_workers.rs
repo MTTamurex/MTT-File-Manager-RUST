@@ -54,9 +54,9 @@ impl ImageViewerApp {
 
         // Cap per-frame processing to keep message handling responsive under heavy cover streams.
         const MAX_COVER_EVENTS_PER_FRAME: usize = 48;
-        const OPENGL_MAX_COVER_EVENTS_PER_FRAME: usize = 12;
-        let max_cover_events_per_frame = if self.is_opengl_backend() {
-            OPENGL_MAX_COVER_EVENTS_PER_FRAME
+        const CONSERVATIVE_MAX_COVER_EVENTS_PER_FRAME: usize = 12;
+        let max_cover_events_per_frame = if self.uses_conservative_folder_preview_policy() {
+            CONSERVATIVE_MAX_COVER_EVENTS_PER_FRAME
         } else {
             MAX_COVER_EVENTS_PER_FRAME
         };
@@ -148,9 +148,9 @@ impl ImageViewerApp {
                 .remove(folder_path);
         }
 
-        let preview_requests: Vec<_> = if self.is_opengl_backend() {
-            // On OpenGL, folder preview uploads are synchronous. Let visible slots
-            // request previews on demand instead of starting a background burst.
+        let preview_requests: Vec<_> = if self.uses_conservative_folder_preview_policy() {
+            // Avoid a background composition burst. Visible slots request previews
+            // on demand so work remains bounded as large folder/tag views load.
             Vec::new()
         } else {
             cover_updates
