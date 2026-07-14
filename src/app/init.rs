@@ -390,6 +390,8 @@ impl ImageViewerApp {
             multi_selection: FxHashSet::default(),
             rectangle_selection_state: None,
             is_item_dragging: false,
+            outbound_drag_input_guard:
+                crate::app::drag_drop_state::OutboundDragInputGuard::Inactive,
             drag_payload_paths: Vec::new(),
             drag_payload_is_single_directory: false,
             drag_source_folder: None,

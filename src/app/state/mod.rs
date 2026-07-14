@@ -24,7 +24,7 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
 use std::time::{Instant, SystemTime};
 
-use crate::app::drag_drop_state::PendingDragMoveConfirmation;
+use crate::app::drag_drop_state::{OutboundDragInputGuard, PendingDragMoveConfirmation};
 use crate::app::drive_state::DriveState;
 use crate::app::dual_panel::{ActivePanel, PanelSnapshot};
 use crate::app::file_hash::{FileHashRequest, FileHashResponse, SelectedFileHash};
@@ -224,6 +224,9 @@ pub struct ImageViewerApp {
         Option<crate::ui::views::rectangle_selection::RectangleSelectionState>,
     // Internal drag-and-drop state (Explorer-like item move/copy inside file list views)
     pub is_item_dragging: bool,
+    /// Prevents stale egui pointer state from restarting a drag after the native
+    /// OLE loop consumes a mouse-release event outside the app.
+    pub outbound_drag_input_guard: OutboundDragInputGuard,
     pub drag_payload_paths: Vec<PathBuf>,
     pub drag_payload_is_single_directory: bool,
     pub drag_source_folder: Option<PathBuf>,

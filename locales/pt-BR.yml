@@ -445,6 +445,7 @@ secondary_toolbar:
 drag_drop:
   copy: "Copiar"
   move: "Mover"
+  outbound_error: "Não foi possível arrastar os itens para outro programa."
   confirm_move_title: "Confirmar movimentação"
   confirm_move_summary_one: "Mover 1 item?"
   confirm_move_summary_many: "Mover %{count} itens?"

@@ -4,9 +4,11 @@
 //! - items from real folders are moved
 //! - items from inside archives are copied because Shell move is not supported
 
+mod outbound;
 mod rendering;
 mod validation;
 
+use crate::app::drag_drop_state::OutboundDragInputGuard;
 use crate::app::state::ImageViewerApp;
 use std::path::{Path, PathBuf};
 
@@ -19,6 +21,10 @@ use validation::{
 impl ImageViewerApp {
     /// Starts an item drag operation from the given index.
     pub fn begin_item_drag(&mut self, item_idx: usize) {
+        if self.outbound_drag_input_guard != OutboundDragInputGuard::Inactive {
+            return;
+        }
+
         if self.file_panel_input_blocked_by_drag_move_confirmation() {
             return;
         }

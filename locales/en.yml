@@ -445,6 +445,7 @@ secondary_toolbar:
 drag_drop:
   copy: "Copy"
   move: "Move"
+  outbound_error: "Could not drag the items to another application."
   confirm_move_title: "Confirm move"
   confirm_move_summary_one: "Move 1 item?"
   confirm_move_summary_many: "Move %{count} items?"

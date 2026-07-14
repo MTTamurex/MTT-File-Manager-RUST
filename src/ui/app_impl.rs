@@ -17,6 +17,20 @@ impl eframe::App for ImageViewerApp {
             ctx.set_zoom_factor(1.0);
         }
 
+        let primary_press_received_by_egui = ctx.input(|i| {
+            i.events.iter().any(|event| {
+                matches!(
+                    event,
+                    egui::Event::PointerButton {
+                        button: egui::PointerButton::Primary,
+                        pressed: true,
+                        ..
+                    }
+                )
+            })
+        });
+        self.update_outbound_drag_input_guard(primary_press_received_by_egui);
+
         // True while Windows is in interactive move/resize loop (WM_ENTERSIZEMOVE..EXITSIZEMOVE).
         let is_in_size_move = is_in_size_move();
 
@@ -348,7 +362,10 @@ impl eframe::App for ImageViewerApp {
         }
 
         // Keep drag feedback on top and avoid cursor override by later widgets.
-        if self.is_item_dragging && !self.file_panel_input_blocked_by_drag_move_confirmation() {
+        if self.is_item_dragging
+            && !self.file_panel_input_blocked_by_drag_move_confirmation()
+            && !self.try_start_outbound_item_drag()
+        {
             let (ctrl, shift, primary_released) = ctx.input(|i| {
                 (
                     i.modifiers.ctrl,

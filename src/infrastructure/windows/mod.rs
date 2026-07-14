@@ -19,6 +19,7 @@ pub mod key_state;
 pub mod media_foundation;
 pub mod metadata;
 pub mod native_menu;
+pub mod outbound_file_drag;
 pub mod owned_handle;
 pub mod physical_drive_info;
 pub mod process_snapshot;
