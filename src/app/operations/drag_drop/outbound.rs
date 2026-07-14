@@ -22,14 +22,6 @@ impl ImageViewerApp {
 
         let paths = self.drag_payload_paths.clone();
         match outbound_file_drag::drag_files(&paths, hwnd) {
-            Ok(outbound_file_drag::OutboundFileDragResult::ReturnedToSource) => {
-                if !key_state::is_primary_mouse_button_down() {
-                    self.cancel_item_drag();
-                    self.arm_outbound_drag_input_guard();
-                }
-                self.ui_ctx.request_repaint();
-                return true;
-            }
             Ok(result) => {
                 log::info!(
                     "[OutboundDrag] Native drag finished for {} item(s): {:?}",
