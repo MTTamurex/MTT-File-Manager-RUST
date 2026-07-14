@@ -209,6 +209,97 @@ pub fn process_grid_keyboard_input(
     }
 }
 
+pub fn process_column_list_keyboard_input(
+    ui: &egui::Ui,
+    current_index: Option<usize>,
+    item_count: usize,
+    rows_per_column: usize,
+    visible_columns: usize,
+    reserved_enter_binding: Option<ShortcutBinding>,
+) -> KeyboardNavResult {
+    if ui.ctx().wants_keyboard_input() || item_count == 0 {
+        return KeyboardNavResult::no_action();
+    }
+
+    let direction = if ui.input(|i| i.key_pressed(egui::Key::ArrowDown)) {
+        Some(ColumnDirection::Down)
+    } else if ui.input(|i| i.key_pressed(egui::Key::ArrowUp)) {
+        Some(ColumnDirection::Up)
+    } else if ui.input(|i| i.key_pressed(egui::Key::ArrowRight)) {
+        Some(ColumnDirection::Right)
+    } else if ui.input(|i| i.key_pressed(egui::Key::ArrowLeft)) {
+        Some(ColumnDirection::Left)
+    } else if ui.input(|i| i.key_pressed(egui::Key::PageDown)) {
+        Some(ColumnDirection::PageDown)
+    } else if ui.input(|i| i.key_pressed(egui::Key::PageUp)) {
+        Some(ColumnDirection::PageUp)
+    } else {
+        None
+    };
+
+    let new_index = direction.map(|direction| {
+        current_index.map_or(0, |current| {
+            calculate_column_list_index(
+                current,
+                item_count,
+                rows_per_column,
+                visible_columns,
+                direction,
+            )
+        })
+    });
+    let enter_pressed = ui.input(|i| {
+        i.key_pressed(egui::Key::Enter)
+            && Some(ShortcutBinding::from_modifiers(
+                egui::Key::Enter,
+                i.modifiers,
+            )) != reserved_enter_binding
+    });
+
+    KeyboardNavResult {
+        new_index,
+        page_action: None,
+        enter_pressed,
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ColumnDirection {
+    Up,
+    Down,
+    Left,
+    Right,
+    PageUp,
+    PageDown,
+}
+
+pub fn calculate_column_list_index(
+    current_index: usize,
+    item_count: usize,
+    rows_per_column: usize,
+    visible_columns: usize,
+    direction: ColumnDirection,
+) -> usize {
+    if item_count == 0 || rows_per_column == 0 {
+        return 0;
+    }
+    let current = current_index.min(item_count - 1);
+    let row = current % rows_per_column;
+    let page_jump = rows_per_column * visible_columns.max(1);
+
+    match direction {
+        ColumnDirection::Up if row > 0 => current - 1,
+        ColumnDirection::Down if row + 1 < rows_per_column && current + 1 < item_count => {
+            current + 1
+        }
+        ColumnDirection::Left => current.saturating_sub(rows_per_column),
+        ColumnDirection::Right => (current + rows_per_column).min(item_count - 1),
+        ColumnDirection::PageUp => current.saturating_sub(page_jump),
+        ColumnDirection::PageDown => (current + page_jump).min(item_count - 1),
+        _ => current,
+    }
+}
+
 /// Calculate the new index based on current position and desired movement
 ///
 /// This is a helper that can be used by both views
@@ -221,4 +312,62 @@ pub fn calculate_new_index(current_index: Option<usize>, delta: i32, item_count:
 /// Clamp index to valid bounds
 pub fn clamp_index(index: usize, item_count: usize) -> usize {
     index.min(item_count.saturating_sub(1))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{calculate_column_list_index, ColumnDirection};
+
+    #[test]
+    fn column_navigation_uses_column_major_order() {
+        assert_eq!(
+            calculate_column_list_index(4, 10, 3, 1, ColumnDirection::Up),
+            3
+        );
+        assert_eq!(
+            calculate_column_list_index(4, 10, 3, 1, ColumnDirection::Down),
+            5
+        );
+        assert_eq!(
+            calculate_column_list_index(4, 10, 3, 1, ColumnDirection::Left),
+            1
+        );
+        assert_eq!(
+            calculate_column_list_index(4, 10, 3, 1, ColumnDirection::Right),
+            7
+        );
+    }
+
+    #[test]
+    fn right_navigation_clamps_in_incomplete_last_column() {
+        assert_eq!(
+            calculate_column_list_index(8, 10, 3, 1, ColumnDirection::Right),
+            9
+        );
+        assert_eq!(
+            calculate_column_list_index(9, 10, 3, 1, ColumnDirection::Down),
+            9
+        );
+    }
+
+    #[test]
+    fn page_navigation_moves_by_visible_columns() {
+        assert_eq!(
+            calculate_column_list_index(2, 20, 4, 2, ColumnDirection::PageDown),
+            10
+        );
+        assert_eq!(
+            calculate_column_list_index(10, 20, 4, 2, ColumnDirection::PageUp),
+            2
+        );
+    }
+
+    #[test]
+    fn first_navigation_target_is_first_item() {
+        let current_index = None;
+        let target = current_index.map_or(0, |current| {
+            calculate_column_list_index(current, 20, 4, 2, ColumnDirection::Down)
+        });
+        assert_eq!(target, 0);
+    }
 }

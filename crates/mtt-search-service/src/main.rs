@@ -33,6 +33,7 @@ use crate::volume_indices::SharedVolumeIndices;
 ///   * any token starting with a Windows drive letter (`X:`)
 ///   * any token starting with the verbatim/UNC prefix (`\\?\` or `\\.\`)
 ///   * any token containing `\\` (UNC root)
+///
 /// The redaction is conservative: when in doubt, replace with `<path>`.
 pub(crate) fn redact_paths(msg: &str) -> String {
     fn looks_like_path(token: &str) -> bool {

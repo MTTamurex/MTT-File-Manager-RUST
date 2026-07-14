@@ -305,6 +305,25 @@ pub enum SortMode {
 pub enum ViewMode {
     Grid,
     List,
+    ColumnList,
+}
+
+impl ViewMode {
+    pub const fn preference_value(self) -> &'static str {
+        match self {
+            Self::Grid => "grid",
+            Self::List => "list",
+            Self::ColumnList => "column_list",
+        }
+    }
+
+    pub fn from_preference(value: &str) -> Self {
+        match value {
+            "list" => Self::List,
+            "column_list" => Self::ColumnList,
+            _ => Self::Grid,
+        }
+    }
 }
 
 /// Icon size
@@ -336,7 +355,7 @@ pub enum SyncStatus {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_path_inside_archive, is_path_inside_existing_archive_file};
+    use super::{is_path_inside_archive, is_path_inside_existing_archive_file, ViewMode};
     use std::path::Path;
 
     #[test]
@@ -377,5 +396,12 @@ mod tests {
         assert!(!is_path_inside_existing_archive_file(
             &archive_named_dir.join("folder").join("file.txt")
         ));
+    }
+
+    #[test]
+    fn view_mode_preferences_round_trip() {
+        for mode in [ViewMode::Grid, ViewMode::List, ViewMode::ColumnList] {
+            assert_eq!(ViewMode::from_preference(mode.preference_value()), mode);
+        }
     }
 }

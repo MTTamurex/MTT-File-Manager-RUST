@@ -465,7 +465,7 @@ pub fn render_status_bar(
                             ui.visuals_mut().widgets.active.fg_stroke = slider_knob_stroke;
                             ui.visuals_mut().widgets.active.bg_stroke = slider_track_stroke;
 
-                            if matches!(view_mode, ViewMode::List) {
+                            if matches!(view_mode, ViewMode::List | ViewMode::ColumnList) {
                                 ui.disable();
                             }
 

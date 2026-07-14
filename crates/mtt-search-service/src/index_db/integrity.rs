@@ -147,7 +147,7 @@ fn bcrypt_random(buf: &mut [u8]) -> Result<(), String> {
 }
 
 fn dpapi_protect(plain: &[u8]) -> Result<Vec<u8>, String> {
-    let mut input = CRYPT_INTEGER_BLOB {
+    let input = CRYPT_INTEGER_BLOB {
         cbData: plain.len() as u32,
         pbData: plain.as_ptr() as *mut u8,
     };
@@ -155,7 +155,7 @@ fn dpapi_protect(plain: &[u8]) -> Result<Vec<u8>, String> {
 
     unsafe {
         CryptProtectData(
-            &mut input,
+            &input,
             PCWSTR::null(),
             None,
             None,
@@ -177,7 +177,7 @@ fn dpapi_protect(plain: &[u8]) -> Result<Vec<u8>, String> {
 }
 
 fn dpapi_unprotect(sealed: &[u8]) -> Result<Vec<u8>, String> {
-    let mut input = CRYPT_INTEGER_BLOB {
+    let input = CRYPT_INTEGER_BLOB {
         cbData: sealed.len() as u32,
         pbData: sealed.as_ptr() as *mut u8,
     };
@@ -185,7 +185,7 @@ fn dpapi_unprotect(sealed: &[u8]) -> Result<Vec<u8>, String> {
 
     unsafe {
         CryptUnprotectData(
-            &mut input,
+            &input,
             None,
             None,
             None,

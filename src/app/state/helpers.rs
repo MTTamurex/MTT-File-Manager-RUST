@@ -68,8 +68,10 @@ fn panel_thumbnail_caches_active(
     is_recycle_bin_view: bool,
     item_count: usize,
 ) -> bool {
-    matches!(view_mode, ViewMode::Grid | ViewMode::List)
-        && !is_computer_view
+    matches!(
+        view_mode,
+        ViewMode::Grid | ViewMode::List | ViewMode::ColumnList
+    ) && !is_computer_view
         && !is_recycle_bin_view
         && item_count > 0
 }
@@ -849,7 +851,10 @@ impl ImageViewerApp {
         let snapshot = self.dual_panel_inactive_state.as_ref()?;
         let mut visible_paths = FxHashSet::default();
 
-        if matches!(snapshot.view_mode, ViewMode::Grid | ViewMode::List) {
+        if matches!(
+            snapshot.view_mode,
+            ViewMode::Grid | ViewMode::List | ViewMode::ColumnList
+        ) {
             insert_visible_paths_from_range(
                 &mut visible_paths,
                 visible_items_for_snapshot(snapshot),
@@ -1306,7 +1311,10 @@ impl ImageViewerApp {
         self.visible_paths_cache.clear();
         self.visible_range_cached = self.visible_index_range;
 
-        if matches!(self.view_mode, ViewMode::Grid | ViewMode::List) {
+        if matches!(
+            self.view_mode,
+            ViewMode::Grid | ViewMode::List | ViewMode::ColumnList
+        ) {
             insert_visible_paths_from_range(
                 &mut self.visible_paths_cache,
                 self.items.as_ref().as_slice(),
@@ -1316,7 +1324,10 @@ impl ImageViewerApp {
 
         if self.dual_panel_enabled {
             if let Some(snapshot) = self.dual_panel_inactive_state.as_ref() {
-                if matches!(snapshot.view_mode, ViewMode::Grid | ViewMode::List) {
+                if matches!(
+                    snapshot.view_mode,
+                    ViewMode::Grid | ViewMode::List | ViewMode::ColumnList
+                ) {
                     insert_visible_paths_from_range(
                         &mut self.visible_paths_cache,
                         visible_items_for_snapshot(snapshot),

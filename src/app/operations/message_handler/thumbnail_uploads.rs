@@ -165,7 +165,10 @@ fn visible_thumbnail_upload_ranks(app: &ImageViewerApp) -> FxHashMap<PathBuf, us
     let mut ranks = FxHashMap::default();
     let mut next_rank = 0usize;
 
-    if matches!(app.view_mode, ViewMode::Grid | ViewMode::List) {
+    if matches!(
+        app.view_mode,
+        ViewMode::Grid | ViewMode::List | ViewMode::ColumnList
+    ) {
         next_rank += insert_visible_upload_ranks(
             &mut ranks,
             app.items.as_ref().as_slice(),
@@ -176,7 +179,10 @@ fn visible_thumbnail_upload_ranks(app: &ImageViewerApp) -> FxHashMap<PathBuf, us
 
     if app.dual_panel_enabled {
         if let Some(snapshot) = app.dual_panel_inactive_state.as_ref() {
-            if matches!(snapshot.view_mode, ViewMode::Grid | ViewMode::List) {
+            if matches!(
+                snapshot.view_mode,
+                ViewMode::Grid | ViewMode::List | ViewMode::ColumnList
+            ) {
                 insert_visible_upload_ranks(
                     &mut ranks,
                     snapshot_items_for_upload_rank(snapshot),
@@ -1249,13 +1255,7 @@ impl ImageViewerApp {
         // of 20 previews/frame could stall the UI for up to 300ms.
         // Keep conservative backends on a tighter budget to avoid synchronous
         // OpenGL stalls and excessive Vulkan staging/upload pressure.
-        let budget = Duration::from_millis(if is_burst && use_conservative_policy {
-            2
-        } else if is_performance_critical {
-            2
-        } else if use_conservative_policy && is_scrolling {
-            2
-        } else if use_conservative_policy {
+        let budget = Duration::from_millis(if is_performance_critical || use_conservative_policy {
             2
         } else {
             8

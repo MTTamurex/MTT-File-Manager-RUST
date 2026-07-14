@@ -34,6 +34,9 @@ const ZERO_SIZE_FOLDER_REPAIR_LIMIT: usize = 4_096;
 const LIVE_SIZE_REFRESH_FILE_LIMIT: u64 = 4_096;
 const FRN_MASK: u64 = 0x0000_FFFF_FFFF_FFFF;
 
+type FolderSizeSummary = (u64, u64, u64, u64);
+type RepairedDirectorySummary = (u64, FolderSizeSummary);
+
 #[inline]
 fn file_index_to_frn(high: u32, low: u32) -> u64 {
     (((high as u64) << 32) | low as u64) & FRN_MASK
@@ -106,7 +109,7 @@ fn repair_missing_live_directory_record(
     path: &str,
     frn: u64,
     is_reparse: bool,
-) -> Result<(u64, (u64, u64, u64, u64)), &'static str> {
+) -> Result<RepairedDirectorySummary, &'static str> {
     let path = Path::new(path);
     let name = path
         .file_name()

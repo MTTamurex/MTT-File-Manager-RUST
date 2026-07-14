@@ -1083,6 +1083,7 @@ fn render_single_panel_content(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
         match app.view_mode {
             ViewMode::Grid => app.render_grid_view(ui),
             ViewMode::List => app.render_list_view(ui),
+            ViewMode::ColumnList => app.render_column_list_view(ui),
         }
         let view_ms = t_view_render.elapsed().as_millis();
         if view_ms > 120 {

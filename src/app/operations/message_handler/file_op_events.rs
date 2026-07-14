@@ -238,11 +238,11 @@ impl ImageViewerApp {
             if summary.additional_issues > 0 {
                 message.push('\n');
                 message.push_str(
-                    &rust_i18n::t!(
+                    rust_i18n::t!(
                         "organizer.additional_issues",
                         count = summary.additional_issues,
                     )
-                    .to_string(),
+                    .as_ref(),
                 );
             }
             self.notifications

@@ -3,6 +3,7 @@
 //! This module provides bridge implementations between App state and UI views,
 //! delegating actual rendering to specialized view modules.
 
+pub mod column_list_bridge;
 pub mod grid_bridge;
 pub mod item_slot_bridge;
 pub mod list_bridge;

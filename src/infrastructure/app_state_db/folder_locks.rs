@@ -7,10 +7,7 @@ use std::collections::HashMap;
 impl AppStateDb {
     /// Save a folder lock to the database. [WRITER]
     pub fn save_folder_lock(&self, path: &str, lock: &FolderLock) {
-        let view_mode_str = match lock.view_mode {
-            ViewMode::Grid => "grid",
-            ViewMode::List => "list",
-        };
+        let view_mode_str = lock.view_mode.preference_value();
         let sort_mode_str = match lock.sort_mode {
             SortMode::Name => "name",
             SortMode::Date => "date",
@@ -97,10 +94,7 @@ impl AppStateDb {
         if let Ok(rows) = rows {
             for row in rows.flatten() {
                 let (path, view_mode_s, sort_mode_s, sort_desc_s, folders_pos_s) = row;
-                let view_mode = match view_mode_s.as_str() {
-                    "list" => ViewMode::List,
-                    _ => ViewMode::Grid,
-                };
+                let view_mode = ViewMode::from_preference(&view_mode_s);
                 let sort_mode = match sort_mode_s.as_str() {
                     "date" => SortMode::Date,
                     "size" => SortMode::Size,

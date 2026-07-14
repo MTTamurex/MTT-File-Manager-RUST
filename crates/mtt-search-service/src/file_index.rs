@@ -987,7 +987,7 @@ pub fn search_page(
 
             if matches {
                 if let Some(full_path) =
-                    path_resolver::resolve_path_cached(frn, &*index, &mut dir_path_cache)
+                    path_resolver::resolve_path_cached(frn, &index, &mut dir_path_cache)
                 {
                     if matched_after_filters < offset {
                         matched_after_filters += 1;

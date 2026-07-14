@@ -103,13 +103,13 @@ pub(crate) fn render_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context
                     ToolbarAction::NavigateToComputer => app.navigate_to_computer(),
                     ToolbarAction::NavigateToRecycleBin => app.navigate_to_recycle_bin(),
                     ToolbarAction::ToggleViewMode => {
-                        if app.view_mode == ViewMode::List {
-                            app.view_mode = ViewMode::Grid;
-                            // Cancel batch folder-size work — Grid mode only
-                            // calculates size on selection, not for all items.
+                        app.view_mode = match app.view_mode {
+                            ViewMode::Grid => ViewMode::ColumnList,
+                            ViewMode::ColumnList => ViewMode::List,
+                            ViewMode::List => ViewMode::Grid,
+                        };
+                        if matches!(app.view_mode, ViewMode::Grid | ViewMode::ColumnList) {
                             app.folder_size_state.cancel_batch();
-                        } else {
-                            app.view_mode = ViewMode::List;
                         }
                         if !app.current_folder_locked {
                             app.view_mode_normal = app.view_mode;

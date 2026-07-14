@@ -3,8 +3,8 @@
 
 mod header;
 mod helpers;
-mod item_renderer;
-mod item_renderer_details;
+pub(crate) mod item_renderer;
+pub(crate) mod item_renderer_details;
 mod scroll;
 mod virtualization;
 
@@ -226,6 +226,8 @@ pub struct ListViewContext<'a> {
     pub scroll_offset_y: f32,
     /// Mutable reference to update scroll offset
     pub mut_scroll_offset_y: &'a mut f32,
+    /// Mutable horizontal offset used by the column-list renderer.
+    pub mut_scroll_offset_x: &'a mut f32,
     pub last_input: crate::app::state::LastInput,
     /// PERFORMANCE: Scroll state tracking for GPU upload throttling
     pub last_scroll_time: &'a mut std::time::Instant,

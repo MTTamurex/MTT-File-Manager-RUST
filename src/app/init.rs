@@ -612,6 +612,7 @@ impl ImageViewerApp {
 
             // Scroll offset for manual grid virtualization
             scroll_offset_y: 0.0,
+            scroll_offset_x: 0.0,
 
             // PERFORMANCE: Visible item range for GPU upload prioritization
             visible_index_range: None,

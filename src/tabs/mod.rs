@@ -64,9 +64,11 @@ pub struct TabState {
     pub selected_gif: Option<crate::ui::components::media_preview::GifPlayer>,
     /// Scroll offset for grid view (manual virtualization)
     pub scroll_offset_y: f32,
+    /// Horizontal offset used by the column-list view.
+    pub scroll_offset_x: f32,
     /// Total items in the folder (status bar)
     pub total_items: usize,
-    /// View mode for this tab (Grid or List)
+    /// View mode for this tab.
     pub view_mode: ViewMode,
     /// Multi-selection set for this tab
     pub multi_selection: FxHashSet<PathBuf>,
@@ -128,6 +130,7 @@ impl TabState {
             selected_metadata: None,
             selected_gif: None,
             scroll_offset_y: 0.0,
+            scroll_offset_x: 0.0,
             total_items: 0,
             view_mode: ViewMode::Grid,
             multi_selection: FxHashSet::default(),
@@ -178,6 +181,7 @@ impl TabState {
             selected_metadata: None,
             selected_gif: None,
             scroll_offset_y: 0.0,
+            scroll_offset_x: 0.0,
             total_items: 0,
             view_mode: ViewMode::Grid,
             multi_selection: FxHashSet::default(),
@@ -219,6 +223,7 @@ impl TabState {
         self.is_computer_view = new_path == COMPUTER_VIEW_ID;
         self.is_recycle_bin_view = new_path == RECYCLE_BIN_VIEW_ID;
         self.scroll_offset_y = 0.0;
+        self.scroll_offset_x = 0.0;
 
         // Update title
         if self.is_computer_view {
@@ -256,6 +261,7 @@ impl TabState {
             self.is_computer_view = path == COMPUTER_VIEW_ID;
             self.is_recycle_bin_view = path == RECYCLE_BIN_VIEW_ID;
             self.scroll_offset_y = 0.0;
+            self.scroll_offset_x = 0.0;
 
             if self.is_computer_view {
                 self.title = COMPUTER_VIEW_ID.to_string();
@@ -302,6 +308,7 @@ impl TabState {
         self.selected_gif = None;
         self.multi_selection.clear();
         self.scroll_offset_y = 0.0;
+        self.scroll_offset_x = 0.0;
         self.total_items = 0;
         self.quick_search_buffer.clear();
         self.sidebar_expanded.clear();

@@ -14,6 +14,79 @@ fn first_tag_color(item: &FileEntry, ctx: &ListViewContext) -> Option<Color32> {
         .map(|tag| tag.color.to_color32())
 }
 
+pub(crate) fn prepare_list_item_resources(
+    ui: &Ui,
+    index: usize,
+    item: &FileEntry,
+    ctx: &mut ListViewContext,
+    ops: &mut dyn ListViewOperations,
+) {
+    if item.is_dir
+        && !ctx.is_computer_view
+        && !ctx.is_recycle_bin_view
+        && item.folder_cover.is_none()
+        && ctx.scanned_folders.peek(&item.path).is_none()
+    {
+        ctx.scanned_folders.put(item.path.clone(), ());
+        ops.request_folder_scan(item.path.clone());
+    }
+
+    if item.is_dir || ctx.is_recycle_bin_view || !item.is_media() {
+        return;
+    }
+
+    let is_selected_for_preview = ctx
+        .selected_file
+        .is_some_and(|selected| selected.path == item.path);
+    if ctx.failed_thumbnails.contains(&item.path)
+        || ctx.loading_set.len() >= crate::ui::cache::MAX_THUMBNAIL_LOADING_SET_ITEMS
+    {
+        return;
+    }
+
+    let is_loading = ctx.loading_set.contains(&item.path);
+    let is_pending = ctx.pending_upload_set.contains(&item.path);
+    let has_texture = ctx.texture_cache.peek(&item.path).is_some();
+    let ppp = ui.ctx().pixels_per_point().max(1.0);
+    let display_request_size_px = if ctx.show_preview_panel && is_selected_for_preview {
+        crate::domain::thumbnail::detail_preview_size(&item.path)
+    } else {
+        1
+    };
+    let display_effective_size_px = ((display_request_size_px as f32) * ppp).ceil() as u32;
+    let display_bucket =
+        crate::workers::thumbnail::processing::get_bucket_size(display_effective_size_px);
+    let desired_thumbnail_bucket = display_bucket.max(crate::ui::theme::MIN_GRID_THUMBNAIL_BUCKET);
+    let min_effective_size_for_bucket = match desired_thumbnail_bucket {
+        0..=128 => 1,
+        129..=256 => 129,
+        257..=512 => 257,
+        _ => 513,
+    };
+    let min_request_size_for_bucket = ((min_effective_size_for_bucket as f32) / ppp).ceil() as u32;
+    let request_size_px = display_request_size_px.max(min_request_size_for_bucket);
+    let needs_bucket_refresh = ctx
+        .attempted_thumbnail_bucket
+        .get(&item.path)
+        .is_some_and(|bucket| *bucket < desired_thumbnail_bucket);
+
+    const MAX_THUMBNAIL_REQUESTS_PER_FRAME: usize = 96;
+    if (!has_texture || needs_bucket_refresh)
+        && !is_loading
+        && !is_pending
+        && ctx.thumbnail_requests_this_frame < MAX_THUMBNAIL_REQUESTS_PER_FRAME
+    {
+        ctx.thumbnail_requests_this_frame += 1;
+        ctx.loading_set.insert(item.path.clone());
+        ops.request_thumbnail_load_with_size(
+            item.path.clone(),
+            request_size_px,
+            index,
+            item.modified,
+        );
+    }
+}
+
 /// Renders a single list item row
 #[allow(clippy::too_many_arguments)]
 pub(super) fn render_list_item(
@@ -29,94 +102,7 @@ pub(super) fn render_list_item(
     col_widths: &ColumnWidths,
     row_height: f32,
 ) {
-    // LAZY LOAD TRIGGER FOR FOLDERS: Discover cover if not yet available
-    if item.is_dir
-        && !ctx.is_computer_view
-        && !ctx.is_recycle_bin_view
-        && item.folder_cover.is_none()
-        && ctx.scanned_folders.peek(&item.path).is_none()
-    {
-        ctx.scanned_folders.put(item.path.clone(), ());
-        ops.request_folder_scan(item.path.clone());
-    }
-
-    // LAZY LOAD TRIGGER FOR MEDIA FILES: Proactively load thumbnail
-    if !item.is_dir && !ctx.is_recycle_bin_view {
-        // PERFORMANCE: Use is_media() method to avoid registry lookups
-        let is_selected_for_preview = ctx
-            .selected_file
-            .is_some_and(|selected| selected.path == item.path);
-
-        // List view does not display thumbnails in rows, but we apply the
-        // same bucket-aware thumbnail loading as grid view.  This ensures the
-        // RAM cache always holds data at bucket 512+ for every visible media
-        // file — so when the user clicks any file the detail panel's 512 px
-        // request can be served from RAM cache immediately (fast path) rather
-        // than going to the worker from scratch.
-
-        if item.is_media()
-            && !ctx.failed_thumbnails.contains(&item.path)
-            && ctx.loading_set.len() < crate::ui::cache::MAX_THUMBNAIL_LOADING_SET_ITEMS
-        {
-            let is_loading = ctx.loading_set.contains(&item.path);
-            let is_pending = ctx.pending_upload_set.contains(&item.path);
-            let has_texture = ctx.texture_cache.peek(&item.path).is_some();
-
-            // Mirror the bucket-aware sizing logic from grid view's
-            // file_slot.rs so the RAM cache is populated at the same
-            // resolution.  Grid view uses MIN_GRID_THUMBNAIL_BUCKET (512)
-            // as the floor; list view does the same.
-            let ppp = ui.ctx().pixels_per_point().max(1.0);
-            let display_request_size_px: u32 = if ctx.show_preview_panel && is_selected_for_preview
-            {
-                crate::domain::thumbnail::detail_preview_size(&item.path)
-            } else {
-                // List rows don't show thumbnails — the display size is
-                // irrelevant.  Use a minimal size; the bucket floor
-                // below will upgrade it to 512.
-                1
-            };
-            let display_effective_size_px = ((display_request_size_px as f32) * ppp).ceil() as u32;
-            let display_bucket =
-                crate::workers::thumbnail::processing::get_bucket_size(display_effective_size_px);
-            let desired_thumbnail_bucket =
-                display_bucket.max(crate::ui::theme::MIN_GRID_THUMBNAIL_BUCKET);
-            let min_effective_size_for_bucket = match desired_thumbnail_bucket {
-                0..=128 => 1,
-                129..=256 => 129,
-                257..=512 => 257,
-                _ => 513,
-            };
-            let min_request_size_for_bucket =
-                ((min_effective_size_for_bucket as f32) / ppp).ceil() as u32;
-            let request_size_px = display_request_size_px.max(min_request_size_for_bucket);
-
-            let attempted_bucket = ctx.attempted_thumbnail_bucket.get(&item.path).copied();
-            let needs_bucket_refresh = match attempted_bucket {
-                Some(b) => b < desired_thumbnail_bucket,
-                None => false,
-            };
-
-            const MAX_THUMBNAIL_REQUESTS_PER_FRAME: usize = 96;
-
-            let can_request = (!has_texture || needs_bucket_refresh)
-                && !is_loading
-                && !is_pending
-                && ctx.thumbnail_requests_this_frame < MAX_THUMBNAIL_REQUESTS_PER_FRAME;
-
-            if can_request {
-                ctx.thumbnail_requests_this_frame += 1;
-                ctx.loading_set.insert(item.path.clone());
-                ops.request_thumbnail_load_with_size(
-                    item.path.clone(),
-                    request_size_px,
-                    i,
-                    item.modified,
-                );
-            }
-        }
-    }
-
+    prepare_list_item_resources(ui, i, item, ctx, ops);
     let is_recycle_bin = ctx.is_recycle_bin_view;
     let w_name = col_widths.name;
     let w_date = col_widths.date;

@@ -316,7 +316,9 @@ pub fn render_grid_view(
         }));
     ctx.rectangle_selection_frame.begin(
         viewport_rect,
+        0.0,
         current_scroll,
+        0.0,
         max_scroll,
         rectangle_metrics,
     );
@@ -399,6 +401,7 @@ pub fn render_grid_view(
             ui,
             state,
             viewport_rect,
+            0.0,
             current_scroll,
         );
     }

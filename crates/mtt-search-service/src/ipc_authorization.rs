@@ -236,11 +236,15 @@ fn ensure_client_connected(pipe: HANDLE) -> Result<(), String> {
     Ok(())
 }
 
-fn collect_existing_authorized_page<I, FPathExists, FParentAuthorized, FPathAuthorized, FProgress>(
-    raw_items: I,
+struct AuthorizedPageRequest {
     raw_has_more: bool,
     offset: usize,
     limit: usize,
+}
+
+fn collect_existing_authorized_page<I, FPathExists, FParentAuthorized, FPathAuthorized, FProgress>(
+    raw_items: I,
+    request: AuthorizedPageRequest,
     mut path_exists: FPathExists,
     mut parent_authorized: FParentAuthorized,
     mut path_authorized: FPathAuthorized,
@@ -253,6 +257,11 @@ where
     FPathAuthorized: FnMut(&str) -> bool,
     FProgress: FnMut(usize) -> Result<bool, String>,
 {
+    let AuthorizedPageRequest {
+        raw_has_more,
+        offset,
+        limit,
+    } = request;
     let mut authorized_items: Vec<SearchResultItem> = Vec::with_capacity(limit.min(1024));
     let mut authorized_total_seen = 0usize;
     let mut has_more_authorized = false;
@@ -365,9 +374,11 @@ pub fn collect_authorized_search_page(
     // blocking writers (USN journal incremental updates).
     collect_existing_authorized_page(
         raw_page.items,
-        raw_has_more,
-        offset,
-        limit,
+        AuthorizedPageRequest {
+            raw_has_more,
+            offset,
+            limit,
+        },
         exact_path_exists,
         |parent| is_parent_authorized(&mut dir_auth_cache, parent),
         current_client_can_read_path,
@@ -430,9 +441,11 @@ mod tests {
         let mut checked_parents = Vec::new();
         let page = collect_existing_authorized_page(
             raw_items,
-            false,
-            0,
-            10,
+            AuthorizedPageRequest {
+                raw_has_more: false,
+                offset: 0,
+                limit: 10,
+            },
             |path| path != r"C:\A\file.txt",
             |parent| {
                 checked_parents.push(parent.to_string());
@@ -474,9 +487,11 @@ mod tests {
 
         let page = collect_existing_authorized_page(
             raw_items,
-            false,
-            1,
-            10,
+            AuthorizedPageRequest {
+                raw_has_more: false,
+                offset: 1,
+                limit: 10,
+            },
             |path| path != r"C:\A\file.txt",
             |_| true,
             |_| true,

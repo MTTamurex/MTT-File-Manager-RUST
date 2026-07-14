@@ -104,10 +104,7 @@ impl StartupPreferences {
 
         let parse_view_mode = |value: Option<&String>| {
             value
-                .map(|s| match s.as_str() {
-                    "list" => ViewMode::List,
-                    _ => ViewMode::Grid,
-                })
+                .map(|s| ViewMode::from_preference(s))
                 .unwrap_or(ViewMode::Grid)
         };
 

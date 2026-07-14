@@ -167,6 +167,7 @@ pub struct PanelSnapshot {
 
     // Scroll
     pub scroll_offset_y: f32,
+    pub scroll_offset_x: f32,
     pub scroll_to_selected: bool,
     pub visible_index_range: Option<(usize, usize)>,
     pub visible_paths_cache: FxHashSet<PathBuf>,
@@ -261,6 +262,7 @@ impl PanelSnapshot {
             current_folder_locked: app.current_folder_locked,
             list_column_widths: PanelListColumnWidths::from_layout(&app.layout),
             scroll_offset_y: app.scroll_offset_y,
+            scroll_offset_x: app.scroll_offset_x,
             scroll_to_selected: app.scroll_to_selected,
             visible_index_range: app.visible_index_range,
             visible_paths_cache: app.visible_paths_cache.clone(),
@@ -310,6 +312,7 @@ impl PanelSnapshot {
         app.current_folder_locked = self.current_folder_locked;
         self.list_column_widths.apply_to_layout(&mut app.layout);
         app.scroll_offset_y = self.scroll_offset_y;
+        app.scroll_offset_x = self.scroll_offset_x;
         app.scroll_to_selected = self.scroll_to_selected;
         app.visible_index_range = self.visible_index_range;
         app.visible_paths_cache = self.visible_paths_cache;
@@ -371,6 +374,7 @@ impl PanelSnapshot {
         );
         self.list_column_widths.swap_with_layout(&mut app.layout);
         std::mem::swap(&mut self.scroll_offset_y, &mut app.scroll_offset_y);
+        std::mem::swap(&mut self.scroll_offset_x, &mut app.scroll_offset_x);
         std::mem::swap(&mut self.scroll_to_selected, &mut app.scroll_to_selected);
         std::mem::swap(&mut self.visible_index_range, &mut app.visible_index_range);
         std::mem::swap(&mut self.visible_paths_cache, &mut app.visible_paths_cache);

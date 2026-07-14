@@ -41,6 +41,7 @@ impl ImageViewerApp {
         active.search_query = self.search_query.clone();
         active.scroll_to_selected = self.scroll_to_selected;
         active.scroll_offset_y = self.scroll_offset_y;
+        active.scroll_offset_x = self.scroll_offset_x;
         active.total_items = self.total_items;
         active.view_mode = self.view_mode;
         // PERF: Move instead of clone for multi_selection (same pattern as all_items)
@@ -161,6 +162,7 @@ impl ImageViewerApp {
             self.search_query = std::mem::take(&mut active.search_query);
             self.scroll_to_selected = active.scroll_to_selected;
             self.scroll_offset_y = active.scroll_offset_y;
+            self.scroll_offset_x = active.scroll_offset_x;
             self.total_items = active.total_items;
             self.view_mode = active.view_mode;
             self.multi_selection = std::mem::take(&mut active.multi_selection);

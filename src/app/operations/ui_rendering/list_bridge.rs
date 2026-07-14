@@ -7,7 +7,9 @@ use eframe::egui;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use crate::app::operations::navigation::{process_list_keyboard_input, should_handle_navigation};
+use crate::app::operations::navigation::{
+    process_column_list_keyboard_input, process_list_keyboard_input, should_handle_navigation,
+};
 use crate::app::state::ImageViewerApp;
 use crate::infrastructure::io_priority;
 use crate::ui::views::rectangle_selection::{RectangleSelectionFrame, RectangleSelectionView};
@@ -108,6 +110,14 @@ impl<'a> ListViewOperations for ListOps<'a> {
 impl ImageViewerApp {
     /// Render list view with extracted navigation logic
     pub fn render_list_view(&mut self, ui: &mut egui::Ui) {
+        self.render_list_like_view(ui, false);
+    }
+
+    pub(crate) fn render_column_list_bridge(&mut self, ui: &mut egui::Ui) {
+        self.render_list_like_view(ui, true);
+    }
+
+    fn render_list_like_view(&mut self, ui: &mut egui::Ui, column_list: bool) {
         let t_total = Instant::now();
         // Keyboard navigation (ONLY when not renaming and media is NOT focused)
         if !self.suppress_file_panel_keyboard
@@ -125,21 +135,41 @@ impl ImageViewerApp {
                     .is_some_and(|f| f.path == x.path)
             });
 
-            let row_height = 24.0;
-            let header_h = 32.0; // Header + Separator precise height for visibility
-            let viewport_h = (ui.available_height() - header_h).max(0.0);
-
-            let nav_result = process_list_keyboard_input(
-                ui,
-                current_index,
-                self.items.len(),
-                row_height,
-                viewport_h,
-                Some(
-                    self.shortcuts
-                        .get(crate::app::shortcuts::ShortcutAction::Properties),
-                ),
+            let reserved_enter = Some(
+                self.shortcuts
+                    .get(crate::app::shortcuts::ShortcutAction::Properties),
             );
+            let nav_result = if column_list {
+                let rows = crate::ui::views::column_list_view::column_list_rows(
+                    self.items.len(),
+                    ui.available_width(),
+                    ui.available_height(),
+                );
+                let visible_columns =
+                    crate::ui::views::column_list_view::column_list_visible_columns(
+                        ui.available_width(),
+                    );
+                process_column_list_keyboard_input(
+                    ui,
+                    current_index,
+                    self.items.len(),
+                    rows,
+                    visible_columns,
+                    reserved_enter,
+                )
+            } else {
+                let row_height = 24.0;
+                let header_h = 32.0;
+                let viewport_h = (ui.available_height() - header_h).max(0.0);
+                process_list_keyboard_input(
+                    ui,
+                    current_index,
+                    self.items.len(),
+                    row_height,
+                    viewport_h,
+                    reserved_enter,
+                )
+            };
 
             let shift = ui.input(|i| i.modifiers.shift);
 
@@ -249,10 +279,14 @@ impl ImageViewerApp {
             && ui
                 .input(|i| i.pointer.hover_pos())
                 .is_some_and(|pos| ui.clip_rect().contains(pos));
-        let rectangle_selection_state = self
-            .rectangle_selection_state
-            .as_ref()
-            .filter(|state| state.view == RectangleSelectionView::List);
+        let rectangle_selection_state = self.rectangle_selection_state.as_ref().filter(|state| {
+            state.view
+                == if column_list {
+                    RectangleSelectionView::ColumnList
+                } else {
+                    RectangleSelectionView::List
+                }
+        });
 
         // Select appropriate column width references based on context
         let (col_name_width, col_date_width, col_type_width, col_size_width, col_status_width) =
@@ -290,8 +324,9 @@ impl ImageViewerApp {
         // Save is deferred until after ListViewContext is dropped (borrow release).
         // If items are empty, keep the flag so auto-fit retries on the next render
         // with actual content.
-        let needs_save_after_autofit = self.pending_list_column_autofit && !items.is_empty();
-        if self.pending_list_column_autofit && !items.is_empty() {
+        let needs_save_after_autofit =
+            !column_list && self.pending_list_column_autofit && !items.is_empty();
+        if !column_list && self.pending_list_column_autofit && !items.is_empty() {
             self.pending_list_column_autofit = false;
             list_view::auto_fit_columns(
                 ui,
@@ -340,6 +375,7 @@ impl ImageViewerApp {
             failed_thumbnails: &self.cache_manager.failed_thumbnails,
             scroll_offset_y: self.scroll_offset_y,
             mut_scroll_offset_y: &mut self.scroll_offset_y,
+            mut_scroll_offset_x: &mut self.scroll_offset_x,
             last_input: self.last_input,
             last_scroll_time: &mut self.last_scroll_time,
             last_scroll_offset: &mut self.last_scroll_offset,
@@ -380,7 +416,11 @@ impl ImageViewerApp {
 
         let t_after_prepare = Instant::now();
 
-        let action = list_view::render_list_view(ui, &mut ctx, &mut ops);
+        let action = if column_list {
+            crate::ui::views::column_list_view::render_column_list_view(ui, &mut ctx, &mut ops)
+        } else {
+            list_view::render_list_view(ui, &mut ctx, &mut ops)
+        };
 
         let t_after_core_render = Instant::now();
 

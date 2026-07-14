@@ -499,6 +499,7 @@ pub struct ImageViewerApp {
 
     // Scroll offset for manual grid virtualization
     pub scroll_offset_y: f32,
+    pub scroll_offset_x: f32,
 
     // PERFORMANCE: Visible item range for GPU upload prioritization
     // Set by grid/list view each frame; used by upload loop to prioritize on-screen items

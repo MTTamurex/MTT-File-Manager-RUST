@@ -89,7 +89,7 @@ fn render_drive_tooltip(ui: &mut Ui, item: &FileEntry) {
 use super::super::common::{snap_rect_to_physical_pixels, TOOLTIP_DELAY_SECS};
 
 /// Renders tooltip with debounce for a list item
-pub(super) fn render_item_tooltip(
+pub(crate) fn render_item_tooltip(
     ui: &mut Ui,
     response: &egui::Response,
     item: &FileEntry,
@@ -239,7 +239,7 @@ pub(super) fn render_item_tooltip(
 }
 
 /// Renders the item icon (drive, folder, or file)
-pub(super) fn render_item_icon(
+pub(crate) fn render_item_icon(
     ui: &mut Ui,
     item: &FileEntry,
     ctx: &mut ListViewContext,

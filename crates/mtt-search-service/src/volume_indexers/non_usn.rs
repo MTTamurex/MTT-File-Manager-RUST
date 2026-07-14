@@ -164,7 +164,7 @@ pub(crate) fn index_non_ntfs_volume(
                 );
 
                 // Adaptive backoff based on whether record count changed.
-                let changed = prev_record_count.map_or(true, |prev| prev != records);
+                let changed = prev_record_count != Some(records);
                 prev_record_count = Some(records);
 
                 if changed {

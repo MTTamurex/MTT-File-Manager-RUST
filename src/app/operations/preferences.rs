@@ -16,10 +16,7 @@ use crate::infrastructure::diagnostic_logger;
 use std::time::SystemTime;
 
 fn view_mode_preference_value(view_mode: ViewMode) -> &'static str {
-    match view_mode {
-        ViewMode::Grid => "grid",
-        ViewMode::List => "list",
-    }
+    view_mode.preference_value()
 }
 
 /// Minimum interval between actual disk writes

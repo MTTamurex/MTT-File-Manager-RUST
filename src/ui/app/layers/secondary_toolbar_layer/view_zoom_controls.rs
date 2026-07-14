@@ -17,9 +17,9 @@ pub(super) fn render_view_and_zoom_controls(ui: &mut egui::Ui, app: &mut ImageVi
         if widgets::toggle_icon_button(
             ui,
             svg_manager,
-            theme::ICON_LIST,
+            theme::ICON_VIEW_DETAILS,
             matches!(app.view_mode, ViewMode::List),
-            &t!("secondary_toolbar.list"),
+            &t!("secondary_toolbar.details"),
         )
         .clicked()
             && !matches!(app.view_mode, ViewMode::List)
@@ -28,6 +28,24 @@ pub(super) fn render_view_and_zoom_controls(ui: &mut egui::Ui, app: &mut ImageVi
             if !locked {
                 app.view_mode_normal = ViewMode::List;
             }
+            view_mode_changed = true;
+        }
+
+        if widgets::toggle_icon_button(
+            ui,
+            svg_manager,
+            theme::ICON_VIEW_COLUMNS,
+            matches!(app.view_mode, ViewMode::ColumnList),
+            &t!("secondary_toolbar.column_list"),
+        )
+        .clicked()
+            && !matches!(app.view_mode, ViewMode::ColumnList)
+        {
+            app.view_mode = ViewMode::ColumnList;
+            if !locked {
+                app.view_mode_normal = ViewMode::ColumnList;
+            }
+            app.folder_size_state.cancel_batch();
             view_mode_changed = true;
         }
 

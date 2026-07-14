@@ -3,6 +3,8 @@ use rusqlite::params;
 use super::IndexDb;
 use crate::file_index::VolumeIndex;
 
+type IncrementalRecord = (u64, String, u64, bool, bool, Vec<u64>);
+
 impl IndexDb {
     /// Save the complete volume index to the database.
     ///
@@ -210,7 +212,7 @@ impl IndexDb {
     pub fn sync_records_incremental_snapshot(
         &self,
         drive_letter: char,
-        additions: &[(u64, String, u64, bool, bool, Vec<u64>)],
+        additions: &[IncrementalRecord],
         removals: &std::collections::HashSet<u64>,
     ) -> Result<(), String> {
         if additions.is_empty() && removals.is_empty() {

@@ -289,12 +289,24 @@ impl ImageViewerApp {
         let down = ((EDGE_ZONE - bottom_distance) / EDGE_ZONE).clamp(0.0, 1.0);
         let delta = (down - up) * MAX_STEP_PER_FRAME;
 
-        if delta.abs() <= 0.1 {
-            return;
+        if frame.max_scroll_y > 0.0 && delta.abs() > 0.1 {
+            self.scroll_offset_y = (self.scroll_offset_y + delta).clamp(0.0, frame.max_scroll_y);
         }
 
-        self.scroll_offset_y = (self.scroll_offset_y + delta).clamp(0.0, frame.max_scroll_y);
-        ui.ctx().request_repaint();
+        let left_distance = pointer_pos.x - viewport.left();
+        let right_distance = viewport.right() - pointer_pos.x;
+        let left = ((EDGE_ZONE - left_distance) / EDGE_ZONE).clamp(0.0, 1.0);
+        let right = ((EDGE_ZONE - right_distance) / EDGE_ZONE).clamp(0.0, 1.0);
+        let delta_x = (right - left) * MAX_STEP_PER_FRAME;
+        if frame.max_scroll_x > 0.0 && delta_x.abs() > 0.1 {
+            self.scroll_offset_x = (self.scroll_offset_x + delta_x).clamp(0.0, frame.max_scroll_x);
+        }
+
+        if (frame.max_scroll_y > 0.0 && delta.abs() > 0.1)
+            || (frame.max_scroll_x > 0.0 && delta_x.abs() > 0.1)
+        {
+            ui.ctx().request_repaint();
+        }
     }
 
     fn update_rectangle_selection_preview(&mut self, metrics: RectangleSelectionMetrics) {

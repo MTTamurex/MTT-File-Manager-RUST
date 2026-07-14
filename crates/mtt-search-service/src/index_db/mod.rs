@@ -104,30 +104,6 @@ pub fn skip_sqlite_data_persistence() -> bool {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn skip_sqlite_data_persistence_reads_env_var() {
-        // Default is false.
-        std::env::remove_var("MTT_SEARCH_SKIP_SQLITE_DATA");
-        assert!(!skip_sqlite_data_persistence());
-
-        for value in ["1", "true", "TRUE", "True"] {
-            std::env::set_var("MTT_SEARCH_SKIP_SQLITE_DATA", value);
-            assert!(skip_sqlite_data_persistence(), "value={}", value);
-        }
-
-        for value in ["0", "false", "", "yes"] {
-            std::env::set_var("MTT_SEARCH_SKIP_SQLITE_DATA", value);
-            assert!(!skip_sqlite_data_persistence(), "value={}", value);
-        }
-
-        std::env::remove_var("MTT_SEARCH_SKIP_SQLITE_DATA");
-    }
-}
-
 /// Resolved data directory — set once at startup by `get_db_path`.
 /// Both the SQLite database *and* binary index files live under this
 /// directory so deleting it clears all caches.
@@ -711,7 +687,7 @@ impl IndexDb {
                 return Err("name arena full while loading file_records".to_string());
             }
             count += 1;
-            if count == 1 || count % 128 == 0 {
+            if count == 1 || count.is_multiple_of(128) {
                 on_progress(count);
             }
         }
@@ -746,5 +722,29 @@ impl IndexDb {
         } else {
             Ok(None)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn skip_sqlite_data_persistence_reads_env_var() {
+        // Default is false.
+        std::env::remove_var("MTT_SEARCH_SKIP_SQLITE_DATA");
+        assert!(!skip_sqlite_data_persistence());
+
+        for value in ["1", "true", "TRUE", "True"] {
+            std::env::set_var("MTT_SEARCH_SKIP_SQLITE_DATA", value);
+            assert!(skip_sqlite_data_persistence(), "value={}", value);
+        }
+
+        for value in ["0", "false", "", "yes"] {
+            std::env::set_var("MTT_SEARCH_SKIP_SQLITE_DATA", value);
+            assert!(!skip_sqlite_data_persistence(), "value={}", value);
+        }
+
+        std::env::remove_var("MTT_SEARCH_SKIP_SQLITE_DATA");
     }
 }

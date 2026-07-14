@@ -7,6 +7,7 @@ use crate::ui::cache::FxHashSet;
 pub enum RectangleSelectionView {
     Grid,
     List,
+    ColumnList,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -36,9 +37,20 @@ pub struct ListRectangleMetrics {
 }
 
 #[derive(Clone, Copy, Debug)]
+pub struct ColumnListRectangleMetrics {
+    pub count: usize,
+    pub rows_per_column: usize,
+    pub column_width: f32,
+    pub row_height: f32,
+    pub content_width: f32,
+    pub content_height: f32,
+}
+
+#[derive(Clone, Copy, Debug)]
 pub enum RectangleSelectionMetrics {
     Grid(GridRectangleMetrics),
     List(ListRectangleMetrics),
+    ColumnList(ColumnListRectangleMetrics),
 }
 
 impl RectangleSelectionMetrics {
@@ -46,6 +58,7 @@ impl RectangleSelectionMetrics {
         match self {
             Self::Grid(_) => RectangleSelectionView::Grid,
             Self::List(_) => RectangleSelectionView::List,
+            Self::ColumnList(_) => RectangleSelectionView::ColumnList,
         }
     }
 
@@ -53,6 +66,7 @@ impl RectangleSelectionMetrics {
         match self {
             Self::Grid(metrics) => metrics.content_width,
             Self::List(metrics) => metrics.content_width,
+            Self::ColumnList(metrics) => metrics.content_width,
         }
     }
 
@@ -60,6 +74,7 @@ impl RectangleSelectionMetrics {
         match self {
             Self::Grid(metrics) => metrics.content_height,
             Self::List(metrics) => metrics.content_height,
+            Self::ColumnList(metrics) => metrics.content_height,
         }
     }
 }
@@ -122,6 +137,8 @@ pub struct RectangleSelectionFrame {
     pub viewport_rect: Option<Rect>,
     pub current_scroll_y: f32,
     pub max_scroll_y: f32,
+    pub current_scroll_x: f32,
+    pub max_scroll_x: f32,
     pub metrics: Option<RectangleSelectionMetrics>,
     pub start_screen_pos: Option<Pos2>,
 }
@@ -130,13 +147,17 @@ impl RectangleSelectionFrame {
     pub fn begin(
         &mut self,
         viewport_rect: Rect,
+        current_scroll_x: f32,
         current_scroll_y: f32,
+        max_scroll_x: f32,
         max_scroll_y: f32,
         metrics: Option<RectangleSelectionMetrics>,
     ) {
         self.viewport_rect = Some(viewport_rect);
         self.current_scroll_y = current_scroll_y;
         self.max_scroll_y = max_scroll_y;
+        self.current_scroll_x = current_scroll_x;
+        self.max_scroll_x = max_scroll_x;
         self.metrics = metrics;
         self.start_screen_pos = None;
     }
@@ -150,7 +171,8 @@ impl RectangleSelectionFrame {
     pub fn screen_to_content(&self, screen_pos: Pos2) -> Option<Pos2> {
         let viewport = self.viewport_rect?;
         let metrics = self.metrics?;
-        let x = (screen_pos.x - viewport.left()).clamp(0.0, metrics.content_width().max(0.0));
+        let x = (screen_pos.x - viewport.left() + self.current_scroll_x)
+            .clamp(0.0, metrics.content_width().max(0.0));
         let y = (screen_pos.y - viewport.top() + self.current_scroll_y)
             .clamp(0.0, metrics.content_height().max(0.0));
         Some(egui::pos2(x, y))
@@ -164,7 +186,59 @@ pub fn collect_indices_in_rect(
     match metrics {
         RectangleSelectionMetrics::Grid(metrics) => collect_grid_indices(selection_rect, metrics),
         RectangleSelectionMetrics::List(metrics) => collect_list_indices(selection_rect, metrics),
+        RectangleSelectionMetrics::ColumnList(metrics) => {
+            collect_column_list_indices(selection_rect, metrics)
+        }
     }
+}
+
+fn collect_column_list_indices(
+    selection_rect: Rect,
+    metrics: ColumnListRectangleMetrics,
+) -> FxHashSet<usize> {
+    let mut indices = FxHashSet::default();
+    if metrics.count == 0
+        || metrics.rows_per_column == 0
+        || metrics.column_width <= 0.0
+        || metrics.row_height <= 0.0
+    {
+        return indices;
+    }
+
+    let column_count = metrics.count.div_ceil(metrics.rows_per_column);
+    let first_col = (selection_rect.left() / metrics.column_width)
+        .floor()
+        .max(0.0) as usize;
+    let last_col = (selection_rect.right() / metrics.column_width)
+        .floor()
+        .max(0.0) as usize;
+    let last_col = last_col.min(column_count.saturating_sub(1));
+    let first_row = (selection_rect.top() / metrics.row_height).floor().max(0.0) as usize;
+    let last_row = (selection_rect.bottom() / metrics.row_height)
+        .floor()
+        .max(0.0) as usize;
+    let last_row = last_row.min(metrics.rows_per_column.saturating_sub(1));
+
+    for col in first_col..=last_col {
+        for row in first_row..=last_row {
+            let index = col * metrics.rows_per_column + row;
+            if index >= metrics.count {
+                break;
+            }
+            let item_rect = Rect::from_min_size(
+                egui::pos2(
+                    col as f32 * metrics.column_width,
+                    row as f32 * metrics.row_height,
+                ),
+                egui::vec2(metrics.column_width, metrics.row_height),
+            );
+            if rects_intersect(selection_rect, item_rect) {
+                indices.insert(index);
+            }
+        }
+    }
+
+    indices
 }
 
 fn collect_grid_indices(selection_rect: Rect, metrics: GridRectangleMetrics) -> FxHashSet<usize> {
@@ -243,16 +317,17 @@ pub fn paint_overlay(
     ui: &egui::Ui,
     state: &RectangleSelectionState,
     viewport_rect: Rect,
+    current_scroll_x: f32,
     current_scroll_y: f32,
 ) {
     let content_rect = state.content_rect();
     let screen_rect = Rect::from_min_max(
         egui::pos2(
-            viewport_rect.left() + content_rect.left(),
+            viewport_rect.left() + content_rect.left() - current_scroll_x,
             viewport_rect.top() + content_rect.top() - current_scroll_y,
         ),
         egui::pos2(
-            viewport_rect.left() + content_rect.right(),
+            viewport_rect.left() + content_rect.right() - current_scroll_x,
             viewport_rect.top() + content_rect.bottom() - current_scroll_y,
         ),
     )
@@ -315,5 +390,22 @@ mod tests {
         );
 
         assert_eq!(sorted(indices), vec![0]);
+    }
+
+    #[test]
+    fn column_list_selection_maps_columns_top_to_bottom() {
+        let indices = collect_indices_in_rect(
+            Rect::from_min_max(egui::pos2(100.0, 20.0), egui::pos2(200.0, 60.0)),
+            RectangleSelectionMetrics::ColumnList(ColumnListRectangleMetrics {
+                count: 8,
+                rows_per_column: 3,
+                column_width: 100.0,
+                row_height: 20.0,
+                content_width: 300.0,
+                content_height: 60.0,
+            }),
+        );
+
+        assert_eq!(sorted(indices), vec![4, 5]);
     }
 }
