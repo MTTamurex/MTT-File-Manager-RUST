@@ -14,7 +14,7 @@ pub(super) fn render_section_header(ui: &mut Ui, title: &str) {
         ui.add_space(SECTION_HEADER_LEFT_PADDING);
         ui.label(
             RichText::new(title)
-                .size(11.0)
+                .size(13.0)
                 .color(Color32::from_gray(120))
                 .strong(),
         );

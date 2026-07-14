@@ -256,7 +256,7 @@ fn render_computer_headers(
                 egui::pos2(rect.left() + 8.0, rect.center().y),
                 egui::Align2::LEFT_CENTER,
                 title,
-                FontId::proportional(11.0),
+                FontId::proportional(13.0),
                 Color32::from_gray(120),
             );
         }
