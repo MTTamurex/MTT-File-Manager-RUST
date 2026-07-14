@@ -140,11 +140,30 @@ impl ImageViewerApp {
                     .get(crate::app::shortcuts::ShortcutAction::Properties),
             );
             let nav_result = if column_list {
-                let rows = crate::ui::views::column_list_view::column_list_rows(
-                    self.items.len(),
-                    ui.available_width(),
-                    ui.available_height(),
-                );
+                let rows = if self.navigation_state.is_computer_view {
+                    let network_count = self
+                        .items
+                        .iter()
+                        .filter(|item| {
+                            item.drive_info.as_ref().is_some_and(|drive| {
+                                drive.drive_type
+                                    == crate::infrastructure::windows::DriveType::Remote
+                            })
+                        })
+                        .count();
+                    crate::ui::views::column_list_view::column_list_grouped_rows(
+                        self.items.len().saturating_sub(network_count),
+                        network_count,
+                        ui.available_width(),
+                        ui.available_height(),
+                    )
+                } else {
+                    crate::ui::views::column_list_view::column_list_rows(
+                        self.items.len(),
+                        ui.available_width(),
+                        ui.available_height(),
+                    )
+                };
                 let visible_columns =
                     crate::ui::views::column_list_view::column_list_visible_columns(
                         ui.available_width(),

@@ -57,6 +57,56 @@ pub(super) fn render_visible_columns(
 }
 
 #[allow(clippy::too_many_arguments)]
+pub(super) fn render_grouped_columns(
+    ui: &mut Ui,
+    viewport_rect: Rect,
+    item_top: f32,
+    scroll_x: f32,
+    rows_per_column: usize,
+    groups: &[&[usize]],
+    ctx: &mut ListViewContext,
+    ops: &mut dyn ListViewOperations,
+    clicked_item: &mut Option<usize>,
+    double_clicked_item: &mut Option<usize>,
+    secondary_clicked_item: &mut Option<usize>,
+) {
+    *ctx.visible_index_range = (!ctx.items.is_empty()).then_some((0, ctx.items.len() - 1));
+    let mut child_ui = ui.new_child(egui::UiBuilder::new().max_rect(viewport_rect));
+    child_ui.set_clip_rect(viewport_rect.intersect(ui.clip_rect()));
+    let mut group_start_column = 0usize;
+
+    for indices in groups {
+        for (group_index, &item_index) in indices.iter().enumerate() {
+            if item_index >= ctx.items.len() {
+                continue;
+            }
+            let column = group_start_column + group_index / rows_per_column;
+            let row = group_index % rows_per_column;
+            let rect = Rect::from_min_size(
+                egui::pos2(
+                    viewport_rect.left() + column as f32 * COLUMN_WIDTH - scroll_x,
+                    item_top + row as f32 * ROW_HEIGHT,
+                ),
+                egui::vec2(COLUMN_WIDTH, ROW_HEIGHT),
+            );
+            if child_ui.is_rect_visible(rect) {
+                render_column_item(
+                    &mut child_ui,
+                    item_index,
+                    rect,
+                    ctx,
+                    ops,
+                    clicked_item,
+                    double_clicked_item,
+                    secondary_clicked_item,
+                );
+            }
+        }
+        group_start_column += indices.len().div_ceil(rows_per_column);
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn render_column_item(
     ui: &mut Ui,
     index: usize,

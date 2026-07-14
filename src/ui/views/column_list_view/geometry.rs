@@ -16,8 +16,19 @@ pub fn calculate_layout(
     available_width: f32,
     available_height: f32,
 ) -> ColumnListLayout {
+    calculate_grouped_layout(&[item_count], available_width, available_height)
+}
+
+pub fn calculate_grouped_layout(
+    group_counts: &[usize],
+    available_width: f32,
+    available_height: f32,
+) -> ColumnListLayout {
     let initial_rows = (available_height / ROW_HEIGHT).floor().max(1.0) as usize;
-    let initial_columns = item_count.div_ceil(initial_rows);
+    let initial_columns = group_counts
+        .iter()
+        .map(|count| count.div_ceil(initial_rows))
+        .sum::<usize>();
     let has_horizontal_scrollbar = initial_columns as f32 * COLUMN_WIDTH > available_width;
     let viewport_height = if has_horizontal_scrollbar {
         (available_height - SCROLLBAR_HEIGHT).max(0.0)
@@ -25,7 +36,10 @@ pub fn calculate_layout(
         available_height.max(0.0)
     };
     let rows_per_column = (viewport_height / ROW_HEIGHT).floor().max(1.0) as usize;
-    let column_count = item_count.div_ceil(rows_per_column);
+    let column_count = group_counts
+        .iter()
+        .map(|count| count.div_ceil(rows_per_column))
+        .sum::<usize>();
 
     ColumnListLayout {
         rows_per_column,
@@ -54,5 +68,12 @@ mod tests {
         let layout = calculate_layout(4, 500.0, 100.0);
         assert!(!layout.has_horizontal_scrollbar);
         assert_eq!(layout.column_count, 1);
+    }
+
+    #[test]
+    fn grouped_layout_starts_each_group_in_a_new_column() {
+        let layout = calculate_grouped_layout(&[2, 2], 900.0, 240.0);
+        assert_eq!(layout.rows_per_column, 10);
+        assert_eq!(layout.column_count, 2);
     }
 }
