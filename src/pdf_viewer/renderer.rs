@@ -1,6 +1,6 @@
 //! PDF page rendering and text extraction using Pdfium.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::OnceLock;
 
 use pdfium_render::prelude::*;
@@ -47,6 +47,7 @@ pub struct PdfTextSegment {
 }
 
 /// Error returned when opening a PDF document.
+#[derive(Debug)]
 pub enum PdfOpenError {
     /// The document is password-protected and no (or wrong) password was provided.
     PasswordRequired,
@@ -69,11 +70,6 @@ impl std::fmt::Display for PdfOpenError {
     }
 }
 
-/// A loaded PDF document ready for page rendering.
-pub struct PdfRenderer {
-    page_sizes: Vec<(f32, f32)>,
-}
-
 /// A rendered PDF page as raw RGBA pixels.
 pub struct RenderedPage {
     pub pixels: Vec<u8>,
@@ -81,40 +77,14 @@ pub struct RenderedPage {
     pub height: u32,
 }
 
-impl PdfRenderer {
-    /// Open a PDF file from disk, optionally with a password.
-    ///
-    /// Returns `Err(PdfOpenError::PasswordRequired)` if the document is
-    /// encrypted and the given password (or `None`) is insufficient.
-    pub fn open(path: &Path, password: Option<&str>) -> Result<Self, PdfOpenError> {
-        let pdfium = pdfium().map_err(PdfOpenError::Other)?;
-        let document = pdfium.load_pdf_from_file(path, password).map_err(|e| {
-            if matches!(
-                e,
-                PdfiumError::PdfiumLibraryInternalError(PdfiumInternalError::PasswordError)
-            ) {
-                PdfOpenError::PasswordRequired
-            } else {
-                PdfOpenError::Other(format!("LoadPdf: {e}"))
-            }
-        })?;
-
-        let page_count = document.pages().len();
-        let mut page_sizes = Vec::with_capacity(page_count as usize);
-
-        for index in 0..page_count {
-            let page = document
-                .pages()
-                .get(index as PdfPageIndex)
-                .map_err(|e| PdfOpenError::Other(e.to_string()))?;
-            page_sizes.push((page.width().value, page.height().value));
-        }
-
-        Ok(Self { page_sizes })
-    }
-
-    pub fn page_sizes(&self) -> &[(f32, f32)] {
-        &self.page_sizes
+pub(super) fn classify_open_error(error: PdfiumError) -> PdfOpenError {
+    if matches!(
+        error,
+        PdfiumError::PdfiumLibraryInternalError(PdfiumInternalError::PasswordError)
+    ) {
+        PdfOpenError::PasswordRequired
+    } else {
+        PdfOpenError::Other(format!("LoadPdf: {error}"))
     }
 }
 

@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use super::viewer_app::{PdfPageLayout, PdfViewerApp, ZoomMode};
+use super::viewer_app::{DocumentStatus, PdfPageLayout, PdfViewerApp, ZoomMode};
 
 #[derive(Default, Serialize, Deserialize)]
 struct PdfViewerStateFile {
@@ -43,7 +43,11 @@ impl PdfViewerApp {
     }
 
     pub(super) fn save_document_state(&self) {
-        if self.total_pages == 0 {
+        if !matches!(
+            self.document_status,
+            DocumentStatus::LoadingMetadata | DocumentStatus::Ready
+        ) || self.total_pages == 0
+        {
             return;
         }
 

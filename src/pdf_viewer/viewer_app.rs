@@ -10,9 +10,12 @@ use std::path::PathBuf;
 use eframe::egui;
 use rust_i18n::t;
 
-use super::render_worker::{RenderRequest, RenderWorker, SearchMatch, ThumbnailRequest};
-use super::renderer::{PdfRenderer, PdfTextSegment};
+use super::render_worker::{
+    RenderRequest, RenderWorker, SearchMatch, ThumbnailRequest, WorkerEvent,
+};
+use super::renderer::{PdfOpenError, PdfTextSegment};
 use super::selection::{DragSelection, PageSelection};
+use super::virtual_layout::{PageGeometry, PageRows, VariableRows};
 
 /// Pages beyond ±CACHE_RADIUS from the current view are evicted.
 const CACHE_RADIUS: u32 = 3;
@@ -34,6 +37,22 @@ pub(super) const TEXTURE_MEMORY_BUDGET: usize = 384 * 1024 * 1024; // 384 MB
 /// exceed this, `texture_adequate()` (0.9–2.0×) lets the existing texture
 /// stretch instead of triggering a re-render.
 const MAX_RENDER_SIDE: f32 = 4096.0;
+const PREVIEW_RENDER_SIDE: u32 = 1536;
+
+fn capped_render_size(width: f32, height: f32, max_side: u32) -> (u32, u32) {
+    let width = width.max(1.0);
+    let height = height.max(1.0);
+    let factor = (max_side as f32 / width.max(height)).min(1.0);
+    (
+        (width * factor).round().max(1.0) as u32,
+        (height * factor).round().max(1.0) as u32,
+    )
+}
+
+fn preview_render_size(width: u32, height: u32) -> Option<(u32, u32)> {
+    (width.max(height) > PREVIEW_RENDER_SIDE)
+        .then(|| capped_render_size(width as f32, height as f32, PREVIEW_RENDER_SIDE))
+}
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -56,6 +75,7 @@ pub(super) struct PageTexture {
     pub(super) texture: egui::TextureHandle,
     pub(super) render_w: u32,
     pub(super) render_h: u32,
+    preview: bool,
 }
 
 impl PageTexture {
@@ -68,7 +88,7 @@ impl PageTexture {
 // ── Password prompt ─────────────────────────────────────────────────────────
 
 #[derive(Default)]
-struct PasswordPrompt {
+pub(super) struct PasswordPrompt {
     input: String,
     /// Set to `true` after the user submits an incorrect password.
     wrong: bool,
@@ -76,11 +96,21 @@ struct PasswordPrompt {
     focus_requested: bool,
 }
 
+pub(super) enum DocumentStatus {
+    Opening { password_attempted: bool },
+    PasswordRequired(PasswordPrompt),
+    LoadingMetadata,
+    Ready,
+    Failed(String),
+}
+
 // ── App ──────────────────────────────────────────────────────────────────────
 
 pub struct PdfViewerApp {
     pub(super) worker_path: PathBuf,
     pub(super) worker: Option<RenderWorker>,
+    pub(super) document_status: DocumentStatus,
+    pending_password: Option<String>,
 
     pub(super) total_pages: u32,
     /// Natural (unrotated) page sizes in DIP.
@@ -97,6 +127,8 @@ pub struct PdfViewerApp {
     pub(super) page_input: String,
     pub(super) page_input_has_focus: bool,
     pub(super) scroll_to_page: Option<u32>,
+    scroll_to_page_fraction: Option<(u32, f32)>,
+    current_page_fraction: f32,
 
     /// Effective zoom percentage (always reflects actual scale applied).
     pub(super) effective_zoom_pct: f32,
@@ -105,28 +137,28 @@ pub struct PdfViewerApp {
     textures: HashMap<u32, PageTexture>,
     /// Pages with in-flight render requests.
     pending: HashSet<u32>,
+    render_failed: HashSet<u32>,
+    needs_refinement: HashSet<u32>,
+    render_generation: u64,
+    viewport_anchor: u32,
     pub(super) thumbnail_textures: HashMap<u32, PageTexture>,
     pub(super) thumbnail_pending: HashSet<u32>,
+    pub(super) thumbnail_failed: HashSet<u32>,
     pub(super) last_sidebar_scrolled_page: Option<u32>,
+    page_rows: Option<(u32, u32, PageRows)>,
+    pub(super) thumbnail_rows: Option<VariableRows>,
     /// Current total memory used by cached textures (tracked incrementally).
     cache_bytes: usize,
 
     pub(super) page_text: HashMap<u32, Vec<PdfTextSegment>>,
     pub(super) drag_selection: Option<DragSelection>,
     pub(super) selection: Option<PageSelection>,
-    /// Error from the render worker (init failure).
-    pub(super) worker_error: Option<String>,
     /// Whether to apply dark theme (set once at creation, applied on first frame).
     dark_mode: Option<bool>,
     /// First currently-visible page index (updated each frame by show_pages).
     visible_lo: Option<u32>,
     /// Last currently-visible page index (updated each frame by show_pages).
     visible_hi: u32,
-    /// Active password prompt (present when the PDF is encrypted and no password has been confirmed yet).
-    password_prompt: Option<PasswordPrompt>,
-    /// The password successfully used to open this document.
-    confirmed_password: Option<String>,
-
     pub(super) search_active: bool,
     pub(super) search_query: String,
     pub(super) search_input_focus_requested: bool,
@@ -139,18 +171,15 @@ pub struct PdfViewerApp {
 
 impl PdfViewerApp {
     pub fn new(path: PathBuf, dark_mode: bool) -> Result<Self, String> {
-        let (page_sizes, password_prompt) = match PdfRenderer::open(&path, None) {
-            Ok(renderer) => (renderer.page_sizes().to_vec(), None),
-            Err(e) if e.is_password_required() => (vec![], Some(PasswordPrompt::default())),
-            Err(e) => return Err(e.to_string()),
-        };
-        let total_pages = page_sizes.len() as u32;
-
-        let mut app = Self {
+        Ok(Self {
             worker_path: path,
             worker: None,
-            total_pages,
-            page_sizes,
+            document_status: DocumentStatus::Opening {
+                password_attempted: false,
+            },
+            pending_password: None,
+            total_pages: 0,
+            page_sizes: Vec::new(),
             zoom: 1.0,
             zoom_mode: ZoomMode::FitWidth,
             page_layout: PdfPageLayout::OnePage,
@@ -159,22 +188,28 @@ impl PdfViewerApp {
             page_input: "1".into(),
             page_input_has_focus: false,
             scroll_to_page: None,
+            scroll_to_page_fraction: None,
+            current_page_fraction: 0.0,
             effective_zoom_pct: 100.0,
             textures: HashMap::new(),
             pending: HashSet::new(),
+            render_failed: HashSet::new(),
+            needs_refinement: HashSet::new(),
+            render_generation: 0,
+            viewport_anchor: 0,
             thumbnail_textures: HashMap::new(),
             thumbnail_pending: HashSet::new(),
+            thumbnail_failed: HashSet::new(),
             last_sidebar_scrolled_page: None,
+            page_rows: None,
+            thumbnail_rows: None,
             cache_bytes: 0,
             page_text: HashMap::new(),
             drag_selection: None,
             selection: None,
-            worker_error: None,
             dark_mode: Some(dark_mode),
             visible_lo: None,
             visible_hi: 0,
-            password_prompt,
-            confirmed_password: None,
             search_active: false,
             search_query: String::new(),
             search_input_focus_requested: false,
@@ -183,18 +218,16 @@ impl PdfViewerApp {
             search_generation: 0,
             search_in_progress: false,
             last_searched_query: String::new(),
-        };
-        app.restore_document_state();
-        Ok(app)
+        })
     }
 
     // ── Worker management ────────────────────────────────────────────────
 
     fn ensure_worker(&mut self, ctx: &egui::Context) {
-        if self.worker.is_none() {
+        if self.worker.is_none() && matches!(self.document_status, DocumentStatus::Opening { .. }) {
             self.worker = Some(RenderWorker::spawn(
                 self.worker_path.clone(),
-                self.confirmed_password.clone(),
+                self.pending_password.take(),
                 ctx.clone(),
             ));
         }
@@ -214,7 +247,7 @@ impl PdfViewerApp {
             .resizable(false)
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .show(ctx, |ui| {
-                if let Some(prompt) = &mut self.password_prompt {
+                if let DocumentStatus::PasswordRequired(prompt) = &mut self.document_status {
                     ui.label(t!("pdfviewer.password_prompt").to_string());
 
                     if prompt.wrong {
@@ -263,45 +296,119 @@ impl PdfViewerApp {
         }
 
         if let Some(pwd) = submitted_password {
-            match PdfRenderer::open(&self.worker_path, Some(&pwd)) {
-                Ok(renderer) => {
-                    self.page_sizes = renderer.page_sizes().to_vec();
-                    self.total_pages = self.page_sizes.len() as u32;
-                    self.confirmed_password = Some(pwd);
-                    self.password_prompt = None;
-                    self.restore_document_state();
+            self.pending_password = Some(pwd);
+            self.document_status = DocumentStatus::Opening {
+                password_attempted: true,
+            };
+        }
+    }
+
+    fn handle_worker_event(&mut self, event: WorkerEvent) {
+        match event {
+            WorkerEvent::Opened {
+                page_count,
+                first_page_size,
+            } => {
+                self.total_pages = page_count;
+                self.page_sizes = first_page_size
+                    .map(|size| vec![size; page_count as usize])
+                    .unwrap_or_default();
+                self.document_status = if page_count <= 1 {
+                    DocumentStatus::Ready
+                } else {
+                    DocumentStatus::LoadingMetadata
+                };
+                self.restore_document_state();
+            }
+            WorkerEvent::MetadataLoaded { page_sizes } => {
+                if page_sizes.len() != self.total_pages as usize {
+                    self.document_status = DocumentStatus::Failed(format!(
+                        "PDF metadata count mismatch: expected {}, got {}",
+                        self.total_pages,
+                        page_sizes.len()
+                    ));
+                    return;
                 }
-                Err(e) if e.is_password_required() => {
-                    if let Some(prompt) = &mut self.password_prompt {
-                        prompt.wrong = true;
-                        prompt.input.clear();
-                        prompt.focus_requested = false;
+                self.page_sizes = page_sizes;
+                self.pending.clear();
+                self.render_failed.clear();
+                self.needs_refinement.extend(self.textures.keys().copied());
+                self.thumbnail_pending.clear();
+                self.thumbnail_textures.clear();
+                self.thumbnail_failed.clear();
+                self.page_rows = None;
+                self.thumbnail_rows = None;
+                self.last_sidebar_scrolled_page = None;
+                self.drag_selection = None;
+                self.selection = None;
+                if self.scroll_to_page.is_none() {
+                    self.scroll_to_page_fraction =
+                        Some((self.current_page, self.current_page_fraction));
+                }
+                self.document_status = DocumentStatus::Ready;
+            }
+            WorkerEvent::RenderRequestsDropped {
+                generation,
+                page_indices,
+            } => {
+                if generation == self.render_generation {
+                    for page_idx in page_indices {
+                        self.pending.remove(&page_idx);
                     }
                 }
-                Err(e) => {
-                    self.worker_error = Some(e.to_string());
-                    self.password_prompt = None;
-                }
+            }
+            WorkerEvent::Failed(PdfOpenError::PasswordRequired) => {
+                self.worker = None;
+                let wrong = matches!(
+                    self.document_status,
+                    DocumentStatus::Opening {
+                        password_attempted: true
+                    }
+                );
+                self.document_status = DocumentStatus::PasswordRequired(PasswordPrompt {
+                    wrong,
+                    ..Default::default()
+                });
+            }
+            WorkerEvent::Failed(PdfOpenError::Other(error)) => {
+                self.worker = None;
+                self.document_status = DocumentStatus::Failed(error);
             }
         }
     }
 
     fn poll_results(&mut self, ctx: &egui::Context) {
-        let worker = match &self.worker {
-            Some(w) => w,
+        let events = match &self.worker {
+            Some(worker) => worker.drain_events(),
             None => return,
         };
 
-        if let Some(err) = worker.take_init_error() {
-            log::error!("[PDF-VIEWER] render worker failed: {err}");
-            self.worker_error = Some(err);
-            self.worker = None;
-            return;
+        for event in events {
+            self.handle_worker_event(event);
         }
+
+        let worker = match &self.worker {
+            Some(worker) => worker,
+            None => return,
+        };
 
         let results = worker.drain_results(4);
         for r in results {
+            if r.generation != self.render_generation {
+                continue;
+            }
             self.pending.remove(&r.page_idx);
+            if let Some(error) = r.error {
+                if r.preview
+                    || (r.provisional && matches!(self.document_status, DocumentStatus::Ready))
+                {
+                    self.needs_refinement.insert(r.page_idx);
+                } else {
+                    self.render_failed.insert(r.page_idx);
+                }
+                log::error!("[PDF-VIEWER] page {} failed: {error}", r.page_idx);
+                continue;
+            }
 
             // Free the old texture BEFORE uploading the new one to avoid
             // momentary 2× peak memory for this page, which can push the
@@ -323,7 +430,13 @@ impl PdfViewerApp {
                 texture: tex,
                 render_w: r.width,
                 render_h: r.height,
+                preview: r.preview,
             };
+            if r.provisional && matches!(self.document_status, DocumentStatus::Ready) {
+                self.needs_refinement.insert(r.page_idx);
+            } else if !r.provisional && !r.preview {
+                self.needs_refinement.remove(&r.page_idx);
+            }
             self.cache_bytes += new_entry.byte_size();
             self.textures.insert(r.page_idx, new_entry);
         }
@@ -345,6 +458,11 @@ impl PdfViewerApp {
 
         for r in thumbnail_results {
             self.thumbnail_pending.remove(&r.page_idx);
+            if let Some(error) = r.error {
+                self.thumbnail_failed.insert(r.page_idx);
+                log::warn!("[PDF-VIEWER] thumbnail {} failed: {error}", r.page_idx);
+                continue;
+            }
             let tex = ctx.load_texture(
                 format!("pdf_thumb_p{}", r.page_idx),
                 egui::ColorImage::from_rgba_unmultiplied(
@@ -359,29 +477,46 @@ impl PdfViewerApp {
                     texture: tex,
                     render_w: r.width,
                     render_h: r.height,
+                    preview: false,
                 },
             );
             self.evict_thumbnail_cache();
         }
     }
 
-    fn submit_render(&mut self, page_idx: u32, need_w: u32, need_h: u32) {
-        if self.pending.contains(&page_idx) {
+    fn submit_render(
+        &mut self,
+        page_idx: u32,
+        need_w: u32,
+        need_h: u32,
+        priority: u32,
+        preview: bool,
+    ) {
+        if self.pending.contains(&page_idx) || self.render_failed.contains(&page_idx) {
             return;
         }
         if let Some(w) = &self.worker {
-            w.request(RenderRequest {
+            if w.request(RenderRequest {
                 page_idx,
                 width: need_w,
                 height: need_h,
-            });
-            self.pending.insert(page_idx);
+                generation: self.render_generation,
+                priority,
+                provisional: matches!(self.document_status, DocumentStatus::LoadingMetadata),
+                preview,
+            }) {
+                self.pending.insert(page_idx);
+            }
         }
     }
 
     pub(super) fn submit_thumbnail(&mut self, page_idx: u32, width: u32, height: u32) {
+        if matches!(self.document_status, DocumentStatus::LoadingMetadata) {
+            return;
+        }
         if self.thumbnail_pending.contains(&page_idx)
             || self.thumbnail_textures.contains_key(&page_idx)
+            || self.thumbnail_failed.contains(&page_idx)
         {
             return;
         }
@@ -438,17 +573,14 @@ impl PdfViewerApp {
     /// Pixel dimensions the renderer should produce (unrotated, DPI-scaled).
     fn needed_render_size(&self, page_idx: u32, scale: f32, ppp: f32) -> (u32, u32) {
         let (nw, nh) = self.page_sizes[page_idx as usize];
-        (
-            (nw * scale * ppp).clamp(1.0, MAX_RENDER_SIDE) as u32,
-            (nh * scale * ppp).clamp(1.0, MAX_RENDER_SIDE) as u32,
-        )
+        capped_render_size(nw * scale * ppp, nh * scale * ppp, MAX_RENDER_SIDE as u32)
     }
 
     /// Returns `true` if the cached texture resolution is close enough to what
     /// we need (between 90 % and 200 %).  Outside that range the texture is
     /// either too blurry or wastefully large.
     fn texture_adequate(cached: &PageTexture, need_w: u32, need_h: u32) -> bool {
-        if need_w == 0 || need_h == 0 {
+        if cached.preview || need_w == 0 || need_h == 0 {
             return false;
         }
         let rw = cached.render_w as f32 / need_w as f32;
@@ -460,9 +592,14 @@ impl PdfViewerApp {
 
     fn evict_distant(&mut self, first_visible: Option<u32>, last_visible: u32) {
         let lo = self.current_page.saturating_sub(CACHE_RADIUS);
-        let hi = (self.current_page + CACHE_RADIUS).min(self.total_pages.saturating_sub(1));
+        let hi = self
+            .current_page
+            .saturating_add(CACHE_RADIUS)
+            .min(self.total_pages.saturating_sub(1));
+        let vis_lo = first_visible.unwrap_or(self.current_page);
+        let vis_hi = last_visible.max(vis_lo);
         self.textures.retain(|&idx, tex| {
-            if idx >= lo && idx <= hi {
+            if (idx >= lo && idx <= hi) || (idx >= vis_lo && idx <= vis_hi) {
                 true
             } else {
                 self.cache_bytes = self.cache_bytes.saturating_sub(tex.byte_size());
@@ -472,22 +609,15 @@ impl PdfViewerApp {
         // Drop text-segment metadata for pages whose textures are no longer
         // cached; without this the per-page text cache grows unboundedly
         // during long browsing sessions on large documents.
-        self.page_text.retain(|&idx, _| idx >= lo && idx <= hi);
+        self.page_text
+            .retain(|&idx, _| (idx >= lo && idx <= hi) || (idx >= vis_lo && idx <= vis_hi));
 
         // If still over budget, evict furthest pages from current_page first,
         // but never evict pages that are currently visible on screen — that
         // would cause a visible placeholder flash (render-evict cycle).
         if self.cache_bytes > TEXTURE_MEMORY_BUDGET {
-            let vis_lo = first_visible.unwrap_or(self.current_page);
-            let vis_hi = if last_visible > 0 {
-                last_visible
-            } else {
-                vis_lo
-            };
             let mut pages: Vec<u32> = self.textures.keys().copied().collect();
-            pages.sort_by_key(|&p| {
-                std::cmp::Reverse((p as i64 - self.current_page as i64).unsigned_abs())
-            });
+            pages.sort_by_key(|&p| (p as i64 - self.current_page as i64).unsigned_abs());
             while self.cache_bytes > TEXTURE_MEMORY_BUDGET {
                 if let Some(victim) = pages.pop() {
                     // Never evict the current page or any currently-visible page
@@ -566,7 +696,12 @@ impl PdfViewerApp {
 
     /// Clear pending set so visible pages can be re-requested at the new scale.
     pub(super) fn on_view_changed(&mut self) {
+        self.render_generation = self.render_generation.wrapping_add(1);
         self.pending.clear();
+        self.render_failed.clear();
+        self.thumbnail_failed.clear();
+        self.page_rows = None;
+        self.thumbnail_rows = None;
     }
 
     pub(super) fn set_page_layout(&mut self, layout: PdfPageLayout) {
@@ -601,9 +736,17 @@ impl PdfViewerApp {
 
     pub(super) fn go_to_page(&mut self, page: u32) {
         let page = page.min(self.total_pages.saturating_sub(1));
+        if page != self.current_page {
+            self.render_generation = self.render_generation.wrapping_add(1);
+            self.pending.clear();
+            self.render_failed.clear();
+        }
+        self.viewport_anchor = page;
         self.current_page = page;
         self.page_input = format!("{}", page + 1);
         self.scroll_to_page = Some(page);
+        self.scroll_to_page_fraction = None;
+        self.current_page_fraction = 0.0;
     }
 
     pub(super) fn prev_page(&mut self) {
@@ -697,11 +840,6 @@ impl PdfViewerApp {
         first_visible: &mut Option<u32>,
         last_visible: &mut u32,
     ) {
-        if self.scroll_to_page == Some(idx) {
-            resp.scroll_to_me(Some(egui::Align::TOP));
-            self.scroll_to_page = None;
-        }
-
         if !ui.is_rect_visible(rect) {
             return;
         }
@@ -713,11 +851,22 @@ impl PdfViewerApp {
 
         let (need_w, need_h) = self.needed_render_size(idx, scale, ppp);
         let needs_render = match self.textures.get(&idx) {
-            Some(t) => !Self::texture_adequate(t, need_w, need_h),
+            Some(t) => {
+                self.needs_refinement.contains(&idx) || !Self::texture_adequate(t, need_w, need_h)
+            }
             None => true,
         };
         if needs_render {
-            self.submit_render(idx, need_w, need_h);
+            let preview_size =
+                if self.textures.contains_key(&idx) || self.needs_refinement.contains(&idx) {
+                    None
+                } else {
+                    preview_render_size(need_w, need_h)
+                };
+            let (request_w, request_h, preview) = preview_size
+                .map(|(width, height)| (width, height, true))
+                .unwrap_or((need_w, need_h, false));
+            self.submit_render(idx, request_w, request_h, 0, preview);
         }
 
         if let Some(t) = self.textures.get(&idx) {
@@ -727,42 +876,93 @@ impl PdfViewerApp {
         }
 
         self.paint_search_highlights(ui.painter(), idx, rect);
-        self.handle_page_selection(ui, resp, idx, rect);
+        if matches!(self.document_status, DocumentStatus::Ready) {
+            self.handle_page_selection(ui, resp, idx, rect);
+        }
     }
 
-    fn show_pages(&mut self, ui: &mut egui::Ui, ctx: &egui::Context, aw: f32, ah: f32) {
+    fn build_page_rows(&self, aw: f32, ah: f32, vertical_gap: f32) -> PageRows {
+        let columns = if self.page_layout == PdfPageLayout::TwoPage {
+            2
+        } else {
+            1
+        };
+        let page_aw = if columns == 2 {
+            ((aw - 12.0) * 0.5).max(100.0)
+        } else {
+            aw
+        };
+        let pages = (0..self.total_pages)
+            .map(|idx| {
+                let scale = self.get_scale(idx, page_aw, ah);
+                let (width, height) = self.display_size(idx, scale);
+                PageGeometry {
+                    scale,
+                    size: egui::vec2(width, height),
+                }
+            })
+            .collect();
+
+        PageRows::new(pages, columns, 12.0, vertical_gap)
+    }
+
+    fn show_pages(
+        &mut self,
+        ui: &mut egui::Ui,
+        ctx: &egui::Context,
+        rows: &PageRows,
+        viewport: egui::Rect,
+        content_width: f32,
+    ) {
         let ppp = ctx.pixels_per_point();
         let mut first_visible: Option<u32> = None;
         let mut last_visible: u32 = 0;
 
-        match self.page_layout {
-            PdfPageLayout::OnePage => {
-                for idx in 0..self.total_pages {
-                    self.show_vertical_page(
-                        ui,
-                        idx,
-                        aw,
-                        ah,
-                        ppp,
-                        &mut first_visible,
-                        &mut last_visible,
-                    );
+        if let Some(row) = rows.visible_rows(viewport, 0).next() {
+            let visible_pages = rows.pages_in_row(row);
+            let anchor = if visible_pages.contains(&(self.current_page as usize)) {
+                self.current_page
+            } else {
+                visible_pages.start as u32
+            };
+            if self.viewport_anchor != anchor {
+                self.viewport_anchor = anchor;
+                self.render_generation = self.render_generation.wrapping_add(1);
+                self.pending.clear();
+                self.render_failed.clear();
+                if !self.page_input_has_focus {
+                    self.current_page = anchor;
+                    self.page_input = format!("{}", anchor + 1);
                 }
             }
-            PdfPageLayout::TwoPage => {
-                let mut idx = 0;
-                while idx < self.total_pages {
-                    self.show_two_page_spread(
-                        ui,
-                        idx,
-                        aw,
-                        ah,
-                        ppp,
-                        &mut first_visible,
-                        &mut last_visible,
-                    );
-                    idx += 2;
-                }
+        }
+
+        let origin = ui.max_rect().min.to_vec2();
+        for row in rows.visible_rows(viewport, 1) {
+            for page in rows.pages_in_row(row) {
+                let Some(geometry) = rows.page(page) else {
+                    continue;
+                };
+                let Some(relative_rect) = rows.page_rect(page, content_width) else {
+                    continue;
+                };
+                let idx = page as u32;
+                let rect = relative_rect.translate(origin);
+                let response = ui.interact(
+                    rect,
+                    ui.id().with(("pdf_page", idx)),
+                    egui::Sense::click_and_drag(),
+                );
+                self.show_page_slot(
+                    ui,
+                    idx,
+                    rect,
+                    &response,
+                    geometry.scale,
+                    ppp,
+                    &mut first_visible,
+                    &mut last_visible,
+                );
             }
         }
 
@@ -783,25 +983,41 @@ impl PdfViewerApp {
 
             // Prefetch adjacent pages for smooth scrolling, clamped to
             // CACHE_RADIUS so prefetched textures are not immediately evicted.
-            let prefetch_aw = if self.page_layout == PdfPageLayout::TwoPage {
-                ((aw - 12.0) * 0.5).max(100.0)
-            } else {
-                aw
-            };
-            let scale0 = self.get_scale(fv, prefetch_aw, ah);
             let cache_lo = self.current_page.saturating_sub(CACHE_RADIUS);
             let cache_hi =
                 (self.current_page + CACHE_RADIUS).min(self.total_pages.saturating_sub(1));
             let pf_lo = fv.saturating_sub(PREFETCH_AHEAD).max(cache_lo);
             let pf_hi = (last_visible + PREFETCH_AHEAD).min(cache_hi);
             for pidx in pf_lo..=pf_hi {
-                let (nw, nh) = self.needed_render_size(pidx, scale0, ppp);
+                let Some(geometry) = rows.page(pidx as usize) else {
+                    continue;
+                };
+                let (nw, nh) = self.needed_render_size(pidx, geometry.scale, ppp);
                 let needs = match self.textures.get(&pidx) {
-                    Some(t) => !Self::texture_adequate(t, nw, nh),
+                    Some(t) if t.preview => false,
+                    Some(t) => {
+                        self.needs_refinement.contains(&pidx) || !Self::texture_adequate(t, nw, nh)
+                    }
                     None => true,
                 };
                 if needs {
-                    self.submit_render(pidx, nw, nh);
+                    let preview_size = if self.textures.contains_key(&pidx)
+                        || self.needs_refinement.contains(&pidx)
+                    {
+                        None
+                    } else {
+                        preview_render_size(nw, nh)
+                    };
+                    let (request_w, request_h, preview) = preview_size
+                        .map(|(width, height)| (width, height, true))
+                        .unwrap_or((nw, nh, false));
+                    self.submit_render(
+                        pidx,
+                        request_w,
+                        request_h,
+                        100 + pidx.abs_diff(self.current_page),
+                        preview,
+                    );
                 }
             }
         }
@@ -809,93 +1025,13 @@ impl PdfViewerApp {
         // Publish visible range for eviction protection.
         self.visible_lo = first_visible;
         self.visible_hi = last_visible;
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn show_vertical_page(
-        &mut self,
-        ui: &mut egui::Ui,
-        idx: u32,
-        aw: f32,
-        ah: f32,
-        ppp: f32,
-        first_visible: &mut Option<u32>,
-        last_visible: &mut u32,
-    ) {
-        let scale = self.get_scale(idx, aw, ah);
-        let (dw, dh) = self.display_size(idx, scale);
-        let indent = ((ui.available_width() - dw) / 2.0).max(0.0);
-
-        ui.horizontal(|ui| {
-            ui.add_space(indent);
-            let (rect, resp) =
-                ui.allocate_exact_size(egui::vec2(dw, dh), egui::Sense::click_and_drag());
-            self.show_page_slot(
-                ui,
-                idx,
-                rect,
-                &resp,
-                scale,
-                ppp,
-                first_visible,
-                last_visible,
-            );
-        });
-        ui.add_space(8.0);
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn show_two_page_spread(
-        &mut self,
-        ui: &mut egui::Ui,
-        left: u32,
-        aw: f32,
-        ah: f32,
-        ppp: f32,
-        first_visible: &mut Option<u32>,
-        last_visible: &mut u32,
-    ) {
-        let gap = 12.0;
-        let page_aw = ((aw - gap) * 0.5).max(100.0);
-        let right = left + 1;
-        let pages = if right < self.total_pages {
-            vec![left, right]
-        } else {
-            vec![left]
-        };
-        let layout = pages
-            .iter()
-            .map(|&idx| {
-                let scale = self.get_scale(idx, page_aw, ah);
-                let (dw, dh) = self.display_size(idx, scale);
-                (idx, scale, dw, dh)
+        self.current_page_fraction = rows
+            .page_top(self.current_page as usize)
+            .zip(rows.page(self.current_page as usize))
+            .map(|(top, geometry)| {
+                ((viewport.min.y - top) / geometry.size.y.max(1.0)).clamp(0.0, 1.0)
             })
-            .collect::<Vec<_>>();
-        let total_w = layout.iter().map(|(_, _, dw, _)| *dw).sum::<f32>()
-            + gap * layout.len().saturating_sub(1) as f32;
-        let indent = ((ui.available_width() - total_w) / 2.0).max(0.0);
-
-        ui.horizontal(|ui| {
-            ui.add_space(indent);
-            for (pos, (idx, scale, dw, dh)) in layout.iter().copied().enumerate() {
-                if pos > 0 {
-                    ui.add_space(gap);
-                }
-                let (rect, resp) =
-                    ui.allocate_exact_size(egui::vec2(dw, dh), egui::Sense::click_and_drag());
-                self.show_page_slot(
-                    ui,
-                    idx,
-                    rect,
-                    &resp,
-                    scale,
-                    ppp,
-                    first_visible,
-                    last_visible,
-                );
-            }
-        });
-        ui.add_space(8.0);
+            .unwrap_or(0.0);
     }
 }
 
@@ -935,38 +1071,61 @@ impl eframe::App for PdfViewerApp {
             ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
         }
 
-        // ── Password prompt ──────────────────────────────────────────────────
-        // Shown before any rendering; worker is not spawned until confirmed.
-        if self.password_prompt.is_some() {
-            egui::CentralPanel::default().show(ctx, |_ui| {});
-            self.handle_password_dialog(ctx);
-            return;
-        }
         self.ensure_worker(ctx);
         self.poll_results(ctx);
+
+        match &self.document_status {
+            DocumentStatus::Opening { .. } => {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    ui.centered_and_justified(|ui| {
+                        ui.spinner();
+                        ui.label(t!("pdfviewer.loading_document").to_string());
+                    });
+                });
+                return;
+            }
+            DocumentStatus::PasswordRequired(_) => {
+                egui::CentralPanel::default().show(ctx, |_ui| {});
+                self.handle_password_dialog(ctx);
+                return;
+            }
+            DocumentStatus::Failed(error) => {
+                let error = error.clone();
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    ui.centered_and_justified(|ui| {
+                        ui.label(
+                            egui::RichText::new(error)
+                                .color(egui::Color32::RED)
+                                .size(16.0),
+                        );
+                    });
+                });
+                return;
+            }
+            DocumentStatus::LoadingMetadata | DocumentStatus::Ready => {}
+        }
+
         self.handle_keyboard(ctx);
         self.handle_selection_shortcuts(ctx);
-        self.handle_search_shortcuts(ctx);
+        if matches!(self.document_status, DocumentStatus::Ready) {
+            self.handle_search_shortcuts(ctx);
+        }
 
         egui::TopBottomPanel::top("pdf_toolbar").show(ctx, |ui| {
             self.show_toolbar(ui);
         });
 
-        self.show_search_bar(ctx);
-        self.show_sidebar(ctx);
-
-        if let Some(err) = &self.worker_error {
-            egui::CentralPanel::default().show(ctx, |ui| {
-                ui.centered_and_justified(|ui| {
-                    ui.label(
-                        egui::RichText::new(err)
-                            .color(egui::Color32::RED)
-                            .size(16.0),
-                    );
+        if matches!(self.document_status, DocumentStatus::LoadingMetadata) {
+            egui::TopBottomPanel::top("pdf_loading_status").show(ctx, |ui| {
+                ui.horizontal_centered(|ui| {
+                    ui.spinner();
+                    ui.label(t!("pdfviewer.loading_pages").to_string());
                 });
             });
-            return;
         }
+
+        self.show_search_bar(ctx);
+        self.show_sidebar(ctx);
 
         egui::CentralPanel::default().show(ctx, |ui| {
             let aw = (ui.available_width() - 20.0).max(100.0);
@@ -982,11 +1141,36 @@ impl eframe::App for PdfViewerApp {
                 self.effective_zoom_pct = self.get_scale(zoom_page, zoom_aw, ah) * 100.0;
             }
 
-            egui::ScrollArea::both()
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    self.show_pages(ui, ctx, aw, ah);
+            let key = (aw.to_bits(), ah.to_bits());
+            let rows = match self.page_rows.take() {
+                Some((cached_aw, cached_ah, rows)) if (cached_aw, cached_ah) == key => rows,
+                _ => self.build_page_rows(aw, ah, ui.spacing().item_spacing.y + 8.0),
+            };
+            let target_y = self
+                .scroll_to_page
+                .take()
+                .and_then(|page| rows.page_top(page as usize))
+                .or_else(|| {
+                    self.scroll_to_page_fraction
+                        .take()
+                        .and_then(|(page, fraction)| {
+                            rows.page_top(page as usize)
+                                .zip(rows.page(page as usize))
+                                .map(|(top, geometry)| {
+                                    top + geometry.size.y * fraction.clamp(0.0, 1.0)
+                                })
+                        })
                 });
+            let mut scroll_area = egui::ScrollArea::both().auto_shrink([false, false]);
+            if let Some(target_y) = target_y {
+                scroll_area = scroll_area.vertical_scroll_offset(target_y);
+            }
+            scroll_area.show_viewport(ui, |ui, viewport| {
+                let content_width = rows.content_width(viewport.width());
+                ui.set_min_size(egui::vec2(content_width, rows.total_height()));
+                self.show_pages(ui, ctx, &rows, viewport, content_width);
+            });
+            self.page_rows = Some((key.0, key.1, rows));
         });
 
         self.evict_distant(self.visible_lo, self.visible_hi);
@@ -1014,5 +1198,23 @@ impl eframe::App for ErrorApp {
                 );
             });
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn render_cap_preserves_page_aspect_ratio() {
+        let (width, height) = capped_render_size(8000.0, 4000.0, 4096);
+
+        assert_eq!((width, height), (4096, 2048));
+    }
+
+    #[test]
+    fn large_render_uses_bounded_preview() {
+        assert_eq!(preview_render_size(3000, 2000), Some((1536, 1024)));
+        assert_eq!(preview_render_size(1200, 800), None);
     }
 }

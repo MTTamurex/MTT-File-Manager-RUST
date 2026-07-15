@@ -2,6 +2,7 @@ use eframe::egui;
 use rust_i18n::t;
 
 use super::viewer_app::PdfViewerApp;
+use super::virtual_layout::VariableRows;
 
 const THUMB_MAX_W: f32 = 120.0;
 const THUMB_MAX_H: f32 = 170.0;
@@ -16,14 +17,51 @@ impl PdfViewerApp {
                 ui.heading(t!("pdfviewer.thumbnails_title").to_string());
                 ui.separator();
 
-                egui::ScrollArea::vertical()
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        for idx in 0..self.total_pages {
-                            self.show_thumbnail_item(ui, idx);
-                            ui.add_space(8.0);
-                        }
-                    });
+                let rows = self.thumbnail_rows.take().unwrap_or_else(|| {
+                    VariableRows::new(
+                        (0..self.total_pages).map(|idx| {
+                            let (_, display_h, _, _) = self.thumbnail_sizes(idx);
+                            display_h + 24.0
+                        }),
+                        ui.spacing().item_spacing.y + 8.0,
+                    )
+                });
+                let mut scroll_area = egui::ScrollArea::vertical().auto_shrink([false, false]);
+                if self.current_page < self.total_pages
+                    && self.last_sidebar_scrolled_page != Some(self.current_page)
+                {
+                    if let Some(offset) = rows
+                        .centered_scroll_offset(self.current_page as usize, ui.available_height())
+                    {
+                        scroll_area = scroll_area.vertical_scroll_offset(offset);
+                    }
+                    self.last_sidebar_scrolled_page = Some(self.current_page);
+                }
+
+                scroll_area.show_viewport(ui, |ui, viewport| {
+                    let content_width = viewport.width();
+                    ui.set_min_size(egui::vec2(content_width, rows.total_height()));
+                    let origin = ui.max_rect().min;
+
+                    for row in rows.visible_range(viewport, 1) {
+                        let Some(top) = rows.top(row) else { continue };
+                        let Some(height) = rows.height(row) else {
+                            continue;
+                        };
+                        let rect = egui::Rect::from_min_size(
+                            origin + egui::vec2(0.0, top),
+                            egui::vec2(content_width, height),
+                        );
+                        let mut row_ui = ui.new_child(
+                            egui::UiBuilder::new()
+                                .id_salt(("pdf_thumbnail_row", row))
+                                .max_rect(rect)
+                                .layout(egui::Layout::top_down(egui::Align::Center)),
+                        );
+                        self.show_thumbnail_item(&mut row_ui, row as u32);
+                    }
+                });
+                self.thumbnail_rows = Some(rows);
             });
     }
 
@@ -45,11 +83,6 @@ impl PdfViewerApp {
                         self.go_to_page(idx);
                     }
 
-                    if is_current && self.last_sidebar_scrolled_page != Some(idx) {
-                        response.scroll_to_me(Some(egui::Align::Center));
-                        self.last_sidebar_scrolled_page = Some(idx);
-                    }
-
                     if ui.is_rect_visible(rect) {
                         self.submit_thumbnail(idx, render_w, render_h);
                         ui.painter().rect_filled(rect, 2.0, egui::Color32::WHITE);
@@ -61,6 +94,7 @@ impl PdfViewerApp {
                                 self.rotation,
                             );
                         } else {
+                            let failed = self.thumbnail_failed.contains(&idx);
                             ui.painter().rect_filled(
                                 rect,
                                 2.0,
@@ -73,7 +107,11 @@ impl PdfViewerApp {
                             ui.painter().text(
                                 rect.center(),
                                 egui::Align2::CENTER_CENTER,
-                                t!("pdfviewer.thumbnail_loading").to_string(),
+                                if failed {
+                                    t!("pdfviewer.thumbnail_unavailable").to_string()
+                                } else {
+                                    t!("pdfviewer.thumbnail_loading").to_string()
+                                },
                                 egui::FontId::proportional(11.0),
                                 if ui.visuals().dark_mode {
                                     egui::Color32::from_gray(170)

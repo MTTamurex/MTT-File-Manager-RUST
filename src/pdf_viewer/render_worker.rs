@@ -12,17 +12,22 @@ use crossbeam_channel::{Receiver, Sender};
 use eframe::egui;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use super::ocr::OcrWord;
-use super::renderer::{PdfTextBounds, PdfTextSegment};
+use super::renderer::{PdfOpenError, PdfTextBounds, PdfTextSegment};
 
 const MAX_THUMBNAILS_PER_BATCH: usize = 8;
+const MAX_PAGES_PER_BATCH: usize = 2;
+const METADATA_PAGES_PER_BATCH: u32 = 32;
 
 pub(super) struct RenderRequest {
     pub page_idx: u32,
     pub width: u32,
     pub height: u32,
+    pub generation: u64,
+    pub priority: u32,
+    pub provisional: bool,
+    pub preview: bool,
 }
 
 pub(super) struct RenderResult {
@@ -30,6 +35,10 @@ pub(super) struct RenderResult {
     pub pixels: Vec<u8>,
     pub width: u32,
     pub height: u32,
+    pub generation: u64,
+    pub provisional: bool,
+    pub preview: bool,
+    pub error: Option<String>,
 }
 
 pub(super) struct ThumbnailRequest {
@@ -43,6 +52,7 @@ pub(super) struct ThumbnailResult {
     pub pixels: Vec<u8>,
     pub width: u32,
     pub height: u32,
+    pub error: Option<String>,
 }
 
 pub(super) struct TextSegmentResult {
@@ -76,6 +86,21 @@ pub(super) struct SearchResult {
     pub matches: Vec<SearchMatch>,
 }
 
+pub(super) enum WorkerEvent {
+    Opened {
+        page_count: u32,
+        first_page_size: Option<(f32, f32)>,
+    },
+    MetadataLoaded {
+        page_sizes: Vec<(f32, f32)>,
+    },
+    RenderRequestsDropped {
+        generation: u64,
+        page_indices: Vec<u32>,
+    },
+    Failed(PdfOpenError),
+}
+
 pub(super) struct RenderWorker {
     tx: Sender<RenderRequest>,
     rx: Receiver<RenderResult>,
@@ -86,24 +111,22 @@ pub(super) struct RenderWorker {
     bounded_text_rx: Receiver<BoundedTextResult>,
     search_tx: Sender<SearchRequest>,
     search_res_rx: Receiver<SearchResult>,
-    /// Set by the worker thread if PDF initialisation fails.
-    init_error: Arc<std::sync::Mutex<Option<String>>>,
+    event_rx: Receiver<WorkerEvent>,
 }
 
 impl RenderWorker {
     /// Spawn the worker thread.
     pub fn spawn(path: PathBuf, password: Option<String>, repaint: egui::Context) -> Self {
         let (req_tx, req_rx) = crossbeam_channel::bounded(32);
-        let (res_tx, res_rx) = crossbeam_channel::bounded(64);
+        let (res_tx, res_rx) = crossbeam_channel::bounded(2);
         let (thumb_tx, thumb_rx) = crossbeam_channel::bounded(64);
-        let (thumb_res_tx, thumb_res_rx) = crossbeam_channel::bounded(64);
+        let (thumb_res_tx, thumb_res_rx) = crossbeam_channel::bounded(16);
         let (text_seg_tx, text_seg_rx) = crossbeam_channel::bounded(64);
         let (bt_req_tx, bt_req_rx) = crossbeam_channel::bounded(8);
         let (bt_res_tx, bt_res_rx) = crossbeam_channel::bounded(8);
         let (search_tx, search_rx) = crossbeam_channel::unbounded();
         let (search_res_tx, search_res_rx) = crossbeam_channel::bounded(4);
-        let init_error = Arc::new(std::sync::Mutex::new(None));
-        let init_error_w = Arc::clone(&init_error);
+        let (event_tx, event_rx) = crossbeam_channel::unbounded();
 
         std::thread::Builder::new()
             .name("pdf-render".into())
@@ -111,6 +134,7 @@ impl RenderWorker {
                 worker_loop(
                     path,
                     password,
+                    event_tx,
                     req_rx,
                     res_tx,
                     thumb_rx,
@@ -121,7 +145,6 @@ impl RenderWorker {
                     search_rx,
                     search_res_tx,
                     repaint,
-                    init_error_w,
                 )
             })
             .expect("spawn pdf-render thread");
@@ -136,13 +159,13 @@ impl RenderWorker {
             bounded_text_rx: bt_res_rx,
             search_tx,
             search_res_rx,
-            init_error,
+            event_rx,
         }
     }
 
     /// Submit a non-blocking render request.
-    pub fn request(&self, req: RenderRequest) {
-        let _ = self.tx.send(req);
+    pub fn request(&self, req: RenderRequest) -> bool {
+        self.tx.try_send(req).is_ok()
     }
 
     pub fn request_thumbnail(&self, req: ThumbnailRequest) -> bool {
@@ -150,13 +173,21 @@ impl RenderWorker {
     }
 
     /// Submit a bounded-text extraction request (for copy).
-    pub fn request_bounded_text(&self, req: BoundedTextRequest) {
-        let _ = self.bounded_text_tx.send(req);
+    pub fn request_bounded_text(&self, req: BoundedTextRequest) -> bool {
+        self.bounded_text_tx.try_send(req).is_ok()
     }
 
     /// Submit a full-document search request.
     pub fn request_search(&self, req: SearchRequest) {
         let _ = self.search_tx.send(req);
+    }
+
+    pub fn drain_events(&self) -> Vec<WorkerEvent> {
+        let mut out = Vec::new();
+        while let Ok(event) = self.event_rx.try_recv() {
+            out.push(event);
+        }
+        out
     }
 
     /// Drain up to `max` completed render results. Remaining results stay
@@ -212,17 +243,59 @@ impl RenderWorker {
         }
         out
     }
+}
 
-    /// Returns the initialisation error if the worker failed to start.
-    pub fn take_init_error(&self) -> Option<String> {
-        self.init_error.lock().ok()?.take()
+fn prioritize_render_requests(
+    requests: HashMap<u32, RenderRequest>,
+    current_generation: &mut u64,
+) -> Vec<RenderRequest> {
+    *current_generation = requests
+        .values()
+        .map(|request| request.generation)
+        .max()
+        .unwrap_or(*current_generation)
+        .max(*current_generation);
+
+    let mut requests = requests
+        .into_values()
+        .filter(|request| request.generation == *current_generation)
+        .collect::<Vec<_>>();
+    requests.sort_by_key(|request| (request.priority, request.page_idx));
+    requests
+}
+
+fn page_size_without_loading(
+    document: &pdfium_render::prelude::PdfDocument<'_>,
+    page_idx: u32,
+) -> Result<(f32, f32), String> {
+    let rect = document
+        .pages()
+        .page_size(page_idx as pdfium_render::prelude::PdfPageIndex)
+        .map_err(|error| error.to_string())?;
+    Ok((rect.width().value, rect.height().value))
+}
+
+fn load_metadata_batch(
+    document: &pdfium_render::prelude::PdfDocument<'_>,
+    page_count: u32,
+    next_page: &mut u32,
+    page_sizes: &mut Vec<(f32, f32)>,
+) -> Result<bool, String> {
+    let end = next_page
+        .saturating_add(METADATA_PAGES_PER_BATCH)
+        .min(page_count);
+    while *next_page < end {
+        page_sizes.push(page_size_without_loading(document, *next_page)?);
+        *next_page += 1;
     }
+    Ok(*next_page >= page_count)
 }
 
 #[allow(clippy::too_many_arguments)]
 fn worker_loop(
     path: PathBuf,
     password: Option<String>,
+    event_tx: Sender<WorkerEvent>,
     render_rx: Receiver<RenderRequest>,
     render_tx: Sender<RenderResult>,
     thumbnail_rx: Receiver<ThumbnailRequest>,
@@ -233,7 +306,6 @@ fn worker_loop(
     search_rx: Receiver<SearchRequest>,
     search_res_tx: Sender<SearchResult>,
     repaint: egui::Context,
-    init_error: Arc<std::sync::Mutex<Option<String>>>,
 ) {
     // Keep a persistent Pdfium + document handle open for the lifetime of
     // this worker, avoiding repeated file open/close on every render.
@@ -241,24 +313,47 @@ fn worker_loop(
         Ok(p) => p,
         Err(err) => {
             log::error!("[PDF-RENDER] failed to init pdfium: {err}");
-            if let Ok(mut slot) = init_error.lock() {
-                *slot = Some(err);
-            }
+            let _ = event_tx.send(WorkerEvent::Failed(PdfOpenError::Other(err)));
             repaint.request_repaint();
             return;
         }
     };
     let document = match pdfium.load_pdf_from_file(&path, password.as_deref()) {
-        Ok(d) => d,
+        Ok(document) => document,
         Err(err) => {
-            log::error!("[PDF-RENDER] failed to load document: {err}");
-            if let Ok(mut slot) = init_error.lock() {
-                *slot = Some(format!("LoadPdf: {err}"));
+            let error = super::renderer::classify_open_error(err);
+            if !error.is_password_required() {
+                log::error!("[PDF-RENDER] failed to load document: {error}");
             }
+            let _ = event_tx.send(WorkerEvent::Failed(error));
             repaint.request_repaint();
             return;
         }
     };
+
+    let page_count = u32::from(document.pages().len());
+    let first_page_size = if page_count == 0 {
+        None
+    } else {
+        match page_size_without_loading(&document, 0) {
+            Ok(size) => Some(size),
+            Err(err) => {
+                let _ = event_tx.send(WorkerEvent::Failed(PdfOpenError::Other(err)));
+                repaint.request_repaint();
+                return;
+            }
+        }
+    };
+    if event_tx
+        .send(WorkerEvent::Opened {
+            page_count,
+            first_page_size,
+        })
+        .is_err()
+    {
+        return;
+    }
+    repaint.request_repaint();
 
     // Initialize WinRT MTA so Windows.Media.Ocr calls work on this thread.
     let _ = unsafe {
@@ -277,6 +372,11 @@ fn worker_loop(
     // carries the actual string content per word.
     let mut ocr_cache: HashMap<u32, Vec<OcrWord>> = HashMap::new();
     let mut search_text_cache: HashMap<u32, SearchText> = HashMap::new();
+    let mut metadata_loaded = page_count <= 1;
+    let mut metadata_started = false;
+    let mut next_metadata_page = u32::from(page_count > 0);
+    let mut page_sizes = first_page_size.into_iter().collect::<Vec<_>>();
+    let mut render_generation = 0;
 
     loop {
         // Drain high-priority bounded-text requests before blocking.
@@ -296,34 +396,69 @@ fn worker_loop(
             &repaint,
             &mut search_text_cache,
         );
+
+        if metadata_started && !metadata_loaded {
+            match load_metadata_batch(
+                &document,
+                page_count,
+                &mut next_metadata_page,
+                &mut page_sizes,
+            ) {
+                Ok(true) => {
+                    metadata_loaded = true;
+                    if event_tx
+                        .send(WorkerEvent::MetadataLoaded {
+                            page_sizes: std::mem::take(&mut page_sizes),
+                        })
+                        .is_err()
+                    {
+                        return;
+                    }
+                    repaint.request_repaint();
+                }
+                Ok(false) => {
+                    if render_rx.is_empty()
+                        && bt_rx.is_empty()
+                        && search_rx.is_empty()
+                        && thumbnail_rx.is_empty()
+                    {
+                        continue;
+                    }
+                }
+                Err(error) => {
+                    let _ = event_tx.send(WorkerEvent::Failed(PdfOpenError::Other(error)));
+                    repaint.request_repaint();
+                    return;
+                }
+            }
+        }
+
         // Prefer interactive work over thumbnail generation.
         crossbeam_channel::select_biased! {
             recv(bt_rx) -> msg => {
-                if let Ok(req) = msg {
-                    handle_bounded_text(
-                        &document,
-                        &req,
-                        &bt_tx,
-                        &text_seg_tx,
-                        &repaint,
-                        &mut segment_cache,
-                        &mut ocr_cache,
-                    );
-                }
+                let Ok(req) = msg else { return };
+                handle_bounded_text(
+                    &document,
+                    &req,
+                    &bt_tx,
+                    &text_seg_tx,
+                    &repaint,
+                    &mut segment_cache,
+                    &mut ocr_cache,
+                );
             },
             recv(search_rx) -> msg => {
-                if let Ok(first) = msg {
-                    let mut current = latest_search_request(first, &search_rx);
-                    while let Some(next) = handle_search(
-                        &document,
-                        &current,
-                        &search_rx,
-                        &search_res_tx,
-                        &repaint,
-                        &mut search_text_cache,
-                    ) {
-                        current = latest_search_request(next, &search_rx);
-                    }
+                let Ok(first) = msg else { return };
+                let mut current = latest_search_request(first, &search_rx);
+                while let Some(next) = handle_search(
+                    &document,
+                    &current,
+                    &search_rx,
+                    &search_res_tx,
+                    &repaint,
+                    &mut search_text_cache,
+                ) {
+                    current = latest_search_request(next, &search_rx);
                 }
             },
             recv(render_rx) -> msg => {
@@ -339,8 +474,17 @@ fn worker_loop(
                     latest.insert(r.page_idx, r);
                 }
 
+                let mut latest = prioritize_render_requests(latest, &mut render_generation);
+                if latest.len() > MAX_PAGES_PER_BATCH {
+                    let dropped = latest.split_off(MAX_PAGES_PER_BATCH);
+                    let _ = event_tx.send(WorkerEvent::RenderRequestsDropped {
+                        generation: render_generation,
+                        page_indices: dropped.into_iter().map(|request| request.page_idx).collect(),
+                    });
+                    repaint.request_repaint();
+                }
                 let latest_len = latest.len();
-                for (position, (_, req)) in latest.into_iter().enumerate() {
+                for (position, req) in latest.into_iter().enumerate() {
                     // Prioritise bounded-text between page renders.
                     drain_bounded_text(
                         &document,
@@ -389,6 +533,10 @@ fn worker_loop(
                                 pixels: p.pixels,
                                 width: p.width,
                                 height: p.height,
+                                generation: req.generation,
+                                provisional: req.provisional,
+                                preview: req.preview,
+                                error: None,
                             });
                             repaint.request_repaint();
 
@@ -398,7 +546,7 @@ fn worker_loop(
                                 &render_rx,
                                 &bt_rx,
                                 &search_rx,
-                                position + 1 == latest_len,
+                                metadata_loaded && position + 1 == latest_len,
                                 &mut segment_cache,
                                 &text_seg_tx,
                                 &repaint,
@@ -406,14 +554,25 @@ fn worker_loop(
                         }
                         Err(e) => {
                             log::error!("[PDF-RENDER] page {page_idx} failed: {e}");
+                            let _ = render_tx.send(RenderResult {
+                                page_idx,
+                                pixels: Vec::new(),
+                                width: 0,
+                                height: 0,
+                                generation: req.generation,
+                                provisional: req.provisional,
+                                preview: req.preview,
+                                error: Some(e),
+                            });
+                            repaint.request_repaint();
                         }
                     }
+                    metadata_started = true;
                 }
             },
             recv(thumbnail_rx) -> msg => {
-                if let Ok(first) = msg {
-                    handle_thumbnail_requests(&document, first, &thumbnail_rx, &thumbnail_tx, &repaint);
-                }
+                let Ok(first) = msg else { return };
+                handle_thumbnail_requests(&document, first, &thumbnail_rx, &thumbnail_tx, &repaint);
             },
         }
     }
@@ -453,6 +612,7 @@ fn handle_thumbnail_requests(
                 pixels: bitmap.as_rgba_bytes(),
                 width: bitmap.width() as u32,
                 height: bitmap.height() as u32,
+                error: None,
             })
         })();
 
@@ -461,7 +621,17 @@ fn handle_thumbnail_requests(
                 let _ = tx.send(result);
                 repaint.request_repaint();
             }
-            Err(e) => log::warn!("[PDF-RENDER] thumbnail {} failed: {e}", req.page_idx),
+            Err(e) => {
+                log::warn!("[PDF-RENDER] thumbnail {} failed: {e}", req.page_idx);
+                let _ = tx.send(ThumbnailResult {
+                    page_idx: req.page_idx,
+                    pixels: Vec::new(),
+                    width: 0,
+                    height: 0,
+                    error: Some(e),
+                });
+                repaint.request_repaint();
+            }
         }
     }
 }
@@ -953,4 +1123,52 @@ fn union_bounds(bounds_slice: &[Option<PdfTextBounds>]) -> Option<PdfTextBounds>
         max_top = max_top.max(b.top);
     }
     found.then(|| PdfTextBounds::from_points(min_left, max_right, max_top, min_bottom))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn request(page_idx: u32, generation: u64, priority: u32) -> RenderRequest {
+        RenderRequest {
+            page_idx,
+            width: 100,
+            height: 100,
+            generation,
+            priority,
+            provisional: false,
+            preview: false,
+        }
+    }
+
+    #[test]
+    fn newer_generation_discards_stale_render_work() {
+        let mut requests = HashMap::new();
+        requests.insert(1, request(1, 3, 0));
+        requests.insert(2, request(2, 4, 50));
+        let mut generation = 3;
+
+        let scheduled = prioritize_render_requests(requests, &mut generation);
+
+        assert_eq!(generation, 4);
+        assert_eq!(scheduled.len(), 1);
+        assert_eq!(scheduled[0].page_idx, 2);
+    }
+
+    #[test]
+    fn visible_pages_are_scheduled_before_prefetch() {
+        let mut requests = HashMap::new();
+        requests.insert(9, request(9, 2, 109));
+        requests.insert(5, request(5, 2, 0));
+        requests.insert(6, request(6, 2, 1));
+        let mut generation = 2;
+
+        let scheduled = prioritize_render_requests(requests, &mut generation);
+        let pages = scheduled
+            .into_iter()
+            .map(|request| request.page_idx)
+            .collect::<Vec<_>>();
+
+        assert_eq!(pages, vec![5, 6, 9]);
+    }
 }

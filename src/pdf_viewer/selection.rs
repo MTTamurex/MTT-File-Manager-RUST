@@ -173,17 +173,18 @@ impl PdfViewerApp {
             return;
         }
 
-        // Set selection with empty text immediately (visual feedback).
-        // The bounded text will arrive asynchronously from the worker.
-        self.selection = Some(PageSelection {
-            page_idx,
-            bounds,
-            text: String::new(),
+        let requested = self.worker.as_ref().is_some_and(|worker| {
+            worker.request_bounded_text(BoundedTextRequest { page_idx, bounds })
         });
-
-        // Request bounded text extraction from the render worker.
-        if let Some(ref worker) = self.worker {
-            worker.request_bounded_text(BoundedTextRequest { page_idx, bounds });
+        if requested {
+            // The bounded text will arrive asynchronously from the worker.
+            self.selection = Some(PageSelection {
+                page_idx,
+                bounds,
+                text: String::new(),
+            });
+        } else {
+            self.selection = None;
         }
     }
 

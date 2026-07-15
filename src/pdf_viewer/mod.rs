@@ -25,6 +25,7 @@ mod selection;
 mod sidebar;
 mod toolbar;
 mod viewer_app;
+mod virtual_layout;
 
 /// Maximum PDF file size accepted by the viewer (512 MB).
 const MAX_PDF_FILE_SIZE: u64 = 512 * 1024 * 1024;

@@ -6,7 +6,7 @@
 use eframe::egui;
 use rust_i18n::t;
 
-use super::viewer_app::{PdfPageLayout, PdfViewerApp, ZoomMode};
+use super::viewer_app::{DocumentStatus, PdfPageLayout, PdfViewerApp, ZoomMode};
 
 impl PdfViewerApp {
     /// Render the toolbar contents inside a horizontal layout.
@@ -226,7 +226,10 @@ impl PdfViewerApp {
             t!("pdfviewer.search_hint")
         };
         if ui
-            .button(t!("pdfviewer.search_button").to_string())
+            .add_enabled(
+                matches!(self.document_status, DocumentStatus::Ready),
+                egui::Button::new(t!("pdfviewer.search_button").to_string()),
+            )
             .on_hover_text(label.clone())
             .clicked()
         {
