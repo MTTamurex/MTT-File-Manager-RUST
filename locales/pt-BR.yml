@@ -288,7 +288,7 @@ search:
   filter_tag_no_tags: "Nenhuma tag definida"
   filter_tag_selected_suffix: "selecionadas"
   filter_tag_clear: "Limpar tudo"
-  hint_date: "mm/dd/yyyy"
+  hint_date: "dd/mm/aaaa"
 list_view:
   name: "Nome"
   total_space: "Espaço Total"

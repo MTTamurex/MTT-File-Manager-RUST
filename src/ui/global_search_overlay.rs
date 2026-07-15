@@ -6,7 +6,10 @@ use crate::app::global_search_state::{
 };
 use crate::app::state::ImageViewerApp;
 use crate::ui::theme;
-use date_filter::{date_components_to_unix_ts, date_components_to_unix_ts_end_of_day};
+use date_filter::{
+    date_input_to_unix_ts, date_input_to_unix_ts_end_of_day, format_date_input,
+    formatted_date_cursor_index, DateInputOrder,
+};
 use eframe::egui;
 use filters::{category_label, format_exact_number};
 use rust_i18n::t;
@@ -361,18 +364,8 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                         app.global_search.max_size_mb = None;
                         app.global_search.created_after = None;
                         app.global_search.created_before = None;
-                        app.global_search.created_after_month = 0;
-                        app.global_search.created_after_day = 0;
-                        app.global_search.created_after_year = 0;
-                        app.global_search.created_after_month_text.clear();
-                        app.global_search.created_after_day_text.clear();
-                        app.global_search.created_after_year_text.clear();
-                        app.global_search.created_before_month = 0;
-                        app.global_search.created_before_day = 0;
-                        app.global_search.created_before_year = 0;
-                        app.global_search.created_before_month_text.clear();
-                        app.global_search.created_before_day_text.clear();
-                        app.global_search.created_before_year_text.clear();
+                        app.global_search.created_after_text.clear();
+                        app.global_search.created_before_text.clear();
                     }
 
                     if app.global_search.available && app.global_search.indexing_in_progress {
@@ -767,15 +760,8 @@ fn render_filter_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
     ui.horizontal(|ui| {
         let label_color = egui::Color32::from_gray(140);
 
-        // Helper to render a compact numeric text input with placeholder,
-        // styled to match DragValue inputs (bordered frame, consistent padding).
-        fn date_component_edit(
-            ui: &mut egui::Ui,
-            text: &mut String,
-            value: &mut u32,
-            hint: &str,
-            width: f32,
-        ) -> bool {
+        // Render one masked input styled to match the other filter controls.
+        fn date_edit(ui: &mut egui::Ui, text: &mut String, hint: &str) -> bool {
             let mut changed = false;
             let widget_visuals = ui.visuals().widgets.inactive;
             let text_color = ui.visuals().text_color();
@@ -788,22 +774,42 @@ fn render_filter_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
                     let resp = ui.add(
                         egui::TextEdit::singleline(text)
                             .hint_text(egui::RichText::new(hint).color(text_color))
-                            .desired_width(width)
+                            .desired_width(82.0)
                             .margin(egui::Vec2::ZERO)
                             .frame(false),
                     );
                     if resp.changed() {
-                        *text = text
-                            .chars()
-                            .filter(|c| c.is_ascii_digit())
-                            .take(4)
-                            .collect();
-                        *value = text.parse().unwrap_or(0);
+                        let edit_state = egui::TextEdit::load_state(ui.ctx(), resp.id);
+                        let cursor_range = edit_state
+                            .as_ref()
+                            .and_then(|state| state.cursor.char_range());
+                        let primary_index = cursor_range
+                            .map(|range| formatted_date_cursor_index(text, range.primary.index));
+                        let secondary_index = cursor_range
+                            .map(|range| formatted_date_cursor_index(text, range.secondary.index));
+                        *text = format_date_input(text);
+
+                        if let (Some(mut state), Some(primary), Some(secondary)) =
+                            (edit_state, primary_index, secondary_index)
+                        {
+                            state.cursor.set_char_range(Some(egui::text::CCursorRange {
+                                primary: egui::text::CCursor::new(primary),
+                                secondary: egui::text::CCursor::new(secondary),
+                            }));
+                            state.store(ui.ctx(), resp.id);
+                        }
                         changed = true;
                     }
                 });
             changed
         }
+
+        let date_order = if &*rust_i18n::locale() == "pt-BR" {
+            DateInputOrder::DayMonthYear
+        } else {
+            DateInputOrder::MonthDayYear
+        };
+        let date_hint = t!("search.hint_date");
 
         // Created after
         ui.label(
@@ -811,34 +817,13 @@ fn render_filter_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
                 .size(10.0)
                 .color(label_color),
         );
-        let mut after_changed = false;
-        after_changed |= date_component_edit(
+        if date_edit(
             ui,
-            &mut app.global_search.created_after_month_text,
-            &mut app.global_search.created_after_month,
-            "MM",
-            28.0,
-        );
-        after_changed |= date_component_edit(
-            ui,
-            &mut app.global_search.created_after_day_text,
-            &mut app.global_search.created_after_day,
-            "DD",
-            28.0,
-        );
-        after_changed |= date_component_edit(
-            ui,
-            &mut app.global_search.created_after_year_text,
-            &mut app.global_search.created_after_year,
-            "YYYY",
-            40.0,
-        );
-        if after_changed {
-            app.global_search.created_after = date_components_to_unix_ts(
-                app.global_search.created_after_month,
-                app.global_search.created_after_day,
-                app.global_search.created_after_year,
-            );
+            &mut app.global_search.created_after_text,
+            date_hint.as_ref(),
+        ) {
+            app.global_search.created_after =
+                date_input_to_unix_ts(&app.global_search.created_after_text, date_order);
             app.global_search.selected_index = None;
         }
 
@@ -850,33 +835,14 @@ fn render_filter_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
                 .size(10.0)
                 .color(label_color),
         );
-        let mut before_changed = false;
-        before_changed |= date_component_edit(
+        if date_edit(
             ui,
-            &mut app.global_search.created_before_month_text,
-            &mut app.global_search.created_before_month,
-            "MM",
-            28.0,
-        );
-        before_changed |= date_component_edit(
-            ui,
-            &mut app.global_search.created_before_day_text,
-            &mut app.global_search.created_before_day,
-            "DD",
-            28.0,
-        );
-        before_changed |= date_component_edit(
-            ui,
-            &mut app.global_search.created_before_year_text,
-            &mut app.global_search.created_before_year,
-            "YYYY",
-            40.0,
-        );
-        if before_changed {
-            app.global_search.created_before = date_components_to_unix_ts_end_of_day(
-                app.global_search.created_before_month,
-                app.global_search.created_before_day,
-                app.global_search.created_before_year,
+            &mut app.global_search.created_before_text,
+            date_hint.as_ref(),
+        ) {
+            app.global_search.created_before = date_input_to_unix_ts_end_of_day(
+                &app.global_search.created_before_text,
+                date_order,
             );
             app.global_search.selected_index = None;
         }
