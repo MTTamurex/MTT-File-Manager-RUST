@@ -145,6 +145,7 @@ pub struct PdfViewerApp {
     pub(super) thumbnail_pending: HashSet<u32>,
     pub(super) thumbnail_failed: HashSet<u32>,
     pub(super) last_sidebar_scrolled_page: Option<u32>,
+    pub(super) thumbnail_keyboard_focus: bool,
     page_rows: Option<(u32, u32, PageRows)>,
     pub(super) thumbnail_rows: Option<VariableRows>,
     /// Current total memory used by cached textures (tracked incrementally).
@@ -162,6 +163,7 @@ pub struct PdfViewerApp {
     pub(super) search_active: bool,
     pub(super) search_query: String,
     pub(super) search_input_focus_requested: bool,
+    pub(super) search_input_has_focus: bool,
     pub(super) search_results: Vec<SearchMatch>,
     pub(super) current_match_idx: usize,
     pub(super) search_generation: u64,
@@ -201,6 +203,7 @@ impl PdfViewerApp {
             thumbnail_pending: HashSet::new(),
             thumbnail_failed: HashSet::new(),
             last_sidebar_scrolled_page: None,
+            thumbnail_keyboard_focus: false,
             page_rows: None,
             thumbnail_rows: None,
             cache_bytes: 0,
@@ -213,6 +216,7 @@ impl PdfViewerApp {
             search_active: false,
             search_query: String::new(),
             search_input_focus_requested: false,
+            search_input_has_focus: false,
             search_results: Vec::new(),
             current_match_idx: 0,
             search_generation: 0,
@@ -778,6 +782,29 @@ impl PdfViewerApp {
     // ── Keyboard ─────────────────────────────────────────────────────────
 
     fn handle_keyboard(&mut self, ctx: &egui::Context) {
+        let text_input_active = self.page_input_has_focus || self.search_input_has_focus;
+        if self.thumbnail_keyboard_focus && !text_input_active {
+            let (previous, next) = ctx.input_mut(|input| {
+                if !input.modifiers.is_none() {
+                    return (false, false);
+                }
+                let previous = input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp)
+                    || input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowLeft);
+                let next = input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown)
+                    || input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowRight);
+                (previous, next)
+            });
+            if previous {
+                self.go_to_page(self.current_page.saturating_sub(1));
+            } else if next {
+                self.go_to_page(
+                    self.current_page
+                        .saturating_add(1)
+                        .min(self.total_pages.saturating_sub(1)),
+                );
+            }
+        }
+
         ctx.input(|i| {
             if i.events.iter().any(|e| matches!(e, egui::Event::Text(_))) {
                 return;
@@ -811,17 +838,19 @@ impl PdfViewerApp {
                 }
             }
 
-            if i.key_pressed(egui::Key::PageUp) {
-                self.prev_page();
-            }
-            if i.key_pressed(egui::Key::PageDown) {
-                self.next_page();
-            }
-            if i.key_pressed(egui::Key::Home) && i.modifiers.ctrl {
-                self.go_to_page(0);
-            }
-            if i.key_pressed(egui::Key::End) && i.modifiers.ctrl {
-                self.go_to_page(self.total_pages.saturating_sub(1));
+            if !text_input_active {
+                if i.key_pressed(egui::Key::PageUp) {
+                    self.prev_page();
+                }
+                if i.key_pressed(egui::Key::PageDown) {
+                    self.next_page();
+                }
+                if i.key_pressed(egui::Key::Home) && i.modifiers.ctrl {
+                    self.go_to_page(0);
+                }
+                if i.key_pressed(egui::Key::End) && i.modifiers.ctrl {
+                    self.go_to_page(self.total_pages.saturating_sub(1));
+                }
             }
         });
     }
@@ -840,6 +869,9 @@ impl PdfViewerApp {
         first_visible: &mut Option<u32>,
         last_visible: &mut u32,
     ) {
+        if resp.clicked() || resp.drag_started() {
+            self.thumbnail_keyboard_focus = false;
+        }
         if !ui.is_rect_visible(rect) {
             return;
         }

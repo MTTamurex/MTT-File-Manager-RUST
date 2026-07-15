@@ -20,6 +20,7 @@ impl PdfViewerApp {
 
     pub(super) fn close_search(&mut self) {
         self.search_active = false;
+        self.search_input_has_focus = false;
         let was_searching = self.search_in_progress;
         self.search_in_progress = false;
         self.search_generation = self.search_generation.wrapping_add(1);
@@ -199,6 +200,7 @@ impl PdfViewerApp {
                         .hint_text(t!("pdfviewer.search_placeholder").to_string())
                         .desired_width(240.0),
                 );
+                self.search_input_has_focus = response.has_focus();
 
                 if response.changed() && self.search_query.trim() != self.last_searched_query {
                     let was_searching = self.search_in_progress;

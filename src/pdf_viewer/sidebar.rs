@@ -9,7 +9,7 @@ const THUMB_MAX_H: f32 = 170.0;
 
 impl PdfViewerApp {
     pub(super) fn show_sidebar(&mut self, ctx: &egui::Context) {
-        egui::SidePanel::left("pdf_thumbnail_sidebar")
+        let panel = egui::SidePanel::left("pdf_thumbnail_sidebar")
             .resizable(true)
             .default_width(170.0)
             .width_range(140.0..=260.0)
@@ -27,15 +27,43 @@ impl PdfViewerApp {
                     )
                 });
                 let mut scroll_area = egui::ScrollArea::vertical().auto_shrink([false, false]);
+                let pointer_over_sidebar = ui.rect_contains_pointer(ui.max_rect());
+                let manual_sidebar_navigation = pointer_over_sidebar
+                    && ui.input(|input| {
+                        input.raw_scroll_delta.y.abs() > f32::EPSILON
+                            || input.pointer.primary_down()
+                    });
+                if manual_sidebar_navigation {
+                    self.last_sidebar_scrolled_page = Some(self.current_page);
+                    self.thumbnail_keyboard_focus = true;
+                }
                 if self.current_page < self.total_pages
                     && self.last_sidebar_scrolled_page != Some(self.current_page)
                 {
+                    let viewport_height = ui.available_height();
                     if let Some(offset) = rows
                         .centered_scroll_offset(self.current_page as usize, ui.available_height())
                     {
-                        scroll_area = scroll_area.vertical_scroll_offset(offset);
+                        let offset = offset.min((rows.total_height() - viewport_height).max(0.0));
+                        let target_viewport = egui::Rect::from_min_max(
+                            egui::pos2(0.0, offset),
+                            egui::pos2(ui.available_width(), offset + viewport_height),
+                        );
+                        let landing_rows = rows.visible_range(target_viewport, 0);
+                        for row in rows.visible_range(target_viewport, 1) {
+                            let (_, _, render_w, render_h) = self.thumbnail_sizes(row as u32);
+                            self.submit_thumbnail(row as u32, render_w, render_h);
+                        }
+                        let landing_ready = landing_rows.clone().all(|row| {
+                            let page_idx = row as u32;
+                            self.thumbnail_textures.contains_key(&page_idx)
+                                || self.thumbnail_failed.contains(&page_idx)
+                        });
+                        if landing_ready {
+                            scroll_area = scroll_area.vertical_scroll_offset(offset);
+                            self.last_sidebar_scrolled_page = Some(self.current_page);
+                        }
                     }
-                    self.last_sidebar_scrolled_page = Some(self.current_page);
                 }
 
                 scroll_area.show_viewport(ui, |ui, viewport| {
@@ -63,12 +91,17 @@ impl PdfViewerApp {
                 });
                 self.thumbnail_rows = Some(rows);
             });
+
+        if ctx.input(|input| input.pointer.any_pressed()) {
+            self.thumbnail_keyboard_focus = panel.response.contains_pointer();
+        }
     }
 
     fn show_thumbnail_item(&mut self, ui: &mut egui::Ui, idx: u32) {
         ui.push_id(idx, |ui| {
             let is_current = idx == self.current_page;
             let (display_w, display_h, render_w, render_h) = self.thumbnail_sizes(idx);
+            self.submit_thumbnail(idx, render_w, render_h);
             let item_h = display_h + 24.0;
             ui.allocate_ui_with_layout(
                 egui::vec2(ui.available_width(), item_h),
@@ -80,11 +113,11 @@ impl PdfViewerApp {
                     );
 
                     if response.clicked() {
+                        self.thumbnail_keyboard_focus = true;
                         self.go_to_page(idx);
                     }
 
                     if ui.is_rect_visible(rect) {
-                        self.submit_thumbnail(idx, render_w, render_h);
                         ui.painter().rect_filled(rect, 2.0, egui::Color32::WHITE);
                         if let Some(thumbnail) = self.thumbnail_textures.get(&idx) {
                             Self::paint_page(
@@ -143,6 +176,7 @@ impl PdfViewerApp {
                         egui::RichText::new(t!("pdfviewer.page", page = idx + 1).to_string())
                     };
                     if ui.selectable_label(is_current, text).clicked() {
+                        self.thumbnail_keyboard_focus = true;
                         self.go_to_page(idx);
                     }
                 },
