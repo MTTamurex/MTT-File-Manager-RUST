@@ -573,8 +573,9 @@ pub struct ImageViewerApp {
     pub tag_assignments_normalized: Arc<rustc_hash::FxHashMap<String, Vec<i64>>>,
     pub tag_assignments_epoch: u64,
     pub tag_counts: rustc_hash::FxHashMap<i64, usize>,
-    pub tag_assignment_gc_sender: Sender<Vec<PathBuf>>,
-    pub tag_assignment_gc_receiver: Receiver<Vec<PathBuf>>,
+    pub(crate) tag_assignment_gc_sender: Sender<crate::app::operations::tag_ops::TagPathUpdate>,
+    pub(crate) tag_assignment_gc_receiver: Receiver<crate::app::operations::tag_ops::TagPathUpdate>,
+    pub(crate) pending_tag_view_hides: rustc_hash::FxHashMap<usize, Vec<PathBuf>>,
     /// Async worker state for the focus-restore purge of missing files from
     /// open tag views. Replaces the previous synchronous scan that blocked
     /// the UI thread on a cold NTFS cache.

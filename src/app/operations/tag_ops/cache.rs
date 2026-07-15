@@ -168,9 +168,17 @@ impl ImageViewerApp {
             }
         }
 
-        // NOTE: The active tab's inactive panel snapshot is NOT cleared here.
-        // It is re-filtered in-place by refresh_visible_items_after_tag_change()
-        // to avoid a visual flash from clearing and reloading.
+        // Active views are reloaded by the caller when required.
+    }
+
+    pub(crate) fn refresh_tag_views_after_drive_change(&mut self) {
+        if self.tag_definitions.is_empty() {
+            return;
+        }
+
+        let tag_ids: FxHashSet<i64> = self.tag_definitions.keys().copied().collect();
+        self.invalidate_cached_tag_views_for_tags(&tag_ids);
+        self.reload_visible_tag_views();
     }
 
     pub fn reconcile_garbage_collected_tag_assignments(&mut self, paths: &[PathBuf]) {
@@ -205,75 +213,130 @@ impl ImageViewerApp {
         self.refresh_visible_items_after_tag_change();
     }
 
+    fn retain_tag_view_items(
+        items: &mut Arc<Vec<crate::domain::file_entry::FileEntry>>,
+        removed_path_keys: &FxHashSet<String>,
+    ) {
+        Arc::make_mut(items)
+            .retain(|item| !removed_path_keys.contains(&normalize_path_text(&item.path)));
+    }
+
     fn prune_paths_from_loaded_tag_views(&mut self, paths: &[PathBuf]) {
+        let removed_path_keys: FxHashSet<String> =
+            paths.iter().map(|path| normalize_path_text(path)).collect();
+
         if tag_id_from_view_path(&self.navigation_state.current_path).is_some() {
-            self.all_items_mut().retain(|item| {
-                !paths
-                    .iter()
-                    .any(|path| tag_assignment_path_matches(&item.path, path))
-            });
-            Arc::make_mut(&mut self.items).retain(|item| {
-                !paths
-                    .iter()
-                    .any(|path| tag_assignment_path_matches(&item.path, path))
-            });
+            Self::retain_tag_view_items(&mut self.all_items, &removed_path_keys);
+            Self::retain_tag_view_items(&mut self.items, &removed_path_keys);
+            self.total_items = self.items.len();
         }
 
         if let Some(snapshot) = self.dual_panel_inactive_state.as_mut() {
             if tag_id_from_view_path(&snapshot.path).is_some() {
-                Arc::make_mut(&mut snapshot.all_items).retain(|item| {
-                    !paths
-                        .iter()
-                        .any(|path| tag_assignment_path_matches(&item.path, path))
-                });
-                Arc::make_mut(&mut snapshot.items).retain(|item| {
-                    !paths
-                        .iter()
-                        .any(|path| tag_assignment_path_matches(&item.path, path))
-                });
+                Self::retain_tag_view_items(&mut snapshot.all_items, &removed_path_keys);
+                Self::retain_tag_view_items(&mut snapshot.items, &removed_path_keys);
                 snapshot.total_items = snapshot.items.len();
+            }
+        }
+
+        let active_tab = self.tab_manager.active_tab;
+        for (index, tab) in self.tab_manager.tabs.iter_mut().enumerate() {
+            if index == active_tab {
+                continue;
+            }
+            if tag_id_from_view_path(&tab.path).is_some() {
+                Self::retain_tag_view_items(&mut tab.all_items, &removed_path_keys);
+                Self::retain_tag_view_items(&mut tab.items, &removed_path_keys);
+                tab.total_items = if tab.items_snapshot_compact {
+                    tab.all_items.len()
+                } else {
+                    tab.items.len()
+                };
+            }
+
+            if let Some(snapshot) = tab.dual_panel_inactive_state.as_mut() {
+                if tag_id_from_view_path(&snapshot.path).is_some() {
+                    Self::retain_tag_view_items(&mut snapshot.all_items, &removed_path_keys);
+                    Self::retain_tag_view_items(&mut snapshot.items, &removed_path_keys);
+                    snapshot.total_items = if snapshot.items_snapshot_compact {
+                        snapshot.all_items.len()
+                    } else {
+                        snapshot.items.len()
+                    };
+                }
             }
         }
     }
 
-    /// Removes items from tag views whose files no longer exist on disk.
-    ///
-    /// Called when the app regains focus to clean up entries for files that were
-    /// deleted externally (e.g. via Windows Explorer) while a tag view was open.
-    pub fn purge_missing_files_from_tag_views(&mut self) {
-        let mut needs_refresh = false;
-
-        // Validate active panel tag view.
-        if tag_id_from_view_path(&self.navigation_state.current_path).is_some() {
-            let missing: Vec<PathBuf> = self
-                .all_items
-                .iter()
-                .filter(|item| !item.path.exists())
-                .map(|item| item.path.clone())
-                .collect();
-            if !missing.is_empty() {
-                self.reconcile_garbage_collected_tag_assignments(&missing);
-                needs_refresh = true;
-            }
+    pub(crate) fn hide_unavailable_paths_from_tag_views(&mut self, paths: &[PathBuf]) {
+        if paths.is_empty() {
+            return;
         }
 
-        // Validate inactive panel tag view.
+        self.prune_paths_from_loaded_tag_views(paths);
+        self.ui_ctx.request_repaint();
+    }
+
+    pub(crate) fn apply_ready_tag_view_hides(&mut self) {
+        const MAX_REVALIDATIONS_PER_FRAME: usize = 32;
+
+        let mut generations: FxHashMap<usize, bool> = FxHashMap::default();
+        generations.insert(self.generation, !self.is_loading_folder);
         if let Some(snapshot) = self.dual_panel_inactive_state.as_ref() {
-            if tag_id_from_view_path(&snapshot.path).is_some() {
-                let missing: Vec<PathBuf> = snapshot
-                    .all_items
-                    .iter()
-                    .filter(|item| !item.path.exists())
-                    .map(|item| item.path.clone())
-                    .collect();
-                if !missing.is_empty() {
-                    self.reconcile_garbage_collected_tag_assignments(&missing);
-                    needs_refresh = true;
-                }
+            generations
+                .entry(snapshot.generation)
+                .and_modify(|ready| *ready |= !snapshot.is_loading_folder)
+                .or_insert(!snapshot.is_loading_folder);
+        }
+        let active_tab = self.tab_manager.active_tab;
+        for (index, tab) in self.tab_manager.tabs.iter().enumerate() {
+            if index != active_tab {
+                generations
+                    .entry(tab.generation)
+                    .and_modify(|ready| *ready = true)
+                    .or_insert(true);
+            }
+            if let Some(snapshot) = tab.dual_panel_inactive_state.as_ref() {
+                generations
+                    .entry(snapshot.generation)
+                    .and_modify(|ready| *ready |= !snapshot.is_loading_folder)
+                    .or_insert(!snapshot.is_loading_folder);
             }
         }
 
-        if needs_refresh {
+        self.pending_tag_view_hides
+            .retain(|generation, paths| generations.contains_key(generation) && !paths.is_empty());
+
+        let mut candidates = Vec::new();
+        for (generation, ready) in &generations {
+            if !ready || candidates.len() >= MAX_REVALIDATIONS_PER_FRAME {
+                continue;
+            }
+            let Some(paths) = self.pending_tag_view_hides.get_mut(generation) else {
+                continue;
+            };
+            while candidates.len() < MAX_REVALIDATIONS_PER_FRAME {
+                let Some(path) = paths.pop() else {
+                    break;
+                };
+                candidates.push(path);
+            }
+        }
+        self.pending_tag_view_hides
+            .retain(|_, paths| !paths.is_empty());
+
+        let mut current_roots = crate::infrastructure::windows::RootAvailabilityCache::default();
+        candidates.retain(|path| {
+            !current_roots.is_root_accessible(path)
+                || !crate::infrastructure::onedrive::fast_path_exists(path)
+        });
+        self.hide_unavailable_paths_from_tag_views(&candidates);
+
+        if self
+            .pending_tag_view_hides
+            .keys()
+            .any(|generation| generations.get(generation).copied().unwrap_or(false))
+        {
             self.ui_ctx.request_repaint();
         }
     }

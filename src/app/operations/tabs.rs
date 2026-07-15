@@ -244,6 +244,17 @@ impl ImageViewerApp {
             }
         }
 
+        let inactive_tag_to_reload = self
+            .dual_panel_inactive_state
+            .as_ref()
+            .filter(|snapshot| snapshot.items.is_empty() && snapshot.all_items.is_empty())
+            .and_then(|snapshot| {
+                crate::domain::special_paths::tag_id_from_view_path(&snapshot.path)
+            });
+        if let Some(tag_id) = inactive_tag_to_reload {
+            self.with_inactive_panel(|app| app.setup_tag_view(tag_id));
+        }
+
         // TAB-SWITCH STALENESS CHECK: Even when the tab has cached items,
         // verify the directory hasn't changed while the tab was inactive.
         // Without this, changes made externally (e.g., in Windows Explorer)

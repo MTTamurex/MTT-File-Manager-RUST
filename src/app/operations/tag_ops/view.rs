@@ -3,6 +3,7 @@ use crate::app::state::{FolderLoadError, ImageViewerApp};
 use crate::domain::file_entry::FileEntry;
 use crate::domain::file_tag::FileTag;
 use crate::domain::special_paths::{tag_id_from_view_path, tag_view_path};
+use crate::infrastructure::windows::RootAvailabilityCache;
 use std::os::windows::ffi::OsStrExt;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicUsize;
@@ -204,6 +205,7 @@ impl ImageViewerApp {
                 let mut last_path: Option<PathBuf> = None;
                 let mut detected_is_ssd: Option<bool> = None;
                 let mut cached_paths_to_validate: Vec<PathBuf> = Vec::new();
+                let mut root_availability = RootAvailabilityCache::default();
                 let mark_first = |first: &mut Option<std::time::Instant>| {
                     if first.is_none() {
                         *first = Some(std::time::Instant::now());
@@ -241,6 +243,9 @@ impl ImageViewerApp {
                             let Some(entry) = cached.get(path) else {
                                 continue;
                             };
+                            if !root_availability.is_root_accessible(&entry.path) {
+                                continue;
+                            }
                             cached_paths_to_validate.push(entry.path.clone());
                             if entry.is_hidden && !show_hidden {
                                 continue;
@@ -261,7 +266,10 @@ impl ImageViewerApp {
 
                     let misses: Vec<std::path::PathBuf> = paths
                         .iter()
-                        .filter(|p| !cached.contains_key(*p))
+                        .filter(|p| {
+                            !cached.contains_key(*p)
+                                && root_availability.is_root_accessible(p.as_path())
+                        })
                         .cloned()
                         .collect();
                     total_cache_misses = total_cache_misses.saturating_add(misses.len());
@@ -358,12 +366,15 @@ impl ImageViewerApp {
                 );
 
                 if !cached_paths_to_validate.is_empty() {
-                    let missing_cached_paths: Vec<PathBuf> = cached_paths_to_validate
+                    let missing_candidates: Vec<PathBuf> = cached_paths_to_validate
                         .into_iter()
                         .filter(|path| !crate::infrastructure::onedrive::fast_path_exists(path))
                         .collect();
-                    if !missing_cached_paths.is_empty() {
-                        let _ = tag_gc_sender.send(missing_cached_paths);
+                    if !missing_candidates.is_empty() {
+                        let _ = tag_gc_sender.send(TagPathUpdate::HideFromViews {
+                            generation: my_gen,
+                            paths: missing_candidates,
+                        });
                     }
                 }
             });

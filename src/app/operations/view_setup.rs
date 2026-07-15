@@ -466,6 +466,11 @@ impl ImageViewerApp {
                     self.drive_state.clear_cached_drive_info();
                     self.drive_state.drive_info_refresh_pending = false;
 
+                    // Tag assignments remain persistent while a root is
+                    // unavailable. Reload visible tag views so unmounted paths
+                    // disappear and return automatically after remounting.
+                    self.refresh_tag_views_after_drive_change();
+
                     // Detect removed drives: if user is browsing inside a removed drive,
                     // navigate them to "Este Computador" to avoid showing stale cached data.
                     let reclassified_drive_roots: HashSet<String> = self

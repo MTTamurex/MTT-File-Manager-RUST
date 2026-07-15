@@ -103,8 +103,21 @@ impl ImageViewerApp {
         self.process_file_operation_results(&current_path_norm, ctx);
         self.flush_organizer_notification_summary();
 
-        while let Ok(paths) = self.tag_assignment_gc_receiver.try_recv() {
-            self.reconcile_garbage_collected_tag_assignments(&paths);
+        while let Ok(update) = self.tag_assignment_gc_receiver.try_recv() {
+            match update {
+                crate::app::operations::tag_ops::TagPathUpdate::PersistedRemoval(paths) => {
+                    self.reconcile_garbage_collected_tag_assignments(&paths);
+                }
+                crate::app::operations::tag_ops::TagPathUpdate::HideFromViews {
+                    generation,
+                    paths,
+                } => {
+                    self.pending_tag_view_hides
+                        .entry(generation)
+                        .or_default()
+                        .extend(paths);
+                }
+            }
         }
 
         // Drain the focus-restore purge worker (replaces the previous
@@ -118,6 +131,7 @@ impl ImageViewerApp {
         let _t_auto_reload_done = watcher_perf.auto_reload_done;
 
         let _t_streaming_done = self.process_streaming_and_thumbnail_events(ctx);
+        self.apply_ready_tag_view_hides();
 
         // GLOBAL SEARCH: Process search results from worker
         self.process_global_search_events();

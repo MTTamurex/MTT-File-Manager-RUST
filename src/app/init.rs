@@ -667,6 +667,7 @@ impl ImageViewerApp {
             tag_counts,
             tag_assignment_gc_sender,
             tag_assignment_gc_receiver,
+            pending_tag_view_hides: rustc_hash::FxHashMap::default(),
             purge_worker_state: Some(
                 crate::app::operations::tag_ops::purge_worker::PurgeWorkerState::new(),
             ),

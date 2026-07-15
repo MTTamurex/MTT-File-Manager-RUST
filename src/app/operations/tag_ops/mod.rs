@@ -9,6 +9,14 @@ pub(crate) mod normalized;
 pub(crate) mod purge_worker;
 mod view;
 
+pub(crate) enum TagPathUpdate {
+    PersistedRemoval(Vec<PathBuf>),
+    HideFromViews {
+        generation: usize,
+        paths: Vec<PathBuf>,
+    },
+}
+
 fn normalize_path_text(path: &Path) -> String {
     crate::domain::file_tag::normalize_tag_path_key(path)
 }

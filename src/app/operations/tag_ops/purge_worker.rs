@@ -1,5 +1,7 @@
 use crate::app::state::ImageViewerApp;
 use crate::domain::special_paths::tag_id_from_view_path;
+use crate::infrastructure::windows::RootAvailabilityCache;
+use rustc_hash::FxHashSet;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
@@ -20,12 +22,17 @@ pub struct PurgeWorkerState {
     /// Output channel for the worker. The sender is taken at spawn time and
     /// moved into the worker thread; the receiver stays here for the message
     /// handler to drain.
-    pub receiver: std::sync::Mutex<Option<mpsc::Receiver<Vec<PathBuf>>>>,
+    pub receiver: std::sync::Mutex<Option<mpsc::Receiver<PurgeResult>>>,
+}
+
+pub struct PurgeResult {
+    missing_paths: Vec<PathBuf>,
+    unavailable_paths: Vec<PathBuf>,
 }
 
 impl PurgeWorkerState {
     pub fn new() -> Self {
-        let (sender, receiver) = mpsc::channel::<Vec<PathBuf>>();
+        let (sender, receiver) = mpsc::channel::<PurgeResult>();
         // Drop the sender we kept here — the worker will install a fresh one.
         drop(sender);
         Self {
@@ -45,16 +52,11 @@ impl ImageViewerApp {
     /// Schedules an async purge of missing files from currently open tag
     /// views. Safe to call from any frame; coalesces concurrent requests.
     pub fn spawn_purge_missing_tag_views(&mut self) {
+        process_purge_results(self);
+
         let Some(state_ref) = self.purge_worker_state.as_ref() else {
             return;
         };
-
-        // Drop any previous results that the UI thread did not consume.
-        if let Ok(guard) = state_ref.receiver.lock() {
-            if let Some(rx) = guard.as_ref() {
-                while rx.try_recv().is_ok() {}
-            }
-        }
 
         // Coalesce: if a worker is already running, do nothing. The
         // compare_exchange swaps the flag and is the single source of truth
@@ -74,9 +76,9 @@ impl ImageViewerApp {
             return;
         }
 
-        // Build a fresh channel for this invocation. The previous receiver
-        // is replaced (any unreceived results were discarded above).
-        let (tx, rx) = mpsc::channel::<Vec<PathBuf>>();
+        // Build a fresh channel for this invocation. Pending results were
+        // applied before acquiring the running flag above.
+        let (tx, rx) = mpsc::channel::<PurgeResult>();
         if let Ok(mut guard) = state_ref.receiver.lock() {
             *guard = Some(rx);
         }
@@ -87,15 +89,22 @@ impl ImageViewerApp {
         let spawn_result = std::thread::Builder::new()
             .name("tag-view-purge".into())
             .spawn(move || {
-                let mut missing: Vec<PathBuf> = Vec::new();
+                let mut root_availability = RootAvailabilityCache::default();
+                let mut missing_candidates: Vec<PathBuf> = Vec::new();
+                let mut unavailable_paths: Vec<PathBuf> = Vec::new();
                 for path in paths {
-                    if !path.exists() {
-                        missing.push(path);
+                    if !root_availability.is_root_accessible(&path) {
+                        unavailable_paths.push(path);
+                    } else if !crate::infrastructure::onedrive::fast_path_exists(&path) {
+                        missing_candidates.push(path);
                     }
                 }
 
-                if !missing.is_empty() {
-                    let _ = tx.send(missing);
+                if !missing_candidates.is_empty() || !unavailable_paths.is_empty() {
+                    let _ = tx.send(PurgeResult {
+                        missing_paths: missing_candidates,
+                        unavailable_paths,
+                    });
                     ui_ctx.request_repaint();
                 }
                 running_flag.store(false, Ordering::Release);
@@ -117,9 +126,12 @@ impl ImageViewerApp {
     /// paths).
     fn collect_active_tag_view_paths(&self) -> Vec<PathBuf> {
         let mut paths: Vec<PathBuf> = Vec::new();
+        let mut seen = FxHashSet::default();
         let mut push = |all_items: &std::sync::Arc<Vec<crate::domain::file_entry::FileEntry>>| {
             for item in all_items.iter() {
-                paths.push(item.path.clone());
+                if seen.insert(crate::domain::file_tag::normalize_tag_path_key(&item.path)) {
+                    paths.push(item.path.clone());
+                }
             }
         };
 
@@ -160,18 +172,28 @@ pub fn process_purge_results(app: &mut ImageViewerApp) {
         return;
     };
 
-    let mut collected: Vec<PathBuf> = Vec::new();
+    let mut missing_paths: Vec<PathBuf> = Vec::new();
+    let mut unavailable_paths: Vec<PathBuf> = Vec::new();
     if let Ok(guard) = state.receiver.lock() {
         if let Some(rx) = guard.as_ref() {
-            while let Ok(batch) = rx.try_recv() {
-                collected.extend(batch);
+            while let Ok(result) = rx.try_recv() {
+                missing_paths.extend(result.missing_paths);
+                unavailable_paths.extend(result.unavailable_paths);
             }
         }
     }
 
-    if collected.is_empty() {
-        return;
-    }
+    // Results can arrive after a drive has been remounted. Revalidate before
+    // pruning so stale worker output cannot hide newly available items.
+    let mut current_roots = RootAvailabilityCache::default();
+    unavailable_paths.retain(|path| !current_roots.is_root_accessible(path));
+    missing_paths.retain(|path| {
+        !current_roots.is_root_accessible(path)
+            || !crate::infrastructure::onedrive::fast_path_exists(path)
+    });
+    unavailable_paths.extend(missing_paths);
 
-    app.reconcile_garbage_collected_tag_assignments(&collected);
+    if !unavailable_paths.is_empty() {
+        app.hide_unavailable_paths_from_tag_views(&unavailable_paths);
+    }
 }

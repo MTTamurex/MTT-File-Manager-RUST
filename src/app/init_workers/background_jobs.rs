@@ -46,7 +46,7 @@ pub(in crate::app) fn spawn_startup_drive_info_preload(
 pub(in crate::app) fn spawn_incremental_gc_worker(
     disk_cache: Arc<ThumbnailDiskCache>,
     app_state_db: Arc<AppStateDb>,
-    tag_gc_sender: mpsc::Sender<Vec<std::path::PathBuf>>,
+    tag_gc_sender: mpsc::Sender<crate::app::operations::tag_ops::TagPathUpdate>,
     ctx: egui::Context,
 ) {
     std::thread::spawn(move || {
@@ -91,7 +91,11 @@ pub(in crate::app) fn spawn_incremental_gc_worker(
             let (removed_tags, removed_tag_paths) =
                 app_state_db.garbage_collect_tag_assignments_incremental(batch);
             if !removed_tag_paths.is_empty() {
-                let _ = tag_gc_sender.send(removed_tag_paths);
+                let _ = tag_gc_sender.send(
+                    crate::app::operations::tag_ops::TagPathUpdate::PersistedRemoval(
+                        removed_tag_paths,
+                    ),
+                );
                 ctx.request_repaint();
             }
             let total_removed = removed + removed_covers + removed_tags;
