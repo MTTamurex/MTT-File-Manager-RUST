@@ -2,6 +2,7 @@ use crate::app::shortcuts::{ShortcutAction, ShortcutBinding};
 use crate::app::ImageViewerApp;
 use crate::domain::file_entry::ViewMode;
 use crate::infrastructure::windows::is_virtual_key_down;
+use crate::ui::address_bar;
 use crate::workers::idle_warmup::IdleWarmupMessage;
 use eframe::egui;
 
@@ -310,7 +311,12 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
             .shortcuts
             .is_triggered(ShortcutAction::FocusAddressBar, ctx)
         {
-            app.navigation_state.path_input = app.navigation_state.current_path.clone();
+            let display_override =
+                app.tag_view_display_name_for_path(&app.navigation_state.current_path);
+            app.navigation_state.path_input = address_bar::editable_path(
+                &app.navigation_state.current_path,
+                display_override.as_deref(),
+            );
             app.is_address_editing = true;
             app.show_address_history_menu = false;
             app.address_bar_focus_request = true;

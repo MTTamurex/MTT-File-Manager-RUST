@@ -1,4 +1,5 @@
 use crate::app::ImageViewerApp;
+use crate::ui::address_bar;
 use eframe::egui;
 use rust_i18n::t;
 
@@ -150,40 +151,18 @@ pub(crate) fn render_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context
                     ToolbarAction::Search(_query) => app.filter_items(),
                     ToolbarAction::Navigate(path) => app.navigate_to(&path),
                     ToolbarAction::StartAddressEdit => {
-                        app.navigation_state.path_input = if let Some(display) =
-                            app.tag_view_display_name_for_path(&app.navigation_state.current_path)
-                        {
-                            display
-                        } else if app.navigation_state.current_path
-                            == crate::domain::special_paths::COMPUTER_VIEW_ID
-                        {
-                            t!("nav.computer").to_string()
-                        } else if app.navigation_state.current_path
-                            == crate::domain::special_paths::RECYCLE_BIN_VIEW_ID
-                        {
-                            t!("nav.recycle_bin").to_string()
-                        } else {
-                            app.navigation_state.current_path.clone()
-                        };
+                        app.navigation_state.path_input = address_bar::editable_path(
+                            &app.navigation_state.current_path,
+                            current_path_display_override.as_deref(),
+                        );
                         app.is_address_editing = true;
                         app.show_address_history_menu = false;
                     }
                     ToolbarAction::StartAddressEditWithHistory => {
-                        app.navigation_state.path_input = if let Some(display) =
-                            app.tag_view_display_name_for_path(&app.navigation_state.current_path)
-                        {
-                            display
-                        } else if app.navigation_state.current_path
-                            == crate::domain::special_paths::COMPUTER_VIEW_ID
-                        {
-                            t!("nav.computer").to_string()
-                        } else if app.navigation_state.current_path
-                            == crate::domain::special_paths::RECYCLE_BIN_VIEW_ID
-                        {
-                            t!("nav.recycle_bin").to_string()
-                        } else {
-                            app.navigation_state.current_path.clone()
-                        };
+                        app.navigation_state.path_input = address_bar::editable_path(
+                            &app.navigation_state.current_path,
+                            current_path_display_override.as_deref(),
+                        );
                         app.is_address_editing = true;
                         app.show_address_history_menu = true;
                     }

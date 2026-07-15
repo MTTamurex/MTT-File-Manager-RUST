@@ -1,5 +1,6 @@
 // UI components and rendering logic
 
+pub(crate) mod address_bar;
 pub mod app; // NEW - Modular sub-apps
 pub mod app_impl; // NEW - eframe::App implementation
 pub mod cache;
