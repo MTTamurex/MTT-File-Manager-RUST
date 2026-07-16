@@ -27,9 +27,8 @@ pub(super) fn render(
         rename.focus_request = false;
     }
 
-    let enter_pressed =
-        response.has_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
-    if enter_pressed {
+    let enter_pressed = ui.input(|input| input.key_pressed(egui::Key::Enter));
+    if enter_confirms_rename(enter_pressed, response.has_focus(), response.lost_focus()) {
         let new_name = rename.text.trim().to_string();
         if !new_name.is_empty() && new_name != rename.original_name {
             return RenameInputAction::Commit(PathBuf::from(&rename.path), new_name);
@@ -40,6 +39,10 @@ pub(super) fn render(
         return RenameInputAction::Cancel;
     }
     RenameInputAction::None
+}
+
+fn enter_confirms_rename(enter_pressed: bool, has_focus: bool, lost_focus: bool) -> bool {
+    enter_pressed && (has_focus || lost_focus)
 }
 
 fn select_editable_name(
@@ -68,4 +71,16 @@ fn select_editable_name(
             egui::text::CCursor::new(select_end),
         )));
     state.store(ui.ctx(), response.id);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::enter_confirms_rename;
+
+    #[test]
+    fn enter_confirms_after_singleline_input_loses_focus() {
+        assert!(enter_confirms_rename(true, false, true));
+        assert!(enter_confirms_rename(true, true, false));
+        assert!(!enter_confirms_rename(false, false, true));
+    }
 }

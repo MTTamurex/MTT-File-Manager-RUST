@@ -27,6 +27,7 @@ pub(super) fn render_results_panel(
     hover_color: egui::Color32,
 ) {
     ensure_tagged_results_for_active_filter(app);
+    let rename_active_at_frame_start = app.global_search.rename_state.is_some();
 
     // Use cached sorted indices to avoid O(N) recomputation every frame.
     // Take ownership temporarily to avoid cloning; put back at the end.
@@ -195,8 +196,10 @@ pub(super) fn render_results_panel(
         let page_down = ctx.input(|i| i.key_pressed(egui::Key::PageDown));
         let page_up = ctx.input(|i| i.key_pressed(egui::Key::PageUp));
 
-        if keyboard_actions_allowed(context_menu_open, app.global_search.rename_state.is_some())
-            && (arrow_down || arrow_up || page_down || page_up)
+        if keyboard_actions_allowed(
+            context_menu_open,
+            rename_active_at_frame_start || app.global_search.rename_state.is_some(),
+        ) && (arrow_down || arrow_up || page_down || page_up)
             && !filtered_indices.is_empty()
         {
             let current_filtered_pos = app
@@ -446,7 +449,10 @@ pub(super) fn render_results_panel(
     }
 
     if activate_result.is_none()
-        && keyboard_actions_allowed(context_menu_open, app.global_search.rename_state.is_some())
+        && keyboard_actions_allowed(
+            context_menu_open,
+            rename_active_at_frame_start || app.global_search.rename_state.is_some(),
+        )
         && app.global_search.interaction_target
             == crate::app::global_search_state::GlobalSearchInteractionTarget::Results
     {
@@ -478,7 +484,10 @@ pub(super) fn render_results_panel(
 
     // Preview shortcut (Space by default) opens the file with the internal viewer.
     if activate_result.is_none()
-        && keyboard_actions_allowed(context_menu_open, app.global_search.rename_state.is_some())
+        && keyboard_actions_allowed(
+            context_menu_open,
+            rename_active_at_frame_start || app.global_search.rename_state.is_some(),
+        )
         && app.global_search.interaction_target
             == crate::app::global_search_state::GlobalSearchInteractionTarget::Results
         && app
@@ -506,7 +515,10 @@ pub(super) fn render_results_panel(
 
     // Enter opens selected result (or the first visible one when none is selected).
     if activate_result.is_none()
-        && keyboard_actions_allowed(context_menu_open, app.global_search.rename_state.is_some())
+        && keyboard_actions_allowed(
+            context_menu_open,
+            rename_active_at_frame_start || app.global_search.rename_state.is_some(),
+        )
         && ctx.input(|i| i.key_pressed(egui::Key::Enter))
         && !filtered_indices.is_empty()
     {
