@@ -15,7 +15,7 @@ use filters::{category_label, format_exact_number};
 use rust_i18n::t;
 use std::time::Duration;
 
-mod actions;
+pub(crate) mod actions;
 mod date_filter;
 pub(crate) mod filters;
 mod result_row;
@@ -32,6 +32,9 @@ const NO_PROGRESS_WARNING_SECS: u64 = 10;
 /// Render the global search overlay. Returns true if the overlay should remain open.
 pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Context) {
     if !app.global_search.active {
+        return;
+    }
+    if app.global_search.suspended_for_drag {
         return;
     }
 
@@ -72,7 +75,7 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
 
             if backdrop_resp.clicked() {
                 let popup_open = ctx.memory(|m| m.any_popup_open());
-                if !popup_open {
+                if !popup_open && !app.context_menu.is_open {
                     if let Some(click_pos) = backdrop_resp.interact_pointer_pos() {
                         if !modal_rect.contains(click_pos) {
                             close_from_backdrop = true;
@@ -87,8 +90,20 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
         return;
     }
 
-    // ESC closes
+    // Escape cancels an inline rename before closing the overlay.
     if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+        if app.context_menu.is_open
+            && app.context_menu.origin
+                == crate::application::context_menu::ContextMenuOrigin::GlobalSearch
+        {
+            return;
+        }
+        if app.global_search.rename_state.take().is_some() {
+            app.global_search.interaction_target =
+                crate::app::global_search_state::GlobalSearchInteractionTarget::Results;
+            ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+            return;
+        }
         app.close_global_search();
         return;
     }
@@ -121,10 +136,12 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
         .global_search
         .pending_query_dispatch_at
         .is_some_and(|deadline| {
-            std::time::Instant::now() >= deadline && !app.global_search.query.is_empty()
+            std::time::Instant::now() >= deadline
+                && !app.global_search.query.is_empty()
+                && app.global_search.rename_state.is_none()
         })
     {
-        app.global_search.selected_index = None;
+        app.global_search.clear_result_selection();
         app.global_search.loading = true;
         app.global_search.results.clear();
         app.global_search.results_generation += 1;
@@ -322,12 +339,19 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                     // Focus input when clicking empty container area
                     if container_resp.clicked() {
                         search_resp.request_focus();
+                        app.global_search.interaction_target = crate::app::global_search_state::GlobalSearchInteractionTarget::SearchInput;
                     }
 
                     // Auto-focus on open
                     if app.global_search.focus_request {
                         search_resp.request_focus();
+                        app.global_search.interaction_target = crate::app::global_search_state::GlobalSearchInteractionTarget::SearchInput;
                         app.global_search.focus_request = false;
+                    }
+
+                    if search_resp.clicked() || search_resp.gained_focus() || search_resp.changed() {
+                        app.global_search.interaction_target = crate::app::global_search_state::GlobalSearchInteractionTarget::SearchInput;
+                        app.global_search.rename_state = None;
                     }
 
                     // Trigger search on text change (with debounce)
@@ -384,6 +408,12 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                         modal_max_height,
                         theme::selection_hover_color(dark_mode),
                     );
+                    if app.global_search.interaction_target
+                        != crate::app::global_search_state::GlobalSearchInteractionTarget::SearchInput
+                        && search_resp.has_focus()
+                    {
+                        search_resp.surrender_focus();
+                    }
                 });
         });
 }
@@ -549,7 +579,7 @@ fn render_filter_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
         .is_some_and(|drive| !drives.contains(&drive))
     {
         app.global_search.drive_filter = None;
-        app.global_search.selected_index = None;
+        app.global_search.clear_result_selection();
     }
 
     // Row 1: category filters (left) + drive filter (right)
@@ -574,7 +604,7 @@ fn render_filter_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
                         .clicked()
                     {
                         app.global_search.category = category;
-                        app.global_search.selected_index = None;
+                        app.global_search.clear_result_selection();
                     }
                 }
             },
@@ -604,7 +634,7 @@ fn render_filter_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
                         .clicked()
                     {
                         app.global_search.drive_filter = None;
-                        app.global_search.selected_index = None;
+                        app.global_search.clear_result_selection();
                     }
 
                     for drive in &drives {
@@ -614,7 +644,7 @@ fn render_filter_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
                             .clicked()
                         {
                             app.global_search.drive_filter = Some(*drive);
-                            app.global_search.selected_index = None;
+                            app.global_search.clear_result_selection();
                         }
                     }
                 });
@@ -665,7 +695,7 @@ fn render_filter_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
                     .clicked()
                 {
                     app.global_search.sort_mode = GlobalSearchSortMode::Relevance;
-                    app.global_search.selected_index = None;
+                    app.global_search.clear_result_selection();
                 }
                 if ui
                     .selectable_label(
@@ -675,7 +705,7 @@ fn render_filter_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
                     .clicked()
                 {
                     app.global_search.sort_mode = GlobalSearchSortMode::ModifiedDate;
-                    app.global_search.selected_index = None;
+                    app.global_search.clear_result_selection();
                 }
                 if ui
                     .selectable_label(
@@ -685,7 +715,7 @@ fn render_filter_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
                     .clicked()
                 {
                     app.global_search.sort_mode = GlobalSearchSortMode::Name;
-                    app.global_search.selected_index = None;
+                    app.global_search.clear_result_selection();
                 }
             });
 
@@ -699,7 +729,7 @@ fn render_filter_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
         };
         if ui.button(dir_label).clicked() {
             app.global_search.sort_descending = !app.global_search.sort_descending;
-            app.global_search.selected_index = None;
+            app.global_search.clear_result_selection();
         }
 
         ui.add_space(8.0);
@@ -719,7 +749,7 @@ fn render_filter_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
         );
         if min_resp.changed() {
             app.global_search.min_size_mb = if min_val > 0 { Some(min_val) } else { None };
-            app.global_search.selected_index = None;
+            app.global_search.clear_result_selection();
         }
 
         ui.add_space(4.0);
@@ -739,7 +769,7 @@ fn render_filter_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
         );
         if max_resp.changed() {
             app.global_search.max_size_mb = if max_val > 0 { Some(max_val) } else { None };
-            app.global_search.selected_index = None;
+            app.global_search.clear_result_selection();
         }
 
         ui.add_space(8.0);
@@ -824,7 +854,7 @@ fn render_filter_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
         ) {
             app.global_search.created_after =
                 date_input_to_unix_ts(&app.global_search.created_after_text, date_order);
-            app.global_search.selected_index = None;
+            app.global_search.clear_result_selection();
         }
 
         ui.add_space(8.0);
@@ -844,7 +874,7 @@ fn render_filter_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
                 &app.global_search.created_before_text,
                 date_order,
             );
-            app.global_search.selected_index = None;
+            app.global_search.clear_result_selection();
         }
     });
 }
@@ -983,7 +1013,7 @@ fn render_tag_filter_button(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
                         .clicked()
                     {
                         app.global_search.tag_filter = GlobalSearchTagFilter::All;
-                        app.global_search.selected_index = None;
+                        app.global_search.clear_result_selection();
                         close_popup = true;
                         item_clicked = true;
                     }
@@ -992,7 +1022,7 @@ fn render_tag_filter_button(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
                         .clicked()
                     {
                         app.global_search.tag_filter = GlobalSearchTagFilter::Any;
-                        app.global_search.selected_index = None;
+                        app.global_search.clear_result_selection();
                         close_popup = true;
                         item_clicked = true;
                     }
@@ -1016,7 +1046,7 @@ fn render_tag_filter_button(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
                             let dot_color = Some(tag.color.to_color32());
                             if popup_menu_item(ui, is_selected, &tag.name, dot_color).clicked() {
                                 toggle_tag_in_filter(&mut app.global_search.tag_filter, tag.id);
-                                app.global_search.selected_index = None;
+                                app.global_search.clear_result_selection();
                                 item_clicked = true;
                             }
                         }
@@ -1029,7 +1059,7 @@ fn render_tag_filter_button(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
                         ui.separator();
                         if ui.button(t!("search.filter_tag_clear")).clicked() {
                             app.global_search.tag_filter = GlobalSearchTagFilter::All;
-                            app.global_search.selected_index = None;
+                            app.global_search.clear_result_selection();
                             close_popup = true;
                             item_clicked = true;
                         }

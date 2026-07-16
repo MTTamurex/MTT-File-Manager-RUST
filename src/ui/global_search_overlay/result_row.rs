@@ -1,18 +1,19 @@
-use crate::app::global_search_state::TooltipRequest;
 use crate::app::state::ImageViewerApp;
 use crate::domain::file_entry::IconSize;
 use crate::ui::theme;
 use eframe::egui;
-use rust_i18n::t;
 
 use super::actions::{self, ResultAction};
 
 pub(super) const ROW_HEIGHT: f32 = 46.0;
 pub(super) const ICON_SIZE: f32 = 18.0;
-use crate::ui::views::common::TOOLTIP_DELAY_SECS;
 const ACTION_BTN_WIDTH: f32 = 52.0;
 const ACTION_BTN_HEIGHT: f32 = 22.0;
 const ACTION_BTN_GAP: f32 = 4.0;
+
+mod interactions;
+mod rename;
+mod tooltip;
 
 #[inline]
 fn cache_key_for_icon(path: &std::path::Path, size: IconSize) -> String {
@@ -128,6 +129,7 @@ pub(super) fn render_result_row(
     app: &mut ImageViewerApp,
     ctx: &egui::Context,
     source_idx: usize,
+    ordered_indices: &[usize],
     row_rect: egui::Rect,
     hover_color: egui::Color32,
     icon_request_budget: &mut usize,
@@ -151,15 +153,27 @@ pub(super) fn render_result_row(
     let row_resp = ui.interact(
         row_rect,
         ui.id().with(("global_search_row", source_idx)),
-        egui::Sense::click(),
+        egui::Sense::click_and_drag(),
     );
 
-    if row_resp.clicked() {
-        app.global_search.selected_index = Some(source_idx);
-    }
+    interactions::handle_selection_and_context_menu(
+        app,
+        ctx,
+        &row_resp,
+        source_idx,
+        ordered_indices,
+        row_rect,
+        &full_path,
+        is_dir,
+    );
 
     let dark_mode = ui.visuals().dark_mode;
-    let is_selected = app.global_search.selected_index == Some(source_idx);
+    let is_selected = app.global_search.selected_indices.contains(&source_idx);
+    let is_renaming = app
+        .global_search
+        .rename_state
+        .as_ref()
+        .is_some_and(|rename| rename.source_index == source_idx);
     if is_selected {
         ui.painter()
             .rect_filled(row_rect, 4.0, theme::selection_color(dark_mode));
@@ -230,24 +244,39 @@ pub(super) fn render_result_row(
         button_size,
     );
 
-    let folder_button_resp = paint_action_button(
-        ui,
+    interactions::maybe_start_drag(
+        app,
+        ctx,
+        &row_resp,
+        source_idx,
+        ordered_indices,
+        is_dir,
+        is_renaming,
         folder_button_rect,
-        ui.id().with(("global_search_open_folder", source_idx)),
-        open_folder_label,
-    );
-    if folder_button_resp.clicked() {
-        *activate_result = Some(ResultAction::OpenFolder(full_path.clone(), is_dir));
-    }
-
-    let open_button_resp = paint_action_button(
-        ui,
         open_button_rect,
-        ui.id().with(("global_search_open_file", source_idx)),
-        open_file_label,
+        icon_tex.clone(),
     );
-    if open_button_resp.clicked() {
-        *activate_result = Some(ResultAction::OpenFile(full_path.clone(), is_dir));
+
+    if !is_renaming {
+        let folder_button_resp = paint_action_button(
+            ui,
+            folder_button_rect,
+            ui.id().with(("global_search_open_folder", source_idx)),
+            open_folder_label,
+        );
+        if folder_button_resp.clicked() {
+            *activate_result = Some(ResultAction::OpenFolder(full_path.clone(), is_dir));
+        }
+
+        let open_button_resp = paint_action_button(
+            ui,
+            open_button_rect,
+            ui.id().with(("global_search_open_file", source_idx)),
+            open_file_label,
+        );
+        if open_button_resp.clicked() {
+            *activate_result = Some(ResultAction::OpenFile(full_path.clone(), is_dir));
+        }
     }
 
     let icon_rect = egui::Rect::from_min_size(
@@ -293,19 +322,42 @@ pub(super) fn render_result_row(
     let text_left = icon_rect.right() + 8.0 + tag_name_offset;
     let text_right = open_button_rect.left() - 8.0;
     let text_max_w = (text_right - text_left).max(60.0);
-    let display_name = crate::ui::views::list_view::truncate_text_for_column(
-        &result_name,
-        text_max_w,
-        &name_font,
-        ui,
-    );
-    ui.painter().text(
-        egui::pos2(text_left, content_rect.top()),
-        egui::Align2::LEFT_TOP,
-        display_name,
-        name_font.clone(),
-        text_color,
-    );
+    if is_renaming {
+        let rename_rect = egui::Rect::from_min_size(
+            egui::pos2(text_left, content_rect.top() - 2.0),
+            egui::vec2(text_max_w, 22.0),
+        );
+        if let Some(rename_state) = app.global_search.rename_state.as_mut() {
+            match rename::render(ui, rename_state, rename_rect, name_font.clone()) {
+                rename::RenameInputAction::None => {}
+                rename::RenameInputAction::Cancel => {
+                    app.global_search.rename_state = None;
+                    app.global_search.interaction_target =
+                        crate::app::global_search_state::GlobalSearchInteractionTarget::Results;
+                }
+                rename::RenameInputAction::Commit(path, new_name) => {
+                    app.global_search.rename_state = None;
+                    app.global_search.interaction_target =
+                        crate::app::global_search_state::GlobalSearchInteractionTarget::Results;
+                    *activate_result = Some(ResultAction::CommitRename(path, new_name));
+                }
+            }
+        }
+    } else {
+        let display_name = crate::ui::views::list_view::truncate_text_for_column(
+            &result_name,
+            text_max_w,
+            &name_font,
+            ui,
+        );
+        ui.painter().text(
+            egui::pos2(text_left, content_rect.top()),
+            egui::Align2::LEFT_TOP,
+            display_name,
+            name_font.clone(),
+            text_color,
+        );
+    }
 
     let meta_y = (content_rect.bottom() - meta_font.size).max(content_rect.top() + 16.0);
     let meta_width = measure_text_width(ui, &meta_text, &meta_font, meta_color);
@@ -332,180 +384,21 @@ pub(super) fn render_result_row(
         );
     }
 
-    // Tooltip with debounce.
-    if row_resp.hovered() {
-        let current_time = ui.input(|i| i.time);
-        let hover_id = egui::Id::new("global_search_hover_start").with(&full_path);
-        let hover_start_time = ui
-            .ctx()
-            .data_mut(|d| *d.get_temp_mut_or_insert_with(hover_id, || current_time));
-        let hover_duration = (current_time - hover_start_time) as f32;
+    tooltip::render(
+        ui,
+        app,
+        &row_resp,
+        source_idx,
+        &full_path,
+        &result_name,
+        is_dir,
+        size,
+        &file_type,
+        &tag_ids,
+        !is_renaming,
+    );
 
-        if hover_duration < TOOLTIP_DELAY_SECS {
-            ui.ctx()
-                .request_repaint_after(std::time::Duration::from_secs_f32(
-                    TOOLTIP_DELAY_SECS - hover_duration + 0.01,
-                ));
-        }
-
-        if hover_duration >= TOOLTIP_DELAY_SECS {
-            // --- Async metadata (P0-02): request background load on cache miss ---
-            let modified_ts = if let Some(&cached_ts) =
-                app.global_search.metadata_cache.get(&full_path)
-            {
-                cached_ts
-            } else if let Some(cached_ts) = app.global_search.sort_modified_ts_for_index(source_idx)
-            {
-                cached_ts
-            } else if app
-                .global_search
-                .attach_tooltip_to_sort_metadata_request(&full_path)
-            {
-                0
-            } else if !app
-                .global_search
-                .tooltip_metadata_inflight
-                .contains(&full_path)
-            {
-                app.global_search
-                    .tooltip_metadata_inflight
-                    .insert(full_path.clone());
-                let _ = app
-                    .global_search
-                    .tooltip_sender
-                    .send(TooltipRequest::Metadata(full_path.clone()));
-                0
-            } else {
-                0
-            };
-
-            let size_opt = actions::resolve_result_size(app, &full_path, is_dir, size);
-            let size_text = size_opt.map(crate::infrastructure::windows::format_size);
-
-            // --- Async thumbnail (P0-03): request background decode on cache miss ---
-            let thumb_tex: Option<egui::TextureHandle> = if !is_dir {
-                let p = std::path::PathBuf::from(&full_path);
-                let is_media = p
-                    .extension()
-                    .map(|ext| {
-                        crate::infrastructure::windows::is_media_extension(&ext.to_string_lossy())
-                    })
-                    .unwrap_or(false);
-                if is_media {
-                    if let Some(tex) = app.cache_manager.get_thumbnail(&p) {
-                        Some(tex.clone())
-                    } else if let Some(tex) =
-                        app.global_search.tooltip_texture_cache.get(&full_path)
-                    {
-                        Some(tex.clone())
-                    } else if !app
-                        .global_search
-                        .tooltip_thumbnail_inflight
-                        .contains(&full_path)
-                    {
-                        app.global_search
-                            .tooltip_thumbnail_inflight
-                            .insert(full_path.clone());
-                        let _ = app
-                            .global_search
-                            .tooltip_sender
-                            .send(TooltipRequest::Thumbnail(full_path.clone()));
-                        None
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
-
-            if let Some(mouse_pos) = ui.input(|i| i.pointer.hover_pos()) {
-                let tooltip_layer =
-                    egui::LayerId::new(egui::Order::Tooltip, row_resp.id.with("tooltip"));
-                egui::show_tooltip_at(
-                    ui.ctx(),
-                    tooltip_layer,
-                    row_resp.id,
-                    mouse_pos,
-                    |ui: &mut egui::Ui| {
-                        ui.set_max_width(300.0);
-                        ui.vertical(|ui| {
-                            ui.label(egui::RichText::new(&result_name).strong());
-                            ui.separator();
-                            if let Some(tex) = &thumb_tex {
-                                let tex_size = tex.size_vec2();
-                                let max_w = 280.0_f32;
-                                let max_h = 180.0_f32;
-                                let scale = (max_w / tex_size.x).min(max_h / tex_size.y).min(1.0);
-                                let display_size =
-                                    egui::vec2(tex_size.x * scale, tex_size.y * scale);
-                                ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
-                                    ui.add(egui::Image::new(tex).fit_to_exact_size(display_size));
-                                });
-                                ui.add_space(4.0);
-                            }
-                            ui.horizontal(|ui| {
-                                ui.label(t!("file_info.type"));
-                                ui.label(&file_type);
-                            });
-                            if !is_dir {
-                                ui.horizontal(|ui| {
-                                    ui.label(t!("file_info.size"));
-                                    ui.label(size_text.as_deref().unwrap_or("-"));
-                                });
-                            }
-                            ui.horizontal(|ui| {
-                                ui.label(t!("file_info.date_modified"));
-                                ui.label(crate::infrastructure::windows::format_date(modified_ts));
-                            });
-                            if let Some(created_ts) =
-                                app.global_search.created_ts_for_index(source_idx)
-                            {
-                                ui.horizontal(|ui| {
-                                    ui.label(t!("file_info.date_created"));
-                                    ui.label(crate::infrastructure::windows::format_date(
-                                        created_ts,
-                                    ));
-                                });
-                            }
-                            if !tag_ids.is_empty() {
-                                ui.horizontal(|ui| {
-                                    ui.label(if tag_ids.len() == 1 {
-                                        t!("file_info.tag")
-                                    } else {
-                                        t!("file_info.tags")
-                                    });
-                                    for tag_id in &tag_ids {
-                                        if let Some(tag) = app.tag_definitions.get(tag_id) {
-                                            let color = tag.color.to_color32();
-                                            let (dot_rect, _) = ui.allocate_exact_size(
-                                                egui::vec2(10.0, 10.0),
-                                                egui::Sense::hover(),
-                                            );
-                                            ui.painter().circle_filled(
-                                                dot_rect.center(),
-                                                3.5,
-                                                color,
-                                            );
-                                            ui.label(&tag.name);
-                                            ui.add_space(6.0);
-                                        }
-                                    }
-                                });
-                            }
-                        });
-                    },
-                );
-            } // if let Some(mouse_pos)
-        }
-    } else {
-        let hover_id = egui::Id::new("global_search_hover_start").with(&full_path);
-        ui.ctx().data_mut(|d| d.remove::<f64>(hover_id));
-    }
-
-    if row_resp.double_clicked() {
+    if row_resp.double_clicked() && !is_renaming {
         *activate_result = Some(ResultAction::OpenFolder(full_path, is_dir));
     }
 }

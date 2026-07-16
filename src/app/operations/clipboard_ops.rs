@@ -25,6 +25,17 @@ impl ImageViewerApp {
     }
 
     pub(crate) fn context_target_is_directory(&self, idx: Option<usize>, path: &Path) -> bool {
+        if self.context_menu.origin
+            == crate::application::context_menu::ContextMenuOrigin::GlobalSearch
+            && self
+                .context_menu
+                .target_paths
+                .first()
+                .is_some_and(|p| p == path)
+        {
+            return self.context_menu.primary_is_directory.unwrap_or(false);
+        }
+
         if crate::infrastructure::windows::is_drive_root_path(path) {
             return true;
         }
@@ -109,6 +120,14 @@ impl ImageViewerApp {
         }
     }
 
+    pub(crate) fn copy_paths_to_clipboard(&mut self, paths: &[PathBuf]) {
+        if paths.is_empty() {
+            return;
+        }
+        let owner = self.shell_op_hwnd();
+        self.clipboard.copy(paths, owner);
+    }
+
     /// Cut: place the file on the Windows clipboard with the MOVE flag
     pub fn command_cut(&mut self, idx: Option<usize>) {
         if self.current_location_is_archive_namespace() {
@@ -147,6 +166,14 @@ impl ImageViewerApp {
             let owner = self.shell_op_hwnd();
             self.clipboard.cut(&files, owner);
         }
+    }
+
+    pub(crate) fn cut_paths_to_clipboard(&mut self, paths: &[PathBuf]) {
+        if paths.is_empty() {
+            return;
+        }
+        let owner = self.shell_op_hwnd();
+        self.clipboard.cut(paths, owner);
     }
 
     /// Paste: Reads from clipboard using ClipboardManager via Background Worker

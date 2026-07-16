@@ -57,8 +57,10 @@ impl ImageViewerApp {
         _item_index: Option<usize>,
     ) {
         use crate::application::context_menu::ContextMenuItem;
+        let is_global_search = self.context_menu.origin
+            == crate::application::context_menu::ContextMenuOrigin::GlobalSearch;
 
-        if is_empty_area && !self.can_open_empty_area_context_menu() {
+        if !is_global_search && is_empty_area && !self.can_open_empty_area_context_menu() {
             self.context_menu.close();
             self.shell_menu_loading = false;
             return;
@@ -78,7 +80,7 @@ impl ImageViewerApp {
         let mut items = Vec::new();
 
         // Special menu for Recycle Bin items
-        if self.navigation_state.is_recycle_bin_view && !is_empty_area {
+        if !is_global_search && self.navigation_state.is_recycle_bin_view && !is_empty_area {
             // Menu items for recycle bin (no primary icons)
             items.push(
                 ContextMenuItem::new(-52, t!("context_menu.restore"))
@@ -107,7 +109,7 @@ impl ImageViewerApp {
         }
 
         // Special menu for empty area in Recycle Bin
-        if self.navigation_state.is_recycle_bin_view && is_empty_area {
+        if !is_global_search && self.navigation_state.is_recycle_bin_view && is_empty_area {
             items.push(
                 ContextMenuItem::new(-54, t!("context_menu.empty_recycle_bin"))
                     .with_command("empty_recycle_bin")
@@ -118,7 +120,7 @@ impl ImageViewerApp {
             return;
         }
 
-        if self.current_location_is_archive_namespace() {
+        if !is_global_search && self.current_location_is_archive_namespace() {
             self.shell_menu_request_id = self.shell_menu_request_id.wrapping_add(1);
             let _ = self
                 .shell_menu_req_tx
@@ -200,6 +202,16 @@ impl ImageViewerApp {
         // PE executables (.exe, .msi, .com, .scr) never show "Open with" in Windows Explorer.
         let target_is_file = if is_empty_area || is_drive {
             false
+        } else if is_global_search {
+            !self.context_menu.primary_is_directory.unwrap_or(false)
+                && paths.first().is_some_and(|path| {
+                    path.extension().is_none_or(|ext| {
+                        !crate::domain::file_entry::is_executable_extension(&format!(
+                            ".{}",
+                            ext.to_string_lossy()
+                        ))
+                    })
+                })
         } else if let Some(idx) = _item_index {
             self.items
                 .get(idx)
@@ -219,8 +231,17 @@ impl ImageViewerApp {
         } else {
             false
         };
-        let can_copy_target = !is_drive && self.can_copy_from_current_location();
-        let can_rename_target = if let Some(idx) = _item_index {
+        let can_copy_target =
+            !is_drive && (is_global_search || self.can_copy_from_current_location());
+        let can_rename_target = if is_global_search {
+            paths.len() == 1
+                && !is_drive
+                && paths.first().is_some_and(|path| {
+                    !crate::domain::file_entry::path_contains_archive_segment(
+                        &path.to_string_lossy().to_lowercase(),
+                    )
+                })
+        } else if let Some(idx) = _item_index {
             self.can_rename_item(idx)
         } else if let Some(path) = drive_target_path {
             path.to_str().is_some_and(|drive_path| {
@@ -241,8 +262,9 @@ impl ImageViewerApp {
         };
         let can_tag_targets = !is_empty_area
             && !is_drive
-            && !self.navigation_state.is_computer_view
-            && !self.navigation_state.is_recycle_bin_view
+            && (is_global_search
+                || (!self.navigation_state.is_computer_view
+                    && !self.navigation_state.is_recycle_bin_view))
             && !paths.is_empty()
             && paths.iter().all(|path| {
                 let path_text = path.to_string_lossy();
@@ -276,16 +298,18 @@ impl ImageViewerApp {
             );
         }
 
-        let can_paste = self.can_paste_into_current_location() && !paste_destination_is_archive;
-        items.push(
-            ContextMenuItem::primary(-4, t!("context_menu.paste"))
-                .with_command("paste")
-                .with_shortcut(
-                    self.shortcuts
-                        .label(crate::app::shortcuts::ShortcutAction::Paste),
-                )
-                .enabled(can_paste && !is_drive),
-        );
+        if self.context_menu.origin.allows_paste() {
+            let can_paste = self.can_paste_into_current_location() && !paste_destination_is_archive;
+            items.push(
+                ContextMenuItem::primary(-4, t!("context_menu.paste"))
+                    .with_command("paste")
+                    .with_shortcut(
+                        self.shortcuts
+                            .label(crate::app::shortcuts::ShortcutAction::Paste),
+                    )
+                    .enabled(can_paste && !is_drive),
+            );
+        }
 
         if !is_empty_area {
             items.push(
@@ -370,9 +394,14 @@ impl ImageViewerApp {
             if !is_drive {
                 if let Some(target_path) = paths.first().and_then(|p| p.to_str()) {
                     // Use cached is_dir field — avoids blocking I/O on OneDrive/network paths
-                    let target_is_dir = _item_index
-                        .and_then(|idx| self.items.get(idx))
-                        .map(|item| item.is_dir)
+                    let target_is_dir = self
+                        .context_menu
+                        .primary_is_directory
+                        .or_else(|| {
+                            _item_index
+                                .and_then(|idx| self.items.get(idx))
+                                .map(|item| item.is_dir)
+                        })
                         .unwrap_or_else(|| {
                             // Fallback: search already-loaded items by path (no I/O)
                             self.items
@@ -603,20 +632,22 @@ impl ImageViewerApp {
         }
 
         // Determine if the target is a file so we only promote "Open with" for files
-        let target_is_file = self
-            .context_menu
-            .target_paths
-            .first()
-            .map(|p| {
-                p.is_file()
-                    && p.extension().is_none_or(|ext| {
-                        !crate::domain::file_entry::is_executable_extension(&format!(
-                            ".{}",
-                            ext.to_string_lossy()
-                        ))
-                    })
+        let target_is_file = self.context_menu.primary_is_directory.map_or_else(
+            || {
+                self.context_menu
+                    .target_paths
+                    .first()
+                    .is_some_and(|p| p.is_file())
+            },
+            |is_directory| !is_directory,
+        ) && self.context_menu.target_paths.first().is_some_and(|p| {
+            p.extension().is_none_or(|ext| {
+                !crate::domain::file_entry::is_executable_extension(&format!(
+                    ".{}",
+                    ext.to_string_lossy()
+                ))
             })
-            .unwrap_or(false);
+        });
 
         let mut open_with_item: Option<ContextMenuItem> = None;
         let mut all_shell_items = Vec::new();

@@ -72,6 +72,23 @@ pub(crate) enum CreatedMetadataState {
     Available(u64),
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum GlobalSearchInteractionTarget {
+    #[default]
+    SearchInput,
+    Results,
+    RenameInput,
+}
+
+pub struct GlobalSearchRenameState {
+    pub source_index: usize,
+    pub path: String,
+    pub original_name: String,
+    pub text: String,
+    pub is_dir: bool,
+    pub focus_request: bool,
+}
+
 /// Combined filter parameters used for cache invalidation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GlobalSearchFilters {
@@ -90,6 +107,12 @@ pub struct GlobalSearchState {
     pub query: String,
     pub results: Vec<mtt_search_protocol::SearchResultItem>,
     pub selected_index: Option<usize>,
+    pub selected_indices: HashSet<usize>,
+    pub selection_anchor: Option<usize>,
+    pub interaction_target: GlobalSearchInteractionTarget,
+    pub rename_state: Option<GlobalSearchRenameState>,
+    pub suspended_for_drag: bool,
+    pub shell_refresh_request_id: Option<u64>,
     pub focus_request: bool,
     pub size_cache: LruCache<String, Option<u64>>,
     /// Bounded cache for tooltip thumbnail textures (prevents VRAM leak).
@@ -199,6 +222,12 @@ impl GlobalSearchState {
             query: String::new(),
             results: Vec::new(),
             selected_index: None,
+            selected_indices: HashSet::new(),
+            selection_anchor: None,
+            interaction_target: GlobalSearchInteractionTarget::SearchInput,
+            rename_state: None,
+            suspended_for_drag: false,
+            shell_refresh_request_id: None,
             focus_request: false,
             size_cache: LruCache::new(
                 NonZeroUsize::new(2000).expect("global_search size_cache size must be non-zero"),
@@ -389,12 +418,89 @@ impl GlobalSearchState {
         self.sort_metadata_inflight.clear();
         self.created_ts_cache.clear();
         self.created_metadata_inflight.clear();
-        self.selected_index = None;
+        self.clear_result_selection();
+        self.rename_state = None;
         self.has_more_results = false;
         self.total_matches = None;
         self.service_results_loaded = 0;
         self.tagged_results_cache_key = None;
         self.results_generation = self.results_generation.wrapping_add(1);
+    }
+
+    pub fn clear_result_selection(&mut self) {
+        self.selected_index = None;
+        self.selected_indices.clear();
+        self.selection_anchor = None;
+        self.rename_state = None;
+        if self.interaction_target == GlobalSearchInteractionTarget::RenameInput {
+            self.interaction_target = GlobalSearchInteractionTarget::Results;
+        }
+    }
+
+    pub fn select_single_result(&mut self, source_index: usize) {
+        if self
+            .rename_state
+            .as_ref()
+            .is_some_and(|rename| rename.source_index != source_index)
+        {
+            self.rename_state = None;
+        }
+        self.selected_index = Some(source_index);
+        self.selected_indices.clear();
+        self.selected_indices.insert(source_index);
+        self.selection_anchor = Some(source_index);
+        self.interaction_target = GlobalSearchInteractionTarget::Results;
+    }
+
+    pub fn toggle_result_selection(&mut self, source_index: usize) {
+        self.rename_state = None;
+        if !self.selected_indices.remove(&source_index) {
+            self.selected_indices.insert(source_index);
+        }
+        self.selected_index = if self.selected_indices.contains(&source_index) {
+            Some(source_index)
+        } else {
+            self.selected_indices.iter().copied().next()
+        };
+        self.selection_anchor = Some(source_index);
+        self.interaction_target = GlobalSearchInteractionTarget::Results;
+    }
+
+    pub fn select_result_range(&mut self, ordered_indices: &[usize], source_index: usize) {
+        self.rename_state = None;
+        let anchor = self.selection_anchor.or(self.selected_index);
+        let Some(target_position) = ordered_indices.iter().position(|&idx| idx == source_index)
+        else {
+            self.select_single_result(source_index);
+            return;
+        };
+        let Some(anchor_position) = anchor.and_then(|idx| {
+            ordered_indices
+                .iter()
+                .position(|&candidate| candidate == idx)
+        }) else {
+            self.select_single_result(source_index);
+            return;
+        };
+
+        let start = anchor_position.min(target_position);
+        let end = anchor_position.max(target_position);
+        self.selected_indices.clear();
+        self.selected_indices
+            .extend(ordered_indices[start..=end].iter().copied());
+        self.selected_index = Some(source_index);
+        self.interaction_target = GlobalSearchInteractionTarget::Results;
+    }
+
+    pub fn retain_valid_result_selection(&mut self) {
+        let result_count = self.results.len();
+        self.selected_indices.retain(|idx| *idx < result_count);
+        if self.selected_index.is_some_and(|idx| idx >= result_count) {
+            self.selected_index = self.selected_indices.iter().copied().next();
+        }
+        if self.selection_anchor.is_some_and(|idx| idx >= result_count) {
+            self.selection_anchor = self.selected_index;
+        }
     }
 
     pub fn release_transient_results(&mut self) {
@@ -737,7 +843,9 @@ impl GlobalSearchState {
 
 #[cfg(test)]
 mod tests {
-    use super::{GlobalSearchSortMode, GlobalSearchState, TooltipRequest};
+    use super::{
+        GlobalSearchInteractionTarget, GlobalSearchSortMode, GlobalSearchState, TooltipRequest,
+    };
     use mtt_search_protocol::SearchResultItem;
 
     fn state_with_tooltip_receiver(
@@ -748,6 +856,26 @@ mod tests {
         let (tooltip_tx, tooltip_rx) = std::sync::mpsc::channel();
         state.tooltip_sender = tooltip_tx;
         (state, tooltip_rx)
+    }
+
+    #[test]
+    fn result_selection_supports_toggle_and_visual_ranges() {
+        let (mut state, _) = state_with_tooltip_receiver();
+        state.select_single_result(4);
+        assert_eq!(state.selected_index, Some(4));
+        assert_eq!(state.selected_indices, [4].into_iter().collect());
+
+        state.toggle_result_selection(8);
+        assert_eq!(state.selected_indices, [4, 8].into_iter().collect());
+        assert_eq!(
+            state.interaction_target,
+            GlobalSearchInteractionTarget::Results
+        );
+
+        state.selection_anchor = Some(4);
+        state.select_result_range(&[2, 4, 6, 8, 10], 8);
+        assert_eq!(state.selected_indices, [4, 6, 8].into_iter().collect());
+        assert_eq!(state.selected_index, Some(8));
     }
 
     #[test]

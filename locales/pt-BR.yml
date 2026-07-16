@@ -187,6 +187,7 @@ operations:
   error_shortcut_limit: "Muitas tentativas ao criar atalho"
   error_shortcut_create: "Erro ao criar atalho: %{error}"
   error_clipboard: "Falha ao abrir clipboard"
+  error_worker_unavailable: "O worker de operações de arquivo não está disponível"
   high_risk_source: "Fonte de alto risco (UNC/Shell). Clique novamente para confirmar a abertura."
   open_failed: "Falha ao abrir item com o aplicativo padrão."
   mount_iso: "Montando ISO: %{name}"

@@ -3,7 +3,7 @@ use crate::app::shortcuts::ShortcutAction;
 use crate::app::state::ImageViewerApp;
 use eframe::egui;
 use rust_i18n::t;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use super::actions::{self, ResultAction};
 use super::result_row;
@@ -35,6 +35,7 @@ pub(super) fn render_results_panel(
         app.tag_assignments_epoch,
     );
     let filtered_indices = std::mem::take(&mut app.global_search.cached_sorted_indices);
+    let context_menu_open = app.context_menu.is_open;
 
     let shows_load_more = !app.global_search.query.is_empty()
         && app.global_search.has_more_results
@@ -130,19 +131,27 @@ pub(super) fn render_results_panel(
         return;
     }
 
+    app.global_search.retain_valid_result_selection();
+    app.global_search
+        .selected_indices
+        .retain(|idx| actions::filtered_contains(&filtered_indices, *idx));
     if app
         .global_search
-        .selected_index
-        .is_some_and(|idx| idx >= app.global_search.results.len())
+        .rename_state
+        .as_ref()
+        .is_some_and(|rename| !actions::filtered_contains(&filtered_indices, rename.source_index))
     {
-        app.global_search.selected_index = None;
+        app.global_search.rename_state = None;
+        app.global_search.interaction_target =
+            crate::app::global_search_state::GlobalSearchInteractionTarget::Results;
     }
     if app
         .global_search
         .selected_index
         .is_some_and(|idx| !actions::filtered_contains(&filtered_indices, idx))
     {
-        app.global_search.selected_index = None;
+        app.global_search.selected_index =
+            app.global_search.selected_indices.iter().copied().next();
     }
 
     // Header with count.
@@ -186,7 +195,10 @@ pub(super) fn render_results_panel(
         let page_down = ctx.input(|i| i.key_pressed(egui::Key::PageDown));
         let page_up = ctx.input(|i| i.key_pressed(egui::Key::PageUp));
 
-        if (arrow_down || arrow_up || page_down || page_up) && !filtered_indices.is_empty() {
+        if keyboard_actions_allowed(context_menu_open, app.global_search.rename_state.is_some())
+            && (arrow_down || arrow_up || page_down || page_up)
+            && !filtered_indices.is_empty()
+        {
             let current_filtered_pos = app
                 .global_search
                 .selected_index
@@ -216,7 +228,8 @@ pub(super) fn render_results_panel(
                 }
             };
 
-            app.global_search.selected_index = Some(filtered_indices[new_filtered_pos]);
+            app.global_search
+                .select_single_result(filtered_indices[new_filtered_pos]);
 
             // Auto-scroll to keep selected item visible.
             let item_top = new_filtered_pos as f32 * RESULT_ROW_HEIGHT;
@@ -252,7 +265,7 @@ pub(super) fn render_results_panel(
         .ctx()
         .pointer_hover_pos()
         .is_some_and(|pos| viewport_rect.contains(pos));
-    if pointer_over {
+    if pointer_over && app.global_search.rename_state.is_none() {
         let delta = ui.input(|i| i.smooth_scroll_delta.y);
         if delta != 0.0 {
             app.global_search.scroll_offset_y -= delta * SCROLL_SENSITIVITY;
@@ -262,6 +275,28 @@ pub(super) fn render_results_panel(
     // Clamp target scroll offset.
     let max_scroll = (total_content_height - viewport_h).max(0.0);
     app.global_search.scroll_offset_y = app.global_search.scroll_offset_y.clamp(0.0, max_scroll);
+
+    if let Some(rename_position) = app
+        .global_search
+        .rename_state
+        .as_ref()
+        .and_then(|rename| actions::filtered_position(&filtered_indices, rename.source_index))
+    {
+        let item_top = rename_position as f32 * RESULT_ROW_HEIGHT;
+        let item_bottom = item_top + RESULT_ROW_HEIGHT;
+        app.global_search.scroll_offset_y = scroll_to_keep_row_visible(
+            app.global_search.scroll_offset_y,
+            item_top,
+            item_bottom,
+            viewport_h,
+            max_scroll,
+        );
+        scrollbar::set_visual_scroll(
+            ui,
+            app.global_search.scroll_offset_y,
+            app.global_search.results_generation,
+        );
+    }
 
     if (app.global_search.scroll_offset_y - app.global_search.last_scroll_offset_y).abs() > 0.1 {
         app.global_search.last_scroll_time = std::time::Instant::now();
@@ -332,6 +367,7 @@ pub(super) fn render_results_panel(
             app,
             ctx,
             source_idx,
+            &filtered_indices,
             item_rect,
             hover_color,
             &mut icon_request_budget,
@@ -342,7 +378,10 @@ pub(super) fn render_results_panel(
     }
 
     // Custom scrollbar (same as list view).
-    if total_content_height > viewport_h && max_scroll > 0.0 {
+    if total_content_height > viewport_h
+        && max_scroll > 0.0
+        && app.global_search.rename_state.is_none()
+    {
         scrollbar::render_scrollbar(
             ui,
             viewport_rect,
@@ -406,8 +445,42 @@ pub(super) fn render_results_panel(
         }
     }
 
+    if activate_result.is_none()
+        && keyboard_actions_allowed(context_menu_open, app.global_search.rename_state.is_some())
+        && app.global_search.interaction_target
+            == crate::app::global_search_state::GlobalSearchInteractionTarget::Results
+    {
+        if app.shortcuts.is_triggered(ShortcutAction::SelectAll, ctx) {
+            app.global_search.selected_indices.clear();
+            app.global_search
+                .selected_indices
+                .extend(filtered_indices.iter().copied());
+            app.global_search.selected_index = filtered_indices.first().copied();
+            app.global_search.selection_anchor = app.global_search.selected_index;
+        } else if app.shortcuts.is_triggered(ShortcutAction::Copy, ctx) {
+            activate_result = Some(ResultAction::Copy(selected_result_paths(
+                app,
+                &filtered_indices,
+            )));
+        } else if app.shortcuts.is_triggered(ShortcutAction::Cut, ctx) {
+            activate_result = Some(ResultAction::Cut(selected_result_paths(
+                app,
+                &filtered_indices,
+            )));
+        } else if app.shortcuts.is_triggered(ShortcutAction::Rename, ctx)
+            && app.global_search.selected_indices.len() == 1
+        {
+            if let Some(source_index) = app.global_search.selected_index {
+                activate_result = Some(ResultAction::BeginRename(source_index));
+            }
+        }
+    }
+
     // Preview shortcut (Space by default) opens the file with the internal viewer.
     if activate_result.is_none()
+        && keyboard_actions_allowed(context_menu_open, app.global_search.rename_state.is_some())
+        && app.global_search.interaction_target
+            == crate::app::global_search_state::GlobalSearchInteractionTarget::Results
         && app
             .shortcuts
             .is_triggered(ShortcutAction::PreviewSelected, ctx)
@@ -418,7 +491,7 @@ pub(super) fn render_results_panel(
             .selected_index
             .filter(|idx| actions::filtered_contains(&filtered_indices, *idx))
             .unwrap_or(filtered_indices[0]);
-        app.global_search.selected_index = Some(selected_idx);
+        app.global_search.select_single_result(selected_idx);
 
         if let Some(full_path) = app
             .global_search
@@ -433,6 +506,7 @@ pub(super) fn render_results_panel(
 
     // Enter opens selected result (or the first visible one when none is selected).
     if activate_result.is_none()
+        && keyboard_actions_allowed(context_menu_open, app.global_search.rename_state.is_some())
         && ctx.input(|i| i.key_pressed(egui::Key::Enter))
         && !filtered_indices.is_empty()
     {
@@ -441,7 +515,7 @@ pub(super) fn render_results_panel(
             .selected_index
             .filter(|idx| actions::filtered_contains(&filtered_indices, *idx))
             .unwrap_or(filtered_indices[0]);
-        app.global_search.selected_index = Some(selected_idx);
+        app.global_search.select_single_result(selected_idx);
 
         if let Some((full_path, is_dir)) = app
             .global_search
@@ -467,7 +541,44 @@ pub(super) fn render_results_panel(
             ResultAction::PreviewFile(full_path) => {
                 actions::preview_search_result(app, &full_path);
             }
+            ResultAction::Copy(paths) => actions::copy_search_results(app, &paths),
+            ResultAction::Cut(paths) => actions::cut_search_results(app, &paths),
+            ResultAction::BeginRename(source_index) => {
+                actions::begin_search_result_rename(app, source_index);
+            }
+            ResultAction::CommitRename(path, new_name) => {
+                actions::commit_search_result_rename(app, path, new_name);
+            }
         }
+    }
+}
+
+fn selected_result_paths(app: &ImageViewerApp, ordered_indices: &[usize]) -> Vec<PathBuf> {
+    ordered_indices
+        .iter()
+        .filter(|idx| app.global_search.selected_indices.contains(idx))
+        .filter_map(|idx| app.global_search.results.get(*idx))
+        .map(|result| PathBuf::from(&result.full_path))
+        .collect()
+}
+
+fn keyboard_actions_allowed(context_menu_open: bool, rename_active: bool) -> bool {
+    !context_menu_open && !rename_active
+}
+
+fn scroll_to_keep_row_visible(
+    current_scroll: f32,
+    item_top: f32,
+    item_bottom: f32,
+    viewport_height: f32,
+    max_scroll: f32,
+) -> f32 {
+    if item_top < current_scroll {
+        item_top.clamp(0.0, max_scroll)
+    } else if item_bottom > current_scroll + viewport_height {
+        (item_bottom - viewport_height).clamp(0.0, max_scroll)
+    } else {
+        current_scroll
     }
 }
 
@@ -617,7 +728,10 @@ fn normalize_search_path_key(path: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_search_path_key, path_name_matches_query, tag_filter_matches_ids};
+    use super::{
+        keyboard_actions_allowed, normalize_search_path_key, path_name_matches_query,
+        scroll_to_keep_row_visible, tag_filter_matches_ids,
+    };
     use crate::app::global_search_state::GlobalSearchTagFilter;
     use std::path::Path;
 
@@ -646,6 +760,29 @@ mod tests {
         assert_eq!(
             normalize_search_path_key(r"\\?\C:\Docs\Emma.txt"),
             normalize_search_path_key(r"C:\Docs\Emma.txt")
+        );
+    }
+
+    #[test]
+    fn context_menu_blocks_result_keyboard_actions() {
+        assert!(!keyboard_actions_allowed(true, false));
+        assert!(!keyboard_actions_allowed(false, true));
+        assert!(keyboard_actions_allowed(false, false));
+    }
+
+    #[test]
+    fn rename_scroll_keeps_row_inside_viewport() {
+        assert_eq!(
+            scroll_to_keep_row_visible(200.0, 100.0, 146.0, 300.0, 900.0),
+            100.0
+        );
+        assert_eq!(
+            scroll_to_keep_row_visible(0.0, 500.0, 546.0, 300.0, 900.0),
+            246.0
+        );
+        assert_eq!(
+            scroll_to_keep_row_visible(100.0, 150.0, 196.0, 300.0, 900.0),
+            100.0
         );
     }
 }

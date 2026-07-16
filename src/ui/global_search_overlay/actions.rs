@@ -1,5 +1,6 @@
 use crate::app::state::ImageViewerApp;
 use rust_i18n::t;
+use std::path::PathBuf;
 
 /// What the user wants to do with a search result.
 pub(super) enum ResultAction {
@@ -9,6 +10,10 @@ pub(super) enum ResultAction {
     OpenFolder(String, bool),
     /// Open the file with the internal viewer (text, PDF, image, video/audio).
     PreviewFile(String),
+    Copy(Vec<PathBuf>),
+    Cut(Vec<PathBuf>),
+    BeginRename(usize),
+    CommitRename(PathBuf, String),
 }
 
 #[inline]
@@ -41,7 +46,7 @@ pub(super) fn normalize_path_for_compare(path: &str) -> String {
     }
 }
 
-pub(super) fn activate_search_result(app: &mut ImageViewerApp, full_path: &str, is_dir: bool) {
+pub(crate) fn activate_search_result(app: &mut ImageViewerApp, full_path: &str, is_dir: bool) {
     app.close_global_search();
 
     if is_dir {
@@ -73,7 +78,7 @@ pub(super) fn activate_search_result(app: &mut ImageViewerApp, full_path: &str, 
     }
 }
 
-pub(super) fn open_file_with_default(app: &mut ImageViewerApp, full_path: &str, is_dir: bool) {
+pub(crate) fn open_file_with_default(app: &mut ImageViewerApp, full_path: &str, is_dir: bool) {
     app.close_global_search();
 
     if is_dir {
@@ -121,6 +126,51 @@ pub(super) fn preview_search_result(app: &mut ImageViewerApp, full_path: &str) {
         // Fallback to default program if no internal viewer supports this type
         app.open_with_shell_guarded(&path);
     }
+}
+
+pub(super) fn copy_search_results(app: &mut ImageViewerApp, paths: &[PathBuf]) {
+    app.copy_paths_to_clipboard(paths);
+}
+
+pub(super) fn cut_search_results(app: &mut ImageViewerApp, paths: &[PathBuf]) {
+    app.cut_paths_to_clipboard(paths);
+}
+
+pub(crate) fn begin_search_result_rename(app: &mut ImageViewerApp, source_index: usize) {
+    use crate::app::global_search_state::{GlobalSearchInteractionTarget, GlobalSearchRenameState};
+
+    if app.global_search.selected_indices.len() != 1 {
+        return;
+    }
+    let Some(result) = app.global_search.results.get(source_index) else {
+        return;
+    };
+    let path = PathBuf::from(&result.full_path);
+    if crate::infrastructure::windows::is_drive_root_path(&path)
+        || crate::domain::file_entry::path_contains_archive_segment(
+            &result.full_path.to_lowercase(),
+        )
+    {
+        return;
+    }
+
+    app.global_search.rename_state = Some(GlobalSearchRenameState {
+        source_index,
+        path: result.full_path.clone(),
+        original_name: result.name.clone(),
+        text: result.name.clone(),
+        is_dir: result.is_dir,
+        focus_request: true,
+    });
+    app.global_search.interaction_target = GlobalSearchInteractionTarget::RenameInput;
+}
+
+pub(super) fn commit_search_result_rename(
+    app: &mut ImageViewerApp,
+    path: PathBuf,
+    new_name: String,
+) {
+    app.rename_path_with_shell(path, new_name);
 }
 
 pub(super) fn file_type_label(full_path: &str, is_dir: bool) -> String {

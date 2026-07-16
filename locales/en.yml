@@ -187,6 +187,7 @@ operations:
   error_shortcut_limit: "Too many attempts creating shortcut"
   error_shortcut_create: "Error creating shortcut: %{error}"
   error_clipboard: "Failed to open clipboard"
+  error_worker_unavailable: "The file operation worker is unavailable"
   high_risk_source: "High-risk source (UNC/Shell). Click again to confirm opening."
   open_failed: "Failed to open item with default application."
   mount_iso: "Mounting ISO: %{name}"

@@ -94,7 +94,7 @@ pub(super) fn is_valid_drop_target_for_paths(paths: &[PathBuf], target: &Path) -
         }
     }
 
-    !paths.iter().all(|source| {
+    !paths.iter().any(|source| {
         source
             .parent()
             .is_some_and(|p| normalize_path_for_compare(p) == target_norm)
@@ -113,10 +113,17 @@ pub(super) fn should_block_file_panel_input_for_pending_confirmation(
 
 pub(super) fn normalize_path_for_compare(path: &Path) -> String {
     let lower = path.to_string_lossy().to_ascii_lowercase();
-    if let Some(stripped) = lower.strip_prefix(r"\\?\") {
+    let normalized = if let Some(stripped) = lower.strip_prefix(r"\\?\unc\") {
+        format!(r"\\{stripped}")
+    } else if let Some(stripped) = lower.strip_prefix(r"\\?\") {
         stripped.to_string()
     } else {
         lower
+    };
+    if normalized.len() > 3 {
+        normalized.trim_end_matches(['\\', '/']).to_string()
+    } else {
+        normalized
     }
 }
 
@@ -288,10 +295,10 @@ mod tests {
     }
 
     #[test]
-    fn drop_target_rejects_when_all_sources_are_already_children() {
+    fn drop_target_rejects_when_any_source_is_already_a_child() {
         let paths = vec![
             PathBuf::from(r"C:\Source\a.txt"),
-            PathBuf::from(r"C:\Source\b.txt"),
+            PathBuf::from(r"C:\Other\b.txt"),
         ];
 
         assert!(!is_valid_drop_target_for_paths(
@@ -307,6 +314,16 @@ mod tests {
         assert!(is_valid_drop_target_for_paths(
             &paths,
             Path::new(r"C:\Dest")
+        ));
+    }
+
+    #[test]
+    fn drop_target_matches_extended_and_regular_unc_paths() {
+        let paths = vec![PathBuf::from(r"\\?\UNC\server\share\a.txt")];
+
+        assert!(!is_valid_drop_target_for_paths(
+            &paths,
+            Path::new(r"\\server\share")
         ));
     }
 }

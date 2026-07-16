@@ -1,6 +1,13 @@
 use std::path::PathBuf;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ItemDragOrigin {
+    #[default]
+    FileView,
+    GlobalSearch,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum OutboundDragInputGuard {
     #[default]
     Inactive,
@@ -34,14 +41,21 @@ pub struct PendingDragMoveConfirmation {
     pub paths: Vec<PathBuf>,
     pub dest_folder: PathBuf,
     pub source_folder: Option<PathBuf>,
+    pub origin: ItemDragOrigin,
 }
 
 impl PendingDragMoveConfirmation {
-    pub fn new(paths: Vec<PathBuf>, dest_folder: PathBuf, source_folder: Option<PathBuf>) -> Self {
+    pub fn new(
+        paths: Vec<PathBuf>,
+        dest_folder: PathBuf,
+        source_folder: Option<PathBuf>,
+        origin: ItemDragOrigin,
+    ) -> Self {
         Self {
             paths,
             dest_folder,
             source_folder,
+            origin,
         }
     }
 }

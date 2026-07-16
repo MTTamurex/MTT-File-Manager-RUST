@@ -33,6 +33,7 @@ pub enum ShellMenuRequest {
     },
     /// Invoke a previously extracted shell command (positive `id` from the menu).
     Invoke {
+        request_id: u64,
         command_id: u32,
         menu_x: i32,
         menu_y: i32,
@@ -84,7 +85,7 @@ pub enum ShellMenuResponse {
     /// Extraction failed (e.g. no shell extensions registered).
     Error { request_id: u64, message: String },
     /// A shell command was invoked (informational only; no result needed).
-    Invoked,
+    Invoked { request_id: u64 },
     /// Submenu for `item_id` was lazily loaded; replace its sub_items in the UI.
     SubmenuLoaded {
         request_id: u64,
@@ -187,6 +188,7 @@ fn shell_menu_loop(rx: Receiver<ShellMenuRequest>, tx: Sender<ShellMenuResponse>
             }
 
             ShellMenuRequest::Invoke {
+                request_id,
                 command_id,
                 menu_x,
                 menu_y,
@@ -200,7 +202,7 @@ fn shell_menu_loop(rx: Receiver<ShellMenuRequest>, tx: Sender<ShellMenuResponse>
                     log::warn!("[ShellMenuWorker] Invoke called with no active context");
                 }
                 // Context is still valid until the menu closes — keep it alive.
-                let _ = tx.send(ShellMenuResponse::Invoked);
+                let _ = tx.send(ShellMenuResponse::Invoked { request_id });
             }
 
             ShellMenuRequest::Cancel => {

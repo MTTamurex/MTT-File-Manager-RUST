@@ -207,6 +207,8 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
     app.context_menu
         .target_paths
         .clone_from(&context_menu.target_paths);
+    app.context_menu.origin = context_menu.origin;
+    app.context_menu.primary_is_directory = context_menu.primary_is_directory;
 
     if let Some(id) = context_menu.selected_command_id.take() {
         if id > 0 {
@@ -255,12 +257,19 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 // Dispatch to the worker thread — no blocking on the UI thread.
                 let _ = app.shell_menu_req_tx.send(
                     crate::infrastructure::shell_menu_worker::ShellMenuRequest::Invoke {
+                        request_id: app.shell_menu_request_id,
                         command_id: id as u32,
                         menu_x: context_menu.position.x as i32,
                         menu_y: context_menu.position.y as i32,
                         hwnd_isize: hwnd.0 as isize,
                     },
                 );
+                if context_menu.origin
+                    == crate::application::context_menu::ContextMenuOrigin::GlobalSearch
+                {
+                    app.global_search.shell_refresh_request_id = Some(app.shell_menu_request_id);
+                }
+                app.shell_menu_loading = true;
 
                 // Cloud Files pin fallback: apply the managed command in addition to
                 // the shell invoke (some shell extensions fire silently).
@@ -291,6 +300,11 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                     return;
                 }
                 if command == "tag_manage" {
+                    if context_menu.origin
+                        == crate::application::context_menu::ContextMenuOrigin::GlobalSearch
+                    {
+                        app.close_global_search();
+                    }
                     app.show_tag_manager = true;
                     context_menu.close();
                     app.context_menu = context_menu;
@@ -299,12 +313,42 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
             }
             match id {
                 -1 => app.create_new_folder(),
-                -2 | -31 => app.command_copy(item_idx),
-                -3 | -30 => app.command_cut(item_idx),
+                -2 | -31 => {
+                    if context_menu.origin
+                        == crate::application::context_menu::ContextMenuOrigin::GlobalSearch
+                    {
+                        app.copy_paths_to_clipboard(&context_menu.target_paths);
+                    } else {
+                        app.command_copy(item_idx);
+                    }
+                }
+                -3 | -30 => {
+                    if context_menu.origin
+                        == crate::application::context_menu::ContextMenuOrigin::GlobalSearch
+                    {
+                        app.cut_paths_to_clipboard(&context_menu.target_paths);
+                    } else {
+                        app.command_cut(item_idx);
+                    }
+                }
                 -4 | -32 => app.command_paste(item_idx),
                 -5 | -33 => {
                     if let Some(path) = context_menu.target_paths.first().cloned() {
-                        if crate::infrastructure::windows::is_drive_root_path(&path) {
+                        if context_menu.origin
+                            == crate::application::context_menu::ContextMenuOrigin::GlobalSearch
+                        {
+                            if let Some(source_index) =
+                                app.global_search.results.iter().position(|result| {
+                                    std::path::Path::new(&result.full_path) == path.as_path()
+                                })
+                            {
+                                app.global_search.select_single_result(source_index);
+                                crate::ui::global_search_overlay::actions::begin_search_result_rename(
+                                    app,
+                                    source_index,
+                                );
+                            }
+                        } else if crate::infrastructure::windows::is_drive_root_path(&path) {
                             // Inline rename in sidebar — don't navigate to Este Computador
                             let drive_path_str = path.to_string_lossy();
                             let current_label =
@@ -329,7 +373,16 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 }
                 -20 => {
                     if let Some(path) = app.context_target_paths(item_idx).first().cloned() {
-                        if app.context_target_is_directory(item_idx, &path) {
+                        let is_directory = app.context_target_is_directory(item_idx, &path);
+                        if context_menu.origin
+                            == crate::application::context_menu::ContextMenuOrigin::GlobalSearch
+                        {
+                            crate::ui::global_search_overlay::actions::open_file_with_default(
+                                app,
+                                path.to_string_lossy().as_ref(),
+                                is_directory,
+                            );
+                        } else if is_directory {
                             let target = path.to_string_lossy();
                             app.navigate_to(target.as_ref());
                         } else {
@@ -479,6 +532,11 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 }
                 -90 => {}
                 -91 => {
+                    if context_menu.origin
+                        == crate::application::context_menu::ContextMenuOrigin::GlobalSearch
+                    {
+                        app.close_global_search();
+                    }
                     app.show_tag_manager = true;
                 }
                 _ => {}

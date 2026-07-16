@@ -48,7 +48,7 @@ impl ImageViewerApp {
                             self.global_search.service_results_loaded = items.len() as u32;
                             self.global_search.results = items;
                             self.global_search.tagged_results_cache_key = None;
-                            self.global_search.selected_index = None;
+                            self.global_search.clear_result_selection();
                             self.global_search.results_generation += 1;
                             self.global_search.reset_sort_metadata_for_current_results();
                             self.global_search.total_matches = total_matches.map(u64::from);

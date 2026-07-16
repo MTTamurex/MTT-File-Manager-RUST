@@ -67,7 +67,8 @@ impl ImageViewerApp {
                         }
                         FileOperationResult::RecycleBinChanged => self.handle_recycle_bin_changed(),
                         FileOperationResult::RestoreCompleted { parent_folders } => {
-                            self.handle_parent_folder_updates(parent_folders, current_path_norm)
+                            self.handle_parent_folder_updates(parent_folders, current_path_norm);
+                            self.request_global_search_refresh();
                         }
                         FileOperationResult::DeleteCompleted {
                             parent_folders,
@@ -79,12 +80,18 @@ impl ImageViewerApp {
                                 current_path_norm,
                             );
                             self.cleanup_deleted_pinned_folders();
+                            self.request_global_search_refresh();
                         }
                         FileOperationResult::CopyCompleted {
                             dest_folder,
                             copied_dests,
                         } => {
-                            self.handle_copy_completed(dest_folder, copied_dests, current_path_norm)
+                            self.handle_copy_completed(
+                                dest_folder,
+                                copied_dests,
+                                current_path_norm,
+                            );
+                            self.request_global_search_refresh();
                         }
                         FileOperationResult::MoveCompleted {
                             source_folder,
@@ -100,6 +107,7 @@ impl ImageViewerApp {
                                 current_path_norm,
                             );
                             self.cleanup_deleted_pinned_folders();
+                            self.request_global_search_refresh();
                         }
                         FileOperationResult::MoveBatchCompleted {
                             source_folders,
@@ -115,6 +123,7 @@ impl ImageViewerApp {
                                 current_path_norm,
                             );
                             self.cleanup_deleted_pinned_folders();
+                            self.request_global_search_refresh();
                         }
                         FileOperationResult::OrganizerMoveCompleted {
                             rule_id: _,
@@ -132,6 +141,7 @@ impl ImageViewerApp {
                             );
                             self.cleanup_deleted_pinned_folders();
                             self.organizer_state.notification_batch.record_moved();
+                            self.request_global_search_refresh();
                         }
                         FileOperationResult::OrganizerMoveSkipped { rule_id: _, path } => {
                             let name = path
@@ -458,6 +468,21 @@ impl ImageViewerApp {
         let new_path =
             self.apply_rename_completed_to_memory(&path, &new_name, parent_folder.as_path());
         self.move_tag_assignments_for_path(&path, &new_path);
+
+        if self.global_search.active {
+            if let Some(result) = self.global_search.results.iter_mut().find(|result| {
+                result
+                    .full_path
+                    .eq_ignore_ascii_case(&path.to_string_lossy())
+            }) {
+                result.full_path = new_path.to_string_lossy().into_owned();
+                result.name.clone_from(&new_name);
+                self.global_search.results_generation =
+                    self.global_search.results_generation.wrapping_add(1);
+                self.global_search.reset_sort_metadata_for_current_results();
+            }
+            self.request_global_search_refresh();
+        }
 
         // Migrate the disk-cache row from old path to new path so thumbnails
         // are preserved after the in-memory caches are evicted on scroll.

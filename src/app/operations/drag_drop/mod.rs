@@ -8,7 +8,7 @@ mod outbound;
 mod rendering;
 mod validation;
 
-use crate::app::drag_drop_state::OutboundDragInputGuard;
+use crate::app::drag_drop_state::{ItemDragOrigin, OutboundDragInputGuard};
 use crate::app::state::ImageViewerApp;
 use std::path::{Path, PathBuf};
 
@@ -79,6 +79,7 @@ impl ImageViewerApp {
         }
 
         self.is_item_dragging = true;
+        self.item_drag_origin = ItemDragOrigin::FileView;
         self.drag_payload_paths = payload;
         self.drag_payload_is_single_directory = payload_is_single_directory;
         self.drag_source_folder = Some(PathBuf::from(&self.navigation_state.current_path));
@@ -117,6 +118,41 @@ impl ImageViewerApp {
             None
         };
 
+        self.ui_ctx.request_repaint();
+    }
+
+    pub(crate) fn begin_global_search_drag(
+        &mut self,
+        paths: Vec<PathBuf>,
+        primary_is_directory: bool,
+        icon: Option<eframe::egui::TextureHandle>,
+    ) {
+        if paths.is_empty()
+            || self.is_item_dragging
+            || self.outbound_drag_input_guard != OutboundDragInputGuard::Inactive
+            || self.file_panel_input_blocked_by_drag_move_confirmation()
+            || !self
+                .ui_ctx
+                .input(|i| i.pointer.button_down(eframe::egui::PointerButton::Primary))
+        {
+            return;
+        }
+
+        self.is_item_dragging = true;
+        self.item_drag_origin = ItemDragOrigin::GlobalSearch;
+        self.drag_payload_is_single_directory = paths.len() == 1 && primary_is_directory;
+        self.drag_source_folder = paths
+            .first()
+            .and_then(|path| path.parent().map(Path::to_path_buf));
+        self.drag_payload_paths = paths;
+        self.drag_target_folder = None;
+        self.drag_hovered_folder = None;
+        self.drag_cross_panel_target = None;
+        self.drag_source_cross_panel_context = false;
+        self.drag_icon_cache = icon;
+        self.global_search.suspended_for_drag = true;
+        self.global_search.rename_state = None;
+        self.context_menu.close();
         self.ui_ctx.request_repaint();
     }
 
@@ -178,6 +214,7 @@ impl ImageViewerApp {
             return;
         }
 
+        let drag_origin = self.item_drag_origin;
         let raw_cross_panel_target = self.drag_cross_panel_target.clone();
         let cross_panel_target = raw_cross_panel_target.clone().filter(|target| {
             !target
@@ -213,9 +250,13 @@ impl ImageViewerApp {
                     paths,
                     dest_folder,
                     Some(source_folder.clone()),
+                    drag_origin,
                 ),
             );
             self.cancel_item_drag();
+            if drag_origin == ItemDragOrigin::GlobalSearch {
+                self.global_search.suspended_for_drag = true;
+            }
             self.ui_ctx.request_repaint();
             return;
         }
@@ -238,8 +279,17 @@ impl ImageViewerApp {
             }
         };
 
-        self.dispatch_drag_file_operation(request);
-        self.clear_selection_after_drag_file_operation(Some(source_folder.as_path()));
+        if !self.dispatch_drag_file_operation(request) {
+            self.cancel_item_drag();
+            self.ui_ctx.request_repaint();
+            return;
+        }
+        if drag_origin == ItemDragOrigin::GlobalSearch {
+            self.cancel_item_drag();
+            self.close_global_search();
+        } else {
+            self.clear_selection_after_drag_file_operation(Some(source_folder.as_path()));
+        }
 
         self.ui_ctx.request_repaint();
     }
@@ -251,6 +301,9 @@ impl ImageViewerApp {
         self.cancel_item_drag();
 
         if !is_valid_drop_target_for_paths(&pending.paths, &pending.dest_folder) {
+            if pending.origin == ItemDragOrigin::GlobalSearch {
+                self.global_search.suspended_for_drag = false;
+            }
             self.ui_ctx.request_repaint();
             return;
         }
@@ -261,14 +314,31 @@ impl ImageViewerApp {
             pending.dest_folder,
             hwnd,
         );
-        self.dispatch_drag_file_operation(request);
-        self.clear_selection_after_drag_file_operation(pending.source_folder.as_deref());
+        if !self.dispatch_drag_file_operation(request) {
+            if pending.origin == ItemDragOrigin::GlobalSearch {
+                self.global_search.suspended_for_drag = false;
+            }
+            self.ui_ctx.request_repaint();
+            return;
+        }
+        if pending.origin == ItemDragOrigin::GlobalSearch {
+            self.close_global_search();
+        } else {
+            self.clear_selection_after_drag_file_operation(pending.source_folder.as_deref());
+        }
         self.ui_ctx.request_repaint();
     }
 
     pub fn cancel_pending_drag_move(&mut self) {
+        let resume_global_search = self
+            .pending_drag_move_confirmation
+            .as_ref()
+            .is_some_and(|pending| pending.origin == ItemDragOrigin::GlobalSearch);
         self.pending_drag_move_confirmation = None;
         self.cancel_item_drag();
+        if resume_global_search {
+            self.global_search.suspended_for_drag = false;
+        }
         self.ui_ctx.request_repaint();
     }
 
@@ -281,7 +351,7 @@ impl ImageViewerApp {
     fn dispatch_drag_file_operation(
         &mut self,
         request: crate::workers::file_operation_worker::FileOperationRequest,
-    ) {
+    ) -> bool {
         self.file_operation_state.file_ops_in_progress += 1;
         if self
             .file_operation_state
@@ -293,11 +363,16 @@ impl ImageViewerApp {
                 .file_operation_state
                 .file_ops_in_progress
                 .saturating_sub(1);
+            self.notifications
+                .error(rust_i18n::t!("operations.error_worker_unavailable").to_string());
+            return false;
         }
+        true
     }
 
     fn clear_selection_after_drag_file_operation(&mut self, source_folder: Option<&Path>) {
         self.is_item_dragging = false;
+        self.item_drag_origin = ItemDragOrigin::FileView;
         self.drag_payload_paths.clear();
         self.drag_payload_is_single_directory = false;
         self.drag_target_folder = None;
@@ -338,7 +413,9 @@ impl ImageViewerApp {
 
     /// Cancels any active drag state.
     pub fn cancel_item_drag(&mut self) {
+        let resume_global_search = self.item_drag_origin == ItemDragOrigin::GlobalSearch;
         self.is_item_dragging = false;
+        self.item_drag_origin = ItemDragOrigin::FileView;
         self.drag_payload_paths.clear();
         self.drag_payload_is_single_directory = false;
         self.drag_source_folder = None;
@@ -348,6 +425,9 @@ impl ImageViewerApp {
         self.drag_cross_panel_target = None;
         self.drag_drop_cross_panel_context = false;
         self.drag_icon_cache = None;
+        if resume_global_search {
+            self.global_search.suspended_for_drag = false;
+        }
     }
 
     /// Updates drop-target tracking during an external drag (files dragged from

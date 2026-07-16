@@ -162,6 +162,19 @@ impl std::fmt::Debug for ContextMenuItem {
 }
 
 /// Context menu state
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ContextMenuOrigin {
+    #[default]
+    FileView,
+    GlobalSearch,
+}
+
+impl ContextMenuOrigin {
+    pub fn allows_paste(self) -> bool {
+        self == Self::FileView
+    }
+}
+
 #[derive(Clone)]
 pub struct ContextMenuState {
     pub is_open: bool,
@@ -170,6 +183,8 @@ pub struct ContextMenuState {
     pub item_index: Option<usize>,
     pub target_paths: Vec<PathBuf>,
     pub is_empty_area: bool,
+    pub origin: ContextMenuOrigin,
+    pub primary_is_directory: Option<bool>,
 
     /// Dynamic items extracted from Shell or built for empty area
     pub items: Vec<ContextMenuItem>,
@@ -202,6 +217,8 @@ impl Default for ContextMenuState {
             item_index: None,
             target_paths: Vec::new(),
             is_empty_area: false,
+            origin: ContextMenuOrigin::FileView,
+            primary_is_directory: None,
             items: Vec::new(),
             partition_dirty: true,
             primary_indices: Vec::new(),
@@ -238,6 +255,28 @@ impl ContextMenuState {
         self.selected_command_id = None;
         self.native_context = None;
         self.pending_load_item = None;
+        self.origin = ContextMenuOrigin::FileView;
+        self.primary_is_directory = None;
+    }
+
+    pub fn open_for_global_search(
+        &mut self,
+        position: egui::Pos2,
+        right_bound: f32,
+        target_paths: Vec<PathBuf>,
+        primary_is_directory: bool,
+    ) {
+        self.is_open = true;
+        self.position = position;
+        self.right_bound = right_bound;
+        self.item_index = None;
+        self.target_paths = target_paths;
+        self.is_empty_area = false;
+        self.selected_command_id = None;
+        self.native_context = None;
+        self.pending_load_item = None;
+        self.origin = ContextMenuOrigin::GlobalSearch;
+        self.primary_is_directory = Some(primary_is_directory);
     }
 
     /// Closes the context menu
@@ -246,6 +285,8 @@ impl ContextMenuState {
         self.item_index = None;
         self.target_paths.clear();
         self.is_empty_area = false;
+        self.origin = ContextMenuOrigin::FileView;
+        self.primary_is_directory = None;
         self.items.clear();
         self.partition_dirty = true;
         self.primary_indices.clear();
@@ -297,5 +338,16 @@ impl std::fmt::Debug for ContextMenuState {
             .field("items_count", &self.items.len())
             .field("selected_command_id", &self.selected_command_id)
             .finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ContextMenuOrigin;
+
+    #[test]
+    fn global_search_context_menu_never_offers_paste() {
+        assert!(ContextMenuOrigin::FileView.allows_paste());
+        assert!(!ContextMenuOrigin::GlobalSearch.allows_paste());
     }
 }

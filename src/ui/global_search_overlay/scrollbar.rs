@@ -49,6 +49,18 @@ pub(super) fn compute_visual_scroll(
     (visual_scroll, scroll_delta)
 }
 
+pub(super) fn set_visual_scroll(ui: &egui::Ui, target_scroll: f32, generation: u64) {
+    let scroll_state_id = ui.id().with("global_search_scroll_state").with(generation);
+    ui.ctx().data_mut(|data| {
+        data.insert_temp(
+            scroll_state_id,
+            ScrollAnimationState {
+                visual_scroll_y: target_scroll,
+            },
+        );
+    });
+}
+
 /// Custom scrollbar with track-click and drag (matches list view behavior).
 pub(super) fn render_scrollbar(
     ui: &mut egui::Ui,

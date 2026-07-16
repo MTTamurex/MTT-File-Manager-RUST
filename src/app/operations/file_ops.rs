@@ -191,7 +191,11 @@ impl ImageViewerApp {
     }
 
     pub fn delete_with_shell_for_paths(&mut self, paths: &[PathBuf]) {
-        if paths.is_empty() || self.current_location_is_archive_namespace() {
+        if paths.is_empty()
+            || paths
+                .iter()
+                .any(|path| crate::domain::file_entry::is_path_inside_existing_archive_file(path))
+        {
             return;
         }
 
@@ -360,29 +364,34 @@ impl ImageViewerApp {
         }
 
         if let Some((_, new_name)) = self.renaming_state.take() {
-            if let Some(item) = self.items.get(idx) {
-                // Send request to background worker
-                self.file_operation_state.file_ops_in_progress += 1;
-                if self
-                    .file_operation_state
-                    .file_op_sender
-                    .send(
-                        crate::workers::file_operation_worker::FileOperationRequest::rename(
-                            item.path.clone(),
-                            new_name,
-                            self.shell_op_hwnd(),
-                        ),
-                    )
-                    .is_err()
-                {
-                    self.file_operation_state.file_ops_in_progress = self
-                        .file_operation_state
-                        .file_ops_in_progress
-                        .saturating_sub(1);
-                    log::warn!("[FileOps] H-3: worker channel closed on rename");
-                }
+            if let Some(path) = self.items.get(idx).map(|item| item.path.clone()) {
+                self.rename_path_with_shell(path, new_name);
             }
         }
+    }
+
+    pub(crate) fn rename_path_with_shell(&mut self, path: PathBuf, new_name: String) -> bool {
+        self.file_operation_state.file_ops_in_progress += 1;
+        if self
+            .file_operation_state
+            .file_op_sender
+            .send(
+                crate::workers::file_operation_worker::FileOperationRequest::rename(
+                    path,
+                    new_name,
+                    self.shell_op_hwnd(),
+                ),
+            )
+            .is_err()
+        {
+            self.file_operation_state.file_ops_in_progress = self
+                .file_operation_state
+                .file_ops_in_progress
+                .saturating_sub(1);
+            log::warn!("[FileOps] H-3: worker channel closed on rename");
+            return false;
+        }
+        true
     }
 
     /// Begins a batch rename operation for the current multi-selection.

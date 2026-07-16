@@ -224,6 +224,7 @@ pub struct ImageViewerApp {
         Option<crate::ui::views::rectangle_selection::RectangleSelectionState>,
     // Internal drag-and-drop state (Explorer-like item move/copy inside file list views)
     pub is_item_dragging: bool,
+    pub item_drag_origin: crate::app::drag_drop_state::ItemDragOrigin,
     /// Prevents stale egui pointer state from restarting a drag after the native
     /// OLE loop consumes a mouse-release event outside the app.
     pub outbound_drag_input_guard: OutboundDragInputGuard,

@@ -176,7 +176,7 @@ impl eframe::App for ImageViewerApp {
         self.item_icon_loader.poll_async_icons(ctx);
 
         // Poll shell menu worker results (async extraction / lazy submenu loading)
-        if self.shell_menu_loading {
+        {
             use crate::infrastructure::shell_menu_worker::ShellMenuResponse;
             while let Ok(response) = self.shell_menu_res_rx.try_recv() {
                 match response {
@@ -226,7 +226,15 @@ impl eframe::App for ImageViewerApp {
                             self.apply_async_submenu_items(item_id, sub_items, &ctx_clone);
                         }
                     }
-                    ShellMenuResponse::Invoked => {}
+                    ShellMenuResponse::Invoked { request_id } => {
+                        if request_id == self.shell_menu_request_id {
+                            self.shell_menu_loading = false;
+                        }
+                        if self.global_search.shell_refresh_request_id == Some(request_id) {
+                            self.global_search.shell_refresh_request_id = None;
+                            self.request_global_search_refresh();
+                        }
+                    }
                 }
             }
         }
@@ -285,7 +293,9 @@ impl eframe::App for ImageViewerApp {
         }
 
         // 10. Operations: Context Menu (Rendering & Actions)
-        app::menu_handler::handle_context_menu(self, ctx);
+        if !self.global_search.active {
+            app::menu_handler::handle_context_menu(self, ctx);
+        }
 
         // 11. Operations: Resize borders (on top) - REMOVED, handled by native subclass
         // app::input::handle_resize_borders(self, ctx);
@@ -356,6 +366,10 @@ impl eframe::App for ImageViewerApp {
 
         // 15. Global Search Overlay (on top of everything)
         crate::ui::global_search_overlay::render_global_search_overlay(self, ctx);
+
+        if self.global_search.active {
+            app::menu_handler::handle_context_menu(self, ctx);
+        }
 
         if self.pending_drag_move_confirmation.is_some() && self.is_item_dragging {
             self.cancel_item_drag();
