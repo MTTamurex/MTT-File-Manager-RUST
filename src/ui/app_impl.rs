@@ -452,11 +452,6 @@ impl eframe::App for ImageViewerApp {
             self.reset_external_drop_state();
         }
 
-        if is_in_size_move {
-            // Ensure continuous redraw while the OS is in the modal move/resize loop.
-            ctx.request_repaint();
-        }
-
         // PERF: Log total frame time when slow (helps diagnose post-inactivity freezes)
         let frame_total_ms = t_frame_start.elapsed().as_secs_f32() * 1000.0;
         self.last_actual_frame_ms = frame_total_ms;
