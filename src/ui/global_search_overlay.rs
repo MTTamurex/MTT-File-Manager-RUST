@@ -146,7 +146,8 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
         app.global_search.results.clear();
         app.global_search.results_generation += 1;
         app.global_search.service_results_loaded = 0;
-        app.global_search.tagged_results_cache_key = None;
+        app.global_search.service_results_prefix_len = 0;
+        app.global_search.cancel_tagged_results_request();
         app.global_search.has_more_results = false;
         app.global_search.total_matches = None;
         app.global_search.requested_offset = 0;

@@ -1,9 +1,11 @@
 use crate::app::global_search_state::GlobalSearchTagFilter;
 use crate::app::shortcuts::ShortcutAction;
 use crate::app::state::ImageViewerApp;
+use crate::workers::tagged_results_worker::{normalize_search_path_key, TaggedResultsRequest};
 use eframe::egui;
 use rust_i18n::t;
-use std::path::{Path, PathBuf};
+use std::collections::HashSet;
+use std::path::PathBuf;
 
 use super::actions::{self, ResultAction};
 use super::result_row;
@@ -618,11 +620,13 @@ fn queue_load_more(app: &mut ImageViewerApp, next_offset: u32, next_limit: u32) 
 
 fn ensure_tagged_results_for_active_filter(app: &mut ImageViewerApp) {
     if app.global_search.query.trim().is_empty() {
+        clear_tagged_results(app);
         return;
     }
 
     let tag_filter = app.global_search.tag_filter.clone();
     if !tag_filter_is_active(&tag_filter) {
+        clear_tagged_results(app);
         return;
     }
 
@@ -634,67 +638,59 @@ fn ensure_tagged_results_for_active_filter(app: &mut ImageViewerApp) {
     if app.global_search.tagged_results_cache_key.as_ref() == Some(&cache_key) {
         return;
     }
-    app.global_search.tagged_results_cache_key = Some(cache_key);
-
-    let tokens: Vec<String> = app
+    if app
         .global_search
-        .query
-        .to_lowercase()
-        .split_whitespace()
-        .map(str::to_owned)
-        .collect();
-    if tokens.is_empty() {
+        .tagged_results_inflight
+        .as_ref()
+        .is_some_and(|(_, inflight_key)| inflight_key == &cache_key)
+    {
         return;
     }
 
-    let mut seen_paths = std::collections::HashSet::with_capacity(app.global_search.results.len());
-    for result in &app.global_search.results {
-        seen_paths.insert(normalize_search_path_key(&result.full_path));
+    app.global_search.cancel_tagged_results_request();
+    if app.global_search.truncate_tagged_results() {
+        mark_tagged_results_changed(app);
     }
 
-    let mut injected = Vec::new();
-    for (path, tag_ids) in app.tag_assignments.iter() {
-        if injected.len() >= TAGGED_RESULTS_INJECTION_LIMIT {
-            break;
-        }
-        if !tag_filter_matches_ids(&tag_filter, tag_ids) || !path_name_matches_query(path, &tokens)
-        {
-            continue;
-        }
-
-        let path_text = path.to_string_lossy().to_string();
-        if !seen_paths.insert(normalize_search_path_key(&path_text)) {
-            continue;
-        }
-
-        let Ok(metadata) = std::fs::metadata(path) else {
-            continue;
-        };
-        let Some(name) = path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .map(str::to_owned)
-        else {
-            continue;
-        };
-
-        injected.push(mtt_search_protocol::SearchResultItem {
-            name,
-            full_path: path_text,
-            is_dir: metadata.is_dir(),
-            size: if metadata.is_file() {
-                metadata.len()
-            } else {
-                0
-            },
-        });
+    let excluded_paths = app
+        .global_search
+        .results
+        .iter()
+        .map(|result| normalize_search_path_key(&result.full_path))
+        .collect::<HashSet<_>>();
+    let request_id = app.global_search.next_tagged_results_request_id();
+    let request = TaggedResultsRequest {
+        request_id,
+        cache_key: cache_key.clone(),
+        tag_assignments: app.tag_assignments.clone(),
+        excluded_paths,
+        limit: TAGGED_RESULTS_INJECTION_LIMIT,
+    };
+    app.global_search.tagged_results_inflight = Some((request_id, cache_key.clone()));
+    if let Err(error) = app.global_search.tagged_results_sender.send(request) {
+        app.global_search.tagged_results_inflight = None;
+        app.global_search.tagged_results_cache_key = Some(cache_key);
+        log::error!("[GlobalSearch] Failed to queue tagged results: {error}");
     }
+}
 
-    if injected.is_empty() {
+fn clear_tagged_results(app: &mut ImageViewerApp) {
+    if app.global_search.tagged_results_cache_key.is_none()
+        && app.global_search.tagged_results_inflight.is_none()
+        && app.global_search.results.len() <= app.global_search.service_results_prefix_len
+    {
         return;
     }
 
-    app.global_search.results.extend(injected);
+    app.global_search.cancel_tagged_results_request();
+    if app.global_search.truncate_tagged_results() {
+        mark_tagged_results_changed(app);
+    }
+}
+
+fn mark_tagged_results_changed(app: &mut ImageViewerApp) {
+    app.global_search.cached_filtered_indices.clear();
+    app.global_search.cached_sorted_indices.clear();
     app.global_search.results_generation = app.global_search.results_generation.wrapping_add(1);
 }
 
@@ -706,45 +702,13 @@ fn tag_filter_is_active(tag_filter: &GlobalSearchTagFilter) -> bool {
     }
 }
 
-fn tag_filter_matches_ids(tag_filter: &GlobalSearchTagFilter, tag_ids: &[i64]) -> bool {
-    match tag_filter {
-        GlobalSearchTagFilter::All => true,
-        GlobalSearchTagFilter::Any => !tag_ids.is_empty(),
-        GlobalSearchTagFilter::Selected(required_ids) => required_ids
-            .iter()
-            .any(|required_id| tag_ids.contains(required_id)),
-    }
-}
-
-fn path_name_matches_query(path: &Path, tokens: &[String]) -> bool {
-    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
-        return false;
-    };
-    let name_lower = name.to_lowercase();
-    tokens.iter().all(|token| name_lower.contains(token))
-}
-
-fn normalize_search_path_key(path: &str) -> String {
-    let slash_normalized = path.replace('/', "\\");
-    let stripped = slash_normalized
-        .strip_prefix(r"\\?\")
-        .or_else(|| slash_normalized.strip_prefix(r"\\.\"))
-        .unwrap_or(&slash_normalized);
-
-    if stripped.len() > 3 {
-        stripped.trim_end_matches('\\').to_lowercase()
-    } else {
-        stripped.to_lowercase()
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{
-        keyboard_actions_allowed, normalize_search_path_key, path_name_matches_query,
-        scroll_to_keep_row_visible, tag_filter_matches_ids,
-    };
+    use super::{keyboard_actions_allowed, scroll_to_keep_row_visible};
     use crate::app::global_search_state::GlobalSearchTagFilter;
+    use crate::workers::tagged_results_worker::{
+        normalize_search_path_key, path_name_matches_query, tag_filter_matches_ids,
+    };
     use std::path::Path;
 
     #[test]

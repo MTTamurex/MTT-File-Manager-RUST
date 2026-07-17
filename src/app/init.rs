@@ -725,6 +725,7 @@ impl ImageViewerApp {
         // Spawn tooltip background worker for async metadata/thumbnail loading (P0-02/P0-03)
         app.global_search
             .spawn_tooltip_worker(disk_cache.clone(), &ctx);
+        app.global_search.spawn_tagged_results_worker(&ctx);
 
         // Pre-set custom composed folder icon on cache_manager (used by grid/list bridges)
         {

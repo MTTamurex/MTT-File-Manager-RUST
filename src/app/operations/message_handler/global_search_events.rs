@@ -2,6 +2,7 @@
 
 use crate::app::state::ImageViewerApp;
 use crate::workers::global_search_worker::GlobalSearchResponse;
+use crate::workers::tagged_results_worker::{normalize_search_path_key, TaggedResultsResponse};
 use eframe::egui;
 use std::time::{Duration, Instant};
 
@@ -45,18 +46,24 @@ impl ImageViewerApp {
                     // Only apply if the query still matches (user may have typed more)
                     if query == self.global_search.query {
                         if offset == 0 {
+                            self.global_search.cancel_tagged_results_request();
                             self.global_search.service_results_loaded = items.len() as u32;
                             self.global_search.results = items;
-                            self.global_search.tagged_results_cache_key = None;
+                            self.global_search.service_results_prefix_len =
+                                self.global_search.results.len();
                             self.global_search.clear_result_selection();
                             self.global_search.results_generation += 1;
                             self.global_search.reset_sort_metadata_for_current_results();
                             self.global_search.total_matches = total_matches.map(u64::from);
                         } else if offset == self.global_search.service_results_loaded {
-                            let service_items_len = items.len() as u32;
+                            let raw_items_len = items.len() as u32;
+                            self.global_search.truncate_tagged_results();
+                            self.global_search.tagged_results_cache_key = None;
                             append_unique_results(&mut self.global_search.results, items);
                             self.global_search.service_results_loaded =
-                                offset.saturating_add(service_items_len);
+                                offset.saturating_add(raw_items_len);
+                            self.global_search.service_results_prefix_len =
+                                self.global_search.results.len();
                             self.global_search.results_generation += 1;
                             if let Some(total_matches) = total_matches {
                                 self.global_search.total_matches = Some(u64::from(total_matches));
@@ -137,6 +144,8 @@ impl ImageViewerApp {
             self.ui_ctx.request_repaint();
         }
 
+        drain_tagged_results_responses(self);
+
         // Drain tooltip worker responses (P0-02/P0-03)
         drain_tooltip_responses(self);
 
@@ -199,17 +208,6 @@ fn is_connectivity_error(message: &str) -> bool {
         || m.contains("timeout")
 }
 
-fn normalize_result_path(path: &str) -> String {
-    let lower = path.to_ascii_lowercase();
-    let stripped = lower.strip_prefix(r"\\?\").unwrap_or(&lower);
-
-    if stripped.len() > 3 {
-        stripped.trim_end_matches('\\').to_string()
-    } else {
-        stripped.to_string()
-    }
-}
-
 fn append_unique_results(
     target: &mut Vec<mtt_search_protocol::SearchResultItem>,
     extra: Vec<mtt_search_protocol::SearchResultItem>,
@@ -220,15 +218,71 @@ fn append_unique_results(
 
     let mut seen = std::collections::HashSet::with_capacity((target.len() + extra.len()).min(2048));
     for item in target.iter() {
-        seen.insert(normalize_result_path(&item.full_path));
+        seen.insert(normalize_search_path_key(&item.full_path));
     }
 
     for item in extra {
-        let key = normalize_result_path(&item.full_path);
+        let key = normalize_search_path_key(&item.full_path);
         if seen.insert(key) {
             target.push(item);
         }
     }
+}
+
+fn drain_tagged_results_responses(app: &mut ImageViewerApp) {
+    while let Ok(response) = app.global_search.tagged_results_receiver.try_recv() {
+        apply_tagged_results_response(app, response);
+    }
+}
+
+fn apply_tagged_results_response(app: &mut ImageViewerApp, response: TaggedResultsResponse) {
+    let expected = app
+        .global_search
+        .tagged_results_inflight
+        .as_ref()
+        .is_some_and(|(request_id, cache_key)| {
+            *request_id == response.request_id && cache_key == &response.cache_key
+        });
+    if !expected {
+        return;
+    }
+    app.global_search.tagged_results_inflight = None;
+
+    let current_key = (
+        app.global_search.query.clone(),
+        app.global_search.tag_filter.clone(),
+        app.tag_assignments_epoch,
+    );
+    if current_key != response.cache_key
+        || matches!(
+            current_key.1,
+            crate::app::global_search_state::GlobalSearchTagFilter::All
+        )
+    {
+        return;
+    }
+
+    app.global_search.truncate_tagged_results();
+    let previous_len = app.global_search.results.len();
+    let response_len = response.items.len();
+    append_unique_results(&mut app.global_search.results, response.items);
+    let added_len = app.global_search.results.len() - previous_len;
+    app.global_search.tagged_results_cache_key =
+        if tagged_response_needs_retry(response.limit_reached, response_len, added_len) {
+            None
+        } else {
+            Some(response.cache_key)
+        };
+    if added_len > 0 {
+        app.global_search.reset_sort_metadata_for_current_results();
+        app.global_search.cached_filtered_indices.clear();
+        app.global_search.cached_sorted_indices.clear();
+        app.global_search.results_generation = app.global_search.results_generation.wrapping_add(1);
+    }
+}
+
+fn tagged_response_needs_retry(limit_reached: bool, response_len: usize, added_len: usize) -> bool {
+    limit_reached && added_len < response_len
 }
 
 /// Drains responses from the tooltip background worker, updating caches
@@ -279,5 +333,17 @@ fn drain_tooltip_responses(app: &mut ImageViewerApp) {
             Err(std::sync::mpsc::TryRecvError::Empty) => break,
             Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::tagged_response_needs_retry;
+
+    #[test]
+    fn retries_limited_tagged_response_when_new_service_page_deduplicates_items() {
+        assert!(tagged_response_needs_retry(true, 2_000, 1_750));
+        assert!(!tagged_response_needs_retry(true, 2_000, 2_000));
+        assert!(!tagged_response_needs_retry(false, 150, 100));
     }
 }

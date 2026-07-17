@@ -2,7 +2,9 @@ use eframe::egui;
 use lru::LruCache;
 use std::collections::HashSet;
 use std::num::NonZeroUsize;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
+use std::sync::Arc;
 use std::time::Instant;
 
 const MAX_SORT_METADATA_IN_FLIGHT: usize = 32;
@@ -198,8 +200,21 @@ pub struct GlobalSearchState {
     /// Service-result count loaded for the active query. This intentionally
     /// excludes client-side tagged result injections used by the tag filter.
     pub service_results_loaded: u32,
+    /// Number of service items stored at the beginning of `results`. Unlike
+    /// `service_results_loaded`, this excludes protocol items removed as duplicates.
+    pub service_results_prefix_len: usize,
     /// Last query/tag-assignment combination used to inject tagged matches.
-    pub tagged_results_cache_key: Option<(String, GlobalSearchTagFilter, u64)>,
+    pub tagged_results_cache_key:
+        Option<crate::workers::tagged_results_worker::TaggedResultsCacheKey>,
+    pub tagged_results_inflight: Option<(
+        u64,
+        crate::workers::tagged_results_worker::TaggedResultsCacheKey,
+    )>,
+    pub tagged_results_sender: Sender<crate::workers::tagged_results_worker::TaggedResultsRequest>,
+    pub tagged_results_receiver:
+        Receiver<crate::workers::tagged_results_worker::TaggedResultsResponse>,
+    pub tagged_results_active_request_id: Arc<AtomicU64>,
+    tagged_results_next_request_id: u64,
 
     // --- Tooltip async worker ---
     pub tooltip_sender: Sender<TooltipRequest>,
@@ -216,6 +231,8 @@ impl GlobalSearchState {
         // Placeholder channels — replaced by spawn_tooltip_worker() during bootstrap.
         let (tooltip_sender, _) = std::sync::mpsc::channel::<TooltipRequest>();
         let (_, tooltip_receiver) = std::sync::mpsc::channel::<TooltipResponse>();
+        let (tagged_results_sender, _) = std::sync::mpsc::channel();
+        let (_, tagged_results_receiver) = std::sync::mpsc::channel();
         Self {
             sender,
             receiver,
@@ -312,12 +329,56 @@ impl GlobalSearchState {
             created_metadata_epoch: 0,
             created_metadata_inflight: HashSet::new(),
             service_results_loaded: 0,
+            service_results_prefix_len: 0,
             tagged_results_cache_key: None,
+            tagged_results_inflight: None,
+            tagged_results_sender,
+            tagged_results_receiver,
+            tagged_results_active_request_id: Arc::new(AtomicU64::new(0)),
+            tagged_results_next_request_id: 0,
             tooltip_sender,
             tooltip_receiver,
             tooltip_metadata_inflight: HashSet::new(),
             tooltip_thumbnail_inflight: HashSet::new(),
         }
+    }
+
+    pub fn spawn_tagged_results_worker(&mut self, ctx: &egui::Context) {
+        match crate::workers::tagged_results_worker::spawn_tagged_results_worker(ctx.clone()) {
+            Ok((sender, receiver, active_request_id)) => {
+                self.tagged_results_sender = sender;
+                self.tagged_results_receiver = receiver;
+                self.tagged_results_active_request_id = active_request_id;
+            }
+            Err(error) => {
+                log::error!("[GlobalSearch] Failed to spawn tagged-results-worker: {error}");
+            }
+        }
+    }
+
+    pub fn next_tagged_results_request_id(&mut self) -> u64 {
+        self.tagged_results_next_request_id = self.tagged_results_next_request_id.wrapping_add(1);
+        self.tagged_results_active_request_id
+            .store(self.tagged_results_next_request_id, Ordering::Relaxed);
+        self.tagged_results_next_request_id
+    }
+
+    pub fn cancel_tagged_results_request(&mut self) {
+        self.next_tagged_results_request_id();
+        self.tagged_results_inflight = None;
+        self.tagged_results_cache_key = None;
+    }
+
+    pub fn truncate_tagged_results(&mut self) -> bool {
+        let service_len = self.service_results_prefix_len.min(self.results.len());
+        if self.results.len() <= service_len {
+            return false;
+        }
+
+        self.results.truncate(service_len);
+        self.reset_sort_metadata_for_current_results();
+        self.retain_valid_result_selection();
+        true
     }
 
     /// Spawns the tooltip background worker thread and reconnects the channels.
@@ -410,6 +471,7 @@ impl GlobalSearchState {
     }
 
     pub fn clear_transient_results(&mut self) {
+        self.cancel_tagged_results_request();
         self.results.clear();
         self.cached_filtered_indices.clear();
         self.cached_available_drives.clear();
@@ -423,7 +485,7 @@ impl GlobalSearchState {
         self.has_more_results = false;
         self.total_matches = None;
         self.service_results_loaded = 0;
-        self.tagged_results_cache_key = None;
+        self.service_results_prefix_len = 0;
         self.results_generation = self.results_generation.wrapping_add(1);
     }
 
@@ -537,12 +599,8 @@ impl GlobalSearchState {
     }
 
     pub fn invalidate_tag_assignment_dependent_results(&mut self) {
-        let service_len = self.service_results_loaded as usize;
-        if self.results.len() > service_len {
-            self.results.truncate(service_len);
-            self.reset_sort_metadata_for_current_results();
-        }
-        self.tagged_results_cache_key = None;
+        self.cancel_tagged_results_request();
+        self.truncate_tagged_results();
         self.cached_filtered_indices.clear();
         self.cached_sorted_indices.clear();
         self.results_generation = self.results_generation.wrapping_add(1);
@@ -929,5 +987,28 @@ mod tests {
         let assignments = rustc_hash::FxHashMap::default();
         state.ensure_sorted_indices(&assignments, 0);
         assert!(tooltip_rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn tagged_results_are_always_truncated_to_the_service_prefix() {
+        let (mut state, _) = state_with_tooltip_receiver();
+        state.results = ["service-1", "service-2", "tagged-1"]
+            .into_iter()
+            .map(|name| SearchResultItem {
+                name: name.to_string(),
+                full_path: format!(r"C:\tmp\{name}.txt"),
+                is_dir: false,
+                size: 0,
+            })
+            .collect();
+        state.service_results_loaded = 2;
+        state.service_results_prefix_len = 2;
+        state.select_single_result(2);
+
+        assert!(state.truncate_tagged_results());
+        assert_eq!(state.results.len(), 2);
+        assert_eq!(state.results[1].name, "service-2");
+        assert!(state.selected_index.is_none());
+        assert!(!state.truncate_tagged_results());
     }
 }

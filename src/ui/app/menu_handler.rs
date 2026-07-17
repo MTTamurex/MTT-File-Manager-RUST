@@ -1,12 +1,15 @@
 use crate::app::ImageViewerApp;
 use eframe::egui;
 use rust_i18n::t;
+use std::ffi::{OsStr, OsString};
+use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use windows::{
     core::PCWSTR,
     Win32::{
         Foundation::HWND,
+        System::SystemInformation::GetSystemDirectoryW,
         UI::Shell::{ShellExecuteExW, SEE_MASK_FLAG_NO_UI, SHELLEXECUTEINFOW},
         UI::WindowsAndMessaging::SW_SHOWNORMAL,
     },
@@ -36,25 +39,122 @@ fn open_terminal_at(path: &Path) {
     }
 }
 
+fn wide_null(value: &OsStr) -> Option<Vec<u16>> {
+    let mut wide: Vec<u16> = value.encode_wide().collect();
+    if wide.contains(&0) {
+        return None;
+    }
+    wide.push(0);
+    Some(wide)
+}
+
+/// Build a command line using the quoting rules consumed by CommandLineToArgvW/CRT.
+fn windows_parameters(args: &[&OsStr]) -> Option<Vec<u16>> {
+    let mut params = Vec::new();
+
+    for (index, arg) in args.iter().enumerate() {
+        let units: Vec<u16> = arg.encode_wide().collect();
+        if units.contains(&0) {
+            return None;
+        }
+        if index > 0 {
+            params.push(b' ' as u16);
+        }
+
+        let needs_quotes = units.is_empty()
+            || units
+                .iter()
+                .any(|unit| *unit == b' ' as u16 || *unit == b'\t' as u16 || *unit == b'"' as u16);
+        if !needs_quotes {
+            params.extend(units);
+            continue;
+        }
+
+        params.push(b'"' as u16);
+        let mut backslashes = 0usize;
+        for unit in units {
+            if unit == b'\\' as u16 {
+                backslashes += 1;
+                continue;
+            }
+
+            if unit == b'"' as u16 {
+                params.extend(std::iter::repeat_n(b'\\' as u16, backslashes * 2 + 1));
+                params.push(unit);
+            } else {
+                params.extend(std::iter::repeat_n(b'\\' as u16, backslashes));
+                params.push(unit);
+            }
+            backslashes = 0;
+        }
+        params.extend(std::iter::repeat_n(b'\\' as u16, backslashes * 2));
+        params.push(b'"' as u16);
+    }
+
+    params.push(0);
+    Some(params)
+}
+
+fn base64_encode(bytes: &[u8]) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut encoded = String::with_capacity(bytes.len().div_ceil(3) * 4);
+
+    for chunk in bytes.chunks(3) {
+        let first = chunk[0];
+        let second = chunk.get(1).copied().unwrap_or(0);
+        let third = chunk.get(2).copied().unwrap_or(0);
+        let value = ((first as u32) << 16) | ((second as u32) << 8) | third as u32;
+
+        encoded.push(TABLE[((value >> 18) & 0x3f) as usize] as char);
+        encoded.push(TABLE[((value >> 12) & 0x3f) as usize] as char);
+        encoded.push(if chunk.len() > 1 {
+            TABLE[((value >> 6) & 0x3f) as usize] as char
+        } else {
+            '='
+        });
+        encoded.push(if chunk.len() > 2 {
+            TABLE[(value & 0x3f) as usize] as char
+        } else {
+            '='
+        });
+    }
+
+    encoded
+}
+
+fn utf16le_base64(units: impl IntoIterator<Item = u16>) -> String {
+    let bytes: Vec<u8> = units.into_iter().flat_map(u16::to_le_bytes).collect();
+    base64_encode(&bytes)
+}
+
+fn powershell_location_script(path: &Path) -> Option<String> {
+    let path_units: Vec<u16> = path.as_os_str().encode_wide().collect();
+    if path_units.contains(&0) {
+        return None;
+    }
+    let path_base64 = utf16le_base64(path_units);
+    Some(format!(
+        "$path=[System.Text.Encoding]::Unicode.GetString(\
+         [System.Convert]::FromBase64String('{path_base64}'));\
+         Set-Location -LiteralPath $path"
+    ))
+}
+
+fn powershell_location_encoded_command(path: &Path) -> Option<String> {
+    let script = powershell_location_script(path)?;
+    Some(utf16le_base64(script.encode_utf16()))
+}
+
 /// Spawn a program elevated via UAC using `ShellExecuteExW` with the `"runas"` verb.
 /// Returns `true` if the elevated process was launched successfully.
-fn elevated_spawn(program: &str, args: &[&str]) -> bool {
-    let program_wide: Vec<u16> = program.encode_utf16().chain(std::iter::once(0)).collect();
+fn elevated_spawn(program: &OsStr, args: &[&OsStr]) -> bool {
+    let Some(program_wide) = wide_null(program) else {
+        return false;
+    };
+    let Some(params_wide) = windows_parameters(args) else {
+        return false;
+    };
     let verb_wide: Vec<u16> = "runas".encode_utf16().chain(std::iter::once(0)).collect();
-
-    // Build a single parameter string, quoting each argument.
-    let params: String = args
-        .iter()
-        .map(|a| {
-            if a.contains(' ') {
-                format!("\"{}\"", a)
-            } else {
-                (*a).to_string()
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(" ");
-    let params_wide: Vec<u16> = params.encode_utf16().chain(std::iter::once(0)).collect();
 
     let mut exec_info = SHELLEXECUTEINFOW {
         cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
@@ -70,8 +170,23 @@ fn elevated_spawn(program: &str, args: &[&str]) -> bool {
     unsafe { ShellExecuteExW(&mut exec_info).is_ok() }
 }
 
-/// Launches an elevated terminal (UAC prompt) in the given directory.
-/// Tries Windows Terminal (`wt.exe`) first; falls back to PowerShell.
+fn system_powershell_path() -> Option<PathBuf> {
+    let mut system_directory = vec![0u16; 32_768];
+    let len = unsafe { GetSystemDirectoryW(Some(&mut system_directory)) } as usize;
+    if len == 0 || len >= system_directory.len() {
+        return None;
+    }
+    system_directory.truncate(len);
+
+    Some(
+        PathBuf::from(OsString::from_wide(&system_directory))
+            .join("WindowsPowerShell")
+            .join("v1.0")
+            .join("powershell.exe"),
+    )
+}
+
+/// Launches an elevated PowerShell terminal (UAC prompt) in the given directory.
 fn open_terminal_admin_at(path: &Path) {
     let dir = if path.is_dir() {
         path.to_path_buf()
@@ -81,11 +196,22 @@ fn open_terminal_admin_at(path: &Path) {
             .unwrap_or_else(|| path.to_path_buf())
     };
 
-    let dir_str = dir.to_string_lossy();
-    if !elevated_spawn("wt.exe", &["-d", &dir_str]) {
-        let cd_cmd = format!("cd '{}'", dir.display());
-        elevated_spawn("powershell.exe", &["-NoExit", "-Command", &cd_cmd]);
-    }
+    let Some(powershell) = system_powershell_path() else {
+        log::error!("Failed to resolve the trusted Windows PowerShell path");
+        return;
+    };
+    let Some(encoded_command) = powershell_location_encoded_command(&dir) else {
+        log::error!("Failed to encode the PowerShell working directory");
+        return;
+    };
+    elevated_spawn(
+        powershell.as_os_str(),
+        &[
+            OsStr::new("-NoExit"),
+            OsStr::new("-EncodedCommand"),
+            OsStr::new(&encoded_command),
+        ],
+    );
 }
 
 fn is_cloud_files_pin_text(text: &str) -> bool {
@@ -552,4 +678,96 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
         app.shell_menu_loading = false;
     }
     app.context_menu = context_menu;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        base64_encode, powershell_location_script, system_powershell_path, utf16le_base64,
+        wide_null, windows_parameters,
+    };
+    use std::ffi::OsStr;
+    use std::os::windows::ffi::OsStrExt;
+
+    fn parameters_text(args: &[&OsStr]) -> String {
+        let mut encoded = windows_parameters(args).expect("arguments should be valid");
+        assert_eq!(encoded.pop(), Some(0));
+        String::from_utf16(&encoded).expect("test arguments should be valid UTF-16")
+    }
+
+    #[test]
+    fn elevated_parameters_quote_spaces_and_trailing_backslashes() {
+        assert_eq!(
+            parameters_text(&[OsStr::new("-d"), OsStr::new(r"C:\Folder Name\")]),
+            r#"-d "C:\Folder Name\\""#
+        );
+    }
+
+    #[test]
+    fn elevated_parameters_escape_embedded_quotes() {
+        assert_eq!(
+            parameters_text(&[OsStr::new("a\"b"), OsStr::new("")]),
+            r#""a\"b" """#
+        );
+    }
+
+    #[test]
+    fn powershell_metacharacters_remain_argument_data() {
+        assert_eq!(
+            parameters_text(&[OsStr::new("-d"), OsStr::new(r"C:\a'; calc; '")]),
+            r#"-d "C:\a'; calc; '""#
+        );
+    }
+
+    #[test]
+    fn wide_values_reject_interior_nul() {
+        assert!(wide_null(OsStr::new("a\0b")).is_none());
+        assert!(windows_parameters(&[OsStr::new("a\0b")]).is_none());
+    }
+
+    #[test]
+    fn elevated_powershell_uses_the_windows_system_directory() {
+        let powershell = system_powershell_path().expect("Windows system directory should resolve");
+        assert!(powershell.is_absolute());
+        assert_eq!(powershell.file_name(), Some(OsStr::new("powershell.exe")));
+        assert!(powershell
+            .components()
+            .any(|component| component.as_os_str() == OsStr::new("WindowsPowerShell")));
+    }
+
+    #[test]
+    fn base64_encoder_uses_standard_padding() {
+        assert_eq!(base64_encode(b""), "");
+        assert_eq!(base64_encode(b"M"), "TQ==");
+        assert_eq!(base64_encode(b"Ma"), "TWE=");
+        assert_eq!(base64_encode(b"Man"), "TWFu");
+    }
+
+    #[test]
+    fn encoded_location_treats_metacharacters_as_path_data() {
+        let temp = tempfile::tempdir().unwrap();
+        let directory = temp.path().join("Pasta ü'; $() & ` segura");
+        std::fs::create_dir(&directory).unwrap();
+
+        let mut script = powershell_location_script(&directory).unwrap();
+        assert!(!script.contains(&directory.to_string_lossy().to_string()));
+        script.push_str(
+            ";[Console]::Out.Write([Convert]::ToBase64String(\
+             [Text.Encoding]::Unicode.GetBytes((Get-Location).Path)))",
+        );
+        let encoded_command = utf16le_base64(script.encode_utf16());
+        let powershell = system_powershell_path().unwrap();
+        let output = std::process::Command::new(powershell)
+            .args(["-NoProfile", "-EncodedCommand", &encoded_command])
+            .output()
+            .unwrap();
+
+        assert!(
+            output.status.success(),
+            "PowerShell failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let expected_path = utf16le_base64(directory.as_os_str().encode_wide());
+        assert_eq!(String::from_utf8_lossy(&output.stdout), expected_path);
+    }
 }

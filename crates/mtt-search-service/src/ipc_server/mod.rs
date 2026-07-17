@@ -4,7 +4,9 @@ mod pipe_io;
 use std::collections::HashMap;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::Duration;
 
 use windows::Win32::Foundation::{CloseHandle, HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT};
 use windows::Win32::Storage::FileSystem::FlushFileBuffers;
@@ -173,31 +175,14 @@ pub fn run_ipc_server(
         std::thread::spawn(move || {
             let pipe = HANDLE(pipe_raw as *mut core::ffi::c_void);
 
-            // Watchdog thread: disconnects the pipe if the client exceeds
-            // IO_TIMEOUT_SECS, preventing slowloris-style DoS that would
-            // exhaust the MAX_ACTIVE_CLIENTS handler pool.
-            //
-            // Synchronization: `client_done` uses SeqCst to ensure the
-            // watchdog sees the handler's store before it tries to disconnect.
-            // The handler sets `client_done = true` BEFORE touching the pipe,
-            // and the watchdog checks it BEFORE calling DisconnectNamedPipe,
-            // so only one thread operates on the pipe at a time.
-            let client_done = Arc::new(AtomicBool::new(false));
-            let watchdog_done = client_done.clone();
+            // The watchdog may disconnect a slow client to unblock its handler,
+            // but the handler remains the sole owner responsible for CloseHandle.
+            let (handler_done_tx, handler_done_rx) = mpsc::channel();
             let watchdog_pipe = pipe_raw;
-            std::thread::spawn(move || {
-                for _ in 0..IO_TIMEOUT_SECS {
-                    std::thread::sleep(std::time::Duration::from_secs(1));
-                    if watchdog_done.load(Ordering::SeqCst) {
-                        return;
-                    }
-                }
-                // Use compare_exchange to ensure only one thread proceeds
-                // with pipe operations: either the watchdog or the handler.
-                if watchdog_done
-                    .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-                    .is_ok()
-                {
+            let watchdog = std::thread::spawn(move || {
+                let timed_out =
+                    watchdog_timed_out(&handler_done_rx, Duration::from_secs(IO_TIMEOUT_SECS));
+                if timed_out {
                     eprintln!(
                         "[IPC] Client timeout after {}s, disconnecting",
                         IO_TIMEOUT_SECS
@@ -207,6 +192,7 @@ pub fn run_ipc_server(
                         let _ = DisconnectNamedPipe(handle);
                     }
                 }
+                timed_out
             });
 
             if let Err(e) = catch_unwind(AssertUnwindSafe(|| {
@@ -221,18 +207,14 @@ pub fn run_ipc_server(
             })) {
                 eprintln!("[IPC] Client handler panic: {:?}", e);
             }
-            // Mark done BEFORE touching the pipe. If the watchdog already
-            // claimed the flag via compare_exchange, we skip pipe cleanup
-            // because the watchdog is handling disconnection.
-            let we_own_pipe = client_done
-                .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-                .is_ok();
-            if we_own_pipe {
-                unsafe {
+            let _ = handler_done_tx.send(());
+            let watchdog_disconnected = watchdog.join().unwrap_or(false);
+            unsafe {
+                if !watchdog_disconnected {
                     let _ = FlushFileBuffers(pipe);
                     let _ = DisconnectNamedPipe(pipe);
-                    let _ = CloseHandle(pipe);
                 }
+                let _ = CloseHandle(pipe);
             }
             active_for_client.fetch_sub(1, Ordering::Release);
             release_pid_slot(&active_pids_for_client, client_pid);
@@ -256,6 +238,10 @@ pub fn run_ipc_server(
         }
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
+}
+
+fn watchdog_timed_out(done: &Receiver<()>, timeout: Duration) -> bool {
+    matches!(done.recv_timeout(timeout), Err(RecvTimeoutError::Timeout))
 }
 
 fn pipe_client_process_id(pipe: HANDLE) -> Result<u32, String> {
@@ -356,5 +342,27 @@ fn wait_for_client(pipe: HANDLE, shutdown: &Arc<AtomicBool>) -> bool {
             let _ = CloseHandle(event);
             return false;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::watchdog_timed_out;
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    #[test]
+    fn watchdog_stops_when_handler_finishes() {
+        let (done_tx, done_rx) = mpsc::channel();
+        done_tx.send(()).unwrap();
+
+        assert!(!watchdog_timed_out(&done_rx, Duration::from_millis(50)));
+    }
+
+    #[test]
+    fn watchdog_reports_timeout_without_completion() {
+        let (_done_tx, done_rx) = mpsc::channel();
+
+        assert!(watchdog_timed_out(&done_rx, Duration::from_millis(5)));
     }
 }
