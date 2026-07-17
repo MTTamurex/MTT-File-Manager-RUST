@@ -203,6 +203,7 @@ pub struct GridViewContext<'a> {
     /// Backend-specific LOD: request smaller thumbnails while the grid is moving,
     /// then upgrade visible cells after scrolling stops.
     pub low_res_thumbnails_while_scrolling: bool,
+    pub is_opengl_backend: bool,
     /// Backend-specific LOD for composed folder previews while scrolling.
     pub low_res_folder_previews_while_scrolling: bool,
     /// Per-frame counter to rate-limit thumbnail requests on folder entry
@@ -301,8 +302,13 @@ pub fn render_grid_view(
     let consume_scroll = pointer_over_viewport && !ctx.global_search_active;
 
     scroll::apply_scroll_input(ui, ctx.mut_scroll_offset_y, max_scroll, consume_scroll);
-    let (current_scroll, scroll_delta) =
-        scroll::compute_visual_scroll(ui, *ctx.mut_scroll_offset_y, viewport_h, ctx.generation);
+    let (current_scroll, scroll_delta) = scroll::compute_visual_scroll(
+        ui,
+        *ctx.mut_scroll_offset_y,
+        viewport_h,
+        ctx.generation,
+        ctx.is_opengl_backend,
+    );
     let rectangle_metrics =
         (!ctx.is_computer_view).then_some(RectangleSelectionMetrics::Grid(GridRectangleMetrics {
             count,
@@ -331,11 +337,6 @@ pub fn render_grid_view(
     }
     // Is scrolling if visual position is changing (using same threshold)
     let is_scrolling = scroll_delta > 0.5;
-    if is_scrolling && ctx.low_res_thumbnails_while_scrolling {
-        // Keep the OpenGL upload throttle active for the full visual lerp, not
-        // only while wheel input is still changing the target offset.
-        *ctx.last_scroll_time = std::time::Instant::now();
-    }
     let thumbnail_work_scrolling = is_scrolling
         || (ctx.low_res_thumbnails_while_scrolling
             && ctx.last_scroll_time.elapsed()

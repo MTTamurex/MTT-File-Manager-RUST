@@ -1,10 +1,21 @@
 use eframe::egui::{self, Color32, Rect, Sense, Ui};
 
 const GRID_SCROLL_SPEED: f32 = 5.5;
+const OPENGL_SCROLL_RESPONSE_RATE: f32 = 9.751_135;
+const MAX_SCROLL_FRAME_DT: f32 = 0.05;
 
 #[derive(Clone, Copy, Debug)]
 struct ScrollState {
     visual_scroll_y: f32,
+}
+
+fn scroll_interpolation_factor(dt: f32, use_elapsed_time: bool) -> f32 {
+    let dt = dt.clamp(0.0, MAX_SCROLL_FRAME_DT);
+    if use_elapsed_time {
+        1.0 - (-OPENGL_SCROLL_RESPONSE_RATE * dt).exp()
+    } else {
+        (dt * 9.0).min(1.0)
+    }
 }
 
 pub(super) fn apply_scroll_input(
@@ -31,6 +42,7 @@ pub(super) fn compute_visual_scroll(
     target_scroll: f32,
     viewport_h: f32,
     generation: usize,
+    is_opengl_backend: bool,
 ) -> (f32, f32) {
     // Scope scroll state to folder generation so visual_scroll resets on navigation
     let scroll_state_id = ui.id().with("scroll_state").with(generation);
@@ -38,14 +50,20 @@ pub(super) fn compute_visual_scroll(
     // stable_dt inherits latency spikes from eframe/wgpu (tessellation+present),
     // causing the lerp to "jump" on slow frames and "snap back" on following frames.
     // predicted_dt is constant and guarantees uniform visual motion.
-    let dt = ui.input(|i| i.predicted_dt).min(0.05);
+    let dt = ui.input(|i| {
+        if is_opengl_backend {
+            i.stable_dt
+        } else {
+            i.predicted_dt
+        }
+    });
 
     let visual_scroll = ui.ctx().data_mut(|d| {
         let state = d.get_temp_mut_or_insert_with::<ScrollState>(scroll_state_id, || ScrollState {
             visual_scroll_y: target_scroll,
         });
 
-        let t = (dt * 9.0).min(1.0);
+        let t = scroll_interpolation_factor(dt, is_opengl_backend);
 
         if (state.visual_scroll_y - target_scroll).abs() > viewport_h * 1.5 {
             state.visual_scroll_y = target_scroll;
@@ -204,5 +222,27 @@ pub(super) fn render_custom_scrollbar(
 
     if (opacity - handle_opacity).abs() > 0.01 {
         ui.ctx().request_repaint();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::scroll_interpolation_factor;
+
+    #[test]
+    fn opengl_interpolation_preserves_60_hz_response() {
+        assert!((scroll_interpolation_factor(1.0 / 60.0, true) - 0.15).abs() < 0.000_01);
+    }
+
+    #[test]
+    fn opengl_interpolation_depends_on_elapsed_time_not_frame_count() {
+        let one_frame_remaining = 1.0 - scroll_interpolation_factor(1.0 / 30.0, true);
+        let half_frame_remaining = 1.0 - scroll_interpolation_factor(1.0 / 60.0, true);
+        assert!((one_frame_remaining - half_frame_remaining.powi(2)).abs() < 0.000_01);
+    }
+
+    #[test]
+    fn non_opengl_interpolation_keeps_existing_linear_step() {
+        assert!((scroll_interpolation_factor(1.0 / 60.0, false) - 0.15).abs() < f32::EPSILON);
     }
 }
