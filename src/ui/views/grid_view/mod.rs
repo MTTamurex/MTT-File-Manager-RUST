@@ -331,6 +331,11 @@ pub fn render_grid_view(
     }
     // Is scrolling if visual position is changing (using same threshold)
     let is_scrolling = scroll_delta > 0.5;
+    if is_scrolling && ctx.low_res_thumbnails_while_scrolling {
+        // Keep the OpenGL upload throttle active for the full visual lerp, not
+        // only while wheel input is still changing the target offset.
+        *ctx.last_scroll_time = std::time::Instant::now();
+    }
     let thumbnail_work_scrolling = is_scrolling
         || (ctx.low_res_thumbnails_while_scrolling
             && ctx.last_scroll_time.elapsed()
