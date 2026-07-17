@@ -755,11 +755,22 @@ impl ImageViewerApp {
             };
             if (self.upload_budget_ms - target_budget_ms).abs() >= 0.5 {
                 self.upload_budget_ms = target_budget_ms.clamp(2.0, 10.0);
-                let entries = [("upload_budget_ms", self.upload_budget_ms.to_string())];
-                if !self.app_state_db.try_set_preferences_batch(&entries) {
-                    log::debug!(
-                        "[PERF-THUMB-UPLOAD] Skipped upload_budget_ms persist this frame (writer busy)"
-                    );
+                self.upload_budget_persist_pending = true;
+            }
+            if self.upload_budget_persist_pending {
+                match self
+                    .app_state_db
+                    .try_set_preference("upload_budget_ms", &self.upload_budget_ms.to_string())
+                {
+                    crate::infrastructure::app_state_db::PreferenceWriteOutcome::Persisted => {
+                        self.upload_budget_persist_pending = false;
+                    }
+                    crate::infrastructure::app_state_db::PreferenceWriteOutcome::Busy => {
+                        log::debug!("[PERF-THUMB-UPLOAD] Upload budget writer busy")
+                    }
+                    crate::infrastructure::app_state_db::PreferenceWriteOutcome::Failed(error) => {
+                        log::warn!("[PERF-THUMB-UPLOAD] Failed to persist upload budget: {error}")
+                    }
                 }
             }
             self.last_upload_budget_update = now;

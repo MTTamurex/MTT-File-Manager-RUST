@@ -423,6 +423,7 @@ secondary_toolbar:
   lock_unavailable: "Bloqueio indisponível nesta vista"
   locked: "Vista bloqueada — clique para desbloquear"
   lock_folder: "Bloquear vista desta pasta"
+  lock_change_failed: "Não foi possível alterar o bloqueio da pasta: %{error}"
   reverse_order: "Inverter Ordem"
   sort_name: "Nome"
   sort_date: "Data"

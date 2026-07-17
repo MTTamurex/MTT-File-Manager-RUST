@@ -184,7 +184,9 @@ impl StartupPreferences {
         } else if let Some(installer_lang) =
             crate::infrastructure::windows::read_installer_language()
         {
-            app_state_db.set_preference("language", &installer_lang);
+            if let Err(error) = app_state_db.set_preference("language", &installer_lang) {
+                log::warn!("[PREFERENCES] Failed to persist installer language: {error}");
+            }
             installer_lang
         } else {
             "pt-BR".to_string()
@@ -202,11 +204,15 @@ impl StartupPreferences {
             .get("gpu_backend")
             .map(|backend| match backend.as_str() {
                 "vulkan" => {
-                    app_state_db.set_preference("gpu_backend", "auto");
+                    if let Err(error) = app_state_db.set_preference("gpu_backend", "auto") {
+                        log::warn!("[PREFERENCES] Failed to migrate GPU backend: {error}");
+                    }
                     "auto".to_string()
                 }
                 "gl" => {
-                    app_state_db.set_preference("gpu_backend", "glow");
+                    if let Err(error) = app_state_db.set_preference("gpu_backend", "glow") {
+                        log::warn!("[PREFERENCES] Failed to migrate GPU backend: {error}");
+                    }
                     "glow".to_string()
                 }
                 _ => backend.clone(),

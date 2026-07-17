@@ -22,6 +22,15 @@ mod pinned_folders;
 mod preferences;
 
 pub use organizer_rules::OrganizerRuleDbError;
+pub use preferences::PreferenceWriteOutcome;
+
+#[derive(Debug, thiserror::Error)]
+pub enum AppStateWriteError {
+    #[error("app-state database writer lock is poisoned")]
+    WriterLockPoisoned,
+    #[error(transparent)]
+    Database(#[from] rusqlite::Error),
+}
 
 /// Persistent store for user settings and metadata.
 ///

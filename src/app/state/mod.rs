@@ -520,6 +520,7 @@ pub struct ImageViewerApp {
     pub fps_avg: f32,
     pub upload_budget_ms: f32,
     pub last_upload_budget_update: Instant,
+    pub upload_budget_persist_pending: bool,
     pub last_memory_maintenance: Instant,
     pub last_memory_trace_log: Instant,
     pub last_texture_cache_retune: Instant,

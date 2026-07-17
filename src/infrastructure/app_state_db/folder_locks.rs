@@ -1,12 +1,17 @@
-use super::AppStateDb;
+use super::{AppStateDb, AppStateWriteError};
 use crate::domain::file_entry::{FoldersPosition, SortMode, ViewMode};
 use crate::domain::folder_lock::FolderLock;
 use rusqlite::params;
 use std::collections::HashMap;
+use std::time::Duration;
 
 impl AppStateDb {
     /// Save a folder lock to the database. [WRITER]
-    pub fn save_folder_lock(&self, path: &str, lock: &FolderLock) {
+    pub fn save_folder_lock(
+        &self,
+        path: &str,
+        lock: &FolderLock,
+    ) -> Result<(), AppStateWriteError> {
         let view_mode_str = lock.view_mode.preference_value();
         let sort_mode_str = match lock.sort_mode {
             SortMode::Name => "name",
@@ -27,11 +32,15 @@ impl AppStateDb {
             FoldersPosition::Last => "last",
             FoldersPosition::Mixed => "mixed",
         };
-        if let Ok(db) = self.writer.lock() {
-            match db.execute(
+        let mut db = self
+            .writer
+            .lock()
+            .map_err(|_| AppStateWriteError::WriterLockPoisoned)?;
+        Self::with_busy_timeout(&mut db, Duration::ZERO, |db| {
+            db.execute(
                 "INSERT OR REPLACE INTO folder_locks
-                 (path, view_mode, sort_mode, sort_descending, folders_position)
-                 VALUES (?, ?, ?, ?, ?)",
+                     (path, view_mode, sort_mode, sort_descending, folders_position)
+                     VALUES (?, ?, ?, ?, ?)",
                 params![
                     path,
                     view_mode_str,
@@ -39,27 +48,31 @@ impl AppStateDb {
                     sort_desc_str,
                     folders_pos_str
                 ],
-            ) {
-                Ok(_) => log::info!(
-                    "[FOLDER-LOCK] Saved lock for {:?}: view={}, sort={}, desc={}, pos={}",
-                    path,
-                    view_mode_str,
-                    sort_mode_str,
-                    sort_desc_str,
-                    folders_pos_str
-                ),
-                Err(e) => log::error!("[FOLDER-LOCK] Failed to save lock for {:?}: {:?}", path, e),
-            }
-        } else {
-            log::error!("[FOLDER-LOCK] Failed to acquire writer lock for save_folder_lock");
-        }
+            )?;
+            Ok(())
+        })?;
+        log::info!(
+            "[FOLDER-LOCK] Saved lock for {:?}: view={}, sort={}, desc={}, pos={}",
+            path,
+            view_mode_str,
+            sort_mode_str,
+            sort_desc_str,
+            folders_pos_str
+        );
+        Ok(())
     }
 
     /// Remove a folder lock. [WRITER]
-    pub fn remove_folder_lock(&self, path: &str) {
-        if let Ok(db) = self.writer.lock() {
-            let _ = db.execute("DELETE FROM folder_locks WHERE path = ?", params![path]);
-        }
+    pub fn remove_folder_lock(&self, path: &str) -> Result<(), AppStateWriteError> {
+        let mut db = self
+            .writer
+            .lock()
+            .map_err(|_| AppStateWriteError::WriterLockPoisoned)?;
+        Self::with_busy_timeout(&mut db, Duration::ZERO, |db| {
+            db.execute("DELETE FROM folder_locks WHERE path = ?", params![path])?;
+            Ok(())
+        })?;
+        Ok(())
     }
 
     /// Load all folder locks at startup. [READER]
@@ -127,5 +140,75 @@ impl AppStateDb {
             results.keys().collect::<Vec<_>>()
         );
         results
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sample_lock() -> FolderLock {
+        FolderLock {
+            view_mode: ViewMode::Grid,
+            sort_mode: SortMode::Name,
+            sort_descending: false,
+            folders_position: FoldersPosition::First,
+        }
+    }
+
+    #[test]
+    fn failed_folder_lock_save_does_not_create_persisted_state() {
+        let temp = tempfile::tempdir().unwrap();
+        let db = AppStateDb::new(temp.path().to_path_buf()).unwrap();
+        {
+            let writer = db.writer.lock().unwrap();
+            writer
+                .execute_batch(
+                    "CREATE TRIGGER fail_folder_lock_insert
+                     BEFORE INSERT ON folder_locks
+                     BEGIN
+                         SELECT RAISE(FAIL, 'forced folder lock failure');
+                     END;",
+                )
+                .unwrap();
+        }
+
+        assert!(db.save_folder_lock("C:\\Locked", &sample_lock()).is_err());
+        assert!(db.get_all_folder_locks().is_empty());
+    }
+
+    #[test]
+    fn failed_folder_lock_remove_preserves_persisted_state() {
+        let temp = tempfile::tempdir().unwrap();
+        let db = AppStateDb::new(temp.path().to_path_buf()).unwrap();
+        db.save_folder_lock("C:\\Locked", &sample_lock()).unwrap();
+        {
+            let writer = db.writer.lock().unwrap();
+            writer
+                .execute_batch(
+                    "CREATE TRIGGER fail_folder_lock_delete
+                     BEFORE DELETE ON folder_locks
+                     BEGIN
+                         SELECT RAISE(FAIL, 'forced folder unlock failure');
+                     END;",
+                )
+                .unwrap();
+        }
+
+        assert!(db.remove_folder_lock("C:\\Locked").is_err());
+        assert!(db.get_all_folder_locks().contains_key("C:\\Locked"));
+    }
+
+    #[test]
+    fn folder_lock_save_does_not_wait_for_external_sqlite_lock() {
+        let temp = tempfile::tempdir().unwrap();
+        let db = AppStateDb::new(temp.path().to_path_buf()).unwrap();
+        let external = rusqlite::Connection::open(temp.path().join("app_state.db")).unwrap();
+        external.execute("BEGIN IMMEDIATE", []).unwrap();
+        let started = std::time::Instant::now();
+
+        assert!(db.save_folder_lock("C:\\Locked", &sample_lock()).is_err());
+        assert!(started.elapsed() < Duration::from_millis(100));
+        external.execute("ROLLBACK", []).unwrap();
     }
 }

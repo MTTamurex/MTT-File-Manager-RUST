@@ -149,11 +149,10 @@ fn render_lock_button(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
         &tooltip,
     )
     .clicked()
+        && app.toggle_folder_lock()
+        && app.current_folder_locked
     {
-        app.toggle_folder_lock();
-        if app.current_folder_locked {
-            app.filter_items();
-            app.sort_items();
-        }
+        app.filter_items();
+        app.sort_items();
     }
 }

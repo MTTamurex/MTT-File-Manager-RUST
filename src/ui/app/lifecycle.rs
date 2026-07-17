@@ -410,8 +410,11 @@ pub fn handle_exit(app: &mut ImageViewerApp) {
     crate::viewer_processes::terminate_all();
 
     // Persist user preferences
-    app.force_save_preferences();
-    log::info!("[EXIT] Preferences saved.");
+    if app.force_save_preferences() {
+        log::info!("[EXIT] Preferences saved.");
+    } else {
+        log::error!("[EXIT] Preferences could not be saved.");
+    }
 
     // ── Phase 2: minimal grace for channel-drop propagation ───────────
     // Workers break on RecvError within microseconds.  A short yield is

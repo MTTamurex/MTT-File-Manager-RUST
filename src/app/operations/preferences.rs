@@ -12,6 +12,7 @@ use crate::app::navigation_state::ThemeMode;
 use crate::app::state::ImageViewerApp;
 use crate::domain::file_entry::{FoldersPosition, SortMode, ViewMode};
 use crate::domain::special_paths::{is_tag_view_path, is_virtual_path, COMPUTER_VIEW_ID};
+use crate::infrastructure::app_state_db::PreferenceWriteOutcome;
 use crate::infrastructure::diagnostic_logger;
 use std::time::SystemTime;
 
@@ -40,15 +41,35 @@ impl ImageViewerApp {
             return;
         }
         // Non-blocking flush: if DB writer is busy, keep dirty=true and retry next frame.
-        if self.do_save_preferences_nonblocking() {
-            self.preferences_dirty = false;
-            self.preferences_last_save = std::time::Instant::now();
+        match self.do_save_preferences_nonblocking() {
+            PreferenceWriteOutcome::Persisted => {
+                self.preferences_dirty = false;
+                self.preferences_last_save = std::time::Instant::now();
+            }
+            PreferenceWriteOutcome::Busy => {
+                self.preferences_last_save = std::time::Instant::now();
+            }
+            PreferenceWriteOutcome::Failed(error) => {
+                log::error!("[PREFERENCES] Failed to persist preferences: {error}");
+                // Keep dirty, but back off instead of retrying and logging every frame.
+                self.preferences_last_save = std::time::Instant::now();
+            }
         }
     }
 
     /// Force-flushes preferences immediately (for exit).
-    pub fn force_save_preferences(&self) {
-        self.do_save_preferences_blocking();
+    pub fn force_save_preferences(&mut self) -> bool {
+        match self.do_save_preferences_blocking() {
+            Ok(()) => {
+                self.preferences_dirty = false;
+                self.preferences_last_save = std::time::Instant::now();
+                true
+            }
+            Err(error) => {
+                log::error!("[PREFERENCES] Blocking preference flush failed: {error}");
+                false
+            }
+        }
     }
 
     fn collect_preferences(&self) -> Vec<(&'static str, String)> {
@@ -333,15 +354,17 @@ impl ImageViewerApp {
     }
 
     /// Non-blocking write attempt used by frame loop flush.
-    fn do_save_preferences_nonblocking(&self) -> bool {
+    fn do_save_preferences_nonblocking(&self) -> PreferenceWriteOutcome {
         let prefs = self.collect_preferences();
         self.app_state_db.try_set_preferences_batch(&prefs)
     }
 
     /// Blocking write used on exit to maximize persistence reliability.
-    fn do_save_preferences_blocking(&self) {
+    fn do_save_preferences_blocking(
+        &self,
+    ) -> Result<(), crate::infrastructure::app_state_db::AppStateWriteError> {
         let prefs = self.collect_preferences();
-        self.app_state_db.set_preferences_batch(&prefs);
+        self.app_state_db.set_preferences_batch(&prefs)
     }
 
     pub fn set_diagnostic_mode(&mut self, enabled: bool) {
@@ -394,7 +417,7 @@ impl ImageViewerApp {
         }
 
         self.save_preferences();
-        self.force_save_preferences();
+        let _ = self.force_save_preferences();
     }
 
     pub fn auto_disable_diagnostic_mode_if_needed(&mut self) {

@@ -423,6 +423,7 @@ secondary_toolbar:
   lock_unavailable: "Lock unavailable in this view"
   locked: "View locked — click to unlock"
   lock_folder: "Lock view to this folder"
+  lock_change_failed: "Could not change the folder lock: %{error}"
   reverse_order: "Reverse Order"
   sort_name: "Name"
   sort_date: "Date"

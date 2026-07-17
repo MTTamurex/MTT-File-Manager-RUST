@@ -23,6 +23,7 @@ use crate::domain::file_entry::{FileEntry, SyncStatus};
 use rusqlite::params;
 use rustc_hash::FxHashMap;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 const STORAGE_CHUNK_SIZE: usize = 500;
 
@@ -228,7 +229,7 @@ impl AppStateDb {
         if local.is_empty() {
             return;
         }
-        let db = match self.writer.lock() {
+        let mut db = match self.writer.lock() {
             Ok(db) => db,
             Err(e) => {
                 log::warn!("[FILE-ENTRY-CACHE] Failed to acquire writer lock: {:?}", e);
@@ -236,38 +237,37 @@ impl AppStateDb {
             }
         };
 
-        let tx = match db.unchecked_transaction() {
-            Ok(tx) => tx,
-            Err(e) => {
-                log::warn!("[FILE-ENTRY-CACHE] Failed to start transaction: {:?}", e);
-                return;
+        let result = Self::with_busy_timeout(&mut db, Duration::ZERO, |db| {
+            let tx = db.transaction()?;
+            {
+                let mut statement = tx.prepare_cached(
+                    "INSERT OR REPLACE INTO file_entry_cache \
+                     (file_path, is_dir, size, modified, created, is_hidden, sync_status, cached_at) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                )?;
+                for entry in local.drain(..) {
+                    let (path, is_dir, size, modified, created, is_hidden, sync_status, cached_at) =
+                        row_from_entry(&entry);
+                    if path.is_empty() {
+                        continue;
+                    }
+                    statement.execute(params![
+                        path,
+                        is_dir,
+                        size,
+                        modified,
+                        created,
+                        is_hidden,
+                        sync_status,
+                        cached_at
+                    ])?;
+                }
             }
-        };
-
-        for entry in local.drain(..) {
-            let (path, is_dir, size, modified, created, is_hidden, sync_status, cached_at) =
-                row_from_entry(&entry);
-            if path.is_empty() {
-                continue;
-            }
-            let _ = tx.execute(
-                "INSERT OR REPLACE INTO file_entry_cache \
-                 (file_path, is_dir, size, modified, created, is_hidden, sync_status, cached_at) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                params![
-                    path,
-                    is_dir,
-                    size,
-                    modified,
-                    created,
-                    is_hidden,
-                    sync_status,
-                    cached_at
-                ],
-            );
+            tx.commit()
+        });
+        if let Err(error) = result {
+            log::warn!("[FILE-ENTRY-CACHE] Batch upsert rolled back: {error}");
         }
-
-        let _ = tx.commit();
     }
 
     /// Invalidate one path. Called from `DriveWatcher` Modified/Deleted events.
@@ -275,14 +275,22 @@ impl AppStateDb {
         let Some(text) = storage_path_text(path) else {
             return;
         };
-        let db = match self.writer.lock() {
+        let mut db = match self.writer.lock() {
             Ok(db) => db,
-            Err(_) => return,
+            Err(error) => {
+                log::warn!("[FILE-ENTRY-CACHE] Invalidate lock failed: {error:?}");
+                return;
+            }
         };
-        let _ = db.execute(
-            "DELETE FROM file_entry_cache WHERE file_path = ?1 COLLATE NOCASE",
-            params![text],
-        );
+        if let Err(error) = Self::with_busy_timeout(&mut db, Duration::ZERO, |db| {
+            db.execute(
+                "DELETE FROM file_entry_cache WHERE file_path = ?1 COLLATE NOCASE",
+                params![text],
+            )?;
+            Ok(())
+        }) {
+            log::warn!("[FILE-ENTRY-CACHE] Invalidate failed: {error}");
+        }
     }
 
     /// Invalidate all cache entries under a path prefix. Called from
@@ -291,17 +299,25 @@ impl AppStateDb {
         let Some(prefix_text) = storage_path_text(prefix) else {
             return;
         };
-        let db = match self.writer.lock() {
+        let mut db = match self.writer.lock() {
             Ok(db) => db,
-            Err(_) => return,
+            Err(error) => {
+                log::warn!("[FILE-ENTRY-CACHE] Prefix invalidate lock failed: {error:?}");
+                return;
+            }
         };
         let pattern = child_like_pattern(&prefix_text);
-        let _ = db.execute(
-            "DELETE FROM file_entry_cache \
-             WHERE file_path = ?1 COLLATE NOCASE \
-                OR file_path LIKE ?2 COLLATE NOCASE ESCAPE '\\'",
-            params![prefix_text, pattern],
-        );
+        if let Err(error) = Self::with_busy_timeout(&mut db, Duration::ZERO, |db| {
+            db.execute(
+                "DELETE FROM file_entry_cache \
+                 WHERE file_path = ?1 COLLATE NOCASE \
+                    OR file_path LIKE ?2 COLLATE NOCASE ESCAPE '\\'",
+                params![prefix_text, pattern],
+            )?;
+            Ok(())
+        }) {
+            log::warn!("[FILE-ENTRY-CACHE] Prefix invalidate failed: {error}");
+        }
     }
 
     /// Move a cache entry to a new path. Called from `DriveWatcher` Renamed.
@@ -311,22 +327,32 @@ impl AppStateDb {
         else {
             return;
         };
-        let db = match self.writer.lock() {
+        let mut db = match self.writer.lock() {
             Ok(db) => db,
-            Err(_) => return,
+            Err(error) => {
+                log::warn!("[FILE-ENTRY-CACHE] Rename lock failed: {error:?}");
+                return;
+            }
         };
         let child_pattern = child_like_pattern(&old_text);
-        let _ = db.execute(
-            "UPDATE file_entry_cache \
-             SET file_path = ?3 || substr(file_path, length(?1) + 1) \
-             WHERE file_path LIKE ?2 COLLATE NOCASE ESCAPE '\\' \
-               AND file_path <> ?1 COLLATE NOCASE",
-            params![&old_text, &child_pattern, &new_text],
-        );
-        let _ = db.execute(
-            "UPDATE file_entry_cache SET file_path = ?1 WHERE file_path = ?2 COLLATE NOCASE",
-            params![&new_text, &old_text],
-        );
+        let result = Self::with_busy_timeout(&mut db, Duration::ZERO, |db| {
+            let tx = db.transaction()?;
+            tx.execute(
+                "UPDATE file_entry_cache \
+                 SET file_path = ?3 || substr(file_path, length(?1) + 1) \
+                 WHERE file_path LIKE ?2 COLLATE NOCASE ESCAPE '\\' \
+                   AND file_path <> ?1 COLLATE NOCASE",
+                params![&old_text, &child_pattern, &new_text],
+            )?;
+            tx.execute(
+                "UPDATE file_entry_cache SET file_path = ?1 WHERE file_path = ?2 COLLATE NOCASE",
+                params![&new_text, &old_text],
+            )?;
+            tx.commit()
+        });
+        if let Err(error) = result {
+            log::warn!("[FILE-ENTRY-CACHE] Rename rolled back: {error}");
+        }
     }
 }
 
@@ -524,5 +550,77 @@ mod tests {
         assert!(hits.contains_key(&PathBuf::from(r"D:\Renamed\child.txt")));
 
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn file_entry_cache_batch_rolls_back_when_one_upsert_fails() {
+        use crate::infrastructure::app_state_db::AppStateDb;
+        let temp = tempfile::tempdir().unwrap();
+        let db = AppStateDb::new(temp.path().to_path_buf()).unwrap();
+        {
+            let writer = db.writer.lock().unwrap();
+            writer
+                .execute_batch(
+                    "CREATE TRIGGER fail_bad_file_entry
+                     BEFORE INSERT ON file_entry_cache
+                     WHEN NEW.file_path = 'C:\\bad.txt'
+                     BEGIN
+                         SELECT RAISE(FAIL, 'forced file cache failure');
+                     END;",
+                )
+                .unwrap();
+        }
+
+        db.upsert_cached_file_entries(&[sample_entry(r"C:\good.txt"), sample_entry(r"C:\bad.txt")]);
+
+        let hits = db.get_cached_file_entries(&[
+            PathBuf::from(r"C:\good.txt"),
+            PathBuf::from(r"C:\bad.txt"),
+        ]);
+        assert!(hits.is_empty());
+    }
+
+    #[test]
+    fn file_entry_cache_rename_rolls_back_descendants_when_root_update_fails() {
+        use crate::infrastructure::app_state_db::AppStateDb;
+        let temp = tempfile::tempdir().unwrap();
+        let db = AppStateDb::new(temp.path().to_path_buf()).unwrap();
+        db.upsert_cached_file_entries(&[
+            sample_entry(r"C:\Folder"),
+            sample_entry(r"C:\Folder\child.txt"),
+        ]);
+        {
+            let writer = db.writer.lock().unwrap();
+            writer
+                .execute_batch(
+                    "CREATE TRIGGER fail_root_file_entry_rename
+                     BEFORE UPDATE ON file_entry_cache
+                     WHEN OLD.file_path = 'C:\\Folder'
+                     BEGIN
+                         SELECT RAISE(FAIL, 'forced root rename failure');
+                     END;",
+                )
+                .unwrap();
+        }
+
+        db.rename_cached_file_entry(Path::new(r"C:\Folder"), Path::new(r"D:\Renamed"));
+
+        let writer = db.writer.lock().unwrap();
+        let old_count: i64 = writer
+            .query_row(
+                "SELECT COUNT(*) FROM file_entry_cache WHERE file_path LIKE 'C:\\Folder%'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let new_count: i64 = writer
+            .query_row(
+                "SELECT COUNT(*) FROM file_entry_cache WHERE file_path LIKE 'D:\\Renamed%'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(old_count, 2);
+        assert_eq!(new_count, 0);
     }
 }

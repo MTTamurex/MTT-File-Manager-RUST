@@ -631,6 +631,7 @@ impl ImageViewerApp {
             fps_avg: 0.0,
             upload_budget_ms,
             last_upload_budget_update: Instant::now(),
+            upload_budget_persist_pending: false,
             last_memory_maintenance: Instant::now(),
             last_memory_trace_log: Instant::now(),
             last_texture_cache_retune: Instant::now(),

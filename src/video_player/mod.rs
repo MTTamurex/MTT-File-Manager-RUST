@@ -64,11 +64,15 @@ fn save_volume_to_db(volume_fraction: f32) {
         .join("state");
 
     if let Ok(db) = crate::infrastructure::app_state_db::AppStateDb::new(state_dir) {
-        db.set_preference("media_volume", &volume_fraction.clamp(0.0, 1.0).to_string());
-        log::debug!(
-            "[VIDEO-PLAYER] Saved volume {:.0}% to preferences",
-            volume_fraction * 100.0
-        );
+        match db.set_preference("media_volume", &volume_fraction.clamp(0.0, 1.0).to_string()) {
+            Ok(()) => log::debug!(
+                "[VIDEO-PLAYER] Saved volume {:.0}% to preferences",
+                volume_fraction * 100.0
+            ),
+            Err(error) => {
+                log::warn!("[VIDEO-PLAYER] Failed to save volume preference: {error}")
+            }
+        }
     }
 }
 

@@ -1,6 +1,7 @@
 use crate::app::state::ImageViewerApp;
 use crate::domain::folder_lock::FolderLock;
 use crate::domain::special_paths::{is_tag_view_path, is_virtual_path, COMPUTER_VIEW_ID};
+use rust_i18n::t;
 
 fn is_lockable_view_path(path: &str) -> bool {
     !path.is_empty()
@@ -11,16 +12,26 @@ impl ImageViewerApp {
     /// Toggle the lock for the current folder.
     /// If unlocked: capture current view settings and save to DB.
     /// If locked: remove from DB and re-enable controls.
-    pub fn toggle_folder_lock(&mut self) {
+    pub fn toggle_folder_lock(&mut self) -> bool {
         let path = self.navigation_state.current_path.clone();
         if !is_lockable_view_path(&path) {
-            return;
+            return false;
         }
 
         if self.current_folder_locked {
             // Unlock
+            if let Err(error) = self.app_state_db.remove_folder_lock(&path) {
+                log::error!("[FOLDER-LOCK] Failed to remove lock for {path:?}: {error}");
+                self.notifications.error(
+                    t!(
+                        "secondary_toolbar.lock_change_failed",
+                        error = error.to_string()
+                    )
+                    .to_string(),
+                );
+                return false;
+            }
             self.folder_locks.remove(&path);
-            self.app_state_db.remove_folder_lock(&path);
             self.current_folder_locked = false;
         } else {
             // Lock: capture current view settings
@@ -30,10 +41,21 @@ impl ImageViewerApp {
                 sort_descending: self.sort_descending,
                 folders_position: self.folders_position,
             };
-            self.app_state_db.save_folder_lock(&path, &lock);
+            if let Err(error) = self.app_state_db.save_folder_lock(&path, &lock) {
+                log::error!("[FOLDER-LOCK] Failed to save lock for {path:?}: {error}");
+                self.notifications.error(
+                    t!(
+                        "secondary_toolbar.lock_change_failed",
+                        error = error.to_string()
+                    )
+                    .to_string(),
+                );
+                return false;
+            }
             self.folder_locks.insert(path, lock);
             self.current_folder_locked = true;
         }
+        true
     }
 
     /// Called after navigating to a new folder.
