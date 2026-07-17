@@ -17,18 +17,26 @@
 //! - Windows needs edge codes (HTLEFT, HTRIGHT, etc.) for resize cursors/behavior
 //! - During minimize, client area is 0x0 which corrupts egui layout calculations
 
-use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU8, Ordering};
+mod hit_test;
+mod redraw_suppression;
+
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::Mutex;
 
 use crate::infrastructure::windows::taskbar_minimize;
 
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::Graphics::Gdi::ValidateRect;
 use windows::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetClientRect, IsIconic, IsZoomed, HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT, HTCAPTION, HTCLIENT,
-    HTLEFT, HTRIGHT, HTTOP, HTTOPLEFT, HTTOPRIGHT, MINMAXINFO, SWP_NOSIZE, WINDOWPOS,
-    WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE, WM_GETMINMAXINFO, WM_NCACTIVATE, WM_NCHITTEST, WM_SIZE,
-    WM_SYSCOMMAND, WM_WINDOWPOSCHANGING,
+    IsIconic, MINMAXINFO, SWP_NOSIZE, WINDOWPOS, WM_CANCELMODE, WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE,
+    WM_GETMINMAXINFO, WM_NCACTIVATE, WM_NCDESTROY, WM_NCHITTEST, WM_NCLBUTTONDOWN, WM_PAINT,
+    WM_SIZE, WM_SYSCOMMAND, WM_WINDOWPOSCHANGING,
+};
+
+pub use hit_test::{
+    clear_caption_drag_region, is_native_caption_drag_enabled, set_caption_drag_region_px,
+    set_native_caption_drag_enabled,
 };
 
 /// SIZE_MINIMIZED constant (wParam for WM_SIZE when window is minimized)
@@ -42,9 +50,6 @@ const SC_MINIMIZE_CMD: usize = 0xF020;
 const SC_RESTORE_CMD: usize = 0xF120;
 const MIN_TRACK_WIDTH_PX: i32 = 800;
 const MIN_TRACK_HEIGHT_PX: i32 = 520;
-
-/// Resize border width in pixels (scaled by DPI at runtime if needed)
-const RESIZE_BORDER_WIDTH: i32 = 8;
 
 /// Subclass ID for our borderless handler
 const BORDERLESS_SUBCLASS_ID: usize = 1;
@@ -96,16 +101,6 @@ static SUBCLASS_INSTALLED: AtomicBool = AtomicBool::new(false);
 /// Set true on WM_ENTERSIZEMOVE, false on WM_EXITSIZEMOVE
 static IS_IN_SIZE_MOVE: AtomicBool = AtomicBool::new(false);
 
-/// Enables native caption drag hit-testing on a UI-defined drag region.
-static NATIVE_CAPTION_DRAG_ENABLED: AtomicBool = AtomicBool::new(true);
-/// Caption drag region (window-relative, physical pixels).
-/// Used by WM_NCHITTEST to return HTCAPTION for the empty tab-bar drag area.
-static CAPTION_DRAG_REGION_VALID: AtomicBool = AtomicBool::new(false);
-static CAPTION_DRAG_REGION_X: AtomicI32 = AtomicI32::new(0);
-static CAPTION_DRAG_REGION_Y: AtomicI32 = AtomicI32::new(0);
-static CAPTION_DRAG_REGION_W: AtomicI32 = AtomicI32::new(0);
-static CAPTION_DRAG_REGION_H: AtomicI32 = AtomicI32::new(0);
-
 /// Current layout phase (atomic for lock-free read)
 static LAYOUT_PHASE: AtomicU8 = AtomicU8::new(0); // 0 = Normal
 
@@ -125,40 +120,6 @@ static SIDEBAR_SNAPSHOT: Mutex<SidebarSnapshot> = Mutex::new(SidebarSnapshot {
 #[inline]
 pub fn is_in_size_move() -> bool {
     IS_IN_SIZE_MOVE.load(Ordering::Relaxed)
-}
-
-/// Returns whether native caption drag hit-testing is enabled.
-#[inline]
-pub fn is_native_caption_drag_enabled() -> bool {
-    NATIVE_CAPTION_DRAG_ENABLED.load(Ordering::Relaxed)
-}
-
-/// Enables or disables native caption drag hit-testing.
-pub fn set_native_caption_drag_enabled(enabled: bool) {
-    NATIVE_CAPTION_DRAG_ENABLED.store(enabled, Ordering::SeqCst);
-    if !enabled {
-        clear_caption_drag_region();
-    }
-}
-
-/// Sets the native caption drag region in physical pixels, window-relative.
-/// Passing non-positive width/height clears the region.
-pub fn set_caption_drag_region_px(x: i32, y: i32, width: i32, height: i32) {
-    if width <= 0 || height <= 0 {
-        clear_caption_drag_region();
-        return;
-    }
-
-    CAPTION_DRAG_REGION_X.store(x, Ordering::Relaxed);
-    CAPTION_DRAG_REGION_Y.store(y, Ordering::Relaxed);
-    CAPTION_DRAG_REGION_W.store(width, Ordering::Relaxed);
-    CAPTION_DRAG_REGION_H.store(height, Ordering::Relaxed);
-    CAPTION_DRAG_REGION_VALID.store(true, Ordering::Release);
-}
-
-/// Clears the native caption drag region.
-pub fn clear_caption_drag_region() {
-    CAPTION_DRAG_REGION_VALID.store(false, Ordering::Release);
 }
 
 /// Get the current layout phase.
@@ -276,6 +237,9 @@ pub fn install_borderless_subclass(hwnd: HWND) -> bool {
 ///
 /// Call this on window close to clean up.
 pub fn remove_borderless_subclass(hwnd: HWND) {
+    IS_IN_SIZE_MOVE.store(false, Ordering::SeqCst);
+    redraw_suppression::reset_for_remove(hwnd);
+
     if !SUBCLASS_INSTALLED.load(Ordering::SeqCst) {
         return;
     }
@@ -302,11 +266,55 @@ extern "system" fn borderless_subclass_proc(
     _uid_subclass: usize,
     _dw_ref_data: usize,
 ) -> LRESULT {
-    // Handle resize state tracking for UI optimization
+    if msg == WM_NCDESTROY {
+        IS_IN_SIZE_MOVE.store(false, Ordering::SeqCst);
+        redraw_suppression::reset_for_destroy();
+        SUBCLASS_INSTALLED.store(false, Ordering::Release);
+        unsafe {
+            let _ =
+                RemoveWindowSubclass(hwnd, Some(borderless_subclass_proc), BORDERLESS_SUBCLASS_ID);
+            return DefSubclassProc(hwnd, msg, wparam, lparam);
+        }
+    }
+
+    if msg == redraw_suppression::REPLAY_MESSAGE {
+        redraw_suppression::handle_replay(hwnd);
+        return LRESULT(0);
+    }
+
+    if msg == WM_PAINT && redraw_suppression::is_active() {
+        unsafe {
+            let _ = ValidateRect(Some(hwnd), None);
+        }
+        return LRESULT(0);
+    }
+
+    if msg == WM_NCLBUTTONDOWN {
+        redraw_suppression::note_non_client_press(hit_test::is_caption_code(wparam.0));
+    }
+
+    // Let default handling observe the modal-loop boundary before suppressing
+    // redraw. Live edge resizing remains unaffected.
     if msg == WM_ENTERSIZEMOVE {
         IS_IN_SIZE_MOVE.store(true, Ordering::SeqCst);
-    } else if msg == WM_EXITSIZEMOVE {
+        let result = unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) };
+        redraw_suppression::begin_caption_move();
+        return result;
+    }
+
+    if msg == WM_EXITSIZEMOVE {
+        let result = unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) };
         IS_IN_SIZE_MOVE.store(false, Ordering::SeqCst);
+        redraw_suppression::end_caption_move(hwnd);
+        return result;
+    }
+
+    if msg == WM_CANCELMODE {
+        let result = unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) };
+        if !IS_IN_SIZE_MOVE.load(Ordering::Acquire) {
+            redraw_suppression::clear_pending_move();
+        }
+        return result;
     }
 
     if msg == taskbar_minimize::SAFE_MINIMIZE_MESSAGE {
@@ -344,6 +352,8 @@ extern "system" fn borderless_subclass_proc(
     }
 
     if msg == WM_SYSCOMMAND {
+        redraw_suppression::note_system_command(wparam.0);
+
         match wparam.0 & SC_COMMAND_MASK {
             SC_MINIMIZE_CMD => {
                 if taskbar_minimize::consume_allowed_native_minimize() {
@@ -358,6 +368,11 @@ extern "system" fn borderless_subclass_proc(
             }
             _ => {}
         }
+    }
+
+    if msg == WM_SIZE && redraw_suppression::is_active() {
+        redraw_suppression::defer_size();
+        return LRESULT(0);
     }
 
     // Handle layout phase transitions for minimize/restore
@@ -379,7 +394,7 @@ extern "system" fn borderless_subclass_proc(
     }
 
     if msg == WM_NCHITTEST {
-        return handle_nchittest(hwnd, lparam);
+        return hit_test::handle(hwnd, lparam);
     }
 
     if msg == WM_NCACTIVATE {
@@ -397,121 +412,6 @@ extern "system" fn borderless_subclass_proc(
 
     // Pass all other messages to default handler
     unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
-}
-
-/// Handle WM_NCHITTEST message to provide resize borders.
-///
-/// Returns appropriate hit-test code based on cursor position:
-/// - Edge zones (8px from border): HTLEFT, HTRIGHT, HTTOP, HTBOTTOM
-/// - Corner zones (8x8px): HTTOPLEFT, HTTOPRIGHT, HTBOTTOMLEFT, HTBOTTOMRIGHT
-/// - Rest of window: HTCLIENT (let egui handle)
-fn handle_nchittest(hwnd: HWND, lparam: LPARAM) -> LRESULT {
-    // SAFETY: HWND is valid, IsZoomed just queries window state.
-    let is_zoomed = unsafe { IsZoomed(hwnd).as_bool() };
-
-    // Extract cursor position from lparam (screen coordinates)
-    let cursor_x = (lparam.0 as i32) & 0xFFFF;
-    let cursor_y = ((lparam.0 as i32) >> 16) & 0xFFFF;
-
-    // Handle signed coordinate conversion for multi-monitor setups
-    let cursor_x = if cursor_x > 32767 {
-        cursor_x - 65536
-    } else {
-        cursor_x
-    };
-    let cursor_y = if cursor_y > 32767 {
-        cursor_y - 65536
-    } else {
-        cursor_y
-    };
-
-    // Get window client rect
-    let mut client_rect = windows::Win32::Foundation::RECT::default();
-    // SAFETY: HWND is valid, client_rect is a valid mutable reference
-    if unsafe { GetClientRect(hwnd, &mut client_rect).is_err() } {
-        return LRESULT(HTCLIENT as isize);
-    }
-
-    // Convert screen coords to window-relative coords
-    // We need window rect, not client rect, for proper edge detection
-    let mut window_rect = windows::Win32::Foundation::RECT::default();
-    // SAFETY: HWND is valid
-    if unsafe {
-        windows::Win32::UI::WindowsAndMessaging::GetWindowRect(hwnd, &mut window_rect).is_err()
-    } {
-        return LRESULT(HTCLIENT as isize);
-    }
-
-    // Calculate position relative to window
-    let x = cursor_x - window_rect.left;
-    let y = cursor_y - window_rect.top;
-    let width = window_rect.right - window_rect.left;
-    let height = window_rect.bottom - window_rect.top;
-
-    // Check if cursor is within window bounds
-    if x < 0 || y < 0 || x >= width || y >= height {
-        return LRESULT(HTCLIENT as isize);
-    }
-
-    // Determine hit-test zone for resize borders/corners.
-    // Disable resize zones while maximized, but still allow caption dragging.
-    if !is_zoomed {
-        let on_left = x < RESIZE_BORDER_WIDTH;
-        let on_right = x >= width - RESIZE_BORDER_WIDTH;
-        let on_top = y < RESIZE_BORDER_WIDTH;
-        let on_bottom = y >= height - RESIZE_BORDER_WIDTH;
-
-        // Corner detection (corners take priority).
-        let resize_hit = if on_top && on_left {
-            Some(HTTOPLEFT)
-        } else if on_top && on_right {
-            Some(HTTOPRIGHT)
-        } else if on_bottom && on_left {
-            Some(HTBOTTOMLEFT)
-        } else if on_bottom && on_right {
-            Some(HTBOTTOMRIGHT)
-        } else if on_left {
-            Some(HTLEFT)
-        } else if on_right {
-            Some(HTRIGHT)
-        } else if on_top {
-            Some(HTTOP)
-        } else if on_bottom {
-            Some(HTBOTTOM)
-        } else {
-            None
-        };
-
-        if let Some(hit) = resize_hit {
-            return LRESULT(hit as isize);
-        }
-    }
-
-    if is_native_caption_drag_enabled() && point_in_caption_drag_region(x, y) {
-        return LRESULT(HTCAPTION as isize);
-    }
-
-    LRESULT(HTCLIENT as isize)
-}
-
-#[inline]
-fn point_in_caption_drag_region(x: i32, y: i32) -> bool {
-    if !CAPTION_DRAG_REGION_VALID.load(Ordering::Acquire) {
-        return false;
-    }
-
-    let rx = CAPTION_DRAG_REGION_X.load(Ordering::Relaxed);
-    let ry = CAPTION_DRAG_REGION_Y.load(Ordering::Relaxed);
-    let rw = CAPTION_DRAG_REGION_W.load(Ordering::Relaxed);
-    let rh = CAPTION_DRAG_REGION_H.load(Ordering::Relaxed);
-
-    if rw <= 0 || rh <= 0 {
-        return false;
-    }
-
-    let right = rx.saturating_add(rw);
-    let bottom = ry.saturating_add(rh);
-    x >= rx && y >= ry && x < right && y < bottom
 }
 
 /// RAII guard for borderless subclass.
@@ -538,14 +438,4 @@ impl Drop for BorderlessSubclass {
     fn drop(&mut self) {
         remove_borderless_subclass(self.hwnd);
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    const _: () = {
-        assert!(RESIZE_BORDER_WIDTH > 0);
-        assert!(RESIZE_BORDER_WIDTH <= 20);
-    };
 }

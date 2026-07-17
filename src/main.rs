@@ -394,18 +394,10 @@ fn main() -> eframe::Result<()> {
         let selected_backends =
             gpu_backend::parse_gpu_backend_preference(gpu_backend_pref.as_deref());
         let native_adapter_selector = gpu_backend::adapter_selector(gpu_backend_pref.as_deref());
-        let present_mode = if selected_backends.contains(eframe::wgpu::Backends::VULKAN) {
-            // Vulkan FIFO presentation can block the UI thread during the native
-            // Windows move loop. Prefer non-blocking presentation with safe fallback.
-            eframe::wgpu::PresentMode::AutoNoVsync
-        } else {
-            eframe::wgpu::PresentMode::AutoVsync
-        };
         log::info!(
-            "[STARTUP] Using Wgpu renderer. Backend preference: {:?} -> backends: {:?}, present_mode: {:?}",
+            "[STARTUP] Using Wgpu renderer. Backend preference: {:?} -> backends: {:?}",
             gpu_backend_pref.as_deref().unwrap_or("auto"),
-            selected_backends,
-            present_mode,
+            selected_backends
         );
         eframe::NativeOptions {
             viewport,
@@ -435,8 +427,7 @@ fn main() -> eframe::Result<()> {
                         ..Default::default()
                     },
                 ),
-                present_mode,
-                desired_maximum_frame_latency: Some(1),
+                desired_maximum_frame_latency: Some(2),
                 ..Default::default()
             },
             ..Default::default()
