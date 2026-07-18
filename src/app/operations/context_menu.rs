@@ -831,8 +831,29 @@ impl ImageViewerApp {
             false
         }
 
-        let new_subitems: Vec<ContextMenuItem> =
-            sub_items.iter().map(|s| convert_item(ctx, s)).collect();
+        fn is_new_submenu(items: &[ContextMenuItem], id: i32) -> bool {
+            items.iter().any(|item| {
+                (item.id == id
+                    && item
+                        .command_string
+                        .as_deref()
+                        .is_some_and(|verb| verb.eq_ignore_ascii_case("new")))
+                    || is_new_submenu(&item.sub_items, id)
+            })
+        }
+
+        let hide_native_folder = is_new_submenu(&self.context_menu.items, item_id as i32);
+        let new_subitems: Vec<ContextMenuItem> = sub_items
+            .iter()
+            .filter(|item| {
+                !hide_native_folder
+                    || !item
+                        .command_string
+                        .as_deref()
+                        .is_some_and(|verb| verb.eq_ignore_ascii_case("newfolder"))
+            })
+            .map(|item| convert_item(ctx, item))
+            .collect();
         update_ui_item(&mut self.context_menu.items, item_id as i32, new_subitems);
     }
 }
