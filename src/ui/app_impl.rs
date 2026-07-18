@@ -224,6 +224,7 @@ impl eframe::App for ImageViewerApp {
                         if request_id == self.shell_menu_request_id {
                             let ctx_clone = ctx.clone();
                             self.apply_async_submenu_items(item_id, sub_items, &ctx_clone);
+                            self.shell_menu_loading = false;
                         }
                     }
                     ShellMenuResponse::Invoked { request_id } => {

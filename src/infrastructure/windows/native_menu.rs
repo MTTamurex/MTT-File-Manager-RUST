@@ -191,7 +191,14 @@ pub fn extract_shell_menu(hwnd: HWND, paths: &[std::path::PathBuf]) -> Result<Sh
         // Get IContextMenu
         let context_menu: IContextMenu = parent_folder.GetUIObjectOf(hwnd, &child_pidls, None)?;
 
-        // Create popup menu to extract items
+        extract_context_menu(context_menu)
+    }
+}
+
+/// Queries an already initialized Shell context-menu object and keeps all native
+/// resources alive for lazy submenu loading and command invocation.
+pub(crate) fn extract_context_menu(context_menu: IContextMenu) -> Result<ShellMenuContext> {
+    unsafe {
         let hmenu = CreatePopupMenu()?;
         if let Err(e) = context_menu
             .QueryContextMenu(hmenu, 0, 1, 0x7FFF, CMF_NORMAL)
@@ -204,7 +211,6 @@ pub fn extract_shell_menu(hwnd: HWND, paths: &[std::path::PathBuf]) -> Result<Sh
         let count = GetMenuItemCount(Some(hmenu));
         log::debug!("[ShellMenu] Total menu items: {}", count);
 
-        // Extract items
         let mut items = Vec::new();
         let mut pending_count = 0;
         for i in 0..count {
@@ -228,9 +234,6 @@ pub fn extract_shell_menu(hwnd: HWND, paths: &[std::path::PathBuf]) -> Result<Sh
             pending_count
         );
 
-        // Collect all GDI bitmap handles from menu items. They will be
-        // deleted AFTER DestroyMenu in ShellMenuContext::Drop. Deleting
-        // them while the HMENU is still alive fails silently.
         let owned_bitmaps = collect_menu_bitmaps(hmenu);
         log::debug!(
             "[ShellMenu] Collected {} GDI bitmap handles for deferred cleanup",

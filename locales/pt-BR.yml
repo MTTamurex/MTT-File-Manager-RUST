@@ -218,6 +218,7 @@ context_menu:
   copy_path: "Copiar caminho"
   create_shortcut: "Criar atalho"
   create_folder: "Criar pasta"
+  new: "Novo"
   pin_quick_access: "Fixar no Acesso Rápido"
   unpin_quick_access: "Remover do Acesso Rápido"
   properties: "Propriedades"

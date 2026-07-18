@@ -218,6 +218,7 @@ context_menu:
   copy_path: "Copy path"
   create_shortcut: "Create shortcut"
   create_folder: "Create folder"
+  new: "New"
   pin_quick_access: "Pin to Quick Access"
   unpin_quick_access: "Remove from Quick Access"
   properties: "Properties"

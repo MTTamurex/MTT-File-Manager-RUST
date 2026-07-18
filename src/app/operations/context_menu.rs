@@ -346,6 +346,16 @@ impl ImageViewerApp {
                     )
                     .enabled(can_create_folder),
             );
+            if can_create_folder {
+                items.push(ContextMenuItem {
+                    id: -110,
+                    text: t!("context_menu.new").to_string(),
+                    is_enabled: false,
+                    svg_icon_name: Some("folder_new".to_string()),
+                    is_loading_placeholder: true,
+                    ..Default::default()
+                });
+            }
             items.push(
                 ContextMenuItem::new(-80, t!("context_menu.open_terminal"))
                     .with_svg_icon("terminal"),
@@ -517,11 +527,21 @@ impl ImageViewerApp {
         // and calls `apply_async_shell_items` to merge them into `self.context_menu.items`.
         if let Some(hwnd) = self.native_hwnd {
             self.shell_menu_request_id = self.shell_menu_request_id.wrapping_add(1);
+            let target = if is_empty_area {
+                crate::infrastructure::shell_menu_worker::ShellMenuTarget::FolderBackground(
+                    paths
+                        .first()
+                        .cloned()
+                        .unwrap_or_else(|| PathBuf::from(&self.navigation_state.current_path)),
+                )
+            } else {
+                crate::infrastructure::shell_menu_worker::ShellMenuTarget::Selection(paths.to_vec())
+            };
             let _ = self.shell_menu_req_tx.send(
                 crate::infrastructure::shell_menu_worker::ShellMenuRequest::Extract {
                     request_id: self.shell_menu_request_id,
                     hwnd_isize: hwnd.0 as isize,
-                    paths: paths.to_vec(),
+                    target,
                 },
             );
             self.shell_menu_loading = true;
@@ -654,11 +674,22 @@ impl ImageViewerApp {
         });
 
         let mut open_with_item: Option<ContextMenuItem> = None;
+        let mut new_submenu_item: Option<ContextMenuItem> = None;
         let mut all_shell_items = Vec::new();
 
         for raw in &shell_items {
             if let Some(item) = convert(ctx, raw) {
                 if item.is_separator {
+                    continue;
+                }
+                let is_new_submenu = self.context_menu.is_empty_area
+                    && (item
+                        .command_string
+                        .as_deref()
+                        .is_some_and(|verb| verb.eq_ignore_ascii_case("new"))
+                        || matches!(item.text.to_lowercase().as_str(), "new" | "novo"));
+                if is_new_submenu {
+                    new_submenu_item = Some(item);
                     continue;
                 }
                 // Promote "Open with" to the main menu only for files
@@ -696,6 +727,18 @@ impl ImageViewerApp {
             } else {
                 // Fallback: append before the separator that precedes shell items
                 items.push(open_with);
+            }
+        }
+
+        if let Some(mut new_submenu) = new_submenu_item {
+            new_submenu.text = t!("context_menu.new").to_string();
+            if new_submenu.icon.is_none() {
+                new_submenu.svg_icon_name = Some("folder_new".to_string());
+            }
+            if let Some(idx) = items.iter().position(|item| item.id == -1) {
+                items.insert(idx + 1, new_submenu);
+            } else {
+                items.push(new_submenu);
             }
         }
 

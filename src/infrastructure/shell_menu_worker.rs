@@ -25,11 +25,11 @@ use crate::infrastructure::windows::native_menu::{
 pub enum ShellMenuRequest {
     /// Pre-initialize shell extensions on the worker STA thread.
     Warmup { hwnd_isize: isize },
-    /// Extract the context menu for `paths`. The worker replies with `Ready` or `Error`.
+    /// Extract a Shell context menu. The worker replies with `Ready` or `Error`.
     Extract {
         request_id: u64,
         hwnd_isize: isize,
-        paths: Vec<PathBuf>,
+        target: ShellMenuTarget,
     },
     /// Invoke a previously extracted shell command (positive `id` from the menu).
     Invoke {
@@ -43,6 +43,11 @@ pub enum ShellMenuRequest {
     Cancel,
     /// Expand a pending submenu for `item_id` (triggered by hover on a lazy item).
     LoadSubmenu { request_id: u64, item_id: u32 },
+}
+
+pub enum ShellMenuTarget {
+    Selection(Vec<PathBuf>),
+    FolderBackground(PathBuf),
 }
 
 /// Send-safe representation of a `ShellMenuItem` — carries no COM handles or OS handles.
@@ -149,14 +154,22 @@ fn shell_menu_loop(rx: Receiver<ShellMenuRequest>, tx: Sender<ShellMenuResponse>
             ShellMenuRequest::Extract {
                 request_id,
                 hwnd_isize,
-                paths,
+                target,
             } => {
                 // Drop any previous context before starting a new extraction.
                 active_ctx = None;
                 active_request_id = None;
 
                 let hwnd = HWND(hwnd_isize as *mut _);
-                match extract_shell_menu(hwnd, &paths) {
+                let extracted = match target {
+                    ShellMenuTarget::Selection(paths) => extract_shell_menu(hwnd, &paths),
+                    ShellMenuTarget::FolderBackground(path) => {
+                        crate::infrastructure::windows::shell_new::extract_background_menu(
+                            hwnd, &path,
+                        )
+                    }
+                };
+                match extracted {
                     Ok(ctx) => {
                         let items: Vec<ShellMenuItemData> = ctx
                             .items
