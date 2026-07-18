@@ -1,9 +1,33 @@
 use crate::app::state::ImageViewerApp;
 use crate::workers::file_operation_worker::FileOperationResult;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::TryRecvError;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+/// Logged once when the disk-cache invalidation channel is first found
+/// disconnected. `SendError` on this channel means the receiver (cache worker)
+/// is gone — a permanent state — so logging every failed rename/move send would
+/// spam the log.
+static DISK_CACHE_INVALIDATION_DISCONNECT_LOGGED: AtomicBool = AtomicBool::new(false);
+
+/// Emits a single warning when the disk-cache invalidation channel is
+/// disconnected. Paths are intentionally omitted to avoid leaking sensitive
+/// filesystem contents; only the operation context and dropped-entry count are
+/// recorded. The channel is never retried (a `SendError` is terminal), and the
+/// underlying file operation itself is unaffected — only the auxiliary
+/// thumbnail/preview disk cache misses this update.
+fn warn_disk_cache_invalidation_disconnected(context: &str, dropped_entries: usize) {
+    if !DISK_CACHE_INVALIDATION_DISCONNECT_LOGGED.swap(true, Ordering::Relaxed) {
+        log::warn!(
+            "[CACHE] Disk-cache invalidation channel disconnected during {context}; \
+             {dropped_entries} cache entr{} dropped. The file operation completed; \
+             only the auxiliary thumbnail cache will not be updated.",
+            if dropped_entries == 1 { "y" } else { "ies" }
+        );
+    }
+}
 
 impl ImageViewerApp {
     pub(super) fn process_file_operation_results(
@@ -345,14 +369,10 @@ impl ImageViewerApp {
             self.cache_manager
                 .put_rgba_data(new_path.clone(), data, w, h);
         }
-        if let Some(bucket) = self
-            .cache_manager
-            .attempted_thumbnail_bucket
-            .remove(&old_path)
-        {
+        if let Some(bucket) = self.cache_manager.attempted_thumbnail_bucket.pop(&old_path) {
             self.cache_manager
                 .attempted_thumbnail_bucket
-                .insert(new_path.clone(), bucket);
+                .put(new_path.clone(), bucket);
         }
         self.cache_manager.loading_set.remove(&old_path);
         self.cache_manager.failed_thumbnails.pop(&old_path);
@@ -379,14 +399,10 @@ impl ImageViewerApp {
             self.cache_manager
                 .put_rgba_data(new_path.clone(), data, w, h);
         }
-        if let Some(bucket) = self
-            .cache_manager
-            .attempted_thumbnail_bucket
-            .remove(&old_path)
-        {
+        if let Some(bucket) = self.cache_manager.attempted_thumbnail_bucket.pop(&old_path) {
             self.cache_manager
                 .attempted_thumbnail_bucket
-                .insert(new_path.clone(), bucket);
+                .put(new_path.clone(), bucket);
         }
 
         if let Some(folder_preview) = self.cache_manager.folder_preview_cache.pop(&old_path) {
@@ -450,10 +466,13 @@ impl ImageViewerApp {
                 rename_to: Some(dest.clone()),
             })
             .collect();
-        let _ = self
+        if let Err(err) = self
             .file_operation_state
             .disk_cache_invalidation_sender
-            .send(entries);
+            .send(entries)
+        {
+            warn_disk_cache_invalidation_disconnected("thumbnail cache rename", err.0.len());
+        }
     }
 
     fn handle_rename_completed(
@@ -488,14 +507,17 @@ impl ImageViewerApp {
         // are preserved after the in-memory caches are evicted on scroll.
         // Use a rename entry instead of the old forced-invalidate.
         use crate::app::init_workers::CacheInvalidationEntry;
-        let _ = self
+        if let Err(err) = self
             .file_operation_state
             .disk_cache_invalidation_sender
             .send(vec![CacheInvalidationEntry {
                 path: path.clone(),
                 force: false,
                 rename_to: Some(new_path.clone()),
-            }]);
+            }])
+        {
+            warn_disk_cache_invalidation_disconnected("rename completed", err.0.len());
+        }
 
         if parent_str == current_path_norm {
             // Clear the dirty flag set by invalidate_folder_and_tab_caches above.
@@ -959,5 +981,39 @@ impl ImageViewerApp {
                 self.watcher_cooldown_until = Some(Instant::now() + Duration::from_secs(2));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod disk_cache_invalidation_tests {
+    use crate::app::init_workers::CacheInvalidationEntry;
+    use std::path::PathBuf;
+    use std::sync::mpsc;
+
+    /// A dropped receiver must make the send fail observably (not silently), and
+    /// the failed payload must be recoverable so the count can be logged — this
+    /// is the exact contract the rename/move handlers rely on via `err.0.len()`.
+    #[test]
+    fn disconnected_channel_send_returns_recoverable_error() {
+        let (tx, rx) = mpsc::channel::<Vec<CacheInvalidationEntry>>();
+        drop(rx);
+
+        let entries = vec![
+            CacheInvalidationEntry {
+                path: PathBuf::from(r"C:\a\one.png"),
+                force: false,
+                rename_to: Some(PathBuf::from(r"C:\a\one_new.png")),
+            },
+            CacheInvalidationEntry {
+                path: PathBuf::from(r"C:\a\two.png"),
+                force: false,
+                rename_to: None,
+            },
+        ];
+
+        let err = tx
+            .send(entries)
+            .expect_err("send must fail on dropped receiver");
+        assert_eq!(err.0.len(), 2);
     }
 }

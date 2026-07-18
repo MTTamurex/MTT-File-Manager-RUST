@@ -562,11 +562,34 @@ fn send_thumbnail_result(
     // This reduces UI stall on every thumbnail upload, especially on OpenGL
     // backends where load_texture blocks the CPU thread synchronously.
     if !data.image_data.is_empty() && !data.not_found {
-        // Need mutable access to the inner Vec for in-place premultiplication.
-        // If the Arc has multiple references, we need to clone it first.
-        let rgba = std::sync::Arc::make_mut(&mut data.image_data);
-        crate::domain::thumbnail::premultiply_rgba_in_place(rgba);
-        data.premultiplied = true;
+        // Validate the decoded buffer at the producer before premultiply/send so a
+        // logic error never ships an inconsistent RGBA buffer to the UI. On
+        // failure, downgrade to a transient empty result (retryable) rather than
+        // forwarding a corrupt buffer.
+        if !crate::domain::thumbnail::is_valid_rgba_buffer(
+            data.width,
+            data.height,
+            crate::domain::thumbnail::MAX_THUMBNAIL_SIDE,
+            data.image_data.len(),
+        ) {
+            log::warn!(
+                "[ThumbnailWorker] Dropping invalid RGBA buffer for {:?} (w={} h={} len={})",
+                data.path.file_name().unwrap_or_default(),
+                data.width,
+                data.height,
+                data.image_data.len()
+            );
+            data.image_data = std::sync::Arc::new(Vec::new());
+            data.width = 0;
+            data.height = 0;
+            data.premultiplied = false;
+        } else {
+            // Need mutable access to the inner Vec for in-place premultiplication.
+            // If the Arc has multiple references, we need to clone it first.
+            let rgba = std::sync::Arc::make_mut(&mut data.image_data);
+            crate::domain::thumbnail::premultiply_rgba_in_place(rgba);
+            data.premultiplied = true;
+        }
     }
 
     if matches!(priority, IOPriority::Interactive) {

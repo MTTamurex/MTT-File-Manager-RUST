@@ -931,6 +931,10 @@ fn render_tag_filter_button(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
     let mut item_clicked = false;
     let popup_pos = egui::pos2(button_rect.left(), button_rect.bottom() + 2.0);
 
+    // Clone the ordered tag-ID snapshot once (O(1) Arc clone) and reuse it for
+    // both the width measurement pass and the render pass below.
+    let sorted_ids = app.sorted_tag_ids();
+
     // Pre-compute the optimal popup width by measuring the widest label.
     // Each row has: 6px left pad + 14px leading column + 6px gap + text + 8px right pad.
     let font_id = egui::FontId::proportional(12.0);
@@ -955,12 +959,14 @@ fn render_tag_filter_button(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
             .rect
             .width();
         max_w = max_w.max(any_w + leading_col);
-        for tag in app.sorted_tag_definitions() {
-            let tw = fonts
-                .layout_no_wrap(tag.name.clone(), font_id.clone(), egui::Color32::WHITE)
-                .rect
-                .width();
-            max_w = max_w.max(tw + leading_col);
+        for &tag_id in sorted_ids.iter() {
+            if let Some(tag) = app.tag_definitions.get(&tag_id) {
+                let tw = fonts
+                    .layout_no_wrap(tag.name.clone(), font_id.clone(), egui::Color32::WHITE)
+                    .rect
+                    .width();
+                max_w = max_w.max(tw + leading_col);
+            }
         }
         if !matches!(app.global_search.tag_filter, GlobalSearchTagFilter::All) {
             let cw = fonts
@@ -1042,11 +1048,14 @@ fn render_tag_filter_button(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
                             _ => Vec::new(),
                         };
 
-                        for tag in app.sorted_tag_definitions() {
-                            let is_selected = selected_ids.contains(&tag.id);
+                        for &tag_id in sorted_ids.iter() {
+                            let Some(tag) = app.tag_definitions.get(&tag_id) else {
+                                continue;
+                            };
+                            let is_selected = selected_ids.contains(&tag_id);
                             let dot_color = Some(tag.color.to_color32());
                             if popup_menu_item(ui, is_selected, &tag.name, dot_color).clicked() {
-                                toggle_tag_in_filter(&mut app.global_search.tag_filter, tag.id);
+                                toggle_tag_in_filter(&mut app.global_search.tag_filter, tag_id);
                                 app.global_search.clear_result_selection();
                                 item_clicked = true;
                             }

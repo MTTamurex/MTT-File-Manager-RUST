@@ -55,7 +55,7 @@ pub(super) fn open_file_icon_db(app_data_dir: &Path) -> Connection {
     conn
 }
 
-fn run_file_icon_migrations(conn: &Connection) {
+pub(super) fn run_file_icon_migrations(conn: &Connection) {
     let _ = conn.execute(
         "CREATE TABLE IF NOT EXISTS file_icons (
             id TEXT PRIMARY KEY,
@@ -381,6 +381,28 @@ mod tests {
 
         cache.save_file_icon(&key, &pixels, 2, 2);
 
+        let (loaded, width, height) = cache.load_file_icon(&key).expect("cached icon");
+        assert_eq!(loaded, pixels);
+        assert_eq!(width, 2);
+        assert_eq!(height, 2);
+    }
+
+    #[test]
+    fn in_memory_fallback_round_trips_within_session() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let cache = IconDiskCache::in_memory_fallback();
+        let exe = dir.path().join("tool.exe");
+        std::fs::write(&exe, b"v1").expect("write source file");
+
+        let key = cache
+            .file_icon_cache_key(&exe, IconSize::Jumbo)
+            .expect("file icon key");
+        let pixels = vec![
+            255, 0, 0, 255, 0, 255, 0, 128, 0, 0, 255, 64, 255, 255, 255, 0,
+        ];
+
+        assert!(cache.load_file_icon(&key).is_none());
+        cache.save_file_icon(&key, &pixels, 2, 2);
         let (loaded, width, height) = cache.load_file_icon(&key).expect("cached icon");
         assert_eq!(loaded, pixels);
         assert_eq!(width, 2);

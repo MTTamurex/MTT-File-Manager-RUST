@@ -284,4 +284,112 @@ mod tests {
         assert_eq!(file_count, 12);
         assert_eq!(folder_count, 3);
     }
+
+    /// Deterministic pseudo-random generator (SplitMix64) so the robustness
+    /// sweep below is reproducible and runs inside `cargo test` without a
+    /// nightly libFuzzer target.
+    struct SplitMix64(u64);
+    impl SplitMix64 {
+        fn next_u64(&mut self) -> u64 {
+            self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
+            let mut z = self.0;
+            z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+            z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+            z ^ (z >> 31)
+        }
+        fn fill(&mut self, buf: &mut [u8]) {
+            for chunk in buf.chunks_mut(8) {
+                let bytes = self.next_u64().to_le_bytes();
+                chunk.copy_from_slice(&bytes[..chunk.len()]);
+            }
+        }
+    }
+
+    /// SEC-L1 robustness: `decode_message::<SearchRequest>` composed with
+    /// `validate()` must never panic, over-allocate, or hang on hostile input.
+    /// Covers truncated valid encodings, random bytes, inflated internal
+    /// lengths, trailing bytes, and sizes from zero up to 64 KiB.
+    #[test]
+    fn fuzz_decode_and_validate_search_request_never_panics() {
+        let mut rng = SplitMix64(0x0DDB_1A5E_5EED_1234);
+
+        // A set of valid encodings to derive truncated / trailing-byte mutants.
+        let seeds = [
+            SearchRequest::Ping,
+            SearchRequest::GetStatus,
+            SearchRequest::WarmIndex,
+            SearchRequest::Query {
+                text: "a".repeat(300),
+                offset: 123,
+                limit: 999,
+            },
+            SearchRequest::CheckPathsModified {
+                paths: vec!["C:/x".to_string(); 8],
+                threshold_secs: 42,
+            },
+            SearchRequest::FolderSize {
+                path: r"C:\projects".to_string(),
+            },
+        ];
+        let seed_payloads: Vec<Vec<u8>> = seeds
+            .iter()
+            .map(|req| {
+                let framed = encode_message(req).unwrap();
+                framed[4..].to_vec() // strip the length prefix; decode takes raw payload
+            })
+            .collect();
+
+        let try_decode = |bytes: &[u8]| {
+            if let Ok(req) = decode_message::<SearchRequest>(bytes) {
+                // Validation must also be panic-free on anything that decodes.
+                let _ = req.validate();
+            }
+        };
+
+        for _ in 0..20_000 {
+            match rng.next_u64() % 4 {
+                // Pure random bytes, size 0..=64 KiB (log-ish distribution).
+                0 => {
+                    let len = (rng.next_u64() as usize) % (64 * 1024 + 1);
+                    let mut buf = vec![0u8; len];
+                    rng.fill(&mut buf);
+                    try_decode(&buf);
+                }
+                // Truncated valid payload.
+                1 => {
+                    let seed = &seed_payloads[(rng.next_u64() as usize) % seed_payloads.len()];
+                    let cut = if seed.is_empty() {
+                        0
+                    } else {
+                        (rng.next_u64() as usize) % (seed.len() + 1)
+                    };
+                    try_decode(&seed[..cut]);
+                }
+                // Valid payload with random trailing bytes appended.
+                2 => {
+                    let seed = &seed_payloads[(rng.next_u64() as usize) % seed_payloads.len()];
+                    let extra = (rng.next_u64() as usize) % 512;
+                    let mut buf = seed.clone();
+                    let start = buf.len();
+                    buf.resize(start + extra, 0);
+                    rng.fill(&mut buf[start..]);
+                    try_decode(&buf);
+                }
+                // Valid payload with a few random byte flips (invalid
+                // discriminants / inflated internal lengths).
+                _ => {
+                    let seed = &seed_payloads[(rng.next_u64() as usize) % seed_payloads.len()];
+                    let mut buf = seed.clone();
+                    if !buf.is_empty() {
+                        let flips = 1 + (rng.next_u64() as usize) % 4;
+                        for _ in 0..flips {
+                            let idx = (rng.next_u64() as usize) % buf.len();
+                            buf[idx] = rng.next_u64() as u8;
+                        }
+                    }
+                    try_decode(&buf);
+                }
+            }
+        }
+    }
 }

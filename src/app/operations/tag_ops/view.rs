@@ -1,7 +1,6 @@
 use super::*;
 use crate::app::state::{FolderLoadError, ImageViewerApp};
 use crate::domain::file_entry::FileEntry;
-use crate::domain::file_tag::FileTag;
 use crate::domain::special_paths::{tag_id_from_view_path, tag_view_path};
 use crate::infrastructure::windows::RootAvailabilityCache;
 use std::os::windows::ffi::OsStrExt;
@@ -99,10 +98,18 @@ fn tag_view_file_entry(path: PathBuf, show_hidden: bool) -> Option<FileEntry> {
 }
 
 impl ImageViewerApp {
-    pub fn sorted_tag_definitions(&self) -> Vec<FileTag> {
-        let mut tags: Vec<FileTag> = self.tag_definitions.values().cloned().collect();
-        tags.sort_by_key(tag_sort_key);
-        tags
+    /// Returns the cached snapshot of tag IDs ordered by
+    /// `(position, name case-insensitive)`. Cloning the `Arc` is O(1); callers
+    /// resolve the current `FileTag` by ID via `self.tag_definitions`.
+    pub fn sorted_tag_ids(&self) -> std::sync::Arc<[i64]> {
+        self.sorted_tag_ids.clone()
+    }
+
+    /// Recomputes [`Self::sorted_tag_ids`] from the current definitions.
+    /// Call after create, rename, delete, or position changes — never on
+    /// assign/unassign or recolor.
+    pub fn rebuild_sorted_tag_ids(&mut self) {
+        self.sorted_tag_ids = super::build_sorted_tag_ids(&self.tag_definitions);
     }
 
     pub fn tag_view_display_name(&self, tag_id: i64) -> String {

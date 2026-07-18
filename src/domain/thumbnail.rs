@@ -48,6 +48,30 @@ pub struct ThumbnailData {
 /// Logical pixel size requested for the detail/preview panel.
 pub const MAX_THUMBNAIL_SIDE: u32 = 512;
 
+/// Maximum side length accepted for a decoded icon RGBA buffer.
+pub const MAX_ICON_SIDE: u32 = 512;
+
+/// Maximum side length accepted for a composed folder-preview RGBA buffer.
+/// Folder previews compose at bucket widths up to 1024 px and the composed
+/// canvas can be taller, so allow generous headroom.
+pub const MAX_FOLDER_PREVIEW_SIDE: u32 = 2048;
+
+/// Validates that `rgba_len` matches an RGBA buffer of `width` x `height`.
+///
+/// Enforces the shared buffer contract before a buffer is handed to
+/// `egui::ColorImage::from_rgba_*`: non-zero dimensions, each side within
+/// `max_side`, and `width * height * 4 == rgba_len` computed with checked
+/// multiplication so a crafted dimension cannot overflow into a small length.
+pub fn is_valid_rgba_buffer(width: u32, height: u32, max_side: u32, rgba_len: usize) -> bool {
+    if width == 0 || height == 0 || width > max_side || height > max_side {
+        return false;
+    }
+    (width as usize)
+        .checked_mul(height as usize)
+        .and_then(|px| px.checked_mul(4))
+        .is_some_and(|expected| expected == rgba_len)
+}
+
 /// Logical pixel size requested for the detail/preview panel.
 pub const DETAIL_PREVIEW_SIZE: u32 = MAX_THUMBNAIL_SIDE;
 
@@ -65,5 +89,37 @@ pub fn detail_preview_size(path: &std::path::Path) -> u32 {
         DETAIL_PREVIEW_GIF_SIZE
     } else {
         DETAIL_PREVIEW_SIZE
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn accepts_minimal_and_max_side_buffers() {
+        assert!(is_valid_rgba_buffer(1, 1, MAX_THUMBNAIL_SIDE, 4));
+        let side = MAX_THUMBNAIL_SIDE;
+        let len = (side as usize) * (side as usize) * 4;
+        assert!(is_valid_rgba_buffer(side, side, MAX_THUMBNAIL_SIDE, len));
+    }
+
+    #[test]
+    fn rejects_zero_oversized_overflow_and_length_mismatch() {
+        // Zero dimensions.
+        assert!(!is_valid_rgba_buffer(0, 1, MAX_THUMBNAIL_SIDE, 0));
+        assert!(!is_valid_rgba_buffer(1, 0, MAX_THUMBNAIL_SIDE, 0));
+        // Above the per-type limit.
+        assert!(!is_valid_rgba_buffer(
+            MAX_THUMBNAIL_SIDE + 1,
+            1,
+            MAX_THUMBNAIL_SIDE,
+            (MAX_THUMBNAIL_SIDE as usize + 1) * 4
+        ));
+        // Overflow-prone dimensions with a small length.
+        assert!(!is_valid_rgba_buffer(u32::MAX, u32::MAX, u32::MAX, 4));
+        // Length inconsistent with dimensions.
+        assert!(!is_valid_rgba_buffer(2, 2, MAX_THUMBNAIL_SIDE, 15));
+        assert!(!is_valid_rgba_buffer(2, 2, MAX_THUMBNAIL_SIDE, 17));
     }
 }

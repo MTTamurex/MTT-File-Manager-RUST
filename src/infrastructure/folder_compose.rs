@@ -59,42 +59,46 @@ pub struct FolderComposer {
     layers: Mutex<HashMap<u32, Arc<FolderCompositionLayers>>>,
 }
 
-impl Default for FolderComposer {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl FolderComposer {
     /// Decodes the embedded folder PNG layers. Bucket scaling happens on demand.
     ///
-    /// Called ONCE at app startup. Panics if the embedded PNGs are invalid
-    /// (should never happen since they're compile-time embedded).
-    pub fn new() -> Self {
+    /// Called ONCE at app startup. Returns `None` if any embedded PNG fails to
+    /// decode (should never happen since they're compile-time embedded, but the
+    /// bootstrap treats folder preview as a degradable component instead of
+    /// panicking the whole application).
+    pub fn try_new() -> Option<Self> {
         let back_img = image::load(
             Cursor::new(crate::embedded_assets::FOLDER_BACK_PNG),
             image::ImageFormat::Png,
         )
-        .expect("Failed to decode embedded folder_back.png");
+        .map_err(|e| log::error!("[FOLDER COMPOSE] Failed to decode folder_back.png: {:?}", e))
+        .ok()?;
 
         let front_img = image::load(
             Cursor::new(crate::embedded_assets::FOLDER_FRONT_PNG),
             image::ImageFormat::Png,
         )
-        .expect("Failed to decode embedded folder_front.png");
+        .map_err(|e| {
+            log::error!(
+                "[FOLDER COMPOSE] Failed to decode folder_front.png: {:?}",
+                e
+            )
+        })
+        .ok()?;
 
         let sheet_img = image::load(
             Cursor::new(crate::embedded_assets::PAPER_SHEET_PNG),
             image::ImageFormat::Png,
         )
-        .expect("Failed to decode embedded paper_sheet.png");
+        .map_err(|e| log::error!("[FOLDER COMPOSE] Failed to decode paper_sheet.png: {:?}", e))
+        .ok()?;
 
-        Self {
+        Some(Self {
             back_img,
             front_img,
             sheet_img,
             layers: Mutex::new(HashMap::with_capacity(BUCKET_OUTPUT_WIDTHS.len())),
-        }
+        })
     }
 
     fn build_layers(
@@ -267,4 +271,36 @@ impl FolderComposer {
 fn scale_margin(value: u32, output_w: u32) -> u32 {
     ((value as u64 * output_w as u64 + (DEFAULT_OUTPUT_W / 2) as u64) / DEFAULT_OUTPUT_W as u64)
         as u32
+}
+
+/// A valid, fully transparent placeholder folder icon.
+///
+/// Used as the default folder icon when [`FolderComposer::try_new`] fails, so
+/// the bootstrap can keep starting without a real composed icon. The buffer
+/// satisfies the `width * height * 4 == len` RGBA invariant.
+pub fn placeholder_folder_icon() -> (Vec<u8>, u32, u32) {
+    let w = DEFAULT_OUTPUT_W;
+    let h = DEFAULT_OUTPUT_W;
+    let len = (w as usize) * (h as usize) * 4;
+    (vec![0u8; len], w, h)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn try_new_decodes_embedded_layers() {
+        assert!(
+            FolderComposer::try_new().is_some(),
+            "embedded folder PNG layers must decode"
+        );
+    }
+
+    #[test]
+    fn placeholder_folder_icon_is_valid_rgba() {
+        let (rgba, w, h) = placeholder_folder_icon();
+        assert!(w > 0 && h > 0);
+        assert_eq!(rgba.len(), (w as usize) * (h as usize) * 4);
+    }
 }

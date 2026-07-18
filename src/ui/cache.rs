@@ -227,8 +227,12 @@ pub struct CacheManager {
     /// the cached texture's real dimensions caused infinite re-extraction
     /// loops for images whose native size is smaller than the desired bucket
     /// (e.g. a 256x256 PNG when the UI wants 512: worker keeps returning 256,
-    /// slot keeps re-requesting). Bounded to MAX_DYNAMIC_TEXTURE_CACHE_ITEMS.
-    pub attempted_thumbnail_bucket: rustc_hash::FxHashMap<PathBuf, u32>,
+    /// slot keeps re-requesting).
+    ///
+    /// An `LruCache` (not a plain map) so reaching capacity evicts only the
+    /// least-recently-used entries instead of wiping the whole history at once,
+    /// which would drop quality-upgrade tracking and cause request bursts.
+    pub attempted_thumbnail_bucket: LruCache<PathBuf, u32>,
     /// Tracks paths that have already emitted a "best_effort_accepted" diagnostic
     /// event, so we don't spam the diagnostic log every frame for the same file.
     pub best_effort_notified: rustc_hash::FxHashSet<PathBuf>,
@@ -288,7 +292,10 @@ impl CacheManager {
             pending_upload_set: FxHashSet::default(),
             folder_preview_trace,
             thumbnail_trace: ThumbnailTraceCounters::default(),
-            attempted_thumbnail_bucket: rustc_hash::FxHashMap::default(),
+            attempted_thumbnail_bucket: LruCache::new(nz_cache_size(
+                MAX_DYNAMIC_TEXTURE_CACHE_ITEMS * 2,
+                "attempted_thumbnail_bucket",
+            )),
             best_effort_notified: rustc_hash::FxHashSet::default(),
             rgba_data_cache: LruCache::new(nz_cache_size(
                 DEFAULT_RGBA_CACHE_ITEMS,
@@ -350,7 +357,10 @@ impl CacheManager {
             pending_upload_set: FxHashSet::default(),
             folder_preview_trace,
             thumbnail_trace: ThumbnailTraceCounters::default(),
-            attempted_thumbnail_bucket: rustc_hash::FxHashMap::default(),
+            attempted_thumbnail_bucket: LruCache::new(nz_cache_size(
+                MAX_DYNAMIC_TEXTURE_CACHE_ITEMS * 2,
+                "attempted_thumbnail_bucket",
+            )),
             best_effort_notified: rustc_hash::FxHashSet::default(),
             rgba_data_cache: LruCache::new(nz_cache_size(rgba_cache_items, "rgba_data_cache")),
             rgba_data_bytes: 0,
@@ -455,27 +465,26 @@ impl CacheManager {
     /// texture's actual dimensions (which can be smaller than the bucket
     /// when the source image is intrinsically small).
     pub fn note_attempted_thumbnail_bucket(&mut self, path: &PathBuf, bucket: u32) {
-        // Defensive cap to prevent unbounded growth on degenerate workloads.
-        // The map is keyed by paths that exist or have been requested in the
-        // current session; the texture cache itself caps at
-        // MAX_DYNAMIC_TEXTURE_CACHE_ITEMS, so this is a safe upper bound.
-        if self.attempted_thumbnail_bucket.len() >= MAX_DYNAMIC_TEXTURE_CACHE_ITEMS * 2
-            && !self.attempted_thumbnail_bucket.contains_key(path)
-        {
-            self.attempted_thumbnail_bucket.clear();
-        }
-        let entry = self
+        // Never reduce the largest bucket already recorded for this path; a
+        // later request for a smaller bucket must not erase the fact that a
+        // higher-quality extraction was already attempted (loop protection).
+        // `put` also refreshes recency, so a path that keeps being requested is
+        // kept warm and survives LRU eviction.
+        let current = self
             .attempted_thumbnail_bucket
-            .entry(path.clone())
-            .or_insert(0);
-        if bucket > *entry {
-            *entry = bucket;
-        }
+            .get(path)
+            .copied()
+            .unwrap_or(0);
+        self.attempted_thumbnail_bucket
+            .put(path.clone(), bucket.max(current));
     }
 
     /// Returns the bucket size most recently requested for `path`, if any.
+    /// Uses `peek` so a read-only query does not alter LRU recency — recency is
+    /// managed explicitly via `note_attempted_thumbnail_bucket` and
+    /// `promote_visible`.
     pub fn attempted_thumbnail_bucket_for(&self, path: &PathBuf) -> Option<u32> {
-        self.attempted_thumbnail_bucket.get(path).copied()
+        self.attempted_thumbnail_bucket.peek(path).copied()
     }
 
     /// Forgets the attempted-bucket record for `path`. Callers must invoke
@@ -483,7 +492,7 @@ impl CacheManager {
     /// (rename/delete/refresh-button), so the slot renderer will request
     /// fresh extraction with the desired bucket again.
     pub fn forget_attempted_thumbnail_bucket(&mut self, path: &PathBuf) {
-        self.attempted_thumbnail_bucket.remove(path);
+        self.attempted_thumbnail_bucket.pop(path);
         self.thumbnail_request_debounce.pop(path);
         self.best_effort_notified.remove(path);
     }
@@ -495,6 +504,9 @@ impl CacheManager {
             let _ = self.texture_cache.get(path);
             let _ = self.folder_preview_cache.get(path);
             let _ = self.rgba_data_cache.get(path);
+            // Keep the bucket history for visible paths warm so it survives LRU
+            // eviction while the item stays on screen.
+            let _ = self.attempted_thumbnail_bucket.get(path);
         }
     }
 
@@ -680,7 +692,6 @@ impl CacheManager {
         self.pending_upload_set.clear();
         self.pending_upload_set.shrink_to_fit();
         self.attempted_thumbnail_bucket.clear();
-        self.attempted_thumbnail_bucket.shrink_to_fit();
         self.best_effort_notified.clear();
         self.best_effort_notified.shrink_to_fit();
         self.thumbnail_request_debounce = LruCache::new(nz_cache_size(
@@ -1216,5 +1227,44 @@ mod tests {
             cache.estimate_ram_cache_usage(),
             DEFAULT_RGBA_CACHE_ITEMS * 4
         );
+    }
+
+    #[test]
+    fn attempted_bucket_never_shrinks_and_detects_upgrade() {
+        let mut cache = CacheManager::new();
+        let p = PathBuf::from("a.png");
+        cache.note_attempted_thumbnail_bucket(&p, 512);
+        // A later smaller request must not reduce the recorded max bucket.
+        cache.note_attempted_thumbnail_bucket(&p, 256);
+        assert_eq!(cache.attempted_thumbnail_bucket_for(&p), Some(512));
+
+        // Upgrade tracking: 256 -> 512 remains detectable.
+        let q = PathBuf::from("b.png");
+        cache.note_attempted_thumbnail_bucket(&q, 256);
+        assert_eq!(cache.attempted_thumbnail_bucket_for(&q), Some(256));
+        cache.note_attempted_thumbnail_bucket(&q, 512);
+        assert_eq!(cache.attempted_thumbnail_bucket_for(&q), Some(512));
+    }
+
+    #[test]
+    fn attempted_bucket_lru_bounds_without_wiping_all_entries() {
+        let mut cache = CacheManager::new();
+        let cap = MAX_DYNAMIC_TEXTURE_CACHE_ITEMS * 2;
+
+        // A recently-used entry that we keep touching must survive eviction.
+        let hot = PathBuf::from("hot.png");
+        cache.note_attempted_thumbnail_bucket(&hot, 256);
+
+        // Insert capacity + 1 distinct paths, keeping `hot` warm.
+        for idx in 0..=cap {
+            cache.note_attempted_thumbnail_bucket(&PathBuf::from(format!("f{idx}.png")), 128);
+            cache.note_attempted_thumbnail_bucket(&hot, 256);
+        }
+
+        // The limit is enforced and the map was NOT wiped to empty.
+        assert_eq!(cache.attempted_thumbnail_bucket.len(), cap);
+        assert!(cache.attempted_thumbnail_bucket.len() > 1);
+        // The recently-used entry is still present.
+        assert_eq!(cache.attempted_thumbnail_bucket_for(&hot), Some(256));
     }
 }

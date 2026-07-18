@@ -317,6 +317,22 @@ fn drain_tooltip_responses(app: &mut ImageViewerApp) {
                 height,
             }) => {
                 app.global_search.tooltip_thumbnail_inflight.remove(&path);
+                // Validate the buffer before it reaches ColorImage::from_rgba_*.
+                if !crate::domain::thumbnail::is_valid_rgba_buffer(
+                    width,
+                    height,
+                    crate::domain::thumbnail::MAX_THUMBNAIL_SIDE,
+                    rgba.len(),
+                ) {
+                    log::warn!(
+                        "[GLOBAL-SEARCH] Rejected invalid tooltip RGBA for {} (w={} h={} len={})",
+                        path,
+                        width,
+                        height,
+                        rgba.len()
+                    );
+                    continue;
+                }
                 let tex = app.ui_ctx.load_texture(
                     format!("gs_thumb_{}", path),
                     egui::ColorImage::from_rgba_unmultiplied(

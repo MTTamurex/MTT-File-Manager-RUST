@@ -41,6 +41,10 @@ pub struct AppStateDb {
     reader: Arc<Mutex<Connection>>,
     #[allow(dead_code)]
     state_dir: PathBuf,
+    /// True when the active writer connection is the primary on-disk database.
+    /// False when running from a temp/in-memory fallback, in which case the
+    /// legacy migration must not touch the primary path.
+    on_primary_path: bool,
 }
 
 impl AppStateDb {
@@ -108,6 +112,8 @@ impl AppStateDb {
             (conn, fallback_path)
         };
 
+        let on_primary_path = active_db_path.as_deref() == Some(db_path.as_path());
+
         db_utils::apply_default_pragmas(&writer_conn);
 
         // 2. Open READER connection
@@ -141,7 +147,40 @@ impl AppStateDb {
             writer,
             reader,
             state_dir,
+            on_primary_path,
         })
+    }
+
+    /// Builds an in-memory app state database as a last-resort fallback.
+    ///
+    /// Used by the bootstrap when the primary constructor panics or cannot open
+    /// any on-disk store. State is session-only and never persisted. This never
+    /// touches the filesystem, so it does not repeat the deterministic failure
+    /// that forced the fallback.
+    pub fn new_in_memory() -> rusqlite::Result<Self> {
+        let writer_conn = Connection::open_in_memory()?;
+        db_utils::apply_default_pragmas(&writer_conn);
+        Self::run_migrations(&writer_conn);
+
+        let writer = Arc::new(Mutex::new(writer_conn));
+        // A second in-memory connection would be a distinct empty database, so
+        // the reader must share the writer connection here.
+        let reader = writer.clone();
+
+        Ok(Self {
+            writer,
+            reader,
+            state_dir: std::env::temp_dir(),
+            on_primary_path: false,
+        })
+    }
+
+    /// Returns true when the active writer is the primary on-disk database.
+    ///
+    /// The legacy migration only runs when the active store is primary, so a
+    /// fallback instance never rewrites the primary database file.
+    pub fn is_on_primary_path(&self) -> bool {
+        self.on_primary_path
     }
 
     fn run_migrations(conn: &Connection) {
@@ -348,5 +387,23 @@ impl AppStateDb {
                 error
             ),
         }
+    }
+}
+
+#[cfg(test)]
+mod fallback_tests {
+    use super::*;
+
+    #[test]
+    fn new_in_memory_is_not_primary_and_is_read_write() {
+        let db = AppStateDb::new_in_memory().expect("in-memory app state db must build");
+        assert!(
+            !db.is_on_primary_path(),
+            "in-memory fallback must never report the primary path"
+        );
+
+        db.set_preference("fallback_probe", "ok")
+            .expect("in-memory fallback must be writable");
+        assert_eq!(db.get_preference("fallback_probe").as_deref(), Some("ok"));
     }
 }

@@ -126,6 +126,51 @@ pub(in crate::app) struct AppBootstrap {
     pub(in crate::app) custom_folder_icon: (Vec<u8>, u32, u32),
 }
 
+/// Extracts a human-readable message from a captured panic payload.
+fn describe_panic(payload: &(dyn std::any::Any + Send)) -> String {
+    if let Some(s) = payload.downcast_ref::<&str>() {
+        (*s).to_string()
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "unknown panic payload".to_string()
+    }
+}
+
+/// Resolves a mandatory store that failed its primary constructor.
+///
+/// Builds an in-memory fallback via `fallback` (a distinct constructor that does
+/// not repeat the deterministic failure). Only when even the in-memory fallback
+/// cannot be built — i.e. no valid store exists at all — is startup aborted.
+fn resolve_mandatory_db<T>(
+    component: &str,
+    failure: &str,
+    fallback: impl FnOnce() -> rusqlite::Result<T>,
+) -> T {
+    log::error!(
+        "[STARTUP] {} primary init failed ({}). Building in-memory fallback.",
+        component,
+        failure
+    );
+    match fallback() {
+        Ok(store) => {
+            log::warn!(
+                "[STARTUP] {} running from in-memory fallback (state not persisted this session).",
+                component
+            );
+            store
+        }
+        Err(e) => {
+            log::error!(
+                "[STARTUP] {} in-memory fallback also failed: {:?}. No valid store — exiting.",
+                component,
+                e
+            );
+            std::process::exit(1);
+        }
+    }
+}
+
 pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
     let bootstrap_start = Instant::now();
     let mut last_step = bootstrap_start;
@@ -174,81 +219,109 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
     // PERF: Parallelize independent SQLite opens + IconDiskCache on cold start.
     // Each opens its own DB file with no cross-dependency, so running them
     // concurrently turns the SUM of their latencies into the MAX.
-    let mut disk_cache: Option<Arc<ThumbnailDiskCache>> = None;
-    let mut app_state_db: Option<Arc<AppStateDb>> = None;
-    let mut directory_index: Option<Arc<DirectoryIndex>> = None;
-    let mut icon_disk_cache: Option<Arc<IconDiskCache>> = None;
+    //
+    // BUG-A1: every join is handled individually so a recoverable panic in one
+    // bootstrap thread degrades that single component instead of unwinding into
+    // the main thread and aborting the whole application.
     let parallel_start = Instant::now();
-    std::thread::scope(|s| {
-        let disk_cache_handle = s.spawn(|| -> rusqlite::Result<ThumbnailDiskCache> {
-            ThumbnailDiskCache::new(cache_dir.clone()).or_else(|e| {
-                log::error!(
-                    "[Cache] Failed to initialize thumbnail cache at {:?}: {:?}. Retrying in-memory.",
-                    cache_dir, e
-                );
-                ThumbnailDiskCache::new(std::env::temp_dir().join("mtt-cache-fallback"))
-            })
-        });
-
-        let app_state_handle = s.spawn(|| -> rusqlite::Result<AppStateDb> {
-            AppStateDb::new(state_dir.clone()).or_else(|e| {
-                log::error!(
-                    "[State] Failed to initialize app state DB at {:?}: {:?}. Retrying in-memory.",
-                    state_dir,
-                    e
-                );
-                AppStateDb::new(std::env::temp_dir().join("mtt-state-fallback"))
-            })
-        });
-
-        let dir_index_handle = s.spawn(|| -> rusqlite::Result<DirectoryIndex> {
-            DirectoryIndex::open(&dir_cache_dir.join("directory_cache.db"))
-        });
-
+    let (disk_cache, app_state_db, directory_index, icon_disk_cache): (
+        Arc<ThumbnailDiskCache>,
+        Arc<AppStateDb>,
+        Option<Arc<DirectoryIndex>>,
+        Arc<IconDiskCache>,
+    ) = std::thread::scope(|s| {
+        let disk_cache_handle = s.spawn(|| ThumbnailDiskCache::new(cache_dir.clone()));
+        let app_state_handle = s.spawn(|| AppStateDb::new(state_dir.clone()));
+        let dir_index_handle =
+            s.spawn(|| DirectoryIndex::open(&dir_cache_dir.join("directory_cache.db")));
         let icon_cache_handle = s.spawn(|| IconDiskCache::new(&base_dir));
 
-        // Migration depends on app_state.db and thumbnails.db initialization.
-        // Wait for both so migration never races ThumbnailDiskCache schema setup.
-        let app_state_raw = app_state_handle.join().unwrap();
-        let disk_cache_raw = disk_cache_handle.join().unwrap();
+        // AppStateDb: mandatory. On open error or panic, build an in-memory
+        // store via a distinct constructor instead of retrying the primary one
+        // (a deterministic panic would just repeat).
+        let app_state_db = match app_state_handle.join() {
+            Ok(Ok(db)) => db,
+            Ok(Err(e)) => resolve_mandatory_db(
+                "AppStateDb",
+                &format!("open error: {:?}", e),
+                AppStateDb::new_in_memory,
+            ),
+            Err(panic) => resolve_mandatory_db(
+                "AppStateDb",
+                &format!("panic: {}", describe_panic(panic.as_ref())),
+                AppStateDb::new_in_memory,
+            ),
+        };
+
+        // ThumbnailDiskCache: mandatory, same degradation policy.
+        let disk_cache = match disk_cache_handle.join() {
+            Ok(Ok(c)) => c,
+            Ok(Err(e)) => resolve_mandatory_db(
+                "ThumbnailDiskCache",
+                &format!("open error: {:?}", e),
+                ThumbnailDiskCache::new_in_memory,
+            ),
+            Err(panic) => resolve_mandatory_db(
+                "ThumbnailDiskCache",
+                &format!("panic: {}", describe_panic(panic.as_ref())),
+                ThumbnailDiskCache::new_in_memory,
+            ),
+        };
+
+        // DirectoryIndex: optional. Degrade to None on open error or panic,
+        // matching the existing behavior for normal open failures.
+        let directory_index = match dir_index_handle.join() {
+            Ok(Ok(index)) => Some(Arc::new(index)),
+            Ok(Err(e)) => {
+                log::warn!("[STARTUP] DirectoryIndex disabled — open error: {:?}", e);
+                None
+            }
+            Err(panic) => {
+                log::error!(
+                    "[STARTUP] DirectoryIndex disabled — thread panicked: {}",
+                    describe_panic(panic.as_ref())
+                );
+                None
+            }
+        };
+
+        // IconDiskCache: degradable to a session-only in-memory store.
+        let icon_disk_cache = match icon_cache_handle.join() {
+            Ok(cache) => cache,
+            Err(panic) => {
+                log::error!(
+                    "[STARTUP] IconDiskCache degraded to in-memory — thread panicked: {}",
+                    describe_panic(panic.as_ref())
+                );
+                IconDiskCache::in_memory_fallback()
+            }
+        };
+
+        (
+            Arc::new(disk_cache),
+            Arc::new(app_state_db),
+            directory_index,
+            Arc::new(icon_disk_cache),
+        )
+    });
+
+    // Legacy migration runs only after the active stores are finalized, and only
+    // when BOTH mandatory stores are on their primary path. Migrating while a
+    // store is in fallback would rewrite a primary DB the app is not using.
+    if app_state_db.is_on_primary_path() && disk_cache.is_on_primary_path() {
         migrate_legacy_tables(
             &cache_dir.join("thumbnails.db"),
             &state_dir.join("app_state.db"),
         );
+    } else {
+        log::warn!(
+            "[Migration] Skipped — a mandatory store is in fallback mode \
+             (app_state primary={}, thumbnails primary={})",
+            app_state_db.is_on_primary_path(),
+            disk_cache.is_on_primary_path()
+        );
+    }
 
-        // Join parallel results.
-        let disk_cache_inner = match disk_cache_raw {
-            Ok(c) => c,
-            Err(e2) => {
-                log::error!("[Cache] In-memory fallback also failed: {:?}. Exiting.", e2);
-                std::process::exit(1);
-            }
-        };
-        let app_state_inner = match app_state_raw {
-            Ok(db) => db,
-            Err(e2) => {
-                log::error!("[State] In-memory fallback also failed: {:?}. Exiting.", e2);
-                std::process::exit(1);
-            }
-        };
-        let dir_index_raw = dir_index_handle.join().unwrap();
-        let icon_cache_inner = icon_cache_handle.join().unwrap();
-
-        // Write to outer variables (scoped threads can borrow outer muts).
-        disk_cache = Some(Arc::new(disk_cache_inner));
-        app_state_db = Some(Arc::new(app_state_inner));
-        directory_index = match dir_index_raw {
-            Ok(index) => Some(Arc::new(index)),
-            Err(e) => {
-                log::warn!("[Cache] Failed to open directory index: {:?}", e);
-                None
-            }
-        };
-        icon_disk_cache = Some(Arc::new(icon_cache_inner));
-    });
-    let disk_cache = disk_cache.unwrap();
-    let app_state_db = app_state_db.unwrap();
-    let icon_disk_cache = icon_disk_cache.unwrap();
     log::info!(
         "[STARTUP] parallel SQLite opens + migration total_ms={}",
         parallel_start.elapsed().as_millis()
@@ -265,9 +338,10 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
     // Decodes 3 embedded PNGs + composites the empty-folder icon (~30-80ms cold).
     // Runs concurrently with worker spawning below.
     let folder_composer_handle = std::thread::spawn(|| {
-        let composer = FolderComposer::new();
-        let empty_icon = composer.compose_empty();
-        (composer, empty_icon)
+        FolderComposer::try_new().map(|composer| {
+            let empty_icon = composer.compose_empty();
+            (composer, empty_icon)
+        })
     });
 
     let (img_tx, img_rx) = crossbeam_channel::bounded(THUMBNAIL_RESULT_CHANNEL_CAPACITY);
@@ -305,8 +379,31 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
     let (meta_req_tx, meta_res_rx) = spawn_metadata_worker(ctx);
     let (live_size_req_tx, live_size_res_rx) = spawn_live_file_size_worker(ctx);
     let (file_hash_req_tx, file_hash_res_rx) = spawn_file_hash_worker(ctx);
-    let (folder_composer_raw, custom_folder_icon) = folder_composer_handle.join().unwrap();
-    let folder_composer = Arc::new(folder_composer_raw);
+    // Folder preview is a degradable component: if the composer fails to decode
+    // its embedded layers (or its thread panics), disable preview and fall back
+    // to a valid placeholder folder icon instead of aborting startup.
+    let (folder_composer, custom_folder_icon) = match folder_composer_handle.join() {
+        Ok(Some((composer, icon))) => (Some(Arc::new(composer)), icon),
+        Ok(None) => {
+            log::error!(
+                "[STARTUP] FolderComposer init failed — folder preview disabled, using placeholder icon"
+            );
+            (
+                None,
+                crate::infrastructure::folder_compose::placeholder_folder_icon(),
+            )
+        }
+        Err(panic) => {
+            log::error!(
+                "[STARTUP] FolderComposer thread panicked: {} — folder preview disabled",
+                describe_panic(panic.as_ref())
+            );
+            (
+                None,
+                crate::infrastructure::folder_compose::placeholder_folder_icon(),
+            )
+        }
+    };
     let folder_preview_trace =
         Arc::new(crate::workers::folder_preview_worker::FolderPreviewTraceCounters::default());
     let (folder_preview_tx, folder_preview_res_rx) = spawn_folder_preview_workers(

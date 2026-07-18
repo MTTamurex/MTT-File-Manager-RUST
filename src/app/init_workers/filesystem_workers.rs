@@ -252,7 +252,7 @@ pub(in crate::app) fn spawn_disk_cache_invalidation_worker(
 pub(in crate::app) fn spawn_folder_preview_workers(
     ctx: &egui::Context,
     disk_cache: Arc<ThumbnailDiskCache>,
-    folder_composer: Arc<crate::infrastructure::folder_compose::FolderComposer>,
+    folder_composer: Option<Arc<crate::infrastructure::folder_compose::FolderComposer>>,
     trace: Arc<crate::workers::folder_preview_worker::FolderPreviewTraceCounters>,
 ) -> (
     crossbeam_channel::Sender<crate::workers::folder_preview_worker::FolderPreviewRequest>,
@@ -266,6 +266,14 @@ pub(in crate::app) fn spawn_folder_preview_workers(
         crate::workers::folder_preview_worker::FolderPreviewRequest,
     >(60);
     let (folder_preview_res_tx, folder_preview_res_rx) = mpsc::channel();
+
+    // When the folder composer failed to initialise, folder preview is disabled:
+    // return the channels so callers keep the same contract, but spawn no worker.
+    // Requests then fill the bounded queue and are dropped as best-effort.
+    let Some(folder_composer) = folder_composer else {
+        log::warn!("[FolderPreview] Composer unavailable — folder preview disabled");
+        return (folder_preview_tx, folder_preview_res_rx);
+    };
 
     {
         use crate::workers::folder_preview_worker::spawn_folder_preview_worker;

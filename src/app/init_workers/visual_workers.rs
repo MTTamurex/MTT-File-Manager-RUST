@@ -216,9 +216,13 @@ pub(in crate::app) fn spawn_icon_worker(
 
                     // Drop stale requests quickly when user has already navigated away.
                     // usize::MAX = pre-warm requests (always process).
+                    // Still emit a terminal empty response so the UI releases this
+                    // path's loading_icons / loading_extensions markers and can retry.
                     if req_generation != usize::MAX
                         && req_generation != generation_ref.load(AtomicOrdering::Relaxed)
                     {
+                        let _ = icon_res_tx.send((path, req_generation, Vec::new(), 0, 0));
+                        icon_ctx.request_repaint();
                         continue;
                     }
 
@@ -290,27 +294,44 @@ pub(in crate::app) fn spawn_icon_worker(
                     };
 
                     match icon_result {
-                        Ok((pixels, width, height)) => {
-                            let _ = icon_res_tx.send((path, req_generation, pixels, width, height));
-                        }
-                        Err(_) => {
-                            let _ = icon_res_tx.send((path, req_generation, Vec::new(), 0, 0));
-                        }
+                        Ok((pixels, width, height)) => (pixels, width, height),
+                        Err(_) => (Vec::new(), 0, 0),
                     }
-                    icon_ctx.request_repaint();
 
                     })); // end catch_unwind
 
-                    if let Err(e) = process_result {
-                        let msg = if let Some(s) = e.downcast_ref::<&str>() {
-                            s.to_string()
-                        } else if let Some(s) = e.downcast_ref::<String>() {
-                            s.clone()
-                        } else {
-                            "unknown".to_string()
-                        };
-                        log::error!("[IconWorker-{}] panic: {}", worker_id, msg);
-                    }
+                    // Always emit exactly one terminal response (Success, Failed,
+                    // or panic) so the UI releases this path's loading markers.
+                    let (pixels, width, height) = match process_result {
+                        Ok(triple) => triple,
+                        Err(e) => {
+                            let msg = if let Some(s) = e.downcast_ref::<&str>() {
+                                s.to_string()
+                            } else if let Some(s) = e.downcast_ref::<String>() {
+                                s.clone()
+                            } else {
+                                "unknown".to_string()
+                            };
+                            log::error!("[IconWorker-{}] panic: {}", worker_id, msg);
+                            (Vec::new(), 0, 0)
+                        }
+                    };
+
+                    // Producer-side validation: never forward an inconsistent RGBA
+                    // buffer; downgrade to an empty (retryable/failed) result.
+                    let (pixels, width, height) = if crate::domain::thumbnail::is_valid_rgba_buffer(
+                        width,
+                        height,
+                        crate::domain::thumbnail::MAX_ICON_SIDE,
+                        pixels.len(),
+                    ) {
+                        (pixels, width, height)
+                    } else {
+                        (Vec::new(), 0, 0)
+                    };
+
+                    let _ = icon_res_tx.send((path, req_generation, pixels, width, height));
+                    icon_ctx.request_repaint();
                 }
 
                 // ComGuard RAII handles CoUninitialize on drop
@@ -361,7 +382,17 @@ pub(in crate::app) fn spawn_metadata_worker(
             );
 
             while let Ok((path, mtime)) = latest_req_rx.recv() {
-                let meta = windows_infra::extract_media_metadata(&path);
+                // Guard against a panic in metadata extraction: without this, a
+                // crash here would kill the worker thread and leave every future
+                // `metadata_loading` marker stuck. On panic, emit a default
+                // (empty) terminal response so the UI clears the marker.
+                let meta = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    windows_infra::extract_media_metadata(&path)
+                }))
+                .unwrap_or_else(|_| {
+                    log::error!("[MetadataWorker] panic extracting metadata for {:?}", path);
+                    windows_infra::MediaMetadata::default()
+                });
                 if meta_res_tx.send((path, mtime, meta)).is_err() {
                     break;
                 }

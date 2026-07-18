@@ -56,8 +56,12 @@ impl ImageViewerApp {
                     if !crate::infrastructure::windows::file_flags::is_file_unsafe_to_read_fast(
                         &path,
                     ) {
-                        let _ = self.metadata_req_sender.send((path.clone(), mtime));
-                        self.metadata_loading.insert(path.clone());
+                        // Only mark the path as loading if the request was
+                        // actually queued; otherwise a failed send would leave the
+                        // marker stuck and block future metadata requests.
+                        if self.metadata_req_sender.send((path.clone(), mtime)).is_ok() {
+                            self.metadata_loading.insert(path.clone());
+                        }
                     }
                 }
 

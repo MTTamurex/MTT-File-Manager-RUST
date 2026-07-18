@@ -431,6 +431,26 @@ impl GlobalSearchState {
                             let decoded = disk_cache
                                 .get_latest(&p)
                                 .and_then(|entry| {
+                                    // Validate the WebP dimensions from the header
+                                    // BEFORE the full decode, so an oversized or
+                                    // garbage image never triggers a large
+                                    // allocation just to be rejected afterwards.
+                                    let (w, h) = image::ImageReader::with_format(
+                                        std::io::Cursor::new(&entry.data),
+                                        image::ImageFormat::WebP,
+                                    )
+                                    .into_dimensions()
+                                    .ok()?;
+                                    let expected_len =
+                                        (w as usize).checked_mul(h as usize)?.checked_mul(4)?;
+                                    if !crate::domain::thumbnail::is_valid_rgba_buffer(
+                                        w,
+                                        h,
+                                        crate::domain::thumbnail::MAX_THUMBNAIL_SIDE,
+                                        expected_len,
+                                    ) {
+                                        return None;
+                                    }
                                     image::load_from_memory_with_format(
                                         &entry.data,
                                         image::ImageFormat::WebP,

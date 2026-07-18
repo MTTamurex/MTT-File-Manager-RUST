@@ -413,6 +413,7 @@ impl ImageViewerApp {
         // being loaded, skip.  Once that result arrives, extension_cache is
         // populated and ALL files with that extension get the icon immediately.
         // Only applies to non-unique-icon extensions.
+        let mut inserted_extension: Option<String> = None;
         if let Some(ext) = path.extension() {
             let ext_lower = ext.to_string_lossy().to_lowercase();
             if !crate::infrastructure::windows::icons::is_per_file_icon_ext(&ext_lower) {
@@ -422,6 +423,7 @@ impl ImageViewerApp {
                     return; // Another file with this ext is already in-flight.
                 }
                 self.loading_extensions.insert(load_ext.to_string());
+                inserted_extension = Some(load_ext.to_string());
             }
         }
 
@@ -431,7 +433,12 @@ impl ImageViewerApp {
             .send((path.clone(), effective_gen))
             .is_err()
         {
+            // Revert BOTH markers on send failure so the request can be retried
+            // instead of being permanently deduped by a stuck extension marker.
             self.loading_icons.remove(&path);
+            if let Some(ext_key) = inserted_extension {
+                self.loading_extensions.remove(ext_key.as_str());
+            }
         }
     }
 }

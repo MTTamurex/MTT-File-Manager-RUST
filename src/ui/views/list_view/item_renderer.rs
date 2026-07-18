@@ -67,7 +67,7 @@ pub(crate) fn prepare_list_item_resources(
     let request_size_px = display_request_size_px.max(min_request_size_for_bucket);
     let needs_bucket_refresh = ctx
         .attempted_thumbnail_bucket
-        .get(&item.path)
+        .peek(&item.path)
         .is_some_and(|bucket| *bucket < desired_thumbnail_bucket);
 
     const MAX_THUMBNAIL_REQUESTS_PER_FRAME: usize = 96;

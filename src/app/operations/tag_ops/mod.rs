@@ -55,6 +55,15 @@ fn tag_sort_key(tag: &FileTag) -> (i64, String) {
     (tag.position, tag.name.to_lowercase())
 }
 
+/// Builds the ordered tag-ID snapshot from the current definitions.
+///
+/// Ordering matches [`tag_sort_key`]: `(position, name case-insensitive)`.
+pub(crate) fn build_sorted_tag_ids(defs: &FxHashMap<i64, FileTag>) -> std::sync::Arc<[i64]> {
+    let mut tags: Vec<&FileTag> = defs.values().collect();
+    tags.sort_by_key(|tag| tag_sort_key(tag));
+    tags.iter().map(|tag| tag.id).collect()
+}
+
 fn tag_assignment_path_matches(assigned_path: &Path, path: &Path) -> bool {
     normalize_path_text(assigned_path) == normalize_path_text(path)
 }
@@ -87,4 +96,30 @@ fn tag_assignment_key_for_path_with_tag<'a>(
         (ids.contains(&tag_id) && tag_assignment_path_matches(assigned_path, path))
             .then_some(assigned_path)
     })
+}
+
+#[cfg(test)]
+mod sorted_tag_ids_tests {
+    use super::build_sorted_tag_ids;
+    use crate::domain::file_tag::{FileTag, TagColor};
+    use rustc_hash::FxHashMap;
+
+    fn tag(id: i64, name: &str, position: i64) -> FileTag {
+        FileTag {
+            id,
+            name: name.to_string(),
+            color: TagColor::Red,
+            position,
+        }
+    }
+
+    #[test]
+    fn orders_by_position_then_name_case_insensitive() {
+        let mut defs: FxHashMap<i64, FileTag> = FxHashMap::default();
+        defs.insert(1, tag(1, "beta", 1));
+        defs.insert(2, tag(2, "Alpha", 1)); // same position, case-insensitive before "beta"
+        defs.insert(3, tag(3, "zeta", 0)); // lower position sorts first
+        let ids = build_sorted_tag_ids(&defs);
+        assert_eq!(&*ids, &[3, 2, 1]);
+    }
 }

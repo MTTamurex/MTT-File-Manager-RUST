@@ -53,7 +53,7 @@ pub(super) fn render_file_slot<O: ItemSlotOperations>(
             display_request_size_px.max(min_request_size_for_bucket)
         };
         let has_texture = ctx.texture_cache.peek(&item.path).is_some();
-        let attempted_bucket = ctx.attempted_thumbnail_bucket.get(&item.path).copied();
+        let attempted_bucket = ctx.attempted_thumbnail_bucket.peek(&item.path).copied();
         let needs_bucket_refresh = match attempted_bucket {
             Some(b) => b < desired_thumbnail_bucket,
             None => false,

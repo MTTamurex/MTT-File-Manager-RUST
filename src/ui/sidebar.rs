@@ -59,6 +59,9 @@ pub struct SidebarContext<'a> {
     /// Folder tree expansion state (shared reference for rendering)
     pub tree_state: &'a SidebarTreeState,
     pub tag_definitions: &'a FxHashMap<i64, FileTag>,
+    /// Tag IDs pre-sorted by `(position, name case-insensitive)`; resolved
+    /// against `tag_definitions` so the sidebar never re-sorts each frame.
+    pub sorted_tag_ids: &'a [i64],
     pub tag_counts: &'a FxHashMap<i64, usize>,
     pub active_tag_filter: Option<i64>,
     pub collapse_tags: bool,
@@ -412,10 +415,10 @@ pub fn render_tags_section(
 
     ui.add_space(4.0);
 
-    let mut tags: Vec<&FileTag> = ctx.tag_definitions.values().collect();
-    tags.sort_by_key(|tag| (tag.position, tag.name.to_lowercase()));
-
-    for tag in tags {
+    for tag_id in ctx.sorted_tag_ids {
+        let Some(tag) = ctx.tag_definitions.get(tag_id) else {
+            continue;
+        };
         let is_selected = ctx.active_tag_filter == Some(tag.id);
         let count = ctx.tag_counts.get(&tag.id).copied().unwrap_or(0);
         let (mut rect, response) =

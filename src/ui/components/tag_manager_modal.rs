@@ -184,7 +184,13 @@ pub fn render_tag_manager_modal(app: &mut ImageViewerApp, ctx: &egui::Context) {
 }
 
 pub fn render_tag_manager_content(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
-    let tags = app.sorted_tag_definitions();
+    // Resolve the current definitions in the cached display order, avoiding the
+    // per-frame clone + lowercase + sort of the whole definition set.
+    let sorted_ids = app.sorted_tag_ids();
+    let tags: Vec<crate::domain::file_tag::FileTag> = sorted_ids
+        .iter()
+        .filter_map(|id| app.tag_definitions.get(id).cloned())
+        .collect();
     let mut actions = Vec::new();
 
     ui.vertical(|ui| {

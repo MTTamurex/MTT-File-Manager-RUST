@@ -240,6 +240,9 @@ impl ImageViewerApp {
         const MAX_PREWARM_UPLOADS_PER_FRAME: usize = 16;
         let mut phase1_processed_regular = false;
         let mut prewarm_uploads = 0usize;
+        // Drain-scoped lazy cache of inactive-panel paths, shared across every
+        // process_single_icon_result call in this drain (built at most once).
+        let mut inactive_panel_paths: Option<Option<crate::ui::cache::FxHashSet<PathBuf>>> = None;
         loop {
             if prewarm_uploads >= MAX_PREWARM_UPLOADS_PER_FRAME {
                 // More pre-warm results may remain — continue next frame.
@@ -251,7 +254,12 @@ impl ImageViewerApp {
                     if icon_generation == usize::MAX {
                         // Pre-warm result: populate extension_cache only.
                         // Store under _Jumbo (primary) and _Large (backward compat).
-                        if !pixels.is_empty() && width > 0 && height > 0 {
+                        if crate::domain::thumbnail::is_valid_rgba_buffer(
+                            width,
+                            height,
+                            crate::domain::thumbnail::MAX_ICON_SIDE,
+                            pixels.len(),
+                        ) {
                             if let Some(ext) = path.extension() {
                                 let ext_raw = ext.to_string_lossy().to_lowercase();
                                 let ext_str =
@@ -317,6 +325,7 @@ impl ImageViewerApp {
                         pixels,
                         width,
                         height,
+                        &mut inactive_panel_paths,
                     );
                     phase1_processed_regular = true;
                     break; // Switch to budgeted Phase 2.
@@ -412,7 +421,15 @@ impl ImageViewerApp {
                     }
                     continue; // Don't count against budget.
                 }
-                self.process_single_icon_result(ctx, path, icon_generation, pixels, width, height);
+                self.process_single_icon_result(
+                    ctx,
+                    path,
+                    icon_generation,
+                    pixels,
+                    width,
+                    height,
+                    &mut inactive_panel_paths,
+                );
                 icon_uploads += 1;
             } else {
                 break;
@@ -429,6 +446,11 @@ impl ImageViewerApp {
     }
 
     /// Process a single regular (non-pre-warm) icon result.
+    ///
+    /// `inactive_panel_paths` is a drain-scoped lazy cache of the inactive
+    /// panel's paths; it is built at most once per `process_icon_worker_results`
+    /// call, on the first result whose generation diverges.
+    #[allow(clippy::too_many_arguments)]
     fn process_single_icon_result(
         &mut self,
         ctx: &egui::Context,
@@ -437,9 +459,12 @@ impl ImageViewerApp {
         pixels: Vec<u8>,
         width: u32,
         height: u32,
+        inactive_panel_paths: &mut Option<Option<crate::ui::cache::FxHashSet<PathBuf>>>,
     ) {
         self.loading_icons.remove(&path);
-        // Remove extension from loading set.
+        // Remove the extension from the loading set BEFORE any generation or
+        // validity discard, so a stale/failed/panicked response never leaves the
+        // extension marker stuck and blocking retries.
         if let Some(ext) = path.extension() {
             let ext_raw = ext.to_string_lossy().to_lowercase();
             if !crate::infrastructure::windows::icons::is_per_file_icon_ext(&ext_raw) {
@@ -450,12 +475,28 @@ impl ImageViewerApp {
 
         // Ignore stale icon results from previous folder generations unless
         // the path still belongs to the visible inactive dual-panel snapshot.
-        if icon_generation != self.generation && !self.path_belongs_to_inactive_panel(&path) {
+        if icon_generation != self.generation
+            && !inactive_panel_paths
+                .get_or_insert_with(|| self.collect_inactive_panel_paths())
+                .as_ref()
+                .is_some_and(|set| set.contains(&path))
+        {
             return;
         }
 
-        if pixels.is_empty() || width == 0 || height == 0 {
-            self.failed_icons.put(path, ());
+        // Validate the buffer before ColorImage::from_rgba_*. Only poison
+        // failed_icons for a result that is relevant to the CURRENT generation;
+        // an empty terminal response used to release markers for a stale or
+        // panicked request must not suppress future retries.
+        if !crate::domain::thumbnail::is_valid_rgba_buffer(
+            width,
+            height,
+            crate::domain::thumbnail::MAX_ICON_SIDE,
+            pixels.len(),
+        ) {
+            if icon_generation == self.generation {
+                self.failed_icons.put(path, ());
+            }
             return;
         }
 

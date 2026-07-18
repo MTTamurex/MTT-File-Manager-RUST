@@ -1,4 +1,5 @@
 use crate::app::state::ImageViewerApp;
+#[cfg(feature = "notify-watcher")]
 use notify::event::{ModifyKind, RenameMode};
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -637,7 +638,7 @@ impl ImageViewerApp {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "notify-watcher"))]
 mod tests {
     use super::*;
     use notify::event::{ModifyKind, RemoveKind, RenameMode};

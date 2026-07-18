@@ -475,7 +475,11 @@ impl ImageViewerApp {
 
             if can_tag_targets && !self.tag_definitions.is_empty() {
                 let mut sub_items = Vec::new();
-                for (idx, tag) in self.sorted_tag_definitions().into_iter().enumerate() {
+                let sorted_ids = self.sorted_tag_ids();
+                for (idx, &tag_id) in sorted_ids.iter().enumerate() {
+                    let Some(tag) = self.tag_definitions.get(&tag_id) else {
+                        continue;
+                    };
                     sub_items.push(
                         ContextMenuItem::new(-9000 - idx as i32, tag.name.clone())
                             .with_command(format!("tag_toggle:{}", tag.id))

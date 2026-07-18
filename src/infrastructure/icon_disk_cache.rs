@@ -57,6 +57,23 @@ impl IconDiskCache {
             file_icon_trim_lock: Mutex::new(()),
         }
     }
+
+    /// Builds a session-only in-memory icon cache as a last-resort fallback.
+    ///
+    /// Used by the bootstrap when [`IconDiskCache::new`] panics. Icons are not
+    /// persisted across restarts, but all methods behave normally within the
+    /// session. This never touches the on-disk store that caused the failure.
+    pub fn in_memory_fallback() -> Self {
+        let conn = Connection::open_in_memory()
+            .expect("in-memory icon cache connection should always open");
+        crate::infrastructure::db_utils::apply_default_pragmas(&conn);
+        file_icons::run_file_icon_migrations(&conn);
+
+        Self {
+            file_icon_db: Mutex::new(conn),
+            file_icon_trim_lock: Mutex::new(()),
+        }
+    }
 }
 
 #[cfg(test)]

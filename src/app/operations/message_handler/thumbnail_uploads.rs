@@ -225,6 +225,10 @@ fn next_thumbnail_upload_index(
 impl ImageViewerApp {
     pub(super) fn process_thumbnail_upload_pipeline(&mut self, ctx: &egui::Context) -> bool {
         let mut received_any = false;
+        // Lazily-built, drain-scoped set of inactive-panel paths. Built only on
+        // the first result whose generation diverges and reused for the rest of
+        // this frame's drains, turning O(n*m) rescans into O(n+m).
+        let mut inactive_panel_paths: Option<Option<crate::ui::cache::FxHashSet<PathBuf>>> = None;
         let mut incoming_count = 0usize;
         let mut has_more_incoming = false;
         let is_burst = self.is_in_restore_burst();
@@ -320,7 +324,10 @@ impl ImageViewerApp {
 
             incoming_count += 1;
             if thumbnail_data.generation != self.generation
-                && !self.path_belongs_to_inactive_panel(&thumbnail_data.path)
+                && !inactive_panel_paths
+                    .get_or_insert_with(|| self.collect_inactive_panel_paths())
+                    .as_ref()
+                    .is_some_and(|set| set.contains(&thumbnail_data.path))
             {
                 self.cache_manager.finish_loading(&thumbnail_data.path);
                 self.cache_manager
@@ -858,7 +865,10 @@ impl ImageViewerApp {
                 };
 
                 if thumbnail_data.generation != self.generation
-                    && !self.path_belongs_to_inactive_panel(&thumbnail_data.path)
+                    && !inactive_panel_paths
+                        .get_or_insert_with(|| self.collect_inactive_panel_paths())
+                        .as_ref()
+                        .is_some_and(|set| set.contains(&thumbnail_data.path))
                 {
                     self.cache_manager
                         .finish_pending_upload(&thumbnail_data.path);
@@ -962,6 +972,26 @@ impl ImageViewerApp {
                     self.cache_manager
                         .thumbnail_trace
                         .record_upload_already_cached();
+                    self.cache_manager.finish_pending_upload(&path);
+                    continue;
+                }
+
+                // Validate the worker-produced RGBA buffer before it reaches
+                // egui::ColorImage::from_rgba_*. A crafted or corrupt buffer with
+                // inconsistent dimensions would otherwise panic or over-allocate.
+                if !crate::domain::thumbnail::is_valid_rgba_buffer(
+                    width,
+                    height,
+                    crate::domain::thumbnail::MAX_THUMBNAIL_SIDE,
+                    rgba_data.len(),
+                ) {
+                    log::warn!(
+                        "[THUMB-UPLOAD] Rejected invalid RGBA buffer for {:?} (w={} h={} len={})",
+                        path.file_name().unwrap_or_default(),
+                        width,
+                        height,
+                        rgba_data.len()
+                    );
                     self.cache_manager.finish_pending_upload(&path);
                     continue;
                 }
@@ -1303,6 +1333,23 @@ impl ImageViewerApp {
                 }
 
                 if !data.rgba_data.is_empty() {
+                    // Validate the composed folder-preview buffer before upload.
+                    if !crate::domain::thumbnail::is_valid_rgba_buffer(
+                        data.width,
+                        data.height,
+                        crate::domain::thumbnail::MAX_FOLDER_PREVIEW_SIDE,
+                        data.rgba_data.len(),
+                    ) {
+                        log::warn!(
+                            "[FOLDER PREVIEW] Rejected invalid RGBA buffer for {:?} (w={} h={} len={})",
+                            data.path.file_name().unwrap_or_default(),
+                            data.width,
+                            data.height,
+                            data.rgba_data.len()
+                        );
+                        continue;
+                    }
+
                     let cached_size = self
                         .cache_manager
                         .folder_preview_cache

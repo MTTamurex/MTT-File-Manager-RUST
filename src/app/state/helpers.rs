@@ -97,12 +97,31 @@ fn visible_items_for_snapshot(snapshot: &crate::app::dual_panel::PanelSnapshot) 
     }
 }
 
-fn item_references_path(item: &FileEntry, path: &std::path::PathBuf) -> bool {
-    &item.path == path
-        || item
-            .folder_cover
-            .as_ref()
-            .is_some_and(|cover| cover == path)
+/// Inserts every path an item can be referenced by (its own path and its
+/// folder cover, if any) into `set`.
+fn insert_item_reference_paths(set: &mut FxHashSet<std::path::PathBuf>, item: &FileEntry) {
+    set.insert(item.path.clone());
+    if let Some(cover) = item.folder_cover.as_ref() {
+        set.insert(cover.clone());
+    }
+}
+
+/// Builds the set of every path the inactive panel snapshot can reference:
+/// its selection (path + cover) and its visible items (path + cover).
+///
+/// Built as an O(n) one-shot so a burst of `m` stale results costs O(n+m)
+/// instead of O(n*m) linear rescans.
+fn collect_inactive_snapshot_paths(
+    snapshot: &crate::app::dual_panel::PanelSnapshot,
+) -> FxHashSet<std::path::PathBuf> {
+    let mut set = FxHashSet::default();
+    if let Some(selected) = snapshot.selected_file.as_ref() {
+        insert_item_reference_paths(&mut set, selected);
+    }
+    for item in visible_items_for_snapshot(snapshot) {
+        insert_item_reference_paths(&mut set, item);
+    }
+    set
 }
 
 fn insert_visible_paths_from_range(
@@ -165,20 +184,18 @@ impl ImageViewerApp {
                 })
     }
 
-    pub(crate) fn path_belongs_to_inactive_panel(&self, path: &std::path::PathBuf) -> bool {
-        self.dual_panel_enabled
-            && self
-                .dual_panel_inactive_state
-                .as_ref()
-                .is_some_and(|snapshot| {
-                    snapshot
-                        .selected_file
-                        .as_ref()
-                        .is_some_and(|selected| item_references_path(selected, path))
-                        || visible_items_for_snapshot(snapshot)
-                            .iter()
-                            .any(|item| item_references_path(item, path))
-                })
+    /// Builds a reusable snapshot of all paths owned by the inactive panel.
+    ///
+    /// Returns `None` when there is no inactive panel (dual panel disabled or no
+    /// snapshot), in which case no stale result can belong to it. Callers build
+    /// this lazily on the first result whose generation diverges and reuse it
+    /// for the rest of the drain, turning O(n*m) rescans into O(n+m).
+    pub(crate) fn collect_inactive_panel_paths(&self) -> Option<FxHashSet<std::path::PathBuf>> {
+        if !self.dual_panel_enabled {
+            return None;
+        }
+        let snapshot = self.dual_panel_inactive_state.as_ref()?;
+        Some(collect_inactive_snapshot_paths(snapshot))
     }
 
     /// Returns `true` while the post-restore burst window is active.
@@ -663,9 +680,6 @@ impl ImageViewerApp {
         self.cache_manager.folder_preview_loading.clear();
         self.cache_manager.pending_upload_set.clear();
         self.cache_manager.attempted_thumbnail_bucket.clear();
-        self.cache_manager
-            .attempted_thumbnail_bucket
-            .shrink_to_fit();
         self.pending_folder_preview_replace.clear();
         self.suppress_next_folder_preview_invalidation.clear();
         self.pending_thumbnails.clear();
@@ -1110,11 +1124,10 @@ impl ImageViewerApp {
             self.visible_range_cached = None;
             self.thumbnail_request_epochs.clear();
             self.cache_manager.attempted_thumbnail_bucket.clear();
-        } else if self.cache_manager.attempted_thumbnail_bucket.len()
-            > MAX_DYNAMIC_TEXTURE_CACHE_ITEMS
-        {
-            self.cache_manager.attempted_thumbnail_bucket.clear();
         }
+        // Non-aggressive trims no longer bulk-clear attempted_thumbnail_bucket:
+        // it is now an LruCache that self-bounds and evicts LRU entries, so the
+        // history (and quality-upgrade tracking) degrades gracefully.
 
         // Reuse existing GIF cleanup policy (TTL + bounded memory) without forcing visible preview drop.
         self.gif_manager.cleanup(false);
@@ -1501,4 +1514,65 @@ fn current_process_memory_snapshot() -> Option<ProcessMemorySnapshot> {
 #[cfg(not(target_os = "windows"))]
 fn current_process_memory_snapshot() -> Option<ProcessMemorySnapshot> {
     None
+}
+
+#[cfg(test)]
+mod inactive_panel_paths_tests {
+    use super::{insert_item_reference_paths, FileEntry, FxHashSet};
+    use crate::domain::file_entry::SyncStatus;
+    use std::path::PathBuf;
+
+    fn entry(path: &str, cover: Option<&str>) -> FileEntry {
+        FileEntry {
+            path: PathBuf::from(path),
+            name: String::new(),
+            is_dir: false,
+            size: 0,
+            modified: 0,
+            created: None,
+            folder_cover: cover.map(PathBuf::from),
+            drive_info: None,
+            sync_status: SyncStatus::None,
+            is_hidden: false,
+            recycle_bin: None,
+        }
+    }
+
+    /// The lazily-built set must answer membership identically to the old
+    /// per-item linear scan: item path, folder cover, and selection are
+    /// recognized; unrelated (stale external) paths are rejected.
+    #[test]
+    fn set_membership_matches_reference_scan() {
+        let items = [
+            entry(r"C:\a\file1.jpg", None),
+            entry(r"C:\a\folder", Some(r"C:\a\folder\cover.png")),
+        ];
+        let selected = entry(r"C:\a\sel.mp4", Some(r"C:\a\sel_cover.png"));
+
+        let mut set = FxHashSet::default();
+        insert_item_reference_paths(&mut set, &selected);
+        for item in &items {
+            insert_item_reference_paths(&mut set, item);
+        }
+
+        // Reference scan equivalent to the removed linear implementation.
+        let reference = |path: &PathBuf| -> bool {
+            let refs = |item: &FileEntry| {
+                &item.path == path || item.folder_cover.as_ref().is_some_and(|c| c == path)
+            };
+            refs(&selected) || items.iter().any(refs)
+        };
+
+        for probe in [
+            r"C:\a\file1.jpg",
+            r"C:\a\folder",
+            r"C:\a\folder\cover.png",
+            r"C:\a\sel.mp4",
+            r"C:\a\sel_cover.png",
+            r"C:\a\missing.txt",
+        ] {
+            let p = PathBuf::from(probe);
+            assert_eq!(set.contains(&p), reference(&p), "mismatch for {probe}");
+        }
+    }
 }

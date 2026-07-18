@@ -24,6 +24,7 @@ impl ImageViewerApp {
                 position,
             },
         );
+        self.rebuild_sorted_tag_ids();
         self.ui_ctx.request_repaint();
         Some(id)
     }
@@ -35,6 +36,8 @@ impl ImageViewerApp {
         if let Some(tag) = self.tag_definitions.get_mut(&tag_id) {
             tag.name = name.trim().to_string();
         }
+        // Name participates in the sort key, so the snapshot must be rebuilt.
+        self.rebuild_sorted_tag_ids();
         self.ui_ctx.request_repaint();
         true
     }
@@ -56,6 +59,7 @@ impl ImageViewerApp {
         }
 
         self.tag_definitions.remove(&tag_id);
+        self.rebuild_sorted_tag_ids();
         self.tag_counts.remove(&tag_id);
         let assignments = Arc::make_mut(&mut self.tag_assignments);
         assignments.retain(|_, ids| {

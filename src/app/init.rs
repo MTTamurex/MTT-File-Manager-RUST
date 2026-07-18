@@ -241,6 +241,8 @@ impl ImageViewerApp {
             .into_iter()
             .map(|tag| (tag.id, tag))
             .collect();
+        let sorted_tag_ids =
+            crate::app::operations::tag_ops::build_sorted_tag_ids(&tag_definitions);
         let tag_assignments = Arc::new(app_state_db.get_all_tag_assignments());
         let tag_assignments_normalized = Arc::new(
             crate::app::operations::tag_ops::normalized::build_tag_assignments_normalized(
@@ -663,6 +665,7 @@ impl ImageViewerApp {
             pinned_folders,
 
             tag_definitions,
+            sorted_tag_ids,
             tag_assignments,
             tag_assignments_normalized,
             tag_assignments_epoch: 0,

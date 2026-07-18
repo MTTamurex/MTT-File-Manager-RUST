@@ -82,6 +82,9 @@ pub struct ThumbnailDiskCache {
     reader: Arc<Mutex<Connection>>, // For get, get_*, check existence
     #[allow(dead_code)]
     cache_dir: PathBuf,
+    /// True when the active writer connection is the primary on-disk database.
+    /// False for a temp/in-memory fallback.
+    on_primary_path: bool,
 }
 
 impl ThumbnailDiskCache {
@@ -159,6 +162,8 @@ impl ThumbnailDiskCache {
         };
         log_step!("open_writer");
 
+        let on_primary_path = active_db_path.as_deref() == Some(db_path.as_path());
+
         // Performance Tuning: Use WAL mode for better concurrency (readers don't block writers)
         // and NORMAL synchronous for faster writes (safe in WAL mode).
         db_utils::apply_default_pragmas(&writer_conn);
@@ -210,7 +215,38 @@ impl ThumbnailDiskCache {
             writer,
             reader,
             cache_dir,
+            on_primary_path,
         })
+    }
+
+    /// Builds an in-memory thumbnail cache as a last-resort fallback.
+    ///
+    /// Used by the bootstrap when the primary constructor panics or cannot open
+    /// any on-disk store. Thumbnails are session-only and never persisted. This
+    /// never touches the filesystem, so it does not repeat the deterministic
+    /// failure that forced the fallback.
+    pub fn new_in_memory() -> rusqlite::Result<Self> {
+        let writer_conn = Connection::open_in_memory()?;
+        db_utils::apply_default_pragmas(&writer_conn);
+        let cache_dir = std::env::temp_dir();
+        Self::run_migrations(&writer_conn, &cache_dir);
+
+        let writer = Arc::new(Mutex::new(writer_conn));
+        // A second in-memory connection would be a distinct empty database, so
+        // the reader must share the writer connection here.
+        let reader = writer.clone();
+
+        Ok(Self {
+            writer,
+            reader,
+            cache_dir,
+            on_primary_path: false,
+        })
+    }
+
+    /// Returns true when the active writer is the primary on-disk database.
+    pub fn is_on_primary_path(&self) -> bool {
+        self.on_primary_path
     }
 
     fn marker_path(cache_dir: &Path, marker_name: &str) -> PathBuf {
@@ -365,5 +401,27 @@ impl ThumbnailDiskCache {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod fallback_tests {
+    use super::*;
+    use std::time::SystemTime;
+
+    #[test]
+    fn new_in_memory_is_not_primary_and_schema_is_usable() {
+        let cache =
+            ThumbnailDiskCache::new_in_memory().expect("in-memory thumbnail cache must build");
+        assert!(
+            !cache.is_on_primary_path(),
+            "in-memory fallback must never report the primary path"
+        );
+
+        // Querying an absent path exercises the reader connection and schema
+        // without panicking; a fresh cache returns no entry.
+        assert!(cache
+            .get(Path::new("C:/does/not/exist.png"), SystemTime::UNIX_EPOCH)
+            .is_none());
     }
 }

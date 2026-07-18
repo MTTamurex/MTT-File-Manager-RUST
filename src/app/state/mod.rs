@@ -568,6 +568,11 @@ pub struct ImageViewerApp {
 
     // File tags / color labels (persistent metadata keyed by path)
     pub tag_definitions: rustc_hash::FxHashMap<i64, crate::domain::file_tag::FileTag>,
+    /// Snapshot of tag IDs ordered by `(position, name case-insensitive)`.
+    /// Rebuilt only when definitions change (create/rename/delete/position),
+    /// never on assign/unassign or recolor. Consumers resolve the current
+    /// `FileTag` by ID so recurring renders avoid clone + lowercase + sort.
+    pub sorted_tag_ids: Arc<[i64]>,
     pub tag_assignments: Arc<rustc_hash::FxHashMap<PathBuf, Vec<i64>>>,
     /// Precomputed case-insensitive view of `tag_assignments` keyed by
     /// `normalize_tag_path_key(path)`. Rebuilt only when `tag_assignments`
