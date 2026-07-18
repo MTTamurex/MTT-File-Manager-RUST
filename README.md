@@ -10,7 +10,7 @@
 - **Dark / Light theme** — Toggle between dark and light mode in Settings > Appearance; persisted in SQLite, applied to all windows including image, PDF, and text viewers with native title bar support via DWM
 - **Dual panel (split view)** — Side-by-side file browsing with independent left and right panels; toggle via the toolbar button. Each panel maintains its own navigation history, sort order, view mode, and selection. File copy/move operations default to the opposite panel as the destination
 - **Tabbed navigation** — Multiple tabs with independent history
-- **Grid and List views** — Adjustable thumbnail sizes
+- **Grid, Details, and Column List views** — Switch between thumbnail, detailed table, and horizontally scrolling column layouts. Column List supports keyboard navigation, rectangle selection, and grouped local/network drives in This PC
 - **Smart address bar** — Direct path input with breadcrumbs
 - **Sidebar** — Quick access to drives, libraries, Cloud Drives, and Recycle Bin
 - **Cloud Drives** — Detects Windows Cloud Files sync roots registered with Explorer and shows them in a dedicated sidebar section; tested with OneDrive, Proton Drive and Google Drive
@@ -24,7 +24,7 @@
 - **Text viewer** — Separate process for plain text, code, logs, and markup files using the same lightweight viewer runtime as the image/PDF viewers
 - **Video player** — Standalone mpv-based player with D3D11 GPU pipeline
 - **Audio playback & metadata** — Audio-only files open in the standalone mpv player with real-time waveform visualization; the preview panel extracts codec, bitrate, channels, sample rate, and music tags
-- **PDF viewer** — Native pdfium-based viewer with bounded texture caching and asynchronous rendering in a separate process
+- **PDF viewer** — Native pdfium-based viewer with asynchronous document loading, prioritized progressive rendering, virtualized pages and thumbnails, bounded texture caching, and keyboard navigation in the thumbnail sidebar
 - **Smart thumbnails** — Multi-stage generation: image crate → WIC → Shell API → Media Foundation
 - **Animated GIF playback** — Animated preview on details panel
 
@@ -35,17 +35,26 @@
 - **Spotlight-style overlay** — Activated by Ctrl+Shift+F
 - **Paginated results** — Offset/limit pagination with incremental loading
 - **Tag filters** — Narrow global search results to any tagged item or to specific tags
+- **File interactions** — Select multiple results, use range selection, copy or cut files, rename inline, open the Windows context menu, and drag results to folders or other applications
+- **Responsive tagged search** — Tagged results are resolved asynchronously and stale requests are cancelled when the query or filters change
 
 > **Disclaimer:** The Global Search feature reads the NTFS/ReFS USN Journal and MFT to build its index. Because accessing these system structures requires elevated privileges, the installer registers a dedicated Windows Service that runs with administrative rights. This is the **only** component of MTT File Manager that requires elevated installation privileges.
 
 ### File Operations
 - **Core operations** — Copy, cut, paste, rename, delete
 - **Batch rename** — Select 2+ files and press F2 to open the batch rename modal; configure a shared base name, number position (suffix/prefix), separator style (parentheses, underscore, dash, space, or none), and start/step/padding; drag-to-reorder; live preview table with per-row conflict detection
-- **Native context menu** — Full Windows Shell context menu integration
+- **Native context menu** — Full Windows Shell context menu integration, including the native **New** submenu when right-clicking an empty folder area
+- **External drag-and-drop** — Drag files from MTT File Manager to Windows Explorer and other compatible Windows applications
 - **Tag assignment** — Add, remove, or switch file/folder tags from the context menu; tags are preserved on supported renames/moves and cleared when files are deleted
 - **Recycle Bin** — Browse, restore, and permanently delete
 - **Cloud Files support** — Sync status badges for cloud-only, locally available, syncing, and pinned files; supports Windows Cloud Files actions such as "Always keep on this device" and "Free up space"
 - **ISO mounting** — Mount ISO files as virtual drives
+
+### Automatic File Organizer
+- **Persistent rules** — Automatically move files from a source folder to a destination based on file extensions
+- **Extension presets** — Quickly configure rules for documents, images, videos, audio, archives, and executables, or enter custom extensions
+- **Safe folder monitoring** — Existing and newly created matching files are processed only after remaining stable for two seconds; destination conflicts are skipped and existing files are never overwritten
+- **Preview and notifications** — Preview how many files match a rule before using it and receive batched details about completed moves, conflicts, and failures
 
 ### Performance & Cache
 - **Multi-level cache** — Memory, disk (SQLite), and GPU textures
@@ -91,6 +100,12 @@ The main file manager does not need to run as administrator for normal file brow
 - **Manage tags** — Open Settings > Tags to create, rename, recolor, delete tags, and toggle whether the Tags section is shown in the sidebar.
 - **Search with tags** — In Global Search, use the Tag filter to show all results, any tagged item, or items matching selected tags.
 - **Performance behavior** — Tag views load in pages and use cached file metadata for fast first paint while thumbnails remain loaded only for visible items.
+
+### File Organizer
+- **Create a rule** — Open Settings > Organizer, choose source and destination folders, then select an extension preset or enter a comma-separated list of extensions.
+- **Preview matches** — Use Preview on an enabled rule to check how many files currently match it.
+- **Enable or disable rules** — Enabled rules scan existing matching files and keep monitoring the source folder for new files. Disabling a rule cancels its pending work.
+- **Handle conflicts** — If a file with the same name already exists in the destination, the source file is left in place and the app reports the conflict.
 
 ### Keyboard Shortcuts
 Some app-level shortcuts are configurable in Settings > Keyboard Shortcuts. Standard file and folder shortcuts remain fixed.
