@@ -99,6 +99,7 @@ pub(super) fn render_list_item(
     clicked_item: &mut Option<usize>,
     double_clicked_item: &mut Option<usize>,
     secondary_clicked_item: &mut Option<usize>,
+    secondary_clicked_empty_area: &mut bool,
     col_widths: &ColumnWidths,
     row_height: f32,
 ) {
@@ -122,7 +123,18 @@ pub(super) fn render_list_item(
         }
 
         if response.secondary_clicked() {
-            *secondary_clicked_item = Some(i);
+            let pointer_pos = ui.input(|input| input.pointer.interact_pos());
+            if ctx.is_computer_view
+                || pointer_pos.is_some_and(|point| {
+                    list_item_content_contains_pointer(
+                        ui, item, ctx, rect, col_widths, row_height, point,
+                    )
+                })
+            {
+                *secondary_clicked_item = Some(i);
+            } else {
+                *secondary_clicked_empty_area = true;
+            }
         }
         let (press_origin, pointer_pos) =
             ui.input(|i| (i.pointer.press_origin(), i.pointer.hover_pos()));
