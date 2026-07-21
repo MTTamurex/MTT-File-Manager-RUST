@@ -2,13 +2,11 @@
 
 mod context_menu;
 mod file_op;
+mod organizer_move;
 mod shfile_ops;
 
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::HWND;
-use windows::Win32::Storage::FileSystem::{
-    MoveFileExW, MOVEFILE_COPY_ALLOWED, MOVEFILE_WRITE_THROUGH,
-};
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_POPUP,
 };
@@ -19,6 +17,10 @@ pub use context_menu::{
 pub use file_op::{
     copy_item_with_file_op, copy_items_with_file_op, move_item_with_file_op,
     move_items_with_file_op,
+};
+pub use organizer_move::{
+    move_file_without_replace, move_organizer_file_without_replace, organizer_file_snapshot,
+    OrganizerFileSnapshot,
 };
 pub use shfile_ops::{
     copy_item_with_shell, copy_items_with_shell, delete_item_with_shell,
@@ -63,37 +65,5 @@ pub fn create_shell_op_proxy_window() -> Option<HWND> {
             Ok(h) if !h.is_invalid() => Some(h),
             _ => None,
         }
-    }
-}
-
-/// Moves a file without replacing an existing destination. Unlike a manual
-/// copy-and-delete sequence, this preserves native filesystem metadata.
-pub fn move_file_without_replace(
-    source: &std::path::Path,
-    destination: &std::path::Path,
-) -> std::io::Result<()> {
-    let source: Vec<u16> = source
-        .as_os_str()
-        .to_string_lossy()
-        .encode_utf16()
-        .chain(std::iter::once(0))
-        .collect();
-    let destination: Vec<u16> = destination
-        .as_os_str()
-        .to_string_lossy()
-        .encode_utf16()
-        .chain(std::iter::once(0))
-        .collect();
-
-    // MOVEFILE_REPLACE_EXISTING is deliberately omitted: a name conflict must
-    // leave both files untouched. COPY_ALLOWED lets Windows handle cross-volume
-    // moves while preserving the metadata it supports.
-    unsafe {
-        MoveFileExW(
-            PCWSTR(source.as_ptr()),
-            PCWSTR(destination.as_ptr()),
-            MOVEFILE_COPY_ALLOWED | MOVEFILE_WRITE_THROUGH,
-        )
-        .map_err(|_| std::io::Error::last_os_error())
     }
 }

@@ -1,4 +1,7 @@
-use super::{sanitize_operation_path, sanitize_operation_paths, FileOperationResult, SendHwnd};
+use super::{
+    sanitize_operation_path, sanitize_operation_paths, sanitize_organizer_path,
+    FileOperationResult, SendHwnd,
+};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::Sender;
@@ -436,13 +439,14 @@ pub(super) fn handle_organizer_move(
     dest_folder: PathBuf,
     rule_id: i64,
     activation: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    expected_snapshot: shell_operations::OrganizerFileSnapshot,
     result_sender: &Sender<FileOperationResult>,
 ) {
     if !activation.load(std::sync::atomic::Ordering::Acquire) {
         return;
     }
-    let valid_path = sanitize_operation_path(&path);
-    let valid_destination = sanitize_operation_path(&dest_folder);
+    let valid_path = sanitize_organizer_path(&path);
+    let valid_destination = sanitize_organizer_path(&dest_folder);
     let (Ok(path), Ok(dest_folder)) = (valid_path, valid_destination) else {
         let _ = result_sender.send(FileOperationResult::OrganizerMoveFailed {
             rule_id,
@@ -451,6 +455,14 @@ pub(super) fn handle_organizer_move(
         });
         return;
     };
+    if is_reparse_point(&path) || is_reparse_point(&dest_folder) {
+        let _ = result_sender.send(FileOperationResult::OrganizerMoveFailed {
+            rule_id,
+            path,
+            message: rust_i18n::t!("organizer.error_security_path").to_string(),
+        });
+        return;
+    }
 
     let Some(source_folder) = path.parent().map(Path::to_path_buf) else {
         return;
@@ -473,7 +485,11 @@ pub(super) fn handle_organizer_move(
         return;
     }
 
-    match shell_operations::move_file_without_replace(&path, &moved_dest) {
+    match shell_operations::move_organizer_file_without_replace(
+        &path,
+        &moved_dest,
+        expected_snapshot,
+    ) {
         Ok(()) => {
             let _ = result_sender.send(FileOperationResult::OrganizerMoveCompleted {
                 rule_id,
@@ -494,6 +510,14 @@ pub(super) fn handle_organizer_move(
             });
         }
     }
+}
+
+fn is_reparse_point(path: &Path) -> bool {
+    use std::os::windows::fs::MetadataExt;
+
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0400;
+    std::fs::symlink_metadata(path)
+        .is_ok_and(|metadata| metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0)
 }
 
 pub(super) fn handle_copy_batch(
@@ -901,6 +925,54 @@ mod tests {
                 .expect("destination creation time"),
             created_at
         );
+    }
+
+    #[test]
+    fn organizer_move_rejects_a_replaced_source_file() {
+        let source_parent = tempfile::tempdir().expect("create source parent");
+        let destination_parent = tempfile::tempdir().expect("create destination parent");
+        let source = source_parent.path().join("report.pdf");
+        let destination = destination_parent.path().join("report.pdf");
+        let displaced = source_parent.path().join("original-report.pdf");
+        std::fs::write(&source, b"original").expect("create original source");
+        let snapshot = shell_operations::organizer_file_snapshot(&source).expect("snapshot source");
+
+        std::fs::rename(&source, displaced).expect("displace original source");
+        std::fs::write(&source, b"original").expect("replace source with same-size file");
+
+        let result =
+            shell_operations::move_organizer_file_without_replace(&source, &destination, snapshot);
+
+        assert_eq!(
+            result.expect_err("replacement must be rejected").kind(),
+            std::io::ErrorKind::InvalidData
+        );
+        assert_eq!(std::fs::read(&source).expect("source remains"), b"original");
+        assert!(!destination.exists());
+    }
+
+    #[test]
+    fn organizer_move_rejects_a_source_open_for_writing() {
+        use std::os::windows::fs::OpenOptionsExt;
+
+        let source_parent = tempfile::tempdir().expect("create source parent");
+        let destination_parent = tempfile::tempdir().expect("create destination parent");
+        let source = source_parent.path().join("notes.txt");
+        let destination = destination_parent.path().join("notes.txt");
+        std::fs::write(&source, b"contents").expect("create source");
+        let snapshot = shell_operations::organizer_file_snapshot(&source).expect("snapshot source");
+        let _writer = std::fs::OpenOptions::new()
+            .write(true)
+            .share_mode(0x1 | 0x2 | 0x4)
+            .open(&source)
+            .expect("open source for writing");
+
+        let result =
+            shell_operations::move_organizer_file_without_replace(&source, &destination, snapshot);
+
+        assert!(result.is_err());
+        assert_eq!(std::fs::read(&source).expect("source remains"), b"contents");
+        assert!(!destination.exists());
     }
 
     #[test]

@@ -1,4 +1,7 @@
-use crate::domain::organizer_rule::{preview_rule, OrganizerRule};
+use crate::domain::organizer_rule::{preview_rule, validate_rule_set, OrganizerRule};
+use crate::infrastructure::windows::shell_operations::{
+    organizer_file_snapshot, OrganizerFileSnapshot,
+};
 use crate::workers::file_operation_worker::FileOperationRequest;
 use std::sync::mpsc::{self, Receiver, Sender};
 
@@ -77,7 +80,7 @@ mod watcher {
         atomic::{AtomicBool, Ordering},
         Arc,
     };
-    use std::time::{Duration, Instant, SystemTime};
+    use std::time::{Duration, Instant};
 
     const STABILITY_DELAY: Duration = Duration::from_secs(2);
 
@@ -85,8 +88,7 @@ mod watcher {
     struct PendingFile {
         rule: OrganizerRule,
         activation: Arc<AtomicBool>,
-        size: u64,
-        modified: Option<SystemTime>,
+        snapshot: OrganizerFileSnapshot,
         stable_since: Instant,
     }
 
@@ -97,6 +99,14 @@ mod watcher {
         mut rules: Vec<OrganizerRule>,
         ui_ctx: eframe::egui::Context,
     ) {
+        if validate_rule_set(&rules).is_err() {
+            let _ = event_sender.send(OrganizerEvent::Error {
+                message: rust_i18n::t!("organizer.error_rule_cycle").to_string(),
+            });
+            for rule in &mut rules {
+                rule.enabled = false;
+            }
+        }
         let (watch_event_sender, watch_event_receiver) = mpsc::channel();
         let mut watcher = configure_watcher(&rules, watch_event_sender.clone(), ui_ctx.clone());
         let mut pending = HashMap::new();
@@ -126,6 +136,12 @@ mod watcher {
 
             match command_receiver.recv_timeout(Duration::from_millis(250)) {
                 Ok(OrganizerCommand::SetRules(new_rules)) => {
+                    if validate_rule_set(&new_rules).is_err() {
+                        let _ = event_sender.send(OrganizerEvent::Error {
+                            message: rust_i18n::t!("organizer.error_rule_cycle").to_string(),
+                        });
+                        continue;
+                    }
                     let previous_rules = std::mem::replace(&mut rules, new_rules);
                     let rules_to_scan =
                         update_activation_flags(&previous_rules, &rules, &mut activation_flags);
@@ -264,15 +280,16 @@ mod watcher {
         if !metadata.is_file() {
             return;
         }
+        let Ok(snapshot) = organizer_file_snapshot(&path) else {
+            return;
+        };
 
-        let modified = metadata.modified().ok();
         match pending.get_mut(&path) {
-            Some(existing) if existing.size == metadata.len() && existing.modified == modified => {}
+            Some(existing) if existing.snapshot == snapshot => {}
             Some(existing) => {
                 existing.rule = rule.clone();
                 existing.activation = activation;
-                existing.size = metadata.len();
-                existing.modified = modified;
+                existing.snapshot = snapshot;
                 existing.stable_since = Instant::now();
             }
             None => {
@@ -281,8 +298,7 @@ mod watcher {
                     PendingFile {
                         rule: rule.clone(),
                         activation,
-                        size: metadata.len(),
-                        modified,
+                        snapshot,
                         stable_since: Instant::now(),
                     },
                 );
@@ -303,12 +319,10 @@ mod watcher {
 
         for (path, pending_file) in ready {
             pending.remove(&path);
-            let Ok(metadata) = std::fs::metadata(&path) else {
+            let Ok(snapshot) = organizer_file_snapshot(&path) else {
                 continue;
             };
-            if metadata.len() != pending_file.size
-                || metadata.modified().ok() != pending_file.modified
-            {
+            if snapshot != pending_file.snapshot {
                 queue_matching_path(
                     std::slice::from_ref(&pending_file.rule),
                     &HashMap::from([(pending_file.rule.id, pending_file.activation.clone())]),
@@ -341,6 +355,7 @@ mod watcher {
                     dest_folder: pending_file.rule.destination_folder,
                     rule_id: pending_file.rule.id,
                     activation: pending_file.activation,
+                    expected_snapshot: pending_file.snapshot,
                 })
                 .is_err()
             {

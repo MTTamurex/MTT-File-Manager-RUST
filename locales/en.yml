@@ -685,6 +685,7 @@ organizer:
   error_source_missing: "The source folder does not exist"
   error_destination_missing: "The destination folder does not exist"
   error_same_folders: "The destination folder must differ from the source"
+  error_rule_cycle: "This rule creates a cycle with another active organizer rule"
   error_database_unavailable: "The organizer database is unavailable"
   error_rule_not_found: "This organizer rule no longer exists"
   error_database: "Unable to save organizer rule: %{reason}"

@@ -1,6 +1,7 @@
 use crate::app::ImageViewerApp;
 use crate::domain::organizer_rule::{
-    parse_extensions, OrganizerExtensionPreset, OrganizerRule, OrganizerRuleError,
+    parse_extensions, validate_rule_set, OrganizerExtensionPreset, OrganizerRule,
+    OrganizerRuleError,
 };
 use crate::infrastructure::app_state_db::OrganizerRuleDbError;
 use crate::ui::theme;
@@ -217,6 +218,20 @@ fn save_form_rule(app: &mut ImageViewerApp) {
 }
 
 fn persist_rule(app: &mut ImageViewerApp, rule: &OrganizerRule, success_message: String) -> bool {
+    let mut proposed_rules = app.organizer_state.rules.clone();
+    if let Some(existing) = proposed_rules
+        .iter_mut()
+        .find(|existing| existing.id == rule.id)
+    {
+        *existing = rule.clone();
+    } else {
+        proposed_rules.push(rule.clone());
+    }
+    if let Err(error) = validate_rule_set(&proposed_rules) {
+        app.notifications.warning(rule_error_message(error));
+        return false;
+    }
+
     match app.app_state_db.save_organizer_rule(rule) {
         Ok(_) => {
             reload_rules(app);
@@ -249,6 +264,7 @@ fn rule_error_message(error: OrganizerRuleError) -> String {
             t!("organizer.error_destination_missing").to_string()
         }
         OrganizerRuleError::SameFolders => t!("organizer.error_same_folders").to_string(),
+        OrganizerRuleError::RuleCycle => t!("organizer.error_rule_cycle").to_string(),
     }
 }
 

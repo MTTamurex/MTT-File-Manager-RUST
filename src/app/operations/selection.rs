@@ -291,9 +291,9 @@ impl ImageViewerApp {
             // instead of stale data from the previously selected file.
             if self.selected_file.is_some() && !self.all_items.is_empty() {
                 self.selected_file = None;
-                self.selected_thumbnail = None;
                 self.selected_metadata = None;
                 self.multi_selection.clear();
+                self.update_selected_thumbnail();
             }
         }
     }

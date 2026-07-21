@@ -10,7 +10,7 @@ mod handlers;
 use crate::infrastructure::diagnostic_logger::{diag_error, field_label};
 use crate::infrastructure::security::{
     classify_shell_namespace_path, sanitize_path_with_local_drive_fallback, sanitize_unc_path,
-    SecurityConfig,
+    validate_no_reparse_points, SecurityConfig,
 };
 use crate::infrastructure::windows::ComScope;
 use crate::workers::archive_extraction_worker::ArchiveExtractionRequest;
@@ -145,6 +145,7 @@ pub(crate) enum FileOperationRequest {
         dest_folder: PathBuf,
         rule_id: i64,
         activation: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        expected_snapshot: crate::infrastructure::windows::shell_operations::OrganizerFileSnapshot,
     },
     /// Batch copy: all files in a single Shell operation (single progress dialog)
     CopyBatch {
@@ -258,11 +259,13 @@ impl FileOperationRequest {
                 dest_folder,
                 rule_id,
                 activation,
+                expected_snapshot,
             } => Self::OrganizerMove {
                 path,
                 dest_folder,
                 rule_id,
                 activation,
+                expected_snapshot,
             },
             Self::CopyBatch {
                 paths, dest_folder, ..
@@ -344,6 +347,26 @@ fn sanitize_operation_path(path: &Path) -> Result<PathBuf, String> {
 
     sanitize_path_with_local_drive_fallback(path, &operation_security_config())
         .map_err(|e| format!("Security validation failed for '{}': {}", path.display(), e))
+}
+
+fn sanitize_organizer_path(path: &Path) -> Result<PathBuf, String> {
+    if should_bypass_sanitization(path) {
+        return Err("Shell namespace paths are not valid organizer paths".to_string());
+    }
+    validate_no_reparse_points(path).map_err(|error| error.to_string())?;
+    if is_unc_path(path) {
+        return sanitize_unc_path(path).map_err(|e| e.to_string());
+    }
+
+    let mut config = operation_security_config();
+    config.allow_symlinks = false;
+    sanitize_path_with_local_drive_fallback(path, &config).map_err(|e| {
+        format!(
+            "Organizer path validation failed for '{}': {}",
+            path.display(),
+            e
+        )
+    })
 }
 
 fn sanitize_operation_paths(paths: &[PathBuf]) -> Result<Vec<PathBuf>, String> {
@@ -459,12 +482,14 @@ pub(crate) fn start_file_operation_worker(
                         dest_folder,
                         rule_id,
                         activation,
+                        expected_snapshot,
                     } => {
                         handlers::handle_organizer_move(
                             path,
                             dest_folder,
                             rule_id,
                             activation,
+                            expected_snapshot,
                             &result_sender,
                         );
                         return CompletionBehavior::NoFinished;
@@ -572,7 +597,7 @@ pub(crate) fn start_file_operation_worker(
 
 #[cfg(test)]
 mod tests {
-    use super::is_explicit_shell_namespace_path;
+    use super::{is_explicit_shell_namespace_path, sanitize_organizer_path};
     use std::path::Path;
 
     #[test]
@@ -593,5 +618,19 @@ mod tests {
         assert!(!is_explicit_shell_namespace_path(Path::new(
             r"C:\Temp\archive.zip\inside"
         )));
+    }
+
+    #[test]
+    fn organizer_path_rejects_a_symbolic_link() {
+        let directory = tempfile::tempdir().expect("create temp directory");
+        let target = directory.path().join("target.txt");
+        let link = directory.path().join("link.txt");
+        std::fs::write(&target, b"target").expect("create target");
+
+        match std::os::windows::fs::symlink_file(&target, &link) {
+            Ok(()) => assert!(sanitize_organizer_path(&link).is_err()),
+            Err(error) if error.raw_os_error() == Some(1314) => {}
+            Err(error) => panic!("unexpected symlink creation failure: {error}"),
+        }
     }
 }

@@ -180,6 +180,10 @@ pub fn sanitize_unc_path(path: &Path) -> Result<PathBuf, SecurityError> {
     unc::sanitize_unc_path(path)
 }
 
+pub(crate) fn validate_no_reparse_points(path: &Path) -> Result<(), SecurityError> {
+    symlink::check_symlink(path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

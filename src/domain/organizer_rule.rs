@@ -18,6 +18,7 @@ pub enum OrganizerRuleError {
     SourceFolderMissing,
     DestinationFolderMissing,
     SameFolders,
+    RuleCycle,
 }
 
 impl OrganizerExtensionPreset {
@@ -136,6 +137,65 @@ pub fn preview_rule(rule: &OrganizerRule) -> Vec<PathBuf> {
         .map(|entry| entry.path())
         .filter(|path| rule.matches(path))
         .collect()
+}
+
+pub fn validate_rule_set(rules: &[OrganizerRule]) -> Result<(), OrganizerRuleError> {
+    use std::collections::{HashMap, HashSet};
+
+    let mut graph: HashMap<String, Vec<String>> = HashMap::new();
+    let mut matched_sources = HashSet::new();
+    for rule in rules.iter().filter(|rule| rule.enabled) {
+        let source = folder_identity(&rule.source_folder);
+        let destination = folder_identity(&rule.destination_folder);
+        for extension in &rule.extensions {
+            let source_extension = format!("{source}\0{extension}");
+            if !matched_sources.insert(source_extension.clone()) {
+                continue;
+            }
+            graph
+                .entry(source_extension)
+                .or_default()
+                .push(format!("{destination}\0{extension}"));
+        }
+    }
+
+    fn visits_cycle(
+        node: &str,
+        graph: &HashMap<String, Vec<String>>,
+        visiting: &mut HashSet<String>,
+        visited: &mut HashSet<String>,
+    ) -> bool {
+        if visited.contains(node) {
+            return false;
+        }
+        if !visiting.insert(node.to_string()) {
+            return true;
+        }
+        if graph.get(node).is_some_and(|destinations| {
+            destinations
+                .iter()
+                .any(|destination| visits_cycle(destination, graph, visiting, visited))
+        }) {
+            return true;
+        }
+        visiting.remove(node);
+        visited.insert(node.to_string());
+        false
+    }
+
+    let mut visiting = HashSet::new();
+    let mut visited = HashSet::new();
+    if graph
+        .keys()
+        .any(|source| visits_cycle(source, &graph, &mut visiting, &mut visited))
+    {
+        return Err(OrganizerRuleError::RuleCycle);
+    }
+    Ok(())
+}
+
+fn folder_identity(path: &Path) -> String {
+    normalize_path(&path.canonicalize().unwrap_or_else(|_| path.to_path_buf()))
 }
 
 fn normalize_extensions(extensions: &[String]) -> Result<Vec<String>, OrganizerRuleError> {
@@ -262,5 +322,122 @@ mod tests {
             true
         )
         .is_err());
+    }
+
+    #[test]
+    fn rejects_enabled_rule_cycles() {
+        let folder_a = tempfile::tempdir().expect("folder a");
+        let folder_b = tempfile::tempdir().expect("folder b");
+        let rules = vec![
+            OrganizerRule::new(
+                1,
+                folder_a.path().to_path_buf(),
+                folder_b.path().to_path_buf(),
+                vec!["pdf".to_string()],
+                true,
+            )
+            .expect("rule a to b"),
+            OrganizerRule::new(
+                2,
+                folder_b.path().to_path_buf(),
+                folder_a.path().to_path_buf(),
+                vec!["pdf".to_string()],
+                true,
+            )
+            .expect("rule b to a"),
+        ];
+
+        assert_eq!(
+            validate_rule_set(&rules),
+            Err(OrganizerRuleError::RuleCycle)
+        );
+    }
+
+    #[test]
+    fn allows_acyclic_rule_chains() {
+        let folder_a = tempfile::tempdir().expect("folder a");
+        let folder_b = tempfile::tempdir().expect("folder b");
+        let folder_c = tempfile::tempdir().expect("folder c");
+        let rules = vec![
+            OrganizerRule::new(
+                1,
+                folder_a.path().to_path_buf(),
+                folder_b.path().to_path_buf(),
+                vec!["pdf".to_string()],
+                true,
+            )
+            .expect("rule a to b"),
+            OrganizerRule::new(
+                2,
+                folder_b.path().to_path_buf(),
+                folder_c.path().to_path_buf(),
+                vec!["pdf".to_string()],
+                true,
+            )
+            .expect("rule b to c"),
+        ];
+
+        assert_eq!(validate_rule_set(&rules), Ok(()));
+    }
+
+    #[test]
+    fn allows_folder_cycles_when_extensions_do_not_overlap() {
+        let folder_a = tempfile::tempdir().expect("folder a");
+        let folder_b = tempfile::tempdir().expect("folder b");
+        let rules = vec![
+            OrganizerRule::new(
+                1,
+                folder_a.path().to_path_buf(),
+                folder_b.path().to_path_buf(),
+                vec!["pdf".to_string()],
+                true,
+            )
+            .expect("pdf rule"),
+            OrganizerRule::new(
+                2,
+                folder_b.path().to_path_buf(),
+                folder_a.path().to_path_buf(),
+                vec!["jpg".to_string()],
+                true,
+            )
+            .expect("jpg rule"),
+        ];
+
+        assert_eq!(validate_rule_set(&rules), Ok(()));
+    }
+
+    #[test]
+    fn ignores_shadowed_rules_when_detecting_cycles() {
+        let folder_a = tempfile::tempdir().expect("folder a");
+        let folder_b = tempfile::tempdir().expect("folder b");
+        let folder_c = tempfile::tempdir().expect("folder c");
+        let rules = vec![
+            OrganizerRule::new(
+                1,
+                folder_a.path().to_path_buf(),
+                folder_c.path().to_path_buf(),
+                vec!["pdf".to_string()],
+                true,
+            )
+            .expect("first matching rule"),
+            OrganizerRule::new(
+                2,
+                folder_a.path().to_path_buf(),
+                folder_b.path().to_path_buf(),
+                vec!["pdf".to_string()],
+                true,
+            )
+            .expect("shadowed rule"),
+            OrganizerRule::new(
+                3,
+                folder_b.path().to_path_buf(),
+                folder_a.path().to_path_buf(),
+                vec!["pdf".to_string()],
+                true,
+            )
+            .expect("return rule"),
+        ];
+
+        assert_eq!(validate_rule_set(&rules), Ok(()));
     }
 }

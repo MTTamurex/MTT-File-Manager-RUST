@@ -685,6 +685,7 @@ organizer:
   error_source_missing: "A pasta de origem não existe"
   error_destination_missing: "A pasta de destino não existe"
   error_same_folders: "A pasta de destino deve ser diferente da origem"
+  error_rule_cycle: "Esta regra cria um ciclo com outra regra ativa do organizador"
   error_database_unavailable: "O banco de dados do organizador não está disponível"
   error_rule_not_found: "Esta regra do organizador não existe mais"
   error_database: "Não foi possível salvar a regra do organizador: %{reason}"
