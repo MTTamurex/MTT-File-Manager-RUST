@@ -130,7 +130,7 @@ fn repair_missing_live_directory_record(
     }
 
     if let Some(record) = vol.records.get(&frn) {
-        if !record.is_dir {
+        if !record.is_dir() {
             return Err("Path resolved to non-directory record");
         }
         return Ok((frn, crate::mft_reader::folder_size_for_service(&vol, frn)));
@@ -204,6 +204,7 @@ fn repair_suspicious_zero_folder_size(
     };
 
     let candidates: Vec<(u64, Option<String>)> = {
+        let _active_operation = crate::memory_trim::begin_active_operation();
         let vol = handle.read();
         let live_refresh_candidates = if file_count <= LIVE_SIZE_REFRESH_FILE_LIMIT {
             vol.collect_file_frns_in_subtree_limited(dir_frn, LIVE_SIZE_REFRESH_FILE_LIMIT as usize)
@@ -261,7 +262,7 @@ fn repair_suspicious_zero_folder_size(
             let mut binary_dirty = false;
             for (frn, size) in size_updates {
                 if let Some(record) = vol.records.get_mut(&frn) {
-                    if !record.is_dir && record.size != size {
+                    if !record.is_dir() && record.size != size {
                         record.size = size;
                         changed += 1;
                         binary_dirty = true;
@@ -369,6 +370,7 @@ pub(super) fn handle_client(
                     std::thread::Builder::new()
                         .name("warm-index".into())
                         .spawn(move || {
+                            let _active_operation = crate::memory_trim::begin_active_operation();
                             struct WarmGuard(Arc<AtomicBool>);
                             impl Drop for WarmGuard {
                                 fn drop(&mut self) {
@@ -580,6 +582,7 @@ pub(super) fn handle_client(
             };
 
             let (result, has_pending_refreshes) = {
+                let _active_operation = crate::memory_trim::begin_active_operation();
                 let vol = handle.read();
                 if !matches!(vol.state, IndexState::Ready) {
                     drop(vol);
@@ -616,7 +619,7 @@ pub(super) fn handle_client(
                             Err("Sizes not loaded")
                         } else {
                             match vol.records.get(&frn) {
-                                Some(record) if record.is_dir => {
+                                Some(record) if record.is_dir() => {
                                     eprintln!(
                                         "[FOLDER-SIZE] resolved via live FRN fallback path={} frn={}",
                                         crate::redact_paths(&path),
@@ -881,7 +884,7 @@ mod tests {
         assert_eq!(folder_count, 0);
         let vol = handle.read();
         let record = vol.records.get(&200).expect("directory record inserted");
-        assert!(record.is_dir);
+        assert!(record.is_dir());
         assert_eq!(
             vol.resolve_path_to_frn(r"C:\Users\mtamu\OneDrive\Documentos Pessoais\Diablo IV"),
             Some(200)

@@ -99,7 +99,7 @@ impl IndexDb {
                             drive,
                             name,
                             record.parent_ref as i64,
-                            record.is_dir,
+                            record.is_dir(),
                             index.reparse_points.contains(&frn)
                         ])
                         .map_err(|e| format!("Insert record error: {}", e))?;

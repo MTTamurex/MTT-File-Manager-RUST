@@ -1704,7 +1704,7 @@ where
             let needs_recheck = index
                 .records
                 .get(&frn)
-                .map(|rec| !rec.is_dir && rec.size == 0)
+                .map(|rec| !rec.is_dir() && rec.size == 0)
                 .unwrap_or(false);
             if !needs_recheck {
                 continue;

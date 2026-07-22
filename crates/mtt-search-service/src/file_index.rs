@@ -29,8 +29,8 @@ pub struct FileRecord {
     pub name_offset: u32,
     /// UTF-8 byte length of the file name.
     pub name_len: u16,
-    /// Whether this is a directory.
-    pub is_dir: bool,
+    /// On-disk directory flag. Kept as a byte so every mmap bit pattern is valid.
+    pub(crate) is_dir: u8,
     /// Explicit padding byte.
     pub _pad: u8,
 }
@@ -46,6 +46,11 @@ impl FileRecord {
             offset: self.name_offset,
             len: self.name_len,
         }
+    }
+
+    #[inline]
+    pub fn is_dir(&self) -> bool {
+        self.is_dir != 0
     }
 }
 
@@ -225,7 +230,7 @@ impl VolumeIndex {
 
         let mut remove_entry = false;
         if let Some(parents) = self.hardlink_parents.get_mut(&frn) {
-            if record.is_dir {
+            if record.is_dir() {
                 remove_entry = true;
             } else {
                 parents
@@ -290,7 +295,7 @@ impl VolumeIndex {
                 size: preserved_size,
                 name_offset: nr.offset,
                 name_len: nr.len,
-                is_dir,
+                is_dir: u8::from(is_dir),
                 _pad: 0,
             },
         );
@@ -378,7 +383,7 @@ impl VolumeIndex {
             size,
             name_offset: nr.offset,
             name_len: nr.len,
-            is_dir,
+            is_dir: u8::from(is_dir),
             _pad: 0,
         };
 
@@ -471,7 +476,7 @@ impl VolumeIndex {
                 size: preserved_size,
                 name_offset: nr.offset,
                 name_len: nr.len,
-                is_dir,
+                is_dir: u8::from(is_dir),
                 _pad: 0,
             },
         );
@@ -617,7 +622,7 @@ impl VolumeIndex {
             if let Some(child_frns) = self.children.get(frn) {
                 for &child_frn in child_frns {
                     if let Some(record) = self.records.get(&child_frn) {
-                        if record.is_dir {
+                        if record.is_dir() {
                             folder_count += 1;
                             stack.push(child_frn);
                         } else {
@@ -653,7 +658,7 @@ impl VolumeIndex {
             if let Some(child_frns) = self.children.get(frn) {
                 for &child_frn in child_frns {
                     if let Some(record) = self.records.get(&child_frn) {
-                        if record.is_dir {
+                        if record.is_dir() {
                             stack.push(child_frn);
                         } else if seen_files.insert(child_frn) {
                             total_size = total_size.saturating_add(record.size);
@@ -693,7 +698,7 @@ impl VolumeIndex {
                         continue;
                     };
 
-                    if record.is_dir {
+                    if record.is_dir() {
                         stack.push(child_frn);
                         continue;
                     }
@@ -735,7 +740,7 @@ impl VolumeIndex {
                         continue;
                     };
 
-                    if record.is_dir {
+                    if record.is_dir() {
                         stack.push(child_frn);
                     } else if seen_files.insert(child_frn) {
                         if file_frns.len() >= limit {
@@ -796,7 +801,7 @@ impl VolumeIndex {
                             // directory records. This avoids selecting stale
                             // non-directory siblings in ambiguous indexes and
                             // returning incorrect subtree totals.
-                            record.is_dir
+                            record.is_dir()
                                 && self
                                     .names
                                     .get(record.name_ref())
@@ -891,6 +896,7 @@ pub fn search_page(
     offset: usize,
     limit: usize,
 ) -> SearchPage {
+    let _active_operation = crate::memory_trim::begin_active_operation();
     if query.is_empty() || limit == 0 {
         return SearchPage {
             items: Vec::new(),
@@ -930,7 +936,7 @@ pub fn search_page(
         }
         let mut dir_path_cache = HashMap::new();
 
-        for (&frn, record) in &index.records {
+        for (&frn, record) in index.records.iter_sorted() {
             scanned += 1;
             if scanned.is_multiple_of(50_000) && std::time::Instant::now() > deadline {
                 eprintln!(
@@ -973,7 +979,7 @@ pub fn search_page(
                     items.push(SearchResult {
                         name: name.to_owned(),
                         full_path,
-                        is_dir: record.is_dir,
+                        is_dir: record.is_dir(),
                         size: record.size,
                     });
                     matched_after_filters += 1;

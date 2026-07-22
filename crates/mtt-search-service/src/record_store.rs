@@ -59,9 +59,9 @@ impl std::fmt::Debug for RecordBase {
 impl RecordBase {
     #[inline]
     fn entries(mmap: &Mmap, count: usize) -> &[RecordEntry] {
-        // SAFETY: `RecordStore::from_mmap` verified 8-byte alignment and that
-        // `mmap.len() == count * size_of::<RecordEntry>()`. The mapping is
-        // read-only and outlives the returned slice (tied to `&mmap`).
+        // SAFETY: `RecordStore::from_mmap` verified alignment and exact size.
+        // RecordEntry has no padding and contains only integer fields, so every
+        // possible byte pattern is valid even if the backing file changes.
         let ptr = mmap.as_ptr() as *const RecordEntry;
         unsafe { std::slice::from_raw_parts(ptr, count) }
     }
@@ -209,7 +209,7 @@ impl RecordStore {
                 mmap.len()
             ));
         }
-        if (mmap.as_ptr() as usize) % std::mem::align_of::<RecordEntry>() != 0 {
+        if !(mmap.as_ptr() as usize).is_multiple_of(std::mem::align_of::<RecordEntry>()) {
             return Err("record mmap is not 8-byte aligned".to_string());
         }
         Ok(Self {
@@ -369,6 +369,20 @@ impl RecordStore {
         }
     }
 
+    /// Iterate all live records in ascending FRN order. The immutable base is
+    /// already sorted, so only overlay references need temporary sorting.
+    pub fn iter_sorted(&self) -> SortedRecordIter<'_> {
+        let mut overlay: Vec<(&u64, &FileRecord)> = self.overlay.iter().collect();
+        overlay.sort_unstable_by_key(|(frn, _)| **frn);
+        SortedRecordIter {
+            store: self,
+            base_index: 0,
+            base_len: self.base.len(),
+            overlay,
+            overlay_index: 0,
+        }
+    }
+
     pub fn keys(&self) -> impl Iterator<Item = &u64> + '_ {
         self.iter().map(|(frn, _)| frn)
     }
@@ -394,14 +408,9 @@ impl RecordStore {
         if !self.base.is_mapped() {
             return;
         }
-        let mut pairs: Vec<(u64, FileRecord)> =
-            self.iter().map(|(&frn, &record)| (frn, record)).collect();
-        pairs.sort_unstable_by_key(|(frn, _)| *frn);
-        pairs.dedup_by_key(|(frn, _)| *frn);
-
-        let mut frns = Vec::with_capacity(pairs.len());
-        let mut records = Vec::with_capacity(pairs.len());
-        for (frn, record) in pairs {
+        let mut frns = Vec::with_capacity(self.live_len);
+        let mut records = Vec::with_capacity(self.live_len);
+        for (&frn, &record) in self.iter_sorted() {
             frns.push(frn);
             records.push(record);
         }
@@ -409,6 +418,15 @@ impl RecordStore {
         self.base = RecordBase::Owned { frns, records };
         self.overlay.clear();
         self.removed.clear();
+    }
+
+    /// Prefer contiguous owned arrays when an operation is about to mutate a
+    /// large fraction of a mapped base. This avoids a HashMap plus tombstone
+    /// entry for nearly every record during bulk size refreshes.
+    pub fn prepare_bulk_mutation(&mut self, mutation_count: usize) {
+        if self.base.is_mapped() && mutation_count.saturating_mul(4) >= self.live_len.max(1) {
+            self.materialize_owned();
+        }
     }
 
     pub fn compact(&mut self) {
@@ -530,6 +548,14 @@ pub struct RecordIter<'a> {
     overlay: std::collections::hash_map::Iter<'a, u64, FileRecord>,
 }
 
+pub struct SortedRecordIter<'a> {
+    store: &'a RecordStore,
+    base_index: usize,
+    base_len: usize,
+    overlay: Vec<(&'a u64, &'a FileRecord)>,
+    overlay_index: usize,
+}
+
 impl<'a> Iterator for RecordIter<'a> {
     type Item = (&'a u64, &'a FileRecord);
 
@@ -546,6 +572,57 @@ impl<'a> Iterator for RecordIter<'a> {
     }
 }
 
+impl<'a> Iterator for SortedRecordIter<'a> {
+    type Item = (&'a u64, &'a FileRecord);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while self.base_index < self.base_len {
+            let frn = self.store.base.frn_ref_at(self.base_index);
+            if !self.store.removed.contains(frn) {
+                break;
+            }
+            self.base_index += 1;
+        }
+
+        let base = (self.base_index < self.base_len).then(|| {
+            (
+                self.store.base.frn_ref_at(self.base_index),
+                self.store.base.rec_ref_at(self.base_index),
+            )
+        });
+        let overlay = self.overlay.get(self.overlay_index).copied();
+
+        match (base, overlay) {
+            (Some(base), Some(overlay)) => match base.0.cmp(overlay.0) {
+                std::cmp::Ordering::Less => {
+                    self.base_index += 1;
+                    Some(base)
+                }
+                std::cmp::Ordering::Greater => {
+                    self.overlay_index += 1;
+                    Some(overlay)
+                }
+                std::cmp::Ordering::Equal => {
+                    // Defensive fallback: overlays are authoritative if an
+                    // invariant violation leaves the base slot untombstoned.
+                    self.base_index += 1;
+                    self.overlay_index += 1;
+                    Some(overlay)
+                }
+            },
+            (Some(base), None) => {
+                self.base_index += 1;
+                Some(base)
+            }
+            (None, Some(overlay)) => {
+                self.overlay_index += 1;
+                Some(overlay)
+            }
+            (None, None) => None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{RecordEntry, RecordStore};
@@ -559,7 +636,7 @@ mod tests {
             size,
             name_offset: 0,
             name_len: 0,
-            is_dir: false,
+            is_dir: 0,
             _pad: 0,
         }
     }
@@ -647,6 +724,19 @@ mod tests {
     }
 
     #[test]
+    fn mapped_sorted_iteration_is_stable_across_copy_on_write() {
+        let mut store = mapped_store(&[(10, record(5, 1)), (20, record(5, 2)), (30, record(5, 3))]);
+        store.get_mut(&10).unwrap().size = 11;
+        store.insert(25, record(5, 25));
+
+        let pairs = store
+            .iter_sorted()
+            .map(|(&frn, rec)| (frn, rec.size))
+            .collect::<Vec<_>>();
+        assert_eq!(pairs, vec![(10, 11), (20, 2), (25, 25), (30, 3)]);
+    }
+
+    #[test]
     fn mapped_insert_overwrite_and_new_and_remove() {
         let mut store = mapped_store(&[(10, record(5, 1)), (20, record(5, 2))]);
 
@@ -698,5 +788,24 @@ mod tests {
         assert!(!store.is_mapped());
         assert_eq!(store.get(&10).unwrap().size, 11);
         assert_eq!(store.get(&20).unwrap().size, 12);
+    }
+
+    #[test]
+    fn bulk_materialization_preserves_mixed_mapped_deltas() {
+        let mut store = mapped_store(&[(10, record(5, 1)), (20, record(5, 2)), (30, record(5, 3))]);
+        store.get_mut(&20).unwrap().size = 22;
+        assert_eq!(store.remove(&10).unwrap().size, 1);
+        store.insert(10, record(5, 11));
+        store.insert(25, record(5, 25));
+        store.remove(&30);
+
+        store.prepare_bulk_mutation(4);
+
+        assert!(!store.is_mapped());
+        let pairs = store
+            .iter_sorted()
+            .map(|(&frn, rec)| (frn, rec.size))
+            .collect::<Vec<_>>();
+        assert_eq!(pairs, vec![(10, 11), (20, 22), (25, 25)]);
     }
 }

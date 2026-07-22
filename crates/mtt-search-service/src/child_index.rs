@@ -116,10 +116,11 @@ impl ChildIndex {
 
     /// Add `child` under `parent` (no-op if already present).
     pub fn add_child(&mut self, parent: u64, child: u64) {
-        let list = self.overlay_entry(parent);
-        if !list.contains(&child) {
-            list.push(child);
+        if self.get(parent).is_some_and(|list| list.contains(&child)) {
+            return;
         }
+        let list = self.overlay_entry(parent);
+        list.push(child);
     }
 
     /// Remove `child` from `parent`. Copies the directory into the overlay only
@@ -127,13 +128,61 @@ impl ChildIndex {
     /// compact base.
     pub fn remove_child(&mut self, parent: u64, child: u64) {
         if self.get(parent).is_some_and(|list| list.contains(&child)) {
+            let parent_exists_in_base = self.dir_frns.binary_search(&parent).is_ok();
             let list = self.overlay_entry(parent);
             list.retain(|&c| c != child);
+            if list.is_empty() && !parent_exists_in_base {
+                self.overlay.remove(&parent);
+            }
         }
     }
 
-    /// Release excess capacity in the overlay and base arrays.
+    /// Fold all copy-on-write deltas into a fresh compact CSR base.
+    fn compact_overlay(&mut self) {
+        if self.overlay.is_empty() {
+            return;
+        }
+
+        for children in self.overlay.values_mut() {
+            children.sort_unstable();
+            children.dedup();
+        }
+
+        let mut parents = self.dir_frns.clone();
+        parents.extend(self.overlay.keys().copied());
+        parents.sort_unstable();
+        parents.dedup();
+
+        let total_children = parents
+            .iter()
+            .map(|parent| self.get(*parent).map_or(0, <[u64]>::len))
+            .sum();
+        let mut dir_frns = Vec::with_capacity(parents.len());
+        let mut offsets = Vec::with_capacity(parents.len() + 1);
+        let mut children = Vec::with_capacity(total_children);
+
+        for parent in parents {
+            let Some(list) = self.get(parent) else {
+                continue;
+            };
+            if list.is_empty() {
+                continue;
+            }
+            dir_frns.push(parent);
+            offsets.push(u32::try_from(children.len()).expect("child index exceeds u32 offsets"));
+            children.extend_from_slice(list);
+        }
+        offsets.push(u32::try_from(children.len()).expect("child index exceeds u32 offsets"));
+
+        self.dir_frns = dir_frns;
+        self.offsets = offsets;
+        self.children = children;
+        self.overlay.clear();
+    }
+
+    /// Consolidate deltas and release excess capacity after stabilization.
     pub fn shrink_to_fit(&mut self) {
+        self.compact_overlay();
         self.dir_frns.shrink_to_fit();
         self.offsets.shrink_to_fit();
         self.children.shrink_to_fit();
@@ -215,5 +264,21 @@ mod tests {
         let mut index = ChildIndex::from_edges(vec![(5, 10)]);
         index.remove_child(5, 999);
         assert_eq!(index.get(5), Some([10u64].as_slice()));
+    }
+
+    #[test]
+    fn shrink_to_fit_folds_overlay_and_drops_empty_transient_parents() {
+        let mut index = ChildIndex::from_edges(vec![(5, 10), (7, 40)]);
+        index.add_child(5, 20);
+        index.add_child(9, 90);
+        index.remove_child(9, 90);
+        index.remove_child(7, 40);
+
+        index.shrink_to_fit();
+
+        assert_eq!(index.get(5), Some([10u64, 20].as_slice()));
+        assert_eq!(index.get(7), None);
+        assert_eq!(index.get(9), None);
+        assert!(index.overlay.is_empty());
     }
 }

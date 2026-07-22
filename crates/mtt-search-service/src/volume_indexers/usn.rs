@@ -49,7 +49,7 @@ fn take_pending_snapshot(handle: &VolumeIndexHandle) -> PendingPersistSnapshot {
                 *frn,
                 vol_index.names.get(record.name_ref()).to_string(),
                 record.parent_ref,
-                record.is_dir,
+                record.is_dir(),
                 vol_index.reparse_points.contains(frn),
                 vol_index
                     .hardlink_parents
@@ -544,7 +544,7 @@ pub(crate) fn index_volume(
             None,
             None,
         );
-        let binary_saved = match crate::index_db::binary::save(&index) {
+        let binary_saved = match crate::index_db::binary::save_and_remap(&mut index) {
             Ok(()) => {
                 index.binary_dirty = false;
                 true
@@ -703,6 +703,7 @@ pub(crate) fn index_volume(
                         bg_handle.try_write_for(std::time::Duration::from_secs(10))
                     {
                         let mut changed = false;
+                        vol.records.prepare_bulk_mutation(size_updates.len());
                         for (frn, size) in &size_updates {
                             if *size > 0 {
                                 if let Some(rec) = vol.records.get_mut(frn) {
@@ -730,6 +731,7 @@ pub(crate) fn index_volume(
                                 bg_handle.try_write_for(std::time::Duration::from_millis(250))
                             {
                                 let mut changed = false;
+                                vol.records.prepare_bulk_mutation(size_updates.len());
                                 for (frn, size) in &size_updates {
                                     if *size > 0 {
                                         if let Some(rec) = vol.records.get_mut(frn) {
@@ -758,6 +760,7 @@ pub(crate) fn index_volume(
                         "[MFT-SIZE] {}:\\ Bulk size extraction complete: {} sizes updated in {:.2}s",
                         drive_letter, applied, elapsed.as_secs_f64()
                     );
+                    flush_binary_snapshot_if_dirty(&bg_handle, drive_letter);
                 }
                 Err(e) => {
                     eprintln!(

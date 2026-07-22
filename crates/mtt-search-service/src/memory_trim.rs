@@ -3,11 +3,34 @@
 /// The in-memory index remains intact. This only asks Windows to remove cold
 /// resident pages from the process working set, which is the number shown in
 /// Task Manager's "Memory" column. Set `MTT_SEARCH_DISABLE_WS_TRIM=1` to disable.
+fn operation_lock() -> &'static parking_lot::RwLock<()> {
+    static LOCK: std::sync::OnceLock<parking_lot::RwLock<()>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(|| parking_lot::RwLock::new(()))
+}
+
+pub(crate) struct ActiveOperationGuard {
+    _guard: parking_lot::RwLockReadGuard<'static, ()>,
+}
+
+/// Prevent working-set trims while an IPC request is actively using the index.
+pub(crate) fn begin_active_operation() -> ActiveOperationGuard {
+    ActiveOperationGuard {
+        _guard: operation_lock().read(),
+    }
+}
+
 pub(crate) fn trim_working_set(reason: &str) {
     if trim_disabled() {
         return;
     }
 
+    let Some(_guard) = operation_lock().try_write() else {
+        return;
+    };
+    trim_working_set_uncoordinated(reason);
+}
+
+fn trim_working_set_uncoordinated(reason: &str) {
     unsafe {
         libmimalloc_sys::mi_collect(true);
     }
@@ -35,7 +58,8 @@ pub(crate) fn trim_working_set(reason: &str) {
 /// Process-wide throttle for idle-triggered trims. Stores the elapsed
 /// milliseconds (since the process-local base instant) of the last idle trim.
 /// `u64::MAX` means "never trimmed yet".
-static LAST_IDLE_TRIM_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(u64::MAX);
+static LAST_IDLE_TRIM_MS: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(u64::MAX);
 
 fn idle_trim_base() -> std::time::Instant {
     static BASE: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
@@ -57,6 +81,10 @@ pub(crate) fn trim_working_set_idle(reason: &str, min_interval: std::time::Durat
         return false;
     }
 
+    let Some(_guard) = operation_lock().try_write() else {
+        return false;
+    };
+
     let now_ms = idle_trim_base().elapsed().as_millis().min(u64::MAX as u128) as u64;
     let interval_ms = min_interval.as_millis().min(u64::MAX as u128) as u64;
 
@@ -73,7 +101,7 @@ pub(crate) fn trim_working_set_idle(reason: &str, min_interval: std::time::Durat
         return false;
     }
 
-    trim_working_set(reason);
+    trim_working_set_uncoordinated(reason);
     true
 }
 
