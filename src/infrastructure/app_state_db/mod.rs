@@ -217,11 +217,23 @@ impl AppStateDb {
                 view_mode TEXT NOT NULL,
                 sort_mode TEXT NOT NULL,
                 sort_descending TEXT NOT NULL,
-                folders_position TEXT NOT NULL
+                folders_position TEXT NOT NULL,
+                scope TEXT NOT NULL DEFAULT 'current_folder'
             )",
             [],
         )
         .unwrap_or(0);
+        let has_scope_col = conn
+            .prepare("SELECT scope FROM folder_locks LIMIT 0")
+            .is_ok();
+        if !has_scope_col {
+            conn.execute(
+                "ALTER TABLE folder_locks
+                 ADD COLUMN scope TEXT NOT NULL DEFAULT 'current_folder'",
+                [],
+            )
+            .unwrap_or(0);
+        }
 
         // Quick Access pinned folders table
         conn.execute(

@@ -1,5 +1,7 @@
+use crate::app::operations::folder_lock_ops::is_lockable_view_path;
 use crate::app::ImageViewerApp;
-use crate::domain::special_paths::{is_tag_view_path, is_virtual_path, COMPUTER_VIEW_ID};
+use crate::domain::folder_lock::FolderLockScope;
+use crate::domain::special_paths::is_virtual_path;
 use crate::ui::{theme, widgets};
 use eframe::egui;
 
@@ -115,9 +117,8 @@ pub(crate) fn render_secondary_toolbar_layer(app: &mut ImageViewerApp, ctx: &egu
 /// Render the folder lock toggle button (padlock icon).
 fn render_lock_button(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
     let is_locked = app.current_folder_locked;
-    let path = &app.navigation_state.current_path;
-    let is_lockable = !path.is_empty()
-        && (path == COMPUTER_VIEW_ID || is_tag_view_path(path) || !is_virtual_path(path));
+    let path = app.navigation_state.current_path.clone();
+    let is_lockable = is_lockable_view_path(&path);
 
     if !is_lockable {
         // Disabled state — render a grayed-out lock icon with no interaction
@@ -134,24 +135,92 @@ fn render_lock_button(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
         return;
     }
 
+    let resolved = app.current_folder_lock_resolution();
+    let is_inherited = resolved
+        .as_ref()
+        .is_some_and(|resolved| resolved.source_path != path);
     let icon_name = if is_locked { "lock" } else { "lock_open" };
-    let tooltip = if is_locked {
-        rust_i18n::t!("secondary_toolbar.locked")
+    let tooltip = if let Some(resolved) = resolved.as_ref().filter(|_| is_inherited) {
+        rust_i18n::t!(
+            "secondary_toolbar.lock_inherited_from",
+            path = resolved.source_path.as_str()
+        )
+        .to_string()
+    } else if is_locked {
+        rust_i18n::t!("secondary_toolbar.locked").to_string()
     } else {
-        rust_i18n::t!("secondary_toolbar.lock_folder")
+        rust_i18n::t!("secondary_toolbar.lock_folder").to_string()
     };
 
-    if widgets::toggle_icon_button(
+    let response = widgets::toggle_icon_button(
         ui,
         &mut app.svg_icon_manager,
         icon_name,
         is_locked,
         &tooltip,
-    )
-    .clicked()
-        && app.toggle_folder_lock()
-        && app.current_folder_locked
-    {
+    );
+    let popup_id = ui.make_persistent_id("folder_lock_menu");
+    if response.clicked() {
+        ui.memory_mut(|memory| memory.toggle_popup(popup_id));
+    }
+
+    let mut action = None;
+    egui::popup::popup_below_widget(
+        ui,
+        popup_id,
+        &response,
+        egui::popup::PopupCloseBehavior::CloseOnClick,
+        |ui| {
+            ui.set_min_width(260.0);
+            if let Some(resolved) = resolved.as_ref().filter(|_| is_inherited) {
+                ui.label(rust_i18n::t!(
+                    "secondary_toolbar.lock_inherited_from",
+                    path = resolved.source_path.as_str()
+                ));
+                ui.small(rust_i18n::t!("secondary_toolbar.lock_inherited_hint"));
+                return;
+            }
+
+            let local_scope = resolved.as_ref().map(|resolved| resolved.lock.scope);
+            if ui
+                .selectable_label(
+                    local_scope == Some(FolderLockScope::CurrentFolder),
+                    rust_i18n::t!("secondary_toolbar.lock_current_folder"),
+                )
+                .clicked()
+            {
+                action = Some(Some(FolderLockScope::CurrentFolder));
+            }
+
+            if !is_virtual_path(&path)
+                && ui
+                    .selectable_label(
+                        local_scope == Some(FolderLockScope::Descendants),
+                        rust_i18n::t!("secondary_toolbar.lock_with_descendants"),
+                    )
+                    .clicked()
+            {
+                action = Some(Some(FolderLockScope::Descendants));
+            }
+
+            if local_scope.is_some() {
+                ui.separator();
+                if ui
+                    .button(rust_i18n::t!("secondary_toolbar.unlock_folder"))
+                    .clicked()
+                {
+                    action = Some(None);
+                }
+            }
+        },
+    );
+
+    let changed = match action {
+        Some(Some(scope)) => app.set_current_folder_lock(scope),
+        Some(None) => app.remove_current_folder_lock(),
+        None => false,
+    };
+    if changed {
         app.filter_items();
         app.sort_items();
     }

@@ -1,6 +1,6 @@
 use super::{AppStateDb, AppStateWriteError};
 use crate::domain::file_entry::{FoldersPosition, SortMode, ViewMode};
-use crate::domain::folder_lock::FolderLock;
+use crate::domain::folder_lock::{FolderLock, FolderLockScope};
 use rusqlite::params;
 use std::collections::HashMap;
 use std::time::Duration;
@@ -32,6 +32,7 @@ impl AppStateDb {
             FoldersPosition::Last => "last",
             FoldersPosition::Mixed => "mixed",
         };
+        let scope_str = lock.scope.preference_value();
         let mut db = self
             .writer
             .lock()
@@ -39,25 +40,27 @@ impl AppStateDb {
         Self::with_busy_timeout(&mut db, Duration::ZERO, |db| {
             db.execute(
                 "INSERT OR REPLACE INTO folder_locks
-                     (path, view_mode, sort_mode, sort_descending, folders_position)
-                     VALUES (?, ?, ?, ?, ?)",
+                     (path, view_mode, sort_mode, sort_descending, folders_position, scope)
+                     VALUES (?, ?, ?, ?, ?, ?)",
                 params![
                     path,
                     view_mode_str,
                     sort_mode_str,
                     sort_desc_str,
-                    folders_pos_str
+                    folders_pos_str,
+                    scope_str
                 ],
             )?;
             Ok(())
         })?;
         log::info!(
-            "[FOLDER-LOCK] Saved lock for {:?}: view={}, sort={}, desc={}, pos={}",
+            "[FOLDER-LOCK] Saved lock for {:?}: view={}, sort={}, desc={}, pos={}, scope={}",
             path,
             view_mode_str,
             sort_mode_str,
             sort_desc_str,
-            folders_pos_str
+            folders_pos_str,
+            scope_str,
         );
         Ok(())
     }
@@ -86,7 +89,7 @@ impl AppStateDb {
             }
         };
         let mut stmt = match db.prepare(
-            "SELECT path, view_mode, sort_mode, sort_descending, folders_position
+            "SELECT path, view_mode, sort_mode, sort_descending, folders_position, scope
              FROM folder_locks",
         ) {
             Ok(s) => s,
@@ -102,11 +105,12 @@ impl AppStateDb {
                 row.get::<_, String>(2)?,
                 row.get::<_, String>(3)?,
                 row.get::<_, String>(4)?,
+                row.get::<_, String>(5)?,
             ))
         });
         if let Ok(rows) = rows {
             for row in rows.flatten() {
-                let (path, view_mode_s, sort_mode_s, sort_desc_s, folders_pos_s) = row;
+                let (path, view_mode_s, sort_mode_s, sort_desc_s, folders_pos_s, scope_s) = row;
                 let view_mode = ViewMode::from_preference(&view_mode_s);
                 let sort_mode = match sort_mode_s.as_str() {
                     "date" => SortMode::Date,
@@ -130,6 +134,7 @@ impl AppStateDb {
                         sort_mode,
                         sort_descending,
                         folders_position,
+                        scope: FolderLockScope::from_preference(&scope_s),
                     },
                 );
             }
@@ -153,6 +158,7 @@ mod tests {
             sort_mode: SortMode::Name,
             sort_descending: false,
             folders_position: FoldersPosition::First,
+            scope: FolderLockScope::CurrentFolder,
         }
     }
 
@@ -210,5 +216,51 @@ mod tests {
         assert!(db.save_folder_lock("C:\\Locked", &sample_lock()).is_err());
         assert!(started.elapsed() < Duration::from_millis(100));
         external.execute("ROLLBACK", []).unwrap();
+    }
+
+    #[test]
+    fn descendant_scope_round_trips() {
+        let db = AppStateDb::new_in_memory().unwrap();
+        let mut lock = sample_lock();
+        lock.scope = FolderLockScope::Descendants;
+
+        db.save_folder_lock("C:\\Locked", &lock).unwrap();
+
+        let locks = db.get_all_folder_locks();
+        assert_eq!(
+            locks.get("C:\\Locked").unwrap().scope,
+            FolderLockScope::Descendants
+        );
+    }
+
+    #[test]
+    fn migration_preserves_old_locks_as_current_folder_scope() {
+        let db = AppStateDb::new_in_memory().unwrap();
+        {
+            let writer = db.writer.lock().unwrap();
+            writer
+                .execute_batch(
+                    "DROP TABLE folder_locks;
+                     CREATE TABLE folder_locks (
+                         path TEXT PRIMARY KEY,
+                         view_mode TEXT NOT NULL,
+                         sort_mode TEXT NOT NULL,
+                         sort_descending TEXT NOT NULL,
+                         folders_position TEXT NOT NULL
+                     );
+                     INSERT INTO folder_locks
+                         (path, view_mode, sort_mode, sort_descending, folders_position)
+                     VALUES
+                         ('C:\\OldLock', 'grid', 'name', 'false', 'first');",
+                )
+                .unwrap();
+            AppStateDb::run_migrations(&writer);
+        }
+
+        let locks = db.get_all_folder_locks();
+        assert_eq!(
+            locks.get("C:\\OldLock").unwrap().scope,
+            FolderLockScope::CurrentFolder
+        );
     }
 }
