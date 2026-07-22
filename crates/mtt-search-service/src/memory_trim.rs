@@ -32,6 +32,51 @@ pub(crate) fn trim_working_set(reason: &str) {
     }
 }
 
+/// Process-wide throttle for idle-triggered trims. Stores the elapsed
+/// milliseconds (since the process-local base instant) of the last idle trim.
+/// `u64::MAX` means "never trimmed yet".
+static LAST_IDLE_TRIM_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(u64::MAX);
+
+fn idle_trim_base() -> std::time::Instant {
+    static BASE: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    *BASE.get_or_init(std::time::Instant::now)
+}
+
+/// Trim the working set during idle periods, throttled process-wide so that
+/// concurrent volume indexer threads do not repeatedly trim within the same
+/// window. Returns `true` when a trim was actually performed.
+///
+/// This reclaims working-set growth caused by on-demand work (searches and
+/// folder-size traversals page in the name arena and record data) that would
+/// otherwise stay resident because the periodic persist trim only runs when the
+/// index is dirty.
+pub(crate) fn trim_working_set_idle(reason: &str, min_interval: std::time::Duration) -> bool {
+    use std::sync::atomic::Ordering;
+
+    if trim_disabled() {
+        return false;
+    }
+
+    let now_ms = idle_trim_base().elapsed().as_millis().min(u64::MAX as u128) as u64;
+    let interval_ms = min_interval.as_millis().min(u64::MAX as u128) as u64;
+
+    let last = LAST_IDLE_TRIM_MS.load(Ordering::Relaxed);
+    if last != u64::MAX && now_ms.saturating_sub(last) < interval_ms {
+        return false;
+    }
+
+    // Claim the window atomically so only one thread trims per interval.
+    if LAST_IDLE_TRIM_MS
+        .compare_exchange(last, now_ms, Ordering::AcqRel, Ordering::Relaxed)
+        .is_err()
+    {
+        return false;
+    }
+
+    trim_working_set(reason);
+    true
+}
+
 pub(crate) fn trim_working_set_delayed(reason: String, delay: std::time::Duration) {
     if trim_disabled() {
         return;

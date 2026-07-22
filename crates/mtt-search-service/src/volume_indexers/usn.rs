@@ -16,6 +16,10 @@ const INCREMENTAL_APPLY_RETRY_SLEEP: std::time::Duration = std::time::Duration::
 const INCREMENTAL_WRITE_FALLBACK_TIMEOUT: std::time::Duration =
     std::time::Duration::from_millis(60);
 const INCREMENTAL_CONTENTION_LOG_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
+/// Minimum gap between idle-triggered working-set trims. Reclaims resident
+/// pages that on-demand searches / folder-size traversals paged in while the
+/// volume has no USN activity. Throttled process-wide in `memory_trim`.
+const IDLE_TRIM_INTERVAL: std::time::Duration = std::time::Duration::from_secs(120);
 
 struct PendingPersistSnapshot {
     drive_letter: char,
@@ -129,7 +133,7 @@ fn flush_binary_snapshot_if_dirty(handle: &VolumeIndexHandle, drive_letter: char
             return false;
         }
 
-        match crate::index_db::binary::save(&vol) {
+        match crate::index_db::binary::save_and_remap(&mut vol) {
             Ok(()) => {
                 vol.binary_dirty = false;
                 true
@@ -798,9 +802,14 @@ pub(crate) fn index_volume(
             break;
         }
 
+        // Tracks whether this cycle processed any real activity. When false,
+        // the volume is idle and we opportunistically trim the working set.
+        let mut did_work = false;
+
         // 1) Read raw USN buffer with no lock held.
         match usn_journal::read_usn_buffer(volume_handle, &journal_info, current_usn) {
             Ok(Some((buffer, bytes_returned, new_usn))) => {
+                did_work = true;
                 // 2) Apply deltas under a short bounded try_write retry window
                 // to avoid read-starvation while reducing staleness under contention.
                 let mut applied = false;
@@ -887,6 +896,7 @@ pub(crate) fn index_volume(
             };
 
             if !pending_frns.is_empty() {
+                did_work = true;
                 // Read sizes without holding any lock (I/O phase).
                 let geometry = crate::mft_reader::query_mft_geometry_pub(volume_handle);
                 if let Ok(record_size) = geometry {
@@ -979,6 +989,15 @@ pub(crate) fn index_volume(
             }
 
             flush_binary_snapshot_if_dirty(&handle, drive_letter);
+        }
+
+        // When the volume is idle, reclaim any working-set growth from
+        // on-demand searches / folder-size traversals. Throttled process-wide.
+        if !did_work {
+            crate::memory_trim::trim_working_set_idle(
+                &format!("{}:\\ idle", drive_letter),
+                IDLE_TRIM_INTERVAL,
+            );
         }
     }
 

@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
+use crate::child_index::ChildIndex;
 use crate::name_arena::{NameArena, NameRef};
 use crate::path_resolver;
 use crate::record_store::RecordStore;
@@ -65,7 +66,7 @@ pub struct VolumeIndex {
     pub records: RecordStore,
     /// Reverse index: parent FRN -> child FRNs.
     /// Enables O(subtree) descent for folder size calculation.
-    pub children: HashMap<u64, Vec<u64>>,
+    pub children: ChildIndex,
     /// Contiguous arena storing all file name strings.
     pub names: NameArena,
     /// Last USN processed (for incremental updates).
@@ -110,20 +111,11 @@ pub struct VolumeIndex {
 impl VolumeIndex {
     pub(crate) const DEFAULT_NAME_BYTES_PER_RECORD: usize = 25;
 
-    #[inline]
-    fn estimated_child_bucket_capacity(estimated_records: usize) -> usize {
-        if estimated_records == 0 {
-            0
-        } else {
-            estimated_records.saturating_mul(2).max(5) / 5
-        }
-    }
-
     pub fn empty(drive_letter: char) -> Self {
         Self {
             drive_letter,
             records: RecordStore::new(),
-            children: HashMap::new(),
+            children: ChildIndex::new(),
             names: NameArena::with_capacity(0),
             last_usn: 0,
             journal_id: 0,
@@ -146,12 +138,10 @@ impl VolumeIndex {
         estimated_records: usize,
         estimated_name_bytes: usize,
     ) -> Self {
-        let child_capacity = Self::estimated_child_bucket_capacity(estimated_records);
-
         Self {
             drive_letter,
             records: RecordStore::with_capacity(estimated_records),
-            children: HashMap::with_capacity(child_capacity),
+            children: ChildIndex::new(),
             names: NameArena::with_capacity(estimated_name_bytes),
             last_usn: 0,
             journal_id: 0,
@@ -174,16 +164,10 @@ impl VolumeIndex {
         estimated_records: usize,
         estimated_name_bytes: usize,
     ) -> Self {
-        let child_capacity = if estimated_records == 0 {
-            0
-        } else {
-            estimated_records.saturating_div(8).max(1024)
-        };
-
         Self {
             drive_letter,
             records: RecordStore::with_sorted_capacity(estimated_records),
-            children: HashMap::with_capacity(child_capacity),
+            children: ChildIndex::new(),
             names: NameArena::with_capacity(estimated_name_bytes),
             last_usn: 0,
             journal_id: 0,
@@ -224,25 +208,13 @@ impl VolumeIndex {
     #[inline]
     fn add_child_edge(&mut self, parent_ref: u64, child_frn: u64) {
         let bucket = Self::normalized_parent_bucket(child_frn, parent_ref);
-        let children = self.children.entry(bucket).or_default();
-        if !children.contains(&child_frn) {
-            children.push(child_frn);
-        }
+        self.children.add_child(bucket, child_frn);
     }
 
     #[inline]
     fn remove_child_edge(&mut self, parent_ref: u64, child_frn: u64) {
         let bucket = Self::normalized_parent_bucket(child_frn, parent_ref);
-        let mut remove_bucket = false;
-        if let Some(siblings) = self.children.get_mut(&bucket) {
-            if siblings.contains(&child_frn) {
-                siblings.retain(|&c| c != child_frn);
-                remove_bucket = siblings.is_empty();
-            }
-        }
-        if remove_bucket {
-            self.children.remove(&bucket);
-        }
+        self.children.remove_child(bucket, child_frn);
     }
 
     fn sanitize_hardlink_entry(&mut self, frn: u64) {
@@ -586,16 +558,18 @@ impl VolumeIndex {
 
     /// Rebuild the `children` reverse index from `records` and `hardlink_parents`.
     /// Call after bulk operations (load from DB, compaction) to ensure consistency.
+    /// Produces a compact CSR base (see [`ChildIndex`]) with an empty overlay.
     pub fn rebuild_children(&mut self) {
         self.sanitize_hardlink_parents();
-        let mut rebuilt: HashMap<u64, Vec<u64>> = HashMap::with_capacity(self.records.len() / 3);
+
+        let mut edges: Vec<(u64, u64)> =
+            Vec::with_capacity(self.records.len() + self.hardlink_parents.len());
+
         // Primary parent from each record.
         for (&frn, record) in &self.records {
-            rebuilt
-                .entry(Self::normalized_parent_bucket(frn, record.parent_ref))
-                .or_default()
-                .push(frn);
+            edges.push((Self::normalized_parent_bucket(frn, record.parent_ref), frn));
         }
+
         // Extra parents from hardlinks — the file appears in these
         // directories too, matching Explorer's recursive size counting.
         // Skip entries that match the primary parent_ref (invariant should
@@ -608,20 +582,14 @@ impl VolumeIndex {
             for &parent in extra_parents {
                 let bucket = Self::normalized_parent_bucket(frn, parent);
                 if Some(bucket) != primary {
-                    rebuilt.entry(bucket).or_default().push(frn);
+                    edges.push((bucket, frn));
                 }
             }
         }
-        self.children = rebuilt
-            .into_iter()
-            .map(|(parent, mut child_frns)| {
-                child_frns.sort_unstable();
-                child_frns.dedup();
-                child_frns.shrink_to_fit();
-                (parent, child_frns)
-            })
-            .collect();
-        self.children.shrink_to_fit();
+
+        // `from_edges` sorts + de-duplicates, so each parent's children end up
+        // sorted and unique (matching the previous per-`Vec` sort/dedup).
+        self.children = ChildIndex::from_edges(edges);
     }
 
     /// Compute recursive subtree totals for a directory using the `children`
@@ -646,7 +614,7 @@ impl VolumeIndex {
             if !visited_dirs.insert(frn) {
                 continue;
             }
-            if let Some(child_frns) = self.children.get(&frn) {
+            if let Some(child_frns) = self.children.get(frn) {
                 for &child_frn in child_frns {
                     if let Some(record) = self.records.get(&child_frn) {
                         if record.is_dir {
@@ -682,7 +650,7 @@ impl VolumeIndex {
             if !visited_dirs.insert(frn) {
                 continue;
             }
-            if let Some(child_frns) = self.children.get(&frn) {
+            if let Some(child_frns) = self.children.get(frn) {
                 for &child_frn in child_frns {
                     if let Some(record) = self.records.get(&child_frn) {
                         if record.is_dir {
@@ -719,7 +687,7 @@ impl VolumeIndex {
                 continue;
             }
 
-            if let Some(child_frns) = self.children.get(&frn) {
+            if let Some(child_frns) = self.children.get(frn) {
                 for &child_frn in child_frns {
                     let Some(record) = self.records.get(&child_frn) else {
                         continue;
@@ -761,7 +729,7 @@ impl VolumeIndex {
                 continue;
             }
 
-            if let Some(child_frns) = self.children.get(&frn) {
+            if let Some(child_frns) = self.children.get(frn) {
                 for &child_frn in child_frns {
                     let Some(record) = self.records.get(&child_frn) else {
                         continue;
@@ -819,7 +787,7 @@ impl VolumeIndex {
             // Use the reverse children index instead of scanning the entire
             // volume. This keeps path resolution proportional to the current
             // directory fanout, not to the total file count on the drive.
-            let child_frn = self.children.get(&current_frn).and_then(|child_frns| {
+            let child_frn = self.children.get(current_frn).and_then(|child_frns| {
                 child_frns.iter().copied().find(|child_frn| {
                     self.records
                         .get(child_frn)

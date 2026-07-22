@@ -116,6 +116,22 @@ pub fn data_dir() -> &'static Path {
         .expect("data_dir() called before get_db_path")
 }
 
+/// Test-only: point `data_dir()` at a per-process temp directory so binary
+/// save/load round-trips can run without the privileged ProgramData setup.
+/// Also pre-generates the per-machine HMAC key exactly once, so parallel
+/// save/load tests do not race on first-run key generation.
+#[cfg(test)]
+pub(crate) fn init_data_dir_for_tests() {
+    static INIT: std::sync::Once = std::sync::Once::new();
+    let _ = DATA_DIR.get_or_init(|| {
+        std::env::temp_dir().join(format!("mtt-search-test-{}", std::process::id()))
+    });
+    INIT.call_once(|| {
+        let _ = std::fs::create_dir_all(data_dir());
+        let _ = integrity::machine_key();
+    });
+}
+
 /// Persisted volume state for fast restart.
 pub struct PersistedVolumeState {
     pub drive_letter: char,

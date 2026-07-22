@@ -1,3 +1,4 @@
+mod child_index;
 mod file_index;
 mod fs_walker;
 mod index_db;

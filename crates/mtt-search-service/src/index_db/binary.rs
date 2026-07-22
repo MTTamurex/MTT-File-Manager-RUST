@@ -1,33 +1,43 @@
 //! Binary index format for fast save/load of the in-memory VolumeIndex.
 //!
-//! Layout (`MTTIDX02`):
-//!   [Header]                     — 72 bytes
-//!   [NameArena]                  — arena_size bytes
+//! Layout (`MTTIDX04`):
+//!   [Header]                     — 80 bytes
 //!   [Records]                    — record_count × 32 bytes (8-byte FRN + 24-byte FileRecord)
 //!   [Hardlinks]                  — hardlink_entry_count × 16 bytes (8-byte child FRN + 8-byte parent FRN)
 //!   [Reparse Points]             — reparse_count × 8 bytes (8-byte FRN)
+//!   [NameArena]                  — arena_size bytes (optionally zstd-compressed)
 //!   [HMAC-SHA256]                — 32 bytes (covers everything above; key is per-machine, DPAPI-sealed)
 //!
-//! SEC: The trailer was upgraded from CRC32 → HMAC-SHA256 with a per-machine
-//! key sealed by DPAPI. CRC32 only protects against accidental corruption; an
-//! attacker who can write to the index file can trivially recompute it. HMAC
-//! requires the per-machine key (see [`super::integrity`]). Files written by
-//! the legacy `MTTIDX01` format are treated as missing on load and rebuilt.
+//! The records section is placed immediately after the fixed 80-byte header so
+//! it starts at an 8-byte-aligned file offset and can be reinterpreted as
+//! `&[RecordEntry]` via a read-only memory map (see [`crate::record_store`]).
+//! The variable-size NameArena is written last so it does not shift the records
+//! offset. `MTTIDX03` files (arena-first) are transparently reordered to
+//! `MTTIDX04` on load without a full re-scan; `MTTIDX02` is discarded.
+//!
+//! SEC: The trailer is HMAC-SHA256 with a per-machine key sealed by DPAPI. HMAC
+//! requires the per-machine key (see [`super::integrity`]).
 
 use std::io::{BufReader, BufWriter, Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use memmap2::MmapOptions;
+use memmap2::{Mmap, MmapOptions};
 
 use super::integrity::{self, HMAC_OUTPUT_SIZE};
 use crate::file_index::{FileRecord, VolumeIndex};
 use crate::record_store::RecordStore;
 
-const MAGIC: &[u8; 8] = b"MTTIDX03";
-const LEGACY_MAGIC: &[u8; 8] = b"MTTIDX02";
-const VERSION: u32 = 3;
+const MAGIC: &[u8; 8] = b"MTTIDX04";
+const LEGACY_V3_MAGIC: &[u8; 8] = b"MTTIDX03";
+const LEGACY_V2_MAGIC: &[u8; 8] = b"MTTIDX02";
+const VERSION: u32 = 4;
+const LEGACY_V3_VERSION: u32 = 3;
 const TRAILER_SIZE: usize = HMAC_OUTPUT_SIZE;
 const MMAP_ARENA_MIN_BYTES: usize = 64 * 1024 * 1024;
+/// Minimum records-section size to memory-map instead of reading into private
+/// heap. Below this the RAM saved is negligible and owning avoids mmap setup
+/// overhead. ~512k records at 32 bytes each.
+const MMAP_RECORDS_MIN_BYTES: usize = 16 * 1024 * 1024;
 const HMAC_STREAM_BUF_SIZE: usize = 64 * 1024;
 
 const ARENA_COMPRESSION_NONE: u8 = 0;
@@ -213,6 +223,22 @@ fn mmap_arena_enabled(arena_size: usize, compression: u8) -> bool {
     }
 }
 
+/// Whether the records section should be memory-mapped (file-backed, evictable)
+/// instead of read into private heap. Enabled by default for large volumes;
+/// set `MTT_SEARCH_MMAP_RECORDS=0` to force owned records.
+fn mmap_records_enabled(records_bytes: usize) -> bool {
+    if records_bytes < MMAP_RECORDS_MIN_BYTES {
+        return false;
+    }
+    match std::env::var("MTT_SEARCH_MMAP_RECORDS") {
+        Ok(value) => !matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "0" | "false" | "no" | "off"
+        ),
+        Err(_) => true,
+    }
+}
+
 /// Compress the raw arena bytes using zstd level 1. Returns `None` if
 /// compression fails or does not meet the minimum savings threshold.
 fn compress_arena(raw: &[u8], record_count: u64) -> Option<Vec<u8>> {
@@ -344,9 +370,6 @@ pub fn save(index: &VolumeIndex) -> Result<(), String> {
         unsafe { std::slice::from_raw_parts(&header as *const Header as *const u8, HEADER_SIZE) };
     write_authenticated_chunk(&mut writer, &mut hmac, header_bytes)?;
 
-    // Write NameArena (compressed or raw).
-    write_authenticated_chunk(&mut writer, &mut hmac, &arena_bytes)?;
-
     // Write Records (sorted by FRN for deterministic output). Most steady-state
     // saves happen after RecordStore compaction, so stream the compact sorted
     // slices directly and avoid an extra all-FRN Vec allocation.
@@ -389,6 +412,10 @@ pub fn save(index: &VolumeIndex) -> Result<(), String> {
         write_authenticated_chunk(&mut writer, &mut hmac, &frn.to_le_bytes())?;
     }
 
+    // Write NameArena (compressed or raw) LAST so the fixed-size records section
+    // stays at an 8-byte-aligned offset (HEADER_SIZE) for zero-copy mmap on load.
+    write_authenticated_chunk(&mut writer, &mut hmac, &arena_bytes)?;
+
     // SEC: Compute HMAC-SHA256 incrementally over the serialized payload.
     let tag = hmac
         .finalize()
@@ -418,16 +445,24 @@ pub fn save(index: &VolumeIndex) -> Result<(), String> {
     Ok(())
 }
 
-/// Load a VolumeIndex from binary file. Returns None if file doesn't exist.
-/// Returns Err on corruption (CRC mismatch, truncation, bad magic).
+/// Peek the 8-byte magic of a binary index file.
+fn read_file_magic(path: &Path) -> Result<[u8; 8], String> {
+    let mut file = std::fs::File::open(path).map_err(|e| format!("Open binary index: {}", e))?;
+    let mut magic = [0u8; 8];
+    file.read_exact(&mut magic)
+        .map_err(|e| format!("Read magic: {}", e))?;
+    Ok(magic)
+}
+
+/// Load a VolumeIndex from the binary file. Returns None if the file is absent
+/// or a superseded legacy format that must be rebuilt. Returns Err on
+/// corruption/tampering (HMAC mismatch, truncation, bad magic).
 pub fn load(drive_letter: char) -> Result<Option<(VolumeIndex, PersistedBinaryState)>, String> {
     let path = index_path(drive_letter);
 
     // Clean up any orphaned .tmp file left by a prior abrupt shutdown (e.g. the
     // installer killed the service mid-write between File::create(.tmp) and the
-    // atomic rename(.tmp → .bin)).  The .tmp is never valid on load — it is
-    // either incomplete or was already renamed.  Leaving it around wastes disk
-    // space and can confuse monitoring tools.
+    // atomic rename(.tmp → .bin)).
     let tmp_path = path.with_extension("bin.tmp");
     if tmp_path.exists() {
         eprintln!(
@@ -442,9 +477,61 @@ pub fn load(drive_letter: char) -> Result<Option<(VolumeIndex, PersistedBinarySt
         return Ok(None);
     }
 
+    // Select format by magic; migrate legacy layouts before reading.
+    let magic = read_file_magic(&path)?;
+    if &magic == LEGACY_V2_MAGIC {
+        eprintln!(
+            "[BINARY-IDX] {}:\\ Legacy MTTIDX02 format detected; discarding and rebuilding.",
+            drive_letter
+        );
+        let _ = std::fs::remove_file(&path);
+        return Ok(None);
+    }
+    if &magic == LEGACY_V3_MAGIC {
+        // Reorder MTTIDX03 (arena-first) to MTTIDX04 (records-first) in place so
+        // records become memory-mappable, without a full MFT re-scan.
+        match migrate_v3_to_v4(&path, drive_letter) {
+            Ok(true) => {} // file is now MTTIDX04; fall through to load it
+            Ok(false) => {
+                eprintln!(
+                    "[BINARY-IDX] {}:\\ MTTIDX03 file corrupt/mismatched; rebuilding.",
+                    drive_letter
+                );
+                let _ = std::fs::remove_file(&path);
+                return Ok(None);
+            }
+            Err(e) => {
+                eprintln!(
+                    "[BINARY-IDX] {}:\\ MTTIDX03 -> MTTIDX04 migration failed ({}); rebuilding.",
+                    drive_letter, e
+                );
+                let _ = std::fs::remove_file(&path);
+                return Ok(None);
+            }
+        }
+    } else if &magic != MAGIC {
+        let _ = std::fs::remove_file(&path);
+        return Err("Bad magic".into());
+    }
+
+    load_v4(drive_letter, &path)
+}
+
+/// How the records section was materialized during a load.
+enum RecordsStorage {
+    /// Streamed through HMAC and to be memory-mapped after verification.
+    Mmap,
+    /// Read fully into an owned record store.
+    Owned(RecordStore),
+}
+
+fn load_v4(
+    drive_letter: char,
+    path: &Path,
+) -> Result<Option<(VolumeIndex, PersistedBinaryState)>, String> {
     let start = std::time::Instant::now();
 
-    let file = std::fs::File::open(&path).map_err(|e| format!("Read binary index: {}", e))?;
+    let file = std::fs::File::open(path).map_err(|e| format!("Read binary index: {}", e))?;
     let file_len = file
         .metadata()
         .map_err(|e| format!("Read binary metadata: {}", e))?
@@ -460,19 +547,8 @@ pub fn load(drive_letter: char) -> Result<Option<(VolumeIndex, PersistedBinarySt
         .read_exact(&mut header_bytes)
         .map_err(|e| format!("Read header: {}", e))?;
 
-    // SEC: Magic check FIRST so we can recognize legacy files and silently
-    // request a rebuild instead of erroring out.
-    if header_bytes[..8] == *LEGACY_MAGIC {
-        eprintln!(
-            "[BINARY-IDX] {}:\\ Legacy MTTIDX02 format detected; \
-             discarding and rebuilding under MTTIDX03 (compressed arena).",
-            drive_letter
-        );
-        let _ = std::fs::remove_file(&path);
-        return Ok(None);
-    }
     if header_bytes[..8] != *MAGIC {
-        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(path);
         return Err("Bad magic".into());
     }
 
@@ -568,9 +644,52 @@ pub fn load(drive_letter: char) -> Result<Option<(VolumeIndex, PersistedBinarySt
     hmac.update(&header_bytes)
         .map_err(|e| format!("HMAC update: {}", e))?;
 
-    // Authenticate NameArena. Uncompressed large arenas are streamed through
-    // HMAC and then mapped read-only. Compressed arenas are read into memory
-    // first and decompressed after the whole-file HMAC is verified.
+    // Records come first in MTTIDX04. Large record sections are streamed through
+    // HMAC and then memory-mapped (file-backed, evictable); small ones are read
+    // into an owned, sorted RecordStore. The writer stores records sorted by
+    // FRN, so a mapped base can binary-search without a validating scan.
+    let records_bytes = record_count * RECORD_SIZE;
+    let map_records = record_count > 0 && mmap_records_enabled(records_bytes);
+    let records_storage = if map_records {
+        read_authenticated_bytes(&mut reader, &mut hmac, records_bytes, "records")?;
+        RecordsStorage::Mmap
+    } else {
+        let mut record_frns = Vec::with_capacity(record_count);
+        let mut record_values = Vec::with_capacity(record_count);
+        let mut record_buf = [0u8; RECORD_SIZE];
+        for _ in 0..record_count {
+            read_authenticated_chunk(&mut reader, &mut hmac, &mut record_buf, "record")?;
+            let frn = read_u64_le(&record_buf, 0, "record frn")?;
+            let rec = decode_file_record(&record_buf[FRN_SIZE..])?;
+            record_frns.push(frn);
+            record_values.push(rec);
+        }
+        RecordsStorage::Owned(RecordStore::from_sorted_parts(record_frns, record_values)?)
+    };
+
+    // Load Hardlinks.
+    let mut hardlink_parents: std::collections::HashMap<u64, Vec<u64>> =
+        std::collections::HashMap::with_capacity(hardlink_count.min(record_count));
+    let mut hardlink_buf = [0u8; HARDLINK_ENTRY_SIZE];
+    for _ in 0..hardlink_count {
+        read_authenticated_chunk(&mut reader, &mut hmac, &mut hardlink_buf, "hardlink pair")?;
+        let child = read_u64_le(&hardlink_buf, 0, "hardlink child")?;
+        let parent = read_u64_le(&hardlink_buf, FRN_SIZE, "hardlink parent")?;
+        hardlink_parents.entry(child).or_default().push(parent);
+    }
+
+    // Load Reparse points.
+    let mut reparse_points = std::collections::HashSet::with_capacity(reparse_count);
+    let mut reparse_buf = [0u8; REPARSE_ENTRY_SIZE];
+    for _ in 0..reparse_count {
+        read_authenticated_chunk(&mut reader, &mut hmac, &mut reparse_buf, "reparse point")?;
+        let frn = read_u64_le(&reparse_buf, 0, "reparse frn")?;
+        reparse_points.insert(frn);
+    }
+
+    // NameArena is written last in MTTIDX04. Uncompressed large arenas are
+    // streamed through HMAC and then mapped read-only; compressed arenas are
+    // read into memory and decompressed after the whole-file HMAC is verified.
     enum ArenaStorage {
         Mmap,
         Vec(Vec<u8>),
@@ -596,41 +715,6 @@ pub fn load(drive_letter: char) -> Result<Option<(VolumeIndex, PersistedBinarySt
         _ => unreachable!("arena_compression validated above"),
     };
 
-    // Load Records. The binary writer stores records sorted by FRN, so load
-    // directly into the compact stable representation instead of rebuilding a
-    // large transient HashMap.
-    let mut record_frns = Vec::with_capacity(record_count);
-    let mut record_values = Vec::with_capacity(record_count);
-    let mut record_buf = [0u8; RECORD_SIZE];
-    for _ in 0..record_count {
-        read_authenticated_chunk(&mut reader, &mut hmac, &mut record_buf, "record")?;
-        let frn = read_u64_le(&record_buf, 0, "record frn")?;
-        let rec = decode_file_record(&record_buf[FRN_SIZE..])?;
-        record_frns.push(frn);
-        record_values.push(rec);
-    }
-    let records = RecordStore::from_sorted_parts(record_frns, record_values)?;
-
-    // Load Hardlinks.
-    let mut hardlink_parents: std::collections::HashMap<u64, Vec<u64>> =
-        std::collections::HashMap::with_capacity(hardlink_count.min(record_count));
-    let mut hardlink_buf = [0u8; HARDLINK_ENTRY_SIZE];
-    for _ in 0..hardlink_count {
-        read_authenticated_chunk(&mut reader, &mut hmac, &mut hardlink_buf, "hardlink pair")?;
-        let child = read_u64_le(&hardlink_buf, 0, "hardlink child")?;
-        let parent = read_u64_le(&hardlink_buf, FRN_SIZE, "hardlink parent")?;
-        hardlink_parents.entry(child).or_default().push(parent);
-    }
-
-    // Load Reparse points.
-    let mut reparse_points = std::collections::HashSet::with_capacity(reparse_count);
-    let mut reparse_buf = [0u8; REPARSE_ENTRY_SIZE];
-    for _ in 0..reparse_count {
-        read_authenticated_chunk(&mut reader, &mut hmac, &mut reparse_buf, "reparse point")?;
-        let frn = read_u64_le(&reparse_buf, 0, "reparse frn")?;
-        reparse_points.insert(frn);
-    }
-
     let mut stored_tag = [0u8; TRAILER_SIZE];
     reader
         .read_exact(&mut stored_tag)
@@ -640,18 +724,47 @@ pub fn load(drive_letter: char) -> Result<Option<(VolumeIndex, PersistedBinarySt
         .finalize()
         .map_err(|e| format!("HMAC compute: {}", e))?;
     if !integrity::ct_eq(&stored_tag, &computed_tag) {
-        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(path);
         return Err("HMAC mismatch (tampering or corruption)".into());
     }
 
-    // Build VolumeIndex.
+    // Build VolumeIndex. Both the records and the arena may be memory-mapped;
+    // the whole file was authenticated above so the mappings are trusted.
     let mut index = VolumeIndex::empty(drive_letter);
+    index.records = match records_storage {
+        RecordsStorage::Owned(store) => store,
+        RecordsStorage::Mmap => {
+            let mmap = unsafe {
+                MmapOptions::new()
+                    .offset(HEADER_SIZE as u64)
+                    .len(records_bytes)
+                    .map(&file)
+            }
+            .map_err(|e| format!("Map records: {}", e))?;
+            match RecordStore::from_mmap(mmap, record_count) {
+                Ok(store) => store,
+                Err(e) => {
+                    // Should be unreachable (offset 80 is 8-aligned), but fall
+                    // back to an owned read so a load never fails on this alone.
+                    eprintln!(
+                        "[BINARY-IDX] {}:\\ records mmap unusable ({}); reading owned",
+                        drive_letter, e
+                    );
+                    read_records_region_owned(&file, record_count)?
+                }
+            }
+        }
+    };
+    let arena_offset = HEADER_SIZE
+        + records_bytes
+        + hardlink_count * HARDLINK_ENTRY_SIZE
+        + reparse_count * REPARSE_ENTRY_SIZE;
     index.names = match arena_storage {
         ArenaStorage::Vec(bytes) => crate::name_arena::NameArena::from_vec(bytes),
         ArenaStorage::Mmap => {
             let mmap = unsafe {
                 MmapOptions::new()
-                    .offset(HEADER_SIZE as u64)
+                    .offset(arena_offset as u64)
                     .len(arena_size)
                     .map(&file)
             }
@@ -661,12 +774,11 @@ pub fn load(drive_letter: char) -> Result<Option<(VolumeIndex, PersistedBinarySt
         ArenaStorage::Compressed(compressed) => {
             let decompressed = decompress_arena(&compressed, h_arena_compression, arena_size)
                 .inspect_err(|_| {
-                    let _ = std::fs::remove_file(&path);
+                    let _ = std::fs::remove_file(path);
                 })?;
             crate::name_arena::NameArena::from_vec(decompressed)
         }
     };
-    index.records = records;
     index.hardlink_parents = hardlink_parents;
     index.reparse_points = reparse_points;
     index.journal_id = h_journal_id;
@@ -694,15 +806,250 @@ pub fn load(drive_letter: char) -> Result<Option<(VolumeIndex, PersistedBinarySt
         "raw"
     };
     eprintln!(
-        "[BINARY-IDX] {}:\\ Loaded {} records + {} {} arena bytes in {:.3}s",
+        "[BINARY-IDX] {}:\\ Loaded {} records ({}) + {} {} arena bytes in {:.3}s",
         drive_letter,
         record_count,
+        if map_records { "mmap" } else { "owned" },
         arena_size,
         compression_label,
         elapsed.as_secs_f64()
     );
 
     Ok(Some((index, state)))
+}
+
+/// Read the records section into an owned RecordStore. Used as a fallback when
+/// the records region cannot be memory-mapped. The whole file was already
+/// HMAC-verified by the caller, so this trusts the on-disk bytes.
+fn read_records_region_owned(
+    file: &std::fs::File,
+    record_count: usize,
+) -> Result<RecordStore, String> {
+    use std::io::{Seek, SeekFrom};
+    let mut handle = file
+        .try_clone()
+        .map_err(|e| format!("clone index handle: {}", e))?;
+    handle
+        .seek(SeekFrom::Start(HEADER_SIZE as u64))
+        .map_err(|e| format!("seek records: {}", e))?;
+    let mut reader = BufReader::new(handle);
+    let mut record_frns = Vec::with_capacity(record_count);
+    let mut record_values = Vec::with_capacity(record_count);
+    let mut record_buf = [0u8; RECORD_SIZE];
+    for _ in 0..record_count {
+        reader
+            .read_exact(&mut record_buf)
+            .map_err(|e| format!("read record: {}", e))?;
+        let frn = read_u64_le(&record_buf, 0, "record frn")?;
+        let rec = decode_file_record(&record_buf[FRN_SIZE..])?;
+        record_frns.push(frn);
+        record_values.push(rec);
+    }
+    RecordStore::from_sorted_parts(record_frns, record_values)
+}
+
+/// Reorder an `MTTIDX03` file (arena-first) into `MTTIDX04` (records-first) in
+/// place so records can be memory-mapped, without a full MFT re-scan. The v3
+/// HMAC is verified first, then recomputed over the new layout. Returns
+/// `Ok(false)` if the file is corrupt or mismatched (caller rebuilds).
+fn migrate_v3_to_v4(path: &Path, drive_letter: char) -> Result<bool, String> {
+    let data = std::fs::read(path).map_err(|e| format!("read v3 index: {}", e))?;
+    if data.len() < HEADER_SIZE + TRAILER_SIZE || data[..8] != *LEGACY_V3_MAGIC {
+        return Ok(false);
+    }
+
+    let header: Header = unsafe { std::ptr::read_unaligned(data.as_ptr() as *const Header) };
+    let h_version = header.version;
+    let h_drive_letter = header.drive_letter;
+    let h_arena_compression = header.arena_compression;
+    let h_journal_id = header.journal_id;
+    let h_last_usn = header.last_usn;
+    let h_record_count = header.record_count;
+    let h_arena_size = header.arena_size;
+    let h_compressed_arena_size = header.compressed_arena_size;
+    let h_hardlink_count = header.hardlink_entry_count;
+    let h_reparse_count = header.reparse_count;
+    let h_flags = header.flags;
+
+    if h_version != LEGACY_V3_VERSION
+        || h_drive_letter as char != drive_letter
+        || (h_arena_compression != ARENA_COMPRESSION_NONE
+            && h_arena_compression != ARENA_COMPRESSION_ZSTD)
+    {
+        return Ok(false);
+    }
+
+    let overflow = || "size overflow in v3 header".to_string();
+    let records_bytes = (h_record_count as usize)
+        .checked_mul(RECORD_SIZE)
+        .ok_or_else(overflow)?;
+    let hardlink_bytes = (h_hardlink_count as usize)
+        .checked_mul(HARDLINK_ENTRY_SIZE)
+        .ok_or_else(overflow)?;
+    let reparse_bytes = (h_reparse_count as usize)
+        .checked_mul(REPARSE_ENTRY_SIZE)
+        .ok_or_else(overflow)?;
+    let compressed_arena_size = h_compressed_arena_size as usize;
+    let payload = HEADER_SIZE
+        .checked_add(compressed_arena_size)
+        .and_then(|s| s.checked_add(records_bytes))
+        .and_then(|s| s.checked_add(hardlink_bytes))
+        .and_then(|s| s.checked_add(reparse_bytes))
+        .ok_or_else(overflow)?;
+    let expected = payload.checked_add(TRAILER_SIZE).ok_or_else(overflow)?;
+    if data.len() != expected {
+        return Ok(false);
+    }
+
+    // Verify the v3 HMAC over the payload before trusting the section bytes.
+    let key = integrity::machine_key().map_err(|e| format!("HMAC key: {}", e))?;
+    let mut hmac = integrity::HmacSha256::new(&key).map_err(|e| format!("HMAC init: {}", e))?;
+    hmac.update(&data[..payload])
+        .map_err(|e| format!("HMAC update: {}", e))?;
+    let tag = hmac.finalize().map_err(|e| format!("HMAC compute: {}", e))?;
+    if !integrity::ct_eq(&tag, &data[payload..expected]) {
+        return Ok(false);
+    }
+
+    // v3 section slices (arena-first): [header][arena][records][hardlinks][reparse].
+    let arena_end = HEADER_SIZE + compressed_arena_size;
+    let records_end = arena_end + records_bytes;
+    let hardlink_end = records_end + hardlink_bytes;
+    let reparse_end = hardlink_end + reparse_bytes;
+    let arena = &data[HEADER_SIZE..arena_end];
+    let records = &data[arena_end..records_end];
+    let hardlinks = &data[records_end..hardlink_end];
+    let reparse = &data[hardlink_end..reparse_end];
+
+    // v4 header: identical fields, updated magic/version.
+    let new_header = Header {
+        magic: *MAGIC,
+        version: VERSION,
+        drive_letter: h_drive_letter,
+        arena_compression: h_arena_compression,
+        _pad: [0; 2],
+        journal_id: h_journal_id,
+        last_usn: h_last_usn,
+        record_count: h_record_count,
+        arena_size: h_arena_size,
+        hardlink_entry_count: h_hardlink_count,
+        reparse_count: h_reparse_count,
+        flags: h_flags,
+        compressed_arena_size: h_compressed_arena_size,
+    };
+    let header_bytes: &[u8] = unsafe {
+        std::slice::from_raw_parts(&new_header as *const Header as *const u8, HEADER_SIZE)
+    };
+
+    let tmp_path = path.with_extension("bin.tmp");
+    let out = std::fs::File::create(&tmp_path).map_err(|e| format!("create tmp: {}", e))?;
+    let mut writer = BufWriter::new(out);
+    let mut out_hmac = integrity::HmacSha256::new(&key).map_err(|e| format!("HMAC init: {}", e))?;
+    write_authenticated_chunk(&mut writer, &mut out_hmac, header_bytes)?;
+    write_authenticated_chunk(&mut writer, &mut out_hmac, records)?;
+    write_authenticated_chunk(&mut writer, &mut out_hmac, hardlinks)?;
+    write_authenticated_chunk(&mut writer, &mut out_hmac, reparse)?;
+    write_authenticated_chunk(&mut writer, &mut out_hmac, arena)?;
+    let out_tag = out_hmac
+        .finalize()
+        .map_err(|e| format!("HMAC compute: {}", e))?;
+    writer
+        .write_all(&out_tag)
+        .map_err(|e| format!("write trailer: {}", e))?;
+    writer.flush().map_err(|e| format!("flush: {}", e))?;
+    let out = writer
+        .into_inner()
+        .map_err(|e| format!("finish write: {}", e))?;
+    out.sync_all().map_err(|e| format!("sync: {}", e))?;
+    drop(out);
+    std::fs::rename(&tmp_path, path).map_err(|e| format!("rename: {}", e))?;
+
+    eprintln!(
+        "[BINARY-IDX] {}:\\ Migrated MTTIDX03 -> MTTIDX04 (records-first) in place",
+        drive_letter
+    );
+    Ok(true)
+}
+
+/// Open the current index file and memory-map its records section when it is
+/// large enough to be worth mapping. Returns `Ok(None)` for small records
+/// (kept owned) or a non-current file. Does not re-verify the HMAC: it is only
+/// called on files this process just wrote in [`save_and_remap`].
+fn map_records_region(drive_letter: char) -> Result<Option<(Mmap, usize)>, String> {
+    let path = index_path(drive_letter);
+    let file = std::fs::File::open(&path).map_err(|e| format!("open index for mmap: {}", e))?;
+    let file_len = file
+        .metadata()
+        .map_err(|e| format!("index metadata: {}", e))?
+        .len() as usize;
+    if file_len < HEADER_SIZE + TRAILER_SIZE {
+        return Ok(None);
+    }
+
+    let mut header_bytes = [0u8; HEADER_SIZE];
+    {
+        let mut reader = BufReader::new(&file);
+        reader
+            .read_exact(&mut header_bytes)
+            .map_err(|e| format!("read header: {}", e))?;
+    }
+    if header_bytes[..8] != *MAGIC {
+        return Ok(None);
+    }
+    let header: Header =
+        unsafe { std::ptr::read_unaligned(header_bytes.as_ptr() as *const Header) };
+    if header.version != VERSION {
+        return Ok(None);
+    }
+    let record_count = header.record_count as usize;
+    let records_bytes = match record_count.checked_mul(RECORD_SIZE) {
+        Some(bytes) => bytes,
+        None => return Ok(None),
+    };
+    if record_count == 0 || !mmap_records_enabled(records_bytes) {
+        return Ok(None);
+    }
+
+    let mmap = unsafe {
+        MmapOptions::new()
+            .offset(HEADER_SIZE as u64)
+            .len(records_bytes)
+            .map(&file)
+    }
+    .map_err(|e| format!("map records: {}", e))?;
+    Ok(Some((mmap, record_count)))
+}
+
+/// Save the index as MTTIDX04 and, for large volumes, swap its record store to
+/// a memory mapping of the freshly written file.
+///
+/// Dropping the previous record store releases any prior mapping, so Windows
+/// reclaims the superseded (unlinked) inode — keeping the on-disk footprint at
+/// 1x while record bytes move from private heap into evictable, file-backed
+/// page cache. Small volumes stay owned (mapping saves negligible RAM).
+pub fn save_and_remap(index: &mut VolumeIndex) -> Result<(), String> {
+    save(index)?;
+    let drive_letter = index.drive_letter;
+    match map_records_region(drive_letter) {
+        Ok(Some((mmap, count))) => match RecordStore::from_mmap(mmap, count) {
+            Ok(store) => index.records = store,
+            Err(e) => {
+                eprintln!(
+                    "[BINARY-IDX] {}:\\ records remap skipped: {}",
+                    drive_letter, e
+                );
+            }
+        },
+        Ok(None) => {}
+        Err(e) => {
+            eprintln!(
+                "[BINARY-IDX] {}:\\ records remap failed: {}",
+                drive_letter,
+                crate::redact_paths(&e)
+            );
+        }
+    }
+    Ok(())
 }
 
 /// Metadata from a loaded binary index (mirrors PersistedVolumeState).
@@ -754,5 +1101,139 @@ mod tests {
     fn decompress_detects_size_mismatch() {
         let raw = b"hello world".to_vec();
         assert!(decompress_arena(&raw, ARENA_COMPRESSION_NONE, 5).is_err());
+    }
+
+    use crate::file_index::VolumeIndex;
+
+    fn sample_index(drive: char) -> VolumeIndex {
+        let mut index = VolumeIndex::empty(drive);
+        assert!(index.insert_record(10, "docs", 5, true, false));
+        assert!(index.insert_record(20, "a.txt", 10, false, false));
+        index.records.get_mut(&20).unwrap().size = 55;
+        assert!(index.insert_record(30, "root.bin", 5, false, false));
+        index.records.get_mut(&30).unwrap().size = 7;
+        index.journal_id = 7;
+        index.last_usn = 8;
+        index.hardlink_data_complete = true;
+        index.reparse_data_complete = true;
+        index.sizes_loaded = true;
+        index.rebuild_children();
+        index
+    }
+
+    fn assert_matches_sample(index: &VolumeIndex, drive: char) {
+        assert_eq!(index.records.len(), 3);
+        assert_eq!(index.records.get(&20).unwrap().size, 55);
+        assert_eq!(index.records.get(&30).unwrap().size, 7);
+        assert_eq!(index.resolve_path_to_frn(&format!(r"{}:\docs", drive)), Some(10));
+        let (total, files, folders, _zero) = index.folder_tree_summary(5);
+        assert_eq!((total, files, folders), (62, 2, 1));
+    }
+
+    #[test]
+    fn v4_round_trips_through_save_and_load() {
+        crate::index_db::init_data_dir_for_tests();
+        let drive = 'W';
+        let path = index_path(drive);
+        let _ = std::fs::remove_file(&path);
+
+        let index = sample_index(drive);
+        save(&index).expect("save v4");
+
+        let (loaded, state) = load(drive).expect("load v4").expect("index present");
+        assert_eq!(state.journal_id, 7);
+        assert_eq!(state.last_usn, 8);
+        assert!(state.has_hardlink_parent_data);
+        assert!(state.has_reparse_point_data);
+        assert_matches_sample(&loaded, drive);
+
+        assert_eq!(&read_file_magic(&path).unwrap(), MAGIC);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// Serialize an index in the legacy MTTIDX03 (arena-first) layout so the
+    /// migration path can be exercised end to end.
+    fn write_v3_file(path: &Path, index: &VolumeIndex) -> Result<(), String> {
+        let key = integrity::machine_key()?;
+        let mut arena = Vec::new();
+        index.names.for_each_slice(|slice| arena.extend_from_slice(slice));
+        let arena_size = index.names.len() as u64;
+        let hardlink_entry_count: u64 =
+            index.hardlink_parents.values().map(|v| v.len() as u64).sum();
+
+        let header = Header {
+            magic: *LEGACY_V3_MAGIC,
+            version: LEGACY_V3_VERSION,
+            drive_letter: index.drive_letter as u8,
+            arena_compression: ARENA_COMPRESSION_NONE,
+            _pad: [0; 2],
+            journal_id: index.journal_id,
+            last_usn: index.last_usn,
+            record_count: index.records.len() as u64,
+            arena_size,
+            hardlink_entry_count,
+            reparse_count: index.reparse_points.len() as u64,
+            flags: 1 | 2 | 4,
+            compressed_arena_size: arena_size,
+        };
+        let header_bytes: &[u8] = unsafe {
+            std::slice::from_raw_parts(&header as *const Header as *const u8, HEADER_SIZE)
+        };
+
+        let file = std::fs::File::create(path).map_err(|e| format!("create v3: {}", e))?;
+        let mut writer = BufWriter::new(file);
+        let mut hmac = integrity::HmacSha256::new(&key).map_err(|e| format!("hmac: {}", e))?;
+
+        // Legacy v3 order: header, arena, records, hardlinks, reparse.
+        write_authenticated_chunk(&mut writer, &mut hmac, header_bytes)?;
+        write_authenticated_chunk(&mut writer, &mut hmac, &arena)?;
+        let mut frns: Vec<u64> = index.records.keys().copied().collect();
+        frns.sort_unstable();
+        for frn in frns {
+            let rec = *index.records.get(&frn).unwrap();
+            write_authenticated_chunk(&mut writer, &mut hmac, &frn.to_le_bytes())?;
+            let rb: &[u8] = unsafe {
+                std::slice::from_raw_parts(&rec as *const FileRecord as *const u8, FILE_RECORD_SIZE)
+            };
+            write_authenticated_chunk(&mut writer, &mut hmac, rb)?;
+        }
+        for (&child, parents) in &index.hardlink_parents {
+            for &parent in parents {
+                write_authenticated_chunk(&mut writer, &mut hmac, &child.to_le_bytes())?;
+                write_authenticated_chunk(&mut writer, &mut hmac, &parent.to_le_bytes())?;
+            }
+        }
+        let mut reparse: Vec<u64> = index.reparse_points.iter().copied().collect();
+        reparse.sort_unstable();
+        for frn in reparse {
+            write_authenticated_chunk(&mut writer, &mut hmac, &frn.to_le_bytes())?;
+        }
+        let tag = hmac.finalize()?;
+        writer.write_all(&tag).map_err(|e| format!("trailer: {}", e))?;
+        writer.flush().map_err(|e| format!("flush: {}", e))?;
+        Ok(())
+    }
+
+    #[test]
+    fn v3_file_migrates_to_v4_and_loads() {
+        crate::index_db::init_data_dir_for_tests();
+        let drive = 'V';
+        let path = index_path(drive);
+        let _ = std::fs::remove_file(&path);
+
+        let index = sample_index(drive);
+        write_v3_file(&path, &index).expect("write v3");
+        assert_eq!(&read_file_magic(&path).unwrap(), LEGACY_V3_MAGIC);
+
+        let (loaded, state) = load(drive).expect("load migrates").expect("index present");
+        assert_eq!(state.journal_id, 7);
+        assert_matches_sample(&loaded, drive);
+
+        // The on-disk file is now reordered to MTTIDX04 and still loads.
+        assert_eq!(&read_file_magic(&path).unwrap(), MAGIC);
+        let (reloaded, _) = load(drive).expect("reload v4").expect("index present");
+        assert_matches_sample(&reloaded, drive);
+
+        let _ = std::fs::remove_file(&path);
     }
 }
