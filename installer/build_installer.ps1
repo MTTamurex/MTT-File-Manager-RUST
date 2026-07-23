@@ -87,6 +87,7 @@ $requiredFiles = @(
     "$RepoRoot\third_party_licenses\MATERIAL-DESIGN-ICONIC-FONT-NOTICE.txt",
     "$RepoRoot\appicon.ico",
     "$RepoRoot\mpv_ui\portable_config\mpv.conf",
+    "$RepoRoot\mpv_ui\portable_config\input.conf",
     "$RepoRoot\mpv_ui\portable_config\scripts\autoload.lua",
     "$RepoRoot\mpv_ui\portable_config\scripts\modernH.lua",
     "$RepoRoot\mpv_ui\portable_config\scripts\vsr.lua",
