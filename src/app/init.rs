@@ -693,6 +693,9 @@ impl ImageViewerApp {
                 tree
             },
 
+            // MILLER'S COLUMNS (ancestor-column listing cache)
+            miller_columns: crate::app::miller_columns_state::MillerColumnsState::new(),
+
             scroll_request: crate::app::state::ScrollRequest::None,
 
             // GLOBAL SEARCH

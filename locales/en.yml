@@ -450,6 +450,7 @@ secondary_toolbar:
   details: "Details"
   column_list: "Column list"
   grid: "Grid"
+  miller_columns: "Miller's Columns"
   global_search: "Global search on this computer (Ctrl+Shift+F)"
   open_selected_media_window: "Open selected media in player window"
   dual_panel_enable: "Enable dual panel (Ctrl+Shift+D)"

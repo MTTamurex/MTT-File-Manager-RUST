@@ -104,13 +104,25 @@ pub(crate) fn render_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context
                     ToolbarAction::NavigateToComputer => app.navigate_to_computer(),
                     ToolbarAction::NavigateToRecycleBin => app.navigate_to_recycle_bin(),
                     ToolbarAction::ToggleViewMode => {
+                        let leaving_miller = matches!(app.view_mode, ViewMode::Miller);
                         app.view_mode = match app.view_mode {
                             ViewMode::Grid => ViewMode::ColumnList,
                             ViewMode::ColumnList => ViewMode::List,
-                            ViewMode::List => ViewMode::Grid,
+                            ViewMode::List => ViewMode::Miller,
+                            ViewMode::Miller => ViewMode::Grid,
                         };
-                        if matches!(app.view_mode, ViewMode::Grid | ViewMode::ColumnList) {
+                        if matches!(
+                            app.view_mode,
+                            ViewMode::Grid | ViewMode::ColumnList | ViewMode::Miller
+                        ) {
                             app.folder_size_state.cancel_batch();
+                        }
+                        let selection_is_outside_current_folder =
+                            app.selected_file.as_ref().is_some_and(|selected| {
+                                !app.items.iter().any(|item| item.path == selected.path)
+                            });
+                        if leaving_miller && selection_is_outside_current_folder {
+                            app.clear_file_view_selection();
                         }
                         if !app.current_folder_locked {
                             app.view_mode_normal = app.view_mode;

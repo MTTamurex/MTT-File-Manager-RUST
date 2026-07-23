@@ -120,7 +120,23 @@ impl ImageViewerApp {
             return;
         }
 
-        if !is_global_search && self.current_location_is_archive_namespace() {
+        let explicit_operation_location = self
+            .context_menu
+            .primary_is_directory
+            .and_then(|_| paths.first())
+            .and_then(|path| {
+                if is_empty_area {
+                    Some(path.as_path())
+                } else {
+                    path.parent()
+                }
+            });
+        let operation_location_is_archive = explicit_operation_location
+            .is_some_and(Self::path_is_archive_namespace)
+            || (explicit_operation_location.is_none()
+                && self.current_location_is_archive_namespace());
+
+        if !is_global_search && operation_location_is_archive {
             self.shell_menu_request_id = self.shell_menu_request_id.wrapping_add(1);
             let _ = self
                 .shell_menu_req_tx
@@ -233,6 +249,15 @@ impl ImageViewerApp {
         };
         let can_copy_target =
             !is_drive && (is_global_search || self.can_copy_from_current_location());
+        let can_cut_target = !is_drive
+            && paths.iter().all(|path| {
+                !crate::domain::file_entry::is_path_inside_existing_archive_file(path)
+                    && !self.path_is_same_or_ancestor_of_open_panel(path)
+            });
+        let can_delete_target = !is_drive
+            && paths
+                .iter()
+                .all(|path| !self.path_is_same_or_ancestor_of_open_panel(path));
         let can_rename_target = if is_global_search {
             paths.len() == 1
                 && !is_drive
@@ -252,14 +277,12 @@ impl ImageViewerApp {
         } else {
             false
         };
-        let paste_destination_is_archive = if is_empty_area {
-            self.current_location_is_archive_namespace()
-        } else {
-            paths.first().is_some_and(|path| {
-                self.context_target_is_directory(_item_index, path)
-                    && Self::path_is_archive_namespace(path)
-            })
-        };
+        let paste_target = paths
+            .first()
+            .filter(|path| self.context_target_is_directory(_item_index, path));
+        let paste_destination_is_archive = paste_target
+            .is_some_and(|path| Self::path_is_archive_namespace(path))
+            || (paste_target.is_none() && self.current_location_is_archive_namespace());
         let can_tag_targets = !is_empty_area
             && !is_drive
             && (is_global_search
@@ -285,7 +308,7 @@ impl ImageViewerApp {
                         self.shortcuts
                             .label(crate::app::shortcuts::ShortcutAction::Cut),
                     )
-                    .enabled(!is_drive),
+                    .enabled(can_cut_target),
             );
             items.push(
                 ContextMenuItem::primary(-2, t!("context_menu.copy"))
@@ -299,7 +322,10 @@ impl ImageViewerApp {
         }
 
         if self.context_menu.origin.allows_paste() {
-            let can_paste = self.can_paste_into_current_location() && !paste_destination_is_archive;
+            let can_paste = paste_target
+                .map(|path| self.can_paste_into_path(path))
+                .unwrap_or_else(|| self.can_paste_into_current_location())
+                && !paste_destination_is_archive;
             items.push(
                 ContextMenuItem::primary(-4, t!("context_menu.paste"))
                     .with_command("paste")
@@ -328,7 +354,7 @@ impl ImageViewerApp {
                         self.shortcuts
                             .label(crate::app::shortcuts::ShortcutAction::Delete),
                     )
-                    .enabled(!is_drive),
+                    .enabled(can_delete_target),
             );
         }
         // ========== SECONDARY ITEMS (App-specific) ==========

@@ -167,7 +167,7 @@ fn visible_thumbnail_upload_ranks(app: &ImageViewerApp) -> FxHashMap<PathBuf, us
 
     if matches!(
         app.view_mode,
-        ViewMode::Grid | ViewMode::List | ViewMode::ColumnList
+        ViewMode::Grid | ViewMode::List | ViewMode::ColumnList | ViewMode::Miller
     ) {
         next_rank += insert_visible_upload_ranks(
             &mut ranks,
@@ -181,7 +181,7 @@ fn visible_thumbnail_upload_ranks(app: &ImageViewerApp) -> FxHashMap<PathBuf, us
         if let Some(snapshot) = app.dual_panel_inactive_state.as_ref() {
             if matches!(
                 snapshot.view_mode,
-                ViewMode::Grid | ViewMode::List | ViewMode::ColumnList
+                ViewMode::Grid | ViewMode::List | ViewMode::ColumnList | ViewMode::Miller
             ) {
                 insert_visible_upload_ranks(
                     &mut ranks,

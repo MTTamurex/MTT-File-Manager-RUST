@@ -25,7 +25,14 @@ pub(super) fn render_action_buttons(ui: &mut egui::Ui, app: &mut ImageViewerApp)
     let has_selection =
         (app.selected_file.is_some() || !app.multi_selection.is_empty()) && !is_drive_selected;
     let in_archive_namespace = app.current_location_is_archive_namespace();
-    let can_cut = has_selection && !in_archive_namespace;
+    let selection_cannot_move = app.multi_selection.iter().any(|path| {
+        crate::domain::file_entry::is_path_inside_existing_archive_file(path)
+            || app.path_is_same_or_ancestor_of_open_panel(path)
+    }) || app.selected_file.as_ref().is_some_and(|item| {
+        crate::domain::file_entry::is_path_inside_existing_archive_file(&item.path)
+            || app.path_is_same_or_ancestor_of_open_panel(&item.path)
+    });
+    let can_cut = has_selection && !selection_cannot_move;
     let can_copy = has_selection && app.can_copy_from_current_location();
     let can_rename = app.multi_selection.len() <= 1
         && !in_archive_namespace
@@ -36,7 +43,7 @@ pub(super) fn render_action_buttons(ui: &mut egui::Ui, app: &mut ImageViewerApp)
     let can_create_folder =
         !crate::domain::special_paths::is_virtual_path(&app.navigation_state.current_path)
             && !in_archive_namespace;
-    let can_delete = has_selection && !in_archive_namespace;
+    let can_delete = has_selection && !in_archive_namespace && !selection_cannot_move;
     let can_empty_recycle_bin = is_recycle_bin_view && !app.items.is_empty();
 
     let icon_color = if ui.visuals().dark_mode {

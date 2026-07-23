@@ -110,14 +110,21 @@ impl<'a> ListViewOperations for ListOps<'a> {
 impl ImageViewerApp {
     /// Render list view with extracted navigation logic
     pub fn render_list_view(&mut self, ui: &mut egui::Ui) {
-        self.render_list_like_view(ui, false);
+        self.render_list_like_view(ui, false, false);
     }
 
     pub(crate) fn render_column_list_bridge(&mut self, ui: &mut egui::Ui) {
-        self.render_list_like_view(ui, true);
+        self.render_list_like_view(ui, true, false);
     }
 
-    fn render_list_like_view(&mut self, ui: &mut egui::Ui, column_list: bool) {
+    /// Render the details list view in compact (name-only) mode — no header,
+    /// no Date/Type/Size columns. Used by the Miller's Columns focused column
+    /// so it keeps the full interaction stack while looking like a column.
+    pub(crate) fn render_list_view_compact(&mut self, ui: &mut egui::Ui) {
+        self.render_list_like_view(ui, false, true);
+    }
+
+    fn render_list_like_view(&mut self, ui: &mut egui::Ui, column_list: bool, compact: bool) {
         let t_total = Instant::now();
         // Keyboard navigation (ONLY when not renaming and media is NOT focused)
         if !self.suppress_file_panel_keyboard
@@ -178,7 +185,7 @@ impl ImageViewerApp {
                 )
             } else {
                 let row_height = 24.0;
-                let header_h = 32.0;
+                let header_h = if compact { 0.0 } else { 32.0 };
                 let viewport_h = (ui.available_height() - header_h).max(0.0);
                 process_list_keyboard_input(
                     ui,
@@ -344,8 +351,8 @@ impl ImageViewerApp {
         // If items are empty, keep the flag so auto-fit retries on the next render
         // with actual content.
         let needs_save_after_autofit =
-            !column_list && self.pending_list_column_autofit && !items.is_empty();
-        if !column_list && self.pending_list_column_autofit && !items.is_empty() {
+            !column_list && !compact && self.pending_list_column_autofit && !items.is_empty();
+        if !column_list && !compact && self.pending_list_column_autofit && !items.is_empty() {
             self.pending_list_column_autofit = false;
             list_view::auto_fit_columns(
                 ui,
@@ -424,6 +431,7 @@ impl ImageViewerApp {
             col_status_width,
             tag_assignments: self.tag_assignments_normalized.as_ref(),
             tag_definitions: &self.tag_definitions,
+            compact,
         };
 
         // Use a different approach: collect actions in vectors

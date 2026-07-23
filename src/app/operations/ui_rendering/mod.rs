@@ -8,6 +8,7 @@ pub mod grid_bridge;
 pub mod item_slot_bridge;
 pub mod list_bridge;
 pub mod list_folder_previews;
+pub mod miller_bridge;
 
 // Re-export commonly used types
 pub use grid_bridge::*;

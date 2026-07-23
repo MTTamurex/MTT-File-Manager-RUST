@@ -1015,7 +1015,7 @@ fn render_single_panel_content(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
                 );
             });
         });
-    } else if app.items.is_empty() {
+    } else if app.items.is_empty() && !matches!(app.view_mode, ViewMode::Miller) {
         let response = ui
             .centered_and_justified(|ui| {
                 ui.label(rust_i18n::t!("panels.empty_folder"));
@@ -1084,6 +1084,7 @@ fn render_single_panel_content(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
             ViewMode::Grid => app.render_grid_view(ui),
             ViewMode::List => app.render_list_view(ui),
             ViewMode::ColumnList => app.render_column_list_view(ui),
+            ViewMode::Miller => app.render_miller_columns_view(ui),
         }
         let view_ms = t_view_render.elapsed().as_millis();
         if view_ms > 120 {

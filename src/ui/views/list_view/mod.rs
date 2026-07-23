@@ -266,6 +266,9 @@ pub struct ListViewContext<'a> {
     pub col_status_width: &'a mut f32,
     pub tag_assignments: &'a rustc_hash::FxHashMap<String, Vec<i64>>,
     pub tag_definitions: &'a rustc_hash::FxHashMap<i64, FileTag>,
+    /// Compact single-column (name-only) mode: hides the header and the
+    /// Date/Type/Size columns. Used by the Miller's Columns focused column.
+    pub compact: bool,
 }
 
 /// Action returned by list view
@@ -312,32 +315,48 @@ pub fn render_list_view(
     let row_height = 24.0;
     let available_w = ui.available_width();
 
-    // Snapshot column widths BEFORE scaling (used as scaling input)
-    let w_status = if ctx.is_onedrive_folder && !ctx.is_computer_view {
-        *ctx.col_status_width
+    // In compact (Miller focused column) mode: a single name column spanning
+    // the full width, with no header — matching the ancestor columns' look.
+    let col_widths = if ctx.compact {
+        ColumnWidths {
+            name: (available_w - 8.0).max(50.0),
+            date: 0.0,
+            type_col: 0.0,
+            size: 0.0,
+        }
     } else {
-        0.0
+        // Snapshot column widths BEFORE scaling (used as scaling input)
+        let w_status = if ctx.is_onedrive_folder && !ctx.is_computer_view {
+            *ctx.col_status_width
+        } else {
+            0.0
+        };
+        let w_name = *ctx.col_name_width;
+        let w_date = *ctx.col_date_width;
+        let w_type = *ctx.col_type_width;
+        let w_size = *ctx.col_size_width;
+
+        // Scale column widths if they exceed available space
+        scale_column_widths(ctx, available_w, w_status, w_name, w_date, w_type, w_size);
+
+        // Snapshot for item rendering (uses post-scaling values to match header)
+        ColumnWidths {
+            name: *ctx.col_name_width,
+            date: *ctx.col_date_width,
+            type_col: *ctx.col_type_width,
+            size: *ctx.col_size_width,
+        }
     };
-    let w_name = *ctx.col_name_width;
-    let w_date = *ctx.col_date_width;
-    let w_type = *ctx.col_type_width;
-    let w_size = *ctx.col_size_width;
 
-    // Scale column widths if they exceed available space
-    scale_column_widths(ctx, available_w, w_status, w_name, w_date, w_type, w_size);
-
-    // Snapshot for item rendering (uses post-scaling values to match header)
-    let col_widths = ColumnWidths {
-        name: *ctx.col_name_width,
-        date: *ctx.col_date_width,
-        type_col: *ctx.col_type_width,
-        size: *ctx.col_size_width,
+    // Render header (uses ctx.col_*_width directly for resize interaction).
+    // Skipped in compact mode.
+    let sort_action = if ctx.compact {
+        None
+    } else {
+        let action = header::render_list_header(ui, ctx, available_w);
+        ui.separator();
+        action
     };
-
-    // Render header (uses ctx.col_*_width directly for resize interaction)
-    let sort_action = header::render_list_header(ui, ctx, available_w);
-
-    ui.separator();
 
     // Render virtualized content
     let interaction = virtualization::render_virtualized_content(

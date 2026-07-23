@@ -159,7 +159,11 @@ impl ImageViewerApp {
 
         // L-12: .into_owned() converts Cow<[PathBuf]> to Vec<PathBuf> (clone only when borrowed)
         let paths: Vec<PathBuf> = self.context_target_paths(idx).into_owned();
-        if paths.is_empty() {
+        if paths.is_empty()
+            || paths
+                .iter()
+                .any(|path| self.path_is_same_or_ancestor_of_open_panel(path))
+        {
             return;
         }
 
@@ -192,9 +196,10 @@ impl ImageViewerApp {
 
     pub fn delete_with_shell_for_paths(&mut self, paths: &[PathBuf]) {
         if paths.is_empty()
-            || paths
-                .iter()
-                .any(|path| crate::domain::file_entry::is_path_inside_existing_archive_file(path))
+            || paths.iter().any(|path| {
+                crate::domain::file_entry::is_path_inside_existing_archive_file(path)
+                    || self.path_is_same_or_ancestor_of_open_panel(path)
+            })
         {
             return;
         }

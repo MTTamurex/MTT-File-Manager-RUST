@@ -6,7 +6,39 @@ use crate::app::state::ImageViewerApp;
 use crate::application::file_operations;
 use std::path::{Path, PathBuf};
 
+fn normalize_path_for_hierarchy(path: &Path) -> String {
+    let lower = path.to_string_lossy().replace('/', "\\").to_lowercase();
+    let normalized = if let Some(stripped) = lower.strip_prefix(r"\\?\unc\") {
+        format!(r"\\{stripped}")
+    } else if let Some(stripped) = lower.strip_prefix(r"\\?\") {
+        stripped.to_string()
+    } else {
+        lower
+    };
+    normalized.trim_end_matches('\\').to_string()
+}
+
+fn path_is_same_or_ancestor(ancestor: &Path, descendant: &Path) -> bool {
+    let ancestor = normalize_path_for_hierarchy(ancestor);
+    let descendant = normalize_path_for_hierarchy(descendant);
+    descendant == ancestor || descendant.starts_with(&format!(r"{ancestor}\"))
+}
+
+fn paste_target_is_valid_for_sources(sources: &[PathBuf], target: &Path) -> bool {
+    !sources
+        .iter()
+        .any(|source| path_is_same_or_ancestor(source, target))
+}
+
 impl ImageViewerApp {
+    pub(crate) fn path_is_same_or_ancestor_of_open_panel(&self, path: &Path) -> bool {
+        path_is_same_or_ancestor(path, Path::new(&self.navigation_state.current_path))
+            || self
+                .dual_panel_inactive_state
+                .as_ref()
+                .is_some_and(|snapshot| path_is_same_or_ancestor(path, Path::new(&snapshot.path)))
+    }
+
     pub(crate) fn path_is_archive_namespace(path: &Path) -> bool {
         if let Some((archive_path, _)) = crate::domain::file_entry::split_archive_path(path) {
             return std::fs::metadata(&archive_path)
@@ -25,15 +57,15 @@ impl ImageViewerApp {
     }
 
     pub(crate) fn context_target_is_directory(&self, idx: Option<usize>, path: &Path) -> bool {
-        if self.context_menu.origin
-            == crate::application::context_menu::ContextMenuOrigin::GlobalSearch
-            && self
-                .context_menu
-                .target_paths
-                .first()
-                .is_some_and(|p| p == path)
+        if self
+            .context_menu
+            .target_paths
+            .first()
+            .is_some_and(|target| target == path)
         {
-            return self.context_menu.primary_is_directory.unwrap_or(false);
+            if let Some(is_directory) = self.context_menu.primary_is_directory {
+                return is_directory;
+            }
         }
 
         if crate::infrastructure::windows::is_drive_root_path(path) {
@@ -74,11 +106,18 @@ impl ImageViewerApp {
     }
 
     pub fn can_paste_into_current_location(&self) -> bool {
-        self.clipboard.has_content()
-            && !self.navigation_state.is_computer_view
+        !self.navigation_state.is_computer_view
             && !self.navigation_state.is_recycle_bin_view
-            && !crate::domain::special_paths::is_virtual_path(&self.navigation_state.current_path)
-            && !self.current_location_is_archive_namespace()
+            && self.can_paste_into_path(Path::new(&self.navigation_state.current_path))
+    }
+
+    pub(crate) fn can_paste_into_path(&self, path: &Path) -> bool {
+        self.clipboard.has_content()
+            && !path.as_os_str().is_empty()
+            && !path
+                .to_str()
+                .is_some_and(crate::domain::special_paths::is_virtual_path)
+            && !Self::path_is_archive_namespace(path)
     }
 
     pub fn command_copy(&mut self, idx: Option<usize>) {
@@ -130,12 +169,14 @@ impl ImageViewerApp {
 
     /// Cut: place the file on the Windows clipboard with the MOVE flag
     pub fn command_cut(&mut self, idx: Option<usize>) {
-        if self.current_location_is_archive_namespace() {
-            self.context_menu.target_paths.clear();
-            return;
-        }
-
         if idx.is_none() && !self.context_menu.target_paths.is_empty() {
+            if self.context_menu.target_paths.iter().any(|path| {
+                crate::domain::file_entry::is_path_inside_existing_archive_file(path)
+                    || self.path_is_same_or_ancestor_of_open_panel(path)
+            }) {
+                self.context_menu.target_paths.clear();
+                return;
+            }
             let owner = self.shell_op_hwnd();
             self.clipboard
                 .cut(&self.context_menu.target_paths.clone(), owner);
@@ -162,14 +203,24 @@ impl ImageViewerApp {
             }
         }
 
-        if !files.is_empty() {
+        if !files.is_empty()
+            && !files.iter().any(|path| {
+                crate::domain::file_entry::is_path_inside_existing_archive_file(path)
+                    || self.path_is_same_or_ancestor_of_open_panel(path)
+            })
+        {
             let owner = self.shell_op_hwnd();
             self.clipboard.cut(&files, owner);
         }
     }
 
     pub(crate) fn cut_paths_to_clipboard(&mut self, paths: &[PathBuf]) {
-        if paths.is_empty() {
+        if paths.is_empty()
+            || paths.iter().any(|path| {
+                crate::domain::file_entry::is_path_inside_existing_archive_file(path)
+                    || self.path_is_same_or_ancestor_of_open_panel(path)
+            })
+        {
             return;
         }
         let owner = self.shell_op_hwnd();
@@ -184,7 +235,7 @@ impl ImageViewerApp {
             self.file_operation_state.file_ops_in_progress
         );
 
-        if !self.can_paste_into_current_location() {
+        if self.navigation_state.is_computer_view || self.navigation_state.is_recycle_bin_view {
             self.context_menu.target_paths.clear();
             return;
         }
@@ -211,7 +262,7 @@ impl ImageViewerApp {
             PathBuf::from(&self.navigation_state.current_path)
         };
 
-        if Self::path_is_archive_namespace(&dest_folder) {
+        if !self.can_paste_into_path(&dest_folder) {
             self.context_menu.target_paths.clear();
             return;
         }
@@ -219,6 +270,10 @@ impl ImageViewerApp {
         // 1. Get files and operation from clipboard via Manager
         // Optimized to use the manager's logic which checks system then internal.
         if let Some((files_to_op, is_move)) = self.clipboard.get_files_to_paste() {
+            if !paste_target_is_valid_for_sources(&files_to_op, &dest_folder) {
+                self.context_menu.target_paths.clear();
+                return;
+            }
             let hwnd = self.shell_op_hwnd();
 
             // 2. Dispatch as a single batch operation (single Windows progress dialog)
@@ -257,5 +312,36 @@ impl ImageViewerApp {
         if let Err(e) = file_operations::copy_path_to_clipboard(path) {
             log::error!("Erro clipboard: {}", e);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{paste_target_is_valid_for_sources, path_is_same_or_ancestor};
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn hierarchy_check_is_case_insensitive_and_separator_aware() {
+        assert!(path_is_same_or_ancestor(
+            Path::new(r"C:\A"),
+            Path::new(r"c:\a\B")
+        ));
+        assert!(!path_is_same_or_ancestor(
+            Path::new(r"C:\A"),
+            Path::new(r"C:\Another")
+        ));
+    }
+
+    #[test]
+    fn paste_rejects_a_folder_destination_inside_itself() {
+        let sources = vec![PathBuf::from(r"C:\A")];
+        assert!(!paste_target_is_valid_for_sources(
+            &sources,
+            Path::new(r"C:\A\B")
+        ));
+        assert!(paste_target_is_valid_for_sources(
+            &sources,
+            Path::new(r"C:\B")
+        ));
     }
 }

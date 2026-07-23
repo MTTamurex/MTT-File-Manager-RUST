@@ -57,6 +57,7 @@ pub const ICON_VIEW_GRID: &[u8] = include_bytes!("../assets/icons/view_grid.svg"
 pub const ICON_VIEW_LIST: &[u8] = include_bytes!("../assets/icons/view_list.svg");
 pub const ICON_VIEW_COLUMNS: &[u8] = include_bytes!("../assets/icons/view_columns.svg");
 pub const ICON_VIEW_DETAILS: &[u8] = include_bytes!("../assets/icons/view_details.svg");
+pub const ICON_VIEW_MILLER: &[u8] = include_bytes!("../assets/icons/view_miller.svg");
 pub const ICON_VOL_HIGH: &[u8] = include_bytes!("../assets/icons/vol_high.svg");
 pub const ICON_VOL_MUTE: &[u8] = include_bytes!("../assets/icons/vol_mute.svg");
 
@@ -102,6 +103,7 @@ pub fn get_icon(name: &str) -> Option<&'static [u8]> {
         "view_list" => Some(ICON_VIEW_LIST),
         "view_columns" => Some(ICON_VIEW_COLUMNS),
         "view_details" => Some(ICON_VIEW_DETAILS),
+        "view_miller" => Some(ICON_VIEW_MILLER),
         "vol_high" => Some(ICON_VOL_HIGH),
         "vol_mute" => Some(ICON_VOL_MUTE),
         _ => None,

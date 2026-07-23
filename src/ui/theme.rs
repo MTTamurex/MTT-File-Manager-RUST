@@ -155,5 +155,6 @@ pub const ICON_FOLDER_ADD: &str = "\u{ED5A}"; // New Folder
 pub const ICON_DETAILS: &str = "\u{ECEA}"; // Details (file-info-line)
 pub const ICON_VIEW_COLUMNS: &str = "view_columns";
 pub const ICON_VIEW_DETAILS: &str = "view_details";
+pub const ICON_VIEW_MILLER: &str = "view_miller";
 pub const ICON_FOLDER: &str = "\u{ED9F}"; // Folder (folder-line)
 pub const ICON_FILE: &str = "\u{ECD3}"; // File (file-line)

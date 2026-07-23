@@ -138,6 +138,10 @@ impl eframe::App for ImageViewerApp {
             if self.sidebar_tree.poll_loaded() {
                 ctx.request_repaint();
             }
+            // Poll Miller's Columns ancestor-listing background loads
+            if self.miller_columns.poll() {
+                ctx.request_repaint();
+            }
             // Periodically re-enumerate expanded sidebar directories to catch
             // external changes (the per-folder notify watcher doesn't cover them).
             if self.file_operation_state.file_ops_in_progress == 0 {

@@ -45,7 +45,6 @@ pub(super) fn render_view_and_zoom_controls(ui: &mut egui::Ui, app: &mut ImageVi
             if !locked {
                 app.view_mode_normal = ViewMode::ColumnList;
             }
-            app.folder_size_state.cancel_batch();
             view_mode_changed = true;
         }
 
@@ -63,14 +62,41 @@ pub(super) fn render_view_and_zoom_controls(ui: &mut egui::Ui, app: &mut ImageVi
             if !locked {
                 app.view_mode_normal = ViewMode::Grid;
             }
-            // Cancel batch folder-size work — Grid mode only
-            // calculates size on selection, not for all items.
-            app.folder_size_state.cancel_batch();
+            view_mode_changed = true;
+        }
+
+        if widgets::toggle_icon_button(
+            ui,
+            svg_manager,
+            theme::ICON_VIEW_MILLER,
+            matches!(app.view_mode, ViewMode::Miller),
+            &t!("secondary_toolbar.miller_columns"),
+        )
+        .clicked()
+            && !matches!(app.view_mode, ViewMode::Miller)
+        {
+            app.view_mode = ViewMode::Miller;
+            if !locked {
+                app.view_mode_normal = ViewMode::Miller;
+            }
             view_mode_changed = true;
         }
     });
 
     if view_mode_changed {
+        let selection_is_outside_current_folder = app
+            .selected_file
+            .as_ref()
+            .is_some_and(|selected| !app.items.iter().any(|item| item.path == selected.path));
+        if !matches!(app.view_mode, ViewMode::Miller) && selection_is_outside_current_folder {
+            app.clear_file_view_selection();
+        }
+        if matches!(
+            app.view_mode,
+            ViewMode::Grid | ViewMode::ColumnList | ViewMode::Miller
+        ) {
+            app.folder_size_state.cancel_batch();
+        }
         app.save_preferences();
     }
 

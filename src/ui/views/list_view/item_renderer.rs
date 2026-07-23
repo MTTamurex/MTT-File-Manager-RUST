@@ -339,22 +339,24 @@ pub(super) fn render_list_item(
             );
         }
 
-        // Column data
-        if ctx.is_computer_view {
-            render_computer_view_columns(ui, item, rect, w_name, w_date, secondary_color);
-        } else {
-            render_regular_columns(
-                ui,
-                item,
-                ctx,
-                rect,
-                w_name,
-                w_date,
-                w_type,
-                w_size,
-                secondary_color,
-                is_recycle_bin,
-            );
+        // Column data (Date/Type/Size) — omitted in compact (name-only) mode.
+        if !ctx.compact {
+            if ctx.is_computer_view {
+                render_computer_view_columns(ui, item, rect, w_name, w_date, secondary_color);
+            } else {
+                render_regular_columns(
+                    ui,
+                    item,
+                    ctx,
+                    rect,
+                    w_name,
+                    w_date,
+                    w_type,
+                    w_size,
+                    secondary_color,
+                    is_recycle_bin,
+                );
+            }
         }
     });
 }

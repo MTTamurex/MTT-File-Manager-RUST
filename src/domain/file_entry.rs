@@ -306,6 +306,8 @@ pub enum ViewMode {
     Grid,
     List,
     ColumnList,
+    /// Miller's Columns: hierarchical multi-pane navigation (Finder-style).
+    Miller,
 }
 
 impl ViewMode {
@@ -314,6 +316,7 @@ impl ViewMode {
             Self::Grid => "grid",
             Self::List => "list",
             Self::ColumnList => "column_list",
+            Self::Miller => "miller",
         }
     }
 
@@ -321,6 +324,7 @@ impl ViewMode {
         match value {
             "list" => Self::List,
             "column_list" => Self::ColumnList,
+            "miller" => Self::Miller,
             _ => Self::Grid,
         }
     }
@@ -400,7 +404,12 @@ mod tests {
 
     #[test]
     fn view_mode_preferences_round_trip() {
-        for mode in [ViewMode::Grid, ViewMode::List, ViewMode::ColumnList] {
+        for mode in [
+            ViewMode::Grid,
+            ViewMode::List,
+            ViewMode::ColumnList,
+            ViewMode::Miller,
+        ] {
             assert_eq!(ViewMode::from_preference(mode.preference_value()), mode);
         }
     }

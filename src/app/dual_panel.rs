@@ -164,6 +164,7 @@ pub struct PanelSnapshot {
     pub folders_position: FoldersPosition,
     pub current_folder_locked: bool,
     pub list_column_widths: PanelListColumnWidths,
+    pub miller_columns: crate::app::miller_columns_state::MillerColumnsState,
 
     // Scroll
     pub scroll_offset_y: f32,
@@ -261,6 +262,7 @@ impl PanelSnapshot {
             folders_position: app.folders_position,
             current_folder_locked: app.current_folder_locked,
             list_column_widths: PanelListColumnWidths::from_layout(&app.layout),
+            miller_columns: app.miller_columns.clone(),
             scroll_offset_y: app.scroll_offset_y,
             scroll_offset_x: app.scroll_offset_x,
             scroll_to_selected: app.scroll_to_selected,
@@ -311,6 +313,7 @@ impl PanelSnapshot {
         app.folders_position = self.folders_position;
         app.current_folder_locked = self.current_folder_locked;
         self.list_column_widths.apply_to_layout(&mut app.layout);
+        app.miller_columns = self.miller_columns;
         app.scroll_offset_y = self.scroll_offset_y;
         app.scroll_offset_x = self.scroll_offset_x;
         app.scroll_to_selected = self.scroll_to_selected;
@@ -373,6 +376,7 @@ impl PanelSnapshot {
             &mut app.current_folder_locked,
         );
         self.list_column_widths.swap_with_layout(&mut app.layout);
+        std::mem::swap(&mut self.miller_columns, &mut app.miller_columns);
         std::mem::swap(&mut self.scroll_offset_y, &mut app.scroll_offset_y);
         std::mem::swap(&mut self.scroll_offset_x, &mut app.scroll_offset_x);
         std::mem::swap(&mut self.scroll_to_selected, &mut app.scroll_to_selected);

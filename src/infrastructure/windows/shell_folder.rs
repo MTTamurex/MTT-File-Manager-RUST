@@ -238,11 +238,16 @@ unsafe fn process_shell_child(
     // SFGAO_STREAM (0x00400000) - Stream (file-like, not a pure folder)
     let sfgao_folder = (attributes & 0x20000000) != 0;
     let sfgao_stream = (attributes & 0x00400000) != 0;
-    // A folder that is also a stream (e.g., ZIP inside archive) is treated as a directory.
-    // A pure folder (SFGAO_FOLDER without SFGAO_STREAM) is always a directory.
-    // For non-ZIP archives, Windows may not set SFGAO_FOLDER for subfolders,
-    // so we also check if size == 0 and no extension as a heuristic.
-    let is_dir = sfgao_folder;
+    // Some non-ZIP providers omit SFGAO_FOLDER for navigable children. A
+    // successful bind is the authoritative fallback and avoids unreliable
+    // name or size heuristics.
+    let bindable_as_folder = if sfgao_folder {
+        true
+    } else {
+        let bound: Result<IShellFolder> = parent.BindToObject(child_pidl, None);
+        bound.is_ok()
+    };
+    let is_dir = sfgao_folder || bindable_as_folder;
 
     log::trace!(
         "[SHELL-CHILD] name={:?}, attributes=0x{:08X}, FOLDER={}, STREAM={}, is_dir={}",

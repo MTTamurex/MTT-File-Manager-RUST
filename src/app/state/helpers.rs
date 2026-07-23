@@ -70,7 +70,7 @@ fn panel_thumbnail_caches_active(
 ) -> bool {
     matches!(
         view_mode,
-        ViewMode::Grid | ViewMode::List | ViewMode::ColumnList
+        ViewMode::Grid | ViewMode::List | ViewMode::ColumnList | ViewMode::Miller
     ) && !is_computer_view
         && !is_recycle_bin_view
         && item_count > 0
@@ -867,7 +867,7 @@ impl ImageViewerApp {
 
         if matches!(
             snapshot.view_mode,
-            ViewMode::Grid | ViewMode::List | ViewMode::ColumnList
+            ViewMode::Grid | ViewMode::List | ViewMode::ColumnList | ViewMode::Miller
         ) {
             insert_visible_paths_from_range(
                 &mut visible_paths,
@@ -1326,7 +1326,7 @@ impl ImageViewerApp {
 
         if matches!(
             self.view_mode,
-            ViewMode::Grid | ViewMode::List | ViewMode::ColumnList
+            ViewMode::Grid | ViewMode::List | ViewMode::ColumnList | ViewMode::Miller
         ) {
             insert_visible_paths_from_range(
                 &mut self.visible_paths_cache,
@@ -1339,7 +1339,7 @@ impl ImageViewerApp {
             if let Some(snapshot) = self.dual_panel_inactive_state.as_ref() {
                 if matches!(
                     snapshot.view_mode,
-                    ViewMode::Grid | ViewMode::List | ViewMode::ColumnList
+                    ViewMode::Grid | ViewMode::List | ViewMode::ColumnList | ViewMode::Miller
                 ) {
                     insert_visible_paths_from_range(
                         &mut self.visible_paths_cache,

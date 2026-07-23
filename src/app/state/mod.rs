@@ -598,6 +598,9 @@ pub struct ImageViewerApp {
     // SIDEBAR FOLDER TREE (hierarchical expand/collapse state)
     pub sidebar_tree: sidebar_tree_state::SidebarTreeState,
 
+    // MILLER'S COLUMNS (ancestor-column directory listing cache)
+    pub miller_columns: crate::app::miller_columns_state::MillerColumnsState,
+
     // Explicit scroll request for keyboard navigation
     pub scroll_request: ScrollRequest,
 

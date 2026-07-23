@@ -30,6 +30,13 @@ fn warn_disk_cache_invalidation_disconnected(context: &str, dropped_entries: usi
 }
 
 impl ImageViewerApp {
+    fn invalidate_miller_column_caches(&mut self, folder: &Path) {
+        self.miller_columns.invalidate(folder);
+        if let Some(snapshot) = self.dual_panel_inactive_state.as_mut() {
+            snapshot.miller_columns.invalidate(folder);
+        }
+    }
+
     pub(super) fn process_file_operation_results(
         &mut self,
         current_path_norm: &str,
@@ -286,6 +293,7 @@ impl ImageViewerApp {
 
     fn invalidate_folder_and_tab_caches(&mut self, folder: &Path) {
         self.invalidate_directory_caches(folder);
+        self.invalidate_miller_column_caches(folder);
         // Keep sidebar folder tree in sync with file operations (delete/rename/move)
         self.sidebar_tree.clear_children(folder);
         let folder_norm = Self::normalize_for_match(folder);
@@ -294,6 +302,7 @@ impl ImageViewerApp {
 
     fn invalidate_folder_listing_and_tab_caches(&mut self, folder: &Path) {
         self.invalidate_directory_listing_caches(folder);
+        self.invalidate_miller_column_caches(folder);
         self.sidebar_tree.clear_children(folder);
         let folder_norm = Self::normalize_for_match(folder);
         self.clear_tab_cache_for_normalized_path(&folder_norm);
