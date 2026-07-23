@@ -96,8 +96,12 @@ pub(crate) fn render_secondary_toolbar_layer(app: &mut ImageViewerApp, ctx: &egu
                     + gap_count * 12.0;
                 let reserved_left_width = toggle_button_width + toggle_gap;
                 let total_available = ui.available_width() + reserved_left_width;
-                let left_pad =
-                    ((total_available - content_width) / 2.0 - reserved_left_width - 8.0).max(0.0);
+                let command_group_left_shift = 56.0;
+                let left_pad = ((total_available - content_width) / 2.0
+                    - reserved_left_width
+                    - 8.0
+                    - command_group_left_shift)
+                    .max(0.0);
                 ui.add_space(left_pad);
 
                 ui.spacing_mut().item_spacing = egui::vec2(12.0, 0.0);
