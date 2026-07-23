@@ -124,7 +124,8 @@ fn render_row(
     let (row_rect, response) =
         ui.allocate_exact_size(egui::vec2(width, COL_ROW_HEIGHT), Sense::click_and_drag());
 
-    if ctx.is_item_dragging && response.contains_pointer() && item.is_dir {
+    let is_drop_candidate = ctx.is_item_dragging && response.contains_pointer() && item.is_dir;
+    if is_drop_candidate {
         *ctx.drop_target = Some(item.path.clone());
     }
 
@@ -142,6 +143,15 @@ fn render_row(
     } else if response.hovered() {
         ui.painter()
             .rect_filled(row_rect, 0.0, theme::selection_hover_color(dark));
+    }
+
+    if is_drop_candidate {
+        ui.painter().rect_stroke(
+            row_rect.shrink(1.0),
+            4.0,
+            egui::Stroke::new(2.0, theme::COLOR_ACCENT),
+            egui::StrokeKind::Inside,
+        );
     }
 
     // Compact Miller columns always use Shell icons. The shared texture cache
