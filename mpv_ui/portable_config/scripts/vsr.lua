@@ -1,5 +1,4 @@
 local mp = require("mp")
-local options = require("mp.options")
 
 local FILTER_TAG = "@mtt-rtx"
 local VSR_FILTER_TAG = "@mtt-rtx-vsr"
@@ -19,47 +18,6 @@ local state = {
     restore_timer = nil,
     window_minimized = false,
 }
-
-local opts = {
-    standaloneprofile = false,
-}
-
-options.read_options(opts, "vsr")
-
-local function set_runtime_property(name, value)
-    local ok, err = pcall(mp.set_property, name, value)
-    if not ok then
-        mp.msg.debug("RTX filters: unable to set " .. name .. "=" .. tostring(value) .. ": " .. tostring(err))
-    end
-end
-
-local function apply_standalone_runtime_profile(vsr_active)
-    if not opts.standaloneprofile then
-        return
-    end
-
-    if vsr_active then
-        set_runtime_property("framedrop", "decoder+vo")
-        set_runtime_property("cache", "yes")
-        set_runtime_property("cache-secs", 4.0)
-        set_runtime_property("demuxer-readahead-secs", 2.0)
-        set_runtime_property("demuxer-max-bytes", 32 * 1024 * 1024)
-        set_runtime_property("demuxer-max-back-bytes", 8 * 1024 * 1024)
-        set_runtime_property("hwdec-extra-frames", 1)
-        set_runtime_property("swapchain-depth", 2)
-        mp.msg.info("RTX filters: standalone VSR runtime profile applied")
-    else
-        set_runtime_property("framedrop", "vo")
-        set_runtime_property("cache", "yes")
-        set_runtime_property("cache-secs", 10.0)
-        set_runtime_property("demuxer-readahead-secs", 5.0)
-        set_runtime_property("demuxer-max-bytes", 96 * 1024 * 1024)
-        set_runtime_property("demuxer-max-back-bytes", 16 * 1024 * 1024)
-        set_runtime_property("hwdec-extra-frames", 1)
-        set_runtime_property("swapchain-depth", 2)
-        mp.msg.info("RTX filters: standalone normal runtime profile applied")
-    end
-end
 
 local function sync_ui_flags()
     mp.set_property_bool("user-data/vsr/vsr-enabled", state.vsr_enabled)
@@ -298,7 +256,6 @@ local function apply_filter_chain()
     remove_filter_chain()
 
     if not state.vsr_enabled and not state.hdr_enabled then
-        apply_standalone_runtime_profile(false)
         set_rtx_hdr_output_options(false)
         return false
     end
@@ -307,8 +264,6 @@ local function apply_filter_chain()
         mp.msg.info("RTX filters: skipped apply (window-minimized)")
         return false
     end
-
-    apply_standalone_runtime_profile(state.vsr_enabled)
 
     local codec = mp.get_property("video-codec", "")
     local pixel_format = mp.get_property("video-params/pixelformat", "")
@@ -465,7 +420,6 @@ mp.observe_property("window-minimized", "bool", function(_, is_minimized)
         if state.chain_active then
             mp.msg.info("RTX filters: suspending chain (window-minimized)")
             remove_filter_chain()
-            apply_standalone_runtime_profile(false)
         end
         return
     end
@@ -511,7 +465,6 @@ end)
 
 mp.register_event("end-file", function()
     remove_filter_chain()
-    apply_standalone_runtime_profile(false)
 end)
 
 sync_ui_flags()
