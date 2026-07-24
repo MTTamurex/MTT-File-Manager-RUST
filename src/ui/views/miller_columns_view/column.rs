@@ -2,8 +2,8 @@
 //!
 //! The focused (rightmost) column is rendered by the normal details list view;
 //! this renderer is used only for the ancestor columns to its left. It supports
-//! selection highlight, hover, and click / double-click / right-click, all
-//! reported back to the bridge which applies path-based actions.
+//! selection highlight, inline rename, hover, and click / double-click /
+//! right-click, all reported back to the bridge which applies path-based actions.
 
 use std::hash::Hash;
 
@@ -39,6 +39,13 @@ pub enum MillerColumnAction {
 pub struct MillerColumnOutput {
     pub action: Option<MillerColumnAction>,
     pub rectangle_selection_frame: RectangleSelectionFrame,
+    pub rename_update: Option<MillerRenameUpdate>,
+}
+
+pub struct MillerRenameUpdate {
+    pub path: PathBuf,
+    pub text: String,
+    pub commit: bool,
 }
 
 /// Borrowed context needed to render one ancestor column.
@@ -50,6 +57,8 @@ pub struct MillerColumnContext<'a> {
     /// The currently previewed file/selection path (for highlight).
     pub selected_file: Option<&'a Path>,
     pub multi_selection: &'a crate::ui::cache::FxHashSet<PathBuf>,
+    pub renaming_state: Option<&'a (PathBuf, String)>,
+    pub focus_rename: bool,
     pub rectangle_selection_state: Option<&'a RectangleSelectionState>,
     pub icon_loader: &'a mut IconLoader,
     pub folder_icon: Option<&'a egui::TextureHandle>,
@@ -108,10 +117,12 @@ pub fn render_miller_column(
         return MillerColumnOutput {
             action: background_action(&background_response, ui),
             rectangle_selection_frame: RectangleSelectionFrame::default(),
+            rename_update: None,
         };
     }
 
     let mut action = None;
+    let mut rename_update = None;
     let mut rectangle_start = None;
     ui.spacing_mut().item_spacing.y = 0.0;
     let scroll_output = egui::ScrollArea::vertical()
@@ -123,7 +134,15 @@ pub fn render_miller_column(
                 let Some(item) = ctx.items.get(index) else {
                     continue;
                 };
-                if let Some(a) = render_row(ui, index, item, ctx, dark, &mut rectangle_start) {
+                if let Some(a) = render_row(
+                    ui,
+                    index,
+                    item,
+                    ctx,
+                    dark,
+                    &mut rectangle_start,
+                    &mut rename_update,
+                ) {
                     action = Some(a);
                 }
             }
@@ -164,6 +183,7 @@ pub fn render_miller_column(
     MillerColumnOutput {
         action: action.or_else(|| background_action(&background_response, ui)),
         rectangle_selection_frame,
+        rename_update,
     }
 }
 
@@ -174,6 +194,7 @@ fn render_row(
     ctx: &mut MillerColumnContext,
     dark: bool,
     rectangle_start: &mut Option<egui::Pos2>,
+    rename_update: &mut Option<MillerRenameUpdate>,
 ) -> Option<MillerColumnAction> {
     let width = ui.available_width();
     let (row_rect, response) =
@@ -260,6 +281,52 @@ fn render_row(
 
     // Name text (truncated to fit).
     let text_x = icon_x + ICON_SIZE + 6.0;
+    if let Some((_, rename_text)) = ctx.renaming_state.filter(|(path, _)| *path == item.path) {
+        let mut text = rename_text.clone();
+        let edit_rect = Rect::from_min_max(
+            egui::pos2(text_x, row_rect.top() + 2.0),
+            egui::pos2(row_rect.right() - 5.0, row_rect.bottom() - 2.0),
+        );
+        let mut commit = false;
+        ui.allocate_new_ui(egui::UiBuilder::new().max_rect(edit_rect), |ui| {
+            let response = ui.add(
+                egui::TextEdit::singleline(&mut text)
+                    .frame(true)
+                    .id_source(("rename_input_miller", &item.path)),
+            );
+            if ctx.focus_rename {
+                response.request_focus();
+                if let Some(mut state) =
+                    egui::widgets::text_edit::TextEditState::load(ui.ctx(), response.id)
+                {
+                    let char_count = text.chars().count();
+                    let select_end = if item.is_dir {
+                        char_count
+                    } else {
+                        text.rfind('.')
+                            .map(|byte_pos| text[..byte_pos].chars().count())
+                            .filter(|&position| position > 0)
+                            .unwrap_or(char_count)
+                    };
+                    state
+                        .cursor
+                        .set_char_range(Some(egui::text::CCursorRange::two(
+                            egui::text::CCursor::new(0),
+                            egui::text::CCursor::new(select_end),
+                        )));
+                    state.store(ui.ctx(), response.id);
+                }
+            }
+            commit = ui.input(|input| input.key_pressed(egui::Key::Enter));
+        });
+        *rename_update = Some(MillerRenameUpdate {
+            path: item.path.clone(),
+            text,
+            commit,
+        });
+        return None;
+    }
+
     let text_color = if is_selected {
         theme::selection_text_color(dark)
     } else {

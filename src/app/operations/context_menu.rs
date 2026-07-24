@@ -268,6 +268,8 @@ impl ImageViewerApp {
                 })
         } else if let Some(idx) = _item_index {
             self.can_rename_item(idx)
+        } else if paths.len() == 1 && !is_drive {
+            paths.first().is_some_and(|path| self.can_rename_path(path))
         } else if let Some(path) = drive_target_path {
             path.to_str().is_some_and(|drive_path| {
                 crate::infrastructure::windows::drive_supports_volume_label_rename(

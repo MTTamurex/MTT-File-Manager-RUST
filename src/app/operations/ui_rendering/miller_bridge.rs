@@ -4,8 +4,8 @@
 //! details list view (`render_list_view`) for complete interaction parity
 //! (rename, multi-select, drag, rectangle selection, keyboard, context menu).
 //! Ancestor columns to its left are rendered from a lightweight background
-//! listing cache (`MillerColumnsState`) and support select / open / context
-//! menu via path-based actions. Clicking an ancestor folder navigates into it
+//! listing cache (`MillerColumnsState`) and support select / open / rename /
+//! context menu via path-based actions. Clicking an ancestor folder navigates into it
 //! (promoting it to the focused column) — matching a Finder-style column view.
 
 use eframe::egui;
@@ -188,6 +188,8 @@ impl ImageViewerApp {
                                         selected_child,
                                         selected_file: selected_file_path.as_deref(),
                                         multi_selection: &selected_paths,
+                                        renaming_state: self.renaming_state.as_ref(),
+                                        focus_rename: self.focus_rename,
                                         rectangle_selection_state: column_rectangle_selection,
                                         icon_loader: &mut self.item_icon_loader,
                                         folder_icon: folder_icon.as_ref(),
@@ -272,6 +274,26 @@ impl ImageViewerApp {
                 &output.rectangle_selection_frame,
                 listing,
             );
+            if let Some(update) = output.rename_update {
+                let is_active_target = self
+                    .renaming_state
+                    .as_ref()
+                    .is_some_and(|(path, _)| *path == update.path);
+                if is_active_target && update.commit {
+                    self.renaming_state = None;
+                    self.focus_rename = false;
+                    if self.can_rename_path(&update.path) {
+                        self.rename_path_with_shell(update.path, update.text);
+                    }
+                } else if is_active_target {
+                    if let Some((_, text)) = self.renaming_state.as_mut() {
+                        *text = update.text;
+                    }
+                }
+            }
+            if self.renaming_state.is_some() {
+                continue;
+            }
             let Some(action) = output.action else {
                 continue;
             };

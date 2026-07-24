@@ -187,7 +187,7 @@ pub struct PanelSnapshot {
     pub loaded_path: String,
 
     // Rename state
-    pub renaming_state: Option<(usize, String)>,
+    pub renaming_state: Option<(PathBuf, String)>,
     pub focus_rename: bool,
 
     // Per-panel async loading pipeline state

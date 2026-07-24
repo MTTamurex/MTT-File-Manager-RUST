@@ -294,8 +294,8 @@ pub struct ImageViewerApp {
     pub hold_visible_items_until_load_complete: bool,
 
     // RENAME STATE
-    pub renaming_state: Option<(usize, String)>, // (Index, Editable Text)
-    pub focus_rename: bool,                      // Trigger to focus the input
+    pub renaming_state: Option<(PathBuf, String)>, // (Path, Editable Text)
+    pub focus_rename: bool,                        // Trigger to focus the input
 
     // BATCH RENAME STATE
     pub batch_rename_state: Option<crate::app::batch_rename::BatchRenameState>,

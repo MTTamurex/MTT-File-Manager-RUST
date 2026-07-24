@@ -18,7 +18,10 @@ impl ImageViewerApp {
         // without a deep clone while still mutating self later
         let items_arc = self.items.clone();
         let item = &items_arc[idx];
-        let is_renaming = self.renaming_state.as_ref().is_some_and(|(i, _)| *i == idx);
+        let is_renaming = self
+            .renaming_state
+            .as_ref()
+            .is_some_and(|(path, _)| *path == item.path);
 
         // To avoid borrow conflicts, collect pending operations
         // and execute after rendering

@@ -347,7 +347,10 @@ fn render_item_slot_for_grid(
 ) {
     use crate::ui::components::item_slot::{render_item_slot, ItemSlotContext};
 
-    let is_renaming = ctx.renaming_state.as_ref().is_some_and(|(i, _)| *i == idx);
+    let is_renaming = ctx
+        .renaming_state
+        .as_ref()
+        .is_some_and(|(path, _)| *path == item.path);
 
     let mut renaming_text_clone = if is_renaming {
         ctx.renaming_state.as_ref().map(|(_, s)| s.clone())

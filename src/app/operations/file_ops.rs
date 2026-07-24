@@ -284,7 +284,7 @@ impl ImageViewerApp {
                     if let Some(idx) = self.items.iter().position(|i| i.path == full_path) {
                         self.selected_item = Some(idx);
                         self.selected_file = Some(self.items[idx].clone());
-                        self.renaming_state = Some((idx, new_folder_name));
+                        self.renaming_state = Some((full_path.clone(), new_folder_name));
                         self.focus_rename = true;
                         self.scroll_to_selected = true;
                     }
@@ -315,12 +315,25 @@ impl ImageViewerApp {
     }
 
     pub fn can_rename_item(&self, idx: usize) -> bool {
-        if self.navigation_state.is_recycle_bin_view || self.current_location_is_archive_namespace()
+        self.items
+            .get(idx)
+            .is_some_and(|item| self.can_rename_path(&item.path))
+    }
+
+    pub fn can_rename_path(&self, target_path: &Path) -> bool {
+        if self.navigation_state.is_recycle_bin_view
+            || crate::domain::file_entry::is_path_inside_existing_archive_file(target_path)
         {
             return false;
         }
 
-        self.items.get(idx).is_some_and(|item| {
+        let current_item = self.items.iter().find(|item| item.path == target_path);
+        let cached_item = target_path.parent().and_then(|parent| {
+            self.miller_columns
+                .get_arc(parent)
+                .and_then(|items| items.iter().find(|item| item.path == target_path).cloned())
+        });
+        current_item.or(cached_item.as_ref()).is_some_and(|item| {
             item.drive_info.as_ref().is_none_or(|drive| {
                 crate::infrastructure::windows::drive_supports_volume_label_rename(drive.drive_type)
             })
@@ -334,18 +347,23 @@ impl ImageViewerApp {
             return false;
         }
 
-        let Some(item_name) = self.items.get(idx).map(|item| {
+        let Some((item_path, item_name)) = self.items.get(idx).map(|item| {
             if item.drive_info.is_some() {
-                crate::infrastructure::windows::get_volume_label_raw(&item.path.to_string_lossy())
-                    .unwrap_or_default()
+                (
+                    item.path.clone(),
+                    crate::infrastructure::windows::get_volume_label_raw(
+                        &item.path.to_string_lossy(),
+                    )
+                    .unwrap_or_default(),
+                )
             } else {
-                item.name.clone()
+                (item.path.clone(), item.name.clone())
             }
         }) else {
             return false;
         };
 
-        self.renaming_state = Some((idx, item_name));
+        self.renaming_state = Some((item_path, item_name));
         self.focus_rename = true;
         true
     }
@@ -365,20 +383,32 @@ impl ImageViewerApp {
             }
         }
 
-        false
+        let Some(parent) = target_path.parent() else {
+            return false;
+        };
+        let Some(item) = self
+            .miller_columns
+            .get_arc(parent)
+            .and_then(|items| items.iter().find(|item| item.path == target_path).cloned())
+        else {
+            return false;
+        };
+        if !self.can_rename_path(target_path) {
+            return false;
+        }
+
+        self.renaming_state = Some((item.path, item.name));
+        self.focus_rename = true;
+        true
     }
 
     /// Renames a file using the Shell API via the background worker
-    pub fn rename_with_shell(&mut self, idx: usize) {
-        if !self.can_rename_item(idx) {
-            self.renaming_state = None;
-            self.focus_rename = false;
-            return;
-        }
-
-        if let Some((_, new_name)) = self.renaming_state.take() {
-            if let Some(path) = self.items.get(idx).map(|item| item.path.clone()) {
+    pub fn rename_with_shell(&mut self, _idx: usize) {
+        if let Some((path, new_name)) = self.renaming_state.take() {
+            if self.can_rename_path(&path) {
                 self.rename_path_with_shell(path, new_name);
+            } else {
+                self.focus_rename = false;
             }
         }
     }
@@ -412,18 +442,27 @@ impl ImageViewerApp {
     /// Collects all selected, non-drive items in display order, then opens the
     /// batch rename modal by setting `batch_rename_state`.
     pub fn begin_batch_rename(&mut self) {
-        if self.multi_selection.len() < 2 || self.current_location_is_archive_namespace() {
+        if self.multi_selection.len() < 2 || self.navigation_state.is_recycle_bin_view {
             return;
         }
 
-        let sources: Vec<PathBuf> = self
-            .items
+        let current_path = Path::new(&self.navigation_state.current_path);
+        let ancestor_listing = self
+            .selected_file
+            .as_ref()
+            .and_then(|item| item.path.parent())
+            .filter(|parent| *parent != current_path)
+            .and_then(|parent| self.miller_columns.get_arc(parent));
+        let items = ancestor_listing
+            .as_deref()
+            .map(Vec::as_slice)
+            .unwrap_or_else(|| self.items.as_slice());
+        let sources: Vec<PathBuf> = items
             .iter()
             .filter(|item| {
                 // Skip drives – cannot batch-rename volume labels
                 item.drive_info.is_none()
-                    // Skip Recycle Bin entries
-                    && !self.navigation_state.is_recycle_bin_view
+                    && !crate::domain::file_entry::is_path_inside_existing_archive_file(&item.path)
                     && self.multi_selection.contains(&item.path)
             })
             .map(|item| item.path.clone())
@@ -439,11 +478,6 @@ impl ImageViewerApp {
     /// Applies the current `batch_rename_state`, sending one aggregate rename
     /// request for all non-conflicting files to the background worker.
     pub fn apply_batch_rename(&mut self) {
-        if self.current_location_is_archive_namespace() {
-            self.batch_rename_state = None;
-            return;
-        }
-
         let Some(state): Option<crate::app::batch_rename::BatchRenameState> =
             self.batch_rename_state.take()
         else {
@@ -454,7 +488,10 @@ impl ImageViewerApp {
         let hwnd = self.shell_op_hwnd();
         let renames: Vec<(PathBuf, String)> = preview
             .into_iter()
-            .filter(|row| !row.conflict)
+            .filter(|row| {
+                !row.conflict
+                    && !crate::domain::file_entry::is_path_inside_existing_archive_file(&row.source)
+            })
             .map(|row| (row.source, row.new_name))
             .collect();
 

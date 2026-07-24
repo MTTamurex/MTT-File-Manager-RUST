@@ -35,10 +35,10 @@ pub(super) fn render_action_buttons(ui: &mut egui::Ui, app: &mut ImageViewerApp)
     let can_cut = has_selection && !selection_cannot_move;
     let can_copy = has_selection && app.can_copy_from_current_location();
     let can_rename = app.multi_selection.len() <= 1
-        && !in_archive_namespace
         && app
-            .selected_item
-            .is_some_and(|idx| app.can_rename_item(idx));
+            .selected_file
+            .as_ref()
+            .is_some_and(|item| app.can_rename_path(&item.path));
     let can_paste = app.can_paste_into_current_location() && !is_drive_selected;
     let can_create_folder =
         !crate::domain::special_paths::is_virtual_path(&app.navigation_state.current_path)
@@ -164,6 +164,8 @@ pub(super) fn execute_action(action: SecAction, app: &mut ImageViewerApp) {
         SecAction::Rename => {
             if let Some(idx) = app.selected_item {
                 app.begin_rename_item(idx);
+            } else if let Some(path) = app.selected_file.as_ref().map(|item| item.path.clone()) {
+                app.begin_rename_path(&path);
             }
         }
         SecAction::CreateFolder => app.create_new_folder(),

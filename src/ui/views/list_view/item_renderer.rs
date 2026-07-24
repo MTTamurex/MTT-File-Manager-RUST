@@ -267,7 +267,7 @@ pub(super) fn render_list_item(
         let is_renaming_this = ctx
             .renaming_state
             .as_ref()
-            .is_some_and(|(idx, _)| *idx == i);
+            .is_some_and(|(path, _)| *path == item.path);
         if is_renaming_this {
             let Some((_, ref rename_text)) = ctx.renaming_state else {
                 return;

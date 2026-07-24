@@ -200,7 +200,7 @@ pub struct ListViewContext<'a> {
     pub multi_selection: &'a FxHashSet<PathBuf>,
     pub sort_mode: SortMode,
     pub sort_descending: bool,
-    pub renaming_state: Option<(usize, String)>,
+    pub renaming_state: Option<(PathBuf, String)>,
     pub focus_rename: bool,
     pub scroll_to_selected: bool, // Scroll to selected item on keyboard navigation
     pub generation: usize,

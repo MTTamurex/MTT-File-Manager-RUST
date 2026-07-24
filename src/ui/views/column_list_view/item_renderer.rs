@@ -268,7 +268,7 @@ fn render_column_item_name(
     if ctx
         .renaming_state
         .as_ref()
-        .is_some_and(|(i, _)| *i == index)
+        .is_some_and(|(path, _)| *path == item.path)
     {
         let mut text = ctx
             .renaming_state

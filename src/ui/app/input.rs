@@ -283,6 +283,8 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
             } else if let Some(idx) = app.selected_item {
                 app.begin_rename_item(idx);
                 user_active = true;
+            } else if let Some(path) = app.selected_file.as_ref().map(|item| item.path.clone()) {
+                user_active = app.begin_rename_path(&path);
             }
         }
 

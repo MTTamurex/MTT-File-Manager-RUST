@@ -139,7 +139,7 @@ pub struct GridViewContext<'a> {
     pub multi_selection: &'a FxHashSet<PathBuf>,
     pub thumbnail_size: f32,
     pub last_grid_cols: usize,
-    pub renaming_state: Option<(usize, String)>,
+    pub renaming_state: Option<(PathBuf, String)>,
     pub focus_rename: bool,
     pub scroll_to_selected: bool, // Scroll to selected item on keyboard navigation
     pub is_computer_view: bool,
