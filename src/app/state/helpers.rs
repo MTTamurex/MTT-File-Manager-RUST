@@ -76,6 +76,14 @@ fn panel_thumbnail_caches_active(
         && item_count > 0
 }
 
+fn detail_panel_thumbnail_active(
+    show_preview_panel: bool,
+    selection_count: usize,
+    selected_file: Option<&FileEntry>,
+) -> bool {
+    show_preview_panel && selection_count <= 1 && selected_file.is_some_and(FileEntry::is_media)
+}
+
 fn visible_count_from_range(
     item_count: usize,
     visible_index_range: Option<(usize, usize)>,
@@ -1264,6 +1272,14 @@ impl ImageViewerApp {
             return true;
         }
 
+        if detail_panel_thumbnail_active(
+            self.show_preview_panel,
+            self.multi_selection.len(),
+            self.selected_file.as_ref(),
+        ) {
+            return true;
+        }
+
         self.dual_panel_enabled
             && self
                 .dual_panel_inactive_state
@@ -1518,7 +1534,7 @@ fn current_process_memory_snapshot() -> Option<ProcessMemorySnapshot> {
 
 #[cfg(test)]
 mod inactive_panel_paths_tests {
-    use super::{insert_item_reference_paths, FileEntry, FxHashSet};
+    use super::{detail_panel_thumbnail_active, insert_item_reference_paths, FileEntry, FxHashSet};
     use crate::domain::file_entry::SyncStatus;
     use std::path::PathBuf;
 
@@ -1574,5 +1590,17 @@ mod inactive_panel_paths_tests {
             let p = PathBuf::from(probe);
             assert_eq!(set.contains(&p), reference(&p), "mismatch for {probe}");
         }
+    }
+
+    #[test]
+    fn selected_media_keeps_thumbnail_cache_active_for_empty_view() {
+        let video = entry(r"C:\a\video.mp4", None);
+        let document = entry(r"C:\a\document.txt", None);
+
+        assert!(detail_panel_thumbnail_active(true, 1, Some(&video)));
+        assert!(!detail_panel_thumbnail_active(false, 1, Some(&video)));
+        assert!(!detail_panel_thumbnail_active(true, 2, Some(&video)));
+        assert!(!detail_panel_thumbnail_active(true, 1, Some(&document)));
+        assert!(!detail_panel_thumbnail_active(true, 0, None));
     }
 }
