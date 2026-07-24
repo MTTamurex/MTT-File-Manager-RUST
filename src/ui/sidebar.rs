@@ -579,8 +579,8 @@ pub fn render_sidebar_drives(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Opt
                 egui::vec2(20.0, rect.height()),
             );
             let eject_rect = Rect::from_center_size(
-                Pos2::new(rect.max.x - 12.0, rect.center().y),
-                egui::vec2(18.0, 18.0),
+                Pos2::new(rect.max.x - 14.0, rect.center().y),
+                egui::vec2(22.0, 22.0),
             );
             let eject_response = show_eject_button.then(|| {
                 ui.interact(
@@ -692,11 +692,7 @@ pub fn render_sidebar_drives(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Opt
 
                     if let Some(eject_response) = eject_response.as_ref() {
                         let eject_color = if eject_response.hovered() {
-                            if is_selected {
-                                crate::ui::theme::selection_text_color(dark_mode)
-                            } else {
-                                ui.visuals().text_color()
-                            }
+                            Color32::from_rgb(220, 60, 60)
                         } else {
                             Color32::from_gray(140)
                         };
@@ -705,7 +701,7 @@ pub fn render_sidebar_drives(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Opt
                             eject_rect.center(),
                             egui::Align2::CENTER_CENTER,
                             "⏏",
-                            egui::FontId::proportional(10.0),
+                            egui::FontId::proportional(13.0),
                             eject_color,
                         );
                     }
@@ -924,7 +920,7 @@ fn render_pinned_folders(
         }
 
         // Pin rect is computed outside the visibility check so it can be used for click detection
-        let pin_size = 18.0;
+        let pin_size = 22.0;
         let pin_rect = Rect::from_center_size(
             Pos2::new(rect.max.x - pin_size / 2.0 - 3.0, rect.center().y),
             egui::vec2(pin_size, pin_size),
@@ -1005,7 +1001,7 @@ fn render_pinned_folders(
                     pin_rect.center(),
                     egui::Align2::CENTER_CENTER,
                     "📌",
-                    egui::FontId::proportional(10.0),
+                    egui::FontId::proportional(13.0),
                     pin_color,
                 );
             }
