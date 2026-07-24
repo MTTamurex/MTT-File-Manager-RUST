@@ -6,14 +6,19 @@ use crate::domain::file_entry::FileEntry;
 use crate::ui::cache::FxHashSet;
 
 impl ImageViewerApp {
+    pub(super) fn update_miller_ancestor_selected_file(&mut self, entry: FileEntry) {
+        self.selected_file = Some(entry.clone());
+        self.update_selected_thumbnail();
+        self.ensure_detail_panel_thumbnail_for_file(&entry);
+    }
+
     /// Select an entry shown outside the focused column for preview and actions.
     pub(super) fn select_ancestor_entry_for_preview(&mut self, entry: FileEntry) {
         self.selected_item = None;
         self.selection_anchor = None;
         self.multi_selection.clear();
         self.multi_selection.insert(entry.path.clone());
-        self.selected_file = Some(entry);
-        self.update_selected_thumbnail();
+        self.update_miller_ancestor_selected_file(entry);
     }
 
     pub(super) fn select_miller_ancestor_entry(
@@ -65,8 +70,7 @@ impl ImageViewerApp {
 
         self.selected_item = None;
         self.selection_anchor = None;
-        self.selected_file = Some(entry);
-        self.update_selected_thumbnail();
+        self.update_miller_ancestor_selected_file(entry);
         self.ui_ctx.request_repaint();
     }
 
@@ -107,8 +111,7 @@ impl ImageViewerApp {
         }
         self.selected_item = None;
         self.selection_anchor = None;
-        self.selected_file = Some(entry.clone());
-        self.update_selected_thumbnail();
+        self.update_miller_ancestor_selected_file(entry.clone());
 
         self.is_item_dragging = true;
         self.item_drag_origin = crate::app::drag_drop_state::ItemDragOrigin::FileView;

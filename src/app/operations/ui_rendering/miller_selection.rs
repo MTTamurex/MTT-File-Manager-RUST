@@ -56,8 +56,8 @@ impl ImageViewerApp {
                     .is_some_and(|selected| !base_selection.contains(&selected.path))
                 {
                     self.selected_file = None;
+                    self.update_selected_thumbnail();
                 }
-                self.update_selected_thumbnail();
                 self.rectangle_selection_state = Some(RectangleSelectionState::new_for_source(
                     metrics.view(),
                     frame.source.clone(),
@@ -163,7 +163,7 @@ impl ImageViewerApp {
                     .set_selection_anchor(directory, &anchor_item.path);
             }
         }
-        self.selected_file = resolved
+        let selected_file = resolved
             .focus_index
             .and_then(|index| items.get(index))
             .filter(|item| self.multi_selection.contains(&item.path))
@@ -175,7 +175,12 @@ impl ImageViewerApp {
                     .find(|item| self.multi_selection.contains(&item.path))
                     .cloned()
             });
-        self.update_selected_thumbnail();
+        if let Some(entry) = selected_file {
+            self.update_miller_ancestor_selected_file(entry);
+        } else {
+            self.selected_file = None;
+            self.update_selected_thumbnail();
+        }
         self.ui_ctx.request_repaint();
     }
 }

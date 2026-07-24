@@ -155,6 +155,12 @@ impl MillerColumnsState {
         self.loading.contains_key(dir)
     }
 
+    pub fn listing_contains_path(&self, directory: &Path, path: &Path) -> Option<bool> {
+        self.listings
+            .get(directory)
+            .map(|items| items.iter().any(|item| item.path == path))
+    }
+
     /// Ensure a directory listing is loaded (or loading) for `dir`.
     pub fn ensure(&mut self, dir: &Path) {
         if self.listings.contains_key(dir) || self.loading.contains_key(dir) {
@@ -416,6 +422,18 @@ mod tests {
             .selection_anchor_index(temp.path(), &items)
             .expect("resolve anchor");
         assert_eq!(items[index].path, anchor);
+
+        state
+            .listings
+            .insert(temp.path().to_path_buf(), Arc::new(items.clone()));
+        assert_eq!(
+            state.listing_contains_path(temp.path(), &anchor),
+            Some(true)
+        );
+        assert_eq!(
+            state.listing_contains_path(temp.path(), &temp.path().join("missing.txt")),
+            Some(false)
+        );
 
         state.clear_selection_anchors();
         assert_eq!(state.selection_anchor_index(temp.path(), &items), None);

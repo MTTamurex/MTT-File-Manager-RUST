@@ -30,6 +30,15 @@ fn selected_paths_match(left: &Path, right: &Path) -> bool {
     left == right || normalize_selection_path(left) == normalize_selection_path(right)
 }
 
+fn selected_path_is_in_miller_ancestor(current_path: &Path, selected_path: &Path) -> bool {
+    selected_path.parent().is_some_and(|selected_parent| {
+        current_path
+            .ancestors()
+            .skip(1)
+            .any(|ancestor| selected_paths_match(ancestor, selected_parent))
+    })
+}
+
 fn selected_entry_content_changed(old: &FileEntry, new: &FileEntry) -> bool {
     old.is_dir != new.is_dir
         || old.size != new.size
@@ -264,6 +273,19 @@ impl ImageViewerApp {
                 .iter()
                 .position(|item| selected_paths_match(&item.path, &selected.path))
         });
+        let is_miller_ancestor_selection = resolved_index.is_none()
+            && matches!(self.view_mode, crate::domain::file_entry::ViewMode::Miller)
+            && self.selected_file.as_ref().is_some_and(|selected| {
+                let current_path = Path::new(&self.navigation_state.current_path);
+                let Some(parent) = selected.path.parent() else {
+                    return false;
+                };
+                selected_path_is_in_miller_ancestor(current_path, &selected.path)
+                    && self
+                        .miller_columns
+                        .listing_contains_path(parent, &selected.path)
+                        .unwrap_or(true)
+            });
 
         if let Some(index) = resolved_index {
             if let Some(fresh_entry) = self.items.get(index).cloned() {
@@ -271,7 +293,11 @@ impl ImageViewerApp {
             }
         }
 
-        if self.selected_item == resolved_index {
+        if self.selected_item == resolved_index
+            && (resolved_index.is_some()
+                || self.selected_file.is_none()
+                || is_miller_ancestor_selection)
+        {
             return;
         }
 
@@ -289,7 +315,10 @@ impl ImageViewerApp {
             // data (all_items non-empty), the file was filtered out by search.
             // Clear the selection so the preview panel shows "no selection"
             // instead of stale data from the previously selected file.
-            if self.selected_file.is_some() && !self.all_items.is_empty() {
+            if !is_miller_ancestor_selection
+                && self.selected_file.is_some()
+                && !self.all_items.is_empty()
+            {
                 self.selected_file = None;
                 self.selected_metadata = None;
                 self.multi_selection.clear();
@@ -728,5 +757,33 @@ impl ImageViewerApp {
 
             player.set_visibility(visible);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::selected_path_is_in_miller_ancestor;
+    use std::path::Path;
+
+    #[test]
+    fn identifies_only_items_from_miller_ancestor_directories() {
+        let current = Path::new(r"C:\A\B");
+
+        assert!(selected_path_is_in_miller_ancestor(
+            current,
+            Path::new(r"C:\A\video.mp4")
+        ));
+        assert!(selected_path_is_in_miller_ancestor(
+            current,
+            Path::new(r"C:\root-video.mp4")
+        ));
+        assert!(!selected_path_is_in_miller_ancestor(
+            current,
+            Path::new(r"C:\A\B\video.mp4")
+        ));
+        assert!(!selected_path_is_in_miller_ancestor(
+            current,
+            Path::new(r"C:\A\Other\video.mp4")
+        ));
     }
 }

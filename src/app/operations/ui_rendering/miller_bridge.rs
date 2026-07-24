@@ -325,8 +325,7 @@ impl ImageViewerApp {
                         } else {
                             self.selected_item = None;
                             self.selection_anchor = None;
-                            self.selected_file = Some(entry.clone());
-                            self.update_selected_thumbnail();
+                            self.update_miller_ancestor_selected_file(entry.clone());
                         }
                         let mut paths = vec![entry.path.clone()];
                         paths.extend(
