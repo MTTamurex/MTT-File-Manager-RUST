@@ -438,7 +438,14 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 }
             }
             match id {
-                -1 => app.create_new_folder(),
+                -1 => {
+                    let target = context_menu
+                        .target_paths
+                        .first()
+                        .cloned()
+                        .unwrap_or_else(|| PathBuf::from(&app.navigation_state.current_path));
+                    app.create_new_folder_at(&target);
+                }
                 -2 | -31 => {
                     if context_menu.origin
                         == crate::application::context_menu::ContextMenuOrigin::GlobalSearch

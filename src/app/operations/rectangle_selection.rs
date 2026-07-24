@@ -5,7 +5,7 @@ use crate::app::state::ImageViewerApp;
 use crate::ui::cache::FxHashSet;
 use crate::ui::views::rectangle_selection::{
     collect_indices_in_rect, RectangleSelectionFrame, RectangleSelectionMetrics,
-    RectangleSelectionModifiers, RectangleSelectionState,
+    RectangleSelectionModifiers, RectangleSelectionSource, RectangleSelectionState,
 };
 
 pub(crate) struct RectangleSelectionResolveResult {
@@ -108,7 +108,7 @@ pub(crate) fn resolve_rectangle_selection(
     }
 }
 
-fn resolve_rectangle_preview_indices(
+pub(crate) fn resolve_rectangle_preview_indices(
     item_count: usize,
     base_preview_indices: &FxHashSet<usize>,
     hit_indices: &FxHashSet<usize>,
@@ -187,6 +187,17 @@ impl ImageViewerApp {
         frame: &RectangleSelectionFrame,
         suppress_new_start: bool,
     ) {
+        if self
+            .rectangle_selection_state
+            .as_ref()
+            .is_some_and(|state| state.source != RectangleSelectionSource::CurrentItems)
+        {
+            if !matches!(self.view_mode, crate::domain::file_entry::ViewMode::Miller) {
+                self.cancel_rectangle_selection();
+            }
+            return;
+        }
+
         let Some(metrics) = frame.metrics else {
             if self.rectangle_selection_state.is_some() {
                 self.cancel_rectangle_selection();

@@ -18,6 +18,15 @@ fn normalize_watch_path(path: &Path) -> String {
     path.to_string_lossy().replace('/', "\\").to_lowercase()
 }
 
+#[cfg(feature = "notify-watcher")]
+fn miller_ancestor_watch_paths(path: &Path) -> Vec<PathBuf> {
+    path.ancestors()
+        .skip(1)
+        .filter(|ancestor| !ancestor.as_os_str().is_empty())
+        .map(Path::to_path_buf)
+        .collect()
+}
+
 impl ImageViewerApp {
     fn configure_watcher_fallback_mode(&mut self, path: &Path) -> (u128, bool, Option<char>) {
         self.watcher_fallback_last_probe = Instant::now();
@@ -177,12 +186,31 @@ impl ImageViewerApp {
             }
         };
 
-        push_watch_path(current_path, "active");
+        push_watch_path(current_path.clone(), "active");
+        if matches!(self.view_mode, crate::domain::file_entry::ViewMode::Miller) {
+            for ancestor in miller_ancestor_watch_paths(Path::new(&current_path)) {
+                push_watch_path(
+                    ancestor.to_string_lossy().into_owned(),
+                    "active Miller ancestor",
+                );
+            }
+        }
 
         if self.dual_panel_enabled {
             if let Some(snapshot) = self.dual_panel_inactive_state.as_ref() {
                 if !crate::domain::special_paths::is_virtual_path(&snapshot.path) {
                     push_watch_path(snapshot.path.clone(), "inactive dual-panel");
+                    if matches!(
+                        snapshot.view_mode,
+                        crate::domain::file_entry::ViewMode::Miller
+                    ) {
+                        for ancestor in miller_ancestor_watch_paths(Path::new(&snapshot.path)) {
+                            push_watch_path(
+                                ancestor.to_string_lossy().into_owned(),
+                                "inactive Miller ancestor",
+                            );
+                        }
+                    }
                 }
             }
         }
@@ -275,5 +303,23 @@ impl ImageViewerApp {
 
             self.watcher = watcher;
         }
+    }
+}
+
+#[cfg(all(test, feature = "notify-watcher"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn miller_watches_each_ancestor_of_the_focused_directory() {
+        assert_eq!(
+            miller_ancestor_watch_paths(Path::new(r"C:\A\B")),
+            vec![PathBuf::from(r"C:\A"), PathBuf::from(r"C:\")]
+        );
+    }
+
+    #[test]
+    fn miller_drive_root_has_no_ancestor_watch_paths() {
+        assert!(miller_ancestor_watch_paths(Path::new(r"C:\")).is_empty());
     }
 }

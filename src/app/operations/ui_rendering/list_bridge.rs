@@ -12,7 +12,9 @@ use crate::app::operations::navigation::{
 };
 use crate::app::state::ImageViewerApp;
 use crate::infrastructure::io_priority;
-use crate::ui::views::rectangle_selection::{RectangleSelectionFrame, RectangleSelectionView};
+use crate::ui::views::rectangle_selection::{
+    RectangleSelectionFrame, RectangleSelectionSource, RectangleSelectionView,
+};
 use crate::ui::views::{list_view, ListViewContext, ListViewOperations};
 
 // Helper function equivalent to open_with_shell from ops
@@ -306,12 +308,13 @@ impl ImageViewerApp {
                 .input(|i| i.pointer.hover_pos())
                 .is_some_and(|pos| ui.clip_rect().contains(pos));
         let rectangle_selection_state = self.rectangle_selection_state.as_ref().filter(|state| {
-            state.view
-                == if column_list {
-                    RectangleSelectionView::ColumnList
-                } else {
-                    RectangleSelectionView::List
-                }
+            state.source == RectangleSelectionSource::CurrentItems
+                && state.view
+                    == if column_list {
+                        RectangleSelectionView::ColumnList
+                    } else {
+                        RectangleSelectionView::List
+                    }
         });
 
         // Select appropriate column width references based on context

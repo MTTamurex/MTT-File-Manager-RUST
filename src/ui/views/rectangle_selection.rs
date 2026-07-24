@@ -10,6 +10,16 @@ pub enum RectangleSelectionView {
     ColumnList,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum RectangleSelectionSource {
+    #[default]
+    CurrentItems,
+    MillerAncestor {
+        directory: PathBuf,
+        listing_id: usize,
+    },
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct RectangleSelectionModifiers {
     pub ctrl: bool,
@@ -82,6 +92,7 @@ impl RectangleSelectionMetrics {
 #[derive(Clone, Debug)]
 pub struct RectangleSelectionState {
     pub view: RectangleSelectionView,
+    pub source: RectangleSelectionSource,
     pub anchor_content: Pos2,
     pub current_content: Pos2,
     pub base_selection: FxHashSet<PathBuf>,
@@ -101,8 +112,29 @@ impl RectangleSelectionState {
         modifiers: RectangleSelectionModifiers,
         generation: usize,
     ) -> Self {
+        Self::new_for_source(
+            view,
+            RectangleSelectionSource::CurrentItems,
+            anchor_content,
+            base_selection,
+            base_preview_indices,
+            modifiers,
+            generation,
+        )
+    }
+
+    pub fn new_for_source(
+        view: RectangleSelectionView,
+        source: RectangleSelectionSource,
+        anchor_content: Pos2,
+        base_selection: FxHashSet<PathBuf>,
+        base_preview_indices: FxHashSet<usize>,
+        modifiers: RectangleSelectionModifiers,
+        generation: usize,
+    ) -> Self {
         Self {
             view,
+            source,
             anchor_content,
             current_content: anchor_content,
             base_selection,
@@ -134,6 +166,7 @@ impl RectangleSelectionState {
 
 #[derive(Clone, Debug, Default)]
 pub struct RectangleSelectionFrame {
+    pub source: RectangleSelectionSource,
     pub viewport_rect: Option<Rect>,
     pub current_scroll_y: f32,
     pub max_scroll_y: f32,
@@ -145,6 +178,26 @@ pub struct RectangleSelectionFrame {
 
 impl RectangleSelectionFrame {
     pub fn begin(
+        &mut self,
+        viewport_rect: Rect,
+        current_scroll_x: f32,
+        current_scroll_y: f32,
+        max_scroll_x: f32,
+        max_scroll_y: f32,
+        metrics: Option<RectangleSelectionMetrics>,
+    ) {
+        self.source = RectangleSelectionSource::CurrentItems;
+        self.begin_geometry(
+            viewport_rect,
+            current_scroll_x,
+            current_scroll_y,
+            max_scroll_x,
+            max_scroll_y,
+            metrics,
+        );
+    }
+
+    fn begin_geometry(
         &mut self,
         viewport_rect: Rect,
         current_scroll_x: f32,
@@ -407,5 +460,24 @@ mod tests {
         );
 
         assert_eq!(sorted(indices), vec![4, 5]);
+    }
+
+    #[test]
+    fn miller_rectangle_state_keeps_its_column_identity() {
+        let source = RectangleSelectionSource::MillerAncestor {
+            directory: PathBuf::from(r"C:\A"),
+            listing_id: 42,
+        };
+        let state = RectangleSelectionState::new_for_source(
+            RectangleSelectionView::List,
+            source.clone(),
+            egui::pos2(0.0, 0.0),
+            FxHashSet::default(),
+            FxHashSet::default(),
+            RectangleSelectionModifiers::default(),
+            42,
+        );
+
+        assert_eq!(state.source, source);
     }
 }

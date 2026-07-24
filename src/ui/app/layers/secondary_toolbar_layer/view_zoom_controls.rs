@@ -84,6 +84,7 @@ pub(super) fn render_view_and_zoom_controls(ui: &mut egui::Ui, app: &mut ImageVi
     });
 
     if view_mode_changed {
+        app.watch_current_folder();
         let selection_is_outside_current_folder = app
             .selected_file
             .as_ref()

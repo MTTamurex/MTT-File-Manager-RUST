@@ -111,6 +111,7 @@ pub(crate) fn render_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context
                             ViewMode::List => ViewMode::Miller,
                             ViewMode::Miller => ViewMode::Grid,
                         };
+                        app.watch_current_folder();
                         if matches!(
                             app.view_mode,
                             ViewMode::Grid | ViewMode::ColumnList | ViewMode::Miller

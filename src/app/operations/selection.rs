@@ -684,6 +684,7 @@ impl ImageViewerApp {
         self.selected_metadata = None;
         self.search_query.clear();
         self.multi_selection.clear();
+        self.rectangle_selection_state = None;
         self.context_menu.target_paths.clear();
         self.renaming_state = None;
         self.selected_gif = None;

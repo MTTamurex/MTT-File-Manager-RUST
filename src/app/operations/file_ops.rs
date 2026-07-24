@@ -255,35 +255,39 @@ impl ImageViewerApp {
     }
 
     pub fn create_new_folder(&mut self) {
-        if crate::domain::special_paths::is_virtual_path(&self.navigation_state.current_path)
-            || self.current_location_is_archive_namespace()
+        let base_path = PathBuf::from(&self.navigation_state.current_path);
+        self.create_new_folder_at(&base_path);
+    }
+
+    pub fn create_new_folder_at(&mut self, base_path: &Path) {
+        if crate::domain::special_paths::is_virtual_path(&base_path.to_string_lossy())
+            || Self::path_is_archive_namespace(base_path)
         {
             return;
         }
 
-        let base_path = PathBuf::from(&self.navigation_state.current_path);
-
-        match file_operations::create_new_folder(&base_path) {
+        match file_operations::create_new_folder(base_path) {
             Ok(full_path) => {
-                let new_folder_name = full_path
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .to_string();
+                let current_path = Path::new(&self.navigation_state.current_path);
+                if base_path == current_path {
+                    let new_folder_name = full_path
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .to_string();
 
-                // CRITICAL: Immediately create entry to allow renaming
-                let new_item = FileEntry::from_path(full_path.clone(), true);
+                    // Immediately create the focused-column entry to allow renaming.
+                    let new_item = FileEntry::from_path(full_path.clone(), true);
+                    self.all_items_mut().push(new_item);
+                    self.filter_items();
 
-                self.all_items_mut().push(new_item);
-                self.filter_items();
-
-                // Find index in filtered vector
-                if let Some(idx) = self.items.iter().position(|i| i.path == full_path) {
-                    self.selected_item = Some(idx);
-                    self.selected_file = Some(self.items[idx].clone());
-                    self.renaming_state = Some((idx, new_folder_name));
-                    self.focus_rename = true;
-                    self.scroll_to_selected = true;
+                    if let Some(idx) = self.items.iter().position(|i| i.path == full_path) {
+                        self.selected_item = Some(idx);
+                        self.selected_file = Some(self.items[idx].clone());
+                        self.renaming_state = Some((idx, new_folder_name));
+                        self.focus_rename = true;
+                        self.scroll_to_selected = true;
+                    }
                 }
 
                 if let Some(parent) = full_path.parent() {
@@ -291,6 +295,10 @@ impl ImageViewerApp {
                     self.directory_cache.invalidate(&parent.to_path_buf());
                     if let Some(directory_index) = &self.directory_index {
                         let _ = directory_index.invalidate(parent);
+                    }
+                    self.miller_columns.invalidate(parent);
+                    if let Some(snapshot) = self.dual_panel_inactive_state.as_mut() {
+                        snapshot.miller_columns.invalidate(parent);
                     }
                 }
 

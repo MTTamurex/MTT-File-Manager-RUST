@@ -12,5 +12,7 @@
 pub mod column;
 pub mod layout;
 
-pub use column::{render_miller_column, MillerColumnAction, MillerColumnContext};
+pub use column::{
+    render_miller_column, MillerColumnAction, MillerColumnContext, MillerColumnOutput,
+};
 pub use layout::{ancestor_chain, ANCESTOR_COL_WIDTH, COL_ROW_HEIGHT, FOCUSED_COL_WIDTH};

@@ -237,6 +237,10 @@ impl ImageViewerApp {
         if let Some(di) = &self.directory_index {
             let _ = di.invalidate(path);
         }
+        self.miller_columns.invalidate(path);
+        if let Some(snapshot) = self.dual_panel_inactive_state.as_mut() {
+            snapshot.miller_columns.invalidate(path);
+        }
         // A directory cache invalidation means the folder's contents may have
         // changed. Invalidate folder-size caches here too so callers do not
         // need to remember to clear size separately from cover/listing state.

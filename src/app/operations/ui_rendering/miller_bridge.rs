@@ -19,6 +19,7 @@ use crate::ui::views::miller_columns_view::{
     ancestor_chain, render_miller_column, MillerColumnAction, MillerColumnContext,
     ANCESTOR_COL_WIDTH, FOCUSED_COL_WIDTH,
 };
+use crate::ui::views::rectangle_selection::RectangleSelectionSource;
 
 impl ImageViewerApp {
     pub fn render_miller_columns_view(&mut self, ui: &mut egui::Ui) {
@@ -31,45 +32,33 @@ impl ImageViewerApp {
             || self.navigation_state.current_path.is_empty()
             || is_virtual_path(&self.navigation_state.current_path)
         {
+            if self
+                .rectangle_selection_state
+                .as_ref()
+                .is_some_and(|state| {
+                    matches!(
+                        state.source,
+                        RectangleSelectionSource::MillerAncestor { .. }
+                    )
+                })
+            {
+                self.cancel_rectangle_selection();
+            }
             self.render_list_view_compact(ui);
             return;
         }
 
         let current_path = self.navigation_state.current_path.clone();
-        let chain = ancestor_chain(&current_path);
-        if chain.len() <= 1 {
-            // Drive root: nothing to the left, but Miller remains name-only.
-            self.render_list_view_compact(ui);
-            return;
-        }
-        let focused_index = chain.len() - 1;
-
-        // Keep ancestor listings warm with the active sort/filter signature.
-        let signature = (
-            self.sort_mode,
-            self.sort_descending,
-            self.folders_position,
-            self.show_hidden_files,
-        );
-        self.miller_columns.set_signature(signature);
-        let keep: std::collections::HashSet<PathBuf> = chain.iter().cloned().collect();
-        self.miller_columns.retain(&keep);
-        for dir in chain.iter().take(focused_index) {
-            self.miller_columns.ensure(dir);
-        }
-
-        // Track focus changes so the strip scrolls to reveal the focused
-        // column after navigation.
-        self.miller_columns.note_focused_dir(&current_path);
-
-        let viewport = ui.available_rect_before_wrap();
 
         // Left/Right arrow: move between columns (Up/Down/Enter belong to the
         // focused list view). Deferred so current_path is stable this frame.
+        // This must run before the drive-root shortcut below: the root still
+        // represents the focused Miller column even though it has no ancestors.
         let mut pending_nav: Option<String> = None;
         let allow_kb = !self.suppress_file_panel_keyboard
             && !self.global_search.active
             && self.renaming_state.is_none()
+            && self.rectangle_selection_state.is_none()
             && !ui.ctx().wants_keyboard_input();
         if allow_kb {
             let (left, right) = ui.input(|i| {
@@ -94,9 +83,43 @@ impl ImageViewerApp {
             }
         }
 
+        let chain = ancestor_chain(&current_path);
+        if chain.len() <= 1 {
+            // Drive root: nothing to the left, but Miller remains name-only.
+            self.render_list_view_compact(ui);
+            if let Some(target) = pending_nav {
+                self.navigate_to(&target);
+                ui.ctx().request_repaint();
+            }
+            return;
+        }
+        let focused_index = chain.len() - 1;
+
+        // Keep ancestor listings warm with the active sort/filter signature.
+        let signature = (
+            self.sort_mode,
+            self.sort_descending,
+            self.folders_position,
+            self.show_hidden_files,
+        );
+        self.miller_columns.set_signature(signature);
+        let keep: std::collections::HashSet<PathBuf> = chain.iter().cloned().collect();
+        self.miller_columns.retain(&keep);
+        for dir in chain.iter().take(focused_index) {
+            self.miller_columns.ensure(dir);
+        }
+
+        // Track focus changes so the strip scrolls to reveal the focused
+        // column after navigation.
+        self.miller_columns.note_focused_dir(&current_path);
+
+        let viewport = ui.available_rect_before_wrap();
+
         // Owned data for ancestor columns (Arc clones — no borrow on self).
         let folder_icon = self.cache_manager.folder_icon_texture.clone();
         let selected_file_path = self.selected_file.as_ref().map(|f| f.path.clone());
+        let selected_paths = self.multi_selection.clone();
+        let rectangle_selection_state = self.rectangle_selection_state.clone();
         let ancestor_data: Vec<(Option<Arc<Vec<FileEntry>>>, bool)> = chain
             .iter()
             .take(focused_index)
@@ -123,7 +146,7 @@ impl ImageViewerApp {
         // horizontal scrollbar and correct clipping (no left-bleed / overlap).
         // Each column is a fixed-width region; the focused column reuses the
         // full details list view for complete interaction parity.
-        let mut ancestor_actions: Vec<(usize, MillerColumnAction)> = Vec::new();
+        let mut ancestor_outputs = Vec::new();
         let mut icon_requests = Vec::new();
         let mut column_drop_target = None;
         let scroll_output = ui.scope(|ui| {
@@ -134,6 +157,7 @@ impl ImageViewerApp {
             egui::ScrollArea::horizontal()
                 .id_salt("miller_strip")
                 .auto_shrink([false, false])
+                .drag_to_scroll(false)
                 .horizontal_scroll_offset(horizontal_offset)
                 .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded)
                 .show(ui, |ui| {
@@ -148,6 +172,17 @@ impl ImageViewerApp {
                             let items: &[FileEntry] =
                                 listing.as_deref().map(|v| v.as_slice()).unwrap_or(&[]);
                             let selected_child = chain.get(col_idx + 1).map(|p| p.as_path());
+                            let listing_id = listing
+                                .as_ref()
+                                .map(|listing| Arc::as_ptr(listing) as usize)
+                                .unwrap_or(0);
+                            let selection_source = RectangleSelectionSource::MillerAncestor {
+                                directory: chain[col_idx].clone(),
+                                listing_id,
+                            };
+                            let column_rectangle_selection = rectangle_selection_state
+                                .as_ref()
+                                .filter(|state| state.source == selection_source);
                             let inner = ui.allocate_ui_with_layout(
                                 egui::vec2(ANCESTOR_COL_WIDTH, col_height),
                                 egui::Layout::top_down(egui::Align::Min),
@@ -157,6 +192,9 @@ impl ImageViewerApp {
                                         directory: &chain[col_idx],
                                         selected_child,
                                         selected_file: selected_file_path.as_deref(),
+                                        multi_selection: &selected_paths,
+                                        rectangle_selection_state: column_rectangle_selection,
+                                        listing_id,
                                         icon_loader: &mut self.item_icon_loader,
                                         folder_icon: folder_icon.as_ref(),
                                         loading_icons: &self.loading_icons,
@@ -169,9 +207,7 @@ impl ImageViewerApp {
                                     render_miller_column(ui, ("miller_col", col_idx), &mut cctx)
                                 },
                             );
-                            if let Some(action) = inner.inner {
-                                ancestor_actions.push((col_idx, action));
-                            }
+                            ancestor_outputs.push((col_idx, inner.inner));
                         }
 
                         if self.is_item_dragging {
@@ -213,14 +249,36 @@ impl ImageViewerApp {
         self.miller_columns
             .set_horizontal_scroll_offset(scroll_output.inner.state.offset.x);
 
+        if let Some(active_source) = self
+            .rectangle_selection_state
+            .as_ref()
+            .map(|state| &state.source)
+            .filter(|source| matches!(source, RectangleSelectionSource::MillerAncestor { .. }))
+        {
+            let source_is_visible = ancestor_outputs
+                .iter()
+                .any(|(_, output)| &output.rectangle_selection_frame.source == active_source);
+            if !source_is_visible {
+                self.cancel_rectangle_selection();
+            }
+        }
+
         for path in icon_requests {
             self.request_icon_load(path);
         }
 
         // ── Apply deferred ancestor interactions. ──
         let right_bound = viewport.right();
-        for (col_idx, action) in ancestor_actions {
+        for (col_idx, output) in ancestor_outputs {
             let Some(listing) = ancestor_data[col_idx].0.as_ref() else {
+                continue;
+            };
+            self.handle_miller_rectangle_selection_frame(
+                ui,
+                &output.rectangle_selection_frame,
+                listing,
+            );
+            let Some(action) = output.action else {
                 continue;
             };
             match action {
@@ -252,8 +310,24 @@ impl ImageViewerApp {
                 }
                 MillerColumnAction::SecondaryClicked(i, pos) => {
                     if let Some(entry) = listing.get(i).cloned() {
-                        self.select_ancestor_entry_for_preview(entry.clone());
-                        let paths = vec![entry.path.clone()];
+                        if !self.multi_selection.contains(&entry.path) {
+                            self.select_ancestor_entry_for_preview(entry.clone());
+                        } else {
+                            self.selected_item = None;
+                            self.selection_anchor = None;
+                            self.selected_file = Some(entry.clone());
+                            self.update_selected_thumbnail();
+                        }
+                        let mut paths = vec![entry.path.clone()];
+                        paths.extend(
+                            listing
+                                .iter()
+                                .filter(|item| {
+                                    item.path != entry.path
+                                        && self.multi_selection.contains(&item.path)
+                                })
+                                .map(|item| item.path.clone()),
+                        );
                         self.context_menu
                             .open(pos, right_bound, None, paths.clone(), false);
                         self.context_menu.primary_is_directory = Some(entry.is_dir);
@@ -262,7 +336,7 @@ impl ImageViewerApp {
                 }
                 MillerColumnAction::DragStarted(i) => {
                     if let Some(entry) = listing.get(i).cloned() {
-                        self.begin_miller_ancestor_drag(entry);
+                        self.begin_miller_ancestor_drag(entry, listing);
                     }
                 }
                 MillerColumnAction::EmptySecondaryClicked(pos) => {
@@ -279,73 +353,5 @@ impl ImageViewerApp {
             self.navigate_to(&target);
             ui.ctx().request_repaint();
         }
-    }
-
-    /// Select an entry shown in an ancestor column so the preview panel and
-    /// context menu target it. Clears the focused-column index selection since
-    /// the entry lives outside `current_path`.
-    fn select_ancestor_entry_for_preview(&mut self, entry: FileEntry) {
-        self.selected_item = None;
-        self.selection_anchor = None;
-        self.multi_selection.clear();
-        self.multi_selection.insert(entry.path.clone());
-        self.selected_file = Some(entry);
-        self.update_selected_thumbnail();
-    }
-
-    fn begin_miller_ancestor_drag(&mut self, entry: FileEntry) {
-        let moving_open_ancestor =
-            !crate::domain::file_entry::is_path_inside_existing_archive_file(&entry.path)
-                && self.path_is_same_or_ancestor_of_open_panel(&entry.path);
-        if moving_open_ancestor
-            || self.is_item_dragging
-            || self.file_panel_input_blocked_by_drag_move_confirmation()
-            || self.outbound_drag_input_guard
-                != crate::app::drag_drop_state::OutboundDragInputGuard::Inactive
-            || !self
-                .ui_ctx
-                .input(|input| input.pointer.button_down(egui::PointerButton::Primary))
-        {
-            return;
-        }
-
-        let source_folder = entry.path.parent().map(Path::to_path_buf);
-        let path = entry.path.clone();
-        self.multi_selection.clear();
-        self.multi_selection.insert(path.clone());
-        self.selected_item = None;
-        self.selection_anchor = None;
-        self.selected_file = Some(entry.clone());
-        self.update_selected_thumbnail();
-
-        self.is_item_dragging = true;
-        self.item_drag_origin = crate::app::drag_drop_state::ItemDragOrigin::FileView;
-        self.drag_payload_paths = vec![path.clone()];
-        self.drag_payload_is_single_directory = entry.is_dir;
-        self.drag_source_folder = source_folder;
-        self.drag_source_cross_panel_context = self.drag_drop_cross_panel_context;
-        self.drag_target_folder = None;
-        self.drag_hovered_folder = None;
-        self.drag_cross_panel_target = None;
-
-        let ui_ctx = self.ui_ctx.clone();
-        self.drag_icon_cache = if entry.is_dir && !entry.is_archive() {
-            self.item_icon_loader
-                .get_or_load_icon(&ui_ctx, &path, true, true)
-                .or_else(|| self.cache_manager.folder_icon_texture.clone())
-        } else if entry.is_media() {
-            self.cache_manager
-                .texture_cache
-                .get(&path)
-                .cloned()
-                .or_else(|| {
-                    self.item_icon_loader
-                        .get_or_load_icon(&ui_ctx, &path, false, true)
-                })
-        } else {
-            self.item_icon_loader
-                .get_or_load_icon(&ui_ctx, &path, false, true)
-        };
-        self.ui_ctx.request_repaint();
     }
 }
