@@ -161,6 +161,7 @@ pub(crate) fn resolve_rectangle_preview_indices(
 
 impl ImageViewerApp {
     pub fn clear_file_view_selection(&mut self) {
+        self.miller_columns.clear_selection_anchors();
         if self.selected_item.is_none()
             && self.selected_file.is_none()
             && self.multi_selection.is_empty()

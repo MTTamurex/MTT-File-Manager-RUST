@@ -32,6 +32,7 @@ pub enum MillerColumnAction {
     DoubleClicked(usize),
     SecondaryClicked(usize, egui::Pos2),
     DragStarted(usize),
+    EmptyClicked,
     EmptySecondaryClicked(egui::Pos2),
 }
 
@@ -105,7 +106,7 @@ pub fn render_miller_column(
             );
         }
         return MillerColumnOutput {
-            action: background_secondary_action(&background_response, ui),
+            action: background_action(&background_response, ui),
             rectangle_selection_frame: RectangleSelectionFrame::default(),
         };
     }
@@ -161,7 +162,7 @@ pub fn render_miller_column(
     }
 
     MillerColumnOutput {
-        action: action.or_else(|| background_secondary_action(&background_response, ui)),
+        action: action.or_else(|| background_action(&background_response, ui)),
         rectangle_selection_frame,
     }
 }
@@ -371,14 +372,16 @@ fn row_content_contains_pointer(
         .contains(point)
 }
 
-fn background_secondary_action(response: &egui::Response, ui: &Ui) -> Option<MillerColumnAction> {
-    if !response.secondary_clicked() {
-        return None;
+fn background_action(response: &egui::Response, ui: &Ui) -> Option<MillerColumnAction> {
+    if response.secondary_clicked() {
+        let position = response
+            .interact_pointer_pos()
+            .or_else(|| ui.input(|input| input.pointer.interact_pos()))
+            .unwrap_or(egui::Pos2::ZERO);
+        Some(MillerColumnAction::EmptySecondaryClicked(position))
+    } else if response.clicked() {
+        Some(MillerColumnAction::EmptyClicked)
+    } else {
+        None
     }
-
-    let position = response
-        .interact_pointer_pos()
-        .or_else(|| ui.input(|input| input.pointer.interact_pos()))
-        .unwrap_or(egui::Pos2::ZERO);
-    Some(MillerColumnAction::EmptySecondaryClicked(position))
 }

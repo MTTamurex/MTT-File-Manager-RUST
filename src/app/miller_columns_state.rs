@@ -142,6 +142,10 @@ impl MillerColumnsState {
             .insert(directory.to_path_buf(), item_path.to_path_buf());
     }
 
+    pub fn clear_selection_anchors(&mut self) {
+        self.selection_anchors.clear();
+    }
+
     /// Cached listing as a cheap-to-clone `Arc`, if already loaded.
     pub fn get_arc(&self, dir: &Path) -> Option<Arc<Vec<FileEntry>>> {
         self.listings.get(dir).cloned()
@@ -412,5 +416,8 @@ mod tests {
             .selection_anchor_index(temp.path(), &items)
             .expect("resolve anchor");
         assert_eq!(items[index].path, anchor);
+
+        state.clear_selection_anchors();
+        assert_eq!(state.selection_anchor_index(temp.path(), &items), None);
     }
 }

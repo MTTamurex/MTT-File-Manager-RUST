@@ -349,6 +349,7 @@ impl ImageViewerApp {
                         self.begin_miller_ancestor_drag(entry, listing);
                     }
                 }
+                MillerColumnAction::EmptyClicked => self.clear_file_view_selection(),
                 MillerColumnAction::EmptySecondaryClicked(pos) => {
                     let paths = vec![chain[col_idx].clone()];
                     self.context_menu
