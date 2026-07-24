@@ -172,13 +172,8 @@ impl ImageViewerApp {
                             let items: &[FileEntry] =
                                 listing.as_deref().map(|v| v.as_slice()).unwrap_or(&[]);
                             let selected_child = chain.get(col_idx + 1).map(|p| p.as_path());
-                            let listing_id = listing
-                                .as_ref()
-                                .map(|listing| Arc::as_ptr(listing) as usize)
-                                .unwrap_or(0);
                             let selection_source = RectangleSelectionSource::MillerAncestor {
                                 directory: chain[col_idx].clone(),
-                                listing_id,
                             };
                             let column_rectangle_selection = rectangle_selection_state
                                 .as_ref()
@@ -194,7 +189,6 @@ impl ImageViewerApp {
                                         selected_file: selected_file_path.as_deref(),
                                         multi_selection: &selected_paths,
                                         rectangle_selection_state: column_rectangle_selection,
-                                        listing_id,
                                         icon_loader: &mut self.item_icon_loader,
                                         folder_icon: folder_icon.as_ref(),
                                         loading_icons: &self.loading_icons,
@@ -284,18 +278,34 @@ impl ImageViewerApp {
             match action {
                 MillerColumnAction::Clicked(i) => {
                     if let Some(entry) = listing.get(i).cloned() {
-                        if entry.is_dir {
+                        let (ctrl, shift) =
+                            ui.input(|input| (input.modifiers.ctrl, input.modifiers.shift));
+                        if entry.is_dir && !ctrl && !shift {
                             // Anti-collapse: clicking the child already in the
-                            // chain keeps the deeper columns intact.
+                            // chain keeps the deeper columns intact and selects it.
                             let already = chain
                                 .get(col_idx + 1)
                                 .map(|c| c.as_path() == entry.path.as_path())
                                 .unwrap_or(false);
-                            if !already {
+                            if already {
+                                self.select_miller_ancestor_entry(
+                                    &chain[col_idx],
+                                    listing,
+                                    i,
+                                    false,
+                                    false,
+                                );
+                            } else {
                                 pending_nav = Some(entry.path.to_string_lossy().to_string());
                             }
                         } else {
-                            self.select_ancestor_entry_for_preview(entry);
+                            self.select_miller_ancestor_entry(
+                                &chain[col_idx],
+                                listing,
+                                i,
+                                ctrl,
+                                shift,
+                            );
                         }
                     }
                 }

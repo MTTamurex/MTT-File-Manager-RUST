@@ -22,6 +22,16 @@ fn open_with_shell(app: &mut ImageViewerApp, path: &Path) {
     app.open_with_shell_guarded(path);
 }
 
+fn should_auto_open_compact_folder(
+    compact: bool,
+    is_directory: bool,
+    ctrl: bool,
+    shift: bool,
+    is_recycle_bin: bool,
+) -> bool {
+    compact && is_directory && !ctrl && !shift && !is_recycle_bin
+}
+
 /// Action types for list view operations
 #[derive(Debug)]
 pub enum ListAction {
@@ -514,10 +524,24 @@ impl ImageViewerApp {
         if !file_panel_input_blocked {
             match action {
                 Some(list_view::ListViewAction::Click(idx)) if !is_renaming => {
-                    if let Some(item) = self.items.get(idx) {
-                        let ctrl = ui.input(|i| i.modifiers.ctrl);
-                        let shift = ui.input(|i| i.modifiers.shift);
+                    let (ctrl, shift) =
+                        ui.input(|input| (input.modifiers.ctrl, input.modifiers.shift));
+                    let auto_open_path = self.items.get(idx).and_then(|item| {
+                        should_auto_open_compact_folder(
+                            compact,
+                            item.is_dir,
+                            ctrl,
+                            shift,
+                            self.navigation_state.is_recycle_bin_view,
+                        )
+                        .then(|| item.path.clone())
+                    });
+                    if let Some(path) = auto_open_path {
+                        self.navigate_to(&path.to_string_lossy());
+                        return;
+                    }
 
+                    if let Some(item) = self.items.get(idx) {
                         if ctrl {
                             // Ctrl + Click: Toggle item and set focus/anchor
                             if self.multi_selection.contains(&item.path) {
@@ -754,5 +778,32 @@ impl ImageViewerApp {
                 self.cache_manager.pending_upload_set.len(),
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_auto_open_compact_folder;
+
+    #[test]
+    fn compact_folder_auto_open_requires_an_unmodified_click() {
+        assert!(should_auto_open_compact_folder(
+            true, true, false, false, false
+        ));
+        assert!(!should_auto_open_compact_folder(
+            true, true, true, false, false
+        ));
+        assert!(!should_auto_open_compact_folder(
+            true, true, false, true, false
+        ));
+        assert!(!should_auto_open_compact_folder(
+            false, true, false, false, false
+        ));
+        assert!(!should_auto_open_compact_folder(
+            true, false, false, false, false
+        ));
+        assert!(!should_auto_open_compact_folder(
+            true, true, false, false, true
+        ));
     }
 }

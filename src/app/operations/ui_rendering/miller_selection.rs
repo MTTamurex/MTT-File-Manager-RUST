@@ -21,29 +21,9 @@ impl ImageViewerApp {
         let Some(metrics) = frame.metrics else {
             return;
         };
-        let RectangleSelectionSource::MillerAncestor {
-            directory,
-            listing_id,
-        } = &frame.source
-        else {
+        let RectangleSelectionSource::MillerAncestor { directory } = &frame.source else {
             return;
         };
-
-        if self
-            .rectangle_selection_state
-            .as_ref()
-            .is_some_and(|state| {
-                matches!(
-                    &state.source,
-                    RectangleSelectionSource::MillerAncestor {
-                        directory: active_directory,
-                        listing_id: active_listing_id,
-                    } if active_directory == directory && active_listing_id != listing_id
-                )
-            })
-        {
-            self.cancel_rectangle_selection();
-        }
 
         if self.rectangle_selection_state.is_none() {
             if let Some(start_screen_pos) = frame.start_screen_pos {
@@ -85,7 +65,7 @@ impl ImageViewerApp {
                     base_selection,
                     base_preview_indices,
                     modifiers,
-                    *listing_id,
+                    0,
                 ));
             }
         }
@@ -114,15 +94,30 @@ impl ImageViewerApp {
             }
         }
 
+        let current_paths: FxHashSet<_> = items.iter().map(|item| item.path.clone()).collect();
+        if let Some(state) = self.rectangle_selection_state.as_mut() {
+            state
+                .base_selection
+                .retain(|path| current_paths.contains(path));
+            state.base_preview_indices = items
+                .iter()
+                .enumerate()
+                .filter_map(|(index, item)| {
+                    state.base_selection.contains(&item.path).then_some(index)
+                })
+                .collect();
+        }
+
         let Some(state) = self.rectangle_selection_state.as_ref() else {
             return;
         };
+        let anchor_index = self.miller_columns.selection_anchor_index(directory, items);
         let hit_indices = collect_indices_in_rect(state.content_rect(), metrics);
         let preview_indices = resolve_rectangle_preview_indices(
             items.len(),
             &state.base_preview_indices,
             &hit_indices,
-            None,
+            anchor_index,
             state.modifiers,
         );
         if let Some(state) = self.rectangle_selection_state.as_mut() {
@@ -141,11 +136,15 @@ impl ImageViewerApp {
         let Some(state) = self.rectangle_selection_state.take() else {
             return;
         };
+        let RectangleSelectionSource::MillerAncestor { directory } = &state.source else {
+            return;
+        };
+        let anchor_index = self.miller_columns.selection_anchor_index(directory, items);
         let resolved = resolve_rectangle_selection(
             items.len(),
             &state.base_selection,
             &state.hit_indices,
-            None,
+            anchor_index,
             state.modifiers,
             |index| items.get(index).map(|item| item.path.clone()),
         );
@@ -158,6 +157,12 @@ impl ImageViewerApp {
         self.multi_selection = resolved.selected_paths;
         self.selected_item = None;
         self.selection_anchor = None;
+        if let Some(anchor_index) = resolved.anchor_index {
+            if let Some(anchor_item) = items.get(anchor_index) {
+                self.miller_columns
+                    .set_selection_anchor(directory, &anchor_item.path);
+            }
+        }
         self.selected_file = resolved
             .focus_index
             .and_then(|index| items.get(index))

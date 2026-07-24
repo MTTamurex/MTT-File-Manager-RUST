@@ -53,6 +53,9 @@ pub struct MillerColumnsState {
     scroll_to_focused_pending: bool,
     /// Persisted horizontal position, independent of egui's transient area ID.
     horizontal_scroll_offset: f32,
+    /// Selection anchor for Shift interactions in an ancestor column. Paths
+    /// remain stable when a cached listing is replaced or re-sorted.
+    selection_anchors: HashMap<PathBuf, PathBuf>,
 }
 
 impl Clone for MillerColumnsState {
@@ -71,6 +74,7 @@ impl Clone for MillerColumnsState {
             focused_dir: self.focused_dir.clone(),
             scroll_to_focused_pending: self.scroll_to_focused_pending,
             horizontal_scroll_offset: self.horizontal_scroll_offset,
+            selection_anchors: self.selection_anchors.clone(),
         }
     }
 }
@@ -89,6 +93,7 @@ impl MillerColumnsState {
             focused_dir: None,
             scroll_to_focused_pending: false,
             horizontal_scroll_offset: 0.0,
+            selection_anchors: HashMap::new(),
         }
     }
 
@@ -125,6 +130,16 @@ impl MillerColumnsState {
 
     pub fn set_horizontal_scroll_offset(&mut self, offset: f32) {
         self.horizontal_scroll_offset = offset.max(0.0);
+    }
+
+    pub fn selection_anchor_index(&self, directory: &Path, items: &[FileEntry]) -> Option<usize> {
+        let anchor_path = self.selection_anchors.get(directory)?;
+        items.iter().position(|item| &item.path == anchor_path)
+    }
+
+    pub fn set_selection_anchor(&mut self, directory: &Path, item_path: &Path) {
+        self.selection_anchors
+            .insert(directory.to_path_buf(), item_path.to_path_buf());
     }
 
     /// Cached listing as a cheap-to-clone `Arc`, if already loaded.
@@ -164,6 +179,8 @@ impl MillerColumnsState {
         self.listings.retain(|dir, _| keep.contains(dir));
         self.loading.retain(|dir, _| keep.contains(dir));
         self.failed_at.retain(|dir, _| keep.contains(dir));
+        self.selection_anchors
+            .retain(|directory, _| keep.contains(directory));
     }
 
     fn start_loading(&mut self, dir: &Path) {
@@ -373,5 +390,27 @@ mod tests {
         assert!(!state.poll());
         assert!(state.get_arc(&dir).is_none());
         assert!(!state.is_loading(&dir));
+    }
+
+    #[test]
+    fn selection_anchor_is_resolved_by_path_after_reordering() {
+        let temp = tempfile::tempdir().expect("create temp dir");
+        let anchor = temp.path().join("anchor.txt");
+        std::fs::write(&anchor, b"anchor").expect("create anchor file");
+        std::fs::write(temp.path().join("other.txt"), b"other").expect("create other file");
+        let mut items = enumerate_directory(
+            temp.path(),
+            (SortMode::Name, false, FoldersPosition::First, false),
+        )
+        .expect("enumerate directory");
+
+        let mut state = MillerColumnsState::new();
+        state.set_selection_anchor(temp.path(), &anchor);
+        items.reverse();
+
+        let index = state
+            .selection_anchor_index(temp.path(), &items)
+            .expect("resolve anchor");
+        assert_eq!(items[index].path, anchor);
     }
 }

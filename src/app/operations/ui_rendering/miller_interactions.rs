@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 
 use crate::app::state::ImageViewerApp;
 use crate::domain::file_entry::FileEntry;
+use crate::ui::cache::FxHashSet;
 
 impl ImageViewerApp {
     /// Select an entry shown outside the focused column for preview and actions.
@@ -13,6 +14,60 @@ impl ImageViewerApp {
         self.multi_selection.insert(entry.path.clone());
         self.selected_file = Some(entry);
         self.update_selected_thumbnail();
+    }
+
+    pub(super) fn select_miller_ancestor_entry(
+        &mut self,
+        directory: &Path,
+        listing: &[FileEntry],
+        index: usize,
+        ctrl: bool,
+        shift: bool,
+    ) {
+        let Some(entry) = listing.get(index).cloned() else {
+            return;
+        };
+        let listing_paths: FxHashSet<_> = listing.iter().map(|item| item.path.clone()).collect();
+        let anchor = self
+            .miller_columns
+            .selection_anchor_index(directory, listing);
+
+        self.multi_selection
+            .retain(|path| listing_paths.contains(path));
+        if ctrl {
+            if !self.multi_selection.remove(&entry.path) {
+                self.multi_selection.insert(entry.path.clone());
+            }
+            self.miller_columns
+                .set_selection_anchor(directory, &entry.path);
+        } else if shift {
+            if let Some(anchor) = anchor {
+                let (start, end) = if anchor < index {
+                    (anchor, index)
+                } else {
+                    (index, anchor)
+                };
+                for item in &listing[start..=end] {
+                    self.multi_selection.insert(item.path.clone());
+                }
+            } else {
+                self.multi_selection.clear();
+                self.multi_selection.insert(entry.path.clone());
+                self.miller_columns
+                    .set_selection_anchor(directory, &entry.path);
+            }
+        } else {
+            self.multi_selection.clear();
+            self.multi_selection.insert(entry.path.clone());
+            self.miller_columns
+                .set_selection_anchor(directory, &entry.path);
+        }
+
+        self.selected_item = None;
+        self.selection_anchor = None;
+        self.selected_file = Some(entry);
+        self.update_selected_thumbnail();
+        self.ui_ctx.request_repaint();
     }
 
     pub(super) fn begin_miller_ancestor_drag(&mut self, entry: FileEntry, listing: &[FileEntry]) {

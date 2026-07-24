@@ -50,7 +50,6 @@ pub struct MillerColumnContext<'a> {
     pub selected_file: Option<&'a Path>,
     pub multi_selection: &'a crate::ui::cache::FxHashSet<PathBuf>,
     pub rectangle_selection_state: Option<&'a RectangleSelectionState>,
-    pub listing_id: usize,
     pub icon_loader: &'a mut IconLoader,
     pub folder_icon: Option<&'a egui::TextureHandle>,
     pub loading_icons: &'a crate::ui::cache::FxHashSet<PathBuf>,
@@ -135,7 +134,6 @@ pub fn render_miller_column(
 
     let source = RectangleSelectionSource::MillerAncestor {
         directory: ctx.directory.to_path_buf(),
-        listing_id: ctx.listing_id,
     };
     let current_scroll_y = scroll_output.state.offset.y;
     let max_scroll_y = (scroll_output.content_size.y - scroll_output.inner_rect.height()).max(0.0);
@@ -191,18 +189,33 @@ fn render_row(
 
     let is_selected = ctx
         .rectangle_selection_state
-        .is_some_and(|state| state.preview_contains(index))
-        || ctx.multi_selection.contains(&item.path)
-        || ctx.selected_child.is_some_and(|p| p == item.path.as_path())
-        || ctx.selected_file.is_some_and(|p| p == item.path.as_path());
+        .map(|state| state.preview_contains(index))
+        .unwrap_or_else(|| ctx.multi_selection.contains(&item.path));
+    let is_navigation_child = ctx.selected_child.is_some_and(|p| p == item.path.as_path());
+    let is_focused = ctx.selected_file.is_some_and(|p| p == item.path.as_path());
     let dim = if item.is_hidden { 0.5 } else { 1.0 };
 
-    if is_selected {
-        ui.painter()
-            .rect_filled(row_rect, 0.0, theme::selection_color(dark));
-    } else if response.hovered() {
+    if is_navigation_child && !is_selected {
         ui.painter()
             .rect_filled(row_rect, 0.0, theme::selection_hover_color(dark));
+    }
+
+    let mut visual_rect = row_rect;
+    visual_rect.max.x -= 4.0;
+    if is_selected {
+        ui.painter().rect_stroke(
+            visual_rect,
+            4.0,
+            egui::Stroke::new(2.0, theme::COLOR_ACCENT),
+            egui::StrokeKind::Inside,
+        );
+    } else if response.hovered() || is_focused {
+        ui.painter().rect_stroke(
+            visual_rect,
+            4.0,
+            egui::Stroke::new(1.0, theme::COLOR_ACCENT.gamma_multiply(0.35)),
+            egui::StrokeKind::Inside,
+        );
     }
 
     if is_drop_candidate {

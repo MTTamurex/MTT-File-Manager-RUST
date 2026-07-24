@@ -16,7 +16,6 @@ pub enum RectangleSelectionSource {
     CurrentItems,
     MillerAncestor {
         directory: PathBuf,
-        listing_id: usize,
     },
 }
 
@@ -466,7 +465,6 @@ mod tests {
     fn miller_rectangle_state_keeps_its_column_identity() {
         let source = RectangleSelectionSource::MillerAncestor {
             directory: PathBuf::from(r"C:\A"),
-            listing_id: 42,
         };
         let state = RectangleSelectionState::new_for_source(
             RectangleSelectionView::List,
