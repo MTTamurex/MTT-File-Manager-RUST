@@ -87,11 +87,14 @@ pub fn get_cloud_sync_roots() -> Vec<CloudRoot> {
     roots
 }
 
-pub fn get_drives_and_cloud_roots() -> (Vec<(String, String)>, Vec<CloudRoot>) {
-    let disks = super::drives::get_all_drives();
+pub fn get_drives_and_cloud_roots() -> (Vec<(String, String)>, Vec<CloudRoot>, HashSet<String>) {
+    let (disks, unavailable_label_roots) = super::drives::get_all_drives_with_label_status();
     let mut cloud_roots = get_cloud_sync_roots();
 
-    cloud_roots.extend(get_google_drive_shortcut_roots(&disks));
+    cloud_roots.extend(get_google_drive_shortcut_roots(
+        &disks,
+        &unavailable_label_roots,
+    ));
 
     let hidden_drive_roots: HashSet<String> = cloud_roots
         .iter()
@@ -105,15 +108,21 @@ pub fn get_drives_and_cloud_roots() -> (Vec<(String, String)>, Vec<CloudRoot>) {
         .collect();
 
     cloud_roots.sort_by(|a, b| a.label.cmp(&b.label).then_with(|| a.path.cmp(&b.path)));
-    (visible_disks, cloud_roots)
+    (visible_disks, cloud_roots, unavailable_label_roots)
 }
 
-pub fn get_google_drive_shortcut_roots(disks: &[(String, String)]) -> Vec<CloudRoot> {
+pub fn get_google_drive_shortcut_roots(
+    disks: &[(String, String)],
+    unavailable_label_roots: &HashSet<String>,
+) -> Vec<CloudRoot> {
     let mut roots = Vec::new();
     let mut seen_targets = HashSet::new();
 
     for (drive_path, drive_label) in disks {
-        if !is_google_drivefs_volume(drive_path, drive_label) {
+        let label_unavailable = unavailable_label_roots.iter().any(|path| {
+            normalize_drive_root_for_compare(path) == normalize_drive_root_for_compare(drive_path)
+        });
+        if !is_google_drivefs_volume(drive_path, drive_label, label_unavailable) {
             continue;
         }
 
@@ -209,8 +218,8 @@ fn push_google_drive_root(
     ));
 }
 
-fn is_google_drivefs_volume(drive_path: &str, drive_label: &str) -> bool {
-    if !drive_label_is_google_drive(drive_label) {
+fn is_google_drivefs_volume(drive_path: &str, drive_label: &str, label_unavailable: bool) -> bool {
+    if !label_unavailable && !drive_label_is_google_drive(drive_label) {
         return false;
     }
 
@@ -219,8 +228,11 @@ fn is_google_drivefs_volume(drive_path: &str, drive_label: &str) -> bool {
         return true;
     }
 
-    query_dos_device(drive_path).is_some_and(|device| text_mentions_drivefs(&device))
-        || volume_supports_remote_storage(drive_path)
+    if query_dos_device(drive_path).is_some_and(|device| text_mentions_drivefs(&device)) {
+        return true;
+    }
+
+    !label_unavailable && volume_supports_remote_storage(drive_path)
 }
 
 fn drive_label_is_google_drive(drive_label: &str) -> bool {

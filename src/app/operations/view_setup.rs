@@ -363,8 +363,13 @@ impl ImageViewerApp {
         let tx = self.drive_state.drive_scan_tx.clone();
         let ctx = self.ui_ctx.clone();
         std::thread::spawn(move || {
-            let (disks, cloud_roots) = crate::infrastructure::windows::get_drives_and_cloud_roots();
-            let scan_result = crate::app::drive_state::DriveScanResult { disks, cloud_roots };
+            let (disks, cloud_roots, unavailable_label_roots) =
+                crate::infrastructure::windows::get_drives_and_cloud_roots();
+            let scan_result = crate::app::drive_state::DriveScanResult {
+                disks,
+                cloud_roots,
+                unavailable_label_roots,
+            };
             let _ = tx.send(scan_result);
             ctx.request_repaint();
         });
@@ -475,6 +480,8 @@ impl ImageViewerApp {
                 self.drive_state.drive_scan_pending = false;
                 self.drive_state
                     .apply_optimistic_drive_filter(&mut scan_result);
+                self.drive_state
+                    .preserve_labels_from_unavailable_queries(&mut scan_result);
                 let old_disks = std::mem::take(&mut self.drive_state.disks);
                 let old_cloud_roots = std::mem::take(&mut self.drive_state.cloud_roots);
                 let cloud_roots_changed = scan_result.cloud_roots != old_cloud_roots;

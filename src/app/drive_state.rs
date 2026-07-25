@@ -8,6 +8,7 @@ use std::time::Instant;
 pub struct DriveScanResult {
     pub disks: Vec<(String, String)>,
     pub cloud_roots: Vec<CloudRoot>,
+    pub unavailable_label_roots: HashSet<String>,
 }
 
 pub struct DriveState {
@@ -109,6 +110,23 @@ impl DriveState {
             }
         }
     }
+
+    pub fn preserve_labels_from_unavailable_queries(&self, scan_result: &mut DriveScanResult) {
+        for (path, label) in &mut scan_result.disks {
+            let Some(root_key) = normalize_drive_root_key(path) else {
+                continue;
+            };
+            if !scan_result.unavailable_label_roots.contains(&root_key) {
+                continue;
+            }
+
+            if let Some((_, known_label)) = self.disks.iter().find(|(known_path, _)| {
+                normalize_drive_root_key(known_path).as_ref() == Some(&root_key)
+            }) {
+                *label = known_label.clone();
+            }
+        }
+    }
 }
 
 pub fn normalize_drive_root_key(path: &str) -> Option<String> {
@@ -198,6 +216,7 @@ mod tests {
                 ("F:\\".to_string(), "Data (F:)".to_string()),
             ],
             cloud_roots: Vec::new(),
+            unavailable_label_roots: HashSet::new(),
         };
         state.apply_optimistic_drive_filter(&mut scan_result);
 
@@ -210,6 +229,7 @@ mod tests {
         let mut confirmed_removed = DriveScanResult {
             disks: vec![("F:\\".to_string(), "Data (F:)".to_string())],
             cloud_roots: Vec::new(),
+            unavailable_label_roots: HashSet::new(),
         };
         state.apply_optimistic_drive_filter(&mut confirmed_removed);
 
@@ -226,12 +246,64 @@ mod tests {
         let mut scan_result = DriveScanResult {
             disks: vec![("E:\\".to_string(), "ISO (E:)".to_string())],
             cloud_roots: Vec::new(),
+            unavailable_label_roots: HashSet::new(),
         };
         state.apply_optimistic_drive_filter(&mut scan_result);
 
         assert_eq!(
             scan_result.disks,
             vec![("E:\\".to_string(), "ISO (E:)".to_string())]
+        );
+    }
+
+    #[test]
+    fn unavailable_label_query_preserves_known_drive_label() {
+        let state = test_drive_state(vec![("Z:\\".to_string(), "Archive (Z:)".to_string())]);
+        let mut scan_result = DriveScanResult {
+            disks: vec![("z:\\".to_string(), "Local Disk (Z:)".to_string())],
+            cloud_roots: Vec::new(),
+            unavailable_label_roots: HashSet::from(["Z:\\".to_string()]),
+        };
+
+        state.preserve_labels_from_unavailable_queries(&mut scan_result);
+
+        assert_eq!(
+            scan_result.disks,
+            vec![("z:\\".to_string(), "Archive (Z:)".to_string())]
+        );
+    }
+
+    #[test]
+    fn successful_label_query_replaces_known_drive_label() {
+        let state = test_drive_state(vec![("Z:\\".to_string(), "Old (Z:)".to_string())]);
+        let mut scan_result = DriveScanResult {
+            disks: vec![("Z:\\".to_string(), "New (Z:)".to_string())],
+            cloud_roots: Vec::new(),
+            unavailable_label_roots: HashSet::new(),
+        };
+
+        state.preserve_labels_from_unavailable_queries(&mut scan_result);
+
+        assert_eq!(
+            scan_result.disks,
+            vec![("Z:\\".to_string(), "New (Z:)".to_string())]
+        );
+    }
+
+    #[test]
+    fn unavailable_label_for_new_drive_keeps_fallback() {
+        let state = test_drive_state(Vec::new());
+        let mut scan_result = DriveScanResult {
+            disks: vec![("Z:\\".to_string(), "Local Disk (Z:)".to_string())],
+            cloud_roots: Vec::new(),
+            unavailable_label_roots: HashSet::from(["Z:\\".to_string()]),
+        };
+
+        state.preserve_labels_from_unavailable_queries(&mut scan_result);
+
+        assert_eq!(
+            scan_result.disks,
+            vec![("Z:\\".to_string(), "Local Disk (Z:)".to_string())]
         );
     }
 }

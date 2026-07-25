@@ -440,8 +440,13 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
     let disks = windows_infra::get_all_drives_fast();
     let (cloud_root_tx, cloud_root_rx) = mpsc::channel();
     std::thread::spawn(move || {
-        let (disks, cloud_roots) = windows_infra::get_drives_and_cloud_roots();
-        let _ = cloud_root_tx.send(crate::app::drive_state::DriveScanResult { disks, cloud_roots });
+        let (disks, cloud_roots, unavailable_label_roots) =
+            windows_infra::get_drives_and_cloud_roots();
+        let _ = cloud_root_tx.send(crate::app::drive_state::DriveScanResult {
+            disks,
+            cloud_roots,
+            unavailable_label_roots,
+        });
     });
     let (drive_scan_tx, drive_scan_rx) = mpsc::channel();
     let (drive_info_tx, drive_info_rx) = mpsc::channel();

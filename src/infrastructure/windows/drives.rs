@@ -2,6 +2,7 @@
 //! Follows .cursorrules: single responsibility, < 300 lines
 
 use crate::infrastructure::windows::DriveType;
+use std::collections::HashSet;
 use std::os::windows::ffi::OsStrExt;
 use std::path::Path;
 use windows::{
@@ -364,7 +365,7 @@ pub struct VolumeInfo {
 ///
 /// Uses Shell Display Name (supports virtual drives like Cryptomator).
 /// Fallback to GetVolumeInformationW if Shell fails.
-pub fn get_volume_label(drive_path: &str) -> String {
+fn try_get_volume_label(drive_path: &str) -> Option<String> {
     unsafe {
         let path_wide: Vec<u16> = drive_path
             .encode_utf16()
@@ -390,22 +391,22 @@ pub fn get_volume_label(drive_path: &str) -> String {
             if let Some(paren_pos) = display_name.rfind(" (") {
                 let label = display_name[..paren_pos].trim();
                 if !label.is_empty() {
-                    return label.to_string();
+                    return Some(label.to_string());
                 }
             } else if !display_name.is_empty() {
-                return display_name;
+                return Some(display_name);
             }
         }
 
         // Fallback: GetVolumeInformationW (real volume label)
-        if let Some(volume_name) = get_volume_label_raw(drive_path) {
-            if !volume_name.is_empty() {
-                return volume_name;
-            }
-        }
-
-        rust_i18n::t!("drive_types.default_label").to_string()
+        get_volume_label_raw(drive_path)
     }
+}
+
+pub fn get_volume_label(drive_path: &str) -> String {
+    try_get_volume_label(drive_path)
+        .filter(|label| !label.is_empty())
+        .unwrap_or_else(|| rust_i18n::t!("drive_types.default_label").to_string())
 }
 
 /// Returns a bitmask of currently available logical drives.
@@ -417,12 +418,17 @@ pub fn get_logical_drives_bitmask() -> u32 {
 
 /// Enumerates all drives with their labels.
 pub fn get_all_drives() -> Vec<(String, String)> {
+    get_all_drives_with_label_status().0
+}
+
+/// Enumerates drives and reports roots whose label could not be queried.
+pub fn get_all_drives_with_label_status() -> (Vec<(String, String)>, HashSet<String>) {
     unsafe {
         // First, get the required length
         let len = GetLogicalDriveStringsW(None);
         if len == 0 {
             log::warn!("[DRIVE-REFRESH] GetLogicalDriveStringsW returned zero length");
-            return Vec::new();
+            return (Vec::new(), HashSet::new());
         }
 
         let mut buffer = vec![0u16; len as usize];
@@ -430,17 +436,23 @@ pub fn get_all_drives() -> Vec<(String, String)> {
 
         if actual_len == 0 {
             log::warn!("[DRIVE-REFRESH] GetLogicalDriveStringsW returned no drives");
-            return Vec::new();
+            return (Vec::new(), HashSet::new());
         }
 
-        String::from_utf16_lossy(&buffer[..actual_len as usize])
+        let mut unavailable_label_roots = HashSet::new();
+        let disks = String::from_utf16_lossy(&buffer[..actual_len as usize])
             .split('\0')
             .filter(|s| !s.is_empty())
             .map(|path| {
-                let label = get_volume_label(path);
+                let label = try_get_volume_label(path).unwrap_or_else(|| {
+                    unavailable_label_roots
+                        .insert(drive_root_from_str(path).unwrap_or_else(|| path.to_string()));
+                    rust_i18n::t!("drive_types.default_label").to_string()
+                });
                 (path.to_string(), format_drive_display_name(path, &label))
             })
-            .collect()
+            .collect();
+        (disks, unavailable_label_roots)
     }
 }
 

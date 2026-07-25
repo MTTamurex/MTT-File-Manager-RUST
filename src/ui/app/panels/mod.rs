@@ -334,11 +334,8 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) -> Option
                     } else {
                         ui.visuals().widgets.noninteractive.bg_stroke
                     };
-                    ui.painter().hline(
-                        hit_rect.min.x..=hit_rect.max.x,
-                        center_y,
-                        stroke,
-                    );
+                    ui.painter()
+                        .hline(hit_rect.min.x..=hit_rect.max.x, center_y, stroke);
                 }
 
                 egui::ScrollArea::vertical()

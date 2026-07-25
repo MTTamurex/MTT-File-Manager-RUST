@@ -648,9 +648,9 @@ impl ImageViewerApp {
             if crate::infrastructure::windows::is_window_minimized(hwnd) {
                 return;
             }
-
-            crate::infrastructure::windows::restore_window_foreground(hwnd);
         }
+        // Let winit focus only a visible window. Calling the native restore helper
+        // here creates a race where a minimize between the checks above is undone.
         self.ui_ctx
             .send_viewport_cmd(eframe::egui::ViewportCommand::Focus);
         self.ui_ctx.request_repaint();
