@@ -177,5 +177,6 @@ pub(in crate::app) fn build_file_operation_state(
         pending_deletions,
         pending_iso_mount: None,
         mounted_iso_drives: std::collections::HashMap::new(),
+        iso_detect_rx: None,
     }
 }

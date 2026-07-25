@@ -59,6 +59,14 @@ impl DriveState {
         self.drive_info_cache_epoch = self.drive_info_cache_epoch.wrapping_add(1);
     }
 
+    pub fn canonical_current_drive(&self, detected_drive: &str) -> Option<String> {
+        let detected_key = normalize_drive_root_key(detected_drive)?;
+        self.disks.iter().find_map(|(path, _)| {
+            let current_key = normalize_drive_root_key(path)?;
+            (current_key == detected_key).then_some(current_key)
+        })
+    }
+
     pub fn hide_drive_optimistically(&mut self, path: &str) -> bool {
         let Some(root_key) = normalize_drive_root_key(path) else {
             return false;
@@ -157,6 +165,18 @@ mod tests {
         assert_eq!(normalize_drive_root_key("Este Computador"), None);
         assert_eq!(normalize_drive_root_key("\\\\server\\share"), None);
         assert_eq!(normalize_drive_root_key(""), None);
+    }
+
+    #[test]
+    fn canonical_current_drive_rejects_stale_or_invalid_drives() {
+        let state = test_drive_state(vec![("I:\\".to_string(), "DVD (I:)".to_string())]);
+
+        assert_eq!(
+            state.canonical_current_drive("i:"),
+            Some("I:\\".to_string())
+        );
+        assert_eq!(state.canonical_current_drive("J:\\"), None);
+        assert_eq!(state.canonical_current_drive("invalid"), None);
     }
 
     #[test]

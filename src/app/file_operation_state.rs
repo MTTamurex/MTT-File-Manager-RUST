@@ -24,4 +24,6 @@ pub struct FileOperationState {
     pub pending_deletions: Arc<dashmap::DashMap<PathBuf, ()>>,
     pub pending_iso_mount: Option<PathBuf>,
     pub mounted_iso_drives: HashMap<String, PathBuf>,
+    /// One-shot receiver for pre-mounted ISO detection at startup.
+    pub iso_detect_rx: Option<Receiver<HashMap<String, PathBuf>>>,
 }

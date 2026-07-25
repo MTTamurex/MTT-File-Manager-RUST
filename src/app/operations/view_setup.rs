@@ -415,6 +415,40 @@ impl ImageViewerApp {
 
     /// Poll for completed background drive scans. Called once per frame.
     pub fn poll_drive_scan(&mut self) {
+        // Poll one-shot ISO detection from startup background thread.
+        if let Some(rx) = &self.file_operation_state.iso_detect_rx {
+            match rx.try_recv() {
+                Ok(detected) => {
+                    self.file_operation_state.iso_detect_rx = None;
+                    if !detected.is_empty() {
+                        log::info!(
+                            "[ISO-DETECT] Merging {} pre-mounted ISO(s) into state",
+                            detected.len()
+                        );
+                        for (detected_drive, iso_path) in detected {
+                            let Some(drive) =
+                                self.drive_state.canonical_current_drive(&detected_drive)
+                            else {
+                                log::debug!(
+                                    "[ISO-DETECT] Ignoring stale or invalid drive mapping: {}",
+                                    detected_drive
+                                );
+                                continue;
+                            };
+                            self.file_operation_state
+                                .mounted_iso_drives
+                                .entry(drive)
+                                .or_insert(iso_path);
+                        }
+                    }
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.file_operation_state.iso_detect_rx = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+            }
+        }
+
         // PERF: Poll for deferred full drive/cloud detection from startup.
         // This avoids blocking the main thread on labels, registry scans and
         // sleeping HDD checks during cold start.
