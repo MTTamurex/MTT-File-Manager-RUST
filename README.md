@@ -10,19 +10,20 @@
 - **Dark / Light theme** — Toggle between dark and light mode in Settings > Appearance; persisted in SQLite, applied to all windows including image, PDF, and text viewers with native title bar support via DWM
 - **Dual panel (split view)** — Side-by-side file browsing with independent left and right panels; toggle via the toolbar button. Each panel maintains its own navigation history, sort order, view mode, and selection. File copy/move operations default to the opposite panel as the destination
 - **Tabbed navigation** — Multiple tabs with independent history
-- **Grid, Details, and Column List views** — Switch between thumbnail, detailed table, and horizontally scrolling column layouts. Column List supports keyboard navigation, rectangle selection, and grouped local/network drives in This PC
+- **Grid, Details, Column List, and Miller's Columns views** — Switch between thumbnail, detailed table, horizontally scrolling list, and Finder-style hierarchical layouts. Miller's Columns keeps the folder hierarchy visible in side-by-side columns and supports keyboard navigation, multi-selection, rectangle selection, inline renaming, context menus, and drag-and-drop
+- **Per-folder view locks** — Preserve the view mode, sorting, and folder position for one folder or for that folder and all of its subfolders; inherited locks identify their source folder
 - **Smart address bar** — Direct path input with breadcrumbs
 - **Sidebar** — Quick access to drives, libraries, Cloud Drives, and Recycle Bin
 - **Cloud Drives** — Detects Windows Cloud Files sync roots registered with Explorer and shows them in a dedicated sidebar section; tested with OneDrive, Proton Drive and Google Drive
 - **Quick Access** — Pin folders via right-click or drag-and-drop; reorder via drag; persistent storage
-- **Tags** — Assign persistent color tags to files and folders, browse dedicated Tag views from the sidebar, and manage custom tags from Settings
+- **Tags** — Assign persistent color tags to files and folders, browse dedicated Tag views from the sidebar, resize the Tags area, and manage custom tags from Settings
 - **Archive navigation** — Open supported compressed files like folders and browse their contents directly (`.zip`, `.7z`, `.rar`, `.tar`, `.tar.gz`, `.tgz`, `.tar.bz2`, `.tbz2`, `.tar.xz`, `.txz`, `.tar.zst`, `.tzst`, `.gz`, `.gzip`)
 
 ### Media Preview
 - **Integrated preview** — View files without leaving the app
 - **Dedicated image viewer** — Separate process with a bounded sliding-window GPU texture cache, hidden-first startup, and multi-threaded decoding
 - **Text viewer** — Separate process for plain text, code, logs, and markup files using the same lightweight viewer runtime as the image/PDF viewers
-- **Video player** — Standalone mpv-based player with D3D11 GPU pipeline
+- **Video player** — Standalone mpv-based player with D3D11 GPU pipeline; Up/Down adjusts volume in 5% steps and the mouse wheel seeks backward or forward by five seconds
 - **Audio playback & metadata** — Audio-only files open in the standalone mpv player with real-time waveform visualization; the preview panel extracts codec, bitrate, channels, sample rate, and music tags
 - **PDF viewer** — Native pdfium-based viewer with asynchronous document loading, prioritized progressive rendering, virtualized pages and thumbnails, bounded texture caching, and keyboard navigation in the thumbnail sidebar
 - **Smart thumbnails** — Multi-stage generation: image crate → WIC → Shell API → Media Foundation
@@ -48,12 +49,13 @@
 - **Tag assignment** — Add, remove, or switch file/folder tags from the context menu; tags are preserved on supported renames/moves and cleared when files are deleted
 - **Recycle Bin** — Browse, restore, and permanently delete
 - **Cloud Files support** — Sync status badges for cloud-only, locally available, syncing, and pinned files; supports Windows Cloud Files actions such as "Always keep on this device" and "Free up space"
-- **ISO mounting** — Mount ISO files as virtual drives
+- **ISO mounting** — Mount ISO files as virtual drives, detect images mounted before the app starts, and eject them from the sidebar
 
 ### Automatic File Organizer
 - **Persistent rules** — Automatically move files from a source folder to a destination based on file extensions
 - **Extension presets** — Quickly configure rules for documents, images, videos, audio, archives, and executables, or enter custom extensions
 - **Safe folder monitoring** — Existing and newly created matching files are processed only after remaining stable for two seconds; destination conflicts are skipped and existing files are never overwritten
+- **Protected moves and rule validation** — Cyclic rules are rejected, source files are checked before moving, and cross-drive copies are verified before their sources are removed
 - **Preview and notifications** — Preview how many files match a rule before using it and receive batched details about completed moves, conflicts, and failures
 
 ### Performance & Cache
@@ -98,6 +100,7 @@ The main file manager does not need to run as administrator for normal file brow
 - **Assign tags** — Select one or more files/folders, open the context menu, and use the Tag submenu to apply or remove color tags.
 - **Browse by tag** — Use the Tags section in the sidebar to open a virtual Tag view containing every item assigned to that tag.
 - **Manage tags** — Open Settings > Tags to create, rename, recolor, delete tags, and toggle whether the Tags section is shown in the sidebar.
+- **Resize the Tags section** — Drag the divider above Tags to adjust its height; double-click the divider to restore automatic sizing.
 - **Search with tags** — In Global Search, use the Tag filter to show all results, any tagged item, or items matching selected tags.
 - **Performance behavior** — Tag views load in pages and use cached file metadata for fast first paint while thumbnails remain loaded only for visible items.
 
@@ -106,6 +109,7 @@ The main file manager does not need to run as administrator for normal file brow
 - **Preview matches** — Use Preview on an enabled rule to check how many files currently match it.
 - **Enable or disable rules** — Enabled rules scan existing matching files and keep monitoring the source folder for new files. Disabling a rule cancels its pending work.
 - **Handle conflicts** — If a file with the same name already exists in the destination, the source file is left in place and the app reports the conflict.
+- **Prevent rule cycles** — Rules that would repeatedly move the same file type between folders are rejected when saved.
 
 ### Keyboard Shortcuts
 Some app-level shortcuts are configurable in Settings > Keyboard Shortcuts. Standard file and folder shortcuts remain fixed.
