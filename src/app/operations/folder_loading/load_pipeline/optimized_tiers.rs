@@ -7,6 +7,7 @@ use crate::infrastructure::directory_index::{DirectoryIndex, IndexedFile};
 use crate::infrastructure::disk_cache::ThumbnailDiskCache;
 use crate::infrastructure::ntfs_reader;
 use crate::infrastructure::onedrive;
+use crate::infrastructure::windows::directory_entry_filter::should_include_directory_entry;
 use eframe::egui;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
@@ -65,16 +66,11 @@ pub(super) fn try_handle_optimized_tiers(
                     break;
                 }
                 let is_hidden = (dir_entry.attributes & 0x02) != 0;
-                let is_system = (dir_entry.attributes & 0x04) != 0;
-                let is_special = matches!(
-                    dir_entry.name.to_lowercase().as_str(),
-                    "desktop.ini" | "thumbs.db" | "$recycle.bin" | "system volume information"
-                );
-                if (show_hidden || !is_hidden)
-                    && !is_system
-                    && !is_special
-                    && !dir_entry.name.starts_with('.')
-                {
+                if should_include_directory_entry(
+                    &dir_entry.name,
+                    dir_entry.attributes,
+                    show_hidden,
+                ) {
                     let full_path = PathBuf::from(base_path).join(&dir_entry.name);
                     let mut is_dir = dir_entry.is_dir;
                     let is_archive = !is_dir && is_archive_extension(&dir_entry.name);

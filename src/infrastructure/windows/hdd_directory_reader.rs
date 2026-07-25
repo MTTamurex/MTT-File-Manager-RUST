@@ -11,8 +11,7 @@ use std::path::Path;
 use windows::core::PCWSTR;
 use windows::Win32::Storage::FileSystem::{
     FindClose, FindExInfoBasic, FindExSearchNameMatch, FindFirstFileExW, FindNextFileW,
-    FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_HIDDEN, FILE_ATTRIBUTE_SYSTEM,
-    FIND_FIRST_EX_LARGE_FETCH, WIN32_FIND_DATAW,
+    FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_HIDDEN, FIND_FIRST_EX_LARGE_FETCH, WIN32_FIND_DATAW,
 };
 use windows::Win32::System::Threading::{
     GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_NORMAL,
@@ -20,6 +19,7 @@ use windows::Win32::System::Threading::{
 
 use crate::domain::file_entry::FileEntry;
 use crate::infrastructure::onedrive;
+use crate::infrastructure::windows::directory_entry_filter::should_include_directory_entry;
 
 /// Batch size for sending results via channel (reduces lock contention)
 const BATCH_SIZE: usize = 500;
@@ -138,9 +138,7 @@ fn read_directory_impl_batched(
             }
 
             let attrs = find_data.dwFileAttributes;
-            let is_hidden = (attrs & FILE_ATTRIBUTE_HIDDEN.0) != 0;
-            let is_system = (attrs & FILE_ATTRIBUTE_SYSTEM.0) != 0;
-            if is_system || (!show_hidden && is_hidden) {
+            if !should_include_directory_entry(&filename, attrs, show_hidden) {
                 if FindNextFileW(handle, &mut find_data).is_err() {
                     break;
                 }
@@ -149,12 +147,10 @@ fn read_directory_impl_batched(
 
             let entry = create_file_entry(&find_data, path, &filename, is_onedrive)?;
 
-            if should_include_entry(&entry) {
-                current_batch.push(entry);
-                if current_batch.len() >= BATCH_SIZE {
-                    batches.push(current_batch);
-                    current_batch = Vec::with_capacity(BATCH_SIZE);
-                }
+            current_batch.push(entry);
+            if current_batch.len() >= BATCH_SIZE {
+                batches.push(current_batch);
+                current_batch = Vec::with_capacity(BATCH_SIZE);
             }
 
             if FindNextFileW(handle, &mut find_data).is_err() {
@@ -225,9 +221,7 @@ fn read_directory_impl(
 
             // Check hidden attribute before creating entry
             let attrs = find_data.dwFileAttributes;
-            let is_hidden = (attrs & FILE_ATTRIBUTE_HIDDEN.0) != 0;
-            let is_system = (attrs & FILE_ATTRIBUTE_SYSTEM.0) != 0;
-            if is_system || (!show_hidden && is_hidden) {
+            if !should_include_directory_entry(&filename, attrs, show_hidden) {
                 if FindNextFileW(handle, &mut find_data).is_err() {
                     break;
                 }
@@ -237,10 +231,7 @@ fn read_directory_impl(
             // Extract metadata in one pass
             let entry = create_file_entry(&find_data, path, &filename, is_onedrive)?;
 
-            // Apply filters
-            if should_include_entry(&entry) {
-                entries.push(entry);
-            }
+            entries.push(entry);
 
             // Get next entry
             if FindNextFileW(handle, &mut find_data).is_err() {
@@ -281,7 +272,6 @@ fn create_file_entry(
     // Extract attributes
     let attributes = find_data.dwFileAttributes;
     let is_hidden = (attributes & FILE_ATTRIBUTE_HIDDEN.0) != 0;
-    let _is_system = (attributes & FILE_ATTRIBUTE_SYSTEM.0) != 0;
     let is_directory = (attributes & FILE_ATTRIBUTE_DIRECTORY.0) != 0;
 
     // Handle archive files as directories
@@ -333,51 +323,4 @@ fn create_file_entry(
         is_hidden,
         recycle_bin: None,
     })
-}
-
-/// Determine if entry should be included in results
-fn should_include_entry(entry: &FileEntry) -> bool {
-    // Skip hidden/system files
-    if entry.name.starts_with('.') {
-        return false;
-    }
-
-    // Skip special system files
-    !matches!(
-        entry.name.to_lowercase().as_str(),
-        "desktop.ini" | "thumbs.db" | "$recycle.bin" | "system volume information"
-    )
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::domain::file_entry::SyncStatus;
-    use std::path::PathBuf;
-
-    #[test]
-    fn test_should_include_entry() {
-        let test_entry = |name: &str| -> FileEntry {
-            FileEntry {
-                path: PathBuf::from(format!("C:\\test\\{}", name)),
-                name: name.to_string(),
-                is_dir: false,
-                size: 100,
-                modified: 1234567890,
-                created: None,
-                folder_cover: None,
-                drive_info: None,
-                sync_status: SyncStatus::None,
-                is_hidden: false,
-                recycle_bin: None,
-            }
-        };
-
-        assert!(!should_include_entry(&test_entry(".hidden")));
-        assert!(!should_include_entry(&test_entry("desktop.ini")));
-        assert!(!should_include_entry(&test_entry("Thumbs.db")));
-        assert!(!should_include_entry(&test_entry("$Recycle.Bin")));
-        assert!(should_include_entry(&test_entry("normal_file.txt")));
-        assert!(should_include_entry(&test_entry("document.pdf")));
-    }
 }

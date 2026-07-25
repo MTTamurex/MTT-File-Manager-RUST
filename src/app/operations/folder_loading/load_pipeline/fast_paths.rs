@@ -308,7 +308,6 @@ pub(super) fn try_handle_fast_paths(
                     // before committing to using the cached index.
                     let pre_entries: Vec<FileEntry> = indexed_files
                         .into_iter()
-                        .filter(|f| !f.name.starts_with('.'))
                         .map(|f| {
                             let is_archive = is_archive_extension(&f.name);
                             let is_dir = f.is_dir || is_archive;

@@ -6,6 +6,7 @@ use crate::domain::file_entry::{FileEntry, SyncStatus};
 use crate::infrastructure::directory_cache::DirectoryCache;
 use crate::infrastructure::io_priority::{self, IOPriority};
 use crate::infrastructure::ntfs_reader;
+use crate::infrastructure::windows::directory_entry_filter::should_include_directory_entry;
 
 const MAX_PREFETCH_DIRS: usize = 5;
 
@@ -43,9 +44,7 @@ pub fn spawn_prefetch_worker(
                             let file_entries: Vec<FileEntry> = entries
                                 .into_iter()
                                 .filter(|e| {
-                                    let is_hidden = (e.attributes & 0x02) != 0;
-                                    let is_system = (e.attributes & 0x04) != 0;
-                                    !is_hidden && !is_system && !e.name.starts_with('.')
+                                    should_include_directory_entry(&e.name, e.attributes, false)
                                 })
                                 .map(|e| FileEntry {
                                     path: path.join(&e.name),

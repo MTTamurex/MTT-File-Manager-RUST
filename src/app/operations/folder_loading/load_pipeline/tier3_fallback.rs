@@ -6,6 +6,7 @@ use crate::infrastructure::directory_dirty_registry::DirectoryDirtyRegistry;
 use crate::infrastructure::directory_index::{DirectoryIndex, IndexedFile};
 use crate::infrastructure::disk_cache::ThumbnailDiskCache;
 use crate::infrastructure::onedrive;
+use crate::infrastructure::windows::directory_entry_filter::should_include_directory_entry;
 use eframe::egui;
 use std::os::windows::ffi::OsStringExt;
 use std::path::PathBuf;
@@ -84,17 +85,7 @@ pub(super) fn run_tier3_fallback(
                     }
 
                     let is_hidden = (attrs & FILE_ATTRIBUTE_HIDDEN.0) != 0;
-                    let is_system = (attrs & FILE_ATTRIBUTE_SYSTEM.0) != 0;
-                    let is_special = matches!(
-                        filename.to_lowercase().as_str(),
-                        "desktop.ini" | "thumbs.db" | "$recycle.bin" | "system volume information"
-                    );
-
-                    if (show_hidden || !is_hidden)
-                        && !is_system
-                        && !is_special
-                        && !filename.starts_with('.')
-                    {
+                    if should_include_directory_entry(&filename, attrs, show_hidden) {
                         let mut is_dir = (attrs & FILE_ATTRIBUTE_DIRECTORY.0) != 0;
                         let full_path = PathBuf::from(base_path).join(&filename);
 
@@ -236,20 +227,7 @@ pub(super) fn run_tier3_fallback(
                         let extended_attrs = attrs;
 
                         let is_hidden = (extended_attrs & FILE_ATTRIBUTE_HIDDEN.0) != 0;
-                        let is_system = (extended_attrs & FILE_ATTRIBUTE_SYSTEM.0) != 0;
-                        let is_special = matches!(
-                            filename.to_lowercase().as_str(),
-                            "desktop.ini"
-                                | "thumbs.db"
-                                | "$recycle.bin"
-                                | "system volume information"
-                        );
-
-                        if (show_hidden || !is_hidden)
-                            && !is_system
-                            && !is_special
-                            && !filename.starts_with('.')
-                        {
+                        if should_include_directory_entry(&filename, extended_attrs, show_hidden) {
                             let mut is_dir = (extended_attrs & FILE_ATTRIBUTE_DIRECTORY.0) != 0;
 
                             // Treat archive files as navigable folders.

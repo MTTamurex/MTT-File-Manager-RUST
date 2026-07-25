@@ -5,6 +5,7 @@ pub mod bitmap_conversion;
 pub mod codec_registry;
 pub mod com_scope;
 pub mod device_change;
+pub(crate) mod directory_entry_filter;
 pub mod drives;
 pub mod file_flags;
 pub mod file_system;
