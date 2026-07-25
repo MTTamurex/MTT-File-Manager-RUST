@@ -243,6 +243,11 @@ impl ImageViewerApp {
         prefs.push(("sidebar_left_width", left_to_save.to_string()));
         prefs.push(("sidebar_right_width", right_to_save.to_string()));
 
+        // Sidebar tags section height persistence
+        if let Some(tags_h) = self.layout.sidebar_tags_height {
+            prefs.push(("sidebar_tags_height", tags_h.to_string()));
+        }
+
         // Save last active folder from current tab
         let last_folder = self.navigation_state.current_path.clone();
         // Save if it's a real path or "This PC" (but not other virtual views or shell URIs)

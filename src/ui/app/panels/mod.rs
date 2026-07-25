@@ -196,10 +196,15 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) -> Option
 
             // ── Compute actual tags height after fixed top is rendered ──
             let avail_after_top = ui.available_height();
+            let tags_max_h = (avail_after_top * 0.75).max(0.0);
+            let tags_min_h = (TAG_HEADER_H + TAG_BOTTOM_PADDING_H).min(tags_max_h);
             let tags_scroll_h = if tag_count == 0 {
                 0.0
             } else {
-                tags_content_h.min(avail_after_top * 0.35)
+                match app.layout.sidebar_tags_height {
+                    Some(h) => h.clamp(tags_min_h, tags_max_h),
+                    None => tags_content_h.min(avail_after_top * 0.35),
+                }
             };
             let tags_block_h = if tags_scroll_h <= 0.0 {
                 0.0
@@ -288,10 +293,53 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) -> Option
                 });
 
             // ── Fixed bottom: Tags section (own scrollbar for many tags) ──
+            let mut tags_divider_drag_delta: Option<f32> = None;
             let tags_action = if tags_scroll_h > 0.0 {
-                ui.add_space(8.0);
-                ui.separator();
-                ui.add_space(8.0);
+                // Draggable separator between drives and tags
+                let divider_h = 9.0;
+                let (divider_rect, _) = ui.allocate_exact_size(
+                    egui::vec2(ui.available_width(), divider_h),
+                    egui::Sense::hover(), // allocate space only
+                );
+                // Widen hit area to full sidebar width
+                let mut hit_rect = divider_rect;
+                hit_rect.min.x = ui.clip_rect().min.x;
+                hit_rect.max.x = ui.clip_rect().max.x;
+
+                let divider_response = ui.interact(
+                    hit_rect,
+                    egui::Id::new("sidebar_tags_divider_drag"),
+                    egui::Sense::click_and_drag(),
+                );
+
+                if divider_response.hovered() || divider_response.dragged() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeVertical);
+                }
+
+                if divider_response.dragged() {
+                    tags_divider_drag_delta = Some(divider_response.drag_delta().y);
+                    ui.ctx().request_repaint();
+                }
+
+                // Double-click resets to auto-size
+                if divider_response.double_clicked() {
+                    app.layout.sidebar_tags_height = None;
+                }
+
+                // Paint separator line (visually same as ui.separator())
+                if ui.is_rect_visible(hit_rect) {
+                    let center_y = hit_rect.center().y;
+                    let stroke = if divider_response.hovered() || divider_response.dragged() {
+                        egui::Stroke::new(1.5, ui.visuals().widgets.active.bg_fill)
+                    } else {
+                        ui.visuals().widgets.noninteractive.bg_stroke
+                    };
+                    ui.painter().hline(
+                        hit_rect.min.x..=hit_rect.max.x,
+                        center_y,
+                        stroke,
+                    );
+                }
 
                 egui::ScrollArea::vertical()
                     .id_salt("sidebar_tags_scroll")
@@ -314,6 +362,13 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) -> Option
 
             // sidebar_ctx no longer used — borrows of app released
             let _ = sidebar_ctx;
+
+            // Apply drag delta to tags height (after sidebar_ctx borrow is released)
+            if let Some(delta_y) = tags_divider_drag_delta {
+                let current_h = app.layout.sidebar_tags_height.unwrap_or(tags_scroll_h);
+                let new_h = (current_h - delta_y).clamp(tags_min_h, tags_max_h);
+                app.layout.sidebar_tags_height = Some(new_h);
+            }
 
             // Clamp target to actual content bounds after rendering
             let max_scroll = (output.content_size.y - output.inner_rect.height()).max(0.0);

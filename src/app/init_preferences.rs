@@ -41,6 +41,7 @@ pub(super) struct StartupPreferences {
     pub(super) dual_panel_active_view_mode: ViewMode,
     pub(super) dual_panel_inactive_view_mode: ViewMode,
     pub(super) active_tag_filter: Option<i64>,
+    pub(super) sidebar_tags_height: Option<f32>,
 }
 
 impl StartupPreferences {
@@ -288,6 +289,10 @@ impl StartupPreferences {
             .and_then(|s| s.parse::<i64>().ok())
             .filter(|id| *id > 0);
 
+        let sidebar_tags_height = prefs
+            .get("sidebar_tags_height")
+            .and_then(|s| s.parse::<f32>().ok());
+
         Self {
             sort_mode,
             sort_mode_computer,
@@ -322,6 +327,7 @@ impl StartupPreferences {
             dual_panel_active_view_mode,
             dual_panel_inactive_view_mode,
             active_tag_filter,
+            sidebar_tags_height,
         }
     }
 }

@@ -215,6 +215,7 @@ impl ImageViewerApp {
             dual_panel_active_view_mode: saved_dual_panel_active_view_mode,
             dual_panel_inactive_view_mode: saved_dual_panel_inactive_view_mode,
             active_tag_filter: saved_active_tag_filter,
+            sidebar_tags_height,
         } = startup_preferences;
 
         // Apply saved language preference
@@ -548,6 +549,7 @@ impl ImageViewerApp {
                 sidebar_left_width,
                 sidebar_right_width,
                 dual_panel_split_ratio,
+                sidebar_tags_height,
             ),
 
             // Metadata worker

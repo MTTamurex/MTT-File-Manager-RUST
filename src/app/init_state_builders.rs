@@ -27,6 +27,7 @@ pub(in crate::app) fn build_layout_state(
     sidebar_left_width: f32,
     sidebar_right_width: f32,
     dual_panel_split_ratio: f32,
+    sidebar_tags_height: Option<f32>,
 ) -> LayoutState {
     LayoutState {
         saved_window_width,
@@ -81,6 +82,7 @@ pub(in crate::app) fn build_layout_state(
             120.0,
         ),
         dual_panel_split_ratio,
+        sidebar_tags_height,
     }
 }
 
