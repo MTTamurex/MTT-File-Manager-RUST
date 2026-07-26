@@ -553,7 +553,7 @@ fn log_slow_worker_request(
 
 fn send_thumbnail_result(
     tx: &Sender<ThumbnailData>,
-    priority: IOPriority,
+    _priority: IOPriority,
     mut data: ThumbnailData,
 ) {
     // Premultiply alpha off the UI thread so the main thread can use
@@ -592,18 +592,9 @@ fn send_thumbnail_result(
         }
     }
 
-    if matches!(priority, IOPriority::Interactive) {
-        let _ = tx.send(data);
-        return;
-    }
-
-    match tx.try_send(data) {
-        Ok(()) => {}
-        Err(crossbeam_channel::TrySendError::Full(_)) => {
-            // Under saturation, drop non-interactive results to protect UI latency.
-        }
-        Err(crossbeam_channel::TrySendError::Disconnected(_)) => {}
-    }
+    // The bounded channel provides backpressure. Dropping a decoded result here
+    // would leave its UI loading marker set with no completion event.
+    let _ = tx.send(data);
 }
 
 fn decode_cache_entry(entry: ThumbnailCacheEntry, req_size: u32) -> Option<(Vec<u8>, u32, u32)> {

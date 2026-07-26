@@ -278,6 +278,7 @@ impl ImageViewerApp {
             .retune_rgba_cache_capacity(visible_texture_keep);
 
         let dynamic_pending_limit = self.current_pending_thumbnail_upload_limit();
+        let dynamic_pending_byte_limit = self.current_pending_thumbnail_upload_byte_limit();
 
         // Reduce intake when pending queue is already backlogged to spread
         // GPU upload work across more frames and prevent frame-time spikes.
@@ -309,6 +310,12 @@ impl ImageViewerApp {
         };
 
         while incoming_count < effective_incoming_cap {
+            if self.pending_thumbnails.len() >= dynamic_pending_limit
+                || self.pending_thumbnail_rgba_bytes() >= dynamic_pending_byte_limit
+            {
+                has_more_incoming = !self.image_receiver.is_empty();
+                break;
+            }
             if incoming_start.elapsed() >= incoming_budget {
                 has_more_incoming = true;
                 break;
@@ -403,54 +410,6 @@ impl ImageViewerApp {
                 self.cache_manager
                     .thumbnail_trace
                     .record_upload_already_cached();
-                continue;
-            }
-
-            let selected_path = self.selected_file.as_ref().map(|file| &file.path);
-            let incoming_selected = selected_path == Some(&thumbnail_data.path);
-            let mut drop_incoming = false;
-            while self.pending_thumbnails.len() >= dynamic_pending_limit {
-                let evict_idx = self
-                    .pending_thumbnails
-                    .iter()
-                    .position(|thumbnail| {
-                        selected_path != Some(&thumbnail.path)
-                            && !eviction_visible
-                                .as_ref()
-                                .is_some_and(|visible| visible.contains(&thumbnail.path))
-                    })
-                    .or_else(|| {
-                        if incoming_selected {
-                            self.pending_thumbnails
-                                .iter()
-                                .position(|thumbnail| selected_path != Some(&thumbnail.path))
-                        } else {
-                            None
-                        }
-                    });
-
-                match evict_idx {
-                    Some(idx) => {
-                        if let Some(old) = self.pending_thumbnails.remove(idx) {
-                            self.cache_manager.finish_pending_upload(&old.path);
-                        }
-                    }
-                    None => {
-                        if eviction_visible.is_none() {
-                            if let Some(old) = self.pending_thumbnails.pop_front() {
-                                self.cache_manager.finish_pending_upload(&old.path);
-                                continue;
-                            }
-                        }
-                        drop_incoming = true;
-                        break;
-                    }
-                }
-            }
-
-            if drop_incoming {
-                self.cache_manager
-                    .finish_pending_upload(&thumbnail_data.path);
                 continue;
             }
 

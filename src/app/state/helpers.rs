@@ -35,12 +35,14 @@ const WORKING_SET_TRIM_FOLLOW_UP_DELAYS: &[Duration] = &[
     Duration::from_millis(6000),
 ];
 const WORKING_SET_TRIM_MIN_INTERVAL: Duration = Duration::from_secs(10);
+const WORKING_SET_TRIM_ACTIVITY_GRACE: Duration = Duration::from_secs(1);
 const LOW_RAM_GPU_IDLE_WS_TRIM_AFTER: Duration = Duration::from_secs(8);
 const LOW_RAM_GPU_IDLE_WS_TRIM_MIN_BYTES: u64 = 24 * 1024 * 1024;
 const SOFT_MEMORY_LIMIT_BYTES: u64 = 550 * 1024 * 1024;
 const HARD_MEMORY_LIMIT_BYTES: u64 = 700 * 1024 * 1024;
 static WORKING_SET_TRIM_BLOCKED: AtomicBool = AtomicBool::new(false);
 static WORKING_SET_TRIM_EPOCH: AtomicU64 = AtomicU64::new(0);
+static LAST_WORKING_SET_TRIM_REQUEST: OnceLock<Mutex<Option<Instant>>> = OnceLock::new();
 
 #[derive(Clone, Copy, Debug)]
 struct ProcessMemorySnapshot {
@@ -105,11 +107,14 @@ fn pending_thumbnail_eviction_index(
                 && !visible_paths.is_some_and(|visible| visible.contains(&thumbnail.path))
         })
         .or_else(|| {
-            pending
-                .iter()
-                .rposition(|thumbnail| selected_path != Some(&thumbnail.path))
+            if visible_paths.is_none() {
+                pending
+                    .iter()
+                    .rposition(|thumbnail| selected_path != Some(&thumbnail.path))
+            } else {
+                None
+            }
         })
-        .or_else(|| (!pending.is_empty()).then_some(0))
 }
 
 fn trim_pending_thumbnail_queue(
@@ -473,7 +478,7 @@ impl ImageViewerApp {
             .min(byte_limited_items)
     }
 
-    fn pending_thumbnail_rgba_bytes(&self) -> usize {
+    pub(crate) fn pending_thumbnail_rgba_bytes(&self) -> usize {
         self.pending_thumbnails
             .iter()
             .map(|thumbnail| thumbnail.image_data.len())
@@ -730,7 +735,7 @@ impl ImageViewerApp {
             || !self.cache_manager.pending_upload_set.is_empty();
 
         self.is_in_restore_burst()
-            || self.last_user_activity.elapsed() < LOW_RAM_GPU_IDLE_WS_TRIM_AFTER
+            || self.last_user_activity.elapsed() < WORKING_SET_TRIM_ACTIVITY_GRACE
             || video_playing
             || self.file_operation_state.file_ops_in_progress > 0
             || self.is_loading_folder
@@ -755,6 +760,20 @@ impl ImageViewerApp {
         let was_blocked = WORKING_SET_TRIM_BLOCKED.swap(blocked, Ordering::AcqRel);
         if blocked && !was_blocked {
             WORKING_SET_TRIM_EPOCH.fetch_add(1, Ordering::AcqRel);
+        } else if !blocked
+            && was_blocked
+            && self.uses_aggressive_gpu_memory_policy()
+            && current_process_memory_snapshot().is_some_and(|snapshot| {
+                snapshot.working_set_bytes >= LOW_RAM_GPU_IDLE_WS_TRIM_MIN_BYTES
+            })
+        {
+            request_process_working_set_trim_series(
+                format!(
+                    "gpu activity completed backend={} path={}",
+                    self.active_gpu_backend, self.navigation_state.current_path
+                ),
+                WORKING_SET_TRIM_FOLLOW_UP_DELAYS,
+            );
         }
     }
 
@@ -1525,9 +1544,11 @@ fn request_process_working_set_trim_series(reason: String, delays: &'static [Dur
         return;
     }
 
-    static LAST_TRIM: OnceLock<Mutex<Option<Instant>>> = OnceLock::new();
     let now = Instant::now();
-    if let Ok(mut last_trim) = LAST_TRIM.get_or_init(|| Mutex::new(None)).lock() {
+    if let Ok(mut last_trim) = LAST_WORKING_SET_TRIM_REQUEST
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+    {
         if last_trim
             .as_ref()
             .is_some_and(|last| now.duration_since(*last) < WORKING_SET_TRIM_MIN_INTERVAL)
@@ -1543,6 +1564,7 @@ fn request_process_working_set_trim_series(reason: String, delays: &'static [Dur
         .stack_size(128 * 1024)
         .spawn(move || {
             let mut elapsed = Duration::ZERO;
+            let mut trimmed_any = false;
             for delay in delays {
                 if *delay > elapsed {
                     std::thread::sleep(*delay - elapsed);
@@ -1554,14 +1576,30 @@ fn request_process_working_set_trim_series(reason: String, delays: &'static [Dur
                     trim_epoch,
                 ) {
                     log::debug!("[MEMORY] working-set trim cancelled because the app became busy");
+                    if !trimmed_any {
+                        clear_working_set_trim_request(now);
+                    }
                     break;
                 }
                 trim_process_working_set(&reason);
+                trimmed_any = true;
             }
         });
 
     if let Err(error) = spawn_result {
+        clear_working_set_trim_request(now);
         log::debug!("[MEMORY] failed to spawn working-set trim: {error}");
+    }
+}
+
+fn clear_working_set_trim_request(requested_at: Instant) {
+    if let Ok(mut last_trim) = LAST_WORKING_SET_TRIM_REQUEST
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+    {
+        if *last_trim == Some(requested_at) {
+            *last_trim = None;
+        }
     }
 }
 
@@ -1780,13 +1818,13 @@ mod inactive_panel_paths_tests {
             FxHashSet::from_iter([selected.clone(), PathBuf::from("visible"), newest_visible]);
         assert_eq!(
             pending_thumbnail_eviction_index(&pending, Some(&visible), Some(&selected)),
-            Some(2)
+            None
         );
 
         let pending = VecDeque::from([thumbnail("selected")]);
         assert_eq!(
             pending_thumbnail_eviction_index(&pending, Some(&visible), Some(&selected)),
-            Some(0)
+            None
         );
     }
 
@@ -1831,8 +1869,8 @@ mod inactive_panel_paths_tests {
 
         let removed =
             trim_pending_thumbnail_queue(&mut pending, 2, 4, Some(&visible), Some(&selected));
-        assert_eq!(removed[0].path, PathBuf::from("visible"));
-        assert_eq!(pending[0].path, selected);
+        assert!(removed.is_empty());
+        assert_eq!(pending.len(), 2);
     }
 
     #[test]

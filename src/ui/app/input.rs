@@ -136,14 +136,6 @@ fn handle_delete_permanently_shortcut(
 }
 
 pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
-    let raw_user_activity = ctx.input(|input| {
-        input.pointer.any_pressed() || input.pointer.any_click() || !input.events.is_empty()
-    });
-    if raw_user_activity {
-        app.last_user_activity = std::time::Instant::now();
-        app.refresh_working_set_trim_blocker(false);
-    }
-
     let mut user_active = false;
     if app.renaming_state.is_none()
         && app.sidebar_renaming.is_none()

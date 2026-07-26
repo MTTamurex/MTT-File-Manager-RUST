@@ -207,6 +207,20 @@ impl ImageViewerApp {
 
             // Only reuse RAM cache if it meets or exceeds the requested size
             if cached_max_dim >= effective_size_px {
+                self.trim_pending_thumbnail_uploads_to_limit();
+                let pending_limit = self.current_pending_thumbnail_upload_limit();
+                let pending_byte_limit = self.current_pending_thumbnail_upload_byte_limit();
+                if self.pending_thumbnails.len() >= pending_limit
+                    || self
+                        .pending_thumbnail_rgba_bytes()
+                        .saturating_add(rgba_data.len())
+                        > pending_byte_limit
+                {
+                    self.cache_manager.finish_loading(&path);
+                    self.ui_ctx.request_repaint();
+                    return;
+                }
+
                 self.cache_manager
                     .note_attempted_thumbnail_bucket(&path, desired_bucket);
                 self.cache_manager.thumbnail_trace.record_ram_cache_hit();
@@ -231,7 +245,6 @@ impl ImageViewerApp {
                     not_found: false,
                     premultiplied: true, // RAM cache stores worker-premultiplied data
                 });
-                self.trim_pending_thumbnail_uploads_to_limit();
                 return;
             }
         }
