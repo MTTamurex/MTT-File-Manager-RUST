@@ -4,11 +4,10 @@ use std::time::{Duration, Instant};
 use crate::domain::file_entry::FileEntry;
 use crate::domain::file_entry::ViewMode;
 use crate::ui::cache::{
-    FxHashSet, DEFAULT_DYNAMIC_RGBA_BUDGET_BYTES, MAX_DYNAMIC_FOLDER_PREVIEW_ITEMS,
+    FxHashSet, DEFAULT_DYNAMIC_RGBA_BUDGET_BYTES, LOW_RAM_GPU_MAX_DYNAMIC_FOLDER_PREVIEW_ITEMS,
+    LOW_RAM_GPU_MAX_DYNAMIC_TEXTURE_CACHE_ITEMS, MAX_DYNAMIC_FOLDER_PREVIEW_ITEMS,
     MAX_DYNAMIC_TEXTURE_CACHE_ITEMS, MAX_RGBA_BUDGET_BYTES, MIN_DYNAMIC_FOLDER_PREVIEW_ITEMS,
     MIN_DYNAMIC_TEXTURE_CACHE_ITEMS, MIN_RGBA_BUDGET_BYTES,
-    VULKAN_MAX_DYNAMIC_FOLDER_PREVIEW_ITEMS as LOW_RAM_GPU_MAX_DYNAMIC_FOLDER_PREVIEW_ITEMS,
-    VULKAN_MAX_DYNAMIC_TEXTURE_CACHE_ITEMS as LOW_RAM_GPU_MAX_DYNAMIC_TEXTURE_CACHE_ITEMS,
 };
 use crate::workers::thumbnail::processing::get_bucket_size;
 
@@ -60,6 +59,10 @@ fn memory_trace_enabled() -> bool {
             })
             .unwrap_or(false)
     })
+}
+
+fn backend_uses_low_ram_gpu_policy(active_gpu_backend: &str) -> bool {
+    matches!(active_gpu_backend, "glow" | "Vulkan" | "Dx12")
 }
 
 fn panel_thumbnail_caches_active(
@@ -235,13 +238,13 @@ impl ImageViewerApp {
     /// Returns `true` for backends that need conservative folder-preview
     /// discovery, composition, and upload pacing.
     pub fn uses_conservative_folder_preview_policy(&self) -> bool {
-        self.is_opengl_backend() || self.is_vulkan_backend()
+        backend_uses_low_ram_gpu_policy(&self.active_gpu_backend)
     }
 
     /// Returns `true` for GPU backends that should use the low-RAM thumbnail
     /// cache profile and working-set trims.
     pub fn uses_aggressive_gpu_memory_policy(&self) -> bool {
-        self.is_vulkan_backend() || self.is_opengl_backend()
+        backend_uses_low_ram_gpu_policy(&self.active_gpu_backend)
     }
 
     /// Check if a video is actively playing in docked mode (preview panel)
@@ -1534,7 +1537,10 @@ fn current_process_memory_snapshot() -> Option<ProcessMemorySnapshot> {
 
 #[cfg(test)]
 mod inactive_panel_paths_tests {
-    use super::{detail_panel_thumbnail_active, insert_item_reference_paths, FileEntry, FxHashSet};
+    use super::{
+        backend_uses_low_ram_gpu_policy, detail_panel_thumbnail_active,
+        insert_item_reference_paths, FileEntry, FxHashSet,
+    };
     use crate::domain::file_entry::SyncStatus;
     use std::path::PathBuf;
 
@@ -1602,5 +1608,13 @@ mod inactive_panel_paths_tests {
         assert!(!detail_panel_thumbnail_active(true, 2, Some(&video)));
         assert!(!detail_panel_thumbnail_active(true, 1, Some(&document)));
         assert!(!detail_panel_thumbnail_active(true, 0, None));
+    }
+
+    #[test]
+    fn low_ram_gpu_policy_includes_all_selectable_backends() {
+        assert!(backend_uses_low_ram_gpu_policy("glow"));
+        assert!(backend_uses_low_ram_gpu_policy("Vulkan"));
+        assert!(backend_uses_low_ram_gpu_policy("Dx12"));
+        assert!(!backend_uses_low_ram_gpu_policy(""));
     }
 }

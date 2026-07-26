@@ -5,8 +5,8 @@ use crate::infrastructure::diagnostic_logger::{
     diag_info, field_bool, field_duration_ms, field_label, field_u64,
 };
 use crate::ui::cache::{
-    MAX_DYNAMIC_TEXTURE_CACHE_ITEMS, MIN_DYNAMIC_TEXTURE_CACHE_ITEMS,
-    VULKAN_MAX_DYNAMIC_TEXTURE_CACHE_ITEMS as LOW_RAM_GPU_MAX_DYNAMIC_TEXTURE_CACHE_ITEMS,
+    LOW_RAM_GPU_MAX_DYNAMIC_TEXTURE_CACHE_ITEMS, MAX_DYNAMIC_TEXTURE_CACHE_ITEMS,
+    MIN_DYNAMIC_TEXTURE_CACHE_ITEMS,
 };
 use eframe::egui;
 use rustc_hash::FxHashMap;
@@ -1304,7 +1304,7 @@ impl ImageViewerApp {
         let start = Instant::now();
 
         let mut folder_uploads = 0;
-        let max_folder_results = if (is_opengl || is_vulkan) && is_scrolling {
+        let max_folder_results = if use_conservative_policy && is_scrolling {
             max_folder_uploads.saturating_mul(8).max(8)
         } else {
             max_folder_uploads
@@ -1324,7 +1324,7 @@ impl ImageViewerApp {
                     continue;
                 }
 
-                let offscreen_during_scroll_lod = (is_opengl || is_vulkan)
+                let offscreen_during_scroll_lod = use_conservative_policy
                     && is_scrolling
                     && !force_replace
                     && visible_paths.is_some_and(|visible| !visible.contains(&data.path));
