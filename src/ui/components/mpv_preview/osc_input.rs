@@ -139,11 +139,16 @@ impl MpvPreview {
                 i.pointer.button_down(egui::PointerButton::Secondary),
                 i.events
                     .iter()
-                    .find_map(|event| match event {
-                        egui::Event::MouseWheel { delta, .. } => Some(delta.y),
+                    .filter_map(|event| match event {
+                        egui::Event::MouseWheel {
+                            delta,
+                            phase: egui::TouchPhase::Move,
+                            modifiers,
+                            ..
+                        } if !modifiers.shift => Some(delta.y),
                         _ => None,
                     })
-                    .unwrap_or(0.0),
+                    .sum::<f32>(),
             )
         });
 

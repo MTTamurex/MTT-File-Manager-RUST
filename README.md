@@ -73,7 +73,7 @@ The app supports three rendering backend choices, selectable in **Settings > Gen
 - Default backend for the main window on Windows
 - Uses `wgpu` DX12 with a DirectComposition visual for presentation
 - Avoids transient black frames when the borderless window is minimized
-- If DX12 is unavailable on the machine, select the Glow + OpenGL fallback and restart the app
+- If DX12 initialization fails, startup automatically retries Vulkan and then Glow + OpenGL
 
 ### Wgpu — Vulkan
 - Optional Vulkan backend for the main window

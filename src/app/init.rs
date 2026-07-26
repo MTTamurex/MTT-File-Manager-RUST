@@ -814,8 +814,6 @@ impl ImageViewerApp {
             }
         }
 
-        app.log_memory_snapshot("post-init");
-
         // Log GPU adapter info to file for diagnostics (works without console).
         if let Some(render_state) = &cc.wgpu_render_state {
             let info = render_state.adapter.get_info();
@@ -848,6 +846,8 @@ impl ImageViewerApp {
         } else {
             app.active_gpu_backend = "glow".to_string();
         }
+
+        app.log_memory_snapshot("post-init");
 
         if app.is_opengl_backend() {
             log::info!(

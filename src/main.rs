@@ -157,6 +157,141 @@ fn start_temporary_startup_priority_boost() {
 #[cfg(not(target_os = "windows"))]
 fn start_temporary_startup_priority_boost() {}
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum StartupRenderer {
+    Automatic,
+    Vulkan,
+    Glow,
+}
+
+impl StartupRenderer {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Automatic => "DirectX 12",
+            Self::Vulkan => "Vulkan",
+            Self::Glow => "Glow",
+        }
+    }
+}
+
+fn startup_renderers(preference: Option<&str>) -> &'static [StartupRenderer] {
+    match preference {
+        Some("vulkan") => &[StartupRenderer::Vulkan, StartupRenderer::Glow],
+        Some("glow") => &[StartupRenderer::Glow],
+        _ => &[
+            StartupRenderer::Automatic,
+            StartupRenderer::Vulkan,
+            StartupRenderer::Glow,
+        ],
+    }
+}
+
+fn native_options_for_renderer(
+    viewport: egui::ViewportBuilder,
+    renderer: StartupRenderer,
+) -> eframe::NativeOptions {
+    if renderer == StartupRenderer::Glow {
+        log::info!("[STARTUP] Using Glow (OpenGL) renderer");
+        return eframe::NativeOptions {
+            viewport,
+            renderer: eframe::Renderer::Glow,
+            persist_window: false,
+            ..Default::default()
+        };
+    }
+
+    let preference = match renderer {
+        StartupRenderer::Automatic => None,
+        StartupRenderer::Vulkan => Some("vulkan"),
+        StartupRenderer::Glow => unreachable!(),
+    };
+    let selected_backends = gpu_backend::parse_gpu_backend_preference(preference);
+    let native_adapter_selector = gpu_backend::adapter_selector(preference);
+    log::info!(
+        "[STARTUP] Using Wgpu renderer. Attempt: {} -> backends: {:?}",
+        renderer.label(),
+        selected_backends
+    );
+
+    let mut wgpu_setup = eframe::egui_wgpu::WgpuSetupCreateNew::without_display_handle();
+    wgpu_setup.instance_descriptor.backends = selected_backends;
+    wgpu_setup
+        .instance_descriptor
+        .backend_options
+        .dx12
+        .presentation_system = eframe::wgpu::Dx12SwapchainKind::DxgiFromVisual;
+    wgpu_setup.power_preference = eframe::wgpu::PowerPreference::HighPerformance;
+    wgpu_setup.native_adapter_selector = native_adapter_selector;
+    wgpu_setup.device_descriptor = std::sync::Arc::new(|_adapter| eframe::wgpu::DeviceDescriptor {
+        label: Some("mtt-file-manager wgpu device"),
+        required_features: eframe::wgpu::Features::default(),
+        required_limits: eframe::wgpu::Limits {
+            max_texture_dimension_2d: gpu_backend::WGPU_REQUIRED_MAX_TEXTURE_DIMENSION_2D,
+            ..eframe::wgpu::Limits::default()
+        },
+        memory_hints: eframe::wgpu::MemoryHints::MemoryUsage,
+        ..Default::default()
+    });
+
+    eframe::NativeOptions {
+        viewport,
+        renderer: eframe::Renderer::Wgpu,
+        persist_window: false,
+        wgpu_options: eframe::egui_wgpu::WgpuConfiguration {
+            wgpu_setup: eframe::egui_wgpu::WgpuSetup::CreateNew(wgpu_setup),
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+}
+
+fn run_main_app_attempt(
+    viewport: egui::ViewportBuilder,
+    renderer: StartupRenderer,
+) -> (eframe::Result<()>, bool) {
+    let app_started = std::rc::Rc::new(std::cell::Cell::new(false));
+    let app_started_in_creator = std::rc::Rc::clone(&app_started);
+    let result = eframe::run_native(
+        "MTT File Manager",
+        native_options_for_renderer(viewport, renderer),
+        Box::new(move |cc| {
+            app_started_in_creator.set(true);
+            let app_new_start = Instant::now();
+            let app = ImageViewerApp::new(cc);
+            log::info!(
+                "[STARTUP] ImageViewerApp::new elapsed_ms={}",
+                app_new_start.elapsed().as_millis()
+            );
+            Ok(Box::new(app))
+        }),
+    );
+    (result, app_started.get())
+}
+
+fn run_main_app_with_fallback(
+    viewport: &egui::ViewportBuilder,
+    preference: Option<&str>,
+) -> (eframe::Result<()>, bool) {
+    let renderers = startup_renderers(preference);
+    for (index, renderer) in renderers.iter().copied().enumerate() {
+        let (result, app_started) = run_main_app_attempt(viewport.clone(), renderer);
+        match result {
+            Ok(()) => return (Ok(()), app_started),
+            Err(error) if !app_started && index + 1 < renderers.len() => {
+                log::error!(
+                    "[STARTUP] {} initialization failed: {}. Trying {}.",
+                    renderer.label(),
+                    error,
+                    renderers[index + 1].label()
+                );
+            }
+            Err(error) => return (Err(error), app_started),
+        }
+    }
+
+    unreachable!("startup renderer list is never empty")
+}
+
 fn main() -> eframe::Result<()> {
     let startup_start = Instant::now();
     // SEC: Remove the current working directory from the default DLL search order.
@@ -377,95 +512,53 @@ fn main() -> eframe::Result<()> {
                 "gl" => "glow".to_string(),
                 _ => pref,
             });
-    let use_glow = match gpu_backend_pref.as_deref() {
-        Some("glow") => true,
-        _ => false, // default/auto: Wgpu with DX12 DirectComposition on Windows
-    };
-
-    let options = if use_glow {
-        log::info!("[STARTUP] Using Glow (OpenGL) renderer");
-        eframe::NativeOptions {
-            viewport,
-            renderer: eframe::Renderer::Glow,
-            persist_window: false,
-            ..Default::default()
-        }
-    } else {
-        let selected_backends =
-            gpu_backend::parse_gpu_backend_preference(gpu_backend_pref.as_deref());
-        let native_adapter_selector = gpu_backend::adapter_selector(gpu_backend_pref.as_deref());
-        log::info!(
-            "[STARTUP] Using Wgpu renderer. Backend preference: {:?} -> backends: {:?}",
-            gpu_backend_pref.as_deref().unwrap_or("auto"),
-            selected_backends
-        );
-        let mut wgpu_setup = eframe::egui_wgpu::WgpuSetupCreateNew::without_display_handle();
-        wgpu_setup.instance_descriptor.backends = selected_backends;
-        wgpu_setup
-            .instance_descriptor
-            .backend_options
-            .dx12
-            .presentation_system = eframe::wgpu::Dx12SwapchainKind::DxgiFromVisual;
-        wgpu_setup.power_preference = eframe::wgpu::PowerPreference::HighPerformance;
-        wgpu_setup.native_adapter_selector = native_adapter_selector;
-        wgpu_setup.device_descriptor =
-            std::sync::Arc::new(|_adapter| eframe::wgpu::DeviceDescriptor {
-                label: Some("mtt-file-manager wgpu device"),
-                required_features: eframe::wgpu::Features::default(),
-                required_limits: eframe::wgpu::Limits {
-                    max_texture_dimension_2d: gpu_backend::WGPU_REQUIRED_MAX_TEXTURE_DIMENSION_2D,
-                    ..eframe::wgpu::Limits::default()
-                },
-                memory_hints: eframe::wgpu::MemoryHints::MemoryUsage,
-                ..Default::default()
-            });
-        eframe::NativeOptions {
-            viewport,
-            renderer: eframe::Renderer::Wgpu,
-            persist_window: false,
-            wgpu_options: eframe::egui_wgpu::WgpuConfiguration {
-                wgpu_setup: eframe::egui_wgpu::WgpuSetup::CreateNew(wgpu_setup),
-                ..Default::default()
-            },
-            ..Default::default()
-        }
-    };
-
     log::info!(
         "[STARTUP] native options ready elapsed_ms={}",
         startup_start.elapsed().as_millis()
     );
 
-    let result = eframe::run_native(
-        "MTT File Manager",
-        options,
-        Box::new(|cc| {
-            // STARTUP OPTIMIZATION: Fonts are now loaded asynchronously in app/init.rs
-            // This allows the window to appear immediately with default fonts.
-            // When the background thread finishes, the new fonts (Segoe UI) are applied dynamically.
-            let app_new_start = Instant::now();
-            let app = ImageViewerApp::new(cc);
-            log::info!(
-                "[STARTUP] ImageViewerApp::new elapsed_ms={}",
-                app_new_start.elapsed().as_millis()
-            );
-
-            Ok(Box::new(app))
-        }),
-    );
+    let (result, app_started) = run_main_app_with_fallback(&viewport, gpu_backend_pref.as_deref());
 
     // Belt-and-suspenders: if eframe returned (window closed) but the process
     // is still alive (background threads stuck in kernel), force-kill immediately.
     // handle_exit() normally calls std::process::exit(0), so this path is only
     // reached if something bypassed it.
     #[cfg(target_os = "windows")]
-    {
+    if app_started {
+        let exit_code = u32::from(result.is_err());
         let _ = std::thread::spawn(
             mtt_file_manager::infrastructure::windows::cancel_pending_io_on_current_process_threads,
         );
         std::thread::sleep(std::time::Duration::from_millis(100));
-        mtt_file_manager::infrastructure::windows::terminate_current_process(0);
+        mtt_file_manager::infrastructure::windows::terminate_current_process(exit_code);
     }
 
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{startup_renderers, StartupRenderer};
+
+    #[test]
+    fn automatic_renderer_has_vulkan_and_glow_fallbacks() {
+        assert_eq!(
+            startup_renderers(Some("auto")),
+            &[
+                StartupRenderer::Automatic,
+                StartupRenderer::Vulkan,
+                StartupRenderer::Glow,
+            ]
+        );
+        assert_eq!(startup_renderers(None), startup_renderers(Some("auto")));
+    }
+
+    #[test]
+    fn explicit_renderer_only_falls_back_to_more_compatible_options() {
+        assert_eq!(
+            startup_renderers(Some("vulkan")),
+            &[StartupRenderer::Vulkan, StartupRenderer::Glow]
+        );
+        assert_eq!(startup_renderers(Some("glow")), &[StartupRenderer::Glow]);
+    }
 }

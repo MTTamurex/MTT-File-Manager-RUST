@@ -136,6 +136,14 @@ fn handle_delete_permanently_shortcut(
 }
 
 pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
+    let raw_user_activity = ctx.input(|input| {
+        input.pointer.any_pressed() || input.pointer.any_click() || !input.events.is_empty()
+    });
+    if raw_user_activity {
+        app.last_user_activity = std::time::Instant::now();
+        app.refresh_working_set_trim_blocker(false);
+    }
+
     let mut user_active = false;
     if app.renaming_state.is_none()
         && app.sidebar_renaming.is_none()
@@ -150,6 +158,7 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
 
             if user_active {
                 app.last_user_activity = std::time::Instant::now();
+                app.refresh_working_set_trim_blocker(false);
                 let _ = app
                     .file_operation_state
                     .idle_warmup_sender
@@ -160,6 +169,12 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
 
         // Handle media hardware input first (overrides normal navigation when player focused)
         if handle_media_hardware_input(app, ctx) {
+            app.last_user_activity = std::time::Instant::now();
+            app.refresh_working_set_trim_blocker(false);
+            let _ = app
+                .file_operation_state
+                .idle_warmup_sender
+                .send(IdleWarmupMessage::UserActive);
             return;
         }
 
@@ -182,6 +197,7 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
 
             if user_active {
                 app.last_user_activity = std::time::Instant::now();
+                app.refresh_working_set_trim_blocker(false);
                 let _ = app
                     .file_operation_state
                     .idle_warmup_sender
@@ -428,6 +444,7 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
     }
     if user_active {
         app.last_user_activity = std::time::Instant::now();
+        app.refresh_working_set_trim_blocker(false);
         let _ = app
             .file_operation_state
             .idle_warmup_sender

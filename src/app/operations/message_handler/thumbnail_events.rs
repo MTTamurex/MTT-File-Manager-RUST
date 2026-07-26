@@ -140,16 +140,10 @@ impl ImageViewerApp {
 
         let t_rebuild = Instant::now();
 
-        // 2. Cover worker results
         self.process_cover_worker_results(ctx);
-
         let streaming_done = Instant::now();
-
-        // 3. Icon worker results
         self.process_icon_worker_results(ctx);
         let t_icons = Instant::now();
-
-        // 4. Thumbnails + folder previews upload pipeline (higher UX priority)
         let mut received_any = self.process_thumbnail_upload_pipeline(ctx);
         let t_thumbs = Instant::now();
 

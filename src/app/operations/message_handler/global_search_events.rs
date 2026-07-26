@@ -146,7 +146,6 @@ impl ImageViewerApp {
 
         drain_tagged_results_responses(self);
 
-        // Drain tooltip worker responses (P0-02/P0-03)
         drain_tooltip_responses(self);
 
         if self.global_search.active {

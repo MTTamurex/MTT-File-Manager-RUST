@@ -1,8 +1,10 @@
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use crate::domain::file_entry::FileEntry;
 use crate::domain::file_entry::ViewMode;
+use crate::domain::thumbnail::ThumbnailData;
 use crate::ui::cache::{
     FxHashSet, DEFAULT_DYNAMIC_RGBA_BUDGET_BYTES, LOW_RAM_GPU_MAX_DYNAMIC_FOLDER_PREVIEW_ITEMS,
     LOW_RAM_GPU_MAX_DYNAMIC_TEXTURE_CACHE_ITEMS, MAX_DYNAMIC_FOLDER_PREVIEW_ITEMS,
@@ -35,6 +37,10 @@ const WORKING_SET_TRIM_FOLLOW_UP_DELAYS: &[Duration] = &[
 const WORKING_SET_TRIM_MIN_INTERVAL: Duration = Duration::from_secs(10);
 const LOW_RAM_GPU_IDLE_WS_TRIM_AFTER: Duration = Duration::from_secs(8);
 const LOW_RAM_GPU_IDLE_WS_TRIM_MIN_BYTES: u64 = 24 * 1024 * 1024;
+const SOFT_MEMORY_LIMIT_BYTES: u64 = 550 * 1024 * 1024;
+const HARD_MEMORY_LIMIT_BYTES: u64 = 700 * 1024 * 1024;
+static WORKING_SET_TRIM_BLOCKED: AtomicBool = AtomicBool::new(false);
+static WORKING_SET_TRIM_EPOCH: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, Copy, Debug)]
 struct ProcessMemorySnapshot {
@@ -61,8 +67,77 @@ fn memory_trace_enabled() -> bool {
     })
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MemoryPressure {
+    None,
+    Soft,
+    Hard,
+}
+
+fn classify_memory_pressure(snapshot: ProcessMemorySnapshot) -> MemoryPressure {
+    let pressure_bytes = snapshot.working_set_bytes.max(snapshot.private_usage_bytes);
+    if pressure_bytes >= HARD_MEMORY_LIMIT_BYTES {
+        MemoryPressure::Hard
+    } else if pressure_bytes >= SOFT_MEMORY_LIMIT_BYTES {
+        MemoryPressure::Soft
+    } else {
+        MemoryPressure::None
+    }
+}
+
+fn working_set_trim_cancelled(blocked: bool, current_epoch: u64, scheduled_epoch: u64) -> bool {
+    blocked || current_epoch != scheduled_epoch
+}
+
 fn backend_uses_low_ram_gpu_policy(active_gpu_backend: &str) -> bool {
     matches!(active_gpu_backend, "glow" | "Vulkan" | "Dx12")
+}
+
+fn pending_thumbnail_eviction_index(
+    pending: &std::collections::VecDeque<ThumbnailData>,
+    visible_paths: Option<&FxHashSet<std::path::PathBuf>>,
+    selected_path: Option<&std::path::PathBuf>,
+) -> Option<usize> {
+    pending
+        .iter()
+        .position(|thumbnail| {
+            selected_path != Some(&thumbnail.path)
+                && !visible_paths.is_some_and(|visible| visible.contains(&thumbnail.path))
+        })
+        .or_else(|| {
+            pending
+                .iter()
+                .rposition(|thumbnail| selected_path != Some(&thumbnail.path))
+        })
+        .or_else(|| (!pending.is_empty()).then_some(0))
+}
+
+fn trim_pending_thumbnail_queue(
+    pending: &mut std::collections::VecDeque<ThumbnailData>,
+    max_items: usize,
+    max_bytes: usize,
+    visible_paths: Option<&FxHashSet<std::path::PathBuf>>,
+    selected_path: Option<&std::path::PathBuf>,
+) -> Vec<ThumbnailData> {
+    let mut pending_bytes = pending
+        .iter()
+        .map(|thumbnail| thumbnail.image_data.len())
+        .sum::<usize>();
+    let mut removed = Vec::new();
+
+    while pending.len() > max_items || pending_bytes > max_bytes {
+        let Some(index) = pending_thumbnail_eviction_index(pending, visible_paths, selected_path)
+        else {
+            break;
+        };
+        let Some(thumbnail) = pending.remove(index) else {
+            break;
+        };
+        pending_bytes = pending_bytes.saturating_sub(thumbnail.image_data.len());
+        removed.push(thumbnail);
+    }
+
+    removed
 }
 
 fn panel_thumbnail_caches_active(
@@ -408,40 +483,17 @@ impl ImageViewerApp {
     pub(crate) fn trim_pending_thumbnail_uploads_to_limit(&mut self) {
         let max_pending = self.current_pending_thumbnail_upload_limit();
         let max_pending_bytes = self.current_pending_thumbnail_upload_byte_limit();
-        let mut pending_bytes = self.pending_thumbnail_rgba_bytes();
-        if self.pending_thumbnails.len() <= max_pending && pending_bytes <= max_pending_bytes {
-            return;
-        }
-
         let visible_paths = self.visible_grid_paths_snapshot();
         let selected_path = self.selected_file.as_ref().map(|file| file.path.clone());
-        while self.pending_thumbnails.len() > max_pending || pending_bytes > max_pending_bytes {
-            let evict_idx = self.pending_thumbnails.iter().position(|thumb| {
-                let is_selected = selected_path.as_ref() == Some(&thumb.path);
-                let is_visible = visible_paths
-                    .as_ref()
-                    .is_some_and(|visible_paths| visible_paths.contains(&thumb.path));
-
-                !is_selected && !is_visible
-            });
-
-            let old = if let Some(evict_idx) = evict_idx {
-                self.pending_thumbnails.remove(evict_idx)
-            } else if visible_paths.is_none() {
-                self.pending_thumbnails
-                    .iter()
-                    .position(|thumb| selected_path.as_ref() != Some(&thumb.path))
-                    .and_then(|idx| self.pending_thumbnails.remove(idx))
-            } else {
-                None
-            };
-
-            if let Some(old) = old {
-                pending_bytes = pending_bytes.saturating_sub(old.image_data.len());
-                self.cache_manager.finish_pending_upload(&old.path);
-            } else {
-                break;
-            }
+        let removed = trim_pending_thumbnail_queue(
+            &mut self.pending_thumbnails,
+            max_pending,
+            max_pending_bytes,
+            visible_paths.as_ref(),
+            selected_path.as_ref(),
+        );
+        for thumbnail in removed {
+            self.cache_manager.finish_pending_upload(&thumbnail.path);
         }
     }
 
@@ -658,6 +710,52 @@ impl ImageViewerApp {
     /// Runs memory maintenance immediately, bypassing normal periodic throttle.
     pub fn run_memory_maintenance_now(&mut self) {
         self.run_memory_maintenance_impl(true);
+    }
+
+    fn working_set_trim_blocked(&self) -> bool {
+        let video_playing = self
+            .media_preview
+            .as_ref()
+            .and_then(|preview| preview.get_video_state())
+            .is_some_and(|state| state.is_playing);
+        let purge_running = self
+            .purge_worker_state
+            .as_ref()
+            .is_some_and(|state| state.running.load(Ordering::Relaxed));
+        let thumbnail_pipeline_busy = self.thumbnail_queue.pending_count() > 0
+            || !self.pending_thumbnails.is_empty()
+            || !self.image_receiver.is_empty()
+            || !self.cache_manager.loading_set.is_empty()
+            || !self.cache_manager.folder_preview_loading.is_empty()
+            || !self.cache_manager.pending_upload_set.is_empty();
+
+        self.is_in_restore_burst()
+            || self.last_user_activity.elapsed() < LOW_RAM_GPU_IDLE_WS_TRIM_AFTER
+            || video_playing
+            || self.file_operation_state.file_ops_in_progress > 0
+            || self.is_loading_folder
+            || self.items_rebuild_in_flight
+            || self.pending_items_rebuild
+            || self.bulk_thumbnail_scanning.load(Ordering::Relaxed)
+            || !self.file_hash_loading.is_empty()
+            || !self.folder_size_state.loading.is_empty()
+            || !self.folder_size_state.batch_loading.is_empty()
+            || !self.metadata_loading.is_empty()
+            || !self.live_file_size_loading.is_empty()
+            || self.global_search.loading
+            || purge_running
+            || self.is_item_dragging
+            || self.pending_drag_move_confirmation.is_some()
+            || self.shell_menu_loading
+            || thumbnail_pipeline_busy
+    }
+
+    pub(crate) fn refresh_working_set_trim_blocker(&self, force_blocked: bool) {
+        let blocked = force_blocked || self.working_set_trim_blocked();
+        let was_blocked = WORKING_SET_TRIM_BLOCKED.swap(blocked, Ordering::AcqRel);
+        if blocked && !was_blocked {
+            WORKING_SET_TRIM_EPOCH.fetch_add(1, Ordering::AcqRel);
+        }
     }
 
     /// Drops stale visible thumbnail work and aggressively downsizes thumbnail
@@ -1009,6 +1107,8 @@ impl ImageViewerApp {
     }
 
     fn run_memory_maintenance_impl(&mut self, force: bool) {
+        let working_set_trim_blocked = self.working_set_trim_blocked();
+        self.refresh_working_set_trim_blocker(false);
         if !force && self.last_memory_maintenance.elapsed() < Duration::from_secs(2) {
             return;
         }
@@ -1023,7 +1123,7 @@ impl ImageViewerApp {
             return;
         };
         let working_set_bytes = process_memory.working_set_bytes;
-        self.run_gpu_idle_working_set_trim(working_set_bytes);
+        self.run_gpu_idle_working_set_trim(working_set_bytes, working_set_trim_blocked);
 
         // Proactive cache trim: even below the soft memory limit, excess
         // texture/RAM cache entries from a previous folder should not linger
@@ -1068,14 +1168,12 @@ impl ImageViewerApp {
             }
         }
 
-        const SOFT_LIMIT_BYTES: u64 = 550 * 1024 * 1024;
-        const HARD_LIMIT_BYTES: u64 = 700 * 1024 * 1024;
-
-        if working_set_bytes < SOFT_LIMIT_BYTES {
+        let pressure = classify_memory_pressure(process_memory);
+        if pressure == MemoryPressure::None {
             return;
         }
 
-        let aggressive = working_set_bytes >= HARD_LIMIT_BYTES;
+        let aggressive = pressure == MemoryPressure::Hard;
         let is_burst = self.is_in_restore_burst();
         self.trim_pending_thumbnail_uploads_to_limit();
         let visible_grid_items = self.visible_grid_items_for_cache();
@@ -1133,12 +1231,9 @@ impl ImageViewerApp {
             self.directory_cache.clear();
             self.visible_paths_cache.clear();
             self.visible_range_cached = None;
-            self.thumbnail_request_epochs.clear();
-            self.cache_manager.attempted_thumbnail_bucket.clear();
         }
-        // Non-aggressive trims no longer bulk-clear attempted_thumbnail_bucket:
-        // it is now an LruCache that self-bounds and evicts LRU entries, so the
-        // history (and quality-upgrade tracking) degrades gracefully.
+        // attempted_thumbnail_bucket is an LRU and remains bounded. Preserve it
+        // under pressure so maximum-quality failures do not restart upload churn.
 
         // Reuse existing GIF cleanup policy (TTL + bounded memory) without forcing visible preview drop.
         self.gif_manager.cleanup(false);
@@ -1157,8 +1252,9 @@ impl ImageViewerApp {
             || ext_evicted > 0
         {
             log::debug!(
-                "[MEMORY] RAM {:.1}MB -> trimmed textures={} rgba={} folder_previews={} pending={} icons={} ext_icons={} mode={}",
+                "[MEMORY] ws={:.1}MB private={:.1}MB -> trimmed textures={} rgba={} folder_previews={} pending={} icons={} ext_icons={} mode={}",
                 working_set_bytes as f64 / 1024.0 / 1024.0,
+                process_memory.private_usage_bytes as f64 / 1024.0 / 1024.0,
                 textures_removed,
                 rgba_removed,
                 folder_previews_removed,
@@ -1170,27 +1266,16 @@ impl ImageViewerApp {
         }
     }
 
-    fn run_gpu_idle_working_set_trim(&mut self, working_set_bytes: u64) {
+    fn run_gpu_idle_working_set_trim(
+        &mut self,
+        working_set_bytes: u64,
+        working_set_trim_blocked: bool,
+    ) {
         if !self.uses_aggressive_gpu_memory_policy()
-            || self.is_in_restore_burst()
+            || working_set_trim_blocked
             || self.last_user_activity.elapsed() < LOW_RAM_GPU_IDLE_WS_TRIM_AFTER
             || working_set_bytes < LOW_RAM_GPU_IDLE_WS_TRIM_MIN_BYTES
-            || self.is_loading_folder
-            || self.is_item_dragging
-            || self.pending_drag_move_confirmation.is_some()
-            || self.shell_menu_loading
         {
-            return;
-        }
-
-        let thumbnail_pipeline_idle = self.thumbnail_queue.pending_count() == 0
-            && self.pending_thumbnails.is_empty()
-            && self.image_receiver.is_empty()
-            && self.cache_manager.loading_set.is_empty()
-            && self.cache_manager.folder_preview_loading.is_empty()
-            && self.cache_manager.pending_upload_set.is_empty();
-
-        if !thumbnail_pipeline_idle {
             return;
         }
 
@@ -1452,6 +1537,7 @@ fn request_process_working_set_trim_series(reason: String, delays: &'static [Dur
         *last_trim = Some(now);
     }
 
+    let trim_epoch = WORKING_SET_TRIM_EPOCH.load(Ordering::Acquire);
     let spawn_result = std::thread::Builder::new()
         .name("mtt-working-set-trim".to_string())
         .stack_size(128 * 1024)
@@ -1461,6 +1547,14 @@ fn request_process_working_set_trim_series(reason: String, delays: &'static [Dur
                 if *delay > elapsed {
                     std::thread::sleep(*delay - elapsed);
                     elapsed = *delay;
+                }
+                if working_set_trim_cancelled(
+                    WORKING_SET_TRIM_BLOCKED.load(Ordering::Acquire),
+                    WORKING_SET_TRIM_EPOCH.load(Ordering::Acquire),
+                    trim_epoch,
+                ) {
+                    log::debug!("[MEMORY] working-set trim cancelled because the app became busy");
+                    break;
                 }
                 trim_process_working_set(&reason);
             }
@@ -1538,11 +1632,17 @@ fn current_process_memory_snapshot() -> Option<ProcessMemorySnapshot> {
 #[cfg(test)]
 mod inactive_panel_paths_tests {
     use super::{
-        backend_uses_low_ram_gpu_policy, detail_panel_thumbnail_active,
-        insert_item_reference_paths, FileEntry, FxHashSet,
+        backend_uses_low_ram_gpu_policy, classify_memory_pressure, detail_panel_thumbnail_active,
+        insert_item_reference_paths, pending_thumbnail_eviction_index,
+        trim_pending_thumbnail_queue, working_set_trim_cancelled, FileEntry, FxHashSet,
+        MemoryPressure, ProcessMemorySnapshot,
     };
     use crate::domain::file_entry::SyncStatus;
+    use crate::domain::thumbnail::ThumbnailData;
+    use crate::infrastructure::io_priority::IOPriority;
+    use std::collections::VecDeque;
     use std::path::PathBuf;
+    use std::sync::Arc;
 
     fn entry(path: &str, cover: Option<&str>) -> FileEntry {
         FileEntry {
@@ -1616,5 +1716,129 @@ mod inactive_panel_paths_tests {
         assert!(backend_uses_low_ram_gpu_policy("Vulkan"));
         assert!(backend_uses_low_ram_gpu_policy("Dx12"));
         assert!(!backend_uses_low_ram_gpu_policy(""));
+    }
+
+    #[test]
+    fn private_commit_triggers_memory_pressure_cleanup() {
+        let mb = 1024 * 1024;
+        assert_eq!(
+            classify_memory_pressure(ProcessMemorySnapshot {
+                working_set_bytes: 100 * mb,
+                private_usage_bytes: 600 * mb,
+            }),
+            MemoryPressure::Soft
+        );
+        assert_eq!(
+            classify_memory_pressure(ProcessMemorySnapshot {
+                working_set_bytes: 100 * mb,
+                private_usage_bytes: 750 * mb,
+            }),
+            MemoryPressure::Hard
+        );
+        assert_eq!(
+            classify_memory_pressure(ProcessMemorySnapshot {
+                working_set_bytes: 500 * mb,
+                private_usage_bytes: 500 * mb,
+            }),
+            MemoryPressure::None
+        );
+    }
+
+    #[test]
+    fn pending_thumbnail_eviction_preserves_selected_then_visible() {
+        let thumbnail = |path: &str| ThumbnailData {
+            path: PathBuf::from(path),
+            image_data: Arc::new(vec![0; 4]),
+            width: 1,
+            height: 1,
+            generation: 0,
+            request_epoch: 0,
+            priority: IOPriority::Interactive,
+            not_found: false,
+            premultiplied: true,
+        };
+        let pending = VecDeque::from([
+            thumbnail("selected"),
+            thumbnail("visible"),
+            thumbnail("offscreen"),
+        ]);
+        let selected = PathBuf::from("selected");
+        let visible = FxHashSet::from_iter([selected.clone(), PathBuf::from("visible")]);
+
+        assert_eq!(
+            pending_thumbnail_eviction_index(&pending, Some(&visible), Some(&selected)),
+            Some(2)
+        );
+
+        let newest_visible = PathBuf::from("newest-visible");
+        let pending = VecDeque::from([
+            thumbnail("selected"),
+            thumbnail("visible"),
+            thumbnail("newest-visible"),
+        ]);
+        let visible =
+            FxHashSet::from_iter([selected.clone(), PathBuf::from("visible"), newest_visible]);
+        assert_eq!(
+            pending_thumbnail_eviction_index(&pending, Some(&visible), Some(&selected)),
+            Some(2)
+        );
+
+        let pending = VecDeque::from([thumbnail("selected")]);
+        assert_eq!(
+            pending_thumbnail_eviction_index(&pending, Some(&visible), Some(&selected)),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn pending_thumbnail_trim_enforces_count_and_byte_limits() {
+        let thumbnail = |path: &str, bytes: usize| ThumbnailData {
+            path: PathBuf::from(path),
+            image_data: Arc::new(vec![0; bytes]),
+            width: 1,
+            height: 1,
+            generation: 0,
+            request_epoch: 0,
+            priority: IOPriority::Interactive,
+            not_found: false,
+            premultiplied: true,
+        };
+        let selected = PathBuf::from("selected");
+        let visible = FxHashSet::from_iter([selected.clone(), PathBuf::from("visible")]);
+        let mut pending = VecDeque::from([
+            thumbnail("selected", 4),
+            thumbnail("visible", 4),
+            thumbnail("offscreen", 4),
+        ]);
+
+        let removed =
+            trim_pending_thumbnail_queue(&mut pending, 2, 8, Some(&visible), Some(&selected));
+        assert_eq!(
+            removed
+                .iter()
+                .map(|thumbnail| thumbnail.path.as_path())
+                .collect::<Vec<_>>(),
+            vec![std::path::Path::new("offscreen")]
+        );
+        assert_eq!(pending.len(), 2);
+        assert_eq!(
+            pending
+                .iter()
+                .map(|thumbnail| thumbnail.image_data.len())
+                .sum::<usize>(),
+            8
+        );
+
+        let removed =
+            trim_pending_thumbnail_queue(&mut pending, 2, 4, Some(&visible), Some(&selected));
+        assert_eq!(removed[0].path, PathBuf::from("visible"));
+        assert_eq!(pending[0].path, selected);
+    }
+
+    #[test]
+    fn working_set_trim_is_cancelled_by_activity_or_epoch_change() {
+        assert!(!working_set_trim_cancelled(false, 7, 7));
+        assert!(working_set_trim_cancelled(true, 7, 7));
+        assert!(working_set_trim_cancelled(false, 8, 7));
     }
 }

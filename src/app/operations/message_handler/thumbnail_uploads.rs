@@ -202,12 +202,9 @@ fn next_thumbnail_upload_index(
     visible_ranks: &FxHashMap<PathBuf, usize>,
 ) -> Option<usize> {
     if let Some(selected_path) = selected_path {
-        let selected_can_preempt =
-            visible_ranks.is_empty() || visible_ranks.contains_key(selected_path);
         if let Some(pos) = pending_thumbnails
             .iter()
             .position(|thumb| &thumb.path == selected_path)
-            .filter(|_| selected_can_preempt)
         {
             return Some(pos);
         }
@@ -409,18 +406,28 @@ impl ImageViewerApp {
                 continue;
             }
 
-            let incoming_visible = eviction_visible
-                .as_ref()
-                .is_some_and(|visible| visible.contains(&thumbnail_data.path));
+            let selected_path = self.selected_file.as_ref().map(|file| &file.path);
+            let incoming_selected = selected_path == Some(&thumbnail_data.path);
             let mut drop_incoming = false;
             while self.pending_thumbnails.len() >= dynamic_pending_limit {
-                // Prefer removing off-screen items to keep visible ones alive.
-                let evict_idx = eviction_visible.as_ref().and_then(|visible| {
-                    // Find first off-screen item in the deque
-                    self.pending_thumbnails
-                        .iter()
-                        .position(|t| !visible.contains(&t.path))
-                });
+                let evict_idx = self
+                    .pending_thumbnails
+                    .iter()
+                    .position(|thumbnail| {
+                        selected_path != Some(&thumbnail.path)
+                            && !eviction_visible
+                                .as_ref()
+                                .is_some_and(|visible| visible.contains(&thumbnail.path))
+                    })
+                    .or_else(|| {
+                        if incoming_selected {
+                            self.pending_thumbnails
+                                .iter()
+                                .position(|thumbnail| selected_path != Some(&thumbnail.path))
+                        } else {
+                            None
+                        }
+                    });
 
                 match evict_idx {
                     Some(idx) => {
@@ -429,21 +436,14 @@ impl ImageViewerApp {
                         }
                     }
                     None => {
-                        if eviction_visible.is_some() {
-                            if incoming_visible {
-                                // All pending items are visible. Allow the visible upload
-                                // queue to temporarily exceed the byte cap instead of
-                                // dropping one visible tile and showing its fallback icon.
-                                break;
-                            } else {
-                                drop_incoming = true;
-                                break;
+                        if eviction_visible.is_none() {
+                            if let Some(old) = self.pending_thumbnails.pop_front() {
+                                self.cache_manager.finish_pending_upload(&old.path);
+                                continue;
                             }
-                        } else if let Some(old) = self.pending_thumbnails.pop_front() {
-                            self.cache_manager.finish_pending_upload(&old.path);
-                        } else {
-                            break;
                         }
+                        drop_incoming = true;
+                        break;
                     }
                 }
             }

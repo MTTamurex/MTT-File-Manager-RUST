@@ -30,6 +30,16 @@ fn warn_disk_cache_invalidation_disconnected(context: &str, dropped_entries: usi
 }
 
 impl ImageViewerApp {
+    pub(super) fn defer_file_operation_results_while_hidden(&mut self) {
+        const MAX_RESULTS_PER_TICK: usize = 96;
+        for _ in 0..MAX_RESULTS_PER_TICK {
+            match self.file_operation_state.file_op_res_receiver.try_recv() {
+                Ok(result) => self.file_operation_state.deferred_results.push_back(result),
+                Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
+            }
+        }
+    }
+
     fn invalidate_miller_column_caches(&mut self, folder: &Path) {
         self.miller_columns.invalidate(folder);
         if let Some(snapshot) = self.dual_panel_inactive_state.as_mut() {
@@ -61,8 +71,18 @@ impl ImageViewerApp {
                 break;
             }
 
-            match self.file_operation_state.file_op_res_receiver.try_recv() {
-                Ok(res) => {
+            let result = self
+                .file_operation_state
+                .deferred_results
+                .pop_front()
+                .or_else(|| {
+                    self.file_operation_state
+                        .file_op_res_receiver
+                        .try_recv()
+                        .ok()
+                });
+            match result {
+                Some(res) => {
                     processed += 1;
                     match res {
                         FileOperationResult::RenameCompleted {
@@ -207,8 +227,7 @@ impl ImageViewerApp {
                         }
                     }
                 }
-                Err(TryRecvError::Empty) => break,
-                Err(TryRecvError::Disconnected) => break,
+                None => break,
             }
         }
 

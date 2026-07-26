@@ -85,6 +85,35 @@ fn notify_event_is_name_change(event: &notify::Event) -> bool {
 
 impl ImageViewerApp {
     #[cfg(feature = "notify-watcher")]
+    pub(super) fn defer_watcher_events_while_hidden(&mut self) {
+        const MAX_EVENTS_PER_TICK: usize = 128;
+        const MAX_DEFERRED_FS_EVENTS: usize = 2048;
+        for _ in 0..MAX_EVENTS_PER_TICK {
+            match self.fs_event_receiver.try_recv() {
+                Ok(event) => {
+                    if self.deferred_fs_events.len() >= MAX_DEFERRED_FS_EVENTS {
+                        if let Some(dropped) = self.deferred_fs_events.pop_front() {
+                            if let Ok(event) = dropped.result {
+                                for path in event.paths {
+                                    self.directory_dirty_registry.mark_dirty(&path);
+                                    self.directory_cache.invalidate(&path);
+                                    if let Some(parent) = path.parent() {
+                                        self.directory_dirty_registry.mark_dirty(parent);
+                                        self.directory_cache.invalidate(&parent.to_path_buf());
+                                    }
+                                }
+                            }
+                        }
+                        self.pending_auto_reload = true;
+                    }
+                    self.deferred_fs_events.push_back(event);
+                }
+                Err(_) => break,
+            }
+        }
+    }
+
+    #[cfg(feature = "notify-watcher")]
     fn navigate_after_current_folder_removed_by_notify(&mut self, reason: &str) {
         log::warn!("{}: {}", reason, self.navigation_state.current_path);
         self.pending_auto_reload = false;

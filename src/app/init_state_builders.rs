@@ -169,6 +169,7 @@ pub(in crate::app) fn build_file_operation_state(
     FileOperationState {
         file_op_sender,
         file_op_res_receiver,
+        deferred_results: std::collections::VecDeque::new(),
         extraction_progress,
         extraction_cancel,
         disk_cache_invalidation_sender,

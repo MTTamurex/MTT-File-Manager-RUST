@@ -7,12 +7,97 @@ use std::path::{Path, PathBuf};
 /// Periodic repaint interval to ensure drive bitmask checks run even when idle.
 const DRIVE_BITMASK_REPAINT_MS: u64 = 1000;
 
+impl ImageViewerApp {
+    fn run_background_updates(&mut self, ctx: &egui::Context, upload_textures: bool) {
+        if is_in_size_move() {
+            self.refresh_working_set_trim_blocker(true);
+            return;
+        }
+
+        let t0 = std::time::Instant::now();
+        if upload_textures {
+            self.process_incoming_messages(ctx);
+        } else {
+            self.process_background_messages(ctx);
+            if self.file_operation_state.file_ops_in_progress > 0 {
+                ctx.request_repaint_after(std::time::Duration::from_millis(100));
+            } else {
+                ctx.request_repaint_after(std::time::Duration::from_millis(
+                    DRIVE_BITMASK_REPAINT_MS,
+                ));
+            }
+            self.flush_preferences_if_needed();
+            self.refresh_working_set_trim_blocker(false);
+            self.reap_video_player_process();
+            crate::viewer_processes::reap_exited();
+            return;
+        }
+        let t1 = std::time::Instant::now();
+        if self.file_operation_state.file_ops_in_progress == 0 {
+            self.refresh_drives_if_needed();
+        }
+
+        // Keep logic polling alive even while eframe suppresses UI for a hidden
+        // or occluded viewport.
+        if self.is_in_restore_burst() {
+            if self.is_opengl_backend() {
+                ctx.request_repaint_after(std::time::Duration::from_millis(16));
+            } else {
+                ctx.request_repaint();
+            }
+        } else if self.file_operation_state.file_ops_in_progress > 0 {
+            ctx.request_repaint_after(std::time::Duration::from_millis(100));
+        } else {
+            ctx.request_repaint_after(std::time::Duration::from_millis(DRIVE_BITMASK_REPAINT_MS));
+        }
+
+        let t2 = std::time::Instant::now();
+        self.poll_drive_scan();
+        self.poll_drive_info();
+        if self.sidebar_tree.poll_loaded() {
+            ctx.request_repaint();
+        }
+        if self.miller_columns.poll() {
+            ctx.request_repaint();
+        }
+        if self.file_operation_state.file_ops_in_progress == 0 {
+            self.sidebar_tree.refresh_expanded_if_stale();
+        }
+
+        let t3 = std::time::Instant::now();
+        self.flush_preferences_if_needed();
+        let t4 = std::time::Instant::now();
+        self.run_memory_maintenance();
+        self.maybe_log_memory_snapshot("frame");
+        self.reap_video_player_process();
+        crate::viewer_processes::reap_exited();
+        let t5 = std::time::Instant::now();
+
+        let msg_ms = t1.duration_since(t0).as_secs_f32() * 1000.0;
+        let drives_ms = t2.duration_since(t1).as_secs_f32() * 1000.0;
+        let poll_ms = t3.duration_since(t2).as_secs_f32() * 1000.0;
+        let prefs_ms = t4.duration_since(t3).as_secs_f32() * 1000.0;
+        let memory_ms = t5.duration_since(t4).as_secs_f32() * 1000.0;
+        let infra_total = msg_ms + drives_ms + poll_ms + prefs_ms + memory_ms;
+        if infra_total > 50.0 {
+            log::warn!(
+                "[PERF] Slow infrastructure: messages={:.0}ms drives={:.0}ms poll={:.0}ms prefs={:.0}ms memory={:.0}ms",
+                msg_ms, drives_ms, poll_ms, prefs_ms, memory_ms
+            );
+        }
+    }
+}
+
 impl eframe::App for ImageViewerApp {
     fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         // Startup must advance while the root viewport is still hidden.
         app::lifecycle::handle_startup_sequence(self, ctx);
         app::lifecycle::track_window_state(self, ctx);
         self.ensure_window_handle(frame);
+        let viewport_visible = ctx.input(|input| input.viewport().visible().unwrap_or(true));
+        if !viewport_visible {
+            self.run_background_updates(ctx, false);
+        }
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
@@ -43,6 +128,8 @@ impl eframe::App for ImageViewerApp {
 
         // True while Windows is in interactive move/resize loop (WM_ENTERSIZEMOVE..EXITSIZEMOVE).
         let is_in_size_move = is_in_size_move();
+
+        self.run_background_updates(ctx, true);
 
         // Apply asynchronously loaded fonts as soon as the worker finishes.
         if let Some(rx) = &self.font_loader_rx {
@@ -103,80 +190,6 @@ impl eframe::App for ImageViewerApp {
             } else {
                 0.0
             };
-        }
-
-        // 3. Infrastructure updates (throttle heavy processing during interactive move/resize)
-        if !is_in_size_move {
-            // PERF TIMING: Detect slow frames after inactivity
-            let t0 = std::time::Instant::now();
-            self.process_incoming_messages(ctx);
-            let t1 = std::time::Instant::now();
-            if self.file_operation_state.file_ops_in_progress == 0 {
-                self.refresh_drives_if_needed();
-            }
-            // Ensure the bitmask check runs even when the app is idle (no mouse/keyboard).
-            // Without this, egui won't repaint and the timer never fires.
-            // During restore burst, repaint as fast as possible so textures re-populate
-            // without waiting for user input or the 1-second idle timer.
-            if self.is_in_restore_burst() {
-                if self.is_opengl_backend() {
-                    ctx.request_repaint_after(std::time::Duration::from_millis(16));
-                } else {
-                    ctx.request_repaint();
-                }
-            } else if self.file_operation_state.file_ops_in_progress > 0 {
-                // File operations run on a background STA worker thread, but
-                // we need frequent repaints to (a) poll the result channel
-                // promptly and (b) keep the UI feeling responsive while the
-                // Shell progress dialog is visible.  100ms is a good balance
-                // between responsiveness and CPU usage.
-                ctx.request_repaint_after(std::time::Duration::from_millis(100));
-            } else {
-                ctx.request_repaint_after(std::time::Duration::from_millis(
-                    DRIVE_BITMASK_REPAINT_MS,
-                ));
-            }
-            let t2 = std::time::Instant::now();
-            self.poll_drive_scan();
-            self.poll_drive_info();
-            // Poll sidebar folder tree background loads
-            if self.sidebar_tree.poll_loaded() {
-                ctx.request_repaint();
-            }
-            // Poll Miller's Columns ancestor-listing background loads
-            if self.miller_columns.poll() {
-                ctx.request_repaint();
-            }
-            // Periodically re-enumerate expanded sidebar directories to catch
-            // external changes (the per-folder notify watcher doesn't cover them).
-            if self.file_operation_state.file_ops_in_progress == 0 {
-                self.sidebar_tree.refresh_expanded_if_stale();
-            }
-
-            let t3 = std::time::Instant::now();
-            // Flush debounced preferences (max once per second)
-            self.flush_preferences_if_needed();
-            let t4 = std::time::Instant::now();
-            // Bound long-session cache growth without disrupting interactive work.
-            self.run_memory_maintenance();
-            self.maybe_log_memory_snapshot("frame");
-            // Reap standalone video player process if it exited naturally.
-            self.reap_video_player_process();
-            crate::viewer_processes::reap_exited();
-            let t5 = std::time::Instant::now();
-
-            let msg_ms = t1.duration_since(t0).as_secs_f32() * 1000.0;
-            let drives_ms = t2.duration_since(t1).as_secs_f32() * 1000.0;
-            let poll_ms = t3.duration_since(t2).as_secs_f32() * 1000.0;
-            let prefs_ms = t4.duration_since(t3).as_secs_f32() * 1000.0;
-            let memory_ms = t5.duration_since(t4).as_secs_f32() * 1000.0;
-            let infra_total = msg_ms + drives_ms + poll_ms + prefs_ms + memory_ms;
-            if infra_total > 50.0 {
-                log::warn!(
-                    "[PERF] Slow infrastructure: messages={:.0}ms drives={:.0}ms poll={:.0}ms prefs={:.0}ms memory={:.0}ms",
-                    msg_ms, drives_ms, poll_ms, prefs_ms, memory_ms
-                );
-            }
         }
 
         self.ensure_computer_icon(ctx);

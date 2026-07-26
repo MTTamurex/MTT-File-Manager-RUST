@@ -3,8 +3,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::Graphics::Dwm::{
-    DWMWA_HAS_ICONIC_BITMAP, DwmSetIconicLivePreviewBitmap, DwmSetIconicThumbnail,
-    DwmSetWindowAttribute,
+    DWMWA_FORCE_ICONIC_REPRESENTATION, DWMWA_HAS_ICONIC_BITMAP, DwmSetIconicLivePreviewBitmap,
+    DwmSetIconicThumbnail, DwmSetWindowAttribute,
 };
 use windows::Win32::Graphics::Gdi::{
     BI_RGB, BITMAPINFO, BITMAPINFOHEADER, BitBlt, CreateCompatibleDC, CreateDIBSection,
@@ -59,8 +59,9 @@ pub(super) fn request(hwnd: HWND) {
 }
 
 fn perform_preview_minimize(hwnd: HWND) {
-    proactive_set_iconic_bitmaps(hwnd);
-    set_has_iconic_bitmap(hwnd, true);
+    if configure_iconic_preview(hwnd) {
+        proactive_set_iconic_bitmaps(hwnd);
+    }
 
     ALLOW_NATIVE_MINIMIZE.store(true, Ordering::Release);
     unsafe {
@@ -104,29 +105,39 @@ extern "system" fn preview_subclass_proc(
     unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
 }
 
-fn set_has_iconic_bitmap(hwnd: HWND, enabled: bool) {
-    let value: i32 = if enabled { 1 } else { 0 };
-    unsafe {
-        let _ = DwmSetWindowAttribute(
-            hwnd,
-            DWMWA_HAS_ICONIC_BITMAP,
-            &value as *const _ as *const core::ffi::c_void,
-            core::mem::size_of::<i32>() as u32,
-        );
+fn configure_iconic_preview(hwnd: HWND) -> bool {
+    let enabled: i32 = 1;
+    for attribute in [DWMWA_FORCE_ICONIC_REPRESENTATION, DWMWA_HAS_ICONIC_BITMAP] {
+        if let Err(error) = unsafe {
+            DwmSetWindowAttribute(
+                hwnd,
+                attribute,
+                &enabled as *const _ as *const core::ffi::c_void,
+                core::mem::size_of::<i32>() as u32,
+            )
+        } {
+            eprintln!("DwmSetWindowAttribute({attribute:?}) failed: {error}");
+            return false;
+        }
     }
+    true
 }
 
 fn handle_dwm_iconic_message(hwnd: HWND, msg: u32, lparam: LPARAM) -> bool {
     match msg {
         WM_DWMSENDICONICTHUMBNAIL => {
-            let raw = lparam.0 as usize;
-            let width = ((raw & 0xffff) as i32).max(1);
-            let height = (((raw >> 16) & 0xffff) as i32).max(1);
+            let (width, height) = iconic_thumbnail_max_size(lparam.0 as usize);
             set_iconic_thumbnail(hwnd, width, height)
         }
         WM_DWMSENDICONICLIVEPREVIEWBITMAP => set_iconic_live_preview(hwnd),
         _ => false,
     }
+}
+
+fn iconic_thumbnail_max_size(raw: usize) -> (i32, i32) {
+    let width = (((raw >> 16) & 0xffff) as i32).max(1);
+    let height = ((raw & 0xffff) as i32).max(1);
+    (width, height)
 }
 
 fn capture_visible_window_frame(hwnd: HWND) -> bool {
@@ -257,7 +268,9 @@ fn proactive_set_iconic_bitmaps(hwnd: HWND) {
         fit_inside(frame.width as i32, frame.height as i32, 400, 300);
     if let Some(bitmap) = create_preview_bitmap(&frame, thumbnail_width, thumbnail_height) {
         unsafe {
-            let _ = DwmSetIconicThumbnail(hwnd, bitmap, 0);
+            if let Err(error) = DwmSetIconicThumbnail(hwnd, bitmap, 0) {
+                eprintln!("DwmSetIconicThumbnail failed: {error}");
+            }
             let _ = DeleteObject(HGDIOBJ::from(bitmap));
         }
     }
@@ -266,7 +279,9 @@ fn proactive_set_iconic_bitmaps(hwnd: HWND) {
         fit_inside(frame.width as i32, frame.height as i32, 1600, 1000);
     if let Some(bitmap) = create_preview_bitmap(&frame, preview_width, preview_height) {
         unsafe {
-            let _ = DwmSetIconicLivePreviewBitmap(hwnd, bitmap, None, 0);
+            if let Err(error) = DwmSetIconicLivePreviewBitmap(hwnd, bitmap, None, 0) {
+                eprintln!("DwmSetIconicLivePreviewBitmap failed: {error}");
+            }
             let _ = DeleteObject(HGDIOBJ::from(bitmap));
         }
     }
@@ -286,7 +301,9 @@ fn set_iconic_thumbnail(hwnd: HWND, max_width: i32, max_height: i32) -> bool {
         return false;
     };
     unsafe {
-        let _ = DwmSetIconicThumbnail(hwnd, bitmap, 0);
+        if let Err(error) = DwmSetIconicThumbnail(hwnd, bitmap, 0) {
+            eprintln!("DwmSetIconicThumbnail failed: {error}");
+        }
         let _ = DeleteObject(HGDIOBJ::from(bitmap));
     }
     true
@@ -301,7 +318,9 @@ fn set_iconic_live_preview(hwnd: HWND) -> bool {
         return false;
     };
     unsafe {
-        let _ = DwmSetIconicLivePreviewBitmap(hwnd, bitmap, None, 0);
+        if let Err(error) = DwmSetIconicLivePreviewBitmap(hwnd, bitmap, None, 0) {
+            eprintln!("DwmSetIconicLivePreviewBitmap failed: {error}");
+        }
         let _ = DeleteObject(HGDIOBJ::from(bitmap));
     }
     true
@@ -366,4 +385,15 @@ fn fit_inside(width: i32, height: i32, max_width: i32, max_height: i32) -> (i32,
         (width * scale).round().max(1.0) as i32,
         (height * scale).round().max(1.0) as i32,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::iconic_thumbnail_max_size;
+
+    #[test]
+    fn iconic_thumbnail_message_uses_high_word_for_width() {
+        let raw = (640usize << 16) | 360usize;
+        assert_eq!(iconic_thumbnail_max_size(raw), (640, 360));
+    }
 }

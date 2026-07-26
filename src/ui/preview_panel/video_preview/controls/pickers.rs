@@ -177,14 +177,20 @@ fn draw_wheel_picker(
     // Handle scroll wheel
     let mut result = None;
     if response.hovered() {
-        let scroll = ui.input(|i| {
-            i.events
+        let scroll = ui.input(|input| {
+            input
+                .events
                 .iter()
-                .find_map(|event| match event {
-                    egui::Event::MouseWheel { delta, .. } => Some(delta.y),
+                .filter_map(|event| match event {
+                    egui::Event::MouseWheel {
+                        delta,
+                        phase: egui::TouchPhase::Move,
+                        modifiers,
+                        ..
+                    } if !modifiers.shift => Some(delta.y),
                     _ => None,
                 })
-                .unwrap_or(0.0)
+                .sum::<f32>()
         });
         if scroll != 0.0 {
             result = Some(if scroll > 0.0 {

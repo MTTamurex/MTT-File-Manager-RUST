@@ -35,7 +35,22 @@ mod watcher_reload;
 
 impl ImageViewerApp {
     pub fn process_incoming_messages(&mut self, ctx: &egui::Context) {
+        self.process_incoming_messages_impl(ctx, true);
+    }
+
+    pub(crate) fn process_background_messages(&mut self, ctx: &egui::Context) {
+        self.process_incoming_messages_impl(ctx, false);
+    }
+
+    fn process_incoming_messages_impl(&mut self, ctx: &egui::Context, upload_textures: bool) {
         let _t_msg_start = Instant::now();
+
+        if !upload_textures {
+            self.defer_file_operation_results_while_hidden();
+            #[cfg(feature = "notify-watcher")]
+            self.defer_watcher_events_while_hidden();
+            return;
+        }
 
         let mut saw_device_event = false;
         while self.device_event_receiver.try_recv().is_ok() {
