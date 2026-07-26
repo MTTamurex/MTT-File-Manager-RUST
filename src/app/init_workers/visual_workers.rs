@@ -118,11 +118,20 @@ pub(in crate::app) fn spawn_async_font_loader() -> mpsc::Receiver<egui::FontDefi
         }
 
         if !loaded_fonts.is_empty() {
+            let has_segoe_ui = loaded_fonts.iter().any(|name| name == "segoe_ui");
             if let Some(proportional) = fonts
                 .families
                 .get_mut(&eframe::egui::FontFamily::Proportional)
             {
-                proportional.extend(loaded_fonts.clone());
+                if has_segoe_ui {
+                    proportional.insert(0, "segoe_ui".to_owned());
+                }
+                proportional.extend(
+                    loaded_fonts
+                        .iter()
+                        .filter(|name| name.as_str() != "segoe_ui")
+                        .cloned(),
+                );
             }
 
             if let Some(monospace) = fonts.families.get_mut(&eframe::egui::FontFamily::Monospace) {
