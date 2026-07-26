@@ -822,7 +822,7 @@ impl PdfViewerApp {
                     self.on_view_changed();
                 }
 
-                let dy = i.smooth_scroll_delta.y;
+                let dy = i.smooth_scroll_delta().y;
                 if dy > 1.0 {
                     self.zoom_in();
                 } else if dy < -1.0 {
@@ -1074,7 +1074,7 @@ impl eframe::App for PdfViewerApp {
         self.save_document_state();
     }
 
-    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+    fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         // Apply theme on first frame (cc.set_visuals in creator can be
         // overridden by the platform integration).
         if let Some(dark) = self.dark_mode.take() {
@@ -1105,10 +1105,16 @@ impl eframe::App for PdfViewerApp {
 
         self.ensure_worker(ctx);
         self.poll_results(ctx);
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let ctx_owned = ui.ctx().clone();
+        let ctx = &ctx_owned;
+        ui.set_style(ctx.global_style());
 
         match &self.document_status {
             DocumentStatus::Opening { .. } => {
-                egui::CentralPanel::default().show(ctx, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
                     ui.centered_and_justified(|ui| {
                         ui.spinner();
                         ui.label(t!("pdfviewer.loading_document").to_string());
@@ -1117,13 +1123,13 @@ impl eframe::App for PdfViewerApp {
                 return;
             }
             DocumentStatus::PasswordRequired(_) => {
-                egui::CentralPanel::default().show(ctx, |_ui| {});
+                egui::CentralPanel::default().show(ui, |_ui| {});
                 self.handle_password_dialog(ctx);
                 return;
             }
             DocumentStatus::Failed(error) => {
                 let error = error.clone();
-                egui::CentralPanel::default().show(ctx, |ui| {
+                egui::CentralPanel::default().show(ui, |ui| {
                     ui.centered_and_justified(|ui| {
                         ui.label(
                             egui::RichText::new(error)
@@ -1143,12 +1149,12 @@ impl eframe::App for PdfViewerApp {
             self.handle_search_shortcuts(ctx);
         }
 
-        egui::TopBottomPanel::top("pdf_toolbar").show(ctx, |ui| {
+        egui::Panel::top("pdf_toolbar").show(ui, |ui| {
             self.show_toolbar(ui);
         });
 
         if matches!(self.document_status, DocumentStatus::LoadingMetadata) {
-            egui::TopBottomPanel::top("pdf_loading_status").show(ctx, |ui| {
+            egui::Panel::top("pdf_loading_status").show(ui, |ui| {
                 ui.horizontal_centered(|ui| {
                     ui.spinner();
                     ui.label(t!("pdfviewer.loading_pages").to_string());
@@ -1156,10 +1162,10 @@ impl eframe::App for PdfViewerApp {
             });
         }
 
-        self.show_search_bar(ctx);
-        self.show_sidebar(ctx);
+        self.show_search_bar(ui);
+        self.show_sidebar(ui);
 
-        egui::CentralPanel::default().show(ctx, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
             let aw = (ui.available_width() - 20.0).max(100.0);
             let ah = ui.available_height().max(100.0);
 
@@ -1217,11 +1223,13 @@ pub(super) struct ErrorApp {
 }
 
 impl eframe::App for ErrorApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Reveal window (started hidden to avoid wgpu init flicker).
         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+    }
 
-        egui::CentralPanel::default().show(ctx, |ui| {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        egui::CentralPanel::default().show(ui, |ui| {
             ui.centered_and_justified(|ui| {
                 ui.label(
                     egui::RichText::new(&self.message)

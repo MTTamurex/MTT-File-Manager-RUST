@@ -216,7 +216,7 @@ pub(super) fn render_grid_item(
             if hover_duration >= TOOLTIP_DELAY_SECS {
                 if let Some(mouse_pos) = ui.input(|i| i.pointer.hover_pos()) {
                     let is_recycle = ctx.is_recycle_bin_view;
-                    let screen_right = ui.ctx().screen_rect().right();
+                    let screen_right = ui.ctx().viewport_rect().right();
                     let tooltip_width = 320.0;
                     let effective_right = if ctx.is_video_docked_visible {
                         screen_right * 0.72
@@ -231,80 +231,76 @@ pub(super) fn render_grid_item(
                     let tooltip_pos = egui::pos2(tooltip_x, mouse_pos.y);
                     let tooltip_layer =
                         egui::LayerId::new(egui::Order::Tooltip, response.id.with("tooltip"));
-                    egui::show_tooltip_at(
-                        ui.ctx(),
+                    egui::Tooltip::always_open(
+                        ui.ctx().clone(),
                         tooltip_layer,
                         response.id,
                         tooltip_pos,
-                        |ui: &mut Ui| {
-                            ui.set_max_width(300.0);
-                            ui.vertical(|ui| {
-                                ui.label(
-                                    egui::RichText::new(
-                                        crate::ui::components::item_slot::display_name_for_item(
-                                            item,
-                                        )
+                    )
+                    .show(|ui: &mut Ui| {
+                        ui.set_max_width(300.0);
+                        ui.vertical(|ui| {
+                            ui.label(
+                                egui::RichText::new(
+                                    crate::ui::components::item_slot::display_name_for_item(item)
                                         .as_ref(),
-                                    )
-                                    .strong(),
-                                );
-                                ui.separator();
-                                if item.drive_info.is_some() {
-                                    render_drive_tooltip(ui, item);
-                                    return;
-                                }
+                                )
+                                .strong(),
+                            );
+                            ui.separator();
+                            if item.drive_info.is_some() {
+                                render_drive_tooltip(ui, item);
+                                return;
+                            }
+                            ui.horizontal(|ui| {
+                                ui.label(rust_i18n::t!("file_info.type").to_string());
+                                ui.label(get_file_type_string(item));
+                            });
+                            if !item.is_dir || item.is_archive() {
                                 ui.horizontal(|ui| {
-                                    ui.label(rust_i18n::t!("file_info.type").to_string());
-                                    ui.label(get_file_type_string(item));
+                                    ui.label(rust_i18n::t!("file_info.size").to_string());
+                                    ui.label(crate::infrastructure::windows::format_size(
+                                        resolve_tooltip_live_size(ui, item, ctx),
+                                    ));
                                 });
-                                if !item.is_dir || item.is_archive() {
+                            }
+                            let (date_lbl, date_val) = if is_recycle {
+                                (
+                                    rust_i18n::t!("list_view.date_deleted").to_string(),
+                                    if item.modified > 0 {
+                                        crate::infrastructure::windows::format_date(item.modified)
+                                    } else {
+                                        item.deletion_date()
+                                            .map(|s| s.to_string())
+                                            .unwrap_or_else(|| "-".to_string())
+                                    },
+                                )
+                            } else {
+                                (
+                                    rust_i18n::t!("list_view.date_modified").to_string(),
+                                    crate::infrastructure::windows::format_date(item.modified),
+                                )
+                            };
+                            ui.horizontal(|ui| {
+                                ui.label(date_lbl);
+                                ui.label(":");
+                                ui.label(date_val);
+                            });
+                            if !is_recycle {
+                                if let Some(created) = item.created {
                                     ui.horizontal(|ui| {
-                                        ui.label(rust_i18n::t!("file_info.size").to_string());
-                                        ui.label(crate::infrastructure::windows::format_size(
-                                            resolve_tooltip_live_size(ui, item, ctx),
+                                        ui.label(
+                                            rust_i18n::t!("file_info.date_created").to_string(),
+                                        );
+                                        ui.label(":");
+                                        ui.label(crate::infrastructure::windows::format_date(
+                                            created,
                                         ));
                                     });
                                 }
-                                let (date_lbl, date_val) = if is_recycle {
-                                    (
-                                        rust_i18n::t!("list_view.date_deleted").to_string(),
-                                        if item.modified > 0 {
-                                            crate::infrastructure::windows::format_date(
-                                                item.modified,
-                                            )
-                                        } else {
-                                            item.deletion_date()
-                                                .map(|s| s.to_string())
-                                                .unwrap_or_else(|| "-".to_string())
-                                        },
-                                    )
-                                } else {
-                                    (
-                                        rust_i18n::t!("list_view.date_modified").to_string(),
-                                        crate::infrastructure::windows::format_date(item.modified),
-                                    )
-                                };
-                                ui.horizontal(|ui| {
-                                    ui.label(date_lbl);
-                                    ui.label(":");
-                                    ui.label(date_val);
-                                });
-                                if !is_recycle {
-                                    if let Some(created) = item.created {
-                                        ui.horizontal(|ui| {
-                                            ui.label(
-                                                rust_i18n::t!("file_info.date_created").to_string(),
-                                            );
-                                            ui.label(":");
-                                            ui.label(crate::infrastructure::windows::format_date(
-                                                created,
-                                            ));
-                                        });
-                                    }
-                                }
-                            });
-                        },
-                    );
+                            }
+                        });
+                    });
                 } // if let Some(mouse_pos)
             }
         }

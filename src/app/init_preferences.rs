@@ -204,7 +204,7 @@ impl StartupPreferences {
         let gpu_backend_preference = prefs
             .get("gpu_backend")
             .map(|backend| match backend.as_str() {
-                "vulkan" => {
+                "dx12" => {
                     if let Err(error) = app_state_db.set_preference("gpu_backend", "auto") {
                         log::warn!("[PREFERENCES] Failed to migrate GPU backend: {error}");
                     }

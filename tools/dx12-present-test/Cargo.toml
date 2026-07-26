@@ -1,0 +1,19 @@
+[package]
+name = "dx12-present-test"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+pollster = "0.4.0"
+wgpu = { version = "29.0.4", default-features = false, features = ["std", "dx12"] }
+winit = "0.30.13"
+windows = { version = "0.62.2", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Dwm",
+    "Win32_Graphics_Gdi",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
+[workspace]

@@ -126,7 +126,7 @@ pub(crate) fn render_item_tooltip(
         if hover_duration >= TOOLTIP_DELAY_SECS {
             if let Some(mouse_pos) = ui.input(|i| i.pointer.hover_pos()) {
                 // SMART TOOLTIP: Position to avoid video player overlay
-                let screen_right = ui.ctx().screen_rect().right();
+                let screen_right = ui.ctx().viewport_rect().right();
                 let tooltip_width = 320.0;
 
                 let effective_right = if ctx.is_video_docked_visible {
@@ -144,91 +144,84 @@ pub(crate) fn render_item_tooltip(
 
                 let tooltip_layer =
                     egui::LayerId::new(egui::Order::Tooltip, response.id.with("tooltip"));
-                egui::show_tooltip_at(
-                    ui.ctx(),
+                egui::Tooltip::always_open(
+                    ui.ctx().clone(),
                     tooltip_layer,
                     response.id,
                     tooltip_pos,
-                    |ui: &mut Ui| {
-                        ui.set_max_width(300.0);
-                        ui.vertical(|ui| {
-                            ui.label(
-                                RichText::new(
-                                    crate::ui::components::item_slot::display_name_for_item(item)
-                                        .as_ref(),
-                                )
-                                .strong(),
-                            );
-                            ui.separator();
-                            if item.drive_info.is_some() {
-                                render_drive_tooltip(ui, item);
-                                return;
+                )
+                .show(|ui: &mut Ui| {
+                    ui.set_max_width(300.0);
+                    ui.vertical(|ui| {
+                        ui.label(
+                            RichText::new(
+                                crate::ui::components::item_slot::display_name_for_item(item)
+                                    .as_ref(),
+                            )
+                            .strong(),
+                        );
+                        ui.separator();
+                        if item.drive_info.is_some() {
+                            render_drive_tooltip(ui, item);
+                            return;
+                        }
+                        // Thumbnail preview for media files
+                        if !item.is_dir && item.is_media() {
+                            if let Some(tex) = ctx.texture_cache.get(&item.path).cloned() {
+                                let tex_size = tex.size_vec2();
+                                let max_w = 280.0_f32;
+                                let max_h = 180.0_f32;
+                                let scale = (max_w / tex_size.x).min(max_h / tex_size.y).min(1.0);
+                                let display_size =
+                                    egui::vec2(tex_size.x * scale, tex_size.y * scale);
+                                ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+                                    ui.add(egui::Image::new(&tex).fit_to_exact_size(display_size));
+                                });
+                                ui.add_space(4.0);
                             }
-                            // Thumbnail preview for media files
-                            if !item.is_dir && item.is_media() {
-                                if let Some(tex) = ctx.texture_cache.get(&item.path).cloned() {
-                                    let tex_size = tex.size_vec2();
-                                    let max_w = 280.0_f32;
-                                    let max_h = 180.0_f32;
-                                    let scale =
-                                        (max_w / tex_size.x).min(max_h / tex_size.y).min(1.0);
-                                    let display_size =
-                                        egui::vec2(tex_size.x * scale, tex_size.y * scale);
-                                    ui.with_layout(
-                                        egui::Layout::top_down(egui::Align::Center),
-                                        |ui| {
-                                            ui.add(
-                                                egui::Image::new(&tex)
-                                                    .fit_to_exact_size(display_size),
-                                            );
-                                        },
-                                    );
-                                    ui.add_space(4.0);
-                                }
-                            }
+                        }
+                        ui.horizontal(|ui| {
+                            ui.label(t!("file_info.type"));
+                            ui.label(get_file_type_string(item));
+                        });
+                        if !item.is_dir || item.is_archive() {
                             ui.horizontal(|ui| {
-                                ui.label(t!("file_info.type"));
-                                ui.label(get_file_type_string(item));
+                                ui.label(t!("file_info.size"));
+                                ui.label(format_size(resolve_tooltip_live_size(ui, item, ctx)));
                             });
-                            if !item.is_dir || item.is_archive() {
+                        }
+                        let date_lbl = if is_recycle_bin {
+                            t!("list_view.date_deleted")
+                        } else {
+                            t!("list_view.date_modified")
+                        };
+                        let date_val = if is_recycle_bin {
+                            if item.modified > 0 {
+                                format_date(item.modified)
+                            } else {
+                                item.deletion_date()
+                                    .map(|s| s.to_string())
+                                    .unwrap_or_else(|| "-".to_string())
+                            }
+                        } else {
+                            format_date(item.modified)
+                        };
+                        ui.horizontal(|ui| {
+                            ui.label(date_lbl);
+                            ui.label(":");
+                            ui.label(date_val);
+                        });
+                        if !is_recycle_bin {
+                            if let Some(created) = item.created {
                                 ui.horizontal(|ui| {
-                                    ui.label(t!("file_info.size"));
-                                    ui.label(format_size(resolve_tooltip_live_size(ui, item, ctx)));
+                                    ui.label(t!("file_info.date_created"));
+                                    ui.label(":");
+                                    ui.label(format_date(created));
                                 });
                             }
-                            let date_lbl = if is_recycle_bin {
-                                t!("list_view.date_deleted")
-                            } else {
-                                t!("list_view.date_modified")
-                            };
-                            let date_val = if is_recycle_bin {
-                                if item.modified > 0 {
-                                    format_date(item.modified)
-                                } else {
-                                    item.deletion_date()
-                                        .map(|s| s.to_string())
-                                        .unwrap_or_else(|| "-".to_string())
-                                }
-                            } else {
-                                format_date(item.modified)
-                            };
-                            ui.horizontal(|ui| {
-                                ui.label(date_lbl);
-                                ui.label(":");
-                                ui.label(date_val);
-                            });
-                            if !is_recycle_bin {
-                                if let Some(created) = item.created {
-                                    ui.horizontal(|ui| {
-                                        ui.label(t!("file_info.date_created"));
-                                        ui.label(":");
-                                        ui.label(format_date(created));
-                                    });
-                                }
-                            }
-                        });
-                    },
-                );
+                        }
+                    });
+                });
             } // if let Some(mouse_pos)
         }
     } else {

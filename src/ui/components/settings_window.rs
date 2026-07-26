@@ -21,7 +21,7 @@ pub struct SettingsWindowOutput {
 /// Render the modal backdrop BEFORE panels to block their input.
 /// Returns true if the backdrop was clicked (should close the window).
 pub fn render_settings_backdrop(ctx: &egui::Context) -> bool {
-    let screen_rect = ctx.screen_rect();
+    let screen_rect = ctx.viewport_rect();
     let mut close_from_backdrop = false;
     egui::Area::new(egui::Id::from("settings_window_backdrop"))
         .fixed_pos(screen_rect.min)
@@ -70,7 +70,7 @@ pub fn render_settings_window(
         keep_open = false;
     }
 
-    let dark_mode = ctx.style().visuals.dark_mode;
+    let dark_mode = ctx.global_style().visuals.dark_mode;
     let bg_color = if dark_mode {
         Color32::from_rgb(50, 50, 50)
     } else {

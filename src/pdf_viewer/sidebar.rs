@@ -8,12 +8,13 @@ const THUMB_MAX_W: f32 = 120.0;
 const THUMB_MAX_H: f32 = 170.0;
 
 impl PdfViewerApp {
-    pub(super) fn show_sidebar(&mut self, ctx: &egui::Context) {
-        let panel = egui::SidePanel::left("pdf_thumbnail_sidebar")
+    pub(super) fn show_sidebar(&mut self, root_ui: &mut egui::Ui) {
+        let ctx = root_ui.ctx().clone();
+        let panel = egui::Panel::left("pdf_thumbnail_sidebar")
             .resizable(true)
-            .default_width(170.0)
-            .width_range(140.0..=260.0)
-            .show(ctx, |ui| {
+            .default_size(170.0)
+            .size_range(140.0..=260.0)
+            .show(root_ui, |ui| {
                 ui.heading(t!("pdfviewer.thumbnails_title").to_string());
                 ui.separator();
 
@@ -30,7 +31,7 @@ impl PdfViewerApp {
                 let pointer_over_sidebar = ui.rect_contains_pointer(ui.max_rect());
                 let manual_sidebar_navigation = pointer_over_sidebar
                     && ui.input(|input| {
-                        input.raw_scroll_delta.y.abs() > f32::EPSILON
+                        input.smooth_scroll_delta().y.abs() > f32::EPSILON
                             || input.pointer.primary_down()
                     });
                 if manual_sidebar_navigation {

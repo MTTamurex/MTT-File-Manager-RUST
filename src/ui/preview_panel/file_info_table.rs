@@ -145,9 +145,11 @@ pub fn render_file_info_table(
                         {
                             if ui
                                 .add(
-                                    egui::ImageButton::new(egui::load::SizedTexture::new(
-                                        tex.id(),
-                                        egui::vec2(16.0, 16.0),
+                                    egui::Button::image(egui::Image::new(
+                                        egui::load::SizedTexture::new(
+                                            tex.id(),
+                                            egui::vec2(16.0, 16.0),
+                                        ),
                                     ))
                                     .frame(false),
                                 )

@@ -8,7 +8,6 @@ pub(crate) const WGPU_REQUIRED_MAX_TEXTURE_DIMENSION_2D: u32 = 8192;
 /// Convert a stored backend preference string into wgpu::Backends flags.
 pub(crate) fn parse_gpu_backend_preference(pref: Option<&str>) -> wgpu::Backends {
     match pref {
-        Some("dx12") => wgpu::Backends::DX12,
         Some("vulkan") => wgpu::Backends::VULKAN,
         _ => auto_gpu_backends(),
     }
@@ -16,7 +15,7 @@ pub(crate) fn parse_gpu_backend_preference(pref: Option<&str>) -> wgpu::Backends
 
 #[cfg(target_os = "windows")]
 fn auto_gpu_backends() -> wgpu::Backends {
-    wgpu::Backends::VULKAN
+    wgpu::Backends::DX12
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -28,7 +27,7 @@ pub(crate) fn adapter_selector(
     pref: Option<&str>,
 ) -> Option<egui_wgpu::NativeAdapterSelectorMethod> {
     match pref {
-        Some("dx12") | Some("vulkan") => None,
+        Some("vulkan") => None,
         _ => {
             #[cfg(target_os = "windows")]
             {
@@ -43,7 +42,7 @@ pub(crate) fn adapter_selector(
 }
 
 #[cfg(target_os = "windows")]
-const AUTO_BACKEND_PRIORITY: &[wgpu::Backend] = &[wgpu::Backend::Vulkan];
+const AUTO_BACKEND_PRIORITY: &[wgpu::Backend] = &[wgpu::Backend::Dx12];
 
 #[cfg(target_os = "windows")]
 fn backend_priority_label(order: &[wgpu::Backend]) -> String {

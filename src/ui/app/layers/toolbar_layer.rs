@@ -13,12 +13,13 @@ macro_rules! debug_log {
     ($($arg:tt)*) => {};
 }
 
-pub(crate) fn render_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context) {
-    egui::TopBottomPanel::top("nav_bar")
+pub(crate) fn render_toolbar_layer(app: &mut ImageViewerApp, root_ui: &mut egui::Ui) {
+    let dark_mode = root_ui.visuals().dark_mode;
+    egui::Panel::top("nav_bar")
         .show_separator_line(true)
-        .exact_height(46.0)
+        .exact_size(46.0)
         .frame(egui::Frame {
-            fill: if ctx.style().visuals.dark_mode {
+            fill: if dark_mode {
                 egui::Color32::from_rgb(45, 45, 45)
             } else {
                 egui::Color32::from_rgb(243, 243, 243)
@@ -31,7 +32,7 @@ pub(crate) fn render_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context
             },
             ..Default::default()
         })
-        .show(ctx, |ui| {
+        .show(root_ui, |ui| {
             use crate::domain::file_entry::ViewMode;
             use crate::domain::special_paths::{
                 COMPUTER_VIEW_ID, RECYCLE_BIN_VIEW_ID, TAG_VIEW_PREFIX,

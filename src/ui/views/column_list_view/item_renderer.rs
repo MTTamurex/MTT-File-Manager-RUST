@@ -228,12 +228,11 @@ fn column_item_content_contains_pointer(
     let font = FontId::proportional(12.0);
     let name = crate::ui::components::item_slot::display_name_for_item(item);
     let display_name = truncate_text_for_column(name.as_ref(), max_width, &font, ui);
-    let text_width = ui.fonts(|fonts| {
-        fonts
-            .layout_no_wrap(display_name, font, Color32::WHITE)
-            .rect
-            .width()
-    });
+    let text_width = ui
+        .painter()
+        .layout_no_wrap(display_name, font, Color32::WHITE)
+        .rect
+        .width();
     Rect::from_min_size(
         rect.min + egui::vec2(24.0 + tag_offset, 3.0),
         egui::vec2(text_width.min(max_width), ROW_HEIGHT - 6.0),
@@ -279,7 +278,7 @@ fn render_column_item_name(
             rect.min + egui::vec2(24.0 + tag_offset, 2.0),
             egui::vec2(COLUMN_WIDTH - 32.0 - tag_offset, ROW_HEIGHT - 4.0),
         );
-        ui.allocate_new_ui(egui::UiBuilder::new().max_rect(edit_rect), |ui| {
+        ui.scope_builder(egui::UiBuilder::new().max_rect(edit_rect), |ui| {
             let response =
                 ui.add(egui::TextEdit::singleline(&mut text).id_source("rename_input_column_list"));
             if ctx.focus_rename {

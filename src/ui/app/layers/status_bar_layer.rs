@@ -2,7 +2,8 @@ use crate::app::ImageViewerApp;
 use eframe::egui;
 use rust_i18n::t;
 
-pub(crate) fn render_status_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Context) {
+pub(crate) fn render_status_bar_layer(app: &mut ImageViewerApp, root_ui: &mut egui::Ui) {
+    let ctx = root_ui.ctx().clone();
     // Detect bulk scan completion using bulk-specific counters instead of the shared queue.
     let is_scanning = app
         .bulk_thumbnail_scanning
@@ -65,9 +66,9 @@ pub(crate) fn render_status_bar_layer(app: &mut ImageViewerApp, ctx: &egui::Cont
         ctx.request_repaint(); // Keep UI refreshing while processing
     }
 
-    egui::TopBottomPanel::bottom("status_bar")
-        .exact_height(24.0)
-        .show(ctx, |ui| {
+    egui::Panel::bottom("status_bar")
+        .exact_size(24.0)
+        .show(root_ui, |ui| {
             use crate::ui::status_bar::{render_status_bar, StatusBarAction};
             let video_preview_active = app
                 .media_preview

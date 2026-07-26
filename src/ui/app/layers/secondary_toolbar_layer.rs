@@ -9,18 +9,19 @@ mod actions;
 mod sort_controls;
 mod view_zoom_controls;
 
-pub(crate) fn render_secondary_toolbar_layer(app: &mut ImageViewerApp, ctx: &egui::Context) {
-    let separator_color = if ctx.style().visuals.dark_mode {
+pub(crate) fn render_secondary_toolbar_layer(app: &mut ImageViewerApp, root_ui: &mut egui::Ui) {
+    let dark_mode = root_ui.visuals().dark_mode;
+    let separator_color = if dark_mode {
         egui::Color32::from_rgb(80, 80, 80)
     } else {
         egui::Color32::from_rgb(210, 210, 210)
     };
 
-    egui::TopBottomPanel::top("secondary_nav_bar")
+    egui::Panel::top("secondary_nav_bar")
         .show_separator_line(false)
-        .exact_height(46.0)
+        .exact_size(46.0)
         .frame(egui::Frame {
-            fill: if ctx.style().visuals.dark_mode {
+            fill: if dark_mode {
                 egui::Color32::from_rgb(45, 45, 45)
             } else {
                 egui::Color32::WHITE
@@ -33,7 +34,7 @@ pub(crate) fn render_secondary_toolbar_layer(app: &mut ImageViewerApp, ctx: &egu
             },
             ..Default::default()
         })
-        .show(ctx, |ui| {
+        .show(root_ui, |ui| {
             let rect = ui.max_rect();
             ui.painter().hline(
                 rect.x_range(),
@@ -164,17 +165,12 @@ fn render_lock_button(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
         &tooltip,
     );
     let popup_id = ui.make_persistent_id("folder_lock_menu");
-    if response.clicked() {
-        ui.memory_mut(|memory| memory.toggle_popup(popup_id));
-    }
 
     let mut action = None;
-    egui::popup::popup_below_widget(
-        ui,
-        popup_id,
-        &response,
-        egui::popup::PopupCloseBehavior::CloseOnClick,
-        |ui| {
+    egui::Popup::menu(&response)
+        .id(popup_id)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClick)
+        .show(|ui| {
             ui.set_min_width(260.0);
             if let Some(resolved) = resolved.as_ref().filter(|_| is_inherited) {
                 ui.label(rust_i18n::t!(
@@ -216,8 +212,7 @@ fn render_lock_button(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
                     action = Some(None);
                 }
             }
-        },
-    );
+        });
 
     let changed = match action {
         Some(Some(scope)) => app.set_current_folder_lock(scope),

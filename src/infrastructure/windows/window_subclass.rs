@@ -23,8 +23,6 @@ mod redraw_suppression;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::Mutex;
 
-use crate::infrastructure::windows::taskbar_minimize;
-
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::Graphics::Gdi::ValidateRect;
 use windows::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
@@ -317,15 +315,6 @@ extern "system" fn borderless_subclass_proc(
         return result;
     }
 
-    if msg == taskbar_minimize::SAFE_MINIMIZE_MESSAGE {
-        taskbar_minimize::perform_safe_minimize(hwnd, mark_layout_minimized);
-        return LRESULT(0);
-    }
-
-    if taskbar_minimize::handle_dwm_iconic_message(hwnd, msg, lparam) {
-        return LRESULT(0);
-    }
-
     if msg == WM_GETMINMAXINFO {
         let minmax = lparam.0 as *mut MINMAXINFO;
         if !minmax.is_null() {
@@ -356,12 +345,7 @@ extern "system" fn borderless_subclass_proc(
 
         match wparam.0 & SC_COMMAND_MASK {
             SC_MINIMIZE_CMD => {
-                if taskbar_minimize::consume_allowed_native_minimize() {
-                    mark_layout_minimized();
-                } else {
-                    taskbar_minimize::request_minimize_with_real_preview(hwnd);
-                    return LRESULT(0);
-                }
+                mark_layout_minimized();
             }
             SC_RESTORE_CMD => {
                 mark_layout_restoring();
@@ -385,7 +369,7 @@ extern "system" fn borderless_subclass_proc(
             // Note: freeze_layout() should be called by UI layer before this
             // to capture sidebar widths. If not yet frozen, do it now with defaults.
             mark_layout_minimized();
-            return unsafe { DefSubclassProc(hwnd, msg, wparam, LPARAM(0)) };
+            return unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) };
         } else if size_type == SIZE_RESTORED || size_type == SIZE_MAXIMIZED {
             // Transition from Minimized to Restoring (not directly to Normal)
             // The UI layer must call try_unfreeze_layout() to complete transition

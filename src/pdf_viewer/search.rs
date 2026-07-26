@@ -186,12 +186,12 @@ impl PdfViewerApp {
         }
     }
 
-    pub(super) fn show_search_bar(&mut self, ctx: &egui::Context) {
+    pub(super) fn show_search_bar(&mut self, root_ui: &mut egui::Ui) {
         if !self.search_active {
             return;
         }
 
-        egui::TopBottomPanel::top("pdf_search_bar").show(ctx, |ui| {
+        egui::Panel::top("pdf_search_bar").show(root_ui, |ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 4.0;
 

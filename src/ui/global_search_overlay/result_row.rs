@@ -86,12 +86,10 @@ fn measure_text_width(
     font_id: &egui::FontId,
     color: egui::Color32,
 ) -> f32 {
-    ui.fonts(|fonts| {
-        fonts
-            .layout_no_wrap(text.to_string(), font_id.clone(), color)
-            .rect
-            .width()
-    })
+    ui.painter()
+        .layout_no_wrap(text.to_string(), font_id.clone(), color)
+        .rect
+        .width()
 }
 
 fn paint_action_button(

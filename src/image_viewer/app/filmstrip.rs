@@ -110,19 +110,20 @@ impl super::DedicatedImageViewerApp {
         }
     }
 
-    pub(super) fn render_filmstrip(&mut self, ctx: &egui::Context) {
+    pub(super) fn render_filmstrip(&mut self, root_ui: &mut egui::Ui) {
         if self.sequence.entries.len() <= 1 {
             return;
         }
 
+        let ctx = root_ui.ctx().clone();
         let total = self.sequence.entries.len();
         let current = self.current_index;
         let item_w = FILMSTRIP_THUMB_SIZE + FILMSTRIP_SPACING;
         let total_content_w = total as f32 * item_w + FILMSTRIP_SPACING;
 
-        egui::TopBottomPanel::bottom("filmstrip_panel")
-            .exact_height(FILMSTRIP_PANEL_HEIGHT)
-            .show(ctx, |ui| {
+        egui::Panel::bottom("filmstrip_panel")
+            .exact_size(FILMSTRIP_PANEL_HEIGHT)
+            .show(root_ui, |ui| {
                 let panel_bg = if ui.visuals().dark_mode {
                     egui::Color32::from_gray(30)
                 } else {
@@ -172,7 +173,7 @@ impl super::DedicatedImageViewerApp {
                             self.paint_filmstrip_item(ui, idx, rect, response.hovered());
 
                             if response.clicked() {
-                                self.navigate_to(idx, ctx);
+                                self.navigate_to(idx, &ctx);
                             }
                         }
                     });

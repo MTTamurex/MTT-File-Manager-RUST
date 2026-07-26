@@ -36,7 +36,7 @@ pub fn render_fullscreen_video(
     let screen_rect = ui
         .ctx()
         .input(|i| i.viewport().inner_rect)
-        .unwrap_or_else(|| ui.ctx().screen_rect());
+        .unwrap_or_else(|| ui.ctx().viewport_rect());
 
     egui::Area::new(egui::Id::new("video_fullscreen"))
         .fixed_pos(screen_rect.min)

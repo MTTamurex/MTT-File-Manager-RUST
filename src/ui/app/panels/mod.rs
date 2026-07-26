@@ -11,17 +11,18 @@ const RIGHT_SIDEBAR_MIN: f32 = 250.0;
 const RIGHT_SIDEBAR_MAX: f32 = 500.0;
 const RESIZE_HANDLE_WIDTH: f32 = 6.0;
 
-pub fn render_panels(app: &mut ImageViewerApp, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+pub fn render_panels(app: &mut ImageViewerApp, root_ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+    let ctx = root_ui.ctx().clone();
     let t_panels_start = std::time::Instant::now();
 
     // 1. Manual resize handles (rendered FIRST so Foreground Windows appearing later stack ON TOP)
     let t_resize = std::time::Instant::now();
-    render_resize_handles(app, ctx);
+    render_resize_handles(app, &ctx);
     let resize_ms = t_resize.elapsed().as_millis();
 
     // 2. Left Sidebar (forced width from app state)
     let t_sidebar = std::time::Instant::now();
-    let sidebar_action = render_sidebar_panel(app, ctx);
+    let sidebar_action = render_sidebar_panel(app, root_ui);
     let sidebar_ms = t_sidebar.elapsed().as_millis();
 
     // Handle sidebar action OUTSIDE the sidebar timing to avoid attributing
@@ -32,12 +33,12 @@ pub fn render_panels(app: &mut ImageViewerApp, ctx: &egui::Context, _frame: &mut
 
     // 3. Right Preview Panel (forced width from app state)
     let t_preview = std::time::Instant::now();
-    content::render_preview_panel_layout(app, ctx, _frame);
+    content::render_preview_panel_layout(app, root_ui, frame);
     let preview_ms = t_preview.elapsed().as_millis();
 
     // 4. Central Panel
     let t_central = std::time::Instant::now();
-    content::render_central_panel_layout(app, ctx);
+    content::render_central_panel_layout(app, root_ui);
     let central_ms = t_central.elapsed().as_millis();
 
     // 5. Focus release: When user clicks anywhere outside the video player,
@@ -77,7 +78,7 @@ pub fn render_panels(app: &mut ImageViewerApp, ctx: &egui::Context, _frame: &mut
     }
 }
 
-fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) -> Option<SidebarAction> {
+fn render_sidebar_panel(app: &mut ImageViewerApp, root_ui: &mut egui::Ui) -> Option<SidebarAction> {
     let t_sidebar_fn = std::time::Instant::now();
     if !app.show_left_sidebar {
         return None;
@@ -91,15 +92,17 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) -> Option
 
     // Use exact_width + resizable(false) to FORCE the width from app state
     // Resize is handled via manual drag handles rendered separately
-    let sidebar_response = egui::SidePanel::left("sidebar")
-        .exact_width(target_width)
+    let dark_mode = root_ui.visuals().dark_mode;
+    let ctx = root_ui.ctx().clone();
+    let sidebar_response = egui::Panel::left("sidebar")
+        .exact_size(target_width)
         .resizable(false) // Resize handled manually via drag handles
-        .frame(egui::Frame::NONE.fill(if ctx.style().visuals.dark_mode {
+        .frame(egui::Frame::NONE.fill(if dark_mode {
             egui::Color32::from_rgb(45, 45, 45)
         } else {
             egui::Color32::WHITE
         }))
-        .show(ctx, |ui| {
+        .show(root_ui, |ui| {
             use crate::ui::sidebar::{
                 render_sidebar_drives, render_sidebar_fixed_top, render_tags_section,
                 SidebarContext,
@@ -150,7 +153,7 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) -> Option
 
             // ── Smooth scroll input ──
             const SIDEBAR_SCROLL_SPEED: f32 = 5.0;
-            let scroll_delta = ui.input(|i| i.smooth_scroll_delta.y);
+            let scroll_delta = ui.input(|i| i.smooth_scroll_delta().y);
             let sidebar_rect = ui.max_rect();
             let pointer_in_sidebar = ui.input(|i| {
                 i.pointer
@@ -407,11 +410,11 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, ctx: &egui::Context) -> Option
             let pos = ctx.input(|i| i.pointer.hover_pos().unwrap_or_default());
             // Use screen width (not sidebar edge) so submenus open to the right
             // into the available central area, not flip left off-screen.
-            let right_bound = ctx.screen_rect().right() - app.layout.sidebar_right_width;
+            let right_bound = ctx.viewport_rect().right() - app.layout.sidebar_right_width;
 
             app.context_menu
                 .open(pos, right_bound, None, vec![path_buf.clone()], false);
-            app.populate_context_menu(ctx, &[path_buf], false, None);
+            app.populate_context_menu(&ctx, &[path_buf], false, None);
             None
         }
         other => other,
@@ -531,7 +534,7 @@ fn render_resize_handles(app: &mut ImageViewerApp, ctx: &egui::Context) {
         return;
     }
 
-    let screen = ctx.screen_rect();
+    let screen = ctx.viewport_rect();
     // Total height of all top panels: tab bar (36) + toolbar (46) + secondary toolbar (46)
     let top_panels_height = 36.0 + 46.0 + 46.0;
 

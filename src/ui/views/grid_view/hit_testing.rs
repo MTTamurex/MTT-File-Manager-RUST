@@ -113,12 +113,11 @@ fn grid_text_contains(
     }
 
     let font_id = egui::FontId::proportional(font_size);
-    let raw_width = ui.fonts(|fonts| {
-        fonts
-            .layout_no_wrap(text.to_string(), font_id, Color32::WHITE)
-            .rect
-            .width()
-    });
+    let raw_width = ui
+        .painter()
+        .layout_no_wrap(text.to_string(), font_id, Color32::WHITE)
+        .rect
+        .width();
     let visual_width = raw_width.min(text_rect.width()).max(1.0);
     Rect::from_min_size(text_rect.min, egui::vec2(visual_width, text_rect.height()))
         .expand(2.0)

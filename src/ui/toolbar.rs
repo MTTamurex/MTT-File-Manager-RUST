@@ -71,12 +71,10 @@ fn breadcrumb_segments(current_path: &str) -> Vec<(String, String)> {
 
 /// Measure the width of a text string using the given font.
 fn measure_text_width(ui: &egui::Ui, text: &str, font_id: &egui::FontId) -> f32 {
-    ui.fonts(|fonts| {
-        fonts
-            .layout_no_wrap(text.to_string(), font_id.clone(), ui.visuals().text_color())
-            .size()
-            .x
-    })
+    ui.painter()
+        .layout_no_wrap(text.to_string(), font_id.clone(), ui.visuals().text_color())
+        .size()
+        .x
 }
 
 /// Render a single breadcrumb button with transparent background and hover effect.
@@ -308,7 +306,7 @@ pub fn render_toolbar(
             let text_resp = search_ui.add_sized(
                 egui::vec2(text_available_w, input_height - 2.0),
                 egui::TextEdit::singleline(search_query)
-                    .frame(false)
+                    .frame(egui::Frame::NONE.inner_margin(egui::Margin::symmetric(4, 2)))
                     .hint_text(hint)
                     .text_color(theme::text_color(ui.visuals().dark_mode))
                     .vertical_align(egui::Align::Center),
@@ -388,7 +386,7 @@ pub fn render_toolbar(
                     egui::TextEdit::singleline(path_input)
                         .hint_text(t!("toolbar.path_placeholder"))
                         .id_source("address_edit")
-                        .frame(false)
+                        .frame(egui::Frame::NONE.inner_margin(egui::Margin::symmetric(4, 2)))
                         .text_color(theme::text_color(ui.visuals().dark_mode)),
                 );
 

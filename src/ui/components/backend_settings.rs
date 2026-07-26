@@ -3,12 +3,9 @@ use eframe::egui::{self, RichText};
 use rust_i18n::t;
 
 const BACKENDS: &[(&str, &str)] = &[
-    ("auto", "Auto - Vulkan (default)"),
-    (
-        "glow",
-        "Glow - OpenGL (fallback when Vulkan is unavailable)",
-    ),
-    ("dx12", "Wgpu - DirectX 12 (experimental)"),
+    ("auto", "Wgpu - DirectX 12 (default)"),
+    ("vulkan", "Wgpu - Vulkan"),
+    ("glow", "Glow - OpenGL (fallback)"),
 ];
 
 pub fn render_backend_settings_section(

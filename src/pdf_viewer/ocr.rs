@@ -81,7 +81,7 @@ fn run_ocr(
     let engine = OcrEngine::TryCreateFromUserProfileLanguages()?;
 
     // RecognizeAsync is awaited synchronously — safe on a worker (MTA) thread.
-    let result = engine.RecognizeAsync(&bitmap)?.get()?;
+    let result = engine.RecognizeAsync(&bitmap)?.join()?;
 
     let mut words = Vec::new();
     let lines = result.Lines()?;

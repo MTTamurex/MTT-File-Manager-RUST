@@ -143,7 +143,7 @@ pub fn extract_shell_menu(hwnd: HWND, paths: &[std::path::PathBuf]) -> Result<Sh
     let call_num = CALL_COUNT.fetch_add(1, Ordering::SeqCst) + 1;
 
     if paths.is_empty() {
-        return Err(Error::from_win32());
+        return Err(Error::from_thread());
     }
 
     unsafe {
@@ -181,11 +181,11 @@ pub fn extract_shell_menu(hwnd: HWND, paths: &[std::path::PathBuf]) -> Result<Sh
         }
 
         if parent_folder_opt.is_none() || child_pidls.is_empty() {
-            return Err(Error::from_win32());
+            return Err(Error::from_thread());
         }
 
         let Some(parent_folder) = parent_folder_opt else {
-            return Err(Error::from_win32());
+            return Err(Error::from_thread());
         };
 
         // Get IContextMenu

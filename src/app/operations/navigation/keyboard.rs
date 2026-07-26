@@ -60,7 +60,7 @@ pub fn process_list_keyboard_input(
     reserved_enter_binding: Option<ShortcutBinding>,
 ) -> KeyboardNavResult {
     // Do not capture keys when a text field (address, search) has focus
-    if ui.ctx().wants_keyboard_input() {
+    if ui.ctx().egui_wants_keyboard_input() {
         return KeyboardNavResult::no_action();
     }
 
@@ -138,7 +138,7 @@ pub fn process_grid_keyboard_input(
     reserved_enter_binding: Option<ShortcutBinding>,
 ) -> KeyboardNavResult {
     // Do not capture keys when a text field (address, search) has focus
-    if ui.ctx().wants_keyboard_input() {
+    if ui.ctx().egui_wants_keyboard_input() {
         return KeyboardNavResult::no_action();
     }
 
@@ -217,7 +217,7 @@ pub fn process_column_list_keyboard_input(
     visible_columns: usize,
     reserved_enter_binding: Option<ShortcutBinding>,
 ) -> KeyboardNavResult {
-    if ui.ctx().wants_keyboard_input() || item_count == 0 {
+    if ui.ctx().egui_wants_keyboard_input() || item_count == 0 {
         return KeyboardNavResult::no_action();
     }
 

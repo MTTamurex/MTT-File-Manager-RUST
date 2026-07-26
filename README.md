@@ -69,21 +69,21 @@
 
 The app supports three rendering backend choices, selectable in **Settings > General > GPU Backend** (requires app restart):
 
-### Auto — Vulkan (Default)
+### Wgpu — DirectX 12 (Default)
 - Default backend for the main window on Windows
-- Best observed scrolling and thumbnail-upload performance in large media folders
-- Uses Vulkan through `wgpu` with aggressive thumbnail memory cleanup tuned for this backend
-- `Auto` mode uses Vulkan only. If Vulkan is unavailable on the machine, select the Glow + OpenGL fallback and restart the app
+- Uses `wgpu` DX12 with a DirectComposition visual for presentation
+- Avoids transient black frames when the borderless window is minimized
+- If DX12 is unavailable on the machine, select the Glow + OpenGL fallback and restart the app
+
+### Wgpu — Vulkan
+- Optional Vulkan backend for the main window
+- Keeps the Vulkan-specific thumbnail and grid performance tuning
+- Does not use the DX12 DirectComposition presentation path
 
 ### Glow — OpenGL (Fallback)
-- Recommended fallback when Vulkan is unavailable or unstable on the machine
+- Recommended fallback when DirectX 12 is unavailable or unstable on the machine
 - Uses eframe's `Glow` renderer directly instead of `wgpu`'s OpenGL backend
 - OpenGL texture uploads can be synchronous on the CPU thread, so the app applies more conservative thumbnail and folder-preview upload limits on this backend
-
-### Wgpu — DirectX 12 (Experimental)
-- Available for compatibility testing from **Settings > General > GPU Backend**
-- **Known limitation DX12**: because wgpu creates the swapchain with `FLIP_DISCARD`, a brief black frame may flash during the minimize animation on Windows. This is a documented behavior of the wgpu DX12 backend and does not affect functionality.
-- DirectX 12 is the only backend currently treated as experimental compared with the Vulkan default and Glow + OpenGL fallback
 
 ## Prerequisites
 
@@ -138,11 +138,11 @@ Some app-level shortcuts are configurable in Settings > Keyboard Shortcuts. Stan
 | Category | Technology | Version | Purpose |
 |----------|-----------|---------|---------|
 | **Language** | Rust | Edition 2021 | Performance and safety |
-| **GUI** | eframe/egui | 0.31 | Modern immediate-mode GUI (features: `persistence`, `wgpu`, `glow`) |
-| **GPU Backend (Default)** | wgpu Vulkan via eframe | 24.x | Main window uses **Vulkan** by default for best thumbnail/grid performance |
-| **GPU Backend (Fallback)** | Glow OpenGL via eframe | via eframe | OpenGL fallback when Vulkan is unavailable; requires app restart |
-| **GPU Backend (Experimental)** | wgpu DirectX 12 via eframe | 24.x | Compatibility backend available from Settings; requires app restart |
-| **Windows API** | windows-rs | 0.61.0 | Native Windows integration |
+| **GUI** | eframe/egui | 0.35 | Modern immediate-mode GUI (features: `persistence`, `wgpu`, `glow`) |
+| **GPU Backend (Default)** | wgpu DirectX 12 via eframe | 29.x | DirectComposition presentation; requires app restart |
+| **GPU Backend (Alternative)** | wgpu Vulkan via eframe | 29.x | Optional Vulkan renderer; requires app restart |
+| **GPU Backend (Fallback)** | Glow OpenGL via eframe | via eframe | OpenGL fallback; requires app restart |
+| **Windows API** | windows-rs | 0.62 | Native Windows integration |
 | **Video** | libmpv2 | 5.0.3 | High-performance video playback |
 | **PDF** | pdfium (pdfium-render) | 0.8.37 | Native PDF rendering (requires pdfium.dll) |
 | **Database** | SQLite (rusqlite) | 0.32 | Reliable persistence |

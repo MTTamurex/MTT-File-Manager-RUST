@@ -153,7 +153,7 @@ fn create_hdrop_medium(encoded_paths: &[Vec<u16>]) -> windows::core::Result<STGM
     let memory = unsafe { GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, bytes) }?;
     let base = unsafe { GlobalLock(memory) };
     if base.is_null() {
-        let error = Error::from_win32();
+        let error = Error::from_thread();
         unsafe {
             let _ = GlobalFree(Some(memory));
         }

@@ -98,7 +98,6 @@ pub(super) fn render_drive_slot<O: ItemSlotOperations>(
             let response = ui.put(
                 name_rect,
                 egui::TextEdit::singleline(&mut **text)
-                    .frame(true)
                     .horizontal_align(egui::Align::Center)
                     .id_source("rename_input_drive"),
             );

@@ -127,7 +127,7 @@ pub fn render_context_menu(
     }
 
     // VERTICAL CLAMPING: Prevent menu from extending below the screen
-    let screen_rect = ctx.screen_rect();
+    let screen_rect = ctx.viewport_rect();
     let separator_count = if !primary_items.is_empty() { 1 } else { 0 }
         + if !overflow_items.is_empty() { 1 } else { 0 };
     let expected_height = (HEADER_BUTTON_HEIGHT + 8.0) * (!primary_items.is_empty() as u32 as f32)
@@ -587,7 +587,7 @@ fn render_single_item(
         let pointer_pos = ui.ctx().pointer_latest_pos();
 
         // Calculate submenu position: RIGHT by default, LEFT only if insufficient space
-        let screen_rect = ui.ctx().screen_rect();
+        let screen_rect = ui.ctx().viewport_rect();
         let menu_width = SUBMENU_MIN_WIDTH; // Expected submenu width
 
         // SMART ALIGNMENT: Uses the real boundary (accounting for the video player)

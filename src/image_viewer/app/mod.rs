@@ -777,7 +777,7 @@ impl DedicatedImageViewerApp {
 }
 
 impl eframe::App for DedicatedImageViewerApp {
-    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+    fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         if !self.repaint_ctx_set {
             self.prefetch.set_repaint_ctx(ctx.clone());
             self.repaint_ctx_set = true;
@@ -847,9 +847,6 @@ impl eframe::App for DedicatedImageViewerApp {
         self.maybe_reveal_startup_window(ctx);
 
         if self.sequence.entries.is_empty() {
-            self.render_top_bar(ctx);
-            self.render_bottom_bar(ctx);
-            self.render_center(ctx);
             return;
         }
 
@@ -865,17 +862,6 @@ impl eframe::App for DedicatedImageViewerApp {
         self.evict_filmstrip_textures();
         self.prefetch_filmstrip_neighbors();
 
-        // Skip top_bar and filmstrip rendering until first texture is ready.
-        // This isolates whether layout churn during startup is causing the visual artifact.
-        if self.viewport_revealed {
-            self.render_top_bar(ctx);
-        }
-        self.render_bottom_bar(ctx);
-        if self.viewport_revealed {
-            self.render_filmstrip(ctx);
-        }
-        self.render_center(ctx);
-
         // Low-frequency fallback poll — workers trigger immediate repaints via
         // ctx.request_repaint(), but this ensures progress even if the signal
         // is missed (e.g. during the first frame before ctx is propagated).
@@ -885,6 +871,29 @@ impl eframe::App for DedicatedImageViewerApp {
 
         // Periodic resource leak diagnostics (every 10s).
         self.resource_monitor.tick();
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let style = ui.ctx().global_style();
+        ui.set_style(style);
+
+        if self.sequence.entries.is_empty() {
+            self.render_top_bar(ui);
+            self.render_bottom_bar(ui);
+            self.render_center(ui);
+            return;
+        }
+
+        // Skip top_bar and filmstrip rendering until first texture is ready.
+        // This isolates whether layout churn during startup is causing the visual artifact.
+        if self.viewport_revealed {
+            self.render_top_bar(ui);
+        }
+        self.render_bottom_bar(ui);
+        if self.viewport_revealed {
+            self.render_filmstrip(ui);
+        }
+        self.render_center(ui);
     }
 }
 

@@ -61,7 +61,7 @@ pub fn render_detached_video(
     let min_window_height = 450.0;
     let default_window_width = 800.0;
     let default_window_height = 500.0;
-    let screen = ui.ctx().screen_rect();
+    let screen = ui.ctx().viewport_rect();
     let max_window_width = (screen.width() * 0.92).max(min_window_width);
     let max_window_height = (screen.height() * 0.90).max(min_window_height);
     let target_aspect: f32 = preview

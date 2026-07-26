@@ -38,7 +38,7 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
         return;
     }
 
-    let screen_rect = ctx.screen_rect();
+    let screen_rect = ctx.viewport_rect();
 
     // Modal window dimensions
     let modal_width = (screen_rect.width() * 0.40).clamp(360.0, 640.0);
@@ -74,7 +74,7 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
             );
 
             if backdrop_resp.clicked() {
-                let popup_open = ctx.memory(|m| m.any_popup_open());
+                let popup_open = egui::Popup::is_any_open(ctx);
                 if !popup_open && !app.context_menu.is_open {
                     if let Some(click_pos) = backdrop_resp.interact_pointer_pos() {
                         if !modal_rect.contains(click_pos) {
@@ -309,7 +309,10 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                     let search_resp = search_ui.add_sized(
                         egui::vec2(text_available_w, input_height - 2.0),
                         egui::TextEdit::singleline(&mut app.global_search.query)
-                            .frame(false)
+                            .frame(
+                                egui::Frame::NONE
+                                    .inner_margin(egui::Margin::symmetric(4, 2)),
+                            )
                             .hint_text(hint)
                             .text_color(ui.visuals().text_color())
                             .vertical_align(egui::Align::Center)
@@ -807,7 +810,7 @@ fn render_filter_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
                             .hint_text(egui::RichText::new(hint).color(text_color))
                             .desired_width(82.0)
                             .margin(egui::Vec2::ZERO)
-                            .frame(false),
+                            .frame(egui::Frame::NONE),
                     );
                     if resp.changed() {
                         let edit_state = egui::TextEdit::load_state(ui.ctx(), resp.id);
@@ -815,9 +818,10 @@ fn render_filter_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
                             .as_ref()
                             .and_then(|state| state.cursor.char_range());
                         let primary_index = cursor_range
-                            .map(|range| formatted_date_cursor_index(text, range.primary.index));
-                        let secondary_index = cursor_range
-                            .map(|range| formatted_date_cursor_index(text, range.secondary.index));
+                            .map(|range| formatted_date_cursor_index(text, range.primary.index.0));
+                        let secondary_index = cursor_range.map(|range| {
+                            formatted_date_cursor_index(text, range.secondary.index.0)
+                        });
                         *text = format_date_input(text);
 
                         if let (Some(mut state), Some(primary), Some(secondary)) =
@@ -826,6 +830,7 @@ fn render_filter_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
                             state.cursor.set_char_range(Some(egui::text::CCursorRange {
                                 primary: egui::text::CCursor::new(primary),
                                 secondary: egui::text::CCursor::new(secondary),
+                                h_pos: None,
                             }));
                             state.store(ui.ctx(), resp.id);
                         }
@@ -939,7 +944,7 @@ fn render_tag_filter_button(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
     // Each row has: 6px left pad + 14px leading column + 6px gap + text + 8px right pad.
     let font_id = egui::FontId::proportional(12.0);
     let leading_col = 6.0 + 14.0 + 6.0 + 8.0; // 34px fixed overhead per row
-    let opt_popup_width = ui.fonts(|fonts| {
+    let opt_popup_width = ui.fonts_mut(|fonts| {
         let mut max_w = TAG_FILTER_POPUP_WIDTH;
         let all_w = fonts
             .layout_no_wrap(

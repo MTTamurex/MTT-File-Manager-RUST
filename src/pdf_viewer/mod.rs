@@ -198,8 +198,9 @@ pub fn run_standalone(path: PathBuf) -> eframe::Result<()> {
         &rust_i18n::t!("pdfviewer.title"),
         options,
         Box::new(move |cc| {
-            cc.egui_ctx
-                .options_mut(|options| options.line_scroll_speed = PDF_VIEWER_LINE_SCROLL_SPEED);
+            cc.egui_ctx.options_mut(|options| {
+                options.input_options.line_scroll_speed = PDF_VIEWER_LINE_SCROLL_SPEED;
+            });
 
             match viewer_app::PdfViewerApp::new(path, dark_mode) {
                 Ok(app) => Ok(Box::new(app)),

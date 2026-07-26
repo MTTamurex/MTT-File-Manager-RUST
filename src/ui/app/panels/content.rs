@@ -17,10 +17,12 @@ thread_local! {
 
 pub(super) fn render_preview_panel_layout(
     app: &mut ImageViewerApp,
-    ctx: &egui::Context,
+    root_ui: &mut egui::Ui,
     frame: &eframe::Frame,
 ) {
     if app.show_preview_panel {
+        let dark_mode = root_ui.visuals().dark_mode;
+        let ctx = root_ui.ctx().clone();
         let defer_preview_work = app.defer_preview_work_after_selection;
         if defer_preview_work {
             app.defer_preview_work_after_selection = false;
@@ -52,11 +54,11 @@ pub(super) fn render_preview_panel_layout(
 
         // Use exact_width + resizable(false) to FORCE the width from app state
         // Resize is handled via manual drag handles rendered separately
-        let _right_panel_response = egui::SidePanel::right("preview_panel")
-            .exact_width(target_width)
+        let _right_panel_response = egui::Panel::right("preview_panel")
+            .exact_size(target_width)
             .resizable(false) // Resize handled manually via drag handles
             .frame(egui::Frame {
-                fill: if ctx.style().visuals.dark_mode {
+                fill: if dark_mode {
                     egui::Color32::from_rgb(45, 45, 45)
                 } else {
                     egui::Color32::WHITE
@@ -69,7 +71,7 @@ pub(super) fn render_preview_panel_layout(
                 },
                 ..Default::default()
             })
-            .show(ctx, |ui| {
+            .show(root_ui, |ui| {
                 use crate::ui::preview_panel::{render_preview_panel, PreviewPanelAction};
 
                 egui::ScrollArea::vertical()
@@ -561,14 +563,15 @@ fn is_current_folder_panel_target(app: &ImageViewerApp, file: &FileEntry) -> boo
         && file.path.as_path() == std::path::Path::new(&app.navigation_state.current_path)
 }
 
-pub(super) fn render_central_panel_layout(app: &mut ImageViewerApp, ctx: &egui::Context) {
+pub(super) fn render_central_panel_layout(app: &mut ImageViewerApp, root_ui: &mut egui::Ui) {
+    let dark_mode = root_ui.visuals().dark_mode;
     egui::CentralPanel::default()
-        .frame(egui::Frame::NONE.fill(if ctx.style().visuals.dark_mode {
+        .frame(egui::Frame::NONE.fill(if dark_mode {
             egui::Color32::from_rgb(45, 45, 45)
         } else {
             egui::Color32::WHITE
         }))
-        .show(ctx, |ui| {
+        .show(root_ui, |ui| {
             // CLIP FIX: Ensure central panel content cannot overflow into sidebars.
             ui.set_clip_rect(ui.max_rect());
 
@@ -622,7 +625,7 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
     ui.painter().rect_filled(
         sep_rect,
         0.0,
-        if ui.ctx().style().visuals.dark_mode {
+        if ui.visuals().dark_mode {
             egui::Color32::from_rgb(60, 60, 60)
         } else {
             egui::Color32::from_rgb(200, 200, 200)
@@ -658,7 +661,7 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
     let focus_stroke_width = 2.0;
     let focus_stroke_margin = 1.0;
     let focus_border_reserved = focus_stroke_width + focus_stroke_margin;
-    let focus_color = if ui.ctx().style().visuals.dark_mode {
+    let focus_color = if ui.visuals().dark_mode {
         egui::Color32::from_rgb(80, 160, 255) // bright blue
     } else {
         egui::Color32::from_rgb(0, 100, 220)
@@ -666,7 +669,7 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
 
     // ── Path header for each panel ──
     let header_height = 24.0;
-    let dark = ui.ctx().style().visuals.dark_mode;
+    let dark = ui.visuals().dark_mode;
 
     // Left panel header
     let left_header_rect =
@@ -756,7 +759,7 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
             ),
         );
 
-        ui.allocate_new_ui(egui::UiBuilder::new().max_rect(label_rect), |ui| {
+        ui.scope_builder(egui::UiBuilder::new().max_rect(label_rect), |ui| {
             ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                 ui.add(
                     egui::Label::new(
@@ -770,7 +773,7 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
         });
 
         let mut clicked = false;
-        ui.allocate_new_ui(egui::UiBuilder::new().max_rect(close_rect), |ui| {
+        ui.scope_builder(egui::UiBuilder::new().max_rect(close_rect), |ui| {
             let btn =
                 egui::Button::new(egui::RichText::new("X").size(12.0).color(header_text_color))
                     .min_size(close_size)
@@ -888,7 +891,7 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
         ActivePanel::Right => "dual_right",
     };
     let central_clip = ui.clip_rect().intersect(total_rect);
-    ui.allocate_new_ui(egui::UiBuilder::new().max_rect(active_content_rect), |ui| {
+    ui.scope_builder(egui::UiBuilder::new().max_rect(active_content_rect), |ui| {
         ui.push_id(active_id, |ui| {
             ui.set_clip_rect(active_content_rect.intersect(central_clip));
             render_single_panel_content(app, ui);
@@ -907,7 +910,7 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
         app_with_inactive.suppress_file_panel_keyboard = true;
         app_with_inactive.drag_drop_cross_panel_context = true;
 
-        ui.allocate_new_ui(
+        ui.scope_builder(
             egui::UiBuilder::new().max_rect(inactive_content_rect),
             |ui| {
                 ui.push_id(inactive_id, |ui| {
@@ -1108,7 +1111,7 @@ fn render_single_panel_content(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
                 rect.right_bottom() - egui::vec2(124.0, 22.0),
                 egui::vec2(110.0, 16.0),
             );
-            ui.allocate_new_ui(egui::UiBuilder::new().max_rect(status_rect), |ui| {
+            ui.scope_builder(egui::UiBuilder::new().max_rect(status_rect), |ui| {
                 ui.label(
                     egui::RichText::new(rust_i18n::t!("panels.updating").to_string())
                         .size(11.0)

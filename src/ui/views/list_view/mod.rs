@@ -82,11 +82,11 @@ fn get_cached_text_width(text: &str, font_id: &FontId, _color: Color32, ui: &Ui)
 
         // PERFORMANCE: Use provided Color32 for layout (API requirement), but don't include in key
         // since text width is independent of color
-        let width = ui.fonts(|f| {
-            f.layout_no_wrap(text.to_string(), font_id.clone(), _color)
-                .rect
-                .width()
-        });
+        let width = ui
+            .painter()
+            .layout_no_wrap(text.to_string(), font_id.clone(), _color)
+            .rect
+            .width();
         cache.put(key, width);
         width
     })

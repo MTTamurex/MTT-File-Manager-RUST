@@ -31,7 +31,7 @@ pub fn render_drag_move_confirmation_modal(app: &mut ImageViewerApp, ctx: &egui:
         return;
     };
 
-    let screen_rect = ctx.screen_rect();
+    let screen_rect = ctx.viewport_rect();
     let modal_width = MODAL_WIDTH.min(screen_rect.width() - 32.0);
 
     // ── Backdrop (blocks interaction outside the modal) ────────────────────────

@@ -164,7 +164,7 @@ pub fn render_notifications(app: &mut ImageViewerApp, ctx: &egui::Context) {
     let text_left = inner_pad + icon_size + 10.0;
     let max_text_width = toast_width - text_left - inner_pad;
 
-    let screen = ctx.screen_rect();
+    let screen = ctx.viewport_rect();
     let base_x = screen.max.x - toast_width - margin;
 
     let mut y_offset = margin;
@@ -383,7 +383,7 @@ pub fn render_notifications(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 max_text_width
             };
 
-            let galley = ctx.fonts(|f| {
+            let galley = ctx.fonts_mut(|f| {
                 f.layout(
                     notification.message.clone(),
                     egui::FontId::proportional(13.5),

@@ -121,12 +121,10 @@ struct TrailLayout {
 }
 
 fn measure_text_width(ui: &egui::Ui, text: &str, font_id: &egui::FontId) -> f32 {
-    ui.fonts(|fonts| {
-        fonts
-            .layout_no_wrap(text.to_string(), font_id.clone(), ui.visuals().text_color())
-            .size()
-            .x
-    })
+    ui.painter()
+        .layout_no_wrap(text.to_string(), font_id.clone(), ui.visuals().text_color())
+        .size()
+        .x
 }
 
 /// Computes which segments fit, which go into the overflow popup, and what

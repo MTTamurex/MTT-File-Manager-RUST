@@ -468,8 +468,9 @@ impl TextViewerApp {
                 self.font_size = DEFAULT_FONT_SIZE;
             }
             // Ctrl+scroll: font size
-            if i.modifiers.ctrl && i.raw_scroll_delta.y != 0.0 {
-                let delta = i.raw_scroll_delta.y.signum();
+            let zoom_delta = i.zoom_delta() - 1.0;
+            if i.modifiers.ctrl && zoom_delta.abs() > f32::EPSILON {
+                let delta = zoom_delta.signum();
                 self.font_size = (self.font_size + delta).clamp(MIN_FONT_SIZE, MAX_FONT_SIZE);
             }
             // Home / End
@@ -568,7 +569,7 @@ fn build_line_offsets(content: &str) -> Vec<u32> {
 // ── eframe::App ──────────────────────────────────────────────────────────────
 
 impl eframe::App for TextViewerApp {
-    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+    fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         // Apply theme on first frame
         if let Some(dark) = self.dark_mode.take() {
             if dark {
@@ -594,28 +595,33 @@ impl eframe::App for TextViewerApp {
             ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
             ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
         }
+    }
 
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let ctx_owned = ui.ctx().clone();
+        let ctx = &ctx_owned;
+        ui.set_style(ctx.global_style());
         self.handle_keyboard(ctx);
 
         // Toolbar
-        egui::TopBottomPanel::top("text_toolbar").show(ctx, |ui| {
+        egui::Panel::top("text_toolbar").show(ui, |ui| {
             self.show_toolbar(ui);
         });
 
         // Search / Goto bar (below toolbar)
         if self.search_open {
-            egui::TopBottomPanel::top("text_search").show(ctx, |ui| {
+            egui::Panel::top("text_search").show(ui, |ui| {
                 self.show_search_bar(ui);
             });
         }
         if self.goto_open {
-            egui::TopBottomPanel::top("text_goto").show(ctx, |ui| {
+            egui::Panel::top("text_goto").show(ui, |ui| {
                 self.show_goto_bar(ui);
             });
         }
 
         // Content
-        egui::CentralPanel::default().show(ctx, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
             self.show_content(ui);
         });
     }
@@ -628,11 +634,13 @@ pub(super) struct ErrorApp {
 }
 
 impl eframe::App for ErrorApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Reveal window (started hidden to avoid wgpu init flicker).
         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+    }
 
-        egui::CentralPanel::default().show(ctx, |ui| {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        egui::CentralPanel::default().show(ui, |ui| {
             ui.centered_and_justified(|ui| {
                 ui.label(
                     egui::RichText::new(&self.message)

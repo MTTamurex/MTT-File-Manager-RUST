@@ -59,7 +59,7 @@ impl ImageViewerApp {
             && !self.global_search.active
             && self.renaming_state.is_none()
             && self.rectangle_selection_state.is_none()
-            && !ui.ctx().wants_keyboard_input();
+            && !ui.ctx().egui_wants_keyboard_input();
         if allow_kb {
             let (left, right) = ui.input(|i| {
                 (
@@ -157,7 +157,10 @@ impl ImageViewerApp {
             egui::ScrollArea::horizontal()
                 .id_salt("miller_strip")
                 .auto_shrink([false, false])
-                .drag_to_scroll(false)
+                .scroll_source(egui::scroll_area::ScrollSource {
+                    drag: egui::scroll_area::DragScroll::Never,
+                    ..Default::default()
+                })
                 .horizontal_scroll_offset(horizontal_offset)
                 .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded)
                 .show(ui, |ui| {

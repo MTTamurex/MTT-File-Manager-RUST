@@ -3,6 +3,8 @@
 # ============================================
 /target/
 Cargo.lock
+!tools/dx12-present-test/Cargo.lock
+/tools/dx12-present-test/target/
 
 # ============================================
 # IDE / Editor

@@ -119,7 +119,7 @@ pub const METADATA_CACHE_SIZE: usize = 512;
 /// Apply a unified floating scrollbar style: thin by default, expands on hover,
 /// neutral gray handle (dark and light mode). Call after every `ctx.set_visuals()`.
 pub fn apply_scroll_style(ctx: &egui::Context) {
-    ctx.style_mut(|style| {
+    ctx.global_style_mut(|style| {
         let s = &mut style.spacing.scroll;
         s.floating = true;
         s.bar_width = 8.0; // Max width when hovered

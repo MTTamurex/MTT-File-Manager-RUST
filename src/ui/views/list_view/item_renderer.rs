@@ -278,10 +278,9 @@ pub(super) fn render_list_item(
                 egui::vec2(w_name - 30.0 - tag_name_offset, row_height - 4.0),
             );
 
-            ui.allocate_new_ui(egui::UiBuilder::new().max_rect(name_rect), |ui| {
+            ui.scope_builder(egui::UiBuilder::new().max_rect(name_rect), |ui| {
                 let response = ui.add(
                     egui::TextEdit::singleline(&mut text)
-                        .frame(true)
                         .horizontal_align(egui::Align::Min)
                         .id_source("rename_input_list"),
                 );
@@ -531,12 +530,11 @@ fn text_content_contains(
         return false;
     }
 
-    let width = ui.fonts(|fonts| {
-        fonts
-            .layout_no_wrap(display_text, font_id, Color32::WHITE)
-            .rect
-            .width()
-    });
+    let width = ui
+        .painter()
+        .layout_no_wrap(display_text, font_id, Color32::WHITE)
+        .rect
+        .width();
     let hit_rect = Rect::from_min_size(
         origin,
         egui::vec2(width.min(max_width), (row_height - 6.0).max(12.0)),

@@ -373,13 +373,13 @@ fn main() -> eframe::Result<()> {
             .get("gpu_backend")
             .cloned()
             .map(|pref| match pref.as_str() {
-                "vulkan" => "auto".to_string(),
+                "dx12" => "auto".to_string(),
                 "gl" => "glow".to_string(),
                 _ => pref,
             });
     let use_glow = match gpu_backend_pref.as_deref() {
         Some("glow") => true,
-        _ => false, // default/auto: Wgpu with Vulkan priority on Windows
+        _ => false, // default/auto: Wgpu with DX12 DirectComposition on Windows
     };
 
     let options = if use_glow {
@@ -399,35 +399,32 @@ fn main() -> eframe::Result<()> {
             gpu_backend_pref.as_deref().unwrap_or("auto"),
             selected_backends
         );
+        let mut wgpu_setup = eframe::egui_wgpu::WgpuSetupCreateNew::without_display_handle();
+        wgpu_setup.instance_descriptor.backends = selected_backends;
+        wgpu_setup
+            .instance_descriptor
+            .backend_options
+            .dx12
+            .presentation_system = eframe::wgpu::Dx12SwapchainKind::DxgiFromVisual;
+        wgpu_setup.power_preference = eframe::wgpu::PowerPreference::HighPerformance;
+        wgpu_setup.native_adapter_selector = native_adapter_selector;
+        wgpu_setup.device_descriptor =
+            std::sync::Arc::new(|_adapter| eframe::wgpu::DeviceDescriptor {
+                label: Some("mtt-file-manager wgpu device"),
+                required_features: eframe::wgpu::Features::default(),
+                required_limits: eframe::wgpu::Limits {
+                    max_texture_dimension_2d: gpu_backend::WGPU_REQUIRED_MAX_TEXTURE_DIMENSION_2D,
+                    ..eframe::wgpu::Limits::default()
+                },
+                memory_hints: eframe::wgpu::MemoryHints::MemoryUsage,
+                ..Default::default()
+            });
         eframe::NativeOptions {
             viewport,
             renderer: eframe::Renderer::Wgpu,
             persist_window: false,
             wgpu_options: eframe::egui_wgpu::WgpuConfiguration {
-                wgpu_setup: eframe::egui_wgpu::WgpuSetup::CreateNew(
-                    eframe::egui_wgpu::WgpuSetupCreateNew {
-                        instance_descriptor: eframe::wgpu::InstanceDescriptor {
-                            backends: selected_backends,
-                            ..Default::default()
-                        },
-                        power_preference: eframe::wgpu::PowerPreference::HighPerformance,
-                        native_adapter_selector,
-                        device_descriptor: std::sync::Arc::new(|_adapter| {
-                            eframe::wgpu::DeviceDescriptor {
-                                label: Some("mtt-file-manager wgpu device"),
-                                required_features: eframe::wgpu::Features::default(),
-                                required_limits: eframe::wgpu::Limits {
-                                    max_texture_dimension_2d:
-                                        gpu_backend::WGPU_REQUIRED_MAX_TEXTURE_DIMENSION_2D,
-                                    ..eframe::wgpu::Limits::default()
-                                },
-                                memory_hints: eframe::wgpu::MemoryHints::MemoryUsage,
-                            }
-                        }),
-                        ..Default::default()
-                    },
-                ),
-                desired_maximum_frame_latency: Some(2),
+                wgpu_setup: eframe::egui_wgpu::WgpuSetup::CreateNew(wgpu_setup),
                 ..Default::default()
             },
             ..Default::default()

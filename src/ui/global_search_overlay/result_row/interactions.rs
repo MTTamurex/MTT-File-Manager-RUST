@@ -51,7 +51,7 @@ pub(super) fn handle_selection_and_context_menu(
     let pointer_pos = ctx.pointer_latest_pos().unwrap_or(row_rect.center());
     app.context_menu.open_for_global_search(
         pointer_pos,
-        ctx.screen_rect().right(),
+        ctx.viewport_rect().right(),
         selected_paths.clone(),
         is_directory,
     );

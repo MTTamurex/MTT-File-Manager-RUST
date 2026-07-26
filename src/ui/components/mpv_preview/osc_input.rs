@@ -137,7 +137,13 @@ impl MpvPreview {
                 i.pointer.hover_pos(),
                 i.pointer.button_down(egui::PointerButton::Primary),
                 i.pointer.button_down(egui::PointerButton::Secondary),
-                i.raw_scroll_delta.y,
+                i.events
+                    .iter()
+                    .find_map(|event| match event {
+                        egui::Event::MouseWheel { delta, .. } => Some(delta.y),
+                        _ => None,
+                    })
+                    .unwrap_or(0.0),
             )
         });
 

@@ -12,7 +12,7 @@ fn handle_preview_shortcut_action(app: &mut ImageViewerApp, ctx: &egui::Context)
         || app.sidebar_renaming.is_some()
         || app.is_address_editing
         || app.global_search.active
-        || ctx.wants_keyboard_input()
+        || ctx.egui_wants_keyboard_input()
     {
         return false;
     }
@@ -145,10 +145,7 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
     {
         if app.shortcut_editor.is_capturing() {
             user_active = ctx.input(|i| {
-                i.pointer.any_pressed()
-                    || i.pointer.any_click()
-                    || i.raw_scroll_delta != egui::Vec2::ZERO
-                    || !i.events.is_empty()
+                i.pointer.any_pressed() || i.pointer.any_click() || !i.events.is_empty()
             });
 
             if user_active {
@@ -179,10 +176,7 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
 
             if !user_active {
                 user_active = ctx.input(|i| {
-                    i.pointer.any_pressed()
-                        || i.pointer.any_click()
-                        || i.raw_scroll_delta != egui::Vec2::ZERO
-                        || !i.events.is_empty()
+                    i.pointer.any_pressed() || i.pointer.any_click() || !i.events.is_empty()
                 });
             }
 
@@ -195,7 +189,7 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
             }
             return;
         }
-        let text_input_active = ctx.wants_keyboard_input();
+        let text_input_active = ctx.egui_wants_keyboard_input();
 
         ctx.input(|i| {
             // INTERACTION MODE DETECTION
@@ -205,11 +199,13 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 app.last_input = crate::app::state::LastInput::Mouse;
                 user_active = true;
             }
-            if i.raw_scroll_delta != egui::Vec2::ZERO {
-                user_active = true;
-            }
-
             for event in &i.events {
+                if matches!(
+                    event,
+                    egui::Event::MouseWheel { delta, .. } if *delta != egui::Vec2::ZERO
+                ) {
+                    user_active = true;
+                }
                 if let egui::Event::Key { key, pressed, .. } = event {
                     // 2. Keyboard detection (Navigation keys)
                     if *pressed {
@@ -596,7 +592,7 @@ fn handle_quick_search(app: &mut ImageViewerApp, ctx: &egui::Context) {
 
     // Never treat typing inside text fields (toolbar search, global search,
     // address edits, inline editors, etc.) as Explorer-style quick search.
-    if ctx.wants_keyboard_input() {
+    if ctx.egui_wants_keyboard_input() {
         let active_tab = app.tab_manager.active_mut();
         if !active_tab.quick_search_buffer.is_empty() {
             active_tab.quick_search_buffer.clear();

@@ -4,21 +4,23 @@ use eframe::egui;
 
 pub(crate) fn render_tab_bar_layer(
     app: &mut ImageViewerApp,
-    ctx: &egui::Context,
+    root_ui: &mut egui::Ui,
     frame: &mut eframe::Frame,
 ) {
-    egui::TopBottomPanel::top("tab_bar_panel")
+    let dark_mode = root_ui.visuals().dark_mode;
+    let ctx = root_ui.ctx().clone();
+    egui::Panel::top("tab_bar_panel")
         .show_separator_line(false)
-        .exact_height(36.0)
+        .exact_size(36.0)
         .frame(egui::Frame {
-            fill: if ctx.style().visuals.dark_mode {
+            fill: if dark_mode {
                 egui::Color32::from_rgb(30, 30, 30)
             } else {
                 egui::Color32::from_rgb(230, 230, 230)
             },
             ..Default::default()
         })
-        .show(ctx, |ui| {
+        .show(root_ui, |ui| {
             use crate::ui::components::media_preview::MediaPreview;
             use crate::ui::tab_bar::{render_tab_bar, TabBarAction};
 
@@ -123,11 +125,7 @@ pub(crate) fn render_tab_bar_layer(
                         app.layout.sidebar_left_width,
                         app.layout.sidebar_right_width,
                     );
-                    if let Some(hwnd) = app.native_hwnd {
-                        crate::infrastructure::windows::taskbar_minimize::request_minimize_with_real_preview(
-                            hwnd,
-                        );
-                    }
+                    ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true));
                 }
                 TabBarAction::None => {}
             }

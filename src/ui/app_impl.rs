@@ -8,7 +8,17 @@ use std::path::{Path, PathBuf};
 const DRIVE_BITMASK_REPAINT_MS: u64 = 1000;
 
 impl eframe::App for ImageViewerApp {
-    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+    fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        // Startup must advance while the root viewport is still hidden.
+        app::lifecycle::handle_startup_sequence(self, ctx);
+        app::lifecycle::track_window_state(self, ctx);
+        self.ensure_window_handle(frame);
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        let ctx_owned = ui.ctx().clone();
+        let ctx = &ctx_owned;
+        ui.set_style(ctx.global_style());
         let t_frame_start = std::time::Instant::now();
 
         // L-15: Only reset zoom when it has drifted (Ctrl+Scroll captured by input handler).
@@ -52,9 +62,6 @@ impl eframe::App for ImageViewerApp {
             // If we need this check, it should be done asynchronously in a worker thread.
         }
 
-        // 2. Lifecycle: Startup sequence & window state tracking
-        app::lifecycle::handle_startup_sequence(self, ctx);
-        app::lifecycle::track_window_state(self, ctx);
         self.auto_disable_diagnostic_mode_if_needed();
         let frame_ms = ctx.input(|i| i.stable_dt) * 1000.0;
 
@@ -99,8 +106,6 @@ impl eframe::App for ImageViewerApp {
         }
 
         // 3. Infrastructure updates (throttle heavy processing during interactive move/resize)
-        self.ensure_window_handle(frame);
-        handle_taskbar_minimize_preview(self, ctx);
         if !is_in_size_move {
             // PERF TIMING: Detect slow frames after inactivity
             let t0 = std::time::Instant::now();
@@ -270,16 +275,16 @@ impl eframe::App for ImageViewerApp {
         }
 
         // 6. Layout: Status Bar (Bottom) - lightweight, always render
-        app::layers::render_status_bar_layer(self, ctx);
+        app::layers::render_status_bar_layer(self, ui);
 
         // 7. Layout: Tab Bar (Top 1) - lightweight, always render
-        app::layers::render_tab_bar_layer(self, ctx, frame);
+        app::layers::render_tab_bar_layer(self, ui, frame);
 
         // 8. Layout: Toolbar (Top 2) - lightweight, always render
-        app::layers::render_toolbar_layer(self, ctx);
+        app::layers::render_toolbar_layer(self, ui);
 
         // 8b. Layout: Secondary Toolbar (Top 3) - lightweight, always render
-        app::layers::render_secondary_toolbar_layer(self, ctx);
+        app::layers::render_secondary_toolbar_layer(self, ui);
 
         // 8c. Settings backdrop (rendered BEFORE panels to block their input)
         let settings_close_from_backdrop = if self.navigation_state.show_settings_window {
@@ -291,7 +296,7 @@ impl eframe::App for ImageViewerApp {
         // 9. Layout: Main Panels (Sidebar, Preview, Central)
         // Keep full rendering even during move/resize so content/video stays visible and synchronized.
         let t_panels = std::time::Instant::now();
-        app::panels::render_panels(self, ctx, frame);
+        app::panels::render_panels(self, ui, frame);
         let panels_ms = t_panels.elapsed().as_secs_f32() * 1000.0;
         if panels_ms > 50.0 {
             log::warn!("[PERF] Slow render_panels: {:.0}ms", panels_ms);
@@ -504,40 +509,4 @@ fn is_valid_external_drop_destination(target: &Path) -> bool {
             .to_str()
             .is_some_and(crate::domain::special_paths::is_virtual_path)
         && !ImageViewerApp::path_is_archive_namespace(target)
-}
-
-fn handle_taskbar_minimize_preview(app: &mut ImageViewerApp, ctx: &egui::Context) {
-    use crate::infrastructure::windows::taskbar_minimize;
-
-    let screenshot_ready = ctx.input(|i| {
-        i.events.iter().any(|event| {
-            if let egui::Event::Screenshot {
-                user_data, image, ..
-            } = event
-            {
-                taskbar_minimize::handle_screenshot_event(user_data, image.as_ref())
-            } else {
-                false
-            }
-        })
-    });
-
-    if screenshot_ready {
-        if let Some(hwnd) = taskbar_minimize::take_minimize_hwnd_after_screenshot() {
-            taskbar_minimize::post_safe_minimize_after_present(hwnd);
-        }
-    }
-
-    if taskbar_minimize::take_screenshot_request() {
-        if taskbar_minimize::is_minimize_after_screenshot_pending() {
-            crate::infrastructure::windows::window_subclass::freeze_layout(
-                app.layout.sidebar_left_width,
-                app.layout.sidebar_right_width,
-            );
-        }
-        ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(
-            taskbar_minimize::screenshot_user_data(),
-        ));
-        ctx.request_repaint();
-    }
 }

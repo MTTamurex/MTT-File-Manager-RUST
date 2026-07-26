@@ -32,7 +32,7 @@ pub fn render_batch_rename_modal(app: &mut ImageViewerApp, ctx: &egui::Context) 
     let title = t!("batch_rename.title", count = state.sources.len()).to_string();
     let mut open = true;
 
-    let screen_rect = ctx.screen_rect();
+    let screen_rect = ctx.viewport_rect();
 
     // ── Backdrop (blocks interaction outside the modal) ──────────────────────
     let mut close_from_backdrop = false;
@@ -68,7 +68,7 @@ pub fn render_batch_rename_modal(app: &mut ImageViewerApp, ctx: &egui::Context) 
         return;
     }
 
-    let dark_mode = ctx.style().visuals.dark_mode;
+    let dark_mode = ctx.global_style().visuals.dark_mode;
     let bg_color = if dark_mode {
         Color32::from_rgb(50, 50, 50)
     } else {

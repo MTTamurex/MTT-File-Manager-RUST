@@ -295,7 +295,7 @@ unsafe fn get_item_display_name(item: &IShellItem2) -> String {
 /// Get string property from IShellItem2.
 unsafe fn get_shell_item_string_property(item: &IShellItem2, pkey: &PROPERTYKEY) -> Result<String> {
     let str_ptr = item.GetString(pkey)?;
-    let result = str_ptr.to_string().map_err(|_| Error::from_win32())?;
+    let result = str_ptr.to_string().map_err(|_| Error::from_thread())?;
     CoTaskMemFree(Some(str_ptr.0 as *mut _));
     Ok(result)
 }
@@ -339,7 +339,7 @@ unsafe fn get_shell_item_filetime_property(
         }
     }
 
-    Err(Error::from_win32())
+    Err(Error::from_thread())
 }
 
 #[inline]

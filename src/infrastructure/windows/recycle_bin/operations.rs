@@ -34,7 +34,7 @@ pub(super) fn restore_from_recycle_bin(physical_path: &Path, original_path: &Pat
         let file_name = original_path
             .file_name()
             .and_then(|n| n.to_str())
-            .ok_or_else(Error::from_win32)?;
+            .ok_or_else(Error::from_thread)?;
         let name_wide: Vec<u16> = file_name.encode_utf16().chain(Some(0)).collect();
 
         // Move the item.

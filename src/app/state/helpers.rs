@@ -1210,7 +1210,7 @@ impl ImageViewerApp {
             return 0;
         }
 
-        let screen = self.ui_ctx.screen_rect();
+        let screen = self.ui_ctx.viewport_rect();
         let mut central_width = screen.width()
             - if self.show_left_sidebar {
                 self.layout.sidebar_left_width.clamp(150.0, 500.0)

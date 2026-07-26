@@ -239,7 +239,7 @@ fn launch_elevated_volume_rename_helper(
             }
 
             return Err(VolumeLabelRenameError::OsError(
-                windows::core::Error::from_win32().to_string(),
+                windows::core::Error::from(win32).to_string(),
             ));
         }
 
@@ -252,22 +252,25 @@ fn launch_elevated_volume_rename_helper(
 
         // 30-second timeout to avoid indefinite hang if elevated helper crashes.
         let wait = WaitForSingleObject(process, 30_000);
+        let wait_error =
+            (wait != WAIT_OBJECT_0 && wait.0 != 258).then(windows::core::Error::from_thread);
         if wait != WAIT_OBJECT_0 {
             let _ = CloseHandle(process);
             return Err(VolumeLabelRenameError::OsError(if wait.0 == 258 {
                 // WAIT_TIMEOUT
                 "Elevated helper timed out after 30 seconds".to_string()
             } else {
-                windows::core::Error::from_win32().to_string()
+                wait_error
+                    .expect("wait failure error was captured")
+                    .to_string()
             }));
         }
 
         let mut exit_code = 1u32;
         if GetExitCodeProcess(process, &mut exit_code).is_err() {
+            let error = windows::core::Error::from_thread();
             let _ = CloseHandle(process);
-            return Err(VolumeLabelRenameError::OsError(
-                windows::core::Error::from_win32().to_string(),
-            ));
+            return Err(VolumeLabelRenameError::OsError(error.to_string()));
         }
 
         let _ = CloseHandle(process);

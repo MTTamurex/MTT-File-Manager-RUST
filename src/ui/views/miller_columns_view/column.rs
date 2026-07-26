@@ -5,8 +5,6 @@
 //! selection highlight, inline rename, hover, and click / double-click /
 //! right-click, all reported back to the bridge which applies path-based actions.
 
-use std::hash::Hash;
-
 use eframe::egui::{self, Color32, FontId, Rect, Sense, Ui};
 use lru::LruCache;
 use std::path::{Path, PathBuf};
@@ -75,7 +73,7 @@ pub struct MillerColumnContext<'a> {
 /// so this renders directly without manual positioning or clip overrides.
 pub fn render_miller_column(
     ui: &mut Ui,
-    id_salt: impl Hash,
+    id_salt: impl egui::AsIdSalt,
     ctx: &mut MillerColumnContext,
 ) -> MillerColumnOutput {
     let dark = ui.visuals().dark_mode;
@@ -128,7 +126,10 @@ pub fn render_miller_column(
     let scroll_output = egui::ScrollArea::vertical()
         .id_salt(column_id)
         .auto_shrink([false, false])
-        .drag_to_scroll(false)
+        .scroll_source(
+            egui::scroll_area::ScrollSource::SCROLL_BAR
+                | egui::scroll_area::ScrollSource::MOUSE_WHEEL,
+        )
         .show_rows(ui, COL_ROW_HEIGHT, ctx.items.len(), |ui, row_range| {
             for index in row_range {
                 let Some(item) = ctx.items.get(index) else {
@@ -288,10 +289,9 @@ fn render_row(
             egui::pos2(row_rect.right() - 5.0, row_rect.bottom() - 2.0),
         );
         let mut commit = false;
-        ui.allocate_new_ui(egui::UiBuilder::new().max_rect(edit_rect), |ui| {
+        ui.scope_builder(egui::UiBuilder::new().max_rect(edit_rect), |ui| {
             let response = ui.add(
                 egui::TextEdit::singleline(&mut text)
-                    .frame(true)
                     .id_source(("rename_input_miller", &item.path)),
             );
             if ctx.focus_rename {
@@ -417,12 +417,11 @@ fn row_content_contains_pointer(
     let font = FontId::proportional(13.0);
     let max_text_w = (row_rect.right() - text_x - CHEVRON_W - 4.0).max(0.0);
     let display = truncate_text_for_column(&item.name, max_text_w, &font, ui);
-    let text_width = ui.fonts(|fonts| {
-        fonts
-            .layout_no_wrap(display, font, Color32::WHITE)
-            .rect
-            .width()
-    });
+    let text_width = ui
+        .painter()
+        .layout_no_wrap(display, font, Color32::WHITE)
+        .rect
+        .width();
     let text_rect = Rect::from_min_size(
         egui::pos2(text_x, row_rect.top() + 3.0),
         egui::vec2(text_width.min(max_text_w), COL_ROW_HEIGHT - 6.0),

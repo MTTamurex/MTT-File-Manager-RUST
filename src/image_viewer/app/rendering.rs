@@ -6,8 +6,9 @@ use rust_i18n::t;
 use super::{MAX_ZOOM_FACTOR, MIN_ZOOM_FACTOR};
 
 impl super::DedicatedImageViewerApp {
-    pub(super) fn render_top_bar(&mut self, ctx: &egui::Context) {
-        egui::TopBottomPanel::top("image_viewer_top_bar").show(ctx, |ui| {
+    pub(super) fn render_top_bar(&mut self, root_ui: &mut egui::Ui) {
+        let ctx = root_ui.ctx().clone();
+        egui::Panel::top("image_viewer_top_bar").show(root_ui, |ui| {
             let mut selected_format = None;
             ui.horizontal_wrapped(|ui| {
                 let total = self.sequence.entries.len();
@@ -21,14 +22,14 @@ impl super::DedicatedImageViewerApp {
                     )
                     .clicked()
                 {
-                    self.navigate_prev(ctx);
+                    self.navigate_prev(&ctx);
                 }
 
                 if ui
                     .add_enabled(next_enabled, egui::Button::new(&*t!("imageviewer.next")))
                     .clicked()
                 {
-                    self.navigate_next(ctx);
+                    self.navigate_next(&ctx);
                 }
 
                 ui.separator();
@@ -75,7 +76,7 @@ impl super::DedicatedImageViewerApp {
                         )
                         .clicked();
                     if clicked {
-                        self.start_wallpaper(ctx);
+                        self.start_wallpaper(&ctx);
                     }
                 }
 
@@ -94,7 +95,7 @@ impl super::DedicatedImageViewerApp {
             });
 
             if let Some(format) = selected_format {
-                self.start_conversion(format, ctx);
+                self.start_conversion(format, &ctx);
             }
         });
     }
@@ -119,8 +120,8 @@ impl super::DedicatedImageViewerApp {
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
     }
 
-    pub(super) fn render_bottom_bar(&mut self, ctx: &egui::Context) {
-        egui::TopBottomPanel::bottom("image_viewer_bottom_bar").show(ctx, |ui| {
+    pub(super) fn render_bottom_bar(&mut self, root_ui: &mut egui::Ui) {
+        egui::Panel::bottom("image_viewer_bottom_bar").show(root_ui, |ui| {
             ui.horizontal_wrapped(|ui| {
                 ui.label(&*t!("imageviewer.zoom"));
 
@@ -154,8 +155,8 @@ impl super::DedicatedImageViewerApp {
         });
     }
 
-    pub(super) fn render_center(&mut self, ctx: &egui::Context) {
-        egui::CentralPanel::default().show(ctx, |ui| {
+    pub(super) fn render_center(&mut self, root_ui: &mut egui::Ui) {
+        egui::CentralPanel::default().show(root_ui, |ui| {
             // Prefer the current GIF animation frame; fall back to static texture.
             // Clone is cheap: egui::TextureHandle is reference-counted.
             let active_tex: Option<egui::TextureHandle> = if let Some(anim) = &self.gif_animation {
@@ -238,7 +239,7 @@ impl super::DedicatedImageViewerApp {
                         };
 
                         if response.hovered() {
-                            let wheel_delta = ui.input(|i| i.raw_scroll_delta.y);
+                            let wheel_delta = ui.input(|i| i.smooth_scroll_delta().y);
                             if wheel_delta.abs() > f32::EPSILON {
                                 // Granular zoom: track wheel delta continuously.
                                 let factor = 1.0 + wheel_delta * 0.0015;

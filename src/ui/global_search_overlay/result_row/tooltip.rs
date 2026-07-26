@@ -49,11 +49,7 @@ pub(super) fn render(
     };
 
     let tooltip_layer = egui::LayerId::new(egui::Order::Tooltip, response.id.with("tooltip"));
-    egui::show_tooltip_at(
-        ui.ctx(),
-        tooltip_layer,
-        response.id,
-        mouse_pos,
+    egui::Tooltip::always_open(ui.ctx().clone(), tooltip_layer, response.id, mouse_pos).show(
         |ui: &mut egui::Ui| {
             ui.set_max_width(300.0);
             ui.vertical(|ui| {
