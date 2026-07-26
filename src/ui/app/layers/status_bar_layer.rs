@@ -68,6 +68,11 @@ pub(crate) fn render_status_bar_layer(app: &mut ImageViewerApp, root_ui: &mut eg
 
     egui::Panel::bottom("status_bar")
         .exact_size(24.0)
+        .frame(
+            egui::Frame::NONE
+                .inner_margin(egui::Margin::symmetric(8, 0))
+                .fill(root_ui.visuals().panel_fill),
+        )
         .show(root_ui, |ui| {
             use crate::ui::status_bar::{render_status_bar, StatusBarAction};
             let video_preview_active = app

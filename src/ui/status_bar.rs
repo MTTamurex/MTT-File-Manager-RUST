@@ -290,7 +290,7 @@ pub fn render_status_bar(
         // low-level process metrics in the status bar.
         let _ = get_kernel_resources_cached(false, video_preview_active);
 
-        ui.horizontal(|ui| {
+        ui.horizontal_centered(|ui| {
             // === LEFTMOST: Settings button ===
             if widgets::toggle_icon_button_sized(
                 ui,
@@ -354,7 +354,7 @@ pub fn render_status_bar(
                         &tooltip,
                         theme::ICON_SIZE_MD - 2.0,
                         2.0,
-                        -1.0,
+                        0.75,
                     )
                     .clicked()
                     {
@@ -366,39 +366,28 @@ pub fn render_status_bar(
 
             ui.separator();
 
-            // Wrap text items in a Frame with asymmetric bottom margin.
-            // This shifts content UP by ~0.5px without changing the row height
-            // (because buttons/eye are taller, so the Frame never becomes the
-            // tallest element → no coupling / vicious circle).
-            egui::Frame::NONE
-                .inner_margin(egui::Margin {
-                    left: 0,
-                    right: 0,
-                    top: 0,
-                    bottom: 2,
-                })
-                .show(ui, |ui| {
-                    if *is_loading_folder {
-                        ui.label(t!("status_bar.loading").to_string());
+            egui::Frame::NONE.show(ui, |ui| {
+                if *is_loading_folder {
+                    ui.label(t!("status_bar.loading").to_string());
+                } else {
+                    let item_text = if total_items == 1 {
+                        t!("status_bar.item_one").to_string()
                     } else {
-                        let item_text = if total_items == 1 {
-                            t!("status_bar.item_one").to_string()
-                        } else {
-                            t!("status_bar.item_many", count = total_items).to_string()
-                        };
-                        ui.label(item_text);
+                        t!("status_bar.item_many", count = total_items).to_string()
+                    };
+                    ui.label(item_text);
+                }
+                if let Some(tag_name) = active_tag_filter_name {
+                    ui.separator();
+                    if ui
+                        .button(t!("tags.filter_active", name = tag_name).to_string())
+                        .on_hover_text(t!("tags.clear_filter"))
+                        .clicked()
+                    {
+                        action = StatusBarAction::ClearTagFilter;
                     }
-                    if let Some(tag_name) = active_tag_filter_name {
-                        ui.separator();
-                        if ui
-                            .button(t!("tags.filter_active", name = tag_name).to_string())
-                            .on_hover_text(t!("tags.clear_filter"))
-                            .clicked()
-                        {
-                            action = StatusBarAction::ClearTagFilter;
-                        }
-                    }
-                }); // end Frame
+                }
+            }); // end Frame
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 egui::Frame::NONE
