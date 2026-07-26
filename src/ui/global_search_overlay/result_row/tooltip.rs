@@ -183,10 +183,14 @@ fn render_tags(ui: &mut egui::Ui, app: &ImageViewerApp, tag_ids: &[i64]) {
         });
         for tag_id in tag_ids {
             if let Some(tag) = app.tag_definitions.get(tag_id) {
-                let (dot_rect, _) =
+                let (tag_icon_rect, _) =
                     ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
-                ui.painter()
-                    .circle_filled(dot_rect.center(), 3.5, tag.color.to_color32());
+                crate::ui::tag_icon::paint_filled(
+                    ui.painter(),
+                    tag_icon_rect.center(),
+                    9.0,
+                    tag.color.to_color32(),
+                );
                 ui.label(&tag.name);
                 ui.add_space(6.0);
             }

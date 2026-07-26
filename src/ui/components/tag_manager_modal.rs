@@ -227,9 +227,10 @@ pub fn render_tag_manager_content(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
                 .or_insert_with(|| tag.name.clone());
 
             ui.horizontal(|ui| {
-                ui.painter().circle_filled(
+                crate::ui::tag_icon::paint_filled(
+                    ui.painter(),
                     egui::pos2(ui.cursor().left() + 7.0, ui.cursor().top() + 11.0),
-                    5.0,
+                    12.0,
                     tag.color.to_color32(),
                 );
                 ui.add_space(18.0);

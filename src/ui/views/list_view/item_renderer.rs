@@ -256,9 +256,10 @@ pub(super) fn render_list_item(
         let tag_color = first_tag_color(item, ctx);
         let tag_name_offset = if tag_color.is_some() { 12.0 } else { 0.0 };
         if let Some(color) = tag_color {
-            ui.painter().circle_filled(
+            crate::ui::tag_icon::paint_filled(
+                ui.painter(),
                 Pos2::new(rect.min.x + 27.0, rect.center().y),
-                3.2,
+                9.0,
                 color.gamma_multiply(hidden_opacity),
             );
         }

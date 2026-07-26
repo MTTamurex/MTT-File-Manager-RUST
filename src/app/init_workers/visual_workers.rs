@@ -53,10 +53,28 @@ pub(in crate::app) fn spawn_cover_worker(
     (cover_req_tx, cover_res_rx)
 }
 
+pub(in crate::app) fn font_definitions_with_embedded_icons() -> egui::FontDefinitions {
+    let mut fonts = egui::FontDefinitions::default();
+    fonts.font_data.insert(
+        "remix_icon".to_owned(),
+        std::sync::Arc::new(egui::FontData::from_static(
+            crate::embedded_assets::REMIXICON_TTF,
+        )),
+    );
+    let mut icon_fonts = vec!["remix_icon".to_owned()];
+    if let Some(proportional_fonts) = fonts.families.get(&egui::FontFamily::Proportional) {
+        icon_fonts.extend(proportional_fonts.iter().cloned());
+    }
+    fonts
+        .families
+        .insert(egui::FontFamily::Name("icons".into()), icon_fonts);
+    fonts
+}
+
 pub(in crate::app) fn spawn_async_font_loader() -> mpsc::Receiver<egui::FontDefinitions> {
     let (font_tx, font_rx) = mpsc::channel();
     std::thread::spawn(move || {
-        let mut fonts = eframe::egui::FontDefinitions::default();
+        let mut fonts = font_definitions_with_embedded_icons();
         let mut loaded_fonts = Vec::new();
         let windows_dir = std::env::var_os("WINDIR")
             .map(PathBuf::from)
@@ -103,18 +121,6 @@ pub(in crate::app) fn spawn_async_font_loader() -> mpsc::Receiver<egui::FontDefi
                     break;
                 }
             }
-        }
-
-        {
-            let data = crate::embedded_assets::REMIXICON_TTF.to_vec();
-            fonts.font_data.insert(
-                "remix_icon".to_owned(),
-                std::sync::Arc::new(eframe::egui::FontData::from_owned(data)),
-            );
-            fonts.families.insert(
-                eframe::egui::FontFamily::Name("icons".into()),
-                vec!["remix_icon".to_owned()],
-            );
         }
 
         if !loaded_fonts.is_empty() {

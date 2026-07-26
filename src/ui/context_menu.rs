@@ -484,8 +484,12 @@ fn render_single_item(
             } else {
                 icon_rect.center().x
             };
-            ui.painter()
-                .circle_filled(egui::pos2(center_x, rect.center().y), 4.0, color);
+            crate::ui::tag_icon::paint_filled(
+                ui.painter(),
+                egui::pos2(center_x, rect.center().y),
+                10.0,
+                color,
+            );
             icon_drawn = true;
         }
         if let Some(svg_name) = &item.svg_icon_name {

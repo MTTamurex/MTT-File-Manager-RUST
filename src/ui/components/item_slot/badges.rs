@@ -112,23 +112,25 @@ pub(super) fn render_tag_badge(
     let painter = ui.painter();
     if color_count == 1 {
         let center = egui::pos2(thumb_rect.left() + 8.0, thumb_rect.top() + 8.0);
-        painter.circle_filled(center, 4.5, colors[0]);
-        painter.circle_stroke(
+        crate::ui::tag_icon::paint_filled_badge(
+            painter,
             center,
-            4.5,
-            egui::Stroke::new(1.0, egui::Color32::from_black_alpha(80)),
+            11.0,
+            colors[0],
+            egui::Color32::from_black_alpha(80),
         );
         return;
     }
 
     let start = egui::pos2(thumb_rect.left() + 6.0, thumb_rect.top() + 7.0);
     for (idx, color) in colors.iter().take(color_count).enumerate() {
-        let center = start + egui::vec2(idx as f32 * 7.0, 0.0);
-        painter.circle_filled(center, 3.2, *color);
-        painter.circle_stroke(
+        let center = start + egui::vec2(idx as f32 * 8.0, 0.0);
+        crate::ui::tag_icon::paint_filled_badge(
+            painter,
             center,
-            3.2,
-            egui::Stroke::new(0.8, egui::Color32::from_black_alpha(70)),
+            8.0,
+            *color,
+            egui::Color32::from_black_alpha(70),
         );
     }
 }

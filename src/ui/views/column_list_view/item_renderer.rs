@@ -257,9 +257,10 @@ fn render_column_item_name(
         .map(|tag| tag.color.to_color32());
     let tag_offset = if tag_color.is_some() { 12.0 } else { 0.0 };
     if let Some(color) = tag_color {
-        ui.painter().circle_filled(
+        crate::ui::tag_icon::paint_filled(
+            ui.painter(),
             Pos2::new(rect.left() + 27.0, rect.center().y),
-            3.2,
+            9.0,
             color.gamma_multiply(opacity),
         );
     }

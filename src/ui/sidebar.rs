@@ -444,9 +444,13 @@ pub fn render_tags_section(
             } else {
                 ui.visuals().text_color()
             };
-            let dot_center = Pos2::new(rect.min.x + 18.0, rect.center().y);
-            ui.painter()
-                .circle_filled(dot_center, 4.0, tag.color.to_color32());
+            let tag_icon_center = Pos2::new(rect.min.x + 18.0, rect.center().y);
+            crate::ui::tag_icon::paint_filled(
+                ui.painter(),
+                tag_icon_center,
+                10.0,
+                tag.color.to_color32(),
+            );
             ui.painter().text(
                 Pos2::new(rect.min.x + 30.0, rect.center().y),
                 egui::Align2::LEFT_CENTER,

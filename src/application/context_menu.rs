@@ -36,7 +36,7 @@ pub struct ContextMenuItem {
     pub is_loading_placeholder: bool,
     /// Checked state for app-defined submenu items.
     pub is_checked: bool,
-    /// Optional leading color dot for app-defined items.
+    /// Optional leading color for app-defined tag items.
     pub leading_color: Option<egui::Color32>,
 }
 
@@ -140,7 +140,7 @@ impl ContextMenuItem {
         self
     }
 
-    /// Builder: add a leading color dot.
+    /// Builder: add a leading tag color.
     pub fn with_leading_color(mut self, color: egui::Color32) -> Self {
         self.leading_color = Some(color);
         self

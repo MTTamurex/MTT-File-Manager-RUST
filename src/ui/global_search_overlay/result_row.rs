@@ -293,7 +293,7 @@ pub(super) fn render_result_row(
         );
     }
 
-    // Tag dot (mirrors list-view behavior: first tag's color, single dot
+    // Tag icon (mirrors list-view behavior: first tag's color, single icon
     // between the icon and the file name, with a 12 px name offset).
     // Collect into owned data so the immutable borrow of `app` does not
     // outlive this block.
@@ -308,9 +308,10 @@ pub(super) fn render_result_row(
         .find_map(|id| app.tag_definitions.get(id).map(|t| t.color.to_color32()));
     let tag_name_offset = if first_tag_color.is_some() { 12.0 } else { 0.0 };
     if let Some(color) = first_tag_color {
-        ui.painter().circle_filled(
+        crate::ui::tag_icon::paint_filled(
+            ui.painter(),
             egui::pos2(icon_rect.right() + 4.0, content_rect.center().y),
-            3.2,
+            9.0,
             color,
         );
     }

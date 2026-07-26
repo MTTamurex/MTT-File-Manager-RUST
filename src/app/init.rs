@@ -33,6 +33,7 @@ use super::init_preferences::StartupPreferences;
 use super::init_state_builders::{
     build_drive_state, build_file_operation_state, build_folder_size_state, build_layout_state,
 };
+use super::init_workers::font_definitions_with_embedded_icons;
 use super::navigation_state::NavigationState;
 use super::state::{ImageViewerApp, LastInput};
 
@@ -112,6 +113,7 @@ fn determine_initial_path(app_state_db: &AppStateDb) -> (String, bool) {
 impl ImageViewerApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let ctx = cc.egui_ctx.clone();
+        ctx.set_fonts(font_definitions_with_embedded_icons());
 
         let AppBootstrap {
             file_entry_sender,

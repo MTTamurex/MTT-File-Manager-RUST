@@ -36,11 +36,12 @@ fn paint_texture_centered(
 /// Paints a colored tag badge on the top-left corner of the icon rect.
 fn paint_tag_badge(ui: &egui::Ui, icon_rect: egui::Rect, color: egui::Color32) {
     let center = egui::pos2(icon_rect.left() + 10.0, icon_rect.top() + 10.0);
-    ui.painter().circle_filled(center, 6.0, color);
-    ui.painter().circle_stroke(
+    crate::ui::tag_icon::paint_filled_badge(
+        ui.painter(),
         center,
-        6.0,
-        egui::Stroke::new(1.0, egui::Color32::from_black_alpha(80)),
+        15.0,
+        color,
+        egui::Color32::from_black_alpha(80),
     );
 }
 

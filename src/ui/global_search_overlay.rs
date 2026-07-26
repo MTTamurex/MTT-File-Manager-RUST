@@ -1101,7 +1101,7 @@ fn render_tag_filter_button(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
 }
 
 /// Renders a single popup menu row with a manual checkmark (✓) prefix when
-/// `selected` is `true`, plus an optional small colored dot (used for
+/// `selected` is `true`, plus an optional colored tag icon (used for
 /// per-tag rows). The whole row is clickable; hover and selection states
 /// are painted manually for full control.
 fn popup_menu_item(
@@ -1124,7 +1124,7 @@ fn popup_menu_item(
         ui.painter().rect_filled(row_rect, 4.0, fill);
     }
 
-    // Leading column: optional colored dot OR checkmark for selected rows.
+    // Leading column: optional colored tag icon OR checkmark for selected rows.
     let leading_size = 14.0_f32;
     let leading_rect = egui::Rect::from_min_size(
         egui::pos2(
@@ -1134,8 +1134,7 @@ fn popup_menu_item(
         egui::vec2(leading_size, leading_size),
     );
     if let Some(color) = leading_color {
-        ui.painter()
-            .circle_filled(leading_rect.center(), 4.0, color);
+        crate::ui::tag_icon::paint_filled(ui.painter(), leading_rect.center(), 10.0, color);
     } else if selected {
         // Draw a checkmark using the selection's text color for contrast.
         let text_color = if ui.visuals().dark_mode {

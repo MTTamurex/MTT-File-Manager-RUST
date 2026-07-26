@@ -17,6 +17,7 @@ pub mod sidebar_tree;
 pub mod status_bar;
 pub mod svg_icons;
 pub mod tab_bar;
+pub(crate) mod tag_icon;
 pub mod theme;
 pub mod toolbar;
 pub mod views;
