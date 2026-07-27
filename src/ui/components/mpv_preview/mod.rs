@@ -24,15 +24,12 @@ use crate::ui::components::mpv::playback as mpv_playback;
 pub use crate::ui::components::mpv::state::{MpvState, PendingSeekState, TrackInfo};
 pub use crate::ui::components::mpv::utils::format_time;
 
-const MPV_DEFAULT_CACHE_SECS: f64 = 8.0;
-const MPV_DEFAULT_READAHEAD_SECS: f64 = 4.0;
-const MPV_DEFAULT_DEMUXER_MAX_BYTES: i64 = 32_i64 * 1024 * 1024;
-const MPV_DEFAULT_DEMUXER_MAX_BACK_BYTES: i64 = 8_i64 * 1024 * 1024;
-
-const MPV_DOCKED_CACHE_SECS: f64 = 12.0;
-const MPV_DOCKED_READAHEAD_SECS: f64 = 6.0;
-const MPV_DOCKED_DEMUXER_MAX_BYTES: i64 = 48_i64 * 1024 * 1024;
-const MPV_DOCKED_DEMUXER_MAX_BACK_BYTES: i64 = 12_i64 * 1024 * 1024;
+const MPV_DOCKED_DEMUXER_MAX_BYTES: i64 = 8_i64 * 1024 * 1024;
+const MPV_DOCKED_DEMUXER_MAX_BACK_BYTES: i64 = 2_i64 * 1024 * 1024;
+const MPV_DOCKED_AUDIO_VISUALIZATION: &str =
+    "[aid1]asplit[ao][a1];[a1]showwaves=s=640x360:mode=cline:rate=24:colors=white,format=pix_fmts=rgb24[vo]";
+const MPV_DETACHED_AUDIO_VISUALIZATION: &str =
+    "[aid1]asplit[ao][a1];[a1]showwaves=s=1920x1080:mode=cline:rate=30:colors=white,format=pix_fmts=rgb24[vo]";
 
 const MPV_DETACHED_CACHE_SECS: f64 = 20.0;
 const MPV_DETACHED_READAHEAD_SECS: f64 = 10.0;
@@ -83,28 +80,8 @@ pub struct MpvPreview {
     pub is_vsr_enabled: bool,
     /// Tracks whether RTX Video features are available on this machine.
     pub is_rtx_supported: bool,
-    /// Tracks whether docked downscale is currently applied
-    docked_downscale_applied: bool,
-    /// Stores previous vf chain to restore on undock
-    docked_prev_vf: Option<String>,
-    /// Tracks whether docked FPS limiting is currently applied
-    docked_fps_limit_applied: bool,
-    /// Stores previous video-sync to restore on undock
-    docked_prev_video_sync: Option<String>,
-    /// Stores previous interpolation to restore on undock
-    docked_prev_interpolation: Option<bool>,
-    /// Stores previous tscale to restore on undock
-    docked_prev_tscale: Option<String>,
-    /// Stores previous cache setting to restore on undock
-    docked_prev_cache: Option<String>,
-    /// Stores previous cache-secs to restore on undock
-    docked_prev_cache_secs: Option<f64>,
-    /// Stores previous demuxer readahead to restore on undock
-    docked_prev_readahead_secs: Option<f64>,
-    /// Stores previous demuxer cache bytes to restore on undock
-    docked_prev_demuxer_max_bytes: Option<i64>,
-    /// Stores previous demuxer back cache bytes to restore on undock
-    docked_prev_demuxer_max_back_bytes: Option<i64>,
+    /// Last mode for which playback properties were applied (`true` = docked).
+    last_profile_was_docked: Option<bool>,
     audio_normalizer_enabled: bool,
 
     // Performance: Async event handling (Fase 2 optimization)
@@ -289,17 +266,7 @@ impl MpvPreview {
             initial_volume: 1.0,
             is_vsr_enabled: false,
             is_rtx_supported: false,
-            docked_downscale_applied: false,
-            docked_prev_vf: None,
-            docked_fps_limit_applied: false,
-            docked_prev_video_sync: None,
-            docked_prev_interpolation: None,
-            docked_prev_tscale: None,
-            docked_prev_cache: None,
-            docked_prev_cache_secs: None,
-            docked_prev_readahead_secs: None,
-            docked_prev_demuxer_max_bytes: None,
-            docked_prev_demuxer_max_back_bytes: None,
+            last_profile_was_docked: None,
             audio_normalizer_enabled: false,
             event_thread_running: Arc::new(AtomicBool::new(false)),
             event_thread_handle: None,

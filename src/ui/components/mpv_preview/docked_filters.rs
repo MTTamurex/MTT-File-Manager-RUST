@@ -65,120 +65,33 @@ impl MpvPreview {
         }
     }
 
-    /// Applies or removes docked-mode downscale and FPS limiting without restarting playback.
-    /// `force_reapply` is used when external changes (e.g., VSR) replace the filter chain.
-    pub(super) fn update_docked_downscale(&mut self, force_reapply: bool) {
-        let should_limit = self.is_docked();
+    /// Switches between the low-memory detail-panel profile and the legacy
+    /// in-process detached profile without adding software video filters.
+    pub(super) fn update_docked_profile(&mut self) {
+        let should_use_docked_profile = self.is_docked();
+        if self.last_profile_was_docked == Some(should_use_docked_profile) {
+            return;
+        }
+
         let Some(m) = &self.mpv else {
             return;
         };
 
-        let current_vf = m.get_property::<String>("vf").unwrap_or_default();
-        let has_downscale = current_vf.contains(mpv_filters::DOCKED_DOWNSCALE_MARKER);
-        let has_fps_limit = current_vf.contains(mpv_filters::DOCKED_FPS_MARKER);
-
-        if should_limit {
-            if force_reapply || !has_downscale || !has_fps_limit {
-                if self.docked_prev_vf.is_none() {
-                    self.docked_prev_vf = Some(current_vf.clone());
-                }
-
-                let mut new_vf = current_vf.clone();
-                if !has_downscale {
-                    new_vf = if new_vf.trim().is_empty() {
-                        mpv_filters::DOCKED_DOWNSCALE_FILTER.to_string()
-                    } else {
-                        format!("{},{}", new_vf, mpv_filters::DOCKED_DOWNSCALE_FILTER)
-                    };
-                }
-                if !has_fps_limit {
-                    new_vf = if new_vf.trim().is_empty() {
-                        mpv_filters::DOCKED_FPS_FILTER.to_string()
-                    } else {
-                        format!("{},{}", new_vf, mpv_filters::DOCKED_FPS_FILTER)
-                    };
-                }
-                let _ = m.set_property("vf", new_vf);
-            }
-
-            if self.docked_prev_video_sync.is_none() {
-                self.docked_prev_video_sync = m.get_property::<String>("video-sync").ok();
-            }
-            if self.docked_prev_interpolation.is_none() {
-                self.docked_prev_interpolation = m.get_property::<bool>("interpolation").ok();
-            }
-            if self.docked_prev_tscale.is_none() {
-                self.docked_prev_tscale = m.get_property::<String>("tscale").ok();
-            }
-
+        if should_use_docked_profile {
             let _ = m.set_property("video-sync", "audio");
             let _ = m.set_property("interpolation", false);
             let _ = m.set_property("tscale", "linear");
-
-            if self.docked_prev_cache.is_none() {
-                self.docked_prev_cache = m.get_property::<String>("cache").ok();
-            }
-            if self.docked_prev_cache_secs.is_none() {
-                self.docked_prev_cache_secs = m.get_property::<f64>("cache-secs").ok();
-            }
-            if self.docked_prev_readahead_secs.is_none() {
-                self.docked_prev_readahead_secs =
-                    m.get_property::<f64>("demuxer-readahead-secs").ok();
-            }
-            if self.docked_prev_demuxer_max_bytes.is_none() {
-                self.docked_prev_demuxer_max_bytes =
-                    m.get_property::<i64>("demuxer-max-bytes").ok();
-            }
-            if self.docked_prev_demuxer_max_back_bytes.is_none() {
-                self.docked_prev_demuxer_max_back_bytes =
-                    m.get_property::<i64>("demuxer-max-back-bytes").ok();
-            }
-
-            let _ = m.set_property("cache", "yes");
-            let _ = m.set_property("cache-secs", MPV_DOCKED_CACHE_SECS);
-            let _ = m.set_property("demuxer-readahead-secs", MPV_DOCKED_READAHEAD_SECS);
+            let _ = m.set_property("cache", "no");
             let _ = m.set_property("demuxer-max-bytes", MPV_DOCKED_DEMUXER_MAX_BYTES);
             let _ = m.set_property("demuxer-max-back-bytes", MPV_DOCKED_DEMUXER_MAX_BACK_BYTES);
 
-            self.docked_downscale_applied = true;
-            self.docked_fps_limit_applied = true;
-        } else if self.docked_downscale_applied
-            || self.docked_fps_limit_applied
-            || has_downscale
-            || has_fps_limit
-        {
-            // Robust detach cleanup: ensure docked-only filters are removed even if
-            // internal flags drift from the actual vf chain.
-            let cleaned_vf = mpv_filters::remove_vf_filter(
-                &mpv_filters::remove_vf_filter(&current_vf, mpv_filters::DOCKED_DOWNSCALE_MARKER),
-                mpv_filters::DOCKED_FPS_MARKER,
+            log::info!(
+                "[MpvPreview] Applied docked low-memory profile: cache=no, demux={}MB/{}MB, vf='{}'",
+                MPV_DOCKED_DEMUXER_MAX_BYTES / (1024 * 1024),
+                MPV_DOCKED_DEMUXER_MAX_BACK_BYTES / (1024 * 1024),
+                m.get_property::<String>("vf").unwrap_or_default()
             );
-            let restore_vf = if has_downscale || has_fps_limit {
-                cleaned_vf
-            } else {
-                self.docked_prev_vf
-                    .clone()
-                    .unwrap_or_else(|| current_vf.clone())
-            };
-            let _ = m.set_property("vf", restore_vf);
-            self.docked_prev_vf = None;
-
-            if let Some(prev) = self.docked_prev_video_sync.take() {
-                let _ = m.set_property("video-sync", prev);
-            }
-            if let Some(prev) = self.docked_prev_interpolation.take() {
-                let _ = m.set_property("interpolation", prev);
-            }
-            if let Some(prev) = self.docked_prev_tscale.take() {
-                let _ = m.set_property("tscale", prev);
-            }
-
-            self.docked_prev_cache = None;
-            self.docked_prev_cache_secs = None;
-            self.docked_prev_readahead_secs = None;
-            self.docked_prev_demuxer_max_bytes = None;
-            self.docked_prev_demuxer_max_back_bytes = None;
-
+        } else {
             let _ = m.set_property("cache", "yes");
             let _ = m.set_property("cache-secs", MPV_DETACHED_CACHE_SECS);
             let _ = m.set_property("demuxer-readahead-secs", MPV_DETACHED_READAHEAD_SECS);
@@ -187,10 +100,33 @@ impl MpvPreview {
                 "demuxer-max-back-bytes",
                 MPV_DETACHED_DEMUXER_MAX_BACK_BYTES,
             );
-
-            self.docked_downscale_applied = false;
-            self.docked_fps_limit_applied = false;
         }
+
+        self.last_profile_was_docked = Some(should_use_docked_profile);
+        self.configure_media_graph();
+    }
+
+    pub(super) fn configure_media_graph(&self) {
+        let Some(m) = &self.mpv else {
+            return;
+        };
+
+        let is_audio = self
+            .path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(crate::infrastructure::windows::is_audio_extension)
+            .unwrap_or(false);
+        let graph = if !is_audio {
+            ""
+        } else if self.is_docked() {
+            MPV_DOCKED_AUDIO_VISUALIZATION
+        } else {
+            MPV_DETACHED_AUDIO_VISUALIZATION
+        };
+
+        let _ = m.set_property("force-window", false);
+        let _ = m.set_property("lavfi-complex", graph);
     }
 
     /// Apply deinterlace filter based on pre-detected interlaced state.
@@ -206,42 +142,11 @@ impl MpvPreview {
                 return;
             }
         };
-        let current_vf = m.get_property::<String>("vf").unwrap_or_default();
-        let has_deinterlace = current_vf.contains(mpv_filters::DEINTERLACE_MARKER);
-
-        if interlaced && !has_deinterlace {
+        if interlaced {
             let _ = m.set_property("deinterlace", "yes");
-            let new_vf =
-                mpv_filters::append_vf_filter(&current_vf, mpv_filters::DEINTERLACE_FILTER);
-            let _ = m.set_property("vf", new_vf);
-            self.update_prev_vf_deinterlace(true);
-        } else if !interlaced && has_deinterlace {
-            let _ = m.set_property("deinterlace", "no");
-            let new_vf =
-                mpv_filters::remove_vf_filter(&current_vf, mpv_filters::DEINTERLACE_MARKER);
-            let _ = m.set_property("vf", new_vf);
-            self.update_prev_vf_deinterlace(false);
-        } else if !interlaced {
+        } else {
             let _ = m.set_property("deinterlace", "no");
         }
-    }
-
-    pub(super) fn update_prev_vf_deinterlace(&mut self, apply: bool) {
-        let Some(prev) = self.docked_prev_vf.clone() else {
-            return;
-        };
-        let updated = if apply {
-            if prev.contains(mpv_filters::DEINTERLACE_MARKER) {
-                prev
-            } else {
-                mpv_filters::append_vf_filter(&prev, mpv_filters::DEINTERLACE_FILTER)
-            }
-        } else if prev.contains(mpv_filters::DEINTERLACE_MARKER) {
-            mpv_filters::remove_vf_filter(&prev, mpv_filters::DEINTERLACE_MARKER)
-        } else {
-            prev
-        };
-        self.docked_prev_vf = Some(updated);
     }
 
     /// Enables NVIDIA RTX Video Super Resolution (VSR).
@@ -276,7 +181,6 @@ impl MpvPreview {
             self.is_vsr_enabled = true;
             log::info!("[MpvPreview] NVIDIA VSR Enabled");
             Self::log_vsr_pipeline(m, "enable_requested");
-            self.update_docked_downscale(true);
             Ok(())
         } else {
             Err("MPV instance not initialized".to_string())
@@ -298,7 +202,6 @@ impl MpvPreview {
             self.is_vsr_enabled = false;
             log::info!("[MpvPreview] VSR Disabled");
             Self::log_vsr_pipeline(m, "disable_requested");
-            self.update_docked_downscale(true);
             Ok(())
         } else {
             Err("MPV instance not initialized".to_string())

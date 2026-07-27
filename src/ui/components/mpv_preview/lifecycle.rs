@@ -54,6 +54,7 @@ impl MpvPreview {
         self.cached_duration = None;
         self.cached_tracks = None;
         self.loaded_path = None;
+        self.last_profile_was_docked = None;
         self.show_player = false;
         self.is_visible = false;
         self.surface.reset_rect();

@@ -65,13 +65,12 @@ impl MpvPreview {
                     let _ = m.set_property("tscale", "linear");
                     let _ = m.set_property("framedrop", "vo");
 
-                    // Bound demux/cache memory so high-bitrate files do not balloon RAM usage.
-                    let _ = m.set_property("cache", "yes");
-                    let _ = m.set_property("cache-secs", MPV_DEFAULT_CACHE_SECS);
-                    let _ = m.set_property("demuxer-readahead-secs", MPV_DEFAULT_READAHEAD_SECS);
-                    let _ = m.set_property("demuxer-max-bytes", MPV_DEFAULT_DEMUXER_MAX_BYTES);
-                    let _ = m
-                        .set_property("demuxer-max-back-bytes", MPV_DEFAULT_DEMUXER_MAX_BACK_BYTES);
+                    // Detail-panel playback only reads local files. Avoid retaining a
+                    // growing read-ahead cache and keep defensive demuxer limits small.
+                    let _ = m.set_property("cache", "no");
+                    let _ = m.set_property("demuxer-max-bytes", MPV_DOCKED_DEMUXER_MAX_BYTES);
+                    let _ =
+                        m.set_property("demuxer-max-back-bytes", MPV_DOCKED_DEMUXER_MAX_BACK_BYTES);
 
                     let _ = m.set_property("pause", true);
 
@@ -115,6 +114,8 @@ impl MpvPreview {
             self.sync_vsr_flags_from_mpv(&m);
         }
 
+        self.update_docked_profile();
+
         // Load file once
         if self.loaded_path.as_ref() != Some(&self.path) {
             // SAFETY: Don't open files that are actively being downloaded/written.
@@ -129,28 +130,7 @@ impl MpvPreview {
                 // The file watcher will trigger a refresh when the download completes.
                 self.loaded_path = Some(self.path.clone());
             } else if let Some(m) = &self.mpv {
-                let is_audio = self
-                    .path
-                    .extension()
-                    .and_then(|ext| ext.to_str())
-                    .map(crate::infrastructure::windows::is_audio_extension)
-                    .unwrap_or(false);
-
-                // Audio visualization: showwaves renders a real-time waveform.
-                // The lavfi-complex graph produces a [vo] output, so force-window
-                // is NOT needed.  format=pix_fmts=rgb24 strips the alpha channel
-                // so the background is solid black instead of transparent.
-                // For video files the graph is cleared so the normal track plays.
-                if is_audio {
-                    let _ = m.set_property("force-window", false);
-                    let _ = m.set_property(
-                        "lavfi-complex",
-                        "[aid1]asplit[ao][a1];[a1]showwaves=s=1920x1080:mode=cline:rate=30:colors=white,format=pix_fmts=rgb24[vo]",
-                    );
-                } else {
-                    let _ = m.set_property("force-window", false);
-                    let _ = m.set_property("lavfi-complex", "");
-                }
+                self.configure_media_graph();
 
                 let path_str = self.path.to_string_lossy().to_string();
                 let _ = m.command("loadfile", &[&path_str]);
@@ -199,19 +179,6 @@ impl MpvPreview {
                 state.interlaced = None;
                 state.video_aspect = None;
             }
-
-            // Defensive cleanup: ensure docked-only filters are not carried across files.
-            self.update_docked_downscale(false);
-        }
-
-        // OPT-3: Only call update_docked_downscale when mode actually changed
-        let is_detached = self.is_detached();
-        let needs_apply =
-            is_detached && (self.docked_downscale_applied || self.docked_fps_limit_applied);
-        let needs_remove =
-            !is_detached && (!self.docked_downscale_applied || !self.docked_fps_limit_applied);
-        if needs_apply || needs_remove {
-            self.update_docked_downscale(false);
         }
 
         // PERF: Check async sidecar subtitle result (non-blocking)
