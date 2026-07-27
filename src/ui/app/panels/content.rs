@@ -1,3 +1,4 @@
+use crate::app::dual_panel::ActivePanel;
 use crate::app::ImageViewerApp;
 use crate::domain::file_entry::{FileEntry, SyncStatus};
 use crate::domain::special_paths::{COMPUTER_VIEW_ID, RECYCLE_BIN_VIEW_ID};
@@ -563,6 +564,31 @@ fn is_current_folder_panel_target(app: &ImageViewerApp, file: &FileEntry) -> boo
         && file.path.as_path() == std::path::Path::new(&app.navigation_state.current_path)
 }
 
+fn physical_panel_ui_id(parent_id: egui::Id, panel: ActivePanel) -> egui::Id {
+    let panel_salt = match panel {
+        ActivePanel::Left => "file_panel_left",
+        ActivePanel::Right => "file_panel_right",
+    };
+    parent_id.with(panel_salt)
+}
+
+fn render_physical_panel_content(
+    app: &mut ImageViewerApp,
+    ui: &mut egui::Ui,
+    panel: ActivePanel,
+    content_rect: egui::Rect,
+    clip_rect: egui::Rect,
+) {
+    let panel_id = physical_panel_ui_id(ui.id(), panel);
+    ui.scope_builder(
+        egui::UiBuilder::new().id(panel_id).max_rect(content_rect),
+        |ui| {
+            ui.set_clip_rect(content_rect.intersect(clip_rect));
+            render_single_panel_content(app, ui);
+        },
+    );
+}
+
 pub(super) fn render_central_panel_layout(app: &mut ImageViewerApp, root_ui: &mut egui::Ui) {
     let dark_mode = root_ui.visuals().dark_mode;
     egui::CentralPanel::default()
@@ -578,15 +604,15 @@ pub(super) fn render_central_panel_layout(app: &mut ImageViewerApp, root_ui: &mu
             if app.dual_panel_enabled {
                 render_dual_panel(app, ui);
             } else {
-                render_single_panel_content(app, ui);
+                let panel = app.dual_panel_active;
+                let content_rect = ui.available_rect_before_wrap().intersect(ui.clip_rect());
+                render_physical_panel_content(app, ui, panel, content_rect, ui.clip_rect());
             }
         });
 }
 
 /// Render the dual-panel split view inside the central panel area.
 fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
-    use crate::app::dual_panel::ActivePanel;
-
     let total_rect = ui.available_rect_before_wrap().intersect(ui.clip_rect());
     if total_rect.width() <= 1.0 || total_rect.height() <= 1.0 {
         return;
@@ -885,24 +911,12 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
         }
     }
 
-    // ── Render ACTIVE panel content with unique ID scope ──
-    let active_id = match active {
-        ActivePanel::Left => "dual_left",
-        ActivePanel::Right => "dual_right",
-    };
+    // Keep each physical panel's egui identity stable when switching between
+    // dual and single layouts so its visual scroll state survives the transition.
     let central_clip = ui.clip_rect().intersect(total_rect);
-    ui.scope_builder(egui::UiBuilder::new().max_rect(active_content_rect), |ui| {
-        ui.push_id(active_id, |ui| {
-            ui.set_clip_rect(active_content_rect.intersect(central_clip));
-            render_single_panel_content(app, ui);
-        });
-    });
+    render_physical_panel_content(app, ui, active, active_content_rect, central_clip);
 
     // ── Render INACTIVE panel content with unique ID scope ──
-    let inactive_id = match active {
-        ActivePanel::Left => "dual_right",
-        ActivePanel::Right => "dual_left",
-    };
     app.with_inactive_panel(|app_with_inactive| {
         // The unfocused pane is still visible; only route its thumbnail requests
         // through the active generation so the shared workers accept them.
@@ -910,14 +924,12 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
         app_with_inactive.suppress_file_panel_keyboard = true;
         app_with_inactive.drag_drop_cross_panel_context = true;
 
-        ui.scope_builder(
-            egui::UiBuilder::new().max_rect(inactive_content_rect),
-            |ui| {
-                ui.push_id(inactive_id, |ui| {
-                    ui.set_clip_rect(inactive_content_rect.intersect(central_clip));
-                    render_single_panel_content(app_with_inactive, ui);
-                });
-            },
+        render_physical_panel_content(
+            app_with_inactive,
+            ui,
+            active.other(),
+            inactive_content_rect,
+            central_clip,
         );
         app_with_inactive.drag_drop_cross_panel_context = false;
         app_with_inactive.use_active_generation_for_thumbnail_requests = false;
@@ -1119,5 +1131,23 @@ fn render_single_panel_content(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
                 );
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::physical_panel_ui_id;
+    use crate::app::dual_panel::ActivePanel;
+    use eframe::egui;
+
+    #[test]
+    fn physical_panel_ids_are_stable_across_layouts() {
+        let central_panel_id = egui::Id::new("central_panel");
+        let mono_left = physical_panel_ui_id(central_panel_id, ActivePanel::Left);
+        let dual_left = physical_panel_ui_id(central_panel_id, ActivePanel::Left);
+        let right = physical_panel_ui_id(central_panel_id, ActivePanel::Right);
+
+        assert_eq!(mono_left, dual_left);
+        assert_ne!(mono_left, right);
     }
 }

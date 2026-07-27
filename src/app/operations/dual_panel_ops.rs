@@ -129,6 +129,9 @@ impl ImageViewerApp {
         // Drop inactive panel state
         self.dual_panel_inactive_state = None;
         self.dual_panel_enabled = false;
+        // The wider single-panel layout can change grid column count. Reconcile
+        // the preserved offset once so the surviving selection remains visible.
+        self.scroll_to_selected = self.selected_item.is_some();
         // Trigger auto-fit of list view columns on the next list view render.
         // Columns were likely shrunk by scale_column_widths for the narrow dual
         // panel; this expands them back to content-appropriate widths.
