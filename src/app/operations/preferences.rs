@@ -247,6 +247,10 @@ impl ImageViewerApp {
         if let Some(tags_h) = self.layout.sidebar_tags_height {
             prefs.push(("sidebar_tags_height", tags_h.to_string()));
         }
+        prefs.push((
+            "sidebar_tag_order",
+            crate::app::operations::tag_ops::serialize_sidebar_tag_order(&self.sidebar_tag_ids),
+        ));
 
         // Save last active folder from current tab
         let last_folder = self.navigation_state.current_path.clone();

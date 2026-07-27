@@ -189,7 +189,7 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, root_ui: &mut egui::Ui) -> Opt
                     mounted_iso_drives: &app.file_operation_state.mounted_iso_drives,
                     tree_state: &app.sidebar_tree,
                     tag_definitions: &app.tag_definitions,
-                    sorted_tag_ids: &app.sorted_tag_ids,
+                    sidebar_tag_ids: &app.sidebar_tag_ids,
                     tag_counts: &app.tag_counts,
                     active_tag_filter: app.active_tag_filter,
                     collapse_tags: app.collapse_tags,
@@ -276,7 +276,7 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, root_ui: &mut egui::Ui) -> Opt
                 mounted_iso_drives: &app.file_operation_state.mounted_iso_drives,
                 tree_state: &app.sidebar_tree,
                 tag_definitions: &app.tag_definitions,
-                sorted_tag_ids: &app.sorted_tag_ids,
+                sidebar_tag_ids: &app.sidebar_tag_ids,
                 tag_counts: &app.tag_counts,
                 active_tag_filter: app.active_tag_filter,
                 collapse_tags: app.collapse_tags,
@@ -446,6 +446,10 @@ fn handle_sidebar_action(app: &mut ImageViewerApp, action: SidebarAction) {
         SidebarAction::PinFolder(path) => app.pin_folder(&path),
         SidebarAction::UnpinFolder(path) => app.unpin_folder(&path),
         SidebarAction::ReorderPinnedFolder { from, to } => app.reorder_pinned_folder(from, to),
+        SidebarAction::ReorderTag {
+            tag_id,
+            before_tag_id,
+        } => app.reorder_sidebar_tag(tag_id, before_tag_id),
         SidebarAction::CommitDriveRename {
             drive_path,
             new_label,

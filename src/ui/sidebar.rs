@@ -9,6 +9,9 @@ use rust_i18n::t;
 use rustc_hash::FxHashMap;
 use std::collections::HashMap;
 
+mod tags;
+pub use tags::render_tags_section;
+
 /// Cached drive type results. Drive types don't change at runtime
 /// (a drive letter is always local or always network), so we cache
 /// indefinitely. The cache is cleared when the drive list changes.
@@ -59,9 +62,8 @@ pub struct SidebarContext<'a> {
     /// Folder tree expansion state (shared reference for rendering)
     pub tree_state: &'a SidebarTreeState,
     pub tag_definitions: &'a FxHashMap<i64, FileTag>,
-    /// Tag IDs pre-sorted by `(position, name case-insensitive)`; resolved
-    /// against `tag_definitions` so the sidebar never re-sorts each frame.
-    pub sorted_tag_ids: &'a [i64],
+    /// User-defined tag order used only by the sidebar.
+    pub sidebar_tag_ids: &'a [i64],
     pub tag_counts: &'a FxHashMap<i64, usize>,
     pub active_tag_filter: Option<i64>,
     pub collapse_tags: bool,
@@ -78,6 +80,10 @@ pub enum SidebarAction {
     ReorderPinnedFolder {
         from: usize,
         to: usize,
+    },
+    ReorderTag {
+        tag_id: i64,
+        before_tag_id: Option<i64>,
     },
     /// User confirmed inline drive rename
     CommitDriveRename {
@@ -339,144 +345,6 @@ pub fn render_sidebar_fixed_top(
     ui.separator();
 
     action
-}
-
-/// Renders the Tags section (fixed at the bottom of the sidebar).
-/// Uses a caller-provided `ScrollArea` with `max_height` so many tags scroll
-/// independently without pushing drives out of view.
-pub fn render_tags_section(
-    ui: &mut egui::Ui,
-    ctx: &mut SidebarContext,
-    action: &mut Option<SidebarAction>,
-) {
-    if !ctx.show_tags || ctx.tag_definitions.is_empty() {
-        return;
-    }
-
-    const TAG_HEADER_H: f32 = 22.0;
-    const TAG_BOTTOM_PADDING_H: f32 = 8.0;
-
-    let (header_rect, _) = ui.allocate_exact_size(
-        egui::vec2(ui.available_width(), TAG_HEADER_H),
-        Sense::hover(),
-    );
-    let toggle_size = 18.0;
-    let toggle_rect = Rect::from_center_size(
-        Pos2::new(
-            header_rect.max.x - toggle_size / 2.0 - 3.0,
-            header_rect.center().y,
-        ),
-        egui::vec2(toggle_size, toggle_size),
-    );
-    let toggle_response = ui
-        .interact(
-            toggle_rect,
-            egui::Id::new("sidebar_toggle_tags"),
-            Sense::click(),
-        )
-        .on_hover_text(if ctx.collapse_tags {
-            t!("sidebar.expand_section")
-        } else {
-            t!("sidebar.collapse_section")
-        });
-
-    if ui.is_rect_visible(header_rect) {
-        ui.painter().text(
-            Pos2::new(header_rect.min.x + 8.0, header_rect.center().y),
-            egui::Align2::LEFT_CENTER,
-            t!("tags.section"),
-            egui::FontId::proportional(10.0),
-            Color32::from_gray(120),
-        );
-
-        let toggle_icon = if ctx.collapse_tags { "v" } else { "^" };
-        let toggle_color = if toggle_response.hovered() {
-            ui.visuals().text_color()
-        } else {
-            Color32::from_gray(140)
-        };
-        ui.painter().text(
-            toggle_rect.center(),
-            egui::Align2::CENTER_CENTER,
-            toggle_icon,
-            egui::FontId::proportional(14.0),
-            toggle_color,
-        );
-    }
-
-    if toggle_response.clicked() && action.is_none() {
-        *action = Some(SidebarAction::ToggleTags);
-    }
-
-    if ctx.collapse_tags {
-        ui.add_space(TAG_BOTTOM_PADDING_H);
-        return;
-    }
-
-    ui.add_space(4.0);
-
-    for tag_id in ctx.sorted_tag_ids {
-        let Some(tag) = ctx.tag_definitions.get(tag_id) else {
-            continue;
-        };
-        let is_selected = ctx.active_tag_filter == Some(tag.id);
-        let count = ctx.tag_counts.get(&tag.id).copied().unwrap_or(0);
-        let (mut rect, response) =
-            ui.allocate_exact_size(egui::vec2(ui.available_width(), 26.0), Sense::click());
-        rect.min.x = ui.clip_rect().min.x;
-        rect.max.x = ui.clip_rect().max.x;
-
-        if ui.is_rect_visible(rect) {
-            let dark_mode = ui.visuals().dark_mode;
-            if is_selected {
-                ui.painter()
-                    .rect_filled(rect, 0.0, crate::ui::theme::selection_color(dark_mode));
-            } else if response.hovered() && !ctx.is_item_dragging {
-                ui.painter().rect_filled(
-                    rect,
-                    0.0,
-                    crate::ui::theme::selection_hover_color(dark_mode),
-                );
-            }
-
-            let text_color = if is_selected {
-                crate::ui::theme::selection_text_color(dark_mode)
-            } else {
-                ui.visuals().text_color()
-            };
-            let tag_icon_center = Pos2::new(rect.min.x + 18.0, rect.center().y);
-            crate::ui::tag_icon::paint_filled(
-                ui.painter(),
-                tag_icon_center,
-                10.0,
-                tag.color.to_color32(),
-            );
-            ui.painter().text(
-                Pos2::new(rect.min.x + 30.0, rect.center().y),
-                egui::Align2::LEFT_CENTER,
-                &tag.name,
-                egui::FontId::proportional(11.5),
-                text_color,
-            );
-
-            if count > 0 {
-                ui.painter().text(
-                    Pos2::new(rect.max.x - 12.0, rect.center().y),
-                    egui::Align2::RIGHT_CENTER,
-                    count.to_string(),
-                    egui::FontId::proportional(10.0),
-                    Color32::from_gray(130),
-                );
-            }
-        }
-
-        if response.clicked() && !ctx.is_renaming && action.is_none() {
-            let next = if is_selected { None } else { Some(tag.id) };
-            *action = Some(SidebarAction::FilterByTag(next));
-        }
-    }
-
-    ui.add_space(TAG_BOTTOM_PADDING_H);
 }
 
 /// Renders the scrollable drives section of the sidebar (drives + folder trees).

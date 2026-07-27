@@ -25,6 +25,7 @@ impl ImageViewerApp {
             },
         );
         self.rebuild_sorted_tag_ids();
+        self.sync_sidebar_tag_order();
         self.ui_ctx.request_repaint();
         Some(id)
     }
@@ -60,6 +61,7 @@ impl ImageViewerApp {
 
         self.tag_definitions.remove(&tag_id);
         self.rebuild_sorted_tag_ids();
+        self.sync_sidebar_tag_order();
         self.tag_counts.remove(&tag_id);
         let assignments = Arc::make_mut(&mut self.tag_assignments);
         assignments.retain(|_, ids| {

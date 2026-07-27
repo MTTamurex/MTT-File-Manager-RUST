@@ -218,6 +218,7 @@ impl ImageViewerApp {
             dual_panel_inactive_view_mode: saved_dual_panel_inactive_view_mode,
             active_tag_filter: saved_active_tag_filter,
             sidebar_tags_height,
+            sidebar_tag_order,
         } = startup_preferences;
 
         // Apply saved language preference
@@ -246,6 +247,10 @@ impl ImageViewerApp {
             .collect();
         let sorted_tag_ids =
             crate::app::operations::tag_ops::build_sorted_tag_ids(&tag_definitions);
+        let sidebar_tag_ids = crate::app::operations::tag_ops::reconcile_sidebar_tag_order(
+            &sidebar_tag_order,
+            &sorted_tag_ids,
+        );
         let tag_assignments = Arc::new(app_state_db.get_all_tag_assignments());
         let tag_assignments_normalized = Arc::new(
             crate::app::operations::tag_ops::normalized::build_tag_assignments_normalized(
@@ -670,6 +675,7 @@ impl ImageViewerApp {
 
             tag_definitions,
             sorted_tag_ids,
+            sidebar_tag_ids,
             tag_assignments,
             tag_assignments_normalized,
             tag_assignments_epoch: 0,

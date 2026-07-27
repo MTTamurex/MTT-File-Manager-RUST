@@ -7,7 +7,12 @@ mod cache;
 mod definitions;
 pub(crate) mod normalized;
 pub(crate) mod purge_worker;
+mod sidebar_order;
 mod view;
+
+pub(crate) use sidebar_order::{
+    parse_sidebar_tag_order, reconcile_sidebar_tag_order, serialize_sidebar_tag_order,
+};
 
 pub(crate) enum TagPathUpdate {
     PersistedRemoval(Vec<PathBuf>),

@@ -573,6 +573,8 @@ pub struct ImageViewerApp {
     /// never on assign/unassign or recolor. Consumers resolve the current
     /// `FileTag` by ID so recurring renders avoid clone + lowercase + sort.
     pub sorted_tag_ids: Arc<[i64]>,
+    /// User-defined tag order used only by the sidebar.
+    pub sidebar_tag_ids: Vec<i64>,
     pub tag_assignments: Arc<rustc_hash::FxHashMap<PathBuf, Vec<i64>>>,
     /// Precomputed case-insensitive view of `tag_assignments` keyed by
     /// `normalize_tag_path_key(path)`. Rebuilt only when `tag_assignments`
