@@ -95,6 +95,10 @@ fn backend_uses_low_ram_gpu_policy(active_gpu_backend: &str) -> bool {
     matches!(active_gpu_backend, "glow" | "Vulkan" | "Dx12")
 }
 
+fn backend_uses_conservative_thumbnail_upload_policy(active_gpu_backend: &str) -> bool {
+    matches!(active_gpu_backend, "Vulkan" | "Dx12")
+}
+
 fn pending_thumbnail_eviction_index(
     pending: &std::collections::VecDeque<ThumbnailData>,
     visible_paths: Option<&FxHashSet<std::path::PathBuf>>,
@@ -313,6 +317,12 @@ impl ImageViewerApp {
     /// hold staging/RGBA memory longer than the generic wgpu path expects.
     pub fn is_vulkan_backend(&self) -> bool {
         self.active_gpu_backend == "Vulkan"
+    }
+
+    /// Returns `true` for asynchronous wgpu backends that should share the
+    /// tighter thumbnail intake, upload, and RGBA-retention limits.
+    pub fn uses_conservative_thumbnail_upload_policy(&self) -> bool {
+        backend_uses_conservative_thumbnail_upload_policy(&self.active_gpu_backend)
     }
 
     /// Returns `true` for backends that need conservative folder-preview
@@ -1670,10 +1680,10 @@ fn current_process_memory_snapshot() -> Option<ProcessMemorySnapshot> {
 #[cfg(test)]
 mod inactive_panel_paths_tests {
     use super::{
-        backend_uses_low_ram_gpu_policy, classify_memory_pressure, detail_panel_thumbnail_active,
-        insert_item_reference_paths, pending_thumbnail_eviction_index,
-        trim_pending_thumbnail_queue, working_set_trim_cancelled, FileEntry, FxHashSet,
-        MemoryPressure, ProcessMemorySnapshot,
+        backend_uses_conservative_thumbnail_upload_policy, backend_uses_low_ram_gpu_policy,
+        classify_memory_pressure, detail_panel_thumbnail_active, insert_item_reference_paths,
+        pending_thumbnail_eviction_index, trim_pending_thumbnail_queue, working_set_trim_cancelled,
+        FileEntry, FxHashSet, MemoryPressure, ProcessMemorySnapshot,
     };
     use crate::domain::file_entry::SyncStatus;
     use crate::domain::thumbnail::ThumbnailData;
@@ -1754,6 +1764,14 @@ mod inactive_panel_paths_tests {
         assert!(backend_uses_low_ram_gpu_policy("Vulkan"));
         assert!(backend_uses_low_ram_gpu_policy("Dx12"));
         assert!(!backend_uses_low_ram_gpu_policy(""));
+    }
+
+    #[test]
+    fn conservative_thumbnail_upload_policy_includes_wgpu_backends() {
+        assert!(backend_uses_conservative_thumbnail_upload_policy("Vulkan"));
+        assert!(backend_uses_conservative_thumbnail_upload_policy("Dx12"));
+        assert!(!backend_uses_conservative_thumbnail_upload_policy("glow"));
+        assert!(!backend_uses_conservative_thumbnail_upload_policy(""));
     }
 
     #[test]

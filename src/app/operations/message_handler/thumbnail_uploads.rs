@@ -23,7 +23,7 @@ const MIN_INCOMING_THUMBNAIL_BUDGET_MS: u64 = 2;
 const TEXTURE_CACHE_RETUNE_INTERVAL_MS: u64 = 900;
 const TEXTURE_CACHE_RETUNE_MIN_DELTA_ITEMS: usize = 16;
 const DIAG_SLOW_TEXTURE_UPLOAD_THRESHOLD: Duration = Duration::from_millis(8);
-const VULKAN_MAX_INCOMING_THUMBNAIL_MSGS_PER_FRAME: usize = 48;
+const CONSERVATIVE_WGPU_MAX_INCOMING_THUMBNAIL_MSGS_PER_FRAME: usize = 48;
 
 fn live_frame_pressure_ms(app: &ImageViewerApp) -> f32 {
     app.last_actual_frame_ms.max(app.frame_time_avg_ms)
@@ -231,6 +231,7 @@ impl ImageViewerApp {
         let is_burst = self.is_in_restore_burst();
         let is_opengl = self.is_opengl_backend();
         let is_vulkan = self.is_vulkan_backend();
+        let use_conservative_upload_policy = self.uses_conservative_thumbnail_upload_policy();
         let frame_pressure_ms = live_frame_pressure_ms(self);
         let is_scrolling = self.last_scroll_time.elapsed() < Duration::from_millis(180);
         // During burst, ignore frame pressure for intake — the slow frames are caused
@@ -285,26 +286,26 @@ impl ImageViewerApp {
         // During burst mode, skip the throttle — we want to fill the queue fast.
         let effective_incoming_cap = if is_opengl && is_scrolling {
             24
-        } else if is_vulkan && is_scrolling {
+        } else if use_conservative_upload_policy && is_scrolling {
             32
         } else if is_burst {
             if is_opengl {
                 24
-            } else if is_vulkan {
-                VULKAN_MAX_INCOMING_THUMBNAIL_MSGS_PER_FRAME
+            } else if use_conservative_upload_policy {
+                CONSERVATIVE_WGPU_MAX_INCOMING_THUMBNAIL_MSGS_PER_FRAME
             } else {
                 MAX_INCOMING_THUMBNAIL_MSGS_PER_FRAME
             }
         } else if self.pending_thumbnails.len() > dynamic_pending_limit / 2 {
-            if is_vulkan {
+            if use_conservative_upload_policy {
                 24
             } else {
                 48
             }
         } else if is_opengl {
             48
-        } else if is_vulkan {
-            VULKAN_MAX_INCOMING_THUMBNAIL_MSGS_PER_FRAME
+        } else if use_conservative_upload_policy {
+            CONSERVATIVE_WGPU_MAX_INCOMING_THUMBNAIL_MSGS_PER_FRAME
         } else {
             MAX_INCOMING_THUMBNAIL_MSGS_PER_FRAME
         };
@@ -600,11 +601,9 @@ impl ImageViewerApp {
             1.0
         };
 
-        // During restore burst, bypass the adaptive throttle entirely.
-        // The slow frames are caused by OS page-faults on the RGBA RAM cache,
-        // not by rendering complexity.  Restricting uploads only prolongs the
-        // blank-tile period.  We allow up to 48 uploads/frame (clamped by the
-        // generous time budget below) which fills the visible grid in ~2-3 seconds.
+        // During restore burst, bypass the adaptive throttle entirely. The
+        // conservative wgpu profile still uses a lower fixed cap to avoid a
+        // large wave of queued staging allocations after restore.
         //
         // On OpenGL (Glow / wgpu-GL) each `ctx.load_texture` call is synchronous
         // on the CPU thread.  Unlike DX12/Vulkan where wgpu queues the upload
@@ -614,7 +613,7 @@ impl ImageViewerApp {
         let base_max_uploads = if is_burst {
             if is_opengl {
                 2
-            } else if is_vulkan {
+            } else if use_conservative_upload_policy {
                 if is_scrolling {
                     6
                 } else {
@@ -634,7 +633,7 @@ impl ImageViewerApp {
         } else if is_video_playing && is_scrolling {
             if is_opengl {
                 2
-            } else if is_vulkan {
+            } else if use_conservative_upload_policy {
                 3
             } else {
                 4
@@ -642,7 +641,7 @@ impl ImageViewerApp {
         } else if is_scrolling {
             if is_opengl {
                 2
-            } else if is_vulkan {
+            } else if use_conservative_upload_policy {
                 3
             } else {
                 6
@@ -650,7 +649,7 @@ impl ImageViewerApp {
         } else if is_video_playing {
             if is_opengl {
                 3
-            } else if is_vulkan {
+            } else if use_conservative_upload_policy {
                 4
             } else {
                 5
@@ -668,12 +667,12 @@ impl ImageViewerApp {
                 if is_burst {
                     if is_opengl {
                         4.0
-                    } else if is_vulkan {
+                    } else if use_conservative_upload_policy {
                         16.0
                     } else {
                         64.0
                     }
-                } else if is_vulkan {
+                } else if use_conservative_upload_policy {
                     12.0
                 } else {
                     16.0
@@ -698,7 +697,11 @@ impl ImageViewerApp {
             // Burst: don't reduce through perf_scale; use the burst cap directly.
             base_max_uploads
         } else {
-            let max_uploads = if is_vulkan { 16.0 } else { 20.0 };
+            let max_uploads = if use_conservative_upload_policy {
+                16.0
+            } else {
+                20.0
+            };
             ((base_max_uploads as f32) * perf_scale)
                 .round()
                 .clamp(1.0, max_uploads) as usize
@@ -745,7 +748,7 @@ impl ImageViewerApp {
         let base_budget_ms = if is_burst {
             if is_opengl {
                 2.0
-            } else if is_vulkan {
+            } else if use_conservative_upload_policy {
                 if is_scrolling {
                     4.0
                 } else {
@@ -761,12 +764,12 @@ impl ImageViewerApp {
         } else if is_scrolling {
             if is_opengl {
                 2.0
-            } else if is_vulkan {
+            } else if use_conservative_upload_policy {
                 4.0
             } else {
                 self.upload_budget_ms * 0.85
             }
-        } else if is_vulkan {
+        } else if use_conservative_upload_policy {
             self.upload_budget_ms.min(8.0)
         } else {
             self.upload_budget_ms
@@ -774,7 +777,11 @@ impl ImageViewerApp {
         let upload_budget_ms = if is_burst {
             base_budget_ms
         } else {
-            let max_budget_ms = if is_vulkan { 8.0 } else { 10.0 };
+            let max_budget_ms = if use_conservative_upload_policy {
+                8.0
+            } else {
+                10.0
+            };
             (base_budget_ms * perf_scale).clamp(2.0, max_budget_ms)
         };
         let upload_budget = Duration::from_millis(upload_budget_ms.round() as u64);
@@ -800,7 +807,8 @@ impl ImageViewerApp {
             usize::MAX
         };
         let mut offscreen_uploads = 0usize;
-        let discard_offscreen_pending = (is_opengl || is_vulkan) && is_scrolling;
+        let discard_offscreen_pending =
+            (is_opengl || use_conservative_upload_policy) && is_scrolling;
         let max_offscreen_discards = max_uploads_per_frame.saturating_mul(8).max(8);
         let mut offscreen_discards = 0usize;
 
@@ -983,7 +991,7 @@ impl ImageViewerApp {
 
                 self.cache_manager.thumbnail_trace.record_upload(&path);
                 self.cache_manager.finish_pending_upload(&path);
-                let should_cache_rgba = !is_vulkan
+                let should_cache_rgba = !use_conservative_upload_policy
                     || is_selected
                     || eviction_visible
                         .as_ref()
