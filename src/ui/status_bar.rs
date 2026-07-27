@@ -454,16 +454,19 @@ pub fn render_status_bar(
                             ui.visuals_mut().widgets.active.fg_stroke = slider_knob_stroke;
                             ui.visuals_mut().widgets.active.bg_stroke = slider_track_stroke;
 
-                            if matches!(view_mode, ViewMode::List | ViewMode::ColumnList) {
-                                ui.disable();
-                            }
-
-                            ui.label(t!("status_bar.thumbnail_size").to_string());
+                            let slider_enabled =
+                                !matches!(view_mode, ViewMode::List | ViewMode::ColumnList);
+                            ui.label(
+                                egui::RichText::new(t!("status_bar.thumbnail_size").to_string())
+                                    .color(theme::text_color(is_dark)),
+                            );
                             ui.spacing_mut().slider_width = 56.0;
                             ui.spacing_mut().interact_size.y = 14.0;
-                            ui.add(
+                            ui.add_enabled(
+                                slider_enabled,
                                 egui::Slider::new(thumbnail_size, theme::THUMBNAIL_MIN..=256.0)
-                                    .show_value(false),
+                                    .show_value(false)
+                                    .trailing_fill(true),
                             );
                         });
                     });

@@ -266,3 +266,22 @@ pub fn icon_image(
         ui.label("?");
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::render_svg_to_image;
+
+    #[test]
+    fn embedded_tag_icon_renders() {
+        let image = render_svg_to_image(
+            crate::embedded_assets::ICON_TAG,
+            16,
+            [60, 60, 60, 255],
+            1.0,
+            false,
+        )
+        .expect("embedded tag icon should be valid SVG");
+
+        assert_eq!(image.size, [16, 16]);
+    }
+}

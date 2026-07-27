@@ -428,27 +428,12 @@ impl ImageViewerApp {
                 ContextMenuItem::new(-26, t!("context_menu.create_shortcut"))
                     .with_svg_icon("external-link"),
             );
-            // Quick Access pin/unpin — only for folders (not drives)
-            if !is_drive {
-                if let Some(target_path) = paths.first().and_then(|p| p.to_str()) {
-                    // Use cached is_dir field — avoids blocking I/O on OneDrive/network paths
-                    let target_is_dir = self
-                        .context_menu
-                        .primary_is_directory
-                        .or_else(|| {
-                            _item_index
-                                .and_then(|idx| self.items.get(idx))
-                                .map(|item| item.is_dir)
-                        })
-                        .unwrap_or_else(|| {
-                            // Fallback: search already-loaded items by path (no I/O)
-                            self.items
-                                .iter()
-                                .find(|it| it.path.to_str() == Some(target_path))
-                                .map(|it| it.is_dir)
-                                .unwrap_or(false)
-                        });
-                    if target_is_dir {
+            // Quick Access stores one real folder per entry. Reuse cached item
+            // metadata so cloud and network paths never require blocking I/O here.
+            if paths.len() == 1 && !is_drive && !target_is_file {
+                let target_path = &paths[0];
+                if self.context_target_is_directory(_item_index, target_path) {
+                    if let Some(target_path) = target_path.to_str() {
                         let is_pinned = self.pinned_folders.iter().any(|pf| pf.path == target_path);
                         items.push(ContextMenuItem::separator());
                         if is_pinned {
@@ -532,7 +517,7 @@ impl ImageViewerApp {
                 items.push(ContextMenuItem::separator());
                 items.push(
                     ContextMenuItem::new(-90, t!("tags.assign"))
-                        .with_svg_icon("pin")
+                        .with_svg_icon("tag")
                         .with_subitems(sub_items),
                 );
             }
