@@ -211,10 +211,10 @@ pub(super) fn render_file_slot<O: ItemSlotOperations>(
                         .horizontal_align(egui::Align::Min)
                         .id_source("rename_input_file"),
                 );
-                response.request_focus();
 
                 // On first focus: select name without extension (Windows Explorer behavior)
                 if ctx.focus_rename {
+                    response.request_focus();
                     if let Some(mut state) =
                         egui::widgets::text_edit::TextEditState::load(ui.ctx(), response.id)
                     {

@@ -230,10 +230,10 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
                         .horizontal_align(egui::Align::Min)
                         .id_source("rename_input_dir"),
                 );
-                response.request_focus();
 
                 // On first focus: select all text (directories have no extension)
                 if ctx.focus_rename {
+                    response.request_focus();
                     if let Some(mut state) =
                         egui::widgets::text_edit::TextEditState::load(ui.ctx(), response.id)
                     {

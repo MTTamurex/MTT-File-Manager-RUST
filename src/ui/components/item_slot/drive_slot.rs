@@ -101,9 +101,9 @@ pub(super) fn render_drive_slot<O: ItemSlotOperations>(
                     .horizontal_align(egui::Align::Center)
                     .id_source("rename_input_drive"),
             );
-            response.request_focus();
 
             if ctx.focus_rename {
+                response.request_focus();
                 if let Some(mut state) =
                     egui::widgets::text_edit::TextEditState::load(ui.ctx(), response.id)
                 {
