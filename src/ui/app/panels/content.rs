@@ -333,9 +333,20 @@ pub(super) fn render_preview_panel_layout(
                                             // Cancel any in-progress calculation before starting new one
                                             app.folder_size_state.cancel
                                                 .store(true, std::sync::atomic::Ordering::Release);
-                                            app.folder_size_state.clear_failure(&path);
-                                            app.folder_size_state.loading.insert(path.clone());
-                                            let _ = app.folder_size_state.req_sender.send(path);
+                                             app.folder_size_state.clear_failure(&path);
+                                             app.folder_size_state.loading.insert(path.clone());
+                                             let request_epoch = app
+                                                 .folder_size_state
+                                                 .batch_invalidation_epoch
+                                                 .get(&path)
+                                                 .copied()
+                                                 .unwrap_or(0);
+                                             let _ = app.folder_size_state.req_sender.send(
+                                                 crate::app::folder_size_state::FolderSizeRequest {
+                                                     folder_path: path,
+                                                     request_epoch,
+                                                 },
+                                             );
                                         }
                                     }
                                     PreviewPanelAction::VolumeChanged(vol) => {

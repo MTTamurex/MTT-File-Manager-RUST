@@ -57,7 +57,10 @@ impl ImageViewerApp {
 
         // Folder-size worker can stay busy in a long recursive scan, so cancel it first.
         self.folder_size_state.cancel.store(true, Ordering::Release);
-        disconnect!(self.folder_size_state.req_sender, std::path::PathBuf);
+        disconnect!(
+            self.folder_size_state.req_sender,
+            crate::app::folder_size_state::FolderSizeRequest
+        );
 
         // Background prefetch pipeline.
         let _ = self

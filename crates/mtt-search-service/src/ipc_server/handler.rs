@@ -104,6 +104,15 @@ fn live_directory_frn(path: &str) -> Result<(u64, bool), String> {
     ))
 }
 
+fn live_directory_is_empty(path: &str) -> Result<bool, String> {
+    let mut entries = std::fs::read_dir(path).map_err(|error| error.to_string())?;
+    match entries.next() {
+        Some(Ok(_)) => Ok(false),
+        Some(Err(error)) => Err(error.to_string()),
+        None => Ok(true),
+    }
+}
+
 fn repair_missing_live_directory_record(
     handle: &VolumeIndexHandle,
     path: &str,
@@ -581,7 +590,7 @@ pub(super) fn handle_client(
                 }
             };
 
-            let (result, has_pending_refreshes) = {
+            let (indexed_frn, has_pending_refreshes) = {
                 let _active_operation = crate::memory_trim::begin_active_operation();
                 let vol = handle.read();
                 if !matches!(vol.state, IndexState::Ready) {
@@ -600,64 +609,84 @@ pub(super) fn handle_client(
                 // read lock. This is passed to repair_suspicious_zero_folder_size to
                 // decide whether to repair partial-zero subtrees (post-restart race).
                 let has_pending = !vol.pending_size_refresh.is_empty();
-                let r = match vol.resolve_path_to_frn(&path) {
-                    Some(frn) => Ok((frn, crate::mft_reader::folder_size_for_service(&vol, frn))),
-                    None => Err("Path not found in index"),
-                };
-                (r, has_pending)
+                (vol.resolve_path_to_frn(&path), has_pending)
             };
 
-            let needs_live_fallback =
-                result.as_ref().err().copied() == Some("Path not found in index");
-            let result = if needs_live_fallback {
-                match live_directory_frn(&path) {
-                    Ok((frn, is_reparse)) => {
+            let live_directory = live_directory_frn(&path);
+            let result = match (indexed_frn, live_directory) {
+                (Some(indexed_frn), Ok((live_frn, _))) if indexed_frn != live_frn => {
+                    if live_directory_is_empty(&path) == Ok(true) {
+                        eprintln!(
+                            "[FOLDER-SIZE] live replacement is empty path={} indexed_frn={} live_frn={}",
+                            crate::redact_paths(&path),
+                            indexed_frn,
+                            live_frn,
+                        );
+                        Ok((live_frn, (0, 0, 0, 0)))
+                    } else {
+                        Err("Directory identity changed; index refresh pending")
+                    }
+                }
+                (Some(frn), Ok((_live_frn, _))) => match live_directory_is_empty(&path) {
+                    Ok(true) => Ok((frn, (0, 0, 0, 0))),
+                    Ok(false) => {
                         let vol = handle.read();
-                        if !matches!(vol.state, IndexState::Ready) {
-                            Err("Volume not ready")
-                        } else if !vol.sizes_loaded {
-                            Err("Sizes not loaded")
-                        } else {
-                            match vol.records.get(&frn) {
-                                Some(record) if record.is_dir() => {
-                                    eprintln!(
-                                        "[FOLDER-SIZE] resolved via live FRN fallback path={} frn={}",
-                                        crate::redact_paths(&path),
-                                        frn,
-                                    );
-                                    Ok((frn, crate::mft_reader::folder_size_for_service(&vol, frn)))
-                                }
-                                Some(_) => Err("Path resolved to non-directory record"),
-                                None => {
-                                    drop(vol);
-                                    match repair_missing_live_directory_record(
-                                        &handle, &path, frn, is_reparse,
-                                    ) {
-                                        Ok(repaired) => {
-                                            eprintln!(
+                        Ok((frn, crate::mft_reader::folder_size_for_service(&vol, frn)))
+                    }
+                    Err(_) => Err("Live path validation failed"),
+                },
+                (Some(_), Err(error)) => {
+                    eprintln!(
+                        "[FOLDER-SIZE] live validation failed path={} reason={}",
+                        crate::redact_paths(&path),
+                        crate::redact_paths(&error),
+                    );
+                    Err("Live path validation failed")
+                }
+                (None, Ok((frn, is_reparse))) => {
+                    let vol = handle.read();
+                    if !matches!(vol.state, IndexState::Ready) {
+                        Err("Volume not ready")
+                    } else if !vol.sizes_loaded {
+                        Err("Sizes not loaded")
+                    } else {
+                        match vol.records.get(&frn) {
+                            Some(record) if record.is_dir() => {
+                                eprintln!(
+                                    "[FOLDER-SIZE] resolved via live FRN fallback path={} frn={}",
+                                    crate::redact_paths(&path),
+                                    frn,
+                                );
+                                Ok((frn, crate::mft_reader::folder_size_for_service(&vol, frn)))
+                            }
+                            Some(_) => Err("Path resolved to non-directory record"),
+                            None => {
+                                drop(vol);
+                                match repair_missing_live_directory_record(
+                                    &handle, &path, frn, is_reparse,
+                                ) {
+                                    Ok(repaired) => {
+                                        eprintln!(
                                                 "[FOLDER-SIZE] repaired missing live directory record path={} frn={}",
                                                 crate::redact_paths(&path),
                                                 frn,
                                             );
-                                            Ok(repaired)
-                                        }
-                                        Err(error) => Err(error),
+                                        Ok(repaired)
                                     }
+                                    Err(error) => Err(error),
                                 }
                             }
                         }
                     }
-                    Err(error) => {
-                        eprintln!(
-                            "[FOLDER-SIZE] live FRN fallback failed path={} reason={}",
-                            crate::redact_paths(&path),
-                            crate::redact_paths(&error),
-                        );
-                        Err("Path not found in index")
-                    }
                 }
-            } else {
-                result
+                (None, Err(error)) => {
+                    eprintln!(
+                        "[FOLDER-SIZE] live FRN fallback failed path={} reason={}",
+                        crate::redact_paths(&path),
+                        crate::redact_paths(&error),
+                    );
+                    Err("Path not found in index")
+                }
             };
 
             match result {
@@ -855,6 +884,31 @@ mod tests {
         assert!(!super::is_absolute_drive_path("C:relative"));
         assert!(!super::is_absolute_drive_path(r"\\server\share"));
         assert!(!super::is_absolute_drive_path(""));
+    }
+
+    #[test]
+    fn live_empty_directory_check_observes_current_contents() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "mtt-folder-size-empty-{}-{unique}",
+            std::process::id()
+        ));
+        std::fs::create_dir(&path).unwrap();
+
+        assert_eq!(
+            super::live_directory_is_empty(path.to_str().unwrap()),
+            Ok(true)
+        );
+        std::fs::write(path.join("present.txt"), b"present").unwrap();
+        assert_eq!(
+            super::live_directory_is_empty(path.to_str().unwrap()),
+            Ok(false)
+        );
+
+        std::fs::remove_dir_all(path).unwrap();
     }
 
     #[test]

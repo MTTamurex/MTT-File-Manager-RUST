@@ -79,7 +79,8 @@ pub(in crate::app) struct AppBootstrap {
         mpsc::Receiver<crate::workers::folder_preview_worker::FolderPreviewData>,
     pub(in crate::app) folder_preview_trace:
         Arc<crate::workers::folder_preview_worker::FolderPreviewTraceCounters>,
-    pub(in crate::app) folder_size_req_tx: mpsc::Sender<PathBuf>,
+    pub(in crate::app) folder_size_req_tx:
+        mpsc::Sender<crate::app::folder_size_state::FolderSizeRequest>,
     pub(in crate::app) folder_size_res_rx: mpsc::Receiver<FolderSizeMessage>,
     pub(in crate::app) folder_size_cancel: Arc<AtomicBool>,
     pub(in crate::app) batch_size_tx: mpsc::Sender<crate::app::folder_size_state::BatchSizeRequest>,

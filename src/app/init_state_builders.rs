@@ -9,7 +9,7 @@ use std::sync::{mpsc, Arc};
 
 use super::drive_state::{DriveScanResult, DriveState};
 use super::file_operation_state::FileOperationState;
-use super::folder_size_state::{FolderSizeMessage, FolderSizeState};
+use super::folder_size_state::{FolderSizeMessage, FolderSizeRequest, FolderSizeState};
 use super::layout_state::LayoutState;
 
 fn load_width_pref(app_state_db: &AppStateDb, key: &str, default: f32) -> f32 {
@@ -115,7 +115,7 @@ pub(in crate::app) fn build_drive_state(
 }
 
 pub(in crate::app) fn build_folder_size_state(
-    req_sender: mpsc::Sender<PathBuf>,
+    req_sender: mpsc::Sender<FolderSizeRequest>,
     res_receiver: mpsc::Receiver<FolderSizeMessage>,
     cancel: Arc<AtomicBool>,
     batch_req_sender: mpsc::Sender<crate::app::folder_size_state::BatchSizeRequest>,
@@ -145,7 +145,7 @@ pub(in crate::app) fn build_folder_size_state(
             NonZeroUsize::new(2000).expect("folder_size_batch cache size must be non-zero"),
         ),
         pending_revalidation: std::collections::HashMap::new(),
-        pending_revalidation_last_prune: std::time::Instant::now(),
+        pending_revalidation_next_deadline: None,
         batch_invalidation_epoch: std::collections::HashMap::new(),
         batch_invalidation_last_prune: std::time::Instant::now(),
     }

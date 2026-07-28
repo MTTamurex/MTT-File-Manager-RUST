@@ -522,7 +522,24 @@ impl ImageViewerApp {
     ) {
         let folder_path = folder.to_path_buf();
         let now = std::time::Instant::now();
-        if schedule_revalidation {
+        let stale_total_size = self
+            .folder_size_state
+            .cache
+            .peek(&folder_path)
+            .map(|summary| summary.total_size)
+            .or_else(|| {
+                self.folder_size_state
+                    .batch_cache
+                    .peek(&folder_path)
+                    .copied()
+            })
+            .or_else(|| {
+                self.folder_size_state
+                    .panel_stale_cache
+                    .peek(&folder_path)
+                    .map(|summary| summary.total_size)
+            });
+        if schedule_revalidation && stale_total_size.is_some() {
             let wake_panel_revalidation =
                 if let Some(summary) = self.folder_size_state.cache.peek(&folder_path).copied() {
                     let has_counts = summary.has_counts();
@@ -554,7 +571,6 @@ impl ImageViewerApp {
         self.folder_size_state.clear_failure(&folder_path);
         // Also clear the batch (list-view) cache so the next render re-fetches.
         self.folder_size_state.batch_cache.pop(&folder_path);
-        self.folder_size_state.batch_loading.remove(&folder_path);
 
         // Bump per-path invalidation epoch so that any in-flight batch
         // worker result (carrying its request_epoch) is detected as stale
@@ -565,15 +581,16 @@ impl ImageViewerApp {
             .entry(folder_path.clone())
             .or_insert(0) += 1;
 
-        if schedule_revalidation {
-            // Schedule a deferred re-invalidation to handle the timing race with
-            // the search service's USN journal polling (2 s interval).  If the
-            // batch worker re-fetches before the service processes the deletion,
-            // it will permanently cache a stale value.  The re-invalidation
-            // clears it so the next render gets the updated size.
-            self.folder_size_state
-                .pending_revalidation
-                .insert(folder_path, now + std::time::Duration::from_secs(3));
+        if schedule_revalidation && stale_total_size.is_some() {
+            // The service validates the live directory identity. This single
+            // delayed pass only covers changes still in transit through USN.
+            let delay =
+                self.folder_size_state
+                    .schedule_revalidation(folder_path, stale_total_size, now);
+            self.ui_ctx
+                .request_repaint_after(delay + std::time::Duration::from_millis(25));
+        } else if !schedule_revalidation {
+            self.folder_size_state.cancel_revalidation(&folder_path);
         }
 
         if was_loading {

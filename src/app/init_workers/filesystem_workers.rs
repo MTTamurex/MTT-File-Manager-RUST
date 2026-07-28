@@ -1,4 +1,4 @@
-use crate::app::folder_size_state::{FolderContentSummary, FolderSizeMessage};
+use crate::app::folder_size_state::{FolderContentSummary, FolderSizeMessage, FolderSizeRequest};
 use crate::infrastructure::app_state_db::AppStateDb;
 use crate::infrastructure::disk_cache::ThumbnailDiskCache;
 use eframe::egui;
@@ -35,6 +35,8 @@ fn is_retryable_folder_size_service_error(message: &str) -> bool {
     lower.contains("sizes not loaded")
         || lower.contains("volume not ready")
         || lower.contains("volume not indexed")
+        || lower.contains("index refresh pending")
+        || lower.contains("live path validation failed")
         || lower.contains("all pipe instances are busy")
         || lower.contains("no process is on the other end of the pipe")
         || lower.contains("pipe closed during read")
@@ -299,11 +301,11 @@ pub(in crate::app) fn spawn_folder_preview_workers(
 pub(in crate::app) fn spawn_folder_size_worker(
     ctx: &egui::Context,
 ) -> (
-    mpsc::Sender<PathBuf>,
+    mpsc::Sender<FolderSizeRequest>,
     mpsc::Receiver<FolderSizeMessage>,
     Arc<AtomicBool>,
 ) {
-    let (folder_size_req_tx, folder_size_req_rx) = mpsc::channel::<PathBuf>();
+    let (folder_size_req_tx, folder_size_req_rx) = mpsc::channel::<FolderSizeRequest>();
     let (folder_size_res_tx, folder_size_res_rx) = mpsc::channel::<FolderSizeMessage>();
     let folder_size_ctx = ctx.clone();
     let folder_size_cancel = Arc::new(AtomicBool::new(false));
@@ -312,17 +314,21 @@ pub(in crate::app) fn spawn_folder_size_worker(
     std::thread::spawn(move || {
         use std::sync::atomic::Ordering;
 
-        while let Ok(folder_path) = folder_size_req_rx.recv() {
+        while let Ok(request) = folder_size_req_rx.recv() {
             folder_size_cancel_worker.store(false, Ordering::Release);
 
-            let mut latest_path = folder_path;
-            while let Ok(newer_path) = folder_size_req_rx.try_recv() {
+            let mut latest_request = request;
+            while let Ok(newer_request) = folder_size_req_rx.try_recv() {
                 let _ = folder_size_res_tx.send(FolderSizeMessage::Cancelled {
-                    folder_path: latest_path,
+                    folder_path: latest_request.folder_path,
+                    request_epoch: latest_request.request_epoch,
                 });
-                latest_path = newer_path;
+                latest_request = newer_request;
             }
-            let folder_path = latest_path;
+            let FolderSizeRequest {
+                folder_path,
+                request_epoch,
+            } = latest_request;
             folder_size_cancel_worker.store(false, Ordering::Release);
 
             // NTFS fast path: use the service's indexed subtree total.
@@ -343,14 +349,17 @@ pub(in crate::app) fn spawn_folder_size_worker(
                                 file_count,
                                 folder_count,
                             ),
+                            request_epoch,
                         });
                         folder_size_ctx.request_repaint();
                         continue;
                     }
                     Err(e) => {
                         if e == "cancelled" {
-                            let _ = folder_size_res_tx
-                                .send(FolderSizeMessage::Cancelled { folder_path });
+                            let _ = folder_size_res_tx.send(FolderSizeMessage::Cancelled {
+                                folder_path,
+                                request_epoch,
+                            });
                             folder_size_ctx.request_repaint();
                             continue;
                         }
@@ -375,13 +384,16 @@ pub(in crate::app) fn spawn_folder_size_worker(
                                             result.file_count,
                                             result.folder_count,
                                         ),
+                                        request_epoch,
                                     });
                                     folder_size_ctx.request_repaint();
                                     continue;
                                 }
                                 Err(fallback_error) if fallback_error == "cancelled" => {
-                                    let _ = folder_size_res_tx
-                                        .send(FolderSizeMessage::Cancelled { folder_path });
+                                    let _ = folder_size_res_tx.send(FolderSizeMessage::Cancelled {
+                                        folder_path,
+                                        request_epoch,
+                                    });
                                     folder_size_ctx.request_repaint();
                                     continue;
                                 }
@@ -402,7 +414,10 @@ pub(in crate::app) fn spawn_folder_size_worker(
                             folder_path.display(),
                             e,
                         );
-                        let _ = folder_size_res_tx.send(FolderSizeMessage::Failed { folder_path });
+                        let _ = folder_size_res_tx.send(FolderSizeMessage::Failed {
+                            folder_path,
+                            request_epoch,
+                        });
                         folder_size_ctx.request_repaint();
                         continue;
                     }
@@ -422,6 +437,7 @@ pub(in crate::app) fn spawn_folder_size_worker(
             let res_tx = folder_size_res_tx.clone();
             let path_clone = folder_path.clone();
             let ctx_clone = folder_size_ctx.clone();
+            let progress_epoch = request_epoch;
 
             let result =
                 crate::infrastructure::windows::folder_size::calculate_folder_size_parallel(
@@ -431,6 +447,7 @@ pub(in crate::app) fn spawn_folder_size_worker(
                         let _ = res_tx.send(FolderSizeMessage::Progress {
                             folder_path: path_clone.clone(),
                             summary: FolderContentSummary::size_only(partial_size),
+                            request_epoch: progress_epoch,
                         });
                         ctx_clone.request_repaint();
                     },
@@ -452,6 +469,7 @@ pub(in crate::app) fn spawn_folder_size_worker(
                             result.file_count,
                             result.folder_count,
                         ),
+                        request_epoch,
                     });
                 }
                 None => {
@@ -459,7 +477,10 @@ pub(in crate::app) fn spawn_folder_size_worker(
                         "[FOLDER-SIZE] Fallback cancelled path={}",
                         folder_path.display(),
                     );
-                    let _ = folder_size_res_tx.send(FolderSizeMessage::Cancelled { folder_path });
+                    let _ = folder_size_res_tx.send(FolderSizeMessage::Cancelled {
+                        folder_path,
+                        request_epoch,
+                    });
                 }
             }
             folder_size_ctx.request_repaint();
@@ -504,10 +525,8 @@ pub(in crate::app) fn spawn_folder_size_batch_worker(
                     continue;
                 }
 
-                // Skip stale requests after a navigation cancel.
-                if cancel_worker.load(Ordering::Acquire) {
-                    continue;
-                }
+                // A current-generation request acknowledges the previous cancel.
+                cancel_worker.store(false, Ordering::Release);
 
                 // Skip empty sentinel paths (sent during cancel drain).
                 if path.as_os_str().is_empty() {
@@ -595,7 +614,9 @@ pub(in crate::app) fn spawn_folder_size_batch_worker(
                     );
 
                 // Only send if scan completed (not cancelled).
-                if !cancel_worker.load(Ordering::Acquire) {
+                if !cancel_worker.load(Ordering::Acquire)
+                    && req_gen == generation_worker.load(Ordering::Acquire)
+                {
                     if let Some(result) = result {
                         let _ = res_tx.send(BatchSizeResult {
                             folder_path: path,

@@ -737,7 +737,18 @@ impl ImageViewerApp {
         };
 
         self.folder_size_state.loading.insert(path.clone());
-        let _ = self.folder_size_state.req_sender.send(path);
+        let request_epoch = self
+            .folder_size_state
+            .batch_invalidation_epoch
+            .get(&path)
+            .copied()
+            .unwrap_or(0);
+        let _ = self.folder_size_state.req_sender.send(
+            crate::app::folder_size_state::FolderSizeRequest {
+                folder_path: path,
+                request_epoch,
+            },
+        );
         true
     }
 
@@ -774,10 +785,42 @@ impl ImageViewerApp {
             };
             processed_messages += 1;
 
+            let (message_path, request_epoch) = match &msg {
+                crate::app::folder_size_state::FolderSizeMessage::Progress {
+                    folder_path,
+                    request_epoch,
+                    ..
+                } => (folder_path, *request_epoch),
+                crate::app::folder_size_state::FolderSizeMessage::Complete {
+                    folder_path,
+                    request_epoch,
+                    ..
+                }
+                | crate::app::folder_size_state::FolderSizeMessage::Cancelled {
+                    folder_path,
+                    request_epoch,
+                }
+                | crate::app::folder_size_state::FolderSizeMessage::Failed {
+                    folder_path,
+                    request_epoch,
+                } => (folder_path, *request_epoch),
+            };
+            let current_epoch = self
+                .folder_size_state
+                .batch_invalidation_epoch
+                .get(message_path)
+                .copied()
+                .unwrap_or(0);
+            if request_epoch < current_epoch {
+                received_any = true;
+                continue;
+            }
+
             match msg {
                 crate::app::folder_size_state::FolderSizeMessage::Progress {
                     folder_path,
                     summary,
+                    request_epoch: _,
                 } => {
                     // Coalesce multiple progress updates for the same folder into one cache write.
                     progress_updates.insert(folder_path, summary);
@@ -786,8 +829,11 @@ impl ImageViewerApp {
                 crate::app::folder_size_state::FolderSizeMessage::Complete {
                     folder_path,
                     summary,
+                    request_epoch: _,
                 } => {
                     progress_updates.remove(&folder_path);
+                    self.folder_size_state
+                        .cancel_revalidation_if_changed(&folder_path, summary.total_size);
                     self.folder_size_state.loading.remove(&folder_path);
                     self.folder_size_state
                         .clear_panel_stale_summary(&folder_path);
@@ -803,7 +849,10 @@ impl ImageViewerApp {
                     self.folder_size_state.cache.put(folder_path, summary);
                     received_any = true;
                 }
-                crate::app::folder_size_state::FolderSizeMessage::Cancelled { folder_path } => {
+                crate::app::folder_size_state::FolderSizeMessage::Cancelled {
+                    folder_path,
+                    request_epoch: _,
+                } => {
                     progress_updates.remove(&folder_path);
                     self.folder_size_state.loading.remove(&folder_path);
                     self.folder_size_state.cache.pop(&folder_path);
@@ -811,7 +860,10 @@ impl ImageViewerApp {
                         .reschedule_panel_revalidation_if_stale(&folder_path, Instant::now());
                     received_any = true;
                 }
-                crate::app::folder_size_state::FolderSizeMessage::Failed { folder_path } => {
+                crate::app::folder_size_state::FolderSizeMessage::Failed {
+                    folder_path,
+                    request_epoch: _,
+                } => {
                     progress_updates.remove(&folder_path);
                     self.folder_size_state.loading.remove(&folder_path);
                     self.folder_size_state.cache.pop(&folder_path);
@@ -875,15 +927,17 @@ impl ImageViewerApp {
                     self.folder_size_state
                         .batch_loading
                         .insert(folder_path.clone());
-                    self.folder_size_state
-                        .pending_revalidation
-                        .entry(folder_path)
-                        .or_insert_with(|| {
-                            std::time::Instant::now() + std::time::Duration::from_secs(5)
-                        });
+                    let delay = self
+                        .folder_size_state
+                        .schedule_revalidation_if_absent(folder_path, std::time::Instant::now());
+                    self.ui_ctx
+                        .request_repaint_after(delay + Duration::from_millis(25));
                     received_any = true;
                     continue;
                 };
+
+                self.folder_size_state
+                    .cancel_revalidation_if_changed(&folder_path, total_size);
 
                 self.folder_size_state
                     .batch_cache
@@ -902,8 +956,8 @@ impl ImageViewerApp {
         // ── Process deferred re-invalidations ──
         // Handles the timing race between client cache invalidation and
         // the search service's 2 s USN journal polling.  If a stale value
-        // was re-cached before the service updated its index, this deferred
-        // clear forces BOTH caches to re-fetch fresh data.
+        // was re-cached before the service updated its index, this delayed
+        // pass clears BOTH caches for one fresh fetch.
         //
         // Also bumps the invalidation epoch so any in-flight result that
         // was sent before the revalidation is discarded as stale.
@@ -913,8 +967,9 @@ impl ImageViewerApp {
                 .folder_size_state
                 .should_prune_pending_revalidations(now)
             {
-                for path in self.folder_size_state.take_expired_revalidations(now) {
-                    self.folder_size_state.pending_revalidation.remove(&path);
+                for (path, release_batch_loading) in
+                    self.folder_size_state.take_expired_revalidations(now)
+                {
                     let is_current_folder_panel = self.selected_file.is_none()
                         && path.as_path() == Path::new(&self.navigation_state.current_path);
                     if is_current_folder_panel {
@@ -937,7 +992,9 @@ impl ImageViewerApp {
                         }
                     }
                     self.folder_size_state.batch_cache.pop(&path);
-                    self.folder_size_state.batch_loading.remove(&path);
+                    if release_batch_loading {
+                        self.folder_size_state.batch_loading.remove(&path);
+                    }
                     self.folder_size_state.cache.pop(&path);
                     self.folder_size_state.loading.remove(&path);
                     self.folder_size_state.clear_failure(&path);

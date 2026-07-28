@@ -36,6 +36,9 @@ impl ImageViewerApp {
                 .filter(|item| item.is_dir)
                 .map(|item| item.path.clone())
                 .collect();
+            self.folder_size_state.cancel_batch();
+            self.folder_size_state
+                .cancel_revalidations(&visible_folder_paths);
             for folder_path in visible_folder_paths {
                 self.invalidate_folder_size_cache_without_revalidation(&folder_path);
                 self.cache_manager.invalidate_folder_preview(&folder_path);
