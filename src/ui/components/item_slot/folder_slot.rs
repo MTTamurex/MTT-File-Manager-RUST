@@ -227,7 +227,7 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
                 let response = ui.put(
                     text_rect,
                     egui::TextEdit::singleline(&mut **text)
-                        .horizontal_align(egui::Align::Center)
+                        .horizontal_align(egui::Align::Min)
                         .id_source("rename_input_dir"),
                 );
                 response.request_focus();
