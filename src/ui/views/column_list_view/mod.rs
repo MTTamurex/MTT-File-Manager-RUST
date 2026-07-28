@@ -151,6 +151,7 @@ pub fn render_column_list_view(
     let mut clicked_item = None;
     let mut double_clicked_item = None;
     let mut secondary_clicked_item = None;
+    let mut secondary_clicked_empty_area = false;
     if ctx.is_computer_view {
         render_computer_headers(
             ui,
@@ -172,6 +173,7 @@ pub fn render_column_list_view(
             &mut clicked_item,
             &mut double_clicked_item,
             &mut secondary_clicked_item,
+            &mut secondary_clicked_empty_area,
         );
     } else {
         render_visible_columns(
@@ -184,6 +186,7 @@ pub fn render_column_list_view(
             &mut clicked_item,
             &mut double_clicked_item,
             &mut secondary_clicked_item,
+            &mut secondary_clicked_empty_area,
         );
     }
 
@@ -203,7 +206,7 @@ pub fn render_column_list_view(
         Some(ListViewAction::SecondaryClick(index))
     } else if let Some(index) = clicked_item {
         Some(ListViewAction::Click(index))
-    } else if background.secondary_clicked() {
+    } else if secondary_clicked_empty_area || background.secondary_clicked() {
         Some(ListViewAction::EmptyAreaSecondaryClick)
     } else if background.clicked() {
         Some(ListViewAction::EmptyAreaClick)

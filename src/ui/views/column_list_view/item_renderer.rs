@@ -17,6 +17,7 @@ pub(super) fn render_visible_columns(
     clicked_item: &mut Option<usize>,
     double_clicked_item: &mut Option<usize>,
     secondary_clicked_item: &mut Option<usize>,
+    secondary_clicked_empty_area: &mut bool,
 ) {
     let column_count = ctx.items.len().div_ceil(rows_per_column);
     let first_column = ((scroll_x / COLUMN_WIDTH).floor() as usize).saturating_sub(1);
@@ -51,6 +52,7 @@ pub(super) fn render_visible_columns(
                 clicked_item,
                 double_clicked_item,
                 secondary_clicked_item,
+                secondary_clicked_empty_area,
             );
         }
     }
@@ -69,6 +71,7 @@ pub(super) fn render_grouped_columns(
     clicked_item: &mut Option<usize>,
     double_clicked_item: &mut Option<usize>,
     secondary_clicked_item: &mut Option<usize>,
+    secondary_clicked_empty_area: &mut bool,
 ) {
     *ctx.visible_index_range = (!ctx.items.is_empty()).then_some((0, ctx.items.len() - 1));
     let mut child_ui = ui.new_child(egui::UiBuilder::new().max_rect(viewport_rect));
@@ -99,6 +102,7 @@ pub(super) fn render_grouped_columns(
                     clicked_item,
                     double_clicked_item,
                     secondary_clicked_item,
+                    secondary_clicked_empty_area,
                 );
             }
         }
@@ -116,6 +120,7 @@ fn render_column_item(
     clicked_item: &mut Option<usize>,
     double_clicked_item: &mut Option<usize>,
     secondary_clicked_item: &mut Option<usize>,
+    secondary_clicked_empty_area: &mut bool,
 ) {
     let item = &ctx.items[index];
     prepare_list_item_resources(ui, index, item, ctx, ops);
@@ -129,8 +134,24 @@ fn render_column_item(
         if response.double_clicked() {
             *double_clicked_item = Some(index);
         }
+        let is_selected = crate::ui::views::common::effective_item_selection(
+            ctx.multi_selection.contains(&item.path),
+            ctx.rectangle_selection_state
+                .map(|state| state.preview_contains(index)),
+        );
         if response.secondary_clicked() {
-            *secondary_clicked_item = Some(index);
+            let content_hit = ui
+                .input(|input| input.pointer.interact_pos())
+                .is_some_and(|point| {
+                    column_item_content_contains_pointer(ui, item, rect, ctx, point)
+                });
+            if ctx.is_computer_view
+                || crate::ui::views::common::secondary_click_targets_item(is_selected, content_hit)
+            {
+                *secondary_clicked_item = Some(index);
+            } else {
+                *secondary_clicked_empty_area = true;
+            }
         }
 
         let (press_origin, pointer_pos) =
@@ -157,10 +178,6 @@ fn render_column_item(
             *ctx.drag_hovered_item = Some(index);
         }
 
-        let is_selected = ctx
-            .rectangle_selection_state
-            .map(|state| state.preview_contains(index))
-            .unwrap_or_else(|| ctx.multi_selection.contains(&item.path));
         let allow_hover = matches!(ctx.last_input, crate::app::state::LastInput::Mouse);
         let is_hovered = allow_hover && response.hovered() && !is_selected;
         let is_focused = ctx.selected_item == Some(index);
@@ -224,6 +241,16 @@ fn column_item_content_contains_pointer(
     let has_tag = crate::domain::file_tag::tag_ids_for_path(ctx.tag_assignments, &item.path)
         .is_some_and(|ids| ids.iter().any(|id| ctx.tag_definitions.contains_key(id)));
     let tag_offset = if has_tag { 12.0 } else { 0.0 };
+    if has_tag
+        && Rect::from_center_size(
+            Pos2::new(rect.left() + 27.0, rect.center().y),
+            egui::vec2(9.0, 9.0),
+        )
+        .expand(2.0)
+        .contains(point)
+    {
+        return true;
+    }
     let max_width = COLUMN_WIDTH - 32.0 - tag_offset;
     let font = FontId::proportional(12.0);
     let name = crate::ui::components::item_slot::display_name_for_item(item);

@@ -266,6 +266,20 @@ impl ImageViewerApp {
             self.request_icon_load(path);
         }
 
+        if self.context_menu.is_open
+            && self
+                .rectangle_selection_state
+                .as_ref()
+                .is_some_and(|state| {
+                    matches!(
+                        state.source,
+                        RectangleSelectionSource::MillerAncestor { .. }
+                    )
+                })
+        {
+            self.cancel_rectangle_selection();
+        }
+
         // ── Apply deferred ancestor interactions. ──
         let right_bound = viewport.right();
         for (col_idx, output) in ancestor_outputs {
@@ -300,6 +314,27 @@ impl ImageViewerApp {
             let Some(action) = output.action else {
                 continue;
             };
+            if matches!(
+                &action,
+                MillerColumnAction::SecondaryClicked(_, _)
+                    | MillerColumnAction::EmptySecondaryClicked(_)
+            ) {
+                let selection_belongs_to_column = self
+                    .rectangle_selection_state
+                    .as_ref()
+                    .is_some_and(|state| {
+                        matches!(
+                            &state.source,
+                            RectangleSelectionSource::MillerAncestor { directory }
+                                if directory == &chain[col_idx]
+                        )
+                    });
+                if selection_belongs_to_column {
+                    self.finish_miller_rectangle_selection(&chain[col_idx], listing);
+                } else {
+                    self.cancel_rectangle_selection();
+                }
+            }
             match action {
                 MillerColumnAction::Clicked(i) => {
                     if let Some(entry) = listing.get(i).cloned() {
@@ -365,6 +400,8 @@ impl ImageViewerApp {
                         self.context_menu
                             .open(pos, right_bound, None, paths.clone(), false);
                         self.context_menu.primary_is_directory = Some(entry.is_dir);
+                        self.context_menu.operation_directory = Some(chain[col_idx].clone());
+                        self.capture_context_menu_panel_origin();
                         self.populate_context_menu(ui.ctx(), &paths, false, None);
                     }
                 }
@@ -379,6 +416,7 @@ impl ImageViewerApp {
                     self.context_menu
                         .open(pos, right_bound, None, paths.clone(), true);
                     self.context_menu.primary_is_directory = Some(true);
+                    self.capture_context_menu_panel_origin();
                     self.populate_context_menu(ui.ctx(), &paths, true, None);
                 }
             }

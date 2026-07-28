@@ -152,7 +152,9 @@ impl ImageViewerApp {
         }
 
         if self.active_tag_filter.take().is_some() {
-            self.save_preferences();
+            if !self.in_inactive_panel_context {
+                self.save_preferences();
+            }
         }
 
         self.remember_current_folder_timestamp_hints();
@@ -196,8 +198,10 @@ impl ImageViewerApp {
         // Apply folder lock if this folder has locked preferences
         self.apply_folder_lock_if_present();
 
-        // UPDATE THE WATCHER
-        self.watch_current_folder();
+        // The app has one watcher owned by the active panel.
+        if !self.in_inactive_panel_context {
+            self.watch_current_folder();
+        }
 
         // Clear old items immediately for path-change navigation.
         // Prevents stale items from the previous folder flashing on screen
@@ -214,10 +218,13 @@ impl ImageViewerApp {
         // Discard pending mtime rechecks for the old folder's subfolders.
         self.pending_folder_mtime_recheck.clear();
 
-        // SYNC TAB STATE after clearing stale lists to avoid heavy cloning on navigation.
-        self.sync_to_tab();
-
-        self.load_folder(false);
+        if self.in_inactive_panel_context {
+            self.load_folder_for_inactive();
+        } else {
+            // Sync after clearing stale lists to avoid heavy cloning on navigation.
+            self.sync_to_tab();
+            self.load_folder(false);
+        }
     }
 
     pub fn go_back(&mut self) {

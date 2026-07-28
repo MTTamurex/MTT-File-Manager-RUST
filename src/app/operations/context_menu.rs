@@ -8,6 +8,16 @@ use rust_i18n::t;
 use std::path::PathBuf;
 
 impl ImageViewerApp {
+    pub(crate) fn capture_context_menu_panel_origin(&mut self) {
+        let panel = if self.in_inactive_panel_context {
+            self.dual_panel_active.other()
+        } else {
+            self.dual_panel_active
+        };
+        self.context_menu.origin_panel_is_left =
+            Some(panel == crate::app::dual_panel::ActivePanel::Left);
+    }
+
     pub fn context_target_paths<'a>(
         &'a self,
         item_idx: Option<usize>,

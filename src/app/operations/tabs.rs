@@ -90,6 +90,7 @@ impl ImageViewerApp {
 
     /// Syncs the active tab state to the app
     pub fn sync_from_tab(&mut self) {
+        self.context_menu.close();
         let sync_start = std::time::Instant::now();
         self.invalidate_active_items_rebuild();
         let previous_path = self.navigation_state.current_path.clone();

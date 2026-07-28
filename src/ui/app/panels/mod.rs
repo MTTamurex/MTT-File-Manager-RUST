@@ -427,6 +427,7 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, root_ui: &mut egui::Ui) -> Opt
 
             app.context_menu
                 .open(pos, right_bound, None, vec![path_buf.clone()], false);
+            app.context_menu.primary_is_directory = Some(true);
             app.populate_context_menu(&ctx, &[path_buf], false, None);
             None
         }

@@ -30,6 +30,18 @@ fn paste_target_is_valid_for_sources(sources: &[PathBuf], target: &Path) -> bool
         .any(|source| path_is_same_or_ancestor(source, target))
 }
 
+fn context_paste_destination(
+    target_paths: &[PathBuf],
+    operation_directory: Option<&Path>,
+    primary_is_directory: Option<bool>,
+) -> Option<PathBuf> {
+    if primary_is_directory == Some(true) {
+        target_paths.first().cloned()
+    } else {
+        operation_directory.map(Path::to_path_buf)
+    }
+}
+
 impl ImageViewerApp {
     pub(crate) fn path_is_same_or_ancestor_of_open_panel(&self, path: &Path) -> bool {
         path_is_same_or_ancestor(path, Path::new(&self.navigation_state.current_path))
@@ -235,21 +247,24 @@ impl ImageViewerApp {
             self.file_operation_state.file_ops_in_progress
         );
 
-        if self.navigation_state.is_computer_view || self.navigation_state.is_recycle_bin_view {
+        let has_explicit_context_target =
+            idx.is_none() && !self.context_menu.target_paths.is_empty();
+        if !has_explicit_context_target
+            && (self.navigation_state.is_computer_view || self.navigation_state.is_recycle_bin_view)
+        {
             self.context_menu.target_paths.clear();
             return;
         }
 
         // Destination folder
-        let dest_folder = if idx.is_none() && !self.context_menu.target_paths.is_empty() {
-            self.context_menu
-                .target_paths
-                .first()
-                .filter(|path| self.context_target_is_directory(idx, path))
-                .cloned()
-                .unwrap_or_else(|| PathBuf::from(&self.navigation_state.current_path))
+        let dest_folder = if has_explicit_context_target {
+            context_paste_destination(
+                &self.context_menu.target_paths,
+                self.context_menu.operation_directory.as_deref(),
+                self.context_menu.primary_is_directory,
+            )
         } else if let Some(idx) = idx {
-            if let Some(item) = self.items.get(idx) {
+            Some(if let Some(item) = self.items.get(idx) {
                 if item.is_dir {
                     item.path.clone()
                 } else {
@@ -257,9 +272,13 @@ impl ImageViewerApp {
                 }
             } else {
                 PathBuf::from(&self.navigation_state.current_path)
-            }
+            })
         } else {
-            PathBuf::from(&self.navigation_state.current_path)
+            Some(PathBuf::from(&self.navigation_state.current_path))
+        };
+        let Some(dest_folder) = dest_folder else {
+            self.context_menu.target_paths.clear();
+            return;
         };
 
         if !self.can_paste_into_path(&dest_folder) {
@@ -317,7 +336,9 @@ impl ImageViewerApp {
 
 #[cfg(test)]
 mod tests {
-    use super::{paste_target_is_valid_for_sources, path_is_same_or_ancestor};
+    use super::{
+        context_paste_destination, paste_target_is_valid_for_sources, path_is_same_or_ancestor,
+    };
     use std::path::{Path, PathBuf};
 
     #[test]
@@ -343,5 +364,21 @@ mod tests {
             &sources,
             Path::new(r"C:\B")
         ));
+    }
+
+    #[test]
+    fn context_paste_uses_item_or_origin_directory() {
+        let folder = PathBuf::from(r"C:\origin\folder");
+        let file = PathBuf::from(r"C:\origin\file.txt");
+        let origin = PathBuf::from(r"C:\origin");
+
+        assert_eq!(
+            context_paste_destination(&[folder.clone()], Some(&origin), Some(true)),
+            Some(folder)
+        );
+        assert_eq!(
+            context_paste_destination(&[file], Some(&origin), Some(false)),
+            Some(origin)
+        );
     }
 }

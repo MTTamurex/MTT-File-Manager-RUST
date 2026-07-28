@@ -1099,6 +1099,7 @@ fn render_single_panel_content(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
             // Set state first
             app.context_menu
                 .open(pos, right_bound, None, paths.clone(), true);
+            app.capture_context_menu_panel_origin();
 
             // Then populate items
             app.populate_context_menu(ui.ctx(), &paths, true, None);

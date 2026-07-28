@@ -1,4 +1,5 @@
 use eframe::egui;
+use std::path::Path;
 
 use crate::app::operations::rectangle_selection::{
     resolve_rectangle_preview_indices, resolve_rectangle_selection,
@@ -126,13 +127,30 @@ impl ImageViewerApp {
         }
 
         if ui.input(|input| input.pointer.primary_released()) {
-            self.finish_miller_rectangle_selection(items);
+            self.finish_miller_rectangle_selection(directory, items);
         } else {
             ui.ctx().request_repaint();
         }
     }
 
-    fn finish_miller_rectangle_selection(&mut self, items: &[FileEntry]) {
+    pub(super) fn finish_miller_rectangle_selection(
+        &mut self,
+        expected_directory: &Path,
+        items: &[FileEntry],
+    ) {
+        if !self
+            .rectangle_selection_state
+            .as_ref()
+            .is_some_and(|state| {
+                matches!(
+                    &state.source,
+                    RectangleSelectionSource::MillerAncestor { directory }
+                        if directory == expected_directory
+                )
+            })
+        {
+            return;
+        }
         let Some(state) = self.rectangle_selection_state.take() else {
             return;
         };

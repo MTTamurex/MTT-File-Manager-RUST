@@ -124,12 +124,18 @@ pub(super) fn render_list_item(
 
         if response.secondary_clicked() {
             let pointer_pos = ui.input(|input| input.pointer.interact_pos());
+            let is_selected = crate::ui::views::common::effective_item_selection(
+                ctx.multi_selection.contains(&item.path),
+                ctx.rectangle_selection_state
+                    .map(|state| state.preview_contains(i)),
+            );
+            let content_hit = pointer_pos.is_some_and(|point| {
+                list_item_content_contains_pointer(
+                    ui, item, ctx, rect, col_widths, row_height, point,
+                )
+            });
             if ctx.is_computer_view
-                || pointer_pos.is_some_and(|point| {
-                    list_item_content_contains_pointer(
-                        ui, item, ctx, rect, col_widths, row_height, point,
-                    )
-                })
+                || crate::ui::views::common::secondary_click_targets_item(is_selected, content_hit)
             {
                 *secondary_clicked_item = Some(i);
             } else {
@@ -171,10 +177,11 @@ pub(super) fn render_list_item(
         }
 
         // --- VISUAL FEEDBACK: BORDER-ONLY (MODERN DESIGN) ---
-        let is_selected = ctx
-            .rectangle_selection_state
-            .map(|state| state.preview_contains(i))
-            .unwrap_or_else(|| ctx.multi_selection.contains(&item.path));
+        let is_selected = crate::ui::views::common::effective_item_selection(
+            ctx.multi_selection.contains(&item.path),
+            ctx.rectangle_selection_state
+                .map(|state| state.preview_contains(i)),
+        );
 
         // STRICT HOVER LOGIC: Only allow hover if LastInput was Mouse
         let allow_hover = matches!(ctx.last_input, crate::app::state::LastInput::Mouse);
@@ -377,11 +384,18 @@ fn list_item_content_contains_pointer(
 
     let font_id = FontId::proportional(12.0);
     let resolved_name = crate::ui::components::item_slot::display_name_for_item(item);
-    let tag_name_offset = if first_tag_color(item, ctx).is_some() {
-        12.0
-    } else {
-        0.0
-    };
+    let has_tag = first_tag_color(item, ctx).is_some();
+    let tag_name_offset = if has_tag { 12.0 } else { 0.0 };
+    if has_tag
+        && Rect::from_center_size(
+            Pos2::new(rect.min.x + 27.0, rect.center().y),
+            egui::vec2(9.0, 9.0),
+        )
+        .expand(2.0)
+        .contains(point)
+    {
+        return true;
+    }
     if text_content_contains(
         ui,
         resolved_name.as_ref(),
@@ -493,7 +507,7 @@ fn list_item_content_contains_pointer(
         return true;
     }
 
-    if ctx.is_onedrive_folder {
+    if ctx.is_onedrive_folder && item.sync_status != crate::domain::file_entry::SyncStatus::None {
         let status_rect = Rect::from_min_size(
             Pos2::new(
                 rect.min.x

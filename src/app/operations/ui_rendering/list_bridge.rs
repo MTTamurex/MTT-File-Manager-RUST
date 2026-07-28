@@ -494,6 +494,16 @@ impl ImageViewerApp {
             );
         }
 
+        if matches!(
+            action.as_ref(),
+            Some(
+                list_view::ListViewAction::SecondaryClick(_)
+                    | list_view::ListViewAction::EmptyAreaSecondaryClick
+            )
+        ) {
+            self.finish_rectangle_selection();
+        }
+
         // ── Send batch folder-size requests (capped per frame) ──
         {
             const MAX_BATCH_REQUESTS_PER_FRAME: usize = 30;
@@ -629,8 +639,11 @@ impl ImageViewerApp {
                         }
 
                         // Collect all selected paths
-                        let selected_paths: Vec<PathBuf> =
-                            self.multi_selection.iter().cloned().collect();
+                        let selected_paths =
+                            super::ordered_context_menu_paths(&item.path, &self.multi_selection);
+                        let primary_is_directory = item.is_dir || item.drive_info.is_some();
+                        let operation_directory =
+                            PathBuf::from(&self.navigation_state.current_path);
 
                         // Use the new styled menu system
                         let pointer_pos = ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO);
@@ -645,6 +658,9 @@ impl ImageViewerApp {
                             selected_paths,
                             false,
                         );
+                        self.context_menu.primary_is_directory = Some(primary_is_directory);
+                        self.context_menu.operation_directory = Some(operation_directory);
+                        self.capture_context_menu_panel_origin();
                     }
                 }
                 Some(list_view::ListViewAction::SortChange(mode)) => {
@@ -671,6 +687,7 @@ impl ImageViewerApp {
                     self.populate_context_menu(ui.ctx(), std::slice::from_ref(&path), true, None);
                     self.context_menu
                         .open(pointer_pos, right_bound, None, vec![path], true);
+                    self.capture_context_menu_panel_origin();
                 }
                 Some(list_view::ListViewAction::EmptyAreaClick) if !is_renaming => {
                     self.clear_file_view_selection();

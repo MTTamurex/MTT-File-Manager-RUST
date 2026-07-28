@@ -8,6 +8,7 @@ impl ImageViewerApp {
         if self.dual_panel_enabled {
             return;
         }
+        self.context_menu.close();
         log::info!("[DualPanel] Enabling dual panel mode");
 
         // Current state becomes left panel (stays in app fields).
@@ -35,6 +36,7 @@ impl ImageViewerApp {
         if !self.dual_panel_enabled {
             return;
         }
+        self.context_menu.close();
         let Some(inactive_snapshot) = self.dual_panel_inactive_state.take() else {
             log::warn!("[DualPanel] switch_active called but no inactive state");
             return;
@@ -124,6 +126,7 @@ impl ImageViewerApp {
         if !self.dual_panel_enabled {
             return;
         }
+        self.context_menu.close();
         log::info!("[DualPanel] Disabling dual panel mode");
 
         // Drop inactive panel state

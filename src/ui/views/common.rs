@@ -62,6 +62,19 @@ pub fn should_start_item_drag(
     }
 }
 
+/// A secondary click targets an item when it hits visible item content or any
+/// part of a row that already belongs to the current selection.
+pub fn secondary_click_targets_item(is_selected: bool, content_hit: bool) -> bool {
+    is_selected || content_hit
+}
+
+pub fn effective_item_selection(
+    committed_selection: bool,
+    rectangle_preview: Option<bool>,
+) -> bool {
+    rectangle_preview.unwrap_or(committed_selection)
+}
+
 #[derive(Clone, Copy)]
 pub struct ViewportTracker {
     pub first_visible_index: usize,
@@ -104,7 +117,7 @@ impl Default for ViewportTracker {
 
 #[cfg(test)]
 mod tests {
-    use super::should_start_item_drag;
+    use super::{effective_item_selection, secondary_click_targets_item, should_start_item_drag};
     use eframe::egui;
 
     #[test]
@@ -144,5 +157,21 @@ mod tests {
             Some(egui::pos2(10.0, 10.0)),
             Some(egui::pos2(30.0, 10.0)),
         ));
+    }
+
+    #[test]
+    fn secondary_click_targets_content_or_selected_row() {
+        assert!(!secondary_click_targets_item(false, false));
+        assert!(secondary_click_targets_item(false, true));
+        assert!(secondary_click_targets_item(true, false));
+        assert!(secondary_click_targets_item(true, true));
+    }
+
+    #[test]
+    fn rectangle_preview_is_the_effective_selection() {
+        assert!(effective_item_selection(false, Some(true)));
+        assert!(!effective_item_selection(true, Some(false)));
+        assert!(effective_item_selection(true, None));
+        assert!(!effective_item_selection(false, None));
     }
 }

@@ -342,7 +342,14 @@ impl ImageViewerApp {
         }
     }
 
-    fn finish_rectangle_selection(&mut self) {
+    pub(crate) fn finish_rectangle_selection(&mut self) {
+        if !self
+            .rectangle_selection_state
+            .as_ref()
+            .is_some_and(|state| state.source == RectangleSelectionSource::CurrentItems)
+        {
+            return;
+        }
         let Some(state) = self.rectangle_selection_state.take() else {
             return;
         };

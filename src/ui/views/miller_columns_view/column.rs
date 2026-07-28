@@ -200,6 +200,11 @@ fn render_row(
     let width = ui.available_width();
     let (row_rect, response) =
         ui.allocate_exact_size(egui::vec2(width, COL_ROW_HEIGHT), Sense::click_and_drag());
+    let is_selected = crate::ui::views::common::effective_item_selection(
+        ctx.multi_selection.contains(&item.path),
+        ctx.rectangle_selection_state
+            .map(|state| state.preview_contains(index)),
+    );
 
     let is_drop_candidate = ctx.is_item_dragging && response.contains_pointer() && item.is_dir;
     if is_drop_candidate {
@@ -207,13 +212,17 @@ fn render_row(
     }
 
     if !ui.is_rect_visible(row_rect) {
-        return interaction(index, item, row_rect, &response, ui, rectangle_start);
+        return interaction(
+            index,
+            item,
+            row_rect,
+            &response,
+            ui,
+            rectangle_start,
+            is_selected,
+        );
     }
 
-    let is_selected = ctx
-        .rectangle_selection_state
-        .map(|state| state.preview_contains(index))
-        .unwrap_or_else(|| ctx.multi_selection.contains(&item.path));
     let is_navigation_child = ctx.selected_child.is_some_and(|p| p == item.path.as_path());
     let is_focused = ctx.selected_file.is_some_and(|p| p == item.path.as_path());
     let dim = if item.is_hidden { 0.5 } else { 1.0 };
@@ -355,7 +364,15 @@ fn render_row(
         );
     }
 
-    interaction(index, item, row_rect, &response, ui, rectangle_start)
+    interaction(
+        index,
+        item,
+        row_rect,
+        &response,
+        ui,
+        rectangle_start,
+        is_selected,
+    )
 }
 
 fn interaction(
@@ -365,6 +382,7 @@ fn interaction(
     response: &egui::Response,
     ui: &Ui,
     rectangle_start: &mut Option<egui::Pos2>,
+    is_selected: bool,
 ) -> Option<MillerColumnAction> {
     let (press_origin, pointer_position) =
         ui.input(|input| (input.pointer.press_origin(), input.pointer.hover_pos()));
@@ -390,7 +408,14 @@ fn interaction(
             .interact_pointer_pos()
             .or_else(|| ui.input(|i| i.pointer.interact_pos()))
             .unwrap_or(egui::Pos2::ZERO);
-        Some(MillerColumnAction::SecondaryClicked(index, pos))
+        if crate::ui::views::common::secondary_click_targets_item(
+            is_selected,
+            row_content_contains_pointer(ui, item, row_rect, pos),
+        ) {
+            Some(MillerColumnAction::SecondaryClicked(index, pos))
+        } else {
+            Some(MillerColumnAction::EmptySecondaryClicked(pos))
+        }
     } else if response.clicked() {
         Some(MillerColumnAction::Clicked(index))
     } else {

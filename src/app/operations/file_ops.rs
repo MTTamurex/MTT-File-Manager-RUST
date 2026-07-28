@@ -527,9 +527,13 @@ impl ImageViewerApp {
         }
     }
 
-    /// Create a Windows shell shortcut (.lnk) pointing to `target` in the same directory.
-    pub fn create_shell_shortcut(&self, target: &Path) -> Result<PathBuf, String> {
-        file_operations::create_shortcut(target, &self.navigation_state.current_path)
+    /// Create a Windows shell shortcut (.lnk) pointing to `target` in `destination`.
+    pub fn create_shell_shortcut(
+        &self,
+        target: &Path,
+        destination: &Path,
+    ) -> Result<PathBuf, String> {
+        file_operations::create_shortcut(target, &destination.to_string_lossy())
     }
 
     /// Mounts an ISO programmatically and marks it for auto-navigation

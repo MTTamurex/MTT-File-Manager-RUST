@@ -182,9 +182,11 @@ pub struct ContextMenuState {
     pub right_bound: f32,
     pub item_index: Option<usize>,
     pub target_paths: Vec<PathBuf>,
+    pub operation_directory: Option<PathBuf>,
     pub is_empty_area: bool,
     pub origin: ContextMenuOrigin,
     pub primary_is_directory: Option<bool>,
+    pub origin_panel_is_left: Option<bool>,
 
     /// Dynamic items extracted from Shell or built for empty area
     pub items: Vec<ContextMenuItem>,
@@ -216,9 +218,11 @@ impl Default for ContextMenuState {
             right_bound: f32::MAX, // Default to no restriction
             item_index: None,
             target_paths: Vec::new(),
+            operation_directory: None,
             is_empty_area: false,
             origin: ContextMenuOrigin::FileView,
             primary_is_directory: None,
+            origin_panel_is_left: None,
             items: Vec::new(),
             partition_dirty: true,
             primary_indices: Vec::new(),
@@ -251,12 +255,16 @@ impl ContextMenuState {
         self.right_bound = right_bound;
         self.item_index = item_index;
         self.target_paths = target_paths;
+        self.operation_directory = is_empty_area
+            .then(|| self.target_paths.first().cloned())
+            .flatten();
         self.is_empty_area = is_empty_area;
         self.selected_command_id = None;
         self.native_context = None;
         self.pending_load_item = None;
         self.origin = ContextMenuOrigin::FileView;
-        self.primary_is_directory = None;
+        self.primary_is_directory = is_empty_area.then_some(true);
+        self.origin_panel_is_left = None;
     }
 
     pub fn open_for_global_search(
@@ -271,12 +279,14 @@ impl ContextMenuState {
         self.right_bound = right_bound;
         self.item_index = None;
         self.target_paths = target_paths;
+        self.operation_directory = None;
         self.is_empty_area = false;
         self.selected_command_id = None;
         self.native_context = None;
         self.pending_load_item = None;
         self.origin = ContextMenuOrigin::GlobalSearch;
         self.primary_is_directory = Some(primary_is_directory);
+        self.origin_panel_is_left = None;
     }
 
     /// Closes the context menu
@@ -284,9 +294,11 @@ impl ContextMenuState {
         self.is_open = false;
         self.item_index = None;
         self.target_paths.clear();
+        self.operation_directory = None;
         self.is_empty_area = false;
         self.origin = ContextMenuOrigin::FileView;
         self.primary_is_directory = None;
+        self.origin_panel_is_left = None;
         self.items.clear();
         self.partition_dirty = true;
         self.primary_indices.clear();
@@ -334,7 +346,9 @@ impl std::fmt::Debug for ContextMenuState {
             .field("right_bound", &self.right_bound)
             .field("item_index", &self.item_index)
             .field("target_paths", &self.target_paths)
+            .field("operation_directory", &self.operation_directory)
             .field("is_empty_area", &self.is_empty_area)
+            .field("origin_panel_is_left", &self.origin_panel_is_left)
             .field("items_count", &self.items.len())
             .field("selected_command_id", &self.selected_command_id)
             .finish()
@@ -343,11 +357,29 @@ impl std::fmt::Debug for ContextMenuState {
 
 #[cfg(test)]
 mod tests {
-    use super::ContextMenuOrigin;
+    use super::{ContextMenuOrigin, ContextMenuState};
 
     #[test]
     fn global_search_context_menu_never_offers_paste() {
         assert!(ContextMenuOrigin::FileView.allows_paste());
         assert!(!ContextMenuOrigin::GlobalSearch.allows_paste());
+    }
+
+    #[test]
+    fn empty_area_context_records_directory_target() {
+        let mut state = ContextMenuState::default();
+        state.open(
+            eframe::egui::Pos2::ZERO,
+            100.0,
+            None,
+            vec![std::path::PathBuf::from(r"C:\folder")],
+            true,
+        );
+
+        assert_eq!(state.primary_is_directory, Some(true));
+        assert_eq!(
+            state.operation_directory,
+            Some(std::path::PathBuf::from(r"C:\folder"))
+        );
     }
 }

@@ -271,6 +271,34 @@ fn find_menu_item_command_by_id(
     None
 }
 
+fn primary_context_target(
+    context_menu: &crate::application::context_menu::ContextMenuState,
+) -> Option<(&Path, bool)> {
+    let path = context_menu.target_paths.first()?.as_path();
+    let is_directory = context_menu
+        .primary_is_directory
+        .unwrap_or_else(|| crate::infrastructure::windows::is_drive_root_path(path));
+    Some((path, is_directory))
+}
+
+fn run_in_context_panel<R>(
+    app: &mut ImageViewerApp,
+    origin_panel_is_left: Option<bool>,
+    action: impl FnOnce(&mut ImageViewerApp) -> R,
+) -> Option<R> {
+    let active_is_left = app.dual_panel_active == crate::app::dual_panel::ActivePanel::Left;
+    let origin_is_inactive = context_origin_is_inactive(origin_panel_is_left, active_is_left);
+    if origin_is_inactive {
+        app.with_inactive_panel(action)
+    } else {
+        Some(action(app))
+    }
+}
+
+fn context_origin_is_inactive(origin_panel_is_left: Option<bool>, active_is_left: bool) -> bool {
+    origin_panel_is_left.is_some_and(|origin_is_left| origin_is_left != active_is_left)
+}
+
 fn apply_cloud_files_pin(
     app: &mut ImageViewerApp,
     target_paths: &[PathBuf],
@@ -333,8 +361,12 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
     app.context_menu
         .target_paths
         .clone_from(&context_menu.target_paths);
+    app.context_menu
+        .operation_directory
+        .clone_from(&context_menu.operation_directory);
     app.context_menu.origin = context_menu.origin;
     app.context_menu.primary_is_directory = context_menu.primary_is_directory;
+    app.context_menu.origin_panel_is_left = context_menu.origin_panel_is_left;
 
     if let Some(id) = context_menu.selected_command_id.take() {
         if id > 0 {
@@ -413,7 +445,6 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
             }
         } else {
             // Internal command handled via trait
-            let item_idx = context_menu.item_index;
             let selected_command = find_menu_item_command_by_id(&context_menu.items, id)
                 .map(|command| command.to_string());
             if let Some(command) = selected_command.as_deref() {
@@ -444,27 +475,14 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                         .first()
                         .cloned()
                         .unwrap_or_else(|| PathBuf::from(&app.navigation_state.current_path));
-                    app.create_new_folder_at(&target);
+                    let origin_panel = context_menu.origin_panel_is_left;
+                    run_in_context_panel(app, origin_panel, move |app| {
+                        app.create_new_folder_at(&target);
+                    });
                 }
-                -2 | -31 => {
-                    if context_menu.origin
-                        == crate::application::context_menu::ContextMenuOrigin::GlobalSearch
-                    {
-                        app.copy_paths_to_clipboard(&context_menu.target_paths);
-                    } else {
-                        app.command_copy(item_idx);
-                    }
-                }
-                -3 | -30 => {
-                    if context_menu.origin
-                        == crate::application::context_menu::ContextMenuOrigin::GlobalSearch
-                    {
-                        app.cut_paths_to_clipboard(&context_menu.target_paths);
-                    } else {
-                        app.command_cut(item_idx);
-                    }
-                }
-                -4 | -32 => app.command_paste(item_idx),
+                -2 | -31 => app.copy_paths_to_clipboard(&context_menu.target_paths),
+                -3 | -30 => app.cut_paths_to_clipboard(&context_menu.target_paths),
+                -4 | -32 => app.command_paste(None),
                 -5 | -33 => {
                     if let Some(path) = context_menu.target_paths.first().cloned() {
                         if context_menu.origin
@@ -493,10 +511,11 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                                 Some((drive_path_str.into_owned(), current_label));
                             app.sidebar_rename_focus = true;
                         } else {
-                            app.begin_rename_path(&path);
+                            let origin_panel = context_menu.origin_panel_is_left;
+                            run_in_context_panel(app, origin_panel, move |app| {
+                                app.begin_rename_path(&path);
+                            });
                         }
-                    } else if let Some(idx) = item_idx.or(app.selected_item) {
-                        app.begin_rename_item(idx);
                     }
                 }
                 -6 | -34 => {
@@ -505,8 +524,8 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                     }
                 }
                 -20 => {
-                    if let Some(path) = app.context_target_paths(item_idx).first().cloned() {
-                        let is_directory = app.context_target_is_directory(item_idx, &path);
+                    if let Some((path, is_directory)) = primary_context_target(&context_menu) {
+                        let path = path.to_path_buf();
                         if context_menu.origin
                             == crate::application::context_menu::ContextMenuOrigin::GlobalSearch
                         {
@@ -517,20 +536,24 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                             );
                         } else if is_directory {
                             let target = path.to_string_lossy();
-                            app.navigate_to(target.as_ref());
+                            let target = target.into_owned();
+                            let origin_panel = context_menu.origin_panel_is_left;
+                            run_in_context_panel(app, origin_panel, move |app| {
+                                app.navigate_to(&target);
+                            });
                         } else {
                             app.open_with_shell_guarded(&path);
                         }
                     }
                 }
                 -21 => {
-                    if let Some(path) = app.context_target_paths(item_idx).first().cloned() {
-                        let target = if app.context_target_is_directory(item_idx, &path) {
-                            path
+                    if let Some((path, is_directory)) = primary_context_target(&context_menu) {
+                        let target = if is_directory {
+                            path.to_path_buf()
                         } else {
-                            path.parent().map(Path::to_path_buf).unwrap_or_else(|| {
-                                PathBuf::from(&app.navigation_state.current_path)
-                            })
+                            path.parent()
+                                .map(Path::to_path_buf)
+                                .unwrap_or_else(|| path.to_path_buf())
                         };
 
                         let prev_view_mode = app.view_mode;
@@ -556,15 +579,27 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                     }
                 }
                 -24 => {
-                    if let Some(path) = app.context_target_paths(item_idx).first().cloned() {
+                    if let Some(path) = context_menu.target_paths.first() {
                         app.copy_path_to_clipboard(&path);
                     }
                 }
                 -26 => {
-                    if let Some(path) = app.context_target_paths(item_idx).first().cloned() {
-                        match app.create_shell_shortcut(&path) {
+                    if let Some(path) = context_menu.target_paths.first() {
+                        let destination = context_menu
+                            .operation_directory
+                            .clone()
+                            .unwrap_or_else(|| PathBuf::from(&app.navigation_state.current_path));
+                        match app.create_shell_shortcut(&path, &destination) {
                             Ok(created) => {
-                                app.load_folder(false);
+                                let origin_panel = context_menu.origin_panel_is_left;
+                                run_in_context_panel(app, origin_panel, |app| {
+                                    if app.in_inactive_panel_context {
+                                        app.loaded_path.clear();
+                                        app.load_folder_for_inactive();
+                                    } else {
+                                        app.load_folder(false);
+                                    }
+                                });
                                 app.notifications
                                     .push(crate::application::AppNotification::info(
                                         t!(
@@ -590,7 +625,7 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                         }
                     }
                 }
-                -28 => app.show_properties_for_idx(item_idx),
+                -28 => app.show_properties_for_idx(None),
                 -50 | -52 => {
                     if !context_menu.target_paths.is_empty() {
                         app.restore_from_recycle_bin(&context_menu.target_paths);
@@ -604,8 +639,8 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 -54 => app.empty_recycle_bin(),
                 -60 => {
                     // L-12: .to_string() breaks the Cow borrow before the mutable call
-                    let path = app
-                        .context_target_paths(item_idx)
+                    let path = context_menu
+                        .target_paths
                         .first()
                         .and_then(|p| p.to_str())
                         .map(|s| s.to_string());
@@ -614,8 +649,8 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                     }
                 }
                 -61 => {
-                    let path = app
-                        .context_target_paths(item_idx)
+                    let path = context_menu
+                        .target_paths
                         .first()
                         .and_then(|p| p.to_str())
                         .map(|s| s.to_string());
@@ -640,28 +675,14 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                     );
                 }
                 -80 => {
-                    let path = if context_menu.is_empty_area {
-                        PathBuf::from(&app.navigation_state.current_path)
-                    } else {
-                        context_menu
-                            .target_paths
-                            .first()
-                            .cloned()
-                            .unwrap_or_else(|| PathBuf::from(&app.navigation_state.current_path))
-                    };
-                    open_terminal_at(&path);
+                    if let Some(path) = context_menu.target_paths.first() {
+                        open_terminal_at(path);
+                    }
                 }
                 -81 => {
-                    let path = if context_menu.is_empty_area {
-                        PathBuf::from(&app.navigation_state.current_path)
-                    } else {
-                        context_menu
-                            .target_paths
-                            .first()
-                            .cloned()
-                            .unwrap_or_else(|| PathBuf::from(&app.navigation_state.current_path))
-                    };
-                    open_terminal_admin_at(&path);
+                    if let Some(path) = context_menu.target_paths.first() {
+                        open_terminal_admin_at(path);
+                    }
                 }
                 -90 => {}
                 -91 => {
@@ -690,11 +711,14 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
 #[cfg(test)]
 mod tests {
     use super::{
-        base64_encode, powershell_location_script, system_powershell_path, utf16le_base64,
-        wide_null, windows_parameters,
+        base64_encode, context_origin_is_inactive, powershell_location_script,
+        primary_context_target, system_powershell_path, utf16le_base64, wide_null,
+        windows_parameters,
     };
+    use crate::application::context_menu::ContextMenuState;
     use std::ffi::OsStr;
     use std::os::windows::ffi::OsStrExt;
+    use std::path::PathBuf;
 
     fn parameters_text(args: &[&OsStr]) -> String {
         let mut encoded = windows_parameters(args).expect("arguments should be valid");
@@ -748,6 +772,25 @@ mod tests {
         assert_eq!(base64_encode(b"M"), "TQ==");
         assert_eq!(base64_encode(b"Ma"), "TWE=");
         assert_eq!(base64_encode(b"Man"), "TWFu");
+    }
+
+    #[test]
+    fn primary_context_target_uses_captured_path_metadata() {
+        let mut context_menu = ContextMenuState::default();
+        context_menu.item_index = Some(99);
+        context_menu.target_paths = vec![PathBuf::from(r"C:\inactive\folder")];
+        context_menu.primary_is_directory = Some(true);
+
+        let (path, is_directory) = primary_context_target(&context_menu).unwrap();
+        assert_eq!(path, std::path::Path::new(r"C:\inactive\folder"));
+        assert!(is_directory);
+    }
+
+    #[test]
+    fn context_panel_identity_survives_focus_switches() {
+        assert!(context_origin_is_inactive(Some(false), true));
+        assert!(!context_origin_is_inactive(Some(false), false));
+        assert!(!context_origin_is_inactive(None, true));
     }
 
     #[test]
