@@ -283,17 +283,25 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, root_ui: &mut egui::Ui) -> Opt
             };
 
             // ── Scrollable middle: Cloud drives + Local disks + Network + folder trees ──
-            let output = egui::ScrollArea::both()
-                .id_salt("sidebar_scroll")
-                .auto_shrink([false, false])
-                .max_height(drives_avail)
-                .min_scrolled_height(0.0)
-                .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded)
-                .vertical_scroll_offset(scroll_offset)
-                .show(ui, |ui| {
-                    ui.set_min_width(ui.available_width());
-                    render_sidebar_drives(ui, &mut sidebar_ctx)
-                });
+            let output = ui
+                .scope(|ui| {
+                    ui.spacing_mut().scroll.fade.strength = 0.0;
+
+                    egui::ScrollArea::both()
+                        .id_salt("sidebar_scroll")
+                        .auto_shrink([false, false])
+                        .max_height(drives_avail)
+                        .min_scrolled_height(0.0)
+                        .scroll_bar_visibility(
+                            egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded,
+                        )
+                        .vertical_scroll_offset(scroll_offset)
+                        .show(ui, |ui| {
+                            ui.set_min_width(ui.available_width());
+                            render_sidebar_drives(ui, &mut sidebar_ctx)
+                        })
+                })
+                .inner;
 
             // ── Fixed bottom: Tags section (own scrollbar for many tags) ──
             let mut tags_divider_drag_delta: Option<f32> = None;
@@ -341,21 +349,26 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, root_ui: &mut egui::Ui) -> Opt
                         .hline(hit_rect.min.x..=hit_rect.max.x, center_y, stroke);
                 }
 
-                egui::ScrollArea::vertical()
-                    .id_salt("sidebar_tags_scroll")
-                    .auto_shrink([false, false])
-                    .max_height(tags_scroll_h)
-                    .min_scrolled_height(0.0)
-                    .scroll_bar_visibility(
-                        egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded,
-                    )
-                    .show(ui, |ui| {
-                        ui.set_min_width(ui.available_width());
-                        let mut act = None;
-                        render_tags_section(ui, &mut sidebar_ctx, &mut act);
-                        act
-                    })
-                    .inner
+                ui.scope(|ui| {
+                    ui.spacing_mut().scroll.fade.strength = 0.0;
+
+                    egui::ScrollArea::vertical()
+                        .id_salt("sidebar_tags_scroll")
+                        .auto_shrink([false, false])
+                        .max_height(tags_scroll_h)
+                        .min_scrolled_height(0.0)
+                        .scroll_bar_visibility(
+                            egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded,
+                        )
+                        .show(ui, |ui| {
+                            ui.set_min_width(ui.available_width());
+                            let mut act = None;
+                            render_tags_section(ui, &mut sidebar_ctx, &mut act);
+                            act
+                        })
+                        .inner
+                })
+                .inner
             } else {
                 None
             };
