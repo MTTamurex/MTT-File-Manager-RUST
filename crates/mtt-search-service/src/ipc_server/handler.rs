@@ -444,6 +444,11 @@ pub(super) fn handle_client(
             }
         }
         SearchRequest::GetStatus => {
+            // REGRESSION NOTE: The app treats repeated GetStatus authorization
+            // failures as a service outage and stops dispatching global search.
+            // Keep trusted_file_manager_client compatible with SCM/LocalSystem;
+            // a policy change here affects search and folder sizes, not just UI
+            // status metadata.
             if !require_trusted_metadata_client(pipe, "GetStatus") {
                 return;
             }
@@ -625,10 +630,15 @@ pub(super) fn handle_client(
                 (vol.resolve_path_to_frn(&path), has_pending)
             };
 
+            // SECURITY/COMPATIBILITY REGRESSION NOTE:
+            // This order is intentional and both contexts are required.
             // System-owned folders such as C:\PerfLogs may be readable only by
-            // the service, while private user folders may exclude LocalSystem.
-            // Try the service token first, then retry the complete inspection
-            // under the caller's token before touching the in-memory index.
+            // LocalSystem, while private folders such as the app's thumbnails,
+            // cache, and state directories may grant access only to the user.
+            // Service-only validation broke private folders; client-only
+            // validation broke protected system folders. Do not reorder or
+            // collapse this fallback without testing both classes through the
+            // installed SCM service. No index operation runs impersonated.
             let live_directory = inspect_live_directory_with_fallback(
                 || inspect_live_directory(&path),
                 || {
@@ -798,6 +808,11 @@ where
 }
 
 fn require_authorized_folder_size_client(pipe: HANDLE, path: &str) -> bool {
+    // SECURITY REGRESSION NOTE: Do not replace this with either an unconditional
+    // allow or a strict image-query-only gate. The former exposes indexed
+    // metadata; the latter failed under LocalSystem for legitimate clients.
+    // The fallback remains fail-closed and authorizes only an exact path that
+    // the impersonated caller can read.
     let authorization =
         authorize_folder_size_client_with(trusted_file_manager_client(pipe), || {
             let _guard = PipeImpersonationGuard::new(pipe)?;

@@ -117,6 +117,14 @@ pub(crate) fn trusted_file_manager_client(pipe: HANDLE) -> Result<(), String> {
         return Err("Client PID is 0".to_string());
     }
 
+    // SECURITY/COMPATIBILITY REGRESSION NOTE:
+    // A LocalSystem service can fail to open an ordinary interactive user's
+    // process even though an elevated run-console instance (same user SID as
+    // the app) succeeds. Rejecting immediately here made GetStatus fail, which
+    // caused the app to mark the whole service offline and disabled search and
+    // folder sizes. Retry only the process-image query while impersonating the
+    // pipe client. The basename and protected sibling-directory checks below
+    // still run unchanged, so this is not a trust bypass.
     let image_path = query_client_image_with_fallback(
         || query_process_image_path(client_pid),
         || {
