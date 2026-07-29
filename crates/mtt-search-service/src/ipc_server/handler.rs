@@ -35,6 +35,8 @@ const FRN_MASK: u64 = 0x0000_FFFF_FFFF_FFFF;
 
 type FolderSizeSummary = (u64, u64, u64, u64);
 type RepairedDirectorySummary = (u64, FolderSizeSummary);
+type LiveDirectoryIdentity = (u64, bool);
+type LiveDirectoryInspection = (LiveDirectoryIdentity, bool);
 
 fn folder_size_needs_repair(
     total_size: u64,
@@ -118,6 +120,30 @@ fn live_directory_is_empty(path: &str) -> Result<bool, String> {
         Some(Ok(_)) => Ok(false),
         Some(Err(error)) => Err(error.to_string()),
         None => Ok(true),
+    }
+}
+
+fn inspect_live_directory(path: &str) -> Result<LiveDirectoryInspection, String> {
+    let identity = live_directory_frn(path)?;
+    let is_empty = live_directory_is_empty(path)?;
+    Ok((identity, is_empty))
+}
+
+fn inspect_live_directory_with_fallback<P, F>(
+    service_check: P,
+    client_check: F,
+) -> Result<LiveDirectoryInspection, String>
+where
+    P: FnOnce() -> Result<LiveDirectoryInspection, String>,
+    F: FnOnce() -> Result<LiveDirectoryInspection, String>,
+{
+    match service_check() {
+        Ok(inspection) => Ok(inspection),
+        Err(service_error) => client_check().map_err(|client_error| {
+            format!(
+                "live validation failed as service: {service_error}; client retry failed: {client_error}"
+            )
+        }),
     }
 }
 
@@ -548,7 +574,7 @@ pub(super) fn handle_client(
             let _ = send_response(pipe, &SearchResponse::PathsModified { modified });
         }
         SearchRequest::FolderSize { path } => {
-            if !require_trusted_metadata_client(pipe, "FolderSize") {
+            if !require_authorized_folder_size_client(pipe, &path) {
                 return;
             }
 
@@ -560,17 +586,10 @@ pub(super) fn handle_client(
                 }
             };
 
-            // NOTE: We intentionally do NOT impersonate the client and gate
-            // FolderSize on `current_client_can_read_path(&path)`. By the time
-            // the app issues a FolderSize request the user is already viewing
-            // the parent listing in the UI (and therefore knows the folder
-            // exists), so the size value carries no additional disclosure
-            // risk worth blocking core functionality for. An impersonated
-            // CreateFileW(GENERIC_READ) gate also produced false negatives on
-            // legitimately readable system folders (e.g. C:\PerfLogs) due to
-            // named-pipe SQOS / impersonation-level interactions, breaking
-            // size aggregation for ordinary users. See git log for the
-            // original CRIT-2 reasoning that this comment supersedes.
+            // The installed app normally passes the client-image trust check.
+            // If LocalSystem cannot inspect the client process, authorization
+            // falls back to an impersonated read check for this exact path.
+            // The impersonation guard is dropped before any index operation.
 
             // Compute folder size from in-memory index.
             let handle = match volume_indices::find_handle(indices, drive_letter) {
@@ -606,10 +625,20 @@ pub(super) fn handle_client(
                 (vol.resolve_path_to_frn(&path), has_pending)
             };
 
-            let live_directory = live_directory_frn(&path);
+            // System-owned folders such as C:\PerfLogs may be readable only by
+            // the service, while private user folders may exclude LocalSystem.
+            // Try the service token first, then retry the complete inspection
+            // under the caller's token before touching the in-memory index.
+            let live_directory = inspect_live_directory_with_fallback(
+                || inspect_live_directory(&path),
+                || {
+                    let _guard = PipeImpersonationGuard::new(pipe)?;
+                    inspect_live_directory(&path)
+                },
+            );
             let result = match (indexed_frn, live_directory) {
-                (Some(indexed_frn), Ok((live_frn, _))) if indexed_frn != live_frn => {
-                    if live_directory_is_empty(&path) == Ok(true) {
+                (Some(indexed_frn), Ok(((live_frn, _), is_empty))) if indexed_frn != live_frn => {
+                    if is_empty {
                         eprintln!(
                             "[FOLDER-SIZE] live replacement is empty path={} indexed_frn={} live_frn={}",
                             crate::redact_paths(&path),
@@ -621,14 +650,14 @@ pub(super) fn handle_client(
                         Err("Directory identity changed; index refresh pending")
                     }
                 }
-                (Some(frn), Ok((_live_frn, _))) => match live_directory_is_empty(&path) {
-                    Ok(true) => Ok((frn, (0, 0, 0, 0))),
-                    Ok(false) => {
+                (Some(frn), Ok(((_live_frn, _), is_empty))) => {
+                    if is_empty {
+                        Ok((frn, (0, 0, 0, 0)))
+                    } else {
                         let vol = handle.read();
                         Ok((frn, crate::mft_reader::folder_size_for_service(&vol, frn)))
                     }
-                    Err(_) => Err("Live path validation failed"),
-                },
+                }
                 (Some(_), Err(error)) => {
                     eprintln!(
                         "[FOLDER-SIZE] live validation failed path={} reason={}",
@@ -637,7 +666,7 @@ pub(super) fn handle_client(
                     );
                     Err("Live path validation failed")
                 }
-                (None, Ok((frn, is_reparse))) => {
+                (None, Ok(((frn, is_reparse), _is_empty))) => {
                     let vol = handle.read();
                     if !matches!(vol.state, IndexState::Ready) {
                         Err("Volume not ready")
@@ -730,6 +759,63 @@ fn require_trusted_metadata_client(pipe: HANDLE, operation: &str) -> bool {
             eprintln!(
                 "[IPC] {} rejected unauthorized client: {}",
                 operation,
+                crate::redact_paths(&error),
+            );
+            let _ = send_response(
+                pipe,
+                &SearchResponse::Error("Authorization failed".to_string()),
+            );
+            false
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum FolderSizeClientAuthorization {
+    TrustedClient,
+    ClientAclFallback { trust_error: String },
+}
+
+fn authorize_folder_size_client_with<F>(
+    trusted_client: Result<(), String>,
+    acl_fallback: F,
+) -> Result<FolderSizeClientAuthorization, String>
+where
+    F: FnOnce() -> Result<bool, String>,
+{
+    match trusted_client {
+        Ok(()) => Ok(FolderSizeClientAuthorization::TrustedClient),
+        Err(trust_error) => match acl_fallback() {
+            Ok(true) => Ok(FolderSizeClientAuthorization::ClientAclFallback { trust_error }),
+            Ok(false) => Err(format!(
+                "trusted client check failed: {trust_error}; client cannot read requested path"
+            )),
+            Err(fallback_error) => Err(format!(
+                "trusted client check failed: {trust_error}; ACL fallback failed: {fallback_error}"
+            )),
+        },
+    }
+}
+
+fn require_authorized_folder_size_client(pipe: HANDLE, path: &str) -> bool {
+    let authorization =
+        authorize_folder_size_client_with(trusted_file_manager_client(pipe), || {
+            let _guard = PipeImpersonationGuard::new(pipe)?;
+            Ok(current_client_can_read_path(path))
+        });
+
+    match authorization {
+        Ok(FolderSizeClientAuthorization::TrustedClient) => true,
+        Ok(FolderSizeClientAuthorization::ClientAclFallback { trust_error }) => {
+            eprintln!(
+                "[IPC] FolderSize client-image check unavailable; authorized by client ACL: {}",
+                crate::redact_paths(&trust_error),
+            );
+            true
+        }
+        Err(error) => {
+            eprintln!(
+                "[IPC] FolderSize rejected unauthorized client: {}",
                 crate::redact_paths(&error),
             );
             let _ = send_response(
@@ -861,6 +947,95 @@ mod tests {
 
     fn make_handles(volumes: Vec<VolumeIndex>) -> Vec<VolumeIndexHandle> {
         volumes.into_iter().map(handle_from).collect()
+    }
+
+    #[test]
+    fn live_directory_inspection_prefers_service_context() {
+        let client_called = std::cell::Cell::new(false);
+        let inspection = inspect_live_directory_with_fallback(
+            || Ok(((10, false), false)),
+            || {
+                client_called.set(true);
+                Err("client fallback must not run".to_string())
+            },
+        )
+        .unwrap();
+
+        assert_eq!(inspection, ((10, false), false));
+        assert!(!client_called.get());
+    }
+
+    #[test]
+    fn live_directory_inspection_retries_as_client() {
+        let inspection = inspect_live_directory_with_fallback(
+            || Err("service access denied".to_string()),
+            || Ok(((20, true), false)),
+        )
+        .unwrap();
+
+        assert_eq!(inspection, ((20, true), false));
+    }
+
+    #[test]
+    fn live_directory_inspection_fails_when_both_contexts_fail() {
+        let error = inspect_live_directory_with_fallback(
+            || Err("service access denied".to_string()),
+            || Err("client access denied".to_string()),
+        )
+        .unwrap_err();
+
+        assert!(error.contains("service access denied"));
+        assert!(error.contains("client access denied"));
+    }
+
+    #[test]
+    fn trusted_folder_size_client_does_not_use_acl_fallback() {
+        let fallback_called = std::cell::Cell::new(false);
+
+        let authorization = authorize_folder_size_client_with(Ok(()), || {
+            fallback_called.set(true);
+            Ok(false)
+        })
+        .unwrap();
+
+        assert_eq!(authorization, FolderSizeClientAuthorization::TrustedClient);
+        assert!(!fallback_called.get());
+    }
+
+    #[test]
+    fn readable_folder_size_path_recovers_failed_client_image_check() {
+        let authorization = authorize_folder_size_client_with(
+            Err("client process unavailable".to_string()),
+            || Ok(true),
+        )
+        .unwrap();
+
+        assert!(matches!(
+            authorization,
+            FolderSizeClientAuthorization::ClientAclFallback { .. }
+        ));
+    }
+
+    #[test]
+    fn unreadable_folder_size_path_remains_fail_closed() {
+        let error = authorize_folder_size_client_with(
+            Err("client process unavailable".to_string()),
+            || Ok(false),
+        )
+        .unwrap_err();
+
+        assert!(error.contains("client cannot read requested path"));
+    }
+
+    #[test]
+    fn failed_folder_size_impersonation_remains_fail_closed() {
+        let error = authorize_folder_size_client_with(
+            Err("client process unavailable".to_string()),
+            || Err("impersonation unavailable".to_string()),
+        )
+        .unwrap_err();
+
+        assert!(error.contains("ACL fallback failed"));
     }
 
     #[test]
