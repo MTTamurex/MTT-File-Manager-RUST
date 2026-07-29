@@ -1,5 +1,6 @@
-use std::ffi::OsString;
-use std::path::Path;
+use std::ffi::{OsStr, OsString};
+use std::os::windows::ffi::{OsStrExt, OsStringExt};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -43,8 +44,15 @@ pub fn install_service() {
             error
         );
         eprintln!(
-            "[SERVICE] Move the service executable to a protected install directory, or set \
+            "[SERVICE] Move the service executable under the system Program Files directory, or set \
              MTT_SEARCH_ALLOW_UNSAFE_SERVICE_INSTALL=1 only for an intentional admin/dev install."
+        );
+        return;
+    }
+    if let Err(error) = crate::index_db::reset_storage_for_install() {
+        eprintln!(
+            "[SERVICE] Refusing to install without securely resetting the index cache: {}",
+            error
         );
         return;
     }
@@ -106,7 +114,196 @@ fn validate_service_install_path(exe_path: &Path) -> Result<(), String> {
         }
     }
 
+    validate_windows_path_security(exe_path)?;
+
     Ok(())
+}
+
+fn validate_windows_path_security(exe_path: &Path) -> Result<(), String> {
+    let program_files = trusted_program_files_path()?;
+    let canonical_exe = std::fs::canonicalize(exe_path)
+        .map_err(|error| format!("cannot canonicalize {}: {}", exe_path.display(), error))?;
+    let canonical_program_files = std::fs::canonicalize(&program_files).map_err(|error| {
+        format!(
+            "cannot canonicalize trusted Program Files path {}: {}",
+            program_files.display(),
+            error
+        )
+    })?;
+
+    let expected_install_dir = canonical_program_files.join("MTT File Manager");
+    let actual_install_dir = canonical_exe
+        .parent()
+        .ok_or_else(|| "service executable has no parent directory".to_string())?;
+    if !paths_equivalent_case_insensitive(actual_install_dir, &expected_install_dir) {
+        return Err(format!(
+            "service executable is outside the trusted Program Files product directory: {}",
+            exe_path.display()
+        ));
+    }
+
+    let mut component = Some(exe_path);
+    while let Some(path) = component {
+        validate_not_reparse_point(path)?;
+        if paths_equivalent_case_insensitive(path, &program_files) {
+            break;
+        }
+        component = path.parent();
+    }
+
+    Ok(())
+}
+
+fn trusted_program_files_path() -> Result<PathBuf, String> {
+    use windows::Win32::System::Com::CoTaskMemFree;
+    use windows::Win32::UI::Shell::{
+        FOLDERID_ProgramFiles, SHGetKnownFolderPath, KF_FLAG_DONT_VERIFY,
+    };
+
+    let raw = unsafe {
+        SHGetKnownFolderPath(&FOLDERID_ProgramFiles, KF_FLAG_DONT_VERIFY, None)
+            .map_err(|error| format!("SHGetKnownFolderPath(ProgramFiles) failed: {}", error))?
+    };
+    let path = PathBuf::from(OsString::from_wide(unsafe { raw.as_wide() }));
+    unsafe {
+        CoTaskMemFree(Some(raw.0.cast()));
+    }
+    Ok(path)
+}
+
+#[cfg(test)]
+fn path_is_same_or_descendant(path: &Path, root: &Path) -> bool {
+    let path = normalize_path_text(path);
+    let root = normalize_path_text(root);
+    path == root || path.starts_with(&format!("{}\\", root.trim_end_matches('\\')))
+}
+
+#[cfg(test)]
+fn normalize_path_text(path: &Path) -> String {
+    path.to_string_lossy()
+        .replace('/', "\\")
+        .trim_end_matches('\\')
+        .to_ascii_lowercase()
+}
+
+fn paths_equivalent_case_insensitive(left: &Path, right: &Path) -> bool {
+    normalize_path_for_policy(left) == normalize_path_for_policy(right)
+}
+
+fn validate_not_reparse_point(path: &Path) -> Result<(), String> {
+    use windows::core::PCWSTR;
+    use windows::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows::Win32::Storage::FileSystem::{
+        CreateFileW, GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION,
+        FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAGS_AND_ATTRIBUTES, FILE_FLAG_BACKUP_SEMANTICS,
+        FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+        OPEN_EXISTING,
+    };
+
+    let path_wide: Vec<u16> = OsStr::new(path.as_os_str())
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    let handle = unsafe {
+        CreateFileW(
+            PCWSTR(path_wide.as_ptr()),
+            0x0080, // FILE_READ_ATTRIBUTES
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            None,
+            OPEN_EXISTING,
+            FILE_FLAGS_AND_ATTRIBUTES(
+                FILE_FLAG_BACKUP_SEMANTICS.0 | FILE_FLAG_OPEN_REPARSE_POINT.0,
+            ),
+            None,
+        )
+    }
+    .map_err(|error| format!("cannot securely open {}: {}", path.display(), error))?;
+
+    struct OwnedHandle(HANDLE);
+    impl Drop for OwnedHandle {
+        fn drop(&mut self) {
+            unsafe {
+                let _ = CloseHandle(self.0);
+            }
+        }
+    }
+    let handle = OwnedHandle(handle);
+
+    let mut information = BY_HANDLE_FILE_INFORMATION::default();
+    unsafe { GetFileInformationByHandle(handle.0, &mut information) }
+        .map_err(|error| format!("cannot inspect {}: {}", path.display(), error))?;
+    if information.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0 {
+        return Err(format!(
+            "path component is a reparse point: {}",
+            path.display()
+        ));
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn path_containment_is_case_insensitive_and_separator_aware() {
+        let root = Path::new(r"C:\Program Files");
+        assert!(path_is_same_or_descendant(
+            Path::new(r"c:\PROGRAM FILES\MTT File Manager\service.exe"),
+            root
+        ));
+        assert!(!path_is_same_or_descendant(
+            Path::new(r"C:\Program Files Malicious\service.exe"),
+            root
+        ));
+    }
+
+    #[test]
+    fn trusted_program_files_known_folder_resolves() {
+        let path = trusted_program_files_path().expect("Program Files Known Folder should resolve");
+        assert!(path.is_absolute());
+        assert!(path.is_dir());
+    }
+
+    #[test]
+    fn current_test_binary_is_rejected_outside_program_files() {
+        if env_flag_enabled("MTT_SEARCH_ALLOW_UNSAFE_SERVICE_INSTALL") {
+            return;
+        }
+        let current = std::env::current_exe().expect("current test executable path");
+        let error = validate_service_install_path(&current).unwrap_err();
+        assert!(error.contains("target directory") || error.contains("outside the trusted"));
+    }
+
+    #[test]
+    fn reparse_point_is_rejected_when_symlink_creation_is_available() {
+        use std::os::windows::fs::symlink_file;
+
+        let directory = std::env::temp_dir().join(format!(
+            "mtt-service-path-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system time")
+                .as_nanos()
+        ));
+        std::fs::create_dir(&directory).expect("temporary directory");
+        let target = directory.join("target.exe");
+        let link = directory.join("service.exe");
+        std::fs::write(&target, b"test").expect("create symlink target");
+        if symlink_file(&target, &link).is_err() {
+            let _ = std::fs::remove_file(&target);
+            let _ = std::fs::remove_dir(&directory);
+            return;
+        }
+
+        let error = validate_not_reparse_point(&link).unwrap_err();
+        let _ = std::fs::remove_file(&link);
+        let _ = std::fs::remove_file(&target);
+        let _ = std::fs::remove_dir(&directory);
+        assert!(error.contains("reparse point"));
+    }
 }
 
 fn path_starts_with_env_path(path: &str, variable: &str) -> bool {

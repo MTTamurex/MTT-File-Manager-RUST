@@ -40,6 +40,7 @@ WizardStyle=modern
 PrivilegesRequired=admin
 MinVersion=10.0
 DisableProgramGroupPage=yes
+DisableDirPage=yes
 
 [Languages]
 Name: "english";    MessagesFile: "compiler:Default.isl"
@@ -86,11 +87,11 @@ Name: "{autodesktop}\{#MyAppName}";   Filename: "{app}\{#MyAppExeName}"; Tasks: 
 ; were copied, so "install" here is idempotent for fresh installs and safe
 ; for upgrades.
 Filename: "{app}\{#MySearchSvc}"; Parameters: "install"; StatusMsg: "Installing search service..."; Flags: runhidden waituntilterminated
-Filename: "sc.exe"; Parameters: "start {#MySearchName}"; StatusMsg: "Starting search service..."; Flags: runhidden waituntilterminated
+Filename: "{sys}\sc.exe"; Parameters: "start {#MySearchName}"; StatusMsg: "Starting search service..."; Flags: runhidden waituntilterminated
 
 [UninstallRun]
 ; Stop and remove the search service before files are deleted
-Filename: "sc.exe"; Parameters: "stop {#MySearchName}"; RunOnceId: "StopSearchService"; Flags: runhidden waituntilterminated
+Filename: "{sys}\sc.exe"; Parameters: "stop {#MySearchName}"; RunOnceId: "StopSearchService"; Flags: runhidden waituntilterminated
 Filename: "{app}\{#MySearchSvc}"; Parameters: "uninstall"; RunOnceId: "UninstallSearchService"; Flags: runhidden waituntilterminated
 
 [Code]
@@ -111,45 +112,90 @@ begin
       'Version', Version);
 end;
 
-function IsExistingInstall: Boolean;
+function DeleteProgramDataCache: Boolean;
+var
+  Attempts: Integer;
 begin
-  Result :=
-    FileExists(ExpandConstant('{app}\unins000.exe')) or
-    FileExists(ExpandConstant('{app}\{#MyAppExeName}')) or
-    FileExists(ExpandConstant('{app}\{#MySearchSvc}'));
+  Result := not DirExists(ProgramDataCacheDir);
+  Attempts := 0;
+  while (not Result) and (Attempts < 60) do
+  begin
+    Log('Deleting MTT ProgramData cache directory: ' + ProgramDataCacheDir);
+    DelTree(ProgramDataCacheDir, True, True, True);
+    Result := not DirExists(ProgramDataCacheDir);
+    if not Result then
+      Sleep(500);
+    Attempts := Attempts + 1;
+  end;
+
+  if not Result then
+    Log('Failed to delete MTT ProgramData cache directory after retries: ' + ProgramDataCacheDir);
 end;
 
-procedure DeleteProgramDataCache;
+function IsSecureInstallDirectory: Boolean;
 begin
-  if not DirExists(ProgramDataCacheDir) then
-    Exit;
-
-  Log('Deleting MTT ProgramData cache directory: ' + ProgramDataCacheDir);
-  if not DelTree(ProgramDataCacheDir, True, True, True) then
-    Log('Failed to delete MTT ProgramData cache directory: ' + ProgramDataCacheDir);
+  Result := CompareText(
+    ExpandConstant('{app}'),
+    ExpandConstant('{autopf}\{#MyAppName}')) = 0;
 end;
 
-// Stop the search service and wait for it to reach the Stopped state.
-// Called before files are copied so the service process is not holding
-// the executable open and cannot be killed mid-write (leaving .bin.tmp
-// without a corresponding .bin).
-procedure StopSearchServiceIfRunning;
+function StartSearchServiceAfterFailedCleanup: Boolean;
 var
   ResultCode: Integer;
   Attempts: Integer;
 begin
-  // Ask SCM to stop the service. Ignore errors (service may not be installed).
-  Exec('sc.exe', 'stop {#MySearchName}', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-
-  // Poll up to ~10 seconds for the service to reach the Stopped state.
-  // sc.exe query returns exit code 0 while the service exists; we look for
-  // STATE 1 (STOPPED) in a separate check via the exit code of "sc query".
-  // Simpler: just sleep a fixed 4 s which is more than enough for the service
-  // to flush its current write and exit cleanly.
+  Result := False;
   Attempts := 0;
-  while Attempts < 8 do
+  while (not Result) and (Attempts < 60) do
   begin
-    Sleep(500);
+    ResultCode := -1;
+    if Exec(ExpandConstant('{sys}\sc.exe'), 'start {#MySearchName}', '', SW_HIDE,
+      ewWaitUntilTerminated, ResultCode) and (ResultCode = 0) then
+      Result := True
+    else
+      Sleep(500);
+    Attempts := Attempts + 1;
+  end;
+end;
+
+// Query the numeric ServiceControllerStatus through the trusted system
+// PowerShell so setup does not depend on localized `sc query` output.
+function IsSearchServiceStopped: Boolean;
+var
+  ResultCode: Integer;
+begin
+  ResultCode := -1;
+  Result := Exec(
+    ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+    '-NoProfile -NonInteractive -Command "$s=Get-Service -Name ''{#MySearchName}'' ' +
+    '-ErrorAction SilentlyContinue; if ($null -eq $s -or [int]$s.Status -eq 1) ' +
+    '{ exit 0 } else { exit 1 }"',
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0);
+end;
+
+function StopSearchServiceIfRunning(var WasRunning: Boolean): Boolean;
+var
+  ResultCode: Integer;
+  Attempts: Integer;
+begin
+  WasRunning := not IsSearchServiceStopped;
+  if not WasRunning then
+  begin
+    Result := True;
+    Exit;
+  end;
+
+  ResultCode := -1;
+  Exec(ExpandConstant('{sys}\sc.exe'), 'stop {#MySearchName}', '', SW_HIDE,
+    ewWaitUntilTerminated, ResultCode);
+
+  Result := False;
+  Attempts := 0;
+  while (not Result) and (Attempts < 60) do
+  begin
+    Result := IsSearchServiceStopped;
+    if not Result then
+      Sleep(500);
     Attempts := Attempts + 1;
   end;
 end;
@@ -158,13 +204,34 @@ end;
 //   1. The .exe is not locked and can be replaced.
 //   2. The service cannot be killed mid-write leaving .bin.tmp on disk.
 procedure CurStepChanged(CurStep: TSetupStep);
+var
+  ServiceWasRunning: Boolean;
 begin
   if CurStep = ssInstall then
   begin
-    StopSearchServiceIfRunning;
+    if not IsSecureInstallDirectory then
+      RaiseException(
+        'MTT File Manager must be installed in its protected Program Files directory.');
 
-    if IsExistingInstall then
-      DeleteProgramDataCache;
+    if not StopSearchServiceIfRunning(ServiceWasRunning) then
+    begin
+      if ServiceWasRunning then
+        StartSearchServiceAfterFailedCleanup;
+      RaiseException(
+        'The search service did not stop within 30 seconds. ' +
+        'Setup was stopped before updating any files.');
+    end;
+
+    // Remove cache on upgrades and any cache pre-created before a fresh
+    // install. Only this regenerable ProgramData directory is affected.
+    if not DeleteProgramDataCache then
+    begin
+      if ServiceWasRunning and not StartSearchServiceAfterFailedCleanup then
+        Log('Failed to restart the previous search service after cache cleanup failure.');
+      RaiseException(
+        'Unable to securely remove the previous search index cache. ' +
+        'Setup was stopped before installing the update.');
+    end;
   end;
 
   // Persist the language selected during installation so the app can
@@ -184,7 +251,8 @@ procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
   if CurUninstallStep = usPostUninstall then
   begin
-    DeleteProgramDataCache;
+    if not DeleteProgramDataCache then
+      Log('Search index cache could not be fully removed during uninstall.');
     RegDeleteValue(HKLM, 'SOFTWARE\MTT-File-Manager', 'InstallerLanguage');
     RegDeleteKeyIncludingSubkeys(HKLM, 'SOFTWARE\MTT-File-Manager');
   end;

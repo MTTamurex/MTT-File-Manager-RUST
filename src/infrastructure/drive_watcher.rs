@@ -12,7 +12,7 @@
 use parking_lot::Mutex;
 use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use windows::core::PCWSTR;
@@ -68,6 +68,19 @@ pub struct DriveWatcher {
     current_prefix: Arc<Mutex<PathBuf>>,
     /// Shutdown flag
     shutdown: Arc<AtomicBool>,
+    state: Arc<AtomicU8>,
+}
+
+const WATCHER_STARTING: u8 = 0;
+const WATCHER_RUNNING: u8 = 1;
+const WATCHER_STOPPED: u8 = 2;
+
+struct RunningGuard(Arc<AtomicU8>);
+
+impl Drop for RunningGuard {
+    fn drop(&mut self) {
+        self.0.store(WATCHER_STOPPED, Ordering::Release);
+    }
 }
 
 impl DriveWatcher {
@@ -89,15 +102,19 @@ impl DriveWatcher {
         let (event_tx, event_rx) = std::sync::mpsc::channel();
         let prefix = Arc::new(Mutex::new(initial_prefix.clone()));
         let shutdown = Arc::new(AtomicBool::new(false));
+        let state = Arc::new(AtomicU8::new(WATCHER_STARTING));
 
         let shutdown_clone = Arc::clone(&shutdown);
         let prefix_for_thread = Arc::clone(&prefix);
+        let state_for_thread = Arc::clone(&state);
 
         // Open the drive handle in the main thread to validate early
         // We pass the path to the thread and open it there to avoid Send issues with HANDLE
         let drive_root_clone = drive_root.clone();
 
         let thread = thread::spawn(move || {
+            let _running_guard = RunningGuard(Arc::clone(&state_for_thread));
+
             // Open handle inside the thread to avoid Send issues
             let Some(handle) = Self::open_drive_handle(&drive_root_clone) else {
                 log::error!(
@@ -106,6 +123,7 @@ impl DriveWatcher {
                 );
                 return;
             };
+            state_for_thread.store(WATCHER_RUNNING, Ordering::Release);
 
             thread_loop::watcher_thread_main(
                 handle,
@@ -123,6 +141,7 @@ impl DriveWatcher {
             event_receiver: event_rx,
             current_prefix: prefix,
             shutdown,
+            state,
         })
     }
 
@@ -198,7 +217,11 @@ impl DriveWatcher {
 
     /// Check if the watcher is still running
     pub fn is_running(&self) -> bool {
-        !self.shutdown.load(Ordering::Relaxed)
+        self.state.load(Ordering::Acquire) == WATCHER_RUNNING
+    }
+
+    pub fn is_stopped(&self) -> bool {
+        self.state.load(Ordering::Acquire) == WATCHER_STOPPED
     }
 
     /// Get the current prefix being watched
@@ -299,5 +322,17 @@ mod tests {
             &invalidated,
             Path::new("C:\\Users\\Test\\Nested")
         ));
+    }
+
+    #[test]
+    fn running_guard_marks_thread_as_stopped() {
+        let state = Arc::new(AtomicU8::new(WATCHER_RUNNING));
+
+        {
+            let _guard = RunningGuard(Arc::clone(&state));
+            assert_eq!(state.load(Ordering::Acquire), WATCHER_RUNNING);
+        }
+
+        assert_eq!(state.load(Ordering::Acquire), WATCHER_STOPPED);
     }
 }

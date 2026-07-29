@@ -83,6 +83,7 @@ pub(in crate::app) struct AppBootstrap {
         mpsc::Sender<crate::app::folder_size_state::FolderSizeRequest>,
     pub(in crate::app) folder_size_res_rx: mpsc::Receiver<FolderSizeMessage>,
     pub(in crate::app) folder_size_cancel: Arc<AtomicBool>,
+    pub(in crate::app) folder_size_latest_request_id: Arc<AtomicU64>,
     pub(in crate::app) batch_size_tx: mpsc::Sender<crate::app::folder_size_state::BatchSizeRequest>,
     pub(in crate::app) batch_size_rx:
         mpsc::Receiver<crate::app::folder_size_state::BatchSizeResult>,
@@ -310,10 +311,15 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
     // when BOTH mandatory stores are on their primary path. Migrating while a
     // store is in fallback would rewrite a primary DB the app is not using.
     if app_state_db.is_on_primary_path() && disk_cache.is_on_primary_path() {
-        migrate_legacy_tables(
+        if let Err(error) = migrate_legacy_tables(
             &cache_dir.join("thumbnails.db"),
             &state_dir.join("app_state.db"),
-        );
+        ) {
+            log::error!(
+                "[Migration] Failed to migrate legacy tables; source tables were preserved: {:?}",
+                error
+            );
+        }
     } else {
         log::warn!(
             "[Migration] Skipped — a mandatory store is in fallback mode \
@@ -413,7 +419,7 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
         folder_composer,
         folder_preview_trace.clone(),
     );
-    let (folder_size_req_tx, folder_size_res_rx, folder_size_cancel) =
+    let (folder_size_req_tx, folder_size_res_rx, folder_size_cancel, folder_size_latest_request_id) =
         spawn_folder_size_worker(ctx);
     let (batch_size_tx, batch_size_rx, batch_size_cancel, batch_size_generation) =
         spawn_folder_size_batch_worker(ctx);
@@ -497,6 +503,7 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
         folder_size_req_tx,
         folder_size_res_rx,
         folder_size_cancel,
+        folder_size_latest_request_id,
         batch_size_tx,
         batch_size_rx,
         batch_size_cancel,
@@ -525,38 +532,31 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
 
 /// One-time migration: copy user_preferences, folder_locks, pinned_folders,
 /// folder_covers from old `thumbnails.db` into the new `app_state.db`, then
-/// drop the migrated tables (plus orphaned directory_index / file_index)
-/// and VACUUM the old database.
+/// drop the migrated tables (plus orphaned directory_index / file_index).
 ///
 /// Uses `ATTACH DATABASE` so all copying happens in a single SQLite session.
 /// `INSERT OR IGNORE` ensures no data is overwritten if the new DB already
 /// has rows (e.g. from a previous successful migration).
-fn migrate_legacy_tables(thumbnails_db_path: &Path, app_state_db_path: &Path) {
-    let conn = match Connection::open(thumbnails_db_path) {
-        Ok(c) => c,
-        Err(e) => {
-            log::debug!(
-                "[Migration] Could not open old thumbnails.db at {:?}: {:?} — skipping.",
-                thumbnails_db_path,
-                e
-            );
-            return;
-        }
-    };
+fn migrate_legacy_tables(
+    thumbnails_db_path: &Path,
+    app_state_db_path: &Path,
+) -> Result<usize, String> {
+    let mut conn = Connection::open(thumbnails_db_path)
+        .map_err(|error| format!("open legacy database: {error}"))?;
 
     // Check whether any legacy table still exists in thumbnails.db.
     let has_legacy: bool = conn
         .query_row(
             "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN \
-             ('user_preferences','folder_locks','pinned_folders','folder_covers')",
+                 ('user_preferences','folder_locks','pinned_folders','folder_covers')",
             [],
             |row| row.get::<_, i64>(0),
         )
-        .unwrap_or(0)
+        .map_err(|error| format!("inspect legacy schema: {error}"))?
         > 0;
 
     if !has_legacy {
-        return; // Already migrated or fresh install — nothing to do.
+        return Ok(0); // Already migrated or fresh install — nothing to do.
     }
 
     log::info!(
@@ -565,115 +565,323 @@ fn migrate_legacy_tables(thumbnails_db_path: &Path, app_state_db_path: &Path) {
         app_state_db_path
     );
 
-    // ATTACH the new app_state.db.
-    let attach_path = app_state_db_path.to_string_lossy().replace('\'', "''");
-    if let Err(e) = conn.execute_batch(&format!("ATTACH DATABASE '{}' AS new_state", attach_path)) {
-        log::error!("[Migration] Failed to ATTACH app_state.db: {:?}", e);
-        return;
-    }
-
-    // Helper: check if a table exists in the old DB.
-    let table_exists = |name: &str| -> bool {
-        conn.query_row(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
-            [name],
-            |row| row.get::<_, i64>(0),
-        )
-        .unwrap_or(0)
-            > 0
-    };
+    let attach_path = app_state_db_path.to_string_lossy();
+    conn.execute("ATTACH DATABASE ?1 AS new_state", [attach_path.as_ref()])
+        .map_err(|error| format!("attach destination database: {error}"))?;
 
     let mut total_migrated: usize = 0;
-
-    // --- user_preferences ---
-    if table_exists("user_preferences") {
-        match conn.execute(
+    let copies = [
+        (
+            "user_preferences",
             "INSERT OR IGNORE INTO new_state.user_preferences (key, value) \
              SELECT key, value FROM user_preferences",
-            [],
-        ) {
-            Ok(n) => {
-                log::info!("[Migration] user_preferences: {} rows copied", n);
-                total_migrated += n;
-            }
-            Err(e) => log::warn!("[Migration] user_preferences copy failed: {:?}", e),
-        }
-    }
-
-    // --- folder_covers ---
-    if table_exists("folder_covers") {
-        match conn.execute(
+            "SELECT COUNT(*) FROM user_preferences source WHERE NOT EXISTS (\
+             SELECT 1 FROM new_state.user_preferences destination \
+             WHERE destination.key = source.key)",
+        ),
+        (
+            "folder_covers",
             "INSERT OR IGNORE INTO new_state.folder_covers (folder_path, cover_path) \
              SELECT folder_path, cover_path FROM folder_covers",
-            [],
-        ) {
-            Ok(n) => {
-                log::info!("[Migration] folder_covers: {} rows copied", n);
-                total_migrated += n;
-            }
-            Err(e) => log::warn!("[Migration] folder_covers copy failed: {:?}", e),
-        }
-    }
-
-    // --- folder_locks (handles both old schema with search_query and new schema) ---
-    if table_exists("folder_locks") {
-        match conn.execute(
+            "SELECT COUNT(*) FROM folder_covers source WHERE NOT EXISTS (\
+             SELECT 1 FROM new_state.folder_covers destination \
+             WHERE destination.folder_path = source.folder_path)",
+        ),
+        (
+            "folder_locks",
             "INSERT OR IGNORE INTO new_state.folder_locks \
              (path, view_mode, sort_mode, sort_descending, folders_position) \
              SELECT path, view_mode, sort_mode, sort_descending, folders_position \
              FROM folder_locks",
-            [],
-        ) {
-            Ok(n) => {
-                log::info!("[Migration] folder_locks: {} rows copied", n);
-                total_migrated += n;
-            }
-            Err(e) => log::warn!("[Migration] folder_locks copy failed: {:?}", e),
-        }
-    }
-
-    // --- pinned_folders ---
-    if table_exists("pinned_folders") {
-        match conn.execute(
+            "SELECT COUNT(*) FROM folder_locks source WHERE NOT EXISTS (\
+             SELECT 1 FROM new_state.folder_locks destination \
+             WHERE destination.path = source.path)",
+        ),
+        (
+            "pinned_folders",
             "INSERT OR IGNORE INTO new_state.pinned_folders (path, display_name, position) \
              SELECT path, display_name, position FROM pinned_folders",
-            [],
-        ) {
-            Ok(n) => {
-                log::info!("[Migration] pinned_folders: {} rows copied", n);
-                total_migrated += n;
+            "SELECT COUNT(*) FROM pinned_folders source WHERE NOT EXISTS (\
+             SELECT 1 FROM new_state.pinned_folders destination \
+             WHERE destination.path = source.path)",
+        ),
+    ];
+
+    // Phase 1 writes only the destination. If the process stops after this
+    // commit, the source remains intact and the migration can safely rerun.
+    {
+        let tx = conn
+            .transaction()
+            .map_err(|error| format!("begin destination migration: {error}"))?;
+        for (table, copy_sql, _) in copies {
+            let exists = tx
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
+                    [table],
+                    |row| row.get::<_, i64>(0),
+                )
+                .map_err(|error| format!("inspect legacy table {table}: {error}"))?
+                > 0;
+            if !exists {
+                continue;
             }
-            Err(e) => log::warn!("[Migration] pinned_folders copy failed: {:?}", e),
+
+            let copied = tx.execute(copy_sql, []).map_err(|error| {
+                log::error!(
+                    "[Migration] Failed to copy legacy table {}; rolling back destination: {:?}",
+                    table,
+                    error
+                );
+                format!("copy legacy table {table}: {error}")
+            })?;
+            log::info!("[Migration] {}: {} rows staged", table, copied);
+            total_migrated += copied;
+        }
+        tx.commit()
+            .map_err(|error| format!("commit destination migration: {error}"))?;
+    }
+
+    // Verify durable destination coverage before touching the source. Matching
+    // primary keys are sufficient because INSERT OR IGNORE intentionally keeps
+    // values already written by a prior successful migration.
+    for (table, _, verify_sql) in copies {
+        let exists = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
+                [table],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(|error| format!("inspect legacy table {table}: {error}"))?
+            > 0;
+        if !exists {
+            continue;
+        }
+        let missing: i64 = conn
+            .query_row(verify_sql, [], |row| row.get(0))
+            .map_err(|error| format!("verify migrated table {table}: {error}"))?;
+        if missing != 0 {
+            return Err(format!(
+                "destination verification failed for {table}: {missing} source rows missing"
+            ));
         }
     }
 
-    // Detach before modifying the old database.
-    let _ = conn.execute_batch("DETACH DATABASE new_state");
+    conn.execute_batch("DETACH DATABASE new_state")
+        .map_err(|error| format!("detach destination database: {error}"))?;
 
-    // Drop migrated tables from old DB.
-    for table in &[
-        "user_preferences",
-        "folder_locks",
-        "pinned_folders",
-        "folder_covers",
-    ] {
-        if let Err(e) = conn.execute(&format!("DROP TABLE IF EXISTS {}", table), []) {
-            log::warn!("[Migration] Failed to drop old table {}: {:?}", table, e);
-        }
-    }
-
-    // Drop orphaned cache-index tables (DirectoryIndex now uses its own DB file).
-    for table in &["directory_index", "file_index"] {
-        let _ = conn.execute(&format!("DROP TABLE IF EXISTS {}", table), []);
-    }
-
-    // Reclaim space.
-    if let Err(e) = conn.execute_batch("VACUUM") {
-        log::debug!("[Migration] VACUUM failed (non-critical): {:?}", e);
-    }
+    // Phase 2 mutates only the source database, so its commit is crash-atomic
+    // even when both production databases use WAL.
+    let cleanup = conn
+        .transaction()
+        .map_err(|error| format!("begin legacy cleanup: {error}"))?;
+    cleanup
+        .execute_batch(
+            "DROP TABLE IF EXISTS user_preferences;
+             DROP TABLE IF EXISTS folder_locks;
+             DROP TABLE IF EXISTS pinned_folders;
+             DROP TABLE IF EXISTS folder_covers;
+             DROP TABLE IF EXISTS directory_index;
+             DROP TABLE IF EXISTS file_index;",
+        )
+        .map_err(|error| format!("drop migrated legacy tables: {error}"))?;
+    cleanup
+        .commit()
+        .map_err(|error| format!("commit legacy cleanup: {error}"))?;
 
     log::info!(
         "[Migration] Complete — {} total rows migrated from thumbnails.db → app_state.db",
         total_migrated
     );
+    Ok(total_migrated)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn create_destination(path: &Path) -> Connection {
+        let conn = Connection::open(path).expect("open destination database");
+        conn.execute_batch(
+            "CREATE TABLE user_preferences (key TEXT PRIMARY KEY, value TEXT);
+             CREATE TABLE folder_covers (folder_path TEXT PRIMARY KEY, cover_path TEXT);
+             CREATE TABLE folder_locks (
+                 path TEXT PRIMARY KEY,
+                 view_mode TEXT NOT NULL,
+                 sort_mode TEXT NOT NULL,
+                 sort_descending TEXT NOT NULL,
+                 folders_position TEXT NOT NULL
+             );
+             CREATE TABLE pinned_folders (
+                 path TEXT PRIMARY KEY,
+                 display_name TEXT NOT NULL,
+                 position INTEGER NOT NULL DEFAULT 0
+             );",
+        )
+        .expect("create destination schema");
+        conn
+    }
+
+    fn table_exists(conn: &Connection, table: &str) -> bool {
+        conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1)",
+            [table],
+            |row| row.get(0),
+        )
+        .expect("query table existence")
+    }
+
+    #[test]
+    fn migrate_legacy_tables_copies_rows_and_drops_sources() {
+        let temp = tempfile::tempdir().expect("create temporary directory");
+        let source_path = temp.path().join("thumbnails.db");
+        let destination_path = temp.path().join("app_state.db");
+        let source = Connection::open(&source_path).expect("open source database");
+        source
+            .execute_batch(
+                "CREATE TABLE user_preferences (key TEXT PRIMARY KEY, value TEXT);
+                 INSERT INTO user_preferences VALUES ('theme', 'dark');
+                 CREATE TABLE folder_covers (folder_path TEXT PRIMARY KEY, cover_path TEXT);
+                 INSERT INTO folder_covers VALUES ('C:\\Pictures', 'cover.jpg');
+                 CREATE TABLE folder_locks (
+                     path TEXT PRIMARY KEY,
+                     view_mode TEXT NOT NULL,
+                     sort_mode TEXT NOT NULL,
+                     sort_descending TEXT NOT NULL,
+                     folders_position TEXT NOT NULL,
+                     search_query TEXT
+                 );
+                 INSERT INTO folder_locks VALUES ('C:\\Work', 'grid', 'name', 'false', 'first', NULL);
+                 CREATE TABLE pinned_folders (
+                     path TEXT PRIMARY KEY,
+                     display_name TEXT NOT NULL,
+                     position INTEGER NOT NULL
+                 );
+                 INSERT INTO pinned_folders VALUES ('C:\\Work', 'Work', 1);
+                 CREATE TABLE directory_index (path TEXT);
+                 CREATE TABLE file_index (path TEXT);",
+            )
+            .expect("create source schema and rows");
+        drop(source);
+        let destination = create_destination(&destination_path);
+        drop(destination);
+
+        assert_eq!(
+            migrate_legacy_tables(&source_path, &destination_path).expect("migrate legacy tables"),
+            4
+        );
+
+        let source = Connection::open(&source_path).expect("reopen source database");
+        for table in [
+            "user_preferences",
+            "folder_covers",
+            "folder_locks",
+            "pinned_folders",
+            "directory_index",
+            "file_index",
+        ] {
+            assert!(
+                !table_exists(&source, table),
+                "source table {table} remains"
+            );
+        }
+        let destination = Connection::open(&destination_path).expect("reopen destination database");
+        for table in [
+            "user_preferences",
+            "folder_covers",
+            "folder_locks",
+            "pinned_folders",
+        ] {
+            let count: i64 = destination
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
+                .expect("count migrated rows");
+            assert_eq!(count, 1, "destination table {table}");
+        }
+    }
+
+    #[test]
+    fn migrate_legacy_tables_is_idempotent_and_preserves_destination_rows() {
+        let temp = tempfile::tempdir().expect("create temporary directory");
+        let source_path = temp.path().join("thumbnails.db");
+        let destination_path = temp.path().join("app_state.db");
+        let source = Connection::open(&source_path).expect("open source database");
+        source
+            .execute_batch(
+                "CREATE TABLE user_preferences (key TEXT PRIMARY KEY, value TEXT);
+                 INSERT INTO user_preferences VALUES ('theme', 'source');",
+            )
+            .expect("create source row");
+        drop(source);
+        let destination = create_destination(&destination_path);
+        destination
+            .execute(
+                "INSERT INTO user_preferences VALUES ('theme', 'destination')",
+                [],
+            )
+            .expect("create existing destination row");
+        drop(destination);
+
+        assert_eq!(
+            migrate_legacy_tables(&source_path, &destination_path).expect("first migration"),
+            0
+        );
+        assert_eq!(
+            migrate_legacy_tables(&source_path, &destination_path).expect("second migration"),
+            0
+        );
+
+        let destination = Connection::open(&destination_path).expect("reopen destination database");
+        let value: String = destination
+            .query_row(
+                "SELECT value FROM user_preferences WHERE key='theme'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("read destination row");
+        assert_eq!(value, "destination");
+    }
+
+    #[test]
+    fn migrate_legacy_tables_rolls_back_and_preserves_sources_on_copy_failure() {
+        let temp = tempfile::tempdir().expect("create temporary directory");
+        let source_path = temp.path().join("thumbnails.db");
+        let destination_path = temp.path().join("app_state.db");
+        let source = Connection::open(&source_path).expect("open source database");
+        source
+            .execute_batch(
+                "CREATE TABLE user_preferences (key TEXT PRIMARY KEY, value TEXT);
+                 INSERT INTO user_preferences VALUES ('theme', 'dark');
+                 CREATE TABLE folder_covers (folder_path TEXT PRIMARY KEY);
+                 INSERT INTO folder_covers VALUES ('C:\\Pictures');",
+            )
+            .expect("create malformed legacy schema");
+        drop(source);
+        let destination = create_destination(&destination_path);
+        drop(destination);
+
+        assert!(migrate_legacy_tables(&source_path, &destination_path).is_err());
+
+        let source = Connection::open(&source_path).expect("reopen source database");
+        assert!(table_exists(&source, "user_preferences"));
+        assert!(table_exists(&source, "folder_covers"));
+        let source_preferences: i64 = source
+            .query_row("SELECT COUNT(*) FROM user_preferences", [], |row| {
+                row.get(0)
+            })
+            .expect("count preserved source rows");
+        assert_eq!(source_preferences, 1);
+        let source_covers: i64 = source
+            .query_row("SELECT COUNT(*) FROM folder_covers", [], |row| row.get(0))
+            .expect("count preserved malformed source rows");
+        assert_eq!(source_covers, 1);
+
+        let destination = Connection::open(&destination_path).expect("reopen destination database");
+        let destination_preferences: i64 = destination
+            .query_row("SELECT COUNT(*) FROM user_preferences", [], |row| {
+                row.get(0)
+            })
+            .expect("count rolled-back destination rows");
+        assert_eq!(destination_preferences, 0);
+    }
 }

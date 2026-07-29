@@ -888,9 +888,9 @@ pub(crate) fn index_volume(
             let pending_frns: Vec<u64> = match handle.try_write() {
                 Some(mut vol) => {
                     if vol.sizes_loaded && !vol.pending_size_refresh.is_empty() {
-                        std::mem::take(&mut vol.pending_size_refresh)
-                            .into_iter()
-                            .collect()
+                        let pending = std::mem::take(&mut vol.pending_size_refresh);
+                        vol.size_refresh_in_progress = true;
+                        pending.into_iter().collect()
                     } else {
                         Vec::new()
                     }
@@ -936,6 +936,7 @@ pub(crate) fn index_volume(
                             }
                             unresolved_frns.retain(|frn| vol.records.get(frn).is_some());
                             vol.pending_size_refresh.extend(unresolved_frns);
+                            vol.size_refresh_in_progress = false;
                             if changed {
                                 vol.binary_dirty = true;
                             }
@@ -945,11 +946,13 @@ pub(crate) fn index_volume(
                         if !applied_updates {
                             let mut vol = handle.write();
                             vol.pending_size_refresh.extend(pending_frns);
+                            vol.size_refresh_in_progress = false;
                         }
                     }
                 } else {
                     let mut vol = handle.write();
                     vol.pending_size_refresh.extend(pending_frns);
+                    vol.size_refresh_in_progress = false;
                 }
             }
         }

@@ -116,6 +116,14 @@ impl ImageViewerApp {
                             self.notifications.warning(message);
                             self.restore_app_focus();
                         }
+                        FileOperationResult::ClipboardMoveFailed { token, message } => {
+                            crate::app::file_operation_state::fail_pending_clipboard_move(
+                                &mut self.file_operation_state.pending_clipboard_move,
+                                token,
+                            );
+                            self.notifications.warning(message);
+                            self.restore_app_focus();
+                        }
                         FileOperationResult::RecycleBinChanged => self.handle_recycle_bin_changed(),
                         FileOperationResult::RestoreCompleted { parent_folders } => {
                             self.handle_parent_folder_updates(parent_folders, current_path_norm);
@@ -165,7 +173,39 @@ impl ImageViewerApp {
                             dest_folder,
                             moved_files,
                             known_moved_pairs,
+                            clipboard_paste_token,
                         } => {
+                            let current_sequence = self.clipboard.current_sequence();
+                            if let (Some(token), Some(pending)) = (
+                                clipboard_paste_token,
+                                self.file_operation_state.pending_clipboard_move,
+                            ) {
+                                if pending.token == token {
+                                    if pending.clipboard_sequence != current_sequence {
+                                        if current_sequence.is_none() {
+                                            self.file_operation_state
+                                                .pending_clipboard_cleanup_sequence =
+                                                pending.clipboard_sequence;
+                                        }
+                                        crate::app::file_operation_state::complete_pending_clipboard_move(
+                                            &mut self.file_operation_state.pending_clipboard_move,
+                                            Some(token),
+                                            current_sequence,
+                                        );
+                                    } else if let Some(sequence) = current_sequence {
+                                        if !self.clipboard.clear_completed_move(sequence) {
+                                            self.file_operation_state
+                                                .pending_clipboard_cleanup_sequence =
+                                                Some(sequence);
+                                        }
+                                        crate::app::file_operation_state::complete_pending_clipboard_move(
+                                            &mut self.file_operation_state.pending_clipboard_move,
+                                            Some(token),
+                                            current_sequence,
+                                        );
+                                    }
+                                }
+                            }
                             self.handle_move_batch_completed(
                                 source_folders,
                                 dest_folder,

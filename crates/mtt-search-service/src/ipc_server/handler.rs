@@ -31,11 +31,19 @@ use super::{MAX_QUERY_OFFSET, MAX_QUERY_RESULTS};
 /// Minimum seconds between WarmIndex operations to prevent DoS via repeated warm requests.
 const WARM_COOLDOWN_SECS: u64 = 60;
 const ZERO_SIZE_FOLDER_REPAIR_LIMIT: usize = 4_096;
-const LIVE_SIZE_REFRESH_FILE_LIMIT: u64 = 4_096;
 const FRN_MASK: u64 = 0x0000_FFFF_FFFF_FFFF;
 
 type FolderSizeSummary = (u64, u64, u64, u64);
 type RepairedDirectorySummary = (u64, FolderSizeSummary);
+
+fn folder_size_needs_repair(
+    total_size: u64,
+    file_count: u64,
+    zero_size_count: u64,
+    has_pending_refreshes: bool,
+) -> bool {
+    file_count > 0 && (total_size == 0 || (has_pending_refreshes && zero_size_count > 0))
+}
 
 #[inline]
 fn file_index_to_frn(high: u32, low: u32) -> u64 {
@@ -165,23 +173,18 @@ fn repair_suspicious_zero_folder_size(
 ) -> (u64, u64, u64) {
     let (total_size, file_count, folder_count, zero_size_count) = summary;
 
-    // Determine whether a repair is warranted:
-    //   (a) Small subtrees: refresh live sizes to catch files that grew after
-    //       indexing but no longer have a pending USN refresh.
-    //   (b) total=0 with files present: all sizes are missing from the index.
-    //   (c) has_pending_refreshes=true AND >=25% of files (min 5) have zero size:
+    // Repair only when the indexed summary is demonstrably suspicious:
+    //   (a) total=0 with files present: all sizes are missing from the index.
+    //   (b) has_pending_refreshes=true and one or more files have zero size:
     //       post-restart race condition where USN catch-up inserted new file FRNs
     //       (size=0) before the background pending_size_refresh task ran, causing
     //       folder totals to be severely underreported (e.g. 185 KB vs 1.30 GB).
-    let needs_repair = if file_count > 0 && file_count <= LIVE_SIZE_REFRESH_FILE_LIMIT {
-        true
-    } else if total_size == 0 {
-        file_count > 0
-    } else {
-        has_pending_refreshes
-            && zero_size_count >= 5
-            && zero_size_count.saturating_mul(4) >= file_count
-    };
+    let needs_repair = folder_size_needs_repair(
+        total_size,
+        file_count,
+        zero_size_count,
+        has_pending_refreshes,
+    );
 
     if !needs_repair {
         return (total_size, file_count, folder_count);
@@ -215,17 +218,8 @@ fn repair_suspicious_zero_folder_size(
     let candidates: Vec<(u64, Option<String>)> = {
         let _active_operation = crate::memory_trim::begin_active_operation();
         let vol = handle.read();
-        let live_refresh_candidates = if file_count <= LIVE_SIZE_REFRESH_FILE_LIMIT {
-            vol.collect_file_frns_in_subtree_limited(dir_frn, LIVE_SIZE_REFRESH_FILE_LIMIT as usize)
-                .unwrap_or_default()
-        } else {
-            Vec::new()
-        };
-        let candidates = if live_refresh_candidates.is_empty() {
-            vol.collect_zero_size_file_frns_in_subtree(dir_frn, ZERO_SIZE_FOLDER_REPAIR_LIMIT)
-        } else {
-            live_refresh_candidates
-        };
+        let candidates =
+            vol.collect_zero_size_file_frns_in_subtree(dir_frn, ZERO_SIZE_FOLDER_REPAIR_LIMIT);
 
         let mut dir_cache = HashMap::new();
         candidates
@@ -608,7 +602,7 @@ pub(super) fn handle_client(
                 // Capture whether there are pending size refreshes while we hold the
                 // read lock. This is passed to repair_suspicious_zero_folder_size to
                 // decide whether to repair partial-zero subtrees (post-restart race).
-                let has_pending = !vol.pending_size_refresh.is_empty();
+                let has_pending = vol.has_pending_size_refreshes();
                 (vol.resolve_path_to_frn(&path), has_pending)
             };
 
@@ -884,6 +878,20 @@ mod tests {
         assert!(!super::is_absolute_drive_path("C:relative"));
         assert!(!super::is_absolute_drive_path(r"\\server\share"));
         assert!(!super::is_absolute_drive_path(""));
+    }
+
+    #[test]
+    fn healthy_small_folder_does_not_trigger_live_repair() {
+        assert!(!super::folder_size_needs_repair(1_024, 8, 0, false));
+        assert!(!super::folder_size_needs_repair(1_024, 8, 4, false));
+    }
+
+    #[test]
+    fn inconsistent_folder_summary_triggers_live_repair() {
+        assert!(super::folder_size_needs_repair(0, 1, 1, false));
+        assert!(super::folder_size_needs_repair(1_024, 20, 1, true));
+        assert!(super::folder_size_needs_repair(1_024, 20, 5, true));
+        assert!(!super::folder_size_needs_repair(1_024, 20, 4, false));
     }
 
     #[test]

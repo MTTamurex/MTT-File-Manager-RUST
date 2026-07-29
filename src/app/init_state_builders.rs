@@ -19,6 +19,7 @@ fn load_width_pref(app_state_db: &AppStateDb, key: &str, default: f32) -> f32 {
         .unwrap_or(default)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(in crate::app) fn build_layout_state(
     app_state_db: &AppStateDb,
     saved_window_width: f32,
@@ -114,10 +115,12 @@ pub(in crate::app) fn build_drive_state(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(in crate::app) fn build_folder_size_state(
     req_sender: mpsc::Sender<FolderSizeRequest>,
     res_receiver: mpsc::Receiver<FolderSizeMessage>,
     cancel: Arc<AtomicBool>,
+    latest_request_id: Arc<AtomicU64>,
     batch_req_sender: mpsc::Sender<crate::app::folder_size_state::BatchSizeRequest>,
     batch_res_receiver: mpsc::Receiver<crate::app::folder_size_state::BatchSizeResult>,
     batch_cancel: Arc<AtomicBool>,
@@ -127,10 +130,13 @@ pub(in crate::app) fn build_folder_size_state(
         req_sender,
         res_receiver,
         cancel,
+        latest_request_id,
         cache: LruCache::new(
             NonZeroUsize::new(500).expect("folder_size cache size must be non-zero"),
         ),
         loading: FxHashSet::default(),
+        active_requests: std::collections::HashMap::new(),
+        next_request_id: 0,
         failed_until: std::collections::HashMap::new(),
         panel_stale_cache: LruCache::new(
             NonZeroUsize::new(64).expect("folder_size panel stale cache size must be non-zero"),
@@ -177,6 +183,9 @@ pub(in crate::app) fn build_file_operation_state(
         idle_warmup_sender,
         file_ops_in_progress: 0,
         batch_rename_progress: None,
+        pending_clipboard_move: None,
+        pending_clipboard_cleanup_sequence: None,
+        next_clipboard_move_token: 0,
         pending_deletions,
         pending_iso_mount: None,
         mounted_iso_drives: std::collections::HashMap::new(),

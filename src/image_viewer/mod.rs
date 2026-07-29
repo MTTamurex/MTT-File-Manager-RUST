@@ -185,13 +185,14 @@ fn open_image_viewer_blocking(path: &Path) {
 
     match Command::new(exe).arg("--image-viewer").arg(path).spawn() {
         Ok(child) => {
+            let child_pid = child.id();
+            crate::viewer_processes::register(child);
             log::info!(
                 "[IMAGE-VIEWER] spawned standalone viewer parent_pid={} child_pid={} path='{}'",
                 std::process::id(),
-                child.id(),
+                child_pid,
                 path.display()
             );
-            crate::viewer_processes::register(child);
         }
         Err(err) => {
             log::error!(

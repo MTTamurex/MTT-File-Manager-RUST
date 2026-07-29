@@ -86,6 +86,7 @@ features = [
     "Win32_UI_WindowsAndMessaging",
     "Win32_System_ProcessStatus",
     "Win32_System_Threading",
+    "Win32_System_JobObjects",
     "Win32_System_Diagnostics_ToolHelp",
     "Win32_Graphics_Imaging",
     "Win32_Graphics_Dwm",

@@ -56,6 +56,9 @@ impl ImageViewerApp {
         );
 
         // Folder-size worker can stay busy in a long recursive scan, so cancel it first.
+        self.folder_size_state
+            .latest_request_id
+            .store(0, Ordering::Release);
         self.folder_size_state.cancel.store(true, Ordering::Release);
         disconnect!(
             self.folder_size_state.req_sender,

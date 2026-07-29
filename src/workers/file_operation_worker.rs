@@ -48,6 +48,8 @@ pub enum FileOperationResult {
         moved_files: Vec<PathBuf>,
         /// Source/destination pairs whose destination was known to be unambiguous.
         known_moved_pairs: Vec<(PathBuf, PathBuf)>,
+        /// Present only for a move dispatched by clipboard paste.
+        clipboard_paste_token: Option<u64>,
     },
     /// A background organizer move completed without allowing replacement of an existing file.
     OrganizerMoveCompleted {
@@ -97,6 +99,10 @@ pub enum FileOperationResult {
     },
     /// A file operation failed or was cancelled by the user.
     OperationFailed {
+        message: String,
+    },
+    ClipboardMoveFailed {
+        token: u64,
         message: String,
     },
 }
@@ -158,6 +164,7 @@ pub(crate) enum FileOperationRequest {
         paths: Vec<PathBuf>,
         dest_folder: PathBuf,
         hwnd: SendHwnd,
+        clipboard_paste_token: Option<u64>,
     },
     RestoreFromRecycleBin {
         items: Vec<(PathBuf, PathBuf)>,
@@ -178,6 +185,16 @@ pub(crate) enum FileOperationRequest {
 }
 
 impl FileOperationRequest {
+    fn clipboard_paste_token(&self) -> Option<u64> {
+        match self {
+            Self::MoveBatch {
+                clipboard_paste_token,
+                ..
+            } => *clipboard_paste_token,
+            _ => None,
+        }
+    }
+
     // Helper to wrap HWND
     pub fn delete(paths: Vec<PathBuf>, hwnd: HWND) -> Self {
         Self::Delete {
@@ -216,6 +233,20 @@ impl FileOperationRequest {
             paths,
             dest_folder,
             hwnd: SendHwnd(hwnd),
+            clipboard_paste_token: None,
+        }
+    }
+    pub fn clipboard_move_batch(
+        paths: Vec<PathBuf>,
+        dest_folder: PathBuf,
+        hwnd: HWND,
+        clipboard_paste_token: u64,
+    ) -> Self {
+        Self::MoveBatch {
+            paths,
+            dest_folder,
+            hwnd: SendHwnd(hwnd),
+            clipboard_paste_token: Some(clipboard_paste_token),
         }
     }
     pub fn show_properties(paths: Vec<PathBuf>, hwnd: HWND) -> Self {
@@ -275,11 +306,15 @@ impl FileOperationRequest {
                 hwnd,
             },
             Self::MoveBatch {
-                paths, dest_folder, ..
+                paths,
+                dest_folder,
+                clipboard_paste_token,
+                ..
             } => Self::MoveBatch {
                 paths,
                 dest_folder,
                 hwnd,
+                clipboard_paste_token,
             },
             Self::RestoreFromRecycleBin { items } => Self::RestoreFromRecycleBin { items },
             Self::DeletePermanently { physical_paths, .. } => Self::DeletePermanently {
@@ -416,6 +451,7 @@ pub(crate) fn start_file_operation_worker(
                 Some(proxy) => request.substitute_hwnd(SendHwnd(proxy)),
                 None => request,
             };
+            let clipboard_paste_token = request.clipboard_paste_token();
 
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 match request {
@@ -520,11 +556,13 @@ pub(crate) fn start_file_operation_worker(
                         paths,
                         dest_folder,
                         hwnd,
+                        clipboard_paste_token,
                     } => {
                         let completion = handlers::handle_move_batch(
                             paths,
                             dest_folder,
                             hwnd,
+                            clipboard_paste_token,
                             &result_sender,
                             &archive_extract_sender,
                         );
@@ -580,8 +618,14 @@ pub(crate) fn start_file_operation_worker(
                         "worker_panic",
                         &[field_label("payload_kind", panic_payload)],
                     );
-                    let _ =
-                        result_sender.send(FileOperationResult::OperationFailed { message: msg });
+                    let failure = match clipboard_paste_token {
+                        Some(token) => FileOperationResult::ClipboardMoveFailed {
+                            token,
+                            message: msg,
+                        },
+                        None => FileOperationResult::OperationFailed { message: msg },
+                    };
+                    let _ = result_sender.send(failure);
                     let _ = result_sender.send(FileOperationResult::Finished);
                 }
             }

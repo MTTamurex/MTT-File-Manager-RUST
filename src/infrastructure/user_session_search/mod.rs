@@ -10,6 +10,7 @@
 mod db;
 mod discovery;
 mod scanner;
+mod watcher_retry;
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -17,7 +18,8 @@ use std::time::{Duration, Instant};
 
 use mtt_search_protocol::SearchResultItem;
 
-use crate::infrastructure::drive_watcher::DriveWatcher;
+use crate::infrastructure::drive_watcher::{DriveWatcher, DriveWatcherEvent};
+use watcher_retry::WatcherRetryState;
 
 const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0400;
 const DISCOVERY_INTERVAL: Duration = Duration::from_secs(12);
@@ -39,6 +41,7 @@ struct IndexedVolume {
     last_scan: Instant,
     items: Vec<IndexedItem>,
     live_paths: HashSet<String>,
+    needs_rescan: bool,
 }
 
 struct CandidateVolume {
@@ -51,6 +54,8 @@ struct CandidateVolume {
 pub struct UserSessionSearchIndex {
     volumes: HashMap<char, IndexedVolume>,
     watchers: HashMap<char, DriveWatcher>,
+    watcher_retries: HashMap<char, WatcherRetryState>,
+    active_letters: HashSet<char>,
     last_discovery: Option<Instant>,
     /// Optional SQLite connection for persisting/loading indexed items.
     db: Option<rusqlite::Connection>,
@@ -78,6 +83,8 @@ impl UserSessionSearchIndex {
         Self {
             volumes,
             watchers: HashMap::new(),
+            watcher_retries: HashMap::new(),
+            active_letters: HashSet::new(),
             last_discovery: None,
             db,
         }
@@ -86,6 +93,8 @@ impl UserSessionSearchIndex {
     /// Apply pending filesystem events only (no discovery/full scan).
     pub fn poll_fast_updates(&mut self) {
         self.apply_pending_events();
+        let active_letters = self.active_letters.clone();
+        self.sync_watchers(&active_letters);
     }
 
     /// Refresh candidate volume set and rescan stale/new volumes.
@@ -102,7 +111,7 @@ impl UserSessionSearchIndex {
         if !force_discovery {
             if let Some(last) = self.last_discovery {
                 if last.elapsed() < DISCOVERY_INTERVAL {
-                    self.apply_pending_events();
+                    self.poll_fast_updates();
                     return;
                 }
             }
@@ -126,6 +135,7 @@ impl UserSessionSearchIndex {
                 .get(&candidate.drive_letter)
                 .map(|existing| {
                     existing.last_scan.elapsed() >= rescan_interval
+                        || existing.needs_rescan
                         || existing.file_system != candidate.file_system
                         || existing.label != candidate.label
                 })
@@ -136,8 +146,9 @@ impl UserSessionSearchIndex {
             }
         }
 
-        self.sync_watchers(&active_letters);
         self.apply_pending_events();
+        self.active_letters = active_letters.clone();
+        self.sync_watchers(&active_letters);
 
         for candidate in &stale_candidates {
             match scanner::scan_volume(candidate.drive_letter) {
@@ -156,6 +167,7 @@ impl UserSessionSearchIndex {
                             last_scan: Instant::now(),
                             items: scan.items,
                             live_paths: scan.live_paths,
+                            needs_rescan: false,
                         },
                     );
                     log::debug!(
@@ -193,6 +205,9 @@ impl UserSessionSearchIndex {
             .retain(|letter, _| active_letters.contains(letter));
         self.watchers
             .retain(|letter, _| active_letters.contains(letter));
+        self.watcher_retries
+            .retain(|letter, _| active_letters.contains(letter));
+        self.active_letters = active_letters;
     }
 
     pub fn search(&self, query: &str, limit: usize) -> Vec<SearchResultItem> {
@@ -274,27 +289,79 @@ impl UserSessionSearchIndex {
     }
 
     fn sync_watchers(&mut self, active_letters: &HashSet<char>) {
+        let now = Instant::now();
+        self.watchers
+            .retain(|letter, _| active_letters.contains(letter));
+        self.watcher_retries
+            .retain(|letter, _| active_letters.contains(letter));
+
+        let dead_letters: Vec<char> = self
+            .watchers
+            .iter()
+            .filter_map(|(letter, watcher)| watcher.is_stopped().then_some(*letter))
+            .collect();
+
+        for letter in dead_letters {
+            if let Some(watcher) = self.watchers.remove(&letter) {
+                if let Some(volume) = self.volumes.get_mut(&letter) {
+                    for event in watcher.poll_events() {
+                        if matches!(event, DriveWatcherEvent::DriveLost(_)) {
+                            self.last_discovery = None;
+                        }
+                        scanner::apply_event_to_volume(volume, &event);
+                    }
+                }
+            }
+            let retry = WatcherRetryState::after_failure(self.watcher_retries.get(&letter), now);
+            log::warn!(
+                "[SESSION-SEARCH] {}:\\ watcher stopped; retry {} in {:.1}s",
+                letter,
+                retry.failures(),
+                retry.retry_in(now).as_secs_f32()
+            );
+            self.watcher_retries.insert(letter, retry);
+        }
+
         for letter in active_letters {
-            if self.watchers.contains_key(letter) {
+            if let Some(watcher) = self.watchers.get(letter) {
+                if watcher.is_running() {
+                    self.watcher_retries.remove(letter);
+                }
+                continue;
+            }
+
+            if self
+                .watcher_retries
+                .get(letter)
+                .is_some_and(|retry| !retry.is_ready(now))
+            {
                 continue;
             }
 
             let root = PathBuf::from(format!("{}:\\", letter));
             if let Some(watcher) = DriveWatcher::new(root.clone(), root) {
                 self.watchers.insert(*letter, watcher);
+            } else {
+                let retry = WatcherRetryState::after_failure(self.watcher_retries.get(letter), now);
+                self.watcher_retries.insert(*letter, retry);
             }
         }
     }
 
     fn apply_pending_events(&mut self) {
+        let mut drive_lost = false;
         for (letter, watcher) in &self.watchers {
             let Some(volume) = self.volumes.get_mut(letter) else {
                 continue;
             };
 
             for event in watcher.poll_events() {
+                drive_lost |= matches!(event, DriveWatcherEvent::DriveLost(_));
                 scanner::apply_event_to_volume(volume, &event);
             }
+        }
+        if drive_lost {
+            self.last_discovery = None;
         }
     }
 }

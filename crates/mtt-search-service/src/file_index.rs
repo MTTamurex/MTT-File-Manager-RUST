@@ -96,6 +96,8 @@ pub struct VolumeIndex {
     /// The volume indexer drains this set periodically and refreshes sizes
     /// via `FSCTL_GET_NTFS_FILE_RECORD`.
     pub pending_size_refresh: HashSet<u64>,
+    /// Whether the volume indexer is currently refreshing a drained batch.
+    pub size_refresh_in_progress: bool,
     /// Extra parent FRNs for hardlinked files.  Key: child FRN, Value:
     /// additional parent FRNs beyond the primary one in `FileRecord.parent_ref`.
     /// Populated during MFT enumeration, consumed by `rebuild_children()`.
@@ -116,6 +118,10 @@ pub struct VolumeIndex {
 impl VolumeIndex {
     pub(crate) const DEFAULT_NAME_BYTES_PER_RECORD: usize = 25;
 
+    pub fn has_pending_size_refreshes(&self) -> bool {
+        !self.pending_size_refresh.is_empty() || self.size_refresh_in_progress
+    }
+
     pub fn empty(drive_letter: char) -> Self {
         Self {
             drive_letter,
@@ -131,6 +137,7 @@ impl VolumeIndex {
             pending_removals: HashSet::new(),
             dir_modified_at: HashMap::new(),
             pending_size_refresh: HashSet::new(),
+            size_refresh_in_progress: false,
             hardlink_parents: HashMap::new(),
             reparse_points: HashSet::new(),
             hardlink_data_complete: false,
@@ -157,6 +164,7 @@ impl VolumeIndex {
             pending_removals: HashSet::new(),
             dir_modified_at: HashMap::new(),
             pending_size_refresh: HashSet::new(),
+            size_refresh_in_progress: false,
             hardlink_parents: HashMap::new(),
             reparse_points: HashSet::new(),
             hardlink_data_complete: false,
@@ -183,6 +191,7 @@ impl VolumeIndex {
             pending_removals: HashSet::new(),
             dir_modified_at: HashMap::new(),
             pending_size_refresh: HashSet::new(),
+            size_refresh_in_progress: false,
             hardlink_parents: HashMap::new(),
             reparse_points: HashSet::new(),
             hardlink_data_complete: false,
@@ -503,6 +512,7 @@ impl VolumeIndex {
         self.pending_removals.clear();
         self.dir_modified_at.clear();
         self.pending_size_refresh.clear();
+        self.size_refresh_in_progress = false;
         self.hardlink_parents.clear();
         self.reparse_points.clear();
         self.hardlink_data_complete = false;
@@ -714,45 +724,6 @@ impl VolumeIndex {
         }
 
         zero_size_frns
-    }
-
-    /// Collect unique file FRNs under `dir_frn`, returning `None` if the
-    /// subtree exceeds `limit`. Used for targeted live size refreshes on small
-    /// folders without making large FolderSize requests unexpectedly expensive.
-    pub fn collect_file_frns_in_subtree_limited(
-        &self,
-        dir_frn: u64,
-        limit: usize,
-    ) -> Option<Vec<u64>> {
-        let mut file_frns = Vec::with_capacity(limit.min(256));
-        let mut stack = vec![dir_frn];
-        let mut visited_dirs = HashSet::with_capacity(256);
-        let mut seen_files = HashSet::with_capacity(limit.min(1024));
-
-        while let Some(frn) = stack.pop() {
-            if !visited_dirs.insert(frn) {
-                continue;
-            }
-
-            if let Some(child_frns) = self.children.get(frn) {
-                for &child_frn in child_frns {
-                    let Some(record) = self.records.get(&child_frn) else {
-                        continue;
-                    };
-
-                    if record.is_dir() {
-                        stack.push(child_frn);
-                    } else if seen_files.insert(child_frn) {
-                        if file_frns.len() >= limit {
-                            return None;
-                        }
-                        file_frns.push(child_frn);
-                    }
-                }
-            }
-        }
-
-        Some(file_frns)
     }
 
     /// Report estimated memory usage: (arena_used, arena_capacity, records_estimate).
@@ -1073,24 +1044,17 @@ mod tests {
     }
 
     #[test]
-    fn collect_file_frns_in_subtree_limited_is_unique_and_reports_over_limit() {
+    fn drained_size_refresh_remains_pending_while_io_is_in_progress() {
         let mut index = VolumeIndex::empty('C');
-        let root = 5u64;
+        index.pending_size_refresh.insert(20);
+        assert!(index.has_pending_size_refreshes());
 
-        assert!(index.insert_record(10, "folder", root, true, false));
-        assert!(index.insert_record(20, "a.bin", 10, false, false));
-        assert!(index.insert_record(21, "b.bin", 10, false, false));
-        assert!(index.insert_record(21, "b.bin", root, false, false));
+        index.pending_size_refresh.clear();
+        index.size_refresh_in_progress = true;
+        assert!(index.has_pending_size_refreshes());
 
-        let mut collected = index
-            .collect_file_frns_in_subtree_limited(root, 2)
-            .expect("subtree should fit limit");
-        collected.sort_unstable();
-        assert_eq!(collected, vec![20, 21]);
-
-        assert!(index
-            .collect_file_frns_in_subtree_limited(root, 1)
-            .is_none());
+        index.size_refresh_in_progress = false;
+        assert!(!index.has_pending_size_refreshes());
     }
 
     #[test]

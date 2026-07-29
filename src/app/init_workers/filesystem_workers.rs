@@ -298,38 +298,60 @@ pub(in crate::app) fn spawn_folder_preview_workers(
     (folder_preview_tx, folder_preview_res_rx)
 }
 
+fn prepare_folder_size_request(
+    cancel: &AtomicBool,
+    latest_request_id: &AtomicU64,
+    request_id: u64,
+) -> bool {
+    cancel.store(false, std::sync::atomic::Ordering::Release);
+    latest_request_id.load(std::sync::atomic::Ordering::Acquire) == request_id
+}
+
 pub(in crate::app) fn spawn_folder_size_worker(
     ctx: &egui::Context,
 ) -> (
     mpsc::Sender<FolderSizeRequest>,
     mpsc::Receiver<FolderSizeMessage>,
     Arc<AtomicBool>,
+    Arc<AtomicU64>,
 ) {
     let (folder_size_req_tx, folder_size_req_rx) = mpsc::channel::<FolderSizeRequest>();
     let (folder_size_res_tx, folder_size_res_rx) = mpsc::channel::<FolderSizeMessage>();
     let folder_size_ctx = ctx.clone();
     let folder_size_cancel = Arc::new(AtomicBool::new(false));
     let folder_size_cancel_worker = folder_size_cancel.clone();
+    let latest_request_id = Arc::new(AtomicU64::new(0));
+    let latest_request_id_worker = latest_request_id.clone();
 
     std::thread::spawn(move || {
-        use std::sync::atomic::Ordering;
-
         while let Ok(request) = folder_size_req_rx.recv() {
-            folder_size_cancel_worker.store(false, Ordering::Release);
-
             let mut latest_request = request;
             while let Ok(newer_request) = folder_size_req_rx.try_recv() {
                 let _ = folder_size_res_tx.send(FolderSizeMessage::Cancelled {
                     folder_path: latest_request.folder_path,
                     request_epoch: latest_request.request_epoch,
+                    request_id: latest_request.request_id,
                 });
                 latest_request = newer_request;
             }
             let FolderSizeRequest {
                 folder_path,
                 request_epoch,
+                request_id,
             } = latest_request;
-            folder_size_cancel_worker.store(false, Ordering::Release);
+            if !prepare_folder_size_request(
+                &folder_size_cancel_worker,
+                &latest_request_id_worker,
+                request_id,
+            ) {
+                let _ = folder_size_res_tx.send(FolderSizeMessage::Cancelled {
+                    folder_path,
+                    request_epoch,
+                    request_id,
+                });
+                folder_size_ctx.request_repaint();
+                continue;
+            }
 
             // NTFS fast path: use the service's indexed subtree total.
             if is_ntfs_volume(&folder_path) {
@@ -350,6 +372,7 @@ pub(in crate::app) fn spawn_folder_size_worker(
                                 folder_count,
                             ),
                             request_epoch,
+                            request_id,
                         });
                         folder_size_ctx.request_repaint();
                         continue;
@@ -359,6 +382,7 @@ pub(in crate::app) fn spawn_folder_size_worker(
                             let _ = folder_size_res_tx.send(FolderSizeMessage::Cancelled {
                                 folder_path,
                                 request_epoch,
+                                request_id,
                             });
                             folder_size_ctx.request_repaint();
                             continue;
@@ -385,6 +409,7 @@ pub(in crate::app) fn spawn_folder_size_worker(
                                             result.folder_count,
                                         ),
                                         request_epoch,
+                                        request_id,
                                     });
                                     folder_size_ctx.request_repaint();
                                     continue;
@@ -393,6 +418,7 @@ pub(in crate::app) fn spawn_folder_size_worker(
                                     let _ = folder_size_res_tx.send(FolderSizeMessage::Cancelled {
                                         folder_path,
                                         request_epoch,
+                                        request_id,
                                     });
                                     folder_size_ctx.request_repaint();
                                     continue;
@@ -417,6 +443,7 @@ pub(in crate::app) fn spawn_folder_size_worker(
                         let _ = folder_size_res_tx.send(FolderSizeMessage::Failed {
                             folder_path,
                             request_epoch,
+                            request_id,
                         });
                         folder_size_ctx.request_repaint();
                         continue;
@@ -438,6 +465,7 @@ pub(in crate::app) fn spawn_folder_size_worker(
             let path_clone = folder_path.clone();
             let ctx_clone = folder_size_ctx.clone();
             let progress_epoch = request_epoch;
+            let progress_request_id = request_id;
 
             let result =
                 crate::infrastructure::windows::folder_size::calculate_folder_size_parallel(
@@ -448,6 +476,7 @@ pub(in crate::app) fn spawn_folder_size_worker(
                             folder_path: path_clone.clone(),
                             summary: FolderContentSummary::size_only(partial_size),
                             request_epoch: progress_epoch,
+                            request_id: progress_request_id,
                         });
                         ctx_clone.request_repaint();
                     },
@@ -470,6 +499,7 @@ pub(in crate::app) fn spawn_folder_size_worker(
                             result.folder_count,
                         ),
                         request_epoch,
+                        request_id,
                     });
                 }
                 None => {
@@ -480,6 +510,7 @@ pub(in crate::app) fn spawn_folder_size_worker(
                     let _ = folder_size_res_tx.send(FolderSizeMessage::Cancelled {
                         folder_path,
                         request_epoch,
+                        request_id,
                     });
                 }
             }
@@ -488,7 +519,12 @@ pub(in crate::app) fn spawn_folder_size_worker(
         }
     });
 
-    (folder_size_req_tx, folder_size_res_rx, folder_size_cancel)
+    (
+        folder_size_req_tx,
+        folder_size_res_rx,
+        folder_size_cancel,
+        latest_request_id,
+    )
 }
 
 /// Spawns a batch worker for list-view folder sizes.
@@ -676,4 +712,22 @@ fn is_ntfs_volume(path: &std::path::Path) -> bool {
     String::from_utf16_lossy(&fs_name)
         .trim_end_matches('\0')
         .eq_ignore_ascii_case("NTFS")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::prepare_folder_size_request;
+    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+
+    #[test]
+    fn cancelled_queued_folder_size_request_is_not_prepared_for_execution() {
+        let cancel = AtomicBool::new(true);
+        let latest_request_id = AtomicU64::new(0);
+
+        assert!(!prepare_folder_size_request(&cancel, &latest_request_id, 7));
+        assert!(!cancel.load(Ordering::Acquire));
+
+        latest_request_id.store(8, Ordering::Release);
+        assert!(prepare_folder_size_request(&cancel, &latest_request_id, 8));
+    }
 }

@@ -159,6 +159,21 @@ pub fn clipboard_sequence_number() -> Option<u32> {
     }
 }
 
+/// Clear only the payload identified by `expected_sequence`.
+///
+/// The sequence is checked after opening the clipboard so another application
+/// cannot replace the payload between validation and `EmptyClipboard`.
+pub fn clear_if_sequence(expected_sequence: u32) -> Result<bool, String> {
+    let _clip = Clipboard::new_attempts(10)
+        .map_err(|error| format!("Failed to open clipboard for move completion: {error:?}"))?;
+    if clipboard_sequence_number() != Some(expected_sequence) {
+        return Ok(false);
+    }
+    clipboard_win::empty()
+        .map_err(|error| format!("Failed to clear completed move clipboard: {error:?}"))?;
+    Ok(true)
+}
+
 // --- Internal helper functions ---
 
 /// Sets the preferred drop effect in the clipboard

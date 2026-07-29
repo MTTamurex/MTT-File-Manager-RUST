@@ -4,16 +4,55 @@ use rust_i18n::t;
 use std::ffi::{OsStr, OsString};
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::Arc;
 use windows::{
     core::PCWSTR,
     Win32::{
         Foundation::HWND,
-        System::SystemInformation::GetSystemDirectoryW,
-        UI::Shell::{ShellExecuteExW, SEE_MASK_FLAG_NO_UI, SHELLEXECUTEINFOW},
+        System::{Com::CoTaskMemFree, SystemInformation::GetSystemDirectoryW},
+        UI::Shell::{
+            FOLDERID_LocalAppData, SHGetKnownFolderPath, ShellExecuteExW, KF_FLAG_DONT_VERIFY,
+            SEE_MASK_FLAG_NO_UI, SHELLEXECUTEINFOW,
+        },
         UI::WindowsAndMessaging::SW_SHOWNORMAL,
     },
 };
+
+#[derive(Debug, PartialEq)]
+enum TerminalExecutable {
+    WindowsTerminal(PathBuf),
+    PowerShell(PathBuf),
+}
+
+fn windows_terminal_path_from_local_app_data(local_app_data: &Path) -> PathBuf {
+    local_app_data
+        .join("Microsoft")
+        .join("WindowsApps")
+        .join("wt.exe")
+}
+
+fn windows_terminal_path() -> Option<PathBuf> {
+    let local_app_data = unsafe {
+        let raw = SHGetKnownFolderPath(&FOLDERID_LocalAppData, KF_FLAG_DONT_VERIFY, None).ok()?;
+        let path = PathBuf::from(OsString::from_wide(raw.as_wide()));
+        CoTaskMemFree(Some(raw.0 as *const _));
+        path
+    };
+
+    Some(windows_terminal_path_from_local_app_data(&local_app_data))
+}
+
+fn terminal_executables(
+    windows_terminal: Option<PathBuf>,
+    powershell: Option<PathBuf>,
+) -> Vec<TerminalExecutable> {
+    windows_terminal
+        .map(TerminalExecutable::WindowsTerminal)
+        .into_iter()
+        .chain(powershell.map(TerminalExecutable::PowerShell))
+        .collect()
+}
 
 /// Launches a terminal in the given directory.
 /// Tries Windows Terminal (`wt.exe`) first; falls back to PowerShell.
@@ -26,16 +65,19 @@ fn open_terminal_at(path: &Path) {
             .unwrap_or_else(|| path.to_path_buf())
     };
 
-    if std::process::Command::new("wt.exe")
-        .arg("-d")
-        .arg(&dir)
-        .spawn()
-        .is_err()
-    {
-        let _ = std::process::Command::new("powershell.exe")
-            .arg("-NoExit")
-            .current_dir(&dir)
-            .spawn();
+    for terminal in terminal_executables(windows_terminal_path(), system_powershell_path()) {
+        let result = match terminal {
+            TerminalExecutable::WindowsTerminal(program) => {
+                Command::new(program).arg("-d").arg(&dir).spawn()
+            }
+            TerminalExecutable::PowerShell(program) => Command::new(program)
+                .arg("-NoExit")
+                .current_dir(&dir)
+                .spawn(),
+        };
+        if result.is_ok() {
+            return;
+        }
     }
 }
 
@@ -580,7 +622,7 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 }
                 -24 => {
                     if let Some(path) = context_menu.target_paths.first() {
-                        app.copy_path_to_clipboard(&path);
+                        app.copy_path_to_clipboard(path);
                     }
                 }
                 -26 => {
@@ -589,7 +631,7 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                             .operation_directory
                             .clone()
                             .unwrap_or_else(|| PathBuf::from(&app.navigation_state.current_path));
-                        match app.create_shell_shortcut(&path, &destination) {
+                        match app.create_shell_shortcut(path, &destination) {
                             Ok(created) => {
                                 let origin_panel = context_menu.origin_panel_is_left;
                                 run_in_context_panel(app, origin_panel, |app| {
@@ -712,8 +754,9 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
 mod tests {
     use super::{
         base64_encode, context_origin_is_inactive, powershell_location_script,
-        primary_context_target, system_powershell_path, utf16le_base64, wide_null,
-        windows_parameters,
+        primary_context_target, system_powershell_path, terminal_executables, utf16le_base64,
+        wide_null, windows_parameters, windows_terminal_path_from_local_app_data,
+        TerminalExecutable,
     };
     use crate::application::context_menu::ContextMenuState;
     use std::ffi::OsStr;
@@ -767,6 +810,35 @@ mod tests {
     }
 
     #[test]
+    fn windows_terminal_alias_path_preserves_local_app_data_path() {
+        let local_app_data = PathBuf::from(r"C:\Usuários & Testes\AppData\Local");
+
+        assert_eq!(
+            windows_terminal_path_from_local_app_data(&local_app_data),
+            local_app_data.join(r"Microsoft\WindowsApps\wt.exe")
+        );
+    }
+
+    #[test]
+    fn terminal_paths_prefer_windows_terminal_and_fall_back_to_powershell() {
+        let windows_terminal = PathBuf::from(r"C:\Local\Microsoft\WindowsApps\wt.exe");
+        let powershell =
+            PathBuf::from(r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe");
+
+        assert_eq!(
+            terminal_executables(Some(windows_terminal.clone()), Some(powershell.clone())),
+            vec![
+                TerminalExecutable::WindowsTerminal(windows_terminal),
+                TerminalExecutable::PowerShell(powershell.clone()),
+            ]
+        );
+        assert_eq!(
+            terminal_executables(None, Some(powershell.clone())),
+            vec![TerminalExecutable::PowerShell(powershell)]
+        );
+    }
+
+    #[test]
     fn base64_encoder_uses_standard_padding() {
         assert_eq!(base64_encode(b""), "");
         assert_eq!(base64_encode(b"M"), "TQ==");
@@ -776,10 +848,12 @@ mod tests {
 
     #[test]
     fn primary_context_target_uses_captured_path_metadata() {
-        let mut context_menu = ContextMenuState::default();
-        context_menu.item_index = Some(99);
-        context_menu.target_paths = vec![PathBuf::from(r"C:\inactive\folder")];
-        context_menu.primary_is_directory = Some(true);
+        let context_menu = ContextMenuState {
+            item_index: Some(99),
+            target_paths: vec![PathBuf::from(r"C:\inactive\folder")],
+            primary_is_directory: Some(true),
+            ..ContextMenuState::default()
+        };
 
         let (path, is_directory) = primary_context_target(&context_menu).unwrap();
         assert_eq!(path, std::path::Path::new(r"C:\inactive\folder"));

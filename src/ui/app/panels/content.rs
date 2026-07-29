@@ -331,21 +331,18 @@ pub(super) fn render_preview_panel_layout(
                                         let is_tag_path = crate::domain::special_paths::tag_id_from_view_path(&path.to_string_lossy()).is_some();
                                         if !is_tag_path {
                                             // Cancel any in-progress calculation before starting new one
-                                            app.folder_size_state.cancel
-                                                .store(true, std::sync::atomic::Ordering::Release);
-                                             app.folder_size_state.clear_failure(&path);
-                                             app.folder_size_state.loading.insert(path.clone());
+                                             app.folder_size_state.cancel
+                                                 .store(true, std::sync::atomic::Ordering::Release);
                                              let request_epoch = app
                                                  .folder_size_state
                                                  .batch_invalidation_epoch
                                                  .get(&path)
                                                  .copied()
                                                  .unwrap_or(0);
-                                             let _ = app.folder_size_state.req_sender.send(
-                                                 crate::app::folder_size_state::FolderSizeRequest {
-                                                     folder_path: path,
-                                                     request_epoch,
-                                                 },
+                                             app.folder_size_state.dispatch_request(
+                                                 path,
+                                                 request_epoch,
+                                                 std::time::Instant::now(),
                                              );
                                         }
                                     }

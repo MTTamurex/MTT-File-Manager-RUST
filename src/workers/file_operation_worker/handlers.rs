@@ -595,9 +595,17 @@ pub(super) fn handle_move_batch(
     paths: Vec<PathBuf>,
     dest_folder: PathBuf,
     hwnd: SendHwnd,
+    clipboard_paste_token: Option<u64>,
     result_sender: &Sender<FileOperationResult>,
     archive_extract_sender: &Sender<ArchiveExtractionRequest>,
 ) -> HandlerCompletion {
+    let send_failure = |message: String| {
+        let failure = match clipboard_paste_token {
+            Some(token) => FileOperationResult::ClipboardMoveFailed { token, message },
+            None => FileOperationResult::OperationFailed { message },
+        };
+        let _ = result_sender.send(failure);
+    };
     let (archive_paths, regular_paths) = split_virtual_archive_paths(paths);
     if !archive_paths.is_empty() {
         // Windows Shell cannot move items out of a compressed-folder view.
@@ -627,6 +635,7 @@ pub(super) fn handle_move_batch(
             regular_paths,
             dest_folder.clone(),
             hwnd,
+            None,
             result_sender,
             archive_extract_sender,
         );
@@ -683,13 +692,12 @@ pub(super) fn handle_move_batch(
                     source_folders: source_folders.into_iter().collect(),
                     moved_files,
                     known_moved_pairs,
+                    clipboard_paste_token,
                 }) {
                     Ok(()) => return HandlerCompletion::DispatchedAsync,
                     Err(e) => {
                         log::warn!("[FileOps] Failed to dispatch archive extraction: {}", e);
-                        let _ = result_sender.send(FileOperationResult::OperationFailed {
-                            message: rust_i18n::t!("operations.error_cancelled").to_string(),
-                        });
+                        send_failure(rust_i18n::t!("operations.error_cancelled").to_string());
                         return HandlerCompletion::CompletedSynchronously;
                     }
                 }
@@ -708,16 +716,16 @@ pub(super) fn handle_move_batch(
                     dest_folder,
                     moved_files: paths,
                     known_moved_pairs,
+                    clipboard_paste_token,
                 });
             } else if !success {
-                let _ = result_sender.send(FileOperationResult::OperationFailed {
-                    message: rust_i18n::t!("operations.error_cancelled").to_string(),
-                });
+                send_failure(rust_i18n::t!("operations.error_cancelled").to_string());
             }
             HandlerCompletion::CompletedSynchronously
         }
         (Err(err), _) | (_, Err(err)) => {
             log::warn!("[SECURITY] Move batch blocked: {}", err);
+            send_failure(err);
             HandlerCompletion::CompletedSynchronously
         }
     }

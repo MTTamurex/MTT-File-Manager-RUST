@@ -168,6 +168,7 @@ pub fn open_video_player(path: PathBuf, position: f64, volume: f32) -> Option<Ch
 
     match spawn_result {
         Ok(child) => {
+            crate::viewer_processes::assign_to_job(&child);
             log::info!(
                 "[VIDEO-PLAYER] spawned standalone player pid={:?} path={} priority=below_normal",
                 child.id(),

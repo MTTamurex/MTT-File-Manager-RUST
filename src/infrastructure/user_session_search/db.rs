@@ -87,6 +87,7 @@ pub(super) fn load_all_volumes(conn: &rusqlite::Connection) -> HashMap<char, Ind
                 last_scan: Instant::now(),
                 items: Vec::new(),
                 live_paths: HashSet::new(),
+                needs_rescan: false,
             },
         );
     }

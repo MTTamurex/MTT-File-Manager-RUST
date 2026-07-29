@@ -3,11 +3,77 @@ use crate::infrastructure::windows::window_subclass::is_in_size_move;
 use crate::ui::app;
 use eframe::egui;
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
-/// Periodic repaint interval to ensure drive bitmask checks run even when idle.
-const DRIVE_BITMASK_REPAINT_MS: u64 = 1000;
+const FILE_OP_REPAINT_INTERVAL: Duration = Duration::from_millis(100);
+const PREFERENCES_FLUSH_INTERVAL: Duration = Duration::from_secs(1);
+const CLIPBOARD_CLEANUP_RETRY_INTERVAL: Duration = Duration::from_secs(1);
+const DRIVE_BITMASK_CHECK_INTERVAL: Duration = Duration::from_secs(3);
+const DRIVE_INFO_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
+
+struct RepaintDeadlineInputs {
+    file_ops_in_progress: bool,
+    clipboard_cleanup_pending: bool,
+    preferences_save_elapsed: Option<Duration>,
+    drive_refresh_elapsed: Duration,
+    drive_info_refresh_elapsed: Option<Duration>,
+}
+
+fn remaining_after_frame_check(elapsed: Duration, interval: Duration) -> Duration {
+    if elapsed >= interval {
+        interval
+    } else {
+        interval - elapsed
+    }
+}
+
+fn next_background_repaint(inputs: RepaintDeadlineInputs) -> Duration {
+    let mut deadline =
+        remaining_after_frame_check(inputs.drive_refresh_elapsed, DRIVE_BITMASK_CHECK_INTERVAL);
+
+    if inputs.file_ops_in_progress {
+        deadline = deadline.min(FILE_OP_REPAINT_INTERVAL);
+    }
+    if inputs.clipboard_cleanup_pending {
+        deadline = deadline.min(CLIPBOARD_CLEANUP_RETRY_INTERVAL);
+    }
+    if let Some(elapsed) = inputs.preferences_save_elapsed {
+        deadline = deadline.min(remaining_after_frame_check(
+            elapsed,
+            PREFERENCES_FLUSH_INTERVAL,
+        ));
+    }
+    if let Some(elapsed) = inputs.drive_info_refresh_elapsed {
+        deadline = deadline.min(remaining_after_frame_check(
+            elapsed,
+            DRIVE_INFO_REFRESH_INTERVAL,
+        ));
+    }
+
+    deadline
+}
 
 impl ImageViewerApp {
+    fn request_next_background_repaint(&self, ctx: &egui::Context) {
+        let drive_info_refresh_elapsed = self
+            .navigation_state
+            .is_computer_view
+            .then(|| self.drive_state.last_drive_info_refresh.elapsed());
+        let deadline = next_background_repaint(RepaintDeadlineInputs {
+            file_ops_in_progress: self.file_operation_state.file_ops_in_progress > 0,
+            clipboard_cleanup_pending: self
+                .file_operation_state
+                .pending_clipboard_cleanup_sequence
+                .is_some(),
+            preferences_save_elapsed: self
+                .preferences_dirty
+                .then(|| self.preferences_last_save.elapsed()),
+            drive_refresh_elapsed: self.drive_state.last_drive_refresh.elapsed(),
+            drive_info_refresh_elapsed,
+        });
+        ctx.request_repaint_after(deadline);
+    }
+
     fn run_background_updates(&mut self, ctx: &egui::Context, upload_textures: bool) {
         if is_in_size_move() {
             self.refresh_working_set_trim_blocker(true);
@@ -19,36 +85,18 @@ impl ImageViewerApp {
             self.process_incoming_messages(ctx);
         } else {
             self.process_background_messages(ctx);
-            if self.file_operation_state.file_ops_in_progress > 0 {
-                ctx.request_repaint_after(std::time::Duration::from_millis(100));
-            } else {
-                ctx.request_repaint_after(std::time::Duration::from_millis(
-                    DRIVE_BITMASK_REPAINT_MS,
-                ));
-            }
+            self.retry_completed_clipboard_cleanup();
             self.flush_preferences_if_needed();
             self.refresh_working_set_trim_blocker(false);
             self.reap_video_player_process();
             crate::viewer_processes::reap_exited();
+            self.request_next_background_repaint(ctx);
             return;
         }
+        self.retry_completed_clipboard_cleanup();
         let t1 = std::time::Instant::now();
         if self.file_operation_state.file_ops_in_progress == 0 {
             self.refresh_drives_if_needed();
-        }
-
-        // Keep logic polling alive even while eframe suppresses UI for a hidden
-        // or occluded viewport.
-        if self.is_in_restore_burst() {
-            if self.is_opengl_backend() {
-                ctx.request_repaint_after(std::time::Duration::from_millis(16));
-            } else {
-                ctx.request_repaint();
-            }
-        } else if self.file_operation_state.file_ops_in_progress > 0 {
-            ctx.request_repaint_after(std::time::Duration::from_millis(100));
-        } else {
-            ctx.request_repaint_after(std::time::Duration::from_millis(DRIVE_BITMASK_REPAINT_MS));
         }
 
         let t2 = std::time::Instant::now();
@@ -72,6 +120,18 @@ impl ImageViewerApp {
         self.reap_video_player_process();
         crate::viewer_processes::reap_exited();
         let t5 = std::time::Instant::now();
+
+        // Keep logic polling alive while idle or while eframe suppresses UI for
+        // an occluded viewport, without forcing a fixed repaint cadence.
+        if self.is_in_restore_burst() {
+            if self.is_opengl_backend() {
+                ctx.request_repaint_after(Duration::from_millis(16));
+            } else {
+                ctx.request_repaint();
+            }
+        } else {
+            self.request_next_background_repaint(ctx);
+        }
 
         let msg_ms = t1.duration_since(t0).as_secs_f32() * 1000.0;
         let drives_ms = t2.duration_since(t1).as_secs_f32() * 1000.0;
@@ -522,4 +582,79 @@ fn is_valid_external_drop_destination(target: &Path) -> bool {
             .to_str()
             .is_some_and(crate::domain::special_paths::is_virtual_path)
         && !ImageViewerApp::path_is_archive_namespace(target)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn idle_inputs() -> RepaintDeadlineInputs {
+        RepaintDeadlineInputs {
+            file_ops_in_progress: false,
+            clipboard_cleanup_pending: false,
+            preferences_save_elapsed: None,
+            drive_refresh_elapsed: Duration::ZERO,
+            drive_info_refresh_elapsed: None,
+        }
+    }
+
+    #[test]
+    fn repaint_uses_earliest_pending_deadline() {
+        let inputs = RepaintDeadlineInputs {
+            preferences_save_elapsed: None,
+            drive_refresh_elapsed: Duration::from_secs(1),
+            drive_info_refresh_elapsed: Some(Duration::from_millis(4500)),
+            ..idle_inputs()
+        };
+
+        assert_eq!(next_background_repaint(inputs), Duration::from_millis(500));
+    }
+
+    #[test]
+    fn dirty_preferences_keep_the_one_second_debounce_deadline() {
+        let inputs = RepaintDeadlineInputs {
+            preferences_save_elapsed: Some(Duration::from_millis(250)),
+            ..idle_inputs()
+        };
+
+        assert_eq!(next_background_repaint(inputs), Duration::from_millis(750));
+    }
+
+    #[test]
+    fn file_operations_keep_the_100ms_poll_deadline() {
+        let inputs = RepaintDeadlineInputs {
+            file_ops_in_progress: true,
+            ..idle_inputs()
+        };
+
+        assert_eq!(next_background_repaint(inputs), Duration::from_millis(100));
+    }
+
+    #[test]
+    fn pending_clipboard_cleanup_keeps_retry_alive() {
+        let inputs = RepaintDeadlineInputs {
+            clipboard_cleanup_pending: true,
+            ..idle_inputs()
+        };
+
+        assert_eq!(next_background_repaint(inputs), Duration::from_secs(1));
+    }
+
+    #[test]
+    fn idle_repaint_tracks_drive_bitmask_deadline() {
+        let inputs = RepaintDeadlineInputs {
+            drive_refresh_elapsed: Duration::from_millis(750),
+            ..idle_inputs()
+        };
+
+        assert_eq!(next_background_repaint(inputs), Duration::from_millis(2250));
+    }
+
+    #[test]
+    fn completed_checks_start_a_new_interval_instead_of_a_hot_loop() {
+        assert_eq!(
+            remaining_after_frame_check(Duration::from_secs(30), Duration::from_secs(3)),
+            Duration::from_secs(3)
+        );
+    }
 }

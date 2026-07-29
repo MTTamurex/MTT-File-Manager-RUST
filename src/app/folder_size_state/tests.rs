@@ -11,8 +11,11 @@ fn test_state() -> FolderSizeState {
         req_sender,
         res_receiver,
         cancel: Arc::new(AtomicBool::new(false)),
+        latest_request_id: Arc::new(AtomicU64::new(0)),
         cache: LruCache::new(NonZeroUsize::new(8).unwrap()),
         loading: FxHashSet::default(),
+        active_requests: HashMap::new(),
+        next_request_id: 0,
         failed_until: HashMap::new(),
         panel_stale_cache: LruCache::new(NonZeroUsize::new(8).unwrap()),
         panel_deferred_revalidation: HashMap::new(),
@@ -195,4 +198,82 @@ fn failed_batch_revalidation_releases_loading_for_retry() {
         state.take_expired_revalidations(start + delay),
         vec![(path, true)]
     );
+}
+
+#[test]
+fn failed_request_send_does_not_leave_loading_or_active_state() {
+    let mut state = test_state();
+    let path = PathBuf::from(r"C:\disconnected");
+    let now = Instant::now();
+
+    assert!(!state.dispatch_request(path.clone(), 0, now));
+    assert!(!state.loading.contains(&path));
+    assert!(!state.active_requests.contains_key(&path));
+    assert!(state.is_failure_active(&path, now));
+}
+
+#[test]
+fn expired_request_releases_loading_and_records_failure() {
+    let mut state = test_state();
+    let (sender, receiver) = std::sync::mpsc::channel();
+    state.req_sender = sender;
+    let path = PathBuf::from(r"C:\slow");
+    let now = Instant::now();
+
+    assert!(state.dispatch_request(path.clone(), 3, now));
+    let request = receiver.recv().unwrap();
+    assert_eq!(request.folder_path, path);
+    assert!(state.is_active_request(&path, request.request_id));
+    assert!(state.loading.contains(&path));
+
+    assert!(state
+        .expire_requests(now + FOLDER_SIZE_REQUEST_TIMEOUT - Duration::from_millis(1))
+        .is_empty());
+    assert_eq!(
+        state.expire_requests(now + FOLDER_SIZE_REQUEST_TIMEOUT),
+        vec![path.clone()]
+    );
+    assert!(!state.loading.contains(&path));
+    assert!(!state.active_requests.contains_key(&path));
+    assert!(state.is_failure_active(&path, now + FOLDER_SIZE_REQUEST_TIMEOUT));
+}
+
+#[test]
+fn old_request_id_cannot_finish_newer_request_for_same_path() {
+    let mut state = test_state();
+    let (sender, receiver) = std::sync::mpsc::channel();
+    state.req_sender = sender;
+    let path = PathBuf::from(r"C:\changing");
+    let now = Instant::now();
+
+    assert!(state.dispatch_request(path.clone(), 1, now));
+    let old = receiver.recv().unwrap();
+    assert!(state.dispatch_request(path.clone(), 2, now));
+    let new = receiver.recv().unwrap();
+
+    assert!(!state.finish_request(&path, old.request_id));
+    assert_eq!(
+        state.latest_request_id.load(Ordering::Acquire),
+        new.request_id
+    );
+    assert!(state.is_active_request(&path, new.request_id));
+    assert!(state.finish_request(&path, new.request_id));
+    assert_eq!(state.latest_request_id.load(Ordering::Acquire), 0);
+    assert!(!state.loading.contains(&path));
+}
+
+#[test]
+fn cancelling_active_request_releases_loading_and_signals_worker() {
+    let mut state = test_state();
+    let (sender, receiver) = std::sync::mpsc::channel();
+    state.req_sender = sender;
+    let path = PathBuf::from(r"C:\invalidated");
+
+    assert!(state.dispatch_request(path.clone(), 1, Instant::now()));
+    let _ = receiver.recv().unwrap();
+    assert!(state.cancel_active_request(&path));
+    assert!(!state.loading.contains(&path));
+    assert!(!state.active_requests.contains_key(&path));
+    assert!(state.cancel.load(Ordering::Acquire));
+    assert_eq!(state.latest_request_id.load(Ordering::Acquire), 0);
 }

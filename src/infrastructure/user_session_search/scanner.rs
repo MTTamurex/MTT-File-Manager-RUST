@@ -132,6 +132,7 @@ pub(super) fn apply_event_to_volume(volume: &mut IndexedVolume, event: &DriveWat
         DriveWatcherEvent::Unknown(_) => {}
         DriveWatcherEvent::DriveLost(_) => {
             volume.live_paths.clear();
+            volume.needs_rescan = true;
         }
     }
 }
@@ -238,6 +239,7 @@ mod tests {
                 size: 3,
             }],
             live_paths,
+            needs_rescan: false,
         };
 
         fs::write(&file_path, b"new content").expect("rewrite file");

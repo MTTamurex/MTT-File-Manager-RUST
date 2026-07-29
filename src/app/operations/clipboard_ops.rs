@@ -288,15 +288,97 @@ impl ImageViewerApp {
 
         // 1. Get files and operation from clipboard via Manager
         // Optimized to use the manager's logic which checks system then internal.
-        if let Some((files_to_op, is_move)) = self.clipboard.get_files_to_paste() {
+        if let Some((files_to_op, is_move, clipboard_sequence)) =
+            self.clipboard.get_files_to_paste()
+        {
             if !paste_target_is_valid_for_sources(&files_to_op, &dest_folder) {
                 self.context_menu.target_paths.clear();
                 return;
             }
             let hwnd = self.shell_op_hwnd();
 
+            if let Some(cleanup_sequence) =
+                self.file_operation_state.pending_clipboard_cleanup_sequence
+            {
+                if clipboard_sequence == Some(cleanup_sequence) {
+                    if self.clipboard.clear_completed_move(cleanup_sequence) {
+                        self.file_operation_state.pending_clipboard_cleanup_sequence = None;
+                    }
+                    self.context_menu.target_paths.clear();
+                    return;
+                }
+                self.file_operation_state.pending_clipboard_cleanup_sequence = None;
+            }
+
+            if self
+                .file_operation_state
+                .pending_clipboard_move
+                .is_some_and(|pending| pending.clipboard_sequence != clipboard_sequence)
+            {
+                self.file_operation_state.pending_clipboard_move = None;
+            }
+            if is_move && self.file_operation_state.pending_clipboard_move.is_some() {
+                log::warn!("[FileOps] Ignoring a second clipboard move while one is pending");
+                self.context_menu.target_paths.clear();
+                return;
+            }
+
             // 2. Dispatch as a single batch operation (single Windows progress dialog)
-            let req = if is_move {
+            let virtual_archive_count = files_to_op
+                .iter()
+                .filter(|path| {
+                    crate::domain::file_entry::is_path_inside_existing_archive_file(path)
+                })
+                .count();
+            if is_move && virtual_archive_count > 0 && virtual_archive_count < files_to_op.len() {
+                log::warn!(
+                    "[FileOps] Refusing mixed clipboard move with archive and filesystem paths"
+                );
+                self.context_menu.target_paths.clear();
+                return;
+            }
+            let pending_clipboard_move = if is_move && virtual_archive_count == 0 {
+                let Some(clipboard_sequence) = clipboard_sequence else {
+                    log::warn!(
+                        "[FileOps] Clipboard sequence unavailable; completion cannot safely clear it"
+                    );
+                    let request =
+                        crate::workers::file_operation_worker::FileOperationRequest::move_batch(
+                            files_to_op,
+                            dest_folder,
+                            hwnd,
+                        );
+                    self.file_operation_state.file_ops_in_progress += 1;
+                    if self
+                        .file_operation_state
+                        .file_op_sender
+                        .send(request)
+                        .is_err()
+                    {
+                        self.file_operation_state.file_ops_in_progress = self
+                            .file_operation_state
+                            .file_ops_in_progress
+                            .saturating_sub(1);
+                    }
+                    self.context_menu.target_paths.clear();
+                    return;
+                };
+                let token = self.file_operation_state.allocate_clipboard_move_token();
+                Some(crate::app::file_operation_state::PendingClipboardMove {
+                    token,
+                    clipboard_sequence: Some(clipboard_sequence),
+                })
+            } else {
+                None
+            };
+            let req = if let Some(pending) = pending_clipboard_move {
+                crate::workers::file_operation_worker::FileOperationRequest::clipboard_move_batch(
+                    files_to_op,
+                    dest_folder,
+                    hwnd,
+                    pending.token,
+                )
+            } else if is_move {
                 crate::workers::file_operation_worker::FileOperationRequest::move_batch(
                     files_to_op,
                     dest_folder,
@@ -310,21 +392,36 @@ impl ImageViewerApp {
                 )
             };
             self.file_operation_state.file_ops_in_progress += 1;
-            if self.file_operation_state.file_op_sender.send(req).is_err() {
+            let send_succeeded = self.file_operation_state.file_op_sender.send(req).is_ok();
+            if !send_succeeded {
                 self.file_operation_state.file_ops_in_progress = self
                     .file_operation_state
                     .file_ops_in_progress
                     .saturating_sub(1);
                 log::warn!("[FileOps] H-3: worker channel closed on clipboard op");
             }
-
-            // Clear internal state if it was a move (Shell does this for us for system clipboard)
-            if is_move {
-                self.clipboard.clear();
+            if let Some(pending) = pending_clipboard_move {
+                self.file_operation_state.pending_clipboard_move =
+                    crate::app::file_operation_state::pending_clipboard_move_after_dispatch(
+                        self.file_operation_state.pending_clipboard_move,
+                        pending,
+                        send_succeeded,
+                    );
             }
         }
 
         self.context_menu.target_paths.clear();
+    }
+
+    pub fn retry_completed_clipboard_cleanup(&mut self) {
+        let Some(sequence) = self.file_operation_state.pending_clipboard_cleanup_sequence else {
+            return;
+        };
+        if self.clipboard.current_sequence() != Some(sequence)
+            || self.clipboard.clear_completed_move(sequence)
+        {
+            self.file_operation_state.pending_clipboard_cleanup_sequence = None;
+        }
     }
 
     pub fn copy_path_to_clipboard(&self, path: &Path) {
@@ -373,7 +470,7 @@ mod tests {
         let origin = PathBuf::from(r"C:\origin");
 
         assert_eq!(
-            context_paste_destination(&[folder.clone()], Some(&origin), Some(true)),
+            context_paste_destination(std::slice::from_ref(&folder), Some(&origin), Some(true)),
             Some(folder)
         );
         assert_eq!(

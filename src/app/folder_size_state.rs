@@ -11,6 +11,7 @@ const INVALIDATION_EPOCH_PRUNE_INTERVAL: Duration = Duration::from_secs(2);
 const INVALIDATION_EPOCH_PRUNE_THRESHOLD: usize = 1_024;
 const FOLDER_SIZE_FAILURE_RETRY_DELAY: Duration = Duration::from_secs(30);
 const FOLDER_SIZE_REVALIDATION_INITIAL_DELAY: Duration = Duration::from_secs(3);
+const FOLDER_SIZE_REQUEST_TIMEOUT: Duration = Duration::from_secs(45);
 pub(crate) const PANEL_STALE_REVALIDATION_DELAY: Duration = Duration::from_millis(500);
 
 #[derive(Debug, Clone, Copy)]
@@ -18,6 +19,12 @@ pub struct PendingFolderSizeRevalidation {
     deadline: Instant,
     stale_total_size: Option<u64>,
     release_batch_loading: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ActiveFolderSizeRequest {
+    request_id: u64,
+    deadline: Instant,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,19 +66,23 @@ pub enum FolderSizeMessage {
         folder_path: PathBuf,
         summary: FolderContentSummary,
         request_epoch: u64,
+        request_id: u64,
     },
     Complete {
         folder_path: PathBuf,
         summary: FolderContentSummary,
         request_epoch: u64,
+        request_id: u64,
     },
     Cancelled {
         folder_path: PathBuf,
         request_epoch: u64,
+        request_id: u64,
     },
     Failed {
         folder_path: PathBuf,
         request_epoch: u64,
+        request_id: u64,
     },
 }
 
@@ -79,6 +90,7 @@ pub enum FolderSizeMessage {
 pub struct FolderSizeRequest {
     pub folder_path: PathBuf,
     pub request_epoch: u64,
+    pub request_id: u64,
 }
 
 /// Result from the batch folder-size worker.
@@ -101,8 +113,11 @@ pub struct FolderSizeState {
     pub req_sender: Sender<FolderSizeRequest>,
     pub res_receiver: Receiver<FolderSizeMessage>,
     pub cancel: Arc<AtomicBool>,
+    pub latest_request_id: Arc<AtomicU64>,
     pub cache: LruCache<PathBuf, FolderContentSummary>,
     pub loading: FxHashSet<PathBuf>,
+    pub active_requests: HashMap<PathBuf, ActiveFolderSizeRequest>,
+    pub next_request_id: u64,
     pub failed_until: HashMap<PathBuf, Instant>,
     /// Last complete values shown in the details panel after invalidation.
     pub panel_stale_cache: LruCache<PathBuf, FolderContentSummary>,
@@ -136,6 +151,110 @@ pub struct FolderSizeState {
 }
 
 impl FolderSizeState {
+    pub fn dispatch_request(
+        &mut self,
+        folder_path: PathBuf,
+        request_epoch: u64,
+        now: Instant,
+    ) -> bool {
+        if self.active_requests.remove(&folder_path).is_some() {
+            self.cancel.store(true, Ordering::Release);
+        }
+        self.next_request_id = self.next_request_id.wrapping_add(1);
+        if self.next_request_id == 0 {
+            self.next_request_id = 1;
+        }
+        let request_id = self.next_request_id;
+        self.latest_request_id.store(request_id, Ordering::Release);
+        let request = FolderSizeRequest {
+            folder_path: folder_path.clone(),
+            request_epoch,
+            request_id,
+        };
+        if self.req_sender.send(request).is_err() {
+            self.invalidate_latest_request(request_id);
+            self.loading.remove(&folder_path);
+            self.active_requests.remove(&folder_path);
+            self.record_failure(folder_path, now);
+            return false;
+        }
+
+        self.clear_failure(&folder_path);
+        self.loading.insert(folder_path.clone());
+        self.active_requests.insert(
+            folder_path,
+            ActiveFolderSizeRequest {
+                request_id,
+                deadline: now + FOLDER_SIZE_REQUEST_TIMEOUT,
+            },
+        );
+        true
+    }
+
+    pub fn is_active_request(&self, folder_path: &PathBuf, request_id: u64) -> bool {
+        self.active_requests
+            .get(folder_path)
+            .is_some_and(|active| active.request_id == request_id)
+    }
+
+    pub fn finish_request(&mut self, folder_path: &PathBuf, request_id: u64) -> bool {
+        if !self.is_active_request(folder_path, request_id) {
+            return false;
+        }
+        self.active_requests.remove(folder_path);
+        self.loading.remove(folder_path);
+        self.invalidate_latest_request(request_id);
+        true
+    }
+
+    pub fn cancel_active_request(&mut self, folder_path: &PathBuf) -> bool {
+        let active = self.active_requests.remove(folder_path);
+        self.loading.remove(folder_path);
+        if let Some(active) = active {
+            self.invalidate_latest_request(active.request_id);
+            self.cancel.store(true, Ordering::Release);
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn expire_requests(&mut self, now: Instant) -> Vec<PathBuf> {
+        let expired: Vec<PathBuf> = self
+            .active_requests
+            .iter()
+            .filter_map(|(path, active)| (active.deadline <= now).then_some(path.clone()))
+            .collect();
+        for path in &expired {
+            if let Some(active) = self.active_requests.remove(path) {
+                self.invalidate_latest_request(active.request_id);
+            }
+            self.loading.remove(path);
+            self.cache.pop(path);
+            self.record_failure(path.clone(), now);
+        }
+        if !expired.is_empty() {
+            self.cancel.store(true, Ordering::Release);
+        }
+        expired
+    }
+
+    pub fn fail_all_requests(&mut self, now: Instant) -> Vec<PathBuf> {
+        let paths: Vec<PathBuf> = self.active_requests.keys().cloned().collect();
+        for path in &paths {
+            if let Some(active) = self.active_requests.remove(path) {
+                self.invalidate_latest_request(active.request_id);
+            }
+            self.loading.remove(path);
+            self.cache.pop(path);
+            self.record_failure(path.clone(), now);
+        }
+        if !paths.is_empty() {
+            self.cancel.store(true, Ordering::Release);
+        }
+        paths
+    }
+
     pub fn preserve_panel_summary_for_deferred_revalidation(
         &mut self,
         folder_path: PathBuf,
@@ -245,6 +364,7 @@ impl FolderSizeState {
         // 0. Abort any in-flight single-folder full-tree scan so it
         //    doesn't keep running after the user navigates away.
         self.cancel.store(true, Ordering::Release);
+        self.latest_request_id.store(0, Ordering::Release);
 
         // 1. Bump generation so the worker discards all queued requests
         //    from the previous folder (they carry the old generation).
@@ -268,6 +388,15 @@ impl FolderSizeState {
         // Revalidations are per-path and must survive navigation so they
         // can purge stale values that were re-cached from IPC or in-flight
         // scans that completed before the service updated its index.
+    }
+
+    fn invalidate_latest_request(&self, request_id: u64) {
+        let _ = self.latest_request_id.compare_exchange(
+            request_id,
+            0,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        );
     }
 
     pub fn should_prune_pending_revalidations(&self, now: Instant) -> bool {
@@ -320,10 +449,10 @@ impl FolderSizeState {
     }
 
     pub fn cancel_revalidation(&mut self, folder_path: &PathBuf) {
-        if self.pending_revalidation.remove(folder_path).is_some() {
-            if self.pending_revalidation.is_empty() {
-                self.pending_revalidation_next_deadline = None;
-            }
+        if self.pending_revalidation.remove(folder_path).is_some()
+            && self.pending_revalidation.is_empty()
+        {
+            self.pending_revalidation_next_deadline = None;
         }
     }
 
@@ -332,10 +461,8 @@ impl FolderSizeState {
         for folder_path in folder_paths {
             changed |= self.pending_revalidation.remove(folder_path).is_some();
         }
-        if changed {
-            if self.pending_revalidation.is_empty() {
-                self.pending_revalidation_next_deadline = None;
-            }
+        if changed && self.pending_revalidation.is_empty() {
+            self.pending_revalidation_next_deadline = None;
         }
     }
 
@@ -379,6 +506,7 @@ impl FolderSizeState {
         self.batch_invalidation_last_prune = now;
 
         let loading = &self.loading;
+        let active_requests = &self.active_requests;
         let batch_loading = &self.batch_loading;
         let cache = &self.cache;
         let batch_cache = &self.batch_cache;
@@ -386,6 +514,7 @@ impl FolderSizeState {
 
         self.batch_invalidation_epoch.retain(|path, _| {
             loading.contains(path)
+                || active_requests.contains_key(path)
                 || batch_loading.contains(path)
                 || cache.contains(path)
                 || batch_cache.contains(path)

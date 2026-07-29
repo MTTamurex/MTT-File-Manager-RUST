@@ -68,6 +68,23 @@ impl ClipboardManager {
         self.internal_sync_sequence = None;
     }
 
+    pub(crate) fn clear_completed_move(&mut self, expected_sequence: u32) -> bool {
+        match windows_clipboard::clear_if_sequence(expected_sequence) {
+            Ok(true) => {
+                self.clear();
+                self.cached_system_has_files.set(Some(false));
+                self.cached_system_has_files_sequence
+                    .set(windows_clipboard::clipboard_sequence_number());
+                true
+            }
+            Ok(false) => false,
+            Err(error) => {
+                log::warn!("[Clipboard] Could not clear completed move: {error}");
+                false
+            }
+        }
+    }
+
     /// Copy files to clipboard (System + Internal)
     pub fn copy(&mut self, paths: &[PathBuf], owner: HWND) {
         if paths.is_empty() {
@@ -140,9 +157,9 @@ impl ClipboardManager {
         self.internal_op = Some(internal_op);
     }
 
-    /// Returns files and operation type (is_move) for pasting.
+    /// Returns files, operation type (is_move), and the clipboard sequence for pasting.
     /// Does NOT perform the operation. Use this to prepare an async operation.
-    pub fn get_files_to_paste(&self) -> Option<(Vec<PathBuf>, bool)> {
+    pub fn get_files_to_paste(&self) -> Option<(Vec<PathBuf>, bool, Option<u32>)> {
         let current_sequence = windows_clipboard::clipboard_sequence_number();
 
         // For copy/cut initiated inside the app, avoid synchronously reading
@@ -150,7 +167,7 @@ impl ClipboardManager {
         // providers can delay-render clipboard data and stall paste startup.
         if self.internal_sync_sequence.is_some() {
             if let Some(files) = self.internal_files_to_paste_for_sequence(current_sequence) {
-                return Some(files);
+                return Some((files.0, files.1, current_sequence));
             }
         }
 
@@ -158,11 +175,16 @@ impl ClipboardManager {
         if let Some(files) = windows_clipboard::get_files_from_clipboard() {
             let op = windows_clipboard::get_clipboard_operation();
             let is_move = matches!(op, Some(windows_clipboard::ClipboardFileOp::Move));
-            return Some((files, is_move));
+            return Some((files, is_move, current_sequence));
         }
 
         // 2. Fallback to Internal
         self.internal_files_to_paste_for_sequence(current_sequence)
+            .map(|(files, is_move)| (files, is_move, current_sequence))
+    }
+
+    pub(crate) fn current_sequence(&self) -> Option<u32> {
+        windows_clipboard::clipboard_sequence_number()
     }
 
     fn has_internal_content_for_sequence(&self, current_sequence: Option<u32>) -> bool {

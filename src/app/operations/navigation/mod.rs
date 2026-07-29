@@ -151,10 +151,8 @@ impl ImageViewerApp {
             return;
         }
 
-        if self.active_tag_filter.take().is_some() {
-            if !self.in_inactive_panel_context {
-                self.save_preferences();
-            }
+        if self.active_tag_filter.take().is_some() && !self.in_inactive_panel_context {
+            self.save_preferences();
         }
 
         self.remember_current_folder_timestamp_hints();

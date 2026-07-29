@@ -190,8 +190,44 @@ pub fn get_db_path() -> Result<PathBuf, String> {
     Ok(data_dir().join("search_index.db"))
 }
 
+/// Invalidate all regenerable index artifacts before installing/updating the
+/// service. This also protects manual installs from files pre-created before
+/// the directory owner and DACL were hardened.
+pub fn reset_storage_for_install() -> Result<(), String> {
+    use std::os::windows::fs::MetadataExt;
+
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0400;
+
+    let _ = get_db_path()?;
+    let directory = data_dir();
+    let entries = std::fs::read_dir(directory)
+        .map_err(|error| format!("Read index directory {:?}: {}", directory, error))?;
+    for entry in entries {
+        let entry = entry.map_err(|error| format!("Read index directory entry: {}", error))?;
+        let path = entry.path();
+        let metadata = std::fs::symlink_metadata(&path)
+            .map_err(|error| format!("Inspect index artifact {:?}: {}", path, error))?;
+        let is_reparse = metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0;
+
+        if metadata.is_dir() {
+            if !is_reparse {
+                return Err(format!(
+                    "Unexpected subdirectory in index storage {:?}; refusing recursive deletion",
+                    path
+                ));
+            }
+            std::fs::remove_dir(&path)
+                .map_err(|error| format!("Remove index junction {:?}: {}", path, error))?;
+        } else {
+            std::fs::remove_file(&path)
+                .map_err(|error| format!("Remove index artifact {:?}: {}", path, error))?;
+        }
+    }
+    Ok(())
+}
+
 /// Apply explicit DACL to the database directory using Win32 API.
-/// Grants: SYSTEM (Full), Administrators (Full), Users (Read+Execute).
+/// Grants: SYSTEM (Full), Administrators (Full).
 /// Removes inherited permissions.
 ///
 /// SEC: Opens the directory with `FILE_FLAG_OPEN_REPARSE_POINT` so junctions
@@ -202,11 +238,12 @@ fn harden_directory_acl(dir: &Path) -> Result<(), String> {
     use windows::core::PCWSTR;
     use windows::Win32::Foundation::{CloseHandle, LocalFree, HANDLE};
     use windows::Win32::Security::Authorization::{
-        SetEntriesInAclW, SetSecurityInfo, EXPLICIT_ACCESS_W, SET_ACCESS, SE_KERNEL_OBJECT,
+        SetEntriesInAclW, SetSecurityInfo, EXPLICIT_ACCESS_W, SET_ACCESS, SE_FILE_OBJECT,
         TRUSTEE_IS_SID, TRUSTEE_IS_WELL_KNOWN_GROUP, TRUSTEE_W,
     };
     use windows::Win32::Security::{
-        ACE_FLAGS, ACL as WIN_ACL, DACL_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION,
+        ACE_FLAGS, ACL as WIN_ACL, DACL_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION,
+        PROTECTED_DACL_SECURITY_INFORMATION, PSID,
     };
     use windows::Win32::Storage::FileSystem::{
         CreateFileW, GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION,
@@ -215,10 +252,10 @@ fn harden_directory_acl(dir: &Path) -> Result<(), String> {
         OPEN_EXISTING,
     };
 
-    // READ_CONTROL | WRITE_DAC | FILE_READ_ATTRIBUTES — minimum required to
-    // read attributes (reparse-point check) and replace the DACL.
+    // READ_CONTROL | WRITE_DAC | WRITE_OWNER | FILE_READ_ATTRIBUTES.
     const REQUIRED_ACCESS: u32 = 0x00020000 /* READ_CONTROL */
         | 0x00040000 /* WRITE_DAC */
+        | 0x00080000 /* WRITE_OWNER */
         | 0x0080 /* FILE_READ_ATTRIBUTES */;
 
     let dir_wide: Vec<u16> = OsStr::new(dir.as_os_str())
@@ -289,18 +326,8 @@ fn harden_directory_acl(dir: &Path) -> Result<(), String> {
     sid_admins.0[8..12].copy_from_slice(&32u32.to_le_bytes());
     sid_admins.0[12..16].copy_from_slice(&544u32.to_le_bytes());
 
-    // Users: S-1-5-32-545 (revision=1, count=2, authority=5, sub=[32, 545])
-    let mut sid_users = AlignedSid([0u8; 16]);
-    sid_users.0[0] = 1;
-    sid_users.0[1] = 2;
-    sid_users.0[7] = 5;
-    sid_users.0[8..12].copy_from_slice(&32u32.to_le_bytes());
-    sid_users.0[12..16].copy_from_slice(&545u32.to_le_bytes());
-
     // FILE_ALL_ACCESS for SYSTEM and Administrators
     const FILE_ALL_ACCESS: u32 = 0x001F01FF;
-    // FILE_GENERIC_READ | FILE_GENERIC_EXECUTE for Users
-    const FILE_GENERIC_READ_EXECUTE: u32 = 0x001200A9;
 
     // CONTAINER_INHERIT_ACE | OBJECT_INHERIT_ACE = sub-containers and objects inherit
     let inheritance = ACE_FLAGS(3u32);
@@ -328,17 +355,6 @@ fn harden_directory_acl(dir: &Path) -> Result<(), String> {
                 ..Default::default()
             },
         },
-        EXPLICIT_ACCESS_W {
-            grfAccessPermissions: FILE_GENERIC_READ_EXECUTE,
-            grfAccessMode: SET_ACCESS,
-            grfInheritance: inheritance,
-            Trustee: TRUSTEE_W {
-                TrusteeForm: TRUSTEE_IS_SID,
-                TrusteeType: TRUSTEE_IS_WELL_KNOWN_GROUP,
-                ptstrName: windows::core::PWSTR(sid_users.0.as_mut_ptr() as *mut u16),
-                ..Default::default()
-            },
-        },
     ];
 
     // Build the new ACL from the explicit entries.
@@ -351,7 +367,8 @@ fn harden_directory_acl(dir: &Path) -> Result<(), String> {
         ));
     }
 
-    // Apply the ACL to the directory's KERNEL HANDLE (SE_KERNEL_OBJECT).
+    // Apply owner + ACL to the validated directory handle. Resetting the owner
+    // prevents a user who pre-created the directory from recovering WRITE_DAC.
     // This binds the DACL to the inode reached by the validated handle,
     // not by re-resolving the path (which could follow a reparse point if
     // one were swapped in between validation and ACL apply).
@@ -359,9 +376,11 @@ fn harden_directory_acl(dir: &Path) -> Result<(), String> {
     let set_result = unsafe {
         SetSecurityInfo(
             dir_handle.0,
-            SE_KERNEL_OBJECT,
-            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
-            None,
+            SE_FILE_OBJECT,
+            OWNER_SECURITY_INFORMATION
+                | DACL_SECURITY_INFORMATION
+                | PROTECTED_DACL_SECURITY_INFORMATION,
+            Some(PSID(sid_admins.0.as_mut_ptr().cast())),
             None,
             Some(new_acl as *const _),
             None,
