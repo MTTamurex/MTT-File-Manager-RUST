@@ -441,7 +441,8 @@ fn main() -> eframe::Result<()> {
             if let Some(path_arg) = args.next() {
                 let mut position: f64 = 0.0;
                 let mut volume: f32 = 1.0;
-                // Parse optional --position and --volume args
+                let mut optical_disc = false;
+                // Parse optional playback arguments.
                 while let Some(opt) = args.next() {
                     let opt_str = opt.to_string_lossy().to_string();
                     if opt_str.eq_ignore_ascii_case("--position") {
@@ -452,7 +453,15 @@ fn main() -> eframe::Result<()> {
                         if let Some(val) = args.next() {
                             volume = val.to_string_lossy().parse().unwrap_or(1.0);
                         }
+                    } else if opt_str.eq_ignore_ascii_case("--optical-disc") {
+                        optical_disc = true;
                     }
+                }
+                if optical_disc {
+                    return mtt_file_manager::video_player::run_standalone_optical_disc(
+                        PathBuf::from(path_arg),
+                        volume,
+                    );
                 }
                 return mtt_file_manager::video_player::run_standalone(
                     PathBuf::from(path_arg),

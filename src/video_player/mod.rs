@@ -7,12 +7,32 @@
 //! mpv creates its own native window (no `wid` embedding), so all native features
 //! work: keyboard shortcuts, OSC, window management via OSC buttons.
 
+mod optical_disc;
+
 use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 
 use crate::infrastructure::diagnostic_logger::{diag_error, diag_info, field_bool, field_u64};
 use rfd::FileDialog;
+
+#[derive(Debug, Clone)]
+enum PlaybackSource {
+    File(PathBuf),
+    OpticalDisc(PathBuf),
+}
+
+impl PlaybackSource {
+    fn path(&self) -> &Path {
+        match self {
+            Self::File(path) | Self::OpticalDisc(path) => path,
+        }
+    }
+
+    fn is_optical_disc(&self) -> bool {
+        matches!(self, Self::OpticalDisc(_))
+    }
+}
 
 /// Base OSC script-opts for the standalone player.
 const STANDALONE_OSC_BASE_SCRIPT_OPTS: &str =
@@ -135,8 +155,21 @@ fn validate_video_path(path: &Path) -> Result<(), String> {
 ///
 /// Returns the `Child` handle so the caller can track/kill the process.
 pub fn open_video_player(path: PathBuf, position: f64, volume: f32) -> Option<Child> {
-    // SEC: Validate path before spawning child process.
-    if let Err(e) = validate_video_path(&path) {
+    open_player(PlaybackSource::File(path), position, volume)
+}
+
+/// Spawn the standalone player for a DVD or Blu-ray optical drive.
+pub fn open_optical_disc_player(path: PathBuf, volume: f32) -> Option<Child> {
+    open_player(PlaybackSource::OpticalDisc(path), 0.0, volume)
+}
+
+fn open_player(source: PlaybackSource, position: f64, volume: f32) -> Option<Child> {
+    let path = source.path();
+    let validation = match &source {
+        PlaybackSource::File(path) => validate_video_path(path),
+        PlaybackSource::OpticalDisc(path) => optical_disc::validate_optical_drive(path).map(|_| ()),
+    };
+    if let Err(e) = validation {
         log::error!(
             "[VIDEO-PLAYER] path validation failed for '{}': {}",
             path.display(),
@@ -158,11 +191,14 @@ pub fn open_video_player(path: PathBuf, position: f64, volume: f32) -> Option<Ch
 
     let mut cmd = Command::new(exe);
     cmd.arg("--video-player")
-        .arg(&path)
+        .arg(path)
         .arg("--position")
         .arg(position.to_string())
         .arg("--volume")
         .arg(volume.to_string());
+    if source.is_optical_disc() {
+        cmd.arg("--optical-disc");
+    }
 
     let spawn_result = cmd.spawn();
 
@@ -469,20 +505,66 @@ unsafe extern "system" fn enum_set_icon(
 /// Creates a native mpv window (borderless) with the custom OSC providing
 /// window controls (close, minimize, maximize). No eframe wrapper needed.
 pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Result<()> {
+    run_standalone_source(PlaybackSource::File(path), position, volume)
+}
+
+/// Entry point for standalone optical-disc playback.
+pub fn run_standalone_optical_disc(path: PathBuf, volume: f32) -> eframe::Result<()> {
+    run_standalone_source(PlaybackSource::OpticalDisc(path), 0.0, volume)
+}
+
+fn show_optical_disc_error(error: &str) {
+    let _ = rfd::MessageDialog::new()
+        .set_level(rfd::MessageLevel::Error)
+        .set_title(rust_i18n::t!("video.optical_error_title").to_string())
+        .set_description(rust_i18n::t!("video.optical_error", error = error).to_string())
+        .set_buttons(rfd::MessageButtons::Ok)
+        .show();
+}
+
+fn run_standalone_source(source: PlaybackSource, position: f64, volume: f32) -> eframe::Result<()> {
     apply_saved_locale();
 
     // SEC: Validate again in child process (defense in depth).
-    if let Err(e) = validate_video_path(&path) {
-        let _ = e;
-        log::error!("[VIDEO-PLAYER] path validation failed in standalone");
-        diag_error("video_player", "path_validation_failed", &[]);
-        return Ok(());
-    }
+    let resolved_disc = match &source {
+        PlaybackSource::File(path) => {
+            if let Err(e) = validate_video_path(path) {
+                log::error!("[VIDEO-PLAYER] path validation failed in standalone: {e}");
+                diag_error("video_player", "path_validation_failed", &[]);
+                return Ok(());
+            }
+            None
+        }
+        PlaybackSource::OpticalDisc(path) => match optical_disc::detect_optical_disc(path) {
+            Ok(disc) => Some(disc),
+            Err(e) => {
+                log::error!("[VIDEO-PLAYER] optical disc validation failed: {e}");
+                diag_error("video_player", "optical_disc_validation_failed", &[]);
+                show_optical_disc_error(&e);
+                return Ok(());
+            }
+        },
+    };
+    let path = source.path();
+    let optical_input = resolved_disc.as_ref().map(|disc| {
+        let (device_option, input_url) = match disc.kind {
+            optical_disc::OpticalDiscKind::Dvd => ("dvd-device", "dvd://"),
+            optical_disc::OpticalDiscKind::BluRay => ("bluray-device", "bd://longest"),
+        };
+        (device_option, disc.mpv_device_path(), input_url)
+    });
 
-    let title_name = path
-        .file_name()
-        .map(|v| v.to_string_lossy().to_string())
-        .unwrap_or_else(|| "Media Player".to_string());
+    let title_name = if let Some(disc) = &resolved_disc {
+        let kind = match disc.kind {
+            optical_disc::OpticalDiscKind::Dvd => rust_i18n::t!("video.dvd"),
+            optical_disc::OpticalDiscKind::BluRay => rust_i18n::t!("video.bluray"),
+        };
+        format!("{} ({})", kind, disc.root.display())
+    } else {
+        path.file_name()
+            .map(|v| v.to_string_lossy().to_string())
+            .unwrap_or_else(|| "Media Player".to_string())
+    };
 
     let config_dir = resolve_mpv_ui_config_dir();
     if let Some(dir) = &config_dir {
@@ -514,6 +596,13 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
             let dir_str = mpv_path_string(dir.as_path());
             let _ = init.set_option("config", true);
             let _ = init.set_option("config-dir", dir_str.as_str());
+        }
+
+        // Optical input options must be set before mpv_initialize. Setting them
+        // as runtime properties leaves dvd:// / bd:// without a device and mpv
+        // falls back to its idle screen.
+        if let Some((device_option, device, _)) = &optical_input {
+            init.set_option(device_option, device.as_str())?;
         }
 
         // Borderless window — OSC provides the window controls
@@ -593,9 +682,12 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
     let mut mpv = match mpv {
         Ok(m) => m,
         Err(e) => {
-            let _ = e;
-            log::error!("[VIDEO-PLAYER] Failed to create mpv instance");
+            log::error!("[VIDEO-PLAYER] Failed to initialize mpv: {e:?}");
             diag_error("video_player", "mpv_instance_create_failed", &[]);
+            if source.is_optical_disc() {
+                let message = rust_i18n::t!("video.optical_mpv_failed");
+                show_optical_disc_error(message.as_ref());
+            }
             return Ok(());
         }
     };
@@ -649,16 +741,21 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
     // fullscreen then exiting causes the window to shrink to near-zero.
     let _ = mpv.set_property("auto-window-resize", false);
 
-    // Load and play the file
-    let path_str = mpv_path_string(&path);
+    // Load and play the file or the internally-generated optical-disc protocol.
+    let path_str = if let Some((_, _, input_url)) = &optical_input {
+        (*input_url).to_string()
+    } else {
+        mpv_path_string(path)
+    };
 
     // Audio visualization: showwaves renders a real-time white waveform on
     // black background.  format=pix_fmts=rgb24 strips the alpha channel.
-    let is_audio = path
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .map(crate::infrastructure::windows::is_audio_extension)
-        .unwrap_or(false);
+    let is_audio = !source.is_optical_disc()
+        && path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(crate::infrastructure::windows::is_audio_extension)
+            .unwrap_or(false);
     if is_audio {
         let _ = mpv.set_property(
             "lavfi-complex",
@@ -667,8 +764,7 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
     }
 
     if let Err(e) = mpv.command("loadfile", &[&path_str]) {
-        let _ = (path_str, e);
-        log::error!("[VIDEO-PLAYER] Failed to load media into mpv");
+        log::error!("[VIDEO-PLAYER] Failed to submit media to mpv: {e:?}");
         diag_error(
             "video_player",
             "loadfile_failed",
@@ -684,6 +780,10 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
                 ),
             ],
         );
+        if source.is_optical_disc() {
+            let message = rust_i18n::t!("video.optical_mpv_failed");
+            show_optical_disc_error(message.as_ref());
+        }
         return Ok(());
     }
 
@@ -762,7 +862,7 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
             }
             Some(Ok(mpv::events::Event::ClientMessage(args))) => {
                 if args.first() == Some(&"open-subtitle-picker") {
-                    match load_external_subtitle_for_standalone(&mut mpv, &path) {
+                    match load_external_subtitle_for_standalone(&mut mpv, path) {
                         Ok(true) => {
                             log::debug!(
                                 "[VIDEO-PLAYER] External subtitle loaded from native picker"
@@ -798,6 +898,7 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
                 const REASON_EOF: u32 = mpv::mpv_end_file_reason::Eof;
                 const REASON_STOP: u32 = mpv::mpv_end_file_reason::Stop;
                 const REASON_QUIT: u32 = mpv::mpv_end_file_reason::Quit;
+                const REASON_ERROR: u32 = mpv::mpv_end_file_reason::Error;
 
                 match reason {
                     REASON_EOF => {
@@ -821,6 +922,13 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
                         log::debug!("[VIDEO-PLAYER] EndFile Quit — exiting");
                         break;
                     }
+                    REASON_ERROR if source.is_optical_disc() => {
+                        log::error!("[VIDEO-PLAYER] Failed to open optical disc with mpv");
+                        diag_error("video_player", "optical_disc_load_failed", &[]);
+                        let message = rust_i18n::t!("video.optical_mpv_failed");
+                        show_optical_disc_error(message.as_ref());
+                        break;
+                    }
                     _ => {
                         if eof_reached {
                             log::info!(
@@ -834,6 +942,17 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
             }
             Some(Err(e)) => {
                 log::warn!("[VIDEO-PLAYER] mpv event error: {:?}", e);
+                if source.is_optical_disc()
+                    && matches!(
+                        e,
+                        mpv::Error::Raw(code) if code == mpv::mpv_error::LoadingFailed
+                    )
+                {
+                    diag_error("video_player", "optical_disc_load_failed", &[]);
+                    let message = rust_i18n::t!("video.optical_mpv_failed");
+                    show_optical_disc_error(message.as_ref());
+                    break;
+                }
             }
             _ => {}
         }

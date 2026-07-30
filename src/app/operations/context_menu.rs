@@ -7,6 +7,18 @@ use eframe::egui;
 use rust_i18n::t;
 use std::path::PathBuf;
 
+fn is_optical_disc_context_target(
+    is_empty_area: bool,
+    path_count: usize,
+    is_drive_root: bool,
+    drive_type: Option<crate::infrastructure::windows::DriveType>,
+) -> bool {
+    !is_empty_area
+        && path_count == 1
+        && is_drive_root
+        && drive_type == Some(crate::infrastructure::windows::DriveType::Cdrom)
+}
+
 impl ImageViewerApp {
     pub(crate) fn capture_context_menu_panel_origin(&mut self) {
         let panel = if self.in_inactive_panel_context {
@@ -222,6 +234,23 @@ impl ImageViewerApp {
             .and_then(|idx| self.items.get(idx))
             .map(|item| item.drive_info.is_some())
             .unwrap_or_else(|| drive_target_path.is_some());
+        let target_drive_type = _item_index
+            .and_then(|idx| self.items.get(idx))
+            .and_then(|item| item.drive_info.as_ref())
+            .map(|info| info.drive_type)
+            .or_else(|| {
+                drive_target_path.map(|path| {
+                    crate::infrastructure::windows::detect_drive_type(
+                        path.to_string_lossy().as_ref(),
+                    )
+                })
+            });
+        let can_play_optical_disc = is_optical_disc_context_target(
+            is_empty_area,
+            paths.len(),
+            drive_target_path.is_some(),
+            target_drive_type,
+        );
         // Determine if the target is a file (not a folder, not a drive, not empty area).
         // Archives (.zip, .rar, .7z) have is_dir=true (they're navigable containers)
         // but still support "Open with" as files.
@@ -405,6 +434,13 @@ impl ImageViewerApp {
         } else {
             items.push(ContextMenuItem::separator());
             items.push(ContextMenuItem::new(-20, t!("context_menu.open")).with_svg_icon("folder"));
+            if can_play_optical_disc {
+                items.push(
+                    ContextMenuItem::new(-82, t!("context_menu.play_optical_disc"))
+                        .with_command("play_optical_disc")
+                        .with_svg_icon("play"),
+                );
+            }
             items.push(
                 ContextMenuItem::new(-21, t!("context_menu.open_new_tab"))
                     .with_svg_icon("external-link"),
@@ -878,5 +914,45 @@ impl ImageViewerApp {
             .map(|item| convert_item(ctx, item))
             .collect();
         update_ui_item(&mut self.context_menu.items, item_id as i32, new_subitems);
+    }
+}
+
+#[cfg(test)]
+mod optical_disc_tests {
+    use super::is_optical_disc_context_target;
+    use crate::infrastructure::windows::DriveType;
+
+    #[test]
+    fn offers_playback_only_for_one_optical_drive_root() {
+        assert!(is_optical_disc_context_target(
+            false,
+            1,
+            true,
+            Some(DriveType::Cdrom)
+        ));
+        assert!(!is_optical_disc_context_target(
+            false,
+            2,
+            true,
+            Some(DriveType::Cdrom)
+        ));
+        assert!(!is_optical_disc_context_target(
+            true,
+            1,
+            true,
+            Some(DriveType::Cdrom)
+        ));
+        assert!(!is_optical_disc_context_target(
+            false,
+            1,
+            false,
+            Some(DriveType::Cdrom)
+        ));
+        assert!(!is_optical_disc_context_target(
+            false,
+            1,
+            true,
+            Some(DriveType::Fixed)
+        ));
     }
 }

@@ -471,6 +471,28 @@ impl ImageViewerApp {
         }
     }
 
+    pub fn open_optical_disc_in_standalone_player(
+        &mut self,
+        drive_root: std::path::PathBuf,
+    ) -> bool {
+        use crate::ui::components::media_preview::MediaPreview;
+
+        self.kill_video_player_process();
+
+        if matches!(self.media_preview.as_ref(), Some(MediaPreview::Video(_))) {
+            self.destroy_media_preview();
+        }
+
+        if let Some(child) =
+            crate::video_player::open_optical_disc_player(drive_root, self.session_volume)
+        {
+            self.video_player_process = Some(child);
+            true
+        } else {
+            false
+        }
+    }
+
     fn selected_preview_overlay_action(&self) -> SelectedPreviewOverlayAction {
         let Some(selected) = self.selected_file.as_ref() else {
             return SelectedPreviewOverlayAction::None;

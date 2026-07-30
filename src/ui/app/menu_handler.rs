@@ -726,6 +726,11 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                         open_terminal_admin_at(path);
                     }
                 }
+                -82 => {
+                    if let Some(path) = context_menu.target_paths.first().cloned() {
+                        app.open_optical_disc_in_standalone_player(path);
+                    }
+                }
                 -90 => {}
                 -91 => {
                     if context_menu.origin
