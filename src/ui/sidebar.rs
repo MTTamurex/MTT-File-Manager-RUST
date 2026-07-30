@@ -587,7 +587,7 @@ pub fn render_sidebar_drives(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Opt
                             ui.painter().rect_filled(
                                 bar_rect,
                                 1.0,
-                                crate::ui::theme::DRIVE_USAGE_BACKGROUND_COLOR,
+                                crate::ui::theme::drive_usage_background_color(dark_mode),
                             );
 
                             let filled_width = bar_rect.width() * usage_ratio;

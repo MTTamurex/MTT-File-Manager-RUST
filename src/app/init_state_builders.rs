@@ -1,4 +1,3 @@
-use crate::domain::file_entry::DriveInfo;
 use crate::infrastructure::app_state_db::AppStateDb;
 use crate::ui::cache::FxHashSet;
 use lru::LruCache;
@@ -7,7 +6,9 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64};
 use std::sync::{mpsc, Arc};
 
-use super::drive_state::{DriveScanResult, DriveState};
+use super::drive_state::{
+    DriveInfoRefreshResult, DriveInfoRefreshTracker, DriveScanResult, DriveState,
+};
 use super::file_operation_state::FileOperationState;
 use super::folder_size_state::{FolderSizeMessage, FolderSizeRequest, FolderSizeState};
 use super::layout_state::LayoutState;
@@ -93,8 +94,8 @@ pub(in crate::app) fn build_drive_state(
     cloud_root_rx: mpsc::Receiver<DriveScanResult>,
     drive_scan_tx: mpsc::Sender<DriveScanResult>,
     drive_scan_rx: mpsc::Receiver<DriveScanResult>,
-    drive_info_tx: mpsc::Sender<Vec<(String, DriveInfo)>>,
-    drive_info_rx: mpsc::Receiver<Vec<(String, DriveInfo)>>,
+    drive_info_tx: mpsc::Sender<DriveInfoRefreshResult>,
+    drive_info_rx: mpsc::Receiver<DriveInfoRefreshResult>,
 ) -> DriveState {
     DriveState {
         disks,
@@ -110,8 +111,7 @@ pub(in crate::app) fn build_drive_state(
         drive_info_cache: std::collections::HashMap::new(),
         drive_info_cache_epoch: 0,
         optimistically_hidden_drives: std::collections::HashSet::new(),
-        drive_info_refresh_pending: false,
-        last_drive_info_refresh: std::time::Instant::now(),
+        drive_info_refresh: DriveInfoRefreshTracker::new(std::time::Instant::now()),
     }
 }
 

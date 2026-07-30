@@ -60,10 +60,10 @@ impl ImageViewerApp {
         if saw_device_event {
             // Drive was inserted/removed: clear all drive icon caches so icons are re-extracted
             self.item_icon_loader.clear_drive_icons();
-            // Mounted media can reuse the same drive letter with different capacity/filesystem.
-            // Drop cached volume info so the details panel never shows the previous ISO/DVD.
+            // A different volume can reuse the same letter and label. Treat device
+            // events as an identity boundary instead of merging old metadata.
             self.drive_state.clear_cached_drive_info();
-            self.drive_state.drive_info_refresh_pending = false;
+            self.drive_state.invalidate_drive_info_refreshes();
 
             // Launch async drive scan (non-blocking)
             self.drive_state.last_drive_refresh = Instant::now();

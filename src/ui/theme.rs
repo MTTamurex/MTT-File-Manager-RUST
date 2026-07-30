@@ -49,7 +49,8 @@ pub fn color_dark_hover() -> Color32 {
 // === DRIVE USAGE ===
 pub const DRIVE_USAGE_NORMAL_COLOR: Color32 = Color32::from_rgb(30, 130, 230);
 pub const DRIVE_USAGE_CRITICAL_COLOR: Color32 = Color32::from_rgb(230, 50, 50);
-pub const DRIVE_USAGE_BACKGROUND_COLOR: Color32 = Color32::from_gray(230);
+pub const DRIVE_USAGE_LIGHT_BACKGROUND_COLOR: Color32 = Color32::from_gray(230);
+pub const DRIVE_USAGE_DARK_BACKGROUND_COLOR: Color32 = Color32::from_gray(70);
 pub const DRIVE_USAGE_CRITICAL_RATIO: f32 = 0.9;
 
 pub fn drive_usage_ratio(total_space: u64, free_space: u64) -> Option<f32> {
@@ -66,6 +67,14 @@ pub fn drive_usage_color(usage_ratio: f32) -> Color32 {
         DRIVE_USAGE_CRITICAL_COLOR
     } else {
         DRIVE_USAGE_NORMAL_COLOR
+    }
+}
+
+pub fn drive_usage_background_color(dark_mode: bool) -> Color32 {
+    if dark_mode {
+        DRIVE_USAGE_DARK_BACKGROUND_COLOR
+    } else {
+        DRIVE_USAGE_LIGHT_BACKGROUND_COLOR
     }
 }
 
@@ -207,6 +216,18 @@ mod tests {
         assert_eq!(
             drive_usage_color(above_ninety_percent),
             DRIVE_USAGE_CRITICAL_COLOR
+        );
+    }
+
+    #[test]
+    fn drive_usage_background_adapts_to_theme() {
+        assert_eq!(
+            drive_usage_background_color(false),
+            DRIVE_USAGE_LIGHT_BACKGROUND_COLOR
+        );
+        assert_eq!(
+            drive_usage_background_color(true),
+            DRIVE_USAGE_DARK_BACKGROUND_COLOR
         );
     }
 }

@@ -4,6 +4,12 @@ use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::Instant;
 
+mod drive_info_refresh;
+pub use drive_info_refresh::{
+    merge_drive_info_query, DriveInfoRefreshEntry, DriveInfoRefreshResult, DriveInfoRefreshScope,
+    DriveInfoRefreshTracker,
+};
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DriveScanResult {
     pub disks: Vec<(String, String)>,
@@ -21,14 +27,12 @@ pub struct DriveState {
     pub drive_scan_pending: bool,
     pub drive_scan_rx: Receiver<DriveScanResult>,
     pub drive_scan_tx: Sender<DriveScanResult>,
-    pub drive_info_rx: Receiver<Vec<(String, DriveInfo)>>,
-    pub drive_info_tx: Sender<Vec<(String, DriveInfo)>>,
+    pub drive_info_rx: Receiver<DriveInfoRefreshResult>,
+    pub drive_info_tx: Sender<DriveInfoRefreshResult>,
     pub drive_info_cache: HashMap<String, DriveInfo>,
     pub drive_info_cache_epoch: u64,
     pub optimistically_hidden_drives: HashSet<String>,
-    /// Guards concurrent background volume-info refreshes.
-    pub drive_info_refresh_pending: bool,
-    pub last_drive_info_refresh: Instant,
+    pub drive_info_refresh: DriveInfoRefreshTracker,
 }
 
 impl DriveState {
@@ -58,6 +62,10 @@ impl DriveState {
     pub fn clear_cached_drive_info(&mut self) {
         self.drive_info_cache.clear();
         self.drive_info_cache_epoch = self.drive_info_cache_epoch.wrapping_add(1);
+    }
+
+    pub fn invalidate_drive_info_refreshes(&mut self) {
+        self.drive_info_refresh.invalidate();
     }
 
     pub fn canonical_current_drive(&self, detected_drive: &str) -> Option<String> {
@@ -163,8 +171,7 @@ mod tests {
             drive_info_cache: HashMap::new(),
             drive_info_cache_epoch: 0,
             optimistically_hidden_drives: HashSet::new(),
-            drive_info_refresh_pending: false,
-            last_drive_info_refresh: Instant::now(),
+            drive_info_refresh: DriveInfoRefreshTracker::new(Instant::now()),
         }
     }
 

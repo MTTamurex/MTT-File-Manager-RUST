@@ -5,6 +5,7 @@
 //! - `clipboard_ops`: Copy, cut, paste operations
 //! - `navigation`: Path navigation and history
 //! - `folder_loading`: Async folder scanning and filtering
+//! - `drive_refresh`: Drive discovery and capacity refresh coordination
 //! - `view_setup`: Computer view, recycle bin view setup
 //! - `recycle_bin_ops`: Recycle bin specific operations
 //! - `tabs`: Tab synchronization
@@ -23,6 +24,7 @@
 pub mod clipboard_ops;
 pub mod context_menu;
 pub mod drag_drop;
+pub mod drive_refresh;
 pub mod dual_panel_ops;
 pub mod file_hash;
 pub mod file_ops;

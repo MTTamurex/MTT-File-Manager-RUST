@@ -362,6 +362,7 @@ pub struct VolumeInfo {
     pub file_system: String,
     pub total_space: u64,
     pub free_space: u64,
+    pub capacity_query_succeeded: bool,
 }
 
 /// Gets the label (name) of a Windows volume.
@@ -537,7 +538,7 @@ pub fn get_volume_info(drive_path: &str) -> VolumeInfo {
                 file_system = fs_str;
             }
         } else {
-            log::warn!("[DRIVE-REFRESH] Failed to query drive file system metadata");
+            log::debug!("[DRIVE-REFRESH] Drive file system metadata is temporarily unavailable");
         }
 
         if result.is_ok() {
@@ -545,13 +546,15 @@ pub fn get_volume_info(drive_path: &str) -> VolumeInfo {
                 file_system,
                 total_space: total_bytes,
                 free_space: total_free_bytes,
+                capacity_query_succeeded: true,
             }
         } else {
-            log::warn!("[DRIVE-REFRESH] Failed to query drive capacity; using zeroed space values");
+            log::debug!("[DRIVE-REFRESH] Drive capacity is temporarily unavailable");
             VolumeInfo {
                 file_system,
                 total_space: 0,
                 free_space: 0,
+                capacity_query_succeeded: false,
             }
         }
     }

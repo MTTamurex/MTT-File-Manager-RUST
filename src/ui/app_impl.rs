@@ -55,9 +55,14 @@ fn next_background_repaint(inputs: RepaintDeadlineInputs) -> Duration {
 
 impl ImageViewerApp {
     fn request_next_background_repaint(&self, ctx: &egui::Context) {
+        let local_scope = crate::app::drive_state::DriveInfoRefreshScope::Local;
         let drive_info_refresh_elapsed = (self.show_left_sidebar
             || self.navigation_state.is_computer_view)
-            .then(|| self.drive_state.last_drive_info_refresh.elapsed());
+            .then(|| {
+                (!self.drive_state.drive_info_refresh.is_pending(local_scope))
+                    .then(|| self.drive_state.drive_info_refresh.elapsed(local_scope))
+            })
+            .flatten();
         let deadline = next_background_repaint(RepaintDeadlineInputs {
             file_ops_in_progress: self.file_operation_state.file_ops_in_progress > 0,
             clipboard_cleanup_pending: self

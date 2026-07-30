@@ -1,4 +1,3 @@
-use crate::domain::file_entry::DriveInfo;
 use crate::domain::file_entry::FileEntry;
 use crate::infrastructure::app_state_db::AppStateDb;
 use crate::infrastructure::directory_cache::DirectoryCache;
@@ -120,8 +119,9 @@ pub(in crate::app) struct AppBootstrap {
     pub(in crate::app) cloud_root_rx: mpsc::Receiver<crate::app::drive_state::DriveScanResult>,
     pub(in crate::app) drive_scan_tx: mpsc::Sender<crate::app::drive_state::DriveScanResult>,
     pub(in crate::app) drive_scan_rx: mpsc::Receiver<crate::app::drive_state::DriveScanResult>,
-    pub(in crate::app) drive_info_tx: mpsc::Sender<Vec<(String, DriveInfo)>>,
-    pub(in crate::app) drive_info_rx: mpsc::Receiver<Vec<(String, DriveInfo)>>,
+    pub(in crate::app) drive_info_tx: mpsc::Sender<crate::app::drive_state::DriveInfoRefreshResult>,
+    pub(in crate::app) drive_info_rx:
+        mpsc::Receiver<crate::app::drive_state::DriveInfoRefreshResult>,
 
     /// Custom composed empty folder icon (back+front+paper_sheet).
     /// Used as the default folder icon instead of the Windows yellow folder.

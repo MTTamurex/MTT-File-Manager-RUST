@@ -11,38 +11,6 @@ pub(crate) fn stop_gc_worker() {
     GC_WORKER_RUNNING.store(false, Ordering::Relaxed);
 }
 
-pub(in crate::app) fn spawn_startup_drive_info_preload(
-    disks_snapshot: Vec<String>,
-    tx: mpsc::Sender<Vec<(String, crate::domain::file_entry::DriveInfo)>>,
-    ctx: egui::Context,
-) {
-    std::thread::spawn(move || {
-        use crate::domain::file_entry::DriveInfo;
-        use crate::infrastructure::windows::{get_volume_info, query_hardware_fields};
-        let mut results = Vec::new();
-        for path in &disks_snapshot {
-            let vol = get_volume_info(path);
-            let drive_type = crate::infrastructure::windows::detect_drive_type(path);
-            let hw = query_hardware_fields(path, drive_type);
-            results.push((
-                path.clone(),
-                DriveInfo {
-                    file_system: vol.file_system,
-                    total_space: vol.total_space,
-                    free_space: vol.free_space,
-                    drive_type,
-                    model: hw.model,
-                    serial_number: hw.serial_number,
-                    firmware_revision: hw.firmware_revision,
-                    bus_type: hw.bus_type,
-                },
-            ));
-        }
-        let _ = tx.send(results);
-        ctx.request_repaint();
-    });
-}
-
 pub(in crate::app) fn spawn_incremental_gc_worker(
     disk_cache: Arc<ThumbnailDiskCache>,
     app_state_db: Arc<AppStateDb>,

@@ -1,6 +1,7 @@
 use eframe::egui;
 
-use super::init_workers::{spawn_incremental_gc_worker, spawn_startup_drive_info_preload};
+use super::drive_state::DriveInfoRefreshScope;
+use super::init_workers::spawn_incremental_gc_worker;
 use super::state::ImageViewerApp;
 
 impl ImageViewerApp {
@@ -8,17 +9,13 @@ impl ImageViewerApp {
         let start = std::time::Instant::now();
         self.watch_current_folder();
 
-        let disks_snapshot: Vec<String> = self
-            .drive_state
-            .disks
-            .iter()
-            .map(|(p, _)| p.clone())
-            .collect();
-        spawn_startup_drive_info_preload(
-            disks_snapshot,
-            self.drive_state.drive_info_tx.clone(),
-            ctx.clone(),
-        );
+        let refresh = &self.drive_state.drive_info_refresh;
+        if !self.navigation_state.is_computer_view
+            && !refresh.is_pending(DriveInfoRefreshScope::Local)
+            && !refresh.is_pending(DriveInfoRefreshScope::Remote)
+        {
+            self.refresh_drive_info_async();
+        }
 
         spawn_incremental_gc_worker(
             self.disk_cache.clone(),

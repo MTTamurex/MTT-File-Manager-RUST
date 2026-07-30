@@ -68,7 +68,7 @@ pub(super) fn render_drive_slot<O: ItemSlotOperations>(
         ui.painter().rect_filled(
             bar_rect,
             2.0,
-            crate::ui::theme::DRIVE_USAGE_BACKGROUND_COLOR,
+            crate::ui::theme::drive_usage_background_color(ui.visuals().dark_mode),
         );
 
         let filled_w = progress_w * usage_ratio;
