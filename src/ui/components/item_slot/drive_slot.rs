@@ -56,25 +56,20 @@ pub(super) fn render_drive_slot<O: ItemSlotOperations>(
     current_y += icon_size + 8.0;
 
     // 2. PROGRESS BAR (Used Space)
-    if drive_info.total_space > 0 {
+    if let Some(usage_ratio) =
+        crate::ui::theme::drive_usage_ratio(drive_info.total_space, drive_info.free_space)
+    {
         let bar_rect = egui::Rect::from_center_size(
             egui::pos2(rect.center().x, current_y + 6.0),
             egui::vec2(progress_w, 12.0),
         );
 
-        let used_space = drive_info.total_space - drive_info.free_space;
-        let usage_ratio = used_space as f32 / drive_info.total_space as f32;
-
-        // Bar color: blue or red if nearly full (> 90%)
-        let bar_color = if usage_ratio > 0.9 {
-            egui::Color32::from_rgb(230, 50, 50) // Red
-        } else {
-            egui::Color32::from_rgb(30, 130, 230) // Windows Blue
-        };
-
-        let bg_color = egui::Color32::from_gray(230);
-
-        ui.painter().rect_filled(bar_rect, 2.0, bg_color);
+        let bar_color = crate::ui::theme::drive_usage_color(usage_ratio);
+        ui.painter().rect_filled(
+            bar_rect,
+            2.0,
+            crate::ui::theme::DRIVE_USAGE_BACKGROUND_COLOR,
+        );
 
         let filled_w = progress_w * usage_ratio;
         let filled_rect = egui::Rect::from_min_size(bar_rect.min, egui::vec2(filled_w, 12.0));

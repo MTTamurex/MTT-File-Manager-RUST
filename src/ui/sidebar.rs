@@ -1,5 +1,6 @@
 use crate::app::state::sidebar_tree_state::SidebarTreeState;
 use crate::domain::cloud_root::CloudRoot;
+use crate::domain::file_entry::DriveInfo;
 use crate::domain::file_tag::FileTag;
 use crate::domain::pinned_folder::PinnedFolder;
 use crate::infrastructure::windows::{detect_drive_type, DriveType};
@@ -37,6 +38,7 @@ pub fn invalidate_drive_type_cache() {
 /// Context for sidebar rendering
 pub struct SidebarContext<'a> {
     pub disks: &'a [(String, String)], // (path, label)
+    pub drive_info_cache: &'a HashMap<String, DriveInfo>,
     pub cloud_roots: &'a [CloudRoot],
     pub current_path: &'a str,
     pub highlighted_drive_path: Option<&'a str>,
@@ -438,9 +440,15 @@ pub fn render_sidebar_drives(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Opt
             let is_expanded = ctx.tree_state.is_expanded(root_path);
             let is_tree_loading = ctx.tree_state.is_loading(root_path);
             let show_eject_button = ctx.mounted_iso_drives.contains_key(disk_path.as_str());
+            let usage_ratio = ctx
+                .drive_info_cache
+                .get(disk_path.as_str())
+                .and_then(|info| {
+                    crate::ui::theme::drive_usage_ratio(info.total_space, info.free_space)
+                });
 
             let (mut rect, response) =
-                ui.allocate_exact_size(egui::vec2(ui.available_width(), 28.0), Sense::click());
+                ui.allocate_exact_size(egui::vec2(ui.available_width(), 32.0), Sense::click());
 
             rect.min.x = ui.max_rect().min.x;
             rect.max.x = ui.max_rect().max.x;
@@ -551,7 +559,7 @@ pub fn render_sidebar_drives(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Opt
 
                 if !is_inline_renaming {
                     ui.painter().text(
-                        Pos2::new(cursor_x, rect.center().y),
+                        Pos2::new(cursor_x, rect.min.y + 11.0),
                         egui::Align2::LEFT_CENTER,
                         disk_label,
                         egui::FontId::proportional(11.5),
@@ -561,6 +569,41 @@ pub fn render_sidebar_drives(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Opt
                             ui.visuals().text_color()
                         },
                     );
+
+                    if let Some(usage_ratio) = usage_ratio {
+                        let content_right = if show_eject_button {
+                            eject_rect.min.x - 4.0
+                        } else {
+                            rect.max.x - 8.0
+                        };
+
+                        if content_right > cursor_x {
+                            let available_width = content_right - cursor_x;
+                            let bar_width = (rect.width() * 0.5).min(available_width);
+                            let bar_rect = Rect::from_min_max(
+                                Pos2::new(cursor_x, rect.min.y + 22.0),
+                                Pos2::new(cursor_x + bar_width, rect.min.y + 26.0),
+                            );
+                            ui.painter().rect_filled(
+                                bar_rect,
+                                1.0,
+                                crate::ui::theme::DRIVE_USAGE_BACKGROUND_COLOR,
+                            );
+
+                            let filled_width = bar_rect.width() * usage_ratio;
+                            if filled_width > 0.0 {
+                                let filled_rect = Rect::from_min_size(
+                                    bar_rect.min,
+                                    egui::vec2(filled_width, bar_rect.height()),
+                                );
+                                ui.painter().rect_filled(
+                                    filled_rect,
+                                    1.0,
+                                    crate::ui::theme::drive_usage_color(usage_ratio),
+                                );
+                            }
+                        }
+                    }
 
                     if let Some(eject_response) = eject_response.as_ref() {
                         let eject_color = if eject_response.hovered() {
@@ -591,8 +634,8 @@ pub fn render_sidebar_drives(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Opt
                 let text_edit_id = egui::Id::new("sidebar_drive_rename");
                 let mut buf = edit_text.to_string();
                 let text_rect = Rect::from_min_size(
-                    Pos2::new(rect.min.x + 36.0, rect.min.y + 2.0),
-                    egui::vec2(rect.width() - 44.0, rect.height() - 4.0),
+                    Pos2::new(rect.min.x + 36.0, rect.min.y + 3.0),
+                    egui::vec2(rect.width() - 44.0, 26.0),
                 );
                 let te = ui.put(
                     text_rect,
@@ -676,7 +719,7 @@ pub fn render_sidebar_drives(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Opt
                 }
             }
 
-            ui.add_space(2.0);
+            ui.add_space(1.0);
 
             // ── Folder tree under this drive (if expanded) ──
             // Always render the tree for visual consistency. Only capture

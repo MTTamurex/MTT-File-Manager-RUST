@@ -55,9 +55,8 @@ fn next_background_repaint(inputs: RepaintDeadlineInputs) -> Duration {
 
 impl ImageViewerApp {
     fn request_next_background_repaint(&self, ctx: &egui::Context) {
-        let drive_info_refresh_elapsed = self
-            .navigation_state
-            .is_computer_view
+        let drive_info_refresh_elapsed = (self.show_left_sidebar
+            || self.navigation_state.is_computer_view)
             .then(|| self.drive_state.last_drive_info_refresh.elapsed());
         let deadline = next_background_repaint(RepaintDeadlineInputs {
             file_ops_in_progress: self.file_operation_state.file_ops_in_progress > 0,

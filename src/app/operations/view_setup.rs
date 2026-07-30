@@ -625,9 +625,8 @@ impl ImageViewerApp {
             }
         }
 
-        // While in computer view, periodically refresh volume info (free/total space)
-        // so drive slots update without requiring the user to leave and re-enter.
-        if self.navigation_state.is_computer_view
+        // Keep visible drive capacity indicators current without blocking rendering.
+        if (self.navigation_state.is_computer_view || self.show_left_sidebar)
             && !self.drive_state.drive_info_refresh_pending
             && self.drive_state.last_drive_info_refresh.elapsed()
                 >= Duration::from_millis(DRIVE_INFO_REFRESH_INTERVAL_MS)

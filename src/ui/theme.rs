@@ -46,6 +46,29 @@ pub fn color_dark_hover() -> Color32 {
     Color32::from_white_alpha(25)
 }
 
+// === DRIVE USAGE ===
+pub const DRIVE_USAGE_NORMAL_COLOR: Color32 = Color32::from_rgb(30, 130, 230);
+pub const DRIVE_USAGE_CRITICAL_COLOR: Color32 = Color32::from_rgb(230, 50, 50);
+pub const DRIVE_USAGE_BACKGROUND_COLOR: Color32 = Color32::from_gray(230);
+pub const DRIVE_USAGE_CRITICAL_RATIO: f32 = 0.9;
+
+pub fn drive_usage_ratio(total_space: u64, free_space: u64) -> Option<f32> {
+    if total_space == 0 {
+        return None;
+    }
+
+    let used_space = total_space.saturating_sub(free_space);
+    Some((used_space as f64 / total_space as f64).clamp(0.0, 1.0) as f32)
+}
+
+pub fn drive_usage_color(usage_ratio: f32) -> Color32 {
+    if usage_ratio > DRIVE_USAGE_CRITICAL_RATIO {
+        DRIVE_USAGE_CRITICAL_COLOR
+    } else {
+        DRIVE_USAGE_NORMAL_COLOR
+    }
+}
+
 // === Dark-mode-aware color access ===
 pub fn text_color(dark_mode: bool) -> Color32 {
     if dark_mode {
@@ -158,3 +181,32 @@ pub const ICON_VIEW_DETAILS: &str = "view_details";
 pub const ICON_VIEW_MILLER: &str = "view_miller";
 pub const ICON_FOLDER: &str = "\u{ED9F}"; // Folder (folder-line)
 pub const ICON_FILE: &str = "\u{ECD3}"; // File (file-line)
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn drive_usage_ratio_handles_capacity_boundaries() {
+        assert_eq!(drive_usage_ratio(0, 0), None);
+        assert_eq!(drive_usage_ratio(100, 100), Some(0.0));
+        assert_eq!(drive_usage_ratio(100, 0), Some(1.0));
+    }
+
+    #[test]
+    fn drive_usage_ratio_handles_free_space_above_total() {
+        assert_eq!(drive_usage_ratio(100, 120), Some(0.0));
+    }
+
+    #[test]
+    fn drive_usage_becomes_critical_only_above_ninety_percent() {
+        let ninety_percent = drive_usage_ratio(100, 10).unwrap();
+        let above_ninety_percent = drive_usage_ratio(100, 9).unwrap();
+
+        assert_eq!(drive_usage_color(ninety_percent), DRIVE_USAGE_NORMAL_COLOR);
+        assert_eq!(
+            drive_usage_color(above_ninety_percent),
+            DRIVE_USAGE_CRITICAL_COLOR
+        );
+    }
+}

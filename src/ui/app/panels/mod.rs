@@ -166,6 +166,7 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, root_ui: &mut egui::Ui) -> Opt
             let top_action = {
                 let mut sidebar_ctx = SidebarContext {
                     disks: &app.drive_state.disks,
+                    drive_info_cache: &app.drive_state.drive_info_cache,
                     cloud_roots: &app.drive_state.cloud_roots,
                     current_path: &app.navigation_state.current_path,
                     highlighted_drive_path,
@@ -253,6 +254,7 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, root_ui: &mut egui::Ui) -> Opt
 
             let mut sidebar_ctx = SidebarContext {
                 disks: &app.drive_state.disks,
+                drive_info_cache: &app.drive_state.drive_info_cache,
                 cloud_roots: &app.drive_state.cloud_roots,
                 current_path: &app.navigation_state.current_path,
                 highlighted_drive_path,
