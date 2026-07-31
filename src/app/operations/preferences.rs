@@ -160,6 +160,15 @@ impl ImageViewerApp {
             .to_string(),
         ));
         prefs.push((
+            "show_quick_access",
+            (if self.show_quick_access {
+                "true"
+            } else {
+                "false"
+            })
+            .to_string(),
+        ));
+        prefs.push((
             "show_tags",
             (if self.show_tags { "true" } else { "false" }).to_string(),
         ));

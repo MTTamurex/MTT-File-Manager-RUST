@@ -12,6 +12,7 @@ pub struct SettingsWindowOutput {
     pub theme_changed: bool,
     pub backend_changed: bool,
     pub shortcuts_changed: bool,
+    pub quick_access_changed: bool,
     pub recycle_bin_changed: bool,
     pub tags_changed: bool,
     pub diagnostic_mode_changed: bool,
@@ -56,6 +57,7 @@ pub fn render_settings_window(
     let mut theme_changed = false;
     let mut backend_changed = false;
     let mut shortcuts_changed = false;
+    let mut quick_access_changed = false;
     let mut recycle_bin_changed = false;
     let mut tags_changed = false;
     let mut diagnostic_mode_changed = false;
@@ -154,6 +156,12 @@ pub fn render_settings_window(
                                     ui.add_space(16.0);
                                     theme_changed |= crate::ui::components::appearance_settings::render_appearance_settings_section(ui, &mut app.theme_mode);
                                     ui.add_space(16.0);
+                                    ui.label(RichText::new(t!("settings.show_quick_access_sidebar").to_string()).strong().color(theme::text_color(dark_mode)));
+                                    ui.add_space(4.0);
+                                    if ui.checkbox(&mut app.show_quick_access, RichText::new(t!("settings.show_quick_access_sidebar")).color(theme::text_color(dark_mode))).changed() {
+                                        quick_access_changed = true;
+                                    }
+                                    ui.add_space(12.0);
                                     ui.label(RichText::new(t!("settings.show_recycle_bin").to_string()).strong().color(theme::text_color(dark_mode)));
                                     ui.add_space(4.0);
                                     if ui.checkbox(&mut app.show_recycle_bin, RichText::new(t!("settings.show_recycle_bin")).color(theme::text_color(dark_mode))).changed() {
@@ -238,6 +246,7 @@ pub fn render_settings_window(
         theme_changed,
         backend_changed,
         shortcuts_changed,
+        quick_access_changed,
         recycle_bin_changed,
         tags_changed,
         diagnostic_mode_changed,

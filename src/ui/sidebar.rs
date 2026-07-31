@@ -52,6 +52,7 @@ pub struct SidebarContext<'a> {
     pub is_folder_dragging: bool, // A folder is being dragged from the main content area
     pub dragging_path: Option<&'a str>, // Path of the folder being dragged
     pub show_recycle_bin: bool,
+    pub show_quick_access: bool,
     pub show_tags: bool,
     pub collapse_quick_access: bool,
     pub collapse_cloud_drives: bool,
@@ -185,6 +186,10 @@ pub fn render_sidebar_fixed_top(
 
     ui.add_space(4.0);
     ui.separator();
+
+    if !ctx.show_quick_access {
+        return action;
+    }
     ui.add_space(8.0);
 
     // === QUICK ACCESS ===

@@ -341,6 +341,7 @@ settings:
   theme_light: "Light"
   theme_dark: "Dark"
   theme_apply_immediately: "Theme changes are applied immediately."
+  show_quick_access_sidebar: "Show Quick Access in sidebar"
   show_recycle_bin: "Show Recycle Bin in Quick Access"
   diagnostics: "Diagnostics"
   diagnostics_description: "Write only anonymous technical diagnostics to the file, without file names, folder names, or full paths."

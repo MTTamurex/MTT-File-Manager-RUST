@@ -203,6 +203,7 @@ impl ImageViewerApp {
             session_volume,
             show_hidden_files,
             show_recycle_bin,
+            show_quick_access,
             show_tags,
             language,
             theme_mode,
@@ -382,6 +383,7 @@ impl ImageViewerApp {
             show_left_sidebar,  // Loaded from SQLite
             show_preview_panel, // Loaded from SQLite
             show_recycle_bin,   // Loaded from SQLite
+            show_quick_access,  // Loaded from SQLite
             show_tags,          // Loaded from SQLite
             collapse_quick_access: false,
             collapse_cloud_drives: false,

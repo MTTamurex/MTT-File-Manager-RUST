@@ -423,6 +423,10 @@ impl eframe::App for ImageViewerApp {
                 self.save_preferences();
                 self.force_save_preferences();
             }
+            if output.quick_access_changed {
+                self.save_preferences();
+                self.force_save_preferences();
+            }
             if output.recycle_bin_changed {
                 self.save_preferences();
                 self.force_save_preferences();

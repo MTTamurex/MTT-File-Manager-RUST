@@ -26,6 +26,7 @@ pub(super) struct StartupPreferences {
     pub(super) session_volume: f32,
     pub(super) show_hidden_files: bool,
     pub(super) show_recycle_bin: bool,
+    pub(super) show_quick_access: bool,
     pub(super) show_tags: bool,
     pub(super) language: String,
     pub(super) theme_mode: ThemeMode,
@@ -179,6 +180,11 @@ impl StartupPreferences {
             .map(|s| s != "false")
             .unwrap_or(true);
 
+        let show_quick_access = prefs
+            .get("show_quick_access")
+            .map(|s| s != "false")
+            .unwrap_or(true);
+
         let show_tags = prefs.get("show_tags").map(|s| s != "false").unwrap_or(true);
 
         let language = if let Some(saved) = prefs.get("language").cloned() {
@@ -317,6 +323,7 @@ impl StartupPreferences {
             session_volume,
             show_hidden_files,
             show_recycle_bin,
+            show_quick_access,
             show_tags,
             language,
             theme_mode,
@@ -335,5 +342,32 @@ impl StartupPreferences {
             sidebar_tags_height,
             sidebar_tag_order,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::StartupPreferences;
+    use crate::infrastructure::app_state_db::AppStateDb;
+
+    fn test_db() -> AppStateDb {
+        let db = AppStateDb::new_in_memory().unwrap();
+        db.set_preference("language", "en").unwrap();
+        db
+    }
+
+    #[test]
+    fn quick_access_is_visible_when_preference_is_missing() {
+        let db = test_db();
+
+        assert!(StartupPreferences::load(&db).show_quick_access);
+    }
+
+    #[test]
+    fn quick_access_is_hidden_when_preference_is_false() {
+        let db = test_db();
+        db.set_preference("show_quick_access", "false").unwrap();
+
+        assert!(!StartupPreferences::load(&db).show_quick_access);
     }
 }
