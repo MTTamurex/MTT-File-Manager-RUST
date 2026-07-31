@@ -477,20 +477,28 @@ impl ImageViewerApp {
     ) -> bool {
         use crate::ui::components::media_preview::MediaPreview;
 
-        self.kill_video_player_process();
+        let launch_volume = self
+            .app_state_db
+            .get_preference("media_volume")
+            .and_then(|value| value.parse::<f32>().ok())
+            .unwrap_or(self.session_volume)
+            .clamp(0.0, 1.0);
+        let Some(child) = crate::video_player::open_optical_disc_player(drive_root, launch_volume)
+        else {
+            self.notifications
+                .push(crate::application::AppNotification::error(
+                    rust_i18n::t!("video.optical_launch_failed").to_string(),
+                ));
+            return false;
+        };
 
+        self.kill_video_player_process();
         if matches!(self.media_preview.as_ref(), Some(MediaPreview::Video(_))) {
             self.destroy_media_preview();
         }
 
-        if let Some(child) =
-            crate::video_player::open_optical_disc_player(drive_root, self.session_volume)
-        {
-            self.video_player_process = Some(child);
-            true
-        } else {
-            false
-        }
+        self.video_player_process = Some(child);
+        true
     }
 
     fn selected_preview_overlay_action(&self) -> SelectedPreviewOverlayAction {

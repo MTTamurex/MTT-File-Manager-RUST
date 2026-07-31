@@ -508,8 +508,51 @@ pub fn run_standalone(path: PathBuf, position: f64, volume: f32) -> eframe::Resu
     run_standalone_source(PlaybackSource::File(path), position, volume)
 }
 
+#[cfg(all(target_os = "windows", not(debug_assertions)))]
+fn initialize_optical_disc_crt_streams() {
+    use std::ffi::{c_char, c_void};
+    use windows::Win32::System::Console::{
+        AllocConsole, AttachConsole, GetConsoleWindow, ATTACH_PARENT_PROCESS,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::{ShowWindow, SW_HIDE};
+
+    unsafe extern "C" {
+        fn __acrt_iob_func(index: u32) -> *mut c_void;
+        fn freopen_s(
+            reopened: *mut *mut c_void,
+            filename: *const c_char,
+            mode: *const c_char,
+            stream: *mut c_void,
+        ) -> i32;
+    }
+
+    // A GUI-subsystem process has no console, but libdvdnav's Windows backend
+    // expects one while opening physical media. Preserve a parent's console for
+    // command-line diagnostics; otherwise create and immediately hide our own.
+    if unsafe { AttachConsole(ATTACH_PARENT_PROCESS) }.is_err() && unsafe { AllocConsole() }.is_ok()
+    {
+        let console_window = unsafe { GetConsoleWindow() };
+        if !console_window.0.is_null() {
+            let _ = unsafe { ShowWindow(console_window, SW_HIDE) };
+        }
+    }
+
+    // Ensure the C streams used by libdvdnav remain valid even after hiding the
+    // private console window.
+    for (index, mode) in [(0, c"r"), (1, c"w"), (2, c"w")] {
+        let stream = unsafe { __acrt_iob_func(index) };
+        let mut reopened = std::ptr::null_mut();
+        unsafe {
+            let _ = freopen_s(&mut reopened, c"NUL".as_ptr(), mode.as_ptr(), stream);
+        }
+    }
+}
+
 /// Entry point for standalone optical-disc playback.
 pub fn run_standalone_optical_disc(path: PathBuf, volume: f32) -> eframe::Result<()> {
+    #[cfg(all(target_os = "windows", not(debug_assertions)))]
+    initialize_optical_disc_crt_streams();
+
     run_standalone_source(PlaybackSource::OpticalDisc(path), 0.0, volume)
 }
 
@@ -586,7 +629,10 @@ fn run_standalone_source(source: PlaybackSource, position: f64, volume: f32) -> 
         );
     }
 
-    let osc_script_opts = build_mpv_osc_script_opts(STANDALONE_OSC_BASE_SCRIPT_OPTS);
+    let mut osc_script_opts = build_mpv_osc_script_opts(STANDALONE_OSC_BASE_SCRIPT_OPTS);
+    if source.is_optical_disc() {
+        osc_script_opts.push_str(",osc-opticaldisc=yes");
+    }
 
     // Create mpv with initializer options (set before mpv_initialize).
     let mpv = mpv::Mpv::with_initializer(|init| {
@@ -651,13 +697,20 @@ fn run_standalone_source(source: PlaybackSource, position: f64, volume: f32) -> 
             log::warn!("[VIDEO-PLAYER] Failed to set script-opts: {:?}", e);
         }
 
-        // force-window must be set at init time so the mpv window exists
-        // when modernH.lua initializes — setting it as a runtime property
-        // causes the window to appear AFTER script init, which leaves the OSC
-        // show/hide key bindings in an inconsistent state (disabled during idle,
-        // not reliably re-enabled on file load).
-        if let Err(e) = init.set_option("force-window", true) {
-            log::warn!("[VIDEO-PLAYER] Failed to set force-window=yes: {:?}", e);
+        // Optical drives can spend tens of seconds authenticating and scanning
+        // titles. `immediate` creates the window before that work begins so the
+        // player can show a loading state instead of appearing unresponsive.
+        let force_window = if source.is_optical_disc() {
+            "immediate"
+        } else {
+            "yes"
+        };
+        if let Err(e) = init.set_option("force-window", force_window) {
+            log::warn!(
+                "[VIDEO-PLAYER] Failed to set force-window={}: {:?}",
+                force_window,
+                e
+            );
         }
 
         // Window sizing — set at init time so the VO uses the correct dimensions
@@ -763,6 +816,13 @@ fn run_standalone_source(source: PlaybackSource, position: f64, volume: f32) -> 
         );
     }
 
+    // `force-window=immediate` creates the optical loading window before
+    // `loadfile`, which can block for several seconds while libdvdnav scans.
+    #[cfg(target_os = "windows")]
+    if source.is_optical_disc() {
+        set_mpv_window_icon(&mpv);
+    }
+
     if let Err(e) = mpv.command("loadfile", &[&path_str]) {
         log::error!("[VIDEO-PLAYER] Failed to submit media to mpv: {e:?}");
         diag_error(
@@ -787,30 +847,10 @@ fn run_standalone_source(source: PlaybackSource, position: f64, volume: f32) -> 
         return Ok(());
     }
 
-    log::info!(
-        "[VIDEO-PLAYER] Starting playback (pos={:.1}s, vol={:.0}%)",
-        position,
-        volume * 100.0
-    );
-    diag_info(
-        "video_player",
-        "playback_started",
-        &[
-            field_bool("is_audio", is_audio),
-            field_u64(
-                "requested_start_ms",
-                (position.max(0.0) * 1000.0).round() as u64,
-            ),
-            field_u64(
-                "volume_percent",
-                (volume.clamp(0.0, 1.0) * 100.0).round() as u64,
-            ),
-        ],
-    );
-
     // Event loop — blocks until mpv shuts down (user closes window or presses 'q')
     let mut seek_applied = false;
     let mut eof_reached = false;
+    let mut file_loaded = false;
     let mut last_known_volume_pct = (volume * 100.0).clamp(0.0, 100.0);
     loop {
         let event = mpv.wait_event(1.0);
@@ -824,7 +864,32 @@ fn run_standalone_source(source: PlaybackSource, position: f64, volume: f32) -> 
                 log::debug!("[VIDEO-PLAYER] mpv shutdown event received");
                 break;
             }
+            Some(Ok(mpv::events::Event::StartFile)) => {
+                file_loaded = false;
+            }
             Some(Ok(mpv::events::Event::FileLoaded)) => {
+                file_loaded = true;
+                log::info!(
+                    "[VIDEO-PLAYER] Playback loaded (pos={:.1}s, vol={:.0}%)",
+                    position,
+                    volume * 100.0
+                );
+                diag_info(
+                    "video_player",
+                    "playback_started",
+                    &[
+                        field_bool("is_audio", is_audio),
+                        field_u64(
+                            "requested_start_ms",
+                            (position.max(0.0) * 1000.0).round() as u64,
+                        ),
+                        field_u64(
+                            "volume_percent",
+                            (volume.clamp(0.0, 1.0) * 100.0).round() as u64,
+                        ),
+                    ],
+                );
+
                 // Set our app icon on the mpv window (replaces default mpv icon)
                 #[cfg(target_os = "windows")]
                 set_mpv_window_icon(&mpv);
@@ -898,7 +963,6 @@ fn run_standalone_source(source: PlaybackSource, position: f64, volume: f32) -> 
                 const REASON_EOF: u32 = mpv::mpv_end_file_reason::Eof;
                 const REASON_STOP: u32 = mpv::mpv_end_file_reason::Stop;
                 const REASON_QUIT: u32 = mpv::mpv_end_file_reason::Quit;
-                const REASON_ERROR: u32 = mpv::mpv_end_file_reason::Error;
 
                 match reason {
                     REASON_EOF => {
@@ -922,13 +986,6 @@ fn run_standalone_source(source: PlaybackSource, position: f64, volume: f32) -> 
                         log::debug!("[VIDEO-PLAYER] EndFile Quit — exiting");
                         break;
                     }
-                    REASON_ERROR if source.is_optical_disc() => {
-                        log::error!("[VIDEO-PLAYER] Failed to open optical disc with mpv");
-                        diag_error("video_player", "optical_disc_load_failed", &[]);
-                        let message = rust_i18n::t!("video.optical_mpv_failed");
-                        show_optical_disc_error(message.as_ref());
-                        break;
-                    }
                     _ => {
                         if eof_reached {
                             log::info!(
@@ -942,12 +999,7 @@ fn run_standalone_source(source: PlaybackSource, position: f64, volume: f32) -> 
             }
             Some(Err(e)) => {
                 log::warn!("[VIDEO-PLAYER] mpv event error: {:?}", e);
-                if source.is_optical_disc()
-                    && matches!(
-                        e,
-                        mpv::Error::Raw(code) if code == mpv::mpv_error::LoadingFailed
-                    )
-                {
+                if source.is_optical_disc() && optical_disc::event_error_is_fatal(file_loaded, &e) {
                     diag_error("video_player", "optical_disc_load_failed", &[]);
                     let message = rust_i18n::t!("video.optical_mpv_failed");
                     show_optical_disc_error(message.as_ref());

@@ -103,7 +103,10 @@ pub fn detect_pre_mounted_isos() -> HashMap<String, PathBuf> {
     result
 }
 
-fn backing_iso_for_drive(drive: &str) -> Option<PathBuf> {
+/// Resolves the ISO file backing a Windows virtual optical drive.
+///
+/// This opens the volume handle and must not run on the UI thread.
+pub(crate) fn backing_iso_for_drive(drive: &str) -> Option<PathBuf> {
     let device_path = format!("\\\\.\\{}", drive.trim_end_matches(['\\', '/']));
     let device_path_wide: Vec<u16> = device_path
         .encode_utf16()

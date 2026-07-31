@@ -24,6 +24,7 @@
 - **Dedicated image viewer** — Separate process with a bounded sliding-window GPU texture cache, hidden-first startup, and multi-threaded decoding
 - **Text viewer** — Separate process for plain text, code, logs, and markup files using the same lightweight viewer runtime as the image/PDF viewers
 - **Video player** — Standalone mpv-based player with D3D11 GPU pipeline, DVD/Blu-ray playback from an optical drive's context menu, 5% volume steps with Up/Down, and five-second seeking with the mouse wheel
+- **Optical media limitations** — DVD menus are not supported; protected DVDs depend on libdvdcss and physical-drive access, while AACS-protected Blu-rays require externally configured libaacs and keys
 - **Audio playback & metadata** — Audio-only files open in the standalone mpv player with real-time waveform visualization; the preview panel extracts codec, bitrate, channels, sample rate, and music tags
 - **PDF viewer** — Native pdfium-based viewer with asynchronous document loading, prioritized progressive rendering, virtualized pages and thumbnails, bounded texture caching, and keyboard navigation in the thumbnail sidebar
 - **Smart thumbnails** — Multi-stage generation: image crate → WIC → Shell API → Media Foundation

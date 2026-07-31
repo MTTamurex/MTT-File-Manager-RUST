@@ -405,7 +405,8 @@ video:
   optical_invalid_root: "The selected source is not a valid drive root."
   optical_not_drive: "The selected drive is not an optical drive."
   optical_no_layout: "No DVD (VIDEO_TS) or Blu-ray (BDMV) video structure was found. Check that video media is present in the drive."
-  optical_mpv_failed: "MPV could not open the media. Commercial AACS-protected Blu-rays require externally configured libaacs and keys."
+  optical_mpv_failed: "MPV could not open the media. CSS-protected DVDs require libdvdcss and physical-drive access; AACS-protected Blu-rays require externally configured libaacs and keys."
+  optical_launch_failed: "The player could not be started for this optical drive."
 vdrive_settings:
   window_title: "⚙ Virtual Drive Configuration"
   title: "Virtual Drive Optimization"

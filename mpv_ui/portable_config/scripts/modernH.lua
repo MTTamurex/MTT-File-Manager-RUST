@@ -55,6 +55,7 @@ local user_opts = {
     compactscale = true,        -- shrink OSC controls when aspect ratio leaves little horizontal room
     compactscalemin = 0.72,     -- minimum automatic compact scale
     compactscalethreshold = 1100, -- playresx below this starts compacting controls
+    opticaldisc = false,        -- show optical-media loading text on the idle screen
 }
 
 -- Icons for jump button depending on jumpamount 
@@ -87,6 +88,7 @@ local icons = {
 local language = {
 	['eng'] = {
 	    welcome = '{\\fs24\\1c&H0&\\1c&HFFFFFF&}Drop files or URLs to play here.',  -- this text appears when mpv starts
+        loading_disc = '{\\fs24\\1c&H0&\\1c&HFFFFFF&}Reading optical media... This may take a few seconds.',
         on = 'ON',
 		off = 'OFF',
 		na = 'n/a',
@@ -120,6 +122,7 @@ local language = {
     },
     ['pt-BR'] = {
         welcome = '{\\fs24\\1c&H0&\\1c&HFFFFFF&}Solte arquivos ou URLs aqui para reproduzir.',
+        loading_disc = '{\\fs24\\1c&H0&\\1c&HFFFFFF&}Lendo mídia óptica... Isso pode levar alguns segundos.',
         on = 'Ligado',
         off = 'Desligado',
         na = 'n/d',
@@ -240,6 +243,9 @@ end
 opt.read_options(user_opts, 'osc', function(list) update_options(list) end)
 -- apply lang opts
 local texts = resolve_language(user_opts.language)
+if user_opts.opticaldisc then
+    texts.welcome = texts.loading_disc or language['eng'].loading_disc
+end
 if user_opts.chapter_fmt == default_chapter_fmt then
     user_opts.chapter_fmt = texts.chapter_title_fmt
 end

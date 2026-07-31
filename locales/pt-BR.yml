@@ -405,7 +405,8 @@ video:
   optical_invalid_root: "A origem selecionada não é a raiz de uma unidade válida."
   optical_not_drive: "A unidade selecionada não é uma unidade óptica."
   optical_no_layout: "Nenhuma estrutura de vídeo DVD (VIDEO_TS) ou Blu-ray (BDMV) foi encontrada. Verifique se há uma mídia de vídeo na unidade."
-  optical_mpv_failed: "O MPV não conseguiu abrir a mídia. Blu-rays comerciais protegidos por AACS exigem libaacs e chaves configuradas externamente."
+  optical_mpv_failed: "O MPV não conseguiu abrir a mídia. DVDs protegidos por CSS exigem libdvdcss e acesso à unidade física; Blu-rays protegidos por AACS exigem libaacs e chaves configuradas externamente."
+  optical_launch_failed: "Não foi possível iniciar o player para esta unidade óptica."
 vdrive_settings:
   window_title: "⚙ Configuração de Drives Virtuais"
   title: "Otimização de Drives Virtuais"
