@@ -206,6 +206,7 @@ operations:
 context_menu:
   open: "Abrir"
   open_with: "Abrir com..."
+  choose_another_app: "Escolher outro aplicativo"
   open_new_tab: "Abrir em nova guia"
   cut: "Recortar"
   copy: "Copiar"

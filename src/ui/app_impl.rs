@@ -280,25 +280,30 @@ impl eframe::App for ImageViewerApp {
                         message,
                     } => {
                         if request_id == self.shell_menu_request_id {
-                            log::debug!("[ShellMenu] Extraction error: {}", message);
-                            self.notifications.warning(
-                                rust_i18n::t!("context_menu.shell_menu_error").to_string(),
-                            );
-                            // Remove the loading placeholder on error so the menu doesn't
-                            // keep showing a stale "Loading…" item.
-                            self.context_menu
-                                .items
-                                .retain(|item| !item.is_loading_placeholder);
-                            // Remove any trailing separator that preceded the placeholder.
-                            while self
-                                .context_menu
-                                .items
-                                .last()
-                                .is_some_and(|item| item.is_separator)
-                            {
-                                self.context_menu.items.pop();
+                            if self.context_menu.is_open {
+                                log::debug!("[ShellMenu] Extraction error: {}", message);
+                                self.notifications.warning(
+                                    rust_i18n::t!("context_menu.shell_menu_error").to_string(),
+                                );
+                                // Remove the loading placeholder on error so the menu doesn't
+                                // keep showing a stale "Loading…" item.
+                                self.context_menu.items.retain(|item| {
+                                    !item.is_loading_placeholder
+                                        || (self.context_menu.target_paths.len() == 1
+                                            && item.command_string.as_deref()
+                                                == Some("openwith_placeholder"))
+                                });
+                                // Remove any trailing separator that preceded the placeholder.
+                                while self
+                                    .context_menu
+                                    .items
+                                    .last()
+                                    .is_some_and(|item| item.is_separator)
+                                {
+                                    self.context_menu.items.pop();
+                                }
+                                self.context_menu.partition_items();
                             }
-                            self.context_menu.partition_items();
                             self.shell_menu_loading = false;
                         }
                     }
@@ -310,7 +315,8 @@ impl eframe::App for ImageViewerApp {
                         if request_id == self.shell_menu_request_id {
                             let ctx_clone = ctx.clone();
                             self.apply_async_submenu_items(item_id, sub_items, &ctx_clone);
-                            self.shell_menu_loading = false;
+                            self.shell_menu_loading =
+                                !self.context_menu.loading_submenu_ids.is_empty();
                         }
                     }
                     ShellMenuResponse::Invoked { request_id } => {
@@ -320,6 +326,82 @@ impl eframe::App for ImageViewerApp {
                         if self.global_search.shell_refresh_request_id == Some(request_id) {
                             self.global_search.shell_refresh_request_id = None;
                             self.request_global_search_refresh();
+                        }
+                    }
+                }
+            }
+        }
+
+        // Poll the independent Windows association worker. This path is not
+        // blocked by third-party context-menu extensions.
+        {
+            use crate::infrastructure::open_with_worker::OpenWithResponse;
+            let mut uploaded_icons = 0;
+            while let Ok(response) = self.open_with_res_rx.try_recv() {
+                match response {
+                    OpenWithResponse::Ready { request_id, items } => {
+                        if self.context_menu.is_open && request_id == self.shell_menu_request_id {
+                            self.apply_open_with_items(items);
+                        }
+                        if request_id == self.shell_menu_request_id {
+                            self.open_with_loading = false;
+                        }
+                    }
+                    OpenWithResponse::Error {
+                        request_id,
+                        message,
+                    } => {
+                        if self.context_menu.is_open && request_id == self.shell_menu_request_id {
+                            log::debug!("[OpenWith] Association enumeration failed: {}", message);
+                            self.apply_open_with_fallback();
+                        }
+                        if request_id == self.shell_menu_request_id {
+                            self.open_with_loading = false;
+                        }
+                    }
+                    OpenWithResponse::Invoked {
+                        request_id,
+                        result,
+                        fallback_path,
+                    } => {
+                        if let Err(error) = result {
+                            log::warn!("[OpenWith] Handler invocation failed: {}", error);
+                            if request_id == self.shell_menu_request_id {
+                                if let (Some(path), Some(hwnd)) = (fallback_path, self.native_hwnd)
+                                {
+                                    if let Err(dialog_error) =
+                                        crate::application::file_operations::open_with_dialog(
+                                            &path,
+                                            Some(hwnd),
+                                        )
+                                    {
+                                        log::warn!(
+                                            "[OpenWith] Fallback dialog failed for '{}': {}",
+                                            path.display(),
+                                            dialog_error
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                        if request_id == self.shell_menu_request_id {
+                            self.open_with_loading = false;
+                        }
+                    }
+                    OpenWithResponse::IconReady {
+                        request_id,
+                        handler_id,
+                        rgba,
+                        width,
+                        height,
+                    } => {
+                        if self.context_menu.is_open && request_id == self.shell_menu_request_id {
+                            self.apply_open_with_icon(handler_id, rgba, width, height, ctx);
+                        }
+                        uploaded_icons += 1;
+                        if uploaded_icons >= 8 {
+                            ctx.request_repaint();
+                            break;
                         }
                     }
                 }

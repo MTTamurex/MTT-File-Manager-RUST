@@ -6,6 +6,7 @@ use crate::app::state::ImageViewerApp;
 use eframe::egui;
 use rust_i18n::t;
 use std::path::PathBuf;
+use std::sync::atomic::Ordering;
 
 fn is_optical_disc_context_target(
     is_empty_area: bool,
@@ -20,6 +21,32 @@ fn is_optical_disc_context_target(
 }
 
 impl ImageViewerApp {
+    pub(crate) fn invalidate_context_menu_workers(&mut self) {
+        self.shell_menu_request_id = self.shell_menu_request_id.wrapping_add(1);
+        self.latest_shell_menu_request_id
+            .store(self.shell_menu_request_id, Ordering::Release);
+        self.pending_shell_menu_invocation_id
+            .store(0, Ordering::Release);
+        self.pending_open_with_invocation_id
+            .store(0, Ordering::Release);
+        let _ = self
+            .shell_menu_control_tx
+            .try_send(crate::infrastructure::shell_menu_worker::ShellMenuRequest::Cancel);
+        let _ = self
+            .open_with_control_tx
+            .try_send(crate::infrastructure::open_with_worker::OpenWithRequest::Cancel);
+        self.shell_menu_loading = false;
+        self.open_with_loading = false;
+        self.context_menu_workers_active = false;
+    }
+
+    pub(crate) fn supersede_context_menu_background_work(&self) {
+        self.latest_shell_menu_request_id.store(
+            self.shell_menu_request_id.wrapping_add(1),
+            Ordering::Release,
+        );
+    }
+
     pub(crate) fn capture_context_menu_panel_origin(&mut self) {
         let panel = if self.in_inactive_panel_context {
             self.dual_panel_active.other()
@@ -77,10 +104,7 @@ impl ImageViewerApp {
         }
 
         self.context_menu.close();
-        let _ = self
-            .shell_menu_req_tx
-            .send(crate::infrastructure::shell_menu_worker::ShellMenuRequest::Cancel);
-        self.shell_menu_loading = false;
+        self.invalidate_context_menu_workers();
     }
 
     pub fn populate_context_menu(
@@ -91,6 +115,7 @@ impl ImageViewerApp {
         _item_index: Option<usize>,
     ) {
         use crate::application::context_menu::ContextMenuItem;
+        self.invalidate_context_menu_workers();
         let is_global_search = self.context_menu.origin
             == crate::application::context_menu::ContextMenuOrigin::GlobalSearch;
 
@@ -171,11 +196,6 @@ impl ImageViewerApp {
                 && self.current_location_is_archive_namespace());
 
         if !is_global_search && operation_location_is_archive {
-            self.shell_menu_request_id = self.shell_menu_request_id.wrapping_add(1);
-            let _ = self
-                .shell_menu_req_tx
-                .send(crate::infrastructure::shell_menu_worker::ShellMenuRequest::Cancel);
-
             if !is_empty_area {
                 items.push(
                     ContextMenuItem::primary(-3, t!("context_menu.cut"))
@@ -597,7 +617,6 @@ impl ImageViewerApp {
         // Results arrive via `shell_menu_res_rx`; the app polls them in its update loop
         // and calls `apply_async_shell_items` to merge them into `self.context_menu.items`.
         if let Some(hwnd) = self.native_hwnd {
-            self.shell_menu_request_id = self.shell_menu_request_id.wrapping_add(1);
             let target = if is_empty_area {
                 crate::infrastructure::shell_menu_worker::ShellMenuTarget::FolderBackground(
                     paths
@@ -608,26 +627,65 @@ impl ImageViewerApp {
             } else {
                 crate::infrastructure::shell_menu_worker::ShellMenuTarget::Selection(paths.to_vec())
             };
-            let _ = self.shell_menu_req_tx.send(
-                crate::infrastructure::shell_menu_worker::ShellMenuRequest::Extract {
-                    request_id: self.shell_menu_request_id,
-                    hwnd_isize: hwnd.0 as isize,
-                    target,
-                },
-            );
-            self.shell_menu_loading = true;
+            let shell_sent = self
+                .shell_menu_req_tx
+                .try_send(
+                    crate::infrastructure::shell_menu_worker::ShellMenuRequest::Extract {
+                        request_id: self.shell_menu_request_id,
+                        hwnd_isize: hwnd.0 as isize,
+                        target,
+                    },
+                )
+                .is_ok();
+            self.shell_menu_loading = shell_sent;
+
+            let open_with_sent = if target_is_file && paths.len() == 1 {
+                let sent = self
+                    .open_with_req_tx
+                    .try_send(
+                        crate::infrastructure::open_with_worker::OpenWithRequest::Enumerate {
+                            request_id: self.shell_menu_request_id,
+                            paths: paths.to_vec(),
+                        },
+                    )
+                    .is_ok();
+                self.open_with_loading = sent;
+                if !sent {
+                    if let Some(index) = items.iter().position(|item| {
+                        item.command_string.as_deref() == Some("openwith_placeholder")
+                    }) {
+                        items[index] = ContextMenuItem::new(
+                            crate::infrastructure::open_with_worker::OPEN_WITH_DIALOG_ID,
+                            t!("context_menu.open_with"),
+                        )
+                        .with_command(
+                            crate::infrastructure::open_with_worker::OPEN_WITH_DIALOG_COMMAND,
+                        );
+                    }
+                }
+                sent
+            } else {
+                let _ = self
+                    .open_with_control_tx
+                    .try_send(crate::infrastructure::open_with_worker::OpenWithRequest::Cancel);
+                self.open_with_loading = false;
+                false
+            };
+            self.context_menu_workers_active = shell_sent || open_with_sent;
 
             // Add a single loading placeholder for "Show more options".
             // All shell items are placed inside this submenu, so only one
             // placeholder is needed and the menu height stays stable.
-            items.push(ContextMenuItem::separator());
-            items.push(ContextMenuItem {
-                id: -200,
-                text: t!("context_menu.show_more").to_string(),
-                is_enabled: false,
-                is_loading_placeholder: true,
-                ..Default::default()
-            });
+            if shell_sent {
+                items.push(ContextMenuItem::separator());
+                items.push(ContextMenuItem {
+                    id: -200,
+                    text: t!("context_menu.show_more").to_string(),
+                    is_enabled: false,
+                    is_loading_placeholder: true,
+                    ..Default::default()
+                });
+            }
         }
 
         self.context_menu.items = items;
@@ -643,7 +701,19 @@ impl ImageViewerApp {
     ) {
         use crate::application::context_menu::ContextMenuItem;
         use crate::infrastructure::shell_menu_worker::ShellMenuItemData;
-        use crate::infrastructure::windows::native_menu::is_known_verb;
+        use crate::infrastructure::windows::native_menu::{is_filtered_shell_text, is_known_verb};
+
+        let uses_direct_open_with = self.context_menu.items.iter().any(|item| {
+            matches!(
+                item.command_string.as_deref(),
+                Some(
+                    "openwith_placeholder"
+                        | "open_with_menu"
+                        | "open_with_dialog"
+                        | "open_with_shell_fallback"
+                )
+            )
+        }) && self.context_menu.target_paths.len() == 1;
 
         fn convert(ui_ctx: &egui::Context, item: &ShellMenuItemData) -> Option<ContextMenuItem> {
             // Filter verbs handled internally
@@ -652,29 +722,7 @@ impl ImageViewerApp {
                     return None;
                 }
             }
-            // Text-based blacklist (localised strings)
-            let lower = item.text.to_lowercase();
-            const BLACKLIST: &[&str] = &[
-                "pin to quick access",
-                "fixar no acesso rápido",
-                "restore previous versions",
-                "restaurar versões anteriores",
-                "copy as path",
-                "copiar como caminho",
-                "create shortcut",
-                "criar atalho",
-                // OneDrive items — handled natively to guarantee availability
-                "always keep on this device",
-                "sempre manter neste dispositivo",
-                "free up space",
-                "liberar espaço",
-                // Terminal — handled natively via Open in Terminal command (-80, -81)
-                "open in terminal",
-                "abrir no terminal",
-                "open in terminal (admin)",
-                "abrir no terminal (admin)",
-            ];
-            if BLACKLIST.iter().any(|&t| lower.contains(t)) {
+            if is_filtered_shell_text(&item.text) {
                 return None;
             }
 
@@ -713,9 +761,11 @@ impl ImageViewerApp {
 
         // Remove all loading placeholders before adding real items.
         // They were inserted in `populate_context_menu` to reserve space.
-        self.context_menu
-            .items
-            .retain(|item| !item.is_loading_placeholder);
+        self.context_menu.items.retain(|item| {
+            !item.is_loading_placeholder
+                || (uses_direct_open_with
+                    && item.command_string.as_deref() == Some("openwith_placeholder"))
+        });
         // Remove any trailing separator(s) that preceded the placeholder block.
         while self
             .context_menu
@@ -749,6 +799,13 @@ impl ImageViewerApp {
         let mut all_shell_items = Vec::new();
 
         for raw in &shell_items {
+            let raw_text = raw.text.to_lowercase();
+            let is_open_with = raw
+                .command_string
+                .as_deref()
+                .is_some_and(|verb| verb.eq_ignore_ascii_case("openas"))
+                || raw_text.contains("open with")
+                || raw_text.contains("abrir com");
             if let Some(item) = convert(ctx, raw) {
                 if item.is_separator {
                     continue;
@@ -764,10 +821,7 @@ impl ImageViewerApp {
                     continue;
                 }
                 // Promote "Open with" to the main menu only for files
-                if target_is_file
-                    && (item.text.to_lowercase().contains("open with")
-                        || item.text.to_lowercase().contains("abrir com"))
-                {
+                if target_is_file && is_open_with {
                     open_with_item = Some(item);
                 } else {
                     all_shell_items.push(item);
@@ -779,23 +833,46 @@ impl ImageViewerApp {
         let items = &mut self.context_menu.items;
 
         // Remove the Open with placeholder before inserting the real item
-        if let Some(idx) = items
-            .iter()
-            .position(|i| i.command_string.as_deref() == Some("openwith_placeholder"))
-        {
-            items.remove(idx);
+        if !uses_direct_open_with {
+            if let Some(idx) = items
+                .iter()
+                .position(|i| i.command_string.as_deref() == Some("openwith_placeholder"))
+            {
+                items.remove(idx);
+            }
         }
 
         // Insert the shell "Open with" right after "Open in new tab" (-21)
         if let Some(mut open_with) = open_with_item {
             // Translate the text to match the current locale
             open_with.text = t!("context_menu.open_with").to_string();
-            if open_with.has_pending_submenu && open_with.sub_items.is_empty() {
-                pending_open_with_submenu_load = Some(open_with.id);
-            }
-            if let Some(idx) = items.iter().position(|i| i.id == -21) {
+            let needs_submenu_load =
+                open_with.has_pending_submenu && open_with.sub_items.is_empty();
+            if uses_direct_open_with {
+                open_with.command_string = Some("open_with_shell_fallback".to_string());
+                if let Some(index) = items.iter().position(|item| {
+                    matches!(
+                        item.command_string.as_deref(),
+                        Some("openwith_placeholder" | "open_with_dialog")
+                    )
+                }) {
+                    if needs_submenu_load {
+                        pending_open_with_submenu_load = Some(open_with.id);
+                    }
+                    items[index] = open_with;
+                    // The native submenu is already usable even if direct
+                    // association enumeration is still running.
+                    self.open_with_loading = false;
+                }
+            } else if let Some(idx) = items.iter().position(|i| i.id == -21) {
+                if needs_submenu_load {
+                    pending_open_with_submenu_load = Some(open_with.id);
+                }
                 items.insert(idx + 1, open_with);
             } else {
+                if needs_submenu_load {
+                    pending_open_with_submenu_load = Some(open_with.id);
+                }
                 // Fallback: append before the separator that precedes shell items
                 items.push(open_with);
             }
@@ -829,16 +906,159 @@ impl ImageViewerApp {
         self.shell_menu_loading = false;
     }
 
+    pub fn apply_open_with_items(
+        &mut self,
+        items: Vec<crate::infrastructure::open_with_worker::OpenWithItemData>,
+    ) {
+        use crate::application::context_menu::ContextMenuItem;
+        use crate::infrastructure::open_with_worker::{
+            OPEN_WITH_DIALOG_COMMAND, OPEN_WITH_DIALOG_ID, OPEN_WITH_HANDLER_COMMAND_PREFIX,
+            OPEN_WITH_MENU_COMMAND, OPEN_WITH_PARENT_ID,
+        };
+
+        let mut sub_items: Vec<ContextMenuItem> = items
+            .into_iter()
+            .filter_map(|item| {
+                let menu_id =
+                    crate::infrastructure::open_with_worker::menu_id_for_handler(item.handler_id)?;
+                Some(
+                    ContextMenuItem::new(menu_id, item.name).with_command(format!(
+                        "{}{}",
+                        OPEN_WITH_HANDLER_COMMAND_PREFIX, item.handler_id
+                    )),
+                )
+            })
+            .collect();
+        if !sub_items.is_empty() {
+            sub_items.push(ContextMenuItem::separator());
+        }
+        sub_items.push(
+            ContextMenuItem::new(OPEN_WITH_DIALOG_ID, t!("context_menu.choose_another_app"))
+                .with_command(OPEN_WITH_DIALOG_COMMAND),
+        );
+
+        let open_with = ContextMenuItem::new(OPEN_WITH_PARENT_ID, t!("context_menu.open_with"))
+            .with_command(OPEN_WITH_MENU_COMMAND)
+            .with_subitems(sub_items);
+        self.replace_open_with_placeholder(open_with);
+        self.open_with_loading = false;
+    }
+
+    pub fn apply_open_with_fallback(&mut self) {
+        use crate::application::context_menu::ContextMenuItem;
+        use crate::infrastructure::open_with_worker::{
+            OPEN_WITH_DIALOG_COMMAND, OPEN_WITH_DIALOG_ID,
+        };
+
+        if self
+            .context_menu
+            .items
+            .iter()
+            .any(|item| item.command_string.as_deref() == Some("open_with_shell_fallback"))
+        {
+            self.open_with_loading = false;
+            return;
+        }
+
+        let fallback = ContextMenuItem::new(OPEN_WITH_DIALOG_ID, t!("context_menu.open_with"))
+            .with_command(OPEN_WITH_DIALOG_COMMAND)
+            .with_svg_icon("external-link");
+        self.replace_open_with_placeholder(fallback);
+        self.open_with_loading = false;
+    }
+
+    pub fn apply_open_with_icon(
+        &mut self,
+        handler_id: u32,
+        rgba: Vec<u8>,
+        width: u32,
+        height: u32,
+        ctx: &egui::Context,
+    ) {
+        let Some(item_id) =
+            crate::infrastructure::open_with_worker::menu_id_for_handler(handler_id)
+        else {
+            return;
+        };
+        let Some(parent) =
+            self.context_menu.items.iter_mut().find(|item| {
+                item.id == crate::infrastructure::open_with_worker::OPEN_WITH_PARENT_ID
+            })
+        else {
+            return;
+        };
+        let Some(item) = parent.sub_items.iter_mut().find(|item| item.id == item_id) else {
+            return;
+        };
+        item.icon = Some(ctx.load_texture(
+            format!(
+                "open_with_icon_{}_{}",
+                self.shell_menu_request_id, handler_id
+            ),
+            egui::ColorImage::from_rgba_unmultiplied([width as usize, height as usize], &rgba),
+            Default::default(),
+        ));
+        item.svg_icon_name = None;
+    }
+
+    fn replace_open_with_placeholder(
+        &mut self,
+        item: crate::application::context_menu::ContextMenuItem,
+    ) {
+        if let Some(index) = self.context_menu.items.iter().position(|existing| {
+            matches!(
+                existing.command_string.as_deref(),
+                Some(
+                    "openwith_placeholder"
+                        | "open_with_menu"
+                        | "open_with_dialog"
+                        | "open_with_shell_fallback"
+                )
+            )
+        }) {
+            let replaced_shell_id = (self.context_menu.items[index].command_string.as_deref()
+                == Some("open_with_shell_fallback"))
+            .then_some(self.context_menu.items[index].id);
+            self.context_menu.items[index] = item;
+            if let Some(shell_id) = replaced_shell_id {
+                if self.context_menu.pending_load_item == Some(shell_id) {
+                    self.context_menu.pending_load_item = None;
+                }
+                self.context_menu.finish_submenu_load(shell_id);
+            }
+        } else if let Some(index) = self
+            .context_menu
+            .items
+            .iter()
+            .position(|item| item.id == -21)
+        {
+            self.context_menu.items.insert(index + 1, item);
+        }
+        self.context_menu.partition_items();
+    }
+
     pub fn handle_lazy_submenu_load(&mut self, _egui_ctx: &egui::Context, item_id: i32) {
+        if !self.context_menu.begin_submenu_load(item_id) {
+            return;
+        }
+
         // The ShellMenuContext now lives exclusively on the worker thread.
         // Send a LoadSubmenu request; the SubmenuLoaded response is processed in
         // the update-loop polling code which calls `apply_async_submenu_items`.
-        let _ = self.shell_menu_req_tx.send(
-            crate::infrastructure::shell_menu_worker::ShellMenuRequest::LoadSubmenu {
-                request_id: self.shell_menu_request_id,
-                item_id: item_id as u32,
-            },
-        );
+        if self
+            .shell_menu_req_tx
+            .try_send(
+                crate::infrastructure::shell_menu_worker::ShellMenuRequest::LoadSubmenu {
+                    request_id: self.shell_menu_request_id,
+                    item_id: item_id as u32,
+                },
+            )
+            .is_err()
+        {
+            self.context_menu.finish_submenu_load(item_id);
+            self.shell_menu_loading = !self.context_menu.loading_submenu_ids.is_empty();
+            return;
+        }
         // Re-open the polling gate so the SubmenuLoaded response is picked up.
         self.shell_menu_loading = true;
     }
@@ -914,6 +1134,7 @@ impl ImageViewerApp {
         }
 
         let hide_native_folder = is_new_submenu(&self.context_menu.items, item_id as i32);
+        self.context_menu.finish_submenu_load(item_id as i32);
         let new_subitems: Vec<ContextMenuItem> = sub_items
             .iter()
             .filter(|item| {

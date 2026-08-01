@@ -98,7 +98,7 @@ pub fn hicon_to_rgba(
         }
 
         // Validate size (icons are usually small, but be defensive)
-        if width > 256 || height > 256 {
+        if width == 0 || height == 0 || width > 256 || height > 256 {
             if !icon_info.hbmColor.is_invalid() {
                 let _ = DeleteObject(icon_info.hbmColor.into());
             }
@@ -131,7 +131,19 @@ pub fn hicon_to_rgba(
         }
 
         let mut dib_bits: *mut c_void = std::ptr::null_mut();
-        let dib = CreateDIBSection(Some(screen_dc), &bi, DIB_RGB_COLORS, &mut dib_bits, None, 0)?;
+        let dib =
+            match CreateDIBSection(Some(screen_dc), &bi, DIB_RGB_COLORS, &mut dib_bits, None, 0) {
+                Ok(dib) => dib,
+                Err(error) => {
+                    let _ = DeleteDC(mem_dc);
+                    ReleaseDC(None, screen_dc);
+                    if !icon_info.hbmColor.is_invalid() {
+                        let _ = DeleteObject(icon_info.hbmColor.into());
+                    }
+                    let _ = DeleteObject(icon_info.hbmMask.into());
+                    return Err(error.into());
+                }
+            };
 
         if dib.is_invalid() || dib_bits.is_null() {
             let _ = DeleteDC(mem_dc);

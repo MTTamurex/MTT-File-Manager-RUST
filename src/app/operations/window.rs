@@ -4,7 +4,6 @@
 //! and performs initialization tasks that require it.
 
 use crate::app::state::ImageViewerApp;
-use crate::infrastructure::shell_menu_worker::ShellMenuRequest;
 use crate::infrastructure::windows::shell_operations::create_shell_op_proxy_window;
 use crate::infrastructure::windows::window_corners::apply_window_corner_preference;
 use crate::infrastructure::windows::window_subclass::install_borderless_subclass;
@@ -26,9 +25,6 @@ impl ImageViewerApp {
     }
 
     /// Captures and stores the native HWND from the main window title.
-    /// On first capture, also warms up shell extensions to avoid
-    /// slowness on the first context menu opening.
-    ///
     /// # Borderless Window Support
     /// When HWND is obtained, installs a native subclass to handle WM_NCHITTEST
     /// for resize borders on the borderless window.
@@ -68,13 +64,6 @@ impl ImageViewerApp {
 
                     // Keep rounded corners in windowed mode (Windows 11 DWM).
                     apply_window_corner_preference(hwnd, self.layout.saved_is_maximized);
-
-                    // Warm shell extensions on the managed STA worker thread.
-                    // This restores first-open context menu UX without spawning
-                    // an unmanaged background thread.
-                    let _ = self.shell_menu_req_tx.send(ShellMenuRequest::Warmup {
-                        hwnd_isize: hwnd.0 as isize,
-                    });
                 }
             }
         }

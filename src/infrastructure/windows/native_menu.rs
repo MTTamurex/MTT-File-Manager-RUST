@@ -35,36 +35,6 @@ pub struct ShellMenuContext {
     pub context_menu: IContextMenu,
     /// Keep the root menu handle alive for on-demand submenu loading
     hmenu: HMENU,
-    /// GDI bitmap handles extracted from menu items. Shell extensions create
-    /// these during QueryContextMenu and many don't clean up on Release().
-    /// We collect them here and delete AFTER DestroyMenu in Drop, because
-    /// DeleteObject fails silently while the bitmap is still referenced by
-    /// the live HMENU.
-    /// RefCell for interior mutability (load_pending_submenu uses &self).
-    owned_bitmaps: std::cell::RefCell<Vec<isize>>,
-}
-
-struct ComApartmentGuard {
-    should_uninitialize: bool,
-}
-
-impl ComApartmentGuard {
-    fn init_sta() -> Self {
-        let should_uninitialize = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED).is_ok() };
-        Self {
-            should_uninitialize,
-        }
-    }
-}
-
-impl Drop for ComApartmentGuard {
-    fn drop(&mut self) {
-        if self.should_uninitialize {
-            unsafe {
-                CoUninitialize();
-            }
-        }
-    }
 }
 
 struct PidlCleanupGuard {
@@ -96,17 +66,9 @@ impl Drop for PidlCleanupGuard {
 impl Drop for ShellMenuContext {
     fn drop(&mut self) {
         unsafe {
-            // 1. Destroy the menu first — releases Windows' internal references
-            //    to the bitmaps set as hbmpItem.
+            // Bitmap handles exposed by shell extensions remain extension-owned.
+            // The host owns only the HMENU it created.
             let _ = DestroyMenu(self.hmenu);
-
-            // 2. NOW delete the orphaned GDI bitmaps. This must happen AFTER
-            //    DestroyMenu; calling DeleteObject while the bitmap is still
-            //    associated with a live HMENU fails silently (returns FALSE).
-            for handle in self.owned_bitmaps.borrow().iter() {
-                let hbmp = windows::Win32::Graphics::Gdi::HBITMAP(*handle as *mut _);
-                let _ = windows::Win32::Graphics::Gdi::DeleteObject(hbmp.into());
-            }
         }
     }
 }
@@ -134,9 +96,43 @@ pub fn is_known_verb(verb: &str) -> bool {
     KNOWN_VERBS.iter().any(|&v| v.eq_ignore_ascii_case(verb))
 }
 
+pub fn is_filtered_shell_text(text: &str) -> bool {
+    const FILTERED_TEXT: &[&str] = &[
+        "pin to quick access",
+        "fixar no acesso rápido",
+        "restore previous versions",
+        "restaurar versões anteriores",
+        "copy as path",
+        "copiar como caminho",
+        "create shortcut",
+        "criar atalho",
+        "always keep on this device",
+        "sempre manter neste dispositivo",
+        "free up space",
+        "liberar espaço",
+        "open in terminal",
+        "abrir no terminal",
+        "open in terminal (admin)",
+        "abrir no terminal (admin)",
+    ];
+    let lower = text.to_lowercase();
+    FILTERED_TEXT.iter().any(|entry| lower.contains(entry))
+}
+
+fn selection_has_single_parent(paths: &[std::path::PathBuf]) -> bool {
+    let Some(first_parent) = paths.first().and_then(|path| path.parent()) else {
+        return paths.len() == 1;
+    };
+    paths.iter().skip(1).all(|path| {
+        path.parent().is_some_and(|parent| {
+            first_parent
+                .to_string_lossy()
+                .eq_ignore_ascii_case(&parent.to_string_lossy())
+        })
+    })
+}
+
 /// Extracts native shell menu items for a path
-/// Shell extensions may show fewer items on first call due to Windows lazy loading.
-/// Call warmup_shell_extensions() on app startup to pre-initialize.
 pub fn extract_shell_menu(hwnd: HWND, paths: &[std::path::PathBuf]) -> Result<ShellMenuContext> {
     use std::sync::atomic::{AtomicU32, Ordering};
     static CALL_COUNT: AtomicU32 = AtomicU32::new(0);
@@ -144,6 +140,12 @@ pub fn extract_shell_menu(hwnd: HWND, paths: &[std::path::PathBuf]) -> Result<Sh
 
     if paths.is_empty() {
         return Err(Error::from_thread());
+    }
+    if !selection_has_single_parent(paths) {
+        return Err(Error::new(
+            E_INVALIDARG,
+            "Shell context menus require items from one parent folder",
+        ));
     }
 
     unsafe {
@@ -154,9 +156,10 @@ pub fn extract_shell_menu(hwnd: HWND, paths: &[std::path::PathBuf]) -> Result<Sh
         );
 
         // Parse all paths to PIDLs and collect children
-        let mut pidls_to_free = PidlCleanupGuard::new(paths.len());
+        let mut pidls_to_free = PidlCleanupGuard::new(paths.len().saturating_mul(2));
         let mut child_pidls = Vec::with_capacity(paths.len());
         let mut parent_folder_opt: Option<IShellFolder> = None;
+        let mut expected_parent_pidl: Option<*mut ITEMIDLIST> = None;
 
         for path in paths {
             let wide_path: Vec<u16> = path
@@ -165,23 +168,56 @@ pub fn extract_shell_menu(hwnd: HWND, paths: &[std::path::PathBuf]) -> Result<Sh
                 .chain(std::iter::once(0))
                 .collect();
             let mut pidl: *mut ITEMIDLIST = std::ptr::null_mut();
-            if SHParseDisplayName(PCWSTR(wide_path.as_ptr()), None, &mut pidl, 0, None).is_ok()
-                && !pidl.is_null()
-            {
-                pidls_to_free.push(pidl);
-
-                let mut child: *mut ITEMIDLIST = std::ptr::null_mut();
-                if let Ok(folder) = SHBindToParent(pidl, Some(&mut child)) {
-                    if parent_folder_opt.is_none() {
-                        parent_folder_opt = Some(folder);
-                    }
-                    child_pidls.push(child as *const ITEMIDLIST);
-                }
+            SHParseDisplayName(PCWSTR(wide_path.as_ptr()), None, &mut pidl, 0, None)?;
+            if pidl.is_null() {
+                return Err(Error::new(
+                    E_INVALIDARG,
+                    "Shell returned a null item ID list",
+                ));
             }
+            pidls_to_free.push(pidl);
+
+            let parent_pidl = ILClone(pidl);
+            if parent_pidl.is_null() {
+                return Err(Error::new(
+                    E_OUTOFMEMORY,
+                    "Failed to clone the Shell parent item ID list",
+                ));
+            }
+            pidls_to_free.push(parent_pidl);
+            if !ILRemoveLastID(Some(parent_pidl)).as_bool() {
+                return Err(Error::new(
+                    E_INVALIDARG,
+                    "Shell item does not have a resolvable parent",
+                ));
+            }
+            if let Some(expected) = expected_parent_pidl {
+                if !ILIsEqual(expected, parent_pidl).as_bool() {
+                    return Err(Error::new(
+                        E_INVALIDARG,
+                        "Shell context menu items resolved to different parent folders",
+                    ));
+                }
+            } else {
+                expected_parent_pidl = Some(parent_pidl);
+            }
+
+            let mut child: *mut ITEMIDLIST = std::ptr::null_mut();
+            let folder = SHBindToParent(pidl, Some(&mut child))?;
+            if child.is_null() {
+                return Err(Error::new(E_INVALIDARG, "Shell returned a null child item"));
+            }
+            if parent_folder_opt.is_none() {
+                parent_folder_opt = Some(folder);
+            }
+            child_pidls.push(child as *const ITEMIDLIST);
         }
 
-        if parent_folder_opt.is_none() || child_pidls.is_empty() {
-            return Err(Error::from_thread());
+        if child_pidls.len() != paths.len() {
+            return Err(Error::new(
+                E_INVALIDARG,
+                "Shell context menu selection was only partially resolved",
+            ));
         }
 
         let Some(parent_folder) = parent_folder_opt else {
@@ -200,6 +236,7 @@ pub fn extract_shell_menu(hwnd: HWND, paths: &[std::path::PathBuf]) -> Result<Sh
 pub(crate) fn extract_context_menu(context_menu: IContextMenu) -> Result<ShellMenuContext> {
     unsafe {
         let hmenu = CreatePopupMenu()?;
+        let query_started = std::time::Instant::now();
         if let Err(e) = context_menu
             .QueryContextMenu(hmenu, 0, 1, 0x7FFF, CMF_NORMAL)
             .ok()
@@ -207,10 +244,12 @@ pub(crate) fn extract_context_menu(context_menu: IContextMenu) -> Result<ShellMe
             let _ = DestroyMenu(hmenu);
             return Err(e);
         }
+        let query_elapsed = query_started.elapsed();
 
         let count = GetMenuItemCount(Some(hmenu));
         log::debug!("[ShellMenu] Total menu items: {}", count);
 
+        let materialize_started = std::time::Instant::now();
         let mut items = Vec::new();
         let mut pending_count = 0;
         for i in 0..count {
@@ -234,55 +273,19 @@ pub(crate) fn extract_context_menu(context_menu: IContextMenu) -> Result<ShellMe
             pending_count
         );
 
-        let owned_bitmaps = collect_menu_bitmaps(hmenu);
+        let materialize_elapsed = materialize_started.elapsed();
         log::debug!(
-            "[ShellMenu] Collected {} GDI bitmap handles for deferred cleanup",
-            owned_bitmaps.len()
+            "[ShellMenu] Query {:.1}ms, materialize {:.1}ms",
+            query_elapsed.as_secs_f64() * 1000.0,
+            materialize_elapsed.as_secs_f64() * 1000.0,
         );
 
         Ok(ShellMenuContext {
             items: std::cell::RefCell::new(items),
             context_menu,
             hmenu,
-            owned_bitmaps: std::cell::RefCell::new(owned_bitmaps),
         })
     }
-}
-
-/// Warmup function to pre-initialize shell extensions
-/// Call this on app startup (e.g., with C:\ as path) to ensure
-/// shell extensions like WinRAR, Send to, Include in library are loaded
-pub fn warmup_shell_extensions(hwnd: HWND) {
-    // Initialize COM on this thread (required for IShellFolder/IContextMenu).
-    // Uses STA because shell extensions are apartment-threaded COM objects.
-    let _com = ComApartmentGuard::init_sta();
-
-    // Use the system drive root to trigger shell extension loading
-    let system_drive = std::env::var("SystemDrive").unwrap_or_else(|_| "C:".to_string());
-    let warmup_path = std::path::PathBuf::from(format!("{}\\", system_drive));
-
-    log::debug!(
-        "[ShellMenu] Warming up shell extensions with {:?}...",
-        warmup_path
-    );
-
-    if let Ok(_ctx) = extract_shell_menu(hwnd, &[warmup_path]) {
-        log::debug!("[ShellMenu] Folder warmup complete");
-    } else {
-        log::warn!("[ShellMenu] Folder warmup failed");
-    }
-
-    // Use a temporary file to trigger file-level shell extensions (e.g., 7-Zip, WinRAR)
-    let temp_file = std::env::temp_dir().join(format!("mtt_warmup_{}.txt", std::process::id()));
-    let _ = std::fs::File::create(&temp_file);
-    if let Ok(_ctx) = extract_shell_menu(hwnd, std::slice::from_ref(&temp_file)) {
-        log::debug!("[ShellMenu] File warmup complete");
-    } else {
-        log::warn!("[ShellMenu] File warmup failed");
-    }
-    let _ = std::fs::remove_file(&temp_file);
-
-    log::info!("[ShellMenu] Shell extensions initialized");
 }
 
 /// Get command string (verb) for a menu item
@@ -311,43 +314,6 @@ unsafe fn get_command_string(context_menu: &IContextMenu, cmd_id: u32) -> Option
         }
     }
     None
-}
-
-/// Recursively walk an HMENU and collect all real HBITMAP handles (as `isize`).
-///
-/// Windows' `DestroyMenu` does NOT free bitmaps set via `MENUITEMINFOW::hbmpItem`.
-/// Shell extensions create these during `QueryContextMenu` and many do not clean
-/// them up in their `IContextMenu::Release()` handler.
-///
-/// We collect them here so they can be deleted AFTER `DestroyMenu` in
-/// `ShellMenuContext::Drop`. Deleting while the HMENU is alive fails silently.
-///
-/// Special system-defined bitmap constants (HBMMENU_*: values -1 through 11) are
-/// skipped because they are not real GDI objects.
-unsafe fn collect_menu_bitmaps(hmenu: HMENU) -> Vec<isize> {
-    let mut handles = Vec::new();
-    collect_menu_bitmaps_recursive(hmenu, &mut handles);
-    handles
-}
-
-unsafe fn collect_menu_bitmaps_recursive(hmenu: HMENU, handles: &mut Vec<isize>) {
-    let count = GetMenuItemCount(Some(hmenu));
-    for i in 0..count {
-        let mut info = MENUITEMINFOW {
-            cbSize: std::mem::size_of::<MENUITEMINFOW>() as u32,
-            fMask: MIIM_BITMAP | MIIM_SUBMENU,
-            ..Default::default()
-        };
-        if GetMenuItemInfoW(hmenu, i as u32, true, &mut info).is_ok() {
-            let ptr = info.hbmpItem.0 as isize;
-            if !info.hbmpItem.0.is_null() && !((-1..=11).contains(&ptr)) {
-                handles.push(ptr);
-            }
-            if !info.hSubMenu.0.is_null() {
-                collect_menu_bitmaps_recursive(info.hSubMenu, handles);
-            }
-        }
-    }
 }
 
 unsafe fn extract_item_info(
@@ -390,12 +356,16 @@ unsafe fn extract_item_info(
         None
     };
 
-    let icon_rgba =
-        if !info.hbmpItem.0.is_null() && !std::ptr::eq(info.hbmpItem.0, HBMMENU_CALLBACK.0) {
-            hbitmap_to_rgba(info.hbmpItem).ok()
-        } else {
-            None
-        };
+    let skip_icon =
+        command_string.as_deref().is_some_and(is_known_verb) || is_filtered_shell_text(&text);
+    let icon_rgba = if !skip_icon
+        && !info.hbmpItem.0.is_null()
+        && !std::ptr::eq(info.hbmpItem.0, HBMMENU_CALLBACK.0)
+    {
+        hbitmap_to_rgba(info.hbmpItem).ok()
+    } else {
+        None
+    };
 
     let mut sub_items = Vec::new();
     let mut pending_submenu_handle = None;
@@ -474,11 +444,6 @@ impl ShellMenuContext {
                     }
                 }
 
-                // Collect new bitmaps from the lazy-loaded submenu for
-                // deferred deletion in Drop (same rationale as initial extraction).
-                let new_bitmaps = collect_menu_bitmaps(hsubmenu);
-                self.owned_bitmaps.borrow_mut().extend(new_bitmaps);
-
                 return !item.sub_items.is_empty();
             }
         }
@@ -541,5 +506,23 @@ pub fn show_properties_dialog(hwnd: HWND, path: &std::path::Path) -> Result<()> 
     unsafe {
         // SAFETY: wide_path is null-terminated, SHOP_FILEPATH specifies we are passing a path string
         SHObjectProperties(Some(hwnd), SHOP_FILEPATH, PCWSTR(wide_path.as_ptr()), None).ok()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::selection_has_single_parent;
+    use std::path::PathBuf;
+
+    #[test]
+    fn shell_selection_requires_one_parent_folder() {
+        assert!(selection_has_single_parent(&[
+            PathBuf::from(r"C:\Folder\a.txt"),
+            PathBuf::from(r"c:\folder\b.txt"),
+        ]));
+        assert!(!selection_has_single_parent(&[
+            PathBuf::from(r"C:\Folder\a.txt"),
+            PathBuf::from(r"C:\Other\b.txt"),
+        ]));
     }
 }

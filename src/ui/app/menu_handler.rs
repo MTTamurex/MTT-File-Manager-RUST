@@ -411,6 +411,32 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
     app.context_menu.origin_panel_is_left = context_menu.origin_panel_is_left;
 
     if let Some(id) = context_menu.selected_command_id.take() {
+        let selected_command =
+            find_menu_item_command_by_id(&context_menu.items, id).map(str::to_owned);
+        let is_open_with_handler = selected_command
+            .as_deref()
+            .and_then(crate::infrastructure::open_with_worker::handler_id_from_command)
+            .is_some();
+        if is_open_with_handler {
+            app.pending_open_with_invocation_id.store(
+                app.shell_menu_request_id,
+                std::sync::atomic::Ordering::Release,
+            );
+        } else if id > 0 {
+            app.pending_shell_menu_invocation_id.store(
+                app.shell_menu_request_id,
+                std::sync::atomic::Ordering::Release,
+            );
+        }
+        app.supersede_context_menu_background_work();
+        app.context_menu_workers_active = false;
+        if !is_open_with_handler {
+            let _ = app
+                .open_with_control_tx
+                .try_send(crate::infrastructure::open_with_worker::OpenWithRequest::Cancel);
+            app.open_with_loading = false;
+        }
+
         if id > 0 {
             // Shell command
             let selected_shell_item_text = find_menu_item_text_by_id(&context_menu.items, id);
@@ -425,6 +451,11 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                     .any(|path| crate::infrastructure::onedrive::is_cloud_sync_path(path));
 
                 if is_cloud_target {
+                    app.pending_shell_menu_invocation_id
+                        .store(0, std::sync::atomic::Ordering::Release);
+                    let _ = app.shell_menu_control_tx.try_send(
+                        crate::infrastructure::shell_menu_worker::ShellMenuRequest::Cancel,
+                    );
                     apply_cloud_files_pin(app, &context_menu.target_paths, command);
                     context_menu.close();
                     app.context_menu = context_menu;
@@ -439,6 +470,11 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 lower.contains("open with") || lower.contains("abrir com")
             });
             if is_open_with {
+                app.pending_shell_menu_invocation_id
+                    .store(0, std::sync::atomic::Ordering::Release);
+                let _ = app
+                    .shell_menu_control_tx
+                    .try_send(crate::infrastructure::shell_menu_worker::ShellMenuRequest::Cancel);
                 if let Some(path) = context_menu.target_paths.first() {
                     if let Some(hwnd) = app.native_hwnd {
                         if let Err(e) =
@@ -455,21 +491,33 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
 
             if let Some(hwnd) = app.native_hwnd {
                 // Dispatch to the worker thread — no blocking on the UI thread.
-                let _ = app.shell_menu_req_tx.send(
-                    crate::infrastructure::shell_menu_worker::ShellMenuRequest::Invoke {
-                        request_id: app.shell_menu_request_id,
-                        command_id: id as u32,
-                        menu_x: context_menu.position.x as i32,
-                        menu_y: context_menu.position.y as i32,
-                        hwnd_isize: hwnd.0 as isize,
-                    },
-                );
-                if context_menu.origin
-                    == crate::application::context_menu::ContextMenuOrigin::GlobalSearch
+                let sent = app
+                    .shell_menu_control_tx
+                    .try_send(
+                        crate::infrastructure::shell_menu_worker::ShellMenuRequest::Invoke {
+                            request_id: app.shell_menu_request_id,
+                            command_id: id as u32,
+                            menu_x: context_menu.position.x as i32,
+                            menu_y: context_menu.position.y as i32,
+                            hwnd_isize: hwnd.0 as isize,
+                        },
+                    )
+                    .is_ok();
+                if sent
+                    && context_menu.origin
+                        == crate::application::context_menu::ContextMenuOrigin::GlobalSearch
                 {
                     app.global_search.shell_refresh_request_id = Some(app.shell_menu_request_id);
                 }
-                app.shell_menu_loading = true;
+                app.shell_menu_loading = sent;
+                if !sent {
+                    app.pending_shell_menu_invocation_id
+                        .store(0, std::sync::atomic::Ordering::Release);
+                    log::warn!(
+                        "Shell command {} was not queued because the worker queue is full or disconnected",
+                        id
+                    );
+                }
 
                 // Cloud Files pin fallback: apply the managed command in addition to
                 // the shell invoke (some shell extensions fire silently).
@@ -487,9 +535,61 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
             }
         } else {
             // Internal command handled via trait
-            let selected_command = find_menu_item_command_by_id(&context_menu.items, id)
-                .map(|command| command.to_string());
+            let _ = app
+                .shell_menu_control_tx
+                .try_send(crate::infrastructure::shell_menu_worker::ShellMenuRequest::Cancel);
             if let Some(command) = selected_command.as_deref() {
+                if let Some(handler_id) =
+                    crate::infrastructure::open_with_worker::handler_id_from_command(command)
+                {
+                    let sent = app
+                        .open_with_control_tx
+                        .try_send(
+                            crate::infrastructure::open_with_worker::OpenWithRequest::Invoke {
+                                request_id: app.shell_menu_request_id,
+                                handler_id,
+                            },
+                        )
+                        .is_ok();
+                    app.open_with_loading = sent;
+                    if !sent {
+                        app.pending_open_with_invocation_id
+                            .store(0, std::sync::atomic::Ordering::Release);
+                        log::warn!(
+                            "Open with handler {} was not queued because the worker queue is full or disconnected",
+                            handler_id
+                        );
+                        if let (Some(path), Some(hwnd)) =
+                            (context_menu.target_paths.first(), app.native_hwnd)
+                        {
+                            let _ = crate::application::file_operations::open_with_dialog(
+                                path,
+                                Some(hwnd),
+                            );
+                        }
+                    }
+                    context_menu.close();
+                    app.context_menu = context_menu;
+                    return;
+                }
+                if command == crate::infrastructure::open_with_worker::OPEN_WITH_DIALOG_COMMAND {
+                    if let (Some(path), Some(hwnd)) =
+                        (context_menu.target_paths.first(), app.native_hwnd)
+                    {
+                        if let Err(error) =
+                            crate::application::file_operations::open_with_dialog(path, Some(hwnd))
+                        {
+                            log::warn!(
+                                "Open with dialog failed for '{}': {}",
+                                path.display(),
+                                error
+                            );
+                        }
+                    }
+                    context_menu.close();
+                    app.context_menu = context_menu;
+                    return;
+                }
                 if let Some(tag_id_raw) = command.strip_prefix("tag_toggle:") {
                     if let Ok(tag_id) = tag_id_raw.parse::<i64>() {
                         app.toggle_tag_on_paths(&context_menu.target_paths, tag_id);
@@ -743,14 +843,14 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 _ => {}
             }
         }
+        if id > 0 && app.native_hwnd.is_none() {
+            app.pending_shell_menu_invocation_id
+                .store(0, std::sync::atomic::Ordering::Release);
+        }
         context_menu.close();
-    } else if !context_menu.is_open {
+    } else if !context_menu.is_open && app.context_menu_workers_active {
         // Menu was dismissed without any command being invoked (Escape / click outside).
-        // Tell the worker to release its COM context.
-        let _ = app
-            .shell_menu_req_tx
-            .send(crate::infrastructure::shell_menu_worker::ShellMenuRequest::Cancel);
-        app.shell_menu_loading = false;
+        app.invalidate_context_menu_workers();
     }
     app.context_menu = context_menu;
 }

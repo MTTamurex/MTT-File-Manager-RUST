@@ -11,6 +11,23 @@ impl ImageViewerApp {
     /// Drop every persistent worker Sender so threads can exit cleanly.
     /// Called by `handle_exit` before the process terminates.
     pub fn shutdown_background_workers(&mut self) {
+        // Invalidate queued context-menu work before disconnecting the channels.
+        // Workers will skip stale queued requests instead of starting new COM calls.
+        self.latest_shell_menu_request_id.store(
+            self.shell_menu_request_id.wrapping_add(1),
+            Ordering::Release,
+        );
+        self.pending_shell_menu_invocation_id
+            .store(0, Ordering::Release);
+        self.pending_open_with_invocation_id
+            .store(0, Ordering::Release);
+        let _ = self
+            .shell_menu_control_tx
+            .try_send(crate::infrastructure::shell_menu_worker::ShellMenuRequest::Cancel);
+        let _ = self
+            .open_with_control_tx
+            .try_send(crate::infrastructure::open_with_worker::OpenWithRequest::Cancel);
+
         // Helper: replace a field with a disconnected channel of the same type so the
         // original Sender is dropped immediately, signalling the worker to exit.
         macro_rules! disconnect {
@@ -20,10 +37,29 @@ impl ImageViewerApp {
             }};
         }
 
+        macro_rules! disconnect_sync {
+            ($field:expr, $T:ty) => {{
+                let (d, _rx) = std::sync::mpsc::sync_channel::<$T>(1);
+                let _ = std::mem::replace(&mut $field, d);
+            }};
+        }
+
         // Shell-menu STA thread
-        disconnect!(
+        disconnect_sync!(
             self.shell_menu_req_tx,
             crate::infrastructure::shell_menu_worker::ShellMenuRequest
+        );
+        disconnect_sync!(
+            self.shell_menu_control_tx,
+            crate::infrastructure::shell_menu_worker::ShellMenuRequest
+        );
+        disconnect_sync!(
+            self.open_with_req_tx,
+            crate::infrastructure::open_with_worker::OpenWithRequest
+        );
+        disconnect_sync!(
+            self.open_with_control_tx,
+            crate::infrastructure::open_with_worker::OpenWithRequest
         );
 
         // Disk-cache invalidation worker

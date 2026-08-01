@@ -762,6 +762,7 @@ impl ImageViewerApp {
             || self.is_item_dragging
             || self.pending_drag_move_confirmation.is_some()
             || self.shell_menu_loading
+            || self.open_with_loading
             || thumbnail_pipeline_busy
     }
 

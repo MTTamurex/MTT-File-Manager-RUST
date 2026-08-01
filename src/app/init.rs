@@ -278,8 +278,21 @@ impl ImageViewerApp {
         }
 
         // Start the dedicated shell menu worker (STA COM thread for async extraction).
-        let (shell_menu_req_tx, shell_menu_res_rx) =
-            crate::infrastructure::shell_menu_worker::start_shell_menu_worker();
+        let crate::infrastructure::shell_menu_worker::ShellMenuWorkerChannels {
+            request_tx: shell_menu_req_tx,
+            control_tx: shell_menu_control_tx,
+            response_rx: shell_menu_res_rx,
+            latest_request_id: latest_shell_menu_request_id,
+            pending_invocation_id: pending_shell_menu_invocation_id,
+        } = crate::infrastructure::shell_menu_worker::start_shell_menu_worker(ctx.clone());
+        let pending_open_with_invocation_id =
+            std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let (open_with_req_tx, open_with_control_tx, open_with_res_rx) =
+            crate::infrastructure::open_with_worker::start_open_with_worker(
+                ctx.clone(),
+                std::sync::Arc::clone(&latest_shell_menu_request_id),
+                std::sync::Arc::clone(&pending_open_with_invocation_id),
+            );
 
         let (cloud_sync_status_refresh_sender, cloud_sync_status_refresh_receiver) =
             std::sync::mpsc::channel();
@@ -479,9 +492,18 @@ impl ImageViewerApp {
             // CONTEXT MENU STATE
             context_menu: ContextMenuState::new(),
             shell_menu_req_tx,
+            shell_menu_control_tx,
             shell_menu_res_rx,
+            latest_shell_menu_request_id,
+            pending_shell_menu_invocation_id,
             shell_menu_loading: false,
             shell_menu_request_id: 0,
+            open_with_req_tx,
+            open_with_control_tx,
+            open_with_res_rx,
+            open_with_loading: false,
+            pending_open_with_invocation_id,
+            context_menu_workers_active: false,
 
             // SESSION ICON LOADER
             item_icon_loader: {

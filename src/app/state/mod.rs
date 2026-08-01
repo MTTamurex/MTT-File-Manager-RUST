@@ -389,14 +389,30 @@ pub struct ImageViewerApp {
     pub context_menu: ContextMenuState,
     /// Channel to send requests to the shell menu background thread (async extraction).
     pub shell_menu_req_tx:
-        std::sync::mpsc::Sender<crate::infrastructure::shell_menu_worker::ShellMenuRequest>,
+        std::sync::mpsc::SyncSender<crate::infrastructure::shell_menu_worker::ShellMenuRequest>,
+    /// Priority channel reserved for invocation and cancellation.
+    pub shell_menu_control_tx:
+        std::sync::mpsc::SyncSender<crate::infrastructure::shell_menu_worker::ShellMenuRequest>,
     /// Channel to receive results from the shell menu background thread.
     pub shell_menu_res_rx:
         std::sync::mpsc::Receiver<crate::infrastructure::shell_menu_worker::ShellMenuResponse>,
+    /// Latest requested extraction, shared with the worker to skip obsolete queued work.
+    pub latest_shell_menu_request_id: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    pub pending_shell_menu_invocation_id: std::sync::Arc<std::sync::atomic::AtomicU64>,
     /// True while the background thread is extracting shell items for the active menu.
     pub shell_menu_loading: bool,
     /// Monotonic id used to discard stale async shell-menu responses.
     pub shell_menu_request_id: u64,
+    pub open_with_req_tx:
+        std::sync::mpsc::SyncSender<crate::infrastructure::open_with_worker::OpenWithRequest>,
+    pub open_with_control_tx:
+        std::sync::mpsc::SyncSender<crate::infrastructure::open_with_worker::OpenWithRequest>,
+    pub open_with_res_rx:
+        std::sync::mpsc::Receiver<crate::infrastructure::open_with_worker::OpenWithResponse>,
+    pub open_with_loading: bool,
+    pub pending_open_with_invocation_id: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    /// True while the current menu owns worker-side COM contexts.
+    pub context_menu_workers_active: bool,
 
     // SESSION ICON LOADER (avoids creating a new one each frame)
     pub item_icon_loader: IconLoader,

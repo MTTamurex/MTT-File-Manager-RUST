@@ -10,21 +10,25 @@
 //! - Command invocation is also sent to this thread — it reuses the stored COM context.
 
 use std::path::PathBuf;
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc::{self, Receiver, Sender, SyncSender};
+use std::sync::Arc;
 
 use windows::Win32::Foundation::HWND;
 use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_APARTMENTTHREADED};
+use windows::Win32::UI::WindowsAndMessaging::{
+    DispatchMessageW, PeekMessageW, TranslateMessage, MSG, PM_REMOVE, WM_QUIT,
+};
 
+use crate::infrastructure::prioritized_receiver::{receive_prioritized, PrioritizedReceive};
 use crate::infrastructure::windows::native_menu::{
-    extract_shell_menu, invoke_menu_command, is_known_verb, warmup_shell_extensions, ShellMenuItem,
+    extract_shell_menu, invoke_menu_command, is_known_verb, ShellMenuItem,
 };
 
 // ── Public request / response types ────────────────────────────────────────
 
 /// Commands sent to the shell menu worker thread.
 pub enum ShellMenuRequest {
-    /// Pre-initialize shell extensions on the worker STA thread.
-    Warmup { hwnd_isize: isize },
     /// Extract a Shell context menu. The worker replies with `Ready` or `Error`.
     Extract {
         request_id: u64,
@@ -103,13 +107,41 @@ pub enum ShellMenuResponse {
 
 /// Starts the dedicated shell menu STA thread.
 /// Returns a `Sender` to send requests and a `Receiver` to collect responses.
-pub fn start_shell_menu_worker() -> (Sender<ShellMenuRequest>, Receiver<ShellMenuResponse>) {
-    let (req_tx, req_rx) = mpsc::channel::<ShellMenuRequest>();
+pub struct ShellMenuWorkerChannels {
+    pub request_tx: SyncSender<ShellMenuRequest>,
+    pub control_tx: SyncSender<ShellMenuRequest>,
+    pub response_rx: Receiver<ShellMenuResponse>,
+    pub latest_request_id: Arc<AtomicU64>,
+    pub pending_invocation_id: Arc<AtomicU64>,
+}
+
+pub fn start_shell_menu_worker(repaint_ctx: eframe::egui::Context) -> ShellMenuWorkerChannels {
+    let (req_tx, req_rx) = mpsc::sync_channel::<ShellMenuRequest>(64);
+    let (control_tx, control_rx) = mpsc::sync_channel::<ShellMenuRequest>(4);
     let (res_tx, res_rx) = mpsc::channel::<ShellMenuResponse>();
+    let latest_request_id = Arc::new(AtomicU64::new(0));
+    let pending_invocation_id = Arc::new(AtomicU64::new(0));
+    let worker_latest_request_id = Arc::clone(&latest_request_id);
+    let worker_pending_invocation_id = Arc::clone(&pending_invocation_id);
 
-    std::thread::spawn(move || shell_menu_loop(req_rx, res_tx));
+    std::thread::spawn(move || {
+        shell_menu_loop(
+            req_rx,
+            control_rx,
+            res_tx,
+            repaint_ctx,
+            worker_latest_request_id,
+            worker_pending_invocation_id,
+        )
+    });
 
-    (req_tx, res_rx)
+    ShellMenuWorkerChannels {
+        request_tx: req_tx,
+        control_tx,
+        response_rx: res_rx,
+        latest_request_id,
+        pending_invocation_id,
+    }
 }
 
 // ── Worker loop (runs on its own STA thread) ────────────────────────────────
@@ -117,50 +149,86 @@ pub fn start_shell_menu_worker() -> (Sender<ShellMenuRequest>, Receiver<ShellMen
 struct ComGuard;
 
 impl ComGuard {
-    fn init_sta() -> Self {
-        unsafe {
-            let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
-        }
-        Self
+    fn init_sta() -> Result<Self, String> {
+        unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) }
+            .ok()
+            .map_err(|error| error.to_string())?;
+        Ok(Self)
     }
 }
 
 impl Drop for ComGuard {
     fn drop(&mut self) {
-        unsafe { CoUninitialize() }
+        unsafe { CoUninitialize() };
     }
 }
 
-fn shell_menu_loop(rx: Receiver<ShellMenuRequest>, tx: Sender<ShellMenuResponse>) {
-    let _com = ComGuard::init_sta();
+fn send_response(
+    tx: &Sender<ShellMenuResponse>,
+    repaint_ctx: &eframe::egui::Context,
+    response: ShellMenuResponse,
+) {
+    if tx.send(response).is_ok() {
+        repaint_ctx.request_repaint();
+    }
+}
+
+fn shell_menu_loop(
+    rx: Receiver<ShellMenuRequest>,
+    control_rx: Receiver<ShellMenuRequest>,
+    tx: Sender<ShellMenuResponse>,
+    repaint_ctx: eframe::egui::Context,
+    latest_request_id: Arc<AtomicU64>,
+    pending_invocation_id: Arc<AtomicU64>,
+) {
+    let _com = match ComGuard::init_sta() {
+        Ok(com) => com,
+        Err(error) => {
+            log::error!("[ShellMenuWorker] Failed to initialize STA COM: {}", error);
+            shell_menu_com_failure_loop(rx, control_rx, tx, repaint_ctx, error);
+            return;
+        }
+    };
     // Active shell context — kept alive between Extract and Invoke/Cancel.
     let mut active_ctx: Option<crate::infrastructure::windows::native_menu::ShellMenuContext> =
         None;
     let mut active_request_id: Option<u64> = None;
-    let mut warmup_done = false;
+    let mut deferred_request = None;
 
-    while let Ok(req) = rx.recv() {
+    loop {
+        if active_request_id.is_some_and(|request_id| {
+            latest_request_id.load(Ordering::Acquire) != request_id
+                && pending_invocation_id.load(Ordering::Acquire) != request_id
+        }) {
+            active_ctx = None;
+            active_request_id = None;
+        }
+        if !pump_sta_messages() {
+            break;
+        }
+        let req = match receive_prioritized(&rx, &control_rx, &mut deferred_request) {
+            PrioritizedReceive::Request(request) => request,
+            PrioritizedReceive::Timeout => continue,
+            PrioritizedReceive::Disconnected => break,
+        };
         match req {
-            ShellMenuRequest::Warmup { hwnd_isize } => {
-                if warmup_done {
-                    continue;
-                }
-
-                let hwnd = HWND(hwnd_isize as *mut _);
-                warmup_shell_extensions(hwnd);
-                warmup_done = true;
-            }
-
             ShellMenuRequest::Extract {
                 request_id,
                 hwnd_isize,
                 target,
             } => {
+                // A newer right-click may have superseded this request while it waited
+                // behind another Shell extension call. Do not start obsolete COM work.
+                if latest_request_id.load(Ordering::Acquire) != request_id {
+                    continue;
+                }
+
                 // Drop any previous context before starting a new extraction.
                 active_ctx = None;
                 active_request_id = None;
 
                 let hwnd = HWND(hwnd_isize as *mut _);
+                let started = std::time::Instant::now();
                 let extracted = match target {
                     ShellMenuTarget::Selection(paths) => extract_shell_menu(hwnd, &paths),
                     ShellMenuTarget::FolderBackground(path) => {
@@ -169,8 +237,16 @@ fn shell_menu_loop(rx: Receiver<ShellMenuRequest>, tx: Sender<ShellMenuResponse>
                         )
                     }
                 };
+                log::debug!(
+                    "[ShellMenuWorker] Extraction request {} completed in {:.1}ms",
+                    request_id,
+                    started.elapsed().as_secs_f64() * 1000.0
+                );
                 match extracted {
                     Ok(ctx) => {
+                        if latest_request_id.load(Ordering::Acquire) != request_id {
+                            continue;
+                        }
                         let items: Vec<ShellMenuItemData> = ctx
                             .items
                             .borrow()
@@ -182,20 +258,33 @@ fn shell_menu_loop(rx: Receiver<ShellMenuRequest>, tx: Sender<ShellMenuResponse>
                                         return false;
                                     }
                                 }
-                                true
+                                !crate::infrastructure::windows::native_menu::is_filtered_shell_text(
+                                    &item.text,
+                                )
                             })
                             .map(ShellMenuItemData::from_shell_item)
                             .collect();
 
                         active_ctx = Some(ctx);
                         active_request_id = Some(request_id);
-                        let _ = tx.send(ShellMenuResponse::Ready { request_id, items });
+                        send_response(
+                            &tx,
+                            &repaint_ctx,
+                            ShellMenuResponse::Ready { request_id, items },
+                        );
                     }
                     Err(e) => {
-                        let _ = tx.send(ShellMenuResponse::Error {
-                            request_id,
-                            message: e.to_string(),
-                        });
+                        if latest_request_id.load(Ordering::Acquire) != request_id {
+                            continue;
+                        }
+                        send_response(
+                            &tx,
+                            &repaint_ctx,
+                            ShellMenuResponse::Error {
+                                request_id,
+                                message: e.to_string(),
+                            },
+                        );
                     }
                 }
             }
@@ -208,14 +297,29 @@ fn shell_menu_loop(rx: Receiver<ShellMenuRequest>, tx: Sender<ShellMenuResponse>
                 hwnd_isize,
             } => {
                 let hwnd = HWND(hwnd_isize as *mut _);
-                if let Some(ref ctx) = active_ctx {
+                if active_request_id == Some(request_id) {
+                    let Some(ref ctx) = active_ctx else {
+                        log::warn!("[ShellMenuWorker] Invoke called with no active context");
+                        pending_invocation_id
+                            .compare_exchange(request_id, 0, Ordering::AcqRel, Ordering::Acquire)
+                            .ok();
+                        send_response(&tx, &repaint_ctx, ShellMenuResponse::Invoked { request_id });
+                        continue;
+                    };
                     let _ =
                         invoke_menu_command(hwnd, &ctx.context_menu, command_id, menu_x, menu_y);
                 } else {
-                    log::warn!("[ShellMenuWorker] Invoke called with no active context");
+                    log::warn!(
+                        "[ShellMenuWorker] Invoke request {} does not match the active context",
+                        request_id
+                    );
                 }
-                // Context is still valid until the menu closes — keep it alive.
-                let _ = tx.send(ShellMenuResponse::Invoked { request_id });
+                active_ctx = None;
+                active_request_id = None;
+                pending_invocation_id
+                    .compare_exchange(request_id, 0, Ordering::AcqRel, Ordering::Acquire)
+                    .ok();
+                send_response(&tx, &repaint_ctx, ShellMenuResponse::Invoked { request_id });
             }
 
             ShellMenuRequest::Cancel => {
@@ -228,11 +332,13 @@ fn shell_menu_loop(rx: Receiver<ShellMenuRequest>, tx: Sender<ShellMenuResponse>
                 request_id,
                 item_id,
             } => {
-                if active_request_id != Some(request_id) {
+                if active_request_id != Some(request_id)
+                    || latest_request_id.load(Ordering::Acquire) != request_id
+                {
                     continue;
                 }
 
-                if let Some(ref ctx) = active_ctx {
+                let sub_items = if let Some(ref ctx) = active_ctx {
                     fn find_item_mut(
                         items: &mut [crate::infrastructure::windows::native_menu::ShellMenuItem],
                         id: u32,
@@ -251,23 +357,81 @@ fn shell_menu_loop(rx: Receiver<ShellMenuRequest>, tx: Sender<ShellMenuResponse>
 
                     let mut items_guard = ctx.items.borrow_mut();
                     if let Some(shell_item) = find_item_mut(&mut items_guard, item_id) {
-                        if ctx.load_pending_submenu(shell_item) {
-                            let sub_items = shell_item
-                                .sub_items
-                                .iter()
-                                .map(ShellMenuItemData::from_shell_item)
-                                .collect();
-                            let _ = tx.send(ShellMenuResponse::SubmenuLoaded {
-                                request_id,
-                                item_id,
-                                sub_items,
-                            });
-                        }
+                        ctx.load_pending_submenu(shell_item);
+                        shell_item
+                            .sub_items
+                            .iter()
+                            .map(ShellMenuItemData::from_shell_item)
+                            .collect()
+                    } else {
+                        Vec::new()
                     }
                 } else {
                     log::warn!("[ShellMenuWorker] LoadSubmenu called with no active context");
-                }
+                    Vec::new()
+                };
+                send_response(
+                    &tx,
+                    &repaint_ctx,
+                    ShellMenuResponse::SubmenuLoaded {
+                        request_id,
+                        item_id,
+                        sub_items,
+                    },
+                );
             }
         }
     }
+}
+
+fn shell_menu_com_failure_loop(
+    rx: Receiver<ShellMenuRequest>,
+    control_rx: Receiver<ShellMenuRequest>,
+    tx: Sender<ShellMenuResponse>,
+    repaint_ctx: eframe::egui::Context,
+    error: String,
+) {
+    let mut deferred_request = None;
+    loop {
+        let request = match receive_prioritized(&rx, &control_rx, &mut deferred_request) {
+            PrioritizedReceive::Request(request) => request,
+            PrioritizedReceive::Timeout => continue,
+            PrioritizedReceive::Disconnected => break,
+        };
+        let response = match request {
+            ShellMenuRequest::Extract { request_id, .. } => Some(ShellMenuResponse::Error {
+                request_id,
+                message: error.clone(),
+            }),
+            ShellMenuRequest::Invoke { request_id, .. } => {
+                Some(ShellMenuResponse::Invoked { request_id })
+            }
+            ShellMenuRequest::LoadSubmenu {
+                request_id,
+                item_id,
+            } => Some(ShellMenuResponse::SubmenuLoaded {
+                request_id,
+                item_id,
+                sub_items: Vec::new(),
+            }),
+            ShellMenuRequest::Cancel => None,
+        };
+        if let Some(response) = response {
+            send_response(&tx, &repaint_ctx, response);
+        }
+    }
+}
+
+fn pump_sta_messages() -> bool {
+    unsafe {
+        let mut message = MSG::default();
+        while PeekMessageW(&mut message, None, 0, 0, PM_REMOVE).as_bool() {
+            if message.message == WM_QUIT {
+                return false;
+            }
+            let _ = TranslateMessage(&message);
+            DispatchMessageW(&message);
+        }
+    }
+    true
 }

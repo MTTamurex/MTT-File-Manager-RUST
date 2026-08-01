@@ -1,6 +1,7 @@
 //! Context menu state management
 //! Follows .cursorrules: single responsibility, < 300 lines
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 
 use eframe::egui;
@@ -208,6 +209,8 @@ pub struct ContextMenuState {
 
     /// ID of an item whose submenu needs lazy loading
     pub pending_load_item: Option<i32>,
+    /// Submenus already dispatched to the Shell worker.
+    pub loading_submenu_ids: HashSet<i32>,
 }
 
 impl Default for ContextMenuState {
@@ -231,6 +234,7 @@ impl Default for ContextMenuState {
             selected_command_id: None,
             native_context: None,
             pending_load_item: None,
+            loading_submenu_ids: HashSet::new(),
         }
     }
 }
@@ -262,6 +266,7 @@ impl ContextMenuState {
         self.selected_command_id = None;
         self.native_context = None;
         self.pending_load_item = None;
+        self.loading_submenu_ids.clear();
         self.origin = ContextMenuOrigin::FileView;
         self.primary_is_directory = is_empty_area.then_some(true);
         self.origin_panel_is_left = None;
@@ -284,6 +289,7 @@ impl ContextMenuState {
         self.selected_command_id = None;
         self.native_context = None;
         self.pending_load_item = None;
+        self.loading_submenu_ids.clear();
         self.origin = ContextMenuOrigin::GlobalSearch;
         self.primary_is_directory = Some(primary_is_directory);
         self.origin_panel_is_left = None;
@@ -307,6 +313,7 @@ impl ContextMenuState {
         self.selected_command_id = None;
         self.native_context = None;
         self.pending_load_item = None;
+        self.loading_submenu_ids.clear();
     }
 
     /// Recompute primary/secondary/overflow index partitions.
@@ -335,6 +342,14 @@ impl ContextMenuState {
     /// Checks if the context menu is open for empty area
     pub fn is_open_for_empty_area(&self) -> bool {
         self.is_open && self.is_empty_area
+    }
+
+    pub fn begin_submenu_load(&mut self, item_id: i32) -> bool {
+        self.loading_submenu_ids.insert(item_id)
+    }
+
+    pub fn finish_submenu_load(&mut self, item_id: i32) {
+        self.loading_submenu_ids.remove(&item_id);
     }
 }
 
@@ -381,5 +396,15 @@ mod tests {
             state.operation_directory,
             Some(std::path::PathBuf::from(r"C:\folder"))
         );
+    }
+
+    #[test]
+    fn submenu_loads_are_deduplicated_until_completion() {
+        let mut state = ContextMenuState::default();
+
+        assert!(state.begin_submenu_load(42));
+        assert!(!state.begin_submenu_load(42));
+        state.finish_submenu_load(42);
+        assert!(state.begin_submenu_load(42));
     }
 }

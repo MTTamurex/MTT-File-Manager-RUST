@@ -206,6 +206,7 @@ operations:
 context_menu:
   open: "Open"
   open_with: "Open with..."
+  choose_another_app: "Choose another app"
   open_new_tab: "Open in new tab"
   cut: "Cut"
   copy: "Copy"

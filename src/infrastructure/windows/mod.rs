@@ -20,6 +20,7 @@ pub mod key_state;
 pub mod media_foundation;
 pub mod metadata;
 pub mod native_menu;
+pub mod open_with_icons;
 pub mod outbound_file_drag;
 pub mod owned_handle;
 pub mod path_availability;
