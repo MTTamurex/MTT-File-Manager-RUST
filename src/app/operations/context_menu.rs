@@ -71,6 +71,18 @@ impl ImageViewerApp {
             .is_none()
     }
 
+    pub fn dismiss_context_menu(&mut self) {
+        if !self.context_menu.is_open {
+            return;
+        }
+
+        self.context_menu.close();
+        let _ = self
+            .shell_menu_req_tx
+            .send(crate::infrastructure::shell_menu_worker::ShellMenuRequest::Cancel);
+        self.shell_menu_loading = false;
+    }
+
     pub fn populate_context_menu(
         &mut self,
         _ctx: &egui::Context,

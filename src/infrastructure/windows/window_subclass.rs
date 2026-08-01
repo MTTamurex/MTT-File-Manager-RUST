@@ -98,6 +98,9 @@ static SUBCLASS_INSTALLED: AtomicBool = AtomicBool::new(false);
 /// Flag to track if window is currently being resized or dragged
 /// Set true on WM_ENTERSIZEMOVE, false on WM_EXITSIZEMOVE
 static IS_IN_SIZE_MOVE: AtomicBool = AtomicBool::new(false);
+/// Latched when a move/resize starts so the UI can observe the event even if
+/// Windows suppresses application frames during the modal move loop.
+static SIZE_MOVE_STARTED: AtomicBool = AtomicBool::new(false);
 
 /// Current layout phase (atomic for lock-free read)
 static LAYOUT_PHASE: AtomicU8 = AtomicU8::new(0); // 0 = Normal
@@ -118,6 +121,11 @@ static SIDEBAR_SNAPSHOT: Mutex<SidebarSnapshot> = Mutex::new(SidebarSnapshot {
 #[inline]
 pub fn is_in_size_move() -> bool {
     IS_IN_SIZE_MOVE.load(Ordering::Relaxed)
+}
+
+#[inline]
+pub fn take_size_move_started() -> bool {
+    SIZE_MOVE_STARTED.swap(false, Ordering::AcqRel)
 }
 
 /// Get the current layout phase.
@@ -236,6 +244,7 @@ pub fn install_borderless_subclass(hwnd: HWND) -> bool {
 /// Call this on window close to clean up.
 pub fn remove_borderless_subclass(hwnd: HWND) {
     IS_IN_SIZE_MOVE.store(false, Ordering::SeqCst);
+    SIZE_MOVE_STARTED.store(false, Ordering::SeqCst);
     redraw_suppression::reset_for_remove(hwnd);
 
     if !SUBCLASS_INSTALLED.load(Ordering::SeqCst) {
@@ -266,6 +275,7 @@ extern "system" fn borderless_subclass_proc(
 ) -> LRESULT {
     if msg == WM_NCDESTROY {
         IS_IN_SIZE_MOVE.store(false, Ordering::SeqCst);
+        SIZE_MOVE_STARTED.store(false, Ordering::SeqCst);
         redraw_suppression::reset_for_destroy();
         SUBCLASS_INSTALLED.store(false, Ordering::Release);
         unsafe {
@@ -295,6 +305,7 @@ extern "system" fn borderless_subclass_proc(
     // redraw. Live edge resizing remains unaffected.
     if msg == WM_ENTERSIZEMOVE {
         IS_IN_SIZE_MOVE.store(true, Ordering::SeqCst);
+        SIZE_MOVE_STARTED.store(true, Ordering::Release);
         let result = unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) };
         redraw_suppression::begin_caption_move();
         return result;

@@ -101,7 +101,8 @@ pub fn handle_startup_sequence(app: &mut ImageViewerApp, ctx: &egui::Context) {
 
 pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
     use crate::infrastructure::windows::window_subclass::{
-        freeze_layout, layout_phase, try_unfreeze_layout, WindowLayoutPhase,
+        freeze_layout, is_in_size_move, layout_phase, take_size_move_started, try_unfreeze_layout,
+        WindowLayoutPhase,
     };
 
     let (
@@ -214,6 +215,11 @@ pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
         app.focus_lost_at = Some(std::time::Instant::now());
     }
     app.was_focused = is_focused;
+
+    let size_move_started = take_size_move_started();
+    if !is_focused || is_minimized || is_in_size_move() || size_move_started {
+        app.dismiss_context_menu();
+    }
 
     // Handle minimization state changes - CRITICAL for OneDrive thread management
     if minimized_changed {
