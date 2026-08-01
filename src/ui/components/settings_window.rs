@@ -103,6 +103,13 @@ pub fn render_settings_window(
             offset: [0, 3],
         });
 
+    // Keep resize cursors and interaction without egui's highlighted edge.
+    let original_style = ctx.global_style();
+    let mut window_style = (*original_style).clone();
+    window_style.visuals.widgets.hovered.bg_stroke = Stroke::NONE;
+    window_style.visuals.widgets.active.bg_stroke = Stroke::NONE;
+    ctx.set_global_style(window_style);
+
     egui::Window::new(t!("settings.window_title"))
         .id(egui::Id::new("settings_window"))
         .open(&mut keep_open)
@@ -116,6 +123,10 @@ pub fn render_settings_window(
         .order(egui::Order::Foreground)
         .frame(frame)
         .show(ctx, |ui| {
+            ui.visuals_mut().widgets.hovered.bg_stroke =
+                original_style.visuals.widgets.hovered.bg_stroke;
+            ui.visuals_mut().widgets.active.bg_stroke =
+                original_style.visuals.widgets.active.bg_stroke;
             ui.set_min_size(egui::vec2(700.0, 420.0));
             let content_height = ui.available_height();
 
@@ -156,14 +167,10 @@ pub fn render_settings_window(
                                     ui.add_space(16.0);
                                     theme_changed |= crate::ui::components::appearance_settings::render_appearance_settings_section(ui, &mut app.theme_mode);
                                     ui.add_space(16.0);
-                                    ui.label(RichText::new(t!("settings.show_quick_access_sidebar").to_string()).strong().color(theme::text_color(dark_mode)));
-                                    ui.add_space(4.0);
                                     if ui.checkbox(&mut app.show_quick_access, RichText::new(t!("settings.show_quick_access_sidebar")).color(theme::text_color(dark_mode))).changed() {
                                         quick_access_changed = true;
                                     }
                                     ui.add_space(12.0);
-                                    ui.label(RichText::new(t!("settings.show_recycle_bin").to_string()).strong().color(theme::text_color(dark_mode)));
-                                    ui.add_space(4.0);
                                     if ui.checkbox(&mut app.show_recycle_bin, RichText::new(t!("settings.show_recycle_bin")).color(theme::text_color(dark_mode))).changed() {
                                         recycle_bin_changed = true;
                                     }
@@ -239,6 +246,8 @@ pub fn render_settings_window(
                 );
             });
         });
+
+    ctx.set_global_style(original_style);
 
     SettingsWindowOutput {
         keep_open,
