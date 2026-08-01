@@ -351,14 +351,6 @@ impl ImageViewerApp {
         false
     }
 
-    pub fn is_video_docked_visible(&self) -> bool {
-        if let Some(preview) = &self.media_preview {
-            !preview.is_detached() && preview.is_visible()
-        } else {
-            false
-        }
-    }
-
     pub(crate) fn effective_thumbnail_request_size_px(&self, logical_size_px: u32) -> u32 {
         let scale = self.ui_ctx.pixels_per_point().max(1.0);
         (((logical_size_px.max(1) as f32) * scale).ceil() as u32)

@@ -303,7 +303,6 @@ impl ImageViewerApp {
 
         // Create context with separate mutable references
         let scroll_to_selected = self.scroll_to_selected;
-        let is_video_docked_visible = self.is_video_docked_visible();
         let multi_selection = &self.multi_selection;
         // Non-blocking in render loop: use cached profile only.
         // Unknown drives fall back to HDD behavior to avoid UI stalls.
@@ -419,7 +418,6 @@ impl ImageViewerApp {
             last_scroll_time: &mut self.last_scroll_time,
             last_scroll_offset: &mut self.last_scroll_offset,
             pending_upload_set: &mut self.cache_manager.pending_upload_set,
-            is_video_docked_visible,
             is_on_hdd: !is_ssd,
             prefetch_rows,
             visible_index_range: &mut self.visible_index_range,
@@ -647,17 +645,10 @@ impl ImageViewerApp {
 
                         // Use the new styled menu system
                         let pointer_pos = ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO);
-                        let right_bound = ui.available_rect_before_wrap().right();
-
                         // Populate with multiple paths
                         self.populate_context_menu(ui.ctx(), &selected_paths, false, Some(idx));
-                        self.context_menu.open(
-                            pointer_pos,
-                            right_bound,
-                            Some(idx),
-                            selected_paths,
-                            false,
-                        );
+                        self.context_menu
+                            .open(pointer_pos, Some(idx), selected_paths, false);
                         self.context_menu.primary_is_directory = Some(primary_is_directory);
                         self.context_menu.operation_directory = Some(operation_directory);
                         self.capture_context_menu_panel_origin();
@@ -683,10 +674,8 @@ impl ImageViewerApp {
                 {
                     let path = PathBuf::from(&self.navigation_state.current_path);
                     let pointer_pos = ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO);
-                    let right_bound = ui.available_rect_before_wrap().right();
                     self.populate_context_menu(ui.ctx(), std::slice::from_ref(&path), true, None);
-                    self.context_menu
-                        .open(pointer_pos, right_bound, None, vec![path], true);
+                    self.context_menu.open(pointer_pos, None, vec![path], true);
                     self.capture_context_menu_panel_origin();
                 }
                 Some(list_view::ListViewAction::EmptyAreaClick) if !is_renaming => {

@@ -20,5 +20,6 @@ pub mod tab_bar;
 pub(crate) mod tag_icon;
 pub mod theme;
 pub mod toolbar;
+pub(crate) mod video_overlay;
 pub mod views;
 pub mod widgets;

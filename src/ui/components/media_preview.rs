@@ -436,6 +436,12 @@ impl MediaPreview {
         }
     }
 
+    pub fn set_overlay_rects(&mut self, overlay_rects: &[egui::Rect], pixels_per_point: f32) {
+        if let MediaPreview::Video(player) = self {
+            player.set_overlay_rects(overlay_rects, pixels_per_point);
+        }
+    }
+
     /// Access to controls state (for inline menus)
     pub fn controls_state_mut(
         &mut self,

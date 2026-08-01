@@ -244,8 +244,6 @@ impl ImageViewerApp {
         // PERFORMANCE: Clear shared buffers before rendering (reuse, don't reallocate)
         self.pending_ops.clear();
 
-        // Check if video is playing in docked mode to reduce disk I/O
-        let is_video_docked_visible = self.is_video_docked_visible();
         let skip_folder_media_reads = crate::infrastructure::windows::is_windows_system_path(
             &self.navigation_state.current_path,
         );
@@ -311,7 +309,6 @@ impl ImageViewerApp {
             last_scroll_time: &mut self.last_scroll_time,
             last_scroll_offset: &mut self.last_scroll_offset,
             pending_upload_set: &mut self.cache_manager.pending_upload_set,
-            is_video_docked_visible,
             prefetch_rows,
             visible_index_range: &mut self.visible_index_range,
             is_item_dragging: self.is_item_dragging || external_drop_over_this_panel,
@@ -472,16 +469,9 @@ impl ImageViewerApp {
 
                         // Use the new styled menu system
                         let pointer_pos = ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO);
-                        let right_bound = ui.available_rect_before_wrap().right();
-
                         self.populate_context_menu(ui.ctx(), &selected_paths, false, Some(idx));
-                        self.context_menu.open(
-                            pointer_pos,
-                            right_bound,
-                            Some(idx),
-                            selected_paths,
-                            false,
-                        );
+                        self.context_menu
+                            .open(pointer_pos, Some(idx), selected_paths, false);
                         self.context_menu.primary_is_directory = Some(primary_is_directory);
                         self.context_menu.operation_directory = Some(operation_directory);
                         self.capture_context_menu_panel_origin();
@@ -492,10 +482,8 @@ impl ImageViewerApp {
                 {
                     let path = PathBuf::from(&self.navigation_state.current_path);
                     let pointer_pos = ui.ctx().pointer_latest_pos().unwrap_or(egui::Pos2::ZERO);
-                    let right_bound = ui.available_rect_before_wrap().right();
                     self.populate_context_menu(ui.ctx(), std::slice::from_ref(&path), true, None);
-                    self.context_menu
-                        .open(pointer_pos, right_bound, None, vec![path], true);
+                    self.context_menu.open(pointer_pos, None, vec![path], true);
                     self.capture_context_menu_panel_origin();
                 }
                 Some(grid_view::GridViewAction::EmptyAreaClick) if !is_renaming => {

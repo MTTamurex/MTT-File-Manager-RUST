@@ -117,17 +117,15 @@ pub fn render_context_menu(
         MENU_MIN_WIDTH
     };
 
-    // SMART ALIGNMENT: If the menu would open over the player area, shift it to the left
     let mut menu_pos = menu_state.position;
     let expected_width = menu_width;
+    let screen_rect = ctx.viewport_rect();
 
-    if menu_pos.x + expected_width > menu_state.right_bound {
-        // If it hits the right edge, move the menu to the left of the cursor
-        menu_pos.x = (menu_state.right_bound - expected_width).max(0.0);
+    if menu_pos.x + expected_width > screen_rect.right() {
+        menu_pos.x = (screen_rect.right() - expected_width).max(screen_rect.left());
     }
 
     // VERTICAL CLAMPING: Prevent menu from extending below the screen
-    let screen_rect = ctx.viewport_rect();
     let separator_count = if !primary_items.is_empty() { 1 } else { 0 }
         + if !overflow_items.is_empty() { 1 } else { 0 };
     let expected_height = (HEADER_BUTTON_HEIGHT + 8.0) * (!primary_items.is_empty() as u32 as f32)
@@ -170,7 +168,6 @@ pub fn render_context_menu(
                         &secondary_items,
                         &mut action_executed,
                         &mut pending_load_item,
-                        menu_state.right_bound,
                         svg_icon_manager,
                     );
 
@@ -181,12 +178,12 @@ pub fn render_context_menu(
                             &overflow_items,
                             &mut action_executed,
                             &mut pending_load_item,
-                            menu_state.right_bound,
                             svg_icon_manager,
                         );
                     }
                 });
         });
+    crate::ui::video_overlay::register_rect(ctx, response.response.rect);
 
     // Handle action execution
     if let Some(id) = action_executed {
@@ -357,7 +354,6 @@ fn render_menu_items(
     items: &[&ContextMenuItem],
     action: &mut Option<i32>,
     lazy_load: &mut Option<i32>,
-    right_bound: f32,
     svg_icon_manager: &mut SvgIconManager,
 ) {
     let mut last_was_separator = true; // collapse leading separators
@@ -367,26 +363,10 @@ fn render_menu_items(
             if last_was_separator {
                 continue; // skip duplicate/leading separators
             }
-            render_single_item(
-                ui,
-                item,
-                action,
-                0,
-                lazy_load,
-                right_bound,
-                svg_icon_manager,
-            );
+            render_single_item(ui, item, action, 0, lazy_load, svg_icon_manager);
             last_was_separator = true;
         } else {
-            render_single_item(
-                ui,
-                item,
-                action,
-                0,
-                lazy_load,
-                right_bound,
-                svg_icon_manager,
-            );
+            render_single_item(ui, item, action, 0, lazy_load, svg_icon_manager);
             last_was_separator = false;
         }
     }
@@ -399,7 +379,6 @@ fn render_single_item(
     action: &mut Option<i32>,
     depth: usize,
     lazy_load: &mut Option<i32>,
-    right_bound: f32,
     svg_icon_manager: &mut SvgIconManager,
 ) {
     if item.is_separator {
@@ -590,13 +569,11 @@ fn render_single_item(
     if has_submenu {
         let pointer_pos = ui.ctx().pointer_latest_pos();
 
-        // Calculate submenu position: RIGHT by default, LEFT only if insufficient space
+        // Calculate submenu position: RIGHT by default, LEFT only at the viewport edge.
         let screen_rect = ui.ctx().viewport_rect();
         let menu_width = SUBMENU_MIN_WIDTH; // Expected submenu width
 
-        // SMART ALIGNMENT: Uses the real boundary (accounting for the video player)
-        let effective_right = screen_rect.right().min(right_bound);
-        let space_on_right = effective_right - rect.right();
+        let space_on_right = screen_rect.right() - rect.right();
         let needs_flip = space_on_right < (menu_width + SUBMENU_X_OFFSET + 20.0); // 20px margin
 
         // Open to the right by default, flip to left only if not enough space
@@ -729,12 +706,12 @@ fn render_single_item(
                                     action,
                                     depth + 1,
                                     lazy_load,
-                                    right_bound,
                                     svg_icon_manager,
                                 );
                             }
                         });
                 });
+            crate::ui::video_overlay::register_rect(ui.ctx(), area_response.response.rect);
 
             // Store submenu rect for hover detection outside the main menu rect
             submenu_rect = Some(area_response.response.rect);
@@ -778,19 +755,10 @@ fn render_overflow_submenu(
     items: &[&ContextMenuItem],
     action: &mut Option<i32>,
     lazy_load: &mut Option<i32>,
-    right_bound: f32,
     svg_icon_manager: &mut SvgIconManager,
 ) {
     let overflow_item = ContextMenuItem::new(-100, rust_i18n::t!("context_menu.show_more"))
         .with_subitems(items.iter().map(|i| (*i).clone()).collect());
 
-    render_single_item(
-        ui,
-        &overflow_item,
-        action,
-        0,
-        lazy_load,
-        right_bound,
-        svg_icon_manager,
-    );
+    render_single_item(ui, &overflow_item, action, 0, lazy_load, svg_icon_manager);
 }

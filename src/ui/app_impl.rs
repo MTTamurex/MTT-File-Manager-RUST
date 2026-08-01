@@ -167,6 +167,7 @@ impl eframe::App for ImageViewerApp {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx_owned = ui.ctx().clone();
         let ctx = &ctx_owned;
+        crate::ui::video_overlay::begin_frame(ctx);
         ui.set_style(ctx.global_style());
         let t_frame_start = std::time::Instant::now();
 
@@ -623,6 +624,11 @@ impl eframe::App for ImageViewerApp {
                 }
             }
             self.reset_external_drop_state();
+        }
+
+        let video_overlay_rects = crate::ui::video_overlay::current_rects(ctx);
+        if let Some(preview) = self.media_preview.as_mut() {
+            preview.set_overlay_rects(&video_overlay_rects, ctx.pixels_per_point());
         }
 
         // PERF: Log total frame time when slow (helps diagnose post-inactivity freezes)

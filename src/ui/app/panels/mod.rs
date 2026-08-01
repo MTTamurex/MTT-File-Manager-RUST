@@ -425,12 +425,9 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, root_ui: &mut egui::Ui) -> Opt
         Some(SidebarAction::OpenDriveContextMenu(path)) => {
             let path_buf = std::path::PathBuf::from(&path);
             let pos = ctx.input(|i| i.pointer.hover_pos().unwrap_or_default());
-            // Use screen width (not sidebar edge) so submenus open to the right
-            // into the available central area, not flip left off-screen.
-            let right_bound = ctx.viewport_rect().right() - app.layout.sidebar_right_width;
 
             app.context_menu
-                .open(pos, right_bound, None, vec![path_buf.clone()], false);
+                .open(pos, None, vec![path_buf.clone()], false);
             app.context_menu.primary_is_directory = Some(true);
             app.populate_context_menu(&ctx, &[path_buf], false, None);
             None

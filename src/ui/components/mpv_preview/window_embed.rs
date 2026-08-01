@@ -5,6 +5,10 @@ use windows::core::w;
 #[cfg(target_os = "windows")]
 use windows::Win32::Foundation::HWND;
 #[cfg(target_os = "windows")]
+use windows::Win32::Graphics::Gdi::{
+    CombineRgn, CreateRectRgn, CreateRoundRectRgn, DeleteObject, SetWindowRgn, RGN_DIFF,
+};
+#[cfg(target_os = "windows")]
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetFocus, SetFocus};
 #[cfg(target_os = "windows")]
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -21,11 +25,59 @@ pub struct VideoSurface {
     mpv_hwnd: Option<HWND>,
     main_hwnd: Option<HWND>,
     last_rect: egui::Rect,
+    last_overlay_regions: Option<Vec<PixelRoundedRect>>,
 }
 
 #[cfg(not(target_os = "windows"))]
 pub struct VideoSurface {
     last_rect: egui::Rect,
+}
+
+#[cfg(any(target_os = "windows", test))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct PixelRoundedRect {
+    left: i32,
+    top: i32,
+    right: i32,
+    bottom: i32,
+    corner_diameter: i32,
+}
+
+#[cfg(any(target_os = "windows", test))]
+const OVERLAY_CORNER_RADIUS_POINTS: f32 = 6.0;
+
+#[cfg(any(target_os = "windows", test))]
+fn overlay_pixel_rects(
+    video_rect: egui::Rect,
+    overlay_rects: &[egui::Rect],
+    pixels_per_point: f32,
+) -> Vec<PixelRoundedRect> {
+    if !video_rect.is_positive() || pixels_per_point <= 0.0 {
+        return Vec::new();
+    }
+
+    let video_left = (video_rect.left() * pixels_per_point).floor() as i32;
+    let video_top = (video_rect.top() * pixels_per_point).floor() as i32;
+    let corner_diameter = (OVERLAY_CORNER_RADIUS_POINTS * 2.0 * pixels_per_point)
+        .round()
+        .max(1.0) as i32;
+
+    overlay_rects
+        .iter()
+        .filter_map(|overlay| {
+            if !video_rect.intersect(*overlay).is_positive() {
+                return None;
+            }
+
+            Some(PixelRoundedRect {
+                left: (overlay.left() * pixels_per_point).floor() as i32 - video_left,
+                top: (overlay.top() * pixels_per_point).floor() as i32 - video_top,
+                right: (overlay.right() * pixels_per_point).ceil() as i32 - video_left,
+                bottom: (overlay.bottom() * pixels_per_point).ceil() as i32 - video_top,
+                corner_diameter,
+            })
+        })
+        .collect()
 }
 
 #[cfg(target_os = "windows")]
@@ -35,6 +87,7 @@ impl VideoSurface {
             mpv_hwnd: None,
             main_hwnd: None,
             last_rect: egui::Rect::NAN,
+            last_overlay_regions: None,
         }
     }
 
@@ -102,6 +155,7 @@ impl VideoSurface {
         }
 
         self.last_rect = rect;
+        self.last_overlay_regions = None;
 
         if let Some(h_video) = self.mpv_hwnd {
             let factor = ui.ctx().pixels_per_point();
@@ -123,6 +177,64 @@ impl VideoSurface {
             unsafe {
                 let _ = ShowWindow(hwnd, if visible { SW_SHOW } else { SW_HIDE });
             }
+        }
+    }
+
+    /// Excludes egui overlay rectangles from the native video child window.
+    /// The parent surface then remains visible and interactive in those areas.
+    pub fn set_overlay_rects(&mut self, overlay_rects: &[egui::Rect], pixels_per_point: f32) {
+        let Some(hwnd) = self.mpv_hwnd else {
+            return;
+        };
+
+        let regions = overlay_pixel_rects(self.last_rect, overlay_rects, pixels_per_point);
+        if self.last_overlay_regions.as_ref() == Some(&regions) {
+            return;
+        }
+
+        let applied = unsafe {
+            if regions.is_empty() {
+                SetWindowRgn(hwnd, None, true) != 0
+            } else {
+                let width = ((self.last_rect.width() * pixels_per_point) as i32).max(1);
+                let height = ((self.last_rect.height() * pixels_per_point) as i32).max(1);
+                let window_region = CreateRectRgn(0, 0, width, height);
+                if window_region.is_invalid() {
+                    false
+                } else {
+                    for rect in &regions {
+                        let overlay_region = CreateRoundRectRgn(
+                            rect.left,
+                            rect.top,
+                            rect.right,
+                            rect.bottom,
+                            rect.corner_diameter,
+                            rect.corner_diameter,
+                        );
+                        if !overlay_region.is_invalid() {
+                            let _ = CombineRgn(
+                                Some(window_region),
+                                Some(window_region),
+                                Some(overlay_region),
+                                RGN_DIFF,
+                            );
+                            let _ = DeleteObject(overlay_region.into());
+                        }
+                    }
+
+                    if SetWindowRgn(hwnd, Some(window_region), true) != 0 {
+                        // Windows owns window_region after a successful call.
+                        true
+                    } else {
+                        let _ = DeleteObject(window_region.into());
+                        false
+                    }
+                }
+            }
+        };
+
+        if applied {
+            self.last_overlay_regions = Some(regions);
         }
     }
 
@@ -172,6 +284,7 @@ impl VideoSurface {
     /// Resets the last rect to force a MoveWindow call on the next frame.
     pub fn reset_rect(&mut self) {
         self.last_rect = egui::Rect::NAN;
+        self.last_overlay_regions = None;
     }
 
     /// No-op for MPV. Kept for API parity.
@@ -212,6 +325,8 @@ impl VideoSurface {
 
     pub fn set_visible(&self, _visible: bool) {}
 
+    pub fn set_overlay_rects(&mut self, _overlay_rects: &[egui::Rect], _pixels_per_point: f32) {}
+
     pub fn hwnd(&self) -> Option<()> {
         None
     }
@@ -230,5 +345,36 @@ impl VideoSurface {
 
     pub fn reset_rect(&mut self) {
         self.last_rect = egui::Rect::NAN;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{overlay_pixel_rects, PixelRoundedRect};
+    use eframe::egui;
+
+    #[test]
+    fn converts_overlay_intersection_to_video_local_pixels() {
+        let video = egui::Rect::from_min_max(egui::pos2(100.0, 50.0), egui::pos2(300.0, 150.0));
+        let overlay = egui::Rect::from_min_max(egui::pos2(250.0, 25.0), egui::pos2(350.0, 100.0));
+
+        assert_eq!(
+            overlay_pixel_rects(video, &[overlay], 1.5),
+            vec![PixelRoundedRect {
+                left: 225,
+                top: -38,
+                right: 375,
+                bottom: 75,
+                corner_diameter: 18,
+            }]
+        );
+    }
+
+    #[test]
+    fn ignores_overlays_outside_video() {
+        let video = egui::Rect::from_min_size(egui::pos2(100.0, 50.0), egui::vec2(200.0, 100.0));
+        let overlay = egui::Rect::from_min_size(egui::pos2(10.0, 10.0), egui::vec2(20.0, 20.0));
+
+        assert!(overlay_pixel_rects(video, &[overlay], 1.25).is_empty());
     }
 }

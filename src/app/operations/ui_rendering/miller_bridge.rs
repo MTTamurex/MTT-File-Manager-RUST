@@ -281,7 +281,6 @@ impl ImageViewerApp {
         }
 
         // ── Apply deferred ancestor interactions. ──
-        let right_bound = viewport.right();
         for (col_idx, output) in ancestor_outputs {
             let Some(listing) = ancestor_data[col_idx].0.as_ref() else {
                 continue;
@@ -397,8 +396,7 @@ impl ImageViewerApp {
                                 })
                                 .map(|item| item.path.clone()),
                         );
-                        self.context_menu
-                            .open(pos, right_bound, None, paths.clone(), false);
+                        self.context_menu.open(pos, None, paths.clone(), false);
                         self.context_menu.primary_is_directory = Some(entry.is_dir);
                         self.context_menu.operation_directory = Some(chain[col_idx].clone());
                         self.capture_context_menu_panel_origin();
@@ -413,8 +411,7 @@ impl ImageViewerApp {
                 MillerColumnAction::EmptyClicked => self.clear_file_view_selection(),
                 MillerColumnAction::EmptySecondaryClicked(pos) => {
                     let paths = vec![chain[col_idx].clone()];
-                    self.context_menu
-                        .open(pos, right_bound, None, paths.clone(), true);
+                    self.context_menu.open(pos, None, paths.clone(), true);
                     self.context_menu.primary_is_directory = Some(true);
                     self.capture_context_menu_panel_origin();
                     self.populate_context_menu(ui.ctx(), &paths, true, None);

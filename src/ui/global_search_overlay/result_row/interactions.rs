@@ -49,12 +49,8 @@ pub(super) fn handle_selection_and_context_menu(
             .filter(|path| path != &primary_path),
     );
     let pointer_pos = ctx.pointer_latest_pos().unwrap_or(row_rect.center());
-    app.context_menu.open_for_global_search(
-        pointer_pos,
-        ctx.viewport_rect().right(),
-        selected_paths.clone(),
-        is_directory,
-    );
+    app.context_menu
+        .open_for_global_search(pointer_pos, selected_paths.clone(), is_directory);
     app.populate_context_menu(ctx, &selected_paths, false, None);
 }
 

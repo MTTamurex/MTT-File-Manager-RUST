@@ -176,7 +176,6 @@ pub struct GridViewContext<'a> {
     pub last_scroll_offset: &'a mut f32,
     /// Set of items awaiting GPU upload
     pub pending_upload_set: &'a mut FxHashSet<PathBuf>,
-    pub is_video_docked_visible: bool,
     pub prefetch_rows: usize,
     /// Output: visible item index range for GPU upload prioritization
     pub visible_index_range: &'a mut Option<(usize, usize)>,

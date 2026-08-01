@@ -125,30 +125,13 @@ pub(crate) fn render_item_tooltip(
         // Only show tooltip if hover duration exceeds threshold
         if hover_duration >= TOOLTIP_DELAY_SECS {
             if let Some(mouse_pos) = ui.input(|i| i.pointer.hover_pos()) {
-                // SMART TOOLTIP: Position to avoid video player overlay
-                let screen_right = ui.ctx().viewport_rect().right();
-                let tooltip_width = 320.0;
-
-                let effective_right = if ctx.is_video_docked_visible {
-                    screen_right * 0.72
-                } else {
-                    screen_right
-                };
-
-                let tooltip_x = if mouse_pos.x + tooltip_width > effective_right {
-                    (effective_right - tooltip_width - 5.0).max(10.0)
-                } else {
-                    mouse_pos.x
-                };
-                let tooltip_pos = egui::pos2(tooltip_x, mouse_pos.y);
-
                 let tooltip_layer =
                     egui::LayerId::new(egui::Order::Tooltip, response.id.with("tooltip"));
-                egui::Tooltip::always_open(
+                let tooltip_response = egui::Tooltip::always_open(
                     ui.ctx().clone(),
                     tooltip_layer,
                     response.id,
-                    tooltip_pos,
+                    mouse_pos,
                 )
                 .show(|ui: &mut Ui| {
                     ui.set_max_width(300.0);
@@ -222,6 +205,12 @@ pub(crate) fn render_item_tooltip(
                         }
                     });
                 });
+                if let Some(tooltip_response) = tooltip_response {
+                    crate::ui::video_overlay::register_rect(
+                        ui.ctx(),
+                        tooltip_response.response.rect,
+                    );
+                }
             } // if let Some(mouse_pos)
         }
     } else {

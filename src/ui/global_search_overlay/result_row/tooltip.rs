@@ -49,37 +49,41 @@ pub(super) fn render(
     };
 
     let tooltip_layer = egui::LayerId::new(egui::Order::Tooltip, response.id.with("tooltip"));
-    egui::Tooltip::always_open(ui.ctx().clone(), tooltip_layer, response.id, mouse_pos).show(
-        |ui: &mut egui::Ui| {
-            ui.set_max_width(300.0);
-            ui.vertical(|ui| {
-                ui.label(egui::RichText::new(result_name).strong());
-                ui.separator();
-                render_thumbnail(ui, thumbnail.as_ref());
-                ui.horizontal(|ui| {
-                    ui.label(t!("file_info.type"));
-                    ui.label(file_type);
-                });
-                if !is_directory {
+    let tooltip_response =
+        egui::Tooltip::always_open(ui.ctx().clone(), tooltip_layer, response.id, mouse_pos).show(
+            |ui: &mut egui::Ui| {
+                ui.set_max_width(300.0);
+                ui.vertical(|ui| {
+                    ui.label(egui::RichText::new(result_name).strong());
+                    ui.separator();
+                    render_thumbnail(ui, thumbnail.as_ref());
                     ui.horizontal(|ui| {
-                        ui.label(t!("file_info.size"));
-                        ui.label(size_text.as_deref().unwrap_or("-"));
+                        ui.label(t!("file_info.type"));
+                        ui.label(file_type);
                     });
-                }
-                ui.horizontal(|ui| {
-                    ui.label(t!("file_info.date_modified"));
-                    ui.label(crate::infrastructure::windows::format_date(modified_ts));
-                });
-                if let Some(created_ts) = app.global_search.created_ts_for_index(source_index) {
+                    if !is_directory {
+                        ui.horizontal(|ui| {
+                            ui.label(t!("file_info.size"));
+                            ui.label(size_text.as_deref().unwrap_or("-"));
+                        });
+                    }
                     ui.horizontal(|ui| {
-                        ui.label(t!("file_info.date_created"));
-                        ui.label(crate::infrastructure::windows::format_date(created_ts));
+                        ui.label(t!("file_info.date_modified"));
+                        ui.label(crate::infrastructure::windows::format_date(modified_ts));
                     });
-                }
-                render_tags(ui, app, tag_ids);
-            });
-        },
-    );
+                    if let Some(created_ts) = app.global_search.created_ts_for_index(source_index) {
+                        ui.horizontal(|ui| {
+                            ui.label(t!("file_info.date_created"));
+                            ui.label(crate::infrastructure::windows::format_date(created_ts));
+                        });
+                    }
+                    render_tags(ui, app, tag_ids);
+                });
+            },
+        );
+    if let Some(tooltip_response) = tooltip_response {
+        crate::ui::video_overlay::register_rect(ui.ctx(), tooltip_response.response.rect);
+    }
 }
 
 fn resolve_modified_timestamp(

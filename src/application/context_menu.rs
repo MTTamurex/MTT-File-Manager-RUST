@@ -180,7 +180,6 @@ impl ContextMenuOrigin {
 pub struct ContextMenuState {
     pub is_open: bool,
     pub position: egui::Pos2,
-    pub right_bound: f32,
     pub item_index: Option<usize>,
     pub target_paths: Vec<PathBuf>,
     pub operation_directory: Option<PathBuf>,
@@ -218,7 +217,6 @@ impl Default for ContextMenuState {
         Self {
             is_open: false,
             position: egui::Pos2::ZERO,
-            right_bound: f32::MAX, // Default to no restriction
             item_index: None,
             target_paths: Vec::new(),
             operation_directory: None,
@@ -249,14 +247,12 @@ impl ContextMenuState {
     pub fn open(
         &mut self,
         position: egui::Pos2,
-        right_bound: f32,
         item_index: Option<usize>,
         target_paths: Vec<PathBuf>,
         is_empty_area: bool,
     ) {
         self.is_open = true;
         self.position = position;
-        self.right_bound = right_bound;
         self.item_index = item_index;
         self.target_paths = target_paths;
         self.operation_directory = is_empty_area
@@ -275,13 +271,11 @@ impl ContextMenuState {
     pub fn open_for_global_search(
         &mut self,
         position: egui::Pos2,
-        right_bound: f32,
         target_paths: Vec<PathBuf>,
         primary_is_directory: bool,
     ) {
         self.is_open = true;
         self.position = position;
-        self.right_bound = right_bound;
         self.item_index = None;
         self.target_paths = target_paths;
         self.operation_directory = None;
@@ -358,7 +352,6 @@ impl std::fmt::Debug for ContextMenuState {
         f.debug_struct("ContextMenuState")
             .field("is_open", &self.is_open)
             .field("position", &self.position)
-            .field("right_bound", &self.right_bound)
             .field("item_index", &self.item_index)
             .field("target_paths", &self.target_paths)
             .field("operation_directory", &self.operation_directory)
@@ -385,7 +378,6 @@ mod tests {
         let mut state = ContextMenuState::default();
         state.open(
             eframe::egui::Pos2::ZERO,
-            100.0,
             None,
             vec![std::path::PathBuf::from(r"C:\folder")],
             true,

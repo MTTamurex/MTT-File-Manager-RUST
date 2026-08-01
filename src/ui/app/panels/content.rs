@@ -1091,11 +1091,9 @@ fn render_single_panel_content(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
 
             // Prepare state
             let pos = ui.input(|i| i.pointer.hover_pos().unwrap_or_default());
-            let right_bound = ui.available_rect_before_wrap().right();
 
             // Set state first
-            app.context_menu
-                .open(pos, right_bound, None, paths.clone(), true);
+            app.context_menu.open(pos, None, paths.clone(), true);
             app.capture_context_menu_panel_origin();
 
             // Then populate items
