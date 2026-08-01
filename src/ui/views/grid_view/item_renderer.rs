@@ -218,79 +218,94 @@ pub(super) fn render_grid_item(
                     let is_recycle = ctx.is_recycle_bin_view;
                     let tooltip_layer =
                         egui::LayerId::new(egui::Order::Tooltip, response.id.with("tooltip"));
-                    let tooltip_response = egui::Tooltip::always_open(
-                        ui.ctx().clone(),
-                        tooltip_layer,
-                        response.id,
-                        mouse_pos,
-                    )
-                    .show(|ui: &mut Ui| {
-                        ui.set_max_width(300.0);
-                        ui.vertical(|ui| {
-                            ui.label(
+                    let tooltip_id = response.id.with("tooltip");
+                    let tooltip_response = crate::ui::video_overlay::without_shadow_if_needed(
+                        ui.ctx(),
+                        tooltip_id,
+                        || {
+                            egui::Tooltip::always_open(
+                                ui.ctx().clone(),
+                                tooltip_layer,
+                                response.id,
+                                mouse_pos,
+                            )
+                            .show(|ui: &mut Ui| {
+                                ui.set_max_width(300.0);
+                                ui.vertical(|ui| {
+                                    ui.label(
                                 egui::RichText::new(
                                     crate::ui::components::item_slot::display_name_for_item(item)
                                         .as_ref(),
                                 )
                                 .strong(),
                             );
-                            ui.separator();
-                            if item.drive_info.is_some() {
-                                render_drive_tooltip(ui, item);
-                                return;
-                            }
-                            ui.horizontal(|ui| {
-                                ui.label(rust_i18n::t!("file_info.type").to_string());
-                                ui.label(get_file_type_string(item));
-                            });
-                            if !item.is_dir || item.is_archive() {
-                                ui.horizontal(|ui| {
-                                    ui.label(rust_i18n::t!("file_info.size").to_string());
-                                    ui.label(crate::infrastructure::windows::format_size(
-                                        resolve_tooltip_live_size(ui, item, ctx),
-                                    ));
-                                });
-                            }
-                            let (date_lbl, date_val) = if is_recycle {
-                                (
-                                    rust_i18n::t!("list_view.date_deleted").to_string(),
-                                    if item.modified > 0 {
-                                        crate::infrastructure::windows::format_date(item.modified)
-                                    } else {
-                                        item.deletion_date()
-                                            .map(|s| s.to_string())
-                                            .unwrap_or_else(|| "-".to_string())
-                                    },
-                                )
-                            } else {
-                                (
-                                    rust_i18n::t!("list_view.date_modified").to_string(),
-                                    crate::infrastructure::windows::format_date(item.modified),
-                                )
-                            };
-                            ui.horizontal(|ui| {
-                                ui.label(date_lbl);
-                                ui.label(":");
-                                ui.label(date_val);
-                            });
-                            if !is_recycle {
-                                if let Some(created) = item.created {
+                                    ui.separator();
+                                    if item.drive_info.is_some() {
+                                        render_drive_tooltip(ui, item);
+                                        return;
+                                    }
                                     ui.horizontal(|ui| {
-                                        ui.label(
-                                            rust_i18n::t!("file_info.date_created").to_string(),
-                                        );
-                                        ui.label(":");
-                                        ui.label(crate::infrastructure::windows::format_date(
-                                            created,
-                                        ));
+                                        ui.label(rust_i18n::t!("file_info.type").to_string());
+                                        ui.label(get_file_type_string(item));
                                     });
-                                }
-                            }
-                        });
-                    });
+                                    if !item.is_dir || item.is_archive() {
+                                        ui.horizontal(|ui| {
+                                            ui.label(rust_i18n::t!("file_info.size").to_string());
+                                            ui.label(crate::infrastructure::windows::format_size(
+                                                resolve_tooltip_live_size(ui, item, ctx),
+                                            ));
+                                        });
+                                    }
+                                    let (date_lbl, date_val) = if is_recycle {
+                                        (
+                                            rust_i18n::t!("list_view.date_deleted").to_string(),
+                                            if item.modified > 0 {
+                                                crate::infrastructure::windows::format_date(
+                                                    item.modified,
+                                                )
+                                            } else {
+                                                item.deletion_date()
+                                                    .map(|s| s.to_string())
+                                                    .unwrap_or_else(|| "-".to_string())
+                                            },
+                                        )
+                                    } else {
+                                        (
+                                            rust_i18n::t!("list_view.date_modified").to_string(),
+                                            crate::infrastructure::windows::format_date(
+                                                item.modified,
+                                            ),
+                                        )
+                                    };
+                                    ui.horizontal(|ui| {
+                                        ui.label(date_lbl);
+                                        ui.label(":");
+                                        ui.label(date_val);
+                                    });
+                                    if !is_recycle {
+                                        if let Some(created) = item.created {
+                                            ui.horizontal(|ui| {
+                                                ui.label(
+                                                    rust_i18n::t!("file_info.date_created")
+                                                        .to_string(),
+                                                );
+                                                ui.label(":");
+                                                ui.label(
+                                                    crate::infrastructure::windows::format_date(
+                                                        created,
+                                                    ),
+                                                );
+                                            });
+                                        }
+                                    }
+                                });
+                            })
+                        },
+                    );
                     if let Some(tooltip_response) = tooltip_response {
                         crate::ui::video_overlay::register_rect(
                             ui.ctx(),
+                            tooltip_id,
                             tooltip_response.response.rect,
                         );
                     }

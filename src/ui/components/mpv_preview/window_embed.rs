@@ -44,12 +44,26 @@ struct PixelRoundedRect {
 }
 
 #[cfg(any(target_os = "windows", test))]
-const OVERLAY_CORNER_RADIUS_POINTS: f32 = 6.0;
+fn rounded_rect_to_pixels(
+    rect: egui::Rect,
+    corner_radius: f32,
+    video_left: i32,
+    video_top: i32,
+    pixels_per_point: f32,
+) -> PixelRoundedRect {
+    PixelRoundedRect {
+        left: (rect.left() * pixels_per_point).floor() as i32 - video_left,
+        top: (rect.top() * pixels_per_point).floor() as i32 - video_top,
+        right: (rect.right() * pixels_per_point).ceil() as i32 - video_left,
+        bottom: (rect.bottom() * pixels_per_point).ceil() as i32 - video_top,
+        corner_diameter: (corner_radius * 2.0 * pixels_per_point).round().max(1.0) as i32,
+    }
+}
 
 #[cfg(any(target_os = "windows", test))]
-fn overlay_pixel_rects(
+fn overlay_pixel_regions(
     video_rect: egui::Rect,
-    overlay_rects: &[egui::Rect],
+    overlays: &[crate::ui::video_overlay::VideoOverlay],
     pixels_per_point: f32,
 ) -> Vec<PixelRoundedRect> {
     if !video_rect.is_positive() || pixels_per_point <= 0.0 {
@@ -58,24 +72,21 @@ fn overlay_pixel_rects(
 
     let video_left = (video_rect.left() * pixels_per_point).floor() as i32;
     let video_top = (video_rect.top() * pixels_per_point).floor() as i32;
-    let corner_diameter = (OVERLAY_CORNER_RADIUS_POINTS * 2.0 * pixels_per_point)
-        .round()
-        .max(1.0) as i32;
 
-    overlay_rects
+    overlays
         .iter()
         .filter_map(|overlay| {
-            if !video_rect.intersect(*overlay).is_positive() {
+            if !video_rect.intersect(overlay.rect).is_positive() {
                 return None;
             }
 
-            Some(PixelRoundedRect {
-                left: (overlay.left() * pixels_per_point).floor() as i32 - video_left,
-                top: (overlay.top() * pixels_per_point).floor() as i32 - video_top,
-                right: (overlay.right() * pixels_per_point).ceil() as i32 - video_left,
-                bottom: (overlay.bottom() * pixels_per_point).ceil() as i32 - video_top,
-                corner_diameter,
-            })
+            Some(rounded_rect_to_pixels(
+                overlay.rect,
+                overlay.corner_radius,
+                video_left,
+                video_top,
+                pixels_per_point,
+            ))
         })
         .collect()
 }
@@ -182,12 +193,16 @@ impl VideoSurface {
 
     /// Excludes egui overlay rectangles from the native video child window.
     /// The parent surface then remains visible and interactive in those areas.
-    pub fn set_overlay_rects(&mut self, overlay_rects: &[egui::Rect], pixels_per_point: f32) {
+    pub(crate) fn set_overlay_rects(
+        &mut self,
+        overlays: &[crate::ui::video_overlay::VideoOverlay],
+        pixels_per_point: f32,
+    ) {
         let Some(hwnd) = self.mpv_hwnd else {
             return;
         };
 
-        let regions = overlay_pixel_rects(self.last_rect, overlay_rects, pixels_per_point);
+        let regions = overlay_pixel_regions(self.last_rect, overlays, pixels_per_point);
         if self.last_overlay_regions.as_ref() == Some(&regions) {
             return;
         }
@@ -325,7 +340,12 @@ impl VideoSurface {
 
     pub fn set_visible(&self, _visible: bool) {}
 
-    pub fn set_overlay_rects(&mut self, _overlay_rects: &[egui::Rect], _pixels_per_point: f32) {}
+    pub(crate) fn set_overlay_rects(
+        &mut self,
+        _overlays: &[crate::ui::video_overlay::VideoOverlay],
+        _pixels_per_point: f32,
+    ) {
+    }
 
     pub fn hwnd(&self) -> Option<()> {
         None
@@ -350,16 +370,24 @@ impl VideoSurface {
 
 #[cfg(test)]
 mod tests {
-    use super::{overlay_pixel_rects, PixelRoundedRect};
+    use super::{overlay_pixel_regions, PixelRoundedRect};
     use eframe::egui;
+
+    fn popup_overlay(rect: egui::Rect) -> crate::ui::video_overlay::VideoOverlay {
+        crate::ui::video_overlay::VideoOverlay {
+            rect,
+            corner_radius: 6.0,
+        }
+    }
 
     #[test]
     fn converts_overlay_intersection_to_video_local_pixels() {
         let video = egui::Rect::from_min_max(egui::pos2(100.0, 50.0), egui::pos2(300.0, 150.0));
-        let overlay = egui::Rect::from_min_max(egui::pos2(250.0, 25.0), egui::pos2(350.0, 100.0));
+        let overlay_rect =
+            egui::Rect::from_min_max(egui::pos2(250.0, 25.0), egui::pos2(350.0, 100.0));
 
         assert_eq!(
-            overlay_pixel_rects(video, &[overlay], 1.5),
+            overlay_pixel_regions(video, &[popup_overlay(overlay_rect)], 1.5),
             vec![PixelRoundedRect {
                 left: 225,
                 top: -38,
@@ -373,8 +401,9 @@ mod tests {
     #[test]
     fn ignores_overlays_outside_video() {
         let video = egui::Rect::from_min_size(egui::pos2(100.0, 50.0), egui::vec2(200.0, 100.0));
-        let overlay = egui::Rect::from_min_size(egui::pos2(10.0, 10.0), egui::vec2(20.0, 20.0));
+        let overlay_rect =
+            egui::Rect::from_min_size(egui::pos2(10.0, 10.0), egui::vec2(20.0, 20.0));
 
-        assert!(overlay_pixel_rects(video, &[overlay], 1.25).is_empty());
+        assert!(overlay_pixel_regions(video, &[popup_overlay(overlay_rect)], 1.25).is_empty());
     }
 }

@@ -630,6 +630,7 @@ impl eframe::App for ImageViewerApp {
         if let Some(preview) = self.media_preview.as_mut() {
             preview.set_overlay_rects(&video_overlay_rects, ctx.pixels_per_point());
         }
+        crate::ui::video_overlay::finish_frame(ctx);
 
         // PERF: Log total frame time when slow (helps diagnose post-inactivity freezes)
         let frame_total_ms = t_frame_start.elapsed().as_secs_f32() * 1000.0;

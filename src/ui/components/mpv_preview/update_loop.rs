@@ -21,6 +21,9 @@ impl MpvPreview {
             egui::vec2(available.x, preview_height)
         };
         let (rect, _response) = ui.allocate_exact_size(size, egui::Sense::hover());
+        if self.is_docked() {
+            crate::ui::video_overlay::set_video_rect(ui.ctx(), rect);
+        }
 
         // Track mouse activity for autohide controls (movement-based)
         if let Some(pos) = ui.input(|i| i.pointer.hover_pos()) {

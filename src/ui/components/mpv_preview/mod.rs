@@ -356,10 +356,13 @@ impl MpvPreview {
         self.surface.set_visible(self.is_visible);
     }
 
-    pub fn set_overlay_rects(&mut self, overlay_rects: &[egui::Rect], pixels_per_point: f32) {
+    pub(crate) fn set_overlay_rects(
+        &mut self,
+        overlays: &[crate::ui::video_overlay::VideoOverlay],
+        pixels_per_point: f32,
+    ) {
         if self.is_docked() {
-            self.surface
-                .set_overlay_rects(overlay_rects, pixels_per_point);
+            self.surface.set_overlay_rects(overlays, pixels_per_point);
         } else {
             self.surface.set_overlay_rects(&[], pixels_per_point);
         }

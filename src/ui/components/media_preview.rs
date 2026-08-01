@@ -436,9 +436,13 @@ impl MediaPreview {
         }
     }
 
-    pub fn set_overlay_rects(&mut self, overlay_rects: &[egui::Rect], pixels_per_point: f32) {
+    pub(crate) fn set_overlay_rects(
+        &mut self,
+        overlays: &[crate::ui::video_overlay::VideoOverlay],
+        pixels_per_point: f32,
+    ) {
         if let MediaPreview::Video(player) = self {
-            player.set_overlay_rects(overlay_rects, pixels_per_point);
+            player.set_overlay_rects(overlays, pixels_per_point);
         }
     }
 

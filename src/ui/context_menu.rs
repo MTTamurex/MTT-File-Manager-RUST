@@ -139,11 +139,12 @@ pub fn render_context_menu(
     }
 
     // Render the menu popup
-    let response = egui::Area::new(egui::Id::new("context_menu"))
+    let menu_id = egui::Id::new("context_menu");
+    let response = egui::Area::new(menu_id)
         .fixed_pos(menu_pos)
         .order(egui::Order::Foreground)
         .show(ctx, |ui| {
-            egui::Frame::popup(ui.style())
+            crate::ui::video_overlay::popup_frame(ui, menu_id)
                 .inner_margin(4.0)
                 .corner_radius(MENU_ROUNDING)
                 .show(ui, |ui| {
@@ -183,7 +184,7 @@ pub fn render_context_menu(
                     }
                 });
         });
-    crate::ui::video_overlay::register_rect(ctx, response.response.rect);
+    crate::ui::video_overlay::register_rect(ctx, menu_id, response.response.rect);
 
     // Handle action execution
     if let Some(id) = action_executed {
@@ -688,11 +689,12 @@ fn render_single_item(
                 *lazy_load = Some(item.id);
             }
 
-            let area_response = egui::Area::new(egui::Id::new(format!("submenu_{}", item.id)))
+            let submenu_id = egui::Id::new(format!("submenu_{}", item.id));
+            let area_response = egui::Area::new(submenu_id)
                 .order(egui::Order::Foreground)
                 .fixed_pos(submenu_pos)
                 .show(ui.ctx(), |ui| {
-                    egui::Frame::popup(ui.style())
+                    crate::ui::video_overlay::popup_frame(ui, submenu_id)
                         .inner_margin(4.0)
                         .corner_radius(MENU_ROUNDING)
                         .show(ui, |ui| {
@@ -711,7 +713,11 @@ fn render_single_item(
                             }
                         });
                 });
-            crate::ui::video_overlay::register_rect(ui.ctx(), area_response.response.rect);
+            crate::ui::video_overlay::register_rect(
+                ui.ctx(),
+                submenu_id,
+                area_response.response.rect,
+            );
 
             // Store submenu rect for hover detection outside the main menu rect
             submenu_rect = Some(area_response.response.rect);
