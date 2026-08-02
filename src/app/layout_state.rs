@@ -35,6 +35,9 @@ pub struct LayoutState {
 
     // Sidebar tags section height (None = auto 35%-cap, Some = user-resized)
     pub sidebar_tags_height: Option<f32>,
+
+    // Quick Access section height (None = content-sized, Some = user-resized)
+    pub sidebar_quick_access_height: Option<f32>,
 }
 
 impl Default for LayoutState {
@@ -61,6 +64,7 @@ impl Default for LayoutState {
             list_col_computer_free_width: 120.0,
             dual_panel_split_ratio: 0.5,
             sidebar_tags_height: None,
+            sidebar_quick_access_height: None,
         }
     }
 }

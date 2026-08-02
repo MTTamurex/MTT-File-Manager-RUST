@@ -257,6 +257,13 @@ impl ImageViewerApp {
             prefs.push(("sidebar_tags_height", tags_h.to_string()));
         }
         prefs.push((
+            "sidebar_quick_access_height",
+            self.layout
+                .sidebar_quick_access_height
+                .map(|height| height.to_string())
+                .unwrap_or_default(),
+        ));
+        prefs.push((
             "sidebar_tag_order",
             crate::app::operations::tag_ops::serialize_sidebar_tag_order(&self.sidebar_tag_ids),
         ));

@@ -112,9 +112,8 @@ pub enum SidebarAction {
     DropItemsTo(String),
 }
 
-/// Renders the fixed top section of the sidebar (This PC + Quick Access).
-/// This section does NOT scroll — it stays pinned at the top.
-pub fn render_sidebar_fixed_top(
+/// Renders the fixed This PC section at the top of the sidebar.
+pub fn render_sidebar_this_pc(
     ui: &mut egui::Ui,
     ctx: &mut SidebarContext,
 ) -> Option<SidebarAction> {
@@ -187,15 +186,20 @@ pub fn render_sidebar_fixed_top(
     ui.add_space(4.0);
     ui.separator();
 
+    action
+}
+
+/// Renders Quick Access inside its independent sidebar `ScrollArea`.
+pub fn render_quick_access(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<SidebarAction> {
+    let mut action = None;
+
     if !ctx.show_quick_access {
         return action;
     }
+    let quick_access_viewport = ui.clip_rect();
     ui.add_space(8.0);
 
     // === QUICK ACCESS ===
-    // Track the start Y for drag-to-pin zone detection
-    let qa_section_start_y = ui.cursor().top();
-
     // Section header with inline collapse toggle
     let (qa_label_rect, _) =
         ui.allocate_exact_size(egui::vec2(ui.available_width(), 16.0), Sense::hover());
@@ -320,16 +324,10 @@ pub fn render_sidebar_fixed_top(
 
         // === Drag-to-pin drop zone ===
         if ctx.is_folder_dragging {
-            let qa_section_end_y = ui.cursor().top();
-            let qa_zone = egui::Rect::from_min_max(
-                egui::pos2(ui.clip_rect().min.x, qa_section_start_y),
-                egui::pos2(ui.clip_rect().max.x, qa_section_end_y),
-            );
-
             let pointer_in_zone = ui
                 .ctx()
                 .input(|inp| inp.pointer.hover_pos())
-                .map(|p| qa_zone.contains(p))
+                .map(|p| quick_access_viewport.contains(p))
                 .unwrap_or(false);
 
             // No visual highlight on the QA zone — pinned folders already show
@@ -349,7 +347,6 @@ pub fn render_sidebar_fixed_top(
 
         ui.add_space(8.0);
     }
-    ui.separator();
 
     action
 }
@@ -789,6 +786,9 @@ pub fn render_sidebar_drives(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Opt
 }
 
 /// Renders the user-pinned folders list with drag-to-reorder support.
+const QUICK_ACCESS_AUTO_SCROLL_MARGIN: f32 = 30.0;
+const QUICK_ACCESS_AUTO_SCROLL_SPEED: f32 = 8.0;
+
 fn render_pinned_folders(
     ui: &mut egui::Ui,
     ctx: &mut SidebarContext,
@@ -801,6 +801,21 @@ fn render_pinned_folders(
     let dark_mode = ui.visuals().dark_mode;
     let drag_id = egui::Id::new("qa_reorder_drag");
     let drag_src: Option<usize> = ui.ctx().data(|d| d.get_temp(drag_id));
+    let viewport = ui.clip_rect();
+    let pointer_pos = ui.ctx().input(|input| {
+        input
+            .pointer
+            .hover_pos()
+            .or_else(|| input.pointer.interact_pos())
+    });
+    let pointer_in_viewport = pointer_pos.filter(|pointer| viewport.contains(*pointer));
+    let (primary_released, cancel_drag) = ui.ctx().input(|input| {
+        let primary_released = input.pointer.primary_released();
+        let cancel_drag = input.key_pressed(egui::Key::Escape)
+            || !input.viewport().focused.unwrap_or(true)
+            || (!input.pointer.primary_down() && !primary_released);
+        (primary_released, cancel_drag)
+    });
     let mut hover_drop_idx: Option<usize> = None;
 
     for (i, pinned) in ctx.pinned_folders.iter().enumerate() {
@@ -811,15 +826,16 @@ fn render_pinned_folders(
         if let Some(src) = drag_src {
             if src != i {
                 let cursor_y = ui.cursor().min.y;
-                let pointer_y = ui
-                    .ctx()
-                    .input(|inp| inp.pointer.hover_pos())
-                    .map(|p| p.y)
-                    .unwrap_or(f32::MAX);
-                if pointer_y < cursor_y + 14.0 && pointer_y >= cursor_y - 14.0 {
+                let pointer_y = pointer_in_viewport.map(|pointer| pointer.y);
+                if pointer_y.is_some_and(|pointer_y| {
+                    viewport.top() <= cursor_y
+                        && cursor_y <= viewport.bottom()
+                        && pointer_y < cursor_y + 14.0
+                        && pointer_y >= cursor_y - 14.0
+                }) {
                     hover_drop_idx = Some(i);
                     ui.painter().hline(
-                        ui.clip_rect().min.x..=ui.clip_rect().max.x,
+                        viewport.min.x..=viewport.max.x,
                         cursor_y,
                         egui::Stroke::new(2.0, Color32::from_rgb(0, 120, 215)),
                     );
@@ -944,15 +960,17 @@ fn render_pinned_folders(
     // Drop indicator line at end of list
     if let Some(src) = drag_src {
         let end_y = ui.cursor().min.y;
-        let pointer_y = ui
-            .ctx()
-            .input(|inp| inp.pointer.hover_pos())
-            .map(|p| p.y)
-            .unwrap_or(f32::MAX);
-        if pointer_y >= end_y - 14.0 && hover_drop_idx.is_none() && src < ctx.pinned_folders.len() {
+        let pointer_y = pointer_in_viewport.map(|pointer| pointer.y);
+        if pointer_y.is_some_and(|pointer_y| {
+            viewport.top() <= end_y
+                && end_y <= viewport.bottom()
+                && pointer_y >= end_y - 14.0
+                && hover_drop_idx.is_none()
+                && src < ctx.pinned_folders.len()
+        }) {
             hover_drop_idx = Some(ctx.pinned_folders.len());
             ui.painter().hline(
-                ui.clip_rect().min.x..=ui.clip_rect().max.x,
+                viewport.min.x..=viewport.max.x,
                 end_y,
                 egui::Stroke::new(2.0, Color32::from_rgb(0, 120, 215)),
             );
@@ -961,14 +979,85 @@ fn render_pinned_folders(
 
     // Handle drop (release while reordering)
     if let Some(src) = drag_src {
-        let released = ui.ctx().input(|inp| inp.pointer.primary_released());
-        if released {
+        if cancel_drag {
             ui.ctx().data_mut(|d| d.remove::<usize>(drag_id));
-            if let Some(dst) = hover_drop_idx {
-                if dst != src && action.is_none() {
-                    *action = Some(SidebarAction::ReorderPinnedFolder { from: src, to: dst });
+        } else {
+            auto_scroll_quick_access_during_drag(ui, pointer_pos, viewport);
+
+            if primary_released {
+                ui.ctx().data_mut(|d| d.remove::<usize>(drag_id));
+            }
+            if primary_released && pointer_in_viewport.is_some() {
+                if let Some(dst) = hover_drop_idx {
+                    if dst != src && action.is_none() {
+                        *action = Some(SidebarAction::ReorderPinnedFolder { from: src, to: dst });
+                    }
                 }
             }
         }
+    }
+}
+
+fn auto_scroll_quick_access_during_drag(
+    ui: &mut egui::Ui,
+    pointer_pos: Option<Pos2>,
+    viewport: Rect,
+) {
+    let Some(pointer) = pointer_pos else {
+        return;
+    };
+    let delta = quick_access_auto_scroll_delta(pointer, viewport);
+    if delta == 0.0 {
+        return;
+    }
+
+    let target_y = if delta < 0.0 {
+        viewport.top() + delta
+    } else {
+        viewport.bottom() + delta
+    };
+    let target = Pos2::new(viewport.left(), target_y);
+    ui.scroll_to_rect(Rect::from_min_max(target, target), None);
+    ui.ctx().request_repaint();
+}
+
+fn quick_access_auto_scroll_delta(pointer: Pos2, viewport: Rect) -> f32 {
+    if pointer.x < viewport.left() || pointer.x > viewport.right() {
+        return 0.0;
+    }
+
+    let margin = QUICK_ACCESS_AUTO_SCROLL_MARGIN.min(viewport.height() * 0.5);
+    if pointer.y < viewport.top() + margin {
+        -((viewport.top() + margin - pointer.y).max(QUICK_ACCESS_AUTO_SCROLL_SPEED))
+    } else if pointer.y > viewport.bottom() - margin {
+        (pointer.y - (viewport.bottom() - margin)).max(QUICK_ACCESS_AUTO_SCROLL_SPEED)
+    } else {
+        0.0
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::quick_access_auto_scroll_delta;
+    use eframe::egui::{pos2, Rect};
+
+    #[test]
+    fn quick_access_auto_scrolls_only_near_vertical_edges_inside_width() {
+        let viewport = Rect::from_min_max(pos2(10.0, 20.0), pos2(110.0, 220.0));
+
+        assert!(quick_access_auto_scroll_delta(pos2(50.0, 25.0), viewport) < 0.0);
+        assert!(quick_access_auto_scroll_delta(pos2(50.0, 215.0), viewport) > 0.0);
+        assert_eq!(
+            quick_access_auto_scroll_delta(pos2(50.0, 120.0), viewport),
+            0.0
+        );
+        assert_eq!(
+            quick_access_auto_scroll_delta(pos2(5.0, 25.0), viewport),
+            0.0
+        );
+
+        let short_viewport = Rect::from_min_max(pos2(10.0, 20.0), pos2(110.0, 44.0));
+        assert!(quick_access_auto_scroll_delta(pos2(50.0, 22.0), short_viewport) < 0.0);
+        assert!(quick_access_auto_scroll_delta(pos2(50.0, 42.0), short_viewport) > 0.0);
     }
 }

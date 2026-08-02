@@ -43,6 +43,7 @@ pub(super) struct StartupPreferences {
     pub(super) dual_panel_inactive_view_mode: ViewMode,
     pub(super) active_tag_filter: Option<i64>,
     pub(super) sidebar_tags_height: Option<f32>,
+    pub(super) sidebar_quick_access_height: Option<f32>,
     pub(super) sidebar_tag_order: Vec<i64>,
 }
 
@@ -299,6 +300,10 @@ impl StartupPreferences {
         let sidebar_tags_height = prefs
             .get("sidebar_tags_height")
             .and_then(|s| s.parse::<f32>().ok());
+        let sidebar_quick_access_height = prefs
+            .get("sidebar_quick_access_height")
+            .and_then(|s| s.parse::<f32>().ok())
+            .filter(|height| height.is_finite() && *height > 0.0);
         let sidebar_tag_order = prefs
             .get("sidebar_tag_order")
             .map(|value| crate::app::operations::tag_ops::parse_sidebar_tag_order(value))
@@ -340,6 +345,7 @@ impl StartupPreferences {
             dual_panel_inactive_view_mode,
             active_tag_filter,
             sidebar_tags_height,
+            sidebar_quick_access_height,
             sidebar_tag_order,
         }
     }
@@ -369,5 +375,39 @@ mod tests {
         db.set_preference("show_quick_access", "false").unwrap();
 
         assert!(!StartupPreferences::load(&db).show_quick_access);
+    }
+
+    #[test]
+    fn quick_access_height_defaults_to_auto() {
+        let db = test_db();
+
+        assert!(StartupPreferences::load(&db)
+            .sidebar_quick_access_height
+            .is_none());
+    }
+
+    #[test]
+    fn quick_access_height_loads_valid_value() {
+        let db = test_db();
+        db.set_preference("sidebar_quick_access_height", "240.5")
+            .unwrap();
+
+        assert_eq!(
+            StartupPreferences::load(&db).sidebar_quick_access_height,
+            Some(240.5)
+        );
+    }
+
+    #[test]
+    fn quick_access_height_ignores_invalid_values() {
+        for value in ["", "invalid", "NaN", "-10", "0"] {
+            let db = test_db();
+            db.set_preference("sidebar_quick_access_height", value)
+                .unwrap();
+
+            assert!(StartupPreferences::load(&db)
+                .sidebar_quick_access_height
+                .is_none());
+        }
     }
 }

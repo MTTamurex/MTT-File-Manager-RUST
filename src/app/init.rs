@@ -220,6 +220,7 @@ impl ImageViewerApp {
             dual_panel_inactive_view_mode: saved_dual_panel_inactive_view_mode,
             active_tag_filter: saved_active_tag_filter,
             sidebar_tags_height,
+            sidebar_quick_access_height,
             sidebar_tag_order,
         } = startup_preferences;
 
@@ -582,6 +583,7 @@ impl ImageViewerApp {
                 sidebar_right_width,
                 dual_panel_split_ratio,
                 sidebar_tags_height,
+                sidebar_quick_access_height,
             ),
 
             // Metadata worker
