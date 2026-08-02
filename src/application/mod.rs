@@ -4,6 +4,7 @@
 pub mod clipboard;
 pub mod context_menu;
 pub mod file_operations;
+pub mod grouping;
 pub mod navigation;
 pub mod notification;
 pub mod renaming;

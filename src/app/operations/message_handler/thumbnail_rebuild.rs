@@ -171,8 +171,9 @@ impl ImageViewerApp {
         self.items_rebuild_request_id = self.items_rebuild_request_id.wrapping_add(1);
         let request_id = self.items_rebuild_request_id;
         let generation = self.generation;
+        let signature = self.current_items_rebuild_signature();
         let items = self.all_items.clone();
-        let query = self.search_query.clone();
+        let query = signature.search_query.clone();
         let active_tag_filter = if self.navigation_state.is_computer_view
             || self.navigation_state.is_recycle_bin_view
             || crate::domain::special_paths::is_tag_view_path(&self.navigation_state.current_path)
@@ -182,9 +183,12 @@ impl ImageViewerApp {
             self.active_tag_filter
         };
         let tag_assignments = self.tag_assignments_normalized.clone();
-        let sort_mode = self.sort_mode;
-        let sort_descending = self.sort_descending;
-        let folders_position = self.folders_position;
+        let sort_mode = signature.sort_mode;
+        let sort_descending = signature.sort_descending;
+        let folders_position = signature.folders_position;
+        let group_mode = signature.group_mode;
+        let group_descending = signature.group_descending;
+        let is_computer_view = signature.is_computer_view;
         let sender = self.items_rebuild_sender.clone();
         let ui_ctx = self.ui_ctx.clone();
 
@@ -216,11 +220,22 @@ impl ImageViewerApp {
                 }
             };
             let total = result_items.len();
+            let group_projection = if is_computer_view {
+                crate::application::grouping::build_computer_projection(&result_items)
+            } else {
+                crate::application::grouping::build_group_projection(
+                    &result_items,
+                    group_mode,
+                    group_descending,
+                )
+            };
             let _ = sender.send(ItemsRebuildResult {
                 generation,
                 request_id,
                 items: result_items,
                 total_items: total,
+                group_projection,
+                signature,
             });
             ui_ctx.request_repaint();
         });
@@ -317,6 +332,7 @@ impl ImageViewerApp {
             let result_items = self.build_sorted_items_snapshot();
             self.items = Arc::new(result_items);
             self.total_items = self.items.len();
+            self.rebuild_group_projection();
             self.hold_visible_items_until_load_complete = false;
 
             if let Some(target_path) = self.pending_select_path.take() {

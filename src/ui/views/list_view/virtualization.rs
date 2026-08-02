@@ -1,14 +1,15 @@
 //! Manual virtualization, scroll handling, scrollbar, and prefetch logic
 
 use eframe::egui::{self, Color32, Rect, Sense, Ui};
-use rust_i18n::t;
 
-use super::helpers::render_section_header;
 use super::item_renderer::render_list_item;
 use super::scroll;
 use super::{ColumnWidths, ListViewContext, ListViewOperations};
+use crate::application::grouping::GroupKey;
+use crate::ui::views::group_header::{render_group_header, GROUP_GAP, GROUP_HEADER_HEIGHT};
 use crate::ui::views::rectangle_selection::{
-    ListRectangleMetrics, RectangleSelectionMetrics, RectangleSelectionView,
+    GroupedRectangleMetrics, ListRectangleMetrics, RectangleSelectionMetrics,
+    RectangleSelectionView,
 };
 
 /// Result of user interactions during rendering
@@ -18,6 +19,7 @@ pub(super) struct InteractionResult {
     pub secondary_clicked_item: Option<usize>,
     pub empty_area_click: bool,
     pub empty_area_secondary_click: bool,
+    pub toggled_group: Option<GroupKey>,
 }
 
 /// Renders the virtualized list content with scroll handling and prefetch.
@@ -30,13 +32,19 @@ pub(super) fn render_virtualized_content(
     col_widths: &ColumnWidths,
 ) -> InteractionResult {
     let total_rows = ctx.items.len();
+    let grouped = ctx.group_projection.is_grouped() && !ctx.compact;
+    ctx.visible_group_paths.clear();
     let mut clicked_item = None;
     let mut double_clicked_item = None;
     let mut secondary_clicked_item = None;
     let mut secondary_clicked_empty_area = false;
 
     // --- MANUAL VIRTUALIZATION START ---
-    let total_content_height = total_rows as f32 * row_height;
+    let total_content_height = if grouped {
+        grouped_content_height(ctx, row_height)
+    } else {
+        total_rows as f32 * row_height
+    };
     let viewport_rect = ui.available_rect_before_wrap();
     let viewport_h = viewport_rect.height();
     let max_scroll = (total_content_height - viewport_h).max(0.0);
@@ -59,18 +67,25 @@ pub(super) fn render_virtualized_content(
     if ctx.scroll_to_selected {
         if let Some(selected_idx) = ctx.selected_item {
             if selected_idx < total_rows {
-                let item_top = selected_idx as f32 * row_height;
-                let item_bottom = item_top + row_height;
+                let item_top = if grouped {
+                    grouped_item_top(ctx, selected_idx, row_height)
+                } else {
+                    Some(selected_idx as f32 * row_height)
+                };
+                if let Some(item_top) = item_top {
+                    let item_bottom = item_top + row_height;
 
-                let current_scroll_check = *ctx.mut_scroll_offset_y;
+                    let current_scroll_check = *ctx.mut_scroll_offset_y;
 
-                // Scroll up if item is above viewport
-                if item_top < current_scroll_check {
-                    *ctx.mut_scroll_offset_y = item_top.max(0.0);
-                }
-                // Scroll down if item is below viewport
-                else if item_bottom > current_scroll_check + viewport_h {
-                    *ctx.mut_scroll_offset_y = (item_bottom - viewport_h).clamp(0.0, max_scroll);
+                    // Scroll up if item is above viewport
+                    if item_top < current_scroll_check {
+                        *ctx.mut_scroll_offset_y = item_top.max(0.0);
+                    }
+                    // Scroll down if item is below viewport
+                    else if item_bottom > current_scroll_check + viewport_h {
+                        *ctx.mut_scroll_offset_y =
+                            (item_bottom - viewport_h).clamp(0.0, max_scroll);
+                    }
                 }
             }
         }
@@ -78,16 +93,33 @@ pub(super) fn render_virtualized_content(
 
     let target_scroll = *ctx.mut_scroll_offset_y;
     let (current_scroll, scroll_delta) =
-        scroll::compute_visual_scroll(ui, target_scroll, viewport_h, ctx.generation);
+        scroll::compute_visual_scroll(ui, target_scroll, viewport_h, max_scroll, ctx.generation);
     let is_scrolling = scroll_delta > 0.5;
 
-    let rectangle_metrics =
-        (!ctx.is_computer_view).then_some(RectangleSelectionMetrics::List(ListRectangleMetrics {
+    let bg_response = ui.interact(
+        viewport_rect,
+        ui.id().with("list_bg"),
+        Sense::click_and_drag(),
+    );
+
+    let rectangle_geometry_needed =
+        ctx.rectangle_selection_state.is_some() || bg_response.drag_started();
+    let rectangle_metrics = if ctx.is_computer_view {
+        None
+    } else if grouped && rectangle_geometry_needed {
+        Some(RectangleSelectionMetrics::Grouped(
+            grouped_list_rectangle_metrics(ctx, row_height, available_w, total_content_height),
+        ))
+    } else if !grouped {
+        Some(RectangleSelectionMetrics::List(ListRectangleMetrics {
             count: total_rows,
             row_height,
             content_width: available_w,
             content_height: total_content_height,
-        }));
+        }))
+    } else {
+        None
+    };
     ctx.rectangle_selection_frame.begin(
         viewport_rect,
         0.0,
@@ -104,12 +136,6 @@ pub(super) fn render_virtualized_content(
     }
 
     // 3. Render Virtual List
-    // DETECT BACKGROUND INTERACTION (Sense::click() captures secondary_clicked without global leakage)
-    let bg_response = ui.interact(
-        viewport_rect,
-        ui.id().with("list_bg"),
-        Sense::click_and_drag(),
-    );
     if !ctx.is_computer_view
         && ctx.rectangle_selection_state.is_none()
         && bg_response.drag_started()
@@ -126,8 +152,9 @@ pub(super) fn render_virtualized_content(
 
     let content_min = viewport_rect.min;
 
-    if ctx.is_computer_view {
-        render_computer_view_grouped(
+    let mut toggled_group = None;
+    if grouped {
+        render_grouped_virtualized(
             &mut child_ui,
             ctx,
             ops,
@@ -136,10 +163,12 @@ pub(super) fn render_virtualized_content(
             available_w,
             row_height,
             col_widths,
+            viewport_h,
             &mut clicked_item,
             &mut double_clicked_item,
             &mut secondary_clicked_item,
             &mut secondary_clicked_empty_area,
+            &mut toggled_group,
         );
     } else {
         render_regular_virtualized(
@@ -159,6 +188,14 @@ pub(super) fn render_virtualized_content(
             &mut secondary_clicked_item,
             &mut secondary_clicked_empty_area,
         );
+    }
+    if grouped
+        && ctx.rectangle_selection_frame.metrics.is_none()
+        && ctx.rectangle_selection_frame.start_screen_pos.is_some()
+    {
+        ctx.rectangle_selection_frame.metrics = Some(RectangleSelectionMetrics::Grouped(
+            grouped_list_rectangle_metrics(ctx, row_height, available_w, total_content_height),
+        ));
     }
 
     if let Some(state) = ctx.rectangle_selection_state.filter(|state| {
@@ -188,7 +225,7 @@ pub(super) fn render_virtualized_content(
     // --- MANUAL VIRTUALIZATION END ---
 
     // Prefetch and visible range tracking
-    if total_rows > 0 {
+    if total_rows > 0 && !grouped {
         handle_prefetch(
             ctx,
             ops,
@@ -212,12 +249,82 @@ pub(super) fn render_virtualized_content(
         secondary_clicked_item,
         empty_area_click,
         empty_area_secondary_click,
+        toggled_group,
     }
 }
 
-/// Grouped rendering for Computer View with local/network sections
+fn grouped_list_rectangle_metrics(
+    ctx: &ListViewContext,
+    row_height: f32,
+    content_width: f32,
+    content_height: f32,
+) -> GroupedRectangleMetrics {
+    let mut item_rects = Vec::new();
+    let mut content_y = 0.0;
+    for section in &ctx.group_projection.sections {
+        content_y += GROUP_HEADER_HEIGHT;
+        if !ctx.collapsed_groups.contains(&section.key) {
+            item_rects.extend(section.item_indices.iter().enumerate().filter_map(
+                |(position, index)| {
+                    (*index < ctx.items.len()).then_some((
+                        *index,
+                        Rect::from_min_size(
+                            egui::pos2(0.0, content_y + position as f32 * row_height),
+                            egui::vec2(content_width, row_height),
+                        ),
+                    ))
+                },
+            ));
+            content_y += section.item_indices.len() as f32 * row_height;
+        }
+        content_y += GROUP_GAP;
+    }
+    GroupedRectangleMetrics {
+        view: RectangleSelectionView::List,
+        item_rects: item_rects.into(),
+        content_width,
+        content_height,
+    }
+}
+
+fn grouped_content_height(ctx: &ListViewContext, row_height: f32) -> f32 {
+    ctx.group_projection
+        .sections
+        .iter()
+        .map(|section| {
+            GROUP_HEADER_HEIGHT
+                + if ctx.collapsed_groups.contains(&section.key) {
+                    0.0
+                } else {
+                    section.item_indices.len() as f32 * row_height
+                }
+                + GROUP_GAP
+        })
+        .sum()
+}
+
+fn grouped_item_top(ctx: &ListViewContext, selected_index: usize, row_height: f32) -> Option<f32> {
+    let mut top = 0.0;
+    for section in &ctx.group_projection.sections {
+        top += GROUP_HEADER_HEIGHT;
+        if ctx.collapsed_groups.contains(&section.key) {
+            top += GROUP_GAP;
+            continue;
+        }
+        if let Some(position) = section
+            .item_indices
+            .iter()
+            .position(|index| *index == selected_index)
+        {
+            return Some(top + position as f32 * row_height);
+        }
+        top += section.item_indices.len() as f32 * row_height + GROUP_GAP;
+    }
+    None
+}
+
 #[allow(clippy::too_many_arguments)]
-fn render_computer_view_grouped(
+fn render_grouped_virtualized(
     child_ui: &mut Ui,
     ctx: &mut ListViewContext,
     ops: &mut dyn ListViewOperations,
@@ -226,49 +333,59 @@ fn render_computer_view_grouped(
     available_w: f32,
     row_height: f32,
     col_widths: &ColumnWidths,
+    viewport_h: f32,
     clicked_item: &mut Option<usize>,
     double_clicked_item: &mut Option<usize>,
     secondary_clicked_item: &mut Option<usize>,
     secondary_clicked_empty_area: &mut bool,
+    toggled_group: &mut Option<GroupKey>,
 ) {
-    let mut local = Vec::new();
-    let mut network = Vec::new();
-
-    for (i, item) in ctx.items.iter().enumerate() {
-        let is_remote = item
-            .drive_info
-            .as_ref()
-            .is_some_and(|di| di.drive_type == crate::infrastructure::windows::DriveType::Remote);
-        if is_remote {
-            network.push((i, item));
-        } else {
-            local.push((i, item));
-        }
-    }
-
-    let mut current_y = content_min.y - current_scroll;
-
-    if !local.is_empty() {
-        let header_h = 30.0;
+    let mut content_y = 0.0;
+    let mut visible_min = usize::MAX;
+    let mut visible_max = 0usize;
+    for section_index in 0..ctx.group_projection.sections.len() {
+        let key = ctx.group_projection.sections[section_index].key.clone();
+        let item_count = ctx.group_projection.sections[section_index]
+            .item_indices
+            .len();
+        let collapsed = ctx.collapsed_groups.contains(&key);
         let header_rect = Rect::from_min_size(
-            egui::pos2(content_min.x, current_y),
-            egui::vec2(available_w, header_h),
+            egui::pos2(content_min.x, content_min.y + content_y - current_scroll),
+            egui::vec2(available_w, GROUP_HEADER_HEIGHT),
         );
-        if child_ui.is_rect_visible(header_rect) {
-            let mut header_ui = child_ui.new_child(egui::UiBuilder::new().max_rect(header_rect));
-            render_section_header(&mut header_ui, &t!("sidebar.local_disks"));
+        if child_ui.is_rect_visible(header_rect)
+            && render_group_header(child_ui, header_rect, &key, item_count, collapsed).clicked()
+        {
+            *toggled_group = Some(key.clone());
         }
-        current_y += header_h;
+        content_y += GROUP_HEADER_HEIGHT;
 
-        for (i, item) in local {
-            let item_rect = Rect::from_min_size(
-                egui::pos2(content_min.x, current_y),
-                egui::vec2(available_w, row_height),
-            );
-            if child_ui.is_rect_visible(item_rect) {
+        if !collapsed {
+            let first =
+                (((current_scroll - content_y) / row_height).floor() as isize - 3).max(0) as usize;
+            let last = (((current_scroll + viewport_h - content_y) / row_height).ceil() as isize
+                + 3)
+            .max(0) as usize;
+            for position in first..last.min(item_count) {
+                let index = ctx.group_projection.sections[section_index].item_indices[position];
+                let Some(item) = ctx.items.get(index) else {
+                    continue;
+                };
+                let item_rect = Rect::from_min_size(
+                    egui::pos2(
+                        content_min.x,
+                        content_min.y + content_y + position as f32 * row_height - current_scroll,
+                    ),
+                    egui::vec2(available_w, row_height),
+                );
+                if child_ui.is_rect_visible(item_rect) {
+                    visible_min = visible_min.min(index);
+                    visible_max = visible_max.max(index);
+                    ctx.visible_group_paths.insert(item.path.clone());
+                }
                 render_list_item(
                     child_ui,
-                    i,
+                    index,
                     item,
                     item_rect,
                     ctx,
@@ -281,47 +398,11 @@ fn render_computer_view_grouped(
                     row_height,
                 );
             }
-            current_y += row_height;
+            content_y += item_count as f32 * row_height;
         }
-        current_y += 10.0;
+        content_y += GROUP_GAP;
     }
-
-    if !network.is_empty() {
-        let header_h = 30.0;
-        let header_rect = Rect::from_min_size(
-            egui::pos2(content_min.x, current_y),
-            egui::vec2(available_w, header_h),
-        );
-        if child_ui.is_rect_visible(header_rect) {
-            let mut header_ui = child_ui.new_child(egui::UiBuilder::new().max_rect(header_rect));
-            render_section_header(&mut header_ui, &t!("sidebar.network_drives"));
-        }
-        current_y += header_h;
-
-        for (i, item) in network {
-            let item_rect = Rect::from_min_size(
-                egui::pos2(content_min.x, current_y),
-                egui::vec2(available_w, row_height),
-            );
-            if child_ui.is_rect_visible(item_rect) {
-                render_list_item(
-                    child_ui,
-                    i,
-                    item,
-                    item_rect,
-                    ctx,
-                    ops,
-                    clicked_item,
-                    double_clicked_item,
-                    secondary_clicked_item,
-                    secondary_clicked_empty_area,
-                    col_widths,
-                    row_height,
-                );
-            }
-            current_y += row_height;
-        }
-    }
+    *ctx.visible_index_range = (visible_min != usize::MAX).then_some((visible_min, visible_max));
 }
 
 /// Regular virtualized rendering with adaptive overscan

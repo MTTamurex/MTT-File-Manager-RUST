@@ -419,12 +419,17 @@ impl ImageViewerApp {
         // Prefer exact PathBuf equality and only fall back to normalized matching
         // for verbatim-prefix or casing differences.
         let items_diverged = !Arc::ptr_eq(&self.items, &self.all_items);
-        let all_items = Arc::make_mut(&mut self.all_items);
+        self.invalidate_and_schedule_items_rebuild();
+        let all_items = self.all_items_mut();
         Self::update_renamed_item_in_place(all_items, &old_path, &path_str, &new_path, new_name);
         if items_diverged {
             let items = Arc::make_mut(&mut self.items);
             Self::update_renamed_item_in_place(items, &old_path, &path_str, &new_path, new_name);
+        } else {
+            self.items = Arc::clone(&self.all_items);
         }
+        self.rebuild_group_projection();
+        self.reconcile_visible_selection_index();
 
         // Move thumbnail cache entries from old path to new path so existing
         // thumbnails remain visible without needing re-extraction.

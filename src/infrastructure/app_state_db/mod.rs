@@ -218,6 +218,8 @@ impl AppStateDb {
                 sort_mode TEXT NOT NULL,
                 sort_descending TEXT NOT NULL,
                 folders_position TEXT NOT NULL,
+                group_mode TEXT NOT NULL DEFAULT 'none',
+                group_descending TEXT NOT NULL DEFAULT 'false',
                 scope TEXT NOT NULL DEFAULT 'current_folder'
             )",
             [],
@@ -233,6 +235,21 @@ impl AppStateDb {
                 [],
             )
             .unwrap_or(0);
+        }
+        for (column, definition) in [
+            ("group_mode", "TEXT NOT NULL DEFAULT 'none'"),
+            ("group_descending", "TEXT NOT NULL DEFAULT 'false'"),
+        ] {
+            let exists = conn
+                .prepare(&format!("SELECT {column} FROM folder_locks LIMIT 0"))
+                .is_ok();
+            if !exists {
+                conn.execute(
+                    &format!("ALTER TABLE folder_locks ADD COLUMN {column} {definition}"),
+                    [],
+                )
+                .unwrap_or(0);
+            }
         }
 
         // Quick Access pinned folders table

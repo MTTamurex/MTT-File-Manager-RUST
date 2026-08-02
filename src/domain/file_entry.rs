@@ -242,28 +242,43 @@ pub fn split_archive_path(path: &std::path::Path) -> Option<(std::path::PathBuf,
 
 /// Returns the type label for displaying an archive file.
 /// E.g.: "Arquivo ZIP", "Arquivo RAR". Returns None if not an archive file.
-pub fn archive_type_label(name: &str) -> Option<String> {
+pub fn canonical_archive_extension(name: &str) -> Option<&'static str> {
     let lower = name.to_ascii_lowercase();
     if lower.ends_with(".tar.gz") || lower.ends_with(".tgz") {
-        Some(t!("file_types.archive_tar_gz").to_string())
+        Some("tar.gz")
     } else if lower.ends_with(".tar.bz2") || lower.ends_with(".tbz2") {
-        Some(t!("file_types.archive_tar_bz2").to_string())
+        Some("tar.bz2")
     } else if lower.ends_with(".tar.zst") || lower.ends_with(".tzst") {
-        Some(t!("file_types.archive_tar_zst").to_string())
+        Some("tar.zst")
     } else if lower.ends_with(".tar.xz") || lower.ends_with(".txz") {
-        Some(t!("file_types.archive_tar_xz").to_string())
+        Some("tar.xz")
     } else if lower.ends_with(".tar") {
-        Some(t!("file_types.archive_tar").to_string())
+        Some("tar")
     } else if lower.ends_with(".zip") {
-        Some(t!("file_types.archive_zip").to_string())
+        Some("zip")
     } else if lower.ends_with(".7z") {
-        Some(t!("file_types.archive_7z").to_string())
+        Some("7z")
     } else if lower.ends_with(".rar") {
-        Some(t!("file_types.archive_rar").to_string())
+        Some("rar")
     } else if lower.ends_with(".gz") || lower.ends_with(".gzip") {
-        Some(t!("file_types.archive_gz").to_string())
+        Some("gz")
     } else {
         None
+    }
+}
+
+pub fn archive_type_label(name: &str) -> Option<String> {
+    match canonical_archive_extension(name)? {
+        "tar.gz" => Some(t!("file_types.archive_tar_gz").to_string()),
+        "tar.bz2" => Some(t!("file_types.archive_tar_bz2").to_string()),
+        "tar.zst" => Some(t!("file_types.archive_tar_zst").to_string()),
+        "tar.xz" => Some(t!("file_types.archive_tar_xz").to_string()),
+        "tar" => Some(t!("file_types.archive_tar").to_string()),
+        "zip" => Some(t!("file_types.archive_zip").to_string()),
+        "7z" => Some(t!("file_types.archive_7z").to_string()),
+        "rar" => Some(t!("file_types.archive_rar").to_string()),
+        "gz" => Some(t!("file_types.archive_gz").to_string()),
+        _ => None,
     }
 }
 
@@ -298,6 +313,39 @@ pub enum SortMode {
     DriveFreeSpace,
     /// Drive letter (Computer View only)
     DriveLetter,
+}
+
+/// Optional visual grouping applied after filtering and sorting.
+#[derive(PartialEq, Eq, Hash, Clone, Copy, Debug, Default)]
+pub enum GroupMode {
+    #[default]
+    None,
+    Name,
+    Date,
+    Type,
+    Size,
+}
+
+impl GroupMode {
+    pub const fn preference_value(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Name => "name",
+            Self::Date => "date",
+            Self::Type => "type",
+            Self::Size => "size",
+        }
+    }
+
+    pub fn from_preference(value: &str) -> Self {
+        match value {
+            "name" => Self::Name,
+            "date" => Self::Date,
+            "type" => Self::Type,
+            "size" => Self::Size,
+            _ => Self::None,
+        }
+    }
 }
 
 /// View mode

@@ -190,6 +190,8 @@ impl ImageViewerApp {
             sort_mode_normal,
             sort_descending,
             folders_position,
+            group_mode,
+            group_descending,
             thumbnail_size,
             view_mode,
             show_left_sidebar,
@@ -320,6 +322,8 @@ impl ImageViewerApp {
             active.show_left_sidebar = show_left_sidebar;
             active.show_preview_panel = show_preview_panel;
             active.active_tag_filter = active_tag_filter;
+            active.group_mode = group_mode;
+            active.group_descending = group_descending;
         }
 
         let mut app = Self {
@@ -373,8 +377,14 @@ impl ImageViewerApp {
             sort_descending_normal: sort_descending,
             folders_position,
             folders_position_normal: folders_position,
+            group_mode,
+            group_descending,
+            group_projection: Arc::new(Default::default()),
+            collapsed_groups_by_context: Default::default(),
             show_hidden_files,
             view_mode_normal: view_mode,
+            group_mode_normal: group_mode,
+            group_descending_normal: group_descending,
             disk_cache: disk_cache.clone(),
             app_state_db: app_state_db.clone(),
             organizer_state,
@@ -435,6 +445,7 @@ impl ImageViewerApp {
             total_items: 0,
             // Search & Navigation (NEW)
             all_items: Arc::new(Vec::new()),
+            items_revision: 0,
             search_query: String::new(),
             last_grid_cols: 1,
             generation: 0,
@@ -659,6 +670,7 @@ impl ImageViewerApp {
 
             // PERFORMANCE: Cached visible paths set to avoid per-frame allocation during scroll
             visible_paths_cache: FxHashSet::default(),
+            visible_group_paths: FxHashSet::default(),
             visible_range_cached: None,
 
             // PERFORMANCE: Scroll state tracking for adaptive GPU upload throttling

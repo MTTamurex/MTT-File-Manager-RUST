@@ -5,6 +5,7 @@ pub mod column_list_view;
 pub mod common;
 pub mod computer_view;
 pub mod grid_view;
+pub mod group_header;
 pub mod list_view;
 pub mod miller_columns_view;
 pub mod rectangle_selection;

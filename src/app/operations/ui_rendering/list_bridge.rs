@@ -138,41 +138,58 @@ impl ImageViewerApp {
 
     fn render_list_like_view(&mut self, ui: &mut egui::Ui, column_list: bool, compact: bool) {
         let t_total = Instant::now();
+        let collapsed_groups = self
+            .collapsed_groups_by_context
+            .get(&self.grouping_context_key())
+            .cloned()
+            .unwrap_or_default();
         // Keyboard navigation (ONLY when not renaming and media is NOT focused)
         if !self.suppress_file_panel_keyboard
             && !self.global_search.active
             && self.rectangle_selection_state.is_none()
+            && ui.input(|input| {
+                [
+                    egui::Key::ArrowUp,
+                    egui::Key::ArrowDown,
+                    egui::Key::ArrowLeft,
+                    egui::Key::ArrowRight,
+                    egui::Key::PageUp,
+                    egui::Key::PageDown,
+                    egui::Key::Enter,
+                ]
+                .into_iter()
+                .any(|key| input.key_pressed(key))
+            })
             && should_handle_navigation(
                 ui,
                 self.renaming_state.is_some(),
                 self.is_media_keyboard_focused(),
             )
         {
-            let current_index = self.items.iter().position(|x| {
-                self.selected_file
-                    .as_ref()
-                    .is_some_and(|f| f.path == x.path)
-            });
-
-            let reserved_enter = Some(
-                self.shortcuts
-                    .get(crate::app::shortcuts::ShortcutAction::Properties),
-            );
-            let nav_result = if column_list {
-                let rows = if self.navigation_state.is_computer_view {
-                    let network_count = self
-                        .items
-                        .iter()
-                        .filter(|item| {
-                            item.drive_info.as_ref().is_some_and(|drive| {
-                                drive.drive_type
-                                    == crate::infrastructure::windows::DriveType::Remote
-                            })
-                        })
-                        .count();
-                    crate::ui::views::column_list_view::column_list_grouped_rows(
-                        self.items.len().saturating_sub(network_count),
-                        network_count,
+            let visible_indices = if compact {
+                (0..self.items.len()).collect::<Vec<_>>()
+            } else {
+                self.visible_group_item_indices()
+            };
+            let mut visual_slots: Vec<Option<usize>> =
+                visible_indices.iter().copied().map(Some).collect();
+            let mut navigation_block_size = 1usize;
+            let rows = if column_list {
+                let group_counts: Vec<usize> = self
+                    .group_projection
+                    .sections
+                    .iter()
+                    .map(|section| {
+                        if collapsed_groups.contains(&section.key) {
+                            1
+                        } else {
+                            section.item_indices.len().max(1)
+                        }
+                    })
+                    .collect();
+                let rows = if self.group_projection.is_grouped() {
+                    crate::ui::views::column_list_view::column_list_grouped_rows_for_counts(
+                        &group_counts,
                         ui.available_width(),
                         ui.available_height(),
                     )
@@ -183,6 +200,28 @@ impl ImageViewerApp {
                         ui.available_height(),
                     )
                 };
+                visual_slots = crate::application::grouping::column_visual_slots(
+                    &self.group_projection,
+                    Some(&collapsed_groups),
+                    self.items.len(),
+                    rows,
+                );
+                navigation_block_size = rows;
+                Some(rows)
+            } else {
+                None
+            };
+            let current_index = self.selected_item.and_then(|selected| {
+                visual_slots
+                    .iter()
+                    .position(|index| *index == Some(selected))
+            });
+
+            let reserved_enter = Some(
+                self.shortcuts
+                    .get(crate::app::shortcuts::ShortcutAction::Properties),
+            );
+            let nav_result = if column_list {
                 let visible_columns =
                     crate::ui::views::column_list_view::column_list_visible_columns(
                         ui.available_width(),
@@ -190,8 +229,8 @@ impl ImageViewerApp {
                 process_column_list_keyboard_input(
                     ui,
                     current_index,
-                    self.items.len(),
-                    rows,
+                    visual_slots.len(),
+                    rows.unwrap_or(1),
                     visible_columns,
                     reserved_enter,
                 )
@@ -199,69 +238,96 @@ impl ImageViewerApp {
                 let row_height = 24.0;
                 let header_h = if compact { 0.0 } else { 32.0 };
                 let viewport_h = (ui.available_height() - header_h).max(0.0);
+                let navigation_viewport_h = if !compact && self.group_projection.is_grouped() {
+                    grouped_visible_list_item_count(
+                        &self.group_projection,
+                        &collapsed_groups,
+                        self.scroll_offset_y,
+                        viewport_h,
+                        row_height,
+                    ) as f32
+                        * row_height
+                } else {
+                    viewport_h
+                };
                 process_list_keyboard_input(
                     ui,
                     current_index,
-                    self.items.len(),
+                    visual_slots.len(),
                     row_height,
-                    viewport_h,
+                    navigation_viewport_h.max(row_height),
                     reserved_enter,
                 )
             };
 
             let shift = ui.input(|i| i.modifiers.shift);
+            let selected_is_visible = self
+                .selected_item
+                .is_some_and(|selected| visual_slots.contains(&Some(selected)));
 
             // Apply navigation result
             if let Some(new_idx) = nav_result.new_index {
-                let clamped = new_idx.min(self.items.len().saturating_sub(1));
-                if let Some(item) = self.items.get(clamped) {
-                    let item_path = item.path.clone();
+                if let Some(clamped) = crate::application::grouping::resolve_visual_slot(
+                    &visual_slots,
+                    new_idx,
+                    current_index,
+                    navigation_block_size,
+                    false,
+                ) {
+                    if let Some(item) = self.items.get(clamped) {
+                        let item_path = item.path.clone();
 
-                    // UPDATED: Decoupled Focus (selected_item) from Selection (multi_selection)
-                    let old_focus = self.selected_item;
-                    self.selected_item = Some(clamped);
-                    self.selected_file = Some(item.clone());
-                    self.update_selected_thumbnail();
-                    self.last_keyboard_nav = Instant::now();
+                        // UPDATED: Decoupled Focus (selected_item) from Selection (multi_selection)
+                        let old_focus = self.selected_item;
+                        self.selected_item = Some(clamped);
+                        self.selected_file = Some(item.clone());
+                        self.update_selected_thumbnail();
+                        self.last_keyboard_nav = Instant::now();
 
-                    if shift {
-                        // Shift + Arrow/Page: Range selection
-                        if self.selection_anchor.is_none() {
-                            self.selection_anchor = old_focus;
-                        }
-                        if let Some(anchor) = self.selection_anchor {
-                            let (start, end) = if anchor < clamped {
-                                (anchor, clamped)
-                            } else {
-                                (clamped, anchor)
-                            };
-                            // Range between anchor and focus (add-only, do NOT clear selection outside range)
-                            for i in start..=end {
-                                if let Some(it) = self.items.get(i) {
-                                    self.multi_selection.insert(it.path.clone());
+                        if shift {
+                            // Shift + Arrow/Page: Range selection
+                            if self.selection_anchor.is_none() {
+                                self.selection_anchor = old_focus;
+                            }
+                            if let Some(anchor) = self.selection_anchor {
+                                let range = if compact {
+                                    let (start, end) = if anchor <= clamped {
+                                        (anchor, clamped)
+                                    } else {
+                                        (clamped, anchor)
+                                    };
+                                    (start..=end).collect()
+                                } else {
+                                    self.visible_group_range(anchor, clamped)
+                                };
+                                for i in range {
+                                    if let Some(it) = self.items.get(i) {
+                                        self.multi_selection.insert(it.path.clone());
+                                    }
                                 }
                             }
+                        } else {
+                            // Navigation without shift: Single-item selection (clear + add focused item)
+                            // This ensures the focused item shows the dark blue selection border
+                            self.multi_selection.clear();
+                            self.multi_selection.insert(item_path.clone());
+                            self.selection_anchor = Some(clamped);
                         }
-                    } else {
-                        // Navigation without shift: Single-item selection (clear + add focused item)
-                        // This ensures the focused item shows the dark blue selection border
-                        self.multi_selection.clear();
-                        self.multi_selection.insert(item_path.clone());
-                        self.selection_anchor = Some(clamped);
+
+                        // Trigger scroll normalization in the view
+                        self.scroll_to_selected = true;
+
+                        // Request visibility for the new selected index
+                        self.scroll_request =
+                            crate::app::state::ScrollRequest::EnsureVisible(clamped);
+
+                        ui.ctx().request_repaint();
                     }
-
-                    // Trigger scroll normalization in the view
-                    self.scroll_to_selected = true;
-
-                    // Request visibility for the new selected index
-                    self.scroll_request = crate::app::state::ScrollRequest::EnsureVisible(clamped);
-
-                    ui.ctx().request_repaint();
                 }
             }
 
             // Enter to open (only when not renaming)
-            if nav_result.enter_pressed {
+            if nav_result.enter_pressed && selected_is_visible {
                 if self.suppress_next_enter_open {
                     self.suppress_next_enter_open = false;
                 } else if let Some(selected) = self.selected_file.as_ref() {
@@ -283,6 +349,7 @@ impl ImageViewerApp {
 
         // Extract data to avoid multiple borrows
         let items = self.items.clone();
+        let group_projection = self.group_projection.clone();
         let selected_item = self.selected_item;
         let selected_file = self.selected_file.clone();
         let sort_mode = self.sort_mode;
@@ -386,6 +453,8 @@ impl ImageViewerApp {
 
         let mut ctx = ListViewContext {
             items: &items,
+            group_projection: &group_projection,
+            collapsed_groups: &collapsed_groups,
             selected_item,
             selected_file: selected_file.as_ref(),
             multi_selection,
@@ -421,6 +490,7 @@ impl ImageViewerApp {
             is_on_hdd: !is_ssd,
             prefetch_rows,
             visible_index_range: &mut self.visible_index_range,
+            visible_group_paths: &mut self.visible_group_paths,
             is_item_dragging: self.is_item_dragging || external_drop_over_this_panel,
             drag_target_folder: self.drag_target_folder.clone(),
             drag_started_item: &mut drag_started_item,
@@ -563,13 +633,17 @@ impl ImageViewerApp {
                         } else if shift {
                             // Shift + Click: Range between anchor and click
                             if let Some(anchor) = self.selection_anchor {
-                                let (start, end) = if anchor < idx {
-                                    (anchor, idx)
+                                let range = if compact {
+                                    let (start, end) = if anchor <= idx {
+                                        (anchor, idx)
+                                    } else {
+                                        (idx, anchor)
+                                    };
+                                    (start..=end).collect()
                                 } else {
-                                    (idx, anchor)
+                                    self.visible_group_range(anchor, idx)
                                 };
-                                // Add range to selection (Do NOT clear outside selection as requested)
-                                for i in start..=end {
+                                for i in range {
                                     if let Some(it) = self.items.get(i) {
                                         self.multi_selection.insert(it.path.clone());
                                     }
@@ -668,6 +742,10 @@ impl ImageViewerApp {
                     }
                     self.sort_items();
                     self.save_preferences();
+                }
+                Some(list_view::ListViewAction::ToggleGroup(key)) if !is_renaming => {
+                    self.toggle_group_collapsed(key);
+                    ui.ctx().request_repaint();
                 }
                 Some(list_view::ListViewAction::EmptyAreaSecondaryClick)
                     if !is_renaming && self.can_open_empty_area_context_menu() =>
@@ -785,6 +863,33 @@ impl ImageViewerApp {
             );
         }
     }
+}
+
+fn grouped_visible_list_item_count(
+    projection: &crate::application::grouping::GroupProjection,
+    collapsed: &rustc_hash::FxHashSet<crate::application::grouping::GroupKey>,
+    scroll_y: f32,
+    viewport_height: f32,
+    row_height: f32,
+) -> usize {
+    let viewport_bottom = scroll_y + viewport_height;
+    let mut content_y = 0.0;
+    let mut count = 0usize;
+    for section in &projection.sections {
+        content_y += crate::ui::views::group_header::GROUP_HEADER_HEIGHT;
+        if !collapsed.contains(&section.key) {
+            let items_top = content_y;
+            let items_bottom = items_top + section.item_indices.len() as f32 * row_height;
+            if items_bottom > scroll_y && items_top < viewport_bottom {
+                let first = ((scroll_y - items_top) / row_height).floor().max(0.0) as usize;
+                let last = ((viewport_bottom - items_top) / row_height).ceil().max(0.0) as usize;
+                count += last.min(section.item_indices.len()).saturating_sub(first);
+            }
+            content_y = items_bottom;
+        }
+        content_y += crate::ui::views::group_header::GROUP_GAP;
+    }
+    count.max(1)
 }
 
 #[cfg(test)]

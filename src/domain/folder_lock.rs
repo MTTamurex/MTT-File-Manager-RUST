@@ -1,4 +1,4 @@
-use crate::domain::file_entry::{FoldersPosition, SortMode, ViewMode};
+use crate::domain::file_entry::{FoldersPosition, GroupMode, SortMode, ViewMode};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FolderLockScope {
@@ -31,5 +31,7 @@ pub struct FolderLock {
     pub sort_mode: SortMode,
     pub sort_descending: bool,
     pub folders_position: FoldersPosition,
+    pub group_mode: GroupMode,
+    pub group_descending: bool,
     pub scope: FolderLockScope,
 }

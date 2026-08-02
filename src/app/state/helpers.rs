@@ -244,7 +244,27 @@ fn insert_visible_paths_from_range(
 
 impl ImageViewerApp {
     pub(crate) fn all_items_mut(&mut self) -> &mut Vec<FileEntry> {
+        self.items_revision = self.items_revision.wrapping_add(1);
         Arc::make_mut(&mut self.all_items)
+    }
+
+    pub(crate) fn current_items_rebuild_signature(
+        &self,
+    ) -> crate::app::state::ItemsRebuildSignature {
+        crate::app::state::ItemsRebuildSignature {
+            items_revision: self.items_revision,
+            search_query: self.search_query.clone(),
+            active_tag_filter: self.active_tag_filter,
+            tag_assignments_epoch: self.tag_assignments_epoch,
+            sort_mode: self.sort_mode,
+            sort_descending: self.sort_descending,
+            folders_position: self.folders_position,
+            group_mode: self.group_mode,
+            group_descending: self.group_descending,
+            path: self.navigation_state.current_path.clone(),
+            is_computer_view: self.navigation_state.is_computer_view,
+            is_recycle_bin_view: self.navigation_state.is_recycle_bin_view,
+        }
     }
 
     pub(crate) fn share_visible_items_from_all_items(&mut self) {
@@ -262,6 +282,12 @@ impl ImageViewerApp {
         self.items_rebuild_in_flight = false;
         self.clear_pending_items_rebuild_flags();
         self.last_items_rebuild = Instant::now();
+    }
+
+    pub(crate) fn invalidate_and_schedule_items_rebuild(&mut self) {
+        self.invalidate_active_items_rebuild();
+        self.pending_items_rebuild = true;
+        self.pending_items_count = usize::MAX;
     }
 
     pub(crate) fn should_preserve_inactive_dual_panel_thumbnail_pipeline(&self) -> bool {
@@ -1000,11 +1026,18 @@ impl ImageViewerApp {
             snapshot.view_mode,
             ViewMode::Grid | ViewMode::List | ViewMode::ColumnList | ViewMode::Miller
         ) {
-            insert_visible_paths_from_range(
-                &mut visible_paths,
-                visible_items_for_snapshot(snapshot),
-                snapshot.visible_index_range,
-            );
+            if crate::application::grouping::is_grouping_rendered(
+                snapshot.view_mode,
+                &snapshot.group_projection,
+            ) {
+                visible_paths.extend(snapshot.visible_group_paths.iter().cloned());
+            } else {
+                insert_visible_paths_from_range(
+                    &mut visible_paths,
+                    visible_items_for_snapshot(snapshot),
+                    snapshot.visible_index_range,
+                );
+            }
         }
 
         if let Some(selected) = snapshot.selected_file.as_ref() {
@@ -1414,8 +1447,15 @@ impl ImageViewerApp {
             self.items.len(),
         ) {
             visible_items = visible_items.saturating_add(
-                visible_count_from_range(self.items.len(), self.visible_index_range)
-                    .unwrap_or_else(|| self.estimated_visible_grid_items()),
+                if crate::application::grouping::is_grouping_rendered(
+                    self.view_mode,
+                    &self.group_projection,
+                ) {
+                    self.visible_group_paths.len()
+                } else {
+                    visible_count_from_range(self.items.len(), self.visible_index_range)
+                        .unwrap_or_else(|| self.estimated_visible_grid_items())
+                },
             );
         }
 
@@ -1429,11 +1469,18 @@ impl ImageViewerApp {
                     inactive_items.len(),
                 ) {
                     visible_items = visible_items.saturating_add(
-                        visible_count_from_range(
-                            inactive_items.len(),
-                            snapshot.visible_index_range,
-                        )
-                        .unwrap_or_else(|| self.estimated_visible_grid_items()),
+                        if crate::application::grouping::is_grouping_rendered(
+                            snapshot.view_mode,
+                            &snapshot.group_projection,
+                        ) {
+                            snapshot.visible_group_paths.len()
+                        } else {
+                            visible_count_from_range(
+                                inactive_items.len(),
+                                snapshot.visible_index_range,
+                            )
+                            .unwrap_or_else(|| self.estimated_visible_grid_items())
+                        },
                     );
                 }
             }
@@ -1454,11 +1501,19 @@ impl ImageViewerApp {
             self.view_mode,
             ViewMode::Grid | ViewMode::List | ViewMode::ColumnList | ViewMode::Miller
         ) {
-            insert_visible_paths_from_range(
-                &mut self.visible_paths_cache,
-                self.items.as_ref().as_slice(),
-                self.visible_index_range,
-            );
+            if crate::application::grouping::is_grouping_rendered(
+                self.view_mode,
+                &self.group_projection,
+            ) {
+                self.visible_paths_cache
+                    .extend(self.visible_group_paths.iter().cloned());
+            } else {
+                insert_visible_paths_from_range(
+                    &mut self.visible_paths_cache,
+                    self.items.as_ref().as_slice(),
+                    self.visible_index_range,
+                );
+            }
         }
 
         if self.dual_panel_enabled {
@@ -1467,11 +1522,19 @@ impl ImageViewerApp {
                     snapshot.view_mode,
                     ViewMode::Grid | ViewMode::List | ViewMode::ColumnList | ViewMode::Miller
                 ) {
-                    insert_visible_paths_from_range(
-                        &mut self.visible_paths_cache,
-                        visible_items_for_snapshot(snapshot),
-                        snapshot.visible_index_range,
-                    );
+                    if crate::application::grouping::is_grouping_rendered(
+                        snapshot.view_mode,
+                        &snapshot.group_projection,
+                    ) {
+                        self.visible_paths_cache
+                            .extend(snapshot.visible_group_paths.iter().cloned());
+                    } else {
+                        insert_visible_paths_from_range(
+                            &mut self.visible_paths_cache,
+                            visible_items_for_snapshot(snapshot),
+                            snapshot.visible_index_range,
+                        );
+                    }
                 }
             }
         }

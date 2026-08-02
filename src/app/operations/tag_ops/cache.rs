@@ -120,13 +120,20 @@ impl ImageViewerApp {
         }
 
         snapshot.total_items = snapshot.items.len();
+        snapshot.group_projection = Arc::new(crate::application::grouping::build_group_projection(
+            &snapshot.items,
+            snapshot.group_mode,
+            snapshot.group_descending,
+        ));
     }
 
     fn clear_cached_tag_tab_items(tab: &mut crate::tabs::TabState) {
         tab.items = Arc::new(Vec::new());
         tab.all_items = Arc::new(Vec::new());
+        tab.items_revision = tab.items_revision.wrapping_add(1);
         tab.items_snapshot_compact = false;
         tab.total_items = 0;
+        tab.group_projection = Arc::new(Default::default());
         tab.selected_item = None;
         tab.selected_file = None;
         tab.selected_thumbnail = None;
@@ -138,8 +145,10 @@ impl ImageViewerApp {
     fn clear_cached_tag_snapshot_items(snapshot: &mut crate::app::dual_panel::PanelSnapshot) {
         snapshot.items = Arc::new(Vec::new());
         snapshot.all_items = Arc::new(Vec::new());
+        snapshot.items_revision = snapshot.items_revision.wrapping_add(1);
         snapshot.items_snapshot_compact = false;
         snapshot.total_items = 0;
+        snapshot.group_projection = Arc::new(Default::default());
         snapshot.selected_item = None;
         snapshot.selected_file = None;
         snapshot.selected_thumbnail = None;

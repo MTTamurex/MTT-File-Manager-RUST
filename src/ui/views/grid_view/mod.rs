@@ -1,7 +1,7 @@
 //! Grid view rendering
 //! Follows .cursorrules: single responsibility, < 300 lines
 
-use eframe::egui::{self, Sense, Ui};
+use eframe::egui::{self, Rect, Sense, Ui};
 use std::path::{Path, PathBuf};
 
 use crate::domain::file_entry::FileEntry;
@@ -9,8 +9,8 @@ use crate::domain::file_tag::FileTag;
 // PERFORMANCE: Use FxHashSet for PathBuf keys - faster hashing than std::collections::HashSet
 use crate::ui::cache::FxHashSet;
 use crate::ui::views::rectangle_selection::{
-    GridRectangleMetrics, RectangleSelectionFrame, RectangleSelectionMetrics,
-    RectangleSelectionState, RectangleSelectionView,
+    GridRectangleMetrics, GroupedRectangleMetrics, RectangleSelectionFrame,
+    RectangleSelectionMetrics, RectangleSelectionState, RectangleSelectionView,
 };
 mod hit_testing;
 mod interactions;
@@ -134,6 +134,8 @@ impl PendingOperations {
 /// Context for grid view rendering
 pub struct GridViewContext<'a> {
     pub items: &'a [FileEntry],
+    pub group_projection: &'a crate::application::grouping::GroupProjection,
+    pub collapsed_groups: &'a FxHashSet<crate::application::grouping::GroupKey>,
     pub selected_item: Option<usize>,
     pub selected_file: Option<&'a FileEntry>,
     pub multi_selection: &'a FxHashSet<PathBuf>,
@@ -179,6 +181,7 @@ pub struct GridViewContext<'a> {
     pub prefetch_rows: usize,
     /// Output: visible item index range for GPU upload prioritization
     pub visible_index_range: &'a mut Option<(usize, usize)>,
+    pub visible_group_paths: &'a mut FxHashSet<PathBuf>,
     /// Whether an item drag operation is active
     pub is_item_dragging: bool,
     /// Current folder path under drop target highlight
@@ -248,6 +251,7 @@ pub enum GridViewAction {
     SecondaryClick(usize),
     EmptyAreaClick,
     EmptyAreaSecondaryClick,
+    ToggleGroup(crate::application::grouping::GroupKey),
 }
 
 /// Renders the grid view
@@ -273,6 +277,8 @@ pub fn render_grid_view(
     // Keyboard navigation (handled by caller)
 
     let count = ctx.items.len();
+    let grouped = ctx.group_projection.is_grouped();
+    ctx.visible_group_paths.clear();
     // Virtualized grid or Grouped grid
     let mut clicked_item = None;
     let mut double_clicked_item = None;
@@ -285,7 +291,23 @@ pub fn render_grid_view(
     let virtual_cell_h = visual_cell_h.max(MIN_VIRTUAL_CELL_HEIGHT);
 
     let total_rows = (count as f32 / cols as f32).ceil() as usize;
-    let total_content_height = total_rows as f32 * virtual_cell_h + padding;
+    let total_content_height = if grouped {
+        ctx.group_projection
+            .sections
+            .iter()
+            .map(|section| {
+                crate::ui::views::group_header::GROUP_HEADER_HEIGHT
+                    + if ctx.collapsed_groups.contains(&section.key) {
+                        0.0
+                    } else {
+                        section.item_indices.len().div_ceil(cols) as f32 * virtual_cell_h + padding
+                    }
+                    + crate::ui::views::group_header::GROUP_GAP
+            })
+            .sum()
+    } else {
+        total_rows as f32 * virtual_cell_h + padding
+    };
 
     // Viewport area
     let viewport_rect = ui.available_rect_before_wrap();
@@ -305,11 +327,34 @@ pub fn render_grid_view(
         ui,
         *ctx.mut_scroll_offset_y,
         viewport_h,
+        max_scroll,
         ctx.generation,
         ctx.is_opengl_backend,
     );
-    let rectangle_metrics =
-        (!ctx.is_computer_view).then_some(RectangleSelectionMetrics::Grid(GridRectangleMetrics {
+    let bg_response = ui.interact(
+        viewport_rect,
+        ui.id().with("grid_bg"),
+        Sense::click_and_drag(),
+    );
+    let rectangle_geometry_needed =
+        ctx.rectangle_selection_state.is_some() || bg_response.drag_started();
+    let rectangle_metrics = if ctx.is_computer_view {
+        None
+    } else if grouped && rectangle_geometry_needed {
+        Some(RectangleSelectionMetrics::Grouped(
+            grouped_grid_rectangle_metrics(
+                ctx,
+                cols,
+                padding,
+                item_w,
+                item_h,
+                virtual_cell_h,
+                available_w,
+                total_content_height,
+            ),
+        ))
+    } else if !grouped {
+        Some(RectangleSelectionMetrics::Grid(GridRectangleMetrics {
             count,
             cols,
             padding,
@@ -318,7 +363,10 @@ pub fn render_grid_view(
             virtual_cell_h,
             content_width: available_w,
             content_height: total_content_height,
-        }));
+        }))
+    } else {
+        None
+    };
     ctx.rectangle_selection_frame.begin(
         viewport_rect,
         0.0,
@@ -345,31 +393,31 @@ pub fn render_grid_view(
     if ctx.scroll_to_selected {
         if let Some(selected_idx) = ctx.selected_item {
             if selected_idx < count {
-                let selected_row = selected_idx / cols;
-                let item_top = selected_row as f32 * virtual_cell_h + padding;
-                let item_bottom = item_top + item_h; // Keep item_h for visual bottom check
+                let item_top = if grouped {
+                    grouped_item_top(ctx, selected_idx, cols, virtual_cell_h, padding)
+                } else {
+                    Some((selected_idx / cols) as f32 * virtual_cell_h + padding)
+                };
+                if let Some(item_top) = item_top {
+                    let item_bottom = item_top + item_h; // Keep item_h for visual bottom check
 
-                // We check against TARGET scroll to ensure we snap to the final correct position
-                // but we might want to check visual if we want to smooth scroll TO the item.
-                // For now, snap target instantly as per requirement (keyboard nav usually snaps)
-                let current_target = *ctx.mut_scroll_offset_y;
+                    // We check against TARGET scroll to ensure we snap to the final correct position
+                    // but we might want to check visual if we want to smooth scroll TO the item.
+                    // For now, snap target instantly as per requirement (keyboard nav usually snaps)
+                    let current_target = *ctx.mut_scroll_offset_y;
 
-                if item_top < current_target {
-                    *ctx.mut_scroll_offset_y = item_top.max(0.0);
-                } else if item_bottom > current_target + viewport_h {
-                    *ctx.mut_scroll_offset_y = (item_bottom - viewport_h).clamp(0.0, max_scroll);
+                    if item_top < current_target {
+                        *ctx.mut_scroll_offset_y = item_top.max(0.0);
+                    } else if item_bottom > current_target + viewport_h {
+                        *ctx.mut_scroll_offset_y =
+                            (item_bottom - viewport_h).clamp(0.0, max_scroll);
+                    }
                 }
             }
         }
     }
 
     // 3. Render Virtual Grid
-    // DETECT BACKGROUND INTERACTION
-    let bg_response = ui.interact(
-        viewport_rect,
-        ui.id().with("grid_bg"),
-        Sense::click_and_drag(),
-    );
     if !ctx.is_computer_view
         && ctx.rectangle_selection_state.is_none()
         && bg_response.drag_started()
@@ -378,6 +426,7 @@ pub fn render_grid_view(
             ctx.rectangle_selection_frame.request_start(origin);
         }
     }
+    let mut toggled_group = None;
     visible_rows_range = virtualization::render_virtualized_grid(
         ui,
         ctx,
@@ -396,7 +445,25 @@ pub fn render_grid_view(
         &mut clicked_item,
         &mut double_clicked_item,
         &mut secondary_clicked_item,
+        &mut toggled_group,
     );
+    if grouped
+        && ctx.rectangle_selection_frame.metrics.is_none()
+        && ctx.rectangle_selection_frame.start_screen_pos.is_some()
+    {
+        ctx.rectangle_selection_frame.metrics = Some(RectangleSelectionMetrics::Grouped(
+            grouped_grid_rectangle_metrics(
+                ctx,
+                cols,
+                padding,
+                item_w,
+                item_h,
+                virtual_cell_h,
+                available_w,
+                total_content_height,
+            ),
+        ));
+    }
     let t_after_virtualized = std::time::Instant::now();
 
     if let Some(state) = ctx.rectangle_selection_state.filter(|state| {
@@ -425,13 +492,15 @@ pub fn render_grid_view(
 
     prefetch::flush_pending_operations(ctx, ops);
     let t_after_flush = std::time::Instant::now();
-    prefetch::process_visible_range_prefetch(
-        ctx,
-        cols,
-        visible_rows_range,
-        thumbnail_work_scrolling,
-        ops,
-    );
+    if !grouped {
+        prefetch::process_visible_range_prefetch(
+            ctx,
+            cols,
+            visible_rows_range,
+            thumbnail_work_scrolling,
+            ops,
+        );
+    }
     let t_after_prefetch = std::time::Instant::now();
 
     let total_us = t_total.elapsed().as_micros();
@@ -451,6 +520,9 @@ pub fn render_grid_view(
         );
     }
 
+    if let Some(key) = toggled_group {
+        return Some(GridViewAction::ToggleGroup(key));
+    }
     interactions::resolve_grid_action(
         clicked_item,
         double_clicked_item,
@@ -458,4 +530,77 @@ pub fn render_grid_view(
         bg_response.clicked(),
         bg_response.secondary_clicked(),
     )
+}
+
+fn grouped_item_top(
+    ctx: &GridViewContext,
+    selected_index: usize,
+    cols: usize,
+    cell_height: f32,
+    padding: f32,
+) -> Option<f32> {
+    let mut top = 0.0;
+    for section in &ctx.group_projection.sections {
+        top += crate::ui::views::group_header::GROUP_HEADER_HEIGHT;
+        if ctx.collapsed_groups.contains(&section.key) {
+            top += crate::ui::views::group_header::GROUP_GAP;
+            continue;
+        }
+        if let Some(position) = section
+            .item_indices
+            .iter()
+            .position(|index| *index == selected_index)
+        {
+            return Some(top + (position / cols) as f32 * cell_height + padding);
+        }
+        top += section.item_indices.len().div_ceil(cols) as f32 * cell_height
+            + padding
+            + crate::ui::views::group_header::GROUP_GAP;
+    }
+    None
+}
+
+#[allow(clippy::too_many_arguments)]
+fn grouped_grid_rectangle_metrics(
+    ctx: &GridViewContext,
+    cols: usize,
+    padding: f32,
+    item_w: f32,
+    item_h: f32,
+    cell_height: f32,
+    content_width: f32,
+    content_height: f32,
+) -> GroupedRectangleMetrics {
+    let mut item_rects = Vec::new();
+    let mut content_y = 0.0;
+    for section in &ctx.group_projection.sections {
+        content_y += crate::ui::views::group_header::GROUP_HEADER_HEIGHT;
+        if !ctx.collapsed_groups.contains(&section.key) {
+            for (position, index) in section.item_indices.iter().enumerate() {
+                if *index >= ctx.items.len() {
+                    continue;
+                }
+                let row = position / cols;
+                let column = position % cols;
+                item_rects.push((
+                    *index,
+                    Rect::from_min_size(
+                        egui::pos2(
+                            column as f32 * (item_w + padding) + padding,
+                            content_y + row as f32 * cell_height + padding,
+                        ),
+                        egui::vec2(item_w, item_h),
+                    ),
+                ));
+            }
+            content_y += section.item_indices.len().div_ceil(cols) as f32 * cell_height + padding;
+        }
+        content_y += crate::ui::views::group_header::GROUP_GAP;
+    }
+    GroupedRectangleMetrics {
+        view: RectangleSelectionView::Grid,
+        item_rects: item_rects.into(),
+        content_width,
+        content_height,
+    }
 }

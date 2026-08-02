@@ -195,6 +195,8 @@ pub(crate) struct ColumnWidths {
 /// Context for list view rendering
 pub struct ListViewContext<'a> {
     pub items: &'a [FileEntry],
+    pub group_projection: &'a crate::application::grouping::GroupProjection,
+    pub collapsed_groups: &'a FxHashSet<crate::application::grouping::GroupKey>,
     pub selected_item: Option<usize>,
     pub selected_file: Option<&'a FileEntry>,
     pub multi_selection: &'a FxHashSet<PathBuf>,
@@ -239,6 +241,7 @@ pub struct ListViewContext<'a> {
     pub prefetch_rows: usize,
     /// Output: visible item index range for GPU upload prioritization
     pub visible_index_range: &'a mut Option<(usize, usize)>,
+    pub visible_group_paths: &'a mut FxHashSet<PathBuf>,
     /// Whether an item drag operation is active
     pub is_item_dragging: bool,
     /// Current folder path under drop target highlight
@@ -278,6 +281,7 @@ pub enum ListViewAction {
     SortChange(SortMode),
     EmptyAreaClick,
     EmptyAreaSecondaryClick,
+    ToggleGroup(crate::application::grouping::GroupKey),
 }
 
 /// Operations that can be performed from list view
@@ -366,6 +370,10 @@ pub fn render_list_view(
         row_height,
         &col_widths,
     );
+
+    if let Some(key) = interaction.toggled_group {
+        return Some(ListViewAction::ToggleGroup(key));
+    }
 
     // Handle actions after rendering - ORDER MATTERS!
     if interaction.empty_area_secondary_click {

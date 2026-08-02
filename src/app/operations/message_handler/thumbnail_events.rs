@@ -212,6 +212,7 @@ impl ImageViewerApp {
         self.pending_items_rebuild = false;
         self.pending_items_count = 0;
         self.items = Arc::new(Vec::new());
+        self.group_projection = Arc::new(Default::default());
         self.all_items_mut().clear();
         self.total_items = 0;
         self.selected_item = None;

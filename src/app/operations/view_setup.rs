@@ -83,11 +83,14 @@ impl ImageViewerApp {
         self.sort_descending = self.sort_descending_normal;
         self.folders_position = self.folders_position_normal;
         self.view_mode = self.view_mode_normal;
+        self.group_mode = self.group_mode_normal;
+        self.group_descending = self.group_descending_normal;
         self.current_folder_locked = false;
 
         self.is_loading_folder = true;
         self.folder_load_error = None;
         self.items = Arc::new(Vec::new());
+        self.group_projection = Arc::new(Default::default());
         self.all_items_mut().clear();
         self.total_items = 0;
         self.reset_selection_and_search();
@@ -258,6 +261,7 @@ impl ImageViewerApp {
         }
 
         self.all_items = Arc::new(computer_items);
+        self.items_revision = self.items_revision.wrapping_add(1);
         self.sort_items();
 
         // PRE-COMPUTE SECTION INDICES (O(n) once, not per frame)

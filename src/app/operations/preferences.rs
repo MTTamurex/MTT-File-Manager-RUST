@@ -122,6 +122,11 @@ impl ImageViewerApp {
             FoldersPosition::Mixed => "mixed",
         };
         prefs.push(("folders_position", folders_pos_str.to_string()));
+        prefs.push((
+            "group_mode",
+            self.group_mode_normal.preference_value().to_string(),
+        ));
+        prefs.push(("group_descending", self.group_descending_normal.to_string()));
 
         // UI preferences
         prefs.push(("thumbnail_size", self.thumbnail_size.to_string()));

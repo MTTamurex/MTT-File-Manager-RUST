@@ -19,7 +19,7 @@ impl ImageViewerApp {
         frame: &RectangleSelectionFrame,
         items: &[FileEntry],
     ) {
-        let Some(metrics) = frame.metrics else {
+        let Some(metrics) = frame.metrics.clone() else {
             return;
         };
         let RectangleSelectionSource::MillerAncestor { directory } = &frame.source else {
@@ -120,6 +120,7 @@ impl ImageViewerApp {
             &hit_indices,
             anchor_index,
             state.modifiers,
+            None,
         );
         if let Some(state) = self.rectangle_selection_state.as_mut() {
             state.hit_indices = hit_indices;
@@ -165,6 +166,7 @@ impl ImageViewerApp {
             anchor_index,
             state.modifiers,
             |index| items.get(index).map(|item| item.path.clone()),
+            None,
         );
 
         if !resolved.selection_changed {

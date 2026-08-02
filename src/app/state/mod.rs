@@ -56,6 +56,24 @@ pub struct ItemsRebuildResult {
     pub request_id: usize,
     pub items: Vec<FileEntry>,
     pub total_items: usize,
+    pub group_projection: crate::application::grouping::GroupProjection,
+    pub signature: ItemsRebuildSignature,
+}
+
+#[derive(Clone, PartialEq)]
+pub struct ItemsRebuildSignature {
+    pub items_revision: u64,
+    pub search_query: String,
+    pub active_tag_filter: Option<i64>,
+    pub tag_assignments_epoch: u64,
+    pub sort_mode: SortMode,
+    pub sort_descending: bool,
+    pub folders_position: FoldersPosition,
+    pub group_mode: crate::domain::file_entry::GroupMode,
+    pub group_descending: bool,
+    pub path: String,
+    pub is_computer_view: bool,
+    pub is_recycle_bin_view: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -188,13 +206,20 @@ pub struct ImageViewerApp {
     pub sort_mode_normal: SortMode,   // Sort mode for normal folder views
     pub sort_descending: bool,        // true = Z-A, Newest, Largest
     pub folders_position: FoldersPosition, // First, Last, Mixed
-    pub show_hidden_files: bool,      // Show files with FILE_ATTRIBUTE_HIDDEN
-    pub show_recycle_bin: bool,       // Show Recycle Bin in Quick Access
-    pub show_quick_access: bool,      // Show Quick Access section in sidebar
-    pub show_tags: bool,              // Show Tags section in sidebar
-    pub collapse_quick_access: bool,  // Collapse Quick Access section in sidebar
-    pub collapse_cloud_drives: bool,  // Collapse Cloud Drives section in sidebar
-    pub collapse_local_disks: bool,   // Collapse Local Disks section in sidebar
+    pub group_mode: crate::domain::file_entry::GroupMode,
+    pub group_descending: bool,
+    pub group_projection: Arc<crate::application::grouping::GroupProjection>,
+    pub collapsed_groups_by_context: rustc_hash::FxHashMap<
+        String,
+        rustc_hash::FxHashSet<crate::application::grouping::GroupKey>,
+    >,
+    pub show_hidden_files: bool, // Show files with FILE_ATTRIBUTE_HIDDEN
+    pub show_recycle_bin: bool,  // Show Recycle Bin in Quick Access
+    pub show_quick_access: bool, // Show Quick Access section in sidebar
+    pub show_tags: bool,         // Show Tags section in sidebar
+    pub collapse_quick_access: bool, // Collapse Quick Access section in sidebar
+    pub collapse_cloud_drives: bool, // Collapse Cloud Drives section in sidebar
+    pub collapse_local_disks: bool, // Collapse Local Disks section in sidebar
     pub collapse_network_drives: bool, // Collapse Network Drives section in sidebar
 
     // "Normal" (unlocked) state â€” these track what unlocked folders should use.
@@ -202,6 +227,8 @@ pub struct ImageViewerApp {
     pub sort_descending_normal: bool,
     pub folders_position_normal: FoldersPosition,
     pub view_mode_normal: ViewMode,
+    pub group_mode_normal: crate::domain::file_entry::GroupMode,
+    pub group_descending_normal: bool,
 
     // Persistence Layer
     pub disk_cache: Arc<ThumbnailDiskCache>,
@@ -277,11 +304,12 @@ pub struct ImageViewerApp {
 
     // Search & Navigation (NEW)
     pub all_items: Arc<Vec<FileEntry>>, // Master cache for search
-    pub search_query: String,           // Search text
-    pub last_grid_cols: usize,          // Memory for vertical navigation (keyboard)
-    pub generation: usize,              // Local counter (Main Thread)
+    pub items_revision: u64,
+    pub search_query: String,                 // Search text
+    pub last_grid_cols: usize,                // Memory for vertical navigation (keyboard)
+    pub generation: usize,                    // Local counter (Main Thread)
     pub current_generation: Arc<AtomicUsize>, // Shared counter (Workers)
-    pub ui_ctx: egui::Context,          // Reference to UI context for async repaints
+    pub ui_ctx: egui::Context,                // Reference to UI context for async repaints
     // PERFORMANCE: Throttle list rebuild during streaming
     pub last_items_rebuild: Instant,
     pub pending_items_rebuild: bool,
@@ -526,6 +554,7 @@ pub struct ImageViewerApp {
     // PERFORMANCE: Cached visible paths set to avoid per-frame allocation during scroll
     // Stores the last computed visible paths and the range that generated them
     pub visible_paths_cache: FxHashSet<PathBuf>,
+    pub visible_group_paths: FxHashSet<PathBuf>,
     pub visible_range_cached: Option<(usize, usize)>,
 
     // PERFORMANCE: Scroll state tracking for adaptive GPU upload throttling

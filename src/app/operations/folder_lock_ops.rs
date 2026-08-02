@@ -63,6 +63,8 @@ impl ImageViewerApp {
             sort_mode: self.sort_mode,
             sort_descending: self.sort_descending,
             folders_position: self.folders_position,
+            group_mode: self.group_mode,
+            group_descending: self.group_descending,
             scope,
         };
         if let Err(error) = self.app_state_db.save_folder_lock(&path, &lock) {
@@ -114,6 +116,9 @@ impl ImageViewerApp {
         self.sort_mode = resolved.lock.sort_mode;
         self.sort_descending = resolved.lock.sort_descending;
         self.folders_position = resolved.lock.folders_position;
+        self.group_mode = resolved.lock.group_mode;
+        self.group_descending = resolved.lock.group_descending;
+        self.sort_items();
         self.current_folder_locked = true;
     }
 
@@ -160,6 +165,9 @@ impl ImageViewerApp {
             };
             self.sort_descending = self.sort_descending_normal;
             self.folders_position = self.folders_position_normal;
+            self.group_mode = self.group_mode_normal;
+            self.group_descending = self.group_descending_normal;
+            self.sort_items();
             self.current_folder_locked = false;
         }
 
@@ -215,7 +223,7 @@ impl ImageViewerApp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::file_entry::{FoldersPosition, SortMode, ViewMode};
+    use crate::domain::file_entry::{FoldersPosition, GroupMode, SortMode, ViewMode};
 
     fn lock(scope: FolderLockScope) -> FolderLock {
         FolderLock {
@@ -223,6 +231,8 @@ mod tests {
             sort_mode: SortMode::Name,
             sort_descending: false,
             folders_position: FoldersPosition::First,
+            group_mode: GroupMode::None,
+            group_descending: false,
             scope,
         }
     }

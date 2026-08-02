@@ -55,35 +55,47 @@ pub struct ColumnListRectangleMetrics {
     pub content_height: f32,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
+pub struct GroupedRectangleMetrics {
+    pub view: RectangleSelectionView,
+    pub item_rects: std::sync::Arc<[(usize, Rect)]>,
+    pub content_width: f32,
+    pub content_height: f32,
+}
+
+#[derive(Clone, Debug)]
 pub enum RectangleSelectionMetrics {
     Grid(GridRectangleMetrics),
     List(ListRectangleMetrics),
     ColumnList(ColumnListRectangleMetrics),
+    Grouped(GroupedRectangleMetrics),
 }
 
 impl RectangleSelectionMetrics {
-    pub fn view(self) -> RectangleSelectionView {
+    pub fn view(&self) -> RectangleSelectionView {
         match self {
             Self::Grid(_) => RectangleSelectionView::Grid,
             Self::List(_) => RectangleSelectionView::List,
             Self::ColumnList(_) => RectangleSelectionView::ColumnList,
+            Self::Grouped(metrics) => metrics.view,
         }
     }
 
-    pub fn content_width(self) -> f32 {
+    pub fn content_width(&self) -> f32 {
         match self {
             Self::Grid(metrics) => metrics.content_width,
             Self::List(metrics) => metrics.content_width,
             Self::ColumnList(metrics) => metrics.content_width,
+            Self::Grouped(metrics) => metrics.content_width,
         }
     }
 
-    pub fn content_height(self) -> f32 {
+    pub fn content_height(&self) -> f32 {
         match self {
             Self::Grid(metrics) => metrics.content_height,
             Self::List(metrics) => metrics.content_height,
             Self::ColumnList(metrics) => metrics.content_height,
+            Self::Grouped(metrics) => metrics.content_height,
         }
     }
 }
@@ -98,6 +110,7 @@ pub struct RectangleSelectionState {
     pub base_preview_indices: FxHashSet<usize>,
     pub hit_indices: FxHashSet<usize>,
     pub preview_indices: FxHashSet<usize>,
+    pub visual_order: Option<std::sync::Arc<[usize]>>,
     pub modifiers: RectangleSelectionModifiers,
     pub generation: usize,
 }
@@ -140,6 +153,7 @@ impl RectangleSelectionState {
             base_preview_indices,
             hit_indices: FxHashSet::default(),
             preview_indices: FxHashSet::default(),
+            visual_order: None,
             modifiers,
             generation,
         }
@@ -222,7 +236,7 @@ impl RectangleSelectionFrame {
 
     pub fn screen_to_content(&self, screen_pos: Pos2) -> Option<Pos2> {
         let viewport = self.viewport_rect?;
-        let metrics = self.metrics?;
+        let metrics = self.metrics.as_ref()?;
         let x = (screen_pos.x - viewport.left() + self.current_scroll_x)
             .clamp(0.0, metrics.content_width().max(0.0));
         let y = (screen_pos.y - viewport.top() + self.current_scroll_y)
@@ -241,6 +255,13 @@ pub fn collect_indices_in_rect(
         RectangleSelectionMetrics::ColumnList(metrics) => {
             collect_column_list_indices(selection_rect, metrics)
         }
+        RectangleSelectionMetrics::Grouped(metrics) => metrics
+            .item_rects
+            .iter()
+            .filter_map(|(index, item_rect)| {
+                rects_intersect(selection_rect, *item_rect).then_some(*index)
+            })
+            .collect(),
     }
 }
 
@@ -459,6 +480,39 @@ mod tests {
         );
 
         assert_eq!(sorted(indices), vec![4, 5]);
+    }
+
+    #[test]
+    fn grouped_selection_returns_logical_indices_and_ignores_headers() {
+        let metrics = RectangleSelectionMetrics::Grouped(GroupedRectangleMetrics {
+            view: RectangleSelectionView::List,
+            item_rects: vec![
+                (
+                    7,
+                    Rect::from_min_size(egui::pos2(0.0, 30.0), egui::vec2(100.0, 20.0)),
+                ),
+                (
+                    2,
+                    Rect::from_min_size(egui::pos2(0.0, 50.0), egui::vec2(100.0, 20.0)),
+                ),
+            ]
+            .into(),
+            content_width: 100.0,
+            content_height: 70.0,
+        });
+
+        assert!(collect_indices_in_rect(
+            Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(100.0, 29.0)),
+            metrics.clone(),
+        )
+        .is_empty());
+        assert_eq!(
+            sorted(collect_indices_in_rect(
+                Rect::from_min_max(egui::pos2(0.0, 31.0), egui::pos2(100.0, 69.0)),
+                metrics,
+            )),
+            vec![2, 7]
+        );
     }
 
     #[test]

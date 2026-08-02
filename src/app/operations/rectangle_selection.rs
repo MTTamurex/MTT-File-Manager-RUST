@@ -22,13 +22,9 @@ pub(crate) fn resolve_rectangle_selection(
     anchor: Option<usize>,
     modifiers: RectangleSelectionModifiers,
     get_item_path: impl Fn(usize) -> Option<PathBuf>,
+    visual_order: Option<&[usize]>,
 ) -> RectangleSelectionResolveResult {
-    let mut hits: Vec<usize> = hit_indices
-        .iter()
-        .copied()
-        .filter(|idx| *idx < item_count)
-        .collect();
-    hits.sort_unstable();
+    let hits = ordered_hit_indices(item_count, hit_indices, visual_order);
 
     if hits.is_empty() {
         return RectangleSelectionResolveResult {
@@ -63,18 +59,8 @@ pub(crate) fn resolve_rectangle_selection(
             }
         }
     } else if modifiers.shift {
-        if let (Some(anchor_idx), Some(first), Some(last)) =
-            (anchor, hits.first().copied(), hits.last().copied())
-        {
-            let (start, end) = if anchor_idx < first {
-                (anchor_idx, last)
-            } else if anchor_idx > last {
-                (first, anchor_idx)
-            } else {
-                (first, last)
-            };
-
-            for idx in start..=end.min(item_count.saturating_sub(1)) {
+        if let Some(range) = selection_range(anchor, &hits, item_count, visual_order) {
+            for idx in range {
                 if let Some(path) = get_item_path(idx) {
                     selected_paths.insert(path);
                 }
@@ -114,13 +100,9 @@ pub(crate) fn resolve_rectangle_preview_indices(
     hit_indices: &FxHashSet<usize>,
     anchor: Option<usize>,
     modifiers: RectangleSelectionModifiers,
+    visual_order: Option<&[usize]>,
 ) -> FxHashSet<usize> {
-    let mut hits: Vec<usize> = hit_indices
-        .iter()
-        .copied()
-        .filter(|idx| *idx < item_count)
-        .collect();
-    hits.sort_unstable();
+    let hits = ordered_hit_indices(item_count, hit_indices, visual_order);
 
     if hits.is_empty() {
         return base_preview_indices.clone();
@@ -138,25 +120,59 @@ pub(crate) fn resolve_rectangle_preview_indices(
                 preview_indices.insert(idx);
             }
         }
-    } else if let (Some(anchor_idx), Some(first), Some(last)) =
-        (anchor, hits.first().copied(), hits.last().copied())
-    {
-        let (start, end) = if anchor_idx < first {
-            (anchor_idx, last)
-        } else if anchor_idx > last {
-            (first, anchor_idx)
-        } else {
-            (first, last)
-        };
-
-        for idx in start..=end.min(item_count.saturating_sub(1)) {
-            preview_indices.insert(idx);
-        }
+    } else if let Some(range) = selection_range(anchor, &hits, item_count, visual_order) {
+        preview_indices.extend(range);
     } else {
         preview_indices.extend(hits);
     }
 
     preview_indices
+}
+
+fn ordered_hit_indices(
+    item_count: usize,
+    hit_indices: &FxHashSet<usize>,
+    visual_order: Option<&[usize]>,
+) -> Vec<usize> {
+    if let Some(order) = visual_order {
+        return order
+            .iter()
+            .copied()
+            .filter(|index| *index < item_count && hit_indices.contains(index))
+            .collect();
+    }
+
+    let mut hits: Vec<_> = hit_indices
+        .iter()
+        .copied()
+        .filter(|index| *index < item_count)
+        .collect();
+    hits.sort_unstable();
+    hits
+}
+
+fn selection_range(
+    anchor: Option<usize>,
+    hits: &[usize],
+    item_count: usize,
+    visual_order: Option<&[usize]>,
+) -> Option<Vec<usize>> {
+    let anchor = anchor?;
+    let first = *hits.first()?;
+    let last = *hits.last()?;
+
+    if let Some(order) = visual_order {
+        let anchor_position = order.iter().position(|index| *index == anchor)?;
+        let first_position = order.iter().position(|index| *index == first)?;
+        let last_position = order.iter().position(|index| *index == last)?;
+        let start = anchor_position.min(first_position);
+        let end = anchor_position.max(last_position);
+        return Some(order[start..=end].to_vec());
+    }
+
+    let start = anchor.min(first);
+    let end = anchor.max(last).min(item_count.saturating_sub(1));
+    Some((start..=end).collect())
 }
 
 impl ImageViewerApp {
@@ -199,7 +215,7 @@ impl ImageViewerApp {
             return;
         }
 
-        let Some(metrics) = frame.metrics else {
+        let Some(metrics) = frame.metrics.clone() else {
             if self.rectangle_selection_state.is_some() {
                 self.cancel_rectangle_selection();
             }
@@ -327,6 +343,17 @@ impl ImageViewerApp {
         };
         let selection_rect = state.content_rect();
         let modifiers = state.modifiers;
+        let visual_order = match &metrics {
+            RectangleSelectionMetrics::Grouped(metrics) => Some(
+                metrics
+                    .item_rects
+                    .iter()
+                    .map(|(index, _)| *index)
+                    .collect::<Vec<_>>()
+                    .into(),
+            ),
+            _ => None,
+        };
         let hit_indices = collect_indices_in_rect(selection_rect, metrics);
         let preview_indices = resolve_rectangle_preview_indices(
             self.items.len(),
@@ -334,11 +361,13 @@ impl ImageViewerApp {
             &hit_indices,
             self.selection_anchor,
             modifiers,
+            visual_order.as_deref(),
         );
 
         if let Some(state) = self.rectangle_selection_state.as_mut() {
             state.hit_indices = hit_indices;
             state.preview_indices = preview_indices;
+            state.visual_order = visual_order;
         }
     }
 
@@ -361,6 +390,7 @@ impl ImageViewerApp {
             self.selection_anchor,
             state.modifiers,
             |idx| self.items.get(idx).map(|item| item.path.clone()),
+            state.visual_order.as_deref(),
         );
 
         if !resolved.selection_changed {
@@ -421,6 +451,7 @@ mod tests {
             Some(1),
             RectangleSelectionModifiers::default(),
             |idx| items.get(idx).cloned(),
+            None,
         );
 
         assert_eq!(result.selected_paths, path_set(&[2, 4]));
@@ -441,6 +472,7 @@ mod tests {
                 shift: false,
             },
             |idx| items.get(idx).cloned(),
+            None,
         );
 
         assert_eq!(result.selected_paths, path_set(&[1, 3, 4, 5]));
@@ -461,6 +493,7 @@ mod tests {
                 shift: true,
             },
             |idx| items.get(idx).cloned(),
+            None,
         );
 
         assert_eq!(result.selected_paths, path_set(&[0, 2, 3, 4, 5]));
@@ -478,6 +511,7 @@ mod tests {
             Some(1),
             RectangleSelectionModifiers::default(),
             |idx| items.get(idx).cloned(),
+            None,
         );
 
         assert_eq!(result.selected_paths, path_set(&[1]));
@@ -496,6 +530,7 @@ mod tests {
             Some(1),
             RectangleSelectionModifiers::default(),
             |idx| items.get(idx).cloned(),
+            None,
         );
 
         assert_eq!(result.selected_paths, path_set(&[2, 4]));
@@ -515,8 +550,31 @@ mod tests {
                 ctrl: false,
                 shift: true,
             },
+            None,
         );
 
         assert_eq!(preview, set(&[0, 2, 3, 4, 5]));
+    }
+
+    #[test]
+    fn shift_rectangle_uses_grouped_visual_order() {
+        let items = paths(6);
+        let visual_order = [4, 1, 5, 2, 0, 3];
+        let result = resolve_rectangle_selection(
+            items.len(),
+            &path_set(&[1]),
+            &set(&[0]),
+            Some(1),
+            RectangleSelectionModifiers {
+                ctrl: false,
+                shift: true,
+            },
+            |idx| items.get(idx).cloned(),
+            Some(&visual_order),
+        );
+
+        assert_eq!(result.selected_paths, path_set(&[0, 1, 2, 5]));
+        assert_eq!(result.focus_index, Some(0));
+        assert_eq!(result.anchor_index, Some(1));
     }
 }

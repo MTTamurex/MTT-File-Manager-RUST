@@ -82,6 +82,7 @@ impl ImageViewerApp {
         if force_refresh {
             // Hard refresh (F5): clear everything immediately.
             self.items = Arc::new(Vec::new());
+            self.group_projection = Arc::new(Default::default());
             self.all_items_mut().clear();
             self.pending_all_items_clear = false;
             self.hold_visible_items_until_load_complete = false;

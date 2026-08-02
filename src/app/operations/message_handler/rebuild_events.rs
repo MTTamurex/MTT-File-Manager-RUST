@@ -19,6 +19,7 @@ impl ImageViewerApp {
         let mut processed_messages = 0usize;
         let mut has_more = false;
         let mut latest_valid = None;
+        let mut stale_current_request = false;
 
         while processed_messages < MAX_REBUILD_MSGS_PER_FRAME {
             if start.elapsed() >= rebuild_budget {
@@ -32,8 +33,12 @@ impl ImageViewerApp {
                     if result.generation == self.generation
                         && result.request_id == self.items_rebuild_request_id
                     {
-                        // Keep only the most recent valid rebuild for this frame.
-                        latest_valid = Some(result);
+                        if result.signature == self.current_items_rebuild_signature() {
+                            // Keep only the most recent valid rebuild for this frame.
+                            latest_valid = Some(result);
+                        } else {
+                            stale_current_request = true;
+                        }
                     }
                 }
                 Err(TryRecvError::Empty) => break,
@@ -49,6 +54,7 @@ impl ImageViewerApp {
             self.items_rebuild_in_flight = false;
             self.items = Arc::new(result.items);
             self.total_items = result.total_items;
+            self.group_projection = Arc::new(result.group_projection);
             self.hold_visible_items_until_load_complete = false;
 
             // After rebuild: if a pending selection was requested (e.g., after rename),
@@ -64,6 +70,11 @@ impl ImageViewerApp {
             } else {
                 ctx.request_repaint();
             }
+        } else if stale_current_request {
+            self.items_rebuild_in_flight = false;
+            self.pending_items_rebuild = true;
+            self.pending_items_count = usize::MAX;
+            self.maybe_schedule_stream_items_rebuild(ctx);
         } else if has_more {
             ctx.request_repaint();
         }

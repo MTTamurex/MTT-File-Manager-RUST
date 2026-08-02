@@ -119,27 +119,51 @@ impl ImageViewerApp {
         let cols = ((available_w - padding) / (item_w + padding))
             .floor()
             .max(1.0) as usize;
+        let collapsed_groups = self
+            .collapsed_groups_by_context
+            .get(&self.grouping_context_key())
+            .cloned()
+            .unwrap_or_default();
 
         // Keyboard navigation (ONLY when not renaming and media is NOT focused)
         if !self.suppress_file_panel_keyboard
             && !self.global_search.active
             && self.rectangle_selection_state.is_none()
+            && ui.input(|input| {
+                [
+                    egui::Key::ArrowUp,
+                    egui::Key::ArrowDown,
+                    egui::Key::ArrowLeft,
+                    egui::Key::ArrowRight,
+                    egui::Key::PageUp,
+                    egui::Key::PageDown,
+                    egui::Key::Enter,
+                ]
+                .into_iter()
+                .any(|key| input.key_pressed(key))
+            })
             && should_handle_navigation(
                 ui,
                 self.renaming_state.is_some(),
                 self.is_media_keyboard_focused(),
             )
         {
-            let current_index = self.items.iter().position(|x| {
-                self.selected_file
-                    .as_ref()
-                    .is_some_and(|f| f.path == x.path)
+            let visual_slots = crate::application::grouping::grid_visual_slots(
+                &self.group_projection,
+                Some(&collapsed_groups),
+                self.items.len(),
+                cols,
+            );
+            let current_index = self.selected_item.and_then(|selected| {
+                visual_slots
+                    .iter()
+                    .position(|index| *index == Some(selected))
             });
 
             let nav_result = process_grid_keyboard_input(
                 ui,
                 current_index,
-                self.items.len(),
+                visual_slots.len(),
                 cols,
                 cell_h,
                 ui.available_height(),
@@ -150,58 +174,63 @@ impl ImageViewerApp {
             );
 
             let shift = ui.input(|i| i.modifiers.shift);
+            let selected_is_visible = self
+                .selected_item
+                .is_some_and(|selected| visual_slots.contains(&Some(selected)));
 
             if let Some(new_idx) = nav_result.new_index {
-                let clamped = new_idx.min(self.items.len().saturating_sub(1));
-                if let Some(item) = self.items.get(clamped) {
-                    // Clone path before any mutable borrows
-                    let item_path = item.path.clone();
+                if let Some(clamped) = crate::application::grouping::resolve_visual_slot(
+                    &visual_slots,
+                    new_idx,
+                    current_index,
+                    cols,
+                    ui.input(|input| input.key_pressed(egui::Key::ArrowRight)),
+                ) {
+                    if let Some(item) = self.items.get(clamped) {
+                        // Clone path before any mutable borrows
+                        let item_path = item.path.clone();
 
-                    // UPDATED: Decoupled Focus (selected_item) from Selection (multi_selection)
-                    let old_focus = self.selected_item;
-                    self.selected_item = Some(clamped);
-                    self.selected_file = Some(item.clone());
-                    self.update_selected_thumbnail();
-                    self.last_keyboard_nav = Instant::now();
+                        // UPDATED: Decoupled Focus (selected_item) from Selection (multi_selection)
+                        let old_focus = self.selected_item;
+                        self.selected_item = Some(clamped);
+                        self.selected_file = Some(item.clone());
+                        self.update_selected_thumbnail();
+                        self.last_keyboard_nav = Instant::now();
 
-                    if shift {
-                        // Shift + Arrow/Page: Range selection
-                        if self.selection_anchor.is_none() {
-                            self.selection_anchor = old_focus;
-                        }
-                        if let Some(anchor) = self.selection_anchor {
-                            let (start, end) = if anchor < clamped {
-                                (anchor, clamped)
-                            } else {
-                                (clamped, anchor)
-                            };
-                            // Add range between anchor and focus (do NOT clear selection outside range)
-                            for i in start..=end {
-                                if let Some(it) = self.items.get(i) {
-                                    self.multi_selection.insert(it.path.clone());
+                        if shift {
+                            // Shift + Arrow/Page: Range selection
+                            if self.selection_anchor.is_none() {
+                                self.selection_anchor = old_focus;
+                            }
+                            if let Some(anchor) = self.selection_anchor {
+                                for i in self.visible_group_range(anchor, clamped) {
+                                    if let Some(it) = self.items.get(i) {
+                                        self.multi_selection.insert(it.path.clone());
+                                    }
                                 }
                             }
+                        } else {
+                            // Navigation without shift: Single-item selection (clear + add focused item)
+                            // This ensures the focused item shows the dark blue selection border
+                            self.multi_selection.clear();
+                            self.multi_selection.insert(item_path);
+                            self.selection_anchor = Some(clamped);
                         }
-                    } else {
-                        // Navigation without shift: Single-item selection (clear + add focused item)
-                        // This ensures the focused item shows the dark blue selection border
-                        self.multi_selection.clear();
-                        self.multi_selection.insert(item_path);
-                        self.selection_anchor = Some(clamped);
+
+                        // Trigger scroll normalization in the view
+                        self.scroll_to_selected = true;
+
+                        // Request visibility for the new selected index
+                        self.scroll_request =
+                            crate::app::state::ScrollRequest::EnsureVisible(clamped);
+
+                        ui.ctx().request_repaint();
                     }
-
-                    // Trigger scroll normalization in the view
-                    self.scroll_to_selected = true;
-
-                    // Request visibility for the new selected index
-                    self.scroll_request = crate::app::state::ScrollRequest::EnsureVisible(clamped);
-
-                    ui.ctx().request_repaint();
                 }
             }
 
             // Enter to open (only when not renaming)
-            if nav_result.enter_pressed {
+            if nav_result.enter_pressed && selected_is_visible {
                 if self.suppress_next_enter_open {
                     self.suppress_next_enter_open = false;
                 } else if let Some(selected) = self.selected_file.as_ref() {
@@ -223,6 +252,7 @@ impl ImageViewerApp {
 
         // Extract data to avoid multiple borrows
         let selected_item = self.selected_item;
+        let group_projection = self.group_projection.clone();
         let selected_file = self.selected_file.clone();
         let thumbnail_size = self.thumbnail_size;
         let last_grid_cols = self.last_grid_cols;
@@ -275,6 +305,8 @@ impl ImageViewerApp {
 
         let mut ctx = GridViewContext {
             items: &self.items,
+            group_projection: &group_projection,
+            collapsed_groups: &collapsed_groups,
             selected_item,
             selected_file: selected_file.as_ref(),
             multi_selection,
@@ -311,6 +343,7 @@ impl ImageViewerApp {
             pending_upload_set: &mut self.cache_manager.pending_upload_set,
             prefetch_rows,
             visible_index_range: &mut self.visible_index_range,
+            visible_group_paths: &mut self.visible_group_paths,
             is_item_dragging: self.is_item_dragging || external_drop_over_this_panel,
             drag_target_folder: self.drag_target_folder.clone(),
             drag_started_item: &mut drag_started_item,
@@ -389,12 +422,7 @@ impl ImageViewerApp {
                         } else if shift {
                             // Shift + Click: Range between anchor and click
                             if let Some(anchor) = self.selection_anchor {
-                                let (start, end) = if anchor < idx {
-                                    (anchor, idx)
-                                } else {
-                                    (idx, anchor)
-                                };
-                                for i in start..=end {
+                                for i in self.visible_group_range(anchor, idx) {
                                     if let Some(it) = self.items.get(i) {
                                         self.multi_selection.insert(it.path.clone());
                                     }
@@ -488,6 +516,10 @@ impl ImageViewerApp {
                 }
                 Some(grid_view::GridViewAction::EmptyAreaClick) if !is_renaming => {
                     self.clear_file_view_selection();
+                }
+                Some(grid_view::GridViewAction::ToggleGroup(key)) if !is_renaming => {
+                    self.toggle_group_collapsed(key);
+                    ui.ctx().request_repaint();
                 }
                 _ => {}
             }

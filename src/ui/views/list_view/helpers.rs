@@ -1,26 +1,9 @@
 //! Helper functions for list view: file type strings, status badges, section headers
 
-use eframe::egui::{self, Color32, FontId, Pos2, RichText, Ui};
+use eframe::egui::{self, Color32, FontId, Pos2};
 use rust_i18n::t;
 
 use crate::domain::file_entry::{FileEntry, SyncStatus};
-
-const SECTION_HEADER_LEFT_PADDING: f32 = 8.0;
-
-/// Renders a section header for grouped views (Computer View)
-pub(super) fn render_section_header(ui: &mut Ui, title: &str) {
-    ui.add_space(8.0);
-    ui.horizontal(|ui| {
-        ui.add_space(SECTION_HEADER_LEFT_PADDING);
-        ui.label(
-            RichText::new(title)
-                .size(13.0)
-                .color(Color32::from_gray(120))
-                .strong(),
-        );
-    });
-    ui.add_space(4.0);
-}
 
 /// Returns translated file type string for display.
 pub(super) fn get_file_type_string(item: &FileEntry) -> String {

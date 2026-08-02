@@ -144,6 +144,7 @@ pub struct PanelSnapshot {
     // Content
     pub items: Arc<Vec<FileEntry>>,
     pub all_items: Arc<Vec<FileEntry>>,
+    pub items_revision: u64,
     pub items_snapshot_compact: bool,
     pub total_items: usize,
     pub is_loading_folder: bool,
@@ -162,6 +163,13 @@ pub struct PanelSnapshot {
     pub sort_mode: SortMode,
     pub sort_descending: bool,
     pub folders_position: FoldersPosition,
+    pub group_mode: crate::domain::file_entry::GroupMode,
+    pub group_descending: bool,
+    pub group_projection: Arc<crate::application::grouping::GroupProjection>,
+    pub collapsed_groups_by_context: rustc_hash::FxHashMap<
+        String,
+        rustc_hash::FxHashSet<crate::application::grouping::GroupKey>,
+    >,
     pub current_folder_locked: bool,
     pub list_column_widths: PanelListColumnWidths,
     pub miller_columns: crate::app::miller_columns_state::MillerColumnsState,
@@ -172,6 +180,7 @@ pub struct PanelSnapshot {
     pub scroll_to_selected: bool,
     pub visible_index_range: Option<(usize, usize)>,
     pub visible_paths_cache: FxHashSet<PathBuf>,
+    pub visible_group_paths: FxHashSet<PathBuf>,
     pub visible_range_cached: Option<(usize, usize)>,
 
     // Search
@@ -247,6 +256,7 @@ impl PanelSnapshot {
             navigation: app.navigation_state.navigation.clone(),
             items: app.items.clone(),
             all_items: app.all_items.clone(),
+            items_revision: app.items_revision,
             items_snapshot_compact: false,
             total_items: app.total_items,
             is_loading_folder: app.is_loading_folder,
@@ -260,6 +270,10 @@ impl PanelSnapshot {
             sort_mode: app.sort_mode,
             sort_descending: app.sort_descending,
             folders_position: app.folders_position,
+            group_mode: app.group_mode,
+            group_descending: app.group_descending,
+            group_projection: app.group_projection.clone(),
+            collapsed_groups_by_context: app.collapsed_groups_by_context.clone(),
             current_folder_locked: app.current_folder_locked,
             list_column_widths: PanelListColumnWidths::from_layout(&app.layout),
             miller_columns: app.miller_columns.clone(),
@@ -268,6 +282,7 @@ impl PanelSnapshot {
             scroll_to_selected: app.scroll_to_selected,
             visible_index_range: app.visible_index_range,
             visible_paths_cache: app.visible_paths_cache.clone(),
+            visible_group_paths: app.visible_group_paths.clone(),
             visible_range_cached: app.visible_range_cached,
             search_query: app.search_query.clone(),
             active_tag_filter: app.active_tag_filter,
@@ -299,6 +314,7 @@ impl PanelSnapshot {
         app.navigation_state.navigation = self.navigation;
         app.items = self.items;
         app.all_items = self.all_items;
+        app.items_revision = self.items_revision;
         app.total_items = self.total_items;
         app.is_loading_folder = self.is_loading_folder;
         app.folder_load_error = self.folder_load_error;
@@ -311,6 +327,10 @@ impl PanelSnapshot {
         app.sort_mode = self.sort_mode;
         app.sort_descending = self.sort_descending;
         app.folders_position = self.folders_position;
+        app.group_mode = self.group_mode;
+        app.group_descending = self.group_descending;
+        app.group_projection = self.group_projection;
+        app.collapsed_groups_by_context = self.collapsed_groups_by_context;
         app.current_folder_locked = self.current_folder_locked;
         self.list_column_widths.apply_to_layout(&mut app.layout);
         app.miller_columns = self.miller_columns;
@@ -319,6 +339,7 @@ impl PanelSnapshot {
         app.scroll_to_selected = self.scroll_to_selected;
         app.visible_index_range = self.visible_index_range;
         app.visible_paths_cache = self.visible_paths_cache;
+        app.visible_group_paths = self.visible_group_paths;
         app.visible_range_cached = self.visible_range_cached;
         app.search_query = self.search_query;
         app.active_tag_filter = self.active_tag_filter;
@@ -356,6 +377,7 @@ impl PanelSnapshot {
         std::mem::swap(&mut self.navigation, &mut app.navigation_state.navigation);
         std::mem::swap(&mut self.items, &mut app.items);
         std::mem::swap(&mut self.all_items, &mut app.all_items);
+        std::mem::swap(&mut self.items_revision, &mut app.items_revision);
         std::mem::swap(&mut self.total_items, &mut app.total_items);
         std::mem::swap(&mut self.is_loading_folder, &mut app.is_loading_folder);
         std::mem::swap(&mut self.folder_load_error, &mut app.folder_load_error);
@@ -371,6 +393,13 @@ impl PanelSnapshot {
         std::mem::swap(&mut self.sort_mode, &mut app.sort_mode);
         std::mem::swap(&mut self.sort_descending, &mut app.sort_descending);
         std::mem::swap(&mut self.folders_position, &mut app.folders_position);
+        std::mem::swap(&mut self.group_mode, &mut app.group_mode);
+        std::mem::swap(&mut self.group_descending, &mut app.group_descending);
+        std::mem::swap(&mut self.group_projection, &mut app.group_projection);
+        std::mem::swap(
+            &mut self.collapsed_groups_by_context,
+            &mut app.collapsed_groups_by_context,
+        );
         std::mem::swap(
             &mut self.current_folder_locked,
             &mut app.current_folder_locked,
@@ -382,6 +411,7 @@ impl PanelSnapshot {
         std::mem::swap(&mut self.scroll_to_selected, &mut app.scroll_to_selected);
         std::mem::swap(&mut self.visible_index_range, &mut app.visible_index_range);
         std::mem::swap(&mut self.visible_paths_cache, &mut app.visible_paths_cache);
+        std::mem::swap(&mut self.visible_group_paths, &mut app.visible_group_paths);
         std::mem::swap(
             &mut self.visible_range_cached,
             &mut app.visible_range_cached,

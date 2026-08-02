@@ -169,12 +169,21 @@ fn visible_thumbnail_upload_ranks(app: &ImageViewerApp) -> FxHashMap<PathBuf, us
         app.view_mode,
         ViewMode::Grid | ViewMode::List | ViewMode::ColumnList | ViewMode::Miller
     ) {
-        next_rank += insert_visible_upload_ranks(
-            &mut ranks,
-            app.items.as_ref().as_slice(),
-            app.visible_index_range,
-            next_rank,
-        );
+        if crate::application::grouping::is_grouping_rendered(app.view_mode, &app.group_projection)
+        {
+            for path in &app.visible_group_paths {
+                let rank = ranks.len();
+                ranks.entry(path.clone()).or_insert(rank);
+            }
+            next_rank = ranks.len();
+        } else {
+            next_rank += insert_visible_upload_ranks(
+                &mut ranks,
+                app.items.as_ref().as_slice(),
+                app.visible_index_range,
+                next_rank,
+            );
+        }
     }
 
     if app.dual_panel_enabled {
@@ -183,12 +192,22 @@ fn visible_thumbnail_upload_ranks(app: &ImageViewerApp) -> FxHashMap<PathBuf, us
                 snapshot.view_mode,
                 ViewMode::Grid | ViewMode::List | ViewMode::ColumnList | ViewMode::Miller
             ) {
-                insert_visible_upload_ranks(
-                    &mut ranks,
-                    snapshot_items_for_upload_rank(snapshot),
-                    snapshot.visible_index_range,
-                    next_rank,
-                );
+                if crate::application::grouping::is_grouping_rendered(
+                    snapshot.view_mode,
+                    &snapshot.group_projection,
+                ) {
+                    for path in &snapshot.visible_group_paths {
+                        let rank = ranks.len();
+                        ranks.entry(path.clone()).or_insert(rank);
+                    }
+                } else {
+                    insert_visible_upload_ranks(
+                        &mut ranks,
+                        snapshot_items_for_upload_rank(snapshot),
+                        snapshot.visible_index_range,
+                        next_rank,
+                    );
+                }
             }
         }
     }

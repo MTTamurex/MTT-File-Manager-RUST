@@ -279,6 +279,7 @@ impl ImageViewerApp {
         if !removed_from_all {
             return false;
         }
+        self.invalidate_and_schedule_items_rebuild();
 
         let items = Arc::make_mut(&mut self.items);
         if let Some(idx) = items
@@ -310,6 +311,9 @@ impl ImageViewerApp {
                 self.selected_file = None;
             }
         }
+
+        self.rebuild_group_projection();
+        self.reconcile_visible_selection_index();
 
         true
     }
@@ -345,6 +349,7 @@ impl ImageViewerApp {
         if !had_any {
             return false;
         }
+        self.invalidate_and_schedule_items_rebuild();
 
         self.all_items_mut()
             .retain(|item| !norms.contains(&Self::normalize_for_match(&item.path)));
@@ -374,6 +379,9 @@ impl ImageViewerApp {
                 self.selected_file = None;
             }
         }
+
+        self.rebuild_group_projection();
+        self.reconcile_visible_selection_index();
 
         true
     }
@@ -418,6 +426,7 @@ impl ImageViewerApp {
         let is_dir = crate::infrastructure::onedrive::fast_is_dir(&cleaned);
         let entry = crate::domain::file_entry::FileEntry::from_path(cleaned.clone(), is_dir);
 
+        self.invalidate_and_schedule_items_rebuild();
         self.all_items_mut().push(entry.clone());
 
         let should_show = self.search_query.is_empty()
@@ -429,6 +438,7 @@ impl ImageViewerApp {
         if should_show {
             Arc::make_mut(&mut self.items).push(entry);
             self.total_items = self.items.len();
+            self.rebuild_group_projection();
         }
 
         self.pending_items_rebuild = true;
@@ -475,6 +485,9 @@ impl ImageViewerApp {
         // double-bump thumbnail_request_epochs and queue redundant invalidations.
         let removed_old = self.try_remove_deleted_path_from_ui(&cleaned_old);
         let added_new = self.try_add_created_path_to_ui(&cleaned_new);
+        if added_new {
+            self.rebuild_group_projection();
+        }
 
         if old_was_selected {
             if let Some(idx) = self
@@ -604,6 +617,8 @@ impl ImageViewerApp {
             if tab_path == path_norm {
                 tab.items = Arc::new(Vec::new());
                 tab.all_items = Arc::new(Vec::new());
+                tab.items_revision = tab.items_revision.wrapping_add(1);
+                tab.group_projection = Arc::new(Default::default());
             }
         }
     }

@@ -30,6 +30,7 @@ pub(super) fn compute_visual_scroll(
     ui: &Ui,
     target_scroll: f32,
     viewport_h: f32,
+    max_scroll: f32,
     generation: usize,
 ) -> (f32, f32) {
     let scroll_state_id = ui.id().with("list_scroll_state").with(generation);
@@ -39,6 +40,7 @@ pub(super) fn compute_visual_scroll(
         let state = d.get_temp_mut_or_insert_with::<ScrollState>(scroll_state_id, || ScrollState {
             visual_scroll_y: target_scroll,
         });
+        state.visual_scroll_y = state.visual_scroll_y.clamp(0.0, max_scroll);
 
         let t = (dt * 9.0).min(1.0);
 
@@ -52,6 +54,7 @@ pub(super) fn compute_visual_scroll(
         if (state.visual_scroll_y - target_scroll).abs() < 1.0 {
             state.visual_scroll_y = target_scroll;
         }
+        state.visual_scroll_y = state.visual_scroll_y.clamp(0.0, max_scroll);
 
         state.visual_scroll_y
     });

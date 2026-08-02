@@ -609,6 +609,38 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                     app.context_menu = context_menu;
                     return;
                 }
+                if let Some(value) = command.strip_prefix("group:") {
+                    let mode = crate::domain::file_entry::GroupMode::from_preference(value);
+                    let origin_panel = context_menu.origin_panel_is_left;
+                    run_in_context_panel(app, origin_panel, move |app| {
+                        app.group_mode = mode;
+                        if !app.current_folder_locked {
+                            app.group_mode_normal = mode;
+                        }
+                        app.rebuild_group_projection();
+                        app.scroll_offset_y = 0.0;
+                        app.scroll_offset_x = 0.0;
+                        app.save_preferences();
+                    });
+                    context_menu.close();
+                    app.context_menu = context_menu;
+                    return;
+                }
+                if let Some(value) = command.strip_prefix("group_direction:") {
+                    let descending = value == "descending";
+                    let origin_panel = context_menu.origin_panel_is_left;
+                    run_in_context_panel(app, origin_panel, move |app| {
+                        app.group_descending = descending;
+                        if !app.current_folder_locked {
+                            app.group_descending_normal = descending;
+                        }
+                        app.rebuild_group_projection();
+                        app.save_preferences();
+                    });
+                    context_menu.close();
+                    app.context_menu = context_menu;
+                    return;
+                }
             }
             match id {
                 -1 => {

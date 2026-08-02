@@ -8,7 +8,7 @@
 
 use crate::app::dual_panel::{ActivePanel, PanelListColumnWidths, PanelSnapshot};
 use crate::application::navigation::NavigationHistory;
-use crate::domain::file_entry::{FileEntry, FoldersPosition, SortMode, ViewMode};
+use crate::domain::file_entry::{FileEntry, FoldersPosition, GroupMode, SortMode, ViewMode};
 use crate::domain::special_paths::{COMPUTER_VIEW_ID, RECYCLE_BIN_VIEW_ID};
 use rustc_hash::FxHashSet;
 use std::collections::HashSet;
@@ -39,6 +39,7 @@ pub struct TabState {
     pub items: Arc<Vec<FileEntry>>,
     /// Unfiltered items (for search)
     pub all_items: Arc<Vec<FileEntry>>,
+    pub items_revision: u64,
     /// Whether `items` was intentionally compacted away because the visible
     /// snapshot is identical to `all_items` for this stored tab state.
     pub items_snapshot_compact: bool,
@@ -78,6 +79,13 @@ pub struct TabState {
     pub sort_descending: bool,
     /// Folders position for this tab
     pub folders_position: FoldersPosition,
+    pub group_mode: GroupMode,
+    pub group_descending: bool,
+    pub group_projection: Arc<crate::application::grouping::GroupProjection>,
+    pub collapsed_groups_by_context: rustc_hash::FxHashMap<
+        String,
+        rustc_hash::FxHashSet<crate::application::grouping::GroupKey>,
+    >,
     /// Whether the left sidebar is visible in this tab
     pub show_left_sidebar: bool,
     /// Whether the right preview/details panel is visible in this tab
@@ -118,6 +126,7 @@ impl TabState {
             is_computer_view: true,
             items: Arc::new(Vec::new()),
             all_items: Arc::new(Vec::new()),
+            items_revision: 0,
             items_snapshot_compact: false,
             generation: 0,
             selected_item: None,
@@ -137,6 +146,10 @@ impl TabState {
             sort_mode: SortMode::Name,
             sort_descending: false,
             folders_position: FoldersPosition::First,
+            group_mode: GroupMode::None,
+            group_descending: false,
+            group_projection: Arc::new(Default::default()),
+            collapsed_groups_by_context: Default::default(),
             show_left_sidebar: true,
             show_preview_panel: true,
             quick_search_buffer: String::new(),
@@ -169,6 +182,7 @@ impl TabState {
             is_computer_view: false,
             items: Arc::new(Vec::new()),
             all_items: Arc::new(Vec::new()),
+            items_revision: 0,
             items_snapshot_compact: false,
             generation: 0,
             selected_item: None,
@@ -188,6 +202,10 @@ impl TabState {
             sort_mode: SortMode::Name,
             sort_descending: false,
             folders_position: FoldersPosition::First,
+            group_mode: GroupMode::None,
+            group_descending: false,
+            group_projection: Arc::new(Default::default()),
+            collapsed_groups_by_context: Default::default(),
             show_left_sidebar: true,
             show_preview_panel: true,
             quick_search_buffer: String::new(),
@@ -299,7 +317,9 @@ impl TabState {
     fn into_lightweight_closed_snapshot(mut self) -> Self {
         self.items = Arc::new(Vec::new());
         self.all_items = Arc::new(Vec::new());
+        self.items_revision = self.items_revision.wrapping_add(1);
         self.items_snapshot_compact = false;
+        self.group_projection = Arc::new(Default::default());
         self.generation = 0;
         self.selected_item = None;
         self.selected_file = None;
@@ -385,6 +405,8 @@ impl TabManager {
         tab.show_left_sidebar = current.show_left_sidebar;
         tab.show_preview_panel = current.show_preview_panel;
         tab.collapse_tags = current.collapse_tags;
+        tab.group_mode = current.group_mode;
+        tab.group_descending = current.group_descending;
         self.next_id += 1;
         self.tabs.push(tab);
         self.active_tab = self.tabs.len() - 1;
@@ -397,6 +419,8 @@ impl TabManager {
         tab.show_left_sidebar = current.show_left_sidebar;
         tab.show_preview_panel = current.show_preview_panel;
         tab.collapse_tags = current.collapse_tags;
+        tab.group_mode = current.group_mode;
+        tab.group_descending = current.group_descending;
         self.next_id += 1;
         self.tabs.push(tab);
         self.active_tab = self.tabs.len() - 1;
@@ -414,6 +438,7 @@ impl TabManager {
             current.items.clone()
         };
         new_tab.all_items = current.all_items.clone();
+        new_tab.items_revision = current.items_revision;
         new_tab.items_snapshot_compact = current.items_snapshot_compact;
         new_tab.selected_item = current.selected_item;
         new_tab.selected_file = current.selected_file.clone();
@@ -427,6 +452,10 @@ impl TabManager {
         new_tab.sort_mode = current.sort_mode;
         new_tab.sort_descending = current.sort_descending;
         new_tab.folders_position = current.folders_position;
+        new_tab.group_mode = current.group_mode;
+        new_tab.group_descending = current.group_descending;
+        new_tab.group_projection = current.group_projection.clone();
+        new_tab.collapsed_groups_by_context = current.collapsed_groups_by_context.clone();
         new_tab.show_left_sidebar = current.show_left_sidebar;
         new_tab.show_preview_panel = current.show_preview_panel;
         new_tab.sidebar_expanded = current.sidebar_expanded.clone();
@@ -503,6 +532,7 @@ impl TabManager {
             reopened.is_computer_view = tab.is_computer_view;
             reopened.items = tab.items;
             reopened.all_items = tab.all_items;
+            reopened.items_revision = tab.items_revision;
             reopened.items_snapshot_compact = tab.items_snapshot_compact;
             reopened.selected_item = tab.selected_item;
             reopened.selected_file = tab.selected_file;
@@ -516,6 +546,10 @@ impl TabManager {
             reopened.sort_mode = tab.sort_mode;
             reopened.sort_descending = tab.sort_descending;
             reopened.folders_position = tab.folders_position;
+            reopened.group_mode = tab.group_mode;
+            reopened.group_descending = tab.group_descending;
+            reopened.group_projection = tab.group_projection;
+            reopened.collapsed_groups_by_context = tab.collapsed_groups_by_context;
             reopened.show_left_sidebar = tab.show_left_sidebar;
             reopened.show_preview_panel = tab.show_preview_panel;
             reopened.sidebar_expanded = tab.sidebar_expanded;

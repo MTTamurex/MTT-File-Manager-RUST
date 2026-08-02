@@ -1,7 +1,7 @@
 use crate::app::dual_panel::ActivePanel;
 use crate::app::navigation_state::ThemeMode;
 use crate::app::shortcuts::ShortcutBindings;
-use crate::domain::file_entry::{FoldersPosition, SortMode, ViewMode};
+use crate::domain::file_entry::{FoldersPosition, GroupMode, SortMode, ViewMode};
 use crate::infrastructure::app_state_db::AppStateDb;
 use crate::infrastructure::diagnostic_logger;
 use crate::ui::theme;
@@ -13,6 +13,8 @@ pub(super) struct StartupPreferences {
     pub(super) sort_mode_normal: SortMode,
     pub(super) sort_descending: bool,
     pub(super) folders_position: FoldersPosition,
+    pub(super) group_mode: GroupMode,
+    pub(super) group_descending: bool,
     pub(super) thumbnail_size: f32,
     pub(super) view_mode: ViewMode,
     pub(super) show_left_sidebar: bool,
@@ -99,6 +101,15 @@ impl StartupPreferences {
                 _ => FoldersPosition::First,
             })
             .unwrap_or(FoldersPosition::First);
+
+        let group_mode = prefs
+            .get("group_mode")
+            .map(|value| GroupMode::from_preference(value))
+            .unwrap_or_default();
+        let group_descending = prefs
+            .get("group_descending")
+            .map(|value| value == "true")
+            .unwrap_or(false);
 
         let thumbnail_size = prefs
             .get("thumbnail_size")
@@ -315,6 +326,8 @@ impl StartupPreferences {
             sort_mode_normal,
             sort_descending,
             folders_position,
+            group_mode,
+            group_descending,
             thumbnail_size,
             view_mode,
             show_left_sidebar,
@@ -354,6 +367,7 @@ impl StartupPreferences {
 #[cfg(test)]
 mod tests {
     use super::StartupPreferences;
+    use crate::domain::file_entry::GroupMode;
     use crate::infrastructure::app_state_db::AppStateDb;
 
     fn test_db() -> AppStateDb {
@@ -409,5 +423,19 @@ mod tests {
                 .sidebar_quick_access_height
                 .is_none());
         }
+    }
+
+    #[test]
+    fn grouping_defaults_to_disabled_and_round_trips() {
+        let db = test_db();
+        let defaults = StartupPreferences::load(&db);
+        assert_eq!(defaults.group_mode, GroupMode::None);
+        assert!(!defaults.group_descending);
+
+        db.set_preference("group_mode", "date").unwrap();
+        db.set_preference("group_descending", "true").unwrap();
+        let loaded = StartupPreferences::load(&db);
+        assert_eq!(loaded.group_mode, GroupMode::Date);
+        assert!(loaded.group_descending);
     }
 }

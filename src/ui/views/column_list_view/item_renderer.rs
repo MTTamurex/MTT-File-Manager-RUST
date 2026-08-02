@@ -65,7 +65,7 @@ pub(super) fn render_grouped_columns(
     item_top: f32,
     scroll_x: f32,
     rows_per_column: usize,
-    groups: &[&[usize]],
+    groups: &[(&[usize], bool)],
     ctx: &mut ListViewContext,
     ops: &mut dyn ListViewOperations,
     clicked_item: &mut Option<usize>,
@@ -73,26 +73,45 @@ pub(super) fn render_grouped_columns(
     secondary_clicked_item: &mut Option<usize>,
     secondary_clicked_empty_area: &mut bool,
 ) {
-    *ctx.visible_index_range = (!ctx.items.is_empty()).then_some((0, ctx.items.len() - 1));
+    *ctx.visible_index_range = None;
     let mut child_ui = ui.new_child(egui::UiBuilder::new().max_rect(viewport_rect));
     child_ui.set_clip_rect(viewport_rect.intersect(ui.clip_rect()));
+    let first_visible_column = ((scroll_x / COLUMN_WIDTH).floor() as usize).saturating_sub(1);
+    let last_visible_column =
+        ((scroll_x + viewport_rect.width()) / COLUMN_WIDTH).ceil() as usize + 1;
     let mut group_start_column = 0usize;
+    let mut visible_min = usize::MAX;
+    let mut visible_max = 0usize;
 
-    for indices in groups {
-        for (group_index, &item_index) in indices.iter().enumerate() {
-            if item_index >= ctx.items.len() {
-                continue;
-            }
-            let column = group_start_column + group_index / rows_per_column;
-            let row = group_index % rows_per_column;
-            let rect = Rect::from_min_size(
-                egui::pos2(
-                    viewport_rect.left() + column as f32 * COLUMN_WIDTH - scroll_x,
-                    item_top + row as f32 * ROW_HEIGHT,
-                ),
-                egui::vec2(COLUMN_WIDTH, ROW_HEIGHT),
-            );
-            if child_ui.is_rect_visible(rect) {
+    for (indices, collapsed) in groups {
+        if *collapsed {
+            group_start_column += 1;
+            continue;
+        }
+        let group_columns = indices.len().div_ceil(rows_per_column).max(1);
+        let visible_start = first_visible_column.max(group_start_column);
+        let visible_end = last_visible_column.min(group_start_column + group_columns);
+        for column in visible_start..visible_end {
+            let local_column = column - group_start_column;
+            let first_position = local_column * rows_per_column;
+            let last_position = (first_position + rows_per_column).min(indices.len());
+            for (row, &item_index) in indices[first_position..last_position].iter().enumerate() {
+                if item_index >= ctx.items.len() {
+                    continue;
+                }
+                let rect = Rect::from_min_size(
+                    egui::pos2(
+                        viewport_rect.left() + column as f32 * COLUMN_WIDTH - scroll_x,
+                        item_top + row as f32 * ROW_HEIGHT,
+                    ),
+                    egui::vec2(COLUMN_WIDTH, ROW_HEIGHT),
+                );
+                if child_ui.is_rect_visible(rect) {
+                    visible_min = visible_min.min(item_index);
+                    visible_max = visible_max.max(item_index);
+                    ctx.visible_group_paths
+                        .insert(ctx.items[item_index].path.clone());
+                }
                 render_column_item(
                     &mut child_ui,
                     item_index,
@@ -106,8 +125,9 @@ pub(super) fn render_grouped_columns(
                 );
             }
         }
-        group_start_column += indices.len().div_ceil(rows_per_column);
+        group_start_column += group_columns;
     }
+    *ctx.visible_index_range = (visible_min != usize::MAX).then_some((visible_min, visible_max));
 }
 
 #[allow(clippy::too_many_arguments)]

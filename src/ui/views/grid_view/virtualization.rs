@@ -1,5 +1,7 @@
 use super::{item_renderer, GridViewContext};
+use crate::application::grouping::GroupKey;
 use crate::ui::cache::FxHashSet;
+use crate::ui::views::group_header::{render_group_header, GROUP_GAP, GROUP_HEADER_HEIGHT};
 use eframe::egui::{self, Rect, Ui};
 use rust_i18n::t;
 use std::path::PathBuf;
@@ -23,11 +25,34 @@ pub(super) fn render_virtualized_grid(
     clicked_item: &mut Option<usize>,
     double_clicked_item: &mut Option<usize>,
     secondary_clicked_item: &mut Option<usize>,
+    toggled_group: &mut Option<GroupKey>,
 ) -> Option<(usize, usize)> {
     let t_total = std::time::Instant::now();
     let mut child_ui = ui.new_child(egui::UiBuilder::new().max_rect(viewport_rect));
     child_ui.set_clip_rect(viewport_rect);
     let content_min = viewport_rect.min;
+
+    if ctx.group_projection.is_grouped() {
+        render_grouped_sections(
+            &mut child_ui,
+            ctx,
+            content_min,
+            viewport_h,
+            current_scroll,
+            cols,
+            padding,
+            item_w,
+            item_h,
+            available_w,
+            virtual_cell_h,
+            is_scrolling,
+            clicked_item,
+            double_clicked_item,
+            secondary_clicked_item,
+            toggled_group,
+        );
+        return None;
+    }
 
     let vis_min_row = (current_scroll / virtual_cell_h).floor() as usize;
     let vis_max_row = ((current_scroll + viewport_h) / virtual_cell_h).ceil() as usize;
@@ -122,6 +147,100 @@ pub(super) fn render_virtualized_grid(
     }
 
     visible_rows_range
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_grouped_sections(
+    ui: &mut Ui,
+    ctx: &mut GridViewContext,
+    content_min: egui::Pos2,
+    viewport_h: f32,
+    current_scroll: f32,
+    cols: usize,
+    padding: f32,
+    item_w: f32,
+    item_h: f32,
+    available_w: f32,
+    virtual_cell_h: f32,
+    is_scrolling: bool,
+    clicked_item: &mut Option<usize>,
+    double_clicked_item: &mut Option<usize>,
+    secondary_clicked_item: &mut Option<usize>,
+    toggled_group: &mut Option<GroupKey>,
+) {
+    let mut content_y = 0.0;
+    let mut visible_min = usize::MAX;
+    let mut visible_max = 0usize;
+    for section_index in 0..ctx.group_projection.sections.len() {
+        let key = ctx.group_projection.sections[section_index].key.clone();
+        let item_count = ctx.group_projection.sections[section_index]
+            .item_indices
+            .len();
+        let collapsed = ctx.collapsed_groups.contains(&key);
+        let header_rect = Rect::from_min_size(
+            egui::pos2(
+                content_min.x + padding,
+                content_min.y + content_y - current_scroll,
+            ),
+            egui::vec2((available_w - padding).max(0.0), GROUP_HEADER_HEIGHT),
+        );
+        if ui.is_rect_visible(header_rect)
+            && render_group_header(ui, header_rect, &key, item_count, collapsed).clicked()
+        {
+            *toggled_group = Some(key);
+        }
+        content_y += GROUP_HEADER_HEIGHT;
+
+        if !collapsed {
+            let row_count = item_count.div_ceil(cols);
+            let first_row = (((current_scroll - content_y) / virtual_cell_h).floor() as isize - 2)
+                .max(0) as usize;
+            let last_row =
+                (((current_scroll + viewport_h - content_y) / virtual_cell_h).ceil() as isize + 2)
+                    .max(0) as usize;
+            for row in first_row..last_row.min(row_count) {
+                for col in 0..cols {
+                    let position = row * cols + col;
+                    if position >= item_count {
+                        break;
+                    }
+                    let index = ctx.group_projection.sections[section_index].item_indices[position];
+                    if index >= ctx.items.len() {
+                        continue;
+                    }
+                    let item_rect = Rect::from_min_size(
+                        egui::pos2(
+                            content_min.x + col as f32 * (item_w + padding) + padding,
+                            content_min.y + content_y + row as f32 * virtual_cell_h + padding
+                                - current_scroll,
+                        ),
+                        egui::vec2(item_w, item_h),
+                    );
+                    if ui.is_rect_visible(item_rect) {
+                        visible_min = visible_min.min(index);
+                        visible_max = visible_max.max(index);
+                        ctx.visible_group_paths
+                            .insert(ctx.items[index].path.clone());
+                    }
+                    item_renderer::render_grid_item(
+                        ui,
+                        index,
+                        &ctx.items[index],
+                        item_rect,
+                        ctx,
+                        clicked_item,
+                        double_clicked_item,
+                        secondary_clicked_item,
+                        is_scrolling,
+                        true,
+                    );
+                }
+            }
+            content_y += row_count as f32 * virtual_cell_h + padding;
+        }
+        content_y += GROUP_GAP;
+    }
+    *ctx.visible_index_range = (visible_min != usize::MAX).then_some((visible_min, visible_max));
 }
 
 fn cleanup_loading_set(

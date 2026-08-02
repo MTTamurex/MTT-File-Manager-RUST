@@ -34,6 +34,7 @@ impl ImageViewerApp {
         }
         active.selected_item = self.selected_item;
         active.generation = self.generation;
+        active.items_revision = self.items_revision;
         active.selected_file = self.selected_file.clone();
         active.selected_thumbnail = None;
         active.selected_gif = None;
@@ -49,6 +50,10 @@ impl ImageViewerApp {
         active.sort_mode = self.sort_mode;
         active.sort_descending = self.sort_descending;
         active.folders_position = self.folders_position;
+        active.group_mode = self.group_mode;
+        active.group_descending = self.group_descending;
+        active.group_projection = self.group_projection.clone();
+        active.collapsed_groups_by_context = self.collapsed_groups_by_context.clone();
         active.show_left_sidebar = self.show_left_sidebar;
         active.show_preview_panel = self.show_preview_panel;
         active.collapse_quick_access = self.collapse_quick_access;
@@ -117,6 +122,7 @@ impl ImageViewerApp {
             };
             active.items_snapshot_compact = false;
             self.generation = active.generation;
+            self.items_revision = active.items_revision;
             self.selected_item = active.selected_item;
             self.selected_file = active.selected_file.clone();
 
@@ -170,6 +176,10 @@ impl ImageViewerApp {
             self.sort_mode = active.sort_mode;
             self.sort_descending = active.sort_descending;
             self.folders_position = active.folders_position;
+            self.group_mode = active.group_mode;
+            self.group_descending = active.group_descending;
+            self.group_projection = active.group_projection.clone();
+            self.collapsed_groups_by_context = active.collapsed_groups_by_context.clone();
             self.show_left_sidebar = active.show_left_sidebar;
             self.show_preview_panel = active.show_preview_panel;
             self.collapse_quick_access = active.collapse_quick_access;
@@ -197,6 +207,7 @@ impl ImageViewerApp {
 
         self.current_generation
             .store(self.generation, AtomicOrdering::Relaxed);
+        self.visible_group_paths.clear();
 
         if self.navigation_state.current_path != previous_path
             || self.navigation_state.is_computer_view != previous_is_computer_view

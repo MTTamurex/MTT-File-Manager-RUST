@@ -156,6 +156,7 @@ impl ImageViewerApp {
         self.apply_folder_lock_if_present();
 
         self.items = Arc::new(Vec::new());
+        self.group_projection = Arc::new(Default::default());
         self.all_items_mut().clear();
         self.total_items = 0;
         self.is_loading_folder = true;

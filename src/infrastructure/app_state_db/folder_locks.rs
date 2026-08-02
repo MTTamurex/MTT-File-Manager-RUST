@@ -1,5 +1,5 @@
 use super::{AppStateDb, AppStateWriteError};
-use crate::domain::file_entry::{FoldersPosition, SortMode, ViewMode};
+use crate::domain::file_entry::{FoldersPosition, GroupMode, SortMode, ViewMode};
 use crate::domain::folder_lock::{FolderLock, FolderLockScope};
 use rusqlite::params;
 use std::collections::HashMap;
@@ -33,6 +33,8 @@ impl AppStateDb {
             FoldersPosition::Mixed => "mixed",
         };
         let scope_str = lock.scope.preference_value();
+        let group_mode_str = lock.group_mode.preference_value();
+        let group_desc_str = lock.group_descending.to_string();
         let mut db = self
             .writer
             .lock()
@@ -40,14 +42,17 @@ impl AppStateDb {
         Self::with_busy_timeout(&mut db, Duration::ZERO, |db| {
             db.execute(
                 "INSERT OR REPLACE INTO folder_locks
-                     (path, view_mode, sort_mode, sort_descending, folders_position, scope)
-                     VALUES (?, ?, ?, ?, ?, ?)",
+                     (path, view_mode, sort_mode, sort_descending, folders_position,
+                      group_mode, group_descending, scope)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 params![
                     path,
                     view_mode_str,
                     sort_mode_str,
                     sort_desc_str,
                     folders_pos_str,
+                    group_mode_str,
+                    group_desc_str,
                     scope_str
                 ],
             )?;
@@ -89,7 +94,8 @@ impl AppStateDb {
             }
         };
         let mut stmt = match db.prepare(
-            "SELECT path, view_mode, sort_mode, sort_descending, folders_position, scope
+            "SELECT path, view_mode, sort_mode, sort_descending, folders_position,
+                    group_mode, group_descending, scope
              FROM folder_locks",
         ) {
             Ok(s) => s,
@@ -106,11 +112,22 @@ impl AppStateDb {
                 row.get::<_, String>(3)?,
                 row.get::<_, String>(4)?,
                 row.get::<_, String>(5)?,
+                row.get::<_, String>(6)?,
+                row.get::<_, String>(7)?,
             ))
         });
         if let Ok(rows) = rows {
             for row in rows.flatten() {
-                let (path, view_mode_s, sort_mode_s, sort_desc_s, folders_pos_s, scope_s) = row;
+                let (
+                    path,
+                    view_mode_s,
+                    sort_mode_s,
+                    sort_desc_s,
+                    folders_pos_s,
+                    group_mode_s,
+                    group_desc_s,
+                    scope_s,
+                ) = row;
                 let view_mode = ViewMode::from_preference(&view_mode_s);
                 let sort_mode = match sort_mode_s.as_str() {
                     "date" => SortMode::Date,
@@ -134,6 +151,8 @@ impl AppStateDb {
                         sort_mode,
                         sort_descending,
                         folders_position,
+                        group_mode: GroupMode::from_preference(&group_mode_s),
+                        group_descending: group_desc_s == "true",
                         scope: FolderLockScope::from_preference(&scope_s),
                     },
                 );
@@ -158,6 +177,8 @@ mod tests {
             sort_mode: SortMode::Name,
             sort_descending: false,
             folders_position: FoldersPosition::First,
+            group_mode: GroupMode::Type,
+            group_descending: true,
             scope: FolderLockScope::CurrentFolder,
         }
     }
@@ -231,6 +252,8 @@ mod tests {
             locks.get("C:\\Locked").unwrap().scope,
             FolderLockScope::Descendants
         );
+        assert_eq!(locks.get("C:\\Locked").unwrap().group_mode, GroupMode::Type);
+        assert!(locks.get("C:\\Locked").unwrap().group_descending);
     }
 
     #[test]
@@ -262,5 +285,10 @@ mod tests {
             locks.get("C:\\OldLock").unwrap().scope,
             FolderLockScope::CurrentFolder
         );
+        assert_eq!(
+            locks.get("C:\\OldLock").unwrap().group_mode,
+            GroupMode::None
+        );
+        assert!(!locks.get("C:\\OldLock").unwrap().group_descending);
     }
 }

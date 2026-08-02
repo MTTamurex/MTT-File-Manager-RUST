@@ -50,6 +50,7 @@ impl ImageViewerApp {
             }
         }
         self.total_items = self.items.len();
+        self.rebuild_group_projection();
 
         self.reconcile_visible_selection_index();
     }
@@ -92,6 +93,72 @@ impl ImageViewerApp {
         }
         self.reconcile_visible_selection_index();
         self.rebuild_computer_view_indices();
+        self.rebuild_group_projection();
+    }
+
+    pub fn rebuild_group_projection(&mut self) {
+        let projection = if self.navigation_state.is_computer_view {
+            crate::application::grouping::build_computer_projection(&self.items)
+        } else {
+            crate::application::grouping::build_group_projection(
+                &self.items,
+                self.group_mode,
+                self.group_descending,
+            )
+        };
+        self.group_projection = Arc::new(projection);
+    }
+
+    pub fn grouping_context_key(&self) -> String {
+        let mode = if self.navigation_state.is_computer_view {
+            "computer"
+        } else {
+            self.group_mode.preference_value()
+        };
+        format!("{}\u{1f}{}", self.navigation_state.current_path, mode)
+    }
+
+    pub fn is_group_collapsed(&self, key: &crate::application::grouping::GroupKey) -> bool {
+        self.collapsed_groups_by_context
+            .get(&self.grouping_context_key())
+            .is_some_and(|groups| groups.contains(key))
+    }
+
+    pub fn toggle_group_collapsed(&mut self, key: crate::application::grouping::GroupKey) {
+        let context = self.grouping_context_key();
+        let groups = self.collapsed_groups_by_context.entry(context).or_default();
+        if !groups.remove(&key) {
+            groups.insert(key);
+        }
+        self.scroll_offset_y = self.scroll_offset_y.max(0.0);
+        self.scroll_offset_x = self.scroll_offset_x.max(0.0);
+    }
+
+    pub fn visible_group_item_indices(&self) -> Vec<usize> {
+        let collapsed = self
+            .collapsed_groups_by_context
+            .get(&self.grouping_context_key());
+        crate::application::grouping::visible_item_indices(
+            &self.group_projection,
+            collapsed,
+            self.items.len(),
+        )
+    }
+
+    pub fn visible_group_range(&self, anchor: usize, target: usize) -> Vec<usize> {
+        let visible = self.visible_group_item_indices();
+        let Some(anchor_position) = visible.iter().position(|index| *index == anchor) else {
+            return vec![target];
+        };
+        let Some(target_position) = visible.iter().position(|index| *index == target) else {
+            return vec![target];
+        };
+        let (start, end) = if anchor_position <= target_position {
+            (anchor_position, target_position)
+        } else {
+            (target_position, anchor_position)
+        };
+        visible[start..=end].to_vec()
     }
 
     fn rebuild_computer_view_indices(&mut self) {

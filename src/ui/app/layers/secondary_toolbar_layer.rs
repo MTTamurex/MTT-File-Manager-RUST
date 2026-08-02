@@ -88,6 +88,7 @@ pub(crate) fn render_secondary_toolbar_layer(app: &mut ImageViewerApp, root_ui: 
                 let content_width = action_button_count * 28.0
                     + 30.0
                     + 110.0
+                    + 180.0
                     + 40.0
                     + 28.0
                     + 3.0 * 28.0

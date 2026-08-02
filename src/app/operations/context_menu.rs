@@ -20,6 +20,47 @@ fn is_optical_disc_context_target(
         && drive_type == Some(crate::infrastructure::windows::DriveType::Cdrom)
 }
 
+fn grouping_menu_item(app: &ImageViewerApp) -> crate::application::context_menu::ContextMenuItem {
+    use crate::application::context_menu::ContextMenuItem;
+    use crate::domain::file_entry::{GroupMode, ViewMode};
+
+    let mut sub_items = Vec::new();
+    for (index, mode, label) in [
+        (0, GroupMode::None, t!("secondary_toolbar.group_none")),
+        (1, GroupMode::Name, t!("secondary_toolbar.group_name")),
+        (2, GroupMode::Date, t!("secondary_toolbar.group_date")),
+        (3, GroupMode::Type, t!("secondary_toolbar.group_type")),
+        (4, GroupMode::Size, t!("secondary_toolbar.group_size")),
+    ] {
+        sub_items.push(
+            ContextMenuItem::new(-300 - index, label)
+                .with_command(format!("group:{}", mode.preference_value()))
+                .checked(app.group_mode == mode),
+        );
+    }
+    sub_items.push(ContextMenuItem::separator());
+    sub_items.push(
+        ContextMenuItem::new(-306, t!("grouping.ascending"))
+            .with_command("group_direction:ascending")
+            .checked(!app.group_descending)
+            .enabled(app.group_mode != GroupMode::None),
+    );
+    sub_items.push(
+        ContextMenuItem::new(-307, t!("grouping.descending"))
+            .with_command("group_direction:descending")
+            .checked(app.group_descending)
+            .enabled(app.group_mode != GroupMode::None),
+    );
+
+    ContextMenuItem::new(-299, t!("secondary_toolbar.group_by"))
+        .with_subitems(sub_items)
+        .enabled(
+            !app.current_folder_locked
+                && !app.navigation_state.is_computer_view
+                && app.view_mode != ViewMode::Miller,
+        )
+}
+
 impl ImageViewerApp {
     pub(crate) fn invalidate_context_menu_workers(&mut self) {
         self.shell_menu_request_id = self.shell_menu_request_id.wrapping_add(1);
@@ -92,10 +133,6 @@ impl ImageViewerApp {
 
     pub fn can_open_empty_area_context_menu(&self) -> bool {
         !self.navigation_state.is_computer_view
-            && crate::domain::special_paths::tag_id_from_view_path(
-                &self.navigation_state.current_path,
-            )
-            .is_none()
     }
 
     pub fn dismiss_context_menu(&mut self) {
@@ -138,6 +175,20 @@ impl ImageViewerApp {
 
         let mut items = Vec::new();
 
+        if !is_global_search
+            && is_empty_area
+            && (self.navigation_state.is_computer_view
+                || crate::domain::special_paths::tag_id_from_view_path(
+                    &self.navigation_state.current_path,
+                )
+                .is_some())
+        {
+            items.push(grouping_menu_item(self));
+            self.context_menu.items = items;
+            self.context_menu.partition_items();
+            return;
+        }
+
         // Special menu for Recycle Bin items
         if !is_global_search && self.navigation_state.is_recycle_bin_view && !is_empty_area {
             // Menu items for recycle bin (no primary icons)
@@ -174,6 +225,8 @@ impl ImageViewerApp {
                     .with_command("empty_recycle_bin")
                     .with_svg_icon("broom"),
             );
+            items.push(ContextMenuItem::separator());
+            items.push(grouping_menu_item(self));
             self.context_menu.items = items;
             self.context_menu.partition_items(); // M-5
             return;
@@ -253,6 +306,8 @@ impl ImageViewerApp {
                         )
                         .enabled(false),
                 );
+                items.push(ContextMenuItem::separator());
+                items.push(grouping_menu_item(self));
             }
 
             self.context_menu.items = items;
@@ -436,6 +491,7 @@ impl ImageViewerApp {
                 && !self.current_location_is_archive_namespace();
         if is_empty_area {
             items.push(ContextMenuItem::separator());
+            items.push(grouping_menu_item(self));
             items.push(
                 ContextMenuItem::new(-1, t!("context_menu.create_folder"))
                     .with_svg_icon("folder_new")

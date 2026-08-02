@@ -2,14 +2,14 @@ mod geometry;
 mod item_renderer;
 mod scroll;
 
-use eframe::egui::{self, Color32, FontId, Rect, Sense, Ui};
-use rust_i18n::t;
+use eframe::egui::{self, Rect, Sense, Ui};
 
 use self::geometry::{calculate_grouped_layout, calculate_layout, COLUMN_WIDTH, ROW_HEIGHT};
 use self::item_renderer::{render_grouped_columns, render_visible_columns};
 use super::list_view::{ListViewAction, ListViewContext, ListViewOperations};
 use super::rectangle_selection::{
-    ColumnListRectangleMetrics, RectangleSelectionMetrics, RectangleSelectionView,
+    ColumnListRectangleMetrics, GroupedRectangleMetrics, RectangleSelectionMetrics,
+    RectangleSelectionView,
 };
 const COMPUTER_HEADER_HEIGHT: f32 = 28.0;
 
@@ -31,6 +31,19 @@ pub fn column_list_grouped_rows(
     .rows_per_column
 }
 
+pub fn column_list_grouped_rows_for_counts(
+    group_counts: &[usize],
+    available_width: f32,
+    available_height: f32,
+) -> usize {
+    calculate_grouped_layout(
+        group_counts,
+        available_width,
+        (available_height - COMPUTER_HEADER_HEIGHT).max(0.0),
+    )
+    .rows_per_column
+}
+
 pub fn column_list_visible_columns(available_width: f32) -> usize {
     (available_width / COLUMN_WIDTH).floor().max(1.0) as usize
 }
@@ -41,32 +54,24 @@ pub fn render_column_list_view(
     ops: &mut dyn ListViewOperations,
 ) -> Option<ListViewAction> {
     let available_rect = ui.available_rect_before_wrap();
-    let mut local_indices = Vec::new();
-    let mut network_indices = Vec::new();
-    if ctx.is_computer_view {
-        for (index, item) in ctx.items.iter().enumerate() {
-            let is_remote = item.drive_info.as_ref().is_some_and(|drive| {
-                drive.drive_type == crate::infrastructure::windows::DriveType::Remote
-            });
-            if is_remote {
-                network_indices.push(index);
-            } else {
-                local_indices.push(index);
-            }
-        }
-    }
-    let header_height = if ctx.is_computer_view {
-        COMPUTER_HEADER_HEIGHT
-    } else {
-        0.0
-    };
+    ctx.visible_group_paths.clear();
+    let grouped = ctx.group_projection.is_grouped() && !ctx.compact;
+    let header_height = if grouped { COMPUTER_HEADER_HEIGHT } else { 0.0 };
     let layout_height = (available_rect.height() - header_height).max(0.0);
-    let layout = if ctx.is_computer_view {
-        calculate_grouped_layout(
-            &[local_indices.len(), network_indices.len()],
-            available_rect.width(),
-            layout_height,
-        )
+    let group_counts: Vec<usize> = ctx
+        .group_projection
+        .sections
+        .iter()
+        .map(|section| {
+            if ctx.collapsed_groups.contains(&section.key) {
+                1
+            } else {
+                section.item_indices.len().max(1)
+            }
+        })
+        .collect();
+    let layout = if grouped {
+        calculate_grouped_layout(&group_counts, available_rect.width(), layout_height)
     } else {
         calculate_layout(ctx.items.len(), available_rect.width(), layout_height)
     };
@@ -86,15 +91,9 @@ pub fn render_column_list_view(
         max_scroll,
         ctx.global_search_active,
     );
-    let selected_layout_index = if ctx.is_computer_view {
-        ctx.selected_item.and_then(|selected| {
-            grouped_layout_index(
-                selected,
-                layout.rows_per_column,
-                &local_indices,
-                &network_indices,
-            )
-        })
+    let selected_layout_index = if grouped {
+        ctx.selected_item
+            .and_then(|selected| grouped_layout_index(selected, layout.rows_per_column, ctx))
     } else {
         ctx.selected_item
     };
@@ -117,16 +116,38 @@ pub fn render_column_list_view(
     }
 
     let current_scroll = *ctx.mut_scroll_offset_x;
-    let rectangle_metrics = (!ctx.is_computer_view).then_some(
-        RectangleSelectionMetrics::ColumnList(ColumnListRectangleMetrics {
-            count: ctx.items.len(),
-            rows_per_column: layout.rows_per_column,
-            column_width: COLUMN_WIDTH,
-            row_height: ROW_HEIGHT,
-            content_width: layout.content_width,
-            content_height: layout.rows_per_column as f32 * ROW_HEIGHT,
-        }),
+    let background = ui.interact(
+        viewport_rect,
+        ui.id().with("column_list_bg"),
+        Sense::click_and_drag(),
     );
+    let rectangle_geometry_needed =
+        ctx.rectangle_selection_state.is_some() || background.drag_started();
+    let rectangle_metrics = if ctx.is_computer_view {
+        None
+    } else if grouped && rectangle_geometry_needed {
+        Some(RectangleSelectionMetrics::Grouped(
+            grouped_column_rectangle_metrics(
+                ctx,
+                layout.rows_per_column,
+                layout.content_width,
+                header_height + layout.rows_per_column as f32 * ROW_HEIGHT,
+            ),
+        ))
+    } else if !grouped {
+        Some(RectangleSelectionMetrics::ColumnList(
+            ColumnListRectangleMetrics {
+                count: ctx.items.len(),
+                rows_per_column: layout.rows_per_column,
+                column_width: COLUMN_WIDTH,
+                row_height: ROW_HEIGHT,
+                content_width: layout.content_width,
+                content_height: layout.rows_per_column as f32 * ROW_HEIGHT,
+            },
+        ))
+    } else {
+        None
+    };
     ctx.rectangle_selection_frame.begin(
         viewport_rect,
         current_scroll,
@@ -136,11 +157,6 @@ pub fn render_column_list_view(
         rectangle_metrics,
     );
 
-    let background = ui.interact(
-        viewport_rect,
-        ui.id().with("column_list_bg"),
-        Sense::click_and_drag(),
-    );
     if !ctx.is_computer_view && ctx.rectangle_selection_state.is_none() && background.drag_started()
     {
         if let Some(origin) = ui.input(|input| input.pointer.press_origin()) {
@@ -152,22 +168,34 @@ pub fn render_column_list_view(
     let mut double_clicked_item = None;
     let mut secondary_clicked_item = None;
     let mut secondary_clicked_empty_area = false;
-    if ctx.is_computer_view {
-        render_computer_headers(
+    let mut toggled_group = None;
+    if grouped {
+        render_group_headers(
             ui,
             viewport_rect,
             current_scroll,
             layout.rows_per_column,
-            &local_indices,
-            &network_indices,
+            ctx,
+            &mut toggled_group,
         );
+        let groups: Vec<(&[usize], bool)> = ctx
+            .group_projection
+            .sections
+            .iter()
+            .map(|section| {
+                (
+                    section.item_indices.as_slice(),
+                    ctx.collapsed_groups.contains(&section.key),
+                )
+            })
+            .collect();
         render_grouped_columns(
             ui,
             viewport_rect,
             viewport_rect.top() + COMPUTER_HEADER_HEIGHT,
             current_scroll,
             layout.rows_per_column,
-            &[&local_indices, &network_indices],
+            &groups,
             ctx,
             ops,
             &mut clicked_item,
@@ -189,6 +217,19 @@ pub fn render_column_list_view(
             &mut secondary_clicked_empty_area,
         );
     }
+    if grouped
+        && ctx.rectangle_selection_frame.metrics.is_none()
+        && ctx.rectangle_selection_frame.start_screen_pos.is_some()
+    {
+        ctx.rectangle_selection_frame.metrics = Some(RectangleSelectionMetrics::Grouped(
+            grouped_column_rectangle_metrics(
+                ctx,
+                layout.rows_per_column,
+                layout.content_width,
+                header_height + layout.rows_per_column as f32 * ROW_HEIGHT,
+            ),
+        ));
+    }
 
     if let Some(state) = ctx.rectangle_selection_state.filter(|state| {
         state.view == RectangleSelectionView::ColumnList && state.generation == ctx.generation
@@ -200,7 +241,9 @@ pub fn render_column_list_view(
         *ctx.visible_index_range = None;
     }
 
-    if let Some(index) = double_clicked_item {
+    if let Some(key) = toggled_group {
+        Some(ListViewAction::ToggleGroup(key))
+    } else if let Some(index) = double_clicked_item {
         Some(ListViewAction::DoubleClick(index))
     } else if let Some(index) = secondary_clicked_item {
         Some(ListViewAction::SecondaryClick(index))
@@ -215,38 +258,80 @@ pub fn render_column_list_view(
     }
 }
 
+fn grouped_column_rectangle_metrics(
+    ctx: &ListViewContext,
+    rows_per_column: usize,
+    content_width: f32,
+    content_height: f32,
+) -> GroupedRectangleMetrics {
+    let mut item_rects = Vec::new();
+    let mut group_start_column = 0usize;
+    for section in &ctx.group_projection.sections {
+        if ctx.collapsed_groups.contains(&section.key) {
+            group_start_column += 1;
+            continue;
+        }
+        for (position, index) in section.item_indices.iter().enumerate() {
+            if *index >= ctx.items.len() {
+                continue;
+            }
+            let column = group_start_column + position / rows_per_column;
+            let row = position % rows_per_column;
+            item_rects.push((
+                *index,
+                Rect::from_min_size(
+                    egui::pos2(
+                        column as f32 * COLUMN_WIDTH,
+                        COMPUTER_HEADER_HEIGHT + row as f32 * ROW_HEIGHT,
+                    ),
+                    egui::vec2(COLUMN_WIDTH, ROW_HEIGHT),
+                ),
+            ));
+        }
+        group_start_column += section.item_indices.len().div_ceil(rows_per_column).max(1);
+    }
+    GroupedRectangleMetrics {
+        view: RectangleSelectionView::ColumnList,
+        item_rects: item_rects.into(),
+        content_width,
+        content_height,
+    }
+}
+
 fn grouped_layout_index(
     item_index: usize,
     rows_per_column: usize,
-    local_indices: &[usize],
-    network_indices: &[usize],
+    ctx: &ListViewContext,
 ) -> Option<usize> {
-    if let Some(position) = local_indices.iter().position(|index| *index == item_index) {
-        return Some(position);
+    let mut start = 0usize;
+    for section in &ctx.group_projection.sections {
+        if ctx.collapsed_groups.contains(&section.key) {
+            start += rows_per_column;
+            continue;
+        }
+        if let Some(position) = section
+            .item_indices
+            .iter()
+            .position(|index| *index == item_index)
+        {
+            return Some(start + position);
+        }
+        start += section.item_indices.len().div_ceil(rows_per_column).max(1) * rows_per_column;
     }
-    let network_position = network_indices
-        .iter()
-        .position(|index| *index == item_index)?;
-    let network_start = local_indices.len().div_ceil(rows_per_column) * rows_per_column;
-    Some(network_start + network_position)
+    None
 }
 
-fn render_computer_headers(
+fn render_group_headers(
     ui: &mut Ui,
     viewport_rect: Rect,
     scroll_x: f32,
     rows_per_column: usize,
-    local_indices: &[usize],
-    network_indices: &[usize],
+    ctx: &ListViewContext,
+    toggled_group: &mut Option<crate::application::grouping::GroupKey>,
 ) {
     let mut start_column = 0usize;
-    for (title, indices) in [
-        (t!("sidebar.local_disks"), local_indices),
-        (t!("sidebar.network_drives"), network_indices),
-    ] {
-        if indices.is_empty() {
-            continue;
-        }
+    for section in &ctx.group_projection.sections {
+        let collapsed = ctx.collapsed_groups.contains(&section.key);
         let rect = Rect::from_min_size(
             egui::pos2(
                 viewport_rect.left() + start_column as f32 * COLUMN_WIDTH - scroll_x,
@@ -254,15 +339,22 @@ fn render_computer_headers(
             ),
             egui::vec2(COLUMN_WIDTH, COMPUTER_HEADER_HEIGHT),
         );
-        if rect.intersects(viewport_rect) {
-            ui.painter().text(
-                egui::pos2(rect.left() + 8.0, rect.center().y),
-                egui::Align2::LEFT_CENTER,
-                title,
-                FontId::proportional(13.0),
-                Color32::from_gray(120),
-            );
+        if rect.intersects(viewport_rect)
+            && crate::ui::views::group_header::render_group_header(
+                ui,
+                rect,
+                &section.key,
+                section.item_indices.len(),
+                collapsed,
+            )
+            .clicked()
+        {
+            *toggled_group = Some(section.key.clone());
         }
-        start_column += indices.len().div_ceil(rows_per_column);
+        start_column += if collapsed {
+            1
+        } else {
+            section.item_indices.len().div_ceil(rows_per_column).max(1)
+        };
     }
 }
