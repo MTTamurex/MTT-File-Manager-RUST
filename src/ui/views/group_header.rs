@@ -25,9 +25,9 @@ pub fn render_group_header(
     }
 
     let text_color = if ui.visuals().dark_mode {
-        Color32::from_gray(215)
+        Color32::from_gray(195)
     } else {
-        Color32::from_gray(55)
+        Color32::from_gray(40)
     };
     let secondary = Color32::from_gray(125);
     let chevron = if collapsed { ">" } else { "v" };

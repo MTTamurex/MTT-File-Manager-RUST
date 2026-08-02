@@ -381,7 +381,7 @@ fn render_grouped_virtualized(
                 if child_ui.is_rect_visible(item_rect) {
                     visible_min = visible_min.min(index);
                     visible_max = visible_max.max(index);
-                    ctx.visible_group_paths.insert(item.path.clone());
+                    ctx.visible_group_paths.push(item.path.clone());
                 }
                 render_list_item(
                     child_ui,

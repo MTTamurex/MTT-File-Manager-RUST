@@ -1,3 +1,4 @@
+use super::prefetch::GroupedPrefetchCandidate;
 use super::{item_renderer, GridViewContext};
 use crate::application::grouping::GroupKey;
 use crate::ui::cache::FxHashSet;
@@ -26,6 +27,7 @@ pub(super) fn render_virtualized_grid(
     double_clicked_item: &mut Option<usize>,
     secondary_clicked_item: &mut Option<usize>,
     toggled_group: &mut Option<GroupKey>,
+    grouped_prefetch_candidates: &mut Vec<GroupedPrefetchCandidate>,
 ) -> Option<(usize, usize)> {
     let t_total = std::time::Instant::now();
     let mut child_ui = ui.new_child(egui::UiBuilder::new().max_rect(viewport_rect));
@@ -50,6 +52,7 @@ pub(super) fn render_virtualized_grid(
             double_clicked_item,
             secondary_clicked_item,
             toggled_group,
+            grouped_prefetch_candidates,
         );
         return None;
     }
@@ -167,16 +170,22 @@ fn render_grouped_sections(
     double_clicked_item: &mut Option<usize>,
     secondary_clicked_item: &mut Option<usize>,
     toggled_group: &mut Option<GroupKey>,
+    grouped_prefetch_candidates: &mut Vec<GroupedPrefetchCandidate>,
 ) {
     let mut content_y = 0.0;
+    let mut visual_start = 0usize;
     let mut visible_min = usize::MAX;
     let mut visible_max = 0usize;
+    let collect_prefetch_candidates =
+        ctx.low_res_thumbnails_while_scrolling && !is_scrolling && !ctx.is_recycle_bin_view;
     for section_index in 0..ctx.group_projection.sections.len() {
         let key = ctx.group_projection.sections[section_index].key.clone();
         let item_count = ctx.group_projection.sections[section_index]
             .item_indices
             .len();
         let collapsed = ctx.collapsed_groups.contains(&key);
+        let section_visual_start = visual_start;
+        visual_start += item_count;
         let header_rect = Rect::from_min_size(
             egui::pos2(
                 content_min.x + padding,
@@ -216,15 +225,23 @@ fn render_grouped_sections(
                         ),
                         egui::vec2(item_w, item_h),
                     );
-                    if ui.is_rect_visible(item_rect) {
+                    let (is_visible, distance) =
+                        grouped_item_thumbnail_visibility(item_rect, ui.clip_rect());
+                    if is_visible {
                         visible_min = visible_min.min(index);
                         visible_max = visible_max.max(index);
-                        ctx.visible_group_paths
-                            .insert(ctx.items[index].path.clone());
+                        ctx.visible_group_paths.push(ctx.items[index].path.clone());
+                    } else if collect_prefetch_candidates {
+                        grouped_prefetch_candidates.push(GroupedPrefetchCandidate {
+                            item_index: index,
+                            visual_index: section_visual_start + position,
+                            distance,
+                        });
                     }
                     item_renderer::render_grid_item(
                         ui,
                         index,
+                        section_visual_start + position,
                         &ctx.items[index],
                         item_rect,
                         ctx,
@@ -232,7 +249,7 @@ fn render_grouped_sections(
                         double_clicked_item,
                         secondary_clicked_item,
                         is_scrolling,
-                        true,
+                        is_visible,
                     );
                 }
             }
@@ -241,6 +258,28 @@ fn render_grouped_sections(
         content_y += GROUP_GAP;
     }
     *ctx.visible_index_range = (visible_min != usize::MAX).then_some((visible_min, visible_max));
+}
+
+fn grouped_item_thumbnail_visibility(item_rect: Rect, viewport_rect: Rect) -> (bool, f32) {
+    if item_rect.intersects(viewport_rect) {
+        return (true, 0.0);
+    }
+
+    let vertical_distance = if item_rect.bottom() < viewport_rect.top() {
+        viewport_rect.top() - item_rect.bottom()
+    } else if item_rect.top() > viewport_rect.bottom() {
+        item_rect.top() - viewport_rect.bottom()
+    } else {
+        0.0
+    };
+    let horizontal_distance = if item_rect.right() < viewport_rect.left() {
+        viewport_rect.left() - item_rect.right()
+    } else if item_rect.left() > viewport_rect.right() {
+        item_rect.left() - viewport_rect.right()
+    } else {
+        0.0
+    };
+    (false, vertical_distance + horizontal_distance)
 }
 
 fn cleanup_loading_set(
@@ -409,6 +448,7 @@ fn render_section_indices(
                 item_renderer::render_grid_item(
                     ui,
                     real_idx,
+                    real_idx,
                     item,
                     item_rect,
                     ctx,
@@ -484,6 +524,7 @@ fn render_standard_grid(
                 item_renderer::render_grid_item(
                     ui,
                     index,
+                    index,
                     &ctx.items[index],
                     item_rect,
                     ctx,
@@ -547,5 +588,31 @@ fn render_standard_grid(
                 ms,
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn grouped_thumbnail_visibility_excludes_overscan_cells() {
+        let viewport = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(100.0, 100.0));
+        let visible = Rect::from_min_size(egui::pos2(10.0, 10.0), egui::vec2(20.0, 20.0));
+        let above = Rect::from_min_size(egui::pos2(10.0, -30.0), egui::vec2(20.0, 10.0));
+        let below = Rect::from_min_size(egui::pos2(10.0, 115.0), egui::vec2(20.0, 10.0));
+
+        assert_eq!(
+            grouped_item_thumbnail_visibility(visible, viewport),
+            (true, 0.0)
+        );
+        assert_eq!(
+            grouped_item_thumbnail_visibility(above, viewport),
+            (false, 20.0)
+        );
+        assert_eq!(
+            grouped_item_thumbnail_visibility(below, viewport),
+            (false, 15.0)
+        );
     }
 }

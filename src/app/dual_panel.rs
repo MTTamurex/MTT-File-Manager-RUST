@@ -180,7 +180,7 @@ pub struct PanelSnapshot {
     pub scroll_to_selected: bool,
     pub visible_index_range: Option<(usize, usize)>,
     pub visible_paths_cache: FxHashSet<PathBuf>,
-    pub visible_group_paths: FxHashSet<PathBuf>,
+    pub visible_group_paths: Vec<PathBuf>,
     pub visible_range_cached: Option<(usize, usize)>,
 
     // Search

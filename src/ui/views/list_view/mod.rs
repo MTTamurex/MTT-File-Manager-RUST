@@ -241,7 +241,7 @@ pub struct ListViewContext<'a> {
     pub prefetch_rows: usize,
     /// Output: visible item index range for GPU upload prioritization
     pub visible_index_range: &'a mut Option<(usize, usize)>,
-    pub visible_group_paths: &'a mut FxHashSet<PathBuf>,
+    pub visible_group_paths: &'a mut Vec<PathBuf>,
     /// Whether an item drag operation is active
     pub is_item_dragging: bool,
     /// Current folder path under drop target highlight

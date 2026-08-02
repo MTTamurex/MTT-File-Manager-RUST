@@ -110,7 +110,7 @@ pub(super) fn render_grouped_columns(
                     visible_min = visible_min.min(item_index);
                     visible_max = visible_max.max(item_index);
                     ctx.visible_group_paths
-                        .insert(ctx.items[item_index].path.clone());
+                        .push(ctx.items[item_index].path.clone());
                 }
                 render_column_item(
                     &mut child_ui,

@@ -181,7 +181,7 @@ pub struct GridViewContext<'a> {
     pub prefetch_rows: usize,
     /// Output: visible item index range for GPU upload prioritization
     pub visible_index_range: &'a mut Option<(usize, usize)>,
-    pub visible_group_paths: &'a mut FxHashSet<PathBuf>,
+    pub visible_group_paths: &'a mut Vec<PathBuf>,
     /// Whether an item drag operation is active
     pub is_item_dragging: bool,
     /// Current folder path under drop target highlight
@@ -427,6 +427,7 @@ pub fn render_grid_view(
         }
     }
     let mut toggled_group = None;
+    let mut grouped_prefetch_candidates = Vec::new();
     visible_rows_range = virtualization::render_virtualized_grid(
         ui,
         ctx,
@@ -446,6 +447,7 @@ pub fn render_grid_view(
         &mut double_clicked_item,
         &mut secondary_clicked_item,
         &mut toggled_group,
+        &mut grouped_prefetch_candidates,
     );
     if grouped
         && ctx.rectangle_selection_frame.metrics.is_none()
@@ -492,7 +494,14 @@ pub fn render_grid_view(
 
     prefetch::flush_pending_operations(ctx, ops);
     let t_after_flush = std::time::Instant::now();
-    if !grouped {
+    if grouped {
+        prefetch::process_grouped_prefetch(
+            ctx,
+            &mut grouped_prefetch_candidates,
+            thumbnail_work_scrolling,
+            ops,
+        );
+    } else {
         prefetch::process_visible_range_prefetch(
             ctx,
             cols,

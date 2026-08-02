@@ -3198,7 +3198,7 @@ dependencies = [
 
 [[package]]
 name = "mtt-file-manager"
-version = "0.1.9"
+version = "0.2.0"
 dependencies = [
  "bincode",
  "blake3",
@@ -3255,7 +3255,7 @@ dependencies = [
 
 [[package]]
 name = "mtt-search-protocol"
-version = "0.1.9"
+version = "0.2.0"
 dependencies = [
  "bincode",
  "serde",
@@ -3263,7 +3263,7 @@ dependencies = [
 
 [[package]]
 name = "mtt-search-service"
-version = "0.1.9"
+version = "0.2.0"
 dependencies = [
  "bincode",
  "libmimalloc-sys",

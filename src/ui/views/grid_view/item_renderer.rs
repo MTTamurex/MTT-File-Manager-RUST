@@ -87,6 +87,7 @@ fn render_drive_tooltip(ui: &mut Ui, item: &FileEntry) {
 pub(super) fn render_grid_item(
     ui: &mut Ui,
     index: usize,
+    thumbnail_priority_index: usize,
     item: &FileEntry,
     rect: Rect,
     ctx: &mut GridViewContext,
@@ -322,6 +323,7 @@ pub(super) fn render_grid_item(
         ui,
         inner_rect,
         index,
+        thumbnail_priority_index,
         item,
         ctx,
         is_scrolling,
@@ -340,10 +342,12 @@ pub(super) fn render_section_header(ui: &mut Ui, title: &str) {
     ui.add_space(4.0);
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_item_slot_for_grid(
     ui: &mut Ui,
     rect: Rect,
     idx: usize,
+    thumbnail_priority_index: usize,
     item: &FileEntry,
     ctx: &mut GridViewContext,
     is_scrolling: bool,
@@ -401,6 +405,7 @@ fn render_item_slot_for_grid(
 
         struct SimpleOps<'a> {
             pending_ops: &'a mut PendingOperations,
+            thumbnail_priority_index: usize,
         }
 
         impl<'a> crate::ui::components::item_slot::ItemSlotOperations for SimpleOps<'a> {
@@ -411,9 +416,12 @@ fn render_item_slot_for_grid(
                 directory_index: Option<usize>,
                 modified: u64,
             ) {
-                self.pending_ops
-                    .thumbnail_loads
-                    .push((path, size, directory_index, modified));
+                self.pending_ops.thumbnail_loads.push((
+                    path,
+                    size,
+                    thumbnail_directory_index(directory_index, self.thumbnail_priority_index),
+                    modified,
+                ));
             }
 
             fn request_folder_scan(&mut self, path: std::path::PathBuf) {
@@ -433,6 +441,7 @@ fn render_item_slot_for_grid(
 
         let mut simple_ops = SimpleOps {
             pending_ops: ctx.pending_ops,
+            thumbnail_priority_index,
         };
 
         if item.is_hidden {
@@ -454,6 +463,13 @@ fn render_item_slot_for_grid(
     }
 }
 
+fn thumbnail_directory_index(
+    requested_index: Option<usize>,
+    thumbnail_priority_index: usize,
+) -> Option<usize> {
+    requested_index.map(|_| thumbnail_priority_index)
+}
+
 fn get_file_type_string(item: &FileEntry) -> String {
     if let Some(label) = crate::domain::file_entry::archive_type_label(&item.name) {
         return label;
@@ -471,4 +487,15 @@ fn get_file_type_string(item: &FileEntry) -> String {
     }
 
     rust_i18n::t!("file_info.file_unknown").to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::thumbnail_directory_index;
+
+    #[test]
+    fn thumbnail_requests_use_visual_priority_without_creating_missing_indices() {
+        assert_eq!(thumbnail_directory_index(Some(42), 3), Some(3));
+        assert_eq!(thumbnail_directory_index(None, 3), None);
+    }
 }

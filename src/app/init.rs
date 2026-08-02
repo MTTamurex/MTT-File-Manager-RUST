@@ -670,7 +670,7 @@ impl ImageViewerApp {
 
             // PERFORMANCE: Cached visible paths set to avoid per-frame allocation during scroll
             visible_paths_cache: FxHashSet::default(),
-            visible_group_paths: FxHashSet::default(),
+            visible_group_paths: Vec::new(),
             visible_range_cached: None,
 
             // PERFORMANCE: Scroll state tracking for adaptive GPU upload throttling

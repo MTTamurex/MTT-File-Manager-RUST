@@ -554,7 +554,7 @@ pub struct ImageViewerApp {
     // PERFORMANCE: Cached visible paths set to avoid per-frame allocation during scroll
     // Stores the last computed visible paths and the range that generated them
     pub visible_paths_cache: FxHashSet<PathBuf>,
-    pub visible_group_paths: FxHashSet<PathBuf>,
+    pub visible_group_paths: Vec<PathBuf>,
     pub visible_range_cached: Option<(usize, usize)>,
 
     // PERFORMANCE: Scroll state tracking for adaptive GPU upload throttling

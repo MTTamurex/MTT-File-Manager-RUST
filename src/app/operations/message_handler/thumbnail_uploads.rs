@@ -161,6 +161,21 @@ fn snapshot_items_for_upload_rank(
     }
 }
 
+fn insert_grouped_visible_upload_ranks(
+    ranks: &mut FxHashMap<PathBuf, usize>,
+    visible_paths: &[PathBuf],
+    base_rank: usize,
+) -> usize {
+    let mut inserted = 0usize;
+    for path in visible_paths {
+        if let std::collections::hash_map::Entry::Vacant(entry) = ranks.entry(path.clone()) {
+            entry.insert(base_rank + inserted);
+            inserted += 1;
+        }
+    }
+    inserted
+}
+
 fn visible_thumbnail_upload_ranks(app: &ImageViewerApp) -> FxHashMap<PathBuf, usize> {
     let mut ranks = FxHashMap::default();
     let mut next_rank = 0usize;
@@ -171,11 +186,11 @@ fn visible_thumbnail_upload_ranks(app: &ImageViewerApp) -> FxHashMap<PathBuf, us
     ) {
         if crate::application::grouping::is_grouping_rendered(app.view_mode, &app.group_projection)
         {
-            for path in &app.visible_group_paths {
-                let rank = ranks.len();
-                ranks.entry(path.clone()).or_insert(rank);
-            }
-            next_rank = ranks.len();
+            next_rank += insert_grouped_visible_upload_ranks(
+                &mut ranks,
+                &app.visible_group_paths,
+                next_rank,
+            );
         } else {
             next_rank += insert_visible_upload_ranks(
                 &mut ranks,
@@ -196,10 +211,11 @@ fn visible_thumbnail_upload_ranks(app: &ImageViewerApp) -> FxHashMap<PathBuf, us
                     snapshot.view_mode,
                     &snapshot.group_projection,
                 ) {
-                    for path in &snapshot.visible_group_paths {
-                        let rank = ranks.len();
-                        ranks.entry(path.clone()).or_insert(rank);
-                    }
+                    insert_grouped_visible_upload_ranks(
+                        &mut ranks,
+                        &snapshot.visible_group_paths,
+                        next_rank,
+                    );
                 } else {
                     insert_visible_upload_ranks(
                         &mut ranks,
@@ -1440,5 +1456,27 @@ impl ImageViewerApp {
                 };
                 items.iter().any(|item| &item.path == path)
             })
+    }
+}
+
+#[cfg(test)]
+mod visible_rank_tests {
+    use super::*;
+
+    #[test]
+    fn grouped_upload_ranks_preserve_visual_path_order() {
+        let paths = vec![
+            PathBuf::from("C:/three.jpg"),
+            PathBuf::from("C:/one.jpg"),
+            PathBuf::from("C:/two.jpg"),
+        ];
+        let mut ranks = FxHashMap::default();
+
+        let inserted = insert_grouped_visible_upload_ranks(&mut ranks, &paths, 4);
+
+        assert_eq!(inserted, 3);
+        assert_eq!(ranks[&paths[0]], 4);
+        assert_eq!(ranks[&paths[1]], 5);
+        assert_eq!(ranks[&paths[2]], 6);
     }
 }
