@@ -490,7 +490,14 @@ fn list_item_content_contains_pointer(
             .map(|size| format_size(*size))
             .unwrap_or_default()
     } else {
-        format_size(item.size)
+        format_size(
+            crate::app::live_file_size::cached_live_file_size(
+                &item.path,
+                item.modified,
+                ctx.live_file_size_cache,
+            )
+            .unwrap_or(item.size),
+        )
     };
     if text_content_contains(
         ui,
@@ -659,7 +666,15 @@ fn render_regular_columns(
             String::new()
         }
     } else {
-        format_size(item.size)
+        let size = crate::app::live_file_size::resolve_cached_or_enqueue_live_file_size(
+            &item.path,
+            item.modified,
+            item.size,
+            ctx.live_file_size_cache,
+            ctx.live_file_size_loading,
+            ctx.live_file_size_req_sender,
+        );
+        format_size(size)
     };
     ui.painter().text(
         Pos2::new(rect.min.x + w_name + w_date + w_type, rect.min.y + 5.0),

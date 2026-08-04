@@ -78,8 +78,11 @@ impl ImageViewerApp {
 
         self.metadata_cache.pop(&path);
         self.metadata_loading.remove(&path);
-        self.live_file_size_cache.pop(&path);
-        self.live_file_size_loading.remove(&path);
+        crate::app::live_file_size::invalidate_live_file_size(
+            &path,
+            &mut self.live_file_size_cache,
+            &mut self.live_file_size_loading,
+        );
 
         if self.last_metadata_path.as_ref() == Some(&path) {
             self.last_metadata_path = None;

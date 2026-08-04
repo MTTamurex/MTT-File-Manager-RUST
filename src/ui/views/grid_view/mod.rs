@@ -192,8 +192,8 @@ pub struct GridViewContext<'a> {
     pub drag_hovered_item: &'a mut Option<usize>,
     pub rectangle_selection_state: Option<&'a RectangleSelectionState>,
     pub rectangle_selection_frame: &'a mut RectangleSelectionFrame,
-    pub live_file_size_cache: &'a mut lru::LruCache<PathBuf, (u64, u64)>,
-    pub live_file_size_loading: &'a mut FxHashSet<PathBuf>,
+    pub live_file_size_cache: &'a mut crate::app::live_file_size::LiveFileSizeCache,
+    pub live_file_size_loading: &'a mut crate::app::live_file_size::ActiveLiveFileSizeRequests,
     pub live_file_size_req_sender:
         &'a std::sync::mpsc::Sender<crate::app::live_file_size::LiveFileSizeRequest>,
     /// PERFORMANCE: Pre-computed local drive indices for computer view (avoids per-frame allocation)

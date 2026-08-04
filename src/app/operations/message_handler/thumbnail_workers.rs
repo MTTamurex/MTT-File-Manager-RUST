@@ -633,16 +633,25 @@ impl ImageViewerApp {
                 break;
             }
 
-            let Ok((path, mtime, live_size)) = self.live_file_size_res_receiver.try_recv() else {
+            let Ok(response) = self.live_file_size_res_receiver.try_recv() else {
                 break;
             };
 
             processed += 1;
-            self.live_file_size_loading.remove(&path);
-
-            if let Some(size) = live_size {
-                self.live_file_size_cache.put(path, (mtime, size));
+            if let Some(should_revalidate) =
+                crate::app::live_file_size::accept_live_file_size_response(
+                    response,
+                    &mut self.live_file_size_cache,
+                    &mut self.live_file_size_loading,
+                    Instant::now(),
+                )
+            {
                 updated = true;
+                if should_revalidate {
+                    ctx.request_repaint_after(
+                        crate::app::live_file_size::LIVE_SIZE_REVALIDATE_INTERVAL,
+                    );
+                }
             }
         }
 

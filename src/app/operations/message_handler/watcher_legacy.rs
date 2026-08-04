@@ -568,6 +568,11 @@ impl ImageViewerApp {
                             });
                         if direct_current_file_modify {
                             if is_unsafe {
+                                crate::app::live_file_size::invalidate_live_file_size(
+                                    &cleaned,
+                                    &mut self.live_file_size_cache,
+                                    &mut self.live_file_size_loading,
+                                );
                                 pending_disk_cache_invalidations.push(cleaned.clone());
                             } else {
                                 self.invalidate_changed_path_preview_state(&cleaned);

@@ -2,12 +2,10 @@ use crate::app::folder_size_state::FolderContentSummary;
 use crate::domain::file_entry::{is_path_inside_archive, FileEntry};
 use crate::domain::special_paths::{COMPUTER_VIEW_ID, RECYCLE_BIN_VIEW_ID};
 use crate::infrastructure::windows::MediaMetadata;
-use crate::ui::cache::FxHashSet;
 use crate::ui::components::breadcrumb::breadcrumb_segments_for_path;
 use crate::ui::preview_panel::actions::PreviewPanelAction;
 use crate::ui::svg_icons::SvgIconManager;
 use eframe::egui;
-use lru::LruCache;
 use rust_i18n::t;
 
 #[derive(Clone, Copy)]
@@ -20,8 +18,8 @@ fn resolve_live_file_size(
     ui: &egui::Ui,
     file: &FileEntry,
     is_metadata_loading: bool,
-    live_file_size_cache: &mut LruCache<std::path::PathBuf, (u64, u64)>,
-    live_file_size_loading: &mut FxHashSet<std::path::PathBuf>,
+    live_file_size_cache: &mut crate::app::live_file_size::LiveFileSizeCache,
+    live_file_size_loading: &mut crate::app::live_file_size::ActiveLiveFileSizeRequests,
     live_file_size_req_sender: &std::sync::mpsc::Sender<
         crate::app::live_file_size::LiveFileSizeRequest,
     >,
@@ -74,8 +72,8 @@ pub fn render_file_info_table(
     is_folder_size_loading: bool,
     is_folder_size_failed: bool,
     is_metadata_loading: bool,
-    live_file_size_cache: &mut LruCache<std::path::PathBuf, (u64, u64)>,
-    live_file_size_loading: &mut FxHashSet<std::path::PathBuf>,
+    live_file_size_cache: &mut crate::app::live_file_size::LiveFileSizeCache,
+    live_file_size_loading: &mut crate::app::live_file_size::ActiveLiveFileSizeRequests,
     live_file_size_req_sender: &std::sync::mpsc::Sender<
         crate::app::live_file_size::LiveFileSizeRequest,
     >,

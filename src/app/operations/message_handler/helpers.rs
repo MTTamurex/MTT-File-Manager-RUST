@@ -102,7 +102,11 @@ impl ImageViewerApp {
         self.cache_manager.pop_rgba_data(&cleaned);
         self.cache_manager.failed_thumbnails.pop(&cleaned);
         self.metadata_cache.pop(&cleaned);
-        self.live_file_size_cache.pop(&cleaned);
+        crate::app::live_file_size::invalidate_live_file_size(
+            &cleaned,
+            &mut self.live_file_size_cache,
+            &mut self.live_file_size_loading,
+        );
         self.disk_cache.remove_cache_for_path(&cleaned);
         self.app_state_db.remove_covers_for_path(&cleaned);
         crate::workers::thumbnail::clear_failure_cache(&cleaned);
@@ -418,7 +422,11 @@ impl ImageViewerApp {
         self.cache_manager.pop_rgba_data(&cleaned);
         self.cache_manager.failed_thumbnails.pop(&cleaned);
         self.metadata_cache.pop(&cleaned);
-        self.live_file_size_cache.pop(&cleaned);
+        crate::app::live_file_size::invalidate_live_file_size(
+            &cleaned,
+            &mut self.live_file_size_cache,
+            &mut self.live_file_size_loading,
+        );
         self.pending_thumbnails.retain(|t| t.path != cleaned);
         self.cache_manager.finish_pending_upload(&cleaned);
         crate::workers::thumbnail::clear_failure_cache(&cleaned);

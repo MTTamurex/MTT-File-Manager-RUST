@@ -614,7 +614,7 @@ impl ImageViewerApp {
             live_file_size_cache: LruCache::new(
                 NonZeroUsize::new(2048).expect("live file size cache size must be non-zero"),
             ),
-            live_file_size_loading: FxHashSet::default(),
+            live_file_size_loading: Default::default(),
             file_hash_req_sender: file_hash_req_tx,
             file_hash_res_receiver: file_hash_res_rx,
             selected_file_hash: None,

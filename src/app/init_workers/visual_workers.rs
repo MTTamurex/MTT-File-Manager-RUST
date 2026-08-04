@@ -435,18 +435,22 @@ pub(in crate::app) fn spawn_live_file_size_worker(
             crate::infrastructure::io_priority::IOPriority::Background,
         );
 
-        while let Ok((path, mtime)) = size_req_rx.recv() {
-            let live_size = if crate::app::live_file_size::should_probe_live_file_size(&path, mtime)
-            {
-                std::fs::metadata(&path)
-                    .ok()
-                    .filter(|meta| meta.is_file())
-                    .map(|meta| meta.len())
+        while let Ok(request) = size_req_rx.recv() {
+            let observed = if crate::app::live_file_size::should_probe_live_file_size(
+                &request.path,
+                request.source_mtime_secs,
+            ) {
+                crate::app::live_file_size::read_live_file_size(&request.path)
             } else {
                 None
             };
 
-            let _ = size_res_tx.send((path, mtime, live_size));
+            let _ = size_res_tx.send(crate::app::live_file_size::LiveFileSizeResponse {
+                path: request.path,
+                source_mtime_secs: request.source_mtime_secs,
+                request_id: request.request_id,
+                observed,
+            });
             size_ctx.request_repaint();
         }
     });

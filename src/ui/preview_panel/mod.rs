@@ -35,8 +35,8 @@ pub fn render_preview_panel(
     folder_summary: Option<crate::app::folder_size_state::FolderContentSummary>,
     is_folder_size_loading: bool,
     is_folder_size_failed: bool,
-    live_file_size_cache: &mut lru::LruCache<std::path::PathBuf, (u64, u64)>,
-    live_file_size_loading: &mut crate::ui::cache::FxHashSet<std::path::PathBuf>,
+    live_file_size_cache: &mut crate::app::live_file_size::LiveFileSizeCache,
+    live_file_size_loading: &mut crate::app::live_file_size::ActiveLiveFileSizeRequests,
     live_file_size_req_sender: &std::sync::mpsc::Sender<
         crate::app::live_file_size::LiveFileSizeRequest,
     >,
