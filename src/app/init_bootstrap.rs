@@ -63,8 +63,9 @@ pub(in crate::app) struct AppBootstrap {
     pub(in crate::app) bulk_thumbnail_session: Arc<AtomicU64>,
     pub(in crate::app) font_rx: mpsc::Receiver<egui::FontDefinitions>,
 
-    pub(in crate::app) icon_req_tx: mpsc::Sender<(PathBuf, usize)>,
-    pub(in crate::app) icon_res_rx: mpsc::Receiver<(PathBuf, usize, Vec<u8>, u32, u32)>,
+    pub(in crate::app) icon_req_tx:
+        crossbeam_channel::Sender<crate::app::init_workers::IconRequest>,
+    pub(in crate::app) icon_res_rx: mpsc::Receiver<crate::app::init_workers::IconResponse>,
     pub(in crate::app) meta_req_tx: mpsc::Sender<(PathBuf, u64)>,
     pub(in crate::app) meta_res_rx: mpsc::Receiver<(PathBuf, u64, windows_infra::MediaMetadata)>,
     pub(in crate::app) live_size_req_tx: mpsc::Sender<super::live_file_size::LiveFileSizeRequest>,

@@ -198,12 +198,25 @@ pub(super) fn render_result_row(
         if tex.is_none()
             && !is_dir
             && (row_has_priority || row_may_spend_budget)
-            && !app.loading_icons.contains(path)
-            && app.failed_icons.peek(path).is_none()
+            && !app
+                .loading_icons
+                .contains(path, crate::domain::file_entry::IconSize::Large)
+            && !app
+                .failed_icons
+                .contains(path, crate::domain::file_entry::IconSize::Large)
         {
-            app.request_icon_load(path.to_path_buf());
-            if !row_has_priority && row_may_spend_budget {
-                *icon_request_budget = icon_request_budget.saturating_sub(1);
+            let request_result = app.request_icon_load(
+                path.to_path_buf(),
+                crate::domain::file_entry::IconSize::Large,
+            );
+            match request_result {
+                crate::app::state::IconRequestOutcome::Enqueued
+                    if !row_has_priority && row_may_spend_budget =>
+                {
+                    *icon_request_budget = icon_request_budget.saturating_sub(1);
+                }
+                crate::app::state::IconRequestOutcome::Backpressured => *icon_request_budget = 0,
+                _ => {}
             }
         }
         tex

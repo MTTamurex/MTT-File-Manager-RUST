@@ -44,6 +44,13 @@ impl ImageViewerApp {
             }};
         }
 
+        macro_rules! disconnect_crossbeam {
+            ($field:expr, $T:ty) => {{
+                let (d, _rx) = crossbeam_channel::bounded::<$T>(1);
+                let _ = std::mem::replace(&mut $field, d);
+            }};
+        }
+
         // Shell-menu STA thread
         disconnect_sync!(
             self.shell_menu_req_tx,
@@ -80,8 +87,13 @@ impl ImageViewerApp {
         }
 
         // Async icon worker
-        disconnect!(self.icon_req_sender, (std::path::PathBuf, usize));
-
+        self.current_generation.fetch_add(1, Ordering::Relaxed);
+        disconnect_crossbeam!(self.icon_req_sender, crate::app::init_workers::IconRequest);
+        let (_icon_res_tx, disconnected_icon_res_rx) =
+            std::sync::mpsc::channel::<crate::app::init_workers::IconResponse>();
+        let old_icon_res_rx =
+            std::mem::replace(&mut self.icon_res_receiver, disconnected_icon_res_rx);
+        drop(old_icon_res_rx);
         // Async metadata worker
         disconnect!(self.metadata_req_sender, (std::path::PathBuf, u64));
 

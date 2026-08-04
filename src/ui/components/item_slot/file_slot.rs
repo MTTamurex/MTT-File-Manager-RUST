@@ -104,14 +104,10 @@ pub(super) fn render_file_slot<O: ItemSlotOperations>(
     // Load icon (always, serves as fallback)
     // In Recycle Bin, uses get_or_load_icon which now supports virtual paths with extension
     // PERFORMANCE: allow_blocking=false prevents UI stutter on slow icons (exe/lnk)
-    // Prefer Jumbo (256×256) for high-res grid rendering; fall back to Large (48×48).
-    let file_icon = ctx
-        .icon_loader
-        .get_or_load_icon_sized(ui.ctx(), &item.path, IconSize::Jumbo, false, false)
-        .or_else(|| {
-            ctx.icon_loader
-                .get_or_load_icon(ui.ctx(), &item.path, false, false)
-        });
+    // Grid keeps Jumbo quality and does not flash a lower-resolution icon first.
+    let file_icon =
+        ctx.icon_loader
+            .get_or_load_icon_sized(ui.ctx(), &item.path, IconSize::Jumbo, false, false);
 
     // If icon is not cached AND not loading AND not failed:
     // Triggers async loading (only for slow cases where allow_blocking=false returned None)
@@ -119,8 +115,8 @@ pub(super) fn render_file_slot<O: ItemSlotOperations>(
     // Inserting here would cause the deferred request_icon_load to skip (already in set).
     // NOTE: Also works for Recycle Bin - physical_path ($R files) contain embedded icons.
     if file_icon.is_none()
-        && !ctx.loading_icons.contains(&item.path)
-        && ctx.failed_icons.peek(&item.path).is_none()
+        && !ctx.loading_icons.contains(&item.path, IconSize::Jumbo)
+        && !ctx.failed_icons.contains(&item.path, IconSize::Jumbo)
     {
         ops.request_icon_load(item.path.clone());
     }

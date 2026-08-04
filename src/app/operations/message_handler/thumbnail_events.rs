@@ -309,6 +309,7 @@ impl ImageViewerApp {
             if saw_end {
                 app.is_loading_folder = false;
                 if app.pending_all_items_clear {
+                    app.capture_stale_items_snapshot();
                     app.all_items_mut().clear();
                     app.pending_all_items_clear = false;
                 }

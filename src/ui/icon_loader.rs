@@ -21,6 +21,124 @@ mod async_ops;
 mod file_icons;
 mod special_icons;
 
+#[derive(Default)]
+pub struct IconLoadTracker {
+    request_ids_by_path: rustc_hash::FxHashMap<std::path::PathBuf, [Option<u64>; 3]>,
+}
+
+pub struct IconFailureTracker {
+    sizes_by_path: LruCache<std::path::PathBuf, u8>,
+}
+
+impl IconFailureTracker {
+    pub fn new(capacity: NonZeroUsize) -> Self {
+        Self {
+            sizes_by_path: LruCache::new(capacity),
+        }
+    }
+
+    pub fn contains(&self, path: &std::path::Path, size: IconSize) -> bool {
+        self.sizes_by_path
+            .peek(path)
+            .is_some_and(|sizes| sizes & icon_size_bit(size) != 0)
+    }
+
+    pub fn insert(&mut self, path: std::path::PathBuf, size: IconSize) {
+        if let Some(sizes) = self.sizes_by_path.get_mut(&path) {
+            *sizes |= icon_size_bit(size);
+        } else {
+            self.sizes_by_path.put(path, icon_size_bit(size));
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.sizes_by_path.clear();
+    }
+
+    pub fn contains_path(&self, path: &std::path::Path) -> bool {
+        self.sizes_by_path.peek(path).is_some()
+    }
+
+    pub fn remove_path(&mut self, path: &std::path::Path) {
+        self.sizes_by_path.pop(path);
+    }
+
+    pub fn len(&self) -> usize {
+        self.sizes_by_path.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.sizes_by_path.is_empty()
+    }
+}
+
+impl IconLoadTracker {
+    pub fn contains(&self, path: &std::path::Path, size: IconSize) -> bool {
+        self.request_ids_by_path
+            .get(path)
+            .is_some_and(|request_ids| request_ids[icon_size_index(size)].is_some())
+    }
+
+    pub fn contains_path(&self, path: &std::path::Path) -> bool {
+        self.request_ids_by_path.contains_key(path)
+    }
+
+    pub fn insert(&mut self, path: std::path::PathBuf, size: IconSize, request_id: u64) {
+        self.request_ids_by_path.entry(path).or_default()[icon_size_index(size)] = Some(request_id);
+    }
+
+    pub fn remove(&mut self, path: &std::path::Path, size: IconSize, request_id: u64) -> bool {
+        let Some(request_ids) = self.request_ids_by_path.get_mut(path) else {
+            return false;
+        };
+        let size_request_id = &mut request_ids[icon_size_index(size)];
+        if *size_request_id != Some(request_id) {
+            return false;
+        }
+        *size_request_id = None;
+        if request_ids.iter().all(Option::is_none) {
+            self.request_ids_by_path.remove(path);
+        }
+        true
+    }
+
+    pub fn clear(&mut self) {
+        self.request_ids_by_path.clear();
+    }
+
+    pub fn remove_path(&mut self, path: &std::path::Path) {
+        self.request_ids_by_path.remove(path);
+    }
+
+    pub fn retain(&mut self, mut keep: impl FnMut(&std::path::Path) -> bool) {
+        self.request_ids_by_path.retain(|path, _| keep(path));
+    }
+
+    pub fn len(&self) -> usize {
+        self.request_ids_by_path.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.request_ids_by_path.is_empty()
+    }
+}
+
+fn icon_size_bit(size: IconSize) -> u8 {
+    match size {
+        IconSize::Small => 1,
+        IconSize::Large => 2,
+        IconSize::Jumbo => 4,
+    }
+}
+
+fn icon_size_index(size: IconSize) -> usize {
+    match size {
+        IconSize::Small => 0,
+        IconSize::Large => 1,
+        IconSize::Jumbo => 2,
+    }
+}
+
 /// RAII guard for Single-Threaded Apartment COM initialization on icon
 /// extraction threads. Required by `SHParseDisplayName` /
 /// `IShellItemImageFactory` to resolve PIDL-based icons correctly.
@@ -350,5 +468,48 @@ impl IconLoader {
         }
         self.sync_icon_budget_calls = self.sync_icon_budget_calls.saturating_add(1);
         self.sync_icon_budget_elapsed = self.sync_icon_budget_elapsed.saturating_add(elapsed);
+    }
+}
+
+#[cfg(test)]
+mod request_tracker_tests {
+    use super::*;
+    use std::path::Path;
+
+    #[test]
+    fn loading_tracker_separates_sizes_for_the_same_path() {
+        let path = std::path::PathBuf::from(r"C:\tools\app.exe");
+        let mut tracker = IconLoadTracker::default();
+
+        tracker.insert(path.clone(), IconSize::Large, 1);
+        assert!(tracker.contains(&path, IconSize::Large));
+        assert!(!tracker.contains(&path, IconSize::Jumbo));
+
+        tracker.insert(path.clone(), IconSize::Jumbo, 1);
+        assert!(tracker.remove(&path, IconSize::Large, 1));
+        assert!(!tracker.contains(&path, IconSize::Large));
+        assert!(tracker.contains(&path, IconSize::Jumbo));
+    }
+
+    #[test]
+    fn stale_response_does_not_remove_a_new_request() {
+        let path = std::path::PathBuf::from(r"C:\tools\app.exe");
+        let mut tracker = IconLoadTracker::default();
+
+        tracker.insert(path.clone(), IconSize::Jumbo, 2);
+        assert!(!tracker.remove(&path, IconSize::Jumbo, 1));
+
+        assert!(tracker.contains(&path, IconSize::Jumbo));
+    }
+
+    #[test]
+    fn failure_tracker_separates_sizes_for_the_same_path() {
+        let path = Path::new(r"C:\tools\app.exe");
+        let mut tracker = IconFailureTracker::new(NonZeroUsize::new(2).unwrap());
+
+        tracker.insert(path.to_path_buf(), IconSize::Large);
+
+        assert!(tracker.contains(path, IconSize::Large));
+        assert!(!tracker.contains(path, IconSize::Jumbo));
     }
 }

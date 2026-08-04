@@ -152,9 +152,9 @@ pub struct GridViewContext<'a> {
     pub loading_set: &'a mut FxHashSet<PathBuf>,
     pub shared_visible_paths: Option<FxHashSet<PathBuf>>,
     /// Set of icons currently loading (async)
-    pub loading_icons: &'a mut FxHashSet<PathBuf>,
+    pub loading_icons: &'a mut crate::ui::icon_loader::IconLoadTracker,
     /// Set of icons that failed extraction (prevents infinite retry)
-    pub failed_icons: &'a lru::LruCache<PathBuf, ()>,
+    pub failed_icons: &'a crate::ui::icon_loader::IconFailureTracker,
     pub scanned_folders: &'a mut lru::LruCache<PathBuf, ()>,
     pub folder_icon_texture: Option<&'a egui::TextureHandle>,
     pub computer_icon: Option<&'a egui::TextureHandle>,

@@ -4,6 +4,24 @@ use eframe::egui;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+fn icon_size_suffix(size: crate::domain::file_entry::IconSize) -> &'static str {
+    match size {
+        crate::domain::file_entry::IconSize::Small => "Small",
+        crate::domain::file_entry::IconSize::Large => "Large",
+        crate::domain::file_entry::IconSize::Jumbo => "Jumbo",
+    }
+}
+
+fn remove_loading_extension(
+    loading_extensions: &mut rustc_hash::FxHashMap<String, u64>,
+    key: &str,
+    request_id: u64,
+) {
+    if loading_extensions.get(key) == Some(&request_id) {
+        loading_extensions.remove(key);
+    }
+}
+
 fn upsert_folder_content_summary(
     cache: &mut lru::LruCache<PathBuf, FolderContentSummary>,
     folder_path: PathBuf,
@@ -250,10 +268,9 @@ impl ImageViewerApp {
                 break;
             }
             match self.icon_res_receiver.try_recv() {
-                Ok((path, icon_generation, pixels, width, height)) => {
+                Ok((path, icon_generation, icon_size, request_id, pixels, width, height)) => {
                     if icon_generation == usize::MAX {
                         // Pre-warm result: populate extension_cache only.
-                        // Store under _Jumbo (primary) and _Large (backward compat).
                         if crate::domain::thumbnail::is_valid_rgba_buffer(
                             width,
                             height,
@@ -266,37 +283,23 @@ impl ImageViewerApp {
                                     crate::infrastructure::windows::icons::canonical_icon_ext(
                                         &ext_raw,
                                     );
-                                let ext_key_jumbo = format!("{}_Jumbo", ext_str);
-                                let ext_key_large = format!("{}_Large", ext_str);
-                                let need_jumbo = self
+                                let ext_key =
+                                    format!("{}_{}", ext_str, icon_size_suffix(icon_size));
+                                if self
                                     .item_icon_loader
                                     .extension_cache
-                                    .peek(&ext_key_jumbo)
-                                    .is_none();
-                                let need_large = self
-                                    .item_icon_loader
-                                    .extension_cache
-                                    .peek(&ext_key_large)
-                                    .is_none();
-                                if need_jumbo || need_large {
+                                    .peek(&ext_key)
+                                    .is_none()
+                                {
                                     let texture = ctx.load_texture(
-                                        ext_key_jumbo.clone(),
+                                        ext_key.clone(),
                                         egui::ColorImage::from_rgba_unmultiplied(
                                             [width as usize, height as usize],
                                             &pixels,
                                         ),
                                         egui::TextureOptions::LINEAR,
                                     );
-                                    if need_jumbo {
-                                        self.item_icon_loader
-                                            .extension_cache
-                                            .put(ext_key_jumbo, texture.clone());
-                                    }
-                                    if need_large {
-                                        self.item_icon_loader
-                                            .extension_cache
-                                            .put(ext_key_large, texture);
-                                    }
+                                    self.item_icon_loader.extension_cache.put(ext_key, texture);
                                     prewarm_uploads += 1;
                                 }
                             }
@@ -306,11 +309,18 @@ impl ImageViewerApp {
                                 if !crate::infrastructure::windows::icons::is_per_file_icon_ext(
                                     &ext_raw,
                                 ) {
-                                    let ext_key =
+                                    let ext_key = format!(
+                                        "{}_{}",
                                         crate::infrastructure::windows::icons::canonical_icon_ext(
                                             &ext_raw,
-                                        );
-                                    self.loading_extensions.remove(ext_key);
+                                        ),
+                                        icon_size_suffix(icon_size)
+                                    );
+                                    remove_loading_extension(
+                                        &mut self.loading_extensions,
+                                        &ext_key,
+                                        request_id,
+                                    );
                                 }
                             }
                         }
@@ -322,6 +332,8 @@ impl ImageViewerApp {
                         ctx,
                         path,
                         icon_generation,
+                        icon_size,
+                        request_id,
                         pixels,
                         width,
                         height,
@@ -362,7 +374,7 @@ impl ImageViewerApp {
                 has_more = true;
                 break;
             }
-            if let Ok((path, icon_generation, pixels, width, height)) =
+            if let Ok((path, icon_generation, icon_size, request_id, pixels, width, height)) =
                 self.icon_res_receiver.try_recv()
             {
                 processed_messages += 1;
@@ -373,37 +385,22 @@ impl ImageViewerApp {
                             let ext_raw = ext.to_string_lossy().to_lowercase();
                             let ext_str =
                                 crate::infrastructure::windows::icons::canonical_icon_ext(&ext_raw);
-                            let ext_key_jumbo = format!("{}_Jumbo", ext_str);
-                            let ext_key_large = format!("{}_Large", ext_str);
-                            let need_jumbo = self
+                            let ext_key = format!("{}_{}", ext_str, icon_size_suffix(icon_size));
+                            if self
                                 .item_icon_loader
                                 .extension_cache
-                                .peek(&ext_key_jumbo)
-                                .is_none();
-                            let need_large = self
-                                .item_icon_loader
-                                .extension_cache
-                                .peek(&ext_key_large)
-                                .is_none();
-                            if need_jumbo || need_large {
+                                .peek(&ext_key)
+                                .is_none()
+                            {
                                 let texture = ctx.load_texture(
-                                    ext_key_jumbo.clone(),
+                                    ext_key.clone(),
                                     egui::ColorImage::from_rgba_unmultiplied(
                                         [width as usize, height as usize],
                                         &pixels,
                                     ),
                                     egui::TextureOptions::LINEAR,
                                 );
-                                if need_jumbo {
-                                    self.item_icon_loader
-                                        .extension_cache
-                                        .put(ext_key_jumbo, texture.clone());
-                                }
-                                if need_large {
-                                    self.item_icon_loader
-                                        .extension_cache
-                                        .put(ext_key_large, texture);
-                                }
+                                self.item_icon_loader.extension_cache.put(ext_key, texture);
                             }
                         }
                         if let Some(ext) = path.extension() {
@@ -411,11 +408,18 @@ impl ImageViewerApp {
                             if !crate::infrastructure::windows::icons::is_per_file_icon_ext(
                                 &ext_raw,
                             ) {
-                                let ext_key =
+                                let ext_key = format!(
+                                    "{}_{}",
                                     crate::infrastructure::windows::icons::canonical_icon_ext(
                                         &ext_raw,
-                                    );
-                                self.loading_extensions.remove(ext_key);
+                                    ),
+                                    icon_size_suffix(icon_size)
+                                );
+                                remove_loading_extension(
+                                    &mut self.loading_extensions,
+                                    &ext_key,
+                                    request_id,
+                                );
                             }
                         }
                     }
@@ -425,6 +429,8 @@ impl ImageViewerApp {
                     ctx,
                     path,
                     icon_generation,
+                    icon_size,
+                    request_id,
                     pixels,
                     width,
                     height,
@@ -456,21 +462,32 @@ impl ImageViewerApp {
         ctx: &egui::Context,
         path: PathBuf,
         icon_generation: usize,
-        pixels: Vec<u8>,
+        icon_size: crate::domain::file_entry::IconSize,
+        request_id: u64,
+        pixels: std::sync::Arc<[u8]>,
         width: u32,
         height: u32,
         inactive_panel_paths: &mut Option<Option<crate::ui::cache::FxHashSet<PathBuf>>>,
     ) {
-        self.loading_icons.remove(&path);
+        let is_current_request = self.loading_icons.remove(&path, icon_size, request_id);
+        let shared_ext_key = path.extension().and_then(|ext| {
+            let ext_raw = ext.to_string_lossy().to_lowercase();
+            (!crate::infrastructure::windows::icons::is_per_file_icon_ext(&ext_raw)).then(|| {
+                format!(
+                    "{}_{}",
+                    crate::infrastructure::windows::icons::canonical_icon_ext(&ext_raw),
+                    icon_size_suffix(icon_size)
+                )
+            })
+        });
         // Remove the extension from the loading set BEFORE any generation or
         // validity discard, so a stale/failed/panicked response never leaves the
         // extension marker stuck and blocking retries.
-        if let Some(ext) = path.extension() {
-            let ext_raw = ext.to_string_lossy().to_lowercase();
-            if !crate::infrastructure::windows::icons::is_per_file_icon_ext(&ext_raw) {
-                let ext_key = crate::infrastructure::windows::icons::canonical_icon_ext(&ext_raw);
-                self.loading_extensions.remove(ext_key);
-            }
+        if let Some(ext_key) = shared_ext_key.as_deref() {
+            remove_loading_extension(&mut self.loading_extensions, ext_key, request_id);
+        }
+        if !is_current_request {
+            return;
         }
 
         // Ignore stale icon results from previous folder generations unless
@@ -495,16 +512,25 @@ impl ImageViewerApp {
             pixels.len(),
         ) {
             if icon_generation == self.generation {
-                self.failed_icons.put(path, ());
+                if let Some(ext_key) = shared_ext_key {
+                    self.failed_extensions.put(ext_key, Instant::now());
+                } else {
+                    self.failed_icons.insert(path, icon_size);
+                }
             }
             return;
         }
 
+        if let Some(ext_key) = shared_ext_key.as_deref() {
+            self.failed_extensions.pop(ext_key);
+        }
+
         let path_text = path.to_string_lossy();
-        // Store as Jumbo (256×256) — the async worker now extracts at Jumbo size.
-        let mut cache_key = String::with_capacity(path_text.len() + 7);
+        let size_suffix = icon_size_suffix(icon_size);
+        let mut cache_key = String::with_capacity(path_text.len() + size_suffix.len() + 1);
         cache_key.push_str(path_text.as_ref());
-        cache_key.push_str("_Jumbo");
+        cache_key.push('_');
+        cache_key.push_str(size_suffix);
         if !self.item_icon_loader.icon_cache.contains(&cache_key) {
             let texture = ctx.load_texture(
                 cache_key.clone(),
@@ -515,39 +541,24 @@ impl ImageViewerApp {
                 egui::TextureOptions::LINEAR,
             );
 
-            // Populate extension cache for instant icon sharing.
-            // Store under both _Jumbo (primary, high-res) and _Large (backward compat)
-            // so both get_or_load_icon_sized(Jumbo) and get_or_load_icon_sized(Large) hit.
+            // Populate the extension cache for callers requesting this exact size.
             if let Some(ext) = path.extension() {
                 let ext_raw = ext.to_string_lossy().to_lowercase();
                 let ext_str = crate::infrastructure::windows::icons::canonical_icon_ext(&ext_raw);
                 if !crate::infrastructure::windows::icons::is_per_file_icon_ext(&ext_raw) {
-                    let mut ext_key_jumbo = String::with_capacity(ext_str.len() + 7);
-                    ext_key_jumbo.push_str(ext_str);
-                    ext_key_jumbo.push_str("_Jumbo");
+                    let mut ext_key = String::with_capacity(ext_str.len() + size_suffix.len() + 1);
+                    ext_key.push_str(ext_str);
+                    ext_key.push('_');
+                    ext_key.push_str(size_suffix);
                     if self
                         .item_icon_loader
                         .extension_cache
-                        .peek(&ext_key_jumbo)
+                        .peek(&ext_key)
                         .is_none()
                     {
                         self.item_icon_loader
                             .extension_cache
-                            .put(ext_key_jumbo, texture.clone());
-                    }
-                    // Also seed _Large for callers that haven't migrated to Jumbo yet
-                    let mut ext_key_large = String::with_capacity(ext_str.len() + 7);
-                    ext_key_large.push_str(ext_str);
-                    ext_key_large.push_str("_Large");
-                    if self
-                        .item_icon_loader
-                        .extension_cache
-                        .peek(&ext_key_large)
-                        .is_none()
-                    {
-                        self.item_icon_loader
-                            .extension_cache
-                            .put(ext_key_large, texture.clone());
+                            .put(ext_key, texture.clone());
                     }
                 }
             }

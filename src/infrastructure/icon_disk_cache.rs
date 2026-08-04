@@ -7,8 +7,12 @@
 
 use parking_lot::Mutex;
 use std::path::Path;
+use std::sync::atomic::AtomicU64;
 
 mod file_icons;
+mod file_icons_gc;
+#[cfg(test)]
+mod file_icons_tests;
 pub use file_icons::FileIconCacheKey;
 use rusqlite::Connection;
 
@@ -34,6 +38,7 @@ pub(super) fn expected_rgba_len(width: u32, height: u32) -> Option<usize> {
 pub struct IconDiskCache {
     pub(super) file_icon_db: Mutex<Connection>,
     pub(super) file_icon_trim_lock: Mutex<()>,
+    pub(super) file_icon_cache_bytes: AtomicU64,
 }
 
 impl IconDiskCache {
@@ -51,10 +56,16 @@ impl IconDiskCache {
         }
 
         let file_icon_db = file_icons::open_file_icon_db(app_data_dir);
+        let file_icon_cache_bytes = file_icons::file_icon_cache_bytes(&file_icon_db)
+            .unwrap_or_else(|error| {
+                log::warn!("[IconDiskCache] Failed to read cache size: {}", error);
+                0
+            });
 
         Self {
             file_icon_db: Mutex::new(file_icon_db),
             file_icon_trim_lock: Mutex::new(()),
+            file_icon_cache_bytes: AtomicU64::new(file_icon_cache_bytes),
         }
     }
 
@@ -72,6 +83,7 @@ impl IconDiskCache {
         Self {
             file_icon_db: Mutex::new(conn),
             file_icon_trim_lock: Mutex::new(()),
+            file_icon_cache_bytes: AtomicU64::new(0),
         }
     }
 }

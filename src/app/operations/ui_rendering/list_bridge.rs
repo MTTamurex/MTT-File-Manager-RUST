@@ -834,7 +834,10 @@ impl ImageViewerApp {
                     .request_thumbnail_prefetch_with_index_and_modified(
                         path, size, index, modified,
                     ),
-                ListAction::RequestIconLoad(path) => self.request_icon_load(path),
+                ListAction::RequestIconLoad(path) => {
+                    let _ =
+                        self.request_icon_load(path, crate::domain::file_entry::IconSize::Large);
+                }
             }
         }
 

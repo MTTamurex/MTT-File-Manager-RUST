@@ -981,6 +981,7 @@ impl ImageViewerApp {
         self.loading_icons
             .retain(|path| visible_paths.contains(path));
         self.loading_extensions.clear();
+        self.failed_extensions.clear();
 
         self.cache_manager.promote_visible(&visible_paths);
         let texture_keep = self.current_dynamic_texture_keep_count();

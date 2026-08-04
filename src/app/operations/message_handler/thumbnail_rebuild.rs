@@ -18,6 +18,9 @@ impl ImageViewerApp {
             || self.cache_manager.has_rgba_data(path)
             || self.cache_manager.is_failed(path)
             || self.cache_manager.has_folder_preview(path)
+            || self.item_icon_loader.has_cached_file_icon(path)
+            || self.loading_icons.contains_path(path)
+            || self.failed_icons.contains_path(path)
     }
 
     pub(super) fn capture_stale_items_snapshot(&mut self) {
@@ -59,6 +62,9 @@ impl ImageViewerApp {
                     self.cache_manager.finish_pending_upload(&item.path);
                     self.pending_thumbnails.retain(|t| t.path != item.path);
                     crate::workers::thumbnail::clear_failure_cache(&item.path);
+                    self.item_icon_loader.invalidate_file_icons(&item.path);
+                    self.loading_icons.remove_path(&item.path);
+                    self.failed_icons.remove_path(&item.path);
                 }
             }
         }
@@ -75,6 +81,9 @@ impl ImageViewerApp {
                 self.pending_thumbnails.retain(|t| t.path != *old_path);
                 self.cache_manager.invalidate_folder_preview(old_path);
                 crate::workers::thumbnail::clear_failure_cache(old_path);
+                self.item_icon_loader.invalidate_file_icons(old_path);
+                self.loading_icons.remove_path(old_path);
+                self.failed_icons.remove_path(old_path);
             }
         }
     }
@@ -317,6 +326,7 @@ impl ImageViewerApp {
         // If the deferred clear was never consumed (e.g., empty folder),
         // apply it now so stale items don't leak into the final snapshot.
         if self.pending_all_items_clear {
+            self.capture_stale_items_snapshot();
             self.all_items_mut().clear();
             self.pending_all_items_clear = false;
         }

@@ -37,6 +37,18 @@ fn make_cache_key(path: &Path, size: IconSize) -> String {
 }
 
 impl IconLoader {
+    pub fn has_cached_file_icon(&self, path: &Path) -> bool {
+        [IconSize::Small, IconSize::Large, IconSize::Jumbo]
+            .into_iter()
+            .any(|size| self.icon_cache.peek(&make_cache_key(path, size)).is_some())
+    }
+
+    pub fn invalidate_file_icons(&mut self, path: &Path) {
+        for size in [IconSize::Small, IconSize::Large, IconSize::Jumbo] {
+            self.icon_cache.pop(&make_cache_key(path, size));
+        }
+    }
+
     /// Sets the custom folder icon from pre-composed RGBA data.
     pub fn set_folder_icon(&mut self, ctx: &egui::Context, pixels: &[u8], width: u32, height: u32) {
         let texture = ctx.load_texture(
@@ -262,18 +274,9 @@ impl IconLoader {
                         return Some(texture.clone());
                     }
 
-                    // Cross-size fallback: if Jumbo isn't cached yet but Large is, use Large.
-                    // If Large isn't cached but Jumbo is, use Jumbo (higher res, downscales well).
-                    if size == IconSize::Jumbo {
-                        let mut fallback_buf = [0u8; 32];
-                        if let Some(large_key) =
-                            ext_key_stack(&mut fallback_buf, ext_str, IconSize::Large)
-                        {
-                            if let Some(texture) = self.extension_cache.get(large_key) {
-                                return Some(texture.clone());
-                            }
-                        }
-                    } else if size == IconSize::Large {
+                    // Large callers may reuse Jumbo, but Grid never substitutes Large
+                    // for a requested Jumbo icon.
+                    if size == IconSize::Large {
                         let mut fallback_buf = [0u8; 32];
                         if let Some(jumbo_key) =
                             ext_key_stack(&mut fallback_buf, ext_str, IconSize::Jumbo)

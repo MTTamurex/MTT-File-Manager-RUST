@@ -1,3 +1,4 @@
+use crate::domain::file_entry::IconSize;
 use crate::infrastructure::app_state_db::AppStateDb;
 use crate::infrastructure::icon_disk_cache::IconDiskCache;
 use crate::infrastructure::windows as windows_infra;
@@ -7,12 +8,21 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 use std::sync::{mpsc, Arc};
 
-type IconRequest = (PathBuf, usize);
-type IconResponse = (PathBuf, usize, Vec<u8>, u32, u32);
+pub(crate) type IconRequest = (PathBuf, usize, IconSize, u64);
+pub(crate) type IconResponse = (PathBuf, usize, IconSize, u64, Arc<[u8]>, u32, u32);
 type MetadataRequest = (PathBuf, u64);
 type MetadataResponse = (PathBuf, u64, windows_infra::MediaMetadata);
 type FileHashRequestIn = (PathBuf, u64, u64);
 type FileHashResponseIn = (PathBuf, u64, u64, Result<String, String>);
+const MAX_SHARED_EXTENSION_ICON_CACHE_ITEMS: usize = 192;
+static DROPPED_ICON_CACHE_WRITES: AtomicUsize = AtomicUsize::new(0);
+
+struct IconPersistRequest {
+    key: crate::infrastructure::icon_disk_cache::FileIconCacheKey,
+    pixels: Arc<[u8]>,
+    width: u32,
+    height: u32,
+}
 
 pub(in crate::app) fn spawn_cover_worker(
     app_state_db: Arc<AppStateDb>,
@@ -154,20 +164,29 @@ pub(in crate::app) fn spawn_icon_worker(
     ctx: &egui::Context,
     current_generation: Arc<AtomicUsize>,
     icon_disk_cache: Arc<IconDiskCache>,
-) -> (mpsc::Sender<IconRequest>, mpsc::Receiver<IconResponse>) {
-    let (icon_req_tx, icon_req_rx_thread) = mpsc::channel::<IconRequest>();
-    let (fanout_tx, fanout_rx) = crossbeam_channel::bounded::<IconRequest>(256);
-    let (icon_res_tx, icon_res_rx) = mpsc::channel::<IconResponse>();
+) -> (
+    crossbeam_channel::Sender<IconRequest>,
+    mpsc::Receiver<IconResponse>,
+) {
+    let (icon_req_tx, icon_req_rx) = crossbeam_channel::bounded::<IconRequest>(256);
+    let (icon_res_tx, icon_res_rx) = mpsc::sync_channel::<IconResponse>(64);
+    let (persist_tx, persist_rx) = crossbeam_channel::bounded::<IconPersistRequest>(64);
 
-    // Keep std::sync::mpsc sender API for the app state, but fan-out requests into
-    // a cloneable crossbeam receiver so icon workers consume truly in parallel.
-    std::thread::spawn(move || {
-        while let Ok(req) = icon_req_rx_thread.recv() {
-            if fanout_tx.send(req).is_err() {
-                break;
+    let persist_cache = icon_disk_cache.clone();
+    let _ = std::thread::Builder::new()
+        .name("icon-cache-writer".to_string())
+        .stack_size(256 * 1024)
+        .spawn(move || {
+            while let Ok(request) = persist_rx.recv() {
+                persist_cache.save_file_icon(
+                    &request.key,
+                    &request.pixels,
+                    request.width,
+                    request.height,
+                );
             }
-        }
-    });
+        })
+        .map_err(|error| log::error!("[IconCache] failed to spawn writer: {}", error));
 
     // Shared extension icon cache across all workers. This is session-only:
     // persistent icon caching is reserved for per-file icons whose pixels vary
@@ -188,17 +207,17 @@ pub(in crate::app) fn spawn_icon_worker(
 
     for worker_id in 0..worker_count {
         let icon_ctx = ctx.clone();
-        let icon_req_rx = fanout_rx.clone();
+        let icon_req_rx = icon_req_rx.clone();
         let icon_res_tx = icon_res_tx.clone();
+        let persist_tx = persist_tx.clone();
         let generation_ref = current_generation.clone();
         let ext_cache = shared_ext_cache.clone();
         let disk_cache = icon_disk_cache.clone();
 
-        let _ = std::thread::Builder::new()
+        match std::thread::Builder::new()
             .name(format!("icon-worker-{}", worker_id))
             .stack_size(256 * 1024)
             .spawn(move || {
-                use crate::domain::file_entry::IconSize;
                 use crate::infrastructure::windows::{
                     extract_file_icon_by_path, extract_shell_icon, get_file_type_icon,
                 };
@@ -227,7 +246,7 @@ pub(in crate::app) fn spawn_icon_worker(
                     crate::infrastructure::io_priority::IOPriority::Interactive,
                 );
 
-                while let Ok((path, req_generation)) = icon_req_rx.recv() {
+                while let Ok((path, req_generation, icon_size, request_id)) = icon_req_rx.recv() {
 
                     // Drop stale requests quickly when user has already navigated away.
                     // usize::MAX = pre-warm requests (always process).
@@ -236,7 +255,15 @@ pub(in crate::app) fn spawn_icon_worker(
                     if req_generation != usize::MAX
                         && req_generation != generation_ref.load(AtomicOrdering::Relaxed)
                     {
-                        let _ = icon_res_tx.send((path, req_generation, Vec::new(), 0, 0));
+                        let _ = icon_res_tx.send((
+                            path,
+                            req_generation,
+                            icon_size,
+                            request_id,
+                            Arc::from([]),
+                            0,
+                            0,
+                        ));
                         icon_ctx.request_repaint();
                         continue;
                     }
@@ -258,66 +285,71 @@ pub(in crate::app) fn spawn_icon_worker(
 
                     let is_virtual_archive_path = crate::domain::file_entry::is_path_inside_archive(&path);
 
-                    // For files, prefer Jumbo (256×256 via IShellItemImageFactory)
-                    // so grid icons render at high resolution instead of the
-                    // blurry upscaled 48×48 Large icons.
+                    let mut persist_key = None;
                     let icon_result = if is_virtual_archive_path {
-                        extract_shell_icon(&path, IconSize::Jumbo)
+                        extract_shell_icon(&path, icon_size)
                     } else if per_file_icon {
-                        if let Some(cache_key) = disk_cache.file_icon_cache_key(&path, IconSize::Jumbo) {
+                        if let Some(cache_key) = disk_cache.file_icon_cache_key(&path, icon_size) {
                             if let Some(cached) = disk_cache.load_file_icon(&cache_key) {
                                 Ok(cached)
                             } else {
-                                let result = extract_file_icon_by_path(&path, IconSize::Jumbo);
-                                if let Ok((pixels, width, height)) = &result {
-                                    disk_cache.save_file_icon(&cache_key, pixels, *width, *height);
+                                let result = extract_file_icon_by_path(&path, icon_size);
+                                if result.is_ok() {
+                                    persist_key = Some(cache_key);
                                 }
                                 result
                             }
                         } else {
-                            extract_file_icon_by_path(&path, IconSize::Jumbo)
+                            extract_file_icon_by_path(&path, icon_size)
                         }
                     } else {
                         let ext_raw = ext_lower.as_deref().unwrap_or("");
                         let ext_str = crate::infrastructure::windows::icons::canonical_icon_ext(ext_raw);
-                        // Check shared Jumbo cache first.
-                        let jumbo_dot_ext = if ext_str.is_empty() {
+                        let size_suffix = match icon_size {
+                            IconSize::Small => "Small",
+                            IconSize::Large => "Large",
+                            IconSize::Jumbo => "Jumbo",
+                        };
+                        let sized_dot_ext = if ext_str.is_empty() {
                             String::new()
                         } else {
-                            format!(".{}_Jumbo", ext_str)
+                            format!(".{}_{}", ext_str, size_suffix)
                         };
                         if let Some(cached) = ext_cache
-                            .get(&jumbo_dot_ext)
+                            .get(&sized_dot_ext)
                             .map(|entry| entry.value().clone())
                         {
                             Ok(cached)
                         } else {
-                            // Try Jumbo extraction via IShellItemImageFactory on the real file.
-                            // Falls back to SHGetFileInfoW (48×48) if IShellItemImageFactory fails.
                             let r = if needs_real_path_shared_icon
                                 || path.exists()
                             {
-                                extract_file_icon_by_path(&path, IconSize::Jumbo)
+                                extract_file_icon_by_path(&path, icon_size)
                             } else {
-                                get_file_type_icon(false, ext_str, IconSize::Jumbo)
+                                get_file_type_icon(false, ext_str, icon_size)
                             };
                             if let Ok(ref data) = r {
-                                ext_cache.insert(jumbo_dot_ext, data.clone());
+                                if ext_cache.len() >= MAX_SHARED_EXTENSION_ICON_CACHE_ITEMS
+                                    && !ext_cache.contains_key(&sized_dot_ext)
+                                {
+                                    ext_cache.clear();
+                                }
+                                ext_cache.insert(sized_dot_ext, data.clone());
                             }
                             r
                         }
                     };
 
                     match icon_result {
-                        Ok((pixels, width, height)) => (pixels, width, height),
-                        Err(_) => (Vec::new(), 0, 0),
+                        Ok((pixels, width, height)) => (pixels, width, height, persist_key),
+                        Err(_) => (Vec::new(), 0, 0, None),
                     }
 
                     })); // end catch_unwind
 
                     // Always emit exactly one terminal response (Success, Failed,
                     // or panic) so the UI releases this path's loading markers.
-                    let (pixels, width, height) = match process_result {
+                    let (pixels, width, height, persist_key) = match process_result {
                         Ok(triple) => triple,
                         Err(e) => {
                             let msg = if let Some(s) = e.downcast_ref::<&str>() {
@@ -328,29 +360,64 @@ pub(in crate::app) fn spawn_icon_worker(
                                 "unknown".to_string()
                             };
                             log::error!("[IconWorker-{}] panic: {}", worker_id, msg);
-                            (Vec::new(), 0, 0)
+                            (Vec::new(), 0, 0, None)
                         }
                     };
 
                     // Producer-side validation: never forward an inconsistent RGBA
                     // buffer; downgrade to an empty (retryable/failed) result.
-                    let (pixels, width, height) = if crate::domain::thumbnail::is_valid_rgba_buffer(
+                    let (pixels, width, height, persist_key) = if crate::domain::thumbnail::is_valid_rgba_buffer(
                         width,
                         height,
                         crate::domain::thumbnail::MAX_ICON_SIDE,
                         pixels.len(),
                     ) {
-                        (pixels, width, height)
+                        (pixels, width, height, persist_key)
                     } else {
-                        (Vec::new(), 0, 0)
+                        (Vec::new(), 0, 0, None)
                     };
 
-                    let _ = icon_res_tx.send((path, req_generation, pixels, width, height));
+                    let pixels: Arc<[u8]> = pixels.into();
+                    let _ = icon_res_tx.send((
+                        path,
+                        req_generation,
+                        icon_size,
+                        request_id,
+                        pixels.clone(),
+                        width,
+                        height,
+                    ));
                     icon_ctx.request_repaint();
+                    if let Some(key) = persist_key {
+                        // Persistence is optional and must not stall the
+                        // interactive Shell extraction workers.
+                        if persist_tx
+                            .try_send(IconPersistRequest {
+                            key,
+                            pixels,
+                            width,
+                            height,
+                            })
+                            .is_err()
+                        {
+                            let dropped = DROPPED_ICON_CACHE_WRITES
+                                .fetch_add(1, AtomicOrdering::Relaxed)
+                                .saturating_add(1);
+                            if dropped.is_power_of_two() {
+                                log::warn!(
+                                    "[IconCache] skipped {} persistence request(s) due to backpressure",
+                                    dropped
+                                );
+                            }
+                        }
+                    }
                 }
 
                 // ComGuard RAII handles CoUninitialize on drop
-            });
+            }) {
+            Ok(_handle) => {}
+            Err(error) => log::error!("[IconWorker-{}] failed to spawn: {}", worker_id, error),
+        }
     }
 
     (icon_req_tx, icon_res_rx)

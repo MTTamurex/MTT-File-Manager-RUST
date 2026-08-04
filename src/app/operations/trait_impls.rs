@@ -33,7 +33,11 @@ impl ItemSlotOperations for ImageViewerApp {
     }
 
     fn request_icon_load(&mut self, path: std::path::PathBuf) {
-        ImageViewerApp::request_icon_load(self, path);
+        let _ = ImageViewerApp::request_icon_load(
+            self,
+            path,
+            crate::domain::file_entry::IconSize::Jumbo,
+        );
     }
 
     fn rename_item(&mut self, idx: usize) {

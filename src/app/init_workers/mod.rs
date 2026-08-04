@@ -20,3 +20,4 @@ pub(super) use visual_workers::{
     font_definitions_with_embedded_icons, spawn_async_font_loader, spawn_cover_worker,
     spawn_file_hash_worker, spawn_icon_worker, spawn_live_file_size_worker, spawn_metadata_worker,
 };
+pub(crate) use visual_workers::{IconRequest, IconResponse};

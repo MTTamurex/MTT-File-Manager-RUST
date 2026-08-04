@@ -102,6 +102,7 @@ impl ImageViewerApp {
                 self.discard_thumbnail_pipeline_for_navigation("folder-load", trim_icons);
                 self.loading_icons.clear(); // Clear icon loading requests
                 self.loading_extensions.clear(); // Clear extension dedup tracking
+                self.failed_extensions.clear();
                 self.failed_icons.clear(); // Retry icon extraction in the new folder generation
                 self.scanned_folders.clear();
             }

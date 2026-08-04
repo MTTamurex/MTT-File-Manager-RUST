@@ -6,7 +6,6 @@
 //! right-click, all reported back to the bridge which applies path-based actions.
 
 use eframe::egui::{self, Color32, FontId, Rect, Sense, Ui};
-use lru::LruCache;
 use std::path::{Path, PathBuf};
 
 use crate::domain::file_entry::FileEntry;
@@ -60,8 +59,8 @@ pub struct MillerColumnContext<'a> {
     pub rectangle_selection_state: Option<&'a RectangleSelectionState>,
     pub icon_loader: &'a mut IconLoader,
     pub folder_icon: Option<&'a egui::TextureHandle>,
-    pub loading_icons: &'a crate::ui::cache::FxHashSet<PathBuf>,
-    pub failed_icons: &'a LruCache<PathBuf, ()>,
+    pub loading_icons: &'a crate::ui::icon_loader::IconLoadTracker,
+    pub failed_icons: &'a crate::ui::icon_loader::IconFailureTracker,
     pub icon_requests: &'a mut Vec<PathBuf>,
     pub is_item_dragging: bool,
     pub drop_target: &'a mut Option<PathBuf>,
@@ -269,8 +268,12 @@ fn render_row(
     };
     if !item.is_dir
         && icon.is_none()
-        && !ctx.loading_icons.contains(&item.path)
-        && ctx.failed_icons.peek(&item.path).is_none()
+        && !ctx
+            .loading_icons
+            .contains(&item.path, crate::domain::file_entry::IconSize::Large)
+        && !ctx
+            .failed_icons
+            .contains(&item.path, crate::domain::file_entry::IconSize::Large)
     {
         ctx.icon_requests.push(item.path.clone());
     }

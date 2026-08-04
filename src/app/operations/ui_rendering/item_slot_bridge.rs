@@ -161,7 +161,7 @@ impl ImageViewerApp {
         }
 
         for path in pending_icon_loads {
-            self.request_icon_load(path);
+            let _ = self.request_icon_load(path, crate::domain::file_entry::IconSize::Jumbo);
         }
 
         if let Some(rename_idx) = pending_rename {

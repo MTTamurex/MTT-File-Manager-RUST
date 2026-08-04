@@ -378,6 +378,15 @@ fn flush_opengl_gpu_textures_for_reupload(app: &mut ImageViewerApp, reason: &str
 }
 
 pub fn handle_exit(app: &mut ImageViewerApp) {
+    // Arm the failsafe before any teardown, FFI, lock, or final persistence.
+    // Do not log from this thread: the logger itself may own the stuck lock.
+    let _ = std::thread::Builder::new()
+        .name("exit-watchdog".into())
+        .spawn(|| {
+            std::thread::sleep(std::time::Duration::from_secs(5));
+            crate::infrastructure::windows::terminate_current_process(0);
+        });
+
     // Capture the current live panel/tab state before the final blocking save.
     app.sync_to_tab();
 
@@ -390,9 +399,19 @@ pub fn handle_exit(app: &mut ImageViewerApp) {
     app.shutdown_background_workers();
     log::info!("[EXIT] Background worker channels disconnected.");
 
-    // Fire CancelSynchronousIo from a background thread to unblock any
-    // threads stuck in kernel-mode I/O (e.g. OneDrive cldflt.sys).
-    let _ = std::thread::Builder::new()
+    // Shut down libmpv to release GPU/decoder resources.
+    if let Some(preview) = app.media_preview.as_mut() {
+        preview.shutdown();
+    }
+    app.media_preview = None;
+
+    // Kill standalone video player process if running
+    app.kill_video_player_process();
+    crate::viewer_processes::terminate_all();
+
+    // Cancel worker I/O and wait for the enumerator before starting the final
+    // preference write, so process-wide cancellation cannot race that write.
+    let io_cancel_handle = std::thread::Builder::new()
         .name("io-cancel".into())
         .spawn(|| {
             let cancelled =
@@ -403,17 +422,11 @@ pub fn handle_exit(app: &mut ImageViewerApp) {
                     cancelled
                 );
             }
-        });
-
-    // Shut down libmpv to release GPU/decoder resources.
-    if let Some(preview) = app.media_preview.as_mut() {
-        preview.shutdown();
+        })
+        .ok();
+    if let Some(handle) = io_cancel_handle {
+        let _ = handle.join();
     }
-    app.media_preview = None;
-
-    // Kill standalone video player process if running
-    app.kill_video_player_process();
-    crate::viewer_processes::terminate_all();
 
     // Persist user preferences
     if app.force_save_preferences() {
@@ -433,15 +446,5 @@ pub fn handle_exit(app: &mut ImageViewerApp) {
     // ── Phase 3: exit process ────────────────────────────────────────────
     // std::process::exit runs libc atexit handlers (including SQLite's) and
     // is sufficient for clean teardown when workers have already stopped.
-    // TerminateProcess is kept as a failsafe on a background thread in case
-    // std::process::exit somehow hangs (e.g. a stuck atexit handler).
-    let _ = std::thread::Builder::new()
-        .name("exit-watchdog".into())
-        .spawn(|| {
-            std::thread::sleep(std::time::Duration::from_secs(1));
-            log::error!("[EXIT] Clean exit hung — forcing TerminateProcess.");
-            crate::infrastructure::windows::terminate_current_process(0);
-        });
-
     std::process::exit(0);
 }

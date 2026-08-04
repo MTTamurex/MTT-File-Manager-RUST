@@ -85,9 +85,9 @@ pub struct ItemSlotContext<'a> {
     /// Set of items loading (file thumbnails)
     pub loading_set: &'a mut FxHashSet<std::path::PathBuf>,
     /// Set of items loading icons (e.g.: .exe)
-    pub loading_icons: &'a mut FxHashSet<std::path::PathBuf>,
+    pub loading_icons: &'a mut crate::ui::icon_loader::IconLoadTracker,
     /// Set of icons that failed (prevents infinite retry)
-    pub failed_icons: &'a lru::LruCache<std::path::PathBuf, ()>,
+    pub failed_icons: &'a crate::ui::icon_loader::IconFailureTracker,
     /// Folder preview cache (Native Sandwich)
     pub folder_preview_cache: &'a mut lru::LruCache<std::path::PathBuf, egui::TextureHandle>,
     /// Set of folders loading native preview

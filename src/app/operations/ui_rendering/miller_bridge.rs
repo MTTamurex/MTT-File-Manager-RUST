@@ -263,7 +263,7 @@ impl ImageViewerApp {
         }
 
         for path in icon_requests {
-            self.request_icon_load(path);
+            let _ = self.request_icon_load(path, crate::domain::file_entry::IconSize::Large);
         }
 
         if self.context_menu.is_open

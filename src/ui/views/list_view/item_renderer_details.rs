@@ -345,8 +345,12 @@ pub(crate) fn render_item_icon(
                 Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1.0, 1.0)),
                 tint,
             );
-        } else if !ctx.loading_icons.contains(&item.path)
-            && ctx.failed_icons.peek(&item.path).is_none()
+        } else if !ctx
+            .loading_icons
+            .contains(&item.path, crate::domain::file_entry::IconSize::Large)
+            && !ctx
+                .failed_icons
+                .contains(&item.path, crate::domain::file_entry::IconSize::Large)
         {
             ops.request_icon_load(item.path.clone());
         }
@@ -363,7 +367,12 @@ pub(crate) fn render_item_icon(
             Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1.0, 1.0)),
             tint,
         );
-    } else if !ctx.loading_icons.contains(&item.path) && ctx.failed_icons.peek(&item.path).is_none()
+    } else if !ctx
+        .loading_icons
+        .contains(&item.path, crate::domain::file_entry::IconSize::Large)
+        && !ctx
+            .failed_icons
+            .contains(&item.path, crate::domain::file_entry::IconSize::Large)
     {
         ops.request_icon_load(item.path.clone());
     }

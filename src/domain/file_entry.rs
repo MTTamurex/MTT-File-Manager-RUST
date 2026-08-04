@@ -379,7 +379,7 @@ impl ViewMode {
 }
 
 /// Icon size
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum IconSize {
     Small, // 16x16 or 32x32 (depends on DPI)
     Large, // 32x32 or 48x48

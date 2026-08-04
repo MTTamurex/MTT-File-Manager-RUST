@@ -410,9 +410,15 @@ impl ImageViewerApp {
         }
     }
 
-    pub fn request_icon_load(&mut self, path: PathBuf) {
-        if self.loading_icons.contains(&path) {
-            return;
+    pub fn request_icon_load(
+        &mut self,
+        path: PathBuf,
+        icon_size: crate::domain::file_entry::IconSize,
+    ) -> crate::app::state::IconRequestOutcome {
+        use crate::app::state::IconRequestOutcome;
+
+        if self.loading_icons.contains(&path, icon_size) {
+            return IconRequestOutcome::Skipped;
         }
 
         let effective_gen = if self.use_active_generation_for_thumbnail_requests {
@@ -421,6 +427,8 @@ impl ImageViewerApp {
         } else {
             self.generation
         };
+        self.next_icon_request_id = self.next_icon_request_id.wrapping_add(1).max(1);
+        let request_id = self.next_icon_request_id;
 
         // Dedup by extension: if another file with the same extension is already
         // being loaded, skip.  Once that result arrives, extension_cache is
@@ -432,27 +440,46 @@ impl ImageViewerApp {
             if !crate::infrastructure::windows::icons::is_per_file_icon_ext(&ext_lower) {
                 let load_ext =
                     crate::infrastructure::windows::icons::canonical_icon_ext(&ext_lower);
-                if self.loading_extensions.contains(load_ext) {
-                    return; // Another file with this ext is already in-flight.
+                let size_suffix = match icon_size {
+                    crate::domain::file_entry::IconSize::Small => "Small",
+                    crate::domain::file_entry::IconSize::Large => "Large",
+                    crate::domain::file_entry::IconSize::Jumbo => "Jumbo",
+                };
+                let load_key = format!("{}_{}", load_ext, size_suffix);
+                if self.loading_extensions.contains_key(&load_key) {
+                    return IconRequestOutcome::Skipped;
                 }
-                self.loading_extensions.insert(load_ext.to_string());
-                inserted_extension = Some(load_ext.to_string());
+                const EXTENSION_FAILURE_COOLDOWN: std::time::Duration =
+                    std::time::Duration::from_secs(5);
+                if let Some(failed_at) = self.failed_extensions.peek(&load_key).copied() {
+                    if failed_at.elapsed() < EXTENSION_FAILURE_COOLDOWN {
+                        return IconRequestOutcome::Skipped;
+                    }
+                    self.failed_extensions.pop(&load_key);
+                }
+                self.loading_extensions.insert(load_key.clone(), request_id);
+                inserted_extension = Some(load_key);
             }
         }
 
-        self.loading_icons.insert(path.clone());
+        self.loading_icons
+            .insert(path.clone(), icon_size, request_id);
         if self
             .icon_req_sender
-            .send((path.clone(), effective_gen))
+            .try_send((path.clone(), effective_gen, icon_size, request_id))
             .is_err()
         {
             // Revert BOTH markers on send failure so the request can be retried
             // instead of being permanently deduped by a stuck extension marker.
-            self.loading_icons.remove(&path);
+            self.loading_icons.remove(&path, icon_size, request_id);
             if let Some(ext_key) = inserted_extension {
-                self.loading_extensions.remove(ext_key.as_str());
+                if self.loading_extensions.get(&ext_key) == Some(&request_id) {
+                    self.loading_extensions.remove(&ext_key);
+                }
             }
+            return IconRequestOutcome::Backpressured;
         }
+        IconRequestOutcome::Enqueued
     }
 }
 

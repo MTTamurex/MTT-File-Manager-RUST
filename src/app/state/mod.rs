@@ -14,6 +14,13 @@ pub enum LastInput {
     Keyboard,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IconRequestOutcome {
+    Enqueued,
+    Skipped,
+    Backpressured,
+}
+
 use std::collections::VecDeque;
 // use std::num::NonZeroUsize;
 use std::path::PathBuf;
@@ -449,11 +456,13 @@ pub struct ImageViewerApp {
     pub gif_manager: crate::ui::components::gif_manager::GifManager,
 
     // ASYNC ICON WORKER (avoids blocking I/O in the render loop)
-    pub icon_req_sender: Sender<(PathBuf, usize)>, // UI â†’ Worker
-    pub icon_res_receiver: Receiver<(PathBuf, usize, Vec<u8>, u32, u32)>, // Worker â†’ UI
-    pub loading_icons: FxHashSet<PathBuf>,         // Tracking in-progress
-    pub loading_extensions: rustc_hash::FxHashSet<String>, // Dedup by extension (prevent 10x .dll requests)
-    pub failed_icons: LruCache<PathBuf, ()>, // Icons that failed extraction (LRU bounded)
+    pub icon_req_sender: crossbeam_channel::Sender<crate::app::init_workers::IconRequest>,
+    pub icon_res_receiver: Receiver<crate::app::init_workers::IconResponse>,
+    pub next_icon_request_id: u64,
+    pub loading_icons: crate::ui::icon_loader::IconLoadTracker,
+    pub loading_extensions: rustc_hash::FxHashMap<String, u64>,
+    pub failed_extensions: LruCache<String, Instant>,
+    pub failed_icons: crate::ui::icon_loader::IconFailureTracker,
 
     // NOTIFICATION SYSTEM (toast messages)
     pub notifications: crate::application::NotificationManager,

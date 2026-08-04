@@ -535,9 +535,13 @@ impl ImageViewerApp {
             // ASYNC ICON WORKER
             icon_req_sender: icon_req_tx,
             icon_res_receiver: icon_res_rx,
-            loading_icons: FxHashSet::default(),
-            loading_extensions: rustc_hash::FxHashSet::default(),
-            failed_icons: LruCache::new(
+            next_icon_request_id: 0,
+            loading_icons: crate::ui::icon_loader::IconLoadTracker::default(),
+            loading_extensions: rustc_hash::FxHashMap::default(),
+            failed_extensions: LruCache::new(
+                NonZeroUsize::new(1024).expect("failed extension cache size must be non-zero"),
+            ),
+            failed_icons: crate::ui::icon_loader::IconFailureTracker::new(
                 NonZeroUsize::new(1000).expect("failed_icons cache size must be non-zero"),
             ),
 
