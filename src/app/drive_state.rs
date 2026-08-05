@@ -4,10 +4,12 @@ use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{Receiver, Sender};
 use std::time::Instant;
 
+mod drive_health;
 mod drive_info_refresh;
+pub use drive_health::DriveHealthResult;
 pub use drive_info_refresh::{
-    merge_drive_info_query, DriveInfoRefreshEntry, DriveInfoRefreshResult, DriveInfoRefreshScope,
-    DriveInfoRefreshTracker,
+    apply_drive_health_snapshot, merge_drive_info_query, DriveInfoRefreshEntry,
+    DriveInfoRefreshResult, DriveInfoRefreshScope, DriveInfoRefreshTracker,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -31,6 +33,13 @@ pub struct DriveState {
     pub drive_info_tx: Sender<DriveInfoRefreshResult>,
     pub drive_info_cache: HashMap<String, DriveInfo>,
     pub drive_info_cache_epoch: u64,
+    pub drive_health_rx: Receiver<DriveHealthResult>,
+    pub drive_health_tx: Sender<DriveHealthResult>,
+    pub drive_health_cache: HashMap<String, mtt_search_protocol::DriveHealthSnapshot>,
+    pub drive_health_pending: HashMap<String, u64>,
+    pub drive_health_updated_at: HashMap<String, Instant>,
+    pub drive_health_failed_at: HashMap<String, Instant>,
+    pub drive_health_next_request_id: u64,
     pub optimistically_hidden_drives: HashSet<String>,
     pub drive_info_refresh: DriveInfoRefreshTracker,
 }
@@ -56,11 +65,13 @@ impl DriveState {
         if let Some(root_key) = normalize_drive_root_key(path) {
             self.drive_info_cache.remove(&root_key);
         }
+        self.invalidate_drive_health(path);
         self.drive_info_cache_epoch = self.drive_info_cache_epoch.wrapping_add(1);
     }
 
     pub fn clear_cached_drive_info(&mut self) {
         self.drive_info_cache.clear();
+        self.clear_drive_health();
         self.drive_info_cache_epoch = self.drive_info_cache_epoch.wrapping_add(1);
     }
 
@@ -156,6 +167,7 @@ mod tests {
         let (_scan_tx, scan_rx) = mpsc::channel();
         let (drive_scan_tx, drive_scan_rx) = mpsc::channel();
         let (drive_info_tx, drive_info_rx) = mpsc::channel();
+        let (drive_health_tx, drive_health_rx) = mpsc::channel();
 
         DriveState {
             disks,
@@ -170,6 +182,13 @@ mod tests {
             drive_info_tx,
             drive_info_cache: HashMap::new(),
             drive_info_cache_epoch: 0,
+            drive_health_rx,
+            drive_health_tx,
+            drive_health_cache: HashMap::new(),
+            drive_health_pending: HashMap::new(),
+            drive_health_updated_at: HashMap::new(),
+            drive_health_failed_at: HashMap::new(),
+            drive_health_next_request_id: 0,
             optimistically_hidden_drives: HashSet::new(),
             drive_info_refresh: DriveInfoRefreshTracker::new(Instant::now()),
         }
@@ -202,6 +221,103 @@ mod tests {
         );
         assert_eq!(state.canonical_current_drive("J:\\"), None);
         assert_eq!(state.canonical_current_drive("invalid"), None);
+    }
+
+    #[test]
+    fn drive_health_requests_are_deduplicated_and_failures_cool_down() {
+        let mut state = test_drive_state(vec![("C:\\".to_string(), "System".to_string())]);
+        let now = Instant::now();
+
+        let request_id = state.begin_drive_health_request("C:\\", now).unwrap();
+        assert_eq!(state.begin_drive_health_request("c:", now), None);
+        assert!(state.finish_drive_health_request("C:\\", request_id));
+
+        state.record_drive_health_failure("C:\\", now);
+        assert_eq!(
+            state.begin_drive_health_request("C:\\", now + std::time::Duration::from_secs(59)),
+            None
+        );
+        assert!(state
+            .begin_drive_health_request("C:\\", now + std::time::Duration::from_secs(61))
+            .is_some());
+    }
+
+    #[test]
+    fn removing_drive_info_invalidates_drive_health_state() {
+        let mut state = test_drive_state(vec![("D:\\".to_string(), "Data".to_string())]);
+        let now = Instant::now();
+        state.drive_health_cache.insert(
+            "D:\\".to_string(),
+            crate::app::drive_state::drive_info_refresh::tests_support::drive_health_snapshot('D'),
+        );
+        state
+            .drive_health_updated_at
+            .insert("D:\\".to_string(), now);
+        state.drive_health_pending.insert("D:\\".to_string(), 7);
+
+        state.remove_cached_drive_info("d:");
+
+        assert!(!state.drive_health_cache.contains_key("D:\\"));
+        assert!(!state.drive_health_updated_at.contains_key("D:\\"));
+        assert!(!state.drive_health_pending.contains_key("D:\\"));
+    }
+
+    #[test]
+    fn successful_drive_health_cache_uses_five_minute_ttl() {
+        let mut state = test_drive_state(vec![("E:\\".to_string(), "External".to_string())]);
+        let now = Instant::now();
+        state.cache_drive_health(
+            "E:\\",
+            crate::app::drive_state::drive_info_refresh::tests_support::drive_health_snapshot('E'),
+            now,
+        );
+
+        assert_eq!(
+            state.begin_drive_health_request("E:\\", now + std::time::Duration::from_secs(299)),
+            None
+        );
+        assert!(state
+            .begin_drive_health_request("E:\\", now + std::time::Duration::from_secs(301))
+            .is_some());
+    }
+
+    #[test]
+    fn fresh_drive_health_cache_can_hydrate_restored_views() {
+        let mut state = test_drive_state(vec![("E:\\".to_string(), "External".to_string())]);
+        let now = Instant::now();
+        let snapshot =
+            crate::app::drive_state::drive_info_refresh::tests_support::drive_health_snapshot('E');
+        state.cache_drive_health("E:\\", snapshot.clone(), now);
+
+        assert_eq!(state.cached_drive_health("e:", now), Some(snapshot));
+        assert_eq!(
+            state.cached_drive_health("E:\\", now + std::time::Duration::from_secs(301)),
+            None
+        );
+    }
+
+    #[test]
+    fn failed_refresh_removes_stale_health_from_drive_info() {
+        let mut state = test_drive_state(vec![("C:\\".to_string(), "System".to_string())]);
+        let snapshot =
+            crate::app::drive_state::drive_info_refresh::tests_support::drive_health_snapshot('C');
+        let drive_info = DriveInfo {
+            file_system: "NTFS".to_string(),
+            total_space: 100,
+            free_space: 50,
+            drive_type: crate::infrastructure::windows::DriveType::Fixed,
+            model: None,
+            serial_number: None,
+            firmware_revision: None,
+            bus_type: None,
+            health: Some(snapshot.clone()),
+        };
+        state.cache_drive_info("C:\\", drive_info);
+        state.cache_drive_health("C:\\", snapshot, Instant::now());
+
+        let updated = state.remove_drive_health_snapshot("C:\\").unwrap();
+        assert!(updated.health.is_none());
+        assert!(state.drive_health_cache.is_empty());
     }
 
     #[test]

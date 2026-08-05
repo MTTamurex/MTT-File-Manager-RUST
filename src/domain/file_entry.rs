@@ -3,7 +3,7 @@ use rust_i18n::t;
 use std::path::{Path, PathBuf};
 
 /// Volume/drive information for the "This PC" view
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct DriveInfo {
     pub file_system: String,
     pub total_space: u64,
@@ -13,6 +13,7 @@ pub struct DriveInfo {
     pub serial_number: Option<String>,
     pub firmware_revision: Option<String>,
     pub bus_type: Option<String>,
+    pub health: Option<mtt_search_protocol::DriveHealthSnapshot>,
 }
 
 /// Recycle Bin metadata — boxed to avoid inflating FileEntry for the 99%+ of

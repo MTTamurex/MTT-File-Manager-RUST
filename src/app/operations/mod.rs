@@ -24,6 +24,7 @@
 pub mod clipboard_ops;
 pub mod context_menu;
 pub mod drag_drop;
+pub mod drive_health;
 pub mod drive_refresh;
 pub mod dual_panel_ops;
 pub mod file_hash;

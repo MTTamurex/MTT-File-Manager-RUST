@@ -541,6 +541,7 @@ fn calculate_effective_file(app: &ImageViewerApp) -> Option<FileEntry> {
                     serial_number: None,
                     firmware_revision: None,
                     bus_type: None,
+                    health: None,
                 });
             }
         } else {

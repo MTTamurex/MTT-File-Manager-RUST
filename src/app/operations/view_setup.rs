@@ -234,6 +234,7 @@ impl ImageViewerApp {
                     serial_number: None,
                     firmware_revision: None,
                     bus_type: None,
+                    health: None,
                 });
             let entry = FileEntry {
                 path: PathBuf::from(path),
@@ -401,6 +402,11 @@ impl ImageViewerApp {
                             .iter()
                             .any(|(path, label)| path == old_path && label == old_label);
                         if !unchanged {
+                            if let Some(letter) = old_path.chars().next() {
+                                crate::infrastructure::windows::invalidate_physical_drive_cache(
+                                    letter,
+                                );
+                            }
                             self.drive_state.remove_cached_drive_info(old_path);
                         }
                     }

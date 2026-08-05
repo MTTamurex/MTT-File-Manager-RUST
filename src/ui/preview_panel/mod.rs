@@ -1,4 +1,5 @@
 pub mod actions;
+mod drive_details;
 pub mod fallback_renderer;
 pub mod file_info_table;
 pub mod image_preview;

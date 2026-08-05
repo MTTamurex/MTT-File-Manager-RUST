@@ -102,10 +102,12 @@ impl ImageViewerApp {
         if self.file_operation_state.file_ops_in_progress == 0 {
             self.refresh_drives_if_needed();
         }
+        self.request_drive_health_for_panel();
 
         let t2 = std::time::Instant::now();
         self.poll_drive_scan();
         self.poll_drive_info();
+        self.poll_drive_health();
         if self.sidebar_tree.poll_loaded() {
             ctx.request_repaint();
         }

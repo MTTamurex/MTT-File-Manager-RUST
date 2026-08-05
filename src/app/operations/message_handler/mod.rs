@@ -60,6 +60,15 @@ impl ImageViewerApp {
         if saw_device_event {
             // Drive was inserted/removed: clear all drive icon caches so icons are re-extracted
             self.item_icon_loader.clear_drive_icons();
+            let cached_physical_letters: Vec<char> = self
+                .drive_state
+                .disks
+                .iter()
+                .filter_map(|(path, _)| path.chars().next())
+                .collect();
+            for letter in cached_physical_letters {
+                crate::infrastructure::windows::invalidate_physical_drive_cache(letter);
+            }
             // A different volume can reuse the same letter and label. Treat device
             // events as an identity boundary instead of merging old metadata.
             self.drive_state.clear_cached_drive_info();

@@ -13,6 +13,7 @@ use windows::Win32::System::Pipes::{
 
 const SEARCH_PIPE_IO_TIMEOUT_MS: u64 = 8_000;
 const CONTROL_PIPE_IO_TIMEOUT_MS: u64 = 5_000;
+const DRIVE_HEALTH_PIPE_IO_TIMEOUT_MS: u64 = 12_000;
 const PIPE_POLL_INTERVAL_MS: u64 = 15;
 
 pub struct SearchPage {
@@ -214,6 +215,41 @@ pub fn folder_size(path: &std::path::Path) -> Result<(u64, u64, u64), String> {
                 ..
             } => Ok((total_size, file_count, folder_count)),
             SearchResponse::Error(e) => Err(e),
+            _ => Err("Unexpected response type".into()),
+        }
+    })();
+
+    unsafe {
+        let _ = CloseHandle(pipe);
+    }
+
+    result
+}
+
+/// Request a point-in-time health snapshot for a physical drive.
+pub fn drive_health(drive_letter: char) -> Result<DriveHealthSnapshot, String> {
+    let requested_letter = drive_letter.to_ascii_uppercase();
+    let request = SearchRequest::GetDriveHealth {
+        drive_letter: requested_letter,
+    };
+    request.validate()?;
+
+    let pipe = open_pipe()?;
+    let result = (|| {
+        write_message(pipe, &request)?;
+        let response = read_validated_response(pipe, DRIVE_HEALTH_PIPE_IO_TIMEOUT_MS)?;
+
+        match response {
+            SearchResponse::DriveHealth(snapshot)
+                if snapshot.drive_letter.to_ascii_uppercase() == requested_letter =>
+            {
+                Ok(snapshot)
+            }
+            SearchResponse::DriveHealth(snapshot) => Err(format!(
+                "Drive health response letter mismatch: requested {}, received {}",
+                requested_letter, snapshot.drive_letter
+            )),
+            SearchResponse::Error(error) => Err(error),
             _ => Err("Unexpected response type".into()),
         }
     })();

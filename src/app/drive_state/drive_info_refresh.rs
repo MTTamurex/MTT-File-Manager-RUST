@@ -146,7 +146,59 @@ pub fn merge_drive_info_query(
     if queried.bus_type.is_none() {
         queried.bus_type.clone_from(&existing.bus_type);
     }
+    if queried.health.is_none() {
+        queried.health.clone_from(&existing.health);
+    }
+    if let Some(snapshot) = queried.health.take() {
+        apply_drive_health_snapshot(&mut queried, snapshot);
+    }
     queried
+}
+
+pub fn apply_drive_health_snapshot(
+    info: &mut DriveInfo,
+    snapshot: mtt_search_protocol::DriveHealthSnapshot,
+) {
+    if let Some(model) = &snapshot.model {
+        info.model = Some(model.clone());
+    }
+    if let Some(serial_number) = &snapshot.serial_number {
+        info.serial_number = Some(serial_number.clone());
+    }
+    if let Some(firmware_revision) = &snapshot.firmware_revision {
+        info.firmware_revision = Some(firmware_revision.clone());
+    }
+    if let Some(interface) = &snapshot.interface {
+        info.bus_type = Some(interface.clone());
+    }
+    info.health = Some(snapshot);
+}
+
+#[cfg(test)]
+pub(crate) mod tests_support {
+    pub fn drive_health_snapshot(drive_letter: char) -> mtt_search_protocol::DriveHealthSnapshot {
+        mtt_search_protocol::DriveHealthSnapshot {
+            drive_letter,
+            physical_disk_number: 0,
+            model: Some("health model".to_string()),
+            serial_number: Some("health serial".to_string()),
+            firmware_revision: Some("health firmware".to_string()),
+            interface: Some("NVMe".to_string()),
+            temperature_celsius: Some(35),
+            life_remaining_percent: Some(98),
+            total_host_reads_bytes: None,
+            total_host_writes_bytes: None,
+            power_cycle_count: None,
+            power_on_hours: None,
+            rotation: mtt_search_protocol::DriveRotation::SolidState,
+            current_transfer_mode: None,
+            max_transfer_mode: None,
+            standard: None,
+            features: Vec::new(),
+            health_state: mtt_search_protocol::DriveHealthState::Good,
+            smart_available: true,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -163,6 +215,7 @@ mod tests {
             serial_number: None,
             firmware_revision: None,
             bus_type: None,
+            health: None,
         }
     }
 
@@ -218,5 +271,27 @@ mod tests {
         assert_eq!(merged.free_space, 500);
         assert_eq!(merged.file_system, "NTFS");
         assert_eq!(merged.model.as_deref(), Some("model"));
+    }
+
+    #[test]
+    fn health_snapshot_overrides_static_hardware_fields_and_survives_refresh() {
+        let mut existing = drive_info(1_000, 400);
+        apply_drive_health_snapshot(&mut existing, tests_support::drive_health_snapshot('C'));
+
+        assert_eq!(existing.model.as_deref(), Some("health model"));
+        assert_eq!(existing.serial_number.as_deref(), Some("health serial"));
+        assert_eq!(
+            existing.firmware_revision.as_deref(),
+            Some("health firmware")
+        );
+        assert_eq!(existing.bus_type.as_deref(), Some("NVMe"));
+
+        let queried = drive_info(2_000, 800);
+        let merged = merge_drive_info_query(Some(&existing), queried, true);
+        assert_eq!(merged.model.as_deref(), Some("health model"));
+        assert_eq!(
+            merged.health.as_ref().map(|health| health.drive_letter),
+            Some('C')
+        );
     }
 }

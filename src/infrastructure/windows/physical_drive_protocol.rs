@@ -27,6 +27,8 @@ pub(super) fn query_nvme_serial(handle: HANDLE, disk_number: u32) -> Option<Stri
             handle,
             STORAGE_ADAPTER_PROTOCOL_SPECIFIC_PROPERTY,
             PROTOCOL_TYPE_NVME,
+            1,
+            0,
             4096,
         )
     };
@@ -42,6 +44,8 @@ pub(super) fn query_usb_ata_firmware(handle: HANDLE, drive_letter: char) -> Opti
         handle,
         STORAGE_DEVICE_PROTOCOL_SPECIFIC_PROPERTY,
         PROTOCOL_TYPE_ATA,
+        0,
+        0,
         512,
     )
     .and_then(|identify| parse_ata_identify_string(&identify, 23, 4))
@@ -52,6 +56,8 @@ fn query_protocol_identify(
     handle: HANDLE,
     property_id: u32,
     protocol_type: u32,
+    request_value: u32,
+    request_subvalue: u32,
     identify_size: usize,
 ) -> Option<Vec<u8>> {
     let mut buffer = vec![0u8; PROTOCOL_DESCRIPTOR_SIZE + identify_size];
@@ -59,6 +65,8 @@ fn query_protocol_identify(
     write_u32(&mut buffer, 4, PROPERTY_STANDARD_QUERY);
     write_u32(&mut buffer, 8, protocol_type);
     write_u32(&mut buffer, 12, PROTOCOL_DATA_TYPE_IDENTIFY);
+    write_u32(&mut buffer, 16, request_value);
+    write_u32(&mut buffer, 20, request_subvalue);
     write_u32(&mut buffer, 24, PROTOCOL_SPECIFIC_DATA_SIZE as u32);
     write_u32(&mut buffer, 28, identify_size as u32);
 
@@ -156,13 +164,14 @@ fn query_sat_identify(drive_letter: char) -> Option<String> {
         packet.pass_through.cdb[14] = 0xEC;
 
         let mut bytes_returned = 0;
+        let packet_ptr = &mut packet as *mut SatIdentifyPacket;
         let success = unsafe {
             DeviceIoControl(
                 handle,
                 IOCTL_SCSI_PASS_THROUGH,
-                Some((&packet as *const SatIdentifyPacket).cast::<c_void>()),
+                Some(packet_ptr.cast_const().cast::<c_void>()),
                 std::mem::size_of::<SatIdentifyPacket>() as u32,
-                Some((&mut packet as *mut SatIdentifyPacket).cast::<c_void>()),
+                Some(packet_ptr.cast::<c_void>()),
                 std::mem::size_of::<SatIdentifyPacket>() as u32,
                 Some(&mut bytes_returned),
                 None,
@@ -170,6 +179,7 @@ fn query_sat_identify(drive_letter: char) -> Option<String> {
         };
 
         if success.is_err()
+            || bytes_returned < std::mem::size_of::<SatIdentifyPacket>() as u32
             || packet.pass_through.scsi_status != 0
             || packet.pass_through.data_transfer_length < 512
         {

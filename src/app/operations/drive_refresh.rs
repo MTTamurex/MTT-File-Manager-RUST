@@ -47,6 +47,7 @@ fn query_drive_info(
             serial_number: hw.serial_number,
             firmware_revision: hw.firmware_revision,
             bus_type: hw.bus_type,
+            health: None,
         },
     }
 }
@@ -106,7 +107,10 @@ fn spawn_drive_info_refresh(
 }
 
 impl ImageViewerApp {
-    fn apply_drive_info_to_current_computer_items(&mut self, results: &[(String, DriveInfo)]) {
+    pub(crate) fn apply_drive_info_to_current_computer_items(
+        &mut self,
+        results: &[(String, DriveInfo)],
+    ) {
         if !self.navigation_state.is_computer_view {
             return;
         }
@@ -118,6 +122,7 @@ impl ImageViewerApp {
             }
         }
         self.sort_items();
+        self.sync_selected_file_from_all_items();
     }
 
     pub fn refresh_drive_info_async(&mut self) {

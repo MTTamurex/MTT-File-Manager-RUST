@@ -50,6 +50,7 @@ fn selected_entry_display_changed(old: &FileEntry, new: &FileEntry) -> bool {
     selected_entry_content_changed(old, new)
         || old.name != new.name
         || old.folder_cover != new.folder_cover
+        || old.drive_info != new.drive_info
         || old.sync_status != new.sync_status
         || old.is_hidden != new.is_hidden
 }

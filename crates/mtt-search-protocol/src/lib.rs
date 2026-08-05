@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
 
+mod drive_health;
+pub use drive_health::*;
+
 /// Named pipe path for IPC between the search service and the file manager app.
 pub const PIPE_NAME: &str = r"\\.\pipe\MTTFileManagerSearch";
 
@@ -40,6 +43,8 @@ pub enum SearchRequest {
     /// The service computes the sum in-memory from its MFT-based index
     /// (zero disk I/O). Returns an error for non-NTFS or unindexed volumes.
     FolderSize { path: String },
+    /// Query a point-in-time hardware health snapshot for a local drive.
+    GetDriveHealth { drive_letter: char },
 }
 
 impl SearchRequest {
@@ -81,6 +86,11 @@ impl SearchRequest {
                 ));
             }
         }
+        if let SearchRequest::GetDriveHealth { drive_letter } = self {
+            if !drive_letter.is_ascii_alphabetic() {
+                return Err("drive letter must be an ASCII letter".to_string());
+            }
+        }
         Ok(())
     }
 }
@@ -111,6 +121,8 @@ pub enum SearchResponse {
     },
     /// Error message.
     Error(String),
+    /// Point-in-time hardware health information for a physical drive.
+    DriveHealth(DriveHealthSnapshot),
 }
 
 impl SearchResponse {
@@ -124,6 +136,9 @@ impl SearchResponse {
                     MAX_RESULT_ITEMS
                 ));
             }
+        }
+        if let SearchResponse::DriveHealth(snapshot) = self {
+            snapshot.validate()?;
         }
         Ok(())
     }
@@ -330,6 +345,7 @@ mod tests {
             SearchRequest::FolderSize {
                 path: r"C:\projects".to_string(),
             },
+            SearchRequest::GetDriveHealth { drive_letter: 'C' },
         ];
         let seed_payloads: Vec<Vec<u8>> = seeds
             .iter()

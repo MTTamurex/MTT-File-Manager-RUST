@@ -99,6 +99,7 @@ pub(in crate::app) fn build_drive_state(
     drive_info_tx: mpsc::Sender<DriveInfoRefreshResult>,
     drive_info_rx: mpsc::Receiver<DriveInfoRefreshResult>,
 ) -> DriveState {
+    let (drive_health_tx, drive_health_rx) = mpsc::channel();
     DriveState {
         disks,
         cloud_roots,
@@ -112,6 +113,13 @@ pub(in crate::app) fn build_drive_state(
         drive_info_tx,
         drive_info_cache: std::collections::HashMap::new(),
         drive_info_cache_epoch: 0,
+        drive_health_rx,
+        drive_health_tx,
+        drive_health_cache: std::collections::HashMap::new(),
+        drive_health_pending: std::collections::HashMap::new(),
+        drive_health_updated_at: std::collections::HashMap::new(),
+        drive_health_failed_at: std::collections::HashMap::new(),
+        drive_health_next_request_id: 0,
         optimistically_hidden_drives: std::collections::HashSet::new(),
         drive_info_refresh: DriveInfoRefreshTracker::new(std::time::Instant::now()),
     }

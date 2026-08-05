@@ -759,6 +759,28 @@ pub(super) fn handle_client(
                 }
             }
         }
+        SearchRequest::GetDriveHealth { drive_letter } => {
+            if !require_trusted_metadata_client(pipe, "GetDriveHealth") {
+                return;
+            }
+
+            match crate::drive_health::query(drive_letter) {
+                Ok(snapshot) => {
+                    let _ = send_response(pipe, &SearchResponse::DriveHealth(snapshot));
+                }
+                Err(error) => {
+                    eprintln!(
+                        "[DRIVE-HEALTH] query failed for {}: {}",
+                        drive_letter.to_ascii_uppercase(),
+                        crate::redact_paths(&error),
+                    );
+                    let _ = send_response(
+                        pipe,
+                        &SearchResponse::Error("Drive health unavailable".to_string()),
+                    );
+                }
+            }
+        }
     }
 }
 
