@@ -91,10 +91,7 @@ pub(super) fn render_drive_details(
         add_detail(
             ui,
             &t!("file_info.drive_health"),
-            health_text(
-                snapshot.health_state.clone(),
-                snapshot.life_remaining_percent,
-            ),
+            health_text(snapshot.health_state.clone()),
         );
     }
     if let Some(temperature) = snapshot.temperature_celsius {
@@ -128,17 +125,14 @@ fn transfer_mode(snapshot: &mtt_search_protocol::DriveHealthSnapshot) -> Option<
     }
 }
 
-fn health_text(state: DriveHealthState, life: Option<u8>) -> String {
-    let status = match state {
+fn health_text(state: DriveHealthState) -> String {
+    match state {
         DriveHealthState::Good => t!("file_info.health_good"),
         DriveHealthState::Warning => t!("file_info.health_warning"),
         DriveHealthState::Critical => t!("file_info.health_critical"),
         DriveHealthState::Unknown => t!("file_info.health_unknown"),
-    };
-    match life {
-        Some(life) => format!("{status} ({life}%)"),
-        None => status.to_string(),
     }
+    .to_string()
 }
 
 fn format_u128_size(bytes: u128) -> String {
