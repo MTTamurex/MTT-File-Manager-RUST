@@ -30,6 +30,13 @@
 - **Smart thumbnails** — Multi-stage generation: image crate → WIC → Shell API → Media Foundation
 - **Animated GIF playback** — Animated preview on details panel
 
+### Drive Information
+- **Hardware details** — The details panel can show model, serial number, firmware, interface, standard, supported features, rotation, and current/maximum transfer modes for local drives
+- **Health telemetry** — Reads standardized NVMe and ATA/SATA health data such as SMART status, temperature, remaining life, host reads/writes, power cycles, and power-on hours when the device protocol provides those values
+- **NVMe link information** — Reports the current and maximum PCIe generation and link width when Windows exposes the corresponding PCI device properties
+- **On-demand access** — Hardware queries run through the elevated `mtt-search-service` only when a local drive is shown in the details panel; successful results are cached for five minutes
+- **Compatibility limits** — Native NVMe and standard ATA/SATA paths are prioritized. SAT-compatible USB bridges are supported on a best-effort basis, while proprietary USB bridges, RAID controllers, multi-disk volumes, and vendor-specific counter formats may not expose all fields
+
 ### Global Search
 - **Instant search** — Query an in-memory index supporting millions of files
 - **Hybrid volume indexing** — NTFS/ReFS via USN Journal; non-USN volumes via full-tree scan
@@ -40,7 +47,7 @@
 - **File interactions** — Select multiple results, use range selection, copy or cut files, rename inline, open the Windows context menu, and drag results to folders or other applications
 - **Responsive tagged search** — Tagged results are resolved asynchronously and stale requests are cancelled when the query or filters change
 
-> **Disclaimer:** The Global Search feature reads the NTFS/ReFS USN Journal and MFT to build its index. Because accessing these system structures requires elevated privileges, the installer registers a dedicated Windows Service that runs with administrative rights. This is the **only** component of MTT File Manager that requires elevated installation privileges.
+> **Disclaimer:** Global Search reads the NTFS/ReFS USN Journal and MFT, and drive health queries access physical storage devices. Because Windows restricts these operations, the installer registers a dedicated Windows Service that runs with administrative rights. This is the **only** component of MTT File Manager that requires elevated installation privileges.
 
 ### File Operations
 - **Core operations** — Copy, cut, paste, rename, delete
@@ -90,10 +97,10 @@ The app supports three rendering backend choices, selectable in **Settings > Gen
 
 - **Windows 10 or newer, 64-bit** — The installer targets x64-compatible Windows systems.
 - **Microsoft Visual C++ Redistributable 2015-2022 (x64)** — Required by the native runtime dependencies. The official Microsoft installer is available at: https://aka.ms/vs/17/release/vc_redist.x64.exe
-- **Administrator permission during installation** — Required to install and start the Global Search Windows Service (`mtt-search-service.exe`).
+- **Administrator permission during installation** — Required to install and start the Global Search and drive telemetry Windows Service (`mtt-search-service.exe`).
 - **Video codecs for extended thumbnail support** — Optional, but recommended for formats not supported by Windows out of the box. See [Video Thumbnail Codecs](#video-thumbnail-codecs).
 
-The main file manager does not need to run as administrator for normal file browsing and file operations. Elevated permission is needed for the search service because Global Search indexes NTFS/ReFS volumes using low-level Windows filesystem data such as the USN Journal and MFT. Access to those structures is restricted by Windows, so the installer registers a dedicated Windows Service with the required privileges instead of requiring the whole application to run elevated.
+The main file manager does not need to run as administrator for normal file browsing and file operations. Elevated permission is isolated in `mtt-search-service.exe`, which indexes NTFS/ReFS volumes using low-level filesystem data and performs on-demand health queries against physical storage devices. The installer registers this dedicated Windows Service with the required privileges instead of requiring the whole application to run elevated.
 
 ## Usage
 
@@ -152,7 +159,7 @@ Some app-level shortcuts are configurable in Settings > Keyboard Shortcuts. Stan
 | **RAR** | unrar | 0.5 | Native RAR handling via the upstream UnRAR source |
 | **Parallelism** | rayon | 1.10 | Parallel processing |
 | **IPC** | Named Pipes + bincode | 1.3 | App ↔ search service communication |
-| **Service** | windows-service | 0.7 | Background indexing service |
+| **Service** | windows-service | 0.7 | Background indexing and on-demand drive telemetry service |
 | **i18n** | rust-i18n | 3 | Multi-language support (en, pt-BR) |
 
 ### Runtime Dependencies
