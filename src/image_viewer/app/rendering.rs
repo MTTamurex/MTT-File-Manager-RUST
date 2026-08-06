@@ -222,13 +222,17 @@ impl super::DedicatedImageViewerApp {
                 let draw_size = tex_size * fit_scale * self.zoom_factor;
                 self.zoom_percent_display = fit_scale * self.zoom_factor * 100.0;
 
+                // Drag-to-pan only makes sense while the image overflows the
+                // viewport (i.e. scrollbars would be shown).
+                let can_pan = draw_size.x > viewport_size.x || draw_size.y > viewport_size.y;
+
                 // No custom scroll_bar_rect: a zero-height rect (as previously
                 // used to pin the horizontal bar to the bottom) degenerates the
                 // VERTICAL bar's position mapping in egui, panicking
                 // ("min > max" in f32::clamp) the moment the vertical bar is
                 // pressed and freezing the viewer window. The default rect
                 // (inner_rect) places both bars correctly on the panel edges.
-                egui::ScrollArea::both()
+                let output = egui::ScrollArea::both()
                     .id_salt("image_viewer_center_scroll")
                     .auto_shrink([false, false])
                     .scroll_bar_visibility(ScrollBarVisibility::VisibleWhenNeeded)
@@ -246,11 +250,14 @@ impl super::DedicatedImageViewerApp {
                         let image_rect =
                             egui::Rect::from_center_size(canvas_rect.center(), draw_size);
 
+                        // Click = zoom in/out; drag = pan the zoomed image.
+                        let image_sense = egui::Sense::click() | egui::Sense::drag();
+
                         let response = if self.rotation != 0 {
                             let resp = ui.interact(
                                 image_rect,
                                 ui.id().with("image_viewer_rotated"),
-                                egui::Sense::click(),
+                                image_sense,
                             );
                             Self::paint_rotated_image(
                                 ui.painter(),
@@ -262,9 +269,17 @@ impl super::DedicatedImageViewerApp {
                         } else {
                             let image = egui::Image::new(&tex)
                                 .fit_to_exact_size(draw_size)
-                                .sense(egui::Sense::click());
+                                .sense(image_sense);
                             ui.put(image_rect, image)
                         };
+
+                        // Grabbing hand while panning; open hand whenever the
+                        // image overflows and can be dragged.
+                        if response.dragged() {
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+                        } else if response.hovered() && can_pan {
+                            ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+                        }
 
                         if response.hovered() {
                             let wheel_delta = ui.input(|i| i.smooth_scroll_delta().y);
@@ -292,7 +307,33 @@ impl super::DedicatedImageViewerApp {
                                     .clamp(MIN_ZOOM_FACTOR, MAX_ZOOM_FACTOR);
                             }
                         }
+
+                        if response.dragged() {
+                            response.drag_delta()
+                        } else {
+                            egui::Vec2::ZERO
+                        }
                     });
+
+                // Drag-to-pan: egui registers the ScrollArea's built-in
+                // background drag widget BEFORE the content, so the image
+                // widget above would always steal the press. Instead the image
+                // itself reports the drag delta, which is applied to the
+                // scroll area's persisted offset (loaded at the start of the
+                // next frame and clamped to the valid range by the ScrollArea).
+                let pan_delta = output.inner;
+                if pan_delta != egui::Vec2::ZERO {
+                    // Must match the ScrollArea's own id exactly: its builder
+                    // hashes the string into an IdSalt, and `Id::with` hashes
+                    // that salt once more.
+                    let scroll_id = ui.make_persistent_id(egui::IdSalt::new(
+                        "image_viewer_center_scroll",
+                    ));
+                    if let Some(mut state) = egui::scroll_area::State::load(ui.ctx(), scroll_id) {
+                        state.offset -= pan_delta;
+                        state.store(ui.ctx(), scroll_id);
+                    }
+                }
             } else if let Some(err) = &self.last_error {
                 self.zoom_percent_display = 100.0;
                 ui.with_layout(

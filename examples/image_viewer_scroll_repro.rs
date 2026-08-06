@@ -50,9 +50,31 @@ fn render_frame(
 
                 let image_rect = egui::Rect::from_center_size(canvas_rect.center(), DRAW_SIZE);
 
-                // Same interaction shape as the image widget in render_center.
-                let _ = ui.interact(image_rect, ui.id().with("image"), egui::Sense::click());
+                // Same interaction shape as the image widget in render_center:
+                // click = zoom, drag = pan.
+                let response = ui.interact(
+                    image_rect,
+                    ui.id().with("image"),
+                    egui::Sense::click() | egui::Sense::drag(),
+                );
+
+                if response.dragged() {
+                    response.drag_delta()
+                } else {
+                    egui::Vec2::ZERO
+                }
             });
+
+        // Same drag-to-pan state mutation as render_center: apply the image's
+        // drag delta to the scroll area's persisted offset.
+        let pan_delta = output.inner;
+        if pan_delta != egui::Vec2::ZERO {
+            let scroll_id = ui.make_persistent_id(egui::IdSalt::new("image_viewer_center_scroll"));
+            if let Some(mut state) = egui::scroll_area::State::load(ui.ctx(), scroll_id) {
+                state.offset -= pan_delta;
+                state.store(ui.ctx(), scroll_id);
+            }
+        }
 
         last_offset.set(Some(output.state.offset));
     });
@@ -81,6 +103,7 @@ fn run_scenario(
     degenerate: bool,
     x_frac: f32,
     y_frac: f32,
+    drag_delta: egui::Vec2,
 ) -> Result<Option<egui::Vec2>, String> {
     let ctx = egui::Context::default();
     let last_offset = std::cell::Cell::new(None);
@@ -107,7 +130,7 @@ fn run_scenario(
         run_ui(&ctx, input, degenerate, &last_offset);
 
         // Drag.
-        let drag = egui::pos2(press.x, press.y + 80.0);
+        let drag = egui::pos2(press.x + drag_delta.x, press.y + drag_delta.y);
         let mut input = base_input();
         input.events.push(egui::Event::PointerMoved(drag));
         run_ui(&ctx, input, degenerate, &last_offset);
@@ -121,6 +144,10 @@ fn run_scenario(
             modifiers: egui::Modifiers::NONE,
         });
         run_ui(&ctx, input, degenerate, &last_offset);
+
+        // One extra frame so the stored pan offset is loaded back by the
+        // ScrollArea (the mutation takes effect on the frame after it is made).
+        run_ui(&ctx, base_input(), degenerate, &last_offset);
     }));
 
     match result {
@@ -140,27 +167,66 @@ fn main() {
     // Silence the default panic hook noise; we report results ourselves.
     std::panic::set_hook(Box::new(|_| {}));
 
-    let scenarios: [(&str, bool, f32, f32); 4] = [
-        ("BUGGY rect | vertical bar press+drag  ", true, 0.997, 0.5),
-        ("BUGGY rect | horizontal bar press+drag", true, 0.5, 0.995),
-        ("FIXED code | vertical bar press+drag  ", false, 0.997, 0.5),
-        ("FIXED code | horizontal bar press+drag", false, 0.5, 0.995),
+    let scenarios: [(&str, bool, f32, f32, egui::Vec2); 5] = [
+        (
+            "BUGGY rect | vertical bar press+drag  ",
+            true,
+            0.997,
+            0.5,
+            egui::vec2(0.0, 80.0),
+        ),
+        (
+            "BUGGY rect | horizontal bar press+drag",
+            true,
+            0.5,
+            0.995,
+            egui::vec2(80.0, 0.0),
+        ),
+        (
+            "FIXED code | vertical bar press+drag  ",
+            false,
+            0.997,
+            0.5,
+            egui::vec2(0.0, 80.0),
+        ),
+        (
+            "FIXED code | horizontal bar press+drag",
+            false,
+            0.5,
+            0.995,
+            egui::vec2(80.0, 0.0),
+        ),
+        // Drag the image itself toward the top-left: content must scroll
+        // down/right (positive offset on both axes).
+        (
+            "FIXED code | image drag-to-pan          ",
+            false,
+            0.5,
+            0.5,
+            egui::vec2(-80.0, -80.0),
+        ),
     ];
 
     let mut failures = 0;
-    for (label, degenerate, x, y) in scenarios {
-        match run_scenario(degenerate, x, y) {
+    for (label, degenerate, x, y, drag) in scenarios {
+        match run_scenario(degenerate, x, y, drag) {
             Ok(offset) => {
                 let offset_str = offset
                     .map(|o| format!("({:.1}, {:.1})", o.x, o.y))
                     .unwrap_or_else(|| "?".into());
                 println!("{label} => OK, final scroll offset = {offset_str}");
                 if !degenerate {
-                    // Functional check: after pressing+dragging a bar toward the
-                    // bottom-right, the corresponding scroll axis must have moved.
-                    let moved = offset.is_some_and(|o| o.x > 1.0 || o.y > 1.0);
+                    // Functional check: the drag must move the content along
+                    // the expected axis.
+                    let moved = if label.contains("vertical") {
+                        offset.is_some_and(|o| o.y > 1.0)
+                    } else if label.contains("horizontal") {
+                        offset.is_some_and(|o| o.x > 1.0)
+                    } else {
+                        offset.is_some_and(|o| o.x > 1.0 && o.y > 1.0)
+                    };
                     if !moved {
-                        println!("  !! FAIL: scrollbar drag did not move the content");
+                        println!("  !! FAIL: drag did not move the content as expected");
                         failures += 1;
                     }
                 }
