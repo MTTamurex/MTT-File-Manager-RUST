@@ -197,13 +197,26 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
             ui.visuals_mut().widgets.active.bg_stroke = egui::Stroke::new(1.0, theme::COLOR_ACCENT);
 
             egui::Frame::window(ui.style())
+                .fill(if dark_mode {
+                    egui::Color32::from_rgb(43, 43, 43)
+                } else {
+                    egui::Color32::from_rgb(246, 246, 246)
+                })
+                .stroke(egui::Stroke::new(
+                    1.0,
+                    if dark_mode {
+                        egui::Color32::from_gray(70)
+                    } else {
+                        egui::Color32::from_gray(220)
+                    },
+                ))
                 .inner_margin(egui::Margin::same(16))
-                .corner_radius(8.0)
+                .corner_radius(10.0)
                 .shadow(egui::epaint::Shadow {
                     spread: 8,
-                    blur: 16,
-                    color: egui::Color32::from_black_alpha(60),
-                    offset: [0, 4],
+                    blur: 24,
+                    color: egui::Color32::from_black_alpha(70),
+                    offset: [0, 8],
                 })
                 .show(ui, |ui| {
                     ui.set_width(modal_width - 32.0);
@@ -271,18 +284,22 @@ pub fn render_global_search_overlay(app: &mut ImageViewerApp, ctx: &egui::Contex
                     );
 
                     // Draw background and border
-                    let visuals = ui.style().interact(&container_resp);
-                    ui.painter().rect_filled(
-                        search_rect,
-                        visuals.corner_radius,
-                        ui.visuals().widgets.inactive.bg_fill,
+                    let input_fill = if dark_mode {
+                        egui::Color32::from_gray(50)
+                    } else {
+                        egui::Color32::WHITE
+                    };
+                    let input_stroke = egui::Stroke::new(
+                        1.0,
+                        if dark_mode {
+                            egui::Color32::from_gray(72)
+                        } else {
+                            egui::Color32::from_gray(214)
+                        },
                     );
-                    ui.painter().rect_stroke(
-                        search_rect,
-                        visuals.corner_radius,
-                        ui.visuals().widgets.inactive.bg_stroke,
-                        egui::StrokeKind::Inside,
-                    );
+                    ui.painter().rect_filled(search_rect, 8.0, input_fill);
+                    ui.painter()
+                        .rect_stroke(search_rect, 8.0, input_stroke, egui::StrokeKind::Inside);
 
                     let mut search_ui = ui.new_child(
                         egui::UiBuilder::new()
@@ -561,6 +578,12 @@ fn phase_label(phase: &str) -> String {
 }
 
 fn render_filter_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
+    let dark_mode = ui.visuals().dark_mode;
+    let hover_color = if dark_mode {
+        theme::color_dark_hover()
+    } else {
+        theme::color_hover()
+    };
     let categories = [
         GlobalSearchCategory::All,
         GlobalSearchCategory::Files,
@@ -595,6 +618,7 @@ fn render_filter_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
             egui::vec2(left_width, 28.0),
             egui::Layout::left_to_right(egui::Align::Center),
             |ui| {
+                ui.spacing_mut().item_spacing.x = 4.0;
                 ui.label(
                     egui::RichText::new(t!("search.filters"))
                         .size(10.0)
@@ -603,10 +627,45 @@ fn render_filter_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
 
                 for category in categories {
                     let selected = app.global_search.category == category;
-                    if ui
-                        .selectable_label(selected, category_label(category))
-                        .clicked()
-                    {
+                    let label = category_label(category);
+                    let font_id = egui::FontId::proportional(12.0);
+                    let text_color = if selected {
+                        theme::COLOR_ACCENT
+                    } else {
+                        theme::text_color(dark_mode)
+                    };
+                    let galley = ui
+                        .painter()
+                        .layout_no_wrap(label, font_id.clone(), text_color);
+                    let (chip_rect, chip_resp) = ui.allocate_exact_size(
+                        egui::vec2(galley.rect.width() + 12.0, 24.0),
+                        egui::Sense::click(),
+                    );
+                    let chip_resp = chip_resp.on_hover_cursor(egui::CursorIcon::PointingHand);
+                    if ui.is_rect_visible(chip_rect) {
+                        if selected {
+                            ui.painter().rect_filled(
+                                chip_rect,
+                                7.0,
+                                if dark_mode {
+                                    egui::Color32::from_rgba_unmultiplied(0, 120, 215, 55)
+                                } else {
+                                    egui::Color32::from_rgba_unmultiplied(0, 120, 215, 24)
+                                },
+                            );
+                        } else if chip_resp.hovered() {
+                            ui.painter().rect_filled(chip_rect, 7.0, hover_color);
+                        }
+                        ui.painter().galley(
+                            egui::pos2(
+                                chip_rect.min.x + 6.0,
+                                chip_rect.center().y - 0.5 * galley.size().y,
+                            ),
+                            galley,
+                            text_color,
+                        );
+                    }
+                    if chip_resp.clicked() {
                         app.global_search.category = category;
                         app.global_search.clear_result_selection();
                     }
