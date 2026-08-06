@@ -39,6 +39,7 @@ pub fn handle_startup_sequence(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 }
             }
             crate::ui::theme::apply_scroll_style(ctx);
+            crate::ui::theme::apply_popup_style(ctx);
 
             // Frame 1: Apply saved geometry while window is hidden
             if app.layout.saved_is_maximized {

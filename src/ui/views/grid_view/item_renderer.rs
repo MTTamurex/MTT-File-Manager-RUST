@@ -49,38 +49,7 @@ fn render_drive_tooltip(ui: &mut Ui, item: &FileEntry) {
     let Some(drive) = &item.drive_info else {
         return;
     };
-
-    let file_system = if drive.file_system.is_empty() {
-        "NTFS"
-    } else {
-        drive.file_system.as_str()
-    };
-    let used_space = drive.total_space.saturating_sub(drive.free_space);
-
-    ui.horizontal(|ui| {
-        ui.label(&*t!("file_info.type"));
-        ui.label(format!("{:?}", drive.drive_type));
-    });
-    ui.horizontal(|ui| {
-        ui.label(&*t!("file_info.used_space"));
-        ui.label(crate::infrastructure::windows::format_size(used_space));
-    });
-    ui.horizontal(|ui| {
-        ui.label(&*t!("file_info.free_space"));
-        ui.label(crate::infrastructure::windows::format_size(
-            drive.free_space,
-        ));
-    });
-    ui.horizontal(|ui| {
-        ui.label(&*t!("file_info.total_space"));
-        ui.label(crate::infrastructure::windows::format_size(
-            drive.total_space,
-        ));
-    });
-    ui.horizontal(|ui| {
-        ui.label(&*t!("file_info.filesystem"));
-        ui.label(file_system);
-    });
+    crate::ui::views::file_tooltip::drive_rows(ui, drive);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -233,33 +202,34 @@ pub(super) fn render_grid_item(
                             .show(|ui: &mut Ui| {
                                 ui.set_max_width(300.0);
                                 ui.vertical(|ui| {
-                                    ui.label(
-                                egui::RichText::new(
-                                    crate::ui::components::item_slot::display_name_for_item(item)
+                                    crate::ui::views::file_tooltip::header(
+                                        ui,
+                                        crate::ui::components::item_slot::display_name_for_item(
+                                            item,
+                                        )
                                         .as_ref(),
-                                )
-                                .strong(),
-                            );
-                                    ui.separator();
+                                    );
                                     if item.drive_info.is_some() {
                                         render_drive_tooltip(ui, item);
                                         return;
                                     }
-                                    ui.horizontal(|ui| {
-                                        ui.label(rust_i18n::t!("file_info.type").to_string());
-                                        ui.label(get_file_type_string(item));
-                                    });
+                                    crate::ui::views::file_tooltip::info_row(
+                                        ui,
+                                        &t!("file_info.type"),
+                                        &get_file_type_string(item),
+                                    );
                                     if !item.is_dir || item.is_archive() {
-                                        ui.horizontal(|ui| {
-                                            ui.label(rust_i18n::t!("file_info.size").to_string());
-                                            ui.label(crate::infrastructure::windows::format_size(
+                                        crate::ui::views::file_tooltip::info_row(
+                                            ui,
+                                            &t!("file_info.size"),
+                                            &crate::infrastructure::windows::format_size(
                                                 resolve_tooltip_live_size(ui, item, ctx),
-                                            ));
-                                        });
+                                            ),
+                                        );
                                     }
                                     let (date_lbl, date_val) = if is_recycle {
                                         (
-                                            rust_i18n::t!("list_view.date_deleted").to_string(),
+                                            t!("list_view.date_deleted").to_string(),
                                             if item.modified > 0 {
                                                 crate::infrastructure::windows::format_date(
                                                     item.modified,
@@ -272,31 +242,24 @@ pub(super) fn render_grid_item(
                                         )
                                     } else {
                                         (
-                                            rust_i18n::t!("list_view.date_modified").to_string(),
+                                            t!("list_view.date_modified").to_string(),
                                             crate::infrastructure::windows::format_date(
                                                 item.modified,
                                             ),
                                         )
                                     };
-                                    ui.horizontal(|ui| {
-                                        ui.label(date_lbl);
-                                        ui.label(":");
-                                        ui.label(date_val);
-                                    });
+                                    crate::ui::views::file_tooltip::info_row(
+                                        ui, &date_lbl, &date_val,
+                                    );
                                     if !is_recycle {
                                         if let Some(created) = item.created {
-                                            ui.horizontal(|ui| {
-                                                ui.label(
-                                                    rust_i18n::t!("file_info.date_created")
-                                                        .to_string(),
-                                                );
-                                                ui.label(":");
-                                                ui.label(
-                                                    crate::infrastructure::windows::format_date(
-                                                        created,
-                                                    ),
-                                                );
-                                            });
+                                            crate::ui::views::file_tooltip::info_row(
+                                                ui,
+                                                &t!("file_info.date_created"),
+                                                &crate::infrastructure::windows::format_date(
+                                                    created,
+                                                ),
+                                            );
                                         }
                                     }
                                 });

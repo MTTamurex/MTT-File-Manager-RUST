@@ -237,6 +237,7 @@ impl ImageViewerApp {
             }
         }
         crate::ui::theme::apply_scroll_style(&ctx);
+        crate::ui::theme::apply_popup_style(&ctx);
 
         // Load folder locks from database
         let folder_locks = app_state_db.get_all_folder_locks();

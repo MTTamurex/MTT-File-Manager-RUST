@@ -1,6 +1,6 @@
 //! Tooltip and icon rendering for list view items
 
-use eframe::egui::{self, Color32, Pos2, Rect, RichText, Ui};
+use eframe::egui::{self, Color32, Pos2, Rect, Ui};
 use rust_i18n::t;
 
 use super::helpers::get_file_type_string;
@@ -55,34 +55,7 @@ fn render_drive_tooltip(ui: &mut Ui, item: &FileEntry) {
     let Some(drive) = &item.drive_info else {
         return;
     };
-
-    let file_system = if drive.file_system.is_empty() {
-        "NTFS"
-    } else {
-        drive.file_system.as_str()
-    };
-    let used_space = drive.total_space.saturating_sub(drive.free_space);
-
-    ui.horizontal(|ui| {
-        ui.label(t!("file_info.type"));
-        ui.label(format!("{:?}", drive.drive_type));
-    });
-    ui.horizontal(|ui| {
-        ui.label(t!("file_info.used_space"));
-        ui.label(format_size(used_space));
-    });
-    ui.horizontal(|ui| {
-        ui.label(t!("file_info.free_space"));
-        ui.label(format_size(drive.free_space));
-    });
-    ui.horizontal(|ui| {
-        ui.label(t!("file_info.total_space"));
-        ui.label(format_size(drive.total_space));
-    });
-    ui.horizontal(|ui| {
-        ui.label(t!("file_info.filesystem"));
-        ui.label(file_system);
-    });
+    crate::ui::views::file_tooltip::drive_rows(ui, drive);
 }
 
 // PERFORMANCE: Tooltip debounce to avoid creation/destruction during scroll
@@ -141,16 +114,11 @@ pub(crate) fn render_item_tooltip(
                         .show(|ui: &mut Ui| {
                             ui.set_max_width(300.0);
                             ui.vertical(|ui| {
-                                ui.label(
-                                    RichText::new(
-                                        crate::ui::components::item_slot::display_name_for_item(
-                                            item,
-                                        )
+                                crate::ui::views::file_tooltip::header(
+                                    ui,
+                                    crate::ui::components::item_slot::display_name_for_item(item)
                                         .as_ref(),
-                                    )
-                                    .strong(),
                                 );
-                                ui.separator();
                                 if item.drive_info.is_some() {
                                     render_drive_tooltip(ui, item);
                                     return;
@@ -158,36 +126,20 @@ pub(crate) fn render_item_tooltip(
                                 // Thumbnail preview for media files
                                 if !item.is_dir && item.is_media() {
                                     if let Some(tex) = ctx.texture_cache.get(&item.path).cloned() {
-                                        let tex_size = tex.size_vec2();
-                                        let max_w = 280.0_f32;
-                                        let max_h = 180.0_f32;
-                                        let scale =
-                                            (max_w / tex_size.x).min(max_h / tex_size.y).min(1.0);
-                                        let display_size =
-                                            egui::vec2(tex_size.x * scale, tex_size.y * scale);
-                                        ui.with_layout(
-                                            egui::Layout::top_down(egui::Align::Center),
-                                            |ui| {
-                                                ui.add(
-                                                    egui::Image::new(&tex)
-                                                        .fit_to_exact_size(display_size),
-                                                );
-                                            },
-                                        );
-                                        ui.add_space(4.0);
+                                        crate::ui::views::file_tooltip::media_preview(ui, &tex);
                                     }
                                 }
-                                ui.horizontal(|ui| {
-                                    ui.label(t!("file_info.type"));
-                                    ui.label(get_file_type_string(item));
-                                });
+                                crate::ui::views::file_tooltip::info_row(
+                                    ui,
+                                    &t!("file_info.type"),
+                                    &get_file_type_string(item),
+                                );
                                 if !item.is_dir || item.is_archive() {
-                                    ui.horizontal(|ui| {
-                                        ui.label(t!("file_info.size"));
-                                        ui.label(format_size(resolve_tooltip_live_size(
-                                            ui, item, ctx,
-                                        )));
-                                    });
+                                    crate::ui::views::file_tooltip::info_row(
+                                        ui,
+                                        &t!("file_info.size"),
+                                        &format_size(resolve_tooltip_live_size(ui, item, ctx)),
+                                    );
                                 }
                                 let date_lbl = if is_recycle_bin {
                                     t!("list_view.date_deleted")
@@ -205,18 +157,14 @@ pub(crate) fn render_item_tooltip(
                                 } else {
                                     format_date(item.modified)
                                 };
-                                ui.horizontal(|ui| {
-                                    ui.label(date_lbl);
-                                    ui.label(":");
-                                    ui.label(date_val);
-                                });
+                                crate::ui::views::file_tooltip::info_row(ui, &date_lbl, &date_val);
                                 if !is_recycle_bin {
                                     if let Some(created) = item.created {
-                                        ui.horizontal(|ui| {
-                                            ui.label(t!("file_info.date_created"));
-                                            ui.label(":");
-                                            ui.label(format_date(created));
-                                        });
+                                        crate::ui::views::file_tooltip::info_row(
+                                            ui,
+                                            &t!("file_info.date_created"),
+                                            &format_date(created),
+                                        );
                                     }
                                 }
                             });

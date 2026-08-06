@@ -190,6 +190,20 @@ pub fn viewer_visuals(dark_mode: bool) -> eframe::egui::Visuals {
     visuals
 }
 
+/// Modern popup/tooltip chrome: rounded corners + soft deep shadow.
+/// Call after every `ctx.set_visuals()`.
+pub fn apply_popup_style(ctx: &egui::Context) {
+    ctx.global_style_mut(|style| {
+        style.visuals.menu_corner_radius = eframe::egui::CornerRadius::same(8);
+        style.visuals.popup_shadow = eframe::egui::epaint::Shadow {
+            offset: [0, 8],
+            blur: 20,
+            spread: 0,
+            color: Color32::from_black_alpha(45),
+        };
+    });
+}
+
 /// (bar fill, separator stroke) for viewer toolbars/sidebars.
 pub fn viewer_bar_colors(dark_mode: bool) -> (Color32, Color32) {
     if dark_mode {

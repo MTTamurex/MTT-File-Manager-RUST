@@ -56,30 +56,36 @@ pub(super) fn render(
                 .show(|ui: &mut egui::Ui| {
                     ui.set_max_width(300.0);
                     ui.vertical(|ui| {
-                        ui.label(egui::RichText::new(result_name).strong());
-                        ui.separator();
-                        render_thumbnail(ui, thumbnail.as_ref());
-                        ui.horizontal(|ui| {
-                            ui.label(t!("file_info.type"));
-                            ui.label(file_type);
-                        });
+                        crate::ui::views::file_tooltip::header(ui, result_name);
+                        crate::ui::views::file_tooltip::media_preview_from_option(
+                            ui,
+                            thumbnail.as_ref(),
+                        );
+                        crate::ui::views::file_tooltip::info_row(
+                            ui,
+                            &t!("file_info.type"),
+                            file_type,
+                        );
                         if !is_directory {
-                            ui.horizontal(|ui| {
-                                ui.label(t!("file_info.size"));
-                                ui.label(size_text.as_deref().unwrap_or("-"));
-                            });
+                            crate::ui::views::file_tooltip::info_row(
+                                ui,
+                                &t!("file_info.size"),
+                                size_text.as_deref().unwrap_or("-"),
+                            );
                         }
-                        ui.horizontal(|ui| {
-                            ui.label(t!("file_info.date_modified"));
-                            ui.label(crate::infrastructure::windows::format_date(modified_ts));
-                        });
+                        crate::ui::views::file_tooltip::info_row(
+                            ui,
+                            &t!("file_info.date_modified"),
+                            &crate::infrastructure::windows::format_date(modified_ts),
+                        );
                         if let Some(created_ts) =
                             app.global_search.created_ts_for_index(source_index)
                         {
-                            ui.horizontal(|ui| {
-                                ui.label(t!("file_info.date_created"));
-                                ui.label(crate::infrastructure::windows::format_date(created_ts));
-                            });
+                            crate::ui::views::file_tooltip::info_row(
+                                ui,
+                                &t!("file_info.date_created"),
+                                &crate::infrastructure::windows::format_date(created_ts),
+                            );
                         }
                         render_tags(ui, app, tag_ids);
                     });
@@ -168,31 +174,27 @@ fn resolve_thumbnail(
     None
 }
 
-fn render_thumbnail(ui: &mut egui::Ui, texture: Option<&egui::TextureHandle>) {
-    let Some(texture) = texture else {
-        return;
-    };
-    let texture_size = texture.size_vec2();
-    let scale = (280.0 / texture_size.x)
-        .min(180.0 / texture_size.y)
-        .min(1.0);
-    let display_size = egui::vec2(texture_size.x * scale, texture_size.y * scale);
-    ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
-        ui.add(egui::Image::new(texture).fit_to_exact_size(display_size));
-    });
-    ui.add_space(4.0);
-}
-
 fn render_tags(ui: &mut egui::Ui, app: &ImageViewerApp, tag_ids: &[i64]) {
     if tag_ids.is_empty() {
         return;
     }
+    let dark_mode = ui.visuals().dark_mode;
     ui.horizontal(|ui| {
-        ui.label(if tag_ids.len() == 1 {
-            t!("file_info.tag")
-        } else {
-            t!("file_info.tags")
-        });
+        ui.allocate_ui_with_layout(
+            egui::vec2(110.0, 18.0),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                ui.label(
+                    egui::RichText::new(if tag_ids.len() == 1 {
+                        t!("file_info.tag")
+                    } else {
+                        t!("file_info.tags")
+                    })
+                    .size(12.0)
+                    .color(crate::ui::theme::secondary_text_color(dark_mode)),
+                );
+            },
+        );
         for tag_id in tag_ids {
             if let Some(tag) = app.tag_definitions.get(tag_id) {
                 let (tag_icon_rect, _) =
@@ -203,7 +205,12 @@ fn render_tags(ui: &mut egui::Ui, app: &ImageViewerApp, tag_ids: &[i64]) {
                     9.0,
                     tag.color.to_color32(),
                 );
-                ui.label(&tag.name);
+                ui.add_space(2.0);
+                ui.label(
+                    egui::RichText::new(tag.name.clone())
+                        .size(12.0)
+                        .color(crate::ui::theme::text_color(dark_mode)),
+                );
                 ui.add_space(6.0);
             }
         }

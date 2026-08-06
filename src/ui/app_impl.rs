@@ -493,6 +493,7 @@ impl eframe::App for ImageViewerApp {
                     }
                 }
                 crate::ui::theme::apply_scroll_style(ctx);
+                crate::ui::theme::apply_popup_style(ctx);
                 self.save_preferences();
                 self.force_save_preferences();
             }
