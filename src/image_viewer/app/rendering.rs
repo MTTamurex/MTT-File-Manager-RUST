@@ -1,4 +1,5 @@
 use crate::image_viewer::loader;
+use crate::ui::theme;
 use eframe::egui;
 use eframe::egui::scroll_area::ScrollBarVisibility;
 use rust_i18n::t;
@@ -8,96 +9,110 @@ use super::{MAX_ZOOM_FACTOR, MIN_ZOOM_FACTOR};
 impl super::DedicatedImageViewerApp {
     pub(super) fn render_top_bar(&mut self, root_ui: &mut egui::Ui) {
         let ctx = root_ui.ctx().clone();
-        egui::Panel::top("image_viewer_top_bar").show(root_ui, |ui| {
-            let mut selected_format = None;
-            ui.horizontal_wrapped(|ui| {
-                let total = self.sequence.entries.len();
-                let prev_enabled = self.current_index > 0;
-                let next_enabled = self.current_index + 1 < total;
+        let (bar_fill, sep_color) = theme::viewer_bar_colors(root_ui.visuals().dark_mode);
+        egui::Panel::top("image_viewer_top_bar")
+            .frame(
+                egui::Frame::new()
+                    .fill(bar_fill)
+                    .inner_margin(egui::Margin::symmetric(10, 6)),
+            )
+            .show(root_ui, |ui| {
+                let mut selected_format = None;
+                ui.horizontal_wrapped(|ui| {
+                    let total = self.sequence.entries.len();
+                    let prev_enabled = self.current_index > 0;
+                    let next_enabled = self.current_index + 1 < total;
 
-                if ui
-                    .add_enabled(
-                        prev_enabled,
-                        egui::Button::new(&*t!("imageviewer.previous")),
-                    )
-                    .clicked()
-                {
-                    self.navigate_prev(&ctx);
-                }
-
-                if ui
-                    .add_enabled(next_enabled, egui::Button::new(&*t!("imageviewer.next")))
-                    .clicked()
-                {
-                    self.navigate_next(&ctx);
-                }
-
-                ui.separator();
-
-                if ui
-                    .button("↺")
-                    .on_hover_text(t!("imageviewer.rotate_ccw"))
-                    .clicked()
-                {
-                    self.rotate_ccw();
-                }
-
-                if ui
-                    .button("↻")
-                    .on_hover_text(t!("imageviewer.rotate_cw"))
-                    .clicked()
-                {
-                    self.rotate_cw();
-                }
-
-                if self.rotation != 0 {
-                    ui.label(format!("{}°", self.rotation));
-                }
-
-                ui.add_enabled_ui(
-                    !self.sequence.entries.is_empty() && !self.conversion_in_progress,
-                    |ui| {
-                        ui.menu_button(t!("imageviewer.convert").to_string(), |ui| {
-                            for format in loader::ExportImageFormat::ALL {
-                                let label = Self::export_format_label(format);
-                                if ui.button(label).clicked() {
-                                    selected_format = Some(format);
-                                }
-                            }
-                        });
-                    },
-                );
-
-                if self.current_path().is_some() {
-                    let clicked = ui
+                    if ui
                         .add_enabled(
-                            !self.wallpaper_in_progress,
-                            egui::Button::new(&*t!("imageviewer.set_wallpaper")),
+                            prev_enabled,
+                            egui::Button::new(&*t!("imageviewer.previous")),
                         )
-                        .clicked();
-                    if clicked {
-                        self.start_wallpaper(&ctx);
+                        .clicked()
+                    {
+                        self.navigate_prev(&ctx);
                     }
+
+                    if ui
+                        .add_enabled(next_enabled, egui::Button::new(&*t!("imageviewer.next")))
+                        .clicked()
+                    {
+                        self.navigate_next(&ctx);
+                    }
+
+                    ui.separator();
+
+                    if ui
+                        .button("↺")
+                        .on_hover_text(t!("imageviewer.rotate_ccw"))
+                        .clicked()
+                    {
+                        self.rotate_ccw();
+                    }
+
+                    if ui
+                        .button("↻")
+                        .on_hover_text(t!("imageviewer.rotate_cw"))
+                        .clicked()
+                    {
+                        self.rotate_cw();
+                    }
+
+                    if self.rotation != 0 {
+                        ui.label(format!("{}°", self.rotation));
+                    }
+
+                    ui.add_enabled_ui(
+                        !self.sequence.entries.is_empty() && !self.conversion_in_progress,
+                        |ui| {
+                            ui.menu_button(t!("imageviewer.convert").to_string(), |ui| {
+                                for format in loader::ExportImageFormat::ALL {
+                                    let label = Self::export_format_label(format);
+                                    if ui.button(label).clicked() {
+                                        selected_format = Some(format);
+                                    }
+                                }
+                            });
+                        },
+                    );
+
+                    if self.current_path().is_some() {
+                        let clicked = ui
+                            .add_enabled(
+                                !self.wallpaper_in_progress,
+                                egui::Button::new(&*t!("imageviewer.set_wallpaper")),
+                            )
+                            .clicked();
+                        if clicked {
+                            self.start_wallpaper(&ctx);
+                        }
+                    }
+
+                    ui.separator();
+                    if total == 0 {
+                        ui.label("0 / 0");
+                    } else {
+                        ui.label(format!("{} / {}", self.current_index + 1, total));
+                    }
+                    ui.separator();
+                    if let Some(path) = self.current_path() {
+                        if let Some(parent) = path.parent() {
+                            ui.small(parent.to_string_lossy());
+                        }
+                    }
+                });
+
+                if let Some(format) = selected_format {
+                    self.start_conversion(format, &ctx);
                 }
 
-                ui.separator();
-                if total == 0 {
-                    ui.label("0 / 0");
-                } else {
-                    ui.label(format!("{} / {}", self.current_index + 1, total));
-                }
-                ui.separator();
-                if let Some(path) = self.current_path() {
-                    if let Some(parent) = path.parent() {
-                        ui.small(parent.to_string_lossy());
-                    }
-                }
+                let inner = ui.max_rect();
+                ui.painter().hline(
+                    inner.x_range(),
+                    inner.max.y + 6.0,
+                    egui::Stroke::new(1.0, sep_color),
+                );
             });
-
-            if let Some(format) = selected_format {
-                self.start_conversion(format, &ctx);
-            }
-        });
     }
 
     pub(super) fn sync_window_title(&mut self, ctx: &egui::Context) {
@@ -121,38 +136,52 @@ impl super::DedicatedImageViewerApp {
     }
 
     pub(super) fn render_bottom_bar(&mut self, root_ui: &mut egui::Ui) {
-        egui::Panel::bottom("image_viewer_bottom_bar").show(root_ui, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                ui.label(&*t!("imageviewer.zoom"));
+        let (bar_fill, sep_color) = theme::viewer_bar_colors(root_ui.visuals().dark_mode);
+        egui::Panel::bottom("image_viewer_bottom_bar")
+            .frame(
+                egui::Frame::new()
+                    .fill(bar_fill)
+                    .inner_margin(egui::Margin::symmetric(10, 6)),
+            )
+            .show(root_ui, |ui| {
+                let inner = ui.max_rect();
+                ui.painter().hline(
+                    inner.x_range(),
+                    inner.min.y - 6.0,
+                    egui::Stroke::new(1.0, sep_color),
+                );
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(&*t!("imageviewer.zoom"));
 
-                let mut slider_zoom = self.zoom_factor;
-                let slider = egui::Slider::new(&mut slider_zoom, MIN_ZOOM_FACTOR..=MAX_ZOOM_FACTOR)
-                    .show_value(false);
+                    let mut slider_zoom = self.zoom_factor;
+                    let slider =
+                        egui::Slider::new(&mut slider_zoom, MIN_ZOOM_FACTOR..=MAX_ZOOM_FACTOR)
+                            .show_value(false);
 
-                if ui.add_sized([260.0, 20.0], slider).changed() {
-                    self.zoom_factor = slider_zoom.clamp(MIN_ZOOM_FACTOR, MAX_ZOOM_FACTOR);
-                }
+                    if ui.add_sized([260.0, 20.0], slider).changed() {
+                        self.zoom_factor = slider_zoom.clamp(MIN_ZOOM_FACTOR, MAX_ZOOM_FACTOR);
+                    }
 
-                ui.label(format!("{:.0}%", self.zoom_percent_display.round()));
+                    ui.label(format!("{:.0}%", self.zoom_percent_display.round()));
 
-                ui.separator();
-                if let Some((w, h)) = self.image_resolution {
-                    ui.label(&*t!("imageviewer.resolution", w = w, h = h));
-                } else {
-                    ui.label(&*t!("imageviewer.resolution_none"));
-                }
-
-                if let Some(status) = &self.status_message {
                     ui.separator();
-                    let color = if status.is_error {
-                        egui::Color32::from_rgb(220, 80, 80)
+                    if let Some((w, h)) = self.image_resolution {
+                        ui.label(&*t!("imageviewer.resolution", w = w, h = h));
                     } else {
-                        egui::Color32::from_rgb(80, 170, 90)
-                    };
-                    ui.colored_label(color, &status.text);
-                }
+                        ui.label(&*t!("imageviewer.resolution_none"));
+                    }
+
+                    if let Some(status) = &self.status_message {
+                        ui.separator();
+                        let color = if status.is_error {
+                            egui::Color32::from_rgb(220, 80, 80)
+                        } else {
+                            egui::Color32::from_rgb(80, 170, 90)
+                        };
+                        ui.colored_label(color, &status.text);
+                    }
+                });
             });
-        });
     }
 
     pub(super) fn render_center(&mut self, root_ui: &mut egui::Ui) {

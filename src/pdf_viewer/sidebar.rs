@@ -1,3 +1,4 @@
+use crate::ui::theme;
 use eframe::egui;
 use rust_i18n::t;
 
@@ -10,10 +11,16 @@ const THUMB_MAX_H: f32 = 170.0;
 impl PdfViewerApp {
     pub(super) fn show_sidebar(&mut self, root_ui: &mut egui::Ui) {
         let ctx = root_ui.ctx().clone();
+        let (bar_fill, sep_color) = theme::viewer_bar_colors(root_ui.visuals().dark_mode);
         let panel = egui::Panel::left("pdf_thumbnail_sidebar")
             .resizable(true)
             .default_size(170.0)
             .size_range(140.0..=260.0)
+            .frame(
+                egui::Frame::new()
+                    .fill(bar_fill)
+                    .inner_margin(egui::Margin::symmetric(8, 6)),
+            )
             .show(root_ui, |ui| {
                 ui.heading(t!("pdfviewer.thumbnails_title").to_string());
                 ui.separator();
@@ -91,6 +98,13 @@ impl PdfViewerApp {
                     }
                 });
                 self.thumbnail_rows = Some(rows);
+
+                let inner = ui.max_rect();
+                ui.painter().vline(
+                    inner.max.x + 8.0,
+                    inner.y_range(),
+                    egui::Stroke::new(1.0, sep_color),
+                );
             });
 
         if ctx.input(|input| input.pointer.any_pressed()) {
@@ -156,7 +170,7 @@ impl PdfViewerApp {
                         }
 
                         let stroke_color = if is_current {
-                            egui::Color32::from_rgb(80, 150, 255)
+                            theme::COLOR_ACCENT
                         } else if ui.visuals().dark_mode {
                             egui::Color32::from_gray(90)
                         } else {
@@ -170,12 +184,14 @@ impl PdfViewerApp {
                         );
                     }
 
-                    let text = if is_current {
-                        egui::RichText::new(t!("pdfviewer.page", page = idx + 1).to_string())
-                            .strong()
-                    } else {
-                        egui::RichText::new(t!("pdfviewer.page", page = idx + 1).to_string())
-                    };
+                    let mut text =
+                        egui::RichText::new(t!("pdfviewer.page", page = idx + 1).to_string());
+                    if is_current {
+                        text = text.strong().color(theme::COLOR_ACCENT);
+                    }
+                    // Avoid the default blue selection highlight behind the label.
+                    ui.visuals_mut().selection.bg_fill = egui::Color32::TRANSPARENT;
+                    ui.visuals_mut().selection.stroke = egui::Stroke::NONE;
                     if ui.selectable_label(is_current, text).clicked() {
                         self.thumbnail_keyboard_focus = true;
                         self.go_to_page(idx);

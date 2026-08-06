@@ -191,98 +191,115 @@ impl PdfViewerApp {
             return;
         }
 
-        egui::Panel::top("pdf_search_bar").show(root_ui, |ui| {
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 4.0;
+        egui::Panel::top("pdf_search_bar")
+            .frame({
+                let (bar_fill, _) =
+                    crate::ui::theme::viewer_bar_colors(root_ui.visuals().dark_mode);
+                egui::Frame::new()
+                    .fill(bar_fill)
+                    .inner_margin(egui::Margin::symmetric(10, 6))
+            })
+            .show(root_ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
 
-                let response = ui.add(
-                    egui::TextEdit::singleline(&mut self.search_query)
-                        .hint_text(t!("pdfviewer.search_placeholder").to_string())
-                        .desired_width(240.0),
-                );
-                self.search_input_has_focus = response.has_focus();
+                    let response = ui.add(
+                        egui::TextEdit::singleline(&mut self.search_query)
+                            .hint_text(t!("pdfviewer.search_placeholder").to_string())
+                            .desired_width(240.0),
+                    );
+                    self.search_input_has_focus = response.has_focus();
 
-                if response.changed() && self.search_query.trim() != self.last_searched_query {
-                    let was_searching = self.search_in_progress;
-                    self.search_generation = self.search_generation.wrapping_add(1);
-                    if was_searching {
-                        if let Some(worker) = &self.worker {
-                            worker.request_search(SearchRequest {
-                                query: String::new(),
-                                generation: self.search_generation,
-                            });
+                    if response.changed() && self.search_query.trim() != self.last_searched_query {
+                        let was_searching = self.search_in_progress;
+                        self.search_generation = self.search_generation.wrapping_add(1);
+                        if was_searching {
+                            if let Some(worker) = &self.worker {
+                                worker.request_search(SearchRequest {
+                                    query: String::new(),
+                                    generation: self.search_generation,
+                                });
+                            }
+                        }
+                        self.search_in_progress = false;
+                        self.search_results.clear();
+                        self.current_match_idx = 0;
+                        self.last_searched_query.clear();
+                    }
+
+                    if self.search_input_focus_requested {
+                        response.request_focus();
+                        self.search_input_focus_requested = false;
+                    }
+
+                    let enter_pressed = ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    if enter_pressed && (response.has_focus() || response.lost_focus()) {
+                        if ui.input(|i| i.modifiers.shift) {
+                            self.prev_match();
+                        } else {
+                            self.execute_search();
                         }
                     }
-                    self.search_in_progress = false;
-                    self.search_results.clear();
-                    self.current_match_idx = 0;
-                    self.last_searched_query.clear();
-                }
 
-                if self.search_input_focus_requested {
-                    response.request_focus();
-                    self.search_input_focus_requested = false;
-                }
-
-                let enter_pressed = ui.input(|i| i.key_pressed(egui::Key::Enter));
-                if enter_pressed && (response.has_focus() || response.lost_focus()) {
-                    if ui.input(|i| i.modifiers.shift) {
-                        self.prev_match();
-                    } else {
+                    if ui
+                        .button(t!("pdfviewer.search_button").to_string())
+                        .clicked()
+                    {
                         self.execute_search();
                     }
-                }
 
-                if ui
-                    .button(t!("pdfviewer.search_button").to_string())
-                    .clicked()
-                {
-                    self.execute_search();
-                }
+                    let status = if self.search_in_progress {
+                        t!("pdfviewer.search_searching").to_string()
+                    } else if !self.last_searched_query.is_empty() && self.search_results.is_empty()
+                    {
+                        t!("pdfviewer.search_no_results").to_string()
+                    } else if !self.search_results.is_empty() {
+                        t!(
+                            "pdfviewer.search_result_count",
+                            current = self.current_match_idx + 1,
+                            total = self.search_results.len()
+                        )
+                        .to_string()
+                    } else {
+                        String::new()
+                    };
+                    ui.label(status);
 
-                let status = if self.search_in_progress {
-                    t!("pdfviewer.search_searching").to_string()
-                } else if !self.last_searched_query.is_empty() && self.search_results.is_empty() {
-                    t!("pdfviewer.search_no_results").to_string()
-                } else if !self.search_results.is_empty() {
-                    t!(
-                        "pdfviewer.search_result_count",
-                        current = self.current_match_idx + 1,
-                        total = self.search_results.len()
-                    )
-                    .to_string()
-                } else {
-                    String::new()
-                };
-                ui.label(status);
+                    let has_results = !self.search_results.is_empty();
+                    ui.add_enabled_ui(has_results, |ui| {
+                        if ui
+                            .button(t!("pdfviewer.search_prev_button").to_string())
+                            .on_hover_text(t!("pdfviewer.search_prev").to_string())
+                            .clicked()
+                        {
+                            self.prev_match();
+                        }
+                        if ui
+                            .button(t!("pdfviewer.search_next_button").to_string())
+                            .on_hover_text(t!("pdfviewer.search_next").to_string())
+                            .clicked()
+                        {
+                            self.next_match();
+                        }
+                    });
 
-                let has_results = !self.search_results.is_empty();
-                ui.add_enabled_ui(has_results, |ui| {
                     if ui
-                        .button(t!("pdfviewer.search_prev_button").to_string())
-                        .on_hover_text(t!("pdfviewer.search_prev").to_string())
+                        .button(t!("pdfviewer.search_close_button").to_string())
+                        .on_hover_text(t!("pdfviewer.search_close").to_string())
                         .clicked()
                     {
-                        self.prev_match();
-                    }
-                    if ui
-                        .button(t!("pdfviewer.search_next_button").to_string())
-                        .on_hover_text(t!("pdfviewer.search_next").to_string())
-                        .clicked()
-                    {
-                        self.next_match();
+                        self.close_search();
                     }
                 });
 
-                if ui
-                    .button(t!("pdfviewer.search_close_button").to_string())
-                    .on_hover_text(t!("pdfviewer.search_close").to_string())
-                    .clicked()
-                {
-                    self.close_search();
-                }
+                let inner = ui.max_rect();
+                let (_, sep_color) = crate::ui::theme::viewer_bar_colors(ui.visuals().dark_mode);
+                ui.painter().hline(
+                    inner.x_range(),
+                    inner.max.y + 6.0,
+                    egui::Stroke::new(1.0, sep_color),
+                );
             });
-        });
     }
 
     pub(super) fn paint_search_highlights(

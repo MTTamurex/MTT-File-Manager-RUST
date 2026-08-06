@@ -573,9 +573,9 @@ impl eframe::App for TextViewerApp {
         // Apply theme on first frame
         if let Some(dark) = self.dark_mode.take() {
             if dark {
-                ctx.set_visuals(egui::Visuals::dark());
+                ctx.set_visuals(crate::ui::theme::viewer_visuals(true));
             } else {
-                ctx.set_visuals(egui::Visuals::light());
+                ctx.set_visuals(crate::ui::theme::viewer_visuals(false));
             }
 
             use raw_window_handle::HasWindowHandle;
@@ -604,20 +604,32 @@ impl eframe::App for TextViewerApp {
         self.handle_keyboard(ctx);
 
         // Toolbar
-        egui::Panel::top("text_toolbar").show(ui, |ui| {
-            self.show_toolbar(ui);
-        });
+        let (toolbar_frame, sep_color) = top_bar_frame(ui);
+        egui::Panel::top("text_toolbar")
+            .frame(toolbar_frame)
+            .show(ui, |ui| {
+                self.show_toolbar(ui);
+                paint_bar_separator(ui, sep_color);
+            });
 
         // Search / Goto bar (below toolbar)
         if self.search_open {
-            egui::Panel::top("text_search").show(ui, |ui| {
-                self.show_search_bar(ui);
-            });
+            let (search_frame, sep_color) = top_bar_frame(ui);
+            egui::Panel::top("text_search")
+                .frame(search_frame)
+                .show(ui, |ui| {
+                    self.show_search_bar(ui);
+                    paint_bar_separator(ui, sep_color);
+                });
         }
         if self.goto_open {
-            egui::Panel::top("text_goto").show(ui, |ui| {
-                self.show_goto_bar(ui);
-            });
+            let (goto_frame, sep_color) = top_bar_frame(ui);
+            egui::Panel::top("text_goto")
+                .frame(goto_frame)
+                .show(ui, |ui| {
+                    self.show_goto_bar(ui);
+                    paint_bar_separator(ui, sep_color);
+                });
         }
 
         // Content
@@ -628,6 +640,26 @@ impl eframe::App for TextViewerApp {
 }
 
 // ── Error fallback app ───────────────────────────────────────────────────────
+
+/// Shared bar frame + separator color for the viewer's top panels.
+fn top_bar_frame(ui: &egui::Ui) -> (egui::Frame, egui::Color32) {
+    let (fill, sep) = crate::ui::theme::viewer_bar_colors(ui.visuals().dark_mode);
+    (
+        egui::Frame::new()
+            .fill(fill)
+            .inner_margin(egui::Margin::symmetric(10, 6)),
+        sep,
+    )
+}
+
+fn paint_bar_separator(ui: &egui::Ui, sep_color: egui::Color32) {
+    let inner = ui.max_rect();
+    ui.painter().hline(
+        inner.x_range(),
+        inner.max.y + 6.0,
+        egui::Stroke::new(1.0, sep_color),
+    );
+}
 
 pub(super) struct ErrorApp {
     pub message: String,

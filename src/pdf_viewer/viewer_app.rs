@@ -1079,9 +1079,9 @@ impl eframe::App for PdfViewerApp {
         // overridden by the platform integration).
         if let Some(dark) = self.dark_mode.take() {
             if dark {
-                ctx.set_visuals(egui::Visuals::dark());
+                ctx.set_visuals(crate::ui::theme::viewer_visuals(true));
             } else {
-                ctx.set_visuals(egui::Visuals::light());
+                ctx.set_visuals(crate::ui::theme::viewer_visuals(false));
             }
 
             // Apply dark/light title bar on the native Windows decoration.
@@ -1149,9 +1149,23 @@ impl eframe::App for PdfViewerApp {
             self.handle_search_shortcuts(ctx);
         }
 
-        egui::Panel::top("pdf_toolbar").show(ui, |ui| {
-            self.show_toolbar(ui);
-        });
+        egui::Panel::top("pdf_toolbar")
+            .frame({
+                let (bar_fill, _) = crate::ui::theme::viewer_bar_colors(ui.visuals().dark_mode);
+                egui::Frame::new()
+                    .fill(bar_fill)
+                    .inner_margin(egui::Margin::symmetric(10, 6))
+            })
+            .show(ui, |ui| {
+                self.show_toolbar(ui);
+                let inner = ui.max_rect();
+                let (_, sep_color) = crate::ui::theme::viewer_bar_colors(ui.visuals().dark_mode);
+                ui.painter().hline(
+                    inner.x_range(),
+                    inner.max.y + 6.0,
+                    egui::Stroke::new(1.0, sep_color),
+                );
+            });
 
         if matches!(self.document_status, DocumentStatus::LoadingMetadata) {
             egui::Panel::top("pdf_loading_status").show(ui, |ui| {

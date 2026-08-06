@@ -127,9 +127,19 @@ impl super::DedicatedImageViewerApp {
                 let panel_bg = if ui.visuals().dark_mode {
                     egui::Color32::from_gray(30)
                 } else {
-                    egui::Color32::from_gray(220)
+                    egui::Color32::from_rgb(238, 238, 238)
                 };
                 ui.painter().rect_filled(ui.max_rect(), 0.0, panel_bg);
+                let sep_color = if ui.visuals().dark_mode {
+                    egui::Color32::from_gray(60)
+                } else {
+                    egui::Color32::from_gray(225)
+                };
+                ui.painter().hline(
+                    ui.max_rect().x_range(),
+                    ui.max_rect().min.y,
+                    egui::Stroke::new(1.0, sep_color),
+                );
 
                 let should_scroll = self.filmstrip.scroll_to_current;
                 self.filmstrip.scroll_to_current = false;
@@ -237,13 +247,13 @@ impl super::DedicatedImageViewerApp {
             if ui.visuals().dark_mode {
                 egui::Color32::from_gray(50)
             } else {
-                egui::Color32::from_gray(200)
+                egui::Color32::WHITE
             }
         } else if hovered {
             if ui.visuals().dark_mode {
                 egui::Color32::from_gray(45)
             } else {
-                egui::Color32::from_gray(210)
+                egui::Color32::from_gray(228)
             }
         } else {
             egui::Color32::TRANSPARENT

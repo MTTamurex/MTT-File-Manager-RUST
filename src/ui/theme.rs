@@ -140,6 +140,65 @@ pub const DEBOUNCE_MS: u64 = 50;
 pub const DRIVE_REFRESH_MS: u64 = 350;
 pub const AUTO_RELOAD_MS: u64 = 200;
 
+// === DEDICATED VIEWERS (image/pdf) ===
+
+/// Refined dark/light visuals for dedicated viewer windows: neutral mica-toned
+/// chrome, rounded widgets and subtle strokes (matches the main window style).
+pub fn viewer_visuals(dark_mode: bool) -> eframe::egui::Visuals {
+    let mut visuals = if dark_mode {
+        eframe::egui::Visuals::dark()
+    } else {
+        eframe::egui::Visuals::light()
+    };
+    if dark_mode {
+        visuals.window_fill = Color32::from_gray(32);
+        visuals.panel_fill = Color32::from_gray(28);
+        visuals.extreme_bg_color = Color32::from_gray(24);
+        visuals.window_stroke = eframe::egui::Stroke::new(1.0, Color32::from_gray(60));
+        visuals.widgets.noninteractive.bg_fill = Color32::from_gray(37);
+        visuals.widgets.noninteractive.bg_stroke =
+            eframe::egui::Stroke::new(1.0, Color32::from_gray(60));
+        visuals.widgets.inactive.bg_fill = Color32::from_gray(45);
+        visuals.widgets.inactive.weak_bg_fill = Color32::from_gray(45);
+        visuals.widgets.inactive.bg_stroke = eframe::egui::Stroke::new(1.0, Color32::from_gray(64));
+        visuals.widgets.hovered.bg_fill = Color32::from_gray(58);
+        visuals.widgets.hovered.weak_bg_fill = Color32::from_gray(58);
+        visuals.widgets.active.bg_fill = Color32::from_gray(70);
+        visuals.widgets.active.weak_bg_fill = Color32::from_gray(70);
+    } else {
+        visuals.window_fill = Color32::from_rgb(246, 246, 246);
+        visuals.panel_fill = Color32::from_rgb(243, 243, 243);
+        visuals.extreme_bg_color = Color32::WHITE;
+        visuals.window_stroke = eframe::egui::Stroke::new(1.0, Color32::from_gray(220));
+        visuals.widgets.noninteractive.bg_stroke =
+            eframe::egui::Stroke::new(1.0, Color32::from_gray(225));
+        visuals.widgets.inactive.bg_fill = Color32::WHITE;
+        visuals.widgets.inactive.weak_bg_fill = Color32::WHITE;
+        visuals.widgets.inactive.bg_stroke =
+            eframe::egui::Stroke::new(1.0, Color32::from_gray(214));
+        visuals.widgets.hovered.bg_fill = Color32::from_rgb(229, 243, 255);
+        visuals.widgets.hovered.weak_bg_fill = Color32::from_rgb(229, 243, 255);
+        visuals.widgets.active.bg_fill = Color32::from_rgb(204, 228, 247);
+        visuals.widgets.active.weak_bg_fill = Color32::from_rgb(204, 228, 247);
+    }
+    let radius = eframe::egui::CornerRadius::same(6);
+    visuals.window_corner_radius = radius;
+    visuals.menu_corner_radius = radius;
+    visuals.widgets.inactive.corner_radius = radius;
+    visuals.widgets.hovered.corner_radius = radius;
+    visuals.widgets.active.corner_radius = radius;
+    visuals
+}
+
+/// (bar fill, separator stroke) for viewer toolbars/sidebars.
+pub fn viewer_bar_colors(dark_mode: bool) -> (Color32, Color32) {
+    if dark_mode {
+        (Color32::from_gray(37), Color32::from_gray(60))
+    } else {
+        (Color32::from_rgb(246, 246, 246), Color32::from_gray(225))
+    }
+}
+
 // === CACHE SIZES ===
 pub const TEXTURE_CACHE_SIZE: usize = 200;
 pub const ICON_CACHE_SIZE: usize = 100;

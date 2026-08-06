@@ -785,9 +785,9 @@ impl eframe::App for DedicatedImageViewerApp {
             // Apply theme on first frame (cc.egui_ctx.set_visuals in creator
             // can be overridden by the platform integration).
             if self.dark_mode {
-                ctx.set_visuals(egui::Visuals::dark());
+                ctx.set_visuals(crate::ui::theme::viewer_visuals(true));
             } else {
-                ctx.set_visuals(egui::Visuals::light());
+                ctx.set_visuals(crate::ui::theme::viewer_visuals(false));
             }
 
             // Apply dark/light title bar on the native Windows decoration.
