@@ -222,17 +222,16 @@ impl super::DedicatedImageViewerApp {
                 let draw_size = tex_size * fit_scale * self.zoom_factor;
                 self.zoom_percent_display = fit_scale * self.zoom_factor * 100.0;
 
-                let available_rect = ui.available_rect_before_wrap();
-                let horizontal_scroll_bar_rect = egui::Rect::from_min_max(
-                    egui::pos2(available_rect.left(), available_rect.bottom()),
-                    egui::pos2(available_rect.right(), available_rect.bottom()),
-                );
-
+                // No custom scroll_bar_rect: a zero-height rect (as previously
+                // used to pin the horizontal bar to the bottom) degenerates the
+                // VERTICAL bar's position mapping in egui, panicking
+                // ("min > max" in f32::clamp) the moment the vertical bar is
+                // pressed and freezing the viewer window. The default rect
+                // (inner_rect) places both bars correctly on the panel edges.
                 egui::ScrollArea::both()
                     .id_salt("image_viewer_center_scroll")
                     .auto_shrink([false, false])
                     .scroll_bar_visibility(ScrollBarVisibility::VisibleWhenNeeded)
-                    .scroll_bar_rect(horizontal_scroll_bar_rect)
                     .show(ui, |ui| {
                         let canvas_size = egui::vec2(
                             draw_size.x.max(viewport_size.x),
