@@ -44,16 +44,31 @@ const HEADER_ICON_RENDER_SIZE: u32 = 40; // Render at 2x for HiDPI quality
 const HEADER_BUTTON_WIDTH: f32 = 56.0;
 const HEADER_BUTTON_HEIGHT: f32 = 48.0;
 const HEADER_SPACING: f32 = 8.0;
-const ITEM_HEIGHT: f32 = 28.0;
+const ITEM_HEIGHT: f32 = 30.0;
 const ITEM_ICON_SIZE: f32 = 16.0;
 const ICON_TEXT_GAP: f32 = 10.0;
-const MENU_ROUNDING: f32 = 6.0;
+const MENU_ROUNDING: f32 = 8.0;
 const MENU_MIN_WIDTH: f32 = 180.0;
 const MENU_MAX_WIDTH: f32 = 400.0;
 const SUBMENU_MIN_WIDTH: f32 = 220.0;
 const SUBMENU_X_OFFSET: f32 = 6.0;
 const SHORTCUT_COLOR: egui::Color32 = egui::Color32::from_gray(128);
-const HOVER_H_MARGIN: f32 = 2.0;
+const HOVER_H_MARGIN: f32 = 4.0;
+
+/// Menu surface fill + border, matching the modernized window chrome.
+fn menu_chrome(dark_mode: bool) -> (egui::Color32, egui::Stroke) {
+    if dark_mode {
+        (
+            egui::Color32::from_rgb(44, 44, 44),
+            egui::Stroke::new(1.0, egui::Color32::from_gray(70)),
+        )
+    } else {
+        (
+            egui::Color32::from_rgb(248, 248, 248),
+            egui::Stroke::new(1.0, egui::Color32::from_gray(224)),
+        )
+    }
+}
 
 /// SVG icon names for header bar (matching main toolbar style)
 const SVG_ICON_CUT: &str = "cut";
@@ -144,7 +159,10 @@ pub fn render_context_menu(
         .fixed_pos(menu_pos)
         .order(egui::Order::Foreground)
         .show(ctx, |ui| {
+            let (menu_fill, menu_stroke) = menu_chrome(ui.visuals().dark_mode);
             crate::ui::video_overlay::popup_frame(ui, menu_id)
+                .fill(menu_fill)
+                .stroke(menu_stroke)
                 .inner_margin(4.0)
                 .corner_radius(MENU_ROUNDING)
                 .show(ui, |ui| {
@@ -261,11 +279,11 @@ fn render_header_bar(
             // Hover highlight
             if response.hovered() {
                 let hover_bg = if ui.visuals().dark_mode {
-                    egui::Color32::from_white_alpha(20)
+                    egui::Color32::from_white_alpha(12)
                 } else {
-                    egui::Color32::from_black_alpha(20)
+                    egui::Color32::from_black_alpha(12)
                 };
-                ui.painter().rect_filled(rect, 4.0, hover_bg);
+                ui.painter().rect_filled(rect, 6.0, hover_bg);
             }
 
             // Get SVG icon name based on command_string
@@ -387,9 +405,9 @@ fn render_single_item(
         let sep_rect = ui.available_rect_before_wrap();
         let y = sep_rect.min.y + 4.0;
         let sep_color = if ui.visuals().dark_mode {
-            egui::Color32::from_gray(60)
+            egui::Color32::from_gray(66)
         } else {
-            egui::Color32::from_gray(220)
+            egui::Color32::from_gray(228)
         };
         ui.painter().hline(
             sep_rect.min.x + 10.0..=sep_rect.max.x - 10.0,
@@ -431,12 +449,12 @@ fn render_single_item(
     // Refined hover highlight (Windows 11 style soft blue with margin) — skip for loading placeholder
     if response.hovered() && !item.is_loading_placeholder && !is_blocked_waiting_for_submenu {
         let hover_color = if ui.visuals().dark_mode {
-            egui::Color32::from_rgb(43, 84, 127)
+            egui::Color32::from_white_alpha(14)
         } else {
             egui::Color32::from_rgb(230, 243, 255)
         };
         let hover_rect = rect.shrink2(egui::vec2(HOVER_H_MARGIN, 0.0));
-        ui.painter().rect_filled(hover_rect, 4.0, hover_color);
+        ui.painter().rect_filled(hover_rect, 6.0, hover_color);
     }
 
     // Icon (16x16)
@@ -694,7 +712,10 @@ fn render_single_item(
                 .order(egui::Order::Foreground)
                 .fixed_pos(submenu_pos)
                 .show(ui.ctx(), |ui| {
+                    let (menu_fill, menu_stroke) = menu_chrome(ui.visuals().dark_mode);
                     crate::ui::video_overlay::popup_frame(ui, submenu_id)
+                        .fill(menu_fill)
+                        .stroke(menu_stroke)
                         .inner_margin(4.0)
                         .corner_radius(MENU_ROUNDING)
                         .show(ui, |ui| {
