@@ -243,7 +243,7 @@ pub fn drive_health(drive_letter: char) -> Result<DriveHealthSnapshot, String> {
             SearchResponse::DriveHealth(snapshot)
                 if snapshot.drive_letter.to_ascii_uppercase() == requested_letter =>
             {
-                Ok(snapshot)
+                Ok(*snapshot)
             }
             SearchResponse::DriveHealth(snapshot) => Err(format!(
                 "Drive health response letter mismatch: requested {}, received {}",

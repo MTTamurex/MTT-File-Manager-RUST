@@ -57,6 +57,7 @@ impl ImageViewerApp {
         let mut pending_nav: Option<String> = None;
         let allow_kb = !self.suppress_file_panel_keyboard
             && !self.global_search.active
+            && !self.navigation_state.show_settings_window
             && self.renaming_state.is_none()
             && self.rectangle_selection_state.is_none()
             && !ui.ctx().egui_wants_keyboard_input();

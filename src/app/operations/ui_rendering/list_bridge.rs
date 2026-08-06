@@ -146,6 +146,7 @@ impl ImageViewerApp {
         // Keyboard navigation (ONLY when not renaming and media is NOT focused)
         if !self.suppress_file_panel_keyboard
             && !self.global_search.active
+            && !self.navigation_state.show_settings_window
             && self.rectangle_selection_state.is_none()
             && ui.input(|input| {
                 [

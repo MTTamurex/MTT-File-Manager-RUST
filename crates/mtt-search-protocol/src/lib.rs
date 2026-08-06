@@ -122,7 +122,7 @@ pub enum SearchResponse {
     /// Error message.
     Error(String),
     /// Point-in-time hardware health information for a physical drive.
-    DriveHealth(DriveHealthSnapshot),
+    DriveHealth(Box<DriveHealthSnapshot>),
 }
 
 impl SearchResponse {

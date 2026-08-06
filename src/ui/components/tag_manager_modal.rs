@@ -1,6 +1,8 @@
 use crate::app::ImageViewerApp;
 use crate::domain::file_tag::TagColor;
-use eframe::egui;
+use crate::ui::components::settings_ui;
+use crate::ui::theme;
+use eframe::egui::{self, RichText};
 use rust_i18n::t;
 
 enum TagManagerAction {
@@ -192,31 +194,35 @@ pub fn render_tag_manager_content(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
         .filter_map(|id| app.tag_definitions.get(id).cloned())
         .collect();
     let mut actions = Vec::new();
+    let dark_mode = ui.visuals().dark_mode;
 
     ui.vertical(|ui| {
-        ui.heading(t!("tags.add"));
+        settings_ui::sub_header(ui, &t!("tags.add"));
+        ui.add_space(6.0);
         ui.horizontal(|ui| {
-            ui.label(t!("tags.name"));
-            ui.add_sized(
-                egui::vec2(180.0, 22.0),
-                egui::TextEdit::singleline(&mut app.tag_manager_new_name),
-            );
-            if let Some(color) = color_picker(
-                ui,
-                egui::Id::new("tag_manager_new_color_picker"),
-                app.tag_manager_new_color,
-            ) {
-                app.tag_manager_new_color = color;
-            }
-            if ui.button(t!("tags.add")).clicked() {
-                actions.push(TagManagerAction::Create);
-            }
+            ui.label(RichText::new(t!("tags.name")).color(theme::secondary_text_color(dark_mode)));
+            let edit_width = (ui.available_width() - 170.0).max(120.0);
+            settings_ui::text_edit(ui, edit_width, &mut app.tag_manager_new_name);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button(t!("tags.add")).clicked() {
+                    actions.push(TagManagerAction::Create);
+                }
+                if let Some(color) = color_picker(
+                    ui,
+                    egui::Id::new("tag_manager_new_color_picker"),
+                    app.tag_manager_new_color,
+                ) {
+                    app.tag_manager_new_color = color;
+                }
+            });
         });
 
-        ui.separator();
+        ui.add_space(12.0);
 
         if tags.is_empty() {
-            ui.label(t!("tags.no_tags"));
+            ui.label(
+                RichText::new(t!("tags.no_tags")).color(theme::secondary_text_color(dark_mode)),
+            );
         }
 
         for tag in &tags {
@@ -226,53 +232,71 @@ pub fn render_tag_manager_content(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
                 .entry(tag.id)
                 .or_insert_with(|| tag.name.clone());
 
-            ui.horizontal(|ui| {
-                crate::ui::tag_icon::paint_filled(
-                    ui.painter(),
-                    egui::pos2(ui.cursor().left() + 7.0, ui.cursor().top() + 11.0),
-                    12.0,
-                    tag.color.to_color32(),
-                );
-                ui.add_space(18.0);
-                ui.add_sized(
-                    egui::vec2(160.0, 22.0),
-                    egui::TextEdit::singleline(edit_name),
-                );
-                if ui.button(t!("tags.save")).clicked() {
-                    actions.push(TagManagerAction::Rename(tag.id, edit_name.clone()));
-                }
-                if let Some(color) = color_picker(
-                    ui,
-                    egui::Id::new(("tag_manager_color_picker", tag.id)),
-                    tag.color,
-                ) {
-                    actions.push(TagManagerAction::Recolor(tag.id, color));
-                }
-                ui.label(assignment_count.to_string());
-                if ui.button(t!("tags.delete")).clicked() {
-                    app.tag_manager_delete_confirm = Some(tag.id);
-                }
-            });
+            egui::Frame::new()
+                .inner_margin(egui::Margin {
+                    left: 4,
+                    right: 4,
+                    top: 4,
+                    bottom: 4,
+                })
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        let (icon_rect, icon_resp) =
+                            ui.allocate_exact_size(egui::vec2(18.0, 26.0), egui::Sense::hover());
+                        crate::ui::tag_icon::paint_filled(
+                            ui.painter(),
+                            icon_rect.center(),
+                            12.0,
+                            tag.color.to_color32(),
+                        );
+                        icon_resp.on_hover_text(
+                            t!("tags.usage_count", count = assignment_count).to_string(),
+                        );
+                        ui.add_space(10.0);
+                        let edit_width = (ui.available_width() - 190.0).max(80.0);
+                        settings_ui::text_edit(ui, edit_width, edit_name);
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button(t!("tags.delete")).clicked() {
+                                app.tag_manager_delete_confirm = Some(tag.id);
+                            }
+                            if let Some(color) = color_picker(
+                                ui,
+                                egui::Id::new(("tag_manager_color_picker", tag.id)),
+                                tag.color,
+                            ) {
+                                actions.push(TagManagerAction::Recolor(tag.id, color));
+                            }
+                            if ui.button(t!("tags.save")).clicked() {
+                                actions.push(TagManagerAction::Rename(tag.id, edit_name.clone()));
+                            }
+                        });
+                    });
 
-            if app.tag_manager_delete_confirm == Some(tag.id) {
-                ui.horizontal(|ui| {
-                    ui.add_space(24.0);
-                    ui.label(
-                        t!(
-                            "tags.delete_confirm",
-                            name = tag.name.clone(),
-                            count = assignment_count
-                        )
-                        .to_string(),
-                    );
-                    if ui.button(t!("tags.confirm")).clicked() {
-                        actions.push(TagManagerAction::Delete(tag.id));
-                    }
-                    if ui.button(t!("tags.cancel")).clicked() {
-                        app.tag_manager_delete_confirm = None;
+                    if app.tag_manager_delete_confirm == Some(tag.id) {
+                        ui.add_space(6.0);
+                        ui.horizontal(|ui| {
+                            ui.add_space(24.0);
+                            ui.label(
+                                RichText::new(
+                                    t!(
+                                        "tags.delete_confirm",
+                                        name = tag.name.clone(),
+                                        count = assignment_count
+                                    )
+                                    .to_string(),
+                                )
+                                .color(ui.visuals().warn_fg_color),
+                            );
+                            if ui.button(t!("tags.confirm")).clicked() {
+                                actions.push(TagManagerAction::Delete(tag.id));
+                            }
+                            if ui.button(t!("tags.cancel")).clicked() {
+                                app.tag_manager_delete_confirm = None;
+                            }
+                        });
                     }
                 });
-            }
+            ui.add_space(2.0);
         }
     });
 

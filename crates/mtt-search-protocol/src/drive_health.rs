@@ -143,12 +143,13 @@ mod tests {
         ));
 
         let snapshot = sample_snapshot();
-        let encoded = encode_message(&SearchResponse::DriveHealth(snapshot.clone())).unwrap();
+        let encoded =
+            encode_message(&SearchResponse::DriveHealth(Box::new(snapshot.clone()))).unwrap();
         let decoded: SearchResponse = decode_message(&encoded[4..]).unwrap();
         assert_eq!(decoded.validate(), Ok(()));
         assert!(matches!(
             decoded,
-            SearchResponse::DriveHealth(decoded_snapshot) if decoded_snapshot == snapshot
+            SearchResponse::DriveHealth(decoded_snapshot) if *decoded_snapshot == snapshot
         ));
     }
 

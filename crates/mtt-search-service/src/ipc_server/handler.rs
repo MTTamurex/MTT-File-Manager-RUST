@@ -766,7 +766,7 @@ pub(super) fn handle_client(
 
             match crate::drive_health::query(drive_letter) {
                 Ok(snapshot) => {
-                    let _ = send_response(pipe, &SearchResponse::DriveHealth(snapshot));
+                    let _ = send_response(pipe, &SearchResponse::DriveHealth(Box::new(snapshot)));
                 }
                 Err(error) => {
                     eprintln!(

@@ -4,6 +4,7 @@ use crate::domain::organizer_rule::{
     OrganizerRuleError,
 };
 use crate::infrastructure::app_state_db::OrganizerRuleDbError;
+use crate::ui::components::settings_ui;
 use crate::ui::theme;
 use eframe::egui::{self, RichText};
 use rust_i18n::t;
@@ -11,91 +12,169 @@ use std::path::PathBuf;
 
 pub fn render_organizer_settings_section(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
     let dark_mode = ui.visuals().dark_mode;
-    ui.label(
-        RichText::new(t!("settings.organizer").to_string())
-            .size(16.0)
-            .strong()
-            .color(theme::text_color(dark_mode)),
-    );
-    ui.add_space(4.0);
-    ui.label(
-        RichText::new(t!("organizer.description"))
-            .size(13.0)
-            .color(theme::secondary_text_color(dark_mode)),
-    );
-    ui.add_space(12.0);
+    settings_ui::section_header(ui, &t!("settings.organizer"), &t!("organizer.description"));
 
-    render_rule_form(ui, app, dark_mode);
+    let form_rect = render_rule_form(ui, app, dark_mode);
     ui.add_space(16.0);
-    ui.separator();
-    ui.add_space(12.0);
-    render_rules(ui, app, dark_mode);
+    let edit_clicked = render_rules(ui, app, dark_mode);
+    if edit_clicked {
+        // Jump straight to the form so the user sees the fields being edited.
+        ui.scroll_to_rect_animation(
+            form_rect,
+            Some(egui::Align::Min),
+            egui::style::ScrollAnimation::none(),
+        );
+    }
 }
 
-fn render_rule_form(ui: &mut egui::Ui, app: &mut ImageViewerApp, dark_mode: bool) {
+fn render_rule_form(ui: &mut egui::Ui, app: &mut ImageViewerApp, dark_mode: bool) -> egui::Rect {
     let editing = app.organizer_state.editing_rule_id.is_some();
-    ui.label(
-        RichText::new(if editing {
-            t!("organizer.edit_rule")
-        } else {
-            t!("organizer.new_rule")
-        })
-        .strong()
-        .color(theme::text_color(dark_mode)),
-    );
-    ui.add_space(6.0);
+    settings_ui::card_frame(dark_mode)
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            settings_ui::sub_header(
+                ui,
+                &if editing {
+                    t!("organizer.edit_rule")
+                } else {
+                    t!("organizer.new_rule")
+                },
+            );
+            ui.add_space(10.0);
 
-    ui.horizontal(|ui| {
-        ui.label(t!("organizer.source"));
-        ui.text_edit_singleline(&mut app.organizer_state.source_input);
-        if ui.button(t!("organizer.choose_folder")).clicked() {
-            if let Some(path) = rfd::FileDialog::new().pick_folder() {
-                app.organizer_state.source_input = path.to_string_lossy().to_string();
-            }
+            egui::Grid::new("organizer_form_grid")
+                .num_columns(2)
+                .spacing([16.0, 10.0])
+                .show(ui, |ui| {
+                    ui.label(
+                        RichText::new(t!("organizer.source"))
+                            .color(theme::secondary_text_color(dark_mode)),
+                    );
+                    ui.horizontal(|ui| {
+                        let edit_width = (ui.available_width() - 130.0).max(120.0);
+                        settings_ui::text_edit(
+                            ui,
+                            edit_width,
+                            &mut app.organizer_state.source_input,
+                        );
+                        ui.add_space(8.0);
+                        if ui.button(t!("organizer.choose_folder")).clicked() {
+                            if let Some(path) = rfd::FileDialog::new().pick_folder() {
+                                app.organizer_state.source_input =
+                                    path.to_string_lossy().to_string();
+                            }
+                        }
+                    });
+                    ui.end_row();
+
+                    ui.label(
+                        RichText::new(t!("organizer.destination"))
+                            .color(theme::secondary_text_color(dark_mode)),
+                    );
+                    ui.horizontal(|ui| {
+                        let edit_width = (ui.available_width() - 130.0).max(120.0);
+                        settings_ui::text_edit(
+                            ui,
+                            edit_width,
+                            &mut app.organizer_state.destination_input,
+                        );
+                        ui.add_space(8.0);
+                        if ui.button(t!("organizer.choose_folder")).clicked() {
+                            if let Some(path) = rfd::FileDialog::new().pick_folder() {
+                                app.organizer_state.destination_input =
+                                    path.to_string_lossy().to_string();
+                            }
+                        }
+                    });
+                    ui.end_row();
+
+                    ui.label(
+                        RichText::new(t!("organizer.extensions"))
+                            .color(theme::secondary_text_color(dark_mode)),
+                    );
+                    ui.horizontal(|ui| {
+                        let edit_width = (ui.available_width() - 240.0).max(80.0);
+                        settings_ui::text_edit(
+                            ui,
+                            edit_width,
+                            &mut app.organizer_state.extensions_input,
+                        );
+                        ui.add_space(8.0);
+                        ui.label(
+                            RichText::new(t!("organizer.extensions_hint"))
+                                .small()
+                                .color(theme::secondary_text_color(dark_mode)),
+                        );
+                    });
+                    ui.end_row();
+
+                    ui.label(
+                        RichText::new(t!("organizer.presets"))
+                            .color(theme::secondary_text_color(dark_mode)),
+                    );
+                    ui.horizontal_wrapped(|ui| {
+                        ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
+                        for preset in OrganizerExtensionPreset::ALL {
+                            if ui.button(preset_label(preset)).clicked() {
+                                app.organizer_state.extensions_input =
+                                    preset.extensions().join(", ");
+                            }
+                        }
+                    });
+                    ui.end_row();
+                });
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                if ui
+                    .button(if editing {
+                        t!("organizer.save_rule")
+                    } else {
+                        t!("organizer.add_rule")
+                    })
+                    .clicked()
+                {
+                    save_form_rule(app);
+                }
+                if editing && ui.button(t!("organizer.cancel")).clicked() {
+                    app.organizer_state.reset_form();
+                }
+            });
+        })
+        .response
+        .rect
+}
+
+/// Longest prefix of `text` (plus ellipsis) that fits `max_width` when rendered bold.
+fn truncate_to_width(ui: &egui::Ui, text: &str, max_width: f32) -> String {
+    let measure = |candidate: &str| {
+        egui::WidgetText::from(RichText::new(candidate).strong())
+            .into_galley(
+                ui,
+                Some(egui::TextWrapMode::Extend),
+                f32::INFINITY,
+                egui::TextStyle::Body,
+            )
+            .size()
+            .x
+    };
+    if measure(text) <= max_width {
+        return text.to_string();
+    }
+    let chars: Vec<char> = text.chars().collect();
+    let mut lo = 0usize;
+    let mut hi = chars.len();
+    while lo < hi {
+        let mid = (lo + hi).div_ceil(2);
+        let candidate: String = chars[..mid].iter().collect::<String>() + "…";
+        if measure(&candidate) <= max_width {
+            lo = mid;
+        } else {
+            hi = mid - 1;
         }
-    });
-    ui.horizontal(|ui| {
-        ui.label(t!("organizer.destination"));
-        ui.text_edit_singleline(&mut app.organizer_state.destination_input);
-        if ui.button(t!("organizer.choose_folder")).clicked() {
-            if let Some(path) = rfd::FileDialog::new().pick_folder() {
-                app.organizer_state.destination_input = path.to_string_lossy().to_string();
-            }
-        }
-    });
-    ui.horizontal(|ui| {
-        ui.label(t!("organizer.extensions"));
-        ui.text_edit_singleline(&mut app.organizer_state.extensions_input);
-        ui.label(
-            RichText::new(t!("organizer.extensions_hint"))
-                .small()
-                .color(theme::secondary_text_color(dark_mode)),
-        );
-    });
-    ui.horizontal_wrapped(|ui| {
-        ui.label(t!("organizer.presets"));
-        for preset in OrganizerExtensionPreset::ALL {
-            if ui.button(preset_label(preset)).clicked() {
-                app.organizer_state.extensions_input = preset.extensions().join(", ");
-            }
-        }
-    });
-    ui.add_space(6.0);
-    ui.horizontal(|ui| {
-        if ui
-            .button(if editing {
-                t!("organizer.save_rule")
-            } else {
-                t!("organizer.add_rule")
-            })
-            .clicked()
-        {
-            save_form_rule(app);
-        }
-        if editing && ui.button(t!("organizer.cancel")).clicked() {
-            app.organizer_state.reset_form();
-        }
-    });
+    }
+    let mut out: String = chars[..lo].iter().collect();
+    out.push('…');
+    out
 }
 
 fn preset_label(preset: OrganizerExtensionPreset) -> String {
@@ -109,41 +188,68 @@ fn preset_label(preset: OrganizerExtensionPreset) -> String {
     }
 }
 
-fn render_rules(ui: &mut egui::Ui, app: &mut ImageViewerApp, dark_mode: bool) {
+fn render_rules(ui: &mut egui::Ui, app: &mut ImageViewerApp, dark_mode: bool) -> bool {
     if app.organizer_state.rules.is_empty() {
         ui.label(
             RichText::new(t!("organizer.no_rules")).color(theme::secondary_text_color(dark_mode)),
         );
-        return;
+        return false;
     }
 
     let rules = app.organizer_state.rules.clone();
+    let mut edit_clicked = false;
     for mut rule in rules {
-        ui.group(|ui| {
+        settings_ui::row_frame(dark_mode).show(ui, |ui| {
+            let extensions_text = rule.extensions.join(", ");
             ui.horizontal(|ui| {
-                if ui
-                    .checkbox(&mut rule.enabled, t!("organizer.enabled"))
-                    .changed()
-                {
-                    let message = if rule.enabled {
-                        t!("organizer.enabled_message").to_string()
-                    } else {
-                        t!("organizer.disabled_message").to_string()
-                    };
-                    persist_rule(app, &rule, message);
+                // Reserve room for the toggle so long extension lists never overlap it.
+                let text_max = (ui.available_width() - 56.0).max(80.0);
+                let display = truncate_to_width(ui, &extensions_text, text_max);
+                let label_resp = ui.label(
+                    RichText::new(display.clone())
+                        .strong()
+                        .color(theme::text_color(dark_mode)),
+                );
+                if display != extensions_text {
+                    label_resp.on_hover_text(extensions_text.clone());
                 }
-                ui.label(RichText::new(rule.extensions.join(", ")).strong());
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let toggle = settings_ui::toggle_switch(ui, &mut rule.enabled)
+                        .on_hover_text(t!("organizer.enabled").to_string());
+                    if toggle.clicked() {
+                        let message = if rule.enabled {
+                            t!("organizer.enabled_message").to_string()
+                        } else {
+                            t!("organizer.disabled_message").to_string()
+                        };
+                        persist_rule(app, &rule, message);
+                    }
+                });
             });
-            ui.label(format!(
-                "{} {}",
-                t!("organizer.source"),
-                rule.source_folder.display()
-            ));
-            ui.label(format!(
-                "{} {}",
-                t!("organizer.destination"),
-                rule.destination_folder.display()
-            ));
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new(t!("organizer.source").to_string())
+                        .color(theme::secondary_text_color(dark_mode)),
+                );
+                ui.add_space(8.0);
+                ui.label(
+                    RichText::new(rule.source_folder.display().to_string())
+                        .color(theme::text_color(dark_mode)),
+                );
+            });
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new(t!("organizer.destination").to_string())
+                        .color(theme::secondary_text_color(dark_mode)),
+                );
+                ui.add_space(8.0);
+                ui.label(
+                    RichText::new(rule.destination_folder.display().to_string())
+                        .color(theme::text_color(dark_mode)),
+                );
+            });
+            ui.add_space(6.0);
             ui.horizontal(|ui| {
                 let previewing = app.organizer_state.is_previewing(rule.id);
                 if ui
@@ -164,6 +270,7 @@ fn render_rules(ui: &mut egui::Ui, app: &mut ImageViewerApp, dark_mode: bool) {
                     ui.spinner();
                 }
                 if ui.button(t!("organizer.edit")).clicked() {
+                    edit_clicked = true;
                     app.organizer_state.source_input =
                         rule.source_folder.to_string_lossy().to_string();
                     app.organizer_state.destination_input =
@@ -189,6 +296,7 @@ fn render_rules(ui: &mut egui::Ui, app: &mut ImageViewerApp, dark_mode: bool) {
         });
         ui.add_space(8.0);
     }
+    edit_clicked
 }
 
 fn save_form_rule(app: &mut ImageViewerApp) {

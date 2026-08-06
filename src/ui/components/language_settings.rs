@@ -1,5 +1,6 @@
 //! Language settings modal for switching the application language
 
+use crate::ui::components::settings_ui;
 use crate::ui::theme;
 use eframe::egui::{self, RichText};
 use rust_i18n::t;
@@ -11,19 +12,11 @@ pub fn render_language_settings_section(ui: &mut egui::Ui) -> bool {
     let mut language_changed = false;
     let dark_mode = ui.visuals().dark_mode;
 
-    ui.label(
-        RichText::new(t!("settings.general"))
-            .size(16.0)
-            .strong()
-            .color(theme::text_color(dark_mode)),
+    settings_ui::section_header(
+        ui,
+        &t!("settings.general"),
+        &t!("settings.general_description"),
     );
-    ui.add_space(4.0);
-    ui.label(
-        RichText::new(t!("settings.general_description"))
-            .size(13.0)
-            .color(theme::secondary_text_color(dark_mode)),
-    );
-    ui.add_space(16.0);
 
     ui.label(
         RichText::new(t!("settings.language"))
@@ -37,16 +30,20 @@ pub fn render_language_settings_section(ui: &mut egui::Ui) -> bool {
             .size(13.0)
             .color(theme::secondary_text_color(dark_mode)),
     );
-    ui.add_space(12.0);
+    ui.add_space(10.0);
 
     let current_locale = rust_i18n::locale();
-
-    for &(code, display_name) in LANGUAGES {
-        let is_selected = &*current_locale == code;
-        if ui.selectable_label(is_selected, display_name).clicked() && !is_selected {
-            rust_i18n::set_locale(code);
-            language_changed = true;
-        }
+    let selected = LANGUAGES
+        .iter()
+        .position(|&(code, _)| code == &*current_locale)
+        .unwrap_or(0);
+    let labels: Vec<&str> = LANGUAGES
+        .iter()
+        .map(|&(_, display_name)| display_name)
+        .collect();
+    if let Some(idx) = settings_ui::segmented_choice(ui, &labels, selected) {
+        rust_i18n::set_locale(LANGUAGES[idx].0);
+        language_changed = true;
     }
 
     ui.add_space(12.0);
@@ -55,8 +52,6 @@ pub fn render_language_settings_section(ui: &mut egui::Ui) -> bool {
             .size(12.0)
             .color(theme::secondary_text_color(dark_mode)),
     );
-    ui.add_space(8.0);
-    ui.separator();
 
     language_changed
 }

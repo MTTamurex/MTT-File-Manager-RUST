@@ -197,6 +197,26 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
             }
             return;
         }
+
+        // While the settings window is open, keep input inside the modal.
+        // Prevents arrow keys/shortcuts from reaching the main file views.
+        if app.navigation_state.show_settings_window {
+            if !user_active {
+                user_active = ctx.input(|i| {
+                    i.pointer.any_pressed() || i.pointer.any_click() || !i.events.is_empty()
+                });
+            }
+
+            if user_active {
+                app.last_user_activity = std::time::Instant::now();
+                app.refresh_working_set_trim_blocker(false);
+                let _ = app
+                    .file_operation_state
+                    .idle_warmup_sender
+                    .send(IdleWarmupMessage::UserActive);
+            }
+            return;
+        }
         let text_input_active = ctx.egui_wants_keyboard_input();
 
         ctx.input(|i| {

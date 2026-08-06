@@ -23,6 +23,7 @@ tags:
   confirm: "Confirmar"
   cancel: "Cancelar"
   delete_confirm: "Excluir a tag '%{name}'? Isso removerá a tag de %{count} item(ns)."
+  usage_count: "%{count} item(ns) usando esta tag"
   clear_filter: "Limpar filtro de tag"
   all: "Todas as tags"
   no_tags: "Sem tags"
@@ -321,7 +322,6 @@ list_view:
   status: "Status"
 settings:
   window_title: "Configurações"
-  categories: "Categorias"
   general: "Geral"
   general_description: "Ajuste preferências globais do aplicativo."
   tags: "Tags"
