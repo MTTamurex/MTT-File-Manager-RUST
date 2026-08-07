@@ -64,6 +64,8 @@ pub struct ItemSlotContext<'a> {
     pub idx: usize,
     /// Thumbnail size
     pub thumbnail_size: f32,
+    /// Visual scale applied to the thumbnail or icon without changing layout.
+    pub hover_scale: f32,
     /// Whether renaming is active
     pub is_renaming: bool,
     /// Rename text (if applicable)
@@ -117,6 +119,10 @@ pub struct ItemSlotContext<'a> {
     pub item_tag_ids: Option<&'a [i64]>,
     /// Tag definitions for color lookup.
     pub tag_definitions: &'a FxHashMap<i64, FileTag>,
+}
+
+fn scaled_visual_rect(rect: egui::Rect, scale: f32) -> egui::Rect {
+    egui::Rect::from_center_size(rect.center(), rect.size() * scale)
 }
 
 /// Renders an item slot for grid view

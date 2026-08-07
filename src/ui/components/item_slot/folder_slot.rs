@@ -83,6 +83,7 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
     let x_offset = (cell_width - folder_w) / 2.0;
     let start_pos = rect.min + egui::vec2(x_offset.max(0.0), vertical_margin);
     let folder_rect = egui::Rect::from_min_size(start_pos, egui::vec2(folder_w, folder_h));
+    let visual_folder_rect = scaled_visual_rect(folder_rect, ctx.hover_scale);
 
     // === FOLDER DRAWING ===
 
@@ -107,6 +108,7 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
             folder_rect.center(),
             egui::vec2(special_side, special_side),
         );
+        let special_rect = scaled_visual_rect(special_rect, ctx.hover_scale);
 
         // Icons are pre-loaded at startup — no placeholder needed.
         let icon = registered_folder_icon.or_else(|| {
@@ -148,7 +150,7 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
 
         if let Some(tex) = native_preview {
             // If we have the native preview, draw maintaining aspect ratio and centering
-            paint_texture_centered(ui, tex.id(), tex.size_vec2(), folder_rect);
+            paint_texture_centered(ui, tex.id(), tex.size_vec2(), visual_folder_rect);
         } else {
             // If no native preview
             let is_virtual_path = ctx.is_recycle_bin_view
@@ -161,7 +163,12 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
                 // Virtual paths (recycle bin, ZIP) or system folders (C:\Windows tree):
                 // Use system folder icon directly, no preview composition.
                 if let Some(sys_icon) = ctx.icon_loader.folder_icon() {
-                    paint_texture_centered(ui, sys_icon.id(), sys_icon.size_vec2(), folder_rect);
+                    paint_texture_centered(
+                        ui,
+                        sys_icon.id(),
+                        sys_icon.size_vec2(),
+                        visual_folder_rect,
+                    );
                 } else if is_virtual_path {
                     // Extra fallback for virtual paths: try item-specific icon
                     if let Some(icon) =
@@ -173,6 +180,7 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
                             folder_rect.center(),
                             egui::vec2(icon_size, icon_size),
                         );
+                        let icon_rect = scaled_visual_rect(icon_rect, ctx.hover_scale);
                         ui.painter().image(
                             icon.id(),
                             icon_rect,
@@ -199,7 +207,12 @@ pub(super) fn render_directory_slot<O: ItemSlotOperations>(
 
                 // While preview is missing/loading: show the shared generic folder icon.
                 if let Some(sys_icon) = ctx.icon_loader.folder_icon() {
-                    paint_texture_centered(ui, sys_icon.id(), sys_icon.size_vec2(), folder_rect);
+                    paint_texture_centered(
+                        ui,
+                        sys_icon.id(),
+                        sys_icon.size_vec2(),
+                        visual_folder_rect,
+                    );
                 }
             }
         }

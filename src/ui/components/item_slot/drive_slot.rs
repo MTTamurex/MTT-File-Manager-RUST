@@ -35,20 +35,21 @@ pub(super) fn render_drive_slot<O: ItemSlotOperations>(
         egui::pos2(rect.center().x, current_y + icon_size / 2.0),
         egui::vec2(icon_size, icon_size),
     );
+    let visual_icon_rect = scaled_visual_rect(icon_rect, ctx.hover_scale);
 
     if let Some(tex) = drive_icon {
         ui.put(
-            icon_rect,
+            visual_icon_rect,
             egui::Image::new(&tex)
-                .max_size(egui::vec2(icon_size, icon_size))
+                .max_size(visual_icon_rect.size())
                 .maintain_aspect_ratio(true),
         );
     } else {
         ui.painter().text(
-            icon_rect.center(),
+            visual_icon_rect.center(),
             egui::Align2::CENTER_CENTER,
             "💽",
-            egui::FontId::proportional(icon_size * 0.8),
+            egui::FontId::proportional(icon_size * ctx.hover_scale * 0.8),
             egui::Color32::GRAY,
         );
     }

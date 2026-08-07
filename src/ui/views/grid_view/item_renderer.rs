@@ -113,6 +113,22 @@ pub(super) fn render_grid_item(
         .rectangle_selection_state
         .map(|state| state.preview_contains(index))
         .unwrap_or_else(|| ctx.multi_selection.contains(&item.path));
+    let is_renaming = ctx
+        .renaming_state
+        .as_ref()
+        .is_some_and(|(path, _)| *path == item.path);
+    let should_zoom = response.hovered()
+        && !drag_candidate
+        && !ctx.is_item_dragging
+        && !rectangle_select_active
+        && !is_scrolling
+        && !is_renaming;
+    let hover_progress = ui.ctx().animate_bool_with_time(
+        response.id.with("grid_hover_zoom").with(&item.path),
+        should_zoom,
+        0.12,
+    );
+    let hover_scale = egui::lerp(1.0..=1.02, hover_progress);
     let allow_hover = matches!(ctx.last_input, crate::app::state::LastInput::Mouse);
     let is_hovered_visual = allow_hover && response.hovered() && !is_selected;
     let is_focused = ctx.selected_item == Some(index);
@@ -291,6 +307,7 @@ pub(super) fn render_grid_item(
         ctx,
         is_scrolling,
         allow_thumbnail_requests,
+        hover_scale,
     );
 }
 
@@ -315,6 +332,7 @@ fn render_item_slot_for_grid(
     ctx: &mut GridViewContext,
     is_scrolling: bool,
     allow_thumbnail_requests: bool,
+    hover_scale: f32,
 ) {
     use crate::ui::components::item_slot::{render_item_slot, ItemSlotContext};
 
@@ -336,6 +354,7 @@ fn render_item_slot_for_grid(
             item,
             idx,
             thumbnail_size: ctx.thumbnail_size,
+            hover_scale,
             is_renaming,
             renaming_text,
             focus_rename: ctx.focus_rename,

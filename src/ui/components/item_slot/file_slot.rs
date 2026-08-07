@@ -152,6 +152,7 @@ pub(super) fn render_file_slot<O: ItemSlotOperations>(
                 thumb_rect.min + egui::vec2(offset_x, offset_y),
                 egui::vec2(draw_w, draw_h),
             );
+            let draw_rect = scaled_visual_rect(draw_rect, ctx.hover_scale);
             ui.painter().image(
                 texture.id(),
                 draw_rect,
@@ -169,7 +170,13 @@ pub(super) fn render_file_slot<O: ItemSlotOperations>(
             let icon_size = thumb_size * 0.5;
             let icon_rect = crate::ui::views::common::snap_rect_to_physical_pixels(
                 ui.ctx(),
-                egui::Rect::from_center_size(thumb_rect.center(), egui::vec2(icon_size, icon_size)),
+                scaled_visual_rect(
+                    egui::Rect::from_center_size(
+                        thumb_rect.center(),
+                        egui::vec2(icon_size, icon_size),
+                    ),
+                    ctx.hover_scale,
+                ),
             );
             ui.painter().image(
                 icon_texture.id(),

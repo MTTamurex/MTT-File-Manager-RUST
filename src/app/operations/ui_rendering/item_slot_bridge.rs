@@ -52,6 +52,7 @@ impl ImageViewerApp {
                 item,
                 idx,
                 thumbnail_size: self.thumbnail_size,
+                hover_scale: 1.0,
                 is_renaming,
                 renaming_text,
                 focus_rename: self.focus_rename,
