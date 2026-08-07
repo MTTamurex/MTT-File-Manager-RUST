@@ -128,7 +128,7 @@ pub(super) fn render_grid_item(
         should_zoom,
         0.12,
     );
-    let hover_scale = egui::lerp(1.0..=1.02, hover_progress);
+    let hover_scale = egui::lerp(1.0..=1.04, hover_progress);
     let allow_hover = matches!(ctx.last_input, crate::app::state::LastInput::Mouse);
     let is_hovered_visual = allow_hover && response.hovered() && !is_selected;
     let is_focused = ctx.selected_item == Some(index);
