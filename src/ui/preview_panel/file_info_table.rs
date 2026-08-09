@@ -290,20 +290,18 @@ pub fn render_file_info_table(
                     || !spec.os_build.is_empty();
 
                 if has_board || has_bios {
-                    ui.add_space(6.0);
-                    ui.separator();
-                    ui.add_space(6.0);
+                    ui.add_space(12.0);
                 }
                 if has_board {
+                    if !spec.board_product.is_empty() {
+                        add_detail(ui, &t!("file_info.board_model"), spec.board_product.clone());
+                    }
                     if !spec.board_manufacturer.is_empty() {
                         add_detail(
                             ui,
                             &t!("file_info.board_manufacturer"),
                             spec.board_manufacturer.clone(),
                         );
-                    }
-                    if !spec.board_product.is_empty() {
-                        add_detail(ui, &t!("file_info.board_model"), spec.board_product.clone());
                     }
                 }
                 if has_bios {
@@ -338,9 +336,7 @@ pub fn render_file_info_table(
 
                 // Windows info always last.
                 if has_os {
-                    ui.add_space(6.0);
-                    ui.separator();
-                    ui.add_space(6.0);
+                    ui.add_space(12.0);
 
                     if !spec.os_edition.is_empty() {
                         add_detail(ui, &t!("file_info.os_edition"), spec.os_edition.clone());
