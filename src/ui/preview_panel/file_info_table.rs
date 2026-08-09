@@ -82,6 +82,7 @@ pub fn render_file_info_table(
     tag_file_count: Option<usize>,
     file_hash_status: Option<Result<String, String>>,
     is_file_hash_loading: bool,
+    computer_storage: Option<(u64, u64)>,
 ) -> Option<PreviewPanelAction> {
     let mut action = None;
 
@@ -246,18 +247,107 @@ pub fn render_file_info_table(
                     add_detail(ui, &t!("file_info.files"), files.to_string());
                 }
             } else if file.name == COMPUTER_VIEW_ID {
-                add_detail(
-                    ui,
-                    &t!("file_info.type"),
-                    t!("file_info.type_system_view").to_string(),
-                );
-                let drive_count = file.size as usize;
-                let drive_text = if drive_count == 1 {
-                    t!("file_info.drives_one").to_string()
-                } else {
-                    t!("file_info.drives_many", count = drive_count).to_string()
+                // Windows 11 "System > About" style device + OS information.
+                let spec = crate::infrastructure::windows::get_system_spec();
+
+                if !spec.device_name.is_empty() {
+                    add_detail(ui, &t!("file_info.device_name"), spec.device_name.clone());
+                }
+                let cpu = spec.cpu_display();
+                if !cpu.is_empty() {
+                    add_detail(ui, &t!("file_info.processor"), cpu);
+                }
+                if spec.total_ram_bytes > 0 {
+                    add_detail(
+                        ui,
+                        &t!("file_info.installed_ram"),
+                        crate::infrastructure::windows::format_size(spec.total_ram_bytes),
+                    );
+                }
+                if let Some(gpu) = spec.gpu_display() {
+                    add_detail(ui, &t!("file_info.graphics_card"), gpu);
+                }
+                let storage_text = match computer_storage {
+                    Some((used, total)) => t!(
+                        "file_info.storage_used_of_total",
+                        used = crate::infrastructure::windows::format_size(used),
+                        total = crate::infrastructure::windows::format_size(total)
+                    )
+                    .to_string(),
+                    None => t!("file_info.calculating").to_string(),
                 };
-                add_detail(ui, &t!("file_info.drives_label"), drive_text);
+                add_detail(ui, &t!("file_info.storage_label"), storage_text);
+
+                // Motherboard + BIOS (SMBIOS data), CPU-Z style.
+                let has_board =
+                    !spec.board_manufacturer.is_empty() || !spec.board_product.is_empty();
+                let has_bios = !spec.bios_vendor.is_empty()
+                    || !spec.bios_version.is_empty()
+                    || !spec.bios_release_date.is_empty()
+                    || spec.firmware_is_uefi.is_some();
+                let has_os = !spec.os_edition.is_empty()
+                    || !spec.os_version.is_empty()
+                    || !spec.os_build.is_empty();
+
+                if has_board || has_bios {
+                    ui.add_space(6.0);
+                    ui.separator();
+                    ui.add_space(6.0);
+                }
+                if has_board {
+                    if !spec.board_manufacturer.is_empty() {
+                        add_detail(
+                            ui,
+                            &t!("file_info.board_manufacturer"),
+                            spec.board_manufacturer.clone(),
+                        );
+                    }
+                    if !spec.board_product.is_empty() {
+                        add_detail(ui, &t!("file_info.board_model"), spec.board_product.clone());
+                    }
+                }
+                if has_bios {
+                    if has_board {
+                        ui.add_space(6.0);
+                    }
+                    if !spec.bios_vendor.is_empty() {
+                        add_detail(ui, &t!("file_info.bios_brand"), spec.bios_vendor.clone());
+                    }
+                    if !spec.bios_version.is_empty() {
+                        add_detail(ui, &t!("file_info.bios_version"), spec.bios_version.clone());
+                    }
+                    if !spec.bios_release_date.is_empty() {
+                        add_detail(ui, &t!("file_info.bios_date"), spec.bios_release_date.clone());
+                    }
+                    if let Some(uefi) = spec.firmware_is_uefi {
+                        add_detail(
+                            ui,
+                            &t!("file_info.bios_mode"),
+                            if uefi {
+                                t!("file_info.bios_mode_uefi").to_string()
+                            } else {
+                                t!("file_info.bios_mode_legacy").to_string()
+                            },
+                        );
+                    }
+                }
+
+                // Windows info always last.
+                if has_os {
+                    ui.add_space(6.0);
+                    ui.separator();
+                    ui.add_space(6.0);
+
+                    if !spec.os_edition.is_empty() {
+                        add_detail(ui, &t!("file_info.os_edition"), spec.os_edition.clone());
+                    }
+                    if !spec.os_version.is_empty() {
+                        add_detail(ui, &t!("file_info.os_version"), spec.os_version.clone());
+                    }
+                    if !spec.os_build.is_empty() {
+                        add_detail(ui, &t!("file_info.os_build"), spec.os_build.clone());
+                    }
+                }
             } else if let Some(drive) = &file.drive_info {
                 add_detail(ui, &t!("file_info.type"), format!("{:?}", drive.drive_type));
             } else if file.is_dir {

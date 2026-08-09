@@ -52,6 +52,7 @@ pub fn render_preview_panel(
     tag_color: Option<egui::Color32>,
     tag_folder_count: Option<usize>,
     tag_file_count: Option<usize>,
+    computer_storage: Option<(u64, u64)>,
 ) -> Option<PreviewPanelAction> {
     // Metadata is processed asynchronously; when it arrives, metadata will be Some(...)
     let mut action = None;
@@ -201,6 +202,7 @@ pub fn render_preview_panel(
         tag_file_count,
         file_hash_status,
         is_file_hash_loading,
+        computer_storage,
     ) {
         action = Some(act);
     }

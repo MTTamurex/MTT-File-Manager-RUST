@@ -60,6 +60,28 @@ impl DriveState {
         })
     }
 
+    /// Aggregated (used, total) bytes across local fixed drives with cached
+    /// capacity info. Used by the This PC details panel (Storage row).
+    /// Returns `None` until the background drive info refresh has populated
+    /// at least one fixed drive.
+    pub fn local_storage_totals(&self) -> Option<(u64, u64)> {
+        let mut used = 0u64;
+        let mut total = 0u64;
+        let mut any = false;
+        for (path, _) in &self.disks {
+            if let Some(info) = self.cached_drive_info(path) {
+                if info.drive_type == crate::infrastructure::windows::DriveType::Fixed
+                    && info.total_space > 0
+                {
+                    used = used.saturating_add(info.total_space.saturating_sub(info.free_space));
+                    total = total.saturating_add(info.total_space);
+                    any = true;
+                }
+            }
+        }
+        any.then_some((used, total))
+    }
+
     pub fn remove_cached_drive_info(&mut self, path: &str) {
         self.drive_info_cache.remove(path);
         if let Some(root_key) = normalize_drive_root_key(path) {

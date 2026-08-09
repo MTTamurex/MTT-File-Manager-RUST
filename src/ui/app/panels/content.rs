@@ -174,6 +174,14 @@ pub(super) fn render_preview_panel_layout(
                             let is_file_hash_loading =
                                 app.file_hash_loading.contains(&file.path);
 
+                            // This PC details panel: aggregated fixed-drive storage
+                            // (used, total) from the background-refreshed cache.
+                            let computer_storage = if app.navigation_state.is_computer_view {
+                                app.drive_state.local_storage_totals()
+                            } else {
+                                None
+                            };
+
 // Resolution guard for preview panel: accept textures that are
                             // large enough for the detail panel, OR that are the best available
                             // when we've already attempted the required quality bucket (some
@@ -225,6 +233,7 @@ pub(super) fn render_preview_panel_layout(
                                 tag_color,
                                 tag_folder_count,
                                 tag_file_count,
+                                computer_storage,
                             );
 
                             if let Some(act) = action {

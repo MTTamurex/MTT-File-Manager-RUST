@@ -81,6 +81,7 @@ features = [
     "Win32_System_Memory",
     "Win32_System_Registry",
     "Win32_Graphics_Gdi",
+    "Win32_Graphics_Dxgi",
     "Win32_Foundation",
     "Win32_Storage_FileSystem",
     "Win32_UI_WindowsAndMessaging",
