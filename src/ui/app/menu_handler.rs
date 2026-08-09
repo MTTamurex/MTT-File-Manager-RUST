@@ -413,6 +413,27 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
     if let Some(id) = context_menu.selected_command_id.take() {
         let selected_command =
             find_menu_item_command_by_id(&context_menu.items, id).map(str::to_owned);
+        if selected_command.as_deref()
+            == Some(crate::application::context_menu::EXTRACT_ALL_PENDING_COMMAND)
+        {
+            // Keep the selection and worker alive until QueryContextMenu returns the
+            // positive command ID assigned by the Shell extension.
+            let started_at = *context_menu
+                .extract_all_pending_since
+                .get_or_insert_with(std::time::Instant::now);
+            if started_at.elapsed() >= std::time::Duration::from_secs(10) {
+                app.notifications
+                    .warning(t!("context_menu.shell_menu_error").to_string());
+                context_menu.close();
+                app.context_menu = context_menu;
+                app.invalidate_context_menu_workers();
+                return;
+            }
+            context_menu.selected_command_id = Some(id);
+            app.context_menu = context_menu;
+            ctx.request_repaint_after(std::time::Duration::from_millis(16));
+            return;
+        }
         let is_open_with_handler = selected_command
             .as_deref()
             .and_then(crate::infrastructure::open_with_worker::handler_id_from_command)

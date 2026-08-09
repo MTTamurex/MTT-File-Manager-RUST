@@ -20,6 +20,110 @@ fn is_optical_disc_context_target(
         && drive_type == Some(crate::infrastructure::windows::DriveType::Cdrom)
 }
 
+fn is_open_with_menu_item(item: &crate::application::context_menu::ContextMenuItem) -> bool {
+    item.command_string.as_deref().is_some_and(|command| {
+        matches!(
+            command,
+            "openwith_placeholder"
+                | "open_with_menu"
+                | "open_with_dialog"
+                | "open_with_shell_fallback"
+        ) || command.eq_ignore_ascii_case("openas")
+    })
+}
+
+fn is_extract_all_shell_item(item: &crate::application::context_menu::ContextMenuItem) -> bool {
+    if item
+        .command_string
+        .as_deref()
+        .is_some_and(|verb| verb.eq_ignore_ascii_case("extractall"))
+    {
+        return true;
+    }
+
+    let text = item.text.trim().trim_end_matches(['.', '\u{2026}']).trim();
+    text.eq_ignore_ascii_case("extract all") || text.eq_ignore_ascii_case("extrair tudo")
+}
+
+fn is_extract_all_pending_item(item: &crate::application::context_menu::ContextMenuItem) -> bool {
+    item.command_string.as_deref()
+        == Some(crate::application::context_menu::EXTRACT_ALL_PENDING_COMMAND)
+}
+
+fn should_offer_extract_all(paths: &[PathBuf], is_empty_area: bool, target_is_file: bool) -> bool {
+    !is_empty_area
+        && target_is_file
+        && paths.len() == 1
+        && paths.first().is_some_and(|path| {
+            crate::domain::file_entry::is_archive_extension(&path.to_string_lossy())
+        })
+}
+
+fn insert_extract_all_pending_item(
+    menu_items: &mut Vec<crate::application::context_menu::ContextMenuItem>,
+) {
+    use crate::application::context_menu::{
+        ContextMenuItem, EXTRACT_ALL_PENDING_COMMAND, EXTRACT_ALL_PENDING_ID,
+    };
+
+    if menu_items.iter().any(is_extract_all_pending_item) {
+        return;
+    }
+    let Some(open_with_index) = menu_items.iter().position(is_open_with_menu_item) else {
+        return;
+    };
+
+    menu_items.insert(
+        open_with_index + 1,
+        ContextMenuItem::new(EXTRACT_ALL_PENDING_ID, t!("context_menu.extract_all"))
+            .with_command(EXTRACT_ALL_PENDING_COMMAND)
+            .with_svg_icon("extract_all"),
+    );
+}
+
+pub(crate) fn extract_all_shell_command_id(
+    menu_items: &[crate::application::context_menu::ContextMenuItem],
+) -> Option<i32> {
+    menu_items
+        .iter()
+        .find(|item| {
+            item.id > 0
+                && item.is_enabled
+                && !item.is_separator
+                && item.sub_items.is_empty()
+                && is_extract_all_shell_item(item)
+        })
+        .map(|item| item.id)
+}
+
+fn promote_extract_all_shell_item(
+    menu_items: &mut Vec<crate::application::context_menu::ContextMenuItem>,
+    shell_items: &mut Vec<crate::application::context_menu::ContextMenuItem>,
+) {
+    let pending_index = menu_items.iter().position(is_extract_all_pending_item);
+    let Some(extract_all_index) = shell_items.iter().position(is_extract_all_shell_item) else {
+        if let Some(index) = pending_index {
+            menu_items.remove(index);
+        }
+        return;
+    };
+
+    if let Some(index) = pending_index {
+        let mut extract_all = shell_items.remove(extract_all_index);
+        extract_all.svg_icon_name = Some("extract_all".to_string());
+        menu_items[index] = extract_all;
+        return;
+    }
+
+    let Some(open_with_index) = menu_items.iter().position(is_open_with_menu_item) else {
+        return;
+    };
+
+    let mut extract_all = shell_items.remove(extract_all_index);
+    extract_all.svg_icon_name = Some("extract_all".to_string());
+    menu_items.insert(open_with_index + 1, extract_all);
+}
+
 fn grouping_menu_item(app: &ImageViewerApp) -> crate::application::context_menu::ContextMenuItem {
     use crate::application::context_menu::ContextMenuItem;
     use crate::domain::file_entry::{GroupMode, ViewMode};
@@ -729,6 +833,10 @@ impl ImageViewerApp {
             };
             self.context_menu_workers_active = shell_sent || open_with_sent;
 
+            if shell_sent && should_offer_extract_all(paths, is_empty_area, target_is_file) {
+                insert_extract_all_pending_item(&mut items);
+            }
+
             // Add a single loading placeholder for "Show more options".
             // All shell items are placed inside this submenu, so only one
             // placeholder is needed and the menu height stays stable.
@@ -933,6 +1041,8 @@ impl ImageViewerApp {
                 items.push(open_with);
             }
         }
+
+        promote_extract_all_shell_item(items, &mut all_shell_items);
 
         if let Some(mut new_submenu) = new_submenu_item {
             new_submenu.text = t!("context_menu.new").to_string();
@@ -1207,9 +1317,161 @@ impl ImageViewerApp {
 }
 
 #[cfg(test)]
-mod optical_disc_tests {
-    use super::is_optical_disc_context_target;
+mod tests {
+    use super::{
+        extract_all_shell_command_id, insert_extract_all_pending_item, is_extract_all_pending_item,
+        is_extract_all_shell_item, is_optical_disc_context_target, promote_extract_all_shell_item,
+        should_offer_extract_all,
+    };
+    use crate::application::context_menu::{
+        ContextMenuItem, EXTRACT_ALL_PENDING_COMMAND, EXTRACT_ALL_PENDING_ID,
+    };
     use crate::infrastructure::windows::DriveType;
+    use std::path::PathBuf;
+
+    #[test]
+    fn recognizes_extract_all_shell_command() {
+        let by_verb = ContextMenuItem::new(10, "Localized text").with_command("ExtractAll");
+        let by_english_text = ContextMenuItem::new(11, "Extract All...");
+        let by_portuguese_text = ContextMenuItem::new(12, "Extrair Tudo\u{2026}");
+        let different_command =
+            ContextMenuItem::new(13, "Extract here").with_command("extracthere");
+
+        assert!(is_extract_all_shell_item(&by_verb));
+        assert!(is_extract_all_shell_item(&by_english_text));
+        assert!(is_extract_all_shell_item(&by_portuguese_text));
+        assert!(!is_extract_all_shell_item(&different_command));
+    }
+
+    #[test]
+    fn promotes_extract_all_directly_after_open_with() {
+        for open_with_command in [
+            "openwith_placeholder",
+            "open_with_menu",
+            "open_with_dialog",
+            "open_with_shell_fallback",
+            "OpenAs",
+        ] {
+            let mut menu_items = vec![
+                ContextMenuItem::new(-20, "Open"),
+                ContextMenuItem::new(-201, "Open with").with_command(open_with_command),
+                ContextMenuItem::new(-80, "Open in terminal"),
+            ];
+            let mut shell_items = vec![
+                ContextMenuItem::new(10, "Share").with_command("share"),
+                ContextMenuItem::new(11, "Extract All").with_command("extractall"),
+            ];
+
+            promote_extract_all_shell_item(&mut menu_items, &mut shell_items);
+
+            assert_eq!(
+                menu_items[1].command_string.as_deref(),
+                Some(open_with_command)
+            );
+            assert_eq!(menu_items[2].command_string.as_deref(), Some("extractall"));
+            assert_eq!(menu_items[2].svg_icon_name.as_deref(), Some("extract_all"));
+            assert_eq!(menu_items[3].id, -80);
+            assert_eq!(shell_items.len(), 1);
+            assert!(!shell_items.iter().any(is_extract_all_shell_item));
+        }
+    }
+
+    #[test]
+    fn inserts_and_replaces_extract_all_pending_item_in_place() {
+        let mut menu_items = vec![
+            ContextMenuItem::new(-201, "Open with").with_command("open_with_menu"),
+            ContextMenuItem::new(-80, "Open in terminal"),
+        ];
+
+        insert_extract_all_pending_item(&mut menu_items);
+
+        assert_eq!(menu_items[1].id, EXTRACT_ALL_PENDING_ID);
+        assert_eq!(
+            menu_items[1].command_string.as_deref(),
+            Some(EXTRACT_ALL_PENDING_COMMAND)
+        );
+        assert_eq!(menu_items[1].svg_icon_name.as_deref(), Some("extract_all"));
+
+        let mut shell_items = vec![
+            ContextMenuItem::new(10, "Share").with_command("share"),
+            ContextMenuItem::new(11, "Extract All").with_command("extractall"),
+        ];
+        promote_extract_all_shell_item(&mut menu_items, &mut shell_items);
+
+        assert_eq!(menu_items[1].id, 11);
+        assert_eq!(menu_items[1].command_string.as_deref(), Some("extractall"));
+        assert_eq!(menu_items[1].svg_icon_name.as_deref(), Some("extract_all"));
+        assert_eq!(menu_items[2].id, -80);
+        assert!(!shell_items.iter().any(is_extract_all_shell_item));
+    }
+
+    #[test]
+    fn removes_pending_extract_all_when_shell_does_not_offer_it() {
+        let mut menu_items = vec![
+            ContextMenuItem::new(-201, "Open with").with_command("open_with_menu"),
+            ContextMenuItem::new(EXTRACT_ALL_PENDING_ID, "Extract All")
+                .with_command(EXTRACT_ALL_PENDING_COMMAND),
+        ];
+        let mut shell_items = vec![ContextMenuItem::new(10, "Share").with_command("share")];
+
+        promote_extract_all_shell_item(&mut menu_items, &mut shell_items);
+
+        assert!(!menu_items.iter().any(is_extract_all_pending_item));
+        assert_eq!(shell_items.len(), 1);
+    }
+
+    #[test]
+    fn resolves_only_enabled_native_extract_all_commands() {
+        let menu_items = vec![
+            ContextMenuItem::new(EXTRACT_ALL_PENDING_ID, "Extract All")
+                .with_command(EXTRACT_ALL_PENDING_COMMAND),
+            ContextMenuItem::new(10, "Extract All")
+                .with_command("extractall")
+                .enabled(false),
+            ContextMenuItem::new(11, "Extract All").with_command("extractall"),
+        ];
+
+        assert_eq!(extract_all_shell_command_id(&menu_items), Some(11));
+    }
+
+    #[test]
+    fn offers_extract_all_immediately_only_for_one_archive_file() {
+        assert!(should_offer_extract_all(
+            &[PathBuf::from(r"C:\files\archive.zip")],
+            false,
+            true
+        ));
+        assert!(!should_offer_extract_all(
+            &[PathBuf::from(r"C:\files\document.txt")],
+            false,
+            true
+        ));
+        assert!(!should_offer_extract_all(
+            &[
+                PathBuf::from(r"C:\files\one.zip"),
+                PathBuf::from(r"C:\files\two.zip")
+            ],
+            false,
+            true
+        ));
+        assert!(!should_offer_extract_all(
+            &[PathBuf::from(r"C:\files\archive.zip")],
+            true,
+            true
+        ));
+    }
+
+    #[test]
+    fn keeps_extract_all_in_shell_items_without_open_with_anchor() {
+        let mut menu_items = vec![ContextMenuItem::new(-20, "Open")];
+        let mut shell_items =
+            vec![ContextMenuItem::new(11, "Extract All").with_command("extractall")];
+
+        promote_extract_all_shell_item(&mut menu_items, &mut shell_items);
+
+        assert_eq!(menu_items.len(), 1);
+        assert!(shell_items.iter().any(is_extract_all_shell_item));
+    }
 
     #[test]
     fn offers_playback_only_for_one_optical_drive_root() {

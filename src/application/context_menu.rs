@@ -6,6 +6,9 @@ use std::path::PathBuf;
 
 use eframe::egui;
 
+pub const EXTRACT_ALL_PENDING_ID: i32 = -203;
+pub const EXTRACT_ALL_PENDING_COMMAND: &str = "extract_all_pending";
+
 /// A single item in the context menu (matches Files ContextMenuFlyoutItemViewModel)
 #[derive(Clone)]
 pub struct ContextMenuItem {
@@ -200,6 +203,8 @@ pub struct ContextMenuState {
 
     /// The ID of the command selected by the user (positive for Shell, negative for internal)
     pub selected_command_id: Option<i32>,
+    /// Start of an early Extract All click waiting for the Shell command ID.
+    pub extract_all_pending_since: Option<std::time::Instant>,
 
     /// Native shell context (holds IContextMenu and other COM objects alive)
     /// Stored as Any to keep the application layer agnostic of Win32 types
@@ -230,6 +235,7 @@ impl Default for ContextMenuState {
             secondary_indices: Vec::new(),
             overflow_indices: Vec::new(),
             selected_command_id: None,
+            extract_all_pending_since: None,
             native_context: None,
             pending_load_item: None,
             loading_submenu_ids: HashSet::new(),
@@ -260,6 +266,7 @@ impl ContextMenuState {
             .flatten();
         self.is_empty_area = is_empty_area;
         self.selected_command_id = None;
+        self.extract_all_pending_since = None;
         self.native_context = None;
         self.pending_load_item = None;
         self.loading_submenu_ids.clear();
@@ -281,6 +288,7 @@ impl ContextMenuState {
         self.operation_directory = None;
         self.is_empty_area = false;
         self.selected_command_id = None;
+        self.extract_all_pending_since = None;
         self.native_context = None;
         self.pending_load_item = None;
         self.loading_submenu_ids.clear();
@@ -305,6 +313,7 @@ impl ContextMenuState {
         self.secondary_indices.clear();
         self.overflow_indices.clear();
         self.selected_command_id = None;
+        self.extract_all_pending_since = None;
         self.native_context = None;
         self.pending_load_item = None;
         self.loading_submenu_ids.clear();
@@ -398,5 +407,25 @@ mod tests {
         assert!(!state.begin_submenu_load(42));
         state.finish_submenu_load(42);
         assert!(state.begin_submenu_load(42));
+    }
+
+    #[test]
+    fn opening_and_closing_clear_pending_extract_all_waits() {
+        let mut state = ContextMenuState {
+            extract_all_pending_since: Some(std::time::Instant::now()),
+            ..Default::default()
+        };
+
+        state.open(
+            eframe::egui::Pos2::ZERO,
+            None,
+            vec![std::path::PathBuf::from(r"C:\archive.zip")],
+            false,
+        );
+        assert!(state.extract_all_pending_since.is_none());
+
+        state.extract_all_pending_since = Some(std::time::Instant::now());
+        state.close();
+        assert!(state.extract_all_pending_since.is_none());
     }
 }

@@ -270,9 +270,30 @@ impl eframe::App for ImageViewerApp {
             while let Ok(response) = self.shell_menu_res_rx.try_recv() {
                 match response {
                     ShellMenuResponse::Ready { request_id, items } => {
-                        if self.context_menu.is_open && request_id == self.shell_menu_request_id {
+                        let extract_all_pending = self.context_menu.selected_command_id
+                            == Some(crate::application::context_menu::EXTRACT_ALL_PENDING_ID);
+                        if (self.context_menu.is_open || extract_all_pending)
+                            && request_id == self.shell_menu_request_id
+                        {
                             let ctx_clone = ctx.clone();
                             self.apply_async_shell_items(items, &ctx_clone);
+                            if extract_all_pending {
+                                if let Some(command_id) =
+                                    crate::app::operations::context_menu::extract_all_shell_command_id(
+                                        &self.context_menu.items,
+                                    )
+                                {
+                                    self.context_menu.selected_command_id = Some(command_id);
+                                    self.context_menu.extract_all_pending_since = None;
+                                } else {
+                                    self.notifications.warning(
+                                        rust_i18n::t!("context_menu.extract_all_unavailable")
+                                            .to_string(),
+                                    );
+                                    self.context_menu.close();
+                                    self.invalidate_context_menu_workers();
+                                }
+                            }
                         }
                         if request_id == self.shell_menu_request_id {
                             self.shell_menu_loading = false;
@@ -283,7 +304,16 @@ impl eframe::App for ImageViewerApp {
                         message,
                     } => {
                         if request_id == self.shell_menu_request_id {
-                            if self.context_menu.is_open {
+                            let extract_all_pending = self.context_menu.selected_command_id
+                                == Some(crate::application::context_menu::EXTRACT_ALL_PENDING_ID);
+                            if extract_all_pending {
+                                log::debug!("[ShellMenu] Extraction error: {}", message);
+                                self.notifications.warning(
+                                    rust_i18n::t!("context_menu.shell_menu_error").to_string(),
+                                );
+                                self.context_menu.close();
+                                self.invalidate_context_menu_workers();
+                            } else if self.context_menu.is_open {
                                 log::debug!("[ShellMenu] Extraction error: {}", message);
                                 self.notifications.warning(
                                     rust_i18n::t!("context_menu.shell_menu_error").to_string(),
@@ -291,10 +321,14 @@ impl eframe::App for ImageViewerApp {
                                 // Remove the loading placeholder on error so the menu doesn't
                                 // keep showing a stale "Loading…" item.
                                 self.context_menu.items.retain(|item| {
-                                    !item.is_loading_placeholder
-                                        || (self.context_menu.target_paths.len() == 1
-                                            && item.command_string.as_deref()
-                                                == Some("openwith_placeholder"))
+                                    item.command_string.as_deref()
+                                        != Some(
+                                            crate::application::context_menu::EXTRACT_ALL_PENDING_COMMAND,
+                                        )
+                                        && (!item.is_loading_placeholder
+                                            || (self.context_menu.target_paths.len() == 1
+                                                && item.command_string.as_deref()
+                                                    == Some("openwith_placeholder")))
                                 });
                                 // Remove any trailing separator that preceded the placeholder.
                                 while self

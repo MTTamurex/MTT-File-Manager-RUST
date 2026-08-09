@@ -22,6 +22,7 @@ pub const ICON_DELETE: &[u8] = include_bytes!("../assets/icons/delete.svg");
 pub const ICON_DRIVE: &[u8] = include_bytes!("../assets/icons/drive.svg");
 pub const ICON_EXTERNAL_LINK: &[u8] = include_bytes!("../assets/icons/external-link.svg");
 pub const ICON_EYE: &[u8] = include_bytes!("../assets/icons/eye.svg");
+pub const ICON_EXTRACT_ALL: &[u8] = include_bytes!("../assets/icons/extract_all.svg");
 pub const ICON_FOLDER: &[u8] = include_bytes!("../assets/icons/folder.svg");
 pub const ICON_FOLDER_NEW: &[u8] =
     include_bytes!("../assets/icons/folder_new_duotone_black_blue_lighter2.svg");
@@ -71,6 +72,7 @@ pub fn get_icon(name: &str) -> Option<&'static [u8]> {
         "delete" => Some(ICON_DELETE),
         "drive" => Some(ICON_DRIVE),
         "eye" => Some(ICON_EYE),
+        "extract_all" => Some(ICON_EXTRACT_ALL),
         "external-link" => Some(ICON_EXTERNAL_LINK),
         "folder" => Some(ICON_FOLDER),
         "folder_new" => Some(ICON_FOLDER_NEW),

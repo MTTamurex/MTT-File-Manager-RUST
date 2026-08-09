@@ -16,6 +16,13 @@ fn svg_icon_key(icon_name: &str, size: u32, effective_color: [u8; 4], ppp_100: u
     h.finish()
 }
 
+fn is_duotone_icon(icon_name: &str) -> bool {
+    matches!(
+        icon_name,
+        "copy" | "cut" | "paste" | "rename" | "folder_new" | "extract_all"
+    )
+}
+
 /// Manages SVG icon loading and caching
 pub struct SvgIconManager {
     /// Cache of rendered textures keyed by a u64 hash of (icon_name, size, color, pixels_per_point)
@@ -48,10 +55,7 @@ impl SvgIconManager {
     ) -> Option<TextureHandle> {
         // Check if icon should preserve original colors (duotone icons)
         // But only if NOT in disabled state (disabled uses alpha < 255 or specific gray)
-        let is_duotone = matches!(
-            icon_name,
-            "copy" | "cut" | "paste" | "rename" | "folder_new"
-        );
+        let is_duotone = is_duotone_icon(icon_name);
         // Disabled state is indicated by: alpha < 255 (e.g., [128, 128, 128, 180])
         let is_disabled = color[3] < 255;
         let preserve_colors = is_duotone && !is_disabled;
@@ -269,7 +273,7 @@ pub fn icon_image(
 
 #[cfg(test)]
 mod tests {
-    use super::render_svg_to_image;
+    use super::{is_duotone_icon, render_svg_to_image};
 
     #[test]
     fn embedded_tag_icon_renders() {
@@ -283,5 +287,24 @@ mod tests {
         .expect("embedded tag icon should be valid SVG");
 
         assert_eq!(image.size, [16, 16]);
+    }
+
+    #[test]
+    fn embedded_extract_all_icon_renders_with_blue_accent() {
+        let image = render_svg_to_image(
+            crate::embedded_assets::ICON_EXTRACT_ALL,
+            16,
+            [60, 60, 60, 255],
+            1.0,
+            true,
+        )
+        .expect("embedded Extract All icon should be valid SVG");
+
+        assert_eq!(image.size, [16, 16]);
+        assert!(is_duotone_icon("extract_all"));
+        assert!(image
+            .pixels
+            .iter()
+            .any(|pixel| pixel.b() > pixel.r() && pixel.b() > pixel.g()));
     }
 }

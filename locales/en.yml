@@ -237,6 +237,8 @@ operations:
 context_menu:
   open: "Open"
   open_with: "Open with..."
+  extract_all: "Extract All..."
+  extract_all_unavailable: "Extract All is not available for this file"
   choose_another_app: "Choose another app"
   open_new_tab: "Open in new tab"
   cut: "Cut"
