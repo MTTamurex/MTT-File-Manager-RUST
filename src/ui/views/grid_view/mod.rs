@@ -1,7 +1,7 @@
 //! Grid view rendering
 //! Follows .cursorrules: single responsibility, < 300 lines
 
-use eframe::egui::{self, Rect, Sense, Ui};
+use eframe::egui::{self, Sense, Ui};
 use std::path::{Path, PathBuf};
 
 use crate::domain::file_entry::FileEntry;
@@ -9,7 +9,8 @@ use crate::domain::file_tag::FileTag;
 // PERFORMANCE: Use FxHashSet for PathBuf keys - faster hashing than std::collections::HashSet
 use crate::ui::cache::FxHashSet;
 use crate::ui::views::rectangle_selection::{
-    GridRectangleMetrics, GroupedRectangleMetrics, RectangleSelectionFrame,
+    GridRectangleMetrics, GroupedProjectionIdentity, GroupedRectangleLayout,
+    GroupedRectangleMetrics, GroupedRectangleSection, RectangleSelectionFrame,
     RectangleSelectionMetrics, RectangleSelectionState, RectangleSelectionView,
 };
 mod hit_testing;
@@ -150,6 +151,7 @@ pub struct GridViewContext<'a> {
     pub texture_cache: &'a mut lru::LruCache<PathBuf, egui::TextureHandle>,
     pub attempted_thumbnail_bucket: &'a lru::LruCache<PathBuf, u32>,
     pub loading_set: &'a mut FxHashSet<PathBuf>,
+    pub thumbnail_queue: &'a crate::workers::thumbnail::PriorityThumbnailQueue,
     pub shared_visible_paths: Option<FxHashSet<PathBuf>>,
     /// Set of icons currently loading (async)
     pub loading_icons: &'a mut crate::ui::icon_loader::IconLoadTracker,
@@ -580,35 +582,32 @@ fn grouped_grid_rectangle_metrics(
     content_width: f32,
     content_height: f32,
 ) -> GroupedRectangleMetrics {
-    let mut item_rects = Vec::new();
+    let mut sections = Vec::new();
     let mut content_y = 0.0;
     for section in &ctx.group_projection.sections {
         content_y += crate::ui::views::group_header::GROUP_HEADER_HEIGHT;
         if !ctx.collapsed_groups.contains(&section.key) {
-            for (position, index) in section.item_indices.iter().enumerate() {
-                if *index >= ctx.items.len() {
-                    continue;
-                }
-                let row = position / cols;
-                let column = position % cols;
-                item_rects.push((
-                    *index,
-                    Rect::from_min_size(
-                        egui::pos2(
-                            column as f32 * (item_w + padding) + padding,
-                            content_y + row as f32 * cell_height + padding,
-                        ),
-                        egui::vec2(item_w, item_h),
-                    ),
-                ));
-            }
+            sections.push(GroupedRectangleSection {
+                item_indices: section.item_indices.clone(),
+                origin: egui::pos2(padding, content_y + padding),
+            });
             content_y += section.item_indices.len().div_ceil(cols) as f32 * cell_height + padding;
         }
         content_y += crate::ui::views::group_header::GROUP_GAP;
     }
+    let sections: std::sync::Arc<[GroupedRectangleSection]> = sections.into();
     GroupedRectangleMetrics {
         view: RectangleSelectionView::Grid,
-        item_rects: item_rects.into(),
+        projection_identity: GroupedProjectionIdentity::new(sections.clone(), ctx.items.len()),
+        sections,
+        layout: GroupedRectangleLayout::Grid {
+            cols,
+            item_w,
+            item_h,
+            column_step: item_w + padding,
+            row_step: cell_height,
+        },
+        item_count: ctx.items.len(),
         content_width,
         content_height,
     }

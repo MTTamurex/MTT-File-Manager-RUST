@@ -6,6 +6,23 @@ use rust_i18n::t;
 
 use super::{MAX_ZOOM_FACTOR, MIN_ZOOM_FACTOR};
 
+fn image_interaction_sense(can_pan: bool) -> egui::Sense {
+    if can_pan {
+        egui::Sense::click_and_drag()
+    } else {
+        egui::Sense::click()
+    }
+}
+
+fn take_zoom_wheel_delta(ui: &mut egui::Ui) -> f32 {
+    let wheel_delta = ui.input(|i| i.smooth_scroll_delta().y);
+    if wheel_delta.abs() > f32::EPSILON {
+        // ScrollArea handles wheel input after its content closure.
+        ui.input_mut(|i| i.smooth_scroll_delta = egui::Vec2::ZERO);
+    }
+    wheel_delta
+}
+
 impl super::DedicatedImageViewerApp {
     pub(super) fn render_top_bar(&mut self, root_ui: &mut egui::Ui) {
         let ctx = root_ui.ctx().clone();
@@ -250,8 +267,9 @@ impl super::DedicatedImageViewerApp {
                         let image_rect =
                             egui::Rect::from_center_size(canvas_rect.center(), draw_size);
 
-                        // Click = zoom in/out; drag = pan the zoomed image.
-                        let image_sense = egui::Sense::click() | egui::Sense::drag();
+                        // Click = zoom in/out; drag = pan only when there is
+                        // actually scrollable image content.
+                        let image_sense = image_interaction_sense(can_pan);
 
                         let response = if self.rotation != 0 {
                             let resp = ui.interact(
@@ -282,7 +300,7 @@ impl super::DedicatedImageViewerApp {
                         }
 
                         if response.hovered() {
-                            let wheel_delta = ui.input(|i| i.smooth_scroll_delta().y);
+                            let wheel_delta = take_zoom_wheel_delta(ui);
                             if wheel_delta.abs() > f32::EPSILON {
                                 // Granular zoom: track wheel delta continuously.
                                 let factor = 1.0 + wheel_delta * 0.0015;
@@ -308,7 +326,7 @@ impl super::DedicatedImageViewerApp {
                             }
                         }
 
-                        if response.dragged() {
+                        if can_pan && response.dragged() {
                             response.drag_delta()
                         } else {
                             egui::Vec2::ZERO
@@ -326,9 +344,8 @@ impl super::DedicatedImageViewerApp {
                     // Must match the ScrollArea's own id exactly: its builder
                     // hashes the string into an IdSalt, and `Id::with` hashes
                     // that salt once more.
-                    let scroll_id = ui.make_persistent_id(egui::IdSalt::new(
-                        "image_viewer_center_scroll",
-                    ));
+                    let scroll_id =
+                        ui.make_persistent_id(egui::IdSalt::new("image_viewer_center_scroll"));
                     if let Some(mut state) = egui::scroll_area::State::load(ui.ctx(), scroll_id) {
                         state.offset -= pan_delta;
                         state.store(ui.ctx(), scroll_id);
@@ -365,3 +382,7 @@ impl super::DedicatedImageViewerApp {
         });
     }
 }
+
+#[cfg(test)]
+#[path = "rendering_tests.rs"]
+mod tests;

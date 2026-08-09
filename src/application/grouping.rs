@@ -2,6 +2,7 @@ use crate::domain::file_entry::{is_archive_extension, FileEntry, GroupMode};
 use rust_i18n::t;
 use std::cmp::Ordering;
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use windows::Win32::Foundation::{FILETIME, SYSTEMTIME};
 use windows::Win32::System::Time::{FileTimeToSystemTime, SystemTimeToTzSpecificLocalTime};
@@ -64,7 +65,7 @@ pub enum GroupKey {
 pub struct GroupSection {
     pub key: GroupKey,
     /// Indices into the filtered and sorted `items` snapshot.
-    pub item_indices: Vec<usize>,
+    pub item_indices: Arc<[usize]>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -122,13 +123,13 @@ pub fn build_computer_projection(items: &[FileEntry]) -> GroupProjection {
     if !local.is_empty() {
         sections.push(GroupSection {
             key: GroupKey::LocalDrives,
-            item_indices: local,
+            item_indices: local.into(),
         });
     }
     if !network.is_empty() {
         sections.push(GroupSection {
             key: GroupKey::NetworkDrives,
-            item_indices: network,
+            item_indices: network.into(),
         });
     }
     GroupProjection { sections }
@@ -305,30 +306,35 @@ fn build_group_projection_at(
 
     let today = unix_to_local_date(now_unix);
     let mut positions: HashMap<GroupKey, usize> = HashMap::new();
-    let mut sections: Vec<GroupSection> = Vec::new();
+    let mut sections: Vec<(GroupKey, Vec<usize>)> = Vec::new();
 
     for (index, item) in items.iter().enumerate() {
         let key = group_key(item, mode, today);
         if let Some(section_index) = positions.get(&key).copied() {
-            sections[section_index].item_indices.push(index);
+            sections[section_index].1.push(index);
         } else {
             positions.insert(key.clone(), sections.len());
-            sections.push(GroupSection {
-                key,
-                item_indices: vec![index],
-            });
+            sections.push((key, vec![index]));
         }
     }
 
     sections.sort_by(|left, right| {
-        let ordering = compare_group_keys(&left.key, &right.key);
+        let ordering = compare_group_keys(&left.0, &right.0);
         if descending {
             ordering.reverse()
         } else {
             ordering
         }
     });
-    GroupProjection { sections }
+    GroupProjection {
+        sections: sections
+            .into_iter()
+            .map(|(key, item_indices)| GroupSection {
+                key,
+                item_indices: item_indices.into(),
+            })
+            .collect(),
+    }
 }
 
 fn group_key(item: &FileEntry, mode: GroupMode, today: Option<CivilDate>) -> GroupKey {
@@ -370,7 +376,7 @@ fn normalize_latin_initial(value: char) -> char {
 }
 
 fn classify_type(item: &FileEntry) -> TypeGroup {
-    if item.is_dir && !is_archive_extension(&item.name) {
+    if is_physical_folder(item) {
         return TypeGroup::Folder;
     }
     if let Some(extension) = crate::domain::file_entry::canonical_archive_extension(&item.name) {
@@ -385,7 +391,7 @@ fn classify_type(item: &FileEntry) -> TypeGroup {
 }
 
 fn classify_size(item: &FileEntry) -> SizeGroup {
-    if item.is_dir && !is_archive_extension(&item.name) {
+    if is_physical_folder(item) {
         return SizeGroup::Unspecified;
     }
     match item.size {
@@ -397,6 +403,20 @@ fn classify_size(item: &FileEntry) -> SizeGroup {
         1_073_741_825..=4_294_967_296 => SizeGroup::Huge,
         _ => SizeGroup::Gigantic,
     }
+}
+
+#[inline]
+fn is_physical_folder(item: &FileEntry) -> bool {
+    if !item.is_dir || !is_archive_extension(&item.name) {
+        return item.is_dir;
+    }
+    if item.size > 0 {
+        return false;
+    }
+
+    // Group projections are rebuilt outside rendering. Probe only the
+    // ambiguous archive-like zero-size case; unavailable paths stay archives.
+    item.path.metadata().is_ok_and(|metadata| metadata.is_dir())
 }
 
 fn classify_date(timestamp: u64, today: Option<CivilDate>) -> DateGroup {
@@ -582,6 +602,48 @@ mod tests {
     }
 
     #[test]
+    fn real_empty_archive_and_archive_named_directory_group_by_physical_kind() {
+        let temp = tempfile::tempdir().expect("create temp dir");
+        let directory_path = temp.path().join("Fotos.zip");
+        std::fs::create_dir(&directory_path).expect("create archive-named directory");
+        let directory = FileEntry::from_path(directory_path, true);
+
+        let archive_path = temp.path().join("empty.zip");
+        std::fs::write(&archive_path, []).expect("create empty archive file");
+        let archive = FileEntry::from_path(archive_path, true);
+
+        assert_eq!(classify_type(&directory), TypeGroup::Folder);
+        assert_eq!(classify_size(&directory), SizeGroup::Unspecified);
+        assert_eq!(
+            classify_type(&archive),
+            TypeGroup::Extension("zip".to_string())
+        );
+        assert_eq!(classify_size(&archive), SizeGroup::Empty);
+    }
+
+    #[test]
+    fn unavailable_zero_size_archive_stays_an_archive() {
+        let archive = entry("missing-empty.zip", true, 0, 0);
+
+        assert_eq!(
+            classify_type(&archive),
+            TypeGroup::Extension("zip".to_string())
+        );
+        assert_eq!(classify_size(&archive), SizeGroup::Empty);
+    }
+
+    #[test]
+    fn navigable_archive_file_groups_as_archive_with_file_size() {
+        let archive = entry("Fotos.zip", true, 999, 0);
+
+        assert_eq!(
+            classify_type(&archive),
+            TypeGroup::Extension("zip".to_string())
+        );
+        assert_eq!(classify_size(&archive), SizeGroup::Tiny);
+    }
+
+    #[test]
     fn type_groups_treat_archives_as_files() {
         assert_eq!(
             classify_type(&entry("folder", true, 0, 0)),
@@ -614,8 +676,8 @@ mod tests {
         ];
         let projection = build_group_projection_at(&items, GroupMode::Type, false, 0);
         assert_eq!(projection.item_count(), 3);
-        assert_eq!(projection.sections[0].item_indices, vec![1]);
-        assert_eq!(projection.sections[1].item_indices, vec![0, 2]);
+        assert_eq!(projection.sections[0].item_indices.as_ref(), &[1]);
+        assert_eq!(projection.sections[1].item_indices.as_ref(), &[0, 2]);
     }
 
     #[test]
@@ -632,11 +694,11 @@ mod tests {
             sections: vec![
                 GroupSection {
                     key: GroupKey::Name(NameGroup::AToH),
-                    item_indices: vec![0, 2],
+                    item_indices: vec![0, 2].into(),
                 },
                 GroupSection {
                     key: GroupKey::Name(NameGroup::QToZ),
-                    item_indices: vec![1],
+                    item_indices: vec![1].into(),
                 },
             ],
         };
@@ -656,11 +718,11 @@ mod tests {
             sections: vec![
                 GroupSection {
                     key: GroupKey::Name(NameGroup::AToH),
-                    item_indices: vec![0, 1],
+                    item_indices: vec![0, 1].into(),
                 },
                 GroupSection {
                     key: GroupKey::Name(NameGroup::QToZ),
-                    item_indices: vec![2],
+                    item_indices: vec![2].into(),
                 },
             ],
         };

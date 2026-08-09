@@ -501,6 +501,44 @@ impl PriorityThumbnailQueue {
         removed
     }
 
+    /// Cancels queued normal work and returns paths whose requests were fully
+    /// removed. Requests already claimed by a worker are not returned, while
+    /// merged bulk requests are restored to bulk-only work.
+    pub fn cancel_normal_paths(&self, paths: &[PathBuf]) -> Vec<PathBuf> {
+        let mut state = self.state.lock();
+        let target_paths: FxHashSet<&PathBuf> = paths.iter().collect();
+        let mut cancelled = FxHashSet::default();
+        let mut retained_bulk = FxHashSet::default();
+
+        state.by_directory.retain(|_, items| {
+            items.retain_mut(|request| {
+                if !target_paths.contains(&request.path) {
+                    return true;
+                }
+                if request.track_bulk_progress {
+                    request.source = ThumbnailRequestSource::BulkScan;
+                    request.directory_index = None;
+                    if let Some(priority) = request.bulk_priority {
+                        request.priority = priority;
+                    }
+                    retained_bulk.insert(request.path.clone());
+                    return true;
+                }
+
+                cancelled.insert(request.path.clone());
+                false
+            });
+            !items.is_empty()
+        });
+
+        for path in paths {
+            if !retained_bulk.contains(path) && state.pending.remove(path) {
+                cancelled.insert(path.clone());
+            }
+        }
+        cancelled.into_iter().collect()
+    }
+
     /// Cancels queued work for a bulk scan session. Pure bulk requests are
     /// removed; requests promoted to normal/visible work are kept but detached
     /// from bulk progress so current-folder thumbnails are not lost.
@@ -858,6 +896,44 @@ mod tests {
         assert_eq!(path, path_b);
         let (path, _, _, _, _, _, _, _, _) = queue.pop().unwrap();
         assert_eq!(path, path_c);
+    }
+
+    #[test]
+    fn cancelling_normal_paths_does_not_report_work_claimed_by_a_worker() {
+        let dir = tempdir().unwrap();
+        let in_flight = dir.path().join("in-flight.png");
+        let queued = dir.path().join("queued.png");
+        let queue = PriorityThumbnailQueue::new();
+        queue.push(in_flight.clone(), 1, 64, IOPriority::Prefetch, 0);
+        queue.push(queued.clone(), 1, 64, IOPriority::Prefetch, 0);
+
+        let (claimed, _, _, _, _, _, _, _, _) = queue.pop().unwrap();
+        assert_eq!(claimed, in_flight);
+
+        assert_eq!(
+            queue.cancel_normal_paths(&[in_flight, queued.clone()]),
+            vec![queued]
+        );
+    }
+
+    #[test]
+    fn cancelling_normal_path_preserves_merged_bulk_work() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("merged.png");
+        let queue = PriorityThumbnailQueue::new();
+        queue.push_bulk_scan(path.clone(), 1, 256, IOPriority::Background, 0, 7);
+        queue.push(path.clone(), 1, 64, IOPriority::Interactive, 0);
+
+        assert!(queue
+            .cancel_normal_paths(std::slice::from_ref(&path))
+            .is_empty());
+        let (popped, _, _, _, priority, _, source, track_bulk_progress, bulk_session) =
+            queue.pop().unwrap();
+        assert_eq!(popped, path);
+        assert_eq!(priority, IOPriority::Background);
+        assert_eq!(source, ThumbnailRequestSource::BulkScan);
+        assert!(track_bulk_progress);
+        assert_eq!(bulk_session, Some(7));
     }
 
     #[test]

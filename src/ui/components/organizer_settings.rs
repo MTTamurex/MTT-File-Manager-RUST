@@ -213,8 +213,9 @@ fn render_rules(ui: &mut egui::Ui, app: &mut ImageViewerApp, dark_mode: bool) ->
                 if display != extensions_text {
                     label_resp.on_hover_text(extensions_text.clone());
                 }
+                let toggle_label = format!("{}: {}", t!("organizer.enabled"), extensions_text);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let toggle = settings_ui::toggle_switch(ui, &mut rule.enabled)
+                    let toggle = settings_ui::toggle_switch(ui, &mut rule.enabled, &toggle_label)
                         .on_hover_text(t!("organizer.enabled").to_string());
                     if toggle.clicked() {
                         let message = if rule.enabled {

@@ -317,7 +317,11 @@ pub fn render_file_info_table(
                         add_detail(ui, &t!("file_info.bios_version"), spec.bios_version.clone());
                     }
                     if !spec.bios_release_date.is_empty() {
-                        add_detail(ui, &t!("file_info.bios_date"), spec.bios_release_date.clone());
+                        add_detail(
+                            ui,
+                            &t!("file_info.bios_date"),
+                            spec.bios_release_date.clone(),
+                        );
                     }
                     if let Some(uefi) = spec.firmware_is_uefi {
                         add_detail(

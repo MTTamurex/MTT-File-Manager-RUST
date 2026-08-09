@@ -41,29 +41,29 @@ fn render_frame(
         }
 
         let output = area.show(ui, |ui| {
-                let canvas_size = egui::vec2(
-                    DRAW_SIZE.x.max(viewport_size.x),
-                    DRAW_SIZE.y.max(viewport_size.y),
-                );
-                ui.set_min_size(canvas_size);
-                let (canvas_rect, _) = ui.allocate_at_least(canvas_size, egui::Sense::hover());
+            let canvas_size = egui::vec2(
+                DRAW_SIZE.x.max(viewport_size.x),
+                DRAW_SIZE.y.max(viewport_size.y),
+            );
+            ui.set_min_size(canvas_size);
+            let (canvas_rect, _) = ui.allocate_at_least(canvas_size, egui::Sense::hover());
 
-                let image_rect = egui::Rect::from_center_size(canvas_rect.center(), DRAW_SIZE);
+            let image_rect = egui::Rect::from_center_size(canvas_rect.center(), DRAW_SIZE);
 
-                // Same interaction shape as the image widget in render_center:
-                // click = zoom, drag = pan.
-                let response = ui.interact(
-                    image_rect,
-                    ui.id().with("image"),
-                    egui::Sense::click() | egui::Sense::drag(),
-                );
+            // Same interaction shape as the image widget in render_center:
+            // click = zoom, drag = pan.
+            let response = ui.interact(
+                image_rect,
+                ui.id().with("image"),
+                egui::Sense::click() | egui::Sense::drag(),
+            );
 
-                if response.dragged() {
-                    response.drag_delta()
-                } else {
-                    egui::Vec2::ZERO
-                }
-            });
+            if response.dragged() {
+                response.drag_delta()
+            } else {
+                egui::Vec2::ZERO
+            }
+        });
 
         // Same drag-to-pan state mutation as render_center: apply the image's
         // drag delta to the scroll area's persisted offset.
@@ -81,9 +81,10 @@ fn render_frame(
 }
 
 fn base_input() -> egui::RawInput {
-    let mut input = egui::RawInput::default();
-    input.screen_rect = Some(egui::Rect::from_min_size(egui::Pos2::ZERO, WINDOW));
-    input
+    egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, WINDOW)),
+        ..Default::default()
+    }
 }
 
 fn run_ui(
@@ -208,6 +209,7 @@ fn main() {
     ];
 
     let mut failures = 0;
+    let mut reproduced_bug = false;
     for (label, degenerate, x, y, drag) in scenarios {
         match run_scenario(degenerate, x, y, drag) {
             Ok(offset) => {
@@ -233,11 +235,18 @@ fn main() {
             }
             Err(msg) => {
                 println!("{label} => PANIC: {msg}");
-                if !degenerate {
+                if degenerate && label.contains("vertical") && msg.contains("min > max") {
+                    reproduced_bug = true;
+                } else if !degenerate || label.contains("vertical") {
                     failures += 1;
                 }
             }
         }
+    }
+
+    if !reproduced_bug {
+        println!("FAIL: the degenerate scroll-bar rect did not reproduce the panic");
+        failures += 1;
     }
 
     if failures > 0 {

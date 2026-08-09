@@ -15,7 +15,7 @@ use windows::Win32::System::Registry::{
     RRF_RT_REG_SZ,
 };
 use windows::Win32::System::SystemInformation::{
-    GetFirmwareType, GlobalMemoryStatusEx, FirmwareTypeBios, FirmwareTypeUefi, FIRMWARE_TYPE,
+    FirmwareTypeBios, FirmwareTypeUefi, GetFirmwareType, GlobalMemoryStatusEx, FIRMWARE_TYPE,
     MEMORYSTATUSEX,
 };
 use windows::Win32::System::WindowsProgramming::GetComputerNameW;

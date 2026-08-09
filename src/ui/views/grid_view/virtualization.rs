@@ -7,6 +7,8 @@ use eframe::egui::{self, Rect, Ui};
 use rust_i18n::t;
 use std::path::PathBuf;
 
+const LOADING_SET_CLEANUP_THRESHOLD: usize = 80;
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn render_virtualized_grid(
     ui: &mut Ui,
@@ -54,6 +56,7 @@ pub(super) fn render_virtualized_grid(
             toggled_group,
             grouped_prefetch_candidates,
         );
+        cleanup_grouped_loading_set(ctx, grouped_prefetch_candidates);
         return None;
     }
 
@@ -282,6 +285,50 @@ fn grouped_item_thumbnail_visibility(item_rect: Rect, viewport_rect: Rect) -> (b
     (false, vertical_distance + horizontal_distance)
 }
 
+fn cleanup_grouped_loading_set(
+    ctx: &mut GridViewContext,
+    grouped_prefetch_candidates: &[GroupedPrefetchCandidate],
+) {
+    let keep_paths: FxHashSet<&PathBuf> = ctx
+        .visible_group_paths
+        .iter()
+        .chain(
+            grouped_prefetch_candidates
+                .iter()
+                .filter_map(|candidate| ctx.items.get(candidate.item_index).map(|item| &item.path)),
+        )
+        .chain(ctx.selected_file.into_iter().map(|item| &item.path))
+        .collect();
+    let stale_paths = grouped_stale_loading_paths(
+        ctx.loading_set,
+        &keep_paths,
+        ctx.shared_visible_paths.as_ref(),
+    );
+    let cancelled_paths = ctx.thumbnail_queue.cancel_normal_paths(&stale_paths);
+    for path in cancelled_paths {
+        ctx.loading_set.remove(&path);
+    }
+}
+
+fn grouped_stale_loading_paths(
+    loading_set: &FxHashSet<PathBuf>,
+    keep_paths: &FxHashSet<&PathBuf>,
+    shared_visible_paths: Option<&FxHashSet<PathBuf>>,
+) -> Vec<PathBuf> {
+    if loading_set.len() <= LOADING_SET_CLEANUP_THRESHOLD {
+        return Vec::new();
+    }
+
+    loading_set
+        .iter()
+        .filter(|path| {
+            !keep_paths.contains(*path)
+                && !shared_visible_paths.is_some_and(|visible_paths| visible_paths.contains(*path))
+        })
+        .cloned()
+        .collect()
+}
+
 fn cleanup_loading_set(
     ctx: &mut GridViewContext,
     vis_min_row: usize,
@@ -293,7 +340,7 @@ fn cleanup_loading_set(
     // Skip cleanup when the set is small or items are still loading in batches.
     // Raising the threshold avoids rebuilding a HashSet every frame during the
     // initial folder load burst (when loading_set grows rapidly from 0 → 200).
-    if ctx.loading_set.len() <= 80 {
+    if ctx.loading_set.len() <= LOADING_SET_CLEANUP_THRESHOLD {
         return;
     }
 
@@ -613,6 +660,31 @@ mod tests {
         assert_eq!(
             grouped_item_thumbnail_visibility(below, viewport),
             (false, 15.0)
+        );
+    }
+
+    #[test]
+    fn grouped_loading_cleanup_only_selects_paths_outside_current_work() {
+        let visible = PathBuf::from("visible.jpg");
+        let prefetch = PathBuf::from("prefetch.jpg");
+        let shared = PathBuf::from("shared.jpg");
+        let mut loading_set: FxHashSet<_> = (0..=LOADING_SET_CLEANUP_THRESHOLD)
+            .map(|index| PathBuf::from(format!("stale-{index}.jpg")))
+            .collect();
+        loading_set.extend([visible.clone(), prefetch.clone(), shared.clone()]);
+        let keep_paths = FxHashSet::from_iter([&visible, &prefetch]);
+        let shared_visible_paths = FxHashSet::from_iter([shared.clone()]);
+
+        let stale_paths =
+            grouped_stale_loading_paths(&loading_set, &keep_paths, Some(&shared_visible_paths));
+        let mut expected_stale_paths = loading_set.clone();
+        expected_stale_paths.remove(&visible);
+        expected_stale_paths.remove(&prefetch);
+        expected_stale_paths.remove(&shared);
+
+        assert_eq!(
+            stale_paths.into_iter().collect::<FxHashSet<_>>(),
+            expected_stale_paths
         );
     }
 }

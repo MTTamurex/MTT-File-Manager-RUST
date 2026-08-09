@@ -8,7 +8,8 @@ use self::geometry::{calculate_grouped_layout, calculate_layout, COLUMN_WIDTH, R
 use self::item_renderer::{render_grouped_columns, render_visible_columns};
 use super::list_view::{ListViewAction, ListViewContext, ListViewOperations};
 use super::rectangle_selection::{
-    ColumnListRectangleMetrics, GroupedRectangleMetrics, RectangleSelectionMetrics,
+    ColumnListRectangleMetrics, GroupedProjectionIdentity, GroupedRectangleLayout,
+    GroupedRectangleMetrics, GroupedRectangleSection, RectangleSelectionMetrics,
     RectangleSelectionView,
 };
 const COMPUTER_HEADER_HEIGHT: f32 = 28.0;
@@ -184,7 +185,7 @@ pub fn render_column_list_view(
             .iter()
             .map(|section| {
                 (
-                    section.item_indices.as_slice(),
+                    section.item_indices.as_ref(),
                     ctx.collapsed_groups.contains(&section.key),
                 )
             })
@@ -264,35 +265,33 @@ fn grouped_column_rectangle_metrics(
     content_width: f32,
     content_height: f32,
 ) -> GroupedRectangleMetrics {
-    let mut item_rects = Vec::new();
+    let mut sections = Vec::new();
     let mut group_start_column = 0usize;
     for section in &ctx.group_projection.sections {
         if ctx.collapsed_groups.contains(&section.key) {
             group_start_column += 1;
             continue;
         }
-        for (position, index) in section.item_indices.iter().enumerate() {
-            if *index >= ctx.items.len() {
-                continue;
-            }
-            let column = group_start_column + position / rows_per_column;
-            let row = position % rows_per_column;
-            item_rects.push((
-                *index,
-                Rect::from_min_size(
-                    egui::pos2(
-                        column as f32 * COLUMN_WIDTH,
-                        COMPUTER_HEADER_HEIGHT + row as f32 * ROW_HEIGHT,
-                    ),
-                    egui::vec2(COLUMN_WIDTH, ROW_HEIGHT),
-                ),
-            ));
-        }
+        sections.push(GroupedRectangleSection {
+            item_indices: section.item_indices.clone(),
+            origin: egui::pos2(
+                group_start_column as f32 * COLUMN_WIDTH,
+                COMPUTER_HEADER_HEIGHT,
+            ),
+        });
         group_start_column += section.item_indices.len().div_ceil(rows_per_column).max(1);
     }
+    let sections: std::sync::Arc<[GroupedRectangleSection]> = sections.into();
     GroupedRectangleMetrics {
         view: RectangleSelectionView::ColumnList,
-        item_rects: item_rects.into(),
+        projection_identity: GroupedProjectionIdentity::new(sections.clone(), ctx.items.len()),
+        sections,
+        layout: GroupedRectangleLayout::ColumnList {
+            rows_per_column,
+            column_width: COLUMN_WIDTH,
+            row_height: ROW_HEIGHT,
+        },
+        item_count: ctx.items.len(),
         content_width,
         content_height,
     }

@@ -4,6 +4,10 @@ mod pcie;
 mod protocol_io;
 mod windows_io;
 
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc;
+use std::time::Duration;
+
 use mtt_search_protocol::{DriveHealthSnapshot, DriveHealthState};
 
 use protocol_io::{query_protocol_data, ProtocolQuery};
@@ -15,8 +19,55 @@ const PROTOCOL_TYPE_ATA: u32 = 2;
 const PROTOCOL_TYPE_NVME: u32 = 3;
 const DATA_TYPE_IDENTIFY: u32 = 1;
 const NVME_DATA_TYPE_LOG_PAGE: u32 = 2;
+const QUERY_TIMEOUT: Duration = Duration::from_secs(19);
+static QUERY_ACTIVE: AtomicBool = AtomicBool::new(false);
 
 pub(crate) fn query(drive_letter: char) -> Result<DriveHealthSnapshot, String> {
+    if QUERY_ACTIVE
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_err()
+    {
+        return Err("another drive health query is still active".to_string());
+    }
+
+    let (result_tx, result_rx) = mpsc::sync_channel(1);
+    let worker = std::thread::Builder::new()
+        .name("drive-health-query".to_string())
+        .spawn(move || {
+            struct QueryPermit;
+
+            impl Drop for QueryPermit {
+                fn drop(&mut self) {
+                    QUERY_ACTIVE.store(false, Ordering::Release);
+                }
+            }
+
+            let _permit = QueryPermit;
+            let _ = result_tx.send(query_inner(drive_letter));
+        })
+        .map_err(|error| {
+            QUERY_ACTIVE.store(false, Ordering::Release);
+            format!("drive health worker creation failed: {error}")
+        })?;
+
+    match result_rx.recv_timeout(QUERY_TIMEOUT) {
+        Ok(result) => {
+            let _ = worker.join();
+            result
+        }
+        // If an overlapped driver ignores cancellation, this worker keeps
+        // QUERY_ACTIVE set and owns every pending buffer/handle. Pass-through has
+        // its own singleton permit for the same fail-closed guarantee. In either
+        // case, the IPC handler stops waiting before its 20-second budget.
+        Err(mpsc::RecvTimeoutError::Timeout) => Err("drive health query timed out".to_string()),
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            let _ = worker.join();
+            Err("drive health worker stopped unexpectedly".to_string())
+        }
+    }
+}
+
+fn query_inner(drive_letter: char) -> Result<DriveHealthSnapshot, String> {
     let drive_letter = drive_letter.to_ascii_uppercase();
     let device = windows_io::open_device(drive_letter)?;
     let snapshot = match device.bus_type {

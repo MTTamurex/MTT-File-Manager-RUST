@@ -54,7 +54,7 @@ impl FileEntry {
         let (size, modified, created) = std::fs::metadata(&path)
             .ok()
             .map(|m| {
-                let size = if is_dir { 0 } else { m.len() };
+                let size = if m.is_dir() { 0 } else { m.len() };
                 let modified = m
                     .modified()
                     .ok()
@@ -408,7 +408,9 @@ pub enum SyncStatus {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_path_inside_archive, is_path_inside_existing_archive_file, ViewMode};
+    use super::{
+        is_path_inside_archive, is_path_inside_existing_archive_file, FileEntry, ViewMode,
+    };
     use std::path::Path;
 
     #[test]
@@ -449,6 +451,21 @@ mod tests {
         assert!(!is_path_inside_existing_archive_file(
             &archive_named_dir.join("folder").join("file.txt")
         ));
+    }
+
+    #[test]
+    fn from_path_keeps_file_size_when_archive_is_visually_navigable() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let archive = dir.path().join("Fotos.zip");
+        std::fs::write(&archive, b"archive bytes").expect("create archive file");
+        let archive_entry = FileEntry::from_path(archive, true);
+
+        let physical_directory = dir.path().join("Arquivos.zip");
+        std::fs::create_dir(&physical_directory).expect("create archive-named directory");
+        let directory_entry = FileEntry::from_path(physical_directory, true);
+
+        assert_eq!(archive_entry.size, 13);
+        assert_eq!(directory_entry.size, 0);
     }
 
     #[test]

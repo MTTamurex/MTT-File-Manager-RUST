@@ -649,7 +649,7 @@ impl ImageViewerApp {
             };
 
             processed += 1;
-            if let Some(should_revalidate) =
+            if let Some(next_revalidation) =
                 crate::app::live_file_size::accept_live_file_size_response(
                     response,
                     &mut self.live_file_size_cache,
@@ -658,11 +658,7 @@ impl ImageViewerApp {
                 )
             {
                 updated = true;
-                if should_revalidate {
-                    ctx.request_repaint_after(
-                        crate::app::live_file_size::LIVE_SIZE_REVALIDATE_INTERVAL,
-                    );
-                }
+                ctx.request_repaint_after(next_revalidation);
             }
         }
 

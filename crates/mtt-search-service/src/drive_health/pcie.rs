@@ -12,9 +12,8 @@ use windows::Win32::Foundation::DEVPROPKEY;
 use windows::Win32::System::Ioctl::{
     GUID_DEVINTERFACE_DISK, IOCTL_STORAGE_GET_DEVICE_NUMBER, STORAGE_DEVICE_NUMBER,
 };
-use windows::Win32::System::IO::DeviceIoControl;
 
-use super::windows_io::open_handle;
+use super::windows_io::{device_io_control, open_handle};
 
 const MAX_DISK_INTERFACES: u32 = 1024;
 const MAX_INTERFACE_DETAIL_BYTES: u32 = 64 * 1024;
@@ -137,17 +136,15 @@ fn interface_details(
 fn interface_disk_number(device_path: &str) -> Option<u32> {
     let handle = open_handle(device_path, 0).ok()?;
     let mut device_number = STORAGE_DEVICE_NUMBER::default();
-    let mut returned = 0;
-    unsafe {
-        DeviceIoControl(
+    let returned = unsafe {
+        device_io_control(
             handle.raw(),
             IOCTL_STORAGE_GET_DEVICE_NUMBER,
             None,
             0,
             Some((&mut device_number as *mut STORAGE_DEVICE_NUMBER).cast::<c_void>()),
             std::mem::size_of::<STORAGE_DEVICE_NUMBER>() as u32,
-            Some(&mut returned),
-            None,
+            "storage device number query",
         )
     }
     .ok()?;

@@ -1,11 +1,13 @@
 use eframe::egui;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use crate::app::state::ImageViewerApp;
 use crate::ui::cache::FxHashSet;
 use crate::ui::views::rectangle_selection::{
-    collect_indices_in_rect, RectangleSelectionFrame, RectangleSelectionMetrics,
-    RectangleSelectionModifiers, RectangleSelectionSource, RectangleSelectionState,
+    collect_indices_in_rect, GroupedProjectionIdentity, RectangleSelectionFrame,
+    RectangleSelectionMetrics, RectangleSelectionModifiers, RectangleSelectionSource,
+    RectangleSelectionState,
 };
 
 pub(crate) struct RectangleSelectionResolveResult {
@@ -173,6 +175,24 @@ fn selection_range(
     let start = anchor.min(first);
     let end = anchor.max(last).min(item_count.saturating_sub(1));
     Some((start..=end).collect())
+}
+
+fn grouped_visual_order(
+    metrics: &RectangleSelectionMetrics,
+    cached: Option<&Arc<[usize]>>,
+    cached_source: Option<&GroupedProjectionIdentity>,
+) -> Option<(Arc<[usize]>, GroupedProjectionIdentity)> {
+    let RectangleSelectionMetrics::Grouped(metrics) = metrics else {
+        return None;
+    };
+    let visual_order = if cached_source == Some(&metrics.projection_identity) {
+        cached
+            .cloned()
+            .unwrap_or_else(|| metrics.visual_order().collect::<Vec<_>>().into())
+    } else {
+        metrics.visual_order().collect::<Vec<_>>().into()
+    };
+    Some((visual_order, metrics.projection_identity.clone()))
 }
 
 impl ImageViewerApp {
@@ -343,17 +363,12 @@ impl ImageViewerApp {
         };
         let selection_rect = state.content_rect();
         let modifiers = state.modifiers;
-        let visual_order = match &metrics {
-            RectangleSelectionMetrics::Grouped(metrics) => Some(
-                metrics
-                    .item_rects
-                    .iter()
-                    .map(|(index, _)| *index)
-                    .collect::<Vec<_>>()
-                    .into(),
-            ),
-            _ => None,
-        };
+        let (visual_order, visual_order_source) = grouped_visual_order(
+            &metrics,
+            state.visual_order.as_ref(),
+            state.visual_order_source.as_ref(),
+        )
+        .unzip();
         let hit_indices = collect_indices_in_rect(selection_rect, metrics);
         let preview_indices = resolve_rectangle_preview_indices(
             self.items.len(),
@@ -368,6 +383,7 @@ impl ImageViewerApp {
             state.hit_indices = hit_indices;
             state.preview_indices = preview_indices;
             state.visual_order = visual_order;
+            state.visual_order_source = visual_order_source;
         }
     }
 
@@ -576,5 +592,71 @@ mod tests {
         assert_eq!(result.selected_paths, path_set(&[0, 1, 2, 5]));
         assert_eq!(result.focus_index, Some(0));
         assert_eq!(result.anchor_index, Some(1));
+    }
+
+    #[test]
+    fn grouped_visual_order_is_reused_after_first_frame() {
+        use crate::ui::views::rectangle_selection::{
+            GroupedProjectionIdentity, GroupedRectangleLayout, GroupedRectangleMetrics,
+            GroupedRectangleSection, RectangleSelectionView,
+        };
+
+        let sections: Arc<[GroupedRectangleSection]> = vec![GroupedRectangleSection {
+            item_indices: vec![4, 1, 5, 2].into(),
+            origin: egui::pos2(0.0, 28.0),
+        }]
+        .into();
+        let metrics = RectangleSelectionMetrics::Grouped(GroupedRectangleMetrics {
+            view: RectangleSelectionView::List,
+            projection_identity: GroupedProjectionIdentity::new(sections.clone(), 6),
+            sections,
+            layout: GroupedRectangleLayout::List { row_height: 24.0 },
+            item_count: 6,
+            content_width: 200.0,
+            content_height: 124.0,
+        });
+
+        let (first, source) =
+            grouped_visual_order(&metrics, None, None).expect("build visual order");
+        let (second, _) = grouped_visual_order(&metrics, Some(&first), Some(&source))
+            .expect("reuse visual order");
+
+        assert_eq!(&*first, &[4, 1, 5, 2]);
+        assert!(Arc::ptr_eq(&first, &second));
+    }
+
+    #[test]
+    fn grouped_visual_order_is_rebuilt_when_projection_changes() {
+        use crate::ui::views::rectangle_selection::{
+            GroupedProjectionIdentity, GroupedRectangleLayout, GroupedRectangleMetrics,
+            GroupedRectangleSection, RectangleSelectionView,
+        };
+
+        fn metrics(indices: Vec<usize>) -> RectangleSelectionMetrics {
+            let sections: Arc<[GroupedRectangleSection]> = vec![GroupedRectangleSection {
+                item_indices: indices.into(),
+                origin: egui::pos2(0.0, 28.0),
+            }]
+            .into();
+            RectangleSelectionMetrics::Grouped(GroupedRectangleMetrics {
+                view: RectangleSelectionView::List,
+                projection_identity: GroupedProjectionIdentity::new(sections.clone(), 6),
+                sections,
+                layout: GroupedRectangleLayout::List { row_height: 24.0 },
+                item_count: 6,
+                content_width: 200.0,
+                content_height: 124.0,
+            })
+        }
+
+        let original_metrics = metrics(vec![4, 1, 5, 2]);
+        let (original, source) = grouped_visual_order(&original_metrics, None, None)
+            .expect("build original visual order");
+        let changed_metrics = metrics(vec![2, 5, 1, 4]);
+        let (rebuilt, _) = grouped_visual_order(&changed_metrics, Some(&original), Some(&source))
+            .expect("rebuild changed visual order");
+
+        assert_eq!(&*rebuilt, &[2, 5, 1, 4]);
+        assert!(!Arc::ptr_eq(&original, &rebuilt));
     }
 }

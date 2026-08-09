@@ -8,7 +8,8 @@ use super::{ColumnWidths, ListViewContext, ListViewOperations};
 use crate::application::grouping::GroupKey;
 use crate::ui::views::group_header::{render_group_header, GROUP_GAP, GROUP_HEADER_HEIGHT};
 use crate::ui::views::rectangle_selection::{
-    GroupedRectangleMetrics, ListRectangleMetrics, RectangleSelectionMetrics,
+    GroupedProjectionIdentity, GroupedRectangleLayout, GroupedRectangleMetrics,
+    GroupedRectangleSection, ListRectangleMetrics, RectangleSelectionMetrics,
     RectangleSelectionView,
 };
 
@@ -259,29 +260,26 @@ fn grouped_list_rectangle_metrics(
     content_width: f32,
     content_height: f32,
 ) -> GroupedRectangleMetrics {
-    let mut item_rects = Vec::new();
+    let mut sections = Vec::new();
     let mut content_y = 0.0;
     for section in &ctx.group_projection.sections {
         content_y += GROUP_HEADER_HEIGHT;
         if !ctx.collapsed_groups.contains(&section.key) {
-            item_rects.extend(section.item_indices.iter().enumerate().filter_map(
-                |(position, index)| {
-                    (*index < ctx.items.len()).then_some((
-                        *index,
-                        Rect::from_min_size(
-                            egui::pos2(0.0, content_y + position as f32 * row_height),
-                            egui::vec2(content_width, row_height),
-                        ),
-                    ))
-                },
-            ));
+            sections.push(GroupedRectangleSection {
+                item_indices: section.item_indices.clone(),
+                origin: egui::pos2(0.0, content_y),
+            });
             content_y += section.item_indices.len() as f32 * row_height;
         }
         content_y += GROUP_GAP;
     }
+    let sections: std::sync::Arc<[GroupedRectangleSection]> = sections.into();
     GroupedRectangleMetrics {
         view: RectangleSelectionView::List,
-        item_rects: item_rects.into(),
+        projection_identity: GroupedProjectionIdentity::new(sections.clone(), ctx.items.len()),
+        sections,
+        layout: GroupedRectangleLayout::List { row_height },
+        item_count: ctx.items.len(),
         content_width,
         content_height,
     }

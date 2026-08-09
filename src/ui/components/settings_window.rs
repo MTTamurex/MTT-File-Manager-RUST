@@ -348,7 +348,7 @@ fn render_settings_title_bar(
         ui.id().with("settings_close_button"),
         egui::Sense::click(),
     );
-    let hovered = close_resp.hovered();
+    let hovered = close_resp.hovered() || close_resp.has_focus();
     ui.painter().rect_filled(
         close_rect,
         6.0,
@@ -370,6 +370,13 @@ fn render_settings_title_bar(
         },
     );
     let close_resp = close_resp.on_hover_cursor(egui::CursorIcon::PointingHand);
+    close_resp.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::WidgetType::Button,
+            ui.is_enabled(),
+            t!("settings.close"),
+        )
+    });
     if close_resp.clicked() {
         *keep_open = false;
     }

@@ -8,6 +8,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 /// Match the previous UX contract: only probe recently-modified files.
 pub const LIVE_SIZE_PROBE_MAX_AGE_SECS: u64 = 300;
 pub const LIVE_SIZE_REVALIDATE_INTERVAL: Duration = Duration::from_secs(1);
+const LIVE_SIZE_STABLE_REVALIDATE_INTERVAL: Duration = Duration::from_secs(30);
 const LIVE_SIZE_STABLE_OBSERVATIONS: u8 = 2;
 const MAX_ACTIVE_LIVE_SIZE_REQUESTS: usize = 64;
 static NEXT_LIVE_SIZE_REQUEST_ID: AtomicU64 = AtomicU64::new(1);
@@ -135,8 +136,12 @@ fn resolve_cached_or_enqueue_live_file_size_at(
         .unwrap_or(fallback_size);
 
     if matching_entry.is_some_and(|entry| {
-        entry.stable_observations >= LIVE_SIZE_STABLE_OBSERVATIONS
-            || now.saturating_duration_since(entry.checked_at) < LIVE_SIZE_REVALIDATE_INTERVAL
+        let revalidate_interval = if entry.stable_observations >= LIVE_SIZE_STABLE_OBSERVATIONS {
+            LIVE_SIZE_STABLE_REVALIDATE_INTERVAL
+        } else {
+            LIVE_SIZE_REVALIDATE_INTERVAL
+        };
+        now.saturating_duration_since(entry.checked_at) < revalidate_interval
     }) {
         return resolved_size;
     }
@@ -187,7 +192,7 @@ pub fn accept_live_file_size_response(
     cache: &mut LiveFileSizeCache,
     active_requests: &mut ActiveLiveFileSizeRequests,
     now: Instant,
-) -> Option<bool> {
+) -> Option<Duration> {
     let expected = ActiveLiveFileSizeRequest {
         source_mtime_secs: response.source_mtime_secs,
         request_id: response.request_id,
@@ -227,7 +232,11 @@ pub fn accept_live_file_size_response(
         },
     );
 
-    Some(stable_observations < LIVE_SIZE_STABLE_OBSERVATIONS)
+    Some(if stable_observations >= LIVE_SIZE_STABLE_OBSERVATIONS {
+        LIVE_SIZE_STABLE_REVALIDATE_INTERVAL
+    } else {
+        LIVE_SIZE_REVALIDATE_INTERVAL
+    })
 }
 
 pub fn invalidate_live_file_size(

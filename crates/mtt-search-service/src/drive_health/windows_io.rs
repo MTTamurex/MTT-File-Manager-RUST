@@ -1,21 +1,24 @@
 use std::ffi::c_void;
 
-use windows::core::PCWSTR;
+use windows::core::{HRESULT, PCWSTR};
 use windows::Win32::Foundation::{
-    CloseHandle, GENERIC_READ, GENERIC_WRITE, HANDLE, INVALID_HANDLE_VALUE,
+    CloseHandle, ERROR_IO_PENDING, GENERIC_READ, GENERIC_WRITE, HANDLE, INVALID_HANDLE_VALUE,
+    WAIT_OBJECT_0, WAIT_TIMEOUT,
 };
 use windows::Win32::Storage::FileSystem::{
-    CreateFileW, GetDriveTypeW, FILE_FLAGS_AND_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ,
-    FILE_SHARE_WRITE, OPEN_EXISTING,
+    CreateFileW, GetDriveTypeW, FILE_FLAGS_AND_ATTRIBUTES, FILE_FLAG_OVERLAPPED, FILE_SHARE_DELETE,
+    FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
 };
 use windows::Win32::System::Ioctl::IOCTL_STORAGE_QUERY_PROPERTY;
-use windows::Win32::System::IO::DeviceIoControl;
+use windows::Win32::System::Threading::{CreateEventW, WaitForSingleObject};
+use windows::Win32::System::IO::{CancelIoEx, DeviceIoControl, GetOverlappedResult, OVERLAPPED};
 
 const IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS: u32 = 0x0056_0000;
 const STORAGE_DEVICE_PROPERTY: u32 = 0;
 const PROPERTY_STANDARD_QUERY: u32 = 0;
 const DRIVE_REMOVABLE: u32 = 2;
 const DRIVE_FIXED: u32 = 3;
+const IOCTL_TIMEOUT_MS: u32 = 5_000;
 
 pub(super) const BUS_TYPE_ATAPI: u32 = 2;
 pub(super) const BUS_TYPE_ATA: u32 = 3;
@@ -38,6 +41,9 @@ struct VolumeDiskExtents {
 }
 
 pub(super) struct Handle(HANDLE);
+
+// Windows kernel handles are process-wide and may be closed from another thread.
+unsafe impl Send for Handle {}
 
 impl Handle {
     pub(super) fn raw(&self) -> HANDLE {
@@ -95,6 +101,18 @@ pub(super) fn open_device(drive_letter: char) -> Result<DeviceContext, String> {
 }
 
 pub(super) fn open_handle(path: &str, access: u32) -> Result<Handle, String> {
+    open_handle_with_flags(path, access, FILE_FLAG_OVERLAPPED)
+}
+
+pub(super) fn open_synchronous_handle(path: &str, access: u32) -> Result<Handle, String> {
+    open_handle_with_flags(path, access, FILE_FLAGS_AND_ATTRIBUTES(0))
+}
+
+fn open_handle_with_flags(
+    path: &str,
+    access: u32,
+    flags: FILE_FLAGS_AND_ATTRIBUTES,
+) -> Result<Handle, String> {
     let path_wide = wide(path);
     let handle = unsafe {
         CreateFileW(
@@ -103,7 +121,7 @@ pub(super) fn open_handle(path: &str, access: u32) -> Result<Handle, String> {
             FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
             None,
             OPEN_EXISTING,
-            FILE_FLAGS_AND_ATTRIBUTES(0),
+            flags,
             None,
         )
     }
@@ -114,25 +132,82 @@ pub(super) fn open_handle(path: &str, access: u32) -> Result<Handle, String> {
     Ok(Handle(handle))
 }
 
+/// Runs an IOCTL on an overlapped handle and drains cancellation before the
+/// caller-owned buffers or `OVERLAPPED` can leave scope. A non-cooperating
+/// driver can stall that drain, so callers run inside the single globally
+/// bounded health worker; its outer timeout returns the IPC handler while this
+/// frame safely retains the operation's memory and handles.
+pub(super) unsafe fn device_io_control(
+    handle: HANDLE,
+    control_code: u32,
+    input: Option<*const c_void>,
+    input_len: u32,
+    output: Option<*mut c_void>,
+    output_len: u32,
+    operation: &str,
+) -> Result<u32, String> {
+    let event = Handle(
+        CreateEventW(None, true, false, None)
+            .map_err(|error| format!("{operation} event creation failed: {error}"))?,
+    );
+    let mut overlapped = OVERLAPPED {
+        hEvent: event.raw(),
+        ..Default::default()
+    };
+
+    match DeviceIoControl(
+        handle,
+        control_code,
+        input,
+        input_len,
+        output,
+        output_len,
+        None,
+        Some(&mut overlapped),
+    ) {
+        Ok(()) => {}
+        Err(error) if error.code() == HRESULT::from_win32(ERROR_IO_PENDING.0) => {
+            match WaitForSingleObject(event.raw(), IOCTL_TIMEOUT_MS) {
+                WAIT_OBJECT_0 => {}
+                WAIT_TIMEOUT => {
+                    let _ = CancelIoEx(handle, Some(&overlapped));
+                    let mut ignored = 0;
+                    let _ = GetOverlappedResult(handle, &overlapped, &mut ignored, true);
+                    return Err(format!("{operation} timed out"));
+                }
+                _ => {
+                    let _ = CancelIoEx(handle, Some(&overlapped));
+                    let mut ignored = 0;
+                    let _ = GetOverlappedResult(handle, &overlapped, &mut ignored, true);
+                    return Err(format!("{operation} wait failed"));
+                }
+            }
+        }
+        Err(error) => return Err(format!("{operation} failed: {error}")),
+    }
+
+    let mut returned = 0;
+    GetOverlappedResult(handle, &overlapped, &mut returned, false)
+        .map_err(|error| format!("{operation} completion failed: {error}"))?;
+    Ok(returned)
+}
+
 fn query_single_extent(volume: HANDLE) -> Result<u32, String> {
     let mut extents = VolumeDiskExtents {
         number_of_disk_extents: 0,
         extents: [DiskExtent::default(); 16],
     };
-    let mut returned = 0;
-    unsafe {
-        DeviceIoControl(
+    let returned = unsafe {
+        device_io_control(
             volume,
             IOCTL_VOLUME_GET_VOLUME_DISK_EXTENTS,
             None,
             0,
             Some((&mut extents as *mut VolumeDiskExtents).cast::<c_void>()),
             std::mem::size_of::<VolumeDiskExtents>() as u32,
-            Some(&mut returned),
-            None,
+            "volume extent query",
         )
-    }
-    .map_err(|error| format!("volume extent query failed: {error}"))?;
+    }?;
 
     let required =
         std::mem::offset_of!(VolumeDiskExtents, extents) + std::mem::size_of::<DiskExtent>();
@@ -154,20 +229,17 @@ fn query_device_descriptor(handle: HANDLE) -> Result<DeviceDescriptor, String> {
     query[0..4].copy_from_slice(&STORAGE_DEVICE_PROPERTY.to_le_bytes());
     query[4..8].copy_from_slice(&PROPERTY_STANDARD_QUERY.to_le_bytes());
     let mut output = vec![0u8; 4096];
-    let mut returned = 0;
-    unsafe {
-        DeviceIoControl(
+    let returned = unsafe {
+        device_io_control(
             handle,
             IOCTL_STORAGE_QUERY_PROPERTY,
             Some(query.as_ptr().cast::<c_void>()),
             query.len() as u32,
             Some(output.as_mut_ptr().cast::<c_void>()),
             output.len() as u32,
-            Some(&mut returned),
-            None,
+            "storage descriptor query",
         )
-    }
-    .map_err(|error| format!("storage descriptor query failed: {error}"))?;
+    }?;
 
     let returned = returned as usize;
     if returned < 36 {

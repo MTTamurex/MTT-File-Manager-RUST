@@ -1,7 +1,7 @@
 use super::{AppStateDb, AppStateWriteError};
 use rusqlite::{params, ErrorCode, TransactionBehavior};
 use std::sync::TryLockError;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const BLOCKING_WRITE_TIMEOUT: Duration = Duration::from_millis(250);
 
@@ -75,6 +75,41 @@ impl AppStateDb {
             .map_err(|_| AppStateWriteError::WriterLockPoisoned)?;
         Self::write_preferences_batch_with_timeout(&mut db, entries, BLOCKING_WRITE_TIMEOUT)?;
         Ok(())
+    }
+
+    /// Bounded batch write for final persistence. Both the process-local writer
+    /// lock and SQLite's external writer lock share the same deadline.
+    pub fn set_preferences_batch_bounded(
+        &self,
+        entries: &[(&str, String)],
+        max_wait: Duration,
+    ) -> PreferenceWriteOutcome {
+        let deadline = Instant::now() + max_wait;
+        let mut db = loop {
+            match self.writer.try_lock() {
+                Ok(db) => break db,
+                Err(TryLockError::Poisoned(_)) => {
+                    return PreferenceWriteOutcome::Failed(AppStateWriteError::WriterLockPoisoned)
+                }
+                Err(TryLockError::WouldBlock) => {
+                    let remaining = deadline.saturating_duration_since(Instant::now());
+                    if remaining.is_zero() {
+                        return PreferenceWriteOutcome::Busy;
+                    }
+                    std::thread::sleep(remaining.min(Duration::from_millis(5)));
+                }
+            }
+        };
+
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            return PreferenceWriteOutcome::Busy;
+        }
+        match Self::write_preferences_batch_with_timeout(&mut db, entries, remaining) {
+            Ok(()) => PreferenceWriteOutcome::Persisted,
+            Err(error) if is_sqlite_busy(&error) => PreferenceWriteOutcome::Busy,
+            Err(error) => PreferenceWriteOutcome::Failed(error.into()),
+        }
     }
 
     fn write_preferences_batch_with_timeout(
@@ -173,7 +208,7 @@ fn is_sqlite_busy(error: &rusqlite::Error) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{AppStateDb, PreferenceWriteOutcome};
-    use std::time::Duration;
+    use std::time::{Duration, Instant};
 
     #[test]
     fn preference_batch_rolls_back_when_any_entry_fails() {
@@ -247,7 +282,7 @@ mod tests {
     }
 
     #[test]
-    fn blocking_preference_batch_uses_bounded_sqlite_wait() {
+    fn bounded_preference_batch_stops_waiting_for_sqlite_lock() {
         let temp = tempfile::tempdir().unwrap();
         let db = AppStateDb::new(temp.path().to_path_buf()).unwrap();
         let external = rusqlite::Connection::open(temp.path().join("app_state.db")).unwrap();
@@ -255,8 +290,48 @@ mod tests {
         let entries = [("key", "value".to_string())];
         let started = std::time::Instant::now();
 
-        assert!(db.set_preferences_batch(&entries).is_err());
+        assert!(matches!(
+            db.set_preferences_batch_bounded(&entries, Duration::from_millis(250)),
+            PreferenceWriteOutcome::Busy
+        ));
         assert!(started.elapsed() < Duration::from_secs(1));
         external.execute("ROLLBACK", []).unwrap();
+    }
+
+    #[test]
+    fn bounded_preference_batch_retries_writer_lock_until_deadline() {
+        let temp = tempfile::tempdir().unwrap();
+        let db = std::sync::Arc::new(AppStateDb::new(temp.path().to_path_buf()).unwrap());
+        let locked_db = db.clone();
+        let (locked_sender, locked_receiver) = std::sync::mpsc::channel();
+        let holder = std::thread::spawn(move || {
+            let _writer = locked_db.writer.lock().unwrap();
+            locked_sender.send(()).unwrap();
+            std::thread::sleep(Duration::from_millis(30));
+        });
+        locked_receiver.recv().unwrap();
+
+        let entries = [("key", "value".to_string())];
+        assert!(matches!(
+            db.set_preferences_batch_bounded(&entries, Duration::from_millis(250)),
+            PreferenceWriteOutcome::Persisted
+        ));
+        holder.join().unwrap();
+        assert_eq!(db.get_preference("key").as_deref(), Some("value"));
+    }
+
+    #[test]
+    fn bounded_preference_batch_stops_waiting_for_writer_lock() {
+        let temp = tempfile::tempdir().unwrap();
+        let db = AppStateDb::new(temp.path().to_path_buf()).unwrap();
+        let _writer = db.writer.lock().unwrap();
+        let entries = [("key", "value".to_string())];
+        let started = Instant::now();
+
+        assert!(matches!(
+            db.set_preferences_batch_bounded(&entries, Duration::from_millis(40)),
+            PreferenceWriteOutcome::Busy
+        ));
+        assert!(started.elapsed() < Duration::from_millis(250));
     }
 }

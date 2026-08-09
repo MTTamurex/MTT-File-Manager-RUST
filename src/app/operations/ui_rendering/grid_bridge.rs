@@ -322,6 +322,7 @@ impl ImageViewerApp {
             texture_cache: &mut self.cache_manager.texture_cache,
             attempted_thumbnail_bucket: &self.cache_manager.attempted_thumbnail_bucket,
             loading_set: &mut self.cache_manager.loading_set,
+            thumbnail_queue: &self.thumbnail_queue,
             shared_visible_paths,
             loading_icons: &mut self.loading_icons,
             failed_icons: &self.failed_icons,

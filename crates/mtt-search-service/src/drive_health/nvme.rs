@@ -1,5 +1,8 @@
 use mtt_search_protocol::{DriveHealthState, DriveRotation};
 
+const MIN_PLAUSIBLE_KELVIN: u16 = 223; // -50 C
+const MAX_PLAUSIBLE_KELVIN: u16 = 423; // 150 C
+
 pub(super) struct NvmeIdentity {
     pub(super) model: Option<String>,
     pub(super) serial: Option<String>,
@@ -64,19 +67,22 @@ pub(super) fn parse_health(data: &[u8]) -> Result<NvmeHealth, String> {
     }
     let critical_warning = data[0];
     let kelvin = read_u16(data, 1)?;
-    let temperature_celsius = if kelvin == 0 {
-        None
-    } else {
-        i16::try_from(i32::from(kelvin) - 273).ok()
-    };
+    let valid_temperature =
+        kelvin == 0 || (MIN_PLAUSIBLE_KELVIN..=MAX_PLAUSIBLE_KELVIN).contains(&kelvin);
+    let temperature_celsius = valid_temperature
+        .then(|| (kelvin != 0).then_some(kelvin as i16 - 273))
+        .flatten();
     let available_spare = data[3];
     let spare_threshold = data[4];
     let percentage_used = data[5];
+    let valid_spare_fields = available_spare <= 100 && spare_threshold <= 100;
     let life_remaining_percent = Some(100u8.saturating_sub(percentage_used));
     let valid_spare = available_spare <= 100 && spare_threshold <= 100 && spare_threshold > 0;
     let health_state =
         if critical_warning != 0 || (valid_spare && available_spare < spare_threshold) {
             DriveHealthState::Critical
+        } else if !valid_temperature || !valid_spare_fields {
+            DriveHealthState::Unknown
         } else if (valid_spare && available_spare == spare_threshold)
             || life_remaining_percent.is_some_and(|life| life <= 10)
         {
@@ -182,14 +188,61 @@ mod tests {
     fn critical_warning_takes_precedence() {
         let mut data = [0u8; 512];
         data[0] = 1;
-        assert_eq!(
-            parse_health(&data).unwrap().health_state,
-            DriveHealthState::Critical
-        );
+        data[5] = 255;
+        let parsed = parse_health(&data).unwrap();
+        assert_eq!(parsed.life_remaining_percent, Some(0));
+        assert_eq!(parsed.health_state, DriveHealthState::Critical);
     }
 
     #[test]
     fn rejects_zero_filled_smart_log() {
         assert!(parse_health(&[0u8; 512]).is_err());
+    }
+
+    #[test]
+    fn invalid_kelvin_is_not_exposed_or_classified_good() {
+        for kelvin in [
+            1,
+            MIN_PLAUSIBLE_KELVIN - 1,
+            MAX_PLAUSIBLE_KELVIN + 1,
+            u16::MAX,
+        ] {
+            let mut data = [0u8; 512];
+            data[1..3].copy_from_slice(&kelvin.to_le_bytes());
+
+            if let Ok(parsed) = parse_health(&data) {
+                assert_eq!(parsed.temperature_celsius, None);
+                assert_eq!(parsed.health_state, DriveHealthState::Unknown);
+            }
+        }
+    }
+
+    #[test]
+    fn spare_fields_above_one_hundred_are_unknown() {
+        for offset in [3, 4] {
+            let mut data = [0u8; 512];
+            data[1..3].copy_from_slice(&303u16.to_le_bytes());
+            data[offset] = 101;
+
+            let parsed = parse_health(&data).unwrap();
+            assert_ne!(parsed.health_state, DriveHealthState::Good);
+            assert_eq!(parsed.health_state, DriveHealthState::Unknown);
+            assert_eq!(parsed.life_remaining_percent, Some(100));
+        }
+    }
+
+    #[test]
+    fn percentage_used_above_one_hundred_is_exhausted_endurance() {
+        for percentage_used in [100, 101, 255] {
+            let mut data = [0u8; 512];
+            data[1..3].copy_from_slice(&303u16.to_le_bytes());
+            data[3] = 100;
+            data[4] = 10;
+            data[5] = percentage_used;
+
+            let parsed = parse_health(&data).unwrap();
+            assert_eq!(parsed.life_remaining_percent, Some(0));
+            assert_eq!(parsed.health_state, DriveHealthState::Warning);
+        }
     }
 }

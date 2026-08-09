@@ -166,7 +166,11 @@ fn repeated_observations_capture_growth_with_the_same_source_mtime_and_then_sett
                 &mut active,
                 now,
             ),
-            Some(index + 1 < sizes.len())
+            Some(if index + 1 == sizes.len() {
+                LIVE_SIZE_STABLE_REVALIDATE_INTERVAL
+            } else {
+                LIVE_SIZE_REVALIDATE_INTERVAL
+            })
         );
     }
 
@@ -184,6 +188,87 @@ fn repeated_observations_capture_growth_with_the_same_source_mtime_and_then_sett
         4096
     );
     assert!(receiver.try_recv().is_err());
+}
+
+#[test]
+fn stable_entry_is_revalidated_after_slow_ttl_and_detects_new_growth() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let path = temp_dir.path().join("resumed-growth.bin");
+    let mut cache = cache();
+    let mut active = ActiveLiveFileSizeRequests::default();
+    let (sender, receiver) = mpsc::channel();
+    let start = Instant::now();
+
+    for index in 0..=LIVE_SIZE_STABLE_OBSERVATIONS {
+        let now = start + LIVE_SIZE_REVALIDATE_INTERVAL * u32::from(index);
+        resolve_cached_or_enqueue_live_file_size_at(
+            &path,
+            0,
+            0,
+            &mut cache,
+            &mut active,
+            &sender,
+            now,
+        );
+        let request = receiver.try_recv().unwrap();
+        accept_live_file_size_response(
+            LiveFileSizeResponse {
+                path: path.clone(),
+                source_mtime_secs: 0,
+                request_id: request.request_id,
+                observed: Some(ObservedLiveFileSize {
+                    size: 4096,
+                    modified: None,
+                }),
+            },
+            &mut cache,
+            &mut active,
+            now,
+        )
+        .unwrap();
+    }
+
+    let stable_at =
+        start + LIVE_SIZE_REVALIDATE_INTERVAL * u32::from(LIVE_SIZE_STABLE_OBSERVATIONS);
+    resolve_cached_or_enqueue_live_file_size_at(
+        &path,
+        0,
+        0,
+        &mut cache,
+        &mut active,
+        &sender,
+        stable_at + LIVE_SIZE_STABLE_REVALIDATE_INTERVAL - Duration::from_nanos(1),
+    );
+    assert!(receiver.try_recv().is_err());
+
+    resolve_cached_or_enqueue_live_file_size_at(
+        &path,
+        0,
+        0,
+        &mut cache,
+        &mut active,
+        &sender,
+        stable_at + LIVE_SIZE_STABLE_REVALIDATE_INTERVAL,
+    );
+    let request = receiver.try_recv().unwrap();
+    assert_eq!(
+        accept_live_file_size_response(
+            LiveFileSizeResponse {
+                path: path.clone(),
+                source_mtime_secs: 0,
+                request_id: request.request_id,
+                observed: Some(ObservedLiveFileSize {
+                    size: 8192,
+                    modified: None,
+                }),
+            },
+            &mut cache,
+            &mut active,
+            stable_at + LIVE_SIZE_STABLE_REVALIDATE_INTERVAL,
+        ),
+        Some(LIVE_SIZE_REVALIDATE_INTERVAL)
+    );
+    assert_eq!(cached_live_file_size(&path, 0, &cache), Some(8192));
 }
 
 #[test]

@@ -22,6 +22,7 @@ fn view_mode_preference_value(view_mode: ViewMode) -> &'static str {
 
 /// Minimum interval between actual disk writes
 const PREFERENCES_FLUSH_INTERVAL_MS: u64 = 1000;
+const FINAL_PREFERENCES_FLUSH_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(250);
 
 impl ImageViewerApp {
     /// Marks preferences as dirty (deferred write).
@@ -59,14 +60,18 @@ impl ImageViewerApp {
 
     /// Force-flushes preferences immediately (for exit).
     pub fn force_save_preferences(&mut self) -> bool {
-        match self.do_save_preferences_blocking() {
-            Ok(()) => {
+        match self.do_save_preferences_bounded() {
+            PreferenceWriteOutcome::Persisted => {
                 self.preferences_dirty = false;
                 self.preferences_last_save = std::time::Instant::now();
                 true
             }
-            Err(error) => {
-                log::error!("[PREFERENCES] Blocking preference flush failed: {error}");
+            PreferenceWriteOutcome::Busy => {
+                log::error!("[PREFERENCES] Final preference flush timed out");
+                false
+            }
+            PreferenceWriteOutcome::Failed(error) => {
+                log::error!("[PREFERENCES] Final preference flush failed: {error}");
                 false
             }
         }
@@ -389,12 +394,11 @@ impl ImageViewerApp {
         self.app_state_db.try_set_preferences_batch(&prefs)
     }
 
-    /// Blocking write used on exit to maximize persistence reliability.
-    fn do_save_preferences_blocking(
-        &self,
-    ) -> Result<(), crate::infrastructure::app_state_db::AppStateWriteError> {
+    /// Deadline-bounded write used on exit to maximize persistence reliability.
+    fn do_save_preferences_bounded(&self) -> PreferenceWriteOutcome {
         let prefs = self.collect_preferences();
-        self.app_state_db.set_preferences_batch(&prefs)
+        self.app_state_db
+            .set_preferences_batch_bounded(&prefs, FINAL_PREFERENCES_FLUSH_TIMEOUT)
     }
 
     pub fn set_diagnostic_mode(&mut self, enabled: bool) {

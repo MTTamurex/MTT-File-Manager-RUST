@@ -3,7 +3,9 @@
 //! Windows 11-inspired look.
 
 use crate::ui::theme;
-use eframe::egui::{self, Color32, Pos2, Rect, RichText, Sense, Stroke, StrokeKind, Vec2};
+use eframe::egui::{
+    self, Color32, Pos2, Rect, RichText, Sense, Stroke, StrokeKind, Vec2, WidgetInfo, WidgetType,
+};
 
 const NAV_ITEM_HEIGHT: f32 = 34.0;
 const SEGMENT_HEIGHT: f32 = 30.0;
@@ -22,6 +24,46 @@ fn hover_fill(dark_mode: bool) -> Color32 {
         theme::color_dark_hover()
     } else {
         theme::color_hover()
+    }
+}
+
+fn paint_focus_outline(ui: &egui::Ui, rect: Rect, radius: f32) {
+    ui.painter().rect_stroke(
+        rect,
+        radius,
+        Stroke::new(1.0, theme::COLOR_ACCENT),
+        StrokeKind::Inside,
+    );
+}
+
+fn radio_arrow_target(
+    ui: &mut egui::Ui,
+    focused: usize,
+    option_count: usize,
+    previous_keys: &[egui::Key],
+    next_keys: &[egui::Key],
+) -> Option<usize> {
+    if option_count == 0 {
+        return None;
+    }
+
+    let (previous, next) = ui.input_mut(|input| {
+        let previous = previous_keys.iter().fold(false, |pressed, &key| {
+            input.consume_key(egui::Modifiers::NONE, key) || pressed
+        });
+        let next = next_keys.iter().fold(false, |pressed, &key| {
+            input.consume_key(egui::Modifiers::NONE, key) || pressed
+        });
+        (previous, next)
+    });
+    if previous || next {
+        ui.memory_mut(|memory| memory.move_focus(egui::FocusDirection::None));
+    }
+
+    match (previous, next) {
+        (true, false) => Some((focused + option_count - 1) % option_count),
+        (false, true) => Some((focused + 1) % option_count),
+        _ => None,
     }
 }
 
@@ -62,7 +104,7 @@ pub fn nav_item(ui: &mut egui::Ui, label: &str, selected: bool) -> bool {
                 Vec2::new(3.0, 16.0),
             );
             painter.rect_filled(indicator, 1.5, theme::COLOR_ACCENT);
-        } else if response.hovered() {
+        } else if response.hovered() || response.has_focus() {
             painter.rect_filled(rect, 6.0, hover_fill(dark_mode));
         }
         let mut text = RichText::new(label)
@@ -80,8 +122,13 @@ pub fn nav_item(ui: &mut egui::Ui, label: &str, selected: bool) -> bool {
         let text_pos = Pos2::new(rect.min.x + 12.0, rect.center().y - 0.5 * galley.size().y);
         ui.painter()
             .galley(text_pos, galley, theme::text_color(dark_mode));
+        if response.has_focus() {
+            paint_focus_outline(ui, rect, 6.0);
+        }
     }
 
+    response
+        .widget_info(|| WidgetInfo::selected(WidgetType::Button, ui.is_enabled(), selected, label));
     response.clicked()
 }
 
@@ -105,8 +152,9 @@ pub fn segmented_choice(ui: &mut egui::Ui, labels: &[&str], selected: usize) -> 
         seg_w * labels.len() as f32 + pad * 2.0,
         SEGMENT_HEIGHT + pad * 2.0,
     );
-    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
-    let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
+    let (rect, response) = ui.allocate_exact_size(size, Sense::hover());
+    let mut activated = None;
+    let mut focused = None;
 
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
@@ -116,16 +164,29 @@ pub fn segmented_choice(ui: &mut egui::Ui, labels: &[&str], selected: usize) -> 
             Color32::from_black_alpha(15)
         };
         painter.rect_filled(rect, 7.0, container);
+    }
 
-        let pointer = response
-            .hover_pos()
-            .or_else(|| response.interact_pointer_pos());
-        for (i, label) in labels.iter().enumerate() {
-            let seg_rect = Rect::from_min_size(
-                Pos2::new(rect.min.x + pad + i as f32 * seg_w, rect.min.y + pad),
-                Vec2::new(seg_w, SEGMENT_HEIGHT),
-            );
-            if i == selected {
+    for (i, label) in labels.iter().enumerate() {
+        let seg_rect = Rect::from_min_size(
+            Pos2::new(rect.min.x + pad + i as f32 * seg_w, rect.min.y + pad),
+            Vec2::new(seg_w, SEGMENT_HEIGHT),
+        );
+        let segment_response = ui
+            .interact(seg_rect, response.id.with(i), Sense::click())
+            .on_hover_cursor(egui::CursorIcon::PointingHand);
+        let is_selected = i == selected;
+        segment_response.widget_info(|| {
+            WidgetInfo::selected(
+                WidgetType::RadioButton,
+                ui.is_enabled(),
+                is_selected,
+                *label,
+            )
+        });
+
+        if ui.is_rect_visible(seg_rect) {
+            let painter = ui.painter();
+            if is_selected {
                 let fill = if dark_mode {
                     Color32::from_gray(69)
                 } else {
@@ -140,7 +201,7 @@ pub fn segmented_choice(ui: &mut egui::Ui, labels: &[&str], selected: usize) -> 
                     },
                 );
                 painter.rect(seg_rect, 5.0, fill, stroke, StrokeKind::Inside);
-            } else if pointer.is_some_and(|p| seg_rect.contains(p)) {
+            } else if segment_response.hovered() || segment_response.has_focus() {
                 painter.rect_filled(
                     seg_rect,
                     5.0,
@@ -158,25 +219,41 @@ pub fn segmented_choice(ui: &mut egui::Ui, labels: &[&str], selected: usize) -> 
                 font_id.clone(),
                 text_color,
             );
+            if segment_response.has_focus() {
+                paint_focus_outline(ui, seg_rect, 5.0);
+            }
+        }
+
+        if segment_response.clicked() && !is_selected {
+            activated = Some(i);
+        }
+        if segment_response.has_focus() {
+            focused = Some(i);
         }
     }
 
-    if response.clicked() {
-        if let Some(pos) = response.interact_pointer_pos() {
-            let idx = ((pos.x - rect.min.x - pad) / seg_w).floor() as usize;
-            if idx < labels.len() && idx != selected {
-                return Some(idx);
-            }
+    if let Some(focused) = focused {
+        if let Some(target) = radio_arrow_target(
+            ui,
+            focused,
+            labels.len(),
+            &[egui::Key::ArrowLeft],
+            &[egui::Key::ArrowRight],
+        ) {
+            ui.memory_mut(|memory| memory.request_focus(response.id.with(target)));
+            return (target != selected).then_some(target);
         }
     }
-    None
+    activated
 }
 
 /// Vertical list of radio-style option rows.
 /// Returns the index of the clicked option, if any.
 pub fn choice_list(ui: &mut egui::Ui, labels: &[&str], selected: usize) -> Option<usize> {
     let dark_mode = ui.visuals().dark_mode;
-    let mut clicked = None;
+    let mut activated = None;
+    let mut focused = None;
+    let mut option_ids = Vec::with_capacity(labels.len());
 
     for (i, label) in labels.iter().enumerate() {
         let is_selected = i == selected;
@@ -185,6 +262,15 @@ pub fn choice_list(ui: &mut egui::Ui, labels: &[&str], selected: usize) -> Optio
             Sense::click(),
         );
         let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
+        option_ids.push(response.id);
+        response.widget_info(|| {
+            WidgetInfo::selected(
+                WidgetType::RadioButton,
+                ui.is_enabled(),
+                is_selected,
+                *label,
+            )
+        });
 
         if ui.is_rect_visible(rect) {
             let painter = ui.painter();
@@ -196,7 +282,7 @@ pub fn choice_list(ui: &mut egui::Ui, labels: &[&str], selected: usize) -> Optio
                     Stroke::new(1.0, theme::COLOR_ACCENT),
                     StrokeKind::Inside,
                 );
-            } else if response.hovered() {
+            } else if response.hovered() || response.has_focus() {
                 painter.rect_filled(rect, 8.0, hover_fill(dark_mode));
                 painter.rect_stroke(
                     rect,
@@ -252,15 +338,33 @@ pub fn choice_list(ui: &mut egui::Ui, labels: &[&str], selected: usize) -> Optio
                 egui::FontId::proportional(13.0),
                 theme::text_color(dark_mode),
             );
+            if response.has_focus() {
+                paint_focus_outline(ui, rect, 8.0);
+            }
         }
 
         if response.clicked() && !is_selected {
-            clicked = Some(i);
+            activated = Some(i);
+        }
+        if response.has_focus() {
+            focused = Some(i);
         }
         ui.add_space(6.0);
     }
 
-    clicked
+    if let Some(focused) = focused {
+        if let Some(target) = radio_arrow_target(
+            ui,
+            focused,
+            labels.len(),
+            &[egui::Key::ArrowUp, egui::Key::ArrowLeft],
+            &[egui::Key::ArrowDown, egui::Key::ArrowRight],
+        ) {
+            ui.memory_mut(|memory| memory.request_focus(option_ids[target]));
+            return (target != selected).then_some(target);
+        }
+    }
+    activated
 }
 
 /// Label + switch row (Windows 11 style). Returns true when toggled.
@@ -268,7 +372,7 @@ pub fn toggle_row(ui: &mut egui::Ui, label: &str, value: &mut bool) -> bool {
     let dark_mode = ui.visuals().dark_mode;
     let (rect, response) =
         ui.allocate_exact_size(Vec2::new(ui.available_width(), 24.0), Sense::click());
-    let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
+    let mut response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
 
     if ui.is_rect_visible(rect) {
         let painter = ui.painter();
@@ -283,27 +387,52 @@ pub fn toggle_row(ui: &mut egui::Ui, label: &str, value: &mut bool) -> bool {
             Pos2::new(rect.max.x - 40.0, rect.center().y - 10.0),
             Vec2::new(40.0, 20.0),
         );
-        paint_switch(ui, track, *value, response.hovered());
+        paint_switch(
+            ui,
+            track,
+            *value,
+            response.hovered() || response.has_focus(),
+        );
+        if response.has_focus() {
+            paint_focus_outline(ui, rect, 4.0);
+        }
     }
 
     if response.clicked() {
         *value = !*value;
-        true
-    } else {
-        false
+        response.mark_changed();
     }
+    response
+        .widget_info(|| WidgetInfo::selected(WidgetType::Checkbox, ui.is_enabled(), *value, label));
+    response.changed()
 }
 
-/// Standalone switch control (40x20). Returns true when toggled.
-pub fn toggle_switch(ui: &mut egui::Ui, value: &mut bool) -> egui::Response {
+/// Standalone switch control (40x20).
+pub fn toggle_switch(
+    ui: &mut egui::Ui,
+    value: &mut bool,
+    accessible_label: &str,
+) -> egui::Response {
     let (rect, response) = ui.allocate_exact_size(Vec2::new(40.0, 20.0), Sense::click());
-    let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
+    let mut response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
     if ui.is_rect_visible(rect) {
-        paint_switch(ui, rect, *value, response.hovered());
+        paint_switch(ui, rect, *value, response.hovered() || response.has_focus());
+        if response.has_focus() {
+            paint_focus_outline(ui, rect, 10.0);
+        }
     }
     if response.clicked() {
         *value = !*value;
+        response.mark_changed();
     }
+    response.widget_info(|| {
+        WidgetInfo::selected(
+            WidgetType::Checkbox,
+            ui.is_enabled(),
+            *value,
+            accessible_label,
+        )
+    });
     response
 }
 
@@ -418,3 +547,7 @@ pub fn card_frame(dark_mode: bool) -> egui::Frame {
             },
         ))
 }
+
+#[cfg(test)]
+#[path = "settings_ui_tests.rs"]
+mod tests;

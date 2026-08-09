@@ -1,15 +1,22 @@
 use std::ffi::c_void;
+use std::os::windows::io::AsRawHandle;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc;
+use std::time::Duration;
 
 use windows::Win32::Foundation::{GENERIC_READ, GENERIC_WRITE, HANDLE};
 use windows::Win32::System::Ioctl::IOCTL_STORAGE_QUERY_PROPERTY;
-use windows::Win32::System::IO::DeviceIoControl;
+use windows::Win32::System::IO::{CancelSynchronousIo, DeviceIoControl};
 
-use super::windows_io::open_handle;
+use super::windows_io::{device_io_control, open_synchronous_handle, Handle};
 
 const PROTOCOL_DESCRIPTOR_SIZE: usize = 48;
 const PROTOCOL_DATA_SIZE: usize = 40;
 const IOCTL_ATA_PASS_THROUGH: u32 = 0x0004_D02C;
 const IOCTL_SCSI_PASS_THROUGH: u32 = 0x0004_D004;
+const PASS_THROUGH_TIMEOUT: Duration = Duration::from_secs(5);
+const CANCELLATION_GRACE: Duration = Duration::from_secs(2);
+static PASS_THROUGH_ACTIVE: AtomicBool = AtomicBool::new(false);
 
 pub(super) struct ProtocolQuery {
     pub(super) property_id: u32,
@@ -34,21 +41,18 @@ pub(super) fn query_protocol_data(
     write_u32(&mut buffer, 24, PROTOCOL_DATA_SIZE as u32)?;
     write_u32(&mut buffer, 28, request.data_len as u32)?;
 
-    let mut returned = 0;
     let buffer_ptr = buffer.as_mut_ptr();
-    unsafe {
-        DeviceIoControl(
+    let returned = unsafe {
+        device_io_control(
             handle,
             IOCTL_STORAGE_QUERY_PROPERTY,
             Some(buffer_ptr.cast_const().cast::<c_void>()),
             buffer.len() as u32,
             Some(buffer_ptr.cast::<c_void>()),
             buffer.len() as u32,
-            Some(&mut returned),
-            None,
+            "protocol-specific query",
         )
-    }
-    .map_err(|error| format!("protocol-specific query failed: {error}"))?;
+    }?;
 
     let returned = returned as usize;
     if returned < PROTOCOL_DESCRIPTOR_SIZE
@@ -108,7 +112,7 @@ pub(super) fn ata_smart_read(physical_disk_number: u32, feature: u8) -> Result<[
 
 fn ata_command(physical_disk_number: u32, command: u8, feature: u8) -> Result<[u8; 512], String> {
     let path = format!(r"\\.\PhysicalDrive{}", physical_disk_number);
-    let handle = open_handle(&path, GENERIC_READ.0 | GENERIC_WRITE.0)?;
+    let handle = open_synchronous_handle(&path, GENERIC_READ.0 | GENERIC_WRITE.0)?;
     let mut packet = AtaPacket {
         pass_through: AtaPassThroughEx::default(),
         data: [0; 512],
@@ -128,21 +132,8 @@ fn ata_command(physical_disk_number: u32, command: u8, feature: u8) -> Result<[u
     packet.pass_through.current_task_file[5] = 0xA0;
     packet.pass_through.current_task_file[6] = command;
 
-    let mut returned = 0;
-    let packet_ptr = &mut packet as *mut AtaPacket;
-    unsafe {
-        DeviceIoControl(
-            handle.raw(),
-            IOCTL_ATA_PASS_THROUGH,
-            Some(packet_ptr.cast_const().cast::<c_void>()),
-            std::mem::size_of::<AtaPacket>() as u32,
-            Some(packet_ptr.cast::<c_void>()),
-            std::mem::size_of::<AtaPacket>() as u32,
-            Some(&mut returned),
-            None,
-        )
-    }
-    .map_err(|error| format!("ATA pass-through failed: {error}"))?;
+    let (packet, returned) =
+        synchronous_pass_through(handle, IOCTL_ATA_PASS_THROUGH, packet, "ATA pass-through")?;
     if returned < std::mem::size_of::<AtaPacket>() as u32
         || packet.pass_through.data_transfer_length < 512
         || packet.pass_through.current_task_file[6] & 0x21 != 0
@@ -187,7 +178,7 @@ pub(super) fn sat_smart_read(drive_letter: char, feature: u8) -> Result<[u8; 512
 
 fn sat_command(drive_letter: char, command: u8, feature: u8) -> Result<[u8; 512], String> {
     let path = format!(r"\\.\{}:", drive_letter);
-    let handle = open_handle(&path, GENERIC_READ.0 | GENERIC_WRITE.0)?;
+    let handle = open_synchronous_handle(&path, GENERIC_READ.0 | GENERIC_WRITE.0)?;
     let mut packet = SatPacket {
         pass_through: ScsiPassThrough::default(),
         sense: [0; 32],
@@ -214,21 +205,8 @@ fn sat_command(drive_letter: char, command: u8, feature: u8) -> Result<[u8; 512]
     packet.pass_through.cdb[13] = 0xA0;
     packet.pass_through.cdb[14] = command;
 
-    let mut returned = 0;
-    let packet_ptr = &mut packet as *mut SatPacket;
-    unsafe {
-        DeviceIoControl(
-            handle.raw(),
-            IOCTL_SCSI_PASS_THROUGH,
-            Some(packet_ptr.cast_const().cast::<c_void>()),
-            std::mem::size_of::<SatPacket>() as u32,
-            Some(packet_ptr.cast::<c_void>()),
-            std::mem::size_of::<SatPacket>() as u32,
-            Some(&mut returned),
-            None,
-        )
-    }
-    .map_err(|error| format!("SAT pass-through failed: {error}"))?;
+    let (packet, returned) =
+        synchronous_pass_through(handle, IOCTL_SCSI_PASS_THROUGH, packet, "SAT pass-through")?;
     if returned < std::mem::size_of::<SatPacket>() as u32
         || packet.pass_through.scsi_status != 0
         || packet.pass_through.data_transfer_length < 512
@@ -236,6 +214,76 @@ fn sat_command(drive_letter: char, command: u8, feature: u8) -> Result<[u8; 512]
         return Err("SAT command did not return valid data".to_string());
     }
     Ok(packet.data)
+}
+
+struct PassThroughPermit;
+
+impl Drop for PassThroughPermit {
+    fn drop(&mut self) {
+        PASS_THROUGH_ACTIVE.store(false, Ordering::Release);
+    }
+}
+
+fn synchronous_pass_through<T: Send + 'static>(
+    handle: Handle,
+    control_code: u32,
+    mut packet: T,
+    operation: &'static str,
+) -> Result<(T, u32), String> {
+    if PASS_THROUGH_ACTIVE
+        .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        .is_err()
+    {
+        return Err("another storage pass-through request is still active".to_string());
+    }
+    let permit = PassThroughPermit;
+    let (result_tx, result_rx) = mpsc::sync_channel(1);
+    let worker = std::thread::Builder::new()
+        .name("drive-health-pass-through".to_string())
+        .spawn(move || {
+            let _permit = permit;
+            let mut returned = 0;
+            let packet_ptr = &mut packet as *mut T;
+            let result = unsafe {
+                DeviceIoControl(
+                    handle.raw(),
+                    control_code,
+                    Some(packet_ptr.cast_const().cast::<c_void>()),
+                    std::mem::size_of::<T>() as u32,
+                    Some(packet_ptr.cast::<c_void>()),
+                    std::mem::size_of::<T>() as u32,
+                    Some(&mut returned),
+                    None,
+                )
+            }
+            .map(|()| (packet, returned))
+            .map_err(|error| format!("{operation} failed: {error}"));
+            let _ = result_tx.send(result);
+        })
+        .map_err(|error| format!("{operation} worker creation failed: {error}"))?;
+
+    match result_rx.recv_timeout(PASS_THROUGH_TIMEOUT) {
+        Ok(result) => {
+            let _ = worker.join();
+            result
+        }
+        Err(mpsc::RecvTimeoutError::Timeout) => {
+            unsafe {
+                let _ = CancelSynchronousIo(HANDLE(worker.as_raw_handle()));
+            }
+            if result_rx.recv_timeout(CANCELLATION_GRACE).is_ok() {
+                let _ = worker.join();
+            }
+            // If cancellation is ignored, dropping JoinHandle only detaches the
+            // sole worker. It retains the packet and device handle, while its
+            // permit prevents any additional pass-through worker from spawning.
+            Err(format!("{operation} timed out"))
+        }
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            let _ = worker.join();
+            Err(format!("{operation} worker stopped unexpectedly"))
+        }
+    }
 }
 
 fn read_u32(buffer: &[u8], offset: usize) -> Result<u32, String> {

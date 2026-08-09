@@ -379,7 +379,18 @@ fn flush_opengl_gpu_textures_for_reupload(app: &mut ImageViewerApp, reason: &str
 }
 
 pub fn handle_exit(app: &mut ImageViewerApp) {
-    // Arm the failsafe before any teardown, FFI, lock, or final persistence.
+    // Prevent the incremental GC from starting another app-state DB write.
+    crate::app::init_workers::stop_gc_worker();
+
+    // Capture and persist live panel/tab state before any teardown can block.
+    app.sync_to_tab();
+    if app.force_save_preferences() {
+        log::info!("[EXIT] Preferences saved.");
+    } else {
+        log::error!("[EXIT] Preferences could not be saved.");
+    }
+
+    // Arm the failsafe after final persistence and before teardown or FFI.
     // Do not log from this thread: the logger itself may own the stuck lock.
     let _ = std::thread::Builder::new()
         .name("exit-watchdog".into())
@@ -387,12 +398,6 @@ pub fn handle_exit(app: &mut ImageViewerApp) {
             std::thread::sleep(std::time::Duration::from_secs(5));
             crate::infrastructure::windows::terminate_current_process(0);
         });
-
-    // Capture the current live panel/tab state before the final blocking save.
-    app.sync_to_tab();
-
-    // Stop the GC worker thread before tearing down.
-    crate::app::init_workers::stop_gc_worker();
 
     // ── Phase 1: cooperative shutdown ────────────────────────────────────
     // Signal all background workers to exit by dropping their Senders.
@@ -410,8 +415,7 @@ pub fn handle_exit(app: &mut ImageViewerApp) {
     app.kill_video_player_process();
     crate::viewer_processes::terminate_all();
 
-    // Cancel worker I/O and wait for the enumerator before starting the final
-    // preference write, so process-wide cancellation cannot race that write.
+    // Cancel worker I/O and wait for the enumerator before process exit.
     let io_cancel_handle = std::thread::Builder::new()
         .name("io-cancel".into())
         .spawn(|| {
@@ -427,13 +431,6 @@ pub fn handle_exit(app: &mut ImageViewerApp) {
         .ok();
     if let Some(handle) = io_cancel_handle {
         let _ = handle.join();
-    }
-
-    // Persist user preferences
-    if app.force_save_preferences() {
-        log::info!("[EXIT] Preferences saved.");
-    } else {
-        log::error!("[EXIT] Preferences could not be saved.");
     }
 
     // ── Phase 2: minimal grace for channel-drop propagation ───────────

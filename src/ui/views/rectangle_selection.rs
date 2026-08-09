@@ -1,5 +1,6 @@
 use eframe::egui::{self, Color32, Pos2, Rect, Stroke};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use crate::ui::cache::FxHashSet;
 
@@ -55,12 +56,78 @@ pub struct ColumnListRectangleMetrics {
     pub content_height: f32,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct GroupedRectangleSection {
+    pub item_indices: Arc<[usize]>,
+    pub origin: Pos2,
+}
+
 #[derive(Clone, Debug)]
+pub struct GroupedProjectionIdentity {
+    sections: Arc<[GroupedRectangleSection]>,
+    item_count: usize,
+}
+
+impl GroupedProjectionIdentity {
+    pub fn new(sections: Arc<[GroupedRectangleSection]>, item_count: usize) -> Self {
+        Self {
+            sections,
+            item_count,
+        }
+    }
+}
+
+impl PartialEq for GroupedProjectionIdentity {
+    fn eq(&self, other: &Self) -> bool {
+        self.item_count == other.item_count
+            && self.sections.len() == other.sections.len()
+            && self
+                .sections
+                .iter()
+                .zip(other.sections.iter())
+                .all(|(left, right)| Arc::ptr_eq(&left.item_indices, &right.item_indices))
+    }
+}
+
+impl Eq for GroupedProjectionIdentity {}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum GroupedRectangleLayout {
+    Grid {
+        cols: usize,
+        item_w: f32,
+        item_h: f32,
+        column_step: f32,
+        row_step: f32,
+    },
+    List {
+        row_height: f32,
+    },
+    ColumnList {
+        rows_per_column: usize,
+        column_width: f32,
+        row_height: f32,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct GroupedRectangleMetrics {
     pub view: RectangleSelectionView,
-    pub item_rects: std::sync::Arc<[(usize, Rect)]>,
+    pub sections: Arc<[GroupedRectangleSection]>,
+    pub projection_identity: GroupedProjectionIdentity,
+    pub layout: GroupedRectangleLayout,
+    pub item_count: usize,
     pub content_width: f32,
     pub content_height: f32,
+}
+
+impl GroupedRectangleMetrics {
+    pub fn visual_order(&self) -> impl Iterator<Item = usize> + '_ {
+        self.sections
+            .iter()
+            .flat_map(|section| section.item_indices.iter().copied())
+            .filter(|index| *index < self.item_count)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -111,6 +178,7 @@ pub struct RectangleSelectionState {
     pub hit_indices: FxHashSet<usize>,
     pub preview_indices: FxHashSet<usize>,
     pub visual_order: Option<std::sync::Arc<[usize]>>,
+    pub visual_order_source: Option<GroupedProjectionIdentity>,
     pub modifiers: RectangleSelectionModifiers,
     pub generation: usize,
 }
@@ -154,6 +222,7 @@ impl RectangleSelectionState {
             hit_indices: FxHashSet::default(),
             preview_indices: FxHashSet::default(),
             visual_order: None,
+            visual_order_source: None,
             modifiers,
             generation,
         }
@@ -255,14 +324,186 @@ pub fn collect_indices_in_rect(
         RectangleSelectionMetrics::ColumnList(metrics) => {
             collect_column_list_indices(selection_rect, metrics)
         }
-        RectangleSelectionMetrics::Grouped(metrics) => metrics
-            .item_rects
-            .iter()
-            .filter_map(|(index, item_rect)| {
-                rects_intersect(selection_rect, *item_rect).then_some(*index)
-            })
-            .collect(),
+        RectangleSelectionMetrics::Grouped(metrics) => {
+            collect_grouped_indices(selection_rect, &metrics)
+        }
     }
+}
+
+fn collect_grouped_indices(
+    selection_rect: Rect,
+    metrics: &GroupedRectangleMetrics,
+) -> FxHashSet<usize> {
+    let mut indices = FxHashSet::default();
+    match metrics.layout {
+        GroupedRectangleLayout::Grid {
+            cols,
+            item_w,
+            item_h,
+            column_step,
+            row_step,
+        } => {
+            if cols == 0 || item_w <= 0.0 || item_h <= 0.0 || column_step <= 0.0 || row_step <= 0.0
+            {
+                return indices;
+            }
+            for section in metrics.sections.iter() {
+                let rows = section.item_indices.len().div_ceil(cols);
+                let Some(row_range) = intersecting_slots(
+                    selection_rect.top(),
+                    selection_rect.bottom(),
+                    section.origin.y,
+                    row_step,
+                    item_h,
+                    rows,
+                ) else {
+                    continue;
+                };
+                let Some(column_range) = intersecting_slots(
+                    selection_rect.left(),
+                    selection_rect.right(),
+                    section.origin.x,
+                    column_step,
+                    item_w,
+                    cols,
+                ) else {
+                    continue;
+                };
+                for row in row_range {
+                    for column in column_range.clone() {
+                        let position = row * cols + column;
+                        let Some(&index) = section.item_indices.get(position) else {
+                            break;
+                        };
+                        if index >= metrics.item_count {
+                            continue;
+                        }
+                        let item_rect = Rect::from_min_size(
+                            egui::pos2(
+                                section.origin.x + column as f32 * column_step,
+                                section.origin.y + row as f32 * row_step,
+                            ),
+                            egui::vec2(item_w, item_h),
+                        );
+                        if rects_intersect(selection_rect, item_rect) {
+                            indices.insert(index);
+                        }
+                    }
+                }
+            }
+        }
+        GroupedRectangleLayout::List { row_height } => {
+            if row_height <= 0.0
+                || selection_rect.right() <= 0.0
+                || selection_rect.left() >= metrics.content_width
+            {
+                return indices;
+            }
+            for section in metrics.sections.iter() {
+                let Some(rows) = intersecting_slots(
+                    selection_rect.top(),
+                    selection_rect.bottom(),
+                    section.origin.y,
+                    row_height,
+                    row_height,
+                    section.item_indices.len(),
+                ) else {
+                    continue;
+                };
+                for position in rows {
+                    let index = section.item_indices[position];
+                    if index >= metrics.item_count {
+                        continue;
+                    }
+                    let row_rect = Rect::from_min_size(
+                        egui::pos2(
+                            section.origin.x,
+                            section.origin.y + position as f32 * row_height,
+                        ),
+                        egui::vec2(metrics.content_width, row_height),
+                    );
+                    if rects_intersect(selection_rect, row_rect) {
+                        indices.insert(index);
+                    }
+                }
+            }
+        }
+        GroupedRectangleLayout::ColumnList {
+            rows_per_column,
+            column_width,
+            row_height,
+        } => {
+            if rows_per_column == 0 || column_width <= 0.0 || row_height <= 0.0 {
+                return indices;
+            }
+            for section in metrics.sections.iter() {
+                let columns = section.item_indices.len().div_ceil(rows_per_column);
+                let Some(column_range) = intersecting_slots(
+                    selection_rect.left(),
+                    selection_rect.right(),
+                    section.origin.x,
+                    column_width,
+                    column_width,
+                    columns,
+                ) else {
+                    continue;
+                };
+                let Some(row_range) = intersecting_slots(
+                    selection_rect.top(),
+                    selection_rect.bottom(),
+                    section.origin.y,
+                    row_height,
+                    row_height,
+                    rows_per_column,
+                ) else {
+                    continue;
+                };
+                for column in column_range {
+                    for row in row_range.clone() {
+                        let position = column * rows_per_column + row;
+                        let Some(&index) = section.item_indices.get(position) else {
+                            break;
+                        };
+                        if index >= metrics.item_count {
+                            continue;
+                        }
+                        let item_rect = Rect::from_min_size(
+                            egui::pos2(
+                                section.origin.x + column as f32 * column_width,
+                                section.origin.y + row as f32 * row_height,
+                            ),
+                            egui::vec2(column_width, row_height),
+                        );
+                        if rects_intersect(selection_rect, item_rect) {
+                            indices.insert(index);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    indices
+}
+
+fn intersecting_slots(
+    selection_min: f32,
+    selection_max: f32,
+    origin: f32,
+    step: f32,
+    extent: f32,
+    count: usize,
+) -> Option<std::ops::RangeInclusive<usize>> {
+    if count == 0
+        || step <= 0.0
+        || extent <= 0.0
+        || selection_max <= origin
+        || selection_min >= origin + (count - 1) as f32 * step + extent
+    {
+        return None;
+    }
+    let first = ((selection_min - origin) / step).floor().max(0.0) as usize;
+    let last = ((selection_max - origin) / step).floor().max(0.0) as usize;
+    Some(first.min(count - 1)..=last.min(count - 1))
 }
 
 fn collect_column_list_indices(
@@ -484,19 +725,17 @@ mod tests {
 
     #[test]
     fn grouped_selection_returns_logical_indices_and_ignores_headers() {
+        let sections: Arc<[GroupedRectangleSection]> = vec![GroupedRectangleSection {
+            item_indices: vec![7, 2].into(),
+            origin: egui::pos2(0.0, 30.0),
+        }]
+        .into();
         let metrics = RectangleSelectionMetrics::Grouped(GroupedRectangleMetrics {
             view: RectangleSelectionView::List,
-            item_rects: vec![
-                (
-                    7,
-                    Rect::from_min_size(egui::pos2(0.0, 30.0), egui::vec2(100.0, 20.0)),
-                ),
-                (
-                    2,
-                    Rect::from_min_size(egui::pos2(0.0, 50.0), egui::vec2(100.0, 20.0)),
-                ),
-            ]
-            .into(),
+            projection_identity: GroupedProjectionIdentity::new(sections.clone(), 8),
+            sections,
+            layout: GroupedRectangleLayout::List { row_height: 20.0 },
+            item_count: 8,
             content_width: 100.0,
             content_height: 70.0,
         });
@@ -512,6 +751,73 @@ mod tests {
                 metrics,
             )),
             vec![2, 7]
+        );
+    }
+
+    #[test]
+    fn grouped_grid_only_maps_intersected_rows_and_preserves_logical_indices() {
+        let sections: Arc<[GroupedRectangleSection]> = vec![GroupedRectangleSection {
+            item_indices: (100..10_100).collect::<Vec<_>>().into(),
+            origin: egui::pos2(8.0, 38.0),
+        }]
+        .into();
+        let metrics = RectangleSelectionMetrics::Grouped(GroupedRectangleMetrics {
+            view: RectangleSelectionView::Grid,
+            projection_identity: GroupedProjectionIdentity::new(sections.clone(), 20_000),
+            sections,
+            layout: GroupedRectangleLayout::Grid {
+                cols: 4,
+                item_w: 40.0,
+                item_h: 50.0,
+                column_step: 48.0,
+                row_step: 58.0,
+            },
+            item_count: 20_000,
+            content_width: 200.0,
+            content_height: 150_000.0,
+        });
+
+        assert_eq!(
+            sorted(collect_indices_in_rect(
+                Rect::from_min_max(egui::pos2(55.0, 97.0), egui::pos2(95.0, 145.0)),
+                metrics,
+            )),
+            vec![105]
+        );
+    }
+
+    #[test]
+    fn grouped_column_list_skips_header_and_maps_top_to_bottom() {
+        let sections: Arc<[GroupedRectangleSection]> = vec![GroupedRectangleSection {
+            item_indices: vec![9, 4, 7, 2, 8].into(),
+            origin: egui::pos2(280.0, 28.0),
+        }]
+        .into();
+        let metrics = RectangleSelectionMetrics::Grouped(GroupedRectangleMetrics {
+            view: RectangleSelectionView::ColumnList,
+            projection_identity: GroupedProjectionIdentity::new(sections.clone(), 10),
+            sections,
+            layout: GroupedRectangleLayout::ColumnList {
+                rows_per_column: 3,
+                column_width: 280.0,
+                row_height: 24.0,
+            },
+            item_count: 10,
+            content_width: 840.0,
+            content_height: 100.0,
+        });
+
+        assert!(collect_indices_in_rect(
+            Rect::from_min_max(egui::pos2(280.0, 0.0), egui::pos2(560.0, 27.0)),
+            metrics.clone(),
+        )
+        .is_empty());
+        assert_eq!(
+            sorted(collect_indices_in_rect(
+                Rect::from_min_max(egui::pos2(560.0, 28.0), egui::pos2(840.0, 76.0)),
+                metrics,
+            )),
+            vec![2, 8]
         );
     }
 
