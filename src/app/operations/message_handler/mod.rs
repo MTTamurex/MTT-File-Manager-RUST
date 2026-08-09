@@ -58,8 +58,9 @@ impl ImageViewerApp {
         }
 
         if saw_device_event {
-            // Drive was inserted/removed: clear all drive icon caches so icons are re-extracted
-            self.item_icon_loader.clear_drive_icons();
+            // Keep the current textures visible while Shell icons are refreshed in the background.
+            // Clearing them here makes every remaining drive briefly show a generic fallback.
+            self.item_icon_loader.refresh_drive_icons();
             let cached_physical_letters: Vec<char> = self
                 .drive_state
                 .disks

@@ -230,6 +230,13 @@ const MAX_AUXILIARY_ICON_THREADS: usize = 4;
 /// Bounded channel capacity for async icon results.
 const ICON_RESULT_CHANNEL_CAPACITY: usize = 256;
 
+fn is_drive_root_icon_key(key: &str) -> bool {
+    let bytes = key.as_bytes();
+    bytes.first().is_some_and(u8::is_ascii_alphabetic)
+        && bytes.get(1) == Some(&b':')
+        && (bytes.len() == 2 || (bytes.len() == 3 && matches!(bytes[2], b'\\' | b'/')))
+}
+
 /// Manages loading and caching of Windows shell icons.
 pub struct IconLoader {
     /// Cache for file icons (path -> texture)
@@ -248,6 +255,8 @@ pub struct IconLoader {
     pub extension_cache: LruCache<String, egui::TextureHandle>,
     /// Keys currently being loaded in background threads (prevents duplicate requests)
     loading_drive_icons: HashSet<String>,
+    /// Drive icons that must be re-extracted while their current texture remains visible.
+    stale_drive_icons: HashSet<String>,
     /// Folder paths that should use a provider icon resource instead of the
     /// generic folder icon (e.g. Google Drive target resolved from a `.lnk`).
     registered_folder_icon_resources: HashMap<String, String>,
@@ -293,6 +302,7 @@ impl IconLoader {
                     .expect("extension icon cache size must be non-zero"),
             ),
             loading_drive_icons: HashSet::new(),
+            stale_drive_icons: HashSet::new(),
             registered_folder_icon_resources: HashMap::new(),
             icon_result_rx: rx,
             icon_result_tx: tx,
@@ -308,6 +318,7 @@ impl IconLoader {
         self.icon_cache.clear();
         self.drive_icon_cache.clear();
         self.failed_drive_icons.clear();
+        self.stale_drive_icons.clear();
         self.extension_cache.clear();
         // NOTE: folder_icon_texture is NOT cleared — it's a static custom composed
         // graphic set once at startup (back+front+paper_sheet layers).
@@ -317,10 +328,15 @@ impl IconLoader {
         self.sync_icon_budget_calls = 0;
     }
 
-    /// Clears drive icon caches (both successful and failed), allowing fresh extraction.
-    /// Called when device events indicate drive insertion/removal.
-    pub fn clear_drive_icons(&mut self) {
-        self.drive_icon_cache.clear();
+    /// Schedules drive icons for refresh without dropping the textures currently on screen.
+    pub fn refresh_drive_icons(&mut self) {
+        self.stale_drive_icons.clear();
+        self.stale_drive_icons.extend(
+            self.drive_icon_cache
+                .iter()
+                .filter(|(key, _)| is_drive_root_icon_key(key))
+                .map(|(key, _)| key.clone()),
+        );
         self.failed_drive_icons.clear();
     }
 
@@ -511,5 +527,24 @@ mod request_tracker_tests {
 
         assert!(tracker.contains(path, IconSize::Large));
         assert!(!tracker.contains(path, IconSize::Jumbo));
+    }
+
+    #[test]
+    fn drive_icon_refresh_preserves_cached_texture() {
+        let mut loader = IconLoader::new();
+        let ctx = egui::Context::default();
+        let texture = ctx.load_texture(
+            "test-drive-icon",
+            egui::ColorImage::new([1, 1], vec![egui::Color32::WHITE]),
+            egui::TextureOptions::LINEAR,
+        );
+        loader.drive_icon_cache.put(r"D:\".to_string(), texture);
+        loader.failed_drive_icons.put(r"D:\".to_string(), ());
+
+        loader.refresh_drive_icons();
+
+        assert!(loader.drive_icon_cache.peek(r"D:\").is_some());
+        assert!(loader.failed_drive_icons.peek(r"D:\").is_none());
+        assert!(loader.stale_drive_icons.contains(r"D:\"));
     }
 }

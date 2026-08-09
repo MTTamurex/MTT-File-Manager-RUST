@@ -124,6 +124,7 @@ impl IconLoader {
             };
             received_any = true;
             self.loading_drive_icons.remove(&result.key);
+            let was_refresh = self.stale_drive_icons.remove(&result.key);
             match result.data {
                 Some((rgba_data, width, height)) => {
                     let texture = ctx.load_texture(
@@ -144,7 +145,9 @@ impl IconLoader {
                     uploads += 1;
                 }
                 None => {
-                    self.failed_drive_icons.put(result.key, ());
+                    if !was_refresh || self.drive_icon_cache.peek(&result.key).is_none() {
+                        self.failed_drive_icons.put(result.key, ());
+                    }
                 }
             }
         }
@@ -162,17 +165,28 @@ impl IconLoader {
         _ctx: &egui::Context,
         drive_path: &str,
     ) -> Option<egui::TextureHandle> {
+        let cached_icon = self.drive_icon_cache.get(drive_path).cloned();
+        if self.stale_drive_icons.contains(drive_path) {
+            self.start_drive_icon_load(drive_path);
+            return cached_icon;
+        }
+
+        if cached_icon.is_some() {
+            return cached_icon;
+        }
+
         if self.failed_drive_icons.peek(drive_path).is_some() {
             return None;
         }
 
-        if let Some(icon) = self.drive_icon_cache.get(drive_path) {
-            return Some(icon.clone());
-        }
+        self.start_drive_icon_load(drive_path);
+        None
+    }
 
+    fn start_drive_icon_load(&mut self, drive_path: &str) {
         // Already loading in background - wait for result
         if self.loading_drive_icons.contains(drive_path) {
-            return None;
+            return;
         }
 
         // Spawn background extraction (non-blocking, bounded)
@@ -181,7 +195,7 @@ impl IconLoader {
         let active = self.auxiliary_icon_threads.clone();
 
         if !super::try_reserve_auxiliary_icon_thread(&active) {
-            return None;
+            return;
         }
 
         self.loading_drive_icons.insert(key.clone());
@@ -212,8 +226,6 @@ impl IconLoader {
             self.loading_drive_icons.remove(&key);
             log::error!("[Icon] Failed to spawn drive-icon-worker: {}", error);
         }
-
-        None
     }
 
     /// Gets or loads a native icon for a specific folder path (like OneDrive).
