@@ -400,6 +400,9 @@ pub fn handle_exit(app: &mut ImageViewerApp) {
         });
 
     // ── Phase 1: cooperative shutdown ────────────────────────────────────
+    // Persist queued cover removals while the DB and cover worker are available.
+    app.flush_pending_folder_cover_removals_for_shutdown();
+
     // Signal all background workers to exit by dropping their Senders.
     // Each worker loop breaks on RecvError and runs its destructors.
     app.shutdown_background_workers();

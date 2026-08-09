@@ -123,15 +123,13 @@ fn pending_thumbnail_eviction_index(
 
 fn trim_pending_thumbnail_queue(
     pending: &mut std::collections::VecDeque<ThumbnailData>,
+    initial_pending_bytes: usize,
     max_items: usize,
     max_bytes: usize,
     visible_paths: Option<&FxHashSet<std::path::PathBuf>>,
     selected_path: Option<&std::path::PathBuf>,
-) -> Vec<ThumbnailData> {
-    let mut pending_bytes = pending
-        .iter()
-        .map(|thumbnail| thumbnail.image_data.len())
-        .sum::<usize>();
+) -> (Vec<ThumbnailData>, usize) {
+    let mut pending_bytes = initial_pending_bytes;
     let mut removed = Vec::new();
 
     while pending.len() > max_items || pending_bytes > max_bytes {
@@ -146,7 +144,7 @@ fn trim_pending_thumbnail_queue(
         removed.push(thumbnail);
     }
 
-    removed
+    (removed, pending_bytes)
 }
 
 fn panel_thumbnail_caches_active(
@@ -280,6 +278,7 @@ impl ImageViewerApp {
     pub(crate) fn invalidate_active_items_rebuild(&mut self) {
         self.items_rebuild_request_id = self.items_rebuild_request_id.wrapping_add(1);
         self.items_rebuild_in_flight = false;
+        self.inactive_final_items_rebuild_pending = false;
         self.clear_pending_items_rebuild_flags();
         self.last_items_rebuild = Instant::now();
     }
@@ -513,21 +512,26 @@ impl ImageViewerApp {
             .sum()
     }
 
-    pub(crate) fn trim_pending_thumbnail_uploads_to_limit(&mut self) {
+    pub(crate) fn trim_pending_thumbnail_uploads_to_limit(
+        &mut self,
+        pending_bytes: usize,
+        visible_paths: Option<&FxHashSet<std::path::PathBuf>>,
+    ) -> usize {
         let max_pending = self.current_pending_thumbnail_upload_limit();
         let max_pending_bytes = self.current_pending_thumbnail_upload_byte_limit();
-        let visible_paths = self.visible_grid_paths_snapshot();
         let selected_path = self.selected_file.as_ref().map(|file| file.path.clone());
-        let removed = trim_pending_thumbnail_queue(
+        let (removed, final_pending_bytes) = trim_pending_thumbnail_queue(
             &mut self.pending_thumbnails,
+            pending_bytes,
             max_pending,
             max_pending_bytes,
-            visible_paths.as_ref(),
+            visible_paths,
             selected_path.as_ref(),
         );
         for thumbnail in removed {
             self.cache_manager.finish_pending_upload(&thumbnail.path);
         }
+        final_pending_bytes
     }
 
     pub fn log_memory_snapshot(&mut self, label: &str) {
@@ -1231,7 +1235,12 @@ impl ImageViewerApp {
 
         let aggressive = pressure == MemoryPressure::Hard;
         let is_burst = self.is_in_restore_burst();
-        self.trim_pending_thumbnail_uploads_to_limit();
+        let pending_thumbnail_bytes = self.pending_thumbnail_rgba_bytes();
+        let visible_paths_for_pending = self.visible_grid_paths_snapshot();
+        self.trim_pending_thumbnail_uploads_to_limit(
+            pending_thumbnail_bytes,
+            visible_paths_for_pending.as_ref(),
+        );
         let visible_grid_items = self.visible_grid_items_for_cache();
         let mut visible_paths = self.visible_grid_paths_snapshot();
         if let Some(detail_panel_paths) = self.detail_panel_folder_preview_paths_for_trim() {
@@ -1924,8 +1933,8 @@ mod inactive_panel_paths_tests {
             thumbnail("offscreen", 4),
         ]);
 
-        let removed =
-            trim_pending_thumbnail_queue(&mut pending, 2, 8, Some(&visible), Some(&selected));
+        let (removed, final_bytes) =
+            trim_pending_thumbnail_queue(&mut pending, 12, 2, 8, Some(&visible), Some(&selected));
         assert_eq!(
             removed
                 .iter()
@@ -1934,6 +1943,7 @@ mod inactive_panel_paths_tests {
             vec![std::path::Path::new("offscreen")]
         );
         assert_eq!(pending.len(), 2);
+        assert_eq!(final_bytes, 8);
         assert_eq!(
             pending
                 .iter()
@@ -1942,10 +1952,11 @@ mod inactive_panel_paths_tests {
             8
         );
 
-        let removed =
-            trim_pending_thumbnail_queue(&mut pending, 2, 4, Some(&visible), Some(&selected));
+        let (removed, final_bytes) =
+            trim_pending_thumbnail_queue(&mut pending, 8, 2, 4, Some(&visible), Some(&selected));
         assert!(removed.is_empty());
         assert_eq!(pending.len(), 2);
+        assert_eq!(final_bytes, 8);
     }
 
     #[test]

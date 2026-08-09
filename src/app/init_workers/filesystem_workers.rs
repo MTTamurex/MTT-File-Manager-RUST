@@ -20,9 +20,37 @@ const NTFS_FOLDER_SIZE_SERVICE_DEADLINE_SECS: u64 = 30;
 pub struct CacheInvalidationEntry {
     pub path: PathBuf,
     pub force: bool,
+    /// Keep folder-cover metadata intact when only visual disk caches are stale.
+    pub preserve_folder_cover_metadata: bool,
     /// If `Some`, this is a rename operation: the disk-cache row for `path`
     /// should be moved to `rename_to` rather than deleted.
     pub rename_to: Option<PathBuf>,
+}
+
+fn merge_cache_invalidation_entries(
+    entries: Vec<CacheInvalidationEntry>,
+) -> Vec<CacheInvalidationEntry> {
+    let mut merged = Vec::<CacheInvalidationEntry>::with_capacity(entries.len());
+    let mut indexes = std::collections::HashMap::<PathBuf, usize>::with_capacity(entries.len());
+
+    for entry in entries {
+        if let Some(&index) = indexes.get(&entry.path) {
+            let current = &mut merged[index];
+            current.force |= entry.force;
+            current.preserve_folder_cover_metadata &= entry.preserve_folder_cover_metadata;
+            // Generic watcher invalidations must not erase a queued rename.
+            // A later rename replaces the destination; a forced invalidation
+            // represents an explicit delete/refresh and cancels it.
+            if entry.rename_to.is_some() || entry.force {
+                current.rename_to = entry.rename_to;
+            }
+        } else {
+            indexes.insert(entry.path.clone(), merged.len());
+            merged.push(entry);
+        }
+    }
+
+    merged
 }
 
 fn should_skip_exists_guard(path: &std::path::Path) -> bool {
@@ -175,14 +203,10 @@ pub(in crate::app) fn spawn_disk_cache_invalidation_worker(
                     entries.append(&mut more);
                 }
 
-                let mut unique_paths = std::collections::HashSet::with_capacity(entries.len());
+                let entries = merge_cache_invalidation_entries(entries);
                 let mut skipped_existing_files = 0usize;
 
                 for entry in entries {
-                    if !unique_paths.insert(entry.path.clone()) {
-                        continue;
-                    }
-
                     if let Some(new_path) = entry.rename_to {
                         // Rename: migrate the disk-cache row to the new path
                         // so thumbnails survive rename without re-extraction.
@@ -193,7 +217,9 @@ pub(in crate::app) fn spawn_disk_cache_invalidation_worker(
                         // all cache rows. The Shell may not have finished yet,
                         // so `fast_path_exists` would give a false positive.
                         disk_cache_for_invalidation.remove_cache_for_path(&entry.path);
-                        app_state_for_invalidation.remove_covers_for_path(&entry.path);
+                        if !entry.preserve_folder_cover_metadata {
+                            app_state_for_invalidation.remove_covers_for_path(&entry.path);
+                        }
                     } else if should_skip_exists_guard(entry.path.as_path()) {
                         // BUG FIX: On virtual/network drives we cannot probe
                         // existence safely (GetFileAttributesW can block
@@ -208,7 +234,9 @@ pub(in crate::app) fn spawn_disk_cache_invalidation_worker(
                         // Individual file thumbnails are preserved.  True orphans
                         // will be cleaned up by the incremental GC.
                         disk_cache_for_invalidation.remove_folder_preview_cache(&entry.path);
-                        app_state_for_invalidation.remove_folder_cover(&entry.path);
+                        if !entry.preserve_folder_cover_metadata {
+                            app_state_for_invalidation.remove_folder_cover(&entry.path);
+                        }
                         log::debug!(
                             "[CACHE-INVALIDATION] Virtual/network path, cleared folder visual cache only (thumbnails preserved): {:?}",
                             entry.path.file_name().unwrap_or_default()
@@ -226,14 +254,18 @@ pub(in crate::app) fn spawn_disk_cache_invalidation_worker(
                         // permanent thumbnail loss, but still clear folder visual
                         // caches (cover/preview) so stale UI can refresh.
                         disk_cache_for_invalidation.remove_folder_preview_cache(&entry.path);
-                        app_state_for_invalidation.remove_folder_cover(&entry.path);
+                        if !entry.preserve_folder_cover_metadata {
+                            app_state_for_invalidation.remove_folder_cover(&entry.path);
+                        }
                         log::debug!(
                             "[CACHE-INVALIDATION] Path exists, invalidated folder visual cache only: {:?}",
                             entry.path.file_name().unwrap_or_default()
                         );
                     } else {
                         disk_cache_for_invalidation.remove_cache_for_path(&entry.path);
-                        app_state_for_invalidation.remove_covers_for_path(&entry.path);
+                        if !entry.preserve_folder_cover_metadata {
+                            app_state_for_invalidation.remove_covers_for_path(&entry.path);
+                        }
                     }
                 }
 
@@ -716,8 +748,81 @@ fn is_ntfs_volume(path: &std::path::Path) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::prepare_folder_size_request;
+    use super::{
+        merge_cache_invalidation_entries, prepare_folder_size_request, CacheInvalidationEntry,
+    };
+    use std::path::PathBuf;
     use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+
+    fn invalidation(
+        path: &str,
+        force: bool,
+        preserve_folder_cover_metadata: bool,
+        rename_to: Option<&str>,
+    ) -> CacheInvalidationEntry {
+        CacheInvalidationEntry {
+            path: PathBuf::from(path),
+            force,
+            preserve_folder_cover_metadata,
+            rename_to: rename_to.map(PathBuf::from),
+        }
+    }
+
+    #[test]
+    fn cache_invalidation_merge_keeps_strongest_flags() {
+        let entries = vec![
+            invalidation("a.png", false, true, None),
+            invalidation("a.png", true, false, None),
+        ];
+
+        let merged = merge_cache_invalidation_entries(entries);
+
+        assert_eq!(merged.len(), 1);
+        assert!(merged[0].force);
+        assert!(!merged[0].preserve_folder_cover_metadata);
+    }
+
+    #[test]
+    fn cache_invalidation_merge_uses_latest_rename_destination() {
+        let entries = vec![
+            invalidation("a.png", false, true, Some("b.png")),
+            invalidation("a.png", false, true, Some("c.png")),
+        ];
+
+        let merged = merge_cache_invalidation_entries(entries);
+
+        assert_eq!(merged[0].rename_to, Some(PathBuf::from("c.png")));
+    }
+
+    #[test]
+    fn cache_invalidation_merge_uses_latest_rename_or_delete_intent() {
+        let rename_then_delete = merge_cache_invalidation_entries(vec![
+            invalidation("a.png", false, true, Some("b.png")),
+            invalidation("a.png", true, false, None),
+        ]);
+        let delete_then_rename = merge_cache_invalidation_entries(vec![
+            invalidation("a.png", true, false, None),
+            invalidation("a.png", false, true, Some("b.png")),
+        ]);
+
+        assert_eq!(rename_then_delete[0].rename_to, None);
+        assert_eq!(
+            delete_then_rename[0].rename_to,
+            Some(PathBuf::from("b.png"))
+        );
+        assert!(delete_then_rename[0].force);
+        assert!(!delete_then_rename[0].preserve_folder_cover_metadata);
+    }
+
+    #[test]
+    fn generic_invalidation_does_not_cancel_queued_rename() {
+        let merged = merge_cache_invalidation_entries(vec![
+            invalidation("a.png", false, true, Some("b.png")),
+            invalidation("a.png", false, true, None),
+        ]);
+
+        assert_eq!(merged[0].rename_to, Some(PathBuf::from("b.png")));
+    }
 
     #[test]
     fn cancelled_queued_folder_size_request_is_not_prepared_for_execution() {

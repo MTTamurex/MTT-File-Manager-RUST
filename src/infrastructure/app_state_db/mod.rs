@@ -21,6 +21,7 @@ mod organizer_rules;
 mod pinned_folders;
 mod preferences;
 
+pub use folder_covers::{FolderCoverReadOutcome, FolderCoverRemoveOutcome};
 pub use organizer_rules::OrganizerRuleDbError;
 pub use preferences::PreferenceWriteOutcome;
 

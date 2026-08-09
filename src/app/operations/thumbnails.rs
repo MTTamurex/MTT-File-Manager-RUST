@@ -207,14 +207,14 @@ impl ImageViewerApp {
 
             // Only reuse RAM cache if it meets or exceeds the requested size
             if cached_max_dim >= effective_size_px {
-                self.trim_pending_thumbnail_uploads_to_limit();
+                let pending_bytes = self.pending_thumbnail_rgba_bytes();
+                let visible_paths = self.visible_grid_paths_snapshot();
+                let pending_bytes = self
+                    .trim_pending_thumbnail_uploads_to_limit(pending_bytes, visible_paths.as_ref());
                 let pending_limit = self.current_pending_thumbnail_upload_limit();
                 let pending_byte_limit = self.current_pending_thumbnail_upload_byte_limit();
                 if self.pending_thumbnails.len() >= pending_limit
-                    || self
-                        .pending_thumbnail_rgba_bytes()
-                        .saturating_add(rgba_data.len())
-                        > pending_byte_limit
+                    || pending_bytes.saturating_add(rgba_data.len()) > pending_byte_limit
                 {
                     self.cache_manager.finish_loading(&path);
                     self.ui_ctx.request_repaint();
@@ -340,11 +340,11 @@ impl ImageViewerApp {
             return;
         }
 
-        let request = crate::workers::folder_preview_worker::FolderPreviewRequest {
-            path: path.clone(),
+        let request = crate::workers::folder_preview_worker::FolderPreviewRequest::new(
+            path.clone(),
             size_px,
             cover_path,
-        };
+        );
         match self.folder_preview_sender.try_send(request) {
             Ok(()) => {
                 // Only NOW the request is committed to the worker pipeline —
@@ -390,11 +390,11 @@ impl ImageViewerApp {
         self.suppress_next_folder_preview_invalidation
             .insert(path.clone());
 
-        let request = crate::workers::folder_preview_worker::FolderPreviewRequest {
-            path: path.clone(),
-            size_px: self.effective_folder_preview_request_size_px(),
+        let request = crate::workers::folder_preview_worker::FolderPreviewRequest::new(
+            path.clone(),
+            self.effective_folder_preview_request_size_px(),
             cover_path,
-        };
+        );
         match self.folder_preview_sender.try_send(request) {
             Ok(()) => {
                 self.cache_manager.note_folder_preview_request_sent(&path);

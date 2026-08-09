@@ -12,7 +12,9 @@ mod optical_disc;
 use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
+use std::time::{Duration, Instant};
 
+use crate::infrastructure::app_state_db::AppStateDb;
 use crate::infrastructure::diagnostic_logger::{diag_error, diag_info, field_bool, field_u64};
 use rfd::FileDialog;
 
@@ -48,34 +50,105 @@ pub(crate) const MPV_OSD_SHAPER: &str = "simple";
 /// Maximum file size for the video player (50 GB).
 const MAX_VIDEO_FILE_SIZE: u64 = 50 * 1024 * 1024 * 1024;
 
-fn apply_saved_locale() {
+const VOLUME_SAVE_DEBOUNCE: Duration = Duration::from_millis(750);
+
+#[derive(Debug)]
+struct PendingVolumeSave {
+    last_value_pct: f32,
+    last_persisted_value_pct: Option<f32>,
+    dirty: bool,
+    deadline: Option<Instant>,
+}
+
+impl PendingVolumeSave {
+    fn new(initial_value_pct: f32, persisted_value_pct: Option<f32>, now: Instant) -> Self {
+        let initial_value_pct = initial_value_pct.clamp(0.0, 100.0);
+        let dirty = persisted_value_pct != Some(initial_value_pct);
+        Self {
+            last_value_pct: initial_value_pct,
+            last_persisted_value_pct: persisted_value_pct,
+            dirty,
+            deadline: dirty.then_some(now + VOLUME_SAVE_DEBOUNCE),
+        }
+    }
+
+    fn record_change(&mut self, value_pct: f32, now: Instant) {
+        self.last_value_pct = value_pct.clamp(0.0, 100.0);
+        self.dirty = self.last_persisted_value_pct != Some(self.last_value_pct);
+        self.deadline = self.dirty.then_some(now + VOLUME_SAVE_DEBOUNCE);
+    }
+
+    fn due_value(&self, now: Instant) -> Option<f32> {
+        (self.dirty && self.deadline.is_some_and(|deadline| now >= deadline))
+            .then_some(self.last_value_pct)
+    }
+
+    fn pending_value(&self) -> Option<f32> {
+        self.dirty.then_some(self.last_value_pct)
+    }
+
+    fn mark_persisted(&mut self, value_pct: f32) {
+        self.last_persisted_value_pct = Some(value_pct);
+        self.dirty = self.last_value_pct != value_pct;
+        if !self.dirty {
+            self.deadline = None;
+        }
+    }
+
+    fn retry_after_debounce(&mut self, now: Instant) {
+        if self.dirty {
+            self.deadline = Some(now + VOLUME_SAVE_DEBOUNCE);
+        }
+    }
+
+    fn event_wait_timeout(&self, now: Instant) -> f64 {
+        self.deadline
+            .map(|deadline| deadline.saturating_duration_since(now).as_secs_f64())
+            .unwrap_or(1.0)
+            .min(1.0)
+    }
+}
+
+fn open_app_state_db() -> Option<AppStateDb> {
     let state_dir = dirs::data_local_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("MTT-File-Manager")
         .join("state");
 
-    if let Ok(db) = crate::infrastructure::app_state_db::AppStateDb::new(state_dir) {
-        if let Some(language) = db.get_preference("language") {
-            rust_i18n::set_locale(&language);
+    match AppStateDb::new(state_dir) {
+        Ok(db) => Some(db),
+        Err(error) => {
+            log::warn!("[VIDEO-PLAYER] Failed to open app-state database: {error}");
+            None
         }
     }
 }
 
-fn save_volume_to_db(volume_fraction: f32) {
-    let state_dir = dirs::data_local_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("MTT-File-Manager")
-        .join("state");
+fn apply_saved_locale(db: Option<&AppStateDb>) {
+    if let Some(language) = db.and_then(|db| db.get_preference("language")) {
+        rust_i18n::set_locale(&language);
+    }
+}
 
-    if let Ok(db) = crate::infrastructure::app_state_db::AppStateDb::new(state_dir) {
-        match db.set_preference("media_volume", &volume_fraction.clamp(0.0, 1.0).to_string()) {
-            Ok(()) => log::debug!(
+fn persisted_volume_pct(db: Option<&AppStateDb>) -> Option<f32> {
+    db.and_then(|db| db.get_preference("media_volume"))
+        .and_then(|value| value.parse::<f32>().ok())
+        .map(|value| (value * 100.0).clamp(0.0, 100.0))
+}
+
+fn save_volume_to_db(db: &AppStateDb, volume_pct: f32) -> bool {
+    let volume_fraction = (volume_pct / 100.0).clamp(0.0, 1.0);
+    match db.set_preference("media_volume", &volume_fraction.to_string()) {
+        Ok(()) => {
+            log::debug!(
                 "[VIDEO-PLAYER] Saved volume {:.0}% to preferences",
-                volume_fraction * 100.0
-            ),
-            Err(error) => {
-                log::warn!("[VIDEO-PLAYER] Failed to save volume preference: {error}")
-            }
+                volume_pct
+            );
+            true
+        }
+        Err(error) => {
+            log::warn!("[VIDEO-PLAYER] Failed to save volume preference: {error}");
+            false
         }
     }
 }
@@ -566,7 +639,8 @@ fn show_optical_disc_error(error: &str) {
 }
 
 fn run_standalone_source(source: PlaybackSource, position: f64, volume: f32) -> eframe::Result<()> {
-    apply_saved_locale();
+    let app_state_db = open_app_state_db();
+    apply_saved_locale(app_state_db.as_ref());
 
     // SEC: Validate again in child process (defense in depth).
     let resolved_disc = match &source {
@@ -851,9 +925,14 @@ fn run_standalone_source(source: PlaybackSource, position: f64, volume: f32) -> 
     let mut seek_applied = false;
     let mut eof_reached = false;
     let mut file_loaded = false;
-    let mut last_known_volume_pct = (volume * 100.0).clamp(0.0, 100.0);
+    let initial_volume_pct = (volume * 100.0).clamp(0.0, 100.0);
+    let mut pending_volume = PendingVolumeSave::new(
+        initial_volume_pct,
+        persisted_volume_pct(app_state_db.as_ref()),
+        Instant::now(),
+    );
     loop {
-        let event = mpv.wait_event(1.0);
+        let event = mpv.wait_event(pending_volume.event_wait_timeout(Instant::now()));
         // Log every non-None event at debug level so we can trace what fires
         // when the close button is clicked at EOF (keep-open=yes paused state).
         if let Some(ref ev) = event {
@@ -951,8 +1030,7 @@ fn run_standalone_source(source: PlaybackSource, position: f64, volume: f32) -> 
             Some(Ok(mpv::events::Event::PropertyChange { name, change, .. })) => {
                 if name == "volume" {
                     if let mpv::events::PropertyData::Double(vol) = change {
-                        last_known_volume_pct = vol.clamp(0.0, 100.0) as f32;
-                        save_volume_to_db(last_known_volume_pct / 100.0);
+                        pending_volume.record_change(vol.clamp(0.0, 100.0) as f32, Instant::now());
                     }
                 }
             }
@@ -1008,11 +1086,89 @@ fn run_standalone_source(source: PlaybackSource, position: f64, volume: f32) -> 
             }
             _ => {}
         }
+
+        let now = Instant::now();
+        if let Some(volume_pct) = pending_volume.due_value(now) {
+            if let Some(db) = app_state_db.as_ref() {
+                if save_volume_to_db(db, volume_pct) {
+                    pending_volume.mark_persisted(volume_pct);
+                } else {
+                    pending_volume.retry_after_debounce(now);
+                }
+            } else {
+                pending_volume.retry_after_debounce(now);
+            }
+        }
     }
 
     log::debug!("[VIDEO-PLAYER] Exiting standalone player");
 
-    save_volume_to_db(last_known_volume_pct / 100.0);
+    if let (Some(db), Some(volume_pct)) = (app_state_db.as_ref(), pending_volume.pending_value()) {
+        let _ = save_volume_to_db(db, volume_pct);
+    }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{PendingVolumeSave, VOLUME_SAVE_DEBOUNCE};
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn volume_save_uses_trailing_edge_debounce() {
+        let started = Instant::now();
+        let mut pending = PendingVolumeSave::new(50.0, Some(50.0), started);
+
+        pending.record_change(60.0, started);
+        assert_eq!(
+            pending.due_value(started + Duration::from_millis(749)),
+            None
+        );
+
+        pending.record_change(70.0, started + Duration::from_millis(500));
+        assert_eq!(pending.due_value(started + VOLUME_SAVE_DEBOUNCE), None);
+        assert_eq!(
+            pending.due_value(started + Duration::from_millis(1_250)),
+            Some(70.0)
+        );
+    }
+
+    #[test]
+    fn identical_or_reverted_volume_is_not_dirty() {
+        let now = Instant::now();
+        let mut pending = PendingVolumeSave::new(50.0, Some(50.0), now);
+
+        pending.record_change(50.0, now);
+        assert_eq!(pending.pending_value(), None);
+
+        pending.record_change(60.0, now);
+        assert_eq!(pending.pending_value(), Some(60.0));
+
+        pending.record_change(50.0, now);
+        assert_eq!(pending.pending_value(), None);
+    }
+
+    #[test]
+    fn persisted_volume_is_not_written_again() {
+        let now = Instant::now();
+        let mut pending = PendingVolumeSave::new(50.0, Some(50.0), now);
+
+        pending.record_change(60.0, now);
+        pending.mark_persisted(60.0);
+
+        assert_eq!(pending.pending_value(), None);
+        assert_eq!(pending.due_value(now + VOLUME_SAVE_DEBOUNCE), None);
+    }
+
+    #[test]
+    fn final_flush_exposes_pending_value_before_debounce() {
+        let now = Instant::now();
+        let mut pending = PendingVolumeSave::new(50.0, Some(50.0), now);
+
+        pending.record_change(65.0, now);
+
+        assert_eq!(pending.due_value(now), None);
+        assert_eq!(pending.pending_value(), Some(65.0));
+    }
 }

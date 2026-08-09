@@ -1,4 +1,5 @@
-use crate::app::state::{ImageViewerApp, ItemsRebuildResult};
+use crate::app::dual_panel::ActivePanel;
+use crate::app::state::{ImageViewerApp, InactiveItemsRebuildResult, ItemsRebuildResult};
 use crate::application::sorting;
 use eframe::egui;
 use std::collections::HashMap;
@@ -11,6 +12,10 @@ const REBUILD_THROTTLE_MS: u64 = 80;
 const REBUILD_PENDING_THRESHOLD: usize = 1200;
 const MAX_EAGER_FOLDER_PREVIEWS: usize = 80;
 const MAX_EAGER_NON_USN_FOLDER_COVER_REVALIDATIONS: usize = 96;
+
+pub(super) fn should_inline_inactive_items_rebuild(item_count: usize) -> bool {
+    item_count <= INLINE_REBUILD_THRESHOLD
+}
 
 impl ImageViewerApp {
     fn has_relevant_stale_visual_state(&self, path: &PathBuf) -> bool {
@@ -250,6 +255,91 @@ impl ImageViewerApp {
         });
     }
 
+    pub(super) fn spawn_inactive_final_items_rebuild_job(
+        &mut self,
+        tab_id: usize,
+        panel: ActivePanel,
+    ) -> bool {
+        self.inactive_final_items_rebuild_pending = true;
+        if !self
+            .inactive_items_rebuild_registry
+            .try_begin(tab_id, panel)
+        {
+            return false;
+        }
+        self.inactive_final_items_rebuild_pending = false;
+
+        let generation = self.generation;
+        let signature = self.current_items_rebuild_signature();
+        let items = self.all_items.clone();
+        let query = signature.search_query.clone();
+        let active_tag_filter = if self.navigation_state.is_computer_view
+            || self.navigation_state.is_recycle_bin_view
+            || crate::domain::special_paths::is_tag_view_path(&self.navigation_state.current_path)
+        {
+            None
+        } else {
+            self.active_tag_filter
+        };
+        let tag_assignments = self.tag_assignments_normalized.clone();
+        let sort_mode = signature.sort_mode;
+        let sort_descending = signature.sort_descending;
+        let folders_position = signature.folders_position;
+        let group_mode = signature.group_mode;
+        let group_descending = signature.group_descending;
+        let is_computer_view = signature.is_computer_view;
+        let sender = self.inactive_items_rebuild_sender.clone();
+        let ui_ctx = self.ui_ctx.clone();
+
+        std::thread::spawn(move || {
+            let result_items = match sorting::filter_items_opt_with_tags(
+                &items,
+                &query,
+                active_tag_filter,
+                &tag_assignments,
+            ) {
+                Some(mut filtered) => {
+                    sorting::sort_items(
+                        &mut filtered,
+                        sort_mode,
+                        sort_descending,
+                        folders_position,
+                    );
+                    filtered
+                }
+                None => {
+                    let mut all = match Arc::try_unwrap(items) {
+                        Ok(all) => all,
+                        Err(shared) => shared.as_ref().clone(),
+                    };
+                    sorting::sort_items(&mut all, sort_mode, sort_descending, folders_position);
+                    all
+                }
+            };
+            let total_items = result_items.len();
+            let group_projection = if is_computer_view {
+                crate::application::grouping::build_computer_projection(&result_items)
+            } else {
+                crate::application::grouping::build_group_projection(
+                    &result_items,
+                    group_mode,
+                    group_descending,
+                )
+            };
+            let _ = sender.send(InactiveItemsRebuildResult {
+                tab_id,
+                panel,
+                generation,
+                items: result_items,
+                total_items,
+                group_projection,
+                signature,
+            });
+            ui_ctx.request_repaint();
+        });
+        true
+    }
+
     fn enqueue_onedrive_eager_folder_previews(&mut self) {
         if !matches!(self.view_mode, crate::domain::file_entry::ViewMode::Grid)
             || self.navigation_state.is_recycle_bin_view
@@ -319,7 +409,7 @@ impl ImageViewerApp {
     pub(super) fn handle_items_after_end_of_load(&mut self, ctx: &egui::Context) {
         self.is_loading_folder = false;
         self.folder_load_error = None;
-        self.file_operation_state.pending_deletions.clear();
+        self.maybe_clear_pending_deletions();
         self.invalidate_active_items_rebuild();
         self.hydrate_current_folder_modified_hint_after_load();
 
@@ -388,5 +478,49 @@ impl ImageViewerApp {
         self.last_items_rebuild = Instant::now();
         self.clear_pending_items_rebuild_flags();
         ctx.request_repaint();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_inline_inactive_items_rebuild;
+    use crate::app::dual_panel::ActivePanel;
+    use crate::app::state::InactiveItemsRebuildRegistry;
+
+    #[test]
+    fn inactive_rebuild_is_inline_through_threshold() {
+        assert!(should_inline_inactive_items_rebuild(255));
+        assert!(should_inline_inactive_items_rebuild(256));
+    }
+
+    #[test]
+    fn inactive_rebuild_above_threshold_is_not_inline() {
+        assert!(!should_inline_inactive_items_rebuild(257));
+    }
+
+    #[test]
+    fn inactive_rebuild_registry_suppresses_concurrent_spawn_for_same_panel() {
+        let registry = InactiveItemsRebuildRegistry::default();
+
+        assert!(registry.try_begin(7, ActivePanel::Right));
+        assert!(!registry.try_begin(7, ActivePanel::Right));
+        assert!(registry.try_begin(7, ActivePanel::Left));
+
+        registry.finish(7, ActivePanel::Right);
+        assert!(registry.try_begin(7, ActivePanel::Right));
+    }
+
+    #[test]
+    fn inactive_rebuild_registry_bounds_global_production() {
+        let registry = InactiveItemsRebuildRegistry::default();
+
+        for tab_id in 0..8 {
+            assert!(registry.try_begin(tab_id, ActivePanel::Left));
+            assert!(registry.try_begin(tab_id, ActivePanel::Right));
+        }
+        assert!(!registry.try_begin(8, ActivePanel::Left));
+
+        registry.finish(0, ActivePanel::Left);
+        assert!(registry.try_begin(8, ActivePanel::Left));
     }
 }

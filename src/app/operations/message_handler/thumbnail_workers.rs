@@ -2,6 +2,7 @@ use crate::app::folder_size_state::FolderContentSummary;
 use crate::app::state::ImageViewerApp;
 use eframe::egui;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 fn icon_size_suffix(size: crate::domain::file_entry::IconSize) -> &'static str {
@@ -64,6 +65,23 @@ fn apply_folder_cover_updates_to_items(
         }
     }
     folder_updates
+}
+
+fn apply_folder_cover_updates_to_snapshot_items(
+    items: &mut Arc<Vec<crate::domain::file_entry::FileEntry>>,
+    items_revision: &mut u64,
+    cover_updates: &std::collections::HashMap<PathBuf, Option<PathBuf>>,
+    covers_changed: &mut Vec<PathBuf>,
+) -> bool {
+    let changed = apply_folder_cover_updates_to_items(
+        Arc::make_mut(items).as_mut_slice(),
+        cover_updates,
+        covers_changed,
+    );
+    if changed {
+        *items_revision = items_revision.wrapping_add(1);
+    }
+    changed
 }
 
 impl ImageViewerApp {
@@ -133,9 +151,9 @@ impl ImageViewerApp {
         // inactive snapshot; without updating it here, folder previews never get
         // requested until a focused regular folder populates the cover cache.
         if let Some(snapshot) = self.dual_panel_inactive_state.as_mut() {
-            let inactive_all_items = std::sync::Arc::make_mut(&mut snapshot.all_items);
-            folder_updates |= apply_folder_cover_updates_to_items(
-                inactive_all_items.as_mut_slice(),
+            folder_updates |= apply_folder_cover_updates_to_snapshot_items(
+                &mut snapshot.all_items,
+                &mut snapshot.items_revision,
                 &cover_updates,
                 &mut covers_changed,
             );
@@ -194,11 +212,11 @@ impl ImageViewerApp {
                 continue;
             }
 
-            let request = crate::workers::folder_preview_worker::FolderPreviewRequest {
-                path: folder_path.clone(),
-                size_px: self.effective_folder_preview_request_size_px(),
-                cover_path: Some(cover_path),
-            };
+            let request = crate::workers::folder_preview_worker::FolderPreviewRequest::new(
+                folder_path.clone(),
+                self.effective_folder_preview_request_size_px(),
+                Some(cover_path),
+            );
             match self.folder_preview_sender.try_send(request) {
                 Ok(()) => self
                     .cache_manager
@@ -217,18 +235,20 @@ impl ImageViewerApp {
         // the thumbnail disk cache directly, so loading raw cover textures here
         // only creates a redundant post-preview upload wave.
         let mut none_count = 0usize;
-        let mut folders_to_invalidate: Vec<std::path::PathBuf> = Vec::new();
+        let mut folders_to_remove: Vec<std::path::PathBuf> = Vec::new();
         for (folder_path, cover_opt) in &cover_updates {
             match cover_opt {
                 Some(_) => {}
                 None => {
-                    folders_to_invalidate.push(folder_path.clone());
+                    folders_to_remove.push(folder_path.clone());
                     none_count += 1;
                 }
             }
         }
-        // Defer SQLite writes to background worker to avoid Mutex contention on UI thread.
-        self.enqueue_disk_cache_invalidations(folders_to_invalidate);
+        self.enqueue_disk_cache_invalidations(folders_to_remove.clone());
+        for folder_path in folders_to_remove {
+            self.remove_folder_cover_without_blocking(&folder_path, false);
+        }
 
         let t_trigger = Instant::now();
         let total_ms = t0.elapsed().as_millis();
@@ -1065,5 +1085,57 @@ impl ImageViewerApp {
         }
 
         received_any || has_more
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::apply_folder_cover_updates_to_snapshot_items;
+    use crate::domain::file_entry::{FileEntry, SyncStatus};
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    fn folder(cover: Option<&str>) -> FileEntry {
+        FileEntry {
+            path: PathBuf::from("folder"),
+            name: "folder".into(),
+            is_dir: true,
+            size: 0,
+            modified: 0,
+            created: None,
+            folder_cover: cover.map(PathBuf::from),
+            drive_info: None,
+            sync_status: SyncStatus::None,
+            is_hidden: false,
+            recycle_bin: None,
+        }
+    }
+
+    #[test]
+    fn inactive_cover_update_increments_revision_only_when_all_items_changes() {
+        let mut items = Arc::new(vec![folder(None)]);
+        let mut revision = 4;
+        let mut changed_paths = Vec::new();
+        let updates = HashMap::from([(
+            PathBuf::from("folder"),
+            Some(PathBuf::from("folder/cover.jpg")),
+        )]);
+
+        assert!(apply_folder_cover_updates_to_snapshot_items(
+            &mut items,
+            &mut revision,
+            &updates,
+            &mut changed_paths,
+        ));
+        assert_eq!(revision, 5);
+
+        assert!(!apply_folder_cover_updates_to_snapshot_items(
+            &mut items,
+            &mut revision,
+            &updates,
+            &mut changed_paths,
+        ));
+        assert_eq!(revision, 5);
     }
 }

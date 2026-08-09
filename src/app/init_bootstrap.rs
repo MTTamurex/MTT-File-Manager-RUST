@@ -28,7 +28,7 @@ use super::init_workers::{
     spawn_live_file_size_worker, spawn_metadata_worker, spawn_prefetching_workers,
     PrefetchWorkerHandles,
 };
-use super::state::{FolderLoadError, ItemsRebuildResult};
+use super::state::{FolderLoadError, InactiveItemsRebuildResult, ItemsRebuildResult};
 
 pub(in crate::app) struct AppBootstrap {
     pub(in crate::app) file_entry_sender: mpsc::Sender<(usize, Vec<FileEntry>)>,
@@ -37,6 +37,8 @@ pub(in crate::app) struct AppBootstrap {
     pub(in crate::app) folder_load_failure_receiver: mpsc::Receiver<(usize, FolderLoadError)>,
     pub(in crate::app) items_rebuild_sender: mpsc::Sender<ItemsRebuildResult>,
     pub(in crate::app) items_rebuild_receiver: mpsc::Receiver<ItemsRebuildResult>,
+    pub(in crate::app) inactive_items_rebuild_sender: mpsc::Sender<InactiveItemsRebuildResult>,
+    pub(in crate::app) inactive_items_rebuild_receiver: mpsc::Receiver<InactiveItemsRebuildResult>,
 
     pub(in crate::app) disk_cache: Arc<ThumbnailDiskCache>,
     pub(in crate::app) app_state_db: Arc<AppStateDb>,
@@ -209,6 +211,8 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
     let (folder_load_failure_sender, folder_load_failure_receiver) =
         mpsc::channel::<(usize, FolderLoadError)>();
     let (items_rebuild_sender, items_rebuild_receiver) = mpsc::channel::<ItemsRebuildResult>();
+    let (inactive_items_rebuild_sender, inactive_items_rebuild_receiver) =
+        mpsc::channel::<InactiveItemsRebuildResult>();
 
     let cache_dir = dirs::data_local_dir()
         .unwrap_or_else(|| PathBuf::from("."))
@@ -468,6 +472,8 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
         folder_load_failure_receiver,
         items_rebuild_sender,
         items_rebuild_receiver,
+        inactive_items_rebuild_sender,
+        inactive_items_rebuild_receiver,
         disk_cache,
         app_state_db,
         directory_index,

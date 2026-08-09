@@ -140,11 +140,42 @@ pub struct FolderPreviewData {
     pub premultiplied: bool,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FolderPreviewRequestMode {
+    Load,
+    RecomposeIfCacheMiss,
+}
+
+#[derive(Clone, Debug)]
 pub struct FolderPreviewRequest {
     pub path: PathBuf,
     pub size_px: u32,
     pub cover_path: Option<PathBuf>,
+    mode: FolderPreviewRequestMode,
+}
+
+impl FolderPreviewRequest {
+    pub fn new(path: PathBuf, size_px: u32, cover_path: Option<PathBuf>) -> Self {
+        Self {
+            path,
+            size_px,
+            cover_path,
+            mode: FolderPreviewRequestMode::Load,
+        }
+    }
+
+    pub fn recompose_if_cache_miss(
+        path: PathBuf,
+        size_px: u32,
+        cover_path: Option<PathBuf>,
+    ) -> Self {
+        Self {
+            path,
+            size_px,
+            cover_path,
+            mode: FolderPreviewRequestMode::RecomposeIfCacheMiss,
+        }
+    }
 }
 
 /// M-19: RAII guard — ensures `CoUninitialize` runs even if the worker panics.
@@ -204,6 +235,7 @@ pub fn spawn_folder_preview_worker(
                     path,
                     size_px,
                     cover_path,
+                    mode,
                 } = request;
                 let bucket_size = get_bucket_size(size_px);
 
@@ -255,6 +287,22 @@ pub fn spawn_folder_preview_worker(
                 if let Some((rgba_data, width, height, created_at)) =
                     disk_cache.get_folder_preview_cache(&path, bucket_size)
                 {
+                    if mode == FolderPreviewRequestMode::RecomposeIfCacheMiss {
+                        log::debug!(
+                            "[FOLDER PREVIEW] DB HIT {:?}; re-compose not needed",
+                            path.file_name().unwrap_or_default(),
+                        );
+                        let _ = tx.send(FolderPreviewData {
+                            path,
+                            rgba_data: std::sync::Arc::new(Vec::new()),
+                            width: 0,
+                            height: 0,
+                            premultiplied: false,
+                        });
+                        throttle_repaint(&ctx, &mut last_repaint);
+                        continue;
+                    }
+
                     let is_stale = std::fs::metadata(&path)
                         .and_then(|m| m.modified())
                         .ok()
@@ -511,5 +559,31 @@ fn throttle_repaint(ctx: &egui::Context, last_repaint: &mut Instant) {
         *last_repaint = Instant::now();
     } else {
         ctx.request_repaint_after(std::time::Duration::from_millis(33));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn folder_preview_request_constructors_set_expected_mode() {
+        let load = FolderPreviewRequest::new(PathBuf::from("folder"), 256, None);
+        let recompose = FolderPreviewRequest::recompose_if_cache_miss(
+            PathBuf::from("covered-folder"),
+            512,
+            Some(PathBuf::from("covered-folder/cover.jpg")),
+        );
+
+        assert_eq!(load.mode, FolderPreviewRequestMode::Load);
+        assert_eq!(
+            recompose.mode,
+            FolderPreviewRequestMode::RecomposeIfCacheMiss
+        );
+        assert_eq!(recompose.path, PathBuf::from("covered-folder"));
+        assert_eq!(
+            recompose.cover_path,
+            Some(PathBuf::from("covered-folder/cover.jpg"))
+        );
     }
 }

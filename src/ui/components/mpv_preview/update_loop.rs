@@ -132,14 +132,24 @@ impl MpvPreview {
                 // Mark as loaded to avoid re-checking every frame while download continues.
                 // The file watcher will trigger a refresh when the download completes.
                 self.loaded_path = Some(self.path.clone());
-            } else if let Some(m) = &self.mpv {
+                self.cancel_waiting_file_load();
+            } else if let Some(m) = self.mpv.clone() {
+                // Close the publication gate before any graph/load command can expose B.
+                let generation = self.begin_file_load();
                 self.configure_media_graph();
 
                 let path_str = self.path.to_string_lossy().to_string();
-                let _ = m.command("loadfile", &[&path_str]);
-
-                // Gate event loop time-pos writes until new file's duration is available
-                self.file_loading.store(true, Ordering::Release);
+                let load_succeeded = match m.command("loadfile", &[&path_str]) {
+                    Ok(()) => true,
+                    Err(error) => {
+                        log::warn!(
+                            "[MpvPreview] Failed to load {}: {:?}",
+                            self.path.display(),
+                            error
+                        );
+                        false
+                    }
+                };
 
                 // PERF: Async sidecar subtitle search (moved off render thread)
                 let video_path = self.path.clone();
@@ -155,33 +165,12 @@ impl MpvPreview {
                     let _ = m.set_property("pause", false);
                     self.play_on_init = false;
                 }
+                if load_succeeded {
+                    self.tracks_need_query.store(generation, Ordering::Release);
+                }
+                self.finish_file_load(generation, load_succeeded);
             }
             self.loaded_path = Some(self.path.clone());
-
-            // Clear cached values for new file
-            self.cached_duration = None;
-            self.cached_tracks = None;
-            self.last_interlaced = None;
-            // Force OSC state re-sync on new file (MPV reloads scripts on loadfile)
-            self.last_osc_enabled = None;
-
-            // Signal event loop to query tracks when file is ready
-            self.tracks_need_query.store(true, Ordering::Release);
-
-            if let Ok(mut pending_seek) = self.pending_seek.write() {
-                *pending_seek = None;
-            }
-
-            // Clear stale state for new file
-            if let Ok(mut state) = self.state.write() {
-                state.current_time = 0.0;
-                state.duration = 0.0;
-                state.tracks_ready = false;
-                state.audio_tracks.clear();
-                state.subtitle_tracks.clear();
-                state.interlaced = None;
-                state.video_aspect = None;
-            }
         }
 
         // PERF: Check async sidecar subtitle result (non-blocking)
@@ -206,7 +195,8 @@ impl MpvPreview {
                     log::error!("[MPV] Failed to auto-load sidecar subtitle: {}", e);
                 }
                 // Re-query tracks after subtitle add
-                self.tracks_need_query.store(true, Ordering::Release);
+                self.tracks_need_query
+                    .store(self.file_load_gate.generation(), Ordering::Release);
             }
         }
 

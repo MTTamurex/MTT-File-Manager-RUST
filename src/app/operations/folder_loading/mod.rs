@@ -70,6 +70,7 @@ impl ImageViewerApp {
         self.loading_started_at = std::time::Instant::now();
         self.pending_items_rebuild = false;
         self.pending_items_count = 0;
+        self.inactive_final_items_rebuild_pending = false;
         self.last_items_rebuild = std::time::Instant::now();
 
         self.start_folder_load_pipeline(false, false);

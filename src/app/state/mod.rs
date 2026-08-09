@@ -21,14 +21,14 @@ pub enum IconRequestOutcome {
     Backpressured,
 }
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 // use std::num::NonZeroUsize;
 use std::path::PathBuf;
 // PERFORMANCE: FxHashSet uses faster hashing for PathBuf keys
 use crate::ui::cache::FxHashSet;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize};
 use std::sync::mpsc::{Receiver, Sender};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Instant, SystemTime};
 
 use crate::app::drag_drop_state::{OutboundDragInputGuard, PendingDragMoveConfirmation};
@@ -65,6 +65,48 @@ pub struct ItemsRebuildResult {
     pub total_items: usize,
     pub group_projection: crate::application::grouping::GroupProjection,
     pub signature: ItemsRebuildSignature,
+}
+
+pub struct InactiveItemsRebuildResult {
+    pub tab_id: usize,
+    pub panel: ActivePanel,
+    pub generation: usize,
+    pub items: Vec<FileEntry>,
+    pub total_items: usize,
+    pub group_projection: crate::application::grouping::GroupProjection,
+    pub signature: ItemsRebuildSignature,
+}
+
+const MAX_INACTIVE_ITEMS_REBUILD_SLOTS: usize = 16;
+
+#[derive(Default)]
+pub(crate) struct InactiveItemsRebuildRegistry {
+    slots: Mutex<std::collections::HashSet<(usize, ActivePanel)>>,
+}
+
+impl InactiveItemsRebuildRegistry {
+    pub(crate) fn try_begin(&self, tab_id: usize, panel: ActivePanel) -> bool {
+        let mut slots = self.slots.lock().unwrap_or_else(|error| error.into_inner());
+        let key = (tab_id, panel);
+        if slots.contains(&key) || slots.len() >= MAX_INACTIVE_ITEMS_REBUILD_SLOTS {
+            return false;
+        }
+        slots.insert(key)
+    }
+
+    pub(crate) fn finish(&self, tab_id: usize, panel: ActivePanel) {
+        self.slots
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .remove(&(tab_id, panel));
+    }
+
+    pub(crate) fn contains(&self, tab_id: usize, panel: ActivePanel) -> bool {
+        self.slots
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .contains(&(tab_id, panel))
+    }
 }
 
 #[derive(Clone, PartialEq)]
@@ -187,6 +229,10 @@ pub struct ImageViewerApp {
     pub items_rebuild_receiver: Receiver<ItemsRebuildResult>,
     pub items_rebuild_request_id: usize,
     pub items_rebuild_in_flight: bool,
+    pub inactive_items_rebuild_sender: Sender<InactiveItemsRebuildResult>,
+    pub inactive_items_rebuild_receiver: Receiver<InactiveItemsRebuildResult>,
+    pub deferred_inactive_items_rebuild_results: VecDeque<InactiveItemsRebuildResult>,
+    pub(crate) inactive_items_rebuild_registry: Arc<InactiveItemsRebuildRegistry>,
 
     // COVER WORKER: Folder cover system (Single Thread Worker)
     pub cover_worker_sender: Sender<PathBuf>, // UI â†’ Worker: Sends folder to process
@@ -321,6 +367,8 @@ pub struct ImageViewerApp {
     pub last_items_rebuild: Instant,
     pub pending_items_rebuild: bool,
     pub pending_items_count: usize,
+    /// A newer final rebuild is waiting for this panel's current job to finish.
+    pub inactive_final_items_rebuild_pending: bool,
     /// When true, `all_items` will be cleared on the first incoming batch
     /// of the current generation. This allows watcher-triggered reloads to
     /// keep the old items visible until the new generation is ready.
@@ -403,6 +451,9 @@ pub struct ImageViewerApp {
     /// persisted cover metadata should be refreshed once the folder stops
     /// receiving rapid watcher events.
     pub pending_folder_cover_refresh: Vec<(std::path::PathBuf, Instant)>,
+    /// Bounded, coalescing folder-cover metadata removals, keyed by folder path.
+    /// The value stores `(next_attempt, rescan_after_remove)`.
+    pub pending_folder_cover_removals: BTreeMap<std::path::PathBuf, (Instant, bool)>,
     /// Timestamp of the last folder-mtime re-sort to enforce a cooldown and
     /// prevent excessive re-sorts during sustained write bursts.
     pub last_folder_mtime_sort: Instant,

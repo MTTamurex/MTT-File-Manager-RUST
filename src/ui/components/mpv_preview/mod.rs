@@ -1,6 +1,6 @@
 use eframe::egui;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -21,6 +21,7 @@ pub use window_embed::VideoSurface;
 use crate::ui::components::mpv::event_loop as mpv_event_loop;
 use crate::ui::components::mpv::filters as mpv_filters;
 use crate::ui::components::mpv::playback as mpv_playback;
+use crate::ui::components::mpv::state::FileLoadGate;
 pub use crate::ui::components::mpv::state::{MpvState, PendingSeekState, TrackInfo};
 pub use crate::ui::components::mpv::utils::format_time;
 
@@ -94,9 +95,9 @@ pub struct MpvPreview {
     pending_external_subtitle: Option<PathBuf>,
 
     // PERF: Shared signal for background track querying
-    tracks_need_query: Arc<AtomicBool>,
-    // PERF: Gate event loop writes during file transitions
-    file_loading: Arc<AtomicBool>,
+    tracks_need_query: Arc<AtomicU64>,
+    // PERF: Gate event loop writes during file transitions.
+    file_load_gate: Arc<FileLoadGate>,
     // Prevent stale time-pos polls from briefly reverting the seek slider.
     pending_seek: Arc<RwLock<Option<PendingSeekState>>>,
     // PERF: Async sidecar subtitle search receiver
@@ -273,8 +274,8 @@ impl MpvPreview {
             cached_duration: None,
             cached_tracks: None,
             pending_external_subtitle: None,
-            tracks_need_query: Arc::new(AtomicBool::new(false)),
-            file_loading: Arc::new(AtomicBool::new(false)),
+            tracks_need_query: Arc::new(AtomicU64::new(0)),
+            file_load_gate: Arc::new(FileLoadGate::default()),
             pending_seek: Arc::new(RwLock::new(None)),
             sidecar_rx: None,
             last_interlaced: None,
@@ -416,5 +417,52 @@ impl MpvPreview {
 impl Drop for MpvPreview {
     fn drop(&mut self) {
         self.shutdown();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MpvPreview, VideoMode};
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    #[test]
+    fn retarget_resets_file_state_without_replacing_preview_runtime() {
+        let mut preview = MpvPreview::new(PathBuf::from("a.mp4"));
+        preview.mode = VideoMode::Fullscreen;
+        preview.audio_normalizer_enabled = true;
+        preview.loaded_path = Some(preview.path.clone());
+        if let Ok(mut state) = preview.state.write() {
+            state.volume = 0.42;
+            state.is_muted = true;
+            state.fullscreen = true;
+            state.is_playing = true;
+            state.current_time = 12.0;
+            state.duration = 90.0;
+            state.tracks_ready = true;
+        }
+        let state = Arc::as_ptr(&preview.state);
+        let event_loop_signal = Arc::as_ptr(&preview.event_thread_running);
+        let generation = Arc::as_ptr(&preview.file_load_gate);
+
+        preview.retarget_for_playback(PathBuf::from("b.mp4"));
+
+        assert_eq!(preview.path, PathBuf::from("b.mp4"));
+        assert_eq!(Arc::as_ptr(&preview.state), state);
+        assert_eq!(
+            Arc::as_ptr(&preview.event_thread_running),
+            event_loop_signal
+        );
+        assert_eq!(Arc::as_ptr(&preview.file_load_gate), generation);
+        assert_eq!(preview.mode, VideoMode::Fullscreen);
+        assert!(preview.audio_normalizer_enabled);
+        let state = preview.state.read().expect("state lock");
+        assert_eq!(state.volume, 0.42);
+        assert!(state.is_muted);
+        assert!(state.fullscreen);
+        assert!(!state.is_playing);
+        assert_eq!(state.current_time, 0.0);
+        assert_eq!(state.duration, 0.0);
+        assert!(!state.tracks_ready);
     }
 }

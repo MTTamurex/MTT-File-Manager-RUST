@@ -15,7 +15,7 @@ struct RepaintDeadlineInputs {
     file_ops_in_progress: bool,
     clipboard_cleanup_pending: bool,
     preferences_save_elapsed: Option<Duration>,
-    drive_refresh_elapsed: Duration,
+    drive_bitmask_check_elapsed: Duration,
     drive_info_refresh_elapsed: Option<Duration>,
 }
 
@@ -28,8 +28,10 @@ fn remaining_after_frame_check(elapsed: Duration, interval: Duration) -> Duratio
 }
 
 fn next_background_repaint(inputs: RepaintDeadlineInputs) -> Duration {
-    let mut deadline =
-        remaining_after_frame_check(inputs.drive_refresh_elapsed, DRIVE_BITMASK_CHECK_INTERVAL);
+    let mut deadline = remaining_after_frame_check(
+        inputs.drive_bitmask_check_elapsed,
+        DRIVE_BITMASK_CHECK_INTERVAL,
+    );
 
     if inputs.file_ops_in_progress {
         deadline = deadline.min(FILE_OP_REPAINT_INTERVAL);
@@ -72,7 +74,7 @@ impl ImageViewerApp {
             preferences_save_elapsed: self
                 .preferences_dirty
                 .then(|| self.preferences_last_save.elapsed()),
-            drive_refresh_elapsed: self.drive_state.last_drive_refresh.elapsed(),
+            drive_bitmask_check_elapsed: self.drive_state.last_drive_bitmask_check.elapsed(),
             drive_info_refresh_elapsed,
         });
         ctx.request_repaint_after(deadline);
@@ -727,7 +729,7 @@ mod tests {
             file_ops_in_progress: false,
             clipboard_cleanup_pending: false,
             preferences_save_elapsed: None,
-            drive_refresh_elapsed: Duration::ZERO,
+            drive_bitmask_check_elapsed: Duration::ZERO,
             drive_info_refresh_elapsed: None,
         }
     }
@@ -736,7 +738,7 @@ mod tests {
     fn repaint_uses_earliest_pending_deadline() {
         let inputs = RepaintDeadlineInputs {
             preferences_save_elapsed: None,
-            drive_refresh_elapsed: Duration::from_secs(1),
+            drive_bitmask_check_elapsed: Duration::from_secs(1),
             drive_info_refresh_elapsed: Some(Duration::from_millis(4500)),
             ..idle_inputs()
         };
@@ -777,7 +779,7 @@ mod tests {
     #[test]
     fn idle_repaint_tracks_drive_bitmask_deadline() {
         let inputs = RepaintDeadlineInputs {
-            drive_refresh_elapsed: Duration::from_millis(750),
+            drive_bitmask_check_elapsed: Duration::from_millis(750),
             ..idle_inputs()
         };
 

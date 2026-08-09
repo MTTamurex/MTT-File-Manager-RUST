@@ -45,6 +45,9 @@ pub struct TabState {
     pub items_snapshot_compact: bool,
     /// Folder-load generation owned by this tab.
     pub generation: usize,
+    pub pending_items_rebuild: bool,
+    pub pending_items_count: usize,
+    pub inactive_final_items_rebuild_pending: bool,
     /// Selected item index
     pub selected_item: Option<usize>,
     /// Selected file entry
@@ -129,6 +132,9 @@ impl TabState {
             items_revision: 0,
             items_snapshot_compact: false,
             generation: 0,
+            pending_items_rebuild: false,
+            pending_items_count: 0,
+            inactive_final_items_rebuild_pending: false,
             selected_item: None,
             selected_file: None,
             search_query: String::new(),
@@ -185,6 +191,9 @@ impl TabState {
             items_revision: 0,
             items_snapshot_compact: false,
             generation: 0,
+            pending_items_rebuild: false,
+            pending_items_count: 0,
+            inactive_final_items_rebuild_pending: false,
             selected_item: None,
             selected_file: None,
             search_query: String::new(),

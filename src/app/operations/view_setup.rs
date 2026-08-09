@@ -63,7 +63,9 @@ impl ImageViewerApp {
         self.drive_state.invalidate_drive_info_refreshes();
         self.drive_state.last_drive_bitmask =
             crate::infrastructure::windows::get_logical_drives_bitmask();
-        self.drive_state.last_drive_refresh = Instant::now();
+        let now = Instant::now();
+        self.drive_state.last_drive_bitmask_check = now;
+        self.drive_state.last_drive_full_refresh = now;
         if !self.refresh_visible_computer_views_after_drive_list_change() {
             self.refresh_drive_info_async();
         }

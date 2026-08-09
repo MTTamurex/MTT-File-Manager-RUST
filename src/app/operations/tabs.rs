@@ -35,6 +35,9 @@ impl ImageViewerApp {
         active.selected_item = self.selected_item;
         active.generation = self.generation;
         active.items_revision = self.items_revision;
+        active.pending_items_rebuild = self.pending_items_rebuild;
+        active.pending_items_count = self.pending_items_count;
+        active.inactive_final_items_rebuild_pending = self.inactive_final_items_rebuild_pending;
         active.selected_file = self.selected_file.clone();
         active.selected_thumbnail = None;
         active.selected_gif = None;
@@ -105,6 +108,8 @@ impl ImageViewerApp {
         let source_tab_items_len = self.tab_manager.active().visible_items_len();
         let source_tab_all_items_len = self.tab_manager.active().all_items.len();
         let source_tab_selection_len = self.tab_manager.active().multi_selection.len();
+        let mut confirmed_folder_cover_removals = Vec::new();
+        let mut deferred_folder_cover_revalidations = Vec::new();
 
         {
             let active = self.tab_manager.active_mut();
@@ -123,6 +128,9 @@ impl ImageViewerApp {
             active.items_snapshot_compact = false;
             self.generation = active.generation;
             self.items_revision = active.items_revision;
+            self.pending_items_rebuild = active.pending_items_rebuild;
+            self.pending_items_count = active.pending_items_count;
+            self.inactive_final_items_rebuild_pending = active.inactive_final_items_rebuild_pending;
             self.selected_item = active.selected_item;
             self.selected_file = active.selected_file.clone();
 
@@ -150,14 +158,21 @@ impl ImageViewerApp {
                     // invalidate the folder_preview_cache so the preview panel updates.
                     // Uses SQLite lookup (minimal I/O) and requests recalculation.
                     let current_folder = std::path::PathBuf::from(&active.path);
-                    let covers = self
+                    match self
                         .app_state_db
-                        .get_folder_covers(std::slice::from_ref(&current_folder));
-                    if let Some(current_cover) = covers.get(&current_folder) {
-                        if current_cover == &removed_path {
-                            self.app_state_db.remove_folder_cover(&current_folder);
-                            self.cache_manager.folder_preview_cache.pop(&current_folder);
-                            let _ = self.cover_worker_sender.send(current_folder);
+                        .try_get_folder_covers(std::slice::from_ref(&current_folder))
+                    {
+                        crate::infrastructure::app_state_db::FolderCoverReadOutcome::Completed(
+                            covers,
+                        ) => {
+                            if covers.get(&current_folder) == Some(&removed_path) {
+                                confirmed_folder_cover_removals.push(current_folder.clone());
+                                self.cache_manager.folder_preview_cache.pop(&current_folder);
+                            }
+                        }
+                        crate::infrastructure::app_state_db::FolderCoverReadOutcome::Busy
+                        | crate::infrastructure::app_state_db::FolderCoverReadOutcome::Failed => {
+                            deferred_folder_cover_revalidations.push(current_folder);
                         }
                     }
                 }
@@ -203,6 +218,13 @@ impl ImageViewerApp {
                     snapshot.restore_from_storage();
                     snapshot
                 });
+        }
+
+        for folder_path in confirmed_folder_cover_removals {
+            self.remove_folder_cover_without_blocking(&folder_path, true);
+        }
+        for folder_path in deferred_folder_cover_revalidations {
+            self.schedule_folder_cover_refresh(&folder_path);
         }
 
         self.current_generation

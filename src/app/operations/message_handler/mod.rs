@@ -33,7 +33,29 @@ mod watcher_events;
 mod watcher_legacy;
 mod watcher_reload;
 
+fn should_clear_pending_deletions(
+    file_ops_in_progress: usize,
+    active_load_in_progress: bool,
+    inactive_load_in_progress: bool,
+) -> bool {
+    file_ops_in_progress == 0 && !active_load_in_progress && !inactive_load_in_progress
+}
+
 impl ImageViewerApp {
+    pub(super) fn maybe_clear_pending_deletions(&self) {
+        let inactive_load_in_progress = self
+            .dual_panel_inactive_state
+            .as_ref()
+            .is_some_and(|snapshot| snapshot.is_loading_folder);
+        if should_clear_pending_deletions(
+            self.file_operation_state.file_ops_in_progress,
+            self.is_loading_folder,
+            inactive_load_in_progress,
+        ) {
+            self.file_operation_state.pending_deletions.clear();
+        }
+    }
+
     pub fn process_incoming_messages(&mut self, ctx: &egui::Context) {
         self.process_incoming_messages_impl(ctx, true);
     }
@@ -44,6 +66,8 @@ impl ImageViewerApp {
 
     fn process_incoming_messages_impl(&mut self, ctx: &egui::Context, upload_textures: bool) {
         let _t_msg_start = Instant::now();
+
+        self.process_pending_folder_cover_removals();
 
         if !upload_textures {
             self.defer_file_operation_results_while_hidden();
@@ -76,7 +100,9 @@ impl ImageViewerApp {
             self.drive_state.invalidate_drive_info_refreshes();
 
             // Launch async drive scan (non-blocking)
-            self.drive_state.last_drive_refresh = Instant::now();
+            let now = Instant::now();
+            self.drive_state.last_drive_bitmask_check = now;
+            self.drive_state.last_drive_full_refresh = now;
             self.reload_drive_list_async();
             self.refresh_drive_info_async();
 
@@ -86,6 +112,7 @@ impl ImageViewerApp {
 
         // Apply async rebuild results (filter/sort) from background thread
         self.process_items_rebuild_results(ctx);
+        self.process_inactive_items_rebuild_results(ctx);
 
         // Cloud Files pin completion: background attrib finished, reload for fresh sync status
         if self
@@ -205,6 +232,7 @@ impl ImageViewerApp {
             .map(|path| CacheInvalidationEntry {
                 path,
                 force: false,
+                preserve_folder_cover_metadata: true,
                 rename_to: None,
             })
             .collect();
@@ -235,6 +263,7 @@ impl ImageViewerApp {
             .map(|path| CacheInvalidationEntry {
                 path,
                 force: true,
+                preserve_folder_cover_metadata: false,
                 rename_to: None,
             })
             .collect();
@@ -247,6 +276,44 @@ impl ImageViewerApp {
             debug_log!(
                 "[CACHE] Failed to enqueue forced disk cache invalidations: {:?}",
                 _err
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_clear_pending_deletions;
+
+    #[test]
+    fn pending_deletions_are_kept_while_file_operation_is_active() {
+        assert!(!should_clear_pending_deletions(1, false, false));
+    }
+
+    #[test]
+    fn pending_deletions_are_kept_while_folder_is_loading() {
+        assert!(!should_clear_pending_deletions(0, true, false));
+        assert!(!should_clear_pending_deletions(0, false, true));
+    }
+
+    #[test]
+    fn pending_deletions_can_clear_when_file_operations_and_load_are_done() {
+        assert!(should_clear_pending_deletions(0, false, false));
+    }
+
+    #[test]
+    fn pending_deletions_wait_for_the_last_active_guard() {
+        let sequence = [
+            (1, true, true, false),
+            (0, true, true, false),
+            (0, false, true, false),
+            (0, false, false, true),
+        ];
+
+        for (file_ops, active_load, inactive_load, expected) in sequence {
+            assert_eq!(
+                should_clear_pending_deletions(file_ops, active_load, inactive_load),
+                expected
             );
         }
     }

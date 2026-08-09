@@ -17,7 +17,7 @@ use std::time::Instant;
 use super::layout_state::LayoutState;
 
 /// Which panel is currently active (receives keyboard/sidebar input).
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum ActivePanel {
     Left,
     Right,
@@ -206,6 +206,7 @@ pub struct PanelSnapshot {
     pub hold_visible_items_until_load_complete: bool,
     pub pending_items_rebuild: bool,
     pub pending_items_count: usize,
+    pub inactive_final_items_rebuild_pending: bool,
     pub loading_started_at: Instant,
     pub last_items_rebuild: Instant,
     pub stale_items_snapshot: Option<std::collections::HashMap<PathBuf, (u64, u64)>>,
@@ -298,6 +299,7 @@ impl PanelSnapshot {
             hold_visible_items_until_load_complete: app.hold_visible_items_until_load_complete,
             pending_items_rebuild: app.pending_items_rebuild,
             pending_items_count: app.pending_items_count,
+            inactive_final_items_rebuild_pending: app.inactive_final_items_rebuild_pending,
             loading_started_at: app.loading_started_at,
             last_items_rebuild: app.last_items_rebuild,
             stale_items_snapshot: app.stale_items_snapshot.clone(),
@@ -355,6 +357,7 @@ impl PanelSnapshot {
         app.hold_visible_items_until_load_complete = self.hold_visible_items_until_load_complete;
         app.pending_items_rebuild = self.pending_items_rebuild;
         app.pending_items_count = self.pending_items_count;
+        app.inactive_final_items_rebuild_pending = self.inactive_final_items_rebuild_pending;
         app.loading_started_at = self.loading_started_at;
         app.last_items_rebuild = self.last_items_rebuild;
         app.stale_items_snapshot = self.stale_items_snapshot;
@@ -439,6 +442,10 @@ impl PanelSnapshot {
             &mut app.pending_items_rebuild,
         );
         std::mem::swap(&mut self.pending_items_count, &mut app.pending_items_count);
+        std::mem::swap(
+            &mut self.inactive_final_items_rebuild_pending,
+            &mut app.inactive_final_items_rebuild_pending,
+        );
         std::mem::swap(&mut self.loading_started_at, &mut app.loading_started_at);
         std::mem::swap(&mut self.last_items_rebuild, &mut app.last_items_rebuild);
         std::mem::swap(

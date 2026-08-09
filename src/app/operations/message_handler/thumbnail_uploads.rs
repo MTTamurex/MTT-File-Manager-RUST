@@ -1,3 +1,5 @@
+mod folder_cover_drain;
+
 use crate::app::state::ImageViewerApp;
 use crate::domain::file_entry::{FileEntry, ViewMode};
 use crate::domain::thumbnail::ThumbnailData;
@@ -14,6 +16,10 @@ use std::collections::HashSet;
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
+
+use folder_cover_drain::{
+    folder_cover_followups, FolderCoverFollowupIndex, FolderCoverThumbnailUploadIndex,
+};
 
 const MAX_INCOMING_THUMBNAIL_MSGS_PER_FRAME: usize = 96;
 const CRITICAL_FRAME_TIME_MS: f32 = 33.33;
@@ -286,6 +292,7 @@ impl ImageViewerApp {
         let incoming_start = Instant::now();
         let mut not_found_failures: Vec<PathBuf> = Vec::new();
         let mut successful_thumb_paths: Vec<PathBuf> = Vec::new();
+        let mut folder_cover_upload_index: Option<FolderCoverThumbnailUploadIndex> = None;
 
         let mut eviction_visible = self.visible_grid_paths_snapshot();
         if let Some(detail_path) = self.detail_panel_folder_preview_path() {
@@ -315,6 +322,7 @@ impl ImageViewerApp {
 
         let dynamic_pending_limit = self.current_pending_thumbnail_upload_limit();
         let dynamic_pending_byte_limit = self.current_pending_thumbnail_upload_byte_limit();
+        let mut pending_thumbnail_bytes = self.pending_thumbnail_rgba_bytes();
 
         // Reduce intake when pending queue is already backlogged to spread
         // GPU upload work across more frames and prevent frame-time spikes.
@@ -347,7 +355,7 @@ impl ImageViewerApp {
 
         while incoming_count < effective_incoming_cap {
             if self.pending_thumbnails.len() >= dynamic_pending_limit
-                || self.pending_thumbnail_rgba_bytes() >= dynamic_pending_byte_limit
+                || pending_thumbnail_bytes >= dynamic_pending_byte_limit
             {
                 has_more_incoming = !self.image_receiver.is_empty();
                 break;
@@ -410,7 +418,26 @@ impl ImageViewerApp {
                 .pop(&thumbnail_data.path);
             crate::workers::thumbnail::clear_failure_cache(&thumbnail_data.path);
 
-            if self.should_skip_folder_cover_thumbnail_upload(&thumbnail_data.path) {
+            if folder_cover_upload_index.is_none() {
+                let inactive_items = self.dual_panel_inactive_state.as_ref().map(|snapshot| {
+                    if snapshot.items_snapshot_compact {
+                        snapshot.all_items.as_ref().as_slice()
+                    } else {
+                        snapshot.items.as_ref().as_slice()
+                    }
+                });
+                folder_cover_upload_index = Some(FolderCoverThumbnailUploadIndex::new(
+                    self.items.as_ref().as_slice(),
+                    self.all_items.as_ref().as_slice(),
+                    inactive_items,
+                ));
+            }
+            if folder_cover_upload_index.as_ref().is_some_and(|index| {
+                index.should_skip(
+                    &thumbnail_data.path,
+                    self.selected_file.as_ref().map(|selected| &selected.path),
+                )
+            }) {
                 successful_thumb_paths.push(thumbnail_data.path.clone());
                 received_any = true;
                 continue;
@@ -427,9 +454,11 @@ impl ImageViewerApp {
                     existing.priority = thumbnail_data.priority;
                 }
                 if incoming_dim > existing_dim {
+                    pending_thumbnail_bytes = pending_thumbnail_bytes
+                        .saturating_sub(existing.image_data.len())
+                        .saturating_add(thumbnail_data.image_data.len());
                     *existing = thumbnail_data;
                 }
-                self.trim_pending_thumbnail_uploads_to_limit();
                 continue;
             }
 
@@ -452,10 +481,16 @@ impl ImageViewerApp {
             self.cache_manager
                 .start_pending_upload(thumbnail_data.path.clone());
             successful_thumb_paths.push(thumbnail_data.path.clone());
+            pending_thumbnail_bytes =
+                pending_thumbnail_bytes.saturating_add(thumbnail_data.image_data.len());
             self.pending_thumbnails.push_back(thumbnail_data);
-            self.trim_pending_thumbnail_uploads_to_limit();
             received_any = true;
         }
+
+        let _final_pending_thumbnail_bytes = self.trim_pending_thumbnail_uploads_to_limit(
+            pending_thumbnail_bytes,
+            eviction_visible.as_ref(),
+        );
 
         if incoming_count >= effective_incoming_cap {
             has_more_incoming = true;
@@ -474,68 +509,38 @@ impl ImageViewerApp {
         // cache — the old placeholder stays visible until the worker produces
         // the new preview, avoiding any visible flicker.
         if !successful_thumb_paths.is_empty() {
-            let successful_set: HashSet<&PathBuf> = successful_thumb_paths.iter().collect();
-            let mut parent_folders_needing_scan = HashSet::new();
+            let followup_index = FolderCoverFollowupIndex::new(self.all_items.as_ref().as_slice());
+            let followups = folder_cover_followups(&successful_thumb_paths, &followup_index);
 
-            for thumb_path in &successful_thumb_paths {
-                let Some(parent) = thumb_path.parent() else {
+            if !followups.folders_to_scan.is_empty() {
+                self.request_folder_scans_batch(followups.folders_to_scan);
+            }
+
+            for (folder_path, cover_path) in followups.previews_to_recompose {
+                if self.cache_manager.has_folder_preview(&folder_path) {
                     continue;
-                };
+                }
 
                 if self
-                    .all_items
-                    .iter()
-                    .any(|item| item.is_dir && item.folder_cover.is_none() && item.path == parent)
+                    .cache_manager
+                    .start_folder_preview_loading(folder_path.clone())
                 {
-                    parent_folders_needing_scan.insert(parent.to_path_buf());
-                }
-            }
-
-            if !parent_folders_needing_scan.is_empty() {
-                self.request_folder_scans_batch(parent_folders_needing_scan.into_iter().collect());
-            }
-
-            for item in self.all_items.iter() {
-                if let Some(ref cover) = item.folder_cover {
-                    if item.is_dir && successful_set.contains(cover) {
-                        if self.cache_manager.has_folder_preview(&item.path) {
-                            continue;
-                        }
-
-                        // SQLite miss ⇒ the current preview was a MediaUnsafe placeholder.
-                        // SQLite hit  ⇒ preview already composed with real media — skip.
-                        if self
-                            .disk_cache
-                            .get_folder_preview_cache(
-                                &item.path,
-                                self.current_folder_preview_bucket_size(),
-                            )
-                            .is_none()
-                        {
-                            if self
-                                .cache_manager
-                                .start_folder_preview_loading(item.path.clone())
-                            {
-                                let request =
-                                    crate::workers::folder_preview_worker::FolderPreviewRequest {
-                                        path: item.path.clone(),
-                                        size_px: self.effective_folder_preview_request_size_px(),
-                                        cover_path: Some(cover.clone()),
-                                    };
-                                if let Err(err) = self.folder_preview_sender.try_send(request) {
-                                    let request = err.into_inner();
-                                    self.cache_manager
-                                        .finish_folder_preview_loading(&request.path);
-                                }
-                            }
-                            log::debug!(
-                                "[FOLDER PREVIEW] Re-composing {:?} (cover {:?} now available)",
-                                item.path.file_name().unwrap_or_default(),
-                                cover.file_name().unwrap_or_default(),
-                            );
-                        }
+                    let request = crate::workers::folder_preview_worker::FolderPreviewRequest::recompose_if_cache_miss(
+                        folder_path.clone(),
+                        self.effective_folder_preview_request_size_px(),
+                        Some(cover_path.clone()),
+                    );
+                    if let Err(err) = self.folder_preview_sender.try_send(request) {
+                        let request = err.into_inner();
+                        self.cache_manager
+                            .finish_folder_preview_loading(&request.path);
                     }
                 }
+                log::debug!(
+                    "[FOLDER PREVIEW] Checking re-compose for {:?} (cover {:?} now available)",
+                    folder_path.file_name().unwrap_or_default(),
+                    cover_path.file_name().unwrap_or_default(),
+                );
             }
         }
 
@@ -1136,65 +1141,6 @@ impl ImageViewerApp {
         received_any
     }
 
-    fn should_skip_folder_cover_thumbnail_upload(&self, path: &PathBuf) -> bool {
-        // Folder previews compose from the thumbnail disk cache directly.  The raw
-        // cover thumbnail request is still useful as a readiness/retry signal for
-        // unsafe media, but uploading that cover as its own grid texture creates a
-        // redundant GPU upload wave in folders with many previewed subfolders.
-        if self
-            .selected_file
-            .as_ref()
-            .is_some_and(|selected| &selected.path == path)
-        {
-            return false;
-        }
-
-        if self.items.iter().any(|item| &item.path == path)
-            || self.all_items.iter().any(|item| &item.path == path)
-        {
-            return false;
-        }
-
-        if self
-            .dual_panel_inactive_state
-            .as_ref()
-            .is_some_and(|snapshot| {
-                let items = if snapshot.items_snapshot_compact {
-                    snapshot.all_items.as_ref()
-                } else {
-                    snapshot.items.as_ref()
-                };
-                items.iter().any(|item| &item.path == path)
-            })
-        {
-            return false;
-        }
-
-        self.all_items.iter().any(|item| {
-            item.is_dir
-                && item
-                    .folder_cover
-                    .as_ref()
-                    .is_some_and(|cover| cover == path)
-        }) || self
-            .dual_panel_inactive_state
-            .as_ref()
-            .is_some_and(|snapshot| {
-                let items = if snapshot.items_snapshot_compact {
-                    snapshot.all_items.as_ref()
-                } else {
-                    snapshot.items.as_ref()
-                };
-                items.iter().any(|item| {
-                    item.is_dir
-                        && item
-                            .folder_cover
-                            .as_ref()
-                            .is_some_and(|cover| cover == path)
-                })
-            })
-    }
-
     fn handle_missing_cover_sources(&mut self, missing_paths: Vec<PathBuf>) -> bool {
         if missing_paths.is_empty() {
             return false;
@@ -1205,7 +1151,6 @@ impl ImageViewerApp {
             return false;
         }
 
-        let mut folders_to_refresh: HashSet<PathBuf> = HashSet::new();
         let mut updated_any = false;
         let mut remaining_master = failed_paths.len();
         let mut removed_folder_covers: Vec<PathBuf> = Vec::new();
@@ -1222,14 +1167,13 @@ impl ImageViewerApp {
                 let folder_path = item.path.clone();
                 item.folder_cover = None;
                 removed_folder_covers.push(folder_path.clone());
-                folders_to_refresh.insert(folder_path);
                 updated_any = true;
                 remaining_master = remaining_master.saturating_sub(1);
             }
         }
 
         for folder_path in &removed_folder_covers {
-            self.app_state_db.remove_folder_cover(folder_path);
+            self.remove_folder_cover_without_blocking(folder_path, true);
         }
 
         let items = std::sync::Arc::make_mut(&mut self.items);
@@ -1247,10 +1191,6 @@ impl ImageViewerApp {
                 updated_any = true;
                 remaining_visible = remaining_visible.saturating_sub(1);
             }
-        }
-
-        for folder_path in folders_to_refresh {
-            let _ = self.cover_worker_sender.send(folder_path);
         }
 
         updated_any

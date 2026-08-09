@@ -27,10 +27,11 @@ impl ImageViewerApp {
             );
             self.is_loading_folder = false;
             self.hold_visible_items_until_load_complete = false;
-            self.file_operation_state.pending_deletions.clear();
+            self.maybe_clear_pending_deletions();
         }
 
         // Also check inactive panel loading timeout
+        let mut inactive_load_timed_out = false;
         if self.dual_panel_enabled {
             if let Some(ref mut snapshot) = self.dual_panel_inactive_state {
                 if snapshot.is_loading_folder
@@ -39,8 +40,12 @@ impl ImageViewerApp {
                     log::warn!("[FOLDER-LOADING] TIMEOUT: Inactive panel loading timed out");
                     snapshot.is_loading_folder = false;
                     snapshot.hold_visible_items_until_load_complete = false;
+                    inactive_load_timed_out = true;
                 }
             }
+        }
+        if inactive_load_timed_out {
+            self.maybe_clear_pending_deletions();
         }
 
         // Determine inactive panel generation for routing (if dual panel active)
@@ -245,6 +250,7 @@ impl ImageViewerApp {
                 });
 
                 if handled_inactive {
+                    self.maybe_clear_pending_deletions();
                     ctx.request_repaint();
                     handled_current = true;
                 }
@@ -277,6 +283,7 @@ impl ImageViewerApp {
                     self.apply_folder_load_error_to_current_panel(failure);
                 }
             }
+            self.maybe_clear_pending_deletions();
             ctx.request_repaint();
             handled_current = true;
         }
@@ -294,6 +301,8 @@ impl ImageViewerApp {
         ctx: &egui::Context,
     ) {
         let ctx2 = ctx.clone();
+        let tab_id = self.tab_manager.active().id;
+        let inactive_panel = self.dual_panel_active.other();
         self.with_inactive_panel(|app| {
             for batch in batches {
                 if app.pending_all_items_clear {
@@ -315,17 +324,28 @@ impl ImageViewerApp {
                 }
                 // Reconcile stale textures
                 app.reconcile_stale_visual_caches();
-                app.pending_items_rebuild = false;
-                app.pending_items_count = 0;
-                app.filter_items();
                 app.hold_visible_items_until_load_complete = false;
                 app.loaded_path = app.navigation_state.current_path.clone();
+                if super::thumbnail_rebuild::should_inline_inactive_items_rebuild(
+                    app.all_items.len(),
+                ) {
+                    app.filter_items();
+                    app.pending_items_rebuild = false;
+                    app.pending_items_count = 0;
+                    app.inactive_final_items_rebuild_pending = false;
+                } else {
+                    app.pending_items_rebuild = true;
+                    app.spawn_inactive_final_items_rebuild_job(tab_id, inactive_panel);
+                }
                 log::info!(
                     "[DualPanel] Inactive panel reload complete: {}",
                     app.navigation_state.current_path
                 );
             }
         });
+        if saw_end {
+            self.maybe_clear_pending_deletions();
+        }
         self.maybe_rebuild_inactive_panel_items(&ctx2);
         ctx2.request_repaint();
     }
@@ -343,6 +363,14 @@ impl ImageViewerApp {
             }
 
             if app.hold_visible_items_until_load_complete && app.is_loading_folder {
+                return;
+            }
+
+            if !super::thumbnail_rebuild::should_inline_inactive_items_rebuild(app.all_items.len())
+            {
+                let tab_id = app.tab_manager.active().id;
+                let panel = app.dual_panel_active.other();
+                app.spawn_inactive_final_items_rebuild_job(tab_id, panel);
                 return;
             }
 

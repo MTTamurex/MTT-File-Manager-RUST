@@ -100,12 +100,15 @@ pub(in crate::app) fn build_drive_state(
     drive_info_rx: mpsc::Receiver<DriveInfoRefreshResult>,
 ) -> DriveState {
     let (drive_health_tx, drive_health_rx) = mpsc::channel();
+    let last_drive_bitmask = crate::infrastructure::windows::get_logical_drives_bitmask();
+    let now = std::time::Instant::now();
     DriveState {
         disks,
         cloud_roots,
         cloud_root_rx: Some(cloud_root_rx),
-        last_drive_refresh: std::time::Instant::now(),
-        last_drive_bitmask: crate::infrastructure::windows::get_logical_drives_bitmask(),
+        last_drive_bitmask_check: now,
+        last_drive_full_refresh: now,
+        last_drive_bitmask,
         drive_scan_pending: false,
         drive_scan_rx,
         drive_scan_tx,

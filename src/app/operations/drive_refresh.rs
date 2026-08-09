@@ -11,6 +11,21 @@ const DRIVE_BITMASK_CHECK_INTERVAL_MS: u64 = 3000;
 const DRIVE_INFO_REFRESH_INTERVAL_MS: u64 = 5000;
 const REMOTE_DRIVE_INFO_REFRESH_INTERVAL_MS: u64 = 60000;
 
+fn take_due_drive_bitmask_check(last_check: &mut Instant, now: Instant) -> bool {
+    if now.saturating_duration_since(*last_check)
+        < Duration::from_millis(DRIVE_BITMASK_CHECK_INTERVAL_MS)
+    {
+        return false;
+    }
+
+    *last_check = now;
+    true
+}
+
+fn drive_full_refresh_is_due(last_refresh: Instant, now: Instant) -> bool {
+    now.saturating_duration_since(last_refresh) >= Duration::from_millis(DRIVE_REFRESH_INTERVAL_MS)
+}
+
 fn drive_scope_matches(
     scope: DriveInfoRefreshScope,
     drive_type: crate::infrastructure::windows::DriveType,
@@ -150,9 +165,8 @@ impl ImageViewerApp {
     }
 
     pub fn refresh_drives_if_needed(&mut self) {
-        let elapsed = self.drive_state.last_drive_refresh.elapsed();
-
-        if elapsed >= Duration::from_millis(DRIVE_BITMASK_CHECK_INTERVAL_MS) {
+        let now = Instant::now();
+        if take_due_drive_bitmask_check(&mut self.drive_state.last_drive_bitmask_check, now) {
             let current_bitmask = crate::infrastructure::windows::get_logical_drives_bitmask();
             if current_bitmask != self.drive_state.last_drive_bitmask {
                 log::debug!(
@@ -161,10 +175,10 @@ impl ImageViewerApp {
                     current_bitmask
                 );
                 self.drive_state.last_drive_bitmask = current_bitmask;
-                self.drive_state.last_drive_refresh = Instant::now();
+                self.drive_state.last_drive_full_refresh = now;
                 self.reload_drive_list_async();
-            } else if elapsed >= Duration::from_millis(DRIVE_REFRESH_INTERVAL_MS) {
-                self.drive_state.last_drive_refresh = Instant::now();
+            } else if drive_full_refresh_is_due(self.drive_state.last_drive_full_refresh, now) {
+                self.drive_state.last_drive_full_refresh = now;
                 self.reload_drive_list_async();
             }
         }
@@ -276,6 +290,42 @@ mod tests {
         assert!(drive_scope_matches(
             DriveInfoRefreshScope::Remote,
             DriveType::Unknown
+        ));
+    }
+
+    #[test]
+    fn bitmask_check_is_not_repeated_each_frame_after_deadline() {
+        let start = Instant::now();
+        let mut last_check = start;
+        let deadline = start + Duration::from_millis(DRIVE_BITMASK_CHECK_INTERVAL_MS);
+
+        assert!(take_due_drive_bitmask_check(&mut last_check, deadline));
+        assert!(!take_due_drive_bitmask_check(&mut last_check, deadline));
+        assert!(!take_due_drive_bitmask_check(
+            &mut last_check,
+            deadline + Duration::from_millis(1)
+        ));
+    }
+
+    #[test]
+    fn bitmask_checks_do_not_postpone_full_refresh_deadline() {
+        let start = Instant::now();
+        let mut last_check = start;
+
+        for seconds in (3..=30).step_by(3) {
+            assert!(take_due_drive_bitmask_check(
+                &mut last_check,
+                start + Duration::from_secs(seconds)
+            ));
+        }
+
+        assert!(!drive_full_refresh_is_due(
+            start,
+            start + Duration::from_millis(DRIVE_REFRESH_INTERVAL_MS - 1)
+        ));
+        assert!(drive_full_refresh_is_due(
+            start,
+            start + Duration::from_millis(DRIVE_REFRESH_INTERVAL_MS)
         ));
     }
 }

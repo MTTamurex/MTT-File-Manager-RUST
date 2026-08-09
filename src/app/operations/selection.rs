@@ -401,21 +401,17 @@ impl ImageViewerApp {
         // Kill standalone video player process if one is running
         self.kill_video_player_process();
 
-        // TAKE OVER: Stop and drop existing player if any
-        if matches!(self.media_preview.as_ref(), Some(MediaPreview::Video(_))) {
-            self.destroy_media_preview();
+        if let Some(MediaPreview::Video(player)) = self.media_preview.as_mut() {
+            player.retarget_for_playback(path);
+        } else {
+            let mut player = MpvPreview::new(path);
+            player.play_on_init = true;
+            player.show_player = true;
+            player.initial_volume = self.session_volume;
+            self.media_preview = Some(MediaPreview::Video(Box::new(player)));
         }
 
-        // Take ownership and start new player
-        let mut player = MpvPreview::new(path);
-        player.play_on_init = true; // Start playing as soon as initialized
-        player.show_player = true; // Ensure player is visible immediately
-
-        // Set initial volume (will be applied when MPV is ready)
-        player.initial_volume = self.session_volume;
-
         let tab_id = self.tab_manager.active().id;
-        self.media_preview = Some(MediaPreview::Video(Box::new(player)));
         self.media_preview_owner_tab_id = Some(tab_id);
 
         // Final sync: hide/show correctly
@@ -638,13 +634,10 @@ impl ImageViewerApp {
         let is_owner = self.media_preview_owner_tab_id == Some(active_tab_id);
         if is_owner {
             use crate::ui::components::media_preview::MediaPreview;
-            let should_stop = match &mut self.media_preview {
-                Some(MediaPreview::Video(player)) => player.path != path,
-                _ => false,
-            };
-
-            if should_stop {
-                self.destroy_media_preview();
+            if let Some(MediaPreview::Video(player)) = &mut self.media_preview {
+                if player.path != path {
+                    player.park_for_selection_change();
+                }
             }
         }
 

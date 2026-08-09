@@ -536,6 +536,7 @@ impl ImageViewerApp {
             .map(|(source, dest)| CacheInvalidationEntry {
                 path: source.clone(),
                 force: false,
+                preserve_folder_cover_metadata: true,
                 rename_to: Some(dest.clone()),
             })
             .collect();
@@ -586,6 +587,7 @@ impl ImageViewerApp {
             .send(vec![CacheInvalidationEntry {
                 path: path.clone(),
                 force: false,
+                preserve_folder_cover_metadata: true,
                 rename_to: Some(new_path.clone()),
             }])
         {
@@ -908,20 +910,27 @@ impl ImageViewerApp {
         self.invalidate_folder_listing_and_tab_caches(&dest_folder);
 
         // If any moved file was a folder cover, force re-discovery.
-        for source_folder in &source_folders {
-            let covers = self
-                .app_state_db
-                .get_folder_covers(std::slice::from_ref(source_folder));
-            if let Some(current_cover) = covers.get(source_folder) {
-                if moved_files.iter().any(|f| f == current_cover) {
-                    self.app_state_db.remove_folder_cover(source_folder);
-                    self.cache_manager.folder_preview_cache.pop(source_folder);
-                    let _ = self.cover_worker_sender.send(source_folder.clone());
-                    #[cfg(debug_assertions)]
-                    log::debug!(
-                        "[MOVE-BATCH] Moved file was folder cover for {:?}, requesting recalculation",
-                        source_folder
-                    );
+        match self.app_state_db.try_get_folder_covers(&source_folders) {
+            crate::infrastructure::app_state_db::FolderCoverReadOutcome::Completed(covers) => {
+                for source_folder in &source_folders {
+                    if covers
+                        .get(source_folder)
+                        .is_some_and(|cover| moved_files.iter().any(|file| file == cover))
+                    {
+                        self.remove_folder_cover_without_blocking(source_folder, true);
+                        self.cache_manager.folder_preview_cache.pop(source_folder);
+                        #[cfg(debug_assertions)]
+                        log::debug!(
+                            "[MOVE-BATCH] Moved file was folder cover for {:?}, requesting recalculation",
+                            source_folder
+                        );
+                    }
+                }
+            }
+            crate::infrastructure::app_state_db::FolderCoverReadOutcome::Busy
+            | crate::infrastructure::app_state_db::FolderCoverReadOutcome::Failed => {
+                for source_folder in &source_folders {
+                    self.schedule_folder_cover_refresh(source_folder);
                 }
             }
         }
@@ -979,9 +988,7 @@ impl ImageViewerApp {
             }
             self.pending_auto_reload = false;
             // Keep pending_deletions until folder load completion to avoid stale thumbnail retries.
-            if !self.is_loading_folder {
-                self.file_operation_state.pending_deletions.clear();
-            }
+            self.maybe_clear_pending_deletions();
 
             // Shell dialogs (copy/move/delete/rename) steal focus from the app
             // window (especially via the proxy HWND). Restore it when the last
@@ -1075,11 +1082,13 @@ mod disk_cache_invalidation_tests {
             CacheInvalidationEntry {
                 path: PathBuf::from(r"C:\a\one.png"),
                 force: false,
+                preserve_folder_cover_metadata: true,
                 rename_to: Some(PathBuf::from(r"C:\a\one_new.png")),
             },
             CacheInvalidationEntry {
                 path: PathBuf::from(r"C:\a\two.png"),
                 force: false,
+                preserve_folder_cover_metadata: false,
                 rename_to: None,
             },
         ];

@@ -6,6 +6,13 @@ use std::time::{Duration, Instant};
 
 const FOLDER_COVER_REFRESH_DEBOUNCE: Duration = Duration::from_secs(2);
 const MAX_PENDING_FOLDER_COVER_REFRESHES: usize = 500;
+const MAX_PENDING_FOLDER_COVER_REMOVALS: usize = 256;
+const MAX_FOLDER_COVER_REMOVE_ATTEMPTS_PER_FRAME: usize = 8;
+const FOLDER_COVER_REMOVE_FRAME_BUDGET: Duration = Duration::from_millis(2);
+const FOLDER_COVER_REMOVE_SHUTDOWN_BUDGET: Duration = Duration::from_millis(40);
+const FOLDER_COVER_REMOVE_SHUTDOWN_BUSY_RETRY: Duration = Duration::from_millis(1);
+const FOLDER_COVER_REMOVE_BUSY_RETRY: Duration = Duration::from_millis(100);
+const FOLDER_COVER_REMOVE_FAILED_RETRY: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DebounceQueueAction {
@@ -48,7 +55,272 @@ fn take_due_debounced_paths(entries: &mut Vec<(PathBuf, Instant)>, now: Instant)
     due_entries
 }
 
+fn upsert_pending_folder_cover_removal(
+    entries: &mut std::collections::BTreeMap<PathBuf, (Instant, bool)>,
+    path: &Path,
+    retry_at: Instant,
+    rescan_after_remove: bool,
+    max_entries: usize,
+) -> DebounceQueueAction {
+    if let Some((existing_retry_at, existing_rescan)) = entries.get_mut(path) {
+        *existing_retry_at = (*existing_retry_at).min(retry_at);
+        *existing_rescan |= rescan_after_remove;
+        DebounceQueueAction::Updated
+    } else if entries.len() >= max_entries {
+        // Keep the existing set. This makes overload behavior independent of
+        // BTreeMap iteration order and prevents old retries from being starved.
+        DebounceQueueAction::Dropped
+    } else {
+        entries.insert(path.to_path_buf(), (retry_at, rescan_after_remove));
+        DebounceQueueAction::Inserted
+    }
+}
+
+fn run_folder_cover_removals_with_budget<Clock, Attempt>(
+    entries: &mut std::collections::BTreeMap<PathBuf, (Instant, bool)>,
+    due_by: Option<Instant>,
+    max_attempts: usize,
+    deadline: Instant,
+    mut clock: Clock,
+    mut attempt: Attempt,
+) -> usize
+where
+    Clock: FnMut() -> Instant,
+    Attempt: FnMut(&Path, bool) -> Option<Instant>,
+{
+    let mut candidates: Vec<(Instant, PathBuf)> = entries
+        .iter()
+        .filter(|(_, (retry_at, _))| due_by.is_none_or(|now| *retry_at <= now))
+        .map(|(path, (retry_at, _))| (*retry_at, path.clone()))
+        .collect();
+    candidates.sort_unstable_by(|(left_due, left_path), (right_due, right_path)| {
+        left_due
+            .cmp(right_due)
+            .then_with(|| left_path.cmp(right_path))
+    });
+    candidates.truncate(max_attempts);
+
+    let mut attempts = 0;
+    for (_, path) in candidates {
+        if clock() >= deadline {
+            break;
+        }
+
+        let Some((_, rescan_after_remove)) = entries.remove(&path) else {
+            continue;
+        };
+        if let Some(retry_at) = attempt(&path, rescan_after_remove) {
+            let action = upsert_pending_folder_cover_removal(
+                entries,
+                &path,
+                retry_at,
+                rescan_after_remove,
+                MAX_PENDING_FOLDER_COVER_REMOVALS,
+            );
+            debug_assert_ne!(action, DebounceQueueAction::Dropped);
+        }
+        attempts += 1;
+    }
+
+    attempts
+}
+
 impl ImageViewerApp {
+    fn finish_folder_cover_removal(&self, folder_path: &Path, rescan_after_remove: bool) {
+        if rescan_after_remove {
+            let _ = self.cover_worker_sender.send(folder_path.to_path_buf());
+        }
+    }
+
+    fn defer_folder_cover_removal(
+        &mut self,
+        folder_path: &Path,
+        retry_after: Duration,
+        rescan_after_remove: bool,
+    ) {
+        let retry_at = Instant::now() + retry_after;
+        let action = upsert_pending_folder_cover_removal(
+            &mut self.pending_folder_cover_removals,
+            folder_path,
+            retry_at,
+            rescan_after_remove,
+            MAX_PENDING_FOLDER_COVER_REMOVALS,
+        );
+        if action == DebounceQueueAction::Dropped {
+            log::debug!(
+                "[FOLDER-COVERS] Removal retry queue full; leaving {:?} for future revalidation",
+                folder_path
+            );
+        }
+        self.schedule_next_folder_cover_removal_repaint();
+    }
+
+    fn schedule_next_folder_cover_removal_repaint(&self) {
+        if let Some(next_retry) = self
+            .pending_folder_cover_removals
+            .values()
+            .map(|(retry_at, _)| *retry_at)
+            .min()
+        {
+            self.ui_ctx
+                .request_repaint_after(next_retry.saturating_duration_since(Instant::now()));
+        }
+    }
+
+    pub(crate) fn remove_folder_cover_without_blocking(
+        &mut self,
+        folder_path: &Path,
+        rescan_after_remove: bool,
+    ) {
+        use crate::infrastructure::app_state_db::FolderCoverRemoveOutcome;
+
+        if let Some((_, pending_rescan)) = self.pending_folder_cover_removals.get_mut(folder_path) {
+            *pending_rescan |= rescan_after_remove;
+            self.schedule_next_folder_cover_removal_repaint();
+            return;
+        }
+
+        match self.app_state_db.try_remove_folder_cover(folder_path) {
+            FolderCoverRemoveOutcome::Removed => {
+                self.finish_folder_cover_removal(folder_path, rescan_after_remove);
+            }
+            FolderCoverRemoveOutcome::Busy => {
+                self.defer_folder_cover_removal(
+                    folder_path,
+                    FOLDER_COVER_REMOVE_BUSY_RETRY,
+                    rescan_after_remove,
+                );
+            }
+            FolderCoverRemoveOutcome::Failed(error) => {
+                log::warn!(
+                    "[FOLDER-COVERS] Failed to remove cover for {:?}: {error}; retrying",
+                    folder_path
+                );
+                self.defer_folder_cover_removal(
+                    folder_path,
+                    FOLDER_COVER_REMOVE_FAILED_RETRY,
+                    rescan_after_remove,
+                );
+            }
+        }
+    }
+
+    pub(super) fn process_pending_folder_cover_removals(&mut self) {
+        if self.pending_folder_cover_removals.is_empty() {
+            return;
+        }
+
+        use crate::infrastructure::app_state_db::FolderCoverRemoveOutcome;
+
+        let now = Instant::now();
+        let deadline = now + FOLDER_COVER_REMOVE_FRAME_BUDGET;
+        let app_state_db = Arc::clone(&self.app_state_db);
+        let cover_worker_sender = self.cover_worker_sender.clone();
+        run_folder_cover_removals_with_budget(
+            &mut self.pending_folder_cover_removals,
+            Some(now),
+            MAX_FOLDER_COVER_REMOVE_ATTEMPTS_PER_FRAME,
+            deadline,
+            Instant::now,
+            |folder_path, rescan_after_remove| match app_state_db
+                .try_remove_folder_cover(folder_path)
+            {
+                FolderCoverRemoveOutcome::Removed => {
+                    if rescan_after_remove {
+                        let _ = cover_worker_sender.send(folder_path.to_path_buf());
+                    }
+                    None
+                }
+                FolderCoverRemoveOutcome::Busy => {
+                    Some(Instant::now() + FOLDER_COVER_REMOVE_BUSY_RETRY)
+                }
+                FolderCoverRemoveOutcome::Failed(error) => {
+                    log::warn!(
+                        "[FOLDER-COVERS] Retry failed for {:?}: {error}",
+                        folder_path
+                    );
+                    Some(Instant::now() + FOLDER_COVER_REMOVE_FAILED_RETRY)
+                }
+            },
+        );
+
+        self.schedule_next_folder_cover_removal_repaint();
+    }
+
+    pub(crate) fn flush_pending_folder_cover_removals_for_shutdown(&mut self) {
+        if self.pending_folder_cover_removals.is_empty() {
+            return;
+        }
+
+        use crate::infrastructure::app_state_db::FolderCoverRemoveOutcome;
+
+        let started = Instant::now();
+        let deadline = started + FOLDER_COVER_REMOVE_SHUTDOWN_BUDGET;
+        let app_state_db = Arc::clone(&self.app_state_db);
+        let cover_worker_sender = self.cover_worker_sender.clone();
+        for (retry_at, _) in self.pending_folder_cover_removals.values_mut() {
+            *retry_at = started;
+        }
+
+        while !self.pending_folder_cover_removals.is_empty() && Instant::now() < deadline {
+            let now = Instant::now();
+            let attempts = run_folder_cover_removals_with_budget(
+                &mut self.pending_folder_cover_removals,
+                Some(now),
+                MAX_PENDING_FOLDER_COVER_REMOVALS,
+                deadline,
+                Instant::now,
+                |folder_path, rescan_after_remove| match app_state_db
+                    .try_remove_folder_cover(folder_path)
+                {
+                    FolderCoverRemoveOutcome::Removed => {
+                        if rescan_after_remove {
+                            let _ = cover_worker_sender.send(folder_path.to_path_buf());
+                        }
+                        None
+                    }
+                    FolderCoverRemoveOutcome::Busy => {
+                        Some(Instant::now() + FOLDER_COVER_REMOVE_SHUTDOWN_BUSY_RETRY)
+                    }
+                    FolderCoverRemoveOutcome::Failed(error) => {
+                        log::warn!(
+                            "[FOLDER-COVERS] Shutdown removal failed for {:?}: {error}",
+                            folder_path
+                        );
+                        Some(Instant::now() + FOLDER_COVER_REMOVE_FAILED_RETRY)
+                    }
+                },
+            );
+
+            let Some(next_retry) = self
+                .pending_folder_cover_removals
+                .values()
+                .map(|(retry_at, _)| *retry_at)
+                .min()
+            else {
+                break;
+            };
+            if next_retry >= deadline {
+                break;
+            }
+            if attempts == 0 || next_retry > Instant::now() {
+                std::thread::sleep(
+                    next_retry
+                        .saturating_duration_since(Instant::now())
+                        .min(Duration::from_millis(1)),
+                );
+            }
+        }
+
+        if !self.pending_folder_cover_removals.is_empty() {
+            log::warn!(
+                "[FOLDER-COVERS] Shutdown flush left {} removal(s) for future revalidation after {:?}",
+                self.pending_folder_cover_removals.len(),
+                started.elapsed()
+            );
+        }
+    }
+
     fn path_matches_normalized(candidate: &Path, target_norm: &str) -> bool {
         Self::normalize_for_match(candidate) == target_norm
     }
@@ -222,7 +494,7 @@ impl ImageViewerApp {
         }
 
         self.enqueue_disk_cache_invalidations(vec![folder_path.clone()]);
-        let _ = self.cover_worker_sender.send(folder_path);
+        self.remove_folder_cover_without_blocking(&folder_path, true);
 
         if updated_any {
             self.pending_items_rebuild = true;
@@ -765,7 +1037,7 @@ impl ImageViewerApp {
         }
     }
 
-    pub(super) fn schedule_folder_cover_refresh(&mut self, folder_path: &Path) {
+    pub(crate) fn schedule_folder_cover_refresh(&mut self, folder_path: &Path) {
         let refresh_at = Instant::now() + FOLDER_COVER_REFRESH_DEBOUNCE;
 
         match upsert_debounced_path(
@@ -1003,5 +1275,105 @@ mod tests {
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].0, future_path);
         assert_eq!(entries[0].1, future_due);
+    }
+
+    #[test]
+    fn folder_cover_removal_retry_preserves_rescan_and_earliest_deadline() {
+        let path = PathBuf::from(r"C:\Temp\Folder");
+        let first_due = Instant::now() + Duration::from_secs(2);
+        let earlier_due = first_due - Duration::from_secs(1);
+        let mut entries = std::collections::BTreeMap::new();
+
+        assert_eq!(
+            upsert_pending_folder_cover_removal(&mut entries, &path, first_due, false, 8),
+            DebounceQueueAction::Inserted
+        );
+        assert_eq!(
+            upsert_pending_folder_cover_removal(&mut entries, &path, earlier_due, true, 8),
+            DebounceQueueAction::Updated
+        );
+
+        assert_eq!(entries.get(&path), Some(&(earlier_due, true)));
+    }
+
+    #[test]
+    fn folder_cover_removal_queue_drops_new_paths_at_cap_but_still_coalesces() {
+        let now = Instant::now();
+        let first = PathBuf::from(r"C:\Temp\First");
+        let second = PathBuf::from(r"C:\Temp\Second");
+        let dropped = PathBuf::from(r"C:\Temp\Dropped");
+        let mut entries = std::collections::BTreeMap::new();
+
+        assert_eq!(
+            upsert_pending_folder_cover_removal(&mut entries, &first, now, false, 2),
+            DebounceQueueAction::Inserted
+        );
+        assert_eq!(
+            upsert_pending_folder_cover_removal(&mut entries, &second, now, false, 2),
+            DebounceQueueAction::Inserted
+        );
+        assert_eq!(
+            upsert_pending_folder_cover_removal(&mut entries, &dropped, now, true, 2),
+            DebounceQueueAction::Dropped
+        );
+        assert_eq!(
+            upsert_pending_folder_cover_removal(
+                &mut entries,
+                &first,
+                now - Duration::from_millis(1),
+                true,
+                2,
+            ),
+            DebounceQueueAction::Updated
+        );
+        assert_eq!(entries.len(), 2);
+        assert!(!entries.contains_key(&dropped));
+        assert_eq!(
+            entries.get(&first),
+            Some(&(now - Duration::from_millis(1), true))
+        );
+    }
+
+    #[test]
+    fn folder_cover_removal_runner_obeys_attempt_and_time_budgets() {
+        let now = Instant::now();
+        let deadline = now + Duration::from_millis(2);
+        let mut entries = std::collections::BTreeMap::new();
+        for name in ["A", "B", "C", "D"] {
+            entries.insert(PathBuf::from(name), (now, false));
+        }
+
+        let clock_values = [
+            now,
+            now + Duration::from_millis(1),
+            now + Duration::from_millis(2),
+        ];
+        let mut clock_index = 0;
+        let attempts = run_folder_cover_removals_with_budget(
+            &mut entries,
+            Some(now),
+            3,
+            deadline,
+            || {
+                let value = clock_values[clock_index];
+                clock_index += 1;
+                value
+            },
+            |_, _| None,
+        );
+
+        assert_eq!(attempts, 2);
+        assert_eq!(entries.len(), 2);
+
+        let attempts = run_folder_cover_removals_with_budget(
+            &mut entries,
+            Some(now),
+            1,
+            now + Duration::from_secs(1),
+            || now,
+            |_, _| None,
+        );
+        assert_eq!(attempts, 1);
+        assert_eq!(entries.len(), 1);
     }
 }

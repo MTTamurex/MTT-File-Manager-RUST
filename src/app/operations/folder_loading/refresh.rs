@@ -11,7 +11,9 @@ impl ImageViewerApp {
         if self.navigation_state.is_computer_view || inactive_computer_visible {
             self.reload_drive_list_async();
             self.refresh_drive_info_async();
-            self.drive_state.last_drive_refresh = Instant::now();
+            let now = Instant::now();
+            self.drive_state.last_drive_bitmask_check = now;
+            self.drive_state.last_drive_full_refresh = now;
             if self.navigation_state.is_computer_view {
                 return;
             }

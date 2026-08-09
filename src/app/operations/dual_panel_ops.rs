@@ -25,6 +25,7 @@ impl ImageViewerApp {
         snapshot.hold_visible_items_until_load_complete = false;
         snapshot.pending_items_rebuild = false;
         snapshot.pending_items_count = 0;
+        snapshot.inactive_final_items_rebuild_pending = false;
         self.dual_panel_inactive_state = Some(snapshot);
         self.dual_panel_enabled = true;
         if persist {
@@ -61,13 +62,29 @@ impl ImageViewerApp {
         // inactive panel explicitly. This avoids cross-contaminating virtual
         // views (notably tag views) with the other panel's This PC snapshot.
         let outgoing_active_snapshot = PanelSnapshot::from_app(self);
+        let incoming_panel = self.dual_panel_active.other();
+        let inactive_rebuild_in_flight = self
+            .inactive_items_rebuild_registry
+            .contains(active_tab_id, incoming_panel);
         inactive_snapshot.apply_to(self);
         // Re-evaluate the restored panel's folder lock without resetting
         // saved unlocked view settings from its panel snapshot.
-        self.apply_folder_lock_on_tab_restore();
+        // A dedicated final rebuild already captured these settings. Re-sorting
+        // here would invalidate that result merely because focus changed.
+        if !self.inactive_final_items_rebuild_pending && !inactive_rebuild_in_flight {
+            self.apply_folder_lock_on_tab_restore();
+        }
         self.dual_panel_inactive_state = Some(outgoing_active_snapshot);
         self.dual_panel_active = self.dual_panel_active.other();
+        let inactive_final_items_rebuild_pending = self.inactive_final_items_rebuild_pending;
+        let pending_items_rebuild = self.pending_items_rebuild;
+        let pending_items_count = self.pending_items_count;
         self.invalidate_active_items_rebuild();
+        if inactive_final_items_rebuild_pending || inactive_rebuild_in_flight {
+            self.inactive_final_items_rebuild_pending = inactive_final_items_rebuild_pending;
+            self.pending_items_rebuild = pending_items_rebuild;
+            self.pending_items_count = pending_items_count;
+        }
 
         // Sync the shared gen tracker with the newly active panel's generation
         // so thumbnail workers accept requests from the now-active panel.

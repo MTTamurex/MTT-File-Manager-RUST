@@ -1,4 +1,5 @@
 use crate::app::state::ImageViewerApp;
+use crate::infrastructure::app_state_db::FolderCoverReadOutcome;
 use crate::infrastructure::windows::{is_image_extension, is_video_extension};
 use std::collections::HashSet;
 use std::path::Path;
@@ -136,7 +137,15 @@ impl ImageViewerApp {
 
         // 1. Single batched SQLite query for all folder covers
         let db_start = Instant::now();
-        let db_covers = self.app_state_db.get_folder_covers(&unique_paths);
+        let db_covers = match self.app_state_db.try_get_folder_covers(&unique_paths) {
+            FolderCoverReadOutcome::Completed(covers) => covers,
+            FolderCoverReadOutcome::Busy | FolderCoverReadOutcome::Failed => {
+                for path in unique_paths {
+                    self.schedule_folder_cover_refresh(&path);
+                }
+                return;
+            }
+        };
         let db_ms = db_start.elapsed().as_millis();
 
         // 2. Resolve covers: DB hit → DirectoryIndex fallback → worker fallback
@@ -170,16 +179,19 @@ impl ImageViewerApp {
                 break;
             }
 
+            let mut removal_owns_rescan = false;
             let cover_opt = if let Some(cover) = db_covers.get(&folder_path) {
                 if is_invalid_cached_cover_path(cover) {
-                    self.app_state_db.remove_folder_cover(&folder_path);
+                    self.remove_folder_cover_without_blocking(&folder_path, true);
+                    removal_owns_rescan = true;
                     None
                 } else if can_validate_cover_exists
                     && !crate::infrastructure::onedrive::fast_path_exists(cover)
                 {
                     // Cover file was deleted externally — evict stale entry
                     // and let the cover worker re-discover.
-                    self.app_state_db.remove_folder_cover(&folder_path);
+                    self.remove_folder_cover_without_blocking(&folder_path, true);
+                    removal_owns_rescan = true;
                     self.cache_manager.texture_cache.pop(cover);
                     self.cache_manager.loading_set.remove(cover);
                     self.cache_manager.invalidate_folder_preview(&folder_path);
@@ -220,7 +232,7 @@ impl ImageViewerApp {
 
             if let Some(cover) = cover_opt {
                 resolved.push((folder_path, cover));
-            } else {
+            } else if !removal_owns_rescan {
                 worker_fallbacks.push(folder_path);
             }
         }
