@@ -717,14 +717,24 @@ impl PdfViewerApp {
     }
 
     pub(super) fn zoom_in(&mut self) {
+        let current_zoom = if self.zoom_mode == ZoomMode::Custom {
+            self.zoom
+        } else {
+            self.effective_zoom_pct / 100.0
+        };
         self.zoom_mode = ZoomMode::Custom;
-        self.zoom = (self.zoom * 1.25).min(5.0);
+        self.zoom = (current_zoom * 1.25).clamp(0.1, 5.0);
         self.on_view_changed();
     }
 
     pub(super) fn zoom_out(&mut self) {
+        let current_zoom = if self.zoom_mode == ZoomMode::Custom {
+            self.zoom
+        } else {
+            self.effective_zoom_pct / 100.0
+        };
         self.zoom_mode = ZoomMode::Custom;
-        self.zoom = (self.zoom / 1.25).max(0.1);
+        self.zoom = (current_zoom / 1.25).clamp(0.1, 5.0);
         self.on_view_changed();
     }
 
@@ -1270,5 +1280,31 @@ mod tests {
     fn large_render_uses_bounded_preview() {
         assert_eq!(preview_render_size(3000, 2000), Some((1536, 1024)));
         assert_eq!(preview_render_size(1200, 800), None);
+    }
+
+    #[test]
+    fn zoom_in_from_fit_mode_uses_effective_zoom() {
+        let mut app = PdfViewerApp::new(PathBuf::new(), false).unwrap();
+        app.zoom = 5.0;
+        app.zoom_mode = ZoomMode::FitWidth;
+        app.effective_zoom_pct = 80.0;
+
+        app.zoom_in();
+
+        assert!(app.zoom_mode == ZoomMode::Custom);
+        assert!((app.zoom - 1.0).abs() < 0.000_001);
+    }
+
+    #[test]
+    fn zoom_out_from_fit_mode_uses_effective_zoom() {
+        let mut app = PdfViewerApp::new(PathBuf::new(), false).unwrap();
+        app.zoom = 5.0;
+        app.zoom_mode = ZoomMode::FitPage;
+        app.effective_zoom_pct = 80.0;
+
+        app.zoom_out();
+
+        assert!(app.zoom_mode == ZoomMode::Custom);
+        assert!((app.zoom - 0.64).abs() < 0.000_001);
     }
 }
