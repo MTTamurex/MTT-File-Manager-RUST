@@ -10,6 +10,7 @@ pub mod drives;
 pub mod file_flags;
 pub mod file_system;
 pub mod file_type;
+pub mod folder_enumeration;
 pub mod folder_size;
 pub mod formatting;
 pub mod hdd_directory_reader;
@@ -52,6 +53,7 @@ pub use file_type::{
     find_folder_preview_item, get_perceived_type, is_audio_extension, is_image_extension,
     is_media_extension, is_mpeg_ts_file, is_video_extension, PerceivedType,
 };
+pub use folder_enumeration::*;
 pub use formatting::*;
 pub use hdd_directory_reader::*;
 pub use icons::*;

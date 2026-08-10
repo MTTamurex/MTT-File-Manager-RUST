@@ -323,13 +323,15 @@ fn entries_to_folder_nodes(
         // The content panel treats archive files as navigable entries, but the
         // sidebar tree should only ever show real filesystem directories.
         .filter(|e| e.is_dir && !e.is_archive())
-        .filter(|e| !is_system(&e.path))
-        .filter(|e| show_hidden || !is_hidden(&e.path))
+        // DirectoryCache producers already exclude system/special entries via
+        // should_include_directory_entry, so no per-entry attribute lookup is
+        // needed here — use the cached FileEntry flag instead of metadata().
+        .filter(|e| show_hidden || !e.is_hidden)
         .map(|e| FolderNode {
             path: e.path.clone(),
             name: e.name.clone(),
             has_subfolders: None,
-            is_hidden: is_hidden(&e.path),
+            is_hidden: e.is_hidden,
         })
         .collect();
     folders.sort_by(|a, b| natord::compare_ignore_case(&a.name, &b.name));
@@ -338,6 +340,55 @@ fn entries_to_folder_nodes(
 
 /// List immediate subdirectories of `parent`, sorted alphabetically.
 /// Returns `None` on I/O error (permission denied, etc.).
+///
+/// Windows: single-pass `FindFirstFileExW` enumeration — attributes come from
+/// `WIN32_FIND_DATAW`, so there are no per-entry `metadata()` syscalls
+/// (same approach as the content panel's folder loading pipeline).
+#[cfg(windows)]
+fn enumerate_subfolders(parent: &Path, show_hidden: bool) -> Option<Vec<FolderNode>> {
+    const FILE_ATTRIBUTE_HIDDEN: u32 = 0x2;
+    const FILE_ATTRIBUTE_SYSTEM: u32 = 0x4;
+
+    let subfolders = match crate::infrastructure::windows::folder_enumeration::
+        enumerate_subfolders_attrs(parent)
+    {
+        Some(s) => s,
+        None => {
+            log::warn!("sidebar-tree: cannot enumerate {}", parent.display());
+            return None;
+        }
+    };
+
+    let mut folders: Vec<FolderNode> = Vec::new();
+
+    for entry in subfolders {
+        // Always skip system folders
+        if (entry.attributes & FILE_ATTRIBUTE_SYSTEM) != 0 {
+            continue;
+        }
+
+        let hidden = (entry.attributes & FILE_ATTRIBUTE_HIDDEN) != 0;
+        // Skip hidden folders unless show_hidden is enabled
+        if hidden && !show_hidden {
+            continue;
+        }
+
+        folders.push(FolderNode {
+            path: parent.join(&entry.name),
+            name: entry.name,
+            has_subfolders: None,
+            is_hidden: hidden,
+        });
+    }
+
+    folders.sort_by(|a, b| natord::compare_ignore_case(&a.name, &b.name));
+
+    Some(folders)
+}
+
+/// List immediate subdirectories of `parent`, sorted alphabetically.
+/// Returns `None` on I/O error (permission denied, etc.).
+#[cfg(not(windows))]
 fn enumerate_subfolders(parent: &Path, show_hidden: bool) -> Option<Vec<FolderNode>> {
     let read_dir = match std::fs::read_dir(parent) {
         Ok(rd) => rd,
@@ -386,28 +437,7 @@ fn enumerate_subfolders(parent: &Path, show_hidden: bool) -> Option<Vec<FolderNo
     Some(folders)
 }
 
-/// Check Windows hidden attribute only.
-#[cfg(windows)]
-fn is_hidden(path: &Path) -> bool {
-    use std::os::windows::fs::MetadataExt;
-    const FILE_ATTRIBUTE_HIDDEN: u32 = 0x2;
-    match std::fs::metadata(path) {
-        Ok(meta) => (meta.file_attributes() & FILE_ATTRIBUTE_HIDDEN) != 0,
-        Err(_) => true,
-    }
-}
-
-/// Check Windows system attribute only.
-#[cfg(windows)]
-fn is_system(path: &Path) -> bool {
-    use std::os::windows::fs::MetadataExt;
-    const FILE_ATTRIBUTE_SYSTEM: u32 = 0x4;
-    match std::fs::metadata(path) {
-        Ok(meta) => (meta.file_attributes() & FILE_ATTRIBUTE_SYSTEM) != 0,
-        Err(_) => true,
-    }
-}
-
+/// Check hidden flag (dot-prefix convention on non-Windows platforms).
 #[cfg(not(windows))]
 fn is_hidden(path: &Path) -> bool {
     path.file_name()
@@ -416,6 +446,7 @@ fn is_hidden(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
+/// Check system attribute (never set on non-Windows platforms).
 #[cfg(not(windows))]
 fn is_system(_path: &Path) -> bool {
     false
@@ -428,6 +459,68 @@ mod tests {
     use std::fs::{self, File};
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[cfg(windows)]
+    #[test]
+    fn enumerate_subfolders_respects_hidden_and_system_attributes() {
+        use super::enumerate_subfolders;
+        use windows::core::PCWSTR;
+        use windows::Win32::Storage::FileSystem::{
+            SetFileAttributesW, FILE_ATTRIBUTE_HIDDEN, FILE_ATTRIBUTE_NORMAL,
+            FILE_ATTRIBUTE_SYSTEM,
+        };
+
+        fn set_attrs(path: &std::path::Path, attrs: windows::Win32::Storage::FileSystem::FILE_FLAGS_AND_ATTRIBUTES) {
+            let wide: Vec<u16> = path
+                .to_string_lossy()
+                .encode_utf16()
+                .chain(std::iter::once(0))
+                .collect();
+            unsafe {
+                SetFileAttributesW(PCWSTR(wide.as_ptr()), attrs)
+                    .expect("set file attributes");
+            }
+        }
+
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let base = std::env::temp_dir().join(format!("mtt-sidebar-tree-enum-{unique}"));
+        fs::create_dir_all(&base).expect("create temp base dir");
+
+        let normal = base.join("Normal");
+        let hidden = base.join("HiddenDir");
+        let system = base.join("SystemDir");
+        fs::create_dir_all(&normal).expect("create normal dir");
+        fs::create_dir_all(&hidden).expect("create hidden dir");
+        fs::create_dir_all(&system).expect("create system dir");
+        // Non-directory entries must be excluded
+        File::create(base.join("file.txt")).expect("create file");
+
+        set_attrs(&hidden, FILE_ATTRIBUTE_HIDDEN);
+        set_attrs(&system, FILE_ATTRIBUTE_SYSTEM);
+
+        let names_visible: Vec<String> = enumerate_subfolders(&base, false)
+            .expect("enumerate")
+            .into_iter()
+            .map(|n| n.name)
+            .collect();
+        assert_eq!(names_visible, vec!["Normal".to_string()]);
+
+        let names_all: Vec<String> = enumerate_subfolders(&base, true)
+            .expect("enumerate")
+            .into_iter()
+            .map(|n| n.name)
+            .collect();
+        // System folders stay excluded; hidden folder appears with show_hidden
+        assert_eq!(names_all, vec!["HiddenDir".to_string(), "Normal".to_string()]);
+
+        // Reset attributes so cleanup succeeds on all platforms
+        set_attrs(&hidden, FILE_ATTRIBUTE_NORMAL);
+        set_attrs(&system, FILE_ATTRIBUTE_NORMAL);
+        let _ = fs::remove_dir_all(&base);
+    }
 
     #[test]
     fn entries_to_folder_nodes_excludes_archive_entries_from_cache_projection() {
