@@ -236,6 +236,50 @@ pub fn open_optical_disc_player(path: PathBuf, volume: f32) -> Option<Child> {
     open_player(PlaybackSource::OpticalDisc(path), 0.0, volume)
 }
 
+/// Maximum time the main app waits for the standalone player to exit after a
+/// graceful close request before falling back to a force kill.
+pub const GRACEFUL_CLOSE_TIMEOUT: Duration = Duration::from_millis(1000);
+
+/// Request graceful termination of the standalone player process by posting
+/// `WM_CLOSE` to every top-level window it owns.
+///
+/// mpv treats `WM_CLOSE` as quit: its event loop receives `Shutdown`, breaks,
+/// and runs the final volume flush before the process exits. A hard
+/// `TerminateProcess` would skip that flush and lose recent volume changes.
+/// Returns `true` if at least one window received the message.
+#[cfg(target_os = "windows")]
+pub fn request_player_window_close(pid: u32) -> bool {
+    use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        EnumWindows, GetWindowThreadProcessId, PostMessageW, WM_CLOSE,
+    };
+
+    unsafe extern "system" fn enum_close(hwnd: HWND, lparam: LPARAM) -> windows::core::BOOL {
+        let data = &mut *(lparam.0 as *mut (u32, bool));
+        let mut window_pid: u32 = 0;
+        GetWindowThreadProcessId(hwnd, Some(&mut window_pid));
+        if window_pid == data.0 {
+            let _ = PostMessageW(Some(hwnd), WM_CLOSE, WPARAM(0), LPARAM(0));
+            data.1 = true;
+        }
+        true.into()
+    }
+
+    let mut data = (pid, false);
+    unsafe {
+        let _ = EnumWindows(
+            Some(enum_close),
+            LPARAM(&mut data as *mut (u32, bool) as isize),
+        );
+    }
+    data.1
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn request_player_window_close(_pid: u32) -> bool {
+    false
+}
+
 fn open_player(source: PlaybackSource, position: f64, volume: f32) -> Option<Child> {
     let path = source.path();
     let validation = match &source {

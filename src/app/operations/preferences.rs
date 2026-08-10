@@ -288,8 +288,21 @@ impl ImageViewerApp {
             prefs.push(("last_folder", last_folder));
         }
 
-        // Save session volume (always available, independent of active player)
-        prefs.push(("media_volume", self.session_volume.to_string()));
+        // Save session volume (always available, independent of active player).
+        // While the standalone player is running it is the volume authority —
+        // it persists each change directly to the DB — so read the DB value
+        // instead of clobbering it with the in-memory copy, which stays stale
+        // until the player is closed and reaped.
+        let media_volume = if self.video_player_process.is_some() {
+            self.app_state_db
+                .get_preference("media_volume")
+                .and_then(|value| value.parse::<f32>().ok())
+                .map(|value| value.clamp(0.0, 1.0))
+                .unwrap_or(self.session_volume)
+        } else {
+            self.session_volume
+        };
+        prefs.push(("media_volume", media_volume.to_string()));
 
         // Show hidden files toggle
         prefs.push((

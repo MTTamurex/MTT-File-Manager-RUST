@@ -331,18 +331,45 @@ impl ImageViewerApp {
         }
     }
 
-    /// Kill the standalone video player process if one is running.
-    /// Reloads volume from the database because the standalone player persists
-    /// volume changes immediately on each adjustment.
+    /// Close the standalone video player process if one is running.
+    ///
+    /// The close is graceful: the player window receives `WM_CLOSE` so mpv
+    /// shuts down normally and the player flushes its pending volume save to
+    /// the database. `TerminateProcess` would skip that flush and lose any
+    /// volume change still inside the debounce window. If the process does
+    /// not exit within the bounded grace period (or has no window yet), it
+    /// is force-killed as a fallback.
+    ///
+    /// Reloads volume from the database afterwards because the standalone
+    /// player persists volume changes there.
     pub fn kill_video_player_process(&mut self) {
         if let Some(mut child) = self.video_player_process.take() {
-            log::debug!("[VIDEO-PLAYER] Killing standalone video player process");
-            let _ = child.kill();
-            // Don't block on child.wait() — TerminateProcess is immediate on
-            // Windows and process::exit will reap any zombies.
+            log::debug!("[VIDEO-PLAYER] Closing standalone video player process");
 
-            // The standalone player saves volume to DB on every change,
-            // so reload now so the next video uses the latest volume.
+            if matches!(child.try_wait(), Ok(None)) {
+                let pid = child.id();
+                let graceful = crate::video_player::request_player_window_close(pid);
+
+                if graceful {
+                    let deadline = std::time::Instant::now()
+                        + crate::video_player::GRACEFUL_CLOSE_TIMEOUT;
+                    while std::time::Instant::now() < deadline {
+                        match child.try_wait() {
+                            Ok(Some(_)) | Err(_) => break,
+                            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(20)),
+                        }
+                    }
+                }
+
+                // No-op if the graceful shutdown already exited the process;
+                // fallback force kill otherwise. Don't block on child.wait() —
+                // TerminateProcess is immediate on Windows.
+                let _ = child.kill();
+            }
+
+            // The standalone player saves volume to DB on change (debounced)
+            // and on graceful exit, so reload now so the next video uses the
+            // latest volume.
             if let Some(vol_str) = self.app_state_db.get_preference("media_volume") {
                 if let Ok(vol) = vol_str.parse::<f32>() {
                     self.session_volume = vol.clamp(0.0, 1.0);
