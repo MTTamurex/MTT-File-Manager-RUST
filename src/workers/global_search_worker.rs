@@ -393,8 +393,17 @@ pub fn start_global_search_worker(
                     Err(std::sync::mpsc::RecvTimeoutError::Timeout) => None,
                     Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
                 },
-                None => match receiver.recv() {
+                None => match receiver.recv_timeout(std::time::Duration::from_secs(30)) {
                     Ok(request) => Some(request),
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                        // PERF-06: even while idle (search overlay closed),
+                        // drain completed background rescan deliveries so a
+                        // finished scan does not linger in the channel holding
+                        // a full volume's worth of items alongside the stale
+                        // in-memory index.
+                        session_index.drain_completed_rescans();
+                        continue;
+                    }
                     Err(_) => break,
                 },
             };

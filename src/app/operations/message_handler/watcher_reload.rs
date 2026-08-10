@@ -35,6 +35,47 @@ impl ImageViewerApp {
             self.watcher_cooldown_until = None;
         }
 
+        // EST-01: overflow-coalesced reload. The bounded notify channel
+        // dropped events during a sustained storm; regardless of how many
+        // were dropped, at most one debounced full reload is applied here,
+        // and only while the affected folder is still the current one.
+        #[cfg(feature = "notify-watcher")]
+        if let Some(overflow_path) = self.watcher_overflow_reload_for.clone() {
+            let still_current = Self::normalize_for_match(&overflow_path)
+                == Self::normalize_for_match(std::path::Path::new(
+                    &self.navigation_state.current_path,
+                ));
+            if !still_current {
+                // Watch target changed since the storm — the marker is stale.
+                self.watcher_overflow_reload_for = None;
+            } else if self.file_operation_state.file_ops_in_progress == 0
+                && !self.layout.saved_is_minimized
+                && !self.is_loading_folder
+                && !self.navigation_state.is_recycle_bin_view
+                && !self.navigation_state.is_computer_view
+            {
+                self.watcher_overflow_reload_for = None;
+                let elapsed = self.last_auto_reload.elapsed();
+                if elapsed > Duration::from_millis(theme::AUTO_RELOAD_MS) {
+                    self.pending_auto_reload = false;
+                    self.loaded_path.clear();
+                    log::info!(
+                        "[FS-WATCH] Overflow-coalesced reload for {:?} (dropped events during storm)",
+                        self.navigation_state.current_path
+                    );
+                    self.reload_current_folder_preserving_icon_cache();
+                    self.last_auto_reload = Instant::now();
+                } else {
+                    // Debounce window still open — keep the flag for the next cycle.
+                    self.watcher_overflow_reload_for = Some(overflow_path);
+                    self.ui_ctx
+                        .request_repaint_after(Duration::from_millis(theme::AUTO_RELOAD_MS + 25));
+                }
+            }
+            // Otherwise (file ops running, minimized, loading, virtual views):
+            // keep the flag and retry on a later frame.
+        }
+
         if self.pending_auto_reload
             && self.file_operation_state.file_ops_in_progress == 0
             && !self.layout.saved_is_minimized

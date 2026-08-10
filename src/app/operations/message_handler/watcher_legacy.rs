@@ -190,6 +190,16 @@ impl ImageViewerApp {
             let received_at = timestamped_event.received_at;
             processed_events += 1;
 
+            // EST-01: coalesced overflow marker — the bounded channel dropped
+            // individual events during a sustained storm. Flag a single
+            // debounced reload scoped to the current folder instead of
+            // processing the synthetic marker.
+            if timestamped_event.overflow {
+                self.watcher_overflow_reload_for =
+                    Some(PathBuf::from(&self.navigation_state.current_path));
+                continue;
+            }
+
             match timestamped_event.result {
                 Ok(evt) => {
                     let mut meaningful_change = false;

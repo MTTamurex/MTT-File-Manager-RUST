@@ -22,6 +22,14 @@ fn tab_title_for_path(path: &str) -> String {
         .unwrap_or_else(|| path.to_string())
 }
 
+/// PERF-05: product-decided hard cap on open tabs.
+///
+/// Each background tab retains its full `items`/`all_items` listings
+/// (~20-30 MB per 100k-entry folder, doubled with dual panel), which was the
+/// largest unbounded RAM growth vector in long sessions. Creation paths must
+/// check `TabManager::can_add_tab` and surface the limit to the user.
+pub const MAX_TABS: usize = 20;
+
 /// Represents a single browser tab
 #[derive(Clone)]
 pub struct TabState {
@@ -407,8 +415,17 @@ impl TabManager {
         &mut self.tabs[self.active_tab]
     }
 
-    /// Add a new tab at "Este Computador" and switch to it
-    pub fn new_tab(&mut self) {
+    /// PERF-05: whether another tab can be created without exceeding MAX_TABS.
+    pub fn can_add_tab(&self) -> bool {
+        self.tabs.len() < MAX_TABS
+    }
+
+    /// Add a new tab at "Este Computador" and switch to it.
+    /// Returns false when the tab cap is reached (no tab is created).
+    pub fn new_tab(&mut self) -> bool {
+        if !self.can_add_tab() {
+            return false;
+        }
         let mut tab = TabState::new_at_computer(self.next_id);
         let current = self.active();
         tab.show_left_sidebar = current.show_left_sidebar;
@@ -419,10 +436,15 @@ impl TabManager {
         self.next_id += 1;
         self.tabs.push(tab);
         self.active_tab = self.tabs.len() - 1;
+        true
     }
 
-    /// Add a new tab at a specific path and switch to it
-    pub fn new_tab_at(&mut self, path: &str) {
+    /// Add a new tab at a specific path and switch to it.
+    /// Returns false when the tab cap is reached (no tab is created).
+    pub fn new_tab_at(&mut self, path: &str) -> bool {
+        if !self.can_add_tab() {
+            return false;
+        }
         let mut tab = TabState::new_at_path(self.next_id, path);
         let current = self.active();
         tab.show_left_sidebar = current.show_left_sidebar;
@@ -433,10 +455,16 @@ impl TabManager {
         self.next_id += 1;
         self.tabs.push(tab);
         self.active_tab = self.tabs.len() - 1;
+        true
     }
 
     /// Duplicate the current tab
     pub fn duplicate_tab(&mut self) {
+        // PERF-05: respect the tab cap (currently no callers; guard keeps the
+        // cap safe if this becomes reachable in the future).
+        if !self.can_add_tab() {
+            return;
+        }
         let current = self.active().clone();
         let mut new_tab = TabState::new_at_path(self.next_id, &current.path);
         new_tab.navigation = current.navigation.clone();
@@ -535,6 +563,11 @@ impl TabManager {
 
     /// Reopen the most recently closed tab
     pub fn reopen_closed_tab(&mut self) -> bool {
+        // PERF-05: respect the tab cap. Checked BEFORE popping closed_tabs so
+        // a rejected reopen never loses the closed-tab snapshot.
+        if !self.can_add_tab() {
+            return false;
+        }
         if let Some(tab) = self.closed_tabs.pop() {
             let mut reopened = TabState::new_at_path(self.next_id, &tab.path);
             reopened.navigation = tab.navigation;
@@ -581,5 +614,28 @@ impl TabManager {
     /// Get number of open tabs
     pub fn count(&self) -> usize {
         self.tabs.len()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tab_cap_blocks_creation_at_max_tabs() {
+        let mut manager = TabManager::new();
+        while manager.can_add_tab() {
+            assert!(manager.new_tab());
+        }
+        assert_eq!(manager.count(), MAX_TABS);
+        // Both creation paths must refuse without side effects.
+        assert!(!manager.new_tab());
+        assert!(!manager.new_tab_at("C:\\"));
+        assert_eq!(manager.count(), MAX_TABS);
+        // Closing one tab frees exactly one slot.
+        manager.close_tab(0);
+        assert!(manager.can_add_tab());
+        assert!(manager.new_tab());
+        assert_eq!(manager.count(), MAX_TABS);
     }
 }

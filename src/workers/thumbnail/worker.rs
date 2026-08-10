@@ -15,7 +15,7 @@ use crossbeam_channel::Sender;
 use eframe::egui;
 use parking_lot::{Condvar, Mutex};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Instant, SystemTime};
 use windows::Win32::Media::MediaFoundation::{MFShutdown, MFStartup, MFSTARTUP_NOSOCKET};
@@ -120,6 +120,7 @@ pub fn spawn_thumbnail_workers(
     bulk_thumbnail_progress: SharedBulkThumbnailProgress,
     bulk_thumbnail_completed: Arc<AtomicUsize>,
     bulk_thumbnail_session: Arc<AtomicU64>,
+    shutdown: Arc<AtomicBool>,
 ) {
     let cpu_count = available_cpu_count();
     let worker_count = compute_thumbnail_worker_count(cpu_count);
@@ -206,12 +207,13 @@ pub fn spawn_thumbnail_workers(
     {
         let queue = queue.clone();
         let gen_tracker = gen_tracker.clone();
+        let retry_shutdown = shutdown.clone();
 
         let spawn_result = std::thread::Builder::new()
             .name("thumb-deferred-retry".to_string())
             .stack_size(256 * 1024)
             .spawn(move || {
-                deferred_retry_loop(queue, gen_tracker);
+                deferred_retry_loop(queue, gen_tracker, retry_shutdown);
             });
 
         if let Err(e) = spawn_result {
@@ -274,7 +276,11 @@ fn thumbnail_cache_writer_loop(
 ///
 /// A 4-permit semaphore limits concurrent re-classify probes to avoid an I/O
 /// spike on folders with many partial files.
-fn deferred_retry_loop(queue: Arc<PriorityThumbnailQueue>, gen_tracker: Arc<AtomicUsize>) {
+fn deferred_retry_loop(
+    queue: Arc<PriorityThumbnailQueue>,
+    gen_tracker: Arc<AtomicUsize>,
+    shutdown: Arc<AtomicBool>,
+) {
     use crate::infrastructure::windows::file_flags::{classify_file_read_safety, FileReadSafety};
     use crate::workers::thumbnail::{
         clear_transient_failure, defer_unsafe_thumbnail, deferred_entry_expired,
@@ -285,7 +291,17 @@ fn deferred_retry_loop(queue: Arc<PriorityThumbnailQueue>, gen_tracker: Arc<Atom
     let probe_sem = Arc::new(Semaphore::new(4));
 
     loop {
+        // EST-05: cooperative exit. Previously this loop ran forever and the
+        // thread was only ever killed by process::exit.
+        if shutdown.load(Ordering::Relaxed) {
+            break;
+        }
+
         std::thread::sleep(std::time::Duration::from_millis(1000));
+
+        if shutdown.load(Ordering::Relaxed) {
+            break;
+        }
 
         let entries = drain_unsafe_registry();
         if entries.is_empty() {

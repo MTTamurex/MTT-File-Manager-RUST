@@ -24,6 +24,10 @@ use watcher_retry::WatcherRetryState;
 const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0400;
 const DISCOVERY_INTERVAL: Duration = Duration::from_secs(12);
 const MAX_ITEMS_PER_VOLUME: usize = 1_500_000;
+/// PERF-06: global cap on concurrent background volume rescans. Excess
+/// volumes wait for the next discovery cycle instead of spawning more
+/// full-volume walkers at once.
+const MAX_CONCURRENT_SESSION_RESCANS: usize = 2;
 
 #[derive(Clone)]
 struct IndexedItem {
@@ -50,6 +54,14 @@ struct CandidateVolume {
     file_system: String,
 }
 
+/// PERF-06: result delivered by a background volume-rescan thread.
+struct RescanDelivery {
+    drive_letter: char,
+    label: String,
+    file_system: String,
+    outcome: Result<scanner::ScanOutcome, String>,
+}
+
 /// In-process search index used for user-session-only mounts.
 pub struct UserSessionSearchIndex {
     volumes: HashMap<char, IndexedVolume>,
@@ -59,6 +71,11 @@ pub struct UserSessionSearchIndex {
     last_discovery: Option<Instant>,
     /// Optional SQLite connection for persisting/loading indexed items.
     db: Option<rusqlite::Connection>,
+    /// PERF-06: deliveries from background rescan threads.
+    rescan_rx: std::sync::mpsc::Receiver<RescanDelivery>,
+    rescan_tx: std::sync::mpsc::Sender<RescanDelivery>,
+    /// Volumes with an in-flight background scan (prevents duplicate scans).
+    rescanning: HashSet<char>,
 }
 
 impl UserSessionSearchIndex {
@@ -80,6 +97,8 @@ impl UserSessionSearchIndex {
             );
         }
 
+        let (rescan_tx, rescan_rx) = std::sync::mpsc::channel::<RescanDelivery>();
+
         Self {
             volumes,
             watchers: HashMap::new(),
@@ -87,14 +106,128 @@ impl UserSessionSearchIndex {
             active_letters: HashSet::new(),
             last_discovery: None,
             db,
+            rescan_rx,
+            rescan_tx,
+            rescanning: HashSet::new(),
         }
     }
 
     /// Apply pending filesystem events only (no discovery/full scan).
     pub fn poll_fast_updates(&mut self) {
+        // PERF-06: apply any completed background rescans first so searches
+        // see fresh data without blocking on a scan.
+        self.apply_completed_rescans();
         self.apply_pending_events();
         let active_letters = self.active_letters.clone();
         self.sync_watchers(&active_letters);
+    }
+
+    /// PERF-06: drain completed background rescan deliveries.
+    ///
+    /// Exposed so the search worker can drain while idle (overlay closed);
+    /// otherwise finished scans — each holding a full volume's worth of
+    /// items — would linger in the channel until the next request.
+    pub fn drain_completed_rescans(&mut self) {
+        self.apply_completed_rescans();
+    }
+
+    /// PERF-06: drain completed background rescan deliveries.
+    fn apply_completed_rescans(&mut self) {
+        while let Ok(delivery) = self.rescan_rx.try_recv() {
+            self.rescanning.remove(&delivery.drive_letter);
+
+            // Volume is no longer active (unmounted/removed while scanning):
+            // discard the scan instead of resurrecting it.
+            if !self.active_letters.contains(&delivery.drive_letter) {
+                log::debug!(
+                    "[SESSION-SEARCH] Discarding rescan result for inactive volume {}:",
+                    delivery.drive_letter
+                );
+                continue;
+            }
+
+            match delivery.outcome {
+                Ok(scan) => {
+                    let count = scan.items.len();
+
+                    if let Some(conn) = &self.db {
+                        db::save_volume(conn, delivery.drive_letter, &scan.items);
+                    }
+
+                    self.volumes.insert(
+                        delivery.drive_letter,
+                        IndexedVolume {
+                            label: delivery.label,
+                            file_system: delivery.file_system,
+                            last_scan: Instant::now(),
+                            items: scan.items,
+                            live_paths: scan.live_paths,
+                            needs_rescan: false,
+                        },
+                    );
+                    log::debug!(
+                        "[SESSION-SEARCH] {}:\\ indexed {} entries in {:.2}s (dirs: {}, errors: {}) [background]",
+                        delivery.drive_letter,
+                        count,
+                        scan.elapsed.as_secs_f64(),
+                        scan.directories_scanned,
+                        scan.errors
+                    );
+                }
+                Err(error) => {
+                    log::warn!(
+                        "[SESSION-SEARCH] {}:\\ background scan failed: {}",
+                        delivery.drive_letter,
+                        error
+                    );
+                }
+            }
+        }
+    }
+
+    /// PERF-06: schedule a full-volume scan on a dedicated detached thread so
+    /// a slow FUSE/virtual mount cannot block the search worker (which would
+    /// also stall service-backed searches). At most one scan per volume and at
+    /// most `MAX_CONCURRENT_SESSION_RESCANS` scans globally are in flight; a
+    /// skipped volume is retried on the next discovery cycle.
+    fn schedule_rescan(&mut self, candidate: &CandidateVolume) {
+        if self.rescanning.contains(&candidate.drive_letter) {
+            return;
+        }
+        if self.rescanning.len() >= MAX_CONCURRENT_SESSION_RESCANS {
+            log::debug!(
+                "[SESSION-SEARCH] Rescan cap reached; deferring {}:\\ to next cycle",
+                candidate.drive_letter
+            );
+            return;
+        }
+        self.rescanning.insert(candidate.drive_letter);
+
+        let drive_letter = candidate.drive_letter;
+        let label = candidate.label.clone();
+        let file_system = candidate.file_system.clone();
+        let tx = self.rescan_tx.clone();
+
+        let spawn_result = std::thread::Builder::new()
+            .name(format!("session-rescan-{drive_letter}"))
+            .spawn(move || {
+                let outcome = scanner::scan_volume(drive_letter).map_err(|e| e.to_string());
+                let _ = tx.send(RescanDelivery {
+                    drive_letter,
+                    label,
+                    file_system,
+                    outcome,
+                });
+            });
+
+        if let Err(error) = spawn_result {
+            self.rescanning.remove(&candidate.drive_letter);
+            log::warn!(
+                "[SESSION-SEARCH] Failed to spawn background rescan for {}:\\: {}",
+                candidate.drive_letter,
+                error
+            );
+        }
     }
 
     /// Refresh candidate volume set and rescan stale/new volumes.
@@ -118,6 +251,9 @@ impl UserSessionSearchIndex {
         }
 
         self.last_discovery = Some(Instant::now());
+        // PERF-06: pick up completed background rescans before evaluating
+        // staleness, so freshly scanned volumes are not rescheduled.
+        self.apply_completed_rescans();
         let mut candidates = discovery::discover_candidate_volumes(service_volumes, service_online);
         candidates.sort_by_key(|c| c.drive_letter);
 
@@ -150,43 +286,10 @@ impl UserSessionSearchIndex {
         self.active_letters = active_letters.clone();
         self.sync_watchers(&active_letters);
 
+        // PERF-06: full volume scans run on dedicated background threads
+        // (was: inline on the search worker, blocking all searches).
         for candidate in &stale_candidates {
-            match scanner::scan_volume(candidate.drive_letter) {
-                Ok(scan) => {
-                    let count = scan.items.len();
-
-                    if let Some(conn) = &self.db {
-                        db::save_volume(conn, candidate.drive_letter, &scan.items);
-                    }
-
-                    self.volumes.insert(
-                        candidate.drive_letter,
-                        IndexedVolume {
-                            label: candidate.label.clone(),
-                            file_system: candidate.file_system.clone(),
-                            last_scan: Instant::now(),
-                            items: scan.items,
-                            live_paths: scan.live_paths,
-                            needs_rescan: false,
-                        },
-                    );
-                    log::debug!(
-                        "[SESSION-SEARCH] {}:\\ indexed {} entries in {:.2}s (dirs: {}, errors: {})",
-                        candidate.drive_letter,
-                        count,
-                        scan.elapsed.as_secs_f64(),
-                        scan.directories_scanned,
-                        scan.errors
-                    );
-                }
-                Err(e) => {
-                    log::warn!(
-                        "[SESSION-SEARCH] {}:\\ scan failed: {}",
-                        candidate.drive_letter,
-                        e
-                    );
-                }
-            }
+            self.schedule_rescan(candidate);
         }
 
         let removed_letters: Vec<char> = self
@@ -207,6 +310,10 @@ impl UserSessionSearchIndex {
             .retain(|letter, _| active_letters.contains(letter));
         self.watcher_retries
             .retain(|letter, _| active_letters.contains(letter));
+        // PERF-06: drop in-flight scan markers for volumes that disappeared;
+        // late deliveries are discarded in apply_completed_rescans.
+        self.rescanning
+            .retain(|letter| active_letters.contains(letter));
         self.active_letters = active_letters;
     }
 

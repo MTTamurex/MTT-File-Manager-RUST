@@ -772,3 +772,6 @@ organizer:
 
 notifications:
   close: "Fechar notificação"
+
+tabs:
+  max_reached: "Limite de %{max} abas atingido. Feche uma aba para abrir outra."

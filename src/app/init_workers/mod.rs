@@ -1,6 +1,7 @@
 mod background_jobs;
 pub(crate) mod consistency_probe_worker;
 mod filesystem_workers;
+pub(crate) mod folder_load_pool;
 mod pipeline_workers;
 mod visual_workers;
 

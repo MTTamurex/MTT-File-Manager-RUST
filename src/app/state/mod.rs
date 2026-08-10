@@ -176,6 +176,11 @@ pub struct WatcherFsProbeCacheEntry {
 pub struct TimestampedNotifyEvent {
     pub received_at: Instant,
     pub result: notify::Result<notify::Event>,
+    /// True when this entry is a coalesced overflow marker synthesized after the
+    /// bounded event channel saturated: individual events from the burst were
+    /// dropped and the consumer must apply a single debounced reload instead of
+    /// processing each event (RDCW overflow semantics).
+    pub overflow: bool,
 }
 
 pub struct ImageViewerApp {
@@ -202,6 +207,9 @@ pub struct ImageViewerApp {
 
     // --- OPTIMIZED THUMBNAIL SYSTEM ---
     pub thumbnail_queue: Arc<PriorityThumbnailQueue>, // UI -> Worker Pool (Priority Queue)
+    /// EST-05: shutdown flag for the thumbnail worker fleet (observed by the
+    /// deferred-retry loop; the queue itself is shut down via `shutdown()`).
+    pub thumbnail_pipeline_shutdown: Arc<AtomicBool>,
     pub image_receiver: crossbeam_channel::Receiver<ThumbnailData>, // Worker Pool -> UI
     pub pending_thumbnails: VecDeque<ThumbnailData>,  // PERFORMANCE: Buffer for throttled uploads
     /// Per-path request epoch used to reject stale in-flight thumbnail results.
@@ -214,6 +222,10 @@ pub struct ImageViewerApp {
 
     // File system
     pub items: Arc<Vec<FileEntry>>, // Arc for cheap clone in render loops (60 FPS)
+
+    /// EST-02: bounded persistent pool executing folder-load pipelines
+    /// (replaces the previous detached thread-per-navigation).
+    pub(crate) folder_load_pool: Arc<crate::app::init_workers::folder_load_pool::FolderLoadPool>,
 
     // Async loading (prevents UI freeze when reading metadata)
     pub file_entry_receiver: Receiver<(usize, Vec<FileEntry>)>,
@@ -400,9 +412,15 @@ pub struct ImageViewerApp {
     #[cfg(feature = "notify-watcher")]
     pub notify_watcher_setup_request_id: u64,
     #[cfg(feature = "notify-watcher")]
-    pub fs_event_receiver: Receiver<TimestampedNotifyEvent>,
+    pub fs_event_receiver: crossbeam_channel::Receiver<TimestampedNotifyEvent>,
     #[cfg(feature = "notify-watcher")]
-    pub fs_event_sender: Sender<TimestampedNotifyEvent>,
+    pub fs_event_sender: crossbeam_channel::Sender<TimestampedNotifyEvent>,
+    /// EST-01: set when the bounded notify channel saturated and dropped
+    /// events. Holds the folder path that was current when the overflow
+    /// marker was processed; at most one debounced full reload is applied,
+    /// and only while that path is still the current folder.
+    #[cfg(feature = "notify-watcher")]
+    pub watcher_overflow_reload_for: Option<PathBuf>,
     /// Events buffered while a file operation is in progress, so external
     /// mutations on other folders are not silently dropped.  Drained once
     /// `file_ops_in_progress` returns to zero.  Capped to avoid unbounded

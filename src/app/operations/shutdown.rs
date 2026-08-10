@@ -11,6 +11,15 @@ impl ImageViewerApp {
     /// Drop every persistent worker Sender so threads can exit cleanly.
     /// Called by `handle_exit` before the process terminates.
     pub fn shutdown_background_workers(&mut self) {
+        // EST-05: shut down the thumbnail worker fleet cooperatively.
+        // `shutdown()` wakes all workers blocked in `pop()` (condvar notify);
+        // they observe the flag and exit, which also drops their
+        // `cache_write_tx` clones so the cache-writer thread terminates.
+        // The deferred-retry loop observes `thumbnail_pipeline_shutdown`.
+        self.thumbnail_pipeline_shutdown
+            .store(true, Ordering::Release);
+        self.thumbnail_queue.shutdown();
+
         // Invalidate queued context-menu work before disconnecting the channels.
         // Workers will skip stale queued requests instead of starting new COM calls.
         self.latest_shell_menu_request_id.store(

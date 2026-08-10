@@ -13,6 +13,16 @@ use std::time::{Duration, Instant};
 
 const WATCHER_FS_PROBE_CACHE_TTL: Duration = Duration::from_secs(600);
 
+/// EST-02: cap on concurrently alive "notify-watcher-setup" threads. Setup
+/// performs blocking kernel calls (`CreateFileW`/RDCW handle acquisition) that
+/// can hang indefinitely on dead SMB/FUSE volumes; repeated navigation across
+/// such paths previously accumulated one blocked thread per navigation. When
+/// the cap is reached the setup is skipped — the next navigation (or watcher
+/// reconfiguration) retries.
+const MAX_NOTIFY_SETUP_THREADS: usize = 2;
+static LIVE_NOTIFY_SETUP_THREADS: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
 #[cfg(feature = "notify-watcher")]
 fn normalize_watch_path(path: &Path) -> String {
     path.to_string_lossy().replace('/', "\\").to_lowercase()
@@ -224,12 +234,40 @@ impl ImageViewerApp {
         let request_id = self.notify_watcher_setup_request_id;
         let setup_tx = self.notify_watcher_setup_sender.clone();
         let tx = self.fs_event_sender.clone();
+        // EST-01: the producer needs a receiver clone to drop the oldest
+        // queued event when the bounded channel saturates (crossbeam senders
+        // cannot drain).
+        let rx_for_overflow = self.fs_event_receiver.clone();
         let ctx_for_events = self.ui_ctx.clone();
         let ctx_for_setup = self.ui_ctx.clone();
+
+        // EST-02: refuse to spawn when the live-setup cap is reached.
+        if LIVE_NOTIFY_SETUP_THREADS.load(std::sync::atomic::Ordering::Relaxed)
+            >= MAX_NOTIFY_SETUP_THREADS
+        {
+            log::warn!(
+                "[NOTIFY-WATCHER] Setup thread cap ({}) reached; skipping setup for {:?} (retry on next navigation)",
+                MAX_NOTIFY_SETUP_THREADS,
+                current_path
+            );
+            return;
+        }
 
         let spawn_result = std::thread::Builder::new()
             .name("notify-watcher-setup".to_string())
             .spawn(move || {
+                // EST-02 guard: count this thread while it is alive, including
+                // panic unwinds.
+                struct SetupThreadGuard;
+                impl Drop for SetupThreadGuard {
+                    fn drop(&mut self) {
+                        LIVE_NOTIFY_SETUP_THREADS
+                            .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+                    }
+                }
+                LIVE_NOTIFY_SETUP_THREADS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let _setup_guard = SetupThreadGuard;
+
                 let watcher_result =
                     notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
                         match &res {
@@ -244,10 +282,39 @@ impl ImageViewerApp {
                                 log::error!("[NOTIFY-WATCHER] Event error: {}", e);
                             }
                         }
-                        let _ = tx.send(crate::app::state::TimestampedNotifyEvent {
+                        let event = crate::app::state::TimestampedNotifyEvent {
                             received_at: std::time::Instant::now(),
                             result: res,
-                        });
+                            overflow: false,
+                        };
+                        match tx.try_send(event) {
+                            Ok(()) => {}
+                            Err(crossbeam_channel::TrySendError::Full(dropped)) => {
+                                // EST-01: bounded channel saturated under a sustained
+                                // event storm. Drop the oldest queued event and
+                                // coalesce the burst into a single overflow marker;
+                                // the UI applies one debounced reload instead of
+                                // processing every dropped event.
+                                let _ = rx_for_overflow.try_recv();
+                                let marker_paths = match &dropped.result {
+                                    Ok(evt) => evt.paths.clone(),
+                                    Err(err) => err.paths.clone(),
+                                };
+                                let marker = notify::Event {
+                                    kind: notify::EventKind::Modify(
+                                        notify::event::ModifyKind::Any,
+                                    ),
+                                    paths: marker_paths,
+                                    attrs: Default::default(),
+                                };
+                                let _ = tx.try_send(crate::app::state::TimestampedNotifyEvent {
+                                    received_at: std::time::Instant::now(),
+                                    result: Ok(marker),
+                                    overflow: true,
+                                });
+                            }
+                            Err(crossbeam_channel::TrySendError::Disconnected(_)) => {}
+                        }
                         ctx_for_events.request_repaint();
                     });
 

@@ -21,165 +21,162 @@ impl ImageViewerApp {
         } else {
             std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(my_gen))
         };
-        let current_path = self.navigation_state.current_path.clone();
-        let file_entry_sender = self.file_entry_sender.clone();
-        let folder_load_failure_sender = self.folder_load_failure_sender.clone();
-        let ctx = self.ui_ctx.clone();
-        let disk_cache = self.disk_cache.clone();
-        let app_state_db = self.app_state_db.clone();
-        let directory_cache = self.directory_cache.clone();
-        let directory_dirty_registry = self.directory_dirty_registry.clone();
-        // Use existing directory_cache for cache-first strategy
-        let directory_index_opt = self.directory_index.clone();
-        let _prefetch_sender = self.file_operation_state.prefetch_sender.clone();
-        let show_hidden = self.show_hidden_files;
-        let spawn_failure_sender = folder_load_failure_sender.clone();
-        let spawn_failure_path = PathBuf::from(&current_path);
-        let spawn_failure_ctx = ctx.clone();
 
-        // STREAMING BATCH LOADING: Adaptive batch size based on disk type
-        if let Err(e) = std::thread::Builder::new()
-            .name("folder-load-pipeline".to_string())
-            .spawn(move || {
-                // Immediate generation check: if a newer load was already started
-                // before this thread was scheduled, exit instantly without doing
-                // any I/O. This prevents stale thread buildup from rapid navigation.
-                if gen_clone.load(std::sync::atomic::Ordering::Relaxed) != my_gen {
-                    return;
-                }
+        let job = crate::app::init_workers::folder_load_pool::FolderLoadJob {
+            my_gen,
+            gen_clone,
+            current_path: self.navigation_state.current_path.clone(),
+            force_refresh,
+            file_entry_sender: self.file_entry_sender.clone(),
+            folder_load_failure_sender: self.folder_load_failure_sender.clone(),
+            ctx: self.ui_ctx.clone(),
+            disk_cache: self.disk_cache.clone(),
+            app_state_db: self.app_state_db.clone(),
+            directory_cache: self.directory_cache.clone(),
+            directory_dirty_registry: self.directory_dirty_registry.clone(),
+            directory_index_opt: self.directory_index.clone(),
+            show_hidden: self.show_hidden_files,
+        };
 
-                let scan_start = std::time::Instant::now();
-
-                let base_path = if current_path.len() == 2 && current_path.ends_with(':') {
-                    format!("{}\\", current_path)
-                } else {
-                    current_path.clone()
-                };
-
-                let is_ssd = io_priority::is_ssd(&PathBuf::from(&current_path));
-                let config = AdaptiveBatchConfig {
-                    is_ssd,
-                    total_items: directory_index_opt
-                        .as_ref()
-                        .and_then(|di| di.get_directory(&PathBuf::from(&base_path)))
-                        .map(|(meta, _)| meta.file_count),
-                };
-                let mut batch_tracker = AdaptiveBatchTracker::new(config);
-                let mut batch_size = batch_tracker.batch_size();
-
-                // STALE-WHILE-REVALIDATE STRATEGY: Instant feedback via DirectoryCache
-                let base_path_buf = PathBuf::from(&base_path);
-                // PERFORMANCE: Only use is_cloud_sync_path() which is string-based (no I/O)
-                // path_has_cloud_attributes() was removed because GetFileAttributesW can BLOCK
-                // indefinitely on cloud-only provider folders
-                let is_onedrive_base = onedrive::is_cloud_sync_path(&base_path_buf);
-                let prefer_reliable_scan = directory_dirty_registry
-                    .is_dirty(base_path_buf.as_path())
-                    || (!is_onedrive_base
-                        && !crate::infrastructure::windows::path_is_usn_filesystem(
-                            base_path_buf.as_path(),
-                        )
-                        .unwrap_or(true));
-                let mut batch = Vec::with_capacity(batch_size);
-                let mut all_entries_disk: Vec<FileEntry> = Vec::new();
-                let mut batch_start = std::time::Instant::now();
-                if fast_paths::try_handle_fast_paths(
-                    my_gen,
-                    &gen_clone,
-                    &current_path,
-                    force_refresh,
-                    &base_path,
-                    &base_path_buf,
-                    is_ssd,
-                    is_onedrive_base,
-                    &mut batch_size,
-                    &mut batch_tracker,
-                    &mut batch_start,
-                    &file_entry_sender,
-                    &ctx,
-                    &disk_cache,
-                    &app_state_db,
-                    &directory_cache,
-                    &directory_dirty_registry,
-                    &directory_index_opt,
-                    show_hidden,
-                ) {
-                    return;
-                }
-
-                if optimized_tiers::try_handle_optimized_tiers(
-                    my_gen,
-                    &gen_clone,
-                    &scan_start,
-                    &base_path,
-                    is_ssd,
-                    is_onedrive_base,
-                    prefer_reliable_scan,
-                    &mut batch_size,
-                    &mut batch_tracker,
-                    &mut batch_start,
-                    &mut batch,
-                    &mut all_entries_disk,
-                    &file_entry_sender,
-                    &ctx,
-                    &disk_cache,
-                    &app_state_db,
-                    &directory_cache,
-                    &directory_dirty_registry,
-                    &directory_index_opt,
-                    show_hidden,
-                ) {
-                    return;
-                }
-
-                tier3_fallback::run_tier3_fallback(
-                    my_gen,
-                    &gen_clone,
-                    &scan_start,
-                    &current_path,
-                    &base_path,
-                    is_onedrive_base,
-                    &mut batch_size,
-                    &mut batch_tracker,
-                    &mut batch_start,
-                    &mut batch,
-                    &mut all_entries_disk,
-                    &file_entry_sender,
-                    &folder_load_failure_sender,
-                    &ctx,
-                    &disk_cache,
-                    &app_state_db,
-                    &directory_cache,
-                    &directory_dirty_registry,
-                    &directory_index_opt,
-                    show_hidden,
-                );
-                // DISABLED: Direct subdirectory prefetch (testing HDD I/O impact)
-                // if !is_ssd && gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
-                //     let subdirs: Vec<PathBuf> = all_entries_disk
-                //         .iter()
-                //         .filter(|e| e.is_dir)
-                //         .take(5)
-                //         .map(|e| e.path.clone())
-                //         .collect();
-                //     if !subdirs.is_empty() {
-                //         let _ = prefetch_sender.send(PrefetchMessage::Prefetch(subdirs));
-                //     }
-                // }
-            })
-        {
-            log::error!(
-                "[FolderLoad] Failed to spawn folder-load-pipeline thread: {}",
-                e
-            );
-            let _ = spawn_failure_sender.send((
-                my_gen,
-                crate::app::state::FolderLoadError::other(
-                    spawn_failure_path,
-                    format!("Failed to spawn folder-load-pipeline thread: {e}"),
-                ),
-            ));
-            spawn_failure_ctx.request_repaint();
-        }
+        // EST-02: submit to the bounded persistent pool instead of spawning a
+        // detached thread per navigation. Stale jobs exit instantly via the
+        // generation guard; workers blocked in kernel I/O cap thread growth
+        // at the pool size instead of accumulating one thread per navigation.
+        self.folder_load_pool.submit(job);
     }
+}
+
+/// EST-02: folder-load pipeline body, executed by the pool workers.
+pub(crate) fn run_folder_load_pipeline(
+    job: crate::app::init_workers::folder_load_pool::FolderLoadJob,
+) {
+    let crate::app::init_workers::folder_load_pool::FolderLoadJob {
+        my_gen,
+        gen_clone,
+        current_path,
+        force_refresh,
+        file_entry_sender,
+        folder_load_failure_sender,
+        ctx,
+        disk_cache,
+        app_state_db,
+        directory_cache,
+        directory_dirty_registry,
+        directory_index_opt,
+        show_hidden,
+    } = job;
+
+    // Immediate generation check: if a newer load was already started
+    // before this job was picked up, exit instantly without doing
+    // any I/O. This prevents stale work from rapid navigation.
+    if gen_clone.load(std::sync::atomic::Ordering::Relaxed) != my_gen {
+        return;
+    }
+
+    let scan_start = std::time::Instant::now();
+
+    let base_path = if current_path.len() == 2 && current_path.ends_with(':') {
+        format!("{}\\", current_path)
+    } else {
+        current_path.clone()
+    };
+
+    let is_ssd = io_priority::is_ssd(&PathBuf::from(&current_path));
+    let config = AdaptiveBatchConfig {
+        is_ssd,
+        total_items: directory_index_opt
+            .as_ref()
+            .and_then(|di| di.get_directory(&PathBuf::from(&base_path)))
+            .map(|(meta, _)| meta.file_count),
+    };
+    let mut batch_tracker = AdaptiveBatchTracker::new(config);
+    let mut batch_size = batch_tracker.batch_size();
+
+    // STALE-WHILE-REVALIDATE STRATEGY: Instant feedback via DirectoryCache
+    let base_path_buf = PathBuf::from(&base_path);
+    // PERFORMANCE: Only use is_cloud_sync_path() which is string-based (no I/O)
+    // path_has_cloud_attributes() was removed because GetFileAttributesW can BLOCK
+    // indefinitely on cloud-only provider folders
+    let is_onedrive_base = onedrive::is_cloud_sync_path(&base_path_buf);
+    let prefer_reliable_scan = directory_dirty_registry
+        .is_dirty(base_path_buf.as_path())
+        || (!is_onedrive_base
+            && !crate::infrastructure::windows::path_is_usn_filesystem(
+                base_path_buf.as_path(),
+            )
+            .unwrap_or(true));
+    let mut batch = Vec::with_capacity(batch_size);
+    let mut all_entries_disk: Vec<FileEntry> = Vec::new();
+    let mut batch_start = std::time::Instant::now();
+    if fast_paths::try_handle_fast_paths(
+        my_gen,
+        &gen_clone,
+        &current_path,
+        force_refresh,
+        &base_path,
+        &base_path_buf,
+        is_ssd,
+        is_onedrive_base,
+        &mut batch_size,
+        &mut batch_tracker,
+        &mut batch_start,
+        &file_entry_sender,
+        &ctx,
+        &disk_cache,
+        &app_state_db,
+        &directory_cache,
+        &directory_dirty_registry,
+        &directory_index_opt,
+        show_hidden,
+    ) {
+        return;
+    }
+
+    if optimized_tiers::try_handle_optimized_tiers(
+        my_gen,
+        &gen_clone,
+        &scan_start,
+        &base_path,
+        is_ssd,
+        is_onedrive_base,
+        prefer_reliable_scan,
+        &mut batch_size,
+        &mut batch_tracker,
+        &mut batch_start,
+        &mut batch,
+        &mut all_entries_disk,
+        &file_entry_sender,
+        &ctx,
+        &disk_cache,
+        &app_state_db,
+        &directory_cache,
+        &directory_dirty_registry,
+        &directory_index_opt,
+        show_hidden,
+    ) {
+        return;
+    }
+
+    tier3_fallback::run_tier3_fallback(
+        my_gen,
+        &gen_clone,
+        &scan_start,
+        &current_path,
+        &base_path,
+        is_onedrive_base,
+        &mut batch_size,
+        &mut batch_tracker,
+        &mut batch_start,
+        &mut batch,
+        &mut all_entries_disk,
+        &file_entry_sender,
+        &folder_load_failure_sender,
+        &ctx,
+        &disk_cache,
+        &app_state_db,
+        &directory_cache,
+        &directory_dirty_registry,
+        &directory_index_opt,
+        show_hidden,
+    );
 }

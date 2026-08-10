@@ -4,11 +4,21 @@ use super::IOPriority;
 
 thread_local! {
     static THREAD_BG_MODE_ACTIVE: Cell<bool> = const { Cell::new(false) };
+    /// PERF-03: memo of the priority class last applied to this thread.
+    /// Thumbnail workers pop thousands of requests with identical priorities
+    /// back-to-back; skipping redundant SetThreadPriority syscalls removes
+    /// that per-request kernel churn.
+    static LAST_PRIORITY_CLASS: Cell<Option<IOPriority>> = const { Cell::new(None) };
 }
 
 /// Set the current thread's priority based on I/O priority level.
 pub(super) fn set_thread_priority(priority: IOPriority) {
     use windows::Win32::System::Threading::*;
+
+    // PERF-03: early-exit when the requested class is already active.
+    if LAST_PRIORITY_CLASS.with(|last| last.get()) == Some(priority) {
+        return;
+    }
 
     unsafe {
         let thread = GetCurrentThread();
@@ -35,6 +45,8 @@ pub(super) fn set_thread_priority(priority: IOPriority) {
             }
         });
     }
+
+    LAST_PRIORITY_CLASS.with(|last| last.set(Some(priority)));
 }
 
 /// Reset thread priority to normal.
@@ -52,4 +64,6 @@ pub(super) fn reset_thread_priority() {
 
         let _ = SetThreadPriority(thread, THREAD_PRIORITY_NORMAL);
     }
+
+    LAST_PRIORITY_CLASS.with(|last| last.set(None));
 }

@@ -37,6 +37,9 @@ pub(in crate::app) struct AppBootstrap {
     pub(in crate::app) folder_load_failure_receiver: mpsc::Receiver<(usize, FolderLoadError)>,
     pub(in crate::app) items_rebuild_sender: mpsc::Sender<ItemsRebuildResult>,
     pub(in crate::app) items_rebuild_receiver: mpsc::Receiver<ItemsRebuildResult>,
+    /// EST-02: bounded persistent folder-load worker pool.
+    pub(in crate::app) folder_load_pool:
+        Arc<crate::app::init_workers::folder_load_pool::FolderLoadPool>,
     pub(in crate::app) inactive_items_rebuild_sender: mpsc::Sender<InactiveItemsRebuildResult>,
     pub(in crate::app) inactive_items_rebuild_receiver: mpsc::Receiver<InactiveItemsRebuildResult>,
 
@@ -49,14 +52,20 @@ pub(in crate::app) struct AppBootstrap {
     pub(in crate::app) cover_req_tx: mpsc::Sender<PathBuf>,
     pub(in crate::app) cover_res_rx: mpsc::Receiver<(PathBuf, Option<PathBuf>)>,
     #[cfg(feature = "notify-watcher")]
-    pub(in crate::app) fs_tx: mpsc::Sender<crate::app::state::TimestampedNotifyEvent>,
+    pub(in crate::app) fs_tx:
+        crossbeam_channel::Sender<crate::app::state::TimestampedNotifyEvent>,
     #[cfg(feature = "notify-watcher")]
-    pub(in crate::app) fs_rx: mpsc::Receiver<crate::app::state::TimestampedNotifyEvent>,
+    pub(in crate::app) fs_rx:
+        crossbeam_channel::Receiver<crate::app::state::TimestampedNotifyEvent>,
     pub(in crate::app) device_event_receiver: mpsc::Receiver<()>,
 
     pub(in crate::app) thumbnail_queue: Arc<PriorityThumbnailQueue>,
     pub(in crate::app) shared_gen: Arc<AtomicUsize>,
     pub(in crate::app) img_rx: crossbeam_channel::Receiver<crate::domain::thumbnail::ThumbnailData>,
+    /// EST-05: shutdown flag observed by the thumbnail deferred-retry loop so
+    /// the worker fleet can terminate cooperatively (defense in depth on top
+    /// of the existing `process::exit` shutdown path).
+    pub(in crate::app) thumbnail_pipeline_shutdown: Arc<AtomicBool>,
     pub(in crate::app) pending_deletions: Arc<dashmap::DashMap<PathBuf, ()>>,
     pub(in crate::app) bulk_thumbnail_progress: SharedBulkThumbnailProgress,
     pub(in crate::app) bulk_thumbnail_scanning: Arc<AtomicBool>,
@@ -211,6 +220,8 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
     let (folder_load_failure_sender, folder_load_failure_receiver) =
         mpsc::channel::<(usize, FolderLoadError)>();
     let (items_rebuild_sender, items_rebuild_receiver) = mpsc::channel::<ItemsRebuildResult>();
+    // EST-02: fixed-size pool for folder-load pipelines.
+    let folder_load_pool = Arc::new(crate::app::init_workers::folder_load_pool::FolderLoadPool::new());
     let (inactive_items_rebuild_sender, inactive_items_rebuild_receiver) =
         mpsc::channel::<InactiveItemsRebuildResult>();
 
@@ -340,8 +351,14 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
     );
 
     let (cover_req_tx, cover_res_rx) = spawn_cover_worker(app_state_db.clone());
+    // EST-01: bounded intake for filesystem events. On saturation the producer
+    // drops the oldest queued event and coalesces the burst into a single
+    // overflow marker, so a sustained event storm cannot grow this queue
+    // monotonically (memory) or keep the UI awake indefinitely.
     #[cfg(feature = "notify-watcher")]
-    let (fs_tx, fs_rx) = mpsc::channel();
+    const FS_EVENT_CHANNEL_CAPACITY: usize = 4096;
+    #[cfg(feature = "notify-watcher")]
+    let (fs_tx, fs_rx) = crossbeam_channel::bounded(FS_EVENT_CHANNEL_CAPACITY);
     let (device_event_sender, device_event_receiver) = mpsc::channel();
     windows_infra::start_device_change_listener(device_event_sender, ctx.clone());
     log_bootstrap_step!("base_channels_and_device_listener");
@@ -358,6 +375,7 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
 
     let (img_tx, img_rx) = crossbeam_channel::bounded(THUMBNAIL_RESULT_CHANNEL_CAPACITY);
     let thumbnail_queue = Arc::new(PriorityThumbnailQueue::new());
+    let thumbnail_pipeline_shutdown = Arc::new(AtomicBool::new(false));
     let shared_gen = Arc::new(AtomicUsize::new(0));
     let bulk_thumbnail_progress = new_shared_bulk_thumbnail_progress();
     let bulk_thumbnail_scanning = Arc::new(AtomicBool::new(false));
@@ -382,6 +400,7 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
         bulk_thumbnail_progress.clone(),
         bulk_thumbnail_completed.clone(),
         bulk_thumbnail_session.clone(),
+        thumbnail_pipeline_shutdown.clone(),
     );
     log_bootstrap_step!("thumbnail_workers");
 
@@ -472,6 +491,7 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
         folder_load_failure_receiver,
         items_rebuild_sender,
         items_rebuild_receiver,
+        folder_load_pool,
         inactive_items_rebuild_sender,
         inactive_items_rebuild_receiver,
         disk_cache,
@@ -487,6 +507,7 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
         fs_rx,
         device_event_receiver,
         thumbnail_queue,
+        thumbnail_pipeline_shutdown,
         shared_gen,
         img_rx,
         pending_deletions,

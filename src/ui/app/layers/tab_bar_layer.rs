@@ -57,24 +57,32 @@ pub(crate) fn render_tab_bar_layer(
                     app.update_video_visibility();
                 }
                 TabBarAction::NewTab => {
-                    let prev_view_mode = app.view_mode;
-                    let prev_sort_mode = app.sort_mode;
-                    let prev_sort_descending = app.sort_descending;
-                    let prev_folders_position = app.folders_position;
-                    app.sync_to_tab();
-                    let current_path = app.tab_manager.active().path.clone();
-                    app.tab_manager.new_tab_at(&current_path);
-                    let active = app.tab_manager.active_mut();
-                    active.view_mode = prev_view_mode;
-                    active.sort_mode = prev_sort_mode;
-                    active.sort_descending = prev_sort_descending;
-                    active.folders_position = prev_folders_position;
-                    app.sync_from_tab();
-                    if current_path == COMPUTER_VIEW_ID {
-                        app.setup_computer_view();
+                    // PERF-05: enforce the tab cap before touching tab state.
+                    if !app.tab_manager.can_add_tab() {
+                        app.notifications.warning(
+                            rust_i18n::t!("tabs.max_reached", max = crate::tabs::MAX_TABS)
+                                .to_string(),
+                        );
+                    } else {
+                        let prev_view_mode = app.view_mode;
+                        let prev_sort_mode = app.sort_mode;
+                        let prev_sort_descending = app.sort_descending;
+                        let prev_folders_position = app.folders_position;
+                        app.sync_to_tab();
+                        let current_path = app.tab_manager.active().path.clone();
+                        app.tab_manager.new_tab_at(&current_path);
+                        let active = app.tab_manager.active_mut();
+                        active.view_mode = prev_view_mode;
+                        active.sort_mode = prev_sort_mode;
+                        active.sort_descending = prev_sort_descending;
+                        active.folders_position = prev_folders_position;
+                        app.sync_from_tab();
+                        if current_path == COMPUTER_VIEW_ID {
+                            app.setup_computer_view();
+                        }
+                        app.sync_to_tab();
+                        app.update_video_visibility();
                     }
-                    app.sync_to_tab();
-                    app.update_video_visibility();
                 }
                 TabBarAction::CloseTab(idx) => {
                     log::debug!(

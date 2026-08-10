@@ -10,6 +10,9 @@ mod load_pipeline;
 mod refresh;
 mod view_updates;
 
+// EST-02: pool workers run the pipeline body directly.
+pub(crate) use load_pipeline::run_folder_load_pipeline;
+
 impl ImageViewerApp {
     pub fn load_folder(&mut self, force_refresh: bool) {
         self.load_folder_with_icon_trim(force_refresh, true);

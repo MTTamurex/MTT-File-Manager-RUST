@@ -743,33 +743,41 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 }
                 -21 => {
                     if let Some((path, is_directory)) = primary_context_target(&context_menu) {
-                        let target = if is_directory {
-                            path.to_path_buf()
+                        // PERF-05: enforce the tab cap before touching tab state.
+                        if !app.tab_manager.can_add_tab() {
+                            app.notifications.warning(
+                                rust_i18n::t!("tabs.max_reached", max = crate::tabs::MAX_TABS)
+                                    .to_string(),
+                            );
                         } else {
-                            path.parent()
-                                .map(Path::to_path_buf)
-                                .unwrap_or_else(|| path.to_path_buf())
-                        };
+                            let target = if is_directory {
+                                path.to_path_buf()
+                            } else {
+                                path.parent()
+                                    .map(Path::to_path_buf)
+                                    .unwrap_or_else(|| path.to_path_buf())
+                            };
 
-                        let prev_view_mode = app.view_mode;
-                        let prev_sort_mode = app.sort_mode;
-                        let prev_sort_descending = app.sort_descending;
-                        let prev_folders_position = app.folders_position;
-                        app.sync_to_tab();
-                        let target_str = target.to_string_lossy();
-                        app.tab_manager.new_tab_at(target_str.as_ref());
-                        let active = app.tab_manager.active_mut();
-                        active.view_mode = prev_view_mode;
-                        active.sort_mode = prev_sort_mode;
-                        active.sort_descending = prev_sort_descending;
-                        active.folders_position = prev_folders_position;
-                        app.sync_from_tab();
+                            let prev_view_mode = app.view_mode;
+                            let prev_sort_mode = app.sort_mode;
+                            let prev_sort_descending = app.sort_descending;
+                            let prev_folders_position = app.folders_position;
+                            app.sync_to_tab();
+                            let target_str = target.to_string_lossy();
+                            app.tab_manager.new_tab_at(target_str.as_ref());
+                            let active = app.tab_manager.active_mut();
+                            active.view_mode = prev_view_mode;
+                            active.sort_mode = prev_sort_mode;
+                            active.sort_descending = prev_sort_descending;
+                            active.folders_position = prev_folders_position;
+                            app.sync_from_tab();
 
-                        if app.navigation_state.is_computer_view {
-                            app.setup_computer_view();
-                        } else {
-                            app.watch_current_folder();
-                            app.load_folder(false);
+                            if app.navigation_state.is_computer_view {
+                                app.setup_computer_view();
+                            } else {
+                                app.watch_current_folder();
+                                app.load_folder(false);
+                            }
                         }
                     }
                 }

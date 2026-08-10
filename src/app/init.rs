@@ -122,6 +122,7 @@ impl ImageViewerApp {
             folder_load_failure_receiver,
             items_rebuild_sender,
             items_rebuild_receiver,
+            folder_load_pool,
             inactive_items_rebuild_sender,
             inactive_items_rebuild_receiver,
             disk_cache,
@@ -137,6 +138,7 @@ impl ImageViewerApp {
             fs_rx,
             device_event_receiver,
             thumbnail_queue,
+            thumbnail_pipeline_shutdown,
             shared_gen,
             img_rx,
             pending_deletions,
@@ -339,11 +341,13 @@ impl ImageViewerApp {
             folder_meta_resolve_rx,
             loaded_path: String::new(), // Start empty - will be set when first folder loads
             thumbnail_queue,
+            thumbnail_pipeline_shutdown,
             image_receiver: img_rx,
             pending_thumbnails: std::collections::VecDeque::new(),
             thumbnail_request_epochs: std::collections::HashMap::new(),
             stale_items_snapshot: None,
             items: Arc::new(Vec::new()),
+            folder_load_pool,
             // Async loading
             file_entry_receiver,
             file_entry_sender,
@@ -482,6 +486,8 @@ impl ImageViewerApp {
             fs_event_receiver: fs_rx,
             #[cfg(feature = "notify-watcher")]
             fs_event_sender: fs_tx,
+            #[cfg(feature = "notify-watcher")]
+            watcher_overflow_reload_for: None,
             #[cfg(feature = "notify-watcher")]
             deferred_fs_events: std::collections::VecDeque::new(),
             device_event_receiver,

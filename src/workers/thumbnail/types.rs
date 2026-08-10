@@ -37,4 +37,9 @@ pub struct ThumbnailRequest {
     pub bulk_priority: Option<IOPriority>,
     pub bulk_session: Option<u64>,
     pub queued_at: Instant,
+    /// PERF-03: monotonic enqueue counter from the queue. Stable FIFO
+    /// tie-break for requests with identical effective priority and
+    /// directory index; preserved across merge/promote so the original
+    /// request order is kept.
+    pub seq: u64,
 }

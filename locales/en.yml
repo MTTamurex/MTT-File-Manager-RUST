@@ -772,3 +772,6 @@ organizer:
 
 notifications:
   close: "Close notification"
+
+tabs:
+  max_reached: "Tab limit (%{max}) reached. Close a tab to open another."
