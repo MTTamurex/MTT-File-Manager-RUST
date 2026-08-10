@@ -1,9 +1,10 @@
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Instant;
 
 use super::scanner::normalize_path_key;
-use super::{IndexedItem, IndexedVolume};
+use super::{trigram, IndexedItem, IndexedVolume};
 
 pub(super) fn open_session_db() -> Option<rusqlite::Connection> {
     let cache_dir = dirs::data_local_dir()?
@@ -88,6 +89,7 @@ pub(super) fn load_all_volumes(conn: &rusqlite::Connection) -> HashMap<char, Ind
                 items: Vec::new(),
                 live_paths: HashSet::new(),
                 needs_rescan: false,
+                trigram_index: None,
             },
         );
     }
@@ -123,11 +125,12 @@ pub(super) fn load_all_volumes(conn: &rusqlite::Connection) -> HashMap<char, Ind
             continue;
         };
 
-        let path_key = normalize_path_key(Path::new(&full_path));
+        // PERF-06: path_key is shared between the item and live_paths.
+        let path_key: Arc<str> = Arc::from(normalize_path_key(Path::new(&full_path)));
         volume.items.push(IndexedItem {
-            name_lower: name.to_lowercase(),
-            name,
-            full_path,
+            name_lower: Arc::from(name.to_lowercase()),
+            name: Arc::from(name),
+            full_path: Arc::from(full_path),
             path_key: path_key.clone(),
             is_dir,
             size,
@@ -136,6 +139,16 @@ pub(super) fn load_all_volumes(conn: &rusqlite::Connection) -> HashMap<char, Ind
     }
 
     volumes.retain(|_, v| !v.items.is_empty());
+
+    // PERF-06: build trigram indices for loaded volumes (within the size
+    // cap). Runs on the search worker thread at startup, not the UI thread.
+    for volume in volumes.values_mut() {
+        if volume.items.len() <= trigram::TRIGRAM_INDEX_MAX_ITEMS {
+            volume.trigram_index = Some(trigram::TrigramIndex::build(
+                volume.items.iter().map(|item| &*item.name_lower),
+            ));
+        }
+    }
 
     volumes
 }
@@ -159,8 +172,8 @@ pub(super) fn save_volume(conn: &rusqlite::Connection, drive_letter: char, items
         for item in items {
             let _ = stmt.execute(rusqlite::params![
                 dl,
-                item.name,
-                item.full_path,
+                item.name.as_ref(),
+                item.full_path.as_ref(),
                 item.is_dir,
                 item.size
             ]);

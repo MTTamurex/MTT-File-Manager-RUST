@@ -1,15 +1,20 @@
 use std::collections::{HashSet, VecDeque};
 use std::os::windows::fs::MetadataExt;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Instant;
 
 use crate::infrastructure::drive_watcher::DriveWatcherEvent;
 
-use super::{IndexedItem, IndexedVolume, FILE_ATTRIBUTE_REPARSE_POINT, MAX_ITEMS_PER_VOLUME};
+use super::{
+    trigram, IndexedItem, IndexedVolume, FILE_ATTRIBUTE_REPARSE_POINT, MAX_ITEMS_PER_VOLUME,
+};
 
 pub(super) struct ScanOutcome {
     pub items: Vec<IndexedItem>,
-    pub live_paths: HashSet<String>,
+    pub live_paths: HashSet<Arc<str>>,
+    /// PERF-06: trigram index built over `items` (None above the size cap).
+    pub trigram_index: Option<trigram::TrigramIndex>,
     pub directories_scanned: usize,
     pub errors: usize,
     pub elapsed: std::time::Duration,
@@ -64,7 +69,9 @@ pub(super) fn scan_volume(drive_letter: char) -> Result<ScanOutcome, String> {
                 continue;
             }
 
-            let path_key = normalize_path_key(&path);
+            // PERF-06: path_key is shared between the item and live_paths
+            // (previously a full heap copy per path).
+            let path_key: Arc<str> = Arc::from(normalize_path_key(&path));
             let is_dir = file_type.is_dir();
             let size = if !is_dir {
                 entry.metadata().map(|m| m.len()).unwrap_or(0)
@@ -72,9 +79,9 @@ pub(super) fn scan_volume(drive_letter: char) -> Result<ScanOutcome, String> {
                 0
             };
             items.push(IndexedItem {
-                name_lower: name.to_lowercase(),
-                name,
-                full_path: path.to_string_lossy().into_owned(),
+                name_lower: Arc::from(name.to_lowercase()),
+                name: Arc::from(name),
+                full_path: Arc::from(path.to_string_lossy().into_owned()),
                 path_key: path_key.clone(),
                 is_dir,
                 size,
@@ -105,9 +112,26 @@ pub(super) fn scan_volume(drive_letter: char) -> Result<ScanOutcome, String> {
         }
     }
 
+    // PERF-06: build the trigram index on the scan thread (off the search
+    // worker). Volumes above the cap keep the linear scan.
+    let trigram_index = if items.len() <= trigram::TRIGRAM_INDEX_MAX_ITEMS {
+        Some(trigram::TrigramIndex::build(
+            items.iter().map(|item| &*item.name_lower),
+        ))
+    } else {
+        log::debug!(
+            "[SESSION-SEARCH] Volume {}:\\ has {} items (> {}); keeping linear scan",
+            drive_letter,
+            items.len(),
+            trigram::TRIGRAM_INDEX_MAX_ITEMS
+        );
+        None
+    };
+
     Ok(ScanOutcome {
         items,
         live_paths,
+        trigram_index,
         directories_scanned,
         errors,
         elapsed: start.elapsed(),
@@ -120,10 +144,14 @@ pub(super) fn apply_event_to_volume(volume: &mut IndexedVolume, event: &DriveWat
             upsert_path(volume, path);
         }
         DriveWatcherEvent::Deleted(path) => {
-            volume.live_paths.remove(&normalize_path_key(path));
+            volume
+                .live_paths
+                .remove(normalize_path_key(path).as_str());
         }
         DriveWatcherEvent::Renamed(old_path, new_path) => {
-            volume.live_paths.remove(&normalize_path_key(old_path));
+            volume
+                .live_paths
+                .remove(normalize_path_key(old_path).as_str());
             upsert_path(volume, new_path);
         }
         DriveWatcherEvent::PrefixInvalidated(prefix) => {
@@ -145,9 +173,9 @@ fn invalidate_prefix(volume: &mut IndexedVolume, prefix: &Path) {
     }
 
     volume.live_paths.retain(|path_key| {
-        path_key != &prefix_key
+        path_key.as_ref() != prefix_key.as_str()
             && !path_key
-                .strip_prefix(&prefix_key)
+                .strip_prefix(prefix_key.as_str())
                 .is_some_and(|suffix| suffix.starts_with('\\'))
     });
 }
@@ -165,35 +193,51 @@ fn upsert_path(volume: &mut IndexedVolume, path: &Path) {
         return;
     }
 
-    let key = normalize_path_key(path);
-    let full_path = path.to_string_lossy().into_owned();
+    let key: Arc<str> = Arc::from(normalize_path_key(path));
+    let full_path: Arc<str> = Arc::from(path.to_string_lossy().into_owned());
     let is_dir = crate::infrastructure::onedrive::fast_is_dir(path);
     let size = if !is_dir {
         std::fs::metadata(path).map(|m| m.len()).unwrap_or(0)
     } else {
         0
     };
-    let name_lower = name.to_lowercase();
+    let name_lower: Arc<str> = Arc::from(name.to_lowercase());
 
-    if let Some(item) = volume.items.iter_mut().find(|item| item.path_key == key) {
-        item.name_lower = name_lower;
-        item.name = name;
-        item.full_path = full_path;
-        item.is_dir = is_dir;
-        item.size = size;
+    let existing_idx = volume
+        .items
+        .iter()
+        .position(|item| item.path_key.as_ref() == key.as_ref());
+
+    if let Some(idx) = existing_idx {
+        {
+            let item = &mut volume.items[idx];
+            item.name_lower = name_lower.clone();
+            item.name = Arc::from(name);
+            item.full_path = full_path;
+            item.is_dir = is_dir;
+            item.size = size;
+        }
         volume.live_paths.insert(key);
+        // PERF-06: keep the trigram index sound after a rename/modify.
+        if let Some(index) = volume.trigram_index.as_mut() {
+            index.insert_name(idx, &name_lower);
+        }
         return;
     }
 
     volume.items.push(IndexedItem {
-        name_lower,
-        name,
+        name_lower: name_lower.clone(),
+        name: Arc::from(name),
         full_path,
         path_key: key.clone(),
         is_dir,
         size,
     });
     volume.live_paths.insert(key);
+    // PERF-06: index the newly appended item.
+    if let Some(index) = volume.trigram_index.as_mut() {
+        index.insert_name(volume.items.len() - 1, &name_lower);
+    }
 }
 
 pub(super) fn normalize_path_key(path: &Path) -> String {
@@ -211,6 +255,7 @@ pub(super) fn normalize_path_key(path: &Path) -> String {
 mod tests {
     use std::collections::HashSet;
     use std::fs;
+    use std::sync::Arc;
     use std::time::Instant;
 
     use crate::infrastructure::user_session_search::{IndexedItem, IndexedVolume};
@@ -223,7 +268,7 @@ mod tests {
         let file_path = dir.path().join("sample.txt");
         fs::write(&file_path, b"old").expect("write initial file");
 
-        let key = normalize_path_key(&file_path);
+        let key: Arc<str> = Arc::from(normalize_path_key(&file_path));
         let mut live_paths = HashSet::new();
         live_paths.insert(key.clone());
         let mut volume = IndexedVolume {
@@ -231,15 +276,16 @@ mod tests {
             file_system: String::new(),
             last_scan: Instant::now(),
             items: vec![IndexedItem {
-                name: "sample.txt".to_string(),
-                name_lower: "sample.txt".to_string(),
-                full_path: file_path.to_string_lossy().into_owned(),
+                name: Arc::from("sample.txt"),
+                name_lower: Arc::from("sample.txt"),
+                full_path: Arc::from(file_path.to_string_lossy().into_owned()),
                 path_key: key,
                 is_dir: false,
                 size: 3,
             }],
             live_paths,
             needs_rescan: false,
+            trigram_index: None,
         };
 
         fs::write(&file_path, b"new content").expect("rewrite file");
