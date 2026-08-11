@@ -326,12 +326,12 @@ fn entries_to_folder_nodes(
         // DirectoryCache producers already exclude system/special entries via
         // should_include_directory_entry, so no per-entry attribute lookup is
         // needed here — use the cached FileEntry flag instead of metadata().
-        .filter(|e| show_hidden || !e.is_hidden)
+        .filter(|e| show_hidden || !cached_entry_is_hidden(e))
         .map(|e| FolderNode {
             path: e.path.clone(),
             name: e.name.clone(),
             has_subfolders: None,
-            is_hidden: e.is_hidden,
+            is_hidden: cached_entry_is_hidden(e),
         })
         .collect();
     folders.sort_by(|a, b| natord::compare_ignore_case(&a.name, &b.name));
@@ -349,15 +349,15 @@ fn enumerate_subfolders(parent: &Path, show_hidden: bool) -> Option<Vec<FolderNo
     const FILE_ATTRIBUTE_HIDDEN: u32 = 0x2;
     const FILE_ATTRIBUTE_SYSTEM: u32 = 0x4;
 
-    let subfolders = match crate::infrastructure::windows::folder_enumeration::
-        enumerate_subfolders_attrs(parent)
-    {
-        Some(s) => s,
-        None => {
-            log::warn!("sidebar-tree: cannot enumerate {}", parent.display());
-            return None;
-        }
-    };
+    let subfolders =
+        match crate::infrastructure::windows::folder_enumeration::enumerate_subfolders_attrs(parent)
+        {
+            Some(s) => s,
+            None => {
+                log::warn!("sidebar-tree: cannot enumerate {}", parent.display());
+                return None;
+            }
+        };
 
     let mut folders: Vec<FolderNode> = Vec::new();
 
@@ -373,9 +373,10 @@ fn enumerate_subfolders(parent: &Path, show_hidden: bool) -> Option<Vec<FolderNo
             continue;
         }
 
+        let name = entry.name.to_string_lossy().into_owned();
         folders.push(FolderNode {
             path: parent.join(&entry.name),
-            name: entry.name,
+            name,
             has_subfolders: None,
             is_hidden: hidden,
         });
@@ -384,6 +385,16 @@ fn enumerate_subfolders(parent: &Path, show_hidden: bool) -> Option<Vec<FolderNo
     folders.sort_by(|a, b| natord::compare_ignore_case(&a.name, &b.name));
 
     Some(folders)
+}
+
+#[cfg(windows)]
+fn cached_entry_is_hidden(entry: &crate::domain::file_entry::FileEntry) -> bool {
+    entry.is_hidden
+}
+
+#[cfg(not(windows))]
+fn cached_entry_is_hidden(entry: &crate::domain::file_entry::FileEntry) -> bool {
+    is_hidden(&entry.path)
 }
 
 /// List immediate subdirectories of `parent`, sorted alphabetically.
@@ -466,19 +477,20 @@ mod tests {
         use super::enumerate_subfolders;
         use windows::core::PCWSTR;
         use windows::Win32::Storage::FileSystem::{
-            SetFileAttributesW, FILE_ATTRIBUTE_HIDDEN, FILE_ATTRIBUTE_NORMAL,
-            FILE_ATTRIBUTE_SYSTEM,
+            SetFileAttributesW, FILE_ATTRIBUTE_HIDDEN, FILE_ATTRIBUTE_NORMAL, FILE_ATTRIBUTE_SYSTEM,
         };
 
-        fn set_attrs(path: &std::path::Path, attrs: windows::Win32::Storage::FileSystem::FILE_FLAGS_AND_ATTRIBUTES) {
+        fn set_attrs(
+            path: &std::path::Path,
+            attrs: windows::Win32::Storage::FileSystem::FILE_FLAGS_AND_ATTRIBUTES,
+        ) {
             let wide: Vec<u16> = path
                 .to_string_lossy()
                 .encode_utf16()
                 .chain(std::iter::once(0))
                 .collect();
             unsafe {
-                SetFileAttributesW(PCWSTR(wide.as_ptr()), attrs)
-                    .expect("set file attributes");
+                SetFileAttributesW(PCWSTR(wide.as_ptr()), attrs).expect("set file attributes");
             }
         }
 
@@ -514,7 +526,10 @@ mod tests {
             .map(|n| n.name)
             .collect();
         // System folders stay excluded; hidden folder appears with show_hidden
-        assert_eq!(names_all, vec!["HiddenDir".to_string(), "Normal".to_string()]);
+        assert_eq!(
+            names_all,
+            vec!["HiddenDir".to_string(), "Normal".to_string()]
+        );
 
         // Reset attributes so cleanup succeeds on all platforms
         set_attrs(&hidden, FILE_ATTRIBUTE_NORMAL);

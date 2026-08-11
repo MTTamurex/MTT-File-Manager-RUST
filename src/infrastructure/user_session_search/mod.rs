@@ -30,6 +30,7 @@ const MAX_ITEMS_PER_VOLUME: usize = 1_500_000;
 /// volumes wait for the next discovery cycle instead of spawning more
 /// full-volume walkers at once.
 const MAX_CONCURRENT_SESSION_RESCANS: usize = 2;
+const MAX_RESCAN_JOURNAL_EVENTS: usize = 8_192;
 
 #[derive(Clone)]
 struct IndexedItem {
@@ -65,10 +66,18 @@ struct CandidateVolume {
 
 /// PERF-06: result delivered by a background volume-rescan thread.
 struct RescanDelivery {
+    scan_id: u64,
     drive_letter: char,
     label: String,
     file_system: String,
     outcome: Result<scanner::ScanOutcome, String>,
+}
+
+#[derive(Default)]
+struct RescanEventJournal {
+    events: Vec<DriveWatcherEvent>,
+    overflowed: bool,
+    invalidated: bool,
 }
 
 /// In-process search index used for user-session-only mounts.
@@ -83,8 +92,14 @@ pub struct UserSessionSearchIndex {
     /// PERF-06: deliveries from background rescan threads.
     rescan_rx: std::sync::mpsc::Receiver<RescanDelivery>,
     rescan_tx: std::sync::mpsc::Sender<RescanDelivery>,
-    /// Volumes with an in-flight background scan (prevents duplicate scans).
-    rescanning: HashSet<char>,
+    /// Current scan identity per volume. Detached stale scans remain counted
+    /// until delivery, but cannot overwrite a newer mount using the same letter.
+    rescanning: HashMap<char, u64>,
+    live_rescan_count: usize,
+    next_rescan_id: u64,
+    /// Watcher events applied while a scan is in flight. They are replayed on
+    /// the completed snapshot before it replaces the live index.
+    rescan_event_journals: HashMap<char, RescanEventJournal>,
 }
 
 impl UserSessionSearchIndex {
@@ -117,16 +132,17 @@ impl UserSessionSearchIndex {
             db,
             rescan_rx,
             rescan_tx,
-            rescanning: HashSet::new(),
+            rescanning: HashMap::new(),
+            live_rescan_count: 0,
+            next_rescan_id: 0,
+            rescan_event_journals: HashMap::new(),
         }
     }
 
     /// Apply pending filesystem events only (no discovery/full scan).
     pub fn poll_fast_updates(&mut self) {
-        // PERF-06: apply any completed background rescans first so searches
-        // see fresh data without blocking on a scan.
-        self.apply_completed_rescans();
         self.apply_pending_events();
+        self.apply_completed_rescans();
         let active_letters = self.active_letters.clone();
         self.sync_watchers(&active_letters);
     }
@@ -137,13 +153,39 @@ impl UserSessionSearchIndex {
     /// otherwise finished scans — each holding a full volume's worth of
     /// items — would linger in the channel until the next request.
     pub fn drain_completed_rescans(&mut self) {
+        self.apply_pending_events();
         self.apply_completed_rescans();
     }
 
     /// PERF-06: drain completed background rescan deliveries.
     fn apply_completed_rescans(&mut self) {
         while let Ok(delivery) = self.rescan_rx.try_recv() {
+            self.live_rescan_count = self.live_rescan_count.saturating_sub(1);
+
+            if self.rescanning.get(&delivery.drive_letter) != Some(&delivery.scan_id) {
+                log::debug!(
+                    "[SESSION-SEARCH] Discarding stale rescan {} for {}:\\",
+                    delivery.scan_id,
+                    delivery.drive_letter
+                );
+                continue;
+            }
             self.rescanning.remove(&delivery.drive_letter);
+            let journal = self
+                .rescan_event_journals
+                .remove(&delivery.drive_letter)
+                .unwrap_or_default();
+
+            if journal.overflowed || journal.invalidated {
+                if let Some(volume) = self.volumes.get_mut(&delivery.drive_letter) {
+                    volume.needs_rescan = true;
+                }
+                log::warn!(
+                    "[SESSION-SEARCH] Discarding {}:\\ rescan because its event journal became unreliable",
+                    delivery.drive_letter
+                );
+                continue;
+            }
 
             // Volume is no longer active (unmounted/removed while scanning):
             // discard the scan instead of resurrecting it.
@@ -158,23 +200,35 @@ impl UserSessionSearchIndex {
             match delivery.outcome {
                 Ok(scan) => {
                     let count = scan.items.len();
-
-                    if let Some(conn) = &self.db {
-                        db::save_volume(conn, delivery.drive_letter, &scan.items);
+                    let mut volume = IndexedVolume {
+                        label: delivery.label,
+                        file_system: delivery.file_system,
+                        last_scan: Instant::now(),
+                        items: scan.items,
+                        live_paths: scan.live_paths,
+                        needs_rescan: false,
+                        trigram_index: scan.trigram_index,
+                    };
+                    for event in &journal.events {
+                        scanner::apply_event_to_volume(&mut volume, event);
                     }
 
-                    self.volumes.insert(
-                        delivery.drive_letter,
-                        IndexedVolume {
-                            label: delivery.label,
-                            file_system: delivery.file_system,
-                            last_scan: Instant::now(),
-                            items: scan.items,
-                            live_paths: scan.live_paths,
-                            needs_rescan: false,
-                            trigram_index: scan.trigram_index,
-                        },
-                    );
+                    if let Some(conn) = &self.db {
+                        if let Err(error) = db::save_volume(
+                            conn,
+                            delivery.drive_letter,
+                            &volume.items,
+                            &volume.live_paths,
+                        ) {
+                            log::warn!(
+                                "[SESSION-SEARCH] Failed to persist {}:\\ snapshot: {}",
+                                delivery.drive_letter,
+                                error
+                            );
+                        }
+                    }
+
+                    self.volumes.insert(delivery.drive_letter, volume);
                     log::debug!(
                         "[SESSION-SEARCH] {}:\\ indexed {} entries in {:.2}s (dirs: {}, errors: {}) [background]",
                         delivery.drive_letter,
@@ -201,17 +255,22 @@ impl UserSessionSearchIndex {
     /// most `MAX_CONCURRENT_SESSION_RESCANS` scans globally are in flight; a
     /// skipped volume is retried on the next discovery cycle.
     fn schedule_rescan(&mut self, candidate: &CandidateVolume) {
-        if self.rescanning.contains(&candidate.drive_letter) {
+        if self.rescanning.contains_key(&candidate.drive_letter) {
             return;
         }
-        if self.rescanning.len() >= MAX_CONCURRENT_SESSION_RESCANS {
+        if self.live_rescan_count >= MAX_CONCURRENT_SESSION_RESCANS {
             log::debug!(
                 "[SESSION-SEARCH] Rescan cap reached; deferring {}:\\ to next cycle",
                 candidate.drive_letter
             );
             return;
         }
-        self.rescanning.insert(candidate.drive_letter);
+        self.next_rescan_id = self.next_rescan_id.wrapping_add(1);
+        let scan_id = self.next_rescan_id;
+        self.rescanning.insert(candidate.drive_letter, scan_id);
+        self.rescan_event_journals
+            .insert(candidate.drive_letter, RescanEventJournal::default());
+        self.live_rescan_count += 1;
 
         let drive_letter = candidate.drive_letter;
         let label = candidate.label.clone();
@@ -223,6 +282,7 @@ impl UserSessionSearchIndex {
             .spawn(move || {
                 let outcome = scanner::scan_volume(drive_letter).map_err(|e| e.to_string());
                 let _ = tx.send(RescanDelivery {
+                    scan_id,
                     drive_letter,
                     label,
                     file_system,
@@ -231,7 +291,11 @@ impl UserSessionSearchIndex {
             });
 
         if let Err(error) = spawn_result {
-            self.rescanning.remove(&candidate.drive_letter);
+            if self.rescanning.get(&candidate.drive_letter) == Some(&scan_id) {
+                self.rescanning.remove(&candidate.drive_letter);
+                self.rescan_event_journals.remove(&candidate.drive_letter);
+            }
+            self.live_rescan_count = self.live_rescan_count.saturating_sub(1);
             log::warn!(
                 "[SESSION-SEARCH] Failed to spawn background rescan for {}:\\: {}",
                 candidate.drive_letter,
@@ -263,6 +327,7 @@ impl UserSessionSearchIndex {
         self.last_discovery = Some(Instant::now());
         // PERF-06: pick up completed background rescans before evaluating
         // staleness, so freshly scanned volumes are not rescheduled.
+        self.apply_pending_events();
         self.apply_completed_rescans();
         let mut candidates = discovery::discover_candidate_volumes(service_volumes, service_online);
         candidates.sort_by_key(|c| c.drive_letter);
@@ -292,7 +357,6 @@ impl UserSessionSearchIndex {
             }
         }
 
-        self.apply_pending_events();
         self.active_letters = active_letters.clone();
         self.sync_watchers(&active_letters);
 
@@ -320,10 +384,12 @@ impl UserSessionSearchIndex {
             .retain(|letter, _| active_letters.contains(letter));
         self.watcher_retries
             .retain(|letter, _| active_letters.contains(letter));
-        // PERF-06: drop in-flight scan markers for volumes that disappeared;
-        // late deliveries are discarded in apply_completed_rescans.
+        // Invalidate scans for disappeared mounts without decrementing the
+        // actual live-thread count; detached deliveries release that slot.
         self.rescanning
-            .retain(|letter| active_letters.contains(letter));
+            .retain(|letter, _| active_letters.contains(letter));
+        self.rescan_event_journals
+            .retain(|letter, _| active_letters.contains(letter));
         self.active_letters = active_letters;
     }
 
@@ -332,7 +398,7 @@ impl UserSessionSearchIndex {
     }
 
     pub fn count_matches(&self, query: &str) -> u32 {
-        if query.is_empty() {
+        if query.trim().is_empty() {
             return 0;
         }
 
@@ -356,7 +422,7 @@ impl UserSessionSearchIndex {
         offset: usize,
         limit: usize,
     ) -> (Vec<SearchResultItem>, bool) {
-        if query.is_empty() || limit == 0 {
+        if query.trim().is_empty() || limit == 0 {
             return (Vec::new(), false);
         }
 
@@ -421,11 +487,16 @@ impl UserSessionSearchIndex {
 
         for letter in dead_letters {
             if let Some(watcher) = self.watchers.remove(&letter) {
-                if let Some(volume) = self.volumes.get_mut(&letter) {
-                    for event in watcher.poll_events() {
-                        if matches!(event, DriveWatcherEvent::DriveLost(_)) {
-                            self.last_discovery = None;
-                        }
+                for event in watcher.poll_events() {
+                    let drive_lost = matches!(event, DriveWatcherEvent::DriveLost(_));
+                    if drive_lost {
+                        self.last_discovery = None;
+                        self.rescanning.remove(&letter);
+                        self.rescan_event_journals.remove(&letter);
+                    } else if let Some(journal) = self.rescan_event_journals.get_mut(&letter) {
+                        record_rescan_event(journal, event.clone(), letter);
+                    }
+                    if let Some(volume) = self.volumes.get_mut(&letter) {
                         scanner::apply_event_to_volume(volume, &event);
                     }
                 }
@@ -469,19 +540,52 @@ impl UserSessionSearchIndex {
     fn apply_pending_events(&mut self) {
         let mut drive_lost = false;
         for (letter, watcher) in &self.watchers {
-            let Some(volume) = self.volumes.get_mut(letter) else {
-                continue;
-            };
-
             for event in watcher.poll_events() {
-                drive_lost |= matches!(event, DriveWatcherEvent::DriveLost(_));
-                scanner::apply_event_to_volume(volume, &event);
+                let event_is_drive_lost = matches!(event, DriveWatcherEvent::DriveLost(_));
+                drive_lost |= event_is_drive_lost;
+                if event_is_drive_lost {
+                    self.rescanning.remove(letter);
+                    self.rescan_event_journals.remove(letter);
+                } else if let Some(journal) = self.rescan_event_journals.get_mut(letter) {
+                    record_rescan_event(journal, event.clone(), *letter);
+                }
+                if let Some(volume) = self.volumes.get_mut(letter) {
+                    scanner::apply_event_to_volume(volume, &event);
+                }
             }
         }
         if drive_lost {
             self.last_discovery = None;
         }
     }
+}
+
+fn record_rescan_event(
+    journal: &mut RescanEventJournal,
+    event: DriveWatcherEvent,
+    drive_letter: char,
+) {
+    if journal.overflowed {
+        return;
+    }
+    if matches!(event, DriveWatcherEvent::PrefixInvalidated(_)) {
+        journal.events.clear();
+        journal.invalidated = true;
+        return;
+    }
+    if journal.invalidated {
+        return;
+    }
+    if journal.events.len() >= MAX_RESCAN_JOURNAL_EVENTS {
+        journal.events.clear();
+        journal.overflowed = true;
+        log::warn!(
+            "[SESSION-SEARCH] {}:\\ rescan event journal overflowed; result will be discarded",
+            drive_letter
+        );
+        return;
+    }
+    journal.events.push(event);
 }
 
 fn item_matches_query(volume: &IndexedVolume, item: &IndexedItem, tokens: &[&str]) -> bool {
@@ -502,25 +606,24 @@ fn visit_volume_matches<F>(volume: &IndexedVolume, tokens: &[&str], mut visit: F
 where
     F: FnMut(&IndexedItem) -> bool,
 {
-    let candidate_indices: Option<Vec<u32>> =
-        volume.trigram_index.as_ref().and_then(|index| {
-            let mut acc: Option<Vec<u32>> = None;
-            for token in tokens {
-                // `None` = token too short to narrow; the exact predicate
-                // still applies to it during verification.
-                let Some(token_candidates) = index.candidates_for_token(token) else {
-                    continue;
-                };
-                acc = Some(match acc {
-                    None => token_candidates,
-                    Some(prev) => intersect_sorted(prev, token_candidates),
-                });
-                if acc.as_ref().is_some_and(|candidates| candidates.is_empty()) {
-                    break;
-                }
+    let candidate_indices: Option<Vec<u32>> = volume.trigram_index.as_ref().and_then(|index| {
+        let mut acc: Option<Vec<u32>> = None;
+        for token in tokens {
+            // `None` = token too short to narrow; the exact predicate
+            // still applies to it during verification.
+            let Some(token_candidates) = index.candidates_for_token(token) else {
+                continue;
+            };
+            acc = Some(match acc {
+                None => token_candidates,
+                Some(prev) => intersect_sorted(prev, token_candidates),
+            });
+            if acc.as_ref().is_some_and(|candidates| candidates.is_empty()) {
+                break;
             }
-            acc
-        });
+        }
+        acc
+    });
 
     match candidate_indices {
         Some(indices) => {
@@ -557,10 +660,35 @@ impl Default for UserSessionSearchIndex {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::{HashMap, HashSet};
+    use std::path::PathBuf;
     use std::sync::Arc;
-    use std::time::Instant;
+    use std::time::{Duration, Instant};
 
-    use super::{trigram, visit_volume_matches, IndexedItem, IndexedVolume};
+    use crate::infrastructure::drive_watcher::DriveWatcherEvent;
+
+    use super::{
+        record_rescan_event, trigram, visit_volume_matches, IndexedItem, IndexedVolume,
+        RescanDelivery, RescanEventJournal, UserSessionSearchIndex, MAX_RESCAN_JOURNAL_EVENTS,
+    };
+
+    fn empty_index() -> UserSessionSearchIndex {
+        let (rescan_tx, rescan_rx) = std::sync::mpsc::channel();
+        UserSessionSearchIndex {
+            volumes: HashMap::new(),
+            watchers: HashMap::new(),
+            watcher_retries: HashMap::new(),
+            active_letters: HashSet::new(),
+            last_discovery: None,
+            db: None,
+            rescan_rx,
+            rescan_tx,
+            rescanning: HashMap::new(),
+            live_rescan_count: 0,
+            next_rescan_id: 0,
+            rescan_event_journals: HashMap::new(),
+        }
+    }
 
     /// Builds a volume from plain names. `with_index` controls whether the
     /// trigram index is attached, so tests can compare both paths.
@@ -721,5 +849,116 @@ mod tests {
         let via_index = indexed_visit_matches(&volume, &["photo", "2025"]);
         assert_eq!(via_index, expected);
         assert_eq!(expected, vec![volume.items.len() - 1]);
+    }
+
+    #[test]
+    fn whitespace_only_queries_return_no_matches() {
+        let mut index = empty_index();
+        index
+            .volumes
+            .insert('C', test_volume(&["visible.txt"], true));
+
+        assert_eq!(index.count_matches("   \t"), 0);
+        let (results, has_more) = index.search_page("   \t", 0, 10);
+        assert!(results.is_empty());
+        assert!(!has_more);
+    }
+
+    #[test]
+    fn completed_rescan_replays_events_received_during_scan() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let created = dir.path().join("created-during-scan.txt");
+        std::fs::write(&created, b"new").expect("create journaled file");
+
+        let mut index = empty_index();
+        index.active_letters.insert('V');
+        index.rescanning.insert('V', 7);
+        index.live_rescan_count = 1;
+        index.rescan_event_journals.insert(
+            'V',
+            RescanEventJournal {
+                events: vec![DriveWatcherEvent::Created(PathBuf::from(&created))],
+                overflowed: false,
+                invalidated: false,
+            },
+        );
+        index
+            .rescan_tx
+            .send(RescanDelivery {
+                scan_id: 7,
+                drive_letter: 'V',
+                label: "Virtual".to_string(),
+                file_system: "FUSE".to_string(),
+                outcome: Ok(super::scanner::ScanOutcome {
+                    items: Vec::new(),
+                    live_paths: HashSet::new(),
+                    trigram_index: Some(trigram::TrigramIndex::build(std::iter::empty())),
+                    directories_scanned: 1,
+                    errors: 0,
+                    elapsed: Duration::from_millis(1),
+                }),
+            })
+            .expect("send delivery");
+
+        index.apply_completed_rescans();
+
+        let volume = index.volumes.get(&'V').expect("installed volume");
+        assert!(volume
+            .live_paths
+            .contains(super::scanner::normalize_path_key(&created).as_str()));
+        assert_eq!(index.live_rescan_count, 0);
+        assert!(!index.rescanning.contains_key(&'V'));
+    }
+
+    #[test]
+    fn rescan_event_journal_is_bounded() {
+        let mut journal = RescanEventJournal::default();
+        for index in 0..=MAX_RESCAN_JOURNAL_EVENTS {
+            record_rescan_event(
+                &mut journal,
+                DriveWatcherEvent::Unknown(PathBuf::from(format!("V:\\{index}"))),
+                'V',
+            );
+        }
+
+        assert!(journal.overflowed);
+        assert!(journal.events.is_empty());
+    }
+
+    #[test]
+    fn prefix_invalidation_rejects_rescan_snapshot() {
+        let mut journal = RescanEventJournal::default();
+        record_rescan_event(
+            &mut journal,
+            DriveWatcherEvent::PrefixInvalidated(PathBuf::from(r"V:\")),
+            'V',
+        );
+
+        assert!(journal.invalidated);
+        assert!(journal.events.is_empty());
+    }
+
+    #[test]
+    fn stale_rescan_delivery_cannot_replace_current_scan() {
+        let mut index = empty_index();
+        index.active_letters.insert('V');
+        index.rescanning.insert('V', 8);
+        index.live_rescan_count = 2;
+        index
+            .rescan_tx
+            .send(RescanDelivery {
+                scan_id: 7,
+                drive_letter: 'V',
+                label: "Old mount".to_string(),
+                file_system: "FUSE".to_string(),
+                outcome: Err("stale".to_string()),
+            })
+            .expect("send stale delivery");
+
+        index.apply_completed_rescans();
+
+        assert!(index.volumes.is_empty());
+        assert_eq!(index.rescanning.get(&'V'), Some(&8));
+        assert_eq!(index.live_rescan_count, 1);
     }
 }

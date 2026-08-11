@@ -19,7 +19,9 @@ const WATCHER_FS_PROBE_CACHE_TTL: Duration = Duration::from_secs(600);
 /// such paths previously accumulated one blocked thread per navigation. When
 /// the cap is reached the setup is skipped — the next navigation (or watcher
 /// reconfiguration) retries.
+#[cfg(feature = "notify-watcher")]
 const MAX_NOTIFY_SETUP_THREADS: usize = 2;
+#[cfg(feature = "notify-watcher")]
 static LIVE_NOTIFY_SETUP_THREADS: std::sync::atomic::AtomicUsize =
     std::sync::atomic::AtomicUsize::new(0);
 
@@ -148,6 +150,14 @@ impl ImageViewerApp {
 
         // Skip virtual views that aren't real filesystem paths (e.g. "Lixeira", "Computador").
         if crate::domain::special_paths::is_virtual_path(&current_path) {
+            #[cfg(feature = "notify-watcher")]
+            {
+                self.notify_watcher_setup_request_id =
+                    self.notify_watcher_setup_request_id.wrapping_add(1);
+                self.notify_watcher_setup_pending = false;
+                self.notify_watcher_setup_retry_after = None;
+                self.watcher = None;
+            }
             log::debug!(
                 "[WATCHER] Skipping watch for virtual view: {}",
                 current_path
@@ -227,11 +237,41 @@ impl ImageViewerApp {
 
         if paths_to_watch.is_empty() {
             self.watcher = None;
+            self.notify_watcher_setup_pending = false;
+            self.notify_watcher_setup_retry_after = None;
             return;
         }
 
+        // Every request invalidates older setup results, even if the thread cap
+        // forces this request to use consistency polling temporarily.
         self.notify_watcher_setup_request_id = self.notify_watcher_setup_request_id.wrapping_add(1);
         let request_id = self.notify_watcher_setup_request_id;
+
+        // Reserve a setup slot atomically before spawning. Incrementing inside
+        // the new thread allowed concurrent callers to all pass the cap check.
+        let reserved = LIVE_NOTIFY_SETUP_THREADS
+            .fetch_update(
+                std::sync::atomic::Ordering::AcqRel,
+                std::sync::atomic::Ordering::Acquire,
+                |live| (live < MAX_NOTIFY_SETUP_THREADS).then_some(live + 1),
+            )
+            .is_ok();
+        if !reserved {
+            // Keep consistency polling enabled while notify setup is unavailable,
+            // including on NTFS/ReFS where it is normally disabled.
+            self.watcher_fallback_polling = true;
+            self.notify_watcher_setup_pending = true;
+            self.notify_watcher_setup_retry_after = None;
+            log::warn!(
+                "[NOTIFY-WATCHER] Setup thread cap ({}) reached; skipping setup for {:?} (retry on next navigation)",
+                MAX_NOTIFY_SETUP_THREADS,
+                current_path
+            );
+            return;
+        }
+
+        self.notify_watcher_setup_pending = false;
+        self.notify_watcher_setup_retry_after = None;
         let setup_tx = self.notify_watcher_setup_sender.clone();
         let tx = self.fs_event_sender.clone();
         // EST-01: the producer needs a receiver clone to drop the oldest
@@ -240,18 +280,7 @@ impl ImageViewerApp {
         let rx_for_overflow = self.fs_event_receiver.clone();
         let ctx_for_events = self.ui_ctx.clone();
         let ctx_for_setup = self.ui_ctx.clone();
-
-        // EST-02: refuse to spawn when the live-setup cap is reached.
-        if LIVE_NOTIFY_SETUP_THREADS.load(std::sync::atomic::Ordering::Relaxed)
-            >= MAX_NOTIFY_SETUP_THREADS
-        {
-            log::warn!(
-                "[NOTIFY-WATCHER] Setup thread cap ({}) reached; skipping setup for {:?} (retry on next navigation)",
-                MAX_NOTIFY_SETUP_THREADS,
-                current_path
-            );
-            return;
-        }
+        let active_path = paths_to_watch[0].clone();
 
         let spawn_result = std::thread::Builder::new()
             .name("notify-watcher-setup".to_string())
@@ -265,7 +294,6 @@ impl ImageViewerApp {
                             .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
                     }
                 }
-                LIVE_NOTIFY_SETUP_THREADS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 let _setup_guard = SetupThreadGuard;
 
                 let watcher_result =
@@ -301,17 +329,28 @@ impl ImageViewerApp {
                                     Err(err) => err.paths.clone(),
                                 };
                                 let marker = notify::Event {
-                                    kind: notify::EventKind::Modify(
-                                        notify::event::ModifyKind::Any,
-                                    ),
+                                    kind: notify::EventKind::Modify(notify::event::ModifyKind::Any),
                                     paths: marker_paths,
                                     attrs: Default::default(),
                                 };
-                                let _ = tx.try_send(crate::app::state::TimestampedNotifyEvent {
-                                    received_at: std::time::Instant::now(),
-                                    result: Ok(marker),
-                                    overflow: true,
-                                });
+                                let mut overflow_event =
+                                    crate::app::state::TimestampedNotifyEvent {
+                                        received_at: std::time::Instant::now(),
+                                        result: Ok(marker),
+                                        overflow: true,
+                                    };
+                                loop {
+                                    match tx.try_send(overflow_event) {
+                                        Ok(()) => break,
+                                        Err(crossbeam_channel::TrySendError::Full(returned)) => {
+                                            let _ = rx_for_overflow.try_recv();
+                                            overflow_event = returned;
+                                        }
+                                        Err(crossbeam_channel::TrySendError::Disconnected(_)) => {
+                                            break;
+                                        }
+                                    }
+                                }
                             }
                             Err(crossbeam_channel::TrySendError::Disconnected(_)) => {}
                         }
@@ -321,10 +360,14 @@ impl ImageViewerApp {
                 let watcher_to_install = match watcher_result {
                     Ok(mut watcher) => {
                         let mut watched_any = false;
+                        let mut active_watched = false;
+                        let mut watched_count = 0usize;
                         for path_to_watch in &paths_to_watch {
                             match watcher.watch(path_to_watch, RecursiveMode::NonRecursive) {
                                 Ok(_) => {
                                     watched_any = true;
+                                    active_watched |= path_to_watch == &active_path;
+                                    watched_count += 1;
                                     log::debug!(
                                         "[NOTIFY-WATCHER] Successfully watching: {:?}",
                                         path_to_watch
@@ -340,35 +383,66 @@ impl ImageViewerApp {
                             }
                         }
 
-                        watched_any.then_some(watcher)
+                        (
+                            watched_any.then_some(watcher),
+                            active_watched,
+                            watched_count == paths_to_watch.len(),
+                        )
                     }
                     Err(e) => {
                         log::error!("[NOTIFY-WATCHER] Failed to create watcher: {}", e);
-                        None
+                        (None, false, false)
                     }
                 };
 
-                let _ = setup_tx.send((request_id, watcher_to_install));
+                let _ = setup_tx.send(crate::app::state::NotifyWatcherSetupResult {
+                    request_id,
+                    watcher: watcher_to_install.0,
+                    active_watched: watcher_to_install.1,
+                    complete: watcher_to_install.2,
+                });
                 ctx_for_setup.request_repaint();
             });
 
         if let Err(error) = spawn_result {
+            LIVE_NOTIFY_SETUP_THREADS.fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
+            self.notify_watcher_setup_pending = true;
+            self.notify_watcher_setup_retry_after = Some(Instant::now() + Duration::from_secs(5));
+            self.watcher_fallback_polling = true;
             log::error!("[NOTIFY-WATCHER] Failed to spawn setup thread: {}", error);
         }
     }
 
     #[cfg(feature = "notify-watcher")]
     pub(crate) fn poll_notify_watcher_setup(&mut self) {
-        while let Ok((request_id, watcher)) = self.notify_watcher_setup_receiver.try_recv() {
-            if request_id != self.notify_watcher_setup_request_id {
+        while let Ok(result) = self.notify_watcher_setup_receiver.try_recv() {
+            if result.request_id != self.notify_watcher_setup_request_id {
                 log::debug!(
                     "[NOTIFY-WATCHER] Dropping stale watcher setup result request_id={}",
-                    request_id
+                    result.request_id
                 );
                 continue;
             }
 
-            self.watcher = watcher;
+            if !result.active_watched {
+                self.watcher_fallback_polling = true;
+            }
+            if !result.complete {
+                self.notify_watcher_setup_pending = true;
+                self.notify_watcher_setup_retry_after =
+                    Some(Instant::now() + Duration::from_secs(5));
+            }
+            self.watcher = result.watcher;
+        }
+
+        if self.notify_watcher_setup_pending
+            && self
+                .notify_watcher_setup_retry_after
+                .is_none_or(|retry_after| Instant::now() >= retry_after)
+            && LIVE_NOTIFY_SETUP_THREADS.load(std::sync::atomic::Ordering::Acquire)
+                < MAX_NOTIFY_SETUP_THREADS
+        {
+            self.queue_notify_watcher_setup();
         }
     }
 }

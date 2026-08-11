@@ -183,6 +183,14 @@ pub struct TimestampedNotifyEvent {
     pub overflow: bool,
 }
 
+#[cfg(feature = "notify-watcher")]
+pub struct NotifyWatcherSetupResult {
+    pub request_id: u64,
+    pub watcher: Option<RecommendedWatcher>,
+    pub active_watched: bool,
+    pub complete: bool,
+}
+
 pub struct ImageViewerApp {
     pub navigation_state: NavigationState,
     /// Last known modified timestamp for the currently browsed folder.
@@ -406,11 +414,15 @@ pub struct ImageViewerApp {
     #[cfg(feature = "notify-watcher")]
     pub watcher: Option<RecommendedWatcher>,
     #[cfg(feature = "notify-watcher")]
-    pub notify_watcher_setup_sender: Sender<(u64, Option<RecommendedWatcher>)>,
+    pub notify_watcher_setup_sender: Sender<NotifyWatcherSetupResult>,
     #[cfg(feature = "notify-watcher")]
-    pub notify_watcher_setup_receiver: Receiver<(u64, Option<RecommendedWatcher>)>,
+    pub notify_watcher_setup_receiver: Receiver<NotifyWatcherSetupResult>,
     #[cfg(feature = "notify-watcher")]
     pub notify_watcher_setup_request_id: u64,
+    #[cfg(feature = "notify-watcher")]
+    pub notify_watcher_setup_pending: bool,
+    #[cfg(feature = "notify-watcher")]
+    pub notify_watcher_setup_retry_after: Option<Instant>,
     #[cfg(feature = "notify-watcher")]
     pub fs_event_receiver: crossbeam_channel::Receiver<TimestampedNotifyEvent>,
     #[cfg(feature = "notify-watcher")]
@@ -421,6 +433,8 @@ pub struct ImageViewerApp {
     /// and only while that path is still the current folder.
     #[cfg(feature = "notify-watcher")]
     pub watcher_overflow_reload_for: Option<PathBuf>,
+    #[cfg(feature = "notify-watcher")]
+    pub watcher_overflow_reload_inactive_for: Option<PathBuf>,
     /// Events buffered while a file operation is in progress, so external
     /// mutations on other folders are not silently dropped.  Drained once
     /// `file_ops_in_progress` returns to zero.  Capped to avoid unbounded

@@ -40,6 +40,25 @@ impl ImageViewerApp {
         // were dropped, at most one debounced full reload is applied here,
         // and only while the affected folder is still the current one.
         #[cfg(feature = "notify-watcher")]
+        if let Some(inactive_path) = self.watcher_overflow_reload_inactive_for.clone() {
+            if self.file_operation_state.file_ops_in_progress == 0
+                && !self.layout.saved_is_minimized
+                && !self.is_loading_folder
+            {
+                if self.last_auto_reload.elapsed() > Duration::from_millis(theme::AUTO_RELOAD_MS) {
+                    self.watcher_overflow_reload_inactive_for = None;
+                    self.reload_inactive_panel_if_matches(&[&inactive_path]);
+                    if self.watcher_overflow_reload_for.is_none() {
+                        self.last_auto_reload = Instant::now();
+                    }
+                } else {
+                    self.ui_ctx
+                        .request_repaint_after(Duration::from_millis(theme::AUTO_RELOAD_MS + 25));
+                }
+            }
+        }
+
+        #[cfg(feature = "notify-watcher")]
         if let Some(overflow_path) = self.watcher_overflow_reload_for.clone() {
             let still_current = Self::normalize_for_match(&overflow_path)
                 == Self::normalize_for_match(std::path::Path::new(

@@ -483,11 +483,17 @@ impl ImageViewerApp {
             #[cfg(feature = "notify-watcher")]
             notify_watcher_setup_request_id: 0,
             #[cfg(feature = "notify-watcher")]
+            notify_watcher_setup_pending: false,
+            #[cfg(feature = "notify-watcher")]
+            notify_watcher_setup_retry_after: None,
+            #[cfg(feature = "notify-watcher")]
             fs_event_receiver: fs_rx,
             #[cfg(feature = "notify-watcher")]
             fs_event_sender: fs_tx,
             #[cfg(feature = "notify-watcher")]
             watcher_overflow_reload_for: None,
+            #[cfg(feature = "notify-watcher")]
+            watcher_overflow_reload_inactive_for: None,
             #[cfg(feature = "notify-watcher")]
             deferred_fs_events: std::collections::VecDeque::new(),
             device_event_receiver,

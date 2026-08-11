@@ -23,6 +23,11 @@ impl ImageViewerApp {
         };
 
         let job = crate::app::init_workers::folder_load_pool::FolderLoadJob {
+            lane: if validate_against_current_generation {
+                crate::app::init_workers::folder_load_pool::FolderLoadLane::Active
+            } else {
+                crate::app::init_workers::folder_load_pool::FolderLoadLane::Inactive
+            },
             my_gen,
             gen_clone,
             current_path: self.navigation_state.current_path.clone(),
@@ -51,6 +56,7 @@ pub(crate) fn run_folder_load_pipeline(
     job: crate::app::init_workers::folder_load_pool::FolderLoadJob,
 ) {
     let crate::app::init_workers::folder_load_pool::FolderLoadJob {
+        lane: _,
         my_gen,
         gen_clone,
         current_path,
@@ -98,13 +104,10 @@ pub(crate) fn run_folder_load_pipeline(
     // path_has_cloud_attributes() was removed because GetFileAttributesW can BLOCK
     // indefinitely on cloud-only provider folders
     let is_onedrive_base = onedrive::is_cloud_sync_path(&base_path_buf);
-    let prefer_reliable_scan = directory_dirty_registry
-        .is_dirty(base_path_buf.as_path())
+    let prefer_reliable_scan = directory_dirty_registry.is_dirty(base_path_buf.as_path())
         || (!is_onedrive_base
-            && !crate::infrastructure::windows::path_is_usn_filesystem(
-                base_path_buf.as_path(),
-            )
-            .unwrap_or(true));
+            && !crate::infrastructure::windows::path_is_usn_filesystem(base_path_buf.as_path())
+                .unwrap_or(true));
     let mut batch = Vec::with_capacity(batch_size);
     let mut all_entries_disk: Vec<FileEntry> = Vec::new();
     let mut batch_start = std::time::Instant::now();

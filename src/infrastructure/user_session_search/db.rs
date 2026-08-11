@@ -153,47 +153,49 @@ pub(super) fn load_all_volumes(conn: &rusqlite::Connection) -> HashMap<char, Ind
     volumes
 }
 
-pub(super) fn save_volume(conn: &rusqlite::Connection, drive_letter: char, items: &[IndexedItem]) {
+pub(super) fn save_volume(
+    conn: &rusqlite::Connection,
+    drive_letter: char,
+    items: &[IndexedItem],
+    live_paths: &HashSet<Arc<str>>,
+) -> rusqlite::Result<()> {
     let dl = drive_letter.to_string();
+    let tx = conn.unchecked_transaction()?;
+    tx.execute("DELETE FROM session_items WHERE drive_letter = ?1", [&dl])?;
 
-    let tx = match conn.execute("BEGIN IMMEDIATE", []) {
-        Ok(_) => true,
-        Err(e) => {
-            log::warn!("[SESSION-SEARCH] Failed to begin transaction: {}", e);
-            false
-        }
-    };
-
-    let _ = conn.execute("DELETE FROM session_items WHERE drive_letter = ?1", [&dl]);
-
-    if let Ok(mut stmt) = conn.prepare(
+    let persisted_count = {
+        let mut stmt = tx.prepare(
         "INSERT INTO session_items (drive_letter, name, full_path, is_dir, size) VALUES (?1, ?2, ?3, ?4, ?5)",
-    ) {
-        for item in items {
-            let _ = stmt.execute(rusqlite::params![
+        )?;
+        let mut count = 0usize;
+        for item in items
+            .iter()
+            .filter(|item| live_paths.contains(&item.path_key))
+        {
+            stmt.execute(rusqlite::params![
                 dl,
                 item.name.as_ref(),
                 item.full_path.as_ref(),
                 item.is_dir,
                 item.size
-            ]);
+            ])?;
+            count += 1;
         }
-    }
+        count
+    };
 
-    let _ = conn.execute(
+    tx.execute(
         "INSERT OR REPLACE INTO session_volumes (drive_letter, label, file_system) VALUES (?1, '', '')",
         [&dl],
-    );
-
-    if tx {
-        let _ = conn.execute("COMMIT", []);
-    }
+    )?;
+    tx.commit()?;
 
     log::debug!(
         "[SESSION-SEARCH] Persisted {} items for {}:\\",
-        items.len(),
+        persisted_count,
         drive_letter
     );
+    Ok(())
 }
 
 pub(super) fn delete_volume(conn: &rusqlite::Connection, drive_letter: char) {

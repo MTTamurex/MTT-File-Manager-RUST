@@ -144,18 +144,18 @@ pub(super) fn apply_event_to_volume(volume: &mut IndexedVolume, event: &DriveWat
             upsert_path(volume, path);
         }
         DriveWatcherEvent::Deleted(path) => {
-            volume
-                .live_paths
-                .remove(normalize_path_key(path).as_str());
+            volume.live_paths.remove(normalize_path_key(path).as_str());
         }
         DriveWatcherEvent::Renamed(old_path, new_path) => {
-            volume
-                .live_paths
-                .remove(normalize_path_key(old_path).as_str());
+            invalidate_prefix(volume, old_path);
             upsert_path(volume, new_path);
+            if crate::infrastructure::onedrive::fast_is_dir(new_path) {
+                volume.needs_rescan = true;
+            }
         }
         DriveWatcherEvent::PrefixInvalidated(prefix) => {
             invalidate_prefix(volume, prefix);
+            volume.needs_rescan = true;
         }
         DriveWatcherEvent::Unknown(_) => {}
         DriveWatcherEvent::DriveLost(_) => {
@@ -235,7 +235,9 @@ fn upsert_path(volume: &mut IndexedVolume, path: &Path) {
     });
     volume.live_paths.insert(key);
     // PERF-06: index the newly appended item.
-    if let Some(index) = volume.trigram_index.as_mut() {
+    if volume.items.len() > trigram::TRIGRAM_INDEX_MAX_ITEMS {
+        volume.trigram_index = None;
+    } else if let Some(index) = volume.trigram_index.as_mut() {
         index.insert_name(volume.items.len() - 1, &name_lower);
     }
 }
@@ -258,9 +260,10 @@ mod tests {
     use std::sync::Arc;
     use std::time::Instant;
 
+    use crate::infrastructure::drive_watcher::DriveWatcherEvent;
     use crate::infrastructure::user_session_search::{IndexedItem, IndexedVolume};
 
-    use super::{normalize_path_key, upsert_path};
+    use super::{apply_event_to_volume, normalize_path_key, upsert_path};
 
     #[test]
     fn upsert_path_refreshes_existing_file_size() {
@@ -293,5 +296,59 @@ mod tests {
 
         assert_eq!(volume.items.len(), 1);
         assert_eq!(volume.items[0].size, 11);
+    }
+
+    #[test]
+    fn directory_rename_invalidates_old_descendants() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let old_dir = dir.path().join("Old");
+        let old_child = old_dir.join("child.txt");
+        fs::create_dir(&old_dir).expect("create old dir");
+        fs::write(&old_child, b"content").expect("create child");
+
+        let old_dir_key: Arc<str> = Arc::from(normalize_path_key(&old_dir));
+        let old_child_key: Arc<str> = Arc::from(normalize_path_key(&old_child));
+        let mut live_paths = HashSet::from([old_dir_key.clone(), old_child_key.clone()]);
+        let items = vec![
+            IndexedItem {
+                name: Arc::from("Old"),
+                name_lower: Arc::from("old"),
+                full_path: Arc::from(old_dir.to_string_lossy().into_owned()),
+                path_key: old_dir_key.clone(),
+                is_dir: true,
+                size: 0,
+            },
+            IndexedItem {
+                name: Arc::from("child.txt"),
+                name_lower: Arc::from("child.txt"),
+                full_path: Arc::from(old_child.to_string_lossy().into_owned()),
+                path_key: old_child_key.clone(),
+                is_dir: false,
+                size: 7,
+            },
+        ];
+        let mut volume = IndexedVolume {
+            label: String::new(),
+            file_system: String::new(),
+            last_scan: Instant::now(),
+            items,
+            live_paths: std::mem::take(&mut live_paths),
+            needs_rescan: false,
+            trigram_index: None,
+        };
+
+        let new_dir = dir.path().join("New");
+        fs::rename(&old_dir, &new_dir).expect("rename directory");
+        apply_event_to_volume(
+            &mut volume,
+            &DriveWatcherEvent::Renamed(old_dir, new_dir.clone()),
+        );
+
+        assert!(!volume.live_paths.contains(&old_dir_key));
+        assert!(!volume.live_paths.contains(&old_child_key));
+        assert!(volume
+            .live_paths
+            .contains(normalize_path_key(&new_dir).as_str()));
+        assert!(volume.needs_rescan);
     }
 }

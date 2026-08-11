@@ -158,9 +158,14 @@ impl ImageViewerApp {
             const MAX_DEFERRED_FS_EVENTS: usize = 2048;
             while processed_events < max_events_individual {
                 match self.fs_event_receiver.try_recv() {
-                    Ok(event) => {
-                        if self.deferred_fs_events.len() >= MAX_DEFERRED_FS_EVENTS {
-                            self.deferred_fs_events.pop_front();
+                    Ok(mut event) => {
+                        if self.deferred_fs_events.len() >= MAX_DEFERRED_FS_EVENTS
+                            && self
+                                .deferred_fs_events
+                                .pop_front()
+                                .is_some_and(|dropped| dropped.overflow)
+                        {
+                            event.overflow = true;
                         }
                         self.deferred_fs_events.push_back(event);
                         processed_events += 1;
@@ -195,8 +200,17 @@ impl ImageViewerApp {
             // debounced reload scoped to the current folder instead of
             // processing the synthetic marker.
             if timestamped_event.overflow {
-                self.watcher_overflow_reload_for =
-                    Some(PathBuf::from(&self.navigation_state.current_path));
+                let current = PathBuf::from(&self.navigation_state.current_path);
+                self.directory_dirty_registry.mark_dirty(&current);
+                let inactive_path = self
+                    .dual_panel_inactive_state
+                    .as_ref()
+                    .map(|snapshot| PathBuf::from(&snapshot.path));
+                if let Some(path) = inactive_path.as_ref() {
+                    self.directory_dirty_registry.mark_dirty(path);
+                    self.watcher_overflow_reload_inactive_for = Some(path.clone());
+                }
+                self.watcher_overflow_reload_for = Some(current);
                 continue;
             }
 
