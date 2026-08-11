@@ -239,6 +239,7 @@ pub fn open_optical_disc_player(path: PathBuf, volume: f32) -> Option<Child> {
 /// Maximum time the main app waits for the standalone player to exit after a
 /// graceful close request before falling back to a force kill.
 pub const GRACEFUL_CLOSE_TIMEOUT: Duration = Duration::from_millis(1000);
+const FORCE_CLOSE_TIMEOUT: Duration = Duration::from_millis(500);
 
 /// Request graceful termination of the standalone player process by posting
 /// `WM_CLOSE` to every top-level window it owns.
@@ -258,8 +259,8 @@ pub fn request_player_window_close(pid: u32) -> bool {
         let data = &mut *(lparam.0 as *mut (u32, bool));
         let mut window_pid: u32 = 0;
         GetWindowThreadProcessId(hwnd, Some(&mut window_pid));
-        if window_pid == data.0 {
-            let _ = PostMessageW(Some(hwnd), WM_CLOSE, WPARAM(0), LPARAM(0));
+        if window_pid == data.0 && PostMessageW(Some(hwnd), WM_CLOSE, WPARAM(0), LPARAM(0)).is_ok()
+        {
             data.1 = true;
         }
         true.into()
@@ -278,6 +279,80 @@ pub fn request_player_window_close(pid: u32) -> bool {
 #[cfg(not(target_os = "windows"))]
 pub fn request_player_window_close(_pid: u32) -> bool {
     false
+}
+
+pub enum PlayerCloseResult {
+    Closed,
+    Failed(Child),
+}
+
+/// Close and reap a standalone player. This may wait for the graceful timeout
+/// and should run off the UI thread except during application shutdown.
+pub fn close_player_process(mut child: Child) -> PlayerCloseResult {
+    let mut exited = match child.try_wait() {
+        Ok(Some(_)) => true,
+        Ok(None) => false,
+        Err(error) => {
+            log::warn!("[VIDEO-PLAYER] Failed to query player status before close: {error}");
+            false
+        }
+    };
+
+    if !exited && request_player_window_close(child.id()) {
+        let deadline = Instant::now() + GRACEFUL_CLOSE_TIMEOUT;
+        while Instant::now() < deadline {
+            match child.try_wait() {
+                Ok(Some(_)) => {
+                    exited = true;
+                    break;
+                }
+                Ok(None) => std::thread::sleep(Duration::from_millis(20)),
+                Err(error) => {
+                    log::warn!("[VIDEO-PLAYER] Failed while waiting for player exit: {error}");
+                    break;
+                }
+            }
+        }
+    }
+
+    if !exited {
+        if let Ok(Some(_)) = child.try_wait() {
+            exited = true;
+        }
+    }
+    if !exited {
+        match child.kill() {
+            Ok(()) => {
+                let deadline = Instant::now() + FORCE_CLOSE_TIMEOUT;
+                while Instant::now() < deadline {
+                    match child.try_wait() {
+                        Ok(Some(_)) => return PlayerCloseResult::Closed,
+                        Ok(None) => std::thread::sleep(Duration::from_millis(10)),
+                        Err(error) => {
+                            log::warn!(
+                                "[VIDEO-PLAYER] Failed to reap force-closed player: {error}"
+                            );
+                            return PlayerCloseResult::Failed(child);
+                        }
+                    }
+                }
+                log::warn!("[VIDEO-PLAYER] Force-closed player did not exit before timeout");
+                return PlayerCloseResult::Failed(child);
+            }
+            Err(error) => {
+                if let Ok(Some(_)) = child.try_wait() {
+                    return PlayerCloseResult::Closed;
+                }
+                log::warn!("[VIDEO-PLAYER] Failed to force-close player: {error}");
+                return PlayerCloseResult::Failed(child);
+            }
+        }
+    }
+    PlayerCloseResult::Closed
+}
+
+pub fn validate_optical_disc_player_source(path: &Path) -> bool {
+    optical_disc::validate_optical_drive(path).is_ok()
 }
 
 fn open_player(source: PlaybackSource, position: f64, volume: f32) -> Option<Child> {

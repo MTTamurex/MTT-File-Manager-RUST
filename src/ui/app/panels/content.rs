@@ -245,14 +245,13 @@ pub(super) fn render_preview_panel_layout(
                                         app.enqueue_file_hash_for_selected(path);
                                     }
                                     PreviewPanelAction::DetachVideo { path, position, volume } => {
-                                        // 1. Kill any existing standalone player
-                                        app.kill_video_player_process();
-                                        // 2. Destroy the in-process media preview (frees MPV/HWND)
-                                        app.destroy_media_preview();
-                                        // 3. Spawn standalone video player process
-                                        if let Some(child) = crate::video_player::open_video_player(path, position, volume) {
-                                            app.video_player_process = Some(child);
-                                        }
+                                        // Replace any standalone player without blocking the UI.
+                                        // The preview is destroyed only after spawn succeeds.
+                                        let _ = app.queue_standalone_video_player(
+                                            path,
+                                            position,
+                                            Some(volume),
+                                        );
                                     }
                                     PreviewPanelAction::RefreshThumbnail(path) => {
                                         // Check if it's a folder or a file

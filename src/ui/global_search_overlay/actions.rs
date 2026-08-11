@@ -90,8 +90,6 @@ pub(crate) fn open_file_with_default(app: &mut ImageViewerApp, full_path: &str, 
 }
 
 pub(super) fn preview_search_result(app: &mut ImageViewerApp, full_path: &str) {
-    use crate::ui::components::media_preview::MediaPreview;
-
     app.close_global_search();
 
     let path = std::path::PathBuf::from(full_path);
@@ -109,13 +107,7 @@ pub(super) fn preview_search_result(app: &mut ImageViewerApp, full_path: &str) {
 
     if is_video || is_audio {
         // Open in standalone window (same as secondary toolbar play button)
-        app.kill_video_player_process();
-        if matches!(app.media_preview.as_ref(), Some(MediaPreview::Video(_))) {
-            app.destroy_media_preview();
-        }
-        if let Some(child) = crate::video_player::open_video_player(path, 0.0, app.session_volume) {
-            app.video_player_process = Some(child);
-        }
+        let _ = app.queue_standalone_video_player(path, 0.0, None);
     } else if is_pdf {
         crate::pdf_viewer::open_pdf_viewer(path);
     } else if is_image {

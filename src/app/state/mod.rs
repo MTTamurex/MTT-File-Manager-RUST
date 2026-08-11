@@ -21,6 +21,21 @@ pub enum IconRequestOutcome {
     Backpressured,
 }
 
+pub enum PendingVideoPlayerAction {
+    StandaloneFile {
+        path: PathBuf,
+        position: f64,
+        volume_override: Option<f32>,
+    },
+    OpticalDisc {
+        drive_root: PathBuf,
+    },
+    Preview {
+        path: PathBuf,
+        tab_id: usize,
+    },
+}
+
 use std::collections::{BTreeMap, VecDeque};
 // use std::num::NonZeroUsize;
 use std::path::PathBuf;
@@ -350,6 +365,10 @@ pub struct ImageViewerApp {
     pub media_preview: Option<MediaPreview>, // Global media preview (video/image)
     pub media_preview_owner_tab_id: Option<usize>, // Tab that owns the current media preview
     pub video_player_process: Option<std::process::Child>, // Standalone video player process handle
+    pub video_player_close_sender: Sender<crate::video_player::PlayerCloseResult>,
+    pub video_player_close_receiver: Receiver<crate::video_player::PlayerCloseResult>,
+    pub video_player_close_in_progress: bool,
+    pub pending_video_player_action: Option<PendingVideoPlayerAction>,
     pub selected_metadata: Option<(PathBuf, windows_infra::MediaMetadata)>,
     pub metadata_req_sender: Sender<(PathBuf, u64)>,
     pub metadata_res_receiver: Receiver<(PathBuf, u64, windows_infra::MediaMetadata)>,

@@ -5,7 +5,7 @@
 //! IMPORTANT: Media preview has owner-based protection. Only the owner tab can modify playback state.
 //! Non-owner tabs can change their own selection without affecting the global media player.
 
-use crate::app::state::ImageViewerApp;
+use crate::app::state::{ImageViewerApp, PendingVideoPlayerAction};
 use crate::domain::file_entry::FileEntry;
 use crate::infrastructure::diagnostic_logger::{diag_info, field_u64};
 use std::path::Path;
@@ -331,51 +331,176 @@ impl ImageViewerApp {
         }
     }
 
-    /// Close the standalone video player process if one is running.
-    ///
-    /// The close is graceful: the player window receives `WM_CLOSE` so mpv
-    /// shuts down normally and the player flushes its pending volume save to
-    /// the database. `TerminateProcess` would skip that flush and lose any
-    /// volume change still inside the debounce window. If the process does
-    /// not exit within the bounded grace period (or has no window yet), it
-    /// is force-killed as a fallback.
-    ///
-    /// Reloads volume from the database afterwards because the standalone
-    /// player persists volume changes there.
-    pub fn kill_video_player_process(&mut self) {
-        if let Some(mut child) = self.video_player_process.take() {
-            log::debug!("[VIDEO-PLAYER] Closing standalone video player process");
-
-            if matches!(child.try_wait(), Ok(None)) {
-                let pid = child.id();
-                let graceful = crate::video_player::request_player_window_close(pid);
-
-                if graceful {
-                    let deadline = std::time::Instant::now()
-                        + crate::video_player::GRACEFUL_CLOSE_TIMEOUT;
-                    while std::time::Instant::now() < deadline {
-                        match child.try_wait() {
-                            Ok(Some(_)) | Err(_) => break,
-                            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(20)),
-                        }
-                    }
-                }
-
-                // No-op if the graceful shutdown already exited the process;
-                // fallback force kill otherwise. Don't block on child.wait() —
-                // TerminateProcess is immediate on Windows.
-                let _ = child.kill();
-            }
-
-            // The standalone player saves volume to DB on change (debounced)
-            // and on graceful exit, so reload now so the next video uses the
-            // latest volume.
-            if let Some(vol_str) = self.app_state_db.get_preference("media_volume") {
-                if let Ok(vol) = vol_str.parse::<f32>() {
-                    self.session_volume = vol.clamp(0.0, 1.0);
-                }
+    fn reload_session_volume_from_db(&mut self) {
+        if let Some(vol_str) = self.app_state_db.get_preference("media_volume") {
+            if let Ok(vol) = vol_str.parse::<f32>() {
+                self.session_volume = vol.clamp(0.0, 1.0);
             }
         }
+    }
+
+    fn execute_pending_video_player_action(&mut self) -> bool {
+        let Some(action) = self.pending_video_player_action.take() else {
+            return true;
+        };
+
+        match action {
+            PendingVideoPlayerAction::StandaloneFile {
+                path,
+                position,
+                volume_override,
+            } => {
+                let volume = volume_override
+                    .unwrap_or(self.session_volume)
+                    .clamp(0.0, 1.0);
+                if let Some(child) = crate::video_player::open_video_player(path, position, volume)
+                {
+                    if matches!(
+                        self.media_preview.as_ref(),
+                        Some(crate::ui::components::media_preview::MediaPreview::Video(_))
+                    ) {
+                        self.destroy_media_preview();
+                    }
+                    self.video_player_process = Some(child);
+                    true
+                } else {
+                    false
+                }
+            }
+            PendingVideoPlayerAction::OpticalDisc { drive_root } => {
+                if let Some(child) =
+                    crate::video_player::open_optical_disc_player(drive_root, self.session_volume)
+                {
+                    if matches!(
+                        self.media_preview.as_ref(),
+                        Some(crate::ui::components::media_preview::MediaPreview::Video(_))
+                    ) {
+                        self.destroy_media_preview();
+                    }
+                    self.video_player_process = Some(child);
+                    true
+                } else {
+                    self.notifications
+                        .push(crate::application::AppNotification::error(
+                            rust_i18n::t!("video.optical_launch_failed").to_string(),
+                        ));
+                    false
+                }
+            }
+            PendingVideoPlayerAction::Preview { path, tab_id } => {
+                use crate::ui::components::media_preview::MediaPreview;
+                use crate::ui::components::MpvPreview;
+
+                let request_is_current = self.tab_manager.active().id == tab_id
+                    && self
+                        .selected_file
+                        .as_ref()
+                        .is_some_and(|selected| selected_paths_match(&selected.path, &path));
+                if !request_is_current {
+                    return false;
+                }
+
+                if let Some(MediaPreview::Video(player)) = self.media_preview.as_mut() {
+                    player.retarget_for_playback(path);
+                } else {
+                    let mut player = MpvPreview::new(path);
+                    player.play_on_init = true;
+                    player.show_player = true;
+                    player.initial_volume = self.session_volume;
+                    self.media_preview = Some(MediaPreview::Video(Box::new(player)));
+                }
+
+                self.media_preview_owner_tab_id = Some(self.tab_manager.active().id);
+                self.update_video_visibility();
+                true
+            }
+        }
+    }
+
+    fn complete_video_player_close_transition(
+        &mut self,
+        result: crate::video_player::PlayerCloseResult,
+    ) -> bool {
+        self.video_player_close_in_progress = false;
+        match result {
+            crate::video_player::PlayerCloseResult::Closed => {
+                self.reload_session_volume_from_db();
+                self.execute_pending_video_player_action()
+            }
+            crate::video_player::PlayerCloseResult::Failed(child) => {
+                self.video_player_process = Some(child);
+                self.pending_video_player_action = None;
+                false
+            }
+        }
+    }
+
+    fn queue_video_player_action(&mut self, action: PendingVideoPlayerAction) -> bool {
+        self.pending_video_player_action = Some(action);
+        if self.video_player_close_in_progress {
+            return true;
+        }
+
+        let Some(child) = self.video_player_process.take() else {
+            return self.execute_pending_video_player_action();
+        };
+
+        let child_slot = std::sync::Arc::new(std::sync::Mutex::new(Some(child)));
+        let worker_child_slot = std::sync::Arc::clone(&child_slot);
+        let close_sender = self.video_player_close_sender.clone();
+        let ctx = self.ui_ctx.clone();
+        self.video_player_close_in_progress = true;
+
+        let spawn_result = std::thread::Builder::new()
+            .name("video-player-close".to_string())
+            .spawn(move || {
+                let child = worker_child_slot
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .take();
+                let result = child
+                    .map(crate::video_player::close_player_process)
+                    .unwrap_or(crate::video_player::PlayerCloseResult::Closed);
+                let _ = close_sender.send(result);
+                ctx.request_repaint();
+            });
+
+        if let Err(error) = spawn_result {
+            log::error!("[VIDEO-PLAYER] Failed to start close worker: {error}");
+            if let Some(child) = child_slot
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .take()
+            {
+                let result = crate::video_player::close_player_process(child);
+                return self.complete_video_player_close_transition(result);
+            }
+            self.video_player_close_in_progress = false;
+            return false;
+        }
+
+        true
+    }
+
+    /// Close the standalone player synchronously during application shutdown.
+    pub fn kill_video_player_process(&mut self) {
+        self.pending_video_player_action = None;
+        if self.video_player_close_in_progress {
+            if let Ok(result) = self.video_player_close_receiver.recv() {
+                let _ = self.complete_video_player_close_transition(result);
+            } else {
+                self.video_player_close_in_progress = false;
+            }
+        }
+        if let Some(child) = self.video_player_process.take() {
+            log::debug!("[VIDEO-PLAYER] Closing standalone video player process");
+            if let crate::video_player::PlayerCloseResult::Failed(child) =
+                crate::video_player::close_player_process(child)
+            {
+                self.video_player_process = Some(child);
+            }
+        }
+        self.reload_session_volume_from_db();
     }
 
     /// Reap the standalone video player process if it has exited naturally.
@@ -383,6 +508,12 @@ impl ImageViewerApp {
     /// When the player exits, reloads volume from the database so that volume changes
     /// made in the standalone player are reflected in the main app.
     pub fn reap_video_player_process(&mut self) {
+        if self.video_player_close_in_progress {
+            if let Ok(result) = self.video_player_close_receiver.try_recv() {
+                let _ = self.complete_video_player_close_transition(result);
+            }
+        }
+
         if let Some(child) = &mut self.video_player_process {
             match child.try_wait() {
                 Ok(Some(_status)) => {
@@ -391,16 +522,11 @@ impl ImageViewerApp {
 
                     // The standalone player persists volume changes to the database.
                     // Reload session_volume so the next video opens at the correct level.
-                    if let Some(vol_str) = self.app_state_db.get_preference("media_volume") {
-                        if let Ok(vol) = vol_str.parse::<f32>() {
-                            self.session_volume = vol.clamp(0.0, 1.0);
-                        }
-                    }
+                    self.reload_session_volume_from_db();
                 }
                 Ok(None) => {} // Still running
                 Err(e) => {
                     log::warn!("[VIDEO-PLAYER] Error checking player status: {}", e);
-                    self.video_player_process = None;
                 }
             }
         }
@@ -422,27 +548,8 @@ impl ImageViewerApp {
     /// Starts media playback in the preview panel using the same flow as clicking
     /// the play overlay in the details panel.
     pub fn request_video_preview_playback(&mut self, path: std::path::PathBuf) {
-        use crate::ui::components::media_preview::MediaPreview;
-        use crate::ui::components::MpvPreview;
-
-        // Kill standalone video player process if one is running
-        self.kill_video_player_process();
-
-        if let Some(MediaPreview::Video(player)) = self.media_preview.as_mut() {
-            player.retarget_for_playback(path);
-        } else {
-            let mut player = MpvPreview::new(path);
-            player.play_on_init = true;
-            player.show_player = true;
-            player.initial_volume = self.session_volume;
-            self.media_preview = Some(MediaPreview::Video(Box::new(player)));
-        }
-
         let tab_id = self.tab_manager.active().id;
-        self.media_preview_owner_tab_id = Some(tab_id);
-
-        // Final sync: hide/show correctly
-        self.update_video_visibility();
+        let _ = self.queue_video_player_action(PendingVideoPlayerAction::Preview { path, tab_id });
     }
 
     fn selected_standalone_media_path(&self) -> Option<std::path::PathBuf> {
@@ -477,55 +584,38 @@ impl ImageViewerApp {
     }
 
     pub fn open_selected_media_in_standalone_player(&mut self) -> bool {
-        use crate::ui::components::media_preview::MediaPreview;
-
         let Some(path) = self.selected_standalone_media_path() else {
             return false;
         };
 
-        self.kill_video_player_process();
+        self.queue_standalone_video_player(path, 0.0, None)
+    }
 
-        if matches!(self.media_preview.as_ref(), Some(MediaPreview::Video(_))) {
-            self.destroy_media_preview();
-        }
-
-        if let Some(child) = crate::video_player::open_video_player(path, 0.0, self.session_volume)
-        {
-            self.video_player_process = Some(child);
-            true
-        } else {
-            false
-        }
+    pub fn queue_standalone_video_player(
+        &mut self,
+        path: std::path::PathBuf,
+        position: f64,
+        volume_override: Option<f32>,
+    ) -> bool {
+        self.queue_video_player_action(PendingVideoPlayerAction::StandaloneFile {
+            path,
+            position,
+            volume_override,
+        })
     }
 
     pub fn open_optical_disc_in_standalone_player(
         &mut self,
         drive_root: std::path::PathBuf,
     ) -> bool {
-        use crate::ui::components::media_preview::MediaPreview;
-
-        let launch_volume = self
-            .app_state_db
-            .get_preference("media_volume")
-            .and_then(|value| value.parse::<f32>().ok())
-            .unwrap_or(self.session_volume)
-            .clamp(0.0, 1.0);
-        let Some(child) = crate::video_player::open_optical_disc_player(drive_root, launch_volume)
-        else {
+        if !crate::video_player::validate_optical_disc_player_source(&drive_root) {
             self.notifications
                 .push(crate::application::AppNotification::error(
                     rust_i18n::t!("video.optical_launch_failed").to_string(),
                 ));
             return false;
-        };
-
-        self.kill_video_player_process();
-        if matches!(self.media_preview.as_ref(), Some(MediaPreview::Video(_))) {
-            self.destroy_media_preview();
         }
-
-        self.video_player_process = Some(child);
-        true
+        self.queue_video_player_action(PendingVideoPlayerAction::OpticalDisc { drive_root })
     }
 
     fn selected_preview_overlay_action(&self) -> SelectedPreviewOverlayAction {
