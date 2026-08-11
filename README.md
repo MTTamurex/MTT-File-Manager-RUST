@@ -11,6 +11,7 @@
 - **Dual panel (split view)** — Side-by-side file browsing with independent left and right panels; toggle via the toolbar button. Each panel maintains its own navigation history, sort order, view mode, and selection. File copy/move operations default to the opposite panel as the destination
 - **Tabbed navigation** — Multiple tabs with independent history
 - **Grid, Details, Column List, and Miller's Columns views** — Switch between thumbnail, detailed table, horizontally scrolling list, and Finder-style hierarchical layouts. Miller's Columns keeps the folder hierarchy visible in side-by-side columns and supports keyboard navigation, multi-selection, rectangle selection, inline renaming, context menus, and drag-and-drop
+- **File grouping** — Group items by name, date, type, or size in supported views; reverse the group order, collapse individual sections, and preserve grouping preferences between sessions
 - **Per-folder view locks** — Preserve the view mode, sorting, and folder position for one folder or for that folder and all of its subfolders; inherited locks identify their source folder
 - **Smart address bar** — Direct path input with breadcrumbs
 - **Sidebar** — Quick access to drives, libraries, Cloud Drives, and Recycle Bin
@@ -21,7 +22,7 @@
 
 ### Media Preview
 - **Integrated preview** — View files without leaving the app
-- **Dedicated image viewer** — Separate process with a bounded sliding-window GPU texture cache, hidden-first startup, and multi-threaded decoding
+- **Dedicated image viewer** — Separate process with a bounded sliding-window GPU texture cache, hidden-first startup, multi-threaded decoding, and drag-to-pan navigation for zoomed images
 - **Text viewer** — Separate process for plain text, code, logs, and markup files using the same lightweight viewer runtime as the image/PDF viewers
 - **Video player** — Standalone mpv-based player with D3D11 GPU pipeline, DVD/Blu-ray playback from an optical drive's context menu, 5% volume steps with Up/Down, and five-second seeking with the mouse wheel
 - **Optical media limitations** — DVD menus are not supported; protected DVDs depend on libdvdcss and physical-drive access, while AACS-protected Blu-rays require externally configured libaacs and keys
@@ -31,6 +32,7 @@
 - **Animated GIF playback** — Animated preview on details panel
 
 ### Drive Information
+- **System overview** — The This PC details panel shows the device name, CPU, installed RAM, GPU, Windows version, storage usage, motherboard, and BIOS information
 - **Hardware details** — The details panel can show model, serial number, firmware, interface, standard, supported features, rotation, and current/maximum transfer modes for local drives
 - **Health telemetry** — Reads standardized NVMe and ATA/SATA health data such as SMART status, temperature, remaining life, host reads/writes, power cycles, and power-on hours when the device protocol provides those values
 - **NVMe link information** — Reports the current and maximum PCIe generation and link width when Windows exposes the corresponding PCI device properties
@@ -38,7 +40,7 @@
 - **Compatibility limits** — Native NVMe and standard ATA/SATA paths are prioritized. SAT-compatible USB bridges are supported on a best-effort basis, while proprietary USB bridges, RAID controllers, multi-disk volumes, and vendor-specific counter formats may not expose all fields
 
 ### Global Search
-- **Instant search** — Query an in-memory index supporting millions of files
+- **Instant search** — Query an in-memory index supporting millions of files, with trigram acceleration for eligible volumes and fallback matching for short queries and very large indexes
 - **Hybrid volume indexing** — NTFS/ReFS via USN Journal; non-USN volumes via full-tree scan
 - **Background service** — Dedicated Windows Service for continuous indexing
 - **Spotlight-style overlay** — Activated by Ctrl+Shift+F
@@ -53,6 +55,7 @@
 - **Core operations** — Copy, cut, paste, rename, delete
 - **Batch rename** — Select 2+ files and press F2 to open the batch rename modal; configure a shared base name, number position (suffix/prefix), separator style (parentheses, underscore, dash, space, or none), and start/step/padding; drag-to-reorder; live preview table with per-row conflict detection
 - **Native context menu** — Full Windows Shell context menu integration, including the native **New** submenu when right-clicking an empty folder area
+- **Archive extraction** — Access the Windows Shell **Extract All** action directly from the context menu for supported archive files
 - **External drag-and-drop** — Drag files from MTT File Manager to Windows Explorer and other compatible Windows applications
 - **Tag assignment** — Add, remove, or switch file/folder tags from the context menu; tags are preserved on supported renames/moves and cleared when files are deleted
 - **Recycle Bin** — Browse, restore, and permanently delete
@@ -71,7 +74,8 @@
 - **Tag view cache** — Persistent metadata cache and paged loading make large Tag views appear quickly without preloading thumbnails or increasing GPU texture cache limits
 - **Async workers** — Background processing keeps UI responsive
 - **UI virtualization** — Efficient rendering of large directories
-- **Per-folder monitoring** — Default `notify` crate watcher with opt-in drive-wide `ReadDirectoryChangesW`
+- **Bounded background work** — Folder loading, thumbnail generation, and search rescans use concurrency limits to avoid resource spikes and improve shutdown behavior
+- **Per-folder monitoring** — Default `notify` crate watcher with opt-in drive-wide `ReadDirectoryChangesW`; event bursts are coalesced into debounced reloads
 
 ## Graphics Backend
 
