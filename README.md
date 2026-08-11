@@ -17,19 +17,34 @@
 - **Sidebar** — Quick access to drives, libraries, Cloud Drives, and Recycle Bin
 - **Cloud Drives** — Detects Windows Cloud Files sync roots registered with Explorer and shows them in a dedicated sidebar section; tested with OneDrive, Proton Drive and Google Drive
 - **Quick Access** — Pin folders via right-click or drag-and-drop; reorder via drag; persistent storage
-- **Tags** — Assign persistent color tags to files and folders, browse dedicated Tag views from the sidebar, resize the Tags area, and manage custom tags from Settings
 - **Archive navigation** — Open supported compressed files like folders and browse their contents directly (`.zip`, `.7z`, `.rar`, `.tar`, `.tar.gz`, `.tgz`, `.tar.bz2`, `.tbz2`, `.tar.xz`, `.txz`, `.tar.zst`, `.tzst`, `.gz`, `.gzip`)
+
+### Tags
+- **Persistent color tags** — Assign custom color tags to files and folders from the context menu
+- **Dedicated Tag views** — Browse every item assigned to a tag from the resizable Tags section in the sidebar
+- **Tag management** — Create, rename, recolor, and delete tags from Settings, with usage counts shown before deletion
+- **Global Search filters** — Show any tagged item or narrow search results to specific tags
+- **File operation tracking** — Preserve tags across supported renames and moves, and clear them when files are deleted
+- **Scalable browsing** — Load large Tag views in pages using cached file metadata while limiting thumbnail work to visible items
 
 ### Media Preview
 - **Integrated preview** — View files without leaving the app
-- **Dedicated image viewer** — Separate process with a bounded sliding-window GPU texture cache, hidden-first startup, multi-threaded decoding, and drag-to-pan navigation for zoomed images
-- **Text viewer** — Separate process for plain text, code, logs, and markup files using the same lightweight viewer runtime as the image/PDF viewers
-- **Video player** — Standalone mpv-based player with D3D11 GPU pipeline, DVD/Blu-ray playback from an optical drive's context menu, 5% volume steps with Up/Down, and five-second seeking with the mouse wheel
-- **Optical media limitations** — DVD menus are not supported; protected DVDs depend on libdvdcss and physical-drive access, while AACS-protected Blu-rays require externally configured libaacs and keys
-- **Audio playback & metadata** — Audio-only files open in the standalone mpv player with real-time waveform visualization; the preview panel extracts codec, bitrate, channels, sample rate, and music tags
-- **PDF viewer** — Native pdfium-based viewer with asynchronous document loading, prioritized progressive rendering, virtualized pages and thumbnails, bounded texture caching, and keyboard navigation in the thumbnail sidebar
+- **Media metadata** — The preview panel extracts video and audio details such as codec, bitrate, channels, sample rate, and music tags
 - **Smart thumbnails** — Multi-stage generation: image crate → WIC → Shell API → Media Foundation
 - **Animated GIF playback** — Animated preview on details panel
+
+### Image, PDF & Text Viewers
+- **Consistent dedicated windows** — Images, PDF documents, and text files open in lightweight viewer windows with shared dark/light styling, themed toolbars, and native title bar integration
+- **Image viewer** — Uses a bounded sliding-window GPU texture cache, hidden-first startup, multi-threaded decoding, zoom controls, and drag-to-pan navigation for zoomed images
+- **PDF viewer** — Uses native PDFium rendering with asynchronous document loading, prioritized progressive rendering, virtualized pages and thumbnails, bounded texture caching, and keyboard navigation in the thumbnail sidebar
+- **Text viewer** — Opens plain text, source code, logs, and markup files in a focused viewer with search and go-to-line controls
+
+### MPV Video Player
+- **Standalone playback** — Opens video and audio files in an mpv-based player with a D3D11 GPU pipeline
+- **Audio visualization** — Displays a real-time waveform while playing audio-only files
+- **Playback controls** — Supports 5% volume steps with Up/Down and five-second seeking with the mouse wheel
+- **Optical media playback** — Plays DVDs and Blu-rays from an optical drive's context menu
+- **Optical media limitations** — DVD menus are not supported; protected DVDs depend on libdvdcss and physical-drive access, while AACS-protected Blu-rays require externally configured libaacs and keys
 
 ### Drive Information
 - **System overview** — The This PC details panel shows the device name, CPU, installed RAM, GPU, Windows version, storage usage, motherboard, and BIOS information
@@ -105,45 +120,6 @@ The app supports three rendering backend choices, selectable in **Settings > Gen
 - **Video codecs for extended thumbnail support** — Optional, but recommended for formats not supported by Windows out of the box. See [Video Thumbnail Codecs](#video-thumbnail-codecs).
 
 The main file manager does not need to run as administrator for normal file browsing and file operations. Elevated permission is isolated in `mtt-search-service.exe`, which indexes NTFS/ReFS volumes using low-level filesystem data and performs on-demand health queries against physical storage devices. The installer registers this dedicated Windows Service with the required privileges instead of requiring the whole application to run elevated.
-
-## Usage
-
-### Tags
-- **Assign tags** — Select one or more files/folders, open the context menu, and use the Tag submenu to apply or remove color tags.
-- **Browse by tag** — Use the Tags section in the sidebar to open a virtual Tag view containing every item assigned to that tag.
-- **Manage tags** — Open Settings > Tags to create, rename, recolor, delete tags, and toggle whether the Tags section is shown in the sidebar.
-- **Resize the Tags section** — Drag the divider above Tags to adjust its height; double-click the divider to restore automatic sizing.
-- **Search with tags** — In Global Search, use the Tag filter to show all results, any tagged item, or items matching selected tags.
-- **Performance behavior** — Tag views load in pages and use cached file metadata for fast first paint while thumbnails remain loaded only for visible items.
-
-### File Organizer
-- **Create a rule** — Open Settings > Organizer, choose source and destination folders, then select an extension preset or enter a comma-separated list of extensions.
-- **Preview matches** — Use Preview on an enabled rule to check how many files currently match it.
-- **Enable or disable rules** — Enabled rules scan existing matching files and keep monitoring the source folder for new files. Disabling a rule cancels its pending work.
-- **Handle conflicts** — If a file with the same name already exists in the destination, the source file is left in place and the app reports the conflict.
-- **Prevent rule cycles** — Rules that would repeatedly move the same file type between folders are rejected when saved.
-
-### Keyboard Shortcuts
-Some app-level shortcuts are configurable in Settings > Keyboard Shortcuts. Standard file and folder shortcuts remain fixed.
-
-| Shortcut | Action |
-|----------|--------|
-| Ctrl+T | New tab |
-| Ctrl+W | Close tab |
-| Ctrl+Tab | Next tab |
-| Ctrl+Shift+Tab | Previous tab |
-| Ctrl+C / Ctrl+V | Copy / Paste |
-| Ctrl+X | Cut |
-| Delete | Move to Recycle Bin |
-| Shift+Delete | Permanent delete |
-| F2 | Rename (single file) / Batch Rename modal (2+ files selected) |
-| F5 | Reload folder |
-| Ctrl+Shift+F | Global search |
-| Ctrl+L | Focus address bar |
-| Ctrl+Shift+N | New folder |
-| Ctrl+Mouse Wheel | Adjust thumbnail size |
-| Alt+Enter | Properties |
-| Space | Video Preview / Open file with internal viewer (Images,PDF,Text)|
 
 ## Technologies
 
