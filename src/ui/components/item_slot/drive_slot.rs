@@ -53,6 +53,7 @@ pub(super) fn render_drive_slot<O: ItemSlotOperations>(
             egui::Color32::GRAY,
         );
     }
+    crate::ui::drive_health_badge::paint_warning_badge(ui.painter(), visual_icon_rect, drive_info);
 
     current_y += icon_size + 8.0;
 

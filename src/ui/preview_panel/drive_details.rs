@@ -88,11 +88,12 @@ pub(super) fn render_drive_details(
         );
     }
     if snapshot.smart_available {
-        add_detail(
-            ui,
-            &t!("file_info.drive_health"),
-            health_text(snapshot.health_state.clone()),
-        );
+        let health = health_text(snapshot.health_state.clone());
+        if snapshot.health_state == DriveHealthState::Warning {
+            add_warning_health_detail(ui, &t!("file_info.drive_health"), health);
+        } else {
+            add_detail(ui, &t!("file_info.drive_health"), health);
+        }
     }
     if let Some(temperature) = snapshot.temperature_celsius {
         add_detail(
@@ -101,6 +102,19 @@ pub(super) fn render_drive_details(
             format!("{temperature} °C"),
         );
     }
+}
+
+fn add_warning_health_detail(ui: &mut egui::Ui, label: &str, value: String) {
+    ui.horizontal_top(|ui| {
+        ui.add_sized(
+            egui::vec2(110.0, 0.0),
+            egui::Label::new(egui::RichText::new(label).color(ui.visuals().weak_text_color())),
+        );
+        ui.add(egui::Label::new(value).wrap());
+        let (badge_rect, _) = ui.allocate_exact_size(egui::vec2(14.0, 14.0), egui::Sense::hover());
+        crate::ui::drive_health_badge::paint_warning_badge_in_rect(ui.painter(), badge_rect);
+    });
+    ui.add_space(4.0);
 }
 
 fn add_optional_detail(

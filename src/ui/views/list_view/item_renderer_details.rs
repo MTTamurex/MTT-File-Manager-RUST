@@ -205,7 +205,7 @@ pub(crate) fn render_item_icon(
         ),
     );
 
-    if item.drive_info.is_some() {
+    if let Some(drive_info) = &item.drive_info {
         if let Some(drive_icon) = ctx
             .item_icon_loader
             .get_or_load_drive_icon(ui.ctx(), &item.path.to_string_lossy())
@@ -216,6 +216,7 @@ pub(crate) fn render_item_icon(
                 Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1.0, 1.0)),
                 tint,
             );
+            crate::ui::drive_health_badge::paint_warning_badge(ui.painter(), icon_rect, drive_info);
         }
         return;
     }

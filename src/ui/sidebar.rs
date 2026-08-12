@@ -442,12 +442,10 @@ pub fn render_sidebar_drives(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Opt
             let is_expanded = ctx.tree_state.is_expanded(root_path);
             let is_tree_loading = ctx.tree_state.is_loading(root_path);
             let show_eject_button = ctx.mounted_iso_drives.contains_key(disk_path.as_str());
-            let usage_ratio = ctx
-                .drive_info_cache
-                .get(disk_path.as_str())
-                .and_then(|info| {
-                    crate::ui::theme::drive_usage_ratio(info.total_space, info.free_space)
-                });
+            let drive_info = ctx.drive_info_cache.get(disk_path.as_str());
+            let usage_ratio = drive_info.and_then(|info| {
+                crate::ui::theme::drive_usage_ratio(info.total_space, info.free_space)
+            });
 
             let (mut rect, response) =
                 ui.allocate_exact_size(egui::vec2(ui.available_width(), 32.0), Sense::click());
@@ -548,6 +546,13 @@ pub fn render_sidebar_drives(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Opt
                         Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1.0, 1.0)),
                         Color32::WHITE,
                     );
+                    if let Some(drive_info) = drive_info {
+                        crate::ui::drive_health_badge::paint_warning_badge(
+                            ui.painter(),
+                            icon_rect,
+                            drive_info,
+                        );
+                    }
                     cursor_x += 24.0;
                 } else {
                     cursor_x += 24.0;
