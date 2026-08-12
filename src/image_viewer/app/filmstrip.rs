@@ -25,6 +25,7 @@ pub(in crate::image_viewer) struct FilmstripState {
     pub(super) result_rx: crossbeam_channel::Receiver<(usize, u64, loader::DecodedFrame)>,
     pub(super) generation: u64,
     pub(super) scroll_to_current: bool,
+    pub(super) last_viewport_width: Option<f32>,
 }
 
 impl FilmstripState {
@@ -38,6 +39,7 @@ impl FilmstripState {
             result_rx,
             generation: 0,
             scroll_to_current: true,
+            last_viewport_width: None,
         }
     }
 
@@ -47,6 +49,7 @@ impl FilmstripState {
         self.cache_misses.clear();
         self.generation = self.generation.wrapping_add(1);
         self.scroll_to_current = true;
+        self.last_viewport_width = None;
         // Drain any stale results from the old generation
         while self.result_rx.try_recv().is_ok() {}
     }
@@ -141,52 +144,60 @@ impl super::DedicatedImageViewerApp {
                     egui::Stroke::new(1.0, sep_color),
                 );
 
-                let should_scroll = self.filmstrip.scroll_to_current;
+                let viewport_width = ui.available_width().max(0.0);
+                let viewport_resized = self
+                    .filmstrip
+                    .last_viewport_width
+                    .is_none_or(|previous| (previous - viewport_width).abs() > 0.5);
+                self.filmstrip.last_viewport_width = Some(viewport_width);
+
+                let should_scroll = self.filmstrip.scroll_to_current || viewport_resized;
                 self.filmstrip.scroll_to_current = false;
 
-                let scroll_output = egui::ScrollArea::horizontal()
+                let mut scroll_area = egui::ScrollArea::horizontal()
                     .id_salt("filmstrip_scroll")
                     .auto_shrink([false, false])
-                    .scroll_bar_visibility(ScrollBarVisibility::AlwaysHidden)
-                    .show_viewport(ui, |ui, viewport| {
-                        ui.spacing_mut().item_spacing = egui::vec2(FILMSTRIP_SPACING, 0.0);
-                        ui.set_min_width(total_content_w);
+                    .scroll_bar_visibility(ScrollBarVisibility::AlwaysHidden);
+                if should_scroll {
+                    scroll_area = scroll_area.horizontal_scroll_offset(centered_scroll_offset(
+                        current,
+                        total_content_w,
+                        viewport_width,
+                    ));
+                }
 
-                        let first_visible = (viewport.min.x / item_w).floor().max(0.0) as usize;
-                        let last_visible = (viewport.max.x / item_w).ceil().max(0.0) as usize;
-                        let start = first_visible.saturating_sub(FILMSTRIP_OVERSCAN);
-                        let end = (last_visible + FILMSTRIP_OVERSCAN + 1).min(total);
+                let scroll_output = scroll_area.show_viewport(ui, |ui, viewport| {
+                    ui.spacing_mut().item_spacing = egui::vec2(FILMSTRIP_SPACING, 0.0);
+                    ui.set_min_width(total_content_w);
 
-                        let content_left = ui.max_rect().left();
-                        let top = ui.max_rect().top();
-                        if should_scroll {
-                            let current_rect = Rect::from_min_size(
-                                egui::pos2(content_left + current as f32 * item_w, top),
-                                egui::vec2(FILMSTRIP_THUMB_SIZE, FILMSTRIP_THUMB_SIZE),
-                            );
-                            ui.scroll_to_rect(current_rect, Some(egui::Align::Center));
+                    let first_visible = (viewport.min.x / item_w).floor().max(0.0) as usize;
+                    let last_visible = (viewport.max.x / item_w).ceil().max(0.0) as usize;
+                    let start = first_visible.saturating_sub(FILMSTRIP_OVERSCAN);
+                    let end = (last_visible + FILMSTRIP_OVERSCAN + 1).min(total);
+
+                    let content_left = ui.max_rect().left();
+                    let top = ui.max_rect().top();
+
+                    self.request_filmstrip_thumbnails(start..end);
+
+                    for idx in start..end {
+                        let rect = Rect::from_min_size(
+                            egui::pos2(content_left + idx as f32 * item_w, top),
+                            egui::vec2(FILMSTRIP_THUMB_SIZE, FILMSTRIP_THUMB_SIZE),
+                        );
+
+                        let response = ui.interact(
+                            rect,
+                            ui.id().with(("filmstrip_item", idx)),
+                            Sense::click(),
+                        );
+                        self.paint_filmstrip_item(ui, idx, rect, response.hovered());
+
+                        if response.clicked() {
+                            self.navigate_to(idx, &ctx);
                         }
-
-                        self.request_filmstrip_thumbnails(start..end);
-
-                        for idx in start..end {
-                            let rect = Rect::from_min_size(
-                                egui::pos2(content_left + idx as f32 * item_w, top),
-                                egui::vec2(FILMSTRIP_THUMB_SIZE, FILMSTRIP_THUMB_SIZE),
-                            );
-
-                            let response = ui.interact(
-                                rect,
-                                ui.id().with(("filmstrip_item", idx)),
-                                Sense::click(),
-                            );
-                            self.paint_filmstrip_item(ui, idx, rect, response.hovered());
-
-                            if response.clicked() {
-                                self.navigate_to(idx, &ctx);
-                            }
-                        }
-                    });
+                    }
+                });
 
                 // Request repaint if we have pending thumbnails
                 if !self.filmstrip.pending.is_empty() {
@@ -290,6 +301,13 @@ impl super::DedicatedImageViewerApp {
     }
 }
 
+fn centered_scroll_offset(current: usize, content_width: f32, viewport_width: f32) -> f32 {
+    let item_width = FILMSTRIP_THUMB_SIZE + FILMSTRIP_SPACING;
+    let current_center = current as f32 * item_width + FILMSTRIP_THUMB_SIZE * 0.5;
+    let max_offset = (content_width - viewport_width).max(0.0);
+    (current_center - viewport_width * 0.5).clamp(0.0, max_offset)
+}
+
 fn empty_decoded_frame() -> loader::DecodedFrame {
     loader::DecodedFrame {
         rgba: Vec::new(),
@@ -297,5 +315,33 @@ fn empty_decoded_frame() -> loader::DecodedFrame {
         height: 0,
         original_width: 0,
         original_height: 0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn centered_offset_tracks_viewport_width() {
+        let content_width = 40.0 * (FILMSTRIP_THUMB_SIZE + FILMSTRIP_SPACING) + FILMSTRIP_SPACING;
+
+        let windowed = centered_scroll_offset(20, content_width, 800.0);
+        let maximized = centered_scroll_offset(20, content_width, 1400.0);
+
+        assert!(maximized < windowed);
+        assert_eq!(windowed, 1320.0);
+        assert_eq!(maximized, 1020.0);
+    }
+
+    #[test]
+    fn centered_offset_clamps_at_content_edges() {
+        let content_width = 20.0 * (FILMSTRIP_THUMB_SIZE + FILMSTRIP_SPACING) + FILMSTRIP_SPACING;
+
+        assert_eq!(centered_scroll_offset(0, content_width, 800.0), 0.0);
+        assert_eq!(
+            centered_scroll_offset(19, content_width, 800.0),
+            content_width - 800.0
+        );
     }
 }
