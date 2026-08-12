@@ -67,6 +67,57 @@ pub struct DecodedFrame {
     pub original_height: u32,
 }
 
+pub fn rotate_frame(frame: DecodedFrame, rotation: u16) -> Result<DecodedFrame, String> {
+    let rotation = rotation % 360;
+    if rotation == 0 {
+        return Ok(frame);
+    }
+    if !matches!(rotation, 90 | 180 | 270) {
+        return Err(format!("Unsupported rotation: {rotation}"));
+    }
+
+    let expected_len = (frame.width as usize)
+        .checked_mul(frame.height as usize)
+        .and_then(|pixels| pixels.checked_mul(4))
+        .ok_or_else(|| "Image dimensions overflow rotation buffer".to_string())?;
+    if frame.rgba.len() != expected_len {
+        return Err("RGBA buffer size does not match image dimensions".to_string());
+    }
+
+    let (output_width, output_height) = if matches!(rotation, 90 | 270) {
+        (frame.height, frame.width)
+    } else {
+        (frame.width, frame.height)
+    };
+    let mut output = Vec::new();
+    output
+        .try_reserve_exact(expected_len)
+        .map_err(|_| "Not enough memory to rotate clipboard image".to_string())?;
+    output.resize(expected_len, 0);
+
+    for y in 0..frame.height {
+        for x in 0..frame.width {
+            let (output_x, output_y) = match rotation {
+                90 => (frame.height - 1 - y, x),
+                180 => (frame.width - 1 - x, frame.height - 1 - y),
+                270 => (y, frame.width - 1 - x),
+                _ => unreachable!(),
+            };
+            let source = ((y * frame.width + x) * 4) as usize;
+            let destination = ((output_y * output_width + output_x) * 4) as usize;
+            output[destination..destination + 4].copy_from_slice(&frame.rgba[source..source + 4]);
+        }
+    }
+
+    Ok(DecodedFrame {
+        rgba: output,
+        width: output_width,
+        height: output_height,
+        original_width: output_width,
+        original_height: output_height,
+    })
+}
+
 /// Cap on the longest side of frames stored in the in-memory image cache.
 /// Frames larger than this are downscaled with Triangle (fast bilinear)
 /// before being cached, reducing per-frame RAM by up to ~16x for
@@ -829,6 +880,37 @@ mod tests {
         let normalized = normalize_export_path(&path, ExportImageFormat::WebP);
 
         assert_eq!(normalized, PathBuf::from("sample.webp"));
+    }
+
+    #[test]
+    fn rotate_frame_clockwise_preserves_pixels() {
+        let frame = DecodedFrame {
+            rgba: vec![1, 0, 0, 255, 2, 0, 0, 255, 3, 0, 0, 255, 4, 0, 0, 255],
+            width: 2,
+            height: 2,
+            original_width: 2,
+            original_height: 2,
+        };
+
+        let rotated = rotate_frame(frame, 90).expect("rotate frame");
+        let red_values: Vec<u8> = rotated.rgba.chunks_exact(4).map(|pixel| pixel[0]).collect();
+        assert_eq!(red_values, vec![3, 1, 4, 2]);
+        assert_eq!((rotated.width, rotated.height), (2, 2));
+    }
+
+    #[test]
+    fn rotate_frame_swaps_rectangular_dimensions() {
+        let frame = DecodedFrame {
+            rgba: vec![0; 2 * 3 * 4],
+            width: 2,
+            height: 3,
+            original_width: 2,
+            original_height: 3,
+        };
+
+        let rotated = rotate_frame(frame, 270).expect("rotate frame");
+        assert_eq!((rotated.width, rotated.height), (3, 2));
+        assert_eq!((rotated.original_width, rotated.original_height), (3, 2));
     }
 
     #[test]

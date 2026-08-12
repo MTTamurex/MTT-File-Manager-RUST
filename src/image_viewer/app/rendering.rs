@@ -105,6 +105,42 @@ impl super::DedicatedImageViewerApp {
                         }
                     }
 
+                    let image_actions_enabled = self.has_current_texture()
+                        && !self.copy_in_progress
+                        && !self.delete_in_progress
+                        && !self.conversion_in_progress
+                        && !self.wallpaper_in_progress;
+                    if ui
+                        .add_enabled(
+                            image_actions_enabled,
+                            egui::Button::new(&*t!("imageviewer.copy")),
+                        )
+                        .on_hover_text(t!("imageviewer.copy_tooltip"))
+                        .clicked()
+                    {
+                        self.start_copy_current_image(&ctx);
+                    }
+                    if ui
+                        .add_enabled(
+                            image_actions_enabled && self.startup_sequence_rx.is_none(),
+                            egui::Button::new(&*t!("imageviewer.delete")),
+                        )
+                        .on_hover_text(t!("imageviewer.delete_tooltip"))
+                        .clicked()
+                    {
+                        self.start_delete_current_image(&ctx);
+                    }
+                    if ui
+                        .add_enabled(
+                            self.has_current_texture(),
+                            egui::Button::new(&*t!("imageviewer.fullscreen")),
+                        )
+                        .on_hover_text(t!("imageviewer.fullscreen_tooltip"))
+                        .clicked()
+                    {
+                        self.toggle_fullscreen(&ctx);
+                    }
+
                     ui.separator();
                     if total == 0 {
                         ui.label("0 / 0");

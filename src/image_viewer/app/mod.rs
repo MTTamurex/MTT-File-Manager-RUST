@@ -2,15 +2,18 @@ use crate::image_viewer::cache::{LoadPriority, PrefetchEngine, WindowCache};
 use crate::image_viewer::indexer::{self, ImageSequence};
 use crate::image_viewer::loader;
 use eframe::egui;
+use rust_i18n::t;
 use std::borrow::Cow;
 use std::collections::HashSet;
 use std::time::Duration;
 
+mod actions;
 mod filmstrip;
 mod gif_export;
 mod rendering;
 mod wallpaper;
 
+use actions::{CopyImageOutcome, DeleteImageOutcome};
 use filmstrip::FilmstripState;
 use gif_export::{GifAnimation, GifUploadQueue, ViewerStatusMessage};
 
@@ -76,6 +79,11 @@ pub struct DedicatedImageViewerApp {
     /// navigated to a new image) is dropped instead of overwriting the UI.
     pub(super) wallpaper_token: u64,
     pub(super) wallpaper_generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    pub(super) copy_rx: Option<std::sync::mpsc::Receiver<CopyImageOutcome>>,
+    pub(super) copy_in_progress: bool,
+    pub(super) delete_rx: Option<std::sync::mpsc::Receiver<DeleteImageOutcome>>,
+    pub(super) delete_in_progress: bool,
+    pub(super) fullscreen: bool,
     pub(super) status_message: Option<ViewerStatusMessage>,
     /// Timestamp of the last navigation action (for key-repeat throttling).
     pub(super) last_navigate_instant: std::time::Instant,
@@ -146,6 +154,11 @@ impl DedicatedImageViewerApp {
             wallpaper_in_progress: false,
             wallpaper_token: 0,
             wallpaper_generation: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
+            copy_rx: None,
+            copy_in_progress: false,
+            delete_rx: None,
+            delete_in_progress: false,
+            fullscreen: false,
             status_message: None,
             last_navigate_instant: now - Duration::from_millis(100),
             filmstrip: FilmstripState::new(),
@@ -178,6 +191,19 @@ impl DedicatedImageViewerApp {
             path.display(),
             self.viewport_revealed
         );
+
+        if let Err(error) = super::validate_image_path(&path) {
+            log::warn!(
+                "[IMAGE-VIEWER] rejected invalid retarget path '{}': {}",
+                path.display(),
+                error
+            );
+            self.status_message = Some(ViewerStatusMessage {
+                text: t!("imageviewer.open_error", error = error).to_string(),
+                is_error: true,
+            });
+            return;
+        }
 
         if self
             .current_path()
@@ -688,9 +714,39 @@ impl DedicatedImageViewerApp {
     }
 
     fn handle_shortcuts(&mut self, ctx: &egui::Context) {
-        let close = ctx.input(|i| i.key_pressed(egui::Key::Escape));
-        if close {
+        let fullscreen = ctx.input(|i| i.key_pressed(egui::Key::F11));
+        if fullscreen && self.has_current_texture() {
+            self.toggle_fullscreen(ctx);
+            return;
+        }
+
+        let escape = ctx.input(|i| i.key_pressed(egui::Key::Escape));
+        if escape && self.fullscreen {
+            self.set_fullscreen(false, ctx);
+            return;
+        }
+        if escape && self.delete_in_progress {
+            return;
+        }
+        if escape {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            return;
+        }
+
+        let actions_enabled = self.has_current_texture()
+            && !self.copy_in_progress
+            && !self.delete_in_progress
+            && !self.conversion_in_progress
+            && !self.wallpaper_in_progress;
+        let copy = ctx.input(|i| i.key_pressed(egui::Key::C) && i.modifiers.ctrl);
+        if copy && actions_enabled {
+            self.start_copy_current_image(ctx);
+            return;
+        }
+
+        let delete = ctx.input(|i| i.key_pressed(egui::Key::Delete));
+        if delete && actions_enabled && self.startup_sequence_rx.is_none() {
+            self.start_delete_current_image(ctx);
             return;
         }
 
@@ -722,6 +778,16 @@ impl DedicatedImageViewerApp {
         } else if rotate_clockwise {
             self.rotate_cw();
         }
+    }
+
+    pub(super) fn toggle_fullscreen(&mut self, ctx: &egui::Context) {
+        self.set_fullscreen(!self.fullscreen, ctx);
+    }
+
+    fn set_fullscreen(&mut self, fullscreen: bool, ctx: &egui::Context) {
+        self.fullscreen = fullscreen;
+        ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(fullscreen));
+        ctx.request_repaint();
     }
 
     fn maybe_reveal_startup_window(&mut self, ctx: &egui::Context) {
@@ -778,6 +844,9 @@ impl DedicatedImageViewerApp {
 
 impl eframe::App for DedicatedImageViewerApp {
     fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        if self.delete_in_progress && ctx.input(|input| input.viewport().close_requested()) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+        }
         if !self.repaint_ctx_set {
             self.prefetch.set_repaint_ctx(ctx.clone());
             self.repaint_ctx_set = true;
@@ -833,6 +902,8 @@ impl eframe::App for DedicatedImageViewerApp {
         }
         self.handle_shortcuts(ctx);
         self.sync_window_title(ctx);
+        self.poll_copy_current_image();
+        self.poll_delete_current_image(ctx);
 
         // Fill any gaps in the cache window only when the user is not rapidly
         // navigating. During rapid navigation navigate_to() already requests
@@ -876,6 +947,11 @@ impl eframe::App for DedicatedImageViewerApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let style = ui.ctx().global_style();
         ui.set_style(style);
+
+        if self.fullscreen {
+            self.render_center(ui);
+            return;
+        }
 
         if self.sequence.entries.is_empty() {
             self.render_top_bar(ui);

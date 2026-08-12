@@ -14,6 +14,20 @@ impl ImageSequence {
             current_index: 0,
         }
     }
+
+    pub fn remove_path(&mut self, path: &Path) -> bool {
+        let Some(removed_index) = self
+            .entries
+            .iter()
+            .position(|entry| paths_eq_case_insensitive(entry, path))
+        else {
+            return false;
+        };
+
+        self.entries.remove(removed_index);
+        self.current_index = removed_index.min(self.entries.len().saturating_sub(1));
+        true
+    }
 }
 
 pub fn build_sequence(open_path: &Path) -> io::Result<ImageSequence> {
@@ -170,5 +184,37 @@ mod tests {
             vec!["image1.jpg", "image2.jpg", "image10.jpg"]
         );
         assert_eq!(sequence.current_index, 2);
+    }
+
+    #[test]
+    fn remove_path_selects_next_or_previous_entry() {
+        let mut sequence = ImageSequence {
+            entries: vec![
+                PathBuf::from("a.png"),
+                PathBuf::from("b.png"),
+                PathBuf::from("c.png"),
+            ],
+            current_index: 1,
+        };
+
+        assert!(sequence.remove_path(Path::new("B.PNG")));
+        assert_eq!(
+            sequence.entries,
+            vec![PathBuf::from("a.png"), PathBuf::from("c.png")]
+        );
+        assert_eq!(sequence.current_index, 1);
+
+        assert!(sequence.remove_path(Path::new("c.png")));
+        assert_eq!(sequence.current_index, 0);
+        assert!(sequence.remove_path(Path::new("a.png")));
+        assert_eq!(sequence.current_index, 0);
+        assert!(sequence.entries.is_empty());
+    }
+
+    #[test]
+    fn remove_path_preserves_sequence_when_path_is_missing() {
+        let mut sequence = ImageSequence::single(PathBuf::from("a.png"));
+        assert!(!sequence.remove_path(Path::new("missing.png")));
+        assert_eq!(sequence.entries, vec![PathBuf::from("a.png")]);
     }
 }

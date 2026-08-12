@@ -78,7 +78,7 @@ fn should_suppress_duplicate_open(path: &Path) -> bool {
     suppress
 }
 
-fn validate_image_path(path: &Path) -> Result<(), String> {
+pub(crate) fn validate_image_path(path: &Path) -> Result<(), String> {
     let path_str = path.to_string_lossy();
 
     if path_str.contains('\0') {

@@ -7,6 +7,10 @@ use clipboard_win::{formats, Clipboard, Getter, Setter};
 use std::path::PathBuf;
 use windows::Win32::Foundation::HWND;
 
+mod image;
+
+pub use image::{copy_image_file_and_bitmap_to_clipboard, ImageClipboardWriteResult};
+
 /// Preferred drop effect values (from shlobj.h)
 /// Used to indicate if the clipboard operation is a Copy or Move (Cut)
 const DROPEFFECT_COPY: u32 = 1;
@@ -177,7 +181,7 @@ pub fn clear_if_sequence(expected_sequence: u32) -> Result<bool, String> {
 // --- Internal helper functions ---
 
 /// Sets the preferred drop effect in the clipboard
-fn set_preferred_drop_effect(effect: u32) -> Result<(), String> {
+pub(super) fn set_preferred_drop_effect(effect: u32) -> Result<(), String> {
     use windows::core::w;
     use windows::Win32::Foundation::GlobalFree;
     use windows::Win32::System::DataExchange::RegisterClipboardFormatW;
