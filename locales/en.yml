@@ -594,6 +594,7 @@ imageviewer:
   copy_in_progress: "Copying image..."
   copy_success: "Image copied: %{name}"
   copy_files_only: "File copied, but the image format was unavailable: %{name}"
+  copy_superseded: "Copy cancelled because the clipboard changed"
   copy_error: "Failed to copy image: %{error}"
   delete: "Delete"
   delete_tooltip: "Delete using Windows  (Delete)"

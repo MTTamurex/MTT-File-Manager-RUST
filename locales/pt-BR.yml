@@ -594,6 +594,7 @@ imageviewer:
   copy_in_progress: "Copiando imagem..."
   copy_success: "Imagem copiada: %{name}"
   copy_files_only: "Arquivo copiado, mas o formato de imagem não ficou disponível: %{name}"
+  copy_superseded: "Cópia cancelada porque a área de transferência foi alterada"
   copy_error: "Falha ao copiar imagem: %{error}"
   delete: "Excluir"
   delete_tooltip: "Excluir usando o Windows  (Delete)"

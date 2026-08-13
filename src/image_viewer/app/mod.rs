@@ -738,7 +738,7 @@ impl DedicatedImageViewerApp {
             && !self.delete_in_progress
             && !self.conversion_in_progress
             && !self.wallpaper_in_progress;
-        let copy = ctx.input(|i| i.key_pressed(egui::Key::C) && i.modifiers.ctrl);
+        let copy = actions_enabled && ctx.input_mut(take_copy_shortcut);
         if copy && actions_enabled {
             self.start_copy_current_image(ctx);
             return;
@@ -973,7 +973,45 @@ impl eframe::App for DedicatedImageViewerApp {
     }
 }
 
+fn take_copy_shortcut(input: &mut egui::InputState) -> bool {
+    // egui-winit converts Ctrl+C into Event::Copy instead of a C key event.
+    if let Some(position) = input
+        .events
+        .iter()
+        .position(|event| matches!(event, egui::Event::Copy))
+    {
+        input.events.remove(position);
+        true
+    } else {
+        input.key_pressed(egui::Key::C) && input.modifiers.ctrl
+    }
+}
+
 fn paths_eq_case_insensitive(a: &std::path::Path, b: &std::path::Path) -> bool {
     a.to_string_lossy()
         .eq_ignore_ascii_case(&b.to_string_lossy())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::take_copy_shortcut;
+    use eframe::egui;
+
+    #[test]
+    fn copy_shortcut_consumes_copy_event() {
+        let mut input = egui::InputState::default();
+        input.events.push(egui::Event::Copy);
+
+        assert!(take_copy_shortcut(&mut input));
+        assert!(input.events.is_empty());
+    }
+
+    #[test]
+    fn copy_shortcut_ignores_unrelated_events() {
+        let mut input = egui::InputState::default();
+        input.events.push(egui::Event::Text("c".to_string()));
+
+        assert!(!take_copy_shortcut(&mut input));
+        assert_eq!(input.events, vec![egui::Event::Text("c".to_string())]);
+    }
 }

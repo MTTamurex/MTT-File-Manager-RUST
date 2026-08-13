@@ -46,7 +46,22 @@ pub fn copy_files_to_clipboard(
     paths: &[PathBuf],
     owner: HWND,
 ) -> Result<ClipboardWriteResult, String> {
-    write_files_to_clipboard(paths, owner, DROPEFFECT_COPY, "copy")
+    write_files_to_clipboard(paths, owner, DROPEFFECT_COPY, "copy", None)?
+        .ok_or_else(|| "Clipboard changed before file copy could be completed".to_string())
+}
+
+pub fn copy_files_to_clipboard_if_unchanged(
+    paths: &[PathBuf],
+    owner: HWND,
+    expected_sequence: u32,
+) -> Result<Option<ClipboardWriteResult>, String> {
+    write_files_to_clipboard(
+        paths,
+        owner,
+        DROPEFFECT_COPY,
+        "copy",
+        Some(expected_sequence),
+    )
 }
 
 /// Cuts file paths to the Windows clipboard (CF_HDROP format with MOVE effect)
@@ -62,7 +77,8 @@ pub fn cut_files_to_clipboard(
     paths: &[PathBuf],
     owner: HWND,
 ) -> Result<ClipboardWriteResult, String> {
-    write_files_to_clipboard(paths, owner, DROPEFFECT_MOVE, "move")
+    write_files_to_clipboard(paths, owner, DROPEFFECT_MOVE, "move", None)?
+        .ok_or_else(|| "Clipboard changed before file move could be completed".to_string())
 }
 
 /// Writes a native file payload and, when possible, its preferred Shell operation.
@@ -75,7 +91,8 @@ fn write_files_to_clipboard(
     owner: HWND,
     preferred_drop_effect: u32,
     operation_name: &str,
-) -> Result<ClipboardWriteResult, String> {
+    expected_sequence: Option<u32>,
+) -> Result<Option<ClipboardWriteResult>, String> {
     if paths.is_empty() {
         return Err("No files to copy or move".to_string());
     }
@@ -90,6 +107,9 @@ fn write_files_to_clipboard(
 
     let _clip = Clipboard::new_attempts_for(owner.0, 10)
         .map_err(|e| format!("Failed to open clipboard: {:?}", e))?;
+    if expected_sequence.is_some_and(|expected| clipboard_sequence_number() != Some(expected)) {
+        return Ok(None);
+    }
 
     // FileList writes with NoClear. Clear explicitly so a failed effect write cannot
     // leave a stale Copy/Move effect associated with the new file list.
@@ -106,10 +126,10 @@ fn write_files_to_clipboard(
             operation_name,
             error
         );
-        return Ok(ClipboardWriteResult::FilesOnly);
+        return Ok(Some(ClipboardWriteResult::FilesOnly));
     }
 
-    Ok(ClipboardWriteResult::Complete)
+    Ok(Some(ClipboardWriteResult::Complete))
 }
 
 /// Gets file paths from the Windows clipboard (CF_HDROP format)

@@ -29,6 +29,15 @@ impl super::DedicatedImageViewerApp {
             );
             return;
         };
+        let Some(clipboard_sequence) =
+            crate::infrastructure::windows_clipboard::clipboard_sequence_number()
+        else {
+            self.set_status(
+                t!("imageviewer.copy_error", error = "clipboard unavailable"),
+                true,
+            );
+            return;
+        };
 
         let rotation = self.rotation;
         let gif_frame_index = self
@@ -62,6 +71,7 @@ impl super::DedicatedImageViewerApp {
                                 frame.height,
                                 &frame.rgba,
                                 owner,
+                                clipboard_sequence,
                             )
                         })
                 } else {
@@ -74,11 +84,17 @@ impl super::DedicatedImageViewerApp {
                         path.display(),
                         bitmap_error
                     );
-                    crate::infrastructure::windows_clipboard::copy_files_to_clipboard(
+                    crate::infrastructure::windows_clipboard::copy_files_to_clipboard_if_unchanged(
                         std::slice::from_ref(&path),
                         owner,
+                        clipboard_sequence,
                     )
-                    .map(|_| ImageClipboardWriteResult::FilesOnly)
+                    .map(|result| {
+                        result.map_or(
+                            ImageClipboardWriteResult::Superseded,
+                            |_| ImageClipboardWriteResult::FilesOnly,
+                        )
+                    })
                     .map_err(|file_error| {
                         format!(
                             "Bitmap copy failed: {bitmap_error}; file copy failed: {file_error}"
@@ -112,6 +128,9 @@ impl super::DedicatedImageViewerApp {
                     }
                     Ok(ImageClipboardWriteResult::FilesOnly) => {
                         self.set_status(t!("imageviewer.copy_files_only", name = name), true);
+                    }
+                    Ok(ImageClipboardWriteResult::Superseded) => {
+                        self.set_status(t!("imageviewer.copy_superseded"), false);
                     }
                     Err(error) => {
                         self.set_status(t!("imageviewer.copy_error", error = error), true);

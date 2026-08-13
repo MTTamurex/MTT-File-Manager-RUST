@@ -13,6 +13,7 @@ const MAX_DIB_BYTES: usize = 128 * 1024 * 1024 + BITMAPV5HEADER_SIZE;
 pub enum ImageClipboardWriteResult {
     Complete,
     FilesOnly,
+    Superseded,
 }
 
 pub fn copy_image_file_and_bitmap_to_clipboard(
@@ -21,6 +22,7 @@ pub fn copy_image_file_and_bitmap_to_clipboard(
     height: u32,
     rgba: &[u8],
     owner: HWND,
+    expected_sequence: u32,
 ) -> Result<ImageClipboardWriteResult, String> {
     if owner.0.is_null() {
         return Err("No clipboard owner window available".to_string());
@@ -30,6 +32,9 @@ pub fn copy_image_file_and_bitmap_to_clipboard(
     let file_list = vec![path.to_string_lossy().to_string()];
     let _clip = Clipboard::new_attempts_for(owner.0, 10)
         .map_err(|error| format!("Failed to open clipboard: {error:?}"))?;
+    if super::clipboard_sequence_number() != Some(expected_sequence) {
+        return Ok(ImageClipboardWriteResult::Superseded);
+    }
 
     clipboard_win::empty().map_err(|error| format!("Failed to clear clipboard: {error:?}"))?;
     formats::FileList
