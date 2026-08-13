@@ -16,11 +16,6 @@ const INCREMENTAL_APPLY_RETRY_SLEEP: std::time::Duration = std::time::Duration::
 const INCREMENTAL_WRITE_FALLBACK_TIMEOUT: std::time::Duration =
     std::time::Duration::from_millis(60);
 const INCREMENTAL_CONTENTION_LOG_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
-/// Minimum gap between idle-triggered working-set trims. Reclaims resident
-/// pages that on-demand searches / folder-size traversals paged in while the
-/// volume has no USN activity. Throttled process-wide in `memory_trim`.
-const IDLE_TRIM_INTERVAL: std::time::Duration = std::time::Duration::from_secs(120);
-
 struct PendingPersistSnapshot {
     drive_letter: char,
     journal_id: u64,
@@ -150,7 +145,7 @@ fn flush_binary_snapshot_if_dirty(handle: &VolumeIndexHandle, drive_letter: char
     };
 
     if should_trim {
-        crate::memory_trim::trim_working_set(&format!("{}:\\ binary snapshot flush", drive_letter));
+        crate::memory_trim::request_trim(format!("{}:\\ binary snapshot flush", drive_letter));
     }
     should_trim
 }
@@ -175,6 +170,7 @@ pub(crate) fn index_volume(
     db: Arc<index_db::IndexDb>,
     shutdown: Arc<AtomicBool>,
 ) {
+    let startup_operation = crate::memory_trim::begin_active_operation("USN index startup");
     eprintln!("[USN] Starting indexing for volume {}:\\", drive_letter);
 
     let mut index = file_index::VolumeIndex::empty(drive_letter);
@@ -642,15 +638,7 @@ pub(crate) fn index_volume(
     let handle: VolumeIndexHandle = volume_indices::upsert(&indices, index);
     indexing_progress.clear(drive_letter);
     if sizes_already_loaded {
-        crate::memory_trim::trim_working_set(&format!("{}:\\ index ready", drive_letter));
-        crate::memory_trim::trim_working_set_delayed(
-            format!("{}:\\ index ready delayed", drive_letter),
-            std::time::Duration::from_secs(10),
-        );
-        crate::memory_trim::trim_working_set_delayed(
-            format!("{}:\\ index ready idle", drive_letter),
-            std::time::Duration::from_secs(60),
-        );
+        crate::memory_trim::request_trim(format!("{}:\\ index ready", drive_letter));
     }
 
     // Background file size extraction — only needed when loaded from a cache
@@ -660,6 +648,8 @@ pub(crate) fn index_volume(
         let bg_handle = handle.clone();
         let indexing_progress = indexing_progress.clone();
         std::thread::spawn(move || {
+            let _active_operation =
+                crate::memory_trim::begin_active_operation("background MFT size extraction");
             // Open a dedicated volume handle for this background thread.
             let bg_volume = match usn_journal::open_volume(drive_letter) {
                 Ok(h) => h,
@@ -770,14 +760,10 @@ pub(crate) fn index_volume(
                 }
             }
 
-            crate::memory_trim::trim_working_set(&format!(
+            crate::memory_trim::request_trim(format!(
                 "{}:\\ background size extraction",
                 drive_letter
             ));
-            crate::memory_trim::trim_working_set_delayed(
-                format!("{}:\\ background size extraction delayed", drive_letter),
-                std::time::Duration::from_secs(10),
-            );
             indexing_progress.clear(drive_letter);
         });
     }
@@ -786,6 +772,7 @@ pub(crate) fn index_volume(
         "[USN] {}:\\ Index ready, starting incremental updates",
         drive_letter
     );
+    drop(startup_operation);
 
     // Incremental update loop.
     let mut last_persist = std::time::Instant::now();
@@ -805,14 +792,10 @@ pub(crate) fn index_volume(
             break;
         }
 
-        // Tracks whether this cycle processed any real activity. When false,
-        // the volume is idle and we opportunistically trim the working set.
-        let mut did_work = false;
-
         // 1) Read raw USN buffer with no lock held.
         match usn_journal::read_usn_buffer(volume_handle, &journal_info, current_usn) {
             Ok(Some((buffer, bytes_returned, new_usn))) => {
-                did_work = true;
+                let _trim_exclusion = crate::memory_trim::begin_trim_exclusion();
                 // 2) Apply deltas under a short bounded try_write retry window
                 // to avoid read-starvation while reducing staleness under contention.
                 let mut applied = false;
@@ -899,7 +882,7 @@ pub(crate) fn index_volume(
             };
 
             if !pending_frns.is_empty() {
-                did_work = true;
+                let _trim_exclusion = crate::memory_trim::begin_trim_exclusion();
                 // Read sizes without holding any lock (I/O phase).
                 let geometry = crate::mft_reader::query_mft_geometry_pub(volume_handle);
                 if let Ok(record_size) = geometry {
@@ -978,6 +961,7 @@ pub(crate) fn index_volume(
 
         // 3) Persist every 5 minutes — incremental sync only (not full rebuild).
         if last_persist.elapsed() > std::time::Duration::from_secs(300) {
+            let _trim_exclusion = crate::memory_trim::begin_trim_exclusion();
             let snapshot = take_pending_snapshot(&handle);
             let should_shrink_index =
                 persist_pending_snapshot(db.as_ref(), &handle, drive_letter, snapshot);
@@ -995,15 +979,6 @@ pub(crate) fn index_volume(
             }
 
             flush_binary_snapshot_if_dirty(&handle, drive_letter);
-        }
-
-        // When the volume is idle, reclaim any working-set growth from
-        // on-demand searches / folder-size traversals. Throttled process-wide.
-        if !did_work {
-            crate::memory_trim::trim_working_set_idle(
-                &format!("{}:\\ idle", drive_letter),
-                IDLE_TRIM_INTERVAL,
-            );
         }
     }
 

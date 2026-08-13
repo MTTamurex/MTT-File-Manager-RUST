@@ -867,7 +867,7 @@ pub fn search_page(
     offset: usize,
     limit: usize,
 ) -> SearchPage {
-    let _active_operation = crate::memory_trim::begin_active_operation();
+    let _active_operation = crate::memory_trim::begin_active_operation("search");
     if query.is_empty() || limit == 0 {
         return SearchPage {
             items: Vec::new(),

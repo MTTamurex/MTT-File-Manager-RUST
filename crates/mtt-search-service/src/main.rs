@@ -167,6 +167,8 @@ pub fn run_indexer(shutdown: Arc<AtomicBool>) {
     );
     eprintln!("[SERVICE] Starting indexer...");
 
+    memory_trim::start_coordinator(shutdown.clone());
+
     // Create shared state before anything else so the IPC server can start
     // accepting connections immediately — even before volumes are discovered.
     let indices: SharedVolumeIndices = volume_indices::new_shared();

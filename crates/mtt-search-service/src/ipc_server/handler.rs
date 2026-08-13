@@ -242,7 +242,6 @@ fn repair_suspicious_zero_folder_size(
     };
 
     let candidates: Vec<(u64, Option<String>)> = {
-        let _active_operation = crate::memory_trim::begin_active_operation();
         let vol = handle.read();
         let candidates =
             vol.collect_zero_size_file_frns_in_subtree(dir_frn, ZERO_SIZE_FOLDER_REPAIR_LIMIT);
@@ -399,7 +398,8 @@ pub(super) fn handle_client(
                     std::thread::Builder::new()
                         .name("warm-index".into())
                         .spawn(move || {
-                            let _active_operation = crate::memory_trim::begin_active_operation();
+                            let _active_operation =
+                                crate::memory_trim::begin_active_operation("index warmup");
                             struct WarmGuard(Arc<AtomicBool>);
                             impl Drop for WarmGuard {
                                 fn drop(&mut self) {
@@ -582,6 +582,8 @@ pub(super) fn handle_client(
             if !require_authorized_folder_size_client(pipe, &path) {
                 return;
             }
+            let _active_operation =
+                crate::memory_trim::begin_active_operation("folder size request");
 
             let drive_letter = match path.chars().next() {
                 Some(c) if c.is_ascii_alphabetic() => c.to_ascii_uppercase(),
@@ -609,7 +611,6 @@ pub(super) fn handle_client(
             };
 
             let (indexed_frn, has_pending_refreshes) = {
-                let _active_operation = crate::memory_trim::begin_active_operation();
                 let vol = handle.read();
                 if !matches!(vol.state, IndexState::Ready) {
                     drop(vol);

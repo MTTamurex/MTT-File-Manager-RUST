@@ -76,11 +76,7 @@ pub(crate) fn index_non_ntfs_volume(
         cached_index.state = file_index::IndexState::Ready;
 
         handle = Some(volume_indices::upsert(&indices, cached_index));
-        crate::memory_trim::trim_working_set(&format!("{}:\\ fallback cache load", drive_letter));
-        crate::memory_trim::trim_working_set_delayed(
-            format!("{}:\\ fallback cache load delayed", drive_letter),
-            std::time::Duration::from_secs(10),
-        );
+        crate::memory_trim::request_trim(format!("{}:\\ fallback cache load", drive_letter));
         eprintln!(
             "[SCAN] {}:\\ Loaded {} cached records for fallback index",
             drive_letter, cached_count
@@ -102,6 +98,8 @@ pub(crate) fn index_non_ntfs_volume(
         if shutdown.load(Ordering::Relaxed) {
             break;
         }
+
+        let _trim_exclusion = crate::memory_trim::begin_trim_exclusion();
 
         let mut scanned_index = prev_record_count
             .map(|estimate| file_index::VolumeIndex::with_estimated_records(drive_letter, estimate))
@@ -157,11 +155,7 @@ pub(crate) fn index_non_ntfs_volume(
                 let records = stats.records_indexed;
                 handle = Some(volume_indices::upsert(&indices, scanned_index));
                 indexing_progress.clear(drive_letter);
-                crate::memory_trim::trim_working_set(&format!("{}:\\ fallback scan", drive_letter));
-                crate::memory_trim::trim_working_set_delayed(
-                    format!("{}:\\ fallback scan delayed", drive_letter),
-                    std::time::Duration::from_secs(10),
-                );
+                crate::memory_trim::request_trim(format!("{}:\\ fallback scan", drive_letter));
 
                 // Adaptive backoff based on whether record count changed.
                 let changed = prev_record_count != Some(records);
@@ -204,6 +198,8 @@ pub(crate) fn index_non_ntfs_volume(
                 }
             }
         }
+
+        drop(_trim_exclusion);
 
         let wait_result = if let Some(monitor) = &change_monitor {
             monitor.wait_for_change_or_timeout(&shutdown, current_interval)
