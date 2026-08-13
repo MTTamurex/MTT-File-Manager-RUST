@@ -318,43 +318,10 @@ fn resolve_shortcut_target(shortcut_path: &Path) -> Option<PathBuf> {
         }
 
         let target_text = String::from_utf16_lossy(&target[..nul]);
-        Some(PathBuf::from(expand_environment_strings(&target_text)))
+        Some(PathBuf::from(
+            super::environment::expand_environment_strings(&target_text),
+        ))
     }
-}
-
-fn expand_environment_strings(text: &str) -> String {
-    if !text.contains('%') {
-        return text.to_string();
-    }
-
-    let mut output = String::with_capacity(text.len());
-    let mut rest = text;
-
-    while let Some(start) = rest.find('%') {
-        output.push_str(&rest[..start]);
-        let after_start = &rest[start + 1..];
-        let Some(end) = after_start.find('%') else {
-            output.push('%');
-            output.push_str(after_start);
-            return output;
-        };
-
-        let name = &after_start[..end];
-        if name.is_empty() {
-            output.push_str("%%");
-        } else if let Ok(value) = std::env::var(name) {
-            output.push_str(&value);
-        } else {
-            output.push('%');
-            output.push_str(name);
-            output.push('%');
-        }
-
-        rest = &after_start[end + 1..];
-    }
-
-    output.push_str(rest);
-    output
 }
 
 fn fast_is_directory(path: &Path) -> bool {
