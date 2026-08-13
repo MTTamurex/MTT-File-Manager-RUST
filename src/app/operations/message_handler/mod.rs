@@ -98,6 +98,9 @@ impl ImageViewerApp {
             // events as an identity boundary instead of merging old metadata.
             self.drive_state.clear_cached_drive_info();
             self.drive_state.invalidate_drive_info_refreshes();
+            self.drive_state
+                .drive_health_scheduler
+                .reset_preload(Instant::now());
 
             // Launch async drive scan (non-blocking)
             let now = Instant::now();

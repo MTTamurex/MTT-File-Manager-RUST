@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 pub const MAX_DRIVE_HEALTH_STRING_LEN: usize = 256;
 pub const MAX_DRIVE_HEALTH_FEATURES: usize = 64;
 pub const MAX_DRIVE_HEALTH_FEATURE_LEN: usize = 128;
+pub const DRIVE_HEALTH_RETRY_LATER_ERROR: &str = "Drive health temporarily busy";
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub enum DriveHealthState {
@@ -134,12 +135,18 @@ mod tests {
 
     #[test]
     fn request_and_response_roundtrip() {
-        let request = SearchRequest::GetDriveHealth { drive_letter: 'd' };
+        let request = SearchRequest::GetDriveHealth {
+            drive_letter: 'd',
+            background: true,
+        };
         let encoded = encode_message(&request).unwrap();
         let decoded: SearchRequest = decode_message(&encoded[4..]).unwrap();
         assert!(matches!(
             decoded,
-            SearchRequest::GetDriveHealth { drive_letter: 'd' }
+            SearchRequest::GetDriveHealth {
+                drive_letter: 'd',
+                background: true,
+            }
         ));
 
         let snapshot = sample_snapshot();
@@ -155,12 +162,18 @@ mod tests {
 
     #[test]
     fn request_rejects_non_ascii_letter() {
-        assert!(SearchRequest::GetDriveHealth { drive_letter: '1' }
-            .validate()
-            .is_err());
-        assert!(SearchRequest::GetDriveHealth { drive_letter: 'Ç' }
-            .validate()
-            .is_err());
+        assert!(SearchRequest::GetDriveHealth {
+            drive_letter: '1',
+            background: false,
+        }
+        .validate()
+        .is_err());
+        assert!(SearchRequest::GetDriveHealth {
+            drive_letter: 'Ç',
+            background: false,
+        }
+        .validate()
+        .is_err());
     }
 
     #[test]

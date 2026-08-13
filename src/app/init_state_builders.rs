@@ -123,6 +123,7 @@ pub(in crate::app) fn build_drive_state(
         drive_health_updated_at: std::collections::HashMap::new(),
         drive_health_failed_at: std::collections::HashMap::new(),
         drive_health_next_request_id: 0,
+        drive_health_scheduler: crate::app::drive_state::DriveHealthScheduler::new(),
         optimistically_hidden_drives: std::collections::HashSet::new(),
         drive_info_refresh: DriveInfoRefreshTracker::new(std::time::Instant::now()),
     }

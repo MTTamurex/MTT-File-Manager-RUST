@@ -547,7 +547,7 @@ pub fn render_sidebar_drives(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Opt
                         Color32::WHITE,
                     );
                     if let Some(drive_info) = drive_info {
-                        crate::ui::drive_health_badge::paint_warning_badge(
+                        crate::ui::drive_health_badge::paint_health_badge(
                             ui.painter(),
                             icon_rect,
                             drive_info,

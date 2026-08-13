@@ -241,6 +241,11 @@ fn synchronous_pass_through<T: Send + 'static>(
     let worker = std::thread::Builder::new()
         .name("drive-health-pass-through".to_string())
         .spawn(move || {
+            // Health queries are globally serialized. Mirror the active query's
+            // priority in this helper thread that owns the synchronous IOCTL.
+            if super::query_is_background() {
+                super::set_background_thread_priority();
+            }
             let _permit = permit;
             let mut returned = 0;
             let packet_ptr = &mut packet as *mut T;

@@ -188,6 +188,7 @@ impl ImageViewerApp {
                 .drive_state
                 .drive_info_refresh
                 .is_pending(DriveInfoRefreshScope::Local)
+                && !self.drive_state.drive_health_scheduler.is_active()
                 && self
                     .drive_state
                     .drive_info_refresh

@@ -1,8 +1,9 @@
 use std::path::Path;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::app::drive_state::{
     apply_drive_health_snapshot, normalize_drive_root_key, DriveHealthResult,
+    DriveInfoRefreshScope, ScheduledDriveHealthRequest,
 };
 use crate::app::state::ImageViewerApp;
 use crate::domain::file_entry::DriveInfo;
@@ -35,6 +36,9 @@ fn panel_drive_health_target(
 
 impl ImageViewerApp {
     pub fn request_drive_health_for_panel(&mut self) {
+        self.drive_state
+            .drive_health_scheduler
+            .set_interactive_target(None);
         if !self.show_preview_panel {
             return;
         }
@@ -84,35 +88,154 @@ impl ImageViewerApp {
             return;
         }
 
+        if self.drive_state.can_begin_drive_health_request(&root, now) {
+            self.drive_state
+                .drive_health_scheduler
+                .set_interactive_target(Some(root));
+        }
+    }
+
+    fn preload_drive_health_roots(&self) -> Vec<String> {
+        self.drive_state
+            .disks
+            .iter()
+            .filter_map(|(path, _)| {
+                let root = normalize_drive_root_key(path)?;
+                let drive_type = self
+                    .drive_state
+                    .cached_drive_info(&root)
+                    .map(|info| info.drive_type)
+                    .unwrap_or_else(|| crate::infrastructure::windows::detect_drive_type(&root));
+                supports_drive_health(drive_type).then_some(root)
+            })
+            .collect()
+    }
+
+    fn drive_health_preload_allowed(&self, now: Instant) -> bool {
+        let local_scope = DriveInfoRefreshScope::Local;
+        self.drive_state.drive_health_scheduler.preload_is_due(now)
+            && self
+                .drive_state
+                .drive_info_refresh
+                .has_completed(local_scope)
+            && !self.drive_state.drive_info_refresh.is_pending(local_scope)
+            && !self.drive_state.drive_scan_pending
+            && self.file_operation_state.file_ops_in_progress == 0
+            && !self.is_loading_folder
+            && !self.items_rebuild_in_flight
+            && !self.pending_items_rebuild
+            && !self.global_search.loading
+            && !self
+                .dual_panel_inactive_state
+                .as_ref()
+                .is_some_and(|panel| panel.is_loading_folder || panel.pending_items_rebuild)
+    }
+
+    pub fn drive_health_next_wakeup_in(&self, now: Instant) -> Option<Duration> {
+        self.drive_state.drive_health_scheduler.next_wakeup_in(now)
+    }
+
+    pub fn dispatch_drive_health_requests(&mut self) {
+        let now = Instant::now();
+        let allow_preload = self.drive_health_preload_allowed(now);
+        if allow_preload
+            && self
+                .drive_state
+                .drive_health_scheduler
+                .preload_reconcile_needed()
+        {
+            let roots = self.preload_drive_health_roots();
+            self.drive_state
+                .drive_health_scheduler
+                .reconcile_preload(roots);
+        }
+
+        while let Some(request) = self
+            .drive_state
+            .drive_health_scheduler
+            .take_next(now, allow_preload)
+        {
+            if self.spawn_drive_health_request(request, now) {
+                break;
+            }
+        }
+    }
+
+    fn spawn_drive_health_request(
+        &mut self,
+        request: ScheduledDriveHealthRequest,
+        now: Instant,
+    ) -> bool {
+        let ScheduledDriveHealthRequest { root, kind } = request;
+
         let Some(request_id) = self.drive_state.begin_drive_health_request(&root, now) else {
-            return;
+            return false;
         };
         let tx = self.drive_state.drive_health_tx.clone();
         let ctx = self.ui_ctx.clone();
-        std::thread::spawn(move || {
-            let result =
-                if crate::infrastructure::io_priority::is_virtual_drive_path(Path::new(&root)) {
+        let worker_root = root.clone();
+        let spawn_result = std::thread::Builder::new()
+            .name("drive-health-client".to_string())
+            .spawn(move || {
+                let _priority = crate::infrastructure::io_priority::ThreadPriorityGuard::new(
+                    if kind == crate::app::drive_state::DriveHealthRequestKind::Preload {
+                        crate::infrastructure::io_priority::IOPriority::Background
+                    } else {
+                        crate::infrastructure::io_priority::IOPriority::Prefetch
+                    },
+                );
+                let result = if crate::infrastructure::io_priority::is_virtual_drive_path(
+                    Path::new(&worker_root),
+                ) {
                     Err("Drive health is unavailable for virtual drives".to_string())
                 } else {
-                    let drive_letter = root
+                    let drive_letter = worker_root
                         .chars()
                         .next()
                         .expect("normalized drive root has a letter");
-                    crate::infrastructure::global_search::drive_health(drive_letter)
+                    crate::infrastructure::global_search::drive_health(
+                        drive_letter,
+                        kind == crate::app::drive_state::DriveHealthRequestKind::Preload,
+                    )
                 };
-            let _ = tx.send(DriveHealthResult {
-                root,
-                request_id,
-                completed_at: Instant::now(),
-                result,
+                let _ = tx.send(DriveHealthResult {
+                    root: worker_root,
+                    request_id,
+                    completed_at: Instant::now(),
+                    result,
+                });
+                ctx.request_repaint();
             });
-            ctx.request_repaint();
-        });
+
+        let spawned = spawn_result.is_ok();
+        match spawn_result {
+            Ok(_) => self
+                .drive_state
+                .drive_health_scheduler
+                .mark_active(root, request_id, kind),
+            Err(error) => {
+                let _ = self
+                    .drive_state
+                    .finish_drive_health_request(&root, request_id);
+                self.drive_state
+                    .drive_health_scheduler
+                    .defer(root.clone(), kind, Instant::now());
+                log::warn!("[DRIVE-HEALTH] Failed to spawn worker for {root}: {error}");
+            }
+        }
+        spawned
     }
 
     pub fn poll_drive_health(&mut self) {
         let mut applied = Vec::new();
         while let Ok(message) = self.drive_state.drive_health_rx.try_recv() {
+            let Some(kind) = self.drive_state.drive_health_scheduler.finish_active(
+                &message.root,
+                message.request_id,
+                message.completed_at,
+            ) else {
+                continue;
+            };
             if !self
                 .drive_state
                 .finish_drive_health_request(&message.root, message.request_id)
@@ -162,6 +285,12 @@ impl ImageViewerApp {
                     }
                 }
                 Err(error) => {
+                    if error == mtt_search_protocol::DRIVE_HEALTH_RETRY_LATER_ERROR {
+                        self.drive_state
+                            .drive_health_scheduler
+                            .defer(root, kind, Instant::now());
+                        continue;
+                    }
                     log::debug!("[DRIVE-HEALTH] Query failed for {}: {}", root, error);
                     self.drive_state
                         .record_drive_health_failure(&root, Instant::now());

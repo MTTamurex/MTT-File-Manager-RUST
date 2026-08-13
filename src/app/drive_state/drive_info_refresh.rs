@@ -28,6 +28,7 @@ struct DriveInfoRefreshSlot {
     in_flight: Option<u64>,
     rerun_requested: bool,
     last_completed: Instant,
+    has_completed: bool,
 }
 
 impl DriveInfoRefreshSlot {
@@ -36,6 +37,7 @@ impl DriveInfoRefreshSlot {
             in_flight: None,
             rerun_requested: false,
             last_completed: now,
+            has_completed: false,
         }
     }
 }
@@ -88,6 +90,7 @@ impl DriveInfoRefreshTracker {
 
         slot.in_flight = None;
         slot.last_completed = now;
+        slot.has_completed = true;
         let rerun = slot.rerun_requested || generation != current_generation;
         slot.rerun_requested = false;
         rerun
@@ -99,6 +102,10 @@ impl DriveInfoRefreshTracker {
 
     pub fn elapsed(&self, scope: DriveInfoRefreshScope) -> Duration {
         self.slot(scope).last_completed.elapsed()
+    }
+
+    pub fn has_completed(&self, scope: DriveInfoRefreshScope) -> bool {
+        self.slot(scope).has_completed
     }
 
     fn slot(&self, scope: DriveInfoRefreshScope) -> &DriveInfoRefreshSlot {
@@ -217,6 +224,21 @@ mod tests {
             bus_type: None,
             health: None,
         }
+    }
+
+    #[test]
+    fn tracker_records_first_completed_refresh() {
+        let start = Instant::now();
+        let mut tracker = DriveInfoRefreshTracker::new(start);
+        assert!(!tracker.has_completed(DriveInfoRefreshScope::Local));
+
+        let generation = tracker.begin(DriveInfoRefreshScope::Local).unwrap();
+        assert!(!tracker.finish(
+            DriveInfoRefreshScope::Local,
+            generation,
+            start + Duration::from_secs(1)
+        ));
+        assert!(tracker.has_completed(DriveInfoRefreshScope::Local));
     }
 
     #[test]

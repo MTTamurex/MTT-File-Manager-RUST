@@ -760,12 +760,15 @@ pub(super) fn handle_client(
                 }
             }
         }
-        SearchRequest::GetDriveHealth { drive_letter } => {
+        SearchRequest::GetDriveHealth {
+            drive_letter,
+            background,
+        } => {
             if !require_trusted_metadata_client(pipe, "GetDriveHealth") {
                 return;
             }
 
-            match crate::drive_health::query(drive_letter) {
+            match crate::drive_health::query(drive_letter, background) {
                 Ok(snapshot) => {
                     let _ = send_response(pipe, &SearchResponse::DriveHealth(Box::new(snapshot)));
                 }
@@ -775,10 +778,14 @@ pub(super) fn handle_client(
                         drive_letter.to_ascii_uppercase(),
                         crate::redact_paths(&error),
                     );
-                    let _ = send_response(
-                        pipe,
-                        &SearchResponse::Error("Drive health unavailable".to_string()),
-                    );
+                    let response = if error == "another drive health query is still active"
+                        || error == "drive health query timed out"
+                    {
+                        mtt_search_protocol::DRIVE_HEALTH_RETRY_LATER_ERROR.to_string()
+                    } else {
+                        "Drive health unavailable".to_string()
+                    };
+                    let _ = send_response(pipe, &SearchResponse::Error(response));
                 }
             }
         }

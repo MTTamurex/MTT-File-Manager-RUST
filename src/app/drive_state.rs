@@ -6,7 +6,9 @@ use std::time::Instant;
 
 mod drive_health;
 mod drive_info_refresh;
-pub use drive_health::DriveHealthResult;
+pub use drive_health::{
+    DriveHealthRequestKind, DriveHealthResult, DriveHealthScheduler, ScheduledDriveHealthRequest,
+};
 pub use drive_info_refresh::{
     apply_drive_health_snapshot, merge_drive_info_query, DriveInfoRefreshEntry,
     DriveInfoRefreshResult, DriveInfoRefreshScope, DriveInfoRefreshTracker,
@@ -41,6 +43,7 @@ pub struct DriveState {
     pub drive_health_updated_at: HashMap<String, Instant>,
     pub drive_health_failed_at: HashMap<String, Instant>,
     pub drive_health_next_request_id: u64,
+    pub drive_health_scheduler: DriveHealthScheduler,
     pub optimistically_hidden_drives: HashSet<String>,
     pub drive_info_refresh: DriveInfoRefreshTracker,
 }
@@ -213,6 +216,7 @@ mod tests {
             drive_health_updated_at: HashMap::new(),
             drive_health_failed_at: HashMap::new(),
             drive_health_next_request_id: 0,
+            drive_health_scheduler: DriveHealthScheduler::new(),
             optimistically_hidden_drives: HashSet::new(),
             drive_info_refresh: DriveInfoRefreshTracker::new(Instant::now()),
         }

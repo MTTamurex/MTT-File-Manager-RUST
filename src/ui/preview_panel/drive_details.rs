@@ -89,8 +89,16 @@ pub(super) fn render_drive_details(
     }
     if snapshot.smart_available {
         let health = health_text(snapshot.health_state.clone());
-        if snapshot.health_state == DriveHealthState::Warning {
-            add_warning_health_detail(ui, &t!("file_info.drive_health"), health);
+        if matches!(
+            snapshot.health_state,
+            DriveHealthState::Warning | DriveHealthState::Critical
+        ) {
+            add_health_alert_detail(
+                ui,
+                &t!("file_info.drive_health"),
+                health,
+                &snapshot.health_state,
+            );
         } else {
             add_detail(ui, &t!("file_info.drive_health"), health);
         }
@@ -104,7 +112,12 @@ pub(super) fn render_drive_details(
     }
 }
 
-fn add_warning_health_detail(ui: &mut egui::Ui, label: &str, value: String) {
+fn add_health_alert_detail(
+    ui: &mut egui::Ui,
+    label: &str,
+    value: String,
+    state: &DriveHealthState,
+) {
     ui.horizontal_top(|ui| {
         ui.add_sized(
             egui::vec2(110.0, 0.0),
@@ -112,7 +125,7 @@ fn add_warning_health_detail(ui: &mut egui::Ui, label: &str, value: String) {
         );
         ui.add(egui::Label::new(value).wrap());
         let (badge_rect, _) = ui.allocate_exact_size(egui::vec2(14.0, 14.0), egui::Sense::hover());
-        crate::ui::drive_health_badge::paint_warning_badge_in_rect(ui.painter(), badge_rect);
+        crate::ui::drive_health_badge::paint_health_badge_in_rect(ui.painter(), badge_rect, state);
     });
     ui.add_space(4.0);
 }

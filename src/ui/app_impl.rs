@@ -17,6 +17,7 @@ struct RepaintDeadlineInputs {
     preferences_save_elapsed: Option<Duration>,
     drive_bitmask_check_elapsed: Duration,
     drive_info_refresh_elapsed: Option<Duration>,
+    drive_health_wakeup_in: Option<Duration>,
 }
 
 fn remaining_after_frame_check(elapsed: Duration, interval: Duration) -> Duration {
@@ -51,6 +52,9 @@ fn next_background_repaint(inputs: RepaintDeadlineInputs) -> Duration {
             DRIVE_INFO_REFRESH_INTERVAL,
         ));
     }
+    if let Some(remaining) = inputs.drive_health_wakeup_in {
+        deadline = deadline.min(remaining);
+    }
 
     deadline
 }
@@ -76,6 +80,7 @@ impl ImageViewerApp {
                 .then(|| self.preferences_last_save.elapsed()),
             drive_bitmask_check_elapsed: self.drive_state.last_drive_bitmask_check.elapsed(),
             drive_info_refresh_elapsed,
+            drive_health_wakeup_in: self.drive_health_next_wakeup_in(std::time::Instant::now()),
         });
         ctx.request_repaint_after(deadline);
     }
@@ -110,6 +115,7 @@ impl ImageViewerApp {
         self.poll_drive_scan();
         self.poll_drive_info();
         self.poll_drive_health();
+        self.dispatch_drive_health_requests();
         if self.sidebar_tree.poll_loaded() {
             ctx.request_repaint();
         }
@@ -731,6 +737,7 @@ mod tests {
             preferences_save_elapsed: None,
             drive_bitmask_check_elapsed: Duration::ZERO,
             drive_info_refresh_elapsed: None,
+            drive_health_wakeup_in: None,
         }
     }
 
@@ -784,6 +791,16 @@ mod tests {
         };
 
         assert_eq!(next_background_repaint(inputs), Duration::from_millis(2250));
+    }
+
+    #[test]
+    fn drive_health_preload_deadline_can_request_an_earlier_repaint() {
+        let inputs = RepaintDeadlineInputs {
+            drive_health_wakeup_in: Some(Duration::from_millis(400)),
+            ..idle_inputs()
+        };
+
+        assert_eq!(next_background_repaint(inputs), Duration::from_millis(400));
     }
 
     #[test]

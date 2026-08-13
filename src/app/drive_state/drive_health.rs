@@ -7,6 +7,9 @@ use super::{normalize_drive_root_key, DriveState};
 const DRIVE_HEALTH_SUCCESS_TTL: Duration = Duration::from_secs(300);
 const DRIVE_HEALTH_FAILURE_COOLDOWN: Duration = Duration::from_secs(60);
 
+mod scheduler;
+pub use scheduler::{DriveHealthRequestKind, DriveHealthScheduler, ScheduledDriveHealthRequest};
+
 #[derive(Debug)]
 pub struct DriveHealthResult {
     pub root: String,
@@ -16,27 +19,28 @@ pub struct DriveHealthResult {
 }
 
 impl DriveState {
+    pub fn can_begin_drive_health_request(&self, path: &str, now: Instant) -> bool {
+        let Some(root) = normalize_drive_root_key(path) else {
+            return false;
+        };
+        !self.drive_health_pending.contains_key(&root)
+            && !self
+                .drive_health_failed_at
+                .get(&root)
+                .is_some_and(|failed| {
+                    now.saturating_duration_since(*failed) < DRIVE_HEALTH_FAILURE_COOLDOWN
+                })
+            && !self
+                .drive_health_updated_at
+                .get(&root)
+                .is_some_and(|updated| {
+                    now.saturating_duration_since(*updated) < DRIVE_HEALTH_SUCCESS_TTL
+                })
+    }
+
     pub fn begin_drive_health_request(&mut self, path: &str, now: Instant) -> Option<u64> {
         let root = normalize_drive_root_key(path)?;
-        if self.drive_health_pending.contains_key(&root) {
-            return None;
-        }
-        if self
-            .drive_health_failed_at
-            .get(&root)
-            .is_some_and(|failed| {
-                now.saturating_duration_since(*failed) < DRIVE_HEALTH_FAILURE_COOLDOWN
-            })
-        {
-            return None;
-        }
-        if self
-            .drive_health_updated_at
-            .get(&root)
-            .is_some_and(|updated| {
-                now.saturating_duration_since(*updated) < DRIVE_HEALTH_SUCCESS_TTL
-            })
-        {
+        if !self.can_begin_drive_health_request(&root, now) {
             return None;
         }
 

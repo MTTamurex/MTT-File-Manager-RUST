@@ -21,23 +21,45 @@ const DATA_TYPE_IDENTIFY: u32 = 1;
 const NVME_DATA_TYPE_LOG_PAGE: u32 = 2;
 const QUERY_TIMEOUT: Duration = Duration::from_secs(19);
 static QUERY_ACTIVE: AtomicBool = AtomicBool::new(false);
+static QUERY_BACKGROUND: AtomicBool = AtomicBool::new(false);
 
-pub(crate) fn query(drive_letter: char) -> Result<DriveHealthSnapshot, String> {
+fn query_is_background() -> bool {
+    QUERY_BACKGROUND.load(Ordering::Acquire)
+}
+
+fn set_background_thread_priority() {
+    use windows::Win32::System::Threading::{
+        GetCurrentThread, SetThreadPriority, THREAD_MODE_BACKGROUND_BEGIN, THREAD_PRIORITY_LOWEST,
+    };
+
+    unsafe {
+        let thread = GetCurrentThread();
+        let _ = SetThreadPriority(thread, THREAD_MODE_BACKGROUND_BEGIN);
+        let _ = SetThreadPriority(thread, THREAD_PRIORITY_LOWEST);
+    }
+}
+
+pub(crate) fn query(drive_letter: char, background: bool) -> Result<DriveHealthSnapshot, String> {
     if QUERY_ACTIVE
         .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
         .is_err()
     {
         return Err("another drive health query is still active".to_string());
     }
+    QUERY_BACKGROUND.store(background, Ordering::Release);
 
     let (result_tx, result_rx) = mpsc::sync_channel(1);
     let worker = std::thread::Builder::new()
         .name("drive-health-query".to_string())
         .spawn(move || {
+            if background {
+                set_background_thread_priority();
+            }
             struct QueryPermit;
 
             impl Drop for QueryPermit {
                 fn drop(&mut self) {
+                    QUERY_BACKGROUND.store(false, Ordering::Release);
                     QUERY_ACTIVE.store(false, Ordering::Release);
                 }
             }
@@ -46,6 +68,7 @@ pub(crate) fn query(drive_letter: char) -> Result<DriveHealthSnapshot, String> {
             let _ = result_tx.send(query_inner(drive_letter));
         })
         .map_err(|error| {
+            QUERY_BACKGROUND.store(false, Ordering::Release);
             QUERY_ACTIVE.store(false, Ordering::Release);
             format!("drive health worker creation failed: {error}")
         })?;

@@ -216,7 +216,7 @@ pub(crate) fn render_item_icon(
                 Rect::from_min_max(Pos2::new(0.0, 0.0), Pos2::new(1.0, 1.0)),
                 tint,
             );
-            crate::ui::drive_health_badge::paint_warning_badge(ui.painter(), icon_rect, drive_info);
+            crate::ui::drive_health_badge::paint_health_badge(ui.painter(), icon_rect, drive_info);
         }
         return;
     }

@@ -13,7 +13,9 @@ use windows::Win32::System::Pipes::{
 
 const SEARCH_PIPE_IO_TIMEOUT_MS: u64 = 8_000;
 const CONTROL_PIPE_IO_TIMEOUT_MS: u64 = 5_000;
-const DRIVE_HEALTH_PIPE_IO_TIMEOUT_MS: u64 = 12_000;
+// The service owns a 19-second safety timeout. Keep the client alive long
+// enough to receive that result instead of starting another query too early.
+const DRIVE_HEALTH_PIPE_IO_TIMEOUT_MS: u64 = 22_000;
 const PIPE_POLL_INTERVAL_MS: u64 = 15;
 
 pub struct SearchPage {
@@ -227,10 +229,11 @@ pub fn folder_size(path: &std::path::Path) -> Result<(u64, u64, u64), String> {
 }
 
 /// Request a point-in-time health snapshot for a physical drive.
-pub fn drive_health(drive_letter: char) -> Result<DriveHealthSnapshot, String> {
+pub fn drive_health(drive_letter: char, background: bool) -> Result<DriveHealthSnapshot, String> {
     let requested_letter = drive_letter.to_ascii_uppercase();
     let request = SearchRequest::GetDriveHealth {
         drive_letter: requested_letter,
+        background,
     };
     request.validate()?;
 

@@ -44,7 +44,10 @@ pub enum SearchRequest {
     /// (zero disk I/O). Returns an error for non-NTFS or unindexed volumes.
     FolderSize { path: String },
     /// Query a point-in-time hardware health snapshot for a local drive.
-    GetDriveHealth { drive_letter: char },
+    GetDriveHealth {
+        drive_letter: char,
+        background: bool,
+    },
 }
 
 impl SearchRequest {
@@ -86,7 +89,7 @@ impl SearchRequest {
                 ));
             }
         }
-        if let SearchRequest::GetDriveHealth { drive_letter } = self {
+        if let SearchRequest::GetDriveHealth { drive_letter, .. } = self {
             if !drive_letter.is_ascii_alphabetic() {
                 return Err("drive letter must be an ASCII letter".to_string());
             }
@@ -345,7 +348,10 @@ mod tests {
             SearchRequest::FolderSize {
                 path: r"C:\projects".to_string(),
             },
-            SearchRequest::GetDriveHealth { drive_letter: 'C' },
+            SearchRequest::GetDriveHealth {
+                drive_letter: 'C',
+                background: true,
+            },
         ];
         let seed_payloads: Vec<Vec<u8>> = seeds
             .iter()

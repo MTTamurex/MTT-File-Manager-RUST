@@ -395,6 +395,9 @@ impl ImageViewerApp {
                 }
 
                 if changed {
+                    self.drive_state
+                        .drive_health_scheduler
+                        .reset_preload(std::time::Instant::now());
                     // Invalidate cached drive types since drive list changed
                     crate::ui::sidebar::invalidate_drive_type_cache();
                     for (old_path, old_label) in &old_disks {

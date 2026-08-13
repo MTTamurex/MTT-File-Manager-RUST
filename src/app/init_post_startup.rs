@@ -16,6 +16,7 @@ impl ImageViewerApp {
         {
             self.refresh_drive_info_async();
         }
+        self.drive_state.drive_health_scheduler.arm_preload(start);
 
         spawn_incremental_gc_worker(
             self.disk_cache.clone(),
