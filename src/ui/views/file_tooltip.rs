@@ -87,6 +87,15 @@ pub fn info_row(ui: &mut egui::Ui, label: &str, value: &str) {
     ui.add_space(1.0);
 }
 
+/// Full drive tooltip: title header + drive metadata rows.
+pub fn drive_tooltip_body(ui: &mut egui::Ui, name: &str, drive: &DriveInfo) {
+    ui.set_max_width(300.0);
+    ui.vertical(|ui| {
+        header(ui, name);
+        drive_rows(ui, drive);
+    });
+}
+
 /// Drive metadata rows (shared by list and grid tooltips).
 pub fn drive_rows(ui: &mut egui::Ui, drive: &DriveInfo) {
     let file_system = if drive.file_system.is_empty() {

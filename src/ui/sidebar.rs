@@ -726,6 +726,66 @@ pub fn render_sidebar_drives(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Opt
                 }
             }
 
+            // ── Drive tooltip (same content/behavior as This PC drive tooltips) ──
+            let hover_timer_id = response
+                .id
+                .with("sidebar_drive_hover_start")
+                .with(disk_path.as_str());
+            if response.hovered() && !ctx.is_item_dragging && !ctx.is_renaming {
+                if crate::ui::context_menu::should_suppress_tooltips(ui.ctx()) {
+                    ui.ctx().data_mut(|d| d.remove::<f64>(hover_timer_id));
+                } else {
+                    let current_time = ui.input(|i| i.time);
+                    let hover_start_time = ui
+                        .ctx()
+                        .data_mut(|d| *d.get_temp_mut_or_insert_with(hover_timer_id, || current_time));
+                    let hover_duration = (current_time - hover_start_time) as f32;
+
+                    if hover_duration < crate::ui::views::common::TOOLTIP_DELAY_SECS {
+                        ui.ctx()
+                            .request_repaint_after(std::time::Duration::from_secs_f32(
+                                crate::ui::views::common::TOOLTIP_DELAY_SECS - hover_duration
+                                    + 0.01,
+                            ));
+                    } else if let Some(drive) = ctx.drive_info_cache.get(disk_path.as_str()) {
+                        if let Some(mouse_pos) = ui.input(|i| i.pointer.hover_pos()) {
+                            let tooltip_layer = egui::LayerId::new(
+                                egui::Order::Tooltip,
+                                response.id.with("tooltip"),
+                            );
+                            let tooltip_id = response.id.with("tooltip");
+                            let tooltip_response =
+                                crate::ui::video_overlay::without_shadow_if_needed(
+                                    ui.ctx(),
+                                    tooltip_id,
+                                    || {
+                                        egui::Tooltip::always_open(
+                                            ui.ctx().clone(),
+                                            tooltip_layer,
+                                            response.id,
+                                            mouse_pos,
+                                        )
+                                        .show(|ui: &mut egui::Ui| {
+                                            crate::ui::views::file_tooltip::drive_tooltip_body(
+                                                ui, disk_label, drive,
+                                            );
+                                        })
+                                    },
+                                );
+                            if let Some(tooltip_response) = tooltip_response {
+                                crate::ui::video_overlay::register_rect(
+                                    ui.ctx(),
+                                    tooltip_id,
+                                    tooltip_response.response.rect,
+                                );
+                            }
+                        }
+                    }
+                }
+            } else {
+                ui.ctx().data_mut(|d| d.remove::<f64>(hover_timer_id));
+            }
+
             ui.add_space(1.0);
 
             // ── Folder tree under this drive (if expanded) ──
