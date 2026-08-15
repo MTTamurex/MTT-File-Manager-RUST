@@ -108,28 +108,16 @@ pub fn render_tags_section(
         };
         let is_selected = ctx.active_tag_filter == Some(tag.id);
         let count = ctx.tag_counts.get(&tag.id).copied().unwrap_or(0);
-        let (mut rect, _) =
-            ui.allocate_exact_size(egui::vec2(ui.available_width(), TAG_ROW_H), Sense::hover());
-        rect.min.x = clip_rect.min.x;
-        rect.max.x = clip_rect.max.x;
-        let handle_rect = Rect::from_min_max(rect.min, Pos2::new(rect.min.x + 28.0, rect.max.y));
-        let click_rect = Rect::from_min_max(Pos2::new(handle_rect.max.x, rect.min.y), rect.max);
-        let response = ui.interact(
-            click_rect,
-            ui.id().with(("sidebar_tag_click", tag.id)),
-            Sense::click(),
-        );
-        let handle_response = ui.interact(
-            handle_rect,
-            ui.id().with(("sidebar_tag_drag_handle", tag.id)),
+        let (mut rect, response) = ui.allocate_exact_size(
+            egui::vec2(ui.available_width(), TAG_ROW_H),
             Sense::click_and_drag(),
         );
+        rect.min.x = clip_rect.min.x;
+        rect.max.x = clip_rect.max.x;
 
-        if handle_response.drag_started_by(egui::PointerButton::Primary) {
+        // Start internal drag for reordering (anywhere on the row, like Quick Access)
+        if response.drag_started() {
             ui.ctx().data_mut(|data| data.insert_temp(drag_id, tag.id));
-        }
-        if handle_response.hovered() || handle_response.dragged() {
-            ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
         }
 
         let mut indicator_y = None;
@@ -156,7 +144,7 @@ pub fn render_tags_section(
             } else if is_selected {
                 ui.painter()
                     .rect_filled(rect, 0.0, crate::ui::theme::selection_color(dark_mode));
-            } else if (response.hovered() || handle_response.hovered()) && !ctx.is_item_dragging {
+            } else if (response.hovered() || response.dragged()) && !ctx.is_item_dragging {
                 ui.painter().rect_filled(
                     rect,
                     0.0,
@@ -203,8 +191,7 @@ pub fn render_tags_section(
             }
         }
 
-        if (response.clicked() || handle_response.clicked()) && !ctx.is_renaming && action.is_none()
-        {
+        if response.clicked() && !ctx.is_renaming && action.is_none() {
             let next = if is_selected { None } else { Some(tag.id) };
             *action = Some(SidebarAction::FilterByTag(next));
         }
