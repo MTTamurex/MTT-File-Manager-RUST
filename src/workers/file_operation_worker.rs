@@ -74,6 +74,11 @@ pub enum FileOperationResult {
         /// Known exact destination files/folders (for write-activity cache clearing).
         copied_dests: Vec<PathBuf>,
     },
+    /// Archive compression completed - dest folder needs reload if active
+    CompressionCompleted {
+        dest_folder: PathBuf,
+        archive_path: PathBuf,
+    },
     RenameCompleted {
         path: PathBuf,
         new_name: String,

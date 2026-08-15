@@ -227,6 +227,10 @@ operations:
   eject_iso_failed: "Falha ao ejetar ISO: %{error}"
   shortcut_created: "Atalho criado: %{name}"
   shortcut_create_failed: "Falha ao criar atalho: %{error}"
+  compress_completed: "Arquivo criado: %{name}"
+  compress_failed: "Falha ao criar arquivo compactado: %{error}"
+  compress_cancelled: "Compactação cancelada"
+  compress_dispatch_failed: "O worker de compactação está indisponível"
   onedrive_command_failed: "Falha ao aplicar comando do OneDrive em um ou mais itens"
   path_not_found: "O caminho não existe: %{path}"
   rename_drive_success: "Nome do drive atualizado: %{name}"
@@ -251,6 +255,9 @@ context_menu:
   empty_recycle_bin: "Esvaziar Lixeira"
   copy_path: "Copiar caminho"
   create_shortcut: "Criar atalho"
+  compress: "Compactar"
+  compress_to_zip: "Compactar para arquivo ZIP"
+  compress_to_7z: "Compactar para arquivo 7Z"
   create_folder: "Criar pasta"
   new: "Novo"
   pin_quick_access: "Fixar no Acesso Rápido"
@@ -666,6 +673,11 @@ drive_slot:
 extract:
   title: "Extraindo itens"
   items_extracted: "extraídos"
+  preparing: "Preparando…"
+  cancel_tooltip: "Cancelar"
+compress:
+  title: "Compactando itens"
+  items_compressed: "compactados"
   preparing: "Preparando…"
   cancel_tooltip: "Cancelar"
 status_bar_system:

@@ -112,6 +112,12 @@ pub(in crate::app) struct AppBootstrap {
         crate::infrastructure::archive_extract::SharedExtractionProgress,
     pub(in crate::app) extraction_cancel:
         crate::infrastructure::archive_extract::ExtractionCancelFlag,
+    pub(in crate::app) compression_sender:
+        mpsc::Sender<crate::workers::archive_compression_worker::ArchiveCompressionRequest>,
+    pub(in crate::app) compression_progress:
+        crate::infrastructure::archive_create::SharedCompressionProgress,
+    pub(in crate::app) compression_cancel:
+        crate::infrastructure::archive_create::CompressionCancelFlag,
     pub(in crate::app) global_search_tx:
         mpsc::Sender<crate::workers::global_search_worker::GlobalSearchRequest>,
     pub(in crate::app) global_search_res_rx:
@@ -458,8 +464,15 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
         shared_gen.clone(),
     );
 
-    let (file_op_tx, file_op_res_rx, extraction_progress, extraction_cancel) =
-        spawn_file_operation_worker();
+    let (
+        file_op_tx,
+        file_op_res_rx,
+        extraction_progress,
+        extraction_cancel,
+        compression_sender,
+        compression_progress,
+        compression_cancel,
+    ) = spawn_file_operation_worker();
     let (global_search_tx, global_search_res_rx) = spawn_global_search_worker(ctx);
     let disk_cache_invalidation_tx =
         spawn_disk_cache_invalidation_worker(disk_cache.clone(), app_state_db.clone());
@@ -542,6 +555,9 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
         file_op_res_rx,
         extraction_progress,
         extraction_cancel,
+        compression_sender,
+        compression_progress,
+        compression_cancel,
         global_search_tx,
         global_search_res_rx,
         disk_cache_invalidation_tx,

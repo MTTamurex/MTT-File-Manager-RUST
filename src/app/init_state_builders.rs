@@ -179,6 +179,11 @@ pub(in crate::app) fn build_file_operation_state(
     >,
     extraction_progress: crate::infrastructure::archive_extract::SharedExtractionProgress,
     extraction_cancel: crate::infrastructure::archive_extract::ExtractionCancelFlag,
+    compression_sender: mpsc::Sender<
+        crate::workers::archive_compression_worker::ArchiveCompressionRequest,
+    >,
+    compression_progress: crate::infrastructure::archive_create::SharedCompressionProgress,
+    compression_cancel: crate::infrastructure::archive_create::CompressionCancelFlag,
     disk_cache_invalidation_sender: mpsc::Sender<
         Vec<crate::app::init_workers::CacheInvalidationEntry>,
     >,
@@ -192,6 +197,9 @@ pub(in crate::app) fn build_file_operation_state(
         deferred_results: std::collections::VecDeque::new(),
         extraction_progress,
         extraction_cancel,
+        compression_sender,
+        compression_progress,
+        compression_cancel,
         disk_cache_invalidation_sender,
         prefetch_sender,
         idle_warmup_sender,

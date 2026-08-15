@@ -19,7 +19,7 @@ fn svg_icon_key(icon_name: &str, size: u32, effective_color: [u8; 4], ppp_100: u
 fn is_duotone_icon(icon_name: &str) -> bool {
     matches!(
         icon_name,
-        "copy" | "cut" | "paste" | "rename" | "folder_new" | "extract_all"
+        "compress" | "copy" | "cut" | "paste" | "rename" | "folder_new" | "extract_all"
     )
 }
 

@@ -227,6 +227,10 @@ operations:
   eject_iso_failed: "Failed to eject ISO: %{error}"
   shortcut_created: "Shortcut created: %{name}"
   shortcut_create_failed: "Failed to create shortcut: %{error}"
+  compress_completed: "Archive created: %{name}"
+  compress_failed: "Failed to create archive: %{error}"
+  compress_cancelled: "Compression cancelled"
+  compress_dispatch_failed: "The compression worker is unavailable"
   onedrive_command_failed: "Failed to apply OneDrive command to one or more items"
   path_not_found: "Path does not exist: %{path}"
   rename_drive_success: "Drive label updated: %{name}"
@@ -251,6 +255,9 @@ context_menu:
   empty_recycle_bin: "Empty Recycle Bin"
   copy_path: "Copy path"
   create_shortcut: "Create shortcut"
+  compress: "Compress"
+  compress_to_zip: "Compress to ZIP file"
+  compress_to_7z: "Compress to 7Z file"
   create_folder: "Create folder"
   new: "New"
   pin_quick_access: "Pin to Quick Access"
@@ -666,6 +673,11 @@ drive_slot:
 extract:
   title: "Extracting items"
   items_extracted: "extracted"
+  preparing: "Preparing…"
+  cancel_tooltip: "Cancel"
+compress:
+  title: "Compressing items"
+  items_compressed: "compressed"
   preparing: "Preparing…"
   cancel_tooltip: "Cancel"
 status_bar_system:

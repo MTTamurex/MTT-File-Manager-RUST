@@ -59,6 +59,56 @@ fn should_offer_extract_all(paths: &[PathBuf], is_empty_area: bool, target_is_fi
         })
 }
 
+/// Compress is offered for selections of one or more real filesystem items:
+/// not empty area, not a drive, not virtual/recycle-bin views, and every path
+/// resolves to a real local item (no shell namespace, drive roots, or paths
+/// inside archive files).
+fn should_offer_compress(paths: &[PathBuf], context: CompressMenuContext) -> bool {
+    let CompressMenuContext {
+        is_empty_area,
+        is_drive,
+        is_global_search,
+        is_computer_view,
+        is_recycle_bin_view,
+    } = context;
+    !is_empty_area
+        && !is_drive
+        && !is_global_search
+        && !is_computer_view
+        && !is_recycle_bin_view
+        && !paths.is_empty()
+        && paths.iter().all(|path| {
+            let path_text = path.to_string_lossy();
+            !path_text.starts_with("shell:")
+                && !crate::infrastructure::windows::is_drive_root_path(path)
+                && !crate::domain::file_entry::path_contains_archive_segment(
+                    &path_text.to_lowercase(),
+                )
+        })
+}
+
+#[derive(Clone, Copy)]
+struct CompressMenuContext {
+    is_empty_area: bool,
+    is_drive: bool,
+    is_global_search: bool,
+    is_computer_view: bool,
+    is_recycle_bin_view: bool,
+}
+
+fn compress_menu_item() -> crate::application::context_menu::ContextMenuItem {
+    use crate::application::context_menu::ContextMenuItem;
+
+    ContextMenuItem::new(-102, t!("context_menu.compress"))
+        .with_svg_icon("compress")
+        .with_subitems(vec![
+            ContextMenuItem::new(-100, t!("context_menu.compress_to_zip"))
+                .with_command("compress:zip"),
+            ContextMenuItem::new(-101, t!("context_menu.compress_to_7z"))
+                .with_command("compress:7z"),
+        ])
+}
+
 fn insert_extract_all_pending_item(
     menu_items: &mut Vec<crate::application::context_menu::ContextMenuItem>,
 ) {
@@ -666,6 +716,18 @@ impl ImageViewerApp {
                 ContextMenuItem::new(-26, t!("context_menu.create_shortcut"))
                     .with_svg_icon("external-link"),
             );
+            if should_offer_compress(
+                paths,
+                CompressMenuContext {
+                    is_empty_area,
+                    is_drive,
+                    is_global_search,
+                    is_computer_view: self.navigation_state.is_computer_view,
+                    is_recycle_bin_view: self.navigation_state.is_recycle_bin_view,
+                },
+            ) {
+                items.push(compress_menu_item());
+            }
             // Quick Access stores one real folder per entry. Reuse cached item
             // metadata so cloud and network paths never require blocking I/O here.
             if paths.len() == 1 && !is_drive && !target_is_file {
@@ -1319,15 +1381,104 @@ impl ImageViewerApp {
 #[cfg(test)]
 mod tests {
     use super::{
-        extract_all_shell_command_id, insert_extract_all_pending_item, is_extract_all_pending_item,
-        is_extract_all_shell_item, is_optical_disc_context_target, promote_extract_all_shell_item,
-        should_offer_extract_all,
+        compress_menu_item, extract_all_shell_command_id, insert_extract_all_pending_item,
+        is_extract_all_pending_item, is_extract_all_shell_item, is_optical_disc_context_target,
+        promote_extract_all_shell_item, should_offer_compress, should_offer_extract_all,
+        CompressMenuContext,
     };
     use crate::application::context_menu::{
         ContextMenuItem, EXTRACT_ALL_PENDING_COMMAND, EXTRACT_ALL_PENDING_ID,
     };
     use crate::infrastructure::windows::DriveType;
     use std::path::PathBuf;
+
+    #[test]
+    fn offers_compress_for_real_selections_only() {
+        let file_view = CompressMenuContext {
+            is_empty_area: false,
+            is_drive: false,
+            is_global_search: false,
+            is_computer_view: false,
+            is_recycle_bin_view: false,
+        };
+
+        // Single file and multi-selection qualify.
+        assert!(should_offer_compress(
+            &[PathBuf::from(r"C:\files\doc.txt")],
+            file_view
+        ));
+        assert!(should_offer_compress(
+            &[
+                PathBuf::from(r"C:\files\doc.txt"),
+                PathBuf::from(r"C:\files\folder"),
+            ],
+            file_view
+        ));
+
+        // Empty area, drives, and virtual views never qualify.
+        assert!(!should_offer_compress(
+            &[PathBuf::from(r"C:\files\doc.txt")],
+            CompressMenuContext {
+                is_empty_area: true,
+                ..file_view
+            }
+        ));
+        assert!(!should_offer_compress(
+            &[PathBuf::from(r"C:\files\doc.txt")],
+            CompressMenuContext {
+                is_drive: true,
+                ..file_view
+            }
+        ));
+        assert!(!should_offer_compress(
+            &[PathBuf::from(r"C:\files\doc.txt")],
+            CompressMenuContext {
+                is_global_search: true,
+                ..file_view
+            }
+        ));
+        assert!(!should_offer_compress(
+            &[PathBuf::from(r"C:\files\doc.txt")],
+            CompressMenuContext {
+                is_recycle_bin_view: true,
+                ..file_view
+            }
+        ));
+        assert!(!should_offer_compress(&[], file_view));
+
+        // Any invalid path disqualifies the whole selection.
+        assert!(!should_offer_compress(
+            &[
+                PathBuf::from(r"C:\files\doc.txt"),
+                PathBuf::from(r"C:\archive.zip\inside.txt"),
+            ],
+            file_view
+        ));
+        assert!(!should_offer_compress(
+            &[PathBuf::from("shell:Downloads")],
+            file_view
+        ));
+        assert!(!should_offer_compress(
+            &[PathBuf::from(r"C:\")],
+            file_view
+        ));
+    }
+
+    #[test]
+    fn compress_menu_item_exposes_zip_and_7z_commands() {
+        let item = compress_menu_item();
+        assert_eq!(item.id, -102);
+        assert_eq!(item.svg_icon_name.as_deref(), Some("compress"));
+        assert_eq!(item.sub_items.len(), 2);
+        assert_eq!(
+            item.sub_items[0].command_string.as_deref(),
+            Some("compress:zip")
+        );
+        assert_eq!(
+            item.sub_items[1].command_string.as_deref(),
+            Some("compress:7z")
+        );
+    }
 
     #[test]
     fn recognizes_extract_all_shell_command() {

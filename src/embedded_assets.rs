@@ -16,6 +16,7 @@ pub const PAPER_SHEET_PNG: &[u8] = include_bytes!("../assets/paper_sheet.png");
 
 // Embed SVG icons
 pub const ICON_BROOM: &[u8] = include_bytes!("../assets/broom_new.svg");
+pub const ICON_COMPRESS: &[u8] = include_bytes!("../assets/icons/compress.svg");
 pub const ICON_COPY: &[u8] = include_bytes!("../assets/icons/copy_duotone_black_blue_lighter2.svg");
 pub const ICON_CUT: &[u8] = include_bytes!("../assets/icons/cut_duotone_black_blue_lighter2.svg");
 pub const ICON_DELETE: &[u8] = include_bytes!("../assets/icons/delete.svg");
@@ -67,6 +68,7 @@ pub const ICON_VOL_MUTE: &[u8] = include_bytes!("../assets/icons/vol_mute.svg");
 pub fn get_icon(name: &str) -> Option<&'static [u8]> {
     match name {
         "broom" => Some(ICON_BROOM),
+        "compress" => Some(ICON_COMPRESS),
         "copy" => Some(ICON_COPY),
         "cut" => Some(ICON_CUT),
         "delete" => Some(ICON_DELETE),

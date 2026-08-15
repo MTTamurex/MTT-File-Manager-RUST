@@ -662,6 +662,17 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                     app.context_menu = context_menu;
                     return;
                 }
+                if let Some(format) = command
+                    .strip_prefix("compress:")
+                    .and_then(
+                        crate::infrastructure::archive_create::CompressionFormat::from_command,
+                    )
+                {
+                    app.begin_compression(&context_menu.target_paths, format);
+                    context_menu.close();
+                    app.context_menu = context_menu;
+                    return;
+                }
             }
             match id {
                 -1 => {
@@ -893,6 +904,8 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                     }
                 }
                 -90 => {}
+                // "Compress" submenu parent — leaf items dispatch via "compress:" command
+                -102 => {}
                 -91 => {
                     if context_menu.origin
                         == crate::application::context_menu::ContextMenuOrigin::GlobalSearch

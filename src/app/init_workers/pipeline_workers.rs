@@ -37,6 +37,9 @@ pub(in crate::app) fn spawn_file_operation_worker() -> (
     mpsc::Receiver<crate::workers::file_operation_worker::FileOperationResult>,
     crate::infrastructure::archive_extract::SharedExtractionProgress,
     crate::infrastructure::archive_extract::ExtractionCancelFlag,
+    mpsc::Sender<crate::workers::archive_compression_worker::ArchiveCompressionRequest>,
+    crate::infrastructure::archive_create::SharedCompressionProgress,
+    crate::infrastructure::archive_create::CompressionCancelFlag,
 ) {
     let (file_op_tx, file_op_rx) = mpsc::channel();
     let (file_op_res_tx, file_op_res_rx) = mpsc::channel();
@@ -52,6 +55,17 @@ pub(in crate::app) fn spawn_file_operation_worker() -> (
         extraction_cancel.clone(),
     );
 
+    // Create archive compression channel and start the dedicated worker.
+    let compression_progress = crate::infrastructure::archive_create::new_shared_progress();
+    let compression_cancel = crate::infrastructure::archive_create::new_cancel_flag();
+    let (archive_compress_tx, archive_compress_rx) = mpsc::channel();
+    crate::workers::archive_compression_worker::start_archive_compression_worker(
+        archive_compress_rx,
+        file_op_res_tx.clone(),
+        compression_progress.clone(),
+        compression_cancel.clone(),
+    );
+
     crate::workers::file_operation_worker::start_file_operation_worker(
         file_op_rx,
         file_op_res_tx,
@@ -62,6 +76,9 @@ pub(in crate::app) fn spawn_file_operation_worker() -> (
         file_op_res_rx,
         extraction_progress,
         extraction_cancel,
+        archive_compress_tx,
+        compression_progress,
+        compression_cancel,
     )
 }
 

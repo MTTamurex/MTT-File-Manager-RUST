@@ -22,6 +22,7 @@
 //! - `trait_impls`: Implementation of UI traits for App
 
 pub mod clipboard_ops;
+pub mod compression;
 pub mod context_menu;
 pub mod drag_drop;
 pub mod drive_health;

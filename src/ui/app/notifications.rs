@@ -234,6 +234,77 @@ pub fn render_notifications(app: &mut ImageViewerApp, ctx: &egui::Context) {
         }
     }
 
+    let compression_state = app
+        .file_operation_state
+        .compression_progress
+        .lock()
+        .ok()
+        .and_then(|g| g.clone());
+
+    if let Some(progress) = compression_state {
+        needs_repaint = true;
+        let progress_toast_height = 62.0;
+        let toast_y = screen.max.y - y_offset - progress_toast_height;
+        y_offset += progress_toast_height + padding;
+
+        let archive_display = truncate_end(&progress.archive_name, 30);
+        let total_known = progress.total > 0;
+        let subtitle = if total_known {
+            format!(
+                "{} ({}/{})",
+                archive_display, progress.processed, progress.total
+            )
+        } else {
+            format!("{} — {}", archive_display, t!("compress.preparing"))
+        };
+
+        // Byte fraction tracks real encoder progress while reads are in
+        // flight. Multithreaded 7z jobs can feed all input before the last
+        // chunks finish encoding — while the job is still active at 100%
+        // input, show the indeterminate shimmer instead of a frozen full bar.
+        let mt_tail = progress.total_bytes > 0 && progress.processed_bytes >= progress.total_bytes;
+        let bar_progress = if mt_tail {
+            None
+        } else if progress.total_bytes > 0 {
+            Some((
+                progress.processed_bytes as usize,
+                progress.total_bytes as usize,
+            ))
+        } else if total_known {
+            Some((progress.processed, progress.total))
+        } else {
+            None
+        };
+
+        let cancelled = render_progress_toast(
+            ctx,
+            egui::Id::new("compression_progress_toast"),
+            egui::pos2(base_x, toast_y),
+            toast_width,
+            progress_toast_height,
+            inner_pad,
+            icon_size,
+            text_left,
+            max_text_width,
+            egui::Color32::from_rgb(30, 58, 95),
+            egui::Color32::from_rgb(100, 160, 255),
+            "📦",
+            t!("compress.title").to_string(),
+            Some(subtitle),
+            bar_progress,
+            true,
+        );
+
+        if cancelled {
+            app.file_operation_state
+                .compression_cancel
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+            if let Ok(mut guard) = app.file_operation_state.compression_progress.lock() {
+                *guard = None;
+            }
+        }
+    }
+
     if let Some(progress) = app.file_operation_state.batch_rename_progress.clone() {
         if progress.total > 0 {
             needs_repaint = true;

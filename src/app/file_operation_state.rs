@@ -66,6 +66,10 @@ pub struct FileOperationState {
     pub deferred_results: VecDeque<crate::workers::file_operation_worker::FileOperationResult>,
     pub extraction_progress: crate::infrastructure::archive_extract::SharedExtractionProgress,
     pub extraction_cancel: crate::infrastructure::archive_extract::ExtractionCancelFlag,
+    pub(crate) compression_sender:
+        Sender<crate::workers::archive_compression_worker::ArchiveCompressionRequest>,
+    pub compression_progress: crate::infrastructure::archive_create::SharedCompressionProgress,
+    pub compression_cancel: crate::infrastructure::archive_create::CompressionCancelFlag,
     pub disk_cache_invalidation_sender:
         Sender<Vec<crate::app::init_workers::CacheInvalidationEntry>>,
     pub prefetch_sender: Sender<crate::workers::prefetch_worker::PrefetchMessage>,

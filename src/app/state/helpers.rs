@@ -765,6 +765,11 @@ impl ImageViewerApp {
             || !self.cache_manager.loading_set.is_empty()
             || !self.cache_manager.folder_preview_loading.is_empty()
             || !self.cache_manager.pending_upload_set.is_empty();
+        let compression_active = self
+            .file_operation_state
+            .compression_progress
+            .lock()
+            .is_ok_and(|guard| guard.is_some());
 
         self.is_in_restore_burst()
             || self.last_user_activity.elapsed() < WORKING_SET_TRIM_ACTIVITY_GRACE
@@ -785,6 +790,7 @@ impl ImageViewerApp {
             || self.pending_drag_move_confirmation.is_some()
             || self.shell_menu_loading
             || self.open_with_loading
+            || compression_active
             || thumbnail_pipeline_busy
     }
 
