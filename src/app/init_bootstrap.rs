@@ -105,7 +105,7 @@ pub(in crate::app) struct AppBootstrap {
     pub(in crate::app) idle_warmup_tx: mpsc::Sender<crate::workers::idle_warmup::IdleWarmupMessage>,
 
     pub(in crate::app) file_op_tx:
-        mpsc::Sender<crate::workers::file_operation_worker::FileOperationRequest>,
+        crossbeam_channel::Sender<crate::workers::file_operation_worker::FileOperationRequest>,
     pub(in crate::app) file_op_res_rx:
         mpsc::Receiver<crate::workers::file_operation_worker::FileOperationResult>,
     pub(in crate::app) extraction_progress:

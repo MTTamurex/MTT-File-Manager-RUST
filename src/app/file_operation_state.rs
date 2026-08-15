@@ -61,7 +61,8 @@ pub(crate) fn fail_pending_clipboard_move(
 }
 
 pub struct FileOperationState {
-    pub(crate) file_op_sender: Sender<crate::workers::file_operation_worker::FileOperationRequest>,
+    pub(crate) file_op_sender:
+        crossbeam_channel::Sender<crate::workers::file_operation_worker::FileOperationRequest>,
     pub file_op_res_receiver: Receiver<crate::workers::file_operation_worker::FileOperationResult>,
     pub deferred_results: VecDeque<crate::workers::file_operation_worker::FileOperationResult>,
     pub extraction_progress: crate::infrastructure::archive_extract::SharedExtractionProgress,

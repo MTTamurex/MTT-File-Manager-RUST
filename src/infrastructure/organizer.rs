@@ -22,7 +22,7 @@ pub struct OrganizerManager {
 
 impl OrganizerManager {
     pub(crate) fn start(
-        file_operation_sender: Sender<FileOperationRequest>,
+        file_operation_sender: crossbeam_channel::Sender<FileOperationRequest>,
         initial_rules: Vec<OrganizerRule>,
         ui_ctx: eframe::egui::Context,
     ) -> Self {
@@ -95,7 +95,7 @@ mod watcher {
     pub(super) fn run_organizer(
         command_receiver: Receiver<OrganizerCommand>,
         event_sender: Sender<OrganizerEvent>,
-        file_operation_sender: Sender<FileOperationRequest>,
+        file_operation_sender: crossbeam_channel::Sender<FileOperationRequest>,
         mut rules: Vec<OrganizerRule>,
         ui_ctx: eframe::egui::Context,
     ) {
@@ -308,7 +308,7 @@ mod watcher {
 
     fn process_stable_files(
         pending: &mut HashMap<PathBuf, PendingFile>,
-        file_operation_sender: &Sender<FileOperationRequest>,
+        file_operation_sender: &crossbeam_channel::Sender<FileOperationRequest>,
         event_sender: &Sender<OrganizerEvent>,
     ) {
         let ready: Vec<_> = pending

@@ -147,8 +147,10 @@ impl ImageViewerApp {
             crate::workers::global_search_worker::GlobalSearchRequest
         );
 
-        // File-operation worker (type is pub(crate), accessible here)
-        disconnect!(
+        // File-operation worker pool (type is pub(crate), accessible here).
+        // Dropping the last sender disconnects the shared crossbeam channel
+        // and makes every pooled worker's recv() fail, exiting all threads.
+        disconnect_crossbeam!(
             self.file_operation_state.file_op_sender,
             crate::workers::file_operation_worker::FileOperationRequest
         );

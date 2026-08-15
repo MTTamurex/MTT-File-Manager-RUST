@@ -2,7 +2,7 @@
 //! Ensures COM is initialized as STA (COINIT_APARTMENTTHREADED) for correct shell behavior.
 
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::Receiver;
+use std::sync::Arc;
 use windows::Win32::Foundation::HWND;
 
 mod handlers;
@@ -413,235 +413,262 @@ fn sanitize_operation_paths(paths: &[PathBuf]) -> Result<Vec<PathBuf>, String> {
     paths.iter().map(|p| sanitize_operation_path(p)).collect()
 }
 
-/// Starts the file operation worker thread.
+/// Number of concurrent shell file operation workers.
+///
+/// Each worker owns its own STA COM apartment and proxy window, so a
+/// long-running transfer (e.g. a multi-hour `IFileOperation` copy) can no
+/// longer block unrelated operations such as deletes or renames.
+const FILE_OPERATION_WORKERS: usize = 4;
+
+/// Starts the file operation worker pool.
+///
+/// The request channel must be shared (multi-consumer) because requests are
+/// pulled concurrently by all workers; each operation then runs on its own
+/// thread until completion.
 pub(crate) fn start_file_operation_worker(
-    receiver: Receiver<FileOperationRequest>,
+    receiver: Arc<crossbeam_channel::Receiver<FileOperationRequest>>,
     result_sender: std::sync::mpsc::Sender<FileOperationResult>,
     archive_extract_sender: std::sync::mpsc::Sender<ArchiveExtractionRequest>,
 ) {
-    let spawn_result = crate::spawn_named("file-op-worker", move || {
-        // Initialize COM as Single-Threaded Apartment (STA)
-        // RAII guard ensures CoUninitialize even on panic.
-        let _com = ComScope::sta();
+    for worker_id in 0..FILE_OPERATION_WORKERS {
+        let receiver = Arc::clone(&receiver);
+        let result_sender = result_sender.clone();
+        let archive_extract_sender = archive_extract_sender.clone();
+        let spawn_result = crate::spawn_named(&format!("file-op-worker-{worker_id}"), move || {
+            run_file_operation_loop(receiver, result_sender, archive_extract_sender);
+        });
 
-        // Create a proxy HWND ON THE WORKER THREAD so that Shell progress
-        // dialogs (shown by SHFileOperationW / IFileOperation) are owned by a
-        // window on the SAME thread as the blocking call.
-        //
-        // Previously the proxy HWND was created on the UI thread and passed
-        // to the worker.  When SHFileOperationW disabled that cross-thread
-        // owner via EnableWindow(), Windows marshaled the WM_ENABLE message
-        // to the UI thread with SendMessage.  If the UI thread was busy
-        // rendering, the worker blocked — but more critically, the Shell's
-        // internal modal message loop could re-enter the UI thread's message
-        // pump and cause the entire window to freeze (total UI lockup for
-        // the duration of the file operation).
-        //
-        // With a same-thread proxy, EnableWindow is a direct call (no
-        // cross-thread marshaling) and the Shell's modal loop stays entirely
-        // on the worker thread.
-        let worker_proxy_hwnd =
-            crate::infrastructure::windows::shell_operations::create_shell_op_proxy_window();
-        if worker_proxy_hwnd.is_none() {
-            log::warn!(
-                "[FileOpWorker] Proxy window creation failed on worker thread; \
-                 falling back to caller-provided HWND (may cause UI freeze)"
+        if let Err(error) = spawn_result {
+            log::error!(
+                "[FileOpWorker] failed to spawn worker thread {worker_id}: {}",
+                error
             );
+            diag_error("file_operation_worker", "spawn_failed", &[]);
         }
+    }
+}
 
-        while let Ok(request) = receiver.recv() {
-            // Substitute the UI-thread HWND with the worker-thread proxy.
-            // Falls back to the original HWND if proxy creation failed.
-            let request = match worker_proxy_hwnd {
-                Some(proxy) => request.substitute_hwnd(SendHwnd(proxy)),
-                None => request,
-            };
-            let clipboard_paste_token = request.clipboard_paste_token();
+fn run_file_operation_loop(
+    receiver: Arc<crossbeam_channel::Receiver<FileOperationRequest>>,
+    result_sender: std::sync::mpsc::Sender<FileOperationResult>,
+    archive_extract_sender: std::sync::mpsc::Sender<ArchiveExtractionRequest>,
+) {
+    // Initialize COM as Single-Threaded Apartment (STA)
+    // RAII guard ensures CoUninitialize even on panic.
+    let _com = ComScope::sta();
 
-            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                match request {
-                    FileOperationRequest::Delete { paths, hwnd } => {
-                        handlers::handle_delete(paths, hwnd, &result_sender);
-                    }
-                    FileOperationRequest::Rename {
-                        path,
-                        new_name,
-                        hwnd,
-                    } => {
-                        handlers::handle_rename(path, new_name, hwnd, &result_sender);
-                    }
-                    FileOperationRequest::RenameBatch { renames, hwnd } => {
-                        handlers::handle_rename_batch(renames, hwnd, &result_sender);
-                        return CompletionBehavior::SendFinishedNoRefresh;
-                    }
-                    FileOperationRequest::Copy {
+    // Create a proxy HWND ON THE WORKER THREAD so that Shell progress
+    // dialogs (shown by SHFileOperationW / IFileOperation) are owned by a
+    // window on the SAME thread as the blocking call.
+    //
+    // Previously the proxy HWND was created on the UI thread and passed
+    // to the worker.  When SHFileOperationW disabled that cross-thread
+    // owner via EnableWindow(), Windows marshaled the WM_ENABLE message
+    // to the UI thread with SendMessage.  If the UI thread was busy
+    // rendering, the worker blocked — but more critically, the Shell's
+    // internal modal message loop could re-enter the UI thread's message
+    // pump and cause the entire window to freeze (total UI lockup for
+    // the duration of the file operation).
+    //
+    // With a same-thread proxy, EnableWindow is a direct call (no
+    // cross-thread marshaling) and the Shell's modal loop stays entirely
+    // on the worker thread.
+    let worker_proxy_hwnd =
+        crate::infrastructure::windows::shell_operations::create_shell_op_proxy_window();
+    if worker_proxy_hwnd.is_none() {
+        log::warn!(
+            "[FileOpWorker] Proxy window creation failed on worker thread; \
+                 falling back to caller-provided HWND (may cause UI freeze)"
+        );
+    }
+
+    while let Ok(request) = receiver.recv() {
+        // Substitute the UI-thread HWND with the worker-thread proxy.
+        // Falls back to the original HWND if proxy creation failed.
+        let request = match worker_proxy_hwnd {
+            Some(proxy) => request.substitute_hwnd(SendHwnd(proxy)),
+            None => request,
+        };
+        let clipboard_paste_token = request.clipboard_paste_token();
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            match request {
+                FileOperationRequest::Delete { paths, hwnd } => {
+                    handlers::handle_delete(paths, hwnd, &result_sender);
+                }
+                FileOperationRequest::Rename {
+                    path,
+                    new_name,
+                    hwnd,
+                } => {
+                    handlers::handle_rename(path, new_name, hwnd, &result_sender);
+                }
+                FileOperationRequest::RenameBatch { renames, hwnd } => {
+                    handlers::handle_rename_batch(renames, hwnd, &result_sender);
+                    return CompletionBehavior::SendFinishedNoRefresh;
+                }
+                FileOperationRequest::Copy {
+                    path,
+                    dest_folder,
+                    hwnd,
+                } => {
+                    let completion = handlers::handle_copy(
                         path,
                         dest_folder,
                         hwnd,
-                    } => {
-                        let completion = handlers::handle_copy(
-                            path,
-                            dest_folder,
-                            hwnd,
-                            &result_sender,
-                            &archive_extract_sender,
-                        );
-                        // handle_copy_completed already reloads the destination view.
-                        return match completion {
-                            handlers::HandlerCompletion::CompletedSynchronously => {
-                                CompletionBehavior::SendFinishedNoRefresh
-                            }
-                            handlers::HandlerCompletion::DispatchedAsync => {
-                                CompletionBehavior::NoFinished
-                            }
-                        };
-                    }
-                    FileOperationRequest::Move {
+                        &result_sender,
+                        &archive_extract_sender,
+                    );
+                    // handle_copy_completed already reloads the destination view.
+                    return match completion {
+                        handlers::HandlerCompletion::CompletedSynchronously => {
+                            CompletionBehavior::SendFinishedNoRefresh
+                        }
+                        handlers::HandlerCompletion::DispatchedAsync => {
+                            CompletionBehavior::NoFinished
+                        }
+                    };
+                }
+                FileOperationRequest::Move {
+                    path,
+                    dest_folder,
+                    hwnd,
+                } => {
+                    let completion = handlers::handle_move(
                         path,
                         dest_folder,
                         hwnd,
-                    } => {
-                        let completion = handlers::handle_move(
-                            path,
-                            dest_folder,
-                            hwnd,
-                            &result_sender,
-                            &archive_extract_sender,
-                        );
-                        // handle_move_completed already reloads source + dest views.
-                        return match completion {
-                            handlers::HandlerCompletion::CompletedSynchronously => {
-                                CompletionBehavior::SendFinishedNoRefresh
-                            }
-                            handlers::HandlerCompletion::DispatchedAsync => {
-                                CompletionBehavior::NoFinished
-                            }
-                        };
-                    }
-                    FileOperationRequest::OrganizerMove {
+                        &result_sender,
+                        &archive_extract_sender,
+                    );
+                    // handle_move_completed already reloads source + dest views.
+                    return match completion {
+                        handlers::HandlerCompletion::CompletedSynchronously => {
+                            CompletionBehavior::SendFinishedNoRefresh
+                        }
+                        handlers::HandlerCompletion::DispatchedAsync => {
+                            CompletionBehavior::NoFinished
+                        }
+                    };
+                }
+                FileOperationRequest::OrganizerMove {
+                    path,
+                    dest_folder,
+                    rule_id,
+                    activation,
+                    expected_snapshot,
+                } => {
+                    handlers::handle_organizer_move(
                         path,
                         dest_folder,
                         rule_id,
                         activation,
                         expected_snapshot,
-                    } => {
-                        handlers::handle_organizer_move(
-                            path,
-                            dest_folder,
-                            rule_id,
-                            activation,
-                            expected_snapshot,
-                            &result_sender,
-                        );
-                        return CompletionBehavior::NoFinished;
-                    }
-                    FileOperationRequest::CopyBatch {
+                        &result_sender,
+                    );
+                    return CompletionBehavior::NoFinished;
+                }
+                FileOperationRequest::CopyBatch {
+                    paths,
+                    dest_folder,
+                    hwnd,
+                } => {
+                    let completion = handlers::handle_copy_batch(
                         paths,
                         dest_folder,
                         hwnd,
-                    } => {
-                        let completion = handlers::handle_copy_batch(
-                            paths,
-                            dest_folder,
-                            hwnd,
-                            &result_sender,
-                            &archive_extract_sender,
-                        );
-                        // handle_copy_completed already reloads the destination view.
-                        return match completion {
-                            handlers::HandlerCompletion::CompletedSynchronously => {
-                                CompletionBehavior::SendFinishedNoRefresh
-                            }
-                            handlers::HandlerCompletion::DispatchedAsync => {
-                                CompletionBehavior::NoFinished
-                            }
-                        };
-                    }
-                    FileOperationRequest::MoveBatch {
+                        &result_sender,
+                        &archive_extract_sender,
+                    );
+                    // handle_copy_completed already reloads the destination view.
+                    return match completion {
+                        handlers::HandlerCompletion::CompletedSynchronously => {
+                            CompletionBehavior::SendFinishedNoRefresh
+                        }
+                        handlers::HandlerCompletion::DispatchedAsync => {
+                            CompletionBehavior::NoFinished
+                        }
+                    };
+                }
+                FileOperationRequest::MoveBatch {
+                    paths,
+                    dest_folder,
+                    hwnd,
+                    clipboard_paste_token,
+                } => {
+                    let completion = handlers::handle_move_batch(
                         paths,
                         dest_folder,
                         hwnd,
                         clipboard_paste_token,
-                    } => {
-                        let completion = handlers::handle_move_batch(
-                            paths,
-                            dest_folder,
-                            hwnd,
-                            clipboard_paste_token,
-                            &result_sender,
-                            &archive_extract_sender,
-                        );
-                        // handle_move_batch_completed already reloads source + dest views.
-                        return match completion {
-                            handlers::HandlerCompletion::CompletedSynchronously => {
-                                CompletionBehavior::SendFinishedNoRefresh
-                            }
-                            handlers::HandlerCompletion::DispatchedAsync => {
-                                CompletionBehavior::NoFinished
-                            }
-                        };
-                    }
-                    FileOperationRequest::RestoreFromRecycleBin { items } => {
-                        handlers::handle_restore_from_recycle_bin(items, &result_sender);
-                    }
-                    FileOperationRequest::DeletePermanently {
-                        physical_paths,
-                        hwnd,
-                    } => handlers::handle_delete_permanently(physical_paths, hwnd, &result_sender),
-                    FileOperationRequest::EmptyRecycleBin { hwnd } => {
-                        handlers::handle_empty_recycle_bin(hwnd, &result_sender);
-                    }
-                    FileOperationRequest::ShowProperties { paths, hwnd } => {
-                        handlers::handle_show_properties(paths, hwnd);
-                        // No Finished message — fire-and-forget, dialog manages itself
-                        return CompletionBehavior::NoFinished;
-                    }
-                }
-                CompletionBehavior::SendFinished
-            }));
-
-            match result {
-                Ok(CompletionBehavior::SendFinished) => {
-                    // Notify general completion for other operations.
-                    let _ = result_sender.send(FileOperationResult::Finished);
-                }
-                Ok(CompletionBehavior::SendFinishedNoRefresh) => {
-                    let _ = result_sender.send(FileOperationResult::FinishedNoRefresh);
-                }
-                Ok(CompletionBehavior::NoFinished) => {}
-                Err(e) => {
-                    let (msg, panic_payload) = if let Some(s) = e.downcast_ref::<&str>() {
-                        (s.to_string(), "str")
-                    } else if let Some(s) = e.downcast_ref::<String>() {
-                        (s.clone(), "string")
-                    } else {
-                        ("unknown".to_string(), "unknown")
-                    };
-                    log::error!("[FileOpWorker] worker thread panicked");
-                    diag_error(
-                        "file_operation_worker",
-                        "worker_panic",
-                        &[field_label("payload_kind", panic_payload)],
+                        &result_sender,
+                        &archive_extract_sender,
                     );
-                    let failure = match clipboard_paste_token {
-                        Some(token) => FileOperationResult::ClipboardMoveFailed {
-                            token,
-                            message: msg,
-                        },
-                        None => FileOperationResult::OperationFailed { message: msg },
+                    // handle_move_batch_completed already reloads source + dest views.
+                    return match completion {
+                        handlers::HandlerCompletion::CompletedSynchronously => {
+                            CompletionBehavior::SendFinishedNoRefresh
+                        }
+                        handlers::HandlerCompletion::DispatchedAsync => {
+                            CompletionBehavior::NoFinished
+                        }
                     };
-                    let _ = result_sender.send(failure);
-                    let _ = result_sender.send(FileOperationResult::Finished);
+                }
+                FileOperationRequest::RestoreFromRecycleBin { items } => {
+                    handlers::handle_restore_from_recycle_bin(items, &result_sender);
+                }
+                FileOperationRequest::DeletePermanently {
+                    physical_paths,
+                    hwnd,
+                } => handlers::handle_delete_permanently(physical_paths, hwnd, &result_sender),
+                FileOperationRequest::EmptyRecycleBin { hwnd } => {
+                    handlers::handle_empty_recycle_bin(hwnd, &result_sender);
+                }
+                FileOperationRequest::ShowProperties { paths, hwnd } => {
+                    handlers::handle_show_properties(paths, hwnd);
+                    // No Finished message — fire-and-forget, dialog manages itself
+                    return CompletionBehavior::NoFinished;
                 }
             }
-        }
-        // COM cleanup handled by _com (ComGuard) RAII Drop
-    });
+            CompletionBehavior::SendFinished
+        }));
 
-    if let Err(error) = spawn_result {
-        log::error!("[FileOpWorker] failed to spawn worker thread: {}", error);
-        diag_error("file_operation_worker", "spawn_failed", &[]);
+        match result {
+            Ok(CompletionBehavior::SendFinished) => {
+                // Notify general completion for other operations.
+                let _ = result_sender.send(FileOperationResult::Finished);
+            }
+            Ok(CompletionBehavior::SendFinishedNoRefresh) => {
+                let _ = result_sender.send(FileOperationResult::FinishedNoRefresh);
+            }
+            Ok(CompletionBehavior::NoFinished) => {}
+            Err(e) => {
+                let (msg, panic_payload) = if let Some(s) = e.downcast_ref::<&str>() {
+                    (s.to_string(), "str")
+                } else if let Some(s) = e.downcast_ref::<String>() {
+                    (s.clone(), "string")
+                } else {
+                    ("unknown".to_string(), "unknown")
+                };
+                log::error!("[FileOpWorker] worker thread panicked");
+                diag_error(
+                    "file_operation_worker",
+                    "worker_panic",
+                    &[field_label("payload_kind", panic_payload)],
+                );
+                let failure = match clipboard_paste_token {
+                    Some(token) => FileOperationResult::ClipboardMoveFailed {
+                        token,
+                        message: msg,
+                    },
+                    None => FileOperationResult::OperationFailed { message: msg },
+                };
+                let _ = result_sender.send(failure);
+                let _ = result_sender.send(FileOperationResult::Finished);
+            }
+        }
     }
+    // COM cleanup handled by _com (ComGuard) RAII Drop
 }
 
 #[cfg(test)]

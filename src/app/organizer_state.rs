@@ -96,7 +96,8 @@ pub struct OrganizerState {
 
 impl OrganizerState {
     pub(crate) fn new(
-        file_operation_sender: Sender<crate::workers::file_operation_worker::FileOperationRequest>,
+        file_operation_sender:
+            crossbeam_channel::Sender<crate::workers::file_operation_worker::FileOperationRequest>,
         rules: Vec<OrganizerRule>,
         ui_ctx: eframe::egui::Context,
     ) -> Self {
