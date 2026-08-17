@@ -583,6 +583,9 @@ impl eframe::App for ImageViewerApp {
         // 14. Notifications
         app::notifications::render_notifications(self, ctx);
 
+        // 14b. Disk usage analyzer: separate OS window (immediate viewport).
+        crate::ui::disk_analysis::render_disk_analysis_viewport(self, ctx);
+
         // 15. Global Search Overlay (on top of everything)
         crate::ui::global_search_overlay::render_global_search_overlay(self, ctx);
 

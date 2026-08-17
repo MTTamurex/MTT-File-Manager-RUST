@@ -903,6 +903,18 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                         app.open_optical_disc_in_standalone_player(path);
                     }
                 }
+                -83 => {
+                    if let Some(path) = context_menu.target_paths.first() {
+                        if let Some(letter) = path
+                            .to_string_lossy()
+                            .chars()
+                            .next()
+                            .filter(|c| c.is_ascii_alphabetic())
+                        {
+                            app.open_disk_analysis(letter.to_ascii_uppercase());
+                        }
+                    }
+                }
                 -90 => {}
                 // "Compress" submenu parent — leaf items dispatch via "compress:" command
                 -102 => {}

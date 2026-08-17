@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 
+mod disk_analysis;
 mod drive_health;
+pub use disk_analysis::*;
 pub use drive_health::*;
 
 /// Named pipe path for IPC between the search service and the file manager app.
@@ -48,6 +50,9 @@ pub enum SearchRequest {
         drive_letter: char,
         background: bool,
     },
+    /// Request a full-volume snapshot for disk usage analysis (NTFS only).
+    /// The service copies its in-memory MFT/USN index; no new disk I/O.
+    DiskAnalysis { drive_letter: char },
 }
 
 impl SearchRequest {
@@ -94,6 +99,11 @@ impl SearchRequest {
                 return Err("drive letter must be an ASCII letter".to_string());
             }
         }
+        if let SearchRequest::DiskAnalysis { drive_letter } = self {
+            if !drive_letter.is_ascii_alphabetic() {
+                return Err("drive letter must be an ASCII letter".to_string());
+            }
+        }
         Ok(())
     }
 }
@@ -126,6 +136,8 @@ pub enum SearchResponse {
     Error(String),
     /// Point-in-time hardware health information for a physical drive.
     DriveHealth(Box<DriveHealthSnapshot>),
+    /// Full-volume snapshot for disk usage analysis (NTFS only).
+    DiskAnalysis(Box<DiskAnalysisSnapshot>),
 }
 
 impl SearchResponse {
@@ -141,6 +153,9 @@ impl SearchResponse {
             }
         }
         if let SearchResponse::DriveHealth(snapshot) = self {
+            snapshot.validate()?;
+        }
+        if let SearchResponse::DiskAnalysis(snapshot) = self {
             snapshot.validate()?;
         }
         Ok(())
@@ -303,6 +318,52 @@ mod tests {
         assert_eq!(folder_count, 3);
     }
 
+    #[test]
+    fn test_roundtrip_disk_analysis() {
+        let req = SearchRequest::DiskAnalysis { drive_letter: 'D' };
+        let encoded = encode_message(&req).unwrap();
+        let decoded: SearchRequest = decode_message(&encoded[4..]).unwrap();
+        assert!(matches!(
+            decoded,
+            SearchRequest::DiskAnalysis { drive_letter: 'D' }
+        ));
+
+        let resp = SearchResponse::DiskAnalysis(Box::new(DiskAnalysisSnapshot {
+            drive_letter: 'D',
+            records: vec![DiskAnalysisRecord {
+                frn: 5,
+                parent_frn: 5,
+                name: String::new(),
+                size: 0,
+                is_dir: true,
+                is_reparse: false,
+            }],
+        }));
+        let encoded = encode_message(&resp).unwrap();
+        let decoded: SearchResponse = decode_message(&encoded[4..]).unwrap();
+        let SearchResponse::DiskAnalysis(snapshot) = decoded else {
+            panic!("unexpected variant");
+        };
+        assert_eq!(snapshot.drive_letter, 'D');
+        assert_eq!(snapshot.records.len(), 1);
+        snapshot.validate().unwrap();
+    }
+
+    #[test]
+    fn disk_analysis_validate_rejects_excess_records() {
+        let snapshot = DiskAnalysisSnapshot {
+            drive_letter: 'C',
+            records: Vec::new(),
+        };
+        assert!(snapshot.validate().is_ok());
+
+        let bad_letter = DiskAnalysisSnapshot {
+            drive_letter: '7',
+            records: Vec::new(),
+        };
+        assert!(bad_letter.validate().is_err());
+    }
+
     /// Deterministic pseudo-random generator (SplitMix64) so the robustness
     /// sweep below is reproducible and runs inside `cargo test` without a
     /// nightly libFuzzer target.
@@ -352,6 +413,7 @@ mod tests {
                 drive_letter: 'C',
                 background: true,
             },
+            SearchRequest::DiskAnalysis { drive_letter: 'C' },
         ];
         let seed_payloads: Vec<Vec<u8>> = seeds
             .iter()

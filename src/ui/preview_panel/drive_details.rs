@@ -7,10 +7,28 @@ pub(super) fn render_drive_details(
     ui: &mut egui::Ui,
     file: &FileEntry,
     add_detail: &impl Fn(&mut egui::Ui, &str, String),
-) {
-    let Some(drive) = file.drive_info.as_ref() else {
-        return;
-    };
+) -> Option<char> {
+    let drive = file.drive_info.as_ref()?;
+
+    // NTFS-only disk usage analyzer entry point.
+    if drive.file_system.eq_ignore_ascii_case("NTFS") {
+        if let Some(letter) = file
+            .path
+            .to_string_lossy()
+            .chars()
+            .next()
+            .filter(|c| c.is_ascii_alphabetic())
+        {
+            if ui
+                .button(t!("disk_analysis.analyze").to_string())
+                .on_hover_cursor(egui::CursorIcon::PointingHand)
+                .clicked()
+            {
+                return Some(letter.to_ascii_uppercase());
+            }
+            ui.add_space(6.0);
+        }
+    }
 
     add_optional_detail(ui, add_detail, "file_info.drive_model", &drive.model);
     add_optional_detail(
@@ -27,9 +45,7 @@ pub(super) fn render_drive_details(
     );
     add_optional_detail(ui, add_detail, "file_info.drive_bus_type", &drive.bus_type);
 
-    let Some(snapshot) = drive.health.as_ref() else {
-        return;
-    };
+    let snapshot = drive.health.as_ref()?;
 
     if let Some(mode) = transfer_mode(snapshot) {
         add_detail(ui, &t!("file_info.drive_transfer_mode"), mode);
@@ -110,6 +126,7 @@ pub(super) fn render_drive_details(
             format!("{temperature} °C"),
         );
     }
+    None
 }
 
 fn add_health_alert_detail(

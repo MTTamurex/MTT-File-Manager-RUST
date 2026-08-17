@@ -24,6 +24,7 @@
 pub mod clipboard_ops;
 pub mod compression;
 pub mod context_menu;
+pub mod disk_analysis;
 pub mod drag_drop;
 pub mod drive_health;
 pub mod drive_refresh;

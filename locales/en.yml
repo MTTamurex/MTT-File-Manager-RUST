@@ -241,6 +241,7 @@ operations:
 context_menu:
   open: "Open"
   open_with: "Open with..."
+  analyze_disk_usage: "Analyze disk usage"
   extract_all: "Extract All..."
   extract_all_unavailable: "Extract All is not available for this file"
   choose_another_app: "Choose another app"
@@ -803,3 +804,30 @@ notifications:
 
 tabs:
   max_reached: "Tab limit (%{max}) reached. Close a tab to open another."
+
+disk_analysis:
+  analyze: "Analyze disk usage"
+  title: "Disk usage"
+  scan: "Scan"
+  scanning: "Scanning..."
+  drives: "Drives"
+  file_types: "File types"
+  deepest_path: "Deepest path"
+  files_count: "%{count} files"
+  folders_count: "%{count} folders"
+  scan_time: "scan %{secs} s"
+  loading: "Reading volume index..."
+  failed: "Analysis failed"
+  retry: "Retry"
+  index_ready: "index current"
+  index_scanning: "index building"
+  used_of: "%{used} used of %{total}"
+  drill_hint: "Click to open folder"
+  category_video: "Video"
+  category_images: "Images"
+  category_audio: "Audio"
+  category_archives: "Archives"
+  category_code: "Code"
+  category_documents: "Documents"
+  category_system: "System"
+  category_other: "Other"

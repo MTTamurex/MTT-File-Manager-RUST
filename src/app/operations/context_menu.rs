@@ -640,6 +640,20 @@ impl ImageViewerApp {
             );
         }
         // ========== SECONDARY ITEMS (App-specific) ==========
+        // Disk usage analyzer entry for NTFS drive roots.
+        if is_drive && !is_empty_area && paths.len() == 1 {
+            let is_ntfs = paths.first().is_some_and(|path| {
+                self.drive_state
+                    .cached_drive_info(&path.to_string_lossy())
+                    .is_some_and(|info| info.file_system.eq_ignore_ascii_case("NTFS"))
+            });
+            if is_ntfs {
+                items.push(
+                    ContextMenuItem::new(-83, t!("context_menu.analyze_disk_usage"))
+                        .with_svg_icon("drive"),
+                );
+            }
+        }
         let can_create_folder =
             !crate::domain::special_paths::is_virtual_path(&self.navigation_state.current_path)
                 && !self.current_location_is_archive_namespace();

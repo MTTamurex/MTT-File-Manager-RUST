@@ -1,4 +1,5 @@
 mod child_index;
+mod disk_analysis;
 mod drive_health;
 mod file_index;
 mod fs_walker;

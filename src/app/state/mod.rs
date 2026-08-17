@@ -766,6 +766,9 @@ pub struct ImageViewerApp {
     // GLOBAL SEARCH (via MTT Search Service)
     pub global_search: GlobalSearchState,
 
+    // DISK USAGE ANALYZER (NTFS, via MTT Search Service)
+    pub disk_analysis: crate::app::disk_analysis_state::DiskAnalysisState,
+
     // FILE OPERATION WORKER/TRACKING
     pub file_operation_state: FileOperationState,
 

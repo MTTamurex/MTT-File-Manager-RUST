@@ -17,6 +17,8 @@ pub enum PreviewPanelAction {
     NavigateTo(PathBuf),
     /// User requested an on-demand SHA-256 calculation for the selected file.
     CalculateFileHash(PathBuf),
+    /// User requested the disk usage analyzer for an NTFS drive.
+    AnalyzeDrive(char),
 }
 
 pub const PREVIEW_MAX_HEIGHT: f32 = 240.0;

@@ -244,6 +244,9 @@ pub(super) fn render_preview_panel_layout(
                                     PreviewPanelAction::CalculateFileHash(path) => {
                                         app.enqueue_file_hash_for_selected(path);
                                     }
+                                    PreviewPanelAction::AnalyzeDrive(letter) => {
+                                        app.open_disk_analysis(letter);
+                                    }
                                     PreviewPanelAction::DetachVideo { path, position, volume } => {
                                         // Replace any standalone player without blocking the UI.
                                         // The preview is destroyed only after spawn succeeds.

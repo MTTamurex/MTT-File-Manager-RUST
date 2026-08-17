@@ -164,6 +164,17 @@ const CHECK_PATHS_TIMEOUT_MS: u64 = 2_000;
 /// loading on the service side.
 const FOLDER_SIZE_TIMEOUT_MS: u64 = 8_000;
 
+/// Timeout for the DiskAnalysis snapshot transfer. The service-side watchdog
+/// kills idle connections at 30 s, so this only needs to outlive a healthy
+/// large transfer.
+const DISK_ANALYSIS_TIMEOUT_MS: u64 = 45_000;
+/// Payload cap for DiskAnalysis responses (full volume snapshot).
+/// Bounded to prevent unbounded allocation; validate() additionally caps
+/// the record count.
+const DISK_ANALYSIS_MAX_PAYLOAD: usize = 512 * 1024 * 1024;
+/// Default response payload cap for all other request types.
+const DEFAULT_MAX_RESPONSE_PAYLOAD: usize = 1024 * 1024;
+
 /// Ask the search service which of the given directory paths have been
 /// modified (via USN journal) within the last `threshold_secs` seconds.
 /// Returns the subset of paths that changed. Useful for tab-switch staleness
@@ -216,6 +227,45 @@ pub fn folder_size(path: &std::path::Path) -> Result<(u64, u64, u64), String> {
                 folder_count,
                 ..
             } => Ok((total_size, file_count, folder_count)),
+            SearchResponse::Error(e) => Err(e),
+            _ => Err("Unexpected response type".into()),
+        }
+    })();
+
+    unsafe {
+        let _ = CloseHandle(pipe);
+    }
+
+    result
+}
+
+/// Request a full-volume snapshot for disk usage analysis from the search
+/// service's in-memory MFT/USN index. NTFS volumes only; the service copies
+/// its live index (no new disk I/O).
+pub fn fetch_disk_analysis(drive_letter: char) -> Result<DiskAnalysisSnapshot, String> {
+    let requested_letter = drive_letter.to_ascii_uppercase();
+    let request = SearchRequest::DiskAnalysis {
+        drive_letter: requested_letter,
+    };
+    request.validate()?;
+
+    let pipe = open_pipe()?;
+    let result = (|| {
+        write_message(pipe, &request)?;
+        let response: SearchResponse =
+            read_response(pipe, DISK_ANALYSIS_TIMEOUT_MS, DISK_ANALYSIS_MAX_PAYLOAD)?;
+        response.validate()?;
+
+        match response {
+            SearchResponse::DiskAnalysis(snapshot)
+                if snapshot.drive_letter.to_ascii_uppercase() == requested_letter =>
+            {
+                Ok(*snapshot)
+            }
+            SearchResponse::DiskAnalysis(snapshot) => Err(format!(
+                "Disk analysis response letter mismatch: requested {}, received {}",
+                requested_letter, snapshot.drive_letter
+            )),
             SearchResponse::Error(e) => Err(e),
             _ => Err("Unexpected response type".into()),
         }
@@ -732,14 +782,18 @@ fn write_all(pipe: HANDLE, data: &[u8]) -> Result<(), String> {
 fn read_response<T: for<'de> serde::Deserialize<'de>>(
     pipe: HANDLE,
     timeout_ms: u64,
+    max_payload_bytes: usize,
 ) -> Result<T, String> {
     // Read 4-byte length prefix
     let mut len_buf = [0u8; 4];
     read_exact_with_timeout(pipe, &mut len_buf, timeout_ms)?;
 
     let payload_len = u32::from_le_bytes(len_buf) as usize;
-    if payload_len == 0 || payload_len > 1024 * 1024 {
-        return Err(format!("Invalid payload length: {}", payload_len));
+    if payload_len == 0 || payload_len > max_payload_bytes {
+        return Err(format!(
+            "Invalid payload length: {} (max {})",
+            payload_len, max_payload_bytes
+        ));
     }
 
     // Read payload
@@ -752,7 +806,7 @@ fn read_response<T: for<'de> serde::Deserialize<'de>>(
 /// Reads and validates a [`SearchResponse`] from the pipe. Returns an error if
 /// the response fails post-deserialization validation (e.g. too many items).
 fn read_validated_response(pipe: HANDLE, timeout_ms: u64) -> Result<SearchResponse, String> {
-    let resp: SearchResponse = read_response(pipe, timeout_ms)?;
+    let resp: SearchResponse = read_response(pipe, timeout_ms, DEFAULT_MAX_RESPONSE_PAYLOAD)?;
     resp.validate()?;
     Ok(resp)
 }

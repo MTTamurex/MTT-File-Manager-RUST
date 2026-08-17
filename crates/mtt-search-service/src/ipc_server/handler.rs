@@ -789,6 +789,39 @@ pub(super) fn handle_client(
                 }
             }
         }
+        SearchRequest::DiskAnalysis { drive_letter } => {
+            let drive_letter = drive_letter.to_ascii_uppercase();
+            // Full volume listing has the same sensitivity class as search
+            // results; gate it with the same client authorization used for
+            // FolderSize, using the drive root for the ACL fallback check.
+            let root_path = format!("{}:\\", drive_letter);
+            if !require_authorized_folder_size_client(pipe, &root_path) {
+                return;
+            }
+            let _active_operation =
+                crate::memory_trim::begin_active_operation("disk analysis request");
+
+            let handle = match volume_indices::find_handle(indices, drive_letter) {
+                Some(h) => h,
+                None => {
+                    let _ = send_response(
+                        pipe,
+                        &SearchResponse::Error("Volume not indexed".to_string()),
+                    );
+                    return;
+                }
+            };
+
+            match crate::disk_analysis::build_snapshot(&handle) {
+                Ok(snapshot) => {
+                    let _ =
+                        send_response(pipe, &SearchResponse::DiskAnalysis(Box::new(snapshot)));
+                }
+                Err(error) => {
+                    let _ = send_response(pipe, &SearchResponse::Error(error));
+                }
+            }
+        }
     }
 }
 
