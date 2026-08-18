@@ -55,9 +55,9 @@ impl FileCategory {
             "zip" | "rar" | "7z" | "tar" | "gz" | "bz2" | "xz" | "zst" | "iso" | "cab" => {
                 FileCategory::Archives
             }
-            "rs" | "js" | "jsx" | "tsx" | "py" | "c" | "cpp" | "h" | "hpp" | "cs"
-            | "java" | "go" | "rb" | "php" | "html" | "css" | "json" | "toml" | "yml" | "yaml"
-            | "xml" | "sql" | "sh" | "ps1" | "lua" => FileCategory::Code,
+            "rs" | "js" | "jsx" | "tsx" | "py" | "c" | "cpp" | "h" | "hpp" | "cs" | "java"
+            | "go" | "rb" | "php" | "html" | "css" | "json" | "toml" | "yml" | "yaml" | "xml"
+            | "sql" | "sh" | "ps1" | "lua" => FileCategory::Code,
             "pdf" | "doc" | "docx" | "xls" | "xlsx" | "ppt" | "pptx" | "txt" | "md" | "rtf"
             | "odt" | "csv" | "epub" => FileCategory::Documents,
             "sys" | "dll" | "exe" | "msi" | "drv" | "efi" | "mui" | "inf" | "cat" | "msu" => {
@@ -370,7 +370,7 @@ mod tests {
         ]));
 
         assert_eq!(model.root, 1); // volume root record (frn 5)
-        // root children: dir + orphan (cycle members stay unreachable).
+                                   // root children: dir + orphan (cycle members stay unreachable).
         let root_children = &model.nodes[model.root as usize].children;
         assert_eq!(root_children.len(), 2);
 
@@ -409,11 +409,7 @@ mod tests {
             rec(13, 5, "vid.mp4", 600, false),
         ]));
 
-        let docs_idx = model
-            .nodes
-            .iter()
-            .position(|n| n.name == "docs")
-            .unwrap() as u32;
+        let docs_idx = model.nodes.iter().position(|n| n.name == "docs").unwrap() as u32;
         assert_eq!(model.nodes[docs_idx as usize].subtree_size, 400);
         assert_eq!(model.nodes[docs_idx as usize].file_count, 2);
         assert_eq!(model.nodes[docs_idx as usize].folder_count, 1);
@@ -438,11 +434,7 @@ mod tests {
             rec(10, 5, "dir", 0, true),
             rec(11, 10, "a.txt", 1, false),
         ]));
-        let file_idx = model
-            .nodes
-            .iter()
-            .position(|n| n.name == "a.txt")
-            .unwrap() as u32;
+        let file_idx = model.nodes.iter().position(|n| n.name == "a.txt").unwrap() as u32;
         assert_eq!(model.path_of(file_idx), r"C:\dir\a.txt");
     }
 }

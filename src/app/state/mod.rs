@@ -234,7 +234,7 @@ pub struct ImageViewerApp {
     /// deferred-retry loop; the queue itself is shut down via `shutdown()`).
     pub thumbnail_pipeline_shutdown: Arc<AtomicBool>,
     pub image_receiver: crossbeam_channel::Receiver<ThumbnailData>, // Worker Pool -> UI
-    pub pending_thumbnails: VecDeque<ThumbnailData>,  // PERFORMANCE: Buffer for throttled uploads
+    pub pending_thumbnails: VecDeque<ThumbnailData>, // PERFORMANCE: Buffer for throttled uploads
     /// Per-path request epoch used to reject stale in-flight thumbnail results.
     pub thumbnail_request_epochs: std::collections::HashMap<PathBuf, u64>,
     /// Snapshot of old items' metadata (path â†’ (modified, size)) taken before

@@ -44,33 +44,41 @@ fn render_summary(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
             egui::RichText::new(
                 t!("disk_analysis.files_count", count = model.total_files).to_string(),
             )
-            .color(ui.visuals().weak_text_color()),
+            .strong(),
         );
         ui.label(
             egui::RichText::new(
                 t!("disk_analysis.folders_count", count = model.total_folders).to_string(),
             )
-            .color(ui.visuals().weak_text_color()),
+            .strong(),
         );
-        ui.add_space(2.0);
-        ui.horizontal(|ui| {
-            ui.label(
-                egui::RichText::new(t!("disk_analysis.deepest_path").to_string())
-                    .color(ui.visuals().weak_text_color()),
-            );
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(model.deepest_path.to_string());
-            });
-        });
     }
 }
 
-fn section_header(ui: &mut egui::Ui, text: &str) {
-    ui.label(
-        egui::RichText::new(text.to_uppercase())
-            .size(11.0)
-            .color(ui.visuals().weak_text_color()),
+/// All sidebar text shares the same color and tone as the Summary
+/// used-vs-total line: strong weight in the theme's default text color.
+fn paint_sidebar_text(
+    ui: &egui::Ui,
+    pos: egui::Pos2,
+    right_aligned: bool,
+    text: String,
+    size: f32,
+) {
+    let galley = egui::WidgetText::from(egui::RichText::new(text).size(size).strong()).into_galley(
+        ui,
+        Some(egui::TextWrapMode::Extend),
+        f32::INFINITY,
+        egui::TextStyle::Body,
     );
+    let mut pos = pos;
+    if right_aligned {
+        pos.x -= galley.size().x;
+    }
+    ui.painter().galley(pos, galley, ui.visuals().text_color());
+}
+
+fn section_header(ui: &mut egui::Ui, text: &str) {
+    ui.label(egui::RichText::new(text.to_uppercase()).size(11.0).strong());
     ui.add_space(4.0);
 }
 
@@ -90,10 +98,8 @@ fn render_drives(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
         };
         let is_active = active_letter == Some(drive.letter);
 
-        let response = ui.allocate_response(
-            egui::vec2(ui.available_width(), 52.0),
-            egui::Sense::click(),
-        );
+        let response =
+            ui.allocate_response(egui::vec2(ui.available_width(), 52.0), egui::Sense::click());
         let rect = response.rect;
         // Border-only feedback, matching the main app's GRID mode:
         // solid accent outline when selected, light accent outline on hover.
@@ -116,19 +122,19 @@ fn render_drives(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
         }
 
         let text_rect = rect.shrink2(egui::vec2(8.0, 6.0));
-        ui.painter().text(
+        paint_sidebar_text(
+            ui,
             text_rect.left_top(),
-            egui::Align2::LEFT_TOP,
+            false,
             format!("{}:  {}", drive.letter, drive.label),
-            egui::FontId::proportional(13.0),
-            ui.visuals().text_color(),
+            13.0,
         );
-        ui.painter().text(
+        paint_sidebar_text(
+            ui,
             text_rect.right_top(),
-            egui::Align2::RIGHT_TOP,
+            true,
             format!("{:.0}%", fraction * 100.0),
-            egui::FontId::proportional(12.0),
-            ui.visuals().text_color(),
+            12.0,
         );
         let bar_rect = egui::Rect::from_min_size(
             egui::pos2(text_rect.min.x, text_rect.min.y + 20.0),
@@ -142,22 +148,25 @@ fn render_drives(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
         ui.painter().rect_filled(
             egui::Rect::from_min_size(
                 bar_rect.min,
-                egui::vec2(bar_rect.width() * fraction.clamp(0.0, 1.0), bar_rect.height()),
+                egui::vec2(
+                    bar_rect.width() * fraction.clamp(0.0, 1.0),
+                    bar_rect.height(),
+                ),
             ),
             2.0,
             crate::ui::theme::drive_usage_color(fraction),
         );
-        ui.painter().text(
+        paint_sidebar_text(
+            ui,
             egui::pos2(text_rect.min.x, bar_rect.max.y + 3.0),
-            egui::Align2::LEFT_TOP,
+            false,
             t!(
                 "disk_analysis.used_of",
                 used = format_size(used),
                 total = format_size(drive.total_space)
             )
             .to_string(),
-            egui::FontId::proportional(11.0),
-            ui.visuals().weak_text_color(),
+            11.0,
         );
 
         if response.clicked() && !is_active {

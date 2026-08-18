@@ -220,7 +220,10 @@ mod tests {
         // root + 5 leaves
         assert_eq!(placed.len(), 5);
 
-        let total: f32 = placed.iter().map(|p| p.rect.width() * p.rect.height()).sum();
+        let total: f32 = placed
+            .iter()
+            .map(|p| p.rect.width() * p.rect.height())
+            .sum();
         let area_total = area.width() * area.height();
         assert!((total - area_total).abs() / area_total < 0.02);
 

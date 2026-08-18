@@ -309,8 +309,7 @@ impl ImageViewerApp {
             std::sync::mpsc::channel();
         let (cloud_open_failure_sender, cloud_open_failure_receiver) = std::sync::mpsc::channel();
         let (tag_assignment_gc_sender, tag_assignment_gc_receiver) = std::sync::mpsc::channel();
-        let (video_player_close_sender, video_player_close_receiver) =
-            std::sync::mpsc::channel();
+        let (video_player_close_sender, video_player_close_receiver) = std::sync::mpsc::channel();
 
         // Background metadata resolution for sidebar-navigated folders (Quick Access, Cloud Drives)
         let (folder_meta_resolve_tx, folder_meta_resolve_rx) = std::sync::mpsc::channel();

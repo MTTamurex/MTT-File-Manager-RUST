@@ -112,7 +112,11 @@ pub fn render_analyzer_body(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
             egui::Panel::left(egui::Id::new("disk_analysis_sidebar"))
                 .resizable(false)
                 .exact_size(250.0)
-                .frame(egui::Frame::NONE.fill(ui.visuals().panel_fill).inner_margin(10.0))
+                .frame(
+                    egui::Frame::NONE
+                        .fill(ui.visuals().panel_fill)
+                        .inner_margin(10.0),
+                )
                 .show(ui, |ui| {
                     egui::ScrollArea::vertical()
                         .id_salt("disk_analysis_sidebar_scroll")
@@ -120,7 +124,11 @@ pub fn render_analyzer_body(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
                 });
 
             egui::CentralPanel::default()
-                .frame(egui::Frame::NONE.fill(ui.visuals().panel_fill).inner_margin(8.0))
+                .frame(
+                    egui::Frame::NONE
+                        .fill(ui.visuals().panel_fill)
+                        .inner_margin(8.0),
+                )
                 .show(ui, |ui| {
                     render_breadcrumb(state, ui);
                     ui.add_space(4.0);
@@ -132,12 +140,20 @@ pub fn render_analyzer_body(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
 fn render_header(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
     egui::Panel::top(egui::Id::new("disk_analysis_header"))
         .show_separator_line(false)
-        .frame(egui::Frame::NONE.fill(ui.visuals().panel_fill).inner_margin(egui::Margin::same(12)))
+        .frame(
+            egui::Frame::NONE
+                .fill(ui.visuals().panel_fill)
+                .inner_margin(egui::Margin::same(12)),
+        )
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 let letter = state.drive_letter;
                 if let Some(letter) = letter {
-                    ui.label(egui::RichText::new(format!("{letter}:")).strong().size(15.0));
+                    ui.label(
+                        egui::RichText::new(format!("{letter}:"))
+                            .strong()
+                            .size(15.0),
+                    );
                     let label = state
                         .drives
                         .iter()
@@ -147,11 +163,13 @@ fn render_header(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
                     if !label.is_empty() {
                         ui.label(label);
                     }
-                    ui.label(
-                        egui::RichText::new("— NTFS").color(ui.visuals().weak_text_color()),
-                    );
+                    ui.label(egui::RichText::new("— NTFS").color(ui.visuals().weak_text_color()));
                 } else {
-                    ui.label(egui::RichText::new(t!("disk_analysis.title").to_string()).strong().size(15.0));
+                    ui.label(
+                        egui::RichText::new(t!("disk_analysis.title").to_string())
+                            .strong()
+                            .size(15.0),
+                    );
                 }
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -179,7 +197,11 @@ fn render_header(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
                     if let Some(elapsed) = state.fetch_elapsed {
                         ui.label(
                             egui::RichText::new(
-                                t!("disk_analysis.scan_time", secs = format!("{:.2}", elapsed.as_secs_f64())).to_string(),
+                                t!(
+                                    "disk_analysis.scan_time",
+                                    secs = format!("{:.2}", elapsed.as_secs_f64())
+                                )
+                                .to_string(),
                             )
                             .color(ui.visuals().weak_text_color()),
                         );
@@ -193,7 +215,11 @@ fn render_header(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
 fn render_footer(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
     egui::Panel::bottom(egui::Id::new("disk_analysis_footer"))
         .show_separator_line(false)
-        .frame(egui::Frame::NONE.fill(ui.visuals().panel_fill).inner_margin(egui::Margin::symmetric(12, 6)))
+        .frame(
+            egui::Frame::NONE
+                .fill(ui.visuals().panel_fill)
+                .inner_margin(egui::Margin::symmetric(12, 6)),
+        )
         .show(ui, |ui| {
             ui.separator();
             ui.horizontal(|ui| {
@@ -224,6 +250,16 @@ fn render_footer(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
                     );
                     ui.add_space(12.0);
                 }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "{}: {}",
+                            t!("disk_analysis.deepest_path"),
+                            model.deepest_path
+                        ))
+                        .color(ui.visuals().weak_text_color()),
+                    );
+                });
             });
         });
 }
@@ -378,13 +414,19 @@ fn render_treemap(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
     // Tooltip for the hovered node.
     if let (Some(h), Some(pos)) = (hovered, pointer) {
         let node = &model.nodes[h as usize];
-        let own = if node.is_dir { node.subtree_size } else { node.size };
+        let own = if node.is_dir {
+            node.subtree_size
+        } else {
+            node.size
+        };
         let parent_size = model.nodes[node.parent as usize].subtree_size.max(1);
         let percent = (own as f64 / parent_size as f64) * 100.0;
         // Clamp so the tooltip stays inside the window and gets a usable width.
         let screen = ui.ctx().viewport_rect();
         let tooltip_pos = egui::pos2(
-            (pos.x + 14.0).min(screen.max.x - 500.0).max(screen.min.x + 4.0),
+            (pos.x + 14.0)
+                .min(screen.max.x - 500.0)
+                .max(screen.min.x + 4.0),
             (pos.y + 12.0).min(screen.max.y - 120.0),
         );
         egui::Area::new(egui::Id::new("disk_analysis_tooltip"))
@@ -470,32 +512,26 @@ fn draw_header_texts(
 }
 
 fn render_center_state(state: &mut DiskAnalysisState, ui: &mut egui::Ui, phase: DiskAnalysisPhase) {
-    ui.centered_and_justified(|ui| {
-        match phase {
-            DiskAnalysisPhase::Failed => {
-                ui.vertical_centered(|ui| {
-                    ui.label(
-                        egui::RichText::new(t!("disk_analysis.failed").to_string()).strong(),
-                    );
-                    if let Some(error) = state.error.clone() {
-                        ui.label(
-                            egui::RichText::new(error).color(ui.visuals().weak_text_color()),
-                        );
+    ui.centered_and_justified(|ui| match phase {
+        DiskAnalysisPhase::Failed => {
+            ui.vertical_centered(|ui| {
+                ui.label(egui::RichText::new(t!("disk_analysis.failed").to_string()).strong());
+                if let Some(error) = state.error.clone() {
+                    ui.label(egui::RichText::new(error).color(ui.visuals().weak_text_color()));
+                }
+                ui.add_space(8.0);
+                if ui.button(t!("disk_analysis.retry").to_string()).clicked() {
+                    if let Some(letter) = state.drive_letter {
+                        state.request(letter);
                     }
-                    ui.add_space(8.0);
-                    if ui.button(t!("disk_analysis.retry").to_string()).clicked() {
-                        if let Some(letter) = state.drive_letter {
-                            state.request(letter);
-                        }
-                    }
-                });
-            }
-            _ => {
-                ui.vertical_centered(|ui| {
-                    ui.spinner();
-                    ui.label(t!("disk_analysis.loading").to_string());
-                });
-            }
+                }
+            });
+        }
+        _ => {
+            ui.vertical_centered(|ui| {
+                ui.spinner();
+                ui.label(t!("disk_analysis.loading").to_string());
+            });
         }
     });
 }

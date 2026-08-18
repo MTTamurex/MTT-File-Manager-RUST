@@ -736,9 +736,9 @@ pub fn render_sidebar_drives(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Opt
                     ui.ctx().data_mut(|d| d.remove::<f64>(hover_timer_id));
                 } else {
                     let current_time = ui.input(|i| i.time);
-                    let hover_start_time = ui
-                        .ctx()
-                        .data_mut(|d| *d.get_temp_mut_or_insert_with(hover_timer_id, || current_time));
+                    let hover_start_time = ui.ctx().data_mut(|d| {
+                        *d.get_temp_mut_or_insert_with(hover_timer_id, || current_time)
+                    });
                     let hover_duration = (current_time - hover_start_time) as f32;
 
                     if hover_duration < crate::ui::views::common::TOOLTIP_DELAY_SECS {
@@ -765,11 +765,13 @@ pub fn render_sidebar_drives(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Opt
                                             response.id,
                                             mouse_pos,
                                         )
-                                        .show(|ui: &mut egui::Ui| {
-                                            crate::ui::views::file_tooltip::drive_tooltip_body(
-                                                ui, disk_label, drive,
-                                            );
-                                        })
+                                        .show(
+                                            |ui: &mut egui::Ui| {
+                                                crate::ui::views::file_tooltip::drive_tooltip_body(
+                                                    ui, disk_label, drive,
+                                                );
+                                            },
+                                        )
                                     },
                                 );
                             if let Some(tooltip_response) = tooltip_response {

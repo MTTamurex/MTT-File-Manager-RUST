@@ -41,45 +41,40 @@ pub(crate) fn start_archive_compression_worker(
             let progress = compression_progress.clone();
             let cancel = compression_cancel.clone();
 
-            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                match request {
-                    ArchiveCompressionRequest::Compress {
-                        sources,
-                        dest,
-                        format,
-                    } => {
-                        let dest_folder = dest
-                            .parent()
-                            .map(std::path::Path::to_path_buf)
-                            .unwrap_or_else(|| dest.clone());
-                        match archive_create::create_archive(
-                            &sources, &dest, format, &progress, &cancel,
-                        ) {
-                            Ok(()) => {
-                                let _ = result_sender.send(
-                                    FileOperationResult::CompressionCompleted {
-                                        dest_folder,
-                                        archive_path: dest,
-                                    },
-                                );
-                            }
-                            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {
-                                log::info!("[ArchiveCompressWorker] compression cancelled");
-                                let _ = result_sender.send(FileOperationResult::OperationFailed {
-                                    message: rust_i18n::t!("operations.compress_cancelled")
-                                        .to_string(),
-                                });
-                            }
-                            Err(e) => {
-                                log::warn!("[ArchiveCompressWorker] compression failed: {}", e);
-                                let _ = result_sender.send(FileOperationResult::OperationFailed {
-                                    message: rust_i18n::t!(
-                                        "operations.compress_failed",
-                                        error = e.to_string()
-                                    )
-                                    .to_string(),
-                                });
-                            }
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match request {
+                ArchiveCompressionRequest::Compress {
+                    sources,
+                    dest,
+                    format,
+                } => {
+                    let dest_folder = dest
+                        .parent()
+                        .map(std::path::Path::to_path_buf)
+                        .unwrap_or_else(|| dest.clone());
+                    match archive_create::create_archive(
+                        &sources, &dest, format, &progress, &cancel,
+                    ) {
+                        Ok(()) => {
+                            let _ = result_sender.send(FileOperationResult::CompressionCompleted {
+                                dest_folder,
+                                archive_path: dest,
+                            });
+                        }
+                        Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {
+                            log::info!("[ArchiveCompressWorker] compression cancelled");
+                            let _ = result_sender.send(FileOperationResult::OperationFailed {
+                                message: rust_i18n::t!("operations.compress_cancelled").to_string(),
+                            });
+                        }
+                        Err(e) => {
+                            log::warn!("[ArchiveCompressWorker] compression failed: {}", e);
+                            let _ = result_sender.send(FileOperationResult::OperationFailed {
+                                message: rust_i18n::t!(
+                                    "operations.compress_failed",
+                                    error = e.to_string()
+                                )
+                                .to_string(),
+                            });
                         }
                     }
                 }

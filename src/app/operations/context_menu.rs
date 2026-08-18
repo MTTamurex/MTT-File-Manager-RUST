@@ -1472,10 +1472,7 @@ mod tests {
             &[PathBuf::from("shell:Downloads")],
             file_view
         ));
-        assert!(!should_offer_compress(
-            &[PathBuf::from(r"C:\")],
-            file_view
-        ));
+        assert!(!should_offer_compress(&[PathBuf::from(r"C:\")], file_view));
     }
 
     #[test]

@@ -11,9 +11,7 @@ impl ImageViewerApp {
         let exe = match std::env::current_exe() {
             Ok(v) => v,
             Err(err) => {
-                log::error!(
-                    "[DISK-ANALYZER] failed to locate current executable for spawn: {err}"
-                );
+                log::error!("[DISK-ANALYZER] failed to locate current executable for spawn: {err}");
                 return;
             }
         };

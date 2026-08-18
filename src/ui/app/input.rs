@@ -35,9 +35,8 @@ fn handle_preview_shortcut_action(app: &mut ImageViewerApp, ctx: &egui::Context)
 fn create_new_tab(app: &mut ImageViewerApp) {
     // PERF-05: enforce the tab cap before touching tab state.
     if !app.tab_manager.can_add_tab() {
-        app.notifications.warning(
-            rust_i18n::t!("tabs.max_reached", max = crate::tabs::MAX_TABS).to_string(),
-        );
+        app.notifications
+            .warning(rust_i18n::t!("tabs.max_reached", max = crate::tabs::MAX_TABS).to_string());
         return;
     }
     let prev_view_mode = app.view_mode;

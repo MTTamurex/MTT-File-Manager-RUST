@@ -52,8 +52,7 @@ pub(in crate::app) struct AppBootstrap {
     pub(in crate::app) cover_req_tx: mpsc::Sender<PathBuf>,
     pub(in crate::app) cover_res_rx: mpsc::Receiver<(PathBuf, Option<PathBuf>)>,
     #[cfg(feature = "notify-watcher")]
-    pub(in crate::app) fs_tx:
-        crossbeam_channel::Sender<crate::app::state::TimestampedNotifyEvent>,
+    pub(in crate::app) fs_tx: crossbeam_channel::Sender<crate::app::state::TimestampedNotifyEvent>,
     #[cfg(feature = "notify-watcher")]
     pub(in crate::app) fs_rx:
         crossbeam_channel::Receiver<crate::app::state::TimestampedNotifyEvent>,
@@ -227,7 +226,8 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
         mpsc::channel::<(usize, FolderLoadError)>();
     let (items_rebuild_sender, items_rebuild_receiver) = mpsc::channel::<ItemsRebuildResult>();
     // EST-02: fixed-size pool for folder-load pipelines.
-    let folder_load_pool = Arc::new(crate::app::init_workers::folder_load_pool::FolderLoadPool::new());
+    let folder_load_pool =
+        Arc::new(crate::app::init_workers::folder_load_pool::FolderLoadPool::new());
     let (inactive_items_rebuild_sender, inactive_items_rebuild_receiver) =
         mpsc::channel::<InactiveItemsRebuildResult>();
 

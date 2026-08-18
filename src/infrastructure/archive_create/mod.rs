@@ -269,10 +269,22 @@ pub fn create_archive(
     let partial = part_path(dest);
     let result = match format {
         CompressionFormat::Zip => zip_archive::write_archive(
-            &entries, &partial, &archive_name, total, total_bytes, progress, cancel,
+            &entries,
+            &partial,
+            &archive_name,
+            total,
+            total_bytes,
+            progress,
+            cancel,
         ),
         CompressionFormat::SevenZip => seven_zip::write_archive(
-            &entries, &partial, &archive_name, total, total_bytes, progress, cancel,
+            &entries,
+            &partial,
+            &archive_name,
+            total,
+            total_bytes,
+            progress,
+            cancel,
         ),
     };
 
@@ -407,7 +419,9 @@ mod tests {
         let mut lcg = 0x2545F4914F6CDD1Du64;
         let mut data = vec![0u8; 128 * 1024];
         for byte in &mut data {
-            lcg = lcg.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            lcg = lcg
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             *byte = (lcg >> 33) as u8;
         }
         write(&source, &data);
@@ -433,14 +447,8 @@ mod tests {
             cancel_for_thread.store(true, Ordering::Relaxed);
         });
 
-        let error = create_archive(
-            &[source],
-            &dest,
-            CompressionFormat::Zip,
-            &progress,
-            &cancel,
-        )
-        .unwrap_err();
+        let error = create_archive(&[source], &dest, CompressionFormat::Zip, &progress, &cancel)
+            .unwrap_err();
 
         assert_eq!(error.kind(), io::ErrorKind::Interrupted);
         assert!(!dest.exists());
@@ -552,7 +560,11 @@ mod tests {
         );
 
         let mut contents = String::new();
-        archive.by_name("sub/inner/c.txt").unwrap().read_to_string(&mut contents).unwrap();
+        archive
+            .by_name("sub/inner/c.txt")
+            .unwrap()
+            .read_to_string(&mut contents)
+            .unwrap();
         assert_eq!(contents, "gamma");
     }
 
@@ -575,8 +587,7 @@ mod tests {
         assert!(!temp.path().join("out.7z.part").exists());
 
         let extracted_root = temp.path().join("extracted");
-        sevenz_rust::decompress_file(&dest, &extracted_root)
-            .expect("7z archive should decompress");
+        sevenz_rust::decompress_file(&dest, &extracted_root).expect("7z archive should decompress");
 
         assert_eq!(
             std::fs::read(extracted_root.join("a.txt")).unwrap(),

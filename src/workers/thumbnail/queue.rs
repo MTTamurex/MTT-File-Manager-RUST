@@ -280,8 +280,7 @@ impl PriorityThumbnailQueue {
                 return false;
             };
 
-            let was_normal =
-                matches!(items[existing_index].source, ThumbnailRequestSource::Normal);
+            let was_normal = matches!(items[existing_index].source, ThumbnailRequestSource::Normal);
 
             {
                 let existing = &mut items[existing_index];
@@ -521,8 +520,8 @@ impl PriorityThumbnailQueue {
             }
 
             // PERF-03: maintain the sorted-bucket invariant incrementally.
-            let became_normal = !was_normal
-                && matches!(incoming.source, ThumbnailRequestSource::Normal);
+            let became_normal =
+                !was_normal && matches!(incoming.source, ThumbnailRequestSource::Normal);
             if key_changed {
                 let request = items.remove(existing_index);
                 Self::insert_sorted(items, request, had_normal_before);
@@ -1409,7 +1408,14 @@ mod tests {
 
         queue.push_with_index(bulk_late.clone(), 1, 512, IOPriority::Prefetch, Some(9), 0);
         queue.push_with_index(bulk_early.clone(), 1, 512, IOPriority::Prefetch, Some(2), 0);
-        queue.push_with_index(selected.clone(), 2, 512, IOPriority::Interactive, Some(5), 0);
+        queue.push_with_index(
+            selected.clone(),
+            2,
+            512,
+            IOPriority::Interactive,
+            Some(5),
+            0,
+        );
 
         let (path, _, _, _, priority, _, _, _, _) = queue.pop().unwrap();
         assert_eq!(path, selected);

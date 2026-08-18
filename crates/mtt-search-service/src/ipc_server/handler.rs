@@ -814,8 +814,7 @@ pub(super) fn handle_client(
 
             match crate::disk_analysis::build_snapshot(&handle) {
                 Ok(snapshot) => {
-                    let _ =
-                        send_response(pipe, &SearchResponse::DiskAnalysis(Box::new(snapshot)));
+                    let _ = send_response(pipe, &SearchResponse::DiskAnalysis(Box::new(snapshot)));
                 }
                 Err(error) => {
                     let _ = send_response(pipe, &SearchResponse::Error(error));

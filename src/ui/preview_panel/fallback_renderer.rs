@@ -149,7 +149,9 @@ pub fn render_fallback(
                 {
                     if paint_analyze_button(ui, svg_manager, icon_rect, letter.to_ascii_uppercase())
                     {
-                        val_action = Some(PreviewPanelAction::AnalyzeDrive(letter.to_ascii_uppercase()));
+                        val_action = Some(PreviewPanelAction::AnalyzeDrive(
+                            letter.to_ascii_uppercase(),
+                        ));
                     }
                 }
             }
