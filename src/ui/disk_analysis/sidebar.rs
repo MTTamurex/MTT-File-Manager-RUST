@@ -1,9 +1,7 @@
-//! Left sidebar of the disk analyzer: NTFS drives, file-type legend, stats.
+//! Left sidebar of the disk analyzer: NTFS drives, volume summary, stats.
 
-use crate::app::disk_analysis_model::FileCategory;
 use crate::app::disk_analysis_state::DiskAnalysisState;
 use crate::infrastructure::windows::formatting::format_size;
-use crate::ui::disk_analysis::category_color;
 use eframe::egui;
 use rust_i18n::t;
 
@@ -15,13 +13,46 @@ pub fn render_sidebar(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
     ui.add_space(10.0);
     ui.separator();
     ui.add_space(6.0);
-    section_header(ui, &t!("disk_analysis.file_types"));
-    render_categories(state, ui);
+    section_header(ui, &t!("disk_analysis.summary"));
+    render_summary(state, ui);
+}
 
+/// Volume summary: file/folder counts and used-vs-total space (moved here
+/// from the old status bar / top bar).
+fn render_summary(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
+    if let Some(drive) = state
+        .drives
+        .iter()
+        .find(|d| Some(d.letter) == state.drive_letter)
+    {
+        let used = drive.total_space.saturating_sub(drive.free_space);
+        ui.label(
+            egui::RichText::new(
+                t!(
+                    "disk_analysis.used_of",
+                    used = format_size(used),
+                    total = format_size(drive.total_space)
+                )
+                .to_string(),
+            )
+            .strong(),
+        );
+        ui.add_space(2.0);
+    }
     if let Some(model) = state.model.clone() {
-        ui.add_space(10.0);
-        ui.separator();
-        ui.add_space(6.0);
+        ui.label(
+            egui::RichText::new(
+                t!("disk_analysis.files_count", count = model.total_files).to_string(),
+            )
+            .color(ui.visuals().weak_text_color()),
+        );
+        ui.label(
+            egui::RichText::new(
+                t!("disk_analysis.folders_count", count = model.total_folders).to_string(),
+            )
+            .color(ui.visuals().weak_text_color()),
+        );
+        ui.add_space(2.0);
         ui.horizontal(|ui| {
             ui.label(
                 egui::RichText::new(t!("disk_analysis.deepest_path").to_string())
@@ -135,52 +166,4 @@ fn render_drives(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
         }
         ui.add_space(2.0);
     }
-}
-
-fn render_categories(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
-    let Some(model) = state.model.clone() else {
-        return;
-    };
-    let dark = ui.visuals().dark_mode;
-    let total = model.total_size.max(1);
-
-    for category in FileCategory::ALL {
-        let i = category.index();
-        let bytes = model.category_totals[i];
-        if bytes == 0 {
-            continue;
-        }
-        let percent = (bytes as f64 / total as f64) * 100.0;
-        ui.horizontal(|ui| {
-            let (dot_rect, _) =
-                ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
-            ui.painter()
-                .circle_filled(dot_rect.center(), 5.0, category_color(category, dark));
-            ui.add_space(4.0);
-            ui.label(category_label(category));
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(
-                    egui::RichText::new(format!("{percent:.0}%"))
-                        .color(ui.visuals().weak_text_color()),
-                );
-                ui.add_space(8.0);
-                ui.label(egui::RichText::new(format_size(bytes)).strong());
-            });
-        });
-        ui.add_space(2.0);
-    }
-}
-
-fn category_label(category: FileCategory) -> egui::WidgetText {
-    let key = match category {
-        FileCategory::Video => "disk_analysis.category_video",
-        FileCategory::Images => "disk_analysis.category_images",
-        FileCategory::Audio => "disk_analysis.category_audio",
-        FileCategory::Archives => "disk_analysis.category_archives",
-        FileCategory::Code => "disk_analysis.category_code",
-        FileCategory::Documents => "disk_analysis.category_documents",
-        FileCategory::System => "disk_analysis.category_system",
-        FileCategory::Other => "disk_analysis.category_other",
-    };
-    t!(key).into()
 }

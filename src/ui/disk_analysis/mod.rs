@@ -66,9 +66,9 @@ pub fn category_color(category: FileCategory, dark: bool) -> egui::Color32 {
         FileCategory::Images => (200, 88, 138),
         FileCategory::Audio => (150, 95, 195),
         FileCategory::Archives => (212, 149, 70),
-        FileCategory::Code => (56, 152, 140),
-        FileCategory::Documents => (120, 168, 80),
-        FileCategory::System => (130, 136, 150),
+        FileCategory::Code => (0, 155, 190),
+        FileCategory::Documents => (124, 172, 52),
+        FileCategory::System => (185, 95, 85),
         FileCategory::Other => (158, 158, 166),
     };
     if dark {
@@ -203,41 +203,32 @@ fn render_header(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let fetching = state.phase == DiskAnalysisPhase::Fetching;
-                    let scan_label = if fetching {
-                        t!("disk_analysis.scanning").to_string()
-                    } else {
-                        t!("disk_analysis.scan").to_string()
-                    };
-                    let scan_enabled = !fetching && letter.is_some();
-                    if ui.add_enabled(scan_enabled, egui::Button::new(scan_label)).clicked() {
+                    // Same refresh icon button as the main app toolbar.
+                    if fetching {
+                        ui.spinner();
+                    } else if letter.is_some()
+                        && crate::ui::widgets::icon_button(
+                            ui,
+                            &mut state.svg_icons,
+                            crate::ui::theme::ICON_REFRESH,
+                            t!("disk_analysis.rescan").as_ref(),
+                            None,
+                        )
+                        .clicked()
+                    {
                         if let Some(letter) = letter {
                             state.request(letter);
                         }
                     }
                     ui.add_space(10.0);
 
-                    // Index state + usage summary.
-                    match state.index_state.as_deref() {
-                        Some("ready") => {
-                            ui.label(egui::RichText::new(t!("disk_analysis.index_ready")).color(ui.visuals().weak_text_color()));
-                        }
-                        Some("scanning") | Some("not_started") => {
-                            ui.label(egui::RichText::new(t!("disk_analysis.index_scanning")).color(ui.visuals().weak_text_color()));
-                        }
-                        _ => {}
-                    }
-                    if let Some(drive) = state.drives.iter().find(|d| Some(d.letter) == letter) {
-                        let used = drive.total_space.saturating_sub(drive.free_space);
+                    // Scan duration, next to the rescan button.
+                    if let Some(elapsed) = state.fetch_elapsed {
                         ui.label(
                             egui::RichText::new(
-                                t!(
-                                    "disk_analysis.used_of",
-                                    used = format_size(used),
-                                    total = format_size(drive.total_space)
-                                )
-                                .to_string(),
+                                t!("disk_analysis.scan_time", secs = format!("{:.2}", elapsed.as_secs_f64())).to_string(),
                             )
-                            .strong(),
+                            .color(ui.visuals().weak_text_color()),
                         );
                     }
                 });
@@ -253,33 +244,49 @@ fn render_footer(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
         .show(ui, |ui| {
             ui.separator();
             ui.horizontal(|ui| {
-                if let Some(model) = state.model.clone() {
-                    ui.label(
-                        egui::RichText::new(
-                            t!("disk_analysis.files_count", count = model.total_files).to_string(),
-                        )
-                        .color(ui.visuals().weak_text_color()),
+                let Some(model) = state.model.clone() else {
+                    return;
+                };
+                // File-type legend (moved here from the sidebar).
+                let dark = ui.visuals().dark_mode;
+                let total = model.total_size.max(1);
+                for category in FileCategory::ALL {
+                    let bytes = model.category_totals[category.index()];
+                    if bytes == 0 {
+                        continue;
+                    }
+                    let percent = (bytes as f64 / total as f64) * 100.0;
+                    let (dot_rect, _) =
+                        ui.allocate_exact_size(egui::vec2(8.0, 8.0), egui::Sense::hover());
+                    ui.painter().circle_filled(
+                        dot_rect.center(),
+                        4.0,
+                        category_color(category, dark),
                     );
-                    ui.add_space(16.0);
+                    ui.add_space(4.0);
+                    ui.label(category_label(category));
                     ui.label(
-                        egui::RichText::new(
-                            t!("disk_analysis.folders_count", count = model.total_folders).to_string(),
-                        )
-                        .color(ui.visuals().weak_text_color()),
+                        egui::RichText::new(format!("{percent:.0}%"))
+                            .color(ui.visuals().weak_text_color()),
                     );
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if let Some(elapsed) = state.fetch_elapsed {
-                            ui.label(
-                                egui::RichText::new(
-                                    t!("disk_analysis.scan_time", secs = format!("{:.2}", elapsed.as_secs_f64())).to_string(),
-                                )
-                                .color(ui.visuals().weak_text_color()),
-                            );
-                        }
-                    });
+                    ui.add_space(12.0);
                 }
             });
         });
+}
+
+fn category_label(category: FileCategory) -> egui::WidgetText {
+    let key = match category {
+        FileCategory::Video => "disk_analysis.category_video",
+        FileCategory::Images => "disk_analysis.category_images",
+        FileCategory::Audio => "disk_analysis.category_audio",
+        FileCategory::Archives => "disk_analysis.category_archives",
+        FileCategory::Code => "disk_analysis.category_code",
+        FileCategory::Documents => "disk_analysis.category_documents",
+        FileCategory::System => "disk_analysis.category_system",
+        FileCategory::Other => "disk_analysis.category_other",
+    };
+    t!(key).into()
 }
 
 fn render_breadcrumb(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {

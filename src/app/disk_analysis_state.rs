@@ -31,8 +31,6 @@ pub enum DiskAnalysisMessage {
         request_id: u64,
         model: Arc<DiskAnalysisModel>,
         fetch_elapsed: Duration,
-        /// Service-side volume index state ("ready", "scanning", ...).
-        index_state: Option<String>,
     },
     Failed {
         request_id: u64,
@@ -58,12 +56,12 @@ pub struct DiskAnalysisState {
     pub model: Option<Arc<DiskAnalysisModel>>,
     pub error: Option<String>,
     pub fetch_elapsed: Option<Duration>,
-    /// Service-side index state for the analyzed volume.
-    pub index_state: Option<String>,
     /// Drill-down breadcrumb trail of node indices (last = current root).
     pub drill_stack: Vec<u32>,
     /// Currently hovered treemap node.
     pub hovered: Option<u32>,
+    /// Icon cache for the analyzer window's own chrome (refresh button).
+    pub svg_icons: crate::ui::svg_icons::SvgIconManager,
     /// Set on close: the main loop compacts the heap on the next frame.
     pub reclaim_pending: bool,
     /// Native HWND of the analyzer viewport window (title-bar theming),
@@ -96,9 +94,9 @@ impl DiskAnalysisState {
             model: None,
             error: None,
             fetch_elapsed: None,
-            index_state: None,
             drill_stack: Vec::new(),
             hovered: None,
+            svg_icons: crate::ui::svg_icons::SvgIconManager::new(),
             reclaim_pending: false,
             #[cfg(target_os = "windows")]
             viewport_hwnd: None,
@@ -145,7 +143,6 @@ impl DiskAnalysisState {
                     request_id,
                     model,
                     fetch_elapsed,
-                    index_state,
                 } => {
                     if request_id != self.active_request_id {
                         continue;
@@ -153,7 +150,6 @@ impl DiskAnalysisState {
                     self.drill_stack = vec![model.root];
                     self.model = Some(model);
                     self.fetch_elapsed = Some(fetch_elapsed);
-                    self.index_state = index_state;
                     self.phase = DiskAnalysisPhase::Ready;
                     self.hovered = None;
                     changed = true;
@@ -180,9 +176,9 @@ impl DiskAnalysisState {
         self.model = None;
         self.error = None;
         self.fetch_elapsed = None;
-        self.index_state = None;
         self.drill_stack.clear();
         self.hovered = None;
+        self.svg_icons.clear_cache();
         self.drives.clear();
         self.reclaim_pending = true;
     }
@@ -202,22 +198,11 @@ fn worker_loop(
         let started = std::time::Instant::now();
         match crate::infrastructure::global_search::fetch_disk_analysis(request.drive_letter) {
             Ok(snapshot) => {
-                let letter = snapshot.drive_letter.to_ascii_uppercase();
-                let index_state = crate::infrastructure::global_search::get_status()
-                    .ok()
-                    .and_then(|status| {
-                        status
-                            .volumes
-                            .iter()
-                            .find(|v| v.drive_letter.to_ascii_uppercase() == letter)
-                            .map(|v| v.state.clone())
-                    });
                 let model = Arc::new(DiskAnalysisModel::build(snapshot));
                 let _ = res_sender.send(DiskAnalysisMessage::ModelReady {
                     request_id: request.request_id,
                     model,
                     fetch_elapsed: started.elapsed(),
-                    index_state,
                 });
             }
             Err(error) => {
