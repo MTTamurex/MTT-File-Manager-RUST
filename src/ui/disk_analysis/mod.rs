@@ -57,17 +57,17 @@ fn sync_native_title_bar(state: &mut DiskAnalysisState, dark: bool) {
     }
 }
 
-/// Muted category palette (dark/light agnostic base colors).
+/// Muted earth-tone category palette (dark/light agnostic base colors).
 pub fn category_color(category: FileCategory, dark: bool) -> egui::Color32 {
     let (r, g, b) = match category {
-        FileCategory::Video => (99, 102, 214),
-        FileCategory::Images => (200, 88, 138),
-        FileCategory::Audio => (150, 95, 195),
-        FileCategory::Archives => (212, 149, 70),
-        FileCategory::Code => (0, 155, 190),
-        FileCategory::Documents => (124, 172, 52),
-        FileCategory::System => (185, 95, 85),
-        FileCategory::Other => (158, 158, 166),
+        FileCategory::Video => (96, 128, 160),
+        FileCategory::Images => (190, 122, 96),
+        FileCategory::Audio => (140, 106, 150),
+        FileCategory::Archives => (172, 140, 84),
+        FileCategory::Code => (86, 142, 132),
+        FileCategory::Documents => (126, 150, 92),
+        FileCategory::System => (112, 116, 122),
+        FileCategory::Other => (150, 140, 128),
     };
     if dark {
         egui::Color32::from_rgb(r, g, b)
@@ -264,7 +264,7 @@ fn render_footer(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
         });
 }
 
-fn category_label(category: FileCategory) -> egui::WidgetText {
+pub fn category_label(category: FileCategory) -> String {
     let key = match category {
         FileCategory::Video => "disk_analysis.category_video",
         FileCategory::Images => "disk_analysis.category_images",
@@ -275,7 +275,7 @@ fn category_label(category: FileCategory) -> egui::WidgetText {
         FileCategory::System => "disk_analysis.category_system",
         FileCategory::Other => "disk_analysis.category_other",
     };
-    t!(key).into()
+    t!(key).to_string()
 }
 
 fn render_breadcrumb(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
