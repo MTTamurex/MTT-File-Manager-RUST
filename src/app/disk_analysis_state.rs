@@ -47,8 +47,6 @@ pub enum DiskAnalysisPhase {
 }
 
 pub struct DiskAnalysisState {
-    /// Whether the analyzer view is currently displayed.
-    pub active: bool,
     pub drive_letter: Option<char>,
     /// Drive snapshot (filled when the analyzer opens).
     pub drives: Vec<AnalyzerDriveSummary>,
@@ -62,9 +60,7 @@ pub struct DiskAnalysisState {
     pub hovered: Option<u32>,
     /// Icon cache for the analyzer window's own chrome (refresh button).
     pub svg_icons: crate::ui::svg_icons::SvgIconManager,
-    /// Set on close: the main loop compacts the heap on the next frame.
-    pub reclaim_pending: bool,
-    /// Native HWND of the analyzer viewport window (title-bar theming),
+    /// Native HWND of the analyzer window (title-bar theming),
     /// stored as the raw pointer value to keep the state `Send`.
     #[cfg(target_os = "windows")]
     pub viewport_hwnd: Option<isize>,
@@ -87,7 +83,6 @@ impl DiskAnalysisState {
             .expect("disk analysis worker thread should spawn");
 
         Self {
-            active: false,
             drive_letter: None,
             drives: Vec::new(),
             phase: DiskAnalysisPhase::Idle,
@@ -97,7 +92,6 @@ impl DiskAnalysisState {
             drill_stack: Vec::new(),
             hovered: None,
             svg_icons: crate::ui::svg_icons::SvgIconManager::new(),
-            reclaim_pending: false,
             #[cfg(target_os = "windows")]
             viewport_hwnd: None,
             #[cfg(target_os = "windows")]
@@ -165,22 +159,6 @@ impl DiskAnalysisState {
             }
         }
         changed
-    }
-
-    /// Hide the view and drop the model; in-flight results are invalidated.
-    /// Sets `reclaim_pending` so the main loop compacts the heap next frame.
-    pub fn close(&mut self) {
-        self.active = false;
-        self.active_request_id = self.active_request_id.wrapping_add(1);
-        self.phase = DiskAnalysisPhase::Idle;
-        self.model = None;
-        self.error = None;
-        self.fetch_elapsed = None;
-        self.drill_stack.clear();
-        self.hovered = None;
-        self.svg_icons.clear_cache();
-        self.drives.clear();
-        self.reclaim_pending = true;
     }
 }
 

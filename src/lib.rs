@@ -2,6 +2,7 @@ rust_i18n::i18n!("locales", fallback = "pt-BR");
 
 pub mod app; // NEW - Application state and initialization
 pub mod application;
+pub mod disk_analyzer;
 pub mod domain;
 pub mod embedded_assets; // Embedded resources for portable executable
 pub mod image_viewer;

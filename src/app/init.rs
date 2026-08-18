@@ -785,11 +785,6 @@ impl ImageViewerApp {
             // GLOBAL SEARCH
             global_search: GlobalSearchState::new(global_search_tx, global_search_res_rx),
 
-            // DISK USAGE ANALYZER
-            disk_analysis: std::sync::Arc::new(parking_lot::Mutex::new(
-                crate::app::disk_analysis_state::DiskAnalysisState::new(),
-            )),
-
             // FILE OPERATION WORKER/TRACKING
             file_operation_state: build_file_operation_state(
                 file_op_tx,

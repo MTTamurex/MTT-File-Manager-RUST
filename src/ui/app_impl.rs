@@ -92,11 +92,6 @@ impl ImageViewerApp {
         }
 
         let t0 = std::time::Instant::now();
-        if self.disk_analysis.lock().reclaim_pending {
-            self.disk_analysis.lock().reclaim_pending = false;
-            self.reclaim_disk_analysis_heap();
-        }
-        self.maybe_refresh_after_heap_compact();
         if upload_textures {
             self.process_incoming_messages(ctx);
         } else {
@@ -541,9 +536,6 @@ impl eframe::App for ImageViewerApp {
                 }
                 crate::ui::theme::apply_scroll_style(ctx);
                 crate::ui::theme::apply_popup_style(ctx);
-                // The deferred analyzer window repaints on its own schedule;
-                // wake it so it picks up the new theme (and title bar).
-                ctx.request_repaint_of(crate::ui::disk_analysis::analyzer_viewport_id());
                 self.save_preferences();
                 self.force_save_preferences();
             }
@@ -590,9 +582,6 @@ impl eframe::App for ImageViewerApp {
 
         // 14. Notifications
         app::notifications::render_notifications(self, ctx);
-
-        // 14b. Disk usage analyzer: separate OS window (immediate viewport).
-        crate::ui::disk_analysis::render_disk_analysis_viewport(self, ctx);
 
         // 15. Global Search Overlay (on top of everything)
         crate::ui::global_search_overlay::render_global_search_overlay(self, ctx);

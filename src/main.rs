@@ -437,6 +437,25 @@ fn main() -> eframe::Result<()> {
             log::error!("[TEXT-VIEWER] missing path argument for --text-viewer");
             return Ok(());
         }
+        if flag_str.eq_ignore_ascii_case("--disk-analyzer") {
+            if let Some(letter_arg) = args.next() {
+                let letter_arg = letter_arg.to_string_lossy();
+                if let Some(letter) = letter_arg
+                    .chars()
+                    .next()
+                    .filter(|c| c.is_ascii_alphabetic())
+                {
+                    return mtt_file_manager::disk_analyzer::run_standalone(
+                        letter.to_ascii_uppercase(),
+                    );
+                }
+                log::error!("[DISK-ANALYZER] invalid drive argument: {letter_arg}");
+                return Ok(());
+            }
+
+            log::error!("[DISK-ANALYZER] missing drive argument for --disk-analyzer");
+            return Ok(());
+        }
         if flag_str.eq_ignore_ascii_case("--video-player") {
             if let Some(path_arg) = args.next() {
                 let mut position: f64 = 0.0;

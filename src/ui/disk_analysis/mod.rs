@@ -2,21 +2,19 @@
 //! Service USN/MFT index). Layout inspired by modern disk analyzers: header
 //! with drive summary and scan action, left sidebar with drives/file types,
 //! squarified treemap with drill-down breadcrumbs, and a stats footer.
+//!
+//! Rendered by the standalone analyzer process (`crate::disk_analyzer`),
+//! which runs as its own OS process (same model as the dedicated viewers)
+//! so it gets an independent taskbar button and minimize/restore lifecycle.
 
 mod sidebar;
 mod treemap;
 
 use crate::app::disk_analysis_model::FileCategory;
 use crate::app::disk_analysis_state::{DiskAnalysisPhase, DiskAnalysisState};
-use crate::app::state::ImageViewerApp;
 use crate::infrastructure::windows::formatting::format_size;
 use eframe::egui;
 use rust_i18n::t;
-
-/// Viewport id of the analyzer window (also used to wake it on theme changes).
-pub fn analyzer_viewport_id() -> egui::ViewportId {
-    egui::ViewportId::from_hash_of("mtt_disk_analyzer")
-}
 
 /// The analyzer viewport keeps the native Windows caption; mirror the app
 /// theme onto it via DWM immersive dark mode (same as the dedicated viewers).
@@ -93,61 +91,16 @@ fn mix(a: egui::Color32, b: egui::Color32, t: f32) -> egui::Color32 {
     )
 }
 
-/// Register the analyzer OS window as a deferred viewport. Unlike an
-/// immediate viewport, a deferred one runs its UI pass on its own repaint
-/// schedule: main-window frames never pay the analyzer render cost and vice
-/// versa. Must be called every main frame while `disk_analysis.active`.
-pub fn render_disk_analysis_viewport(app: &mut ImageViewerApp, ctx: &egui::Context) {
-    if !app.disk_analysis.lock().active {
-        return;
-    }
-    let shared = std::sync::Arc::clone(&app.disk_analysis);
-    ctx.show_viewport_deferred(
-        analyzer_viewport_id(),
-        egui::ViewportBuilder::default()
-            .with_title(t!("disk_analysis.title").to_string())
-            .with_inner_size([1150.0, 720.0])
-            .with_min_inner_size([760.0, 480.0]),
-        move |ui: &mut egui::Ui, _class| {
-            let mut state = shared.lock();
-            render_view_deferred(&mut state, ui);
-        },
-    );
-}
-
-fn render_view_deferred(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
+/// Render one analyzer frame into `ui`. The standalone process wraps this
+/// in its root panel; close/Escape are handled by that process.
+pub fn render_analyzer_body(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
     let ctx = ui.ctx().clone();
-    // Close paths (X button, Escape) and any pass after the close: render
-    // nothing. The spinner-scheduled repaint after close would otherwise
-    // paint the cleared state ("Reading volume index...", empty sidebar)
-    // and keep the window alive.
-    let close_requested = ctx.input(|i| i.viewport().close_requested());
-    let escape = ctx.input(|i| i.key_pressed(egui::Key::Escape));
-    if close_requested || escape || !state.active {
-        if state.active {
-            state.close();
-            // Hide immediately; the parent stops re-registering the viewport
-            // on its next pass, which prunes and destroys the window.
-            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
-            ctx.request_repaint_of(egui::ViewportId::ROOT);
-        }
-        return;
-    }
 
     #[cfg(target_os = "windows")]
     sync_native_title_bar(state, ctx.global_style().visuals.dark_mode);
 
     if state.poll() {
         ctx.request_repaint();
-    }
-    // Input in the analyzer window counts as app activity: without this the
-    // main viewport sees "idle" and the idle working-set trim evicts the
-    // whole process while the user is actively using the analyzer.
-    let analyzer_input = ctx.input(|i| {
-        i.pointer.any_pressed() || i.pointer.any_click() || !i.events.is_empty()
-    });
-    if analyzer_input {
-        crate::app::state::note_external_viewport_activity();
     }
 
     egui::CentralPanel::default()

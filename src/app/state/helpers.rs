@@ -43,30 +43,6 @@ const HARD_MEMORY_LIMIT_BYTES: u64 = 700 * 1024 * 1024;
 static WORKING_SET_TRIM_BLOCKED: AtomicBool = AtomicBool::new(false);
 static WORKING_SET_TRIM_EPOCH: AtomicU64 = AtomicU64::new(0);
 static LAST_WORKING_SET_TRIM_REQUEST: OnceLock<Mutex<Option<Instant>>> = OnceLock::new();
-/// Millis since `EXTERNAL_VIEWPORT_EPOCH` of the last user input in a
-/// non-main viewport (deferred analyzer window). `u64::MAX` = never.
-static EXTERNAL_VIEWPORT_ACTIVITY: AtomicU64 = AtomicU64::new(u64::MAX);
-static EXTERNAL_VIEWPORT_EPOCH: OnceLock<Instant> = OnceLock::new();
-/// Background `HeapCompact` state: in-flight and finished flags. While
-/// compacting, the committed-but-freed analyzer memory is on its way back to
-/// the OS, so pressure-based cache trimming is paused.
-static HEAP_COMPACT_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
-static HEAP_COMPACT_FINISHED: AtomicBool = AtomicBool::new(false);
-
-/// Record user input in a non-main viewport so idle-based maintenance
-/// (working-set trim) treats the process as actively used.
-pub(crate) fn note_external_viewport_activity() {
-    let epoch = EXTERNAL_VIEWPORT_EPOCH.get_or_init(Instant::now);
-    EXTERNAL_VIEWPORT_ACTIVITY.store(epoch.elapsed().as_millis() as u64, Ordering::Release);
-}
-
-fn external_viewport_activity_recent(within: Duration) -> bool {
-    let Some(epoch) = EXTERNAL_VIEWPORT_EPOCH.get() else {
-        return false;
-    };
-    let recorded = EXTERNAL_VIEWPORT_ACTIVITY.load(Ordering::Acquire);
-    recorded != u64::MAX && epoch.elapsed().as_millis() as u64 - recorded < within.as_millis() as u64
-}
 
 #[derive(Clone, Copy, Debug)]
 struct ProcessMemorySnapshot {
@@ -773,56 +749,6 @@ impl ImageViewerApp {
         self.run_memory_maintenance_impl(true);
     }
 
-    /// The analyzer's volume snapshot/model allocates hundreds of MB in the
-    /// process heap; after release the Windows heap keeps those pages
-    /// committed, so `private_usage_bytes` stays above the hard memory limit
-    /// and maintenance keeps trimming thumbnail/icon caches aggressively
-    /// (slow scrolling, slow thumbnails). Compacting the heap lets the
-    /// pressure classification recover once the model is released.
-    ///
-    /// `HeapCompact` walks the whole process heap and can take tens of
-    /// seconds after a multi-million-node model is freed, so it runs on a
-    /// background thread — never on the UI thread (it froze the main window
-    /// for ~1 min on analyzer close).
-    #[cfg(target_os = "windows")]
-    pub(crate) fn reclaim_disk_analysis_heap(&mut self) {
-        HEAP_COMPACT_IN_FLIGHT.store(true, Ordering::Release);
-        let spawned = std::thread::Builder::new()
-            .name("disk-analysis-heap-compact".to_string())
-            .spawn(|| {
-                use windows::Win32::System::Memory::{GetProcessHeap, HeapCompact, HEAP_FLAGS};
-                unsafe {
-                    if let Ok(heap) = GetProcessHeap() {
-                        let _ = HeapCompact(heap, HEAP_FLAGS(0));
-                    }
-                }
-                HEAP_COMPACT_IN_FLIGHT.store(false, Ordering::Release);
-                HEAP_COMPACT_FINISHED.store(true, Ordering::Release);
-            })
-            .is_ok();
-        if !spawned {
-            HEAP_COMPACT_IN_FLIGHT.store(false, Ordering::Release);
-        }
-        log::debug!(
-            "[MEMORY] heap compaction dispatched after disk analysis close (spawned={spawned})"
-        );
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    pub(crate) fn reclaim_disk_analysis_heap(&mut self) {}
-
-    /// Runs one maintenance pass when the background heap compaction
-    /// finished, so the pressure classification sees the reclaimed memory.
-    #[cfg(target_os = "windows")]
-    pub(crate) fn maybe_refresh_after_heap_compact(&mut self) {
-        if HEAP_COMPACT_FINISHED.swap(false, Ordering::AcqRel) {
-            self.run_memory_maintenance_now();
-        }
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    pub(crate) fn maybe_refresh_after_heap_compact(&mut self) {}
-
     fn working_set_trim_blocked(&self) -> bool {
         let video_playing = self
             .media_preview
@@ -860,9 +786,6 @@ impl ImageViewerApp {
             || !self.live_file_size_loading.is_empty()
             || self.global_search.loading
             || purge_running
-            || external_viewport_activity_recent(WORKING_SET_TRIM_ACTIVITY_GRACE)
-            || self.disk_analysis.lock().phase
-                == crate::app::disk_analysis_state::DiskAnalysisPhase::Fetching
             || self.is_item_dragging
             || self.pending_drag_move_confirmation.is_some()
             || self.shell_menu_loading
@@ -1311,30 +1234,8 @@ impl ImageViewerApp {
             }
         }
 
-        // While the analyzer is open, its bounded model allocation must not
-        // drive the main app into aggressive cache destruction: classify
-        // pressure with the model footprint subtracted. Raw values still
-        // gate the idle working-set trim and the [MEMORY] logs.
-        let analyzer_bytes = self
-            .disk_analysis
-            .lock()
-            .model
-            .as_ref()
-            .map(|m| m.approx_bytes)
-            .unwrap_or(0);
-        let adjusted_pressure_snapshot = ProcessMemorySnapshot {
-            working_set_bytes: process_memory.working_set_bytes.saturating_sub(analyzer_bytes),
-            private_usage_bytes: process_memory
-                .private_usage_bytes
-                .saturating_sub(analyzer_bytes),
-        };
-        let pressure = classify_memory_pressure(adjusted_pressure_snapshot);
+        let pressure = classify_memory_pressure(process_memory);
         if pressure == MemoryPressure::None {
-            return;
-        }
-        if HEAP_COMPACT_IN_FLIGHT.load(Ordering::Acquire) {
-            // The analyzer's memory is being returned to the OS right now;
-            // don't destroy caches for pressure that is about to disappear.
             return;
         }
 
