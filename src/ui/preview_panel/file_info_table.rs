@@ -638,11 +638,7 @@ pub fn render_file_info_table(
                     },
                 );
 
-                if let Some(letter) =
-                    super::drive_details::render_drive_details(ui, file, &add_detail)
-                {
-                    action = Some(PreviewPanelAction::AnalyzeDrive(letter));
-                }
+                super::drive_details::render_drive_details(ui, file, &add_detail);
             }
 
             // 6. File hash (SHA-256, on-demand). Only for real on-disk files

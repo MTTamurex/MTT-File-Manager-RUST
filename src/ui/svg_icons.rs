@@ -290,6 +290,20 @@ mod tests {
     }
 
     #[test]
+    fn embedded_disk_analysis_icon_renders() {
+        let image = render_svg_to_image(
+            crate::embedded_assets::ICON_DISK_ANALYSIS,
+            16,
+            [60, 60, 60, 255],
+            1.0,
+            false,
+        )
+        .expect("embedded disk analysis icon should be valid SVG");
+
+        assert_eq!(image.size, [16, 16]);
+    }
+
+    #[test]
     fn embedded_extract_all_icon_renders_with_blue_accent() {
         let image = render_svg_to_image(
             crate::embedded_assets::ICON_EXTRACT_ALL,

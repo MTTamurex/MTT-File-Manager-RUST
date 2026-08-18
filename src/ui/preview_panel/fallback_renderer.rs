@@ -4,6 +4,7 @@ use crate::ui::icon_loader::IconLoader;
 use crate::ui::preview_panel::actions::PreviewPanelAction;
 use crate::ui::svg_icons::SvgIconManager;
 use eframe::egui;
+use rust_i18n::t;
 
 /// Paints a texture centered within `container`, preserving aspect ratio.
 fn paint_texture_centered(
@@ -31,6 +32,63 @@ fn paint_texture_centered(
         egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
         egui::Color32::WHITE,
     );
+}
+
+/// Chart button overlaid on the bottom-right corner of the drive icon.
+/// Returns true when clicked.
+fn paint_analyze_button(
+    ui: &mut egui::Ui,
+    svg_manager: &mut SvgIconManager,
+    icon_rect: egui::Rect,
+    letter: char,
+) -> bool {
+    const SIZE: f32 = 26.0;
+    let btn_rect = egui::Rect::from_min_size(
+        egui::pos2(icon_rect.max.x - SIZE - 2.0, icon_rect.max.y - SIZE - 2.0),
+        egui::vec2(SIZE, SIZE),
+    );
+    let resp = ui.interact(
+        btn_rect,
+        egui::Id::new("drive_analyze_button").with(letter),
+        egui::Sense::click(),
+    );
+
+    let dark = ui.visuals().dark_mode;
+    let bg = if resp.hovered() {
+        if dark {
+            egui::Color32::from_rgb(70, 70, 74)
+        } else {
+            egui::Color32::from_rgb(235, 235, 238)
+        }
+    } else {
+        ui.visuals().extreme_bg_color
+    };
+    ui.painter().rect_filled(btn_rect, 6.0, bg);
+    ui.painter().rect_stroke(
+        btn_rect.shrink(0.5),
+        6.0,
+        ui.visuals().widgets.inactive.bg_stroke,
+        egui::StrokeKind::Inside,
+    );
+
+    let color = if dark {
+        [220, 220, 220, 255]
+    } else {
+        [60, 60, 60, 255]
+    };
+    if let Some(tex) = svg_manager.get_icon(ui.ctx(), "disk_analysis", 16, color) {
+        ui.painter().image(
+            tex.id(),
+            btn_rect.shrink(5.0),
+            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+            egui::Color32::WHITE,
+        );
+    }
+
+    resp.clone()
+        .on_hover_text(t!("disk_analysis.analyze").to_string())
+        .on_hover_cursor(egui::CursorIcon::PointingHand);
+    resp.clicked()
 }
 
 /// Paints a colored tag badge on the top-left corner of the icon rect.
@@ -70,12 +128,31 @@ pub fn render_fallback(
             ui.allocate_response(egui::vec2(icon_size, icon_size), egui::Sense::hover());
         }
     } else if file.drive_info.is_some() {
+        let icon_rect = ui
+            .allocate_exact_size(egui::vec2(icon_size, icon_size), egui::Sense::hover())
+            .0;
         if let Some(icon) =
             item_icon_loader.get_or_load_drive_icon(ui.ctx(), &file.path.to_string_lossy())
         {
-            ui.add(egui::Image::new(&icon).max_size(egui::vec2(icon_size, icon_size)));
-        } else {
-            ui.allocate_response(egui::vec2(icon_size, icon_size), egui::Sense::hover());
+            paint_texture_centered(ui, icon.id(), icon.size_vec2(), icon_rect);
+        }
+        // NTFS-only analyzer entry point: chart button on the icon's
+        // bottom-right corner.
+        if let Some(drive) = file.drive_info.as_ref() {
+            if drive.file_system.eq_ignore_ascii_case("NTFS") {
+                if let Some(letter) = file
+                    .path
+                    .to_string_lossy()
+                    .chars()
+                    .next()
+                    .filter(|c| c.is_ascii_alphabetic())
+                {
+                    if paint_analyze_button(ui, svg_manager, icon_rect, letter.to_ascii_uppercase())
+                    {
+                        val_action = Some(PreviewPanelAction::AnalyzeDrive(letter.to_ascii_uppercase()));
+                    }
+                }
+            }
         }
     } else if is_recycle_bin_view && file.name == RECYCLE_BIN_VIEW_ID {
         // RECYCLE BIN
