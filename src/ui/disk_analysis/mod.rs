@@ -7,11 +7,57 @@ mod sidebar;
 mod treemap;
 
 use crate::app::disk_analysis_model::FileCategory;
-use crate::app::disk_analysis_state::DiskAnalysisPhase;
+use crate::app::disk_analysis_state::{DiskAnalysisPhase, DiskAnalysisState};
 use crate::app::state::ImageViewerApp;
 use crate::infrastructure::windows::formatting::format_size;
 use eframe::egui;
 use rust_i18n::t;
+
+/// Viewport id of the analyzer window (also used to wake it on theme changes).
+pub fn analyzer_viewport_id() -> egui::ViewportId {
+    egui::ViewportId::from_hash_of("mtt_disk_analyzer")
+}
+
+/// The analyzer viewport keeps the native Windows caption; mirror the app
+/// theme onto it via DWM immersive dark mode (same as the dedicated viewers).
+#[cfg(target_os = "windows")]
+fn sync_native_title_bar(state: &mut DiskAnalysisState, dark: bool) {
+    use windows::core::PCWSTR;
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, IsWindow};
+
+    let cached = state.viewport_hwnd.map(|raw| HWND(raw as *mut _));
+    let cached = match cached {
+        Some(hwnd) if unsafe { IsWindow(Some(hwnd)) }.as_bool() => Some(hwnd),
+        _ => {
+            // Window was destroyed (or never found): force re-lookup.
+            state.viewport_hwnd = None;
+            state.viewport_title_bar_dark = None;
+            None
+        }
+    };
+    let hwnd = cached.or_else(|| {
+        // Same title-lookup hack the main window uses (eframe exposes no
+        // HWND for viewports). Retries each frame until the window exists.
+        let title: Vec<u16> = format!("{}\0", t!("disk_analysis.title"))
+            .encode_utf16()
+            .collect();
+        let found = unsafe { FindWindowW(None, PCWSTR(title.as_ptr())) }
+            .ok()
+            .filter(|h| !h.is_invalid());
+        if let Some(h) = found {
+            state.viewport_hwnd = Some(h.0 as isize);
+        }
+        state.viewport_title_bar_dark = None;
+        found
+    });
+    if let Some(hwnd) = hwnd {
+        if state.viewport_title_bar_dark != Some(dark) {
+            crate::infrastructure::windows::window_corners::apply_dark_title_bar(hwnd, dark);
+            state.viewport_title_bar_dark = Some(dark);
+        }
+    }
+}
 
 /// Muted category palette (dark/light agnostic base colors).
 pub fn category_color(category: FileCategory, dark: bool) -> egui::Color32 {
@@ -47,44 +93,68 @@ fn mix(a: egui::Color32, b: egui::Color32, t: f32) -> egui::Color32 {
     )
 }
 
-/// Render the analyzer into its own OS window (same-process immediate
-/// viewport). Must be called every frame while `disk_analysis.active`.
+/// Register the analyzer OS window as a deferred viewport. Unlike an
+/// immediate viewport, a deferred one runs its UI pass on its own repaint
+/// schedule: main-window frames never pay the analyzer render cost and vice
+/// versa. Must be called every main frame while `disk_analysis.active`.
 pub fn render_disk_analysis_viewport(app: &mut ImageViewerApp, ctx: &egui::Context) {
-    if !app.disk_analysis.active {
+    if !app.disk_analysis.lock().active {
         return;
     }
-    let close_requested = ctx.show_viewport_immediate(
-        egui::ViewportId::from_hash_of("mtt_disk_analyzer"),
+    let shared = std::sync::Arc::clone(&app.disk_analysis);
+    ctx.show_viewport_deferred(
+        analyzer_viewport_id(),
         egui::ViewportBuilder::default()
             .with_title(t!("disk_analysis.title").to_string())
             .with_inner_size([1150.0, 720.0])
             .with_min_inner_size([760.0, 480.0]),
-        |ui: &mut egui::Ui, _class| {
-            let close = ui.input(|i| i.viewport().close_requested());
-            render_view_body(app, ui);
-            close
+        move |ui: &mut egui::Ui, _class| {
+            let mut state = shared.lock();
+            render_view_deferred(&mut state, ui);
         },
     );
-    if close_requested {
-        app.close_disk_analysis();
-    }
 }
 
-fn render_view_body(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
+fn render_view_deferred(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
     let ctx = ui.ctx().clone();
-    if app.disk_analysis.poll() {
+    // Close paths (X button, Escape) and any pass after the close: render
+    // nothing. The spinner-scheduled repaint after close would otherwise
+    // paint the cleared state ("Reading volume index...", empty sidebar)
+    // and keep the window alive.
+    let close_requested = ctx.input(|i| i.viewport().close_requested());
+    let escape = ctx.input(|i| i.key_pressed(egui::Key::Escape));
+    if close_requested || escape || !state.active {
+        if state.active {
+            state.close();
+            // Hide immediately; the parent stops re-registering the viewport
+            // on its next pass, which prunes and destroys the window.
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+            ctx.request_repaint_of(egui::ViewportId::ROOT);
+        }
+        return;
+    }
+
+    #[cfg(target_os = "windows")]
+    sync_native_title_bar(state, ctx.global_style().visuals.dark_mode);
+
+    if state.poll() {
         ctx.request_repaint();
     }
-    if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-        app.close_disk_analysis();
-        return;
+    // Input in the analyzer window counts as app activity: without this the
+    // main viewport sees "idle" and the idle working-set trim evicts the
+    // whole process while the user is actively using the analyzer.
+    let analyzer_input = ctx.input(|i| {
+        i.pointer.any_pressed() || i.pointer.any_click() || !i.events.is_empty()
+    });
+    if analyzer_input {
+        crate::app::state::note_external_viewport_activity();
     }
 
     egui::CentralPanel::default()
         .frame(egui::Frame::NONE.fill(ui.visuals().panel_fill))
         .show(ui, |ui| {
-            render_header(app, ui);
-            render_footer(app, ui);
+            render_header(state, ui);
+            render_footer(state, ui);
 
             egui::Panel::left(egui::Id::new("disk_analysis_sidebar"))
                 .resizable(false)
@@ -93,38 +163,34 @@ fn render_view_body(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
                 .show(ui, |ui| {
                     egui::ScrollArea::vertical()
                         .id_salt("disk_analysis_sidebar_scroll")
-                        .show(ui, |ui| sidebar::render_sidebar(app, ui));
+                        .show(ui, |ui| sidebar::render_sidebar(state, ui));
                 });
 
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE.fill(ui.visuals().panel_fill).inner_margin(8.0))
                 .show(ui, |ui| {
-                    render_breadcrumb(app, ui);
+                    render_breadcrumb(state, ui);
                     ui.add_space(4.0);
-                    render_treemap(app, ui);
+                    render_treemap(state, ui);
                 });
         });
 }
 
-fn drive_label(app: &ImageViewerApp, letter: char) -> String {
-    app.drive_state
-        .disks
-        .iter()
-        .find(|(path, _)| path.chars().next().map(|c| c.to_ascii_uppercase()) == Some(letter))
-        .map(|(_, label)| label.clone())
-        .unwrap_or_default()
-}
-
-fn render_header(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
+fn render_header(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
     egui::Panel::top(egui::Id::new("disk_analysis_header"))
         .show_separator_line(false)
         .frame(egui::Frame::NONE.fill(ui.visuals().panel_fill).inner_margin(egui::Margin::same(12)))
         .show(ui, |ui| {
             ui.horizontal(|ui| {
-                let letter = app.disk_analysis.drive_letter;
+                let letter = state.drive_letter;
                 if let Some(letter) = letter {
                     ui.label(egui::RichText::new(format!("{letter}:")).strong().size(15.0));
-                    let label = drive_label(app, letter);
+                    let label = state
+                        .drives
+                        .iter()
+                        .find(|d| d.letter == letter)
+                        .map(|d| d.label.clone())
+                        .unwrap_or_default();
                     if !label.is_empty() {
                         ui.label(label);
                     }
@@ -136,7 +202,7 @@ fn render_header(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
                 }
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let fetching = app.disk_analysis.phase == DiskAnalysisPhase::Fetching;
+                    let fetching = state.phase == DiskAnalysisPhase::Fetching;
                     let scan_label = if fetching {
                         t!("disk_analysis.scanning").to_string()
                     } else {
@@ -145,13 +211,13 @@ fn render_header(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
                     let scan_enabled = !fetching && letter.is_some();
                     if ui.add_enabled(scan_enabled, egui::Button::new(scan_label)).clicked() {
                         if let Some(letter) = letter {
-                            app.disk_analysis.request(letter);
+                            state.request(letter);
                         }
                     }
                     ui.add_space(10.0);
 
                     // Index state + usage summary.
-                    match app.disk_analysis.index_state.as_deref() {
+                    match state.index_state.as_deref() {
                         Some("ready") => {
                             ui.label(egui::RichText::new(t!("disk_analysis.index_ready")).color(ui.visuals().weak_text_color()));
                         }
@@ -160,24 +226,19 @@ fn render_header(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
                         }
                         _ => {}
                     }
-                    if let Some(letter) = letter {
-                        let info = app
-                            .drive_state
-                            .cached_drive_info(&format!("{letter}:\\"));
-                        if let Some(info) = info {
-                            let used = info.total_space.saturating_sub(info.free_space);
-                            ui.label(
-                                egui::RichText::new(
-                                    t!(
-                                        "disk_analysis.used_of",
-                                        used = format_size(used),
-                                        total = format_size(info.total_space)
-                                    )
-                                    .to_string(),
+                    if let Some(drive) = state.drives.iter().find(|d| Some(d.letter) == letter) {
+                        let used = drive.total_space.saturating_sub(drive.free_space);
+                        ui.label(
+                            egui::RichText::new(
+                                t!(
+                                    "disk_analysis.used_of",
+                                    used = format_size(used),
+                                    total = format_size(drive.total_space)
                                 )
-                                .strong(),
-                            );
-                        }
+                                .to_string(),
+                            )
+                            .strong(),
+                        );
                     }
                 });
             });
@@ -185,14 +246,14 @@ fn render_header(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
         });
 }
 
-fn render_footer(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
+fn render_footer(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
     egui::Panel::bottom(egui::Id::new("disk_analysis_footer"))
         .show_separator_line(false)
         .frame(egui::Frame::NONE.fill(ui.visuals().panel_fill).inner_margin(egui::Margin::symmetric(12, 6)))
         .show(ui, |ui| {
             ui.separator();
             ui.horizontal(|ui| {
-                if let Some(model) = app.disk_analysis.model.clone() {
+                if let Some(model) = state.model.clone() {
                     ui.label(
                         egui::RichText::new(
                             t!("disk_analysis.files_count", count = model.total_files).to_string(),
@@ -207,7 +268,7 @@ fn render_footer(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
                         .color(ui.visuals().weak_text_color()),
                     );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if let Some(elapsed) = app.disk_analysis.fetch_elapsed {
+                        if let Some(elapsed) = state.fetch_elapsed {
                             ui.label(
                                 egui::RichText::new(
                                     t!("disk_analysis.scan_time", secs = format!("{:.2}", elapsed.as_secs_f64())).to_string(),
@@ -221,43 +282,36 @@ fn render_footer(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
         });
 }
 
-fn render_breadcrumb(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
-    let Some(model) = app.disk_analysis.model.clone() else {
+fn render_breadcrumb(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
+    let Some(model) = state.model.clone() else {
         return;
     };
-    let stack = app.disk_analysis.drill_stack.clone();
-    let mut truncate_to: Option<usize> = None;
-    ui.horizontal(|ui| {
-        for (i, idx) in stack.iter().enumerate() {
-            let node = &model.nodes[*idx as usize];
-            let label = node.name.clone();
-            let is_last = i + 1 == stack.len();
-            let text = if is_last {
-                egui::RichText::new(label).strong()
-            } else {
-                egui::RichText::new(label).color(ui.visuals().weak_text_color())
-            };
-            if ui.add(egui::Button::new(text).frame(false)).clicked() && !is_last {
-                truncate_to = Some(i + 1);
-            }
-            if !is_last {
-                ui.label(egui::RichText::new("›").color(ui.visuals().weak_text_color()));
+    let stack = state.drill_stack.clone();
+    // Segment target encodes the stack position so a click truncates the
+    // drill trail exactly like the main app's address bar navigation.
+    let segments: Vec<(String, String)> = stack
+        .iter()
+        .enumerate()
+        .map(|(i, &idx)| (model.nodes[idx as usize].name.clone(), i.to_string()))
+        .collect();
+    if let Some(target) = crate::ui::components::breadcrumb::render_breadcrumb_trail(ui, &segments)
+    {
+        if let Ok(pos) = target.parse::<usize>() {
+            if pos + 1 < stack.len() {
+                state.drill_stack.truncate(pos + 1);
+                state.hovered = None;
+                ui.ctx().request_repaint();
             }
         }
-    });
-    if let Some(len) = truncate_to {
-        app.disk_analysis.drill_stack.truncate(len);
-        app.disk_analysis.hovered = None;
-        ui.ctx().request_repaint();
     }
 }
 
-fn render_treemap(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
-    let phase = app.disk_analysis.phase;
-    let model = app.disk_analysis.model.clone();
+fn render_treemap(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
+    let phase = state.phase;
+    let model = state.model.clone();
 
     let Some(model) = model else {
-        render_center_state(app, ui, phase);
+        render_center_state(state, ui, phase);
         return;
     };
 
@@ -273,7 +327,7 @@ fn render_treemap(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
         });
     }
 
-    let current = *app.disk_analysis.drill_stack.last().unwrap_or(&model.root);
+    let current = *state.drill_stack.last().unwrap_or(&model.root);
     let avail = ui.available_rect_before_wrap();
     if avail.width() < 16.0 || avail.height() < 16.0 {
         return;
@@ -323,11 +377,17 @@ fn render_treemap(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
     }
 
     // Hover + drill-down interaction.
-    let pointer = resp.hover_pos();
+    // Geometric hover check instead of `resp.hover_pos()`: when the clamped
+    // tooltip covers the pointer (near window edges) its layer steals the
+    // hover from this response, hiding the tooltip next frame and making it
+    // flicker. The raw pointer position keeps the hover stable.
+    let pointer = ui
+        .input(|i| i.pointer.hover_pos())
+        .filter(|p| rect.contains(*p));
     let hovered = pointer
         .and_then(|pos| treemap::hit_test(&placed, pos))
         .map(|p| p.idx);
-    app.disk_analysis.hovered = hovered;
+    state.hovered = hovered;
     if hovered.is_some() {
         ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
     }
@@ -346,8 +406,10 @@ fn render_treemap(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
             if let Some(p) = treemap::hit_test(&placed, pos) {
                 // Reparse points are leaves: never drill into them.
                 if p.is_dir && !model.nodes[p.idx as usize].is_reparse {
-                    app.disk_analysis.drill_stack.push(p.idx);
-                    app.disk_analysis.hovered = None;
+                    // Full ancestor chain so the breadcrumb shows the whole
+                    // path even when clicking a nested frame directly.
+                    state.drill_stack = model.chain_to(p.idx);
+                    state.hovered = None;
                 }
             }
         }
@@ -367,8 +429,11 @@ fn render_treemap(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
         );
         egui::Area::new(egui::Id::new("disk_analysis_tooltip"))
             .order(egui::Order::Tooltip)
+            .interactable(false)
             .fixed_pos(tooltip_pos)
             .show(ui.ctx(), |ui| {
+                // Non-interactive tooltip: clicks pass through to the treemap.
+                ui.style_mut().interaction.selectable_labels = false;
                 egui::Frame::popup(ui.style()).show(ui, |ui| {
                     ui.set_max_width(480.0);
                     ui.add(
@@ -444,7 +509,7 @@ fn draw_header_texts(
     );
 }
 
-fn render_center_state(app: &mut ImageViewerApp, ui: &mut egui::Ui, phase: DiskAnalysisPhase) {
+fn render_center_state(state: &mut DiskAnalysisState, ui: &mut egui::Ui, phase: DiskAnalysisPhase) {
     ui.centered_and_justified(|ui| {
         match phase {
             DiskAnalysisPhase::Failed => {
@@ -452,15 +517,15 @@ fn render_center_state(app: &mut ImageViewerApp, ui: &mut egui::Ui, phase: DiskA
                     ui.label(
                         egui::RichText::new(t!("disk_analysis.failed").to_string()).strong(),
                     );
-                    if let Some(error) = app.disk_analysis.error.clone() {
+                    if let Some(error) = state.error.clone() {
                         ui.label(
                             egui::RichText::new(error).color(ui.visuals().weak_text_color()),
                         );
                     }
                     ui.add_space(8.0);
                     if ui.button(t!("disk_analysis.retry").to_string()).clicked() {
-                        if let Some(letter) = app.disk_analysis.drive_letter {
-                            app.disk_analysis.request(letter);
+                        if let Some(letter) = state.drive_letter {
+                            state.request(letter);
                         }
                     }
                 });

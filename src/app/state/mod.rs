@@ -767,7 +767,12 @@ pub struct ImageViewerApp {
     pub global_search: GlobalSearchState,
 
     // DISK USAGE ANALYZER (NTFS, via MTT Search Service)
-    pub disk_analysis: crate::app::disk_analysis_state::DiskAnalysisState,
+    /// Shared with the deferred analyzer viewport callback: Arc so the
+    /// 'static + Send + Sync callback can own a clone, Mutex because both
+    /// the main loop and the analyzer window mutate it.
+    pub disk_analysis: std::sync::Arc<
+        parking_lot::Mutex<crate::app::disk_analysis_state::DiskAnalysisState>,
+    >,
 
     // FILE OPERATION WORKER/TRACKING
     pub file_operation_state: FileOperationState,
@@ -791,6 +796,7 @@ pub struct ImageViewerApp {
 }
 
 mod helpers;
+pub(crate) use helpers::note_external_viewport_activity;
 pub mod sidebar_tree_state;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

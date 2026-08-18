@@ -762,6 +762,13 @@ impl ImageViewerApp {
             } else {
                 3.0
             };
+            // While the analyzer is open its viewport inflates frame_time_avg;
+            // don't let that throttle the main window's thumbnail uploads.
+            let target_budget_ms = if self.disk_analysis.lock().active {
+                target_budget_ms.max(6.0)
+            } else {
+                target_budget_ms
+            };
             if (self.upload_budget_ms - target_budget_ms).abs() >= 0.5 {
                 self.upload_budget_ms = target_budget_ms.clamp(2.0, 10.0);
                 self.upload_budget_persist_pending = true;

@@ -106,6 +106,10 @@ pub struct DiskAnalysisModel {
     /// Per-category (bytes, file count) over all files.
     pub category_totals: [u64; 16],
     pub build_elapsed: Duration,
+    /// Approximate live heap footprint of the model. Lets the memory-pressure
+    /// governor ignore this bounded, transient allocation while the analyzer
+    /// is open (so the main app's caches are not destroyed because of it).
+    pub approx_bytes: u64,
 }
 
 impl DiskAnalysisModel {
@@ -284,6 +288,17 @@ impl DiskAnalysisModel {
         let total_size = root_node.subtree_size;
         let total_files = root_node.file_count;
         let total_folders = root_node.folder_count.saturating_sub(1);
+        // Rough live footprint: node struct + name heap + children vec +
+        // per-category totals box.
+        let approx_bytes: u64 = nodes
+            .iter()
+            .map(|n| {
+                std::mem::size_of::<AnalysisNode>() as u64
+                    + n.name.len() as u64
+                    + n.children.capacity() as u64 * 4
+                    + if n.cat_bytes.is_some() { 64 } else { 0 }
+            })
+            .sum();
         Self {
             drive_letter,
             nodes,
@@ -294,7 +309,27 @@ impl DiskAnalysisModel {
             deepest_path,
             category_totals,
             build_elapsed: started.elapsed(),
+            approx_bytes,
         }
+    }
+
+    /// Chain of node indices from the volume root down to `idx` (both
+    /// inclusive), i.e. the full ancestor path used by the breadcrumb trail.
+    pub fn chain_to(&self, idx: u32) -> Vec<u32> {
+        let mut chain = Vec::new();
+        let mut current = idx;
+        // Bounded walk: self-parent roots terminate; unreachable cycle
+        // members (never placed by the treemap) cannot loop forever.
+        while chain.len() <= self.nodes.len() {
+            chain.push(current);
+            let parent = self.nodes[current as usize].parent;
+            if parent == current {
+                break;
+            }
+            current = parent;
+        }
+        chain.reverse();
+        chain
     }
 
     /// Full backslash-separated path of a node (for tooltips).

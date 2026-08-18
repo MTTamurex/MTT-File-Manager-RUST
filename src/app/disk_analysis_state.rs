@@ -10,6 +10,17 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::time::Duration;
 
+/// Drive facts the analyzer window needs. Snapshotted from `DriveState` when
+/// the analyzer opens so the deferred viewport never borrows the main app.
+#[derive(Clone)]
+pub struct AnalyzerDriveSummary {
+    pub letter: char,
+    pub label: String,
+    pub file_system: String,
+    pub total_space: u64,
+    pub free_space: u64,
+}
+
 pub struct DiskAnalysisRequest {
     pub drive_letter: char,
     pub request_id: u64,
@@ -41,6 +52,8 @@ pub struct DiskAnalysisState {
     /// Whether the analyzer view is currently displayed.
     pub active: bool,
     pub drive_letter: Option<char>,
+    /// Drive snapshot (filled when the analyzer opens).
+    pub drives: Vec<AnalyzerDriveSummary>,
     pub phase: DiskAnalysisPhase,
     pub model: Option<Arc<DiskAnalysisModel>>,
     pub error: Option<String>,
@@ -51,6 +64,15 @@ pub struct DiskAnalysisState {
     pub drill_stack: Vec<u32>,
     /// Currently hovered treemap node.
     pub hovered: Option<u32>,
+    /// Set on close: the main loop compacts the heap on the next frame.
+    pub reclaim_pending: bool,
+    /// Native HWND of the analyzer viewport window (title-bar theming),
+    /// stored as the raw pointer value to keep the state `Send`.
+    #[cfg(target_os = "windows")]
+    pub viewport_hwnd: Option<isize>,
+    /// Last dark-mode flag applied to the viewport title bar.
+    #[cfg(target_os = "windows")]
+    pub viewport_title_bar_dark: Option<bool>,
     req_sender: Sender<DiskAnalysisRequest>,
     res_receiver: Receiver<DiskAnalysisMessage>,
     next_request_id: u64,
@@ -69,6 +91,7 @@ impl DiskAnalysisState {
         Self {
             active: false,
             drive_letter: None,
+            drives: Vec::new(),
             phase: DiskAnalysisPhase::Idle,
             model: None,
             error: None,
@@ -76,6 +99,11 @@ impl DiskAnalysisState {
             index_state: None,
             drill_stack: Vec::new(),
             hovered: None,
+            reclaim_pending: false,
+            #[cfg(target_os = "windows")]
+            viewport_hwnd: None,
+            #[cfg(target_os = "windows")]
+            viewport_title_bar_dark: None,
             req_sender,
             res_receiver,
             next_request_id: 0,
@@ -144,6 +172,7 @@ impl DiskAnalysisState {
     }
 
     /// Hide the view and drop the model; in-flight results are invalidated.
+    /// Sets `reclaim_pending` so the main loop compacts the heap next frame.
     pub fn close(&mut self) {
         self.active = false;
         self.active_request_id = self.active_request_id.wrapping_add(1);
@@ -154,6 +183,8 @@ impl DiskAnalysisState {
         self.index_state = None;
         self.drill_stack.clear();
         self.hovered = None;
+        self.drives.clear();
+        self.reclaim_pending = true;
     }
 }
 
