@@ -58,6 +58,8 @@ pub struct DiskAnalysisState {
     pub drill_stack: Vec<u32>,
     /// Currently hovered treemap node.
     pub hovered: Option<u32>,
+    /// Right-click context menu target (node index); `None` when closed.
+    pub context_menu: Option<u32>,
     /// Icon cache for the analyzer window's own chrome (refresh button).
     pub svg_icons: crate::ui::svg_icons::SvgIconManager,
     /// Native HWND of the analyzer window (title-bar theming),
@@ -91,6 +93,7 @@ impl DiskAnalysisState {
             fetch_elapsed: None,
             drill_stack: Vec::new(),
             hovered: None,
+            context_menu: None,
             svg_icons: crate::ui::svg_icons::SvgIconManager::new(),
             #[cfg(target_os = "windows")]
             viewport_hwnd: None,
@@ -115,6 +118,7 @@ impl DiskAnalysisState {
         self.phase = DiskAnalysisPhase::Fetching;
         self.error = None;
         self.hovered = None;
+        self.context_menu = None;
         if self
             .req_sender
             .send(DiskAnalysisRequest {
@@ -146,6 +150,7 @@ impl DiskAnalysisState {
                     self.fetch_elapsed = Some(fetch_elapsed);
                     self.phase = DiskAnalysisPhase::Ready;
                     self.hovered = None;
+                    self.context_menu = None;
                     changed = true;
                 }
                 DiskAnalysisMessage::Failed { request_id, error } => {

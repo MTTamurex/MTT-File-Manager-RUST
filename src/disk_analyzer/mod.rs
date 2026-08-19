@@ -4,6 +4,8 @@
 //! viewers — so the analyzer window gets an independent taskbar button and
 //! minimize/restore lifecycle instead of being tied to the main window.
 
+pub mod open_in_main;
+
 use crate::app::disk_analysis_state::{AnalyzerDriveSummary, DiskAnalysisState};
 use crate::viewer_runtime;
 use eframe::egui;
@@ -132,7 +134,13 @@ impl eframe::App for DiskAnalyzerApp {
         }
 
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            // Escape closes the context menu first, then the window.
+            if self.state.context_menu.is_some() {
+                self.state.context_menu = None;
+                egui::Popup::close_all(&ctx);
+            } else {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
             return;
         }
 

@@ -108,6 +108,44 @@ fn read_early_preferences(keys: &[&str]) -> std::collections::HashMap<String, St
     values
 }
 
+/// Persist an "open in main app" request for the running main instance.
+/// Used by the `--open-path` helper mode (spawned by child processes such as
+/// the disk analyzer when they cannot message the main window directly).
+/// Returns the process exit code.
+fn write_pending_open_request(path: &str) -> i32 {
+    use mtt_file_manager::app::operations::external_open;
+
+    let Some(data_local_dir) = dirs::data_local_dir() else {
+        log::error!("[OPEN-PATH] data_local_dir unavailable");
+        return 1;
+    };
+    let db_path = data_local_dir
+        .join("MTT-File-Manager")
+        .join("state")
+        .join("app_state.db");
+    let conn = match rusqlite::Connection::open(&db_path) {
+        Ok(conn) => conn,
+        Err(error) => {
+            log::error!("[OPEN-PATH] failed to open app_state.db: {error}");
+            return 1;
+        }
+    };
+    let value = external_open::encode_db_request(path);
+    match conn.execute(
+        "INSERT OR REPLACE INTO user_preferences (key, value) VALUES (?, ?)",
+        rusqlite::params![external_open::PENDING_OPEN_REQUEST_KEY, value],
+    ) {
+        Ok(_) => {
+            log::info!("[OPEN-PATH] pending open request persisted: {path}");
+            0
+        }
+        Err(error) => {
+            log::error!("[OPEN-PATH] failed to persist open request: {error}");
+            1
+        }
+    }
+}
+
 #[cfg(target_os = "windows")]
 fn start_temporary_startup_priority_boost() {
     use std::time::Duration;
@@ -455,6 +493,14 @@ fn main() -> eframe::Result<()> {
 
             log::error!("[DISK-ANALYZER] missing drive argument for --disk-analyzer");
             return Ok(());
+        }
+        if flag_str.eq_ignore_ascii_case("--open-path") {
+            let Some(path_arg) = args.next() else {
+                log::error!("[OPEN-PATH] missing path argument for --open-path");
+                std::process::exit(2);
+            };
+            let exit_code = write_pending_open_request(&path_arg.to_string_lossy());
+            std::process::exit(exit_code);
         }
         if flag_str.eq_ignore_ascii_case("--video-player") {
             if let Some(path_arg) = args.next() {

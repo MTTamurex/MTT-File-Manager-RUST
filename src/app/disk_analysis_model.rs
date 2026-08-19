@@ -421,6 +421,17 @@ impl DiskAnalysisModel {
         path.pop();
         path
     }
+
+    /// Folder to open in the main app for node `idx`: the directory itself
+    /// for directories, the containing folder for files.
+    pub fn folder_path_of(&self, idx: u32) -> String {
+        let node = &self.nodes[idx as usize];
+        if node.is_dir {
+            self.path_of(idx)
+        } else {
+            self.path_of(node.parent)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -542,5 +553,26 @@ mod tests {
         ]));
         let file_idx = model.nodes.iter().position(|n| n.name == "a.txt").unwrap() as u32;
         assert_eq!(model.path_of(file_idx), r"C:\dir\a.txt");
+    }
+
+    #[test]
+    fn folder_path_of_resolves_dirs_files_and_root_children() {
+        let model = DiskAnalysisModel::build(snapshot(vec![
+            rec(5, 5, "", 0, true),
+            rec(10, 5, "dir", 0, true),
+            rec(11, 10, "a.txt", 1, false),
+            rec(12, 5, "root_file.bin", 2, false),
+        ]));
+        let dir_idx = model.nodes.iter().position(|n| n.name == "dir").unwrap() as u32;
+        let file_idx = model.nodes.iter().position(|n| n.name == "a.txt").unwrap() as u32;
+        let root_file_idx = model
+            .nodes
+            .iter()
+            .position(|n| n.name == "root_file.bin")
+            .unwrap() as u32;
+        assert_eq!(model.folder_path_of(dir_idx), r"C:\dir");
+        assert_eq!(model.folder_path_of(file_idx), r"C:\dir");
+        assert_eq!(model.folder_path_of(root_file_idx), "C:");
+        assert_eq!(model.folder_path_of(model.root), "C:");
     }
 }

@@ -20,16 +20,18 @@
 mod hit_test;
 mod redraw_suppression;
 
+use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::Mutex;
 
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::Graphics::Gdi::ValidateRect;
+use windows::Win32::System::DataExchange::COPYDATASTRUCT;
 use windows::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::{
-    IsIconic, MINMAXINFO, SWP_NOSIZE, WINDOWPOS, WM_CANCELMODE, WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE,
-    WM_GETMINMAXINFO, WM_NCACTIVATE, WM_NCDESTROY, WM_NCHITTEST, WM_NCLBUTTONDOWN, WM_PAINT,
-    WM_SIZE, WM_SYSCOMMAND, WM_WINDOWPOSCHANGING,
+    IsIconic, MINMAXINFO, SWP_NOSIZE, WINDOWPOS, WM_CANCELMODE, WM_COPYDATA, WM_ENTERSIZEMOVE,
+    WM_EXITSIZEMOVE, WM_GETMINMAXINFO, WM_NCACTIVATE, WM_NCDESTROY, WM_NCHITTEST,
+    WM_NCLBUTTONDOWN, WM_PAINT, WM_SIZE, WM_SYSCOMMAND, WM_WINDOWPOSCHANGING,
 };
 
 pub use hit_test::{
@@ -111,6 +113,27 @@ static SIDEBAR_SNAPSHOT: Mutex<SidebarSnapshot> = Mutex::new(SidebarSnapshot {
     right_width: 300.0,
     valid: false,
 });
+
+// ============================================================================
+// EXTERNAL OPEN REQUESTS (WM_COPYDATA from child processes)
+// ============================================================================
+
+/// Magic `dwData` value identifying our own WM_COPYDATA "open path" payloads
+/// ("MTTF" in ASCII). Anything else is left to default handling.
+pub const OPEN_REQUEST_MAGIC: usize = 0x4D545446;
+/// Hard cap on an accepted WM_COPYDATA payload (a path never needs more).
+const OPEN_REQUEST_MAX_BYTES: u32 = 8192;
+
+/// Paths queued by WM_COPYDATA, drained by the UI update loop.
+static PENDING_OPEN_REQUESTS: Mutex<VecDeque<String>> = Mutex::new(VecDeque::new());
+
+/// Drain all paths queued via WM_COPYDATA (oldest first).
+pub fn take_pending_open_requests() -> Vec<String> {
+    match PENDING_OPEN_REQUESTS.lock() {
+        Ok(mut queue) => queue.drain(..).collect(),
+        Err(_) => Vec::new(),
+    }
+}
 
 // ============================================================================
 // PUBLIC API
@@ -299,6 +322,39 @@ extern "system" fn borderless_subclass_proc(
 
     if msg == WM_NCLBUTTONDOWN {
         redraw_suppression::note_non_client_press(hit_test::is_caption_code(wparam.0));
+    }
+
+    // "Open in main app" requests from child processes (disk analyzer, etc.).
+    // Only copy the payload and queue it; navigation happens in the UI loop.
+    if msg == WM_COPYDATA {
+        let copy_data = lparam.0 as *const COPYDATASTRUCT;
+        if !copy_data.is_null() {
+            unsafe {
+                let data = &*copy_data;
+                if data.dwData == OPEN_REQUEST_MAGIC
+                    && data.cbData > 0
+                    && data.cbData <= OPEN_REQUEST_MAX_BYTES
+                    && !data.lpData.is_null()
+                {
+                    let bytes =
+                        std::slice::from_raw_parts(data.lpData as *const u8, data.cbData as usize);
+                    if let Ok(path) = std::str::from_utf8(bytes) {
+                        if !path.trim().is_empty() {
+                            if let Ok(mut queue) = PENDING_OPEN_REQUESTS.lock() {
+                                queue.push_back(path.to_string());
+                            }
+                            // Restore/foreground now, while the sender's
+                            // synchronous SendMessage is still in flight:
+                            // the input queues are attached at this moment,
+                            // so this thread may legally take the foreground.
+                            super::drives::restore_window_foreground(hwnd);
+                            return LRESULT(1);
+                        }
+                    }
+                }
+            }
+        }
+        return LRESULT(0);
     }
 
     // Let default handling observe the modal-loop boundary before suppressing

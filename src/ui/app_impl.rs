@@ -168,6 +168,9 @@ impl eframe::App for ImageViewerApp {
         app::lifecycle::handle_startup_sequence(self, ctx);
         app::lifecycle::track_window_state(self, ctx);
         self.ensure_window_handle(frame);
+        // "Open in main app" requests from the disk analyzer (WM_COPYDATA
+        // queue or DB fallback); no-op until startup completes.
+        crate::app::operations::external_open::process_external_open_requests(self, ctx);
         let viewport_visible = ctx.input(|input| input.viewport().visible().unwrap_or(true));
         if !viewport_visible {
             self.run_background_updates(ctx, false);

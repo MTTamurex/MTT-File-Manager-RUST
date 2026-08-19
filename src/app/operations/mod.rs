@@ -18,6 +18,7 @@
 //! - `context_menu`: Context menu population
 //! - `window`: Window handle management
 //! - `message_handler`: Async message processing
+//! - `external_open`: "Open in main app" requests from child processes
 //! - `ui_rendering`: Rendering functions for file lists
 //! - `trait_impls`: Implementation of UI traits for App
 
@@ -29,6 +30,7 @@ pub mod drag_drop;
 pub mod drive_health;
 pub mod drive_refresh;
 pub mod dual_panel_ops;
+pub mod external_open;
 pub mod file_hash;
 pub mod file_ops;
 pub mod folder_loading;

@@ -400,6 +400,7 @@ fn render_treemap(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
         }
     }
     if resp.clicked() {
+        state.context_menu = None;
         if let Some(pos) = resp.interact_pointer_pos() {
             if let Some(p) = treemap::hit_test(&placed, pos) {
                 // Reparse points are leaves: never drill into them.
@@ -413,46 +414,88 @@ fn render_treemap(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
         }
     }
 
-    // Tooltip for the hovered node.
-    if let (Some(h), Some(pos)) = (hovered, pointer) {
-        let node = &model.nodes[h as usize];
-        let own = if node.is_dir {
-            node.subtree_size
-        } else {
-            node.size
-        };
-        let parent_size = model.nodes[node.parent as usize].subtree_size.max(1);
-        let percent = (own as f64 / parent_size as f64) * 100.0;
-        // Clamp so the tooltip stays inside the window and gets a usable width.
-        let screen = ui.ctx().viewport_rect();
-        let tooltip_pos = egui::pos2(
-            (pos.x + 14.0)
-                .min(screen.max.x - 500.0)
-                .max(screen.min.x + 4.0),
-            (pos.y + 12.0).min(screen.max.y - 120.0),
-        );
-        egui::Area::new(egui::Id::new("disk_analysis_tooltip"))
-            .order(egui::Order::Tooltip)
-            .interactable(false)
-            .fixed_pos(tooltip_pos)
-            .show(ui.ctx(), |ui| {
-                // Non-interactive tooltip: clicks pass through to the treemap.
-                ui.style_mut().interaction.selectable_labels = false;
-                egui::Frame::popup(ui.style()).show(ui, |ui| {
-                    ui.set_max_width(480.0);
-                    ui.add(
-                        egui::Label::new(egui::RichText::new(model.path_of(h)).strong())
-                            .wrap_mode(egui::TextWrapMode::Truncate),
-                    );
-                    ui.label(format!("{} · {:.1}%", format_size(own), percent));
-                    if node.is_dir {
-                        ui.label(
-                            egui::RichText::new(t!("disk_analysis.drill_hint").to_string())
-                                .color(weak_color),
+    // Right-click a tile: remember the target for the context menu below.
+    if resp.secondary_clicked() {
+        if let Some(pos) = resp.interact_pointer_pos() {
+            if let Some(p) = treemap::hit_test(&placed, pos) {
+                state.context_menu = Some(p.idx);
+            }
+        }
+    }
+
+    // Tooltip for the hovered node (hidden while the context menu is open).
+    if state.context_menu.is_none() {
+        if let (Some(h), Some(pos)) = (hovered, pointer) {
+            let node = &model.nodes[h as usize];
+            let own = if node.is_dir {
+                node.subtree_size
+            } else {
+                node.size
+            };
+            let parent_size = model.nodes[node.parent as usize].subtree_size.max(1);
+            let percent = (own as f64 / parent_size as f64) * 100.0;
+            // Clamp so the tooltip stays inside the window and gets a usable width.
+            let screen = ui.ctx().viewport_rect();
+            let tooltip_pos = egui::pos2(
+                (pos.x + 14.0)
+                    .min(screen.max.x - 500.0)
+                    .max(screen.min.x + 4.0),
+                (pos.y + 12.0).min(screen.max.y - 120.0),
+            );
+            egui::Area::new(egui::Id::new("disk_analysis_tooltip"))
+                .order(egui::Order::Tooltip)
+                .interactable(false)
+                .fixed_pos(tooltip_pos)
+                .show(ui.ctx(), |ui| {
+                    // Non-interactive tooltip: clicks pass through to the treemap.
+                    ui.style_mut().interaction.selectable_labels = false;
+                    egui::Frame::popup(ui.style()).show(ui, |ui| {
+                        ui.set_max_width(480.0);
+                        ui.add(
+                            egui::Label::new(egui::RichText::new(model.path_of(h)).strong())
+                                .wrap_mode(egui::TextWrapMode::Truncate),
                         );
-                    }
+                        ui.label(format!("{} · {:.1}%", format_size(own), percent));
+                        if node.is_dir {
+                            ui.label(
+                                egui::RichText::new(t!("disk_analysis.drill_hint").to_string())
+                                    .color(weak_color),
+                            );
+                        }
+                    });
                 });
-            });
+        }
+    }
+
+    // Context menu for the right-clicked tile (open folder in the main app).
+    // Opens at the pointer position; only when a tile was actually hit.
+    let context_menu_id = egui::Id::new("disk_analysis_tile_context");
+    let open_cmd = if resp.secondary_clicked() && state.context_menu.is_some() {
+        Some(egui::SetOpenCommand::Bool(true))
+    } else if resp.clicked() {
+        Some(egui::SetOpenCommand::Bool(false))
+    } else {
+        None
+    };
+    let menu = egui::Popup::context_menu(&resp)
+        .id(context_menu_id)
+        .open_memory(open_cmd);
+    if let Some(menu_resp) = menu.show(|ui| {
+        ui.button(t!("disk_analysis.open_in_main_app").to_string())
+            .clicked()
+    }) {
+        if menu_resp.inner {
+            if let Some(menu_idx) = state.context_menu {
+                let target = model.folder_path_of(menu_idx);
+                crate::disk_analyzer::open_in_main::open_path_in_main_app(&target);
+            }
+            egui::Popup::close_id(ui.ctx(), context_menu_id);
+        }
+    }
+    // Keep state in sync when egui closes the popup (outside click, etc.)
+    // so the tooltip suppression below is lifted.
+    if state.context_menu.is_some() && !egui::Popup::is_id_open(ui.ctx(), context_menu_id) {
+        state.context_menu = None;
     }
 }
 

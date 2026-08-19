@@ -823,6 +823,7 @@ disk_analysis:
   retry: "Retry"
   used_of: "%{used} used of %{total}"
   drill_hint: "Click to open folder"
+  open_in_main_app: "Open in main app"
   category_video: "Video"
   category_images: "Images"
   category_audio: "Audio"
