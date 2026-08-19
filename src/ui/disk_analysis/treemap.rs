@@ -51,8 +51,8 @@ fn layout_children(
     if rect.width() < MIN_LEAF_SIZE * 2.0 || rect.height() < MIN_LEAF_SIZE * 2.0 {
         return;
     }
-    let children: Vec<(u32, f32)> = model.nodes[parent as usize]
-        .children
+    let children: Vec<(u32, f32)> = model
+        .children(parent)
         .iter()
         .map(|&child| (child, weight(model, child)))
         .filter(|(_, w)| *w > 0.0)
