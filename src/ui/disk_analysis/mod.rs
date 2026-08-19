@@ -57,17 +57,19 @@ fn sync_native_title_bar(state: &mut DiskAnalysisState, dark: bool) {
     }
 }
 
-/// Muted earth-tone category palette (dark/light agnostic base colors).
+/// Category palette based on the Okabe-Ito colorblind-safe set: muted but
+/// maximally separated in hue/lightness so slices stay distinguishable in
+/// both themes (including after the light-mode darkening).
 pub fn category_color(category: FileCategory, dark: bool) -> egui::Color32 {
     let (r, g, b) = match category {
-        FileCategory::Video => (96, 128, 160),
-        FileCategory::Images => (190, 122, 96),
-        FileCategory::Audio => (140, 106, 150),
-        FileCategory::Archives => (172, 140, 84),
-        FileCategory::Code => (86, 142, 132),
-        FileCategory::Documents => (126, 150, 92),
-        FileCategory::System => (112, 116, 122),
-        FileCategory::Other => (150, 140, 128),
+        FileCategory::Video => (0, 114, 178),
+        FileCategory::Images => (204, 121, 167),
+        FileCategory::Audio => (230, 159, 0),
+        FileCategory::Archives => (240, 228, 66),
+        FileCategory::Code => (86, 180, 233),
+        FileCategory::Documents => (0, 158, 110),
+        FileCategory::System => (213, 94, 0),
+        FileCategory::Other => (150, 150, 150),
     };
     if dark {
         egui::Color32::from_rgb(r, g, b)
