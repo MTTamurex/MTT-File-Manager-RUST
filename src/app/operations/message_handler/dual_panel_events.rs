@@ -54,6 +54,16 @@ fn parent_path_for_deleted_panel(path: &Path) -> Option<String> {
     }
 }
 
+/// Normalized folder key tolerant of trailing separators, used to match a
+/// panel path against folders affected by file operations. `Path::parent()`
+/// of `C:\x\a.jpg` yields `C:\x` while a drive-root parent yields `C:\`;
+/// panel paths may carry either form, so trailing separators are ignored.
+fn folder_key_for_match(path: &Path) -> String {
+    ImageViewerApp::normalize_for_match(path)
+        .trim_end_matches(['\\', '/'])
+        .to_string()
+}
+
 fn path_is_same_or_descendant(candidate: &Path, root: &Path) -> bool {
     let candidate_clean = ImageViewerApp::clean_path(candidate);
     let root_clean = ImageViewerApp::clean_path(root);
@@ -198,25 +208,24 @@ impl ImageViewerApp {
             Some(s) => s.path.clone(),
             None => return,
         };
-        let inactive_norm = Self::normalize_for_match(Path::new(&inactive_path));
+        let inactive_norm = folder_key_for_match(Path::new(&inactive_path));
 
-        let matches = folders
+        let Some(affected_folder) = folders
             .iter()
-            .any(|f| Self::normalize_for_match(f.as_path()) == inactive_norm);
-        if !matches {
+            .find(|folder| folder_key_for_match(folder.as_path()) == inactive_norm)
+        else {
             return;
-        }
+        };
 
         log::info!(
             "[DualPanel] Inactive panel folder affected by change, reloading: {}",
             inactive_path
         );
 
-        let inactive_pb = PathBuf::from(&inactive_path);
-        self.directory_dirty_registry.mark_dirty(&inactive_pb);
-        self.directory_cache.invalidate(&inactive_pb);
+        self.directory_dirty_registry.mark_dirty(affected_folder);
+        self.directory_cache.invalidate(affected_folder);
         if let Some(ref di) = self.directory_index {
-            let _ = di.invalidate(&inactive_pb);
+            let _ = di.invalidate(affected_folder);
         }
 
         self.with_inactive_panel(|app| {
@@ -371,5 +380,37 @@ mod tests {
             Path::new(r"D:\Teste 10"),
             Path::new(r"D:\Teste")
         ));
+    }
+
+    #[test]
+    fn folder_key_for_match_ignores_trailing_separator() {
+        assert_eq!(
+            folder_key_for_match(Path::new(r"D:\Images\")),
+            folder_key_for_match(Path::new(r"d:\images"))
+        );
+    }
+
+    #[test]
+    fn folder_key_for_match_equates_drive_root_forms() {
+        assert_eq!(
+            folder_key_for_match(Path::new(r"D:")),
+            folder_key_for_match(Path::new(r"D:\"))
+        );
+    }
+
+    #[test]
+    fn folder_key_for_match_ignores_extended_path_prefix() {
+        assert_eq!(
+            folder_key_for_match(Path::new(r"\\?\D:\Images")),
+            folder_key_for_match(Path::new(r"D:\Images\"))
+        );
+    }
+
+    #[test]
+    fn folder_key_for_match_keeps_distinct_folders_distinct() {
+        assert_ne!(
+            folder_key_for_match(Path::new(r"D:\Images")),
+            folder_key_for_match(Path::new(r"D:\Images 2"))
+        );
     }
 }
