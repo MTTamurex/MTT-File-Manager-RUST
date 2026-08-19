@@ -342,6 +342,16 @@ impl ImageViewerApp {
 
                                 let parent_norm = Self::normalize_for_match(parent);
                                 if parent_norm == current_path_norm
+                                    // Files created by an app-initiated move/copy
+                                    // that just completed are already handled by the
+                                    // completion handler (view reload + thumbnail
+                                    // cache remap). Adding them incrementally here
+                                    // would pop the just-remapped texture caches and
+                                    // cancel in-flight thumbnail requests, leaving
+                                    // the destination panel without thumbnails.
+                                    && !crate::infrastructure::windows::file_flags::covers_completed_write(
+                                        &cleaned,
+                                    )
                                     && !self.try_add_created_path_to_ui(&cleaned)
                                 {
                                     needs_reload = true;

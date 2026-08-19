@@ -206,6 +206,8 @@ pub fn spawn_thumbnail_workers(
     // flags), never via the write-lock probe.
     {
         let queue = queue.clone();
+        let tx = tx.clone();
+        let ctx = ctx.clone();
         let gen_tracker = gen_tracker.clone();
         let retry_shutdown = shutdown.clone();
 
@@ -213,7 +215,7 @@ pub fn spawn_thumbnail_workers(
             .name("thumb-deferred-retry".to_string())
             .stack_size(256 * 1024)
             .spawn(move || {
-                deferred_retry_loop(queue, gen_tracker, retry_shutdown);
+                deferred_retry_loop(queue, tx, ctx, gen_tracker, retry_shutdown);
             });
 
         if let Err(e) = spawn_result {
@@ -278,6 +280,8 @@ fn thumbnail_cache_writer_loop(
 /// spike on folders with many partial files.
 fn deferred_retry_loop(
     queue: Arc<PriorityThumbnailQueue>,
+    tx: Sender<ThumbnailData>,
+    ctx: egui::Context,
     gen_tracker: Arc<AtomicUsize>,
     shutdown: Arc<AtomicBool>,
 ) {
@@ -285,6 +289,26 @@ fn deferred_retry_loop(
     use crate::workers::thumbnail::{
         clear_transient_failure, defer_unsafe_thumbnail, deferred_entry_expired,
         drain_unsafe_registry,
+    };
+
+    // Notify the UI that a deferred request will never be retried, so the
+    // caller-side loading_set marker is cleared and the renderer can
+    // re-request the thumbnail under the current generation. Without this,
+    // a dropped deferred entry leaves the item stuck in the "loading" state
+    // until a manual refresh.
+    let notify_dropped_entry = |path: &PathBuf, entry: &crate::workers::thumbnail::DeferredThumbnailEntry| {
+        let _ = tx.send(ThumbnailData {
+            path: path.clone(),
+            image_data: std::sync::Arc::new(Vec::new()),
+            width: 0,
+            height: 0,
+            generation: entry.req_generation,
+            request_epoch: 0,
+            priority: entry.req_priority,
+            not_found: false,
+            premultiplied: false,
+        });
+        ctx.request_repaint();
     };
 
     // 4-permit semaphore: cap concurrent classify probes to avoid I/O spikes.
@@ -316,6 +340,7 @@ fn deferred_retry_loop(
                     "[THUMB-RETRY] Dropping stale deferred entry: {:?}",
                     path.file_name()
                 );
+                notify_dropped_entry(&path, &entry);
                 continue;
             }
 
@@ -325,6 +350,7 @@ fn deferred_retry_loop(
                     "[THUMB-RETRY] Dropping expired deferred entry: {:?}",
                     path.file_name()
                 );
+                notify_dropped_entry(&path, &entry);
                 continue;
             }
 

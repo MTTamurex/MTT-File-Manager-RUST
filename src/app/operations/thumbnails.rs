@@ -157,6 +157,12 @@ impl ImageViewerApp {
             .contains_key(&path)
         {
             self.cache_manager.thumbnail_trace.record_pending_deletion();
+            // The caller (file_slot/list_view) inserted this path into
+            // loading_set before dispatching. Remove it so the slot guard
+            // does not see is_loading=true for the whole lifetime of the
+            // pending-deletion marker, which would permanently block the
+            // thumbnail for the path.
+            self.cache_manager.finish_loading(&path);
             return;
         }
 

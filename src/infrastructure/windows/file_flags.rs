@@ -259,6 +259,15 @@ fn completed_write_covers_current_path(path: &Path) -> bool {
         .is_ok_and(|modified| completed_write_covers_modified_path(path, modified))
 }
 
+/// Returns `true` when the path was written by a Shell file operation this app
+/// recently completed (move/copy). Watcher Create events for such files are
+/// echoes of our own operation: the file-op completion handler already
+/// refreshed the affected views and remapped the thumbnail caches, so the
+/// watcher must not treat them as external creations.
+pub fn covers_completed_write(path: &Path) -> bool {
+    completed_write_covers_current_path(path)
+}
+
 pub fn mark_recent_write_activity(path: &Path) {
     mark_recent_write_activity_at(path, Instant::now());
 }

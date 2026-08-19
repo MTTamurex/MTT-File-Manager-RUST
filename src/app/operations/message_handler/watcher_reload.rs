@@ -29,7 +29,17 @@ impl ImageViewerApp {
         // status bar flickering when many files were created (e.g. archive extraction).
         if let Some(until) = self.watcher_cooldown_until {
             if Instant::now() < until {
-                self.pending_auto_reload = false;
+                // Defer the pending reload instead of cancelling it. The
+                // app-initiated reload after a file operation can still be
+                // superseded (folder-load generation races in dual-panel
+                // moves); cancelling here would leave a stale panel until a
+                // manual refresh. Keep the flag armed and wake up right after
+                // the cooldown so the reload fires exactly once, late.
+                if self.pending_auto_reload {
+                    let remaining = until.saturating_duration_since(Instant::now());
+                    self.ui_ctx
+                        .request_repaint_after(remaining + Duration::from_millis(50));
+                }
                 return;
             }
             self.watcher_cooldown_until = None;
