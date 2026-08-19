@@ -56,6 +56,8 @@ pub struct DedicatedImageViewerApp {
     pub(super) viewport_revealed: bool,
     #[cfg(target_os = "windows")]
     pub(super) native_hwnd: Option<windows::Win32::Foundation::HWND>,
+    /// Throttle for polling the shared theme preference while running.
+    pub(super) last_theme_poll: std::time::Instant,
     /// Animated GIF state; `Some` when the current image is a multi-frame GIF.
     pub(super) gif_animation: Option<GifAnimation>,
     /// Index for which GIF loading was already attempted (avoids retrying).
@@ -144,6 +146,7 @@ impl DedicatedImageViewerApp {
             viewport_revealed: false,
             #[cfg(target_os = "windows")]
             native_hwnd: None,
+            last_theme_poll: std::time::Instant::now(),
             gif_animation: None,
             gif_loaded_index: None,
             gif_decode_rx: None,
@@ -945,6 +948,20 @@ impl eframe::App for DedicatedImageViewerApp {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        // Follow main-app theme switches while the viewer is open.
+        if let Some(dark) = crate::viewer_runtime::poll_saved_theme_change(
+            self.dark_mode,
+            &mut self.last_theme_poll,
+        ) {
+            self.dark_mode = dark;
+            let ctx = ui.ctx().clone();
+            ctx.set_visuals(crate::ui::theme::viewer_visuals(dark));
+            #[cfg(target_os = "windows")]
+            if let Some(hwnd) = self.native_hwnd {
+                crate::infrastructure::windows::window_corners::apply_dark_title_bar(hwnd, dark);
+            }
+        }
+
         let style = ui.ctx().global_style();
         ui.set_style(style);
 

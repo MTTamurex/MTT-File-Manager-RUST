@@ -70,6 +70,21 @@ pub fn is_saved_theme_dark() -> bool {
         .unwrap_or(false)
 }
 
+/// 1 Hz poll of the shared prefs: returns the saved theme's dark flag when it
+/// differs from `current_dark`, so long-lived viewer/analyzer subprocesses
+/// follow main-app theme switches without needing a restart.
+pub fn poll_saved_theme_change(
+    current_dark: bool,
+    last_poll: &mut std::time::Instant,
+) -> Option<bool> {
+    if last_poll.elapsed() < std::time::Duration::from_secs(1) {
+        return None;
+    }
+    *last_poll = std::time::Instant::now();
+    let saved = is_saved_theme_dark();
+    (saved != current_dark).then_some(saved)
+}
+
 /// Build [`eframe::NativeOptions`] tuned for a low-baseline-RAM viewer
 /// subprocess. See the module-level docs for the rationale of each knob.
 pub fn build_viewer_native_options(viewport: egui::ViewportBuilder) -> eframe::NativeOptions {

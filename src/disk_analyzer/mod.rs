@@ -82,6 +82,7 @@ struct DiskAnalyzerApp {
     state: DiskAnalysisState,
     dark_mode: bool,
     revealed: bool,
+    last_theme_poll: std::time::Instant,
 }
 
 impl DiskAnalyzerApp {
@@ -93,6 +94,7 @@ impl DiskAnalyzerApp {
             state,
             dark_mode,
             revealed: false,
+            last_theme_poll: std::time::Instant::now(),
         }
     }
 }
@@ -112,6 +114,21 @@ impl eframe::App for DiskAnalyzerApp {
             ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
             ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
             self.revealed = true;
+        }
+
+        // Follow main-app theme switches while the window is open.
+        if let Some(dark) = crate::viewer_runtime::poll_saved_theme_change(
+            self.dark_mode,
+            &mut self.last_theme_poll,
+        ) {
+            self.dark_mode = dark;
+            if dark {
+                ctx.set_visuals(egui::Visuals::dark());
+            } else {
+                ctx.set_visuals(egui::Visuals::light());
+            }
+            crate::ui::theme::apply_scroll_style(&ctx);
+            crate::ui::theme::apply_popup_style(&ctx);
         }
 
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {

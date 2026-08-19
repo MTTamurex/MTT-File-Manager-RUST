@@ -156,6 +156,10 @@ pub struct PdfViewerApp {
     pub(super) selection: Option<PageSelection>,
     /// Whether to apply dark theme (set once at creation, applied on first frame).
     dark_mode: Option<bool>,
+    /// Throttle for polling the shared theme preference while running.
+    last_theme_poll: std::time::Instant,
+    /// Native window handle (raw value) for title-bar theming updates.
+    native_hwnd: Option<isize>,
     /// First currently-visible page index (updated each frame by show_pages).
     visible_lo: Option<u32>,
     /// Last currently-visible page index (updated each frame by show_pages).
@@ -211,6 +215,8 @@ impl PdfViewerApp {
             drag_selection: None,
             selection: None,
             dark_mode: Some(dark_mode),
+            last_theme_poll: std::time::Instant::now(),
+            native_hwnd: None,
             visible_lo: None,
             visible_hi: 0,
             search_active: false,
@@ -1099,6 +1105,7 @@ impl eframe::App for PdfViewerApp {
             if let Ok(handle) = frame.window_handle() {
                 if let raw_window_handle::RawWindowHandle::Win32(wh) = handle.as_raw() {
                     let hwnd = windows::Win32::Foundation::HWND(wh.hwnd.get() as _);
+                    self.native_hwnd = Some(wh.hwnd.get());
                     crate::infrastructure::windows::center_window_on_primary_monitor(hwnd);
                     crate::infrastructure::windows::window_corners::apply_dark_title_bar(
                         hwnd, dark,
@@ -1120,6 +1127,19 @@ impl eframe::App for PdfViewerApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx_owned = ui.ctx().clone();
         let ctx = &ctx_owned;
+        // Follow main-app theme switches while the viewer is open.
+        if let Some(dark) = crate::viewer_runtime::poll_saved_theme_change(
+            ctx.global_style().visuals.dark_mode,
+            &mut self.last_theme_poll,
+        ) {
+            ctx.set_visuals(crate::ui::theme::viewer_visuals(dark));
+            if let Some(raw) = self.native_hwnd {
+                crate::infrastructure::windows::window_corners::apply_dark_title_bar(
+                    windows::Win32::Foundation::HWND(raw as *mut _),
+                    dark,
+                );
+            }
+        }
         ui.set_style(ctx.global_style());
 
         match &self.document_status {
