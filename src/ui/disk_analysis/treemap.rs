@@ -6,6 +6,7 @@
 
 use crate::app::disk_analysis_model::DiskAnalysisModel;
 use eframe::egui;
+use std::sync::Arc;
 
 pub const HEADER_HEIGHT: f32 = 20.0;
 const MIN_FRAME_W: f32 = 70.0;
@@ -23,6 +24,44 @@ pub struct PlacedRect {
     pub header: bool,
 }
 
+#[derive(Clone, Copy, PartialEq)]
+struct LayoutKey {
+    model_ptr: usize,
+    root_idx: u32,
+    area: egui::Rect,
+}
+
+#[derive(Default)]
+pub struct LayoutCache {
+    key: Option<LayoutKey>,
+    placed: Arc<[PlacedRect]>,
+}
+
+impl LayoutCache {
+    pub fn get(
+        &mut self,
+        model: &Arc<DiskAnalysisModel>,
+        root_idx: u32,
+        area: egui::Rect,
+    ) -> Arc<[PlacedRect]> {
+        let key = LayoutKey {
+            model_ptr: Arc::as_ptr(model) as usize,
+            root_idx,
+            area,
+        };
+        if self.key != Some(key) {
+            self.placed = Arc::from(layout(model, root_idx, area));
+            self.key = Some(key);
+        }
+        self.placed.clone()
+    }
+
+    pub fn clear(&mut self) {
+        self.key = None;
+        self.placed = Arc::from([]);
+    }
+}
+
 /// Layout the children of `root_idx` into `area`. Parents are emitted before
 /// their children so hit-testing can pick the deepest entry containing a point.
 pub fn layout(model: &DiskAnalysisModel, root_idx: u32, area: egui::Rect) -> Vec<PlacedRect> {
@@ -34,11 +73,11 @@ pub fn layout(model: &DiskAnalysisModel, root_idx: u32, area: egui::Rect) -> Vec
 fn weight(model: &DiskAnalysisModel, idx: u32) -> f32 {
     let node = &model.nodes[idx as usize];
     let value = if node.is_dir {
-        node.subtree_size
+        node.subtree_allocated_size
     } else {
-        node.size
+        node.allocated_size
     };
-    value.max(1) as f32
+    value as f32
 }
 
 fn layout_children(
@@ -51,8 +90,12 @@ fn layout_children(
     if rect.width() < MIN_LEAF_SIZE * 2.0 || rect.height() < MIN_LEAF_SIZE * 2.0 {
         return;
     }
-    let children: Vec<(u32, f32)> = model
-        .children(parent)
+    let child_slice = model.children(parent);
+    let total_weight: f32 = child_slice.iter().map(|&child| weight(model, child)).sum();
+    if total_weight <= 0.0 {
+        return;
+    }
+    let children: Vec<(u32, f32)> = child_slice
         .iter()
         .map(|&child| (child, weight(model, child)))
         .filter(|(_, w)| *w > 0.0)
@@ -61,7 +104,7 @@ fn layout_children(
         return;
     }
 
-    for (idx, r) in squarify(&children, rect) {
+    for (idx, r) in squarify(&children, rect, total_weight) {
         let node = &model.nodes[idx as usize];
         if node.is_dir {
             let header = r.width() >= MIN_FRAME_W && r.height() >= MIN_FRAME_H;
@@ -87,20 +130,31 @@ fn layout_children(
             });
         }
     }
+
+    // A very wide directory can have no child large enough for a 3px tile.
+    // Keep the current root visible as one aggregate tile instead of showing
+    // an empty analyzer for a non-empty directory.
+    if depth == 0 && out.is_empty() {
+        out.push(PlacedRect {
+            idx: parent,
+            rect,
+            is_dir: true,
+            header: rect.width() >= MIN_FRAME_W && rect.height() >= MIN_FRAME_H,
+        });
+    }
 }
 
 /// Classic squarified treemap: rows of items are laid along the shortest side
 /// of the remaining rectangle while the worst aspect ratio keeps improving.
-fn squarify(items: &[(u32, f32)], rect: egui::Rect) -> Vec<(u32, egui::Rect)> {
+fn squarify(items: &[(u32, f32)], rect: egui::Rect, total_weight: f32) -> Vec<(u32, egui::Rect)> {
     let mut result = Vec::with_capacity(items.len());
-    let total: f32 = items.iter().map(|(_, w)| w).sum();
-    if total <= 0.0 || rect.width() <= 1.0 || rect.height() <= 1.0 {
+    if total_weight <= 0.0 || rect.width() <= 1.0 || rect.height() <= 1.0 {
         return result;
     }
     let area = rect.width() * rect.height();
     let mut scaled: Vec<(u32, f32)> = items
         .iter()
-        .map(|(idx, w)| (*idx, (w * area / total).max(0.001)))
+        .map(|(idx, w)| (*idx, (w * area / total_weight).max(0.001)))
         .collect();
     scaled.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
 
@@ -193,6 +247,7 @@ mod tests {
             parent_frn: 5,
             name: String::new(),
             size: 0,
+            allocated_size: 0,
             is_dir: true,
             is_reparse: false,
         }];
@@ -202,6 +257,7 @@ mod tests {
                 parent_frn: 5,
                 name: format!("f{i}.bin"),
                 size: *size,
+                allocated_size: *size,
                 is_dir: false,
                 is_reparse: false,
             });
@@ -248,5 +304,34 @@ mod tests {
         let (big, small) = if a0 > a1 { (a0, a1) } else { (a1, a0) };
         let ratio = big / small;
         assert!((ratio - 3.0).abs() < 0.05, "ratio was {ratio}");
+    }
+
+    #[test]
+    fn zero_allocation_entries_do_not_distort_layout() {
+        let model = model_with_children(&[0, 0, 100]);
+        let area = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(400.0, 400.0));
+        let placed = layout(&model, model.root, area);
+        assert_eq!(placed.len(), 1);
+        assert_eq!(model.nodes[placed[0].idx as usize].allocated_size, 100);
+    }
+
+    #[test]
+    fn cache_reuses_identical_layout() {
+        let model = Arc::new(model_with_children(&[100, 300]));
+        let area = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(400.0, 400.0));
+        let mut cache = LayoutCache::default();
+        let first = cache.get(&model, model.root, area);
+        let second = cache.get(&model, model.root, area);
+        assert!(Arc::ptr_eq(&first, &second));
+    }
+
+    #[test]
+    fn very_wide_directory_falls_back_to_aggregate_root_tile() {
+        let model = model_with_children(&vec![1; 20_000]);
+        let area = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(400.0, 400.0));
+        let placed = layout(&model, model.root, area);
+        assert_eq!(placed.len(), 1);
+        assert_eq!(placed[0].idx, model.root);
+        assert_eq!(placed[0].rect, area);
     }
 }

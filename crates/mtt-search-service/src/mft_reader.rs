@@ -13,7 +13,7 @@ use windows::Win32::Foundation::{CloseHandle, GetLastError, HANDLE, WIN32_ERROR}
 use windows::Win32::Storage::FileSystem::{ReadFile, SetFilePointerEx, FILE_BEGIN};
 use windows::Win32::System::IO::DeviceIoControl;
 
-use crate::file_index::VolumeIndex;
+use crate::file_index::{FileMetrics, VolumeIndex};
 
 // ── FSCTL codes ─────────────────────────────────────────────────────────────
 
@@ -256,41 +256,81 @@ fn query_mft_geometry(volume: HANDLE) -> Result<MftGeometry, String> {
     })
 }
 
-/// Extract the $DATA size from an attribute at `offset` within `record`.
-/// Handles both resident and non-resident attributes. Only considers default
-/// (unnamed) $DATA streams — skips Alternate Data Streams.
-fn extract_data_size_at(record: &[u8], offset: usize, record_size: usize) -> Option<u64> {
-    if offset + 16 > record_size {
-        return None;
-    }
-    let attr_type = read_u32_le(record, offset)?;
-    if attr_type != ATTR_TYPE_DATA {
-        return None;
-    }
-    // name_length at offset+9: non-zero means Alternate Data Stream.
-    let name_length = record[offset + 9];
-    if name_length != 0 {
+/// Extract metrics from one $DATA attribute. Only the first extent owns the
+/// logical size, but every extent contributes its physically present data
+/// runs. Sparse runs have no LCN and therefore consume no clusters.
+fn extract_data_metrics_at(
+    record: &[u8],
+    offset: usize,
+    record_size: usize,
+    cluster_size: Option<u64>,
+) -> Option<(FileMetrics, bool)> {
+    if offset + 16 > record_size || read_u32_le(record, offset)? != ATTR_TYPE_DATA {
         return None;
     }
 
-    let non_resident_flag = record[offset + 8];
-    if non_resident_flag == 0 {
-        // Resident attribute: value_length at attr_offset+0x10.
-        if offset + 0x14 <= record_size {
-            let value_length = read_u32_le(record, offset + 0x10)?;
-            return Some(value_length as u64);
-        }
-    } else {
-        // Non-resident attribute: real_size at attr_offset+0x30.
-        // The real_size field is consistent across all copies of a
-        // non-resident attribute header (base and continuation records),
-        // so we read it regardless of lowest_vcn.
-        if offset + 0x38 <= record_size {
-            let real_size = read_u64_le(record, offset + 0x30)?;
-            return Some(real_size);
-        }
+    let unnamed = record[offset + 9] == 0;
+    if record[offset + 8] == 0 {
+        let value_length = read_u32_le(record, offset + 0x10)? as u64;
+        return Some((
+            FileMetrics {
+                logical_size: if unnamed { value_length } else { 0 },
+                allocated_size: 0,
+            },
+            unnamed,
+        ));
     }
-    None
+
+    if offset + 0x38 > record_size {
+        return None;
+    }
+    let lowest_vcn = read_u64_le(record, offset + 0x10)?;
+    let allocated_length = read_u64_le(record, offset + 0x28)?;
+    let real_size = read_u64_le(record, offset + 0x30)?;
+    let allocated_size = if let Some(cluster_size) = cluster_size {
+        let attr_len = read_u32_le(record, offset + 4)? as usize;
+        let attr_end = offset.checked_add(attr_len)?;
+        let mapping_offset = read_u16_le(record, offset + 0x20)? as usize;
+        if attr_len < 0x40 || mapping_offset < 0x40 || mapping_offset >= attr_len {
+            return None;
+        }
+        let run_start = offset.checked_add(mapping_offset)?;
+        if attr_end > record_size || run_start >= attr_end {
+            return None;
+        }
+        parse_data_runs_bytes(&record[run_start..attr_end])
+            .into_iter()
+            .fold(0u64, |total, (_, clusters)| {
+                total.saturating_add(clusters.saturating_mul(cluster_size))
+            })
+    } else if lowest_vcn == 0 {
+        // Logical-size-only callers do not have volume geometry. Allocation
+        // is not consumed on those paths, so retain the scalar as a fallback.
+        allocated_length
+    } else {
+        0
+    };
+
+    Some((
+        FileMetrics {
+            logical_size: if unnamed && lowest_vcn == 0 {
+                real_size
+            } else {
+                0
+            },
+            allocated_size,
+        },
+        unnamed,
+    ))
+}
+
+/// Extract the logical size of the unnamed $DATA stream.
+fn extract_data_size_at(record: &[u8], offset: usize, record_size: usize) -> Option<u64> {
+    if record.get(offset + 8).copied()? != 0 && read_u64_le(record, offset + 0x10)? != 0 {
+        return None;
+    }
+    let (metrics, unnamed) = extract_data_metrics_at(record, offset, record_size, None)?;
+    unnamed.then_some(metrics.logical_size)
 }
 
 /// Result of parsing an MFT record for the $DATA size.
@@ -653,10 +693,9 @@ fn stat_file_size_fallback(
     }
 }
 
-/// Open a file directly by its FRN (File Reference Number) and query its size.
-/// Uses `OpenFileById` from kernel32 — no path resolution needed. This is
-/// the last-resort fallback for files whose parent chain can't be resolved.
-fn size_by_file_id(volume: HANDLE, frn: u64) -> Option<u64> {
+/// Open a file directly by FRN and query every data stream. `FileStreamInfo`
+/// reports allocation after NTFS compression/sparse handling and includes ADS.
+fn metrics_by_file_id(volume: HANDLE, frn: u64) -> Option<FileMetrics> {
     // FILE_ID_DESCRIPTOR layout for FileIdType (8-byte NTFS FRN):
     //   Offset 0:  dwSize (u32) = 24
     //   Offset 4:  Type   (u32) = 0 (FileIdType)
@@ -681,6 +720,12 @@ fn size_by_file_id(volume: HANDLE, frn: u64) -> Option<u64> {
         ) -> *mut std::ffi::c_void;
 
         fn GetFileSizeEx(h_file: *mut std::ffi::c_void, lp_file_size: *mut i64) -> i32;
+        fn GetFileInformationByHandleEx(
+            h_file: *mut std::ffi::c_void,
+            file_information_class: i32,
+            file_information: *mut std::ffi::c_void,
+            buffer_size: u32,
+        ) -> i32;
     }
 
     let desc = FileIdDescriptor {
@@ -711,14 +756,84 @@ fn size_by_file_id(volume: HANDLE, frn: u64) -> Option<u64> {
     }
 
     let handle = HandleGuard::new(HANDLE(raw_handle))?;
-    let mut size: i64 = 0;
-    let ok = unsafe { GetFileSizeEx(handle.as_raw().0, &mut size) };
-
-    if ok != 0 && size >= 0 {
-        Some(size as u64)
-    } else {
-        None
+    let mut fallback_logical: i64 = 0;
+    if unsafe { GetFileSizeEx(handle.as_raw().0, &mut fallback_logical) } == 0
+        || fallback_logical < 0
+    {
+        fallback_logical = 0;
     }
+
+    const FILE_STREAM_INFO_CLASS: i32 = 7;
+    const ERROR_INSUFFICIENT_BUFFER: u32 = 122;
+    const ERROR_MORE_DATA: u32 = 234;
+    const MAX_STREAM_INFO_BYTES: usize = 16 * 1024 * 1024;
+
+    let mut words = vec![0u64; 8192];
+    loop {
+        let buffer_bytes = words.len().saturating_mul(std::mem::size_of::<u64>());
+        let ok = unsafe {
+            GetFileInformationByHandleEx(
+                handle.as_raw().0,
+                FILE_STREAM_INFO_CLASS,
+                words.as_mut_ptr() as *mut std::ffi::c_void,
+                buffer_bytes as u32,
+            )
+        };
+        if ok != 0 {
+            let bytes =
+                unsafe { std::slice::from_raw_parts(words.as_ptr() as *const u8, buffer_bytes) };
+            let mut offset = 0usize;
+            let mut logical_size = fallback_logical as u64;
+            let mut allocated_size = 0u64;
+            loop {
+                if offset + 24 > bytes.len() {
+                    return None;
+                }
+                let next = read_u32_le(bytes, offset)? as usize;
+                let name_bytes = read_u32_le(bytes, offset + 4)? as usize;
+                let stream_size = read_i64_le(bytes, offset + 8)?;
+                let stream_allocated = read_i64_le(bytes, offset + 16)?;
+                let name_end = offset.checked_add(24)?.checked_add(name_bytes)?;
+                if !name_bytes.is_multiple_of(2) || name_end > bytes.len() {
+                    return None;
+                }
+                let name_utf16: Vec<u16> = bytes[offset + 24..name_end]
+                    .chunks_exact(2)
+                    .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+                    .collect();
+                let stream_name = String::from_utf16_lossy(&name_utf16);
+                if stream_name.eq_ignore_ascii_case("::$DATA") && stream_size >= 0 {
+                    logical_size = stream_size as u64;
+                }
+                if stream_allocated >= 0 {
+                    allocated_size = allocated_size.saturating_add(stream_allocated as u64);
+                }
+                if next == 0 {
+                    return Some(FileMetrics {
+                        logical_size,
+                        allocated_size,
+                    });
+                }
+                if next < 24 || offset.checked_add(next)? >= bytes.len() {
+                    return None;
+                }
+                offset += next;
+            }
+        }
+
+        let error = unsafe { GetLastError() }.0;
+        if !matches!(error, ERROR_INSUFFICIENT_BUFFER | ERROR_MORE_DATA)
+            || buffer_bytes >= MAX_STREAM_INFO_BYTES
+        {
+            return None;
+        }
+        let next_bytes = buffer_bytes.saturating_mul(2).min(MAX_STREAM_INFO_BYTES);
+        words.resize(next_bytes.div_ceil(std::mem::size_of::<u64>()), 0);
+    }
+}
+
+fn size_by_file_id(volume: HANDLE, frn: u64) -> Option<u64> {
+    metrics_by_file_id(volume, frn).map(|metrics| metrics.logical_size)
 }
 
 /// Read the size of a single file by FRN using FSCTL_GET_NTFS_FILE_RECORD.
@@ -729,6 +844,15 @@ pub fn read_single_file_size(volume: HANDLE, frn: u64, record_size: u32) -> Opti
     let mut output_buffer = vec![0u8; OUTPUT_HEADER + rs];
     let mut dir_cache = HashMap::new();
     resolve_file_size_with_fallbacks(volume, None, frn, rs, &mut output_buffer, &mut dir_cache)
+}
+
+/// Read logical and physical stream metrics for an incremental update.
+pub fn read_single_file_metrics(
+    volume: HANDLE,
+    frn: u64,
+    _record_size: u32,
+) -> Option<FileMetrics> {
+    metrics_by_file_id(volume, frn)
 }
 
 /// Public wrapper to query the MFT record size for a volume.
@@ -761,7 +885,14 @@ fn parse_data_runs_bytes(run_data: &[u8]) -> Vec<(i64, u64)> {
         let count_bytes = (header & 0x0F) as usize;
         let offset_bytes = ((header >> 4) & 0x0F) as usize;
 
-        if count_bytes == 0 || pos + count_bytes + offset_bytes > run_data.len() {
+        if count_bytes == 0
+            || count_bytes > size_of::<u64>()
+            || offset_bytes > size_of::<i64>()
+            || pos
+                .checked_add(count_bytes)
+                .and_then(|end| end.checked_add(offset_bytes))
+                .is_none_or(|end| end > run_data.len())
+        {
             break;
         }
 
@@ -783,12 +914,15 @@ fn parse_data_runs_bytes(run_data: &[u8]) -> Vec<(i64, u64)> {
             lcn_offset |= (run_data[pos + i] as i64) << (i * 8);
         }
         // Sign-extend.
-        if run_data[pos + offset_bytes - 1] & 0x80 != 0 {
+        if offset_bytes < size_of::<i64>() && run_data[pos + offset_bytes - 1] & 0x80 != 0 {
             lcn_offset |= !0i64 << (offset_bytes * 8);
         }
         pos += offset_bytes;
 
-        prev_lcn += lcn_offset;
+        let Some(lcn) = prev_lcn.checked_add(lcn_offset) else {
+            break;
+        };
+        prev_lcn = lcn;
         runs.push((prev_lcn, cluster_count));
     }
 
@@ -911,15 +1045,22 @@ fn apply_fixup(record: &mut [u8]) -> bool {
 ///
 /// For extension records (base_record_ref != 0): only looks for $DATA
 /// attributes and stores the size in `extension_sizes` for later application.
-fn parse_mft_record_bulk(
-    record: &[u8],
-    record_size: usize,
-    frn: u64,
-    index: &mut VolumeIndex,
-    extension_sizes: &mut HashMap<u64, u64>,
-    extension_parents: &mut HashMap<u64, Vec<u64>>,
-    size_recheck_candidates: &mut Vec<u64>,
-) {
+struct BulkParseState<'a> {
+    index: &'a mut VolumeIndex,
+    extension_sizes: &'a mut HashMap<u64, FileMetrics>,
+    extension_parents: &'a mut HashMap<u64, Vec<u64>>,
+    size_recheck_candidates: &'a mut Vec<u64>,
+    cluster_size: u64,
+}
+
+fn parse_mft_record_bulk(record: &[u8], record_size: usize, frn: u64, state: BulkParseState<'_>) {
+    let BulkParseState {
+        index,
+        extension_sizes,
+        extension_parents,
+        size_recheck_candidates,
+        cluster_size,
+    } = state;
     if record.len() < record_size || record_size < 0x30 {
         return;
     }
@@ -961,11 +1102,13 @@ fn parse_mft_record_bulk(
             }
             match attr_type {
                 ATTR_TYPE_DATA => {
-                    if let Some(size) = extract_data_size_at(record, offset, record_size) {
+                    if let Some((metrics, _)) =
+                        extract_data_metrics_at(record, offset, record_size, Some(cluster_size))
+                    {
                         extension_sizes
                             .entry(base_ref)
-                            .and_modify(|existing| *existing = (*existing).max(size))
-                            .or_insert(size);
+                            .and_modify(|existing| existing.merge(metrics))
+                            .or_insert(metrics);
                     }
                 }
                 ATTR_TYPE_FILE_NAME if !is_dir => {
@@ -998,6 +1141,7 @@ fn parse_mft_record_bulk(
     // ── Base record: extract name, parent, size, flags ──
     let mut best_name: Option<(String, u64, u8)> = None; // (name, parent_frn, namespace)
     let mut file_size: u64 = 0;
+    let mut allocated_size: u64 = 0;
     let mut saw_default_data_attr = false;
     let mut has_attr_list = false;
     let mut has_reparse_attr = false;
@@ -1108,9 +1252,14 @@ fn parse_mft_record_bulk(
                 has_attr_list = true;
             }
             ATTR_TYPE_DATA => {
-                if let Some(size) = extract_data_size_at(record, offset, record_size) {
-                    saw_default_data_attr = true;
-                    file_size = size;
+                if let Some((metrics, unnamed)) =
+                    extract_data_metrics_at(record, offset, record_size, Some(cluster_size))
+                {
+                    if unnamed {
+                        saw_default_data_attr = true;
+                        file_size = file_size.max(metrics.logical_size);
+                    }
+                    allocated_size = allocated_size.saturating_add(metrics.allocated_size);
                 }
             }
             _ => {}
@@ -1132,7 +1281,10 @@ fn parse_mft_record_bulk(
             parent_frn,
             is_dir,
             is_skip_reparse,
-            file_size,
+            FileMetrics {
+                logical_size: if is_dir { 0 } else { file_size },
+                allocated_size: if is_dir { 0 } else { allocated_size },
+            },
         ) {
             return; // Arena full.
         }
@@ -1220,7 +1372,7 @@ where
     result
 }
 
-/// Read only file sizes from the MFT and return `(FRN, size)` updates.
+/// Read logical and allocated file sizes from the MFT.
 ///
 /// This is used when an existing cached index is structurally complete but was
 /// loaded from an older cache without sizes. It avoids building a second full
@@ -1229,7 +1381,7 @@ pub fn read_mft_sizes_bulk<F>(
     volume: HANDLE,
     drive_letter: char,
     mut on_progress: F,
-) -> Result<Vec<(u64, u64)>, String>
+) -> Result<Vec<(u64, FileMetrics)>, String>
 where
     F: FnMut(u64, u64),
 {
@@ -1279,9 +1431,10 @@ fn parse_mft_record_size_bulk(
     record: &[u8],
     record_size: usize,
     frn: u64,
-    size_updates: &mut Vec<(u64, u64)>,
-    extension_sizes: &mut HashMap<u64, u64>,
+    size_updates: &mut Vec<(u64, FileMetrics)>,
+    extension_sizes: &mut HashMap<u64, FileMetrics>,
     size_recheck_candidates: &mut Vec<u64>,
+    cluster_size: u64,
 ) {
     if record.len() < record_size || record_size < 0x30 {
         return;
@@ -1320,11 +1473,13 @@ fn parse_mft_record_size_bulk(
                 break;
             }
             if attr_type == ATTR_TYPE_DATA {
-                if let Some(size) = extract_data_size_at(record, offset, record_size) {
+                if let Some((metrics, _)) =
+                    extract_data_metrics_at(record, offset, record_size, Some(cluster_size))
+                {
                     extension_sizes
                         .entry(base_ref)
-                        .and_modify(|existing| *existing = (*existing).max(size))
-                        .or_insert(size);
+                        .and_modify(|existing| existing.merge(metrics))
+                        .or_insert(metrics);
                 }
             }
             offset += attr_len;
@@ -1333,6 +1488,7 @@ fn parse_mft_record_size_bulk(
     }
 
     let mut file_size = 0u64;
+    let mut allocated_size = 0u64;
     let mut saw_default_data_attr = false;
     let mut has_attr_list = false;
 
@@ -1353,9 +1509,14 @@ fn parse_mft_record_size_bulk(
                 has_attr_list = true;
             }
             ATTR_TYPE_DATA => {
-                if let Some(size) = extract_data_size_at(record, offset, record_size) {
-                    saw_default_data_attr = true;
-                    file_size = size;
+                if let Some((metrics, unnamed)) =
+                    extract_data_metrics_at(record, offset, record_size, Some(cluster_size))
+                {
+                    if unnamed {
+                        saw_default_data_attr = true;
+                        file_size = file_size.max(metrics.logical_size);
+                    }
+                    allocated_size = allocated_size.saturating_add(metrics.allocated_size);
                 }
             }
             _ => {}
@@ -1364,8 +1525,14 @@ fn parse_mft_record_size_bulk(
         offset += attr_len;
     }
 
-    if file_size > 0 {
-        size_updates.push((frn, file_size));
+    if saw_default_data_attr || allocated_size > 0 {
+        size_updates.push((
+            frn,
+            FileMetrics {
+                logical_size: file_size,
+                allocated_size,
+            },
+        ));
     } else if has_attr_list || !saw_default_data_attr {
         size_recheck_candidates.push(frn);
     }
@@ -1378,15 +1545,15 @@ fn read_mft_size_data<F>(
     data_runs: &[(i64, u64)],
     total_records: u64,
     on_progress: &mut F,
-) -> Result<Vec<(u64, u64)>, String>
+) -> Result<Vec<(u64, FileMetrics)>, String>
 where
     F: FnMut(u64, u64),
 {
     let record_size = geo.bytes_per_file_record as usize;
     let cluster_size = geo.bytes_per_cluster as usize;
 
-    let mut size_updates: Vec<(u64, u64)> = Vec::with_capacity(8192);
-    let mut extension_sizes: HashMap<u64, u64> = HashMap::new();
+    let mut size_updates: Vec<(u64, FileMetrics)> = Vec::with_capacity(8192);
+    let mut extension_sizes: HashMap<u64, FileMetrics> = HashMap::new();
     let mut size_recheck_candidates: Vec<u64> = Vec::new();
 
     let chunk_records = (16 * 1024 * 1024) / record_size;
@@ -1457,6 +1624,7 @@ where
                         &mut size_updates,
                         &mut extension_sizes,
                         &mut size_recheck_candidates,
+                        cluster_size as u64,
                     );
                 }
 
@@ -1474,9 +1642,12 @@ where
     }
 
     let mut ext_applied = 0u64;
-    for (base_frn, size) in extension_sizes {
-        if size > 0 {
-            size_updates.push((base_frn, size));
+    for (base_frn, metrics) in extension_sizes {
+        if metrics.logical_size > 0 || metrics.allocated_size > 0 {
+            match size_updates.binary_search_by_key(&base_frn, |(frn, _)| *frn) {
+                Ok(pos) => size_updates[pos].1.merge(metrics),
+                Err(pos) => size_updates.insert(pos, (base_frn, metrics)),
+            }
             ext_applied += 1;
         }
     }
@@ -1489,6 +1660,15 @@ where
     if !size_recheck_candidates.is_empty() {
         let mut output_buffer = vec![0u8; OUTPUT_HEADER + record_size];
         for frn in size_recheck_candidates {
+            if let Some(metrics) = metrics_by_file_id(handle, frn) {
+                precise_file_id += 1;
+                match size_updates.binary_search_by_key(&frn, |(record_frn, _)| *record_frn) {
+                    Ok(pos) => size_updates[pos].1 = metrics,
+                    Err(pos) => size_updates.insert(pos, (frn, metrics)),
+                }
+                precise_fixed += 1;
+                continue;
+            }
             let resolved = match resolve_file_size(handle, frn, record_size, &mut output_buffer) {
                 SizeResolution::Direct(size) => {
                     precise_direct += 1;
@@ -1499,19 +1679,21 @@ where
                     Some(size)
                 }
                 SizeResolution::None => {
-                    if let Some(size) = size_by_file_id(handle, frn) {
-                        precise_file_id += 1;
-                        Some(size)
-                    } else {
-                        precise_unresolved += 1;
-                        None
-                    }
+                    precise_unresolved += 1;
+                    None
                 }
             };
 
             if let Some(size) = resolved {
                 if size > 0 {
-                    size_updates.push((frn, size));
+                    let metrics = FileMetrics {
+                        logical_size: size,
+                        allocated_size: 0,
+                    };
+                    match size_updates.binary_search_by_key(&frn, |(record_frn, _)| *record_frn) {
+                        Ok(pos) => size_updates[pos].1.logical_size = size,
+                        Err(pos) => size_updates.insert(pos, (frn, metrics)),
+                    }
                     precise_fixed += 1;
                 }
             }
@@ -1560,7 +1742,7 @@ where
         initial_record_capacity,
         initial_record_capacity.saturating_mul(VolumeIndex::DEFAULT_NAME_BYTES_PER_RECORD),
     );
-    let mut extension_sizes: HashMap<u64, u64> = HashMap::new();
+    let mut extension_sizes: HashMap<u64, FileMetrics> = HashMap::new();
     let mut extension_parents: HashMap<u64, Vec<u64>> = HashMap::new();
     let mut size_recheck_candidates: Vec<u64> = Vec::new();
 
@@ -1637,10 +1819,13 @@ where
                         record_data,
                         record_size,
                         frn,
-                        &mut index,
-                        &mut extension_sizes,
-                        &mut extension_parents,
-                        &mut size_recheck_candidates,
+                        BulkParseState {
+                            index: &mut index,
+                            extension_sizes: &mut extension_sizes,
+                            extension_parents: &mut extension_parents,
+                            size_recheck_candidates: &mut size_recheck_candidates,
+                            cluster_size: cluster_size as u64,
+                        },
                     );
                 }
 
@@ -1659,10 +1844,12 @@ where
 
     // Apply sizes from extension records to their base records.
     let mut ext_applied = 0u64;
-    for (base_frn, size) in &extension_sizes {
+    for (base_frn, metrics) in &extension_sizes {
         if let Some(rec) = index.records.get_mut(base_frn) {
-            if rec.size < *size {
-                rec.size = *size;
+            let old = (rec.size, rec.allocated_size);
+            rec.size = rec.size.max(metrics.logical_size);
+            rec.allocated_size = rec.allocated_size.saturating_add(metrics.allocated_size);
+            if old != (rec.size, rec.allocated_size) {
                 ext_applied += 1;
             }
         }
@@ -1710,6 +1897,16 @@ where
                 continue;
             }
 
+            if let Some(metrics) = metrics_by_file_id(handle, frn) {
+                if let Some(rec) = index.records.get_mut(&frn) {
+                    rec.size = metrics.logical_size;
+                    rec.allocated_size = metrics.allocated_size;
+                    precise_file_id += 1;
+                    precise_fixed += 1;
+                }
+                continue;
+            }
+
             let resolved = match resolve_file_size(handle, frn, record_size, &mut output_buffer) {
                 SizeResolution::Direct(size) => {
                     precise_direct += 1;
@@ -1722,9 +1919,6 @@ where
                 SizeResolution::None => {
                     if let Some(size) = stat_file_size_fallback(&index, frn, &mut dir_cache) {
                         precise_metadata += 1;
-                        Some(size)
-                    } else if let Some(size) = size_by_file_id(handle, frn) {
-                        precise_file_id += 1;
                         Some(size)
                     } else {
                         precise_unresolved += 1;
@@ -1771,4 +1965,118 @@ where
     );
 
     Ok(index)
+}
+
+#[cfg(test)]
+mod metric_tests {
+    use super::*;
+
+    fn non_resident_data(
+        logical: u64,
+        scalar_allocated: u64,
+        flags: u16,
+        named: bool,
+        lowest_vcn: u64,
+        runlist: &[u8],
+    ) -> Vec<u8> {
+        let mut attr = vec![0u8; 0x48 + runlist.len()];
+        let attr_len = attr.len() as u32;
+        attr[0..4].copy_from_slice(&ATTR_TYPE_DATA.to_le_bytes());
+        attr[4..8].copy_from_slice(&attr_len.to_le_bytes());
+        attr[8] = 1;
+        attr[9] = u8::from(named);
+        attr[0x0C..0x0E].copy_from_slice(&flags.to_le_bytes());
+        attr[0x10..0x18].copy_from_slice(&lowest_vcn.to_le_bytes());
+        attr[0x20..0x22].copy_from_slice(&0x48u16.to_le_bytes());
+        attr[0x28..0x30].copy_from_slice(&scalar_allocated.to_le_bytes());
+        attr[0x30..0x38].copy_from_slice(&logical.to_le_bytes());
+        attr[0x40..0x48].copy_from_slice(&scalar_allocated.to_le_bytes());
+        attr[0x48..].copy_from_slice(runlist);
+        attr
+    }
+
+    #[test]
+    fn extracts_normal_non_resident_allocation() {
+        let attr = non_resident_data(1_000, 4_096, 0, false, 0, &[0x11, 1, 1, 0]);
+        let (metrics, unnamed) =
+            extract_data_metrics_at(&attr, 0, attr.len(), Some(4_096)).unwrap();
+        assert!(unnamed);
+        assert_eq!(metrics.logical_size, 1_000);
+        assert_eq!(metrics.allocated_size, 4_096);
+    }
+
+    #[test]
+    fn extracts_sparse_physical_allocation() {
+        let attr = non_resident_data(
+            1 << 40,
+            1 << 40,
+            0x8000,
+            false,
+            0,
+            &[0x01, 100, 0x11, 2, 1, 0],
+        );
+        let (metrics, _) = extract_data_metrics_at(&attr, 0, attr.len(), Some(4_096)).unwrap();
+        assert_eq!(metrics.logical_size, 1 << 40);
+        assert_eq!(metrics.allocated_size, 8_192);
+    }
+
+    #[test]
+    fn data_runs_accept_eight_byte_negative_lcn_offset() {
+        let runs = parse_data_runs_bytes(&[
+            0x11, 1, 2, 0x81, 1, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0,
+        ]);
+        assert_eq!(runs, vec![(2, 1), (1, 1)]);
+    }
+
+    #[test]
+    fn data_runs_reject_integer_widths_above_eight_bytes() {
+        assert!(parse_data_runs_bytes(&[0x19, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]).is_empty());
+        assert!(parse_data_runs_bytes(&[0x91, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]).is_empty());
+    }
+
+    #[test]
+    fn badclus_style_sparse_stream_does_not_claim_the_volume() {
+        let attr = non_resident_data(
+            8 * 1024_u64.pow(4),
+            8 * 1024_u64.pow(4),
+            0x8000,
+            false,
+            0,
+            &[0x02, 0xff, 0xff, 0],
+        );
+        let (metrics, _) = extract_data_metrics_at(&attr, 0, attr.len(), Some(4_096)).unwrap();
+        assert_eq!(metrics.allocated_size, 0);
+    }
+
+    #[test]
+    fn ads_contributes_allocation_but_not_logical_size() {
+        let attr = non_resident_data(10_000, 12_288, 0, true, 0, &[0x11, 3, 1, 0]);
+        let (metrics, unnamed) =
+            extract_data_metrics_at(&attr, 0, attr.len(), Some(4_096)).unwrap();
+        assert!(!unnamed);
+        assert_eq!(metrics.logical_size, 0);
+        assert_eq!(metrics.allocated_size, 12_288);
+    }
+
+    #[test]
+    fn continuation_extent_contributes_runs_but_not_logical_size() {
+        let attr = non_resident_data(10_000, 12_288, 0, false, 1, &[0x11, 3, 1, 0]);
+        let (metrics, _) = extract_data_metrics_at(&attr, 0, attr.len(), Some(4_096)).unwrap();
+        assert_eq!(metrics.logical_size, 0);
+        assert_eq!(metrics.allocated_size, 12_288);
+    }
+
+    #[test]
+    fn resident_data_has_no_separate_cluster_allocation() {
+        let mut attr = vec![0u8; 0x20];
+        let attr_len = attr.len() as u32;
+        attr[0..4].copy_from_slice(&ATTR_TYPE_DATA.to_le_bytes());
+        attr[4..8].copy_from_slice(&attr_len.to_le_bytes());
+        attr[0x10..0x14].copy_from_slice(&42u32.to_le_bytes());
+        let (metrics, unnamed) =
+            extract_data_metrics_at(&attr, 0, attr.len(), Some(4_096)).unwrap();
+        assert!(unnamed);
+        assert_eq!(metrics.logical_size, 42);
+        assert_eq!(metrics.allocated_size, 0);
+    }
 }

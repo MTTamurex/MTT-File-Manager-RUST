@@ -27,7 +27,10 @@ fn send_to_main_window(path: &str) -> bool {
     use windows::core::PCWSTR;
     use windows::Win32::Foundation::{LPARAM, WPARAM};
     use windows::Win32::System::DataExchange::COPYDATASTRUCT;
-    use windows::Win32::UI::WindowsAndMessaging::{FindWindowW, IsWindow, SendMessageW, WM_COPYDATA};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        FindWindowW, IsWindow, SendMessageTimeoutW, SMTO_ABORTIFHUNG, SMTO_BLOCK, SMTO_ERRORONEXIT,
+        WM_COPYDATA,
+    };
 
     let bytes = path.as_bytes();
     if bytes.is_empty() || bytes.len() > MAX_REQUEST_BYTES {
@@ -51,16 +54,17 @@ fn send_to_main_window(path: &str) -> bool {
             cbData: bytes.len() as u32,
             lpData: bytes.as_ptr() as *mut std::ffi::c_void,
         };
-        // The subclass handler only copies the payload into a queue, so this
-        // synchronous send returns promptly even under load.
-        let delivered = SendMessageW(
+        let mut receiver_result = 0usize;
+        let send_result = SendMessageTimeoutW(
             hwnd,
             WM_COPYDATA,
-            Some(WPARAM(0)),
-            Some(LPARAM(&mut copy_data as *mut COPYDATASTRUCT as isize)),
-        )
-        .0
-            == 1;
+            WPARAM(0),
+            LPARAM(&mut copy_data as *mut COPYDATASTRUCT as isize),
+            SMTO_ABORTIFHUNG | SMTO_BLOCK | SMTO_ERRORONEXIT,
+            1_000,
+            Some(&mut receiver_result),
+        );
+        let delivered = send_result.0 != 0 && receiver_result == 1;
         if delivered {
             // Bring the main window to the front from HERE: this process is
             // the foreground one (the user just clicked it), which is the

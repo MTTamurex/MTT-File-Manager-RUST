@@ -8,7 +8,7 @@
 //! so it gets an independent taskbar button and minimize/restore lifecycle.
 
 mod sidebar;
-mod treemap;
+pub(crate) mod treemap;
 
 use crate::app::disk_analysis_model::FileCategory;
 use crate::app::disk_analysis_state::{DiskAnalysisPhase, DiskAnalysisState};
@@ -230,7 +230,7 @@ fn render_footer(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
                 };
                 // File-type legend (moved here from the sidebar).
                 let dark = ui.visuals().dark_mode;
-                let total = model.total_size.max(1);
+                let total = model.total_allocated_size.max(1);
                 for category in FileCategory::ALL {
                     let bytes = model.category_totals[category.index()];
                     if bytes == 0 {
@@ -332,7 +332,7 @@ fn render_treemap(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
     }
     let (rect, resp) = ui.allocate_exact_size(avail.size(), egui::Sense::click());
     let area = rect.shrink(4.0);
-    let placed = treemap::layout(&model, current, area);
+    let placed = state.treemap_cache.get(&model, current, area);
 
     let dark = ui.visuals().dark_mode;
     let panel = ui.visuals().panel_fill;
@@ -340,7 +340,7 @@ fn render_treemap(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
     let weak_color = ui.visuals().weak_text_color();
     let painter = ui.painter().with_clip_rect(rect);
 
-    for p in &placed {
+    for p in placed.iter() {
         let node = &model.nodes[p.idx as usize];
         let base = category_color(node.category, dark);
         if p.is_dir {
@@ -353,7 +353,13 @@ fn render_treemap(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
                     egui::vec2(p.rect.width(), treemap::HEADER_HEIGHT),
                 );
                 painter.rect_filled(header, 0.0, mix(panel, base, 0.34));
-                draw_header_texts(&painter, header, &node.name, node.subtree_size, text_color);
+                draw_header_texts(
+                    &painter,
+                    header,
+                    &node.name,
+                    node.subtree_allocated_size,
+                    text_color,
+                );
             }
             painter.rect_stroke(
                 p.rect.shrink(0.5),
@@ -416,24 +422,30 @@ fn render_treemap(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
 
     // Right-click a tile: remember the target for the context menu below.
     if resp.secondary_clicked() {
-        if let Some(pos) = resp.interact_pointer_pos() {
-            if let Some(p) = treemap::hit_test(&placed, pos) {
-                state.context_menu = Some(p.idx);
-            }
-        }
+        state.context_menu = resp
+            .interact_pointer_pos()
+            .and_then(|pos| treemap::hit_test(&placed, pos))
+            .map(|p| p.idx);
     }
 
     // Tooltip for the hovered node (hidden while the context menu is open).
     if state.context_menu.is_none() {
         if let (Some(h), Some(pos)) = (hovered, pointer) {
             let node = &model.nodes[h as usize];
-            let own = if node.is_dir {
+            let logical = if node.is_dir {
                 node.subtree_size
             } else {
                 node.size
             };
-            let parent_size = model.nodes[node.parent as usize].subtree_size.max(1);
-            let percent = (own as f64 / parent_size as f64) * 100.0;
+            let allocated = if node.is_dir {
+                node.subtree_allocated_size
+            } else {
+                node.allocated_size
+            };
+            let parent_size = model.nodes[node.parent as usize]
+                .subtree_allocated_size
+                .max(1);
+            let percent = (allocated as f64 / parent_size as f64) * 100.0;
             // Clamp so the tooltip stays inside the window and gets a usable width.
             let screen = ui.ctx().viewport_rect();
             let tooltip_pos = egui::pos2(
@@ -455,7 +467,14 @@ fn render_treemap(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
                             egui::Label::new(egui::RichText::new(model.path_of(h)).strong())
                                 .wrap_mode(egui::TextWrapMode::Truncate),
                         );
-                        ui.label(format!("{} · {:.1}%", format_size(own), percent));
+                        ui.label(format!(
+                            "{}: {} · {}: {} · {:.1}%",
+                            t!("disk_analysis.logical_size"),
+                            format_size(logical),
+                            t!("disk_analysis.allocated_size"),
+                            format_size(allocated),
+                            percent
+                        ));
                         if node.is_dir {
                             ui.label(
                                 egui::RichText::new(t!("disk_analysis.drill_hint").to_string())

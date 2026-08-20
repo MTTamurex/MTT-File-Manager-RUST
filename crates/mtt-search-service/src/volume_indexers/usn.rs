@@ -127,6 +127,9 @@ fn flush_binary_snapshot_if_dirty(handle: &VolumeIndexHandle, drive_letter: char
         if !vol.sizes_loaded {
             return false;
         }
+        if vol.has_pending_size_refreshes() {
+            return false;
+        }
 
         match crate::index_db::binary::save_and_remap(&mut vol) {
             Ok(()) => {
@@ -694,15 +697,15 @@ pub(crate) fn index_volume(
                     {
                         let mut changed = false;
                         vol.records.prepare_bulk_mutation(size_updates.len());
-                        for (frn, size) in &size_updates {
-                            if *size > 0 {
-                                if let Some(rec) = vol.records.get_mut(frn) {
-                                    let new_size = rec.size.max(*size);
-                                    if rec.size != new_size {
-                                        rec.size = new_size;
-                                        applied += 1;
-                                        changed = true;
-                                    }
+                        for (frn, metrics) in &size_updates {
+                            if let Some(rec) = vol.records.get_mut(frn) {
+                                let new_size = rec.size.max(metrics.logical_size);
+                                let new_allocated = rec.allocated_size.max(metrics.allocated_size);
+                                if (rec.size, rec.allocated_size) != (new_size, new_allocated) {
+                                    rec.size = new_size;
+                                    rec.allocated_size = new_allocated;
+                                    applied += 1;
+                                    changed = true;
                                 }
                             }
                         }
@@ -722,15 +725,18 @@ pub(crate) fn index_volume(
                             {
                                 let mut changed = false;
                                 vol.records.prepare_bulk_mutation(size_updates.len());
-                                for (frn, size) in &size_updates {
-                                    if *size > 0 {
-                                        if let Some(rec) = vol.records.get_mut(frn) {
-                                            let new_size = rec.size.max(*size);
-                                            if rec.size != new_size {
-                                                rec.size = new_size;
-                                                applied += 1;
-                                                changed = true;
-                                            }
+                                for (frn, metrics) in &size_updates {
+                                    if let Some(rec) = vol.records.get_mut(frn) {
+                                        let new_size = rec.size.max(metrics.logical_size);
+                                        let new_allocated =
+                                            rec.allocated_size.max(metrics.allocated_size);
+                                        if (rec.size, rec.allocated_size)
+                                            != (new_size, new_allocated)
+                                        {
+                                            rec.size = new_size;
+                                            rec.allocated_size = new_allocated;
+                                            applied += 1;
+                                            changed = true;
                                         }
                                     }
                                 }
@@ -886,15 +892,16 @@ pub(crate) fn index_volume(
                 // Read sizes without holding any lock (I/O phase).
                 let geometry = crate::mft_reader::query_mft_geometry_pub(volume_handle);
                 if let Ok(record_size) = geometry {
-                    let mut size_updates: Vec<(u64, u64)> = Vec::with_capacity(pending_frns.len());
+                    let mut size_updates: Vec<(u64, crate::file_index::FileMetrics)> =
+                        Vec::with_capacity(pending_frns.len());
                     let mut unresolved_frns: Vec<u64> = Vec::new();
                     for &frn in &pending_frns {
-                        if let Some(size) = crate::mft_reader::read_single_file_size(
+                        if let Some(metrics) = crate::mft_reader::read_single_file_metrics(
                             volume_handle,
                             frn,
                             record_size,
                         ) {
-                            size_updates.push((frn, size));
+                            size_updates.push((frn, metrics));
                         } else {
                             unresolved_frns.push(frn);
                         }
@@ -909,10 +916,13 @@ pub(crate) fn index_volume(
                             handle.try_write_for(INCREMENTAL_WRITE_FALLBACK_TIMEOUT)
                         {
                             let mut changed = false;
-                            for (frn, size) in &size_updates {
+                            for (frn, metrics) in &size_updates {
                                 if let Some(rec) = vol.records.get_mut(frn) {
-                                    if rec.size != *size {
-                                        rec.size = *size;
+                                    if (rec.size, rec.allocated_size)
+                                        != (metrics.logical_size, metrics.allocated_size)
+                                    {
+                                        rec.size = metrics.logical_size;
+                                        rec.allocated_size = metrics.allocated_size;
                                         changed = true;
                                     }
                                 }

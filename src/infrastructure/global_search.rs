@@ -167,11 +167,8 @@ const FOLDER_SIZE_TIMEOUT_MS: u64 = 8_000;
 /// Timeout for the DiskAnalysis snapshot transfer. The service-side watchdog
 /// kills idle connections at 30 s, so this only needs to outlive a healthy
 /// large transfer.
-const DISK_ANALYSIS_TIMEOUT_MS: u64 = 45_000;
-/// Payload cap for DiskAnalysis responses (full volume snapshot).
-/// Bounded to prevent unbounded allocation; validate() additionally caps
-/// the record count.
-const DISK_ANALYSIS_MAX_PAYLOAD: usize = 512 * 1024 * 1024;
+const DISK_ANALYSIS_HEADER_TIMEOUT_MS: u64 = 90_000;
+const DISK_ANALYSIS_PAYLOAD_TIMEOUT_MS: u64 = 45_000;
 /// Default response payload cap for all other request types.
 const DEFAULT_MAX_RESPONSE_PAYLOAD: usize = 1024 * 1024;
 
@@ -243,6 +240,19 @@ pub fn folder_size(path: &std::path::Path) -> Result<(u64, u64, u64), String> {
 /// service's in-memory MFT/USN index. NTFS volumes only; the service copies
 /// its live index (no new disk I/O).
 pub fn fetch_disk_analysis(drive_letter: char) -> Result<DiskAnalysisSnapshot, String> {
+    fetch_disk_analysis_cancellable(drive_letter, || false)?
+        .ok_or_else(|| "Disk analysis cancelled".to_string())
+}
+
+/// Cancellable variant used by the standalone analyzer's latest-wins worker.
+/// Returning `Ok(None)` means a newer request superseded this transfer.
+pub fn fetch_disk_analysis_cancellable<F>(
+    drive_letter: char,
+    is_cancelled: F,
+) -> Result<Option<DiskAnalysisSnapshot>, String>
+where
+    F: Fn() -> bool,
+{
     let requested_letter = drive_letter.to_ascii_uppercase();
     let request = SearchRequest::DiskAnalysis {
         drive_letter: requested_letter,
@@ -251,16 +261,27 @@ pub fn fetch_disk_analysis(drive_letter: char) -> Result<DiskAnalysisSnapshot, S
 
     let pipe = open_pipe()?;
     let result = (|| {
+        if is_cancelled() {
+            return Ok(None);
+        }
         write_message(pipe, &request)?;
-        let response: SearchResponse =
-            read_response(pipe, DISK_ANALYSIS_TIMEOUT_MS, DISK_ANALYSIS_MAX_PAYLOAD)?;
+        let Some(response): Option<SearchResponse> = read_response_cancellable(
+            pipe,
+            DISK_ANALYSIS_HEADER_TIMEOUT_MS,
+            DISK_ANALYSIS_PAYLOAD_TIMEOUT_MS,
+            mtt_search_protocol::MAX_DISK_ANALYSIS_PAYLOAD_BYTES,
+            &is_cancelled,
+        )?
+        else {
+            return Ok(None);
+        };
         response.validate()?;
 
         match response {
             SearchResponse::DiskAnalysis(snapshot)
                 if snapshot.drive_letter.to_ascii_uppercase() == requested_letter =>
             {
-                Ok(*snapshot)
+                Ok(Some(*snapshot))
             }
             SearchResponse::DiskAnalysis(snapshot) => Err(format!(
                 "Disk analysis response letter mismatch: requested {}, received {}",
@@ -803,6 +824,38 @@ fn read_response<T: for<'de> serde::Deserialize<'de>>(
     decode_message(&payload)
 }
 
+fn read_response_cancellable<T, F>(
+    pipe: HANDLE,
+    header_timeout_ms: u64,
+    payload_timeout_ms: u64,
+    max_payload_bytes: usize,
+    is_cancelled: &F,
+) -> Result<Option<T>, String>
+where
+    T: for<'de> serde::Deserialize<'de>,
+    F: Fn() -> bool,
+{
+    let mut len_buf = [0u8; 4];
+    if !read_exact_cancellable(pipe, &mut len_buf, header_timeout_ms, is_cancelled)? {
+        return Ok(None);
+    }
+    let payload_len = u32::from_le_bytes(len_buf) as usize;
+    if payload_len == 0 || payload_len > max_payload_bytes {
+        return Err(format!(
+            "Invalid payload length: {} (max {})",
+            payload_len, max_payload_bytes
+        ));
+    }
+    if is_cancelled() {
+        return Ok(None);
+    }
+    let mut payload = vec![0u8; payload_len];
+    if !read_exact_cancellable(pipe, &mut payload, payload_timeout_ms, is_cancelled)? {
+        return Ok(None);
+    }
+    decode_message(&payload).map(Some)
+}
+
 /// Reads and validates a [`SearchResponse`] from the pipe. Returns an error if
 /// the response fails post-deserialization validation (e.g. too many items).
 fn read_validated_response(pipe: HANDLE, timeout_ms: u64) -> Result<SearchResponse, String> {
@@ -855,4 +908,53 @@ fn read_exact_with_timeout(pipe: HANDLE, buf: &mut [u8], timeout_ms: u64) -> Res
     }
 
     Ok(())
+}
+
+fn read_exact_cancellable<F>(
+    pipe: HANDLE,
+    buf: &mut [u8],
+    timeout_ms: u64,
+    is_cancelled: &F,
+) -> Result<bool, String>
+where
+    F: Fn() -> bool,
+{
+    let start = std::time::Instant::now();
+    let mut offset = 0usize;
+    while offset < buf.len() {
+        if is_cancelled() {
+            return Ok(false);
+        }
+        if start.elapsed() > std::time::Duration::from_millis(timeout_ms) {
+            return Err(format!(
+                "Search service timeout waiting response ({}ms)",
+                timeout_ms
+            ));
+        }
+        let mut total_avail = 0u32;
+        unsafe {
+            PeekNamedPipe(pipe, None, 0, None, Some(&mut total_avail), None)
+                .map_err(|e| format!("PeekNamedPipe failed: {}", e))?;
+        }
+        if total_avail == 0 {
+            std::thread::sleep(std::time::Duration::from_millis(PIPE_POLL_INTERVAL_MS));
+            continue;
+        }
+        let to_read = (buf.len() - offset).min(total_avail as usize);
+        let mut bytes_read = 0u32;
+        unsafe {
+            ReadFile(
+                pipe,
+                Some(&mut buf[offset..offset + to_read]),
+                Some(&mut bytes_read),
+                None,
+            )
+            .map_err(|e| format!("ReadFile failed: {}", e))?;
+        }
+        if bytes_read == 0 {
+            return Err("Pipe closed during read".into());
+        }
+        offset += bytes_read as usize;
+    }
+    Ok(true)
 }

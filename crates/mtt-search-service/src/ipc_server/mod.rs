@@ -37,6 +37,11 @@ const MAX_QUERY_OFFSET: usize = 5_000_000;
 /// Per-connection I/O timeout in seconds (prevents slowloris DoS).
 const IO_TIMEOUT_SECS: u64 = 30;
 
+pub(super) enum WatchdogEvent {
+    Extend(Duration),
+    Done,
+}
+
 /// Start the IPC server loop.
 pub fn run_ipc_server(
     indices: SharedVolumeIndices,
@@ -177,11 +182,11 @@ pub fn run_ipc_server(
 
             // The watchdog may disconnect a slow client to unblock its handler,
             // but the handler remains the sole owner responsible for CloseHandle.
-            let (handler_done_tx, handler_done_rx) = mpsc::channel();
+            let (watchdog_tx, watchdog_rx) = mpsc::channel();
             let watchdog_pipe = pipe_raw;
             let watchdog = std::thread::spawn(move || {
                 let timed_out =
-                    watchdog_timed_out(&handler_done_rx, Duration::from_secs(IO_TIMEOUT_SECS));
+                    watchdog_timed_out(&watchdog_rx, Duration::from_secs(IO_TIMEOUT_SECS));
                 if timed_out {
                     eprintln!(
                         "[IPC] Client timeout after {}s, disconnecting",
@@ -203,11 +208,12 @@ pub fn run_ipc_server(
                     &warming_for_client,
                     &warm_epoch_for_client,
                     &policy_for_client,
+                    &watchdog_tx,
                 )
             })) {
                 eprintln!("[IPC] Client handler panic: {:?}", e);
             }
-            let _ = handler_done_tx.send(());
+            let _ = watchdog_tx.send(WatchdogEvent::Done);
             let watchdog_disconnected = watchdog.join().unwrap_or(false);
             unsafe {
                 if !watchdog_disconnected {
@@ -240,8 +246,19 @@ pub fn run_ipc_server(
     }
 }
 
-fn watchdog_timed_out(done: &Receiver<()>, timeout: Duration) -> bool {
-    matches!(done.recv_timeout(timeout), Err(RecvTimeoutError::Timeout))
+fn watchdog_timed_out(events: &Receiver<WatchdogEvent>, timeout: Duration) -> bool {
+    let started = std::time::Instant::now();
+    let mut deadline = started + timeout;
+    loop {
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        match events.recv_timeout(remaining) {
+            Ok(WatchdogEvent::Done) | Err(RecvTimeoutError::Disconnected) => return false,
+            Ok(WatchdogEvent::Extend(total)) => {
+                deadline = deadline.max(started + total);
+            }
+            Err(RecvTimeoutError::Timeout) => return true,
+        }
+    }
 }
 
 fn pipe_client_process_id(pipe: HANDLE) -> Result<u32, String> {
@@ -347,14 +364,14 @@ fn wait_for_client(pipe: HANDLE, shutdown: &Arc<AtomicBool>) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::watchdog_timed_out;
+    use super::{watchdog_timed_out, WatchdogEvent};
     use std::sync::mpsc;
     use std::time::Duration;
 
     #[test]
     fn watchdog_stops_when_handler_finishes() {
         let (done_tx, done_rx) = mpsc::channel();
-        done_tx.send(()).unwrap();
+        done_tx.send(WatchdogEvent::Done).unwrap();
 
         assert!(!watchdog_timed_out(&done_rx, Duration::from_millis(50)));
     }
@@ -364,5 +381,18 @@ mod tests {
         let (_done_tx, done_rx) = mpsc::channel();
 
         assert!(watchdog_timed_out(&done_rx, Duration::from_millis(5)));
+    }
+
+    #[test]
+    fn watchdog_honors_operation_specific_extension() {
+        let (tx, rx) = mpsc::channel();
+        tx.send(WatchdogEvent::Extend(Duration::from_millis(100)))
+            .unwrap();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(20));
+            let _ = tx.send(WatchdogEvent::Done);
+        });
+
+        assert!(!watchdog_timed_out(&rx, Duration::from_millis(5)));
     }
 }

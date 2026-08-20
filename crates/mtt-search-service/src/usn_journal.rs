@@ -40,11 +40,26 @@ const USN_REASON_RENAME_NEW_NAME: u32 = 0x00002000;
 const USN_REASON_DATA_EXTEND: u32 = 0x00000002;
 const USN_REASON_DATA_TRUNCATION: u32 = 0x00000004;
 const USN_REASON_DATA_OVERWRITE: u32 = 0x00000001;
+const USN_REASON_NAMED_DATA_OVERWRITE: u32 = 0x00000010;
+const USN_REASON_NAMED_DATA_EXTEND: u32 = 0x00000020;
+const USN_REASON_NAMED_DATA_TRUNCATION: u32 = 0x00000040;
+const USN_REASON_BASIC_INFO_CHANGE: u32 = 0x00008000;
+const USN_REASON_COMPRESSION_CHANGE: u32 = 0x00020000;
+const USN_REASON_ENCRYPTION_CHANGE: u32 = 0x00040000;
+const USN_REASON_STREAM_CHANGE: u32 = 0x00200000;
 const USN_REASON_CLOSE: u32 = 0x80000000;
 
 /// Combined mask for reasons that indicate a file's data size may have changed.
-const USN_REASON_SIZE_CHANGED: u32 =
-    USN_REASON_DATA_EXTEND | USN_REASON_DATA_TRUNCATION | USN_REASON_DATA_OVERWRITE;
+const USN_REASON_SIZE_CHANGED: u32 = USN_REASON_DATA_EXTEND
+    | USN_REASON_DATA_TRUNCATION
+    | USN_REASON_DATA_OVERWRITE
+    | USN_REASON_NAMED_DATA_OVERWRITE
+    | USN_REASON_NAMED_DATA_EXTEND
+    | USN_REASON_NAMED_DATA_TRUNCATION
+    | USN_REASON_BASIC_INFO_CHANGE
+    | USN_REASON_COMPRESSION_CHANGE
+    | USN_REASON_ENCRYPTION_CHANGE
+    | USN_REASON_STREAM_CHANGE;
 
 // File attributes
 const FILE_ATTRIBUTE_DIRECTORY: u32 = 0x10;
@@ -256,6 +271,13 @@ pub fn read_usn_buffer(
             | USN_REASON_DATA_EXTEND
             | USN_REASON_DATA_TRUNCATION
             | USN_REASON_DATA_OVERWRITE
+            | USN_REASON_NAMED_DATA_OVERWRITE
+            | USN_REASON_NAMED_DATA_EXTEND
+            | USN_REASON_NAMED_DATA_TRUNCATION
+            | USN_REASON_BASIC_INFO_CHANGE
+            | USN_REASON_COMPRESSION_CHANGE
+            | USN_REASON_ENCRYPTION_CHANGE
+            | USN_REASON_STREAM_CHANGE
             | USN_REASON_CLOSE,
         return_only_on_close: 0,
         timeout: 0,
@@ -382,29 +404,27 @@ pub fn parse_usn_records(
 
             if apply_changes {
                 // Incremental update: process reason flags
+                let is_dir = (file_attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
                 if reason & USN_REASON_FILE_DELETE != 0 {
                     index.remove_record(frn);
                 } else if reason & USN_REASON_RENAME_NEW_NAME != 0 {
                     // Rename/move: remove from old parent, add to new parent.
-                    let is_dir = (file_attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
                     let is_reparse = (file_attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
                     index.move_record(frn, &name, parent_frn, is_dir, is_reparse);
                 } else {
                     // Create or update (preserves hardlink children entries).
-                    let is_dir = (file_attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
                     let is_reparse = (file_attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
                     index.insert_record(frn, &name, parent_frn, is_dir, is_reparse);
+                }
 
-                    // Track files whose data size may have changed for
-                    // incremental MFT size refresh. Include FILE_CREATE so
-                    // that newly-created files (which have no DATA_EXTEND
-                    // event yet) also have their sizes fetched from MFT,
-                    // preventing them from staying at size=0 indefinitely
-                    // when they are copied or moved onto the volume.
-                    if !is_dir && (reason & (USN_REASON_SIZE_CHANGED | USN_REASON_FILE_CREATE) != 0)
-                    {
-                        index.pending_size_refresh.insert(frn);
-                    }
+                // Refresh both logical and allocated sizes. This is outside
+                // the rename branch because USN can combine rename and stream
+                // changes in one record.
+                if reason & USN_REASON_FILE_DELETE == 0
+                    && !is_dir
+                    && reason & (USN_REASON_SIZE_CHANGED | USN_REASON_FILE_CREATE) != 0
+                {
+                    index.pending_size_refresh.insert(frn);
                 }
                 // Track that the parent directory's contents changed.
                 // This enables CheckPathsModified to detect external changes

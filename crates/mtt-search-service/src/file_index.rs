@@ -6,15 +6,31 @@ use crate::name_arena::{NameArena, NameRef};
 use crate::path_resolver;
 use crate::record_store::RecordStore;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct FileMetrics {
+    /// Logical length of the unnamed data stream.
+    pub logical_size: u64,
+    /// Physical allocation of all named and unnamed data streams.
+    pub allocated_size: u64,
+}
+
+impl FileMetrics {
+    pub(crate) fn merge(&mut self, other: Self) {
+        self.logical_size = self.logical_size.max(other.logical_size);
+        self.allocated_size = self.allocated_size.saturating_add(other.allocated_size);
+    }
+}
+
 /// Compact file record stored in the in-memory index.
 ///
-/// Layout: exactly 24 bytes.
+/// Layout: exactly 32 bytes.
 ///   parent_ref  : u64  — 8 bytes (offset 0)
-///   size        : u64  — 8 bytes (offset 8)  — file size in bytes (0 for dirs, populated by MFT reader)
-///   name_offset : u32  — 4 bytes (offset 16) — byte offset into NameArena
-///   name_len    : u16  — 2 bytes (offset 20) — UTF-8 byte count
-///   is_dir      : bool — 1 byte  (offset 22)
-///   _pad        : u8   — 1 byte  (offset 23)
+///   size        : u64  — 8 bytes (offset 8)  — logical size of the unnamed data stream
+///   allocated   : u64  — 8 bytes (offset 16) — physical allocation of all data streams
+///   name_offset : u32  — 4 bytes (offset 24) — byte offset into NameArena
+///   name_len    : u16  — 2 bytes (offset 28) — UTF-8 byte count
+///   is_dir      : bool — 1 byte  (offset 30)
+///   _pad        : u8   — 1 byte  (offset 31)
 ///
 /// Fields are inlined rather than wrapped in NameRef to avoid internal
 /// struct padding that would inflate the record further.
@@ -25,6 +41,8 @@ pub struct FileRecord {
     pub parent_ref: u64,
     /// File size in bytes. 0 for directories. Populated by MFT size reader.
     pub size: u64,
+    /// Clusters physically allocated to all file data streams. 0 for directories.
+    pub allocated_size: u64,
     /// Byte offset of the file name in VolumeIndex's NameArena.
     pub name_offset: u32,
     /// UTF-8 byte length of the file name.
@@ -35,8 +53,8 @@ pub struct FileRecord {
     pub _pad: u8,
 }
 
-// Compile-time assertion: FileRecord MUST be exactly 24 bytes.
-const _: () = assert!(std::mem::size_of::<FileRecord>() == 24);
+// Compile-time assertion: FileRecord MUST be exactly 32 bytes.
+const _: () = assert!(std::mem::size_of::<FileRecord>() == 32);
 
 impl FileRecord {
     /// Construct a [`NameRef`] for use with [`NameArena::get`].
@@ -293,15 +311,20 @@ impl VolumeIndex {
         };
 
         // Determine what to do with the children map based on existing record.
-        let old = self.records.get(&frn).map(|r| (r.parent_ref, r.size));
+        let old = self
+            .records
+            .get(&frn)
+            .map(|r| (r.parent_ref, r.size, r.allocated_size));
 
-        let preserved_size = old.map_or(0, |(_, s)| s);
+        let preserved_size = old.map_or(0, |(_, size, _)| size);
+        let preserved_allocated_size = old.map_or(0, |(_, _, allocated)| allocated);
 
         self.records.insert(
             frn,
             FileRecord {
                 parent_ref,
                 size: preserved_size,
+                allocated_size: preserved_allocated_size,
                 name_offset: nr.offset,
                 name_len: nr.len,
                 is_dir: u8::from(is_dir),
@@ -311,11 +334,11 @@ impl VolumeIndex {
         self.set_reparse_state(frn, is_reparse);
 
         match old {
-            Some((old_parent, _)) if old_parent == parent_ref => {
+            Some((old_parent, _, _)) if old_parent == parent_ref => {
                 // Same parent re-insert (e.g. long name + 8.3 short name).
                 // FRN is already in this parent's children — skip to avoid duplicates.
             }
-            Some((old_parent, _)) => {
+            Some((old_parent, _, _)) => {
                 // Different parent — this is a hardlink.  Save the OLD parent
                 // as an extra so `rebuild_children` can restore both entries.
                 let extras = self.hardlink_parents.entry(frn).or_default();
@@ -380,7 +403,7 @@ impl VolumeIndex {
         parent_ref: u64,
         is_dir: bool,
         is_reparse: bool,
-        size: u64,
+        metrics: FileMetrics,
     ) -> bool {
         let nr = match self.names.insert(name) {
             Some(nr) => nr,
@@ -389,7 +412,8 @@ impl VolumeIndex {
 
         let record = FileRecord {
             parent_ref,
-            size,
+            size: metrics.logical_size,
+            allocated_size: metrics.allocated_size,
             name_offset: nr.offset,
             name_len: nr.len,
             is_dir: u8::from(is_dir),
@@ -403,17 +427,23 @@ impl VolumeIndex {
                 true
             }
             Err(record) => {
-                let old = self.records.get(&frn).map(|r| (r.parent_ref, r.size));
+                let old = self
+                    .records
+                    .get(&frn)
+                    .map(|r| (r.parent_ref, r.size, r.allocated_size));
                 let mut record = record;
                 if record.size == 0 {
-                    record.size = old.map_or(0, |(_, old_size)| old_size);
+                    record.size = old.map_or(0, |(_, old_size, _)| old_size);
+                }
+                if record.allocated_size == 0 {
+                    record.allocated_size = old.map_or(0, |(_, _, allocated)| allocated);
                 }
                 self.records.insert(frn, record);
                 self.set_reparse_state(frn, is_reparse);
 
                 match old {
-                    Some((old_parent, _)) if old_parent == parent_ref => {}
-                    Some((old_parent, _)) => {
+                    Some((old_parent, _, _)) if old_parent == parent_ref => {}
+                    Some((old_parent, _, _)) => {
                         let extras = self.hardlink_parents.entry(frn).or_default();
                         if !extras.contains(&old_parent) {
                             extras.push(old_parent);
@@ -468,7 +498,10 @@ impl VolumeIndex {
             None => return false,
         };
 
-        let preserved_size = self.records.get(&frn).map_or(0, |r| r.size);
+        let (preserved_size, preserved_allocated_size) = self
+            .records
+            .get(&frn)
+            .map_or((0, 0), |r| (r.size, r.allocated_size));
 
         // Remove from old primary parent's children (true move, not hardlink).
         if let Some(old_record) = self.records.get(&frn) {
@@ -483,6 +516,7 @@ impl VolumeIndex {
             FileRecord {
                 parent_ref: new_parent,
                 size: preserved_size,
+                allocated_size: preserved_allocated_size,
                 name_offset: nr.offset,
                 name_len: nr.len,
                 is_dir: u8::from(is_dir),
@@ -976,7 +1010,7 @@ pub fn search_page(
 
 #[cfg(test)]
 mod tests {
-    use super::{search_page, IndexState, VolumeIndex};
+    use super::{search_page, FileMetrics, IndexState, VolumeIndex};
     use crate::volume_indices::handle_from;
 
     #[test]
@@ -1105,8 +1139,25 @@ mod tests {
     fn sorted_untracked_insert_builds_compact_store_without_pending_growth() {
         let mut index = VolumeIndex::with_sorted_record_capacity('C', 2, 64);
 
-        assert!(index.insert_sorted_record_untracked(10, "folder", 5, true, false, 0));
-        assert!(index.insert_sorted_record_untracked(20, "file.bin", 10, false, false, 42));
+        assert!(index.insert_sorted_record_untracked(
+            10,
+            "folder",
+            5,
+            true,
+            false,
+            FileMetrics::default(),
+        ));
+        assert!(index.insert_sorted_record_untracked(
+            20,
+            "file.bin",
+            10,
+            false,
+            false,
+            FileMetrics {
+                logical_size: 42,
+                allocated_size: 48,
+            },
+        ));
 
         assert!(index.pending_additions.is_empty());
         assert!(index.pending_removals.is_empty());

@@ -341,6 +341,7 @@ pub(super) fn handle_client(
     is_warming: &Arc<AtomicBool>,
     last_warm_epoch_secs: &Arc<AtomicU64>,
     security_policy: &IpcSecurityPolicy,
+    watchdog: &std::sync::mpsc::Sender<super::WatchdogEvent>,
 ) {
     let request_data = match read_message(pipe) {
         Some(data) => data,
@@ -791,13 +792,12 @@ pub(super) fn handle_client(
         }
         SearchRequest::DiskAnalysis { drive_letter } => {
             let drive_letter = drive_letter.to_ascii_uppercase();
-            // Full volume listing has the same sensitivity class as search
-            // results; gate it with the same client authorization used for
-            // FolderSize, using the drive root for the ACL fallback check.
-            let root_path = format!("{}:\\", drive_letter);
-            if !require_authorized_folder_size_client(pipe, &root_path) {
+            if !require_trusted_metadata_client(pipe, "DiskAnalysis") {
                 return;
             }
+            let _ = watchdog.send(super::WatchdogEvent::Extend(
+                std::time::Duration::from_secs(140),
+            ));
             let _active_operation =
                 crate::memory_trim::begin_active_operation("disk analysis request");
 
@@ -808,6 +808,14 @@ pub(super) fn handle_client(
                         pipe,
                         &SearchResponse::Error("Volume not indexed".to_string()),
                     );
+                    return;
+                }
+            };
+
+            let _snapshot_permit = match crate::disk_analysis::try_acquire_snapshot() {
+                Ok(permit) => permit,
+                Err(error) => {
+                    let _ = send_response(pipe, &SearchResponse::Error(error));
                     return;
                 }
             };

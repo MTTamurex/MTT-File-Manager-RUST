@@ -89,8 +89,12 @@ pub struct AnalysisNode {
     pub child_len: u32,
     /// Own size in bytes (0 for directories).
     pub size: u64,
-    /// Aggregated size of the subtree. Reparse directories do not descend.
+    /// Physical allocation of all streams owned by this file.
+    pub allocated_size: u64,
+    /// Aggregated logical size of the subtree. Reparse directories do not descend.
     pub subtree_size: u64,
+    /// Aggregated physical allocation of the subtree.
+    pub subtree_allocated_size: u64,
     pub is_dir: bool,
     pub is_reparse: bool,
     /// Files: own category. Directories: dominant category by subtree bytes.
@@ -107,6 +111,7 @@ pub struct DiskAnalysisModel {
     /// Index of the synthetic volume root ("C:").
     pub root: u32,
     pub total_size: u64,
+    pub total_allocated_size: u64,
     pub total_files: u64,
     pub total_folders: u64,
     /// Maximum tree depth reached from the root.
@@ -126,6 +131,13 @@ impl DiskAnalysisModel {
 
     /// Build the tree model from a raw snapshot. O(n) passes; cycle-safe.
     pub fn build(snapshot: DiskAnalysisSnapshot) -> Self {
+        Self::build_cancellable(snapshot, || false).expect("non-cancellable build")
+    }
+
+    pub fn build_cancellable<F>(snapshot: DiskAnalysisSnapshot, is_cancelled: F) -> Option<Self>
+    where
+        F: Fn() -> bool,
+    {
         let started = Instant::now();
         let drive_letter = snapshot.drive_letter;
         let records = snapshot.records;
@@ -139,7 +151,9 @@ impl DiskAnalysisModel {
             child_start: 0,
             child_len: 0,
             size: 0,
+            allocated_size: 0,
             subtree_size: 0,
+            subtree_allocated_size: 0,
             is_dir: true,
             is_reparse: false,
             category: FileCategory::Other,
@@ -153,7 +167,10 @@ impl DiskAnalysisModel {
         let mut self_parents: Vec<bool> = Vec::with_capacity(record_count);
         let mut frn_pairs: Vec<(u64, u32)> = Vec::with_capacity(record_count);
         let mut volume_root_idx: Option<u32> = None;
-        for record in records {
+        for (record_pos, record) in records.into_iter().enumerate() {
+            if record_pos % 4096 == 0 && is_cancelled() {
+                return None;
+            }
             let idx = nodes.len() as u32;
             let self_parent = record.parent_frn == record.frn;
             if volume_root_idx.is_none() && self_parent && record.is_dir {
@@ -173,17 +190,26 @@ impl DiskAnalysisModel {
                 child_start: 0,
                 child_len: 0,
                 size: record.size,
+                allocated_size: record.allocated_size,
                 subtree_size: record.size,
+                subtree_allocated_size: record.allocated_size,
                 is_dir: record.is_dir,
                 is_reparse: record.is_reparse,
                 category,
             });
         }
 
+        if is_cancelled() {
+            return None;
+        }
+
         // FRN -> node index lookup as a sorted vector (roughly half the
         // memory of a HashMap at millions of entries). Duplicate FRNs keep
         // the highest index, matching HashMap last-write-wins.
         frn_pairs.sort_unstable();
+        if is_cancelled() {
+            return None;
+        }
         let mut frn_len = 0usize;
         for i in 0..frn_pairs.len() {
             if frn_len > 0 && frn_pairs[frn_len - 1].0 == frn_pairs[i].0 {
@@ -210,6 +236,9 @@ impl DiskAnalysisModel {
         let mut resolved_idxs: Vec<u32> = Vec::with_capacity(record_count);
         let mut child_counts: Vec<u32> = vec![0; node_count];
         for (i, &parent_frn) in parent_frns.iter().enumerate() {
+            if i % 4096 == 0 && is_cancelled() {
+                return None;
+            }
             let idx = (i + 1) as u32;
             if Some(idx) == volume_root_idx {
                 continue;
@@ -281,28 +310,37 @@ impl DiskAnalysisModel {
             start..start + node.child_len as usize
         }
         let mut stack: Vec<(u32, bool)> = vec![(root, false)];
+        let mut aggregation_steps = 0usize;
         while let Some((idx, visited)) = stack.pop() {
+            aggregation_steps += 1;
+            if aggregation_steps.is_multiple_of(4096) && is_cancelled() {
+                return None;
+            }
             let node = &nodes[idx as usize];
             if visited {
                 let descend = node.is_dir && !node.is_reparse;
                 if descend {
                     let mut totals = [0u64; 8];
                     let mut subtree = node.size;
+                    let mut subtree_allocated = node.allocated_size;
                     let mut files = 0u64;
                     let mut folders = if node.is_dir { 1 } else { 0 };
                     for &child in &child_links[child_range(node)] {
-                        subtree += nodes[child as usize].subtree_size;
+                        subtree = subtree.saturating_add(nodes[child as usize].subtree_size);
+                        subtree_allocated = subtree_allocated
+                            .saturating_add(nodes[child as usize].subtree_allocated_size);
                         files += u64::from(file_counts[child as usize]);
                         folders += u64::from(folder_counts[child as usize]);
                         let slot = cat_slot[child as usize];
                         if slot != u32::MAX {
                             let cb = &dir_cat[slot as usize];
                             for i in 0..8 {
-                                totals[i] += cb[i];
+                                totals[i] = totals[i].saturating_add(cb[i]);
                             }
                         } else {
                             let c = &nodes[child as usize];
-                            totals[c.category.index()] += c.size;
+                            totals[c.category.index()] =
+                                totals[c.category.index()].saturating_add(c.allocated_size);
                         }
                     }
                     let dominant = totals
@@ -315,17 +353,21 @@ impl DiskAnalysisModel {
                     folder_counts[idx as usize] = folders as u32;
                     let n = &mut nodes[idx as usize];
                     n.subtree_size = subtree;
+                    n.subtree_allocated_size = subtree_allocated;
                     n.category = dominant;
                     dir_cat[cat_slot[idx as usize] as usize] = totals;
                 } else if node.is_dir {
                     // Reparse dir: count itself, no descent.
                     let n = &mut nodes[idx as usize];
                     n.subtree_size = n.size;
+                    n.subtree_allocated_size = n.allocated_size;
                     file_counts[idx as usize] = 0;
                     folder_counts[idx as usize] = 1;
                 } else {
-                    category_totals[node.category.index()] += node.size;
-                    category_totals[node.category.index() + 8] += 1;
+                    category_totals[node.category.index()] =
+                        category_totals[node.category.index()].saturating_add(node.allocated_size);
+                    category_totals[node.category.index() + 8] =
+                        category_totals[node.category.index() + 8].saturating_add(1);
                 }
                 continue;
             }
@@ -348,7 +390,12 @@ impl DiskAnalysisModel {
             depths[vr as usize] = 0;
         }
         let mut stack = vec![root];
+        let mut depth_steps = 0usize;
         while let Some(idx) = stack.pop() {
+            depth_steps += 1;
+            if depth_steps.is_multiple_of(4096) && is_cancelled() {
+                return None;
+            }
             if nodes[idx as usize].is_reparse {
                 continue;
             }
@@ -364,6 +411,7 @@ impl DiskAnalysisModel {
         let deepest_path = depths.iter().copied().max().unwrap_or(0);
 
         let total_size = nodes[root as usize].subtree_size;
+        let total_allocated_size = nodes[root as usize].subtree_allocated_size;
         let total_files = u64::from(file_counts[root as usize]);
         let total_folders = u64::from(folder_counts[root as usize]).saturating_sub(1);
         drop(depths);
@@ -372,18 +420,19 @@ impl DiskAnalysisModel {
 
         nodes.shrink_to_fit();
         child_links.shrink_to_fit();
-        Self {
+        Some(Self {
             drive_letter,
             nodes,
             child_links,
             root,
             total_size,
+            total_allocated_size,
             total_files,
             total_folders,
             deepest_path,
             category_totals,
             build_elapsed: started.elapsed(),
-        }
+        })
     }
 
     /// Chain of node indices from the volume root down to `idx` (both
@@ -414,6 +463,9 @@ impl DiskAnalysisModel {
             current = self.nodes[current as usize].parent;
         }
         let mut path = format!("{}:\\", self.drive_letter.to_ascii_uppercase());
+        if parts.is_empty() {
+            return path;
+        }
         for part in parts.iter().rev() {
             path.push_str(part);
             path.push('\\');
@@ -445,6 +497,7 @@ mod tests {
             parent_frn: parent,
             name: name.to_string(),
             size,
+            allocated_size: size,
             is_dir,
             is_reparse: false,
         }
@@ -527,6 +580,17 @@ mod tests {
     }
 
     #[test]
+    fn keeps_logical_and_allocated_totals_independent() {
+        let mut sparse = rec(11, 5, "sparse.bin", 1 << 40, false);
+        sparse.allocated_size = 8_192;
+        let model = DiskAnalysisModel::build(snapshot(vec![rec(5, 5, "", 0, true), sparse]));
+
+        assert_eq!(model.total_size, 1 << 40);
+        assert_eq!(model.total_allocated_size, 8_192);
+        assert_eq!(model.category_totals[FileCategory::Other.index()], 8_192);
+    }
+
+    #[test]
     fn csr_children_preserve_record_order() {
         let model = DiskAnalysisModel::build(snapshot(vec![
             rec(5, 5, "", 0, true),
@@ -572,7 +636,7 @@ mod tests {
             .unwrap() as u32;
         assert_eq!(model.folder_path_of(dir_idx), r"C:\dir");
         assert_eq!(model.folder_path_of(file_idx), r"C:\dir");
-        assert_eq!(model.folder_path_of(root_file_idx), "C:");
-        assert_eq!(model.folder_path_of(model.root), "C:");
+        assert_eq!(model.folder_path_of(root_file_idx), r"C:\");
+        assert_eq!(model.folder_path_of(model.root), r"C:\");
     }
 }

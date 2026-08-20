@@ -824,6 +824,8 @@ disk_analysis:
   used_of: "%{used} usados de %{total}"
   drill_hint: "Clique para abrir a pasta"
   open_in_main_app: "Abrir no app principal"
+  logical_size: "Tamanho lógico"
+  allocated_size: "Alocado"
   category_video: "Vídeo"
   category_images: "Imagens"
   category_audio: "Áudio"

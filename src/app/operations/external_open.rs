@@ -33,8 +33,8 @@ pub fn process_external_open_requests(app: &mut ImageViewerApp, ctx: &egui::Cont
         return;
     }
 
-    let queued = crate::infrastructure::windows::window_subclass::take_pending_open_requests();
-    let path = match queued.into_iter().next() {
+    let queued = crate::infrastructure::windows::window_subclass::take_pending_open_request();
+    let path = match queued {
         Some(path) => Some(path),
         None => take_db_request(&app.app_state_db),
     };

@@ -18,7 +18,7 @@ pub struct RecordEntry {
 
 // Compile-time layout guarantees for the zero-copy mmap cast.
 const _: () = {
-    assert!(std::mem::size_of::<RecordEntry>() == 32);
+    assert!(std::mem::size_of::<RecordEntry>() == 40);
     assert!(std::mem::align_of::<RecordEntry>() == 8);
     assert!(std::mem::offset_of!(RecordEntry, frn) == 0);
     assert!(std::mem::offset_of!(RecordEntry, rec) == 8);
@@ -634,6 +634,7 @@ mod tests {
         FileRecord {
             parent_ref,
             size,
+            allocated_size: size,
             name_offset: 0,
             name_len: 0,
             is_dir: 0,

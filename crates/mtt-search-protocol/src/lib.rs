@@ -335,6 +335,7 @@ mod tests {
                 parent_frn: 5,
                 name: String::new(),
                 size: 0,
+                allocated_size: 0,
                 is_dir: true,
                 is_reparse: false,
             }],
@@ -351,6 +352,9 @@ mod tests {
 
     #[test]
     fn disk_analysis_validate_rejects_excess_records() {
+        assert!(validate_disk_analysis_record_count(MAX_DISK_ANALYSIS_RECORDS).is_ok());
+        assert!(validate_disk_analysis_record_count(MAX_DISK_ANALYSIS_RECORDS + 1).is_err());
+
         let snapshot = DiskAnalysisSnapshot {
             drive_letter: 'C',
             records: Vec::new(),

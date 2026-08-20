@@ -296,20 +296,21 @@ fn deferred_retry_loop(
     // re-request the thumbnail under the current generation. Without this,
     // a dropped deferred entry leaves the item stuck in the "loading" state
     // until a manual refresh.
-    let notify_dropped_entry = |path: &PathBuf, entry: &crate::workers::thumbnail::DeferredThumbnailEntry| {
-        let _ = tx.send(ThumbnailData {
-            path: path.clone(),
-            image_data: std::sync::Arc::new(Vec::new()),
-            width: 0,
-            height: 0,
-            generation: entry.req_generation,
-            request_epoch: 0,
-            priority: entry.req_priority,
-            not_found: false,
-            premultiplied: false,
-        });
-        ctx.request_repaint();
-    };
+    let notify_dropped_entry =
+        |path: &PathBuf, entry: &crate::workers::thumbnail::DeferredThumbnailEntry| {
+            let _ = tx.send(ThumbnailData {
+                path: path.clone(),
+                image_data: std::sync::Arc::new(Vec::new()),
+                width: 0,
+                height: 0,
+                generation: entry.req_generation,
+                request_epoch: 0,
+                priority: entry.req_priority,
+                not_found: false,
+                premultiplied: false,
+            });
+            ctx.request_repaint();
+        };
 
     // 4-permit semaphore: cap concurrent classify probes to avoid I/O spikes.
     let probe_sem = Arc::new(Semaphore::new(4));

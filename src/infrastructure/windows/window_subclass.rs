@@ -30,8 +30,8 @@ use windows::Win32::System::DataExchange::COPYDATASTRUCT;
 use windows::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::{
     IsIconic, MINMAXINFO, SWP_NOSIZE, WINDOWPOS, WM_CANCELMODE, WM_COPYDATA, WM_ENTERSIZEMOVE,
-    WM_EXITSIZEMOVE, WM_GETMINMAXINFO, WM_NCACTIVATE, WM_NCDESTROY, WM_NCHITTEST,
-    WM_NCLBUTTONDOWN, WM_PAINT, WM_SIZE, WM_SYSCOMMAND, WM_WINDOWPOSCHANGING,
+    WM_EXITSIZEMOVE, WM_GETMINMAXINFO, WM_NCACTIVATE, WM_NCDESTROY, WM_NCHITTEST, WM_NCLBUTTONDOWN,
+    WM_PAINT, WM_SIZE, WM_SYSCOMMAND, WM_WINDOWPOSCHANGING,
 };
 
 pub use hit_test::{
@@ -123,15 +123,16 @@ static SIDEBAR_SNAPSHOT: Mutex<SidebarSnapshot> = Mutex::new(SidebarSnapshot {
 pub const OPEN_REQUEST_MAGIC: usize = 0x4D545446;
 /// Hard cap on an accepted WM_COPYDATA payload (a path never needs more).
 const OPEN_REQUEST_MAX_BYTES: u32 = 8192;
+const OPEN_REQUEST_QUEUE_CAPACITY: usize = 64;
 
 /// Paths queued by WM_COPYDATA, drained by the UI update loop.
 static PENDING_OPEN_REQUESTS: Mutex<VecDeque<String>> = Mutex::new(VecDeque::new());
 
-/// Drain all paths queued via WM_COPYDATA (oldest first).
-pub fn take_pending_open_requests() -> Vec<String> {
+/// Take the oldest queued path without discarding later requests.
+pub fn take_pending_open_request() -> Option<String> {
     match PENDING_OPEN_REQUESTS.lock() {
-        Ok(mut queue) => queue.drain(..).collect(),
-        Err(_) => Vec::new(),
+        Ok(mut queue) => queue.pop_front(),
+        Err(_) => None,
     }
 }
 
@@ -340,8 +341,18 @@ extern "system" fn borderless_subclass_proc(
                         std::slice::from_raw_parts(data.lpData as *const u8, data.cbData as usize);
                     if let Ok(path) = std::str::from_utf8(bytes) {
                         if !path.trim().is_empty() {
-                            if let Ok(mut queue) = PENDING_OPEN_REQUESTS.lock() {
-                                queue.push_back(path.to_string());
+                            let queued = PENDING_OPEN_REQUESTS
+                                .lock()
+                                .map(|mut queue| {
+                                    if queue.len() >= OPEN_REQUEST_QUEUE_CAPACITY {
+                                        return false;
+                                    }
+                                    queue.push_back(path.to_string());
+                                    true
+                                })
+                                .unwrap_or(false);
+                            if !queued {
+                                return LRESULT(0);
                             }
                             // Restore/foreground now, while the sender's
                             // synchronous SendMessage is still in flight:

@@ -64,15 +64,13 @@ fn render_usage_pie(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
     let Some(model) = state.model.clone() else {
         return;
     };
-    let total = model.total_size.max(1);
+    let total = model.total_allocated_size.max(1);
     let dark = ui.visuals().dark_mode;
 
     let available = ui.available_width();
     let diameter = available.min(180.0);
-    let response = ui.allocate_response(
-        egui::vec2(available, diameter + 8.0),
-        egui::Sense::hover(),
-    );
+    let response =
+        ui.allocate_response(egui::vec2(available, diameter + 8.0), egui::Sense::hover());
     let rect = response.rect;
     // The scroll area's scrollbar gutter offsets the content rect, so the
     // raw center reads as shifted right; nudge left to optically center the
@@ -119,11 +117,7 @@ fn render_usage_pie(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
                     a += std::f32::consts::TAU;
                 }
                 if a < end {
-                    hovered = Some((
-                        category,
-                        bytes,
-                        (bytes as f64 / total as f64) * 100.0,
-                    ));
+                    hovered = Some((category, bytes, (bytes as f64 / total as f64) * 100.0));
                 }
             }
         }
@@ -133,7 +127,9 @@ fn render_usage_pie(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
     if let (Some((category, bytes, percent)), Some(pos)) = (hovered, pointer) {
         let screen = ui.ctx().viewport_rect();
         let tooltip_pos = egui::pos2(
-            (pos.x + 14.0).min(screen.max.x - 320.0).max(screen.min.x + 4.0),
+            (pos.x + 14.0)
+                .min(screen.max.x - 320.0)
+                .max(screen.min.x + 4.0),
             (pos.y + 12.0).min(screen.max.y - 60.0),
         );
         egui::Area::new(egui::Id::new("disk_analysis_pie_tooltip"))

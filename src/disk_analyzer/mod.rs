@@ -6,7 +6,7 @@
 
 pub mod open_in_main;
 
-use crate::app::disk_analysis_state::{AnalyzerDriveSummary, DiskAnalysisState};
+use crate::app::disk_analysis_state::DiskAnalysisState;
 use crate::viewer_runtime;
 use eframe::egui;
 
@@ -90,7 +90,7 @@ struct DiskAnalyzerApp {
 impl DiskAnalyzerApp {
     fn new(drive_letter: char, dark_mode: bool) -> Self {
         let mut state = DiskAnalysisState::new();
-        state.drives = collect_drive_summaries();
+        state.drives = crate::app::disk_analysis_state::collect_drive_summaries();
         state.request(drive_letter);
         Self {
             state,
@@ -146,25 +146,4 @@ impl eframe::App for DiskAnalyzerApp {
 
         crate::ui::disk_analysis::render_analyzer_body(&mut self.state, ui);
     }
-}
-
-/// Local drive facts for the sidebar/header (this process has no DriveState).
-fn collect_drive_summaries() -> Vec<AnalyzerDriveSummary> {
-    let (disks, _unavailable_label_roots) =
-        crate::infrastructure::windows::get_all_drives_with_label_status();
-    let mut drives = Vec::new();
-    for (path, label) in disks {
-        let Some(letter) = path.chars().next().filter(|c| c.is_ascii_alphabetic()) else {
-            continue;
-        };
-        let vol = crate::infrastructure::windows::get_volume_info(&path);
-        drives.push(AnalyzerDriveSummary {
-            letter: letter.to_ascii_uppercase(),
-            label,
-            file_system: vol.file_system,
-            total_space: vol.total_space,
-            free_space: vol.free_space,
-        });
-    }
-    drives
 }
