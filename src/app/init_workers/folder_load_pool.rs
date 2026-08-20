@@ -30,8 +30,8 @@ const FOLDER_LOAD_QUEUE_CAPACITY: usize = 32;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum FolderLoadLane {
-    Active,
-    Inactive,
+    LeftPanel,
+    RightPanel,
 }
 
 /// Everything a folder-load pipeline run needs. Sent through the mailbox;
@@ -49,6 +49,7 @@ pub(crate) struct FolderLoadJob {
     pub app_state_db: Arc<AppStateDb>,
     pub directory_cache: Arc<DirectoryCache>,
     pub directory_dirty_registry: Arc<DirectoryDirtyRegistry>,
+    pub dirty_version: Option<u64>,
     pub directory_index_opt: Option<Arc<DirectoryIndex>>,
     pub show_hidden: bool,
 }

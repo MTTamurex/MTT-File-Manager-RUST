@@ -19,6 +19,10 @@ impl ImageViewerApp {
         // synchronized with whichever panel is active.  Each panel has its
         // own generation value for routing folder-load results, but the
         // shared gen_tracker must match the active panel's generation.
+        // Folder listing cancellation is per physical panel, so the new right
+        // panel must not share the left panel's token.
+        snapshot.folder_load_generation =
+            std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(snapshot.generation));
         snapshot.rectangle_selection_state = None;
         snapshot.is_loading_folder = false;
         snapshot.pending_all_items_clear = false;
@@ -146,7 +150,12 @@ impl ImageViewerApp {
         self.context_menu.close();
         log::info!("[DualPanel] Disabling dual panel mode");
 
-        // Drop inactive panel state
+        // Cancel any listing job owned by the panel being removed.
+        if let Some(snapshot) = self.dual_panel_inactive_state.as_ref() {
+            snapshot
+                .folder_load_generation
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
         self.dual_panel_inactive_state = None;
         self.dual_panel_enabled = false;
         // The wider single-panel layout can change grid column count. Reconcile
@@ -182,13 +191,12 @@ impl ImageViewerApp {
     ///
     /// Uses zero-allocation `swap_with_app` twice (swap in, run, swap out).
     ///
-    /// **Safe for `load_folder`** since each panel has its own `generation` /
-    /// `current_generation`; results are routed in `process_streaming_and_thumbnail_events`.
+    /// **Safe for `load_folder`** since each panel has its own `generation` and
+    /// folder-load cancellation token; results are routed by generation in
+    /// `process_streaming_and_thumbnail_events`.
     ///
-    /// **Generation note**: if the closure calls `bump_folder_load_generation` (e.g. via
-    /// `load_folder_for_inactive`), that sets `current_generation` to the inactive panel's
-    /// new generation.  We restore it to the active panel's generation on exit so the
-    /// thumbnail worker keeps accepting requests from the active panel.
+    /// `current_generation` remains aligned with the active panel so shared
+    /// thumbnail workers keep accepting its requests.
     pub fn with_inactive_panel<R>(&mut self, f: impl FnOnce(&mut Self) -> R) -> Option<R> {
         if !self.dual_panel_enabled {
             return None;

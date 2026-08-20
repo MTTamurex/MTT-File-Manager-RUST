@@ -33,6 +33,7 @@ pub(super) fn try_handle_fast_paths(
     app_state_db: &Arc<AppStateDb>,
     directory_cache: &Arc<DirectoryCache>,
     directory_dirty_registry: &Arc<DirectoryDirtyRegistry>,
+    dirty_version: Option<u64>,
     directory_index_opt: &Option<Arc<DirectoryIndex>>,
     _show_hidden: bool,
 ) -> bool {
@@ -358,7 +359,7 @@ pub(super) fn try_handle_fast_paths(
                         }
 
                         directory_cache.put(base.clone(), entries.clone());
-                        directory_dirty_registry.clear_dirty(&base);
+                        directory_dirty_registry.clear_dirty_if_version(&base, dirty_version);
 
                         let mut offset = 0;
                         while offset < entries.len() {

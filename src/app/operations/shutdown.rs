@@ -97,6 +97,12 @@ impl ImageViewerApp {
 
         // Async icon worker
         self.current_generation.fetch_add(1, Ordering::Relaxed);
+        self.folder_load_generation.fetch_add(1, Ordering::Relaxed);
+        if let Some(snapshot) = self.dual_panel_inactive_state.as_ref() {
+            snapshot
+                .folder_load_generation
+                .fetch_add(1, Ordering::Relaxed);
+        }
         disconnect_crossbeam!(self.icon_req_sender, crate::app::init_workers::IconRequest);
         let (_icon_res_tx, disconnected_icon_res_rx) =
             std::sync::mpsc::channel::<crate::app::init_workers::IconResponse>();

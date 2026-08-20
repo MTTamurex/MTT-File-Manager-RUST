@@ -9,28 +9,39 @@ mod tier3_fallback;
 
 use std::path::PathBuf;
 
+fn folder_load_lane(
+    active_panel: crate::app::dual_panel::ActivePanel,
+    is_active_panel_load: bool,
+) -> crate::app::init_workers::folder_load_pool::FolderLoadLane {
+    use crate::app::dual_panel::ActivePanel;
+    use crate::app::init_workers::folder_load_pool::FolderLoadLane;
+
+    match (active_panel, is_active_panel_load) {
+        (ActivePanel::Left, true) | (ActivePanel::Right, false) => FolderLoadLane::LeftPanel,
+        (ActivePanel::Right, true) | (ActivePanel::Left, false) => FolderLoadLane::RightPanel,
+    }
+}
+
 impl ImageViewerApp {
     pub(super) fn start_folder_load_pipeline(
         &mut self,
         force_refresh: bool,
-        validate_against_current_generation: bool,
+        is_active_panel_load: bool,
     ) {
         let my_gen = self.generation;
-        let gen_clone = if validate_against_current_generation {
-            self.current_generation.clone()
+        let gen_clone = self.folder_load_generation.clone();
+        let current_path = self.navigation_state.current_path.clone();
+        let dirty_path = if current_path.len() == 2 && current_path.ends_with(':') {
+            PathBuf::from(format!("{}\\", current_path))
         } else {
-            std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(my_gen))
+            PathBuf::from(&current_path)
         };
 
         let job = crate::app::init_workers::folder_load_pool::FolderLoadJob {
-            lane: if validate_against_current_generation {
-                crate::app::init_workers::folder_load_pool::FolderLoadLane::Active
-            } else {
-                crate::app::init_workers::folder_load_pool::FolderLoadLane::Inactive
-            },
+            lane: folder_load_lane(self.dual_panel_active, is_active_panel_load),
             my_gen,
             gen_clone,
-            current_path: self.navigation_state.current_path.clone(),
+            current_path,
             force_refresh,
             file_entry_sender: self.file_entry_sender.clone(),
             folder_load_failure_sender: self.folder_load_failure_sender.clone(),
@@ -39,6 +50,7 @@ impl ImageViewerApp {
             app_state_db: self.app_state_db.clone(),
             directory_cache: self.directory_cache.clone(),
             directory_dirty_registry: self.directory_dirty_registry.clone(),
+            dirty_version: self.directory_dirty_registry.version(&dirty_path),
             directory_index_opt: self.directory_index.clone(),
             show_hidden: self.show_hidden_files,
         };
@@ -68,6 +80,7 @@ pub(crate) fn run_folder_load_pipeline(
         app_state_db,
         directory_cache,
         directory_dirty_registry,
+        dirty_version,
         directory_index_opt,
         show_hidden,
     } = job;
@@ -129,6 +142,7 @@ pub(crate) fn run_folder_load_pipeline(
         &app_state_db,
         &directory_cache,
         &directory_dirty_registry,
+        dirty_version,
         &directory_index_opt,
         show_hidden,
     ) {
@@ -154,6 +168,7 @@ pub(crate) fn run_folder_load_pipeline(
         &app_state_db,
         &directory_cache,
         &directory_dirty_registry,
+        dirty_version,
         &directory_index_opt,
         show_hidden,
     ) {
@@ -179,7 +194,35 @@ pub(crate) fn run_folder_load_pipeline(
         &app_state_db,
         &directory_cache,
         &directory_dirty_registry,
+        dirty_version,
         &directory_index_opt,
         show_hidden,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::dual_panel::ActivePanel;
+    use crate::app::init_workers::folder_load_pool::FolderLoadLane;
+
+    #[test]
+    fn folder_load_lane_follows_physical_panel_across_focus_changes() {
+        assert!(matches!(
+            folder_load_lane(ActivePanel::Left, false),
+            FolderLoadLane::RightPanel
+        ));
+        assert!(matches!(
+            folder_load_lane(ActivePanel::Right, true),
+            FolderLoadLane::RightPanel
+        ));
+        assert!(matches!(
+            folder_load_lane(ActivePanel::Right, false),
+            FolderLoadLane::LeftPanel
+        ));
+        assert!(matches!(
+            folder_load_lane(ActivePanel::Left, true),
+            FolderLoadLane::LeftPanel
+        ));
+    }
 }

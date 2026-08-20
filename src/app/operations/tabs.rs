@@ -5,8 +5,8 @@
 use crate::app::dual_panel::PanelListColumnWidths;
 use crate::app::state::ImageViewerApp;
 use crate::domain::special_paths::COMPUTER_VIEW_ID;
-use std::path::Path;
-use std::sync::atomic::Ordering as AtomicOrdering;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 use std::sync::Arc;
 
 impl ImageViewerApp {
@@ -110,6 +110,23 @@ impl ImageViewerApp {
         let source_tab_selection_len = self.tab_manager.active().multi_selection.len();
         let mut confirmed_folder_cover_removals = Vec::new();
         let mut deferred_folder_cover_revalidations = Vec::new();
+
+        if self.is_loading_folder
+            && !crate::domain::special_paths::is_virtual_path(&self.navigation_state.current_path)
+        {
+            self.directory_dirty_registry
+                .mark_dirty(Path::new(&self.navigation_state.current_path));
+        }
+        if let Some(snapshot) = self.dual_panel_inactive_state.as_ref().filter(|snapshot| {
+            snapshot.is_loading_folder
+                && !crate::domain::special_paths::is_virtual_path(&snapshot.path)
+        }) {
+            snapshot
+                .folder_load_generation
+                .fetch_add(1, AtomicOrdering::Relaxed);
+            self.directory_dirty_registry
+                .mark_dirty(Path::new(&snapshot.path));
+        }
 
         {
             let active = self.tab_manager.active_mut();
@@ -227,6 +244,13 @@ impl ImageViewerApp {
             self.schedule_folder_cover_refresh(&folder_path);
         }
 
+        // Active-panel folder jobs do not survive a tab switch because their
+        // streamed UI results are routed only to the current tab. Cancel the
+        // outgoing token and give the restored tab a fresh one so old jobs
+        // cannot become valid again after a later tab round-trip.
+        self.folder_load_generation
+            .fetch_add(1, AtomicOrdering::Relaxed);
+        self.folder_load_generation = Arc::new(AtomicUsize::new(self.generation));
         self.current_generation
             .store(self.generation, AtomicOrdering::Relaxed);
         self.visible_group_paths.clear();
@@ -287,6 +311,22 @@ impl ImageViewerApp {
             });
         if let Some(tag_id) = inactive_tag_to_reload {
             self.with_inactive_panel(|app| app.setup_tag_view(tag_id));
+        }
+
+        let inactive_folder_to_restart = self
+            .dual_panel_inactive_state
+            .as_ref()
+            .filter(|snapshot| {
+                snapshot.is_loading_folder
+                    && snapshot
+                        .folder_load_generation
+                        .load(AtomicOrdering::Relaxed)
+                        != snapshot.generation
+                    && !crate::domain::special_paths::is_virtual_path(&snapshot.path)
+            })
+            .map(|snapshot| PathBuf::from(&snapshot.path));
+        if let Some(path) = inactive_folder_to_restart {
+            self.reload_inactive_panel_if_matches(&[&path]);
         }
 
         // TAB-SWITCH STALENESS CHECK: Even when the tab has cached items,

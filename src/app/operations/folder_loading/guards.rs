@@ -18,6 +18,17 @@ fn next_generation() -> usize {
     GLOBAL_GENERATION.fetch_add(1, AtomicOrdering::Relaxed) + 1
 }
 
+fn publish_folder_load_generation(
+    generation: usize,
+    folder_load_generation: &AtomicUsize,
+    active_generation: Option<&AtomicUsize>,
+) {
+    folder_load_generation.store(generation, AtomicOrdering::Relaxed);
+    if let Some(active_generation) = active_generation {
+        active_generation.store(generation, AtomicOrdering::Relaxed);
+    }
+}
+
 impl ImageViewerApp {
     pub(super) fn should_skip_folder_load(&self, force_refresh: bool) -> bool {
         // GUARD CLAUSE: Prevent spam by checking if we're already on this path
@@ -58,11 +69,13 @@ impl ImageViewerApp {
 
     pub(in crate::app::operations) fn bump_folder_load_generation(&mut self) {
         self.generation = next_generation(); // Globally unique generation ID
-        if self.in_inactive_panel_context {
-            return;
-        }
-        self.current_generation
-            .store(self.generation, AtomicOrdering::Relaxed); // Sync with workers
+        let active_generation =
+            (!self.in_inactive_panel_context).then_some(self.current_generation.as_ref());
+        publish_folder_load_generation(
+            self.generation,
+            self.folder_load_generation.as_ref(),
+            active_generation,
+        );
     }
 
     pub(super) fn reset_folder_loading_state(&mut self, force_refresh: bool, trim_icons: bool) {
@@ -119,5 +132,34 @@ impl ImageViewerApp {
         self.folder_load_error = None;
         self.loading_started_at = Instant::now(); // Track loading start for timeout
         self.invalidate_active_items_rebuild();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn newer_load_cancels_only_the_same_physical_panel() {
+        let active_workers = AtomicUsize::new(11);
+        let left_panel = AtomicUsize::new(11);
+        let right_panel = AtomicUsize::new(22);
+
+        publish_folder_load_generation(12, &left_panel, Some(&active_workers));
+
+        assert_eq!(left_panel.load(AtomicOrdering::Relaxed), 12);
+        assert_eq!(active_workers.load(AtomicOrdering::Relaxed), 12);
+        assert_eq!(right_panel.load(AtomicOrdering::Relaxed), 22);
+    }
+
+    #[test]
+    fn inactive_panel_load_does_not_cancel_active_panel_workers() {
+        let active_workers = AtomicUsize::new(31);
+        let inactive_panel = AtomicUsize::new(30);
+
+        publish_folder_load_generation(32, &inactive_panel, None);
+
+        assert_eq!(inactive_panel.load(AtomicOrdering::Relaxed), 32);
+        assert_eq!(active_workers.load(AtomicOrdering::Relaxed), 31);
     }
 }

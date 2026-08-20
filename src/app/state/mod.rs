@@ -401,7 +401,9 @@ pub struct ImageViewerApp {
     pub last_grid_cols: usize,                // Memory for vertical navigation (keyboard)
     pub generation: usize,                    // Local counter (Main Thread)
     pub current_generation: Arc<AtomicUsize>, // Shared counter (Workers)
-    pub ui_ctx: egui::Context,                // Reference to UI context for async repaints
+    /// Per-physical-panel cancellation token for folder listing jobs.
+    pub folder_load_generation: Arc<AtomicUsize>,
+    pub ui_ctx: egui::Context, // Reference to UI context for async repaints
     // PERFORMANCE: Throttle list rebuild during streaming
     pub last_items_rebuild: Instant,
     pub pending_items_rebuild: bool,

@@ -64,6 +64,22 @@ fn folder_key_for_match(path: &Path) -> String {
         .to_string()
 }
 
+fn inactive_panel_reload_target<'a>(
+    dual_panel_enabled: bool,
+    inactive_path: &str,
+    affected_folders: &'a [&'a PathBuf],
+) -> Option<&'a PathBuf> {
+    if !dual_panel_enabled {
+        return None;
+    }
+
+    let inactive_norm = folder_key_for_match(Path::new(inactive_path));
+    affected_folders
+        .iter()
+        .copied()
+        .find(|folder| folder_key_for_match(folder) == inactive_norm)
+}
+
 fn path_is_same_or_descendant(candidate: &Path, root: &Path) -> bool {
     let candidate_clean = ImageViewerApp::clean_path(candidate);
     let root_clean = ImageViewerApp::clean_path(root);
@@ -200,19 +216,19 @@ impl ImageViewerApp {
     /// Reload the inactive dual panel if its folder matches any of the given paths.
     /// Used when file operations or external watcher events may have affected
     /// the inactive panel's folder contents.
-    pub(super) fn reload_inactive_panel_if_matches(&mut self, folders: &[&PathBuf]) {
-        if !self.dual_panel_enabled {
+    pub(in crate::app::operations) fn reload_inactive_panel_if_matches(
+        &mut self,
+        folders: &[&PathBuf],
+    ) {
+        let Some(inactive_path) = self
+            .dual_panel_inactive_state
+            .as_ref()
+            .map(|snapshot| snapshot.path.clone())
+        else {
             return;
-        }
-        let inactive_path = match self.dual_panel_inactive_state.as_ref() {
-            Some(s) => s.path.clone(),
-            None => return,
         };
-        let inactive_norm = folder_key_for_match(Path::new(&inactive_path));
-
-        let Some(affected_folder) = folders
-            .iter()
-            .find(|folder| folder_key_for_match(folder.as_path()) == inactive_norm)
+        let Some(affected_folder) =
+            inactive_panel_reload_target(self.dual_panel_enabled, &inactive_path, folders)
         else {
             return;
         };
@@ -412,5 +428,29 @@ mod tests {
             folder_key_for_match(Path::new(r"D:\Images")),
             folder_key_for_match(Path::new(r"D:\Images 2"))
         );
+    }
+
+    #[test]
+    fn move_completion_routes_reload_to_inactive_destination_without_focus_change() {
+        let source = PathBuf::from(r"D:\Source");
+        let destination = PathBuf::from(r"E:\Destination");
+        let affected_folders = [&source, &destination];
+
+        let reload_target =
+            inactive_panel_reload_target(true, r"E:\Destination\", &affected_folders);
+
+        assert_eq!(reload_target, Some(&destination));
+    }
+
+    #[test]
+    fn move_completion_does_not_route_reload_when_dual_panel_is_disabled() {
+        let source = PathBuf::from(r"D:\Source");
+        let destination = PathBuf::from(r"E:\Destination");
+        let affected_folders = [&source, &destination];
+
+        let reload_target =
+            inactive_panel_reload_target(false, r"E:\Destination", &affected_folders);
+
+        assert_eq!(reload_target, None);
     }
 }

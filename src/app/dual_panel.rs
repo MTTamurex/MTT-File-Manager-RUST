@@ -202,6 +202,7 @@ pub struct PanelSnapshot {
     // Per-panel async loading pipeline state
     pub generation: usize,
     pub current_generation: Arc<AtomicUsize>,
+    pub folder_load_generation: Arc<AtomicUsize>,
     pub pending_all_items_clear: bool,
     pub hold_visible_items_until_load_complete: bool,
     pub pending_items_rebuild: bool,
@@ -295,6 +296,7 @@ impl PanelSnapshot {
             focus_rename: app.focus_rename,
             generation: app.generation,
             current_generation: app.current_generation.clone(),
+            folder_load_generation: app.folder_load_generation.clone(),
             pending_all_items_clear: app.pending_all_items_clear,
             hold_visible_items_until_load_complete: app.hold_visible_items_until_load_complete,
             pending_items_rebuild: app.pending_items_rebuild,
@@ -353,6 +355,7 @@ impl PanelSnapshot {
         app.focus_rename = self.focus_rename;
         app.generation = self.generation;
         app.current_generation = self.current_generation;
+        app.folder_load_generation = self.folder_load_generation;
         app.pending_all_items_clear = self.pending_all_items_clear;
         app.hold_visible_items_until_load_complete = self.hold_visible_items_until_load_complete;
         app.pending_items_rebuild = self.pending_items_rebuild;
@@ -429,6 +432,10 @@ impl PanelSnapshot {
         std::mem::swap(&mut self.focus_rename, &mut app.focus_rename);
         std::mem::swap(&mut self.generation, &mut app.generation);
         std::mem::swap(&mut self.current_generation, &mut app.current_generation);
+        std::mem::swap(
+            &mut self.folder_load_generation,
+            &mut app.folder_load_generation,
+        );
         std::mem::swap(
             &mut self.pending_all_items_clear,
             &mut app.pending_all_items_clear,

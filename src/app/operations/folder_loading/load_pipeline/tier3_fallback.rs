@@ -53,6 +53,7 @@ pub(super) fn run_tier3_fallback(
     app_state_db: &Arc<AppStateDb>,
     directory_cache: &Arc<DirectoryCache>,
     directory_dirty_registry: &Arc<DirectoryDirtyRegistry>,
+    dirty_version: Option<u64>,
     directory_index_opt: &Option<Arc<DirectoryIndex>>,
     show_hidden: bool,
 ) {
@@ -141,7 +142,8 @@ pub(super) fn run_tier3_fallback(
                 // Populate caches so subsequent OneDrive navigations are instant.
                 if gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
                     directory_cache.put(PathBuf::from(base_path), all_entries_disk.clone());
-                    directory_dirty_registry.clear_dirty(PathBuf::from(base_path).as_path());
+                    directory_dirty_registry
+                        .clear_dirty_if_version(PathBuf::from(base_path).as_path(), dirty_version);
 
                     if !show_hidden {
                         if let Some(di) = directory_index_opt {
@@ -382,7 +384,8 @@ pub(super) fn run_tier3_fallback(
     if gen_clone.load(AtomicOrdering::Relaxed) == my_gen {
         // Cache storage for instant future navigation.
         directory_cache.put(PathBuf::from(base_path), all_entries_disk.clone());
-        directory_dirty_registry.clear_dirty(PathBuf::from(base_path).as_path());
+        directory_dirty_registry
+            .clear_dirty_if_version(PathBuf::from(base_path).as_path(), dirty_version);
 
         if !show_hidden {
             if let Some(di) = directory_index_opt {

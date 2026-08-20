@@ -469,6 +469,7 @@ impl ImageViewerApp {
             last_grid_cols: 1,
             generation: 0,
             current_generation: shared_gen,
+            folder_load_generation: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             ui_ctx: ctx.clone(),
             last_items_rebuild: Instant::now(),
             pending_items_rebuild: false,
