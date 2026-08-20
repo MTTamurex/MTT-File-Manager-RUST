@@ -16,6 +16,31 @@ pub const PENDING_OPEN_REQUEST_KEY: &str = "pending_open_request";
 const DB_REQUEST_MAX_AGE_SECS: u64 = 600;
 /// Throttle for the DB fallback poll (WM_COPYDATA is checked every frame).
 const DB_POLL_INTERVAL: Duration = Duration::from_secs(2);
+const DIRECTORY_TARGET_PREFIX: &str = "D|";
+const FILE_TARGET_PREFIX: &str = "F|";
+
+/// Encode the target kind without relying on filesystem metadata in the
+/// receiving process. Unprefixed legacy requests remain directory requests.
+pub fn encode_target_request(path: &str, is_dir: bool) -> String {
+    format!(
+        "{}{path}",
+        if is_dir {
+            DIRECTORY_TARGET_PREFIX
+        } else {
+            FILE_TARGET_PREFIX
+        }
+    )
+}
+
+fn decode_target_request(request: &str) -> (&str, bool) {
+    if let Some(path) = request.strip_prefix(FILE_TARGET_PREFIX) {
+        (path, false)
+    } else if let Some(path) = request.strip_prefix(DIRECTORY_TARGET_PREFIX) {
+        (path, true)
+    } else {
+        (request, true)
+    }
+}
 
 /// Encode a request row as `<unix_secs>|<path>` so staleness is detectable.
 pub fn encode_db_request(path: &str) -> String {
@@ -38,12 +63,16 @@ pub fn process_external_open_requests(app: &mut ImageViewerApp, ctx: &egui::Cont
         Some(path) => Some(path),
         None => take_db_request(&app.app_state_db),
     };
-    let Some(path) = path else {
+    let Some(request) = path else {
         return;
     };
+    let (path, is_dir) = decode_target_request(&request);
+    if path.is_empty() {
+        return;
+    }
 
-    log::info!("[EXTERNAL-OPEN] navigating to requested folder: {path}");
-    app.navigate_to(&path);
+    log::info!("[EXTERNAL-OPEN] revealing requested item: {path}");
+    crate::ui::global_search_overlay::actions::activate_search_result(app, path, is_dir);
     if let Some(hwnd) = app.native_hwnd {
         crate::infrastructure::windows::restore_window_foreground(hwnd);
     }
@@ -99,5 +128,25 @@ mod tests {
             .unwrap()
             .as_secs();
         assert!(secs <= now && now - secs < 5);
+    }
+
+    #[test]
+    fn target_request_preserves_path_and_item_kind() {
+        let file = encode_target_request(r"C:\Some Folder\report.pdf", false);
+        let directory = encode_target_request(r"C:\Some Folder", true);
+
+        assert_eq!(
+            decode_target_request(&file),
+            (r"C:\Some Folder\report.pdf", false)
+        );
+        assert_eq!(decode_target_request(&directory), (r"C:\Some Folder", true));
+    }
+
+    #[test]
+    fn legacy_target_request_remains_a_directory_request() {
+        assert_eq!(
+            decode_target_request(r"C:\Legacy Folder"),
+            (r"C:\Legacy Folder", true)
+        );
     }
 }

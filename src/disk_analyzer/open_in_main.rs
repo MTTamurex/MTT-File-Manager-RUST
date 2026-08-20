@@ -1,4 +1,4 @@
-//! Sends "open folder" requests from the analyzer process to the main app.
+//! Sends "open item" requests from the analyzer process to the main app.
 //!
 //! Primary channel: WM_COPYDATA to the main window (validated by magic in
 //! the window subclass). Fallback: spawn the executable in `--open-path`
@@ -10,16 +10,18 @@ const MAIN_WINDOW_TITLE: &str = "MTT File Manager";
 /// Mirrors the receiver-side payload cap in `window_subclass.rs`.
 const MAX_REQUEST_BYTES: usize = 8192;
 
-/// Ask the main app to navigate to `path`. Never fails visibly: both
-/// channels are best-effort with logging.
-pub fn open_path_in_main_app(path: &str) {
+/// Ask the main app to navigate to `path`, revealing it when it is a file.
+/// Never fails visibly: both channels are best-effort with logging.
+pub fn open_path_in_main_app(path: &str, is_dir: bool) {
+    let request = crate::app::operations::external_open::encode_target_request(path, is_dir);
+
     #[cfg(target_os = "windows")]
-    if send_to_main_window(path) {
+    if send_to_main_window(&request) {
         log::info!("[DISK-ANALYZER] open-in-main request sent: {path}");
         return;
     }
 
-    spawn_open_path_helper(path);
+    spawn_open_path_helper(&request);
 }
 
 #[cfg(target_os = "windows")]

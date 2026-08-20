@@ -505,8 +505,9 @@ fn render_treemap(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
     }) {
         if menu_resp.inner {
             if let Some(menu_idx) = state.context_menu {
-                let target = model.folder_path_of(menu_idx);
-                crate::disk_analyzer::open_in_main::open_path_in_main_app(&target);
+                let target = model.path_of(menu_idx);
+                let is_dir = model.nodes[menu_idx as usize].is_dir;
+                crate::disk_analyzer::open_in_main::open_path_in_main_app(&target, is_dir);
             }
             egui::Popup::close_id(ui.ctx(), context_menu_id);
         }
