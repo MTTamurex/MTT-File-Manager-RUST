@@ -17,6 +17,13 @@ pub(super) fn should_inline_inactive_items_rebuild(item_count: usize) -> bool {
     item_count <= INLINE_REBUILD_THRESHOLD
 }
 
+pub(super) fn should_spawn_inactive_items_rebuild(
+    item_count: usize,
+    rebuild_in_flight: bool,
+) -> bool {
+    !should_inline_inactive_items_rebuild(item_count) && !rebuild_in_flight
+}
+
 impl ImageViewerApp {
     fn has_relevant_stale_visual_state(&self, path: &PathBuf) -> bool {
         self.cache_manager.has_thumbnail(path)
@@ -483,7 +490,7 @@ impl ImageViewerApp {
 
 #[cfg(test)]
 mod tests {
-    use super::should_inline_inactive_items_rebuild;
+    use super::{should_inline_inactive_items_rebuild, should_spawn_inactive_items_rebuild};
     use crate::app::dual_panel::ActivePanel;
     use crate::app::state::InactiveItemsRebuildRegistry;
 
@@ -496,6 +503,12 @@ mod tests {
     #[test]
     fn inactive_rebuild_above_threshold_is_not_inline() {
         assert!(!should_inline_inactive_items_rebuild(257));
+    }
+
+    #[test]
+    fn inactive_rebuild_above_threshold_is_not_rescheduled_while_in_flight() {
+        assert!(should_spawn_inactive_items_rebuild(257, false));
+        assert!(!should_spawn_inactive_items_rebuild(257, true));
     }
 
     #[test]

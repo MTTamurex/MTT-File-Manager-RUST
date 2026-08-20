@@ -64,11 +64,19 @@ fn folder_key_for_match(path: &Path) -> String {
         .to_string()
 }
 
-fn inactive_panel_reload_target<'a>(
+fn folder_path_for_load(path: &str) -> PathBuf {
+    if path.len() == 2 && path.ends_with(':') {
+        PathBuf::from(format!("{path}\\"))
+    } else {
+        PathBuf::from(path)
+    }
+}
+
+fn inactive_panel_reload_target(
     dual_panel_enabled: bool,
     inactive_path: &str,
-    affected_folders: &'a [&'a PathBuf],
-) -> Option<&'a PathBuf> {
+    affected_folders: &[&PathBuf],
+) -> Option<PathBuf> {
     if !dual_panel_enabled {
         return None;
     }
@@ -76,8 +84,8 @@ fn inactive_panel_reload_target<'a>(
     let inactive_norm = folder_key_for_match(Path::new(inactive_path));
     affected_folders
         .iter()
-        .copied()
         .find(|folder| folder_key_for_match(folder) == inactive_norm)
+        .map(|_| folder_path_for_load(inactive_path))
 }
 
 fn path_is_same_or_descendant(candidate: &Path, root: &Path) -> bool {
@@ -227,7 +235,7 @@ impl ImageViewerApp {
         else {
             return;
         };
-        let Some(affected_folder) =
+        let Some(reload_folder) =
             inactive_panel_reload_target(self.dual_panel_enabled, &inactive_path, folders)
         else {
             return;
@@ -238,10 +246,10 @@ impl ImageViewerApp {
             inactive_path
         );
 
-        self.directory_dirty_registry.mark_dirty(affected_folder);
-        self.directory_cache.invalidate(affected_folder);
+        self.directory_dirty_registry.mark_dirty(&reload_folder);
+        self.directory_cache.invalidate(&reload_folder);
         if let Some(ref di) = self.directory_index {
-            let _ = di.invalidate(affected_folder);
+            let _ = di.invalidate(&reload_folder);
         }
 
         self.with_inactive_panel(|app| {
@@ -439,7 +447,7 @@ mod tests {
         let reload_target =
             inactive_panel_reload_target(true, r"E:\Destination\", &affected_folders);
 
-        assert_eq!(reload_target, Some(&destination));
+        assert_eq!(reload_target, Some(PathBuf::from(r"E:\Destination\")));
     }
 
     #[test]
@@ -452,5 +460,25 @@ mod tests {
             inactive_panel_reload_target(false, r"E:\Destination", &affected_folders);
 
         assert_eq!(reload_target, None);
+    }
+
+    #[test]
+    fn reload_target_uses_the_inactive_panel_path_spelling() {
+        let operation_path = PathBuf::from(r"\\?\x:\18\");
+        let affected_folders = [&operation_path];
+
+        let reload_target = inactive_panel_reload_target(true, r"X:\18", &affected_folders);
+
+        assert_eq!(reload_target, Some(PathBuf::from(r"X:\18")));
+    }
+
+    #[test]
+    fn reload_target_expands_drive_root_for_folder_loading() {
+        let operation_path = PathBuf::from(r"X:\");
+        let affected_folders = [&operation_path];
+
+        let reload_target = inactive_panel_reload_target(true, r"X:", &affected_folders);
+
+        assert_eq!(reload_target, Some(PathBuf::from(r"X:\")));
     }
 }

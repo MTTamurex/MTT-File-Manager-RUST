@@ -366,11 +366,18 @@ impl ImageViewerApp {
                 return;
             }
 
+            let tab_id = app.tab_manager.active().id;
+            let panel = app.dual_panel_active.other();
+            let rebuild_in_flight = app.inactive_items_rebuild_registry.contains(tab_id, panel);
+            if super::thumbnail_rebuild::should_spawn_inactive_items_rebuild(
+                app.all_items.len(),
+                rebuild_in_flight,
+            ) {
+                app.spawn_inactive_final_items_rebuild_job(tab_id, panel);
+                return;
+            }
             if !super::thumbnail_rebuild::should_inline_inactive_items_rebuild(app.all_items.len())
             {
-                let tab_id = app.tab_manager.active().id;
-                let panel = app.dual_panel_active.other();
-                app.spawn_inactive_final_items_rebuild_job(tab_id, panel);
                 return;
             }
 
