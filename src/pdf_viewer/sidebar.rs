@@ -22,8 +22,14 @@ impl PdfViewerApp {
                     .inner_margin(egui::Margin::symmetric(8, 6)),
             )
             .show(root_ui, |ui| {
-                ui.heading(t!("pdfviewer.thumbnails_title").to_string());
+                ui.vertical_centered(|ui| {
+                    ui.label(
+                        egui::RichText::new(t!("pdfviewer.thumbnails_title").to_string())
+                            .size(16.0),
+                    );
+                });
                 ui.separator();
+                ui.add_space(2.0);
 
                 let rows = self.thumbnail_rows.take().unwrap_or_else(|| {
                     VariableRows::new(
@@ -177,10 +183,10 @@ impl PdfViewerApp {
                             egui::Color32::from_gray(160)
                         };
                         ui.painter().rect_stroke(
-                            rect.expand(1.0),
+                            rect,
                             2.0,
                             egui::Stroke::new(if is_current { 2.0 } else { 1.0 }, stroke_color),
-                            egui::StrokeKind::Outside,
+                            egui::StrokeKind::Inside,
                         );
                     }
 
