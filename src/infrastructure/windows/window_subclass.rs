@@ -221,6 +221,7 @@ fn mark_layout_minimized() {
 fn mark_layout_restoring() {
     let current = LAYOUT_PHASE.load(Ordering::Relaxed);
     if current == WindowLayoutPhase::Minimized as u8 {
+        crate::app::state::cancel_pending_working_set_trim_for_native_restore();
         LAYOUT_PHASE.store(WindowLayoutPhase::Restoring as u8, Ordering::SeqCst);
     }
 }

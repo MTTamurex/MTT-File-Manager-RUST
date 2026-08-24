@@ -73,6 +73,11 @@ impl ImageViewerApp {
             self.defer_file_operation_results_while_hidden();
             #[cfg(feature = "notify-watcher")]
             self.defer_watcher_events_while_hidden();
+            self.process_items_rebuild_results(ctx);
+            self.process_inactive_items_rebuild_results(ctx);
+            crate::app::operations::tag_ops::purge_worker::process_purge_results(self);
+            self.process_global_search_events(false);
+            self.process_streaming_and_thumbnail_events(ctx, false);
             return;
         }
 
@@ -185,11 +190,11 @@ impl ImageViewerApp {
         let _t_drive_events_done = watcher_perf.drive_events_done;
         let _t_auto_reload_done = watcher_perf.auto_reload_done;
 
-        let _t_streaming_done = self.process_streaming_and_thumbnail_events(ctx);
+        let _t_streaming_done = self.process_streaming_and_thumbnail_events(ctx, true);
         self.apply_ready_tag_view_hides();
 
         // GLOBAL SEARCH: Process search results from worker
-        self.process_global_search_events();
+        self.process_global_search_events(true);
 
         // FOLDER METADATA: Resolve timestamps for sidebar-navigated folders (Quick Access, Cloud Drives)
         while let Ok((path, modified, created)) = self.folder_meta_resolve_rx.try_recv() {

@@ -38,11 +38,14 @@ const WORKING_SET_TRIM_MIN_INTERVAL: Duration = Duration::from_secs(10);
 const WORKING_SET_TRIM_ACTIVITY_GRACE: Duration = Duration::from_secs(1);
 const LOW_RAM_GPU_IDLE_WS_TRIM_AFTER: Duration = Duration::from_secs(8);
 const LOW_RAM_GPU_IDLE_WS_TRIM_MIN_BYTES: u64 = 24 * 1024 * 1024;
+const BACKGROUND_WS_TRIM_REARM_GROWTH_BYTES: u64 = 8 * 1024 * 1024;
 const SOFT_MEMORY_LIMIT_BYTES: u64 = 550 * 1024 * 1024;
 const HARD_MEMORY_LIMIT_BYTES: u64 = 700 * 1024 * 1024;
 static WORKING_SET_TRIM_BLOCKED: AtomicBool = AtomicBool::new(false);
 static WORKING_SET_TRIM_EPOCH: AtomicU64 = AtomicU64::new(0);
+static WORKING_SET_TRIM_SUCCESS_COUNT: AtomicU64 = AtomicU64::new(0);
 static LAST_WORKING_SET_TRIM_REQUEST: OnceLock<Mutex<Option<Instant>>> = OnceLock::new();
+static WORKING_SET_TRIM_EXECUTION_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
 #[derive(Clone, Copy, Debug)]
 struct ProcessMemorySnapshot {
@@ -89,6 +92,34 @@ fn classify_memory_pressure(snapshot: ProcessMemorySnapshot) -> MemoryPressure {
 
 fn working_set_trim_cancelled(blocked: bool, current_epoch: u64, scheduled_epoch: u64) -> bool {
     blocked || current_epoch != scheduled_epoch
+}
+
+fn file_operations_block_trim(active: usize, deferred_terminal_results: usize) -> bool {
+    active > deferred_terminal_results
+}
+
+fn background_trim_should_rearm(
+    active: bool,
+    pending: bool,
+    working_set_bytes: u64,
+    stable_working_set_bytes: u64,
+) -> bool {
+    active
+        && !pending
+        && working_set_bytes >= LOW_RAM_GPU_IDLE_WS_TRIM_MIN_BYTES
+        && working_set_bytes.saturating_sub(stable_working_set_bytes)
+            >= BACKGROUND_WS_TRIM_REARM_GROWTH_BYTES
+}
+
+fn working_set_trim_execution_lock() -> &'static Mutex<()> {
+    WORKING_SET_TRIM_EXECUTION_LOCK.get_or_init(|| Mutex::new(()))
+}
+
+pub(crate) fn cancel_pending_working_set_trim_for_native_restore() {
+    let _execution_guard = working_set_trim_execution_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    WORKING_SET_TRIM_EPOCH.fetch_add(1, Ordering::AcqRel);
 }
 
 fn backend_uses_low_ram_gpu_policy(active_gpu_backend: &str) -> bool {
@@ -749,7 +780,7 @@ impl ImageViewerApp {
         self.run_memory_maintenance_impl(true);
     }
 
-    fn working_set_trim_blocked(&self) -> bool {
+    fn working_set_trim_blocker_reason(&self) -> Option<&'static str> {
         let video_playing = self
             .media_preview
             .as_ref()
@@ -771,49 +802,301 @@ impl ImageViewerApp {
             .lock()
             .is_ok_and(|guard| guard.is_some());
 
-        self.is_in_restore_burst()
-            || self.last_user_activity.elapsed() < WORKING_SET_TRIM_ACTIVITY_GRACE
-            || video_playing
-            || self.file_operation_state.file_ops_in_progress > 0
-            || self.is_loading_folder
-            || self.items_rebuild_in_flight
-            || self.pending_items_rebuild
-            || self.bulk_thumbnail_scanning.load(Ordering::Relaxed)
-            || !self.file_hash_loading.is_empty()
-            || !self.folder_size_state.loading.is_empty()
-            || !self.folder_size_state.batch_loading.is_empty()
-            || !self.metadata_loading.is_empty()
-            || !self.live_file_size_loading.is_empty()
-            || self.global_search.loading
-            || purge_running
-            || self.is_item_dragging
-            || self.pending_drag_move_confirmation.is_some()
-            || self.shell_menu_loading
-            || self.open_with_loading
-            || compression_active
-            || thumbnail_pipeline_busy
+        if self.is_in_restore_burst() {
+            Some("restore-burst")
+        } else if self.last_user_activity.elapsed() < WORKING_SET_TRIM_ACTIVITY_GRACE {
+            Some("recent-user-activity")
+        } else if video_playing {
+            Some("video-playing")
+        } else if self.file_operations_active_for_background() {
+            Some("file-operation")
+        } else if self.is_loading_folder {
+            Some("folder-loading")
+        } else if self.items_rebuild_in_flight {
+            Some("items-rebuild")
+        } else if self.pending_items_rebuild {
+            Some("pending-items-rebuild")
+        } else if self.bulk_thumbnail_scanning.load(Ordering::Relaxed) {
+            Some("bulk-thumbnail-scan")
+        } else if !self.file_hash_loading.is_empty() {
+            Some("file-hash")
+        } else if !self.folder_size_state.loading.is_empty() {
+            Some("folder-size")
+        } else if !self.folder_size_state.batch_loading.is_empty() {
+            Some("folder-size-batch")
+        } else if !self.metadata_loading.is_empty() {
+            Some("metadata")
+        } else if !self.live_file_size_loading.is_empty() {
+            Some("live-file-size")
+        } else if self.global_search.loading {
+            Some("global-search")
+        } else if purge_running {
+            Some("tag-purge")
+        } else if self.is_item_dragging {
+            Some("item-drag")
+        } else if self.pending_drag_move_confirmation.is_some() {
+            Some("move-confirmation")
+        } else if self.shell_menu_loading {
+            Some("shell-menu")
+        } else if self.open_with_loading {
+            Some("open-with")
+        } else if compression_active {
+            Some("compression")
+        } else if thumbnail_pipeline_busy {
+            Some("thumbnail-pipeline")
+        } else if !self.loading_icons.is_empty() || !self.loading_extensions.is_empty() {
+            Some("icon-pipeline")
+        } else if self.item_icon_loader.has_pending_auxiliary_icon_work() {
+            Some("auxiliary-icon-pipeline")
+        } else {
+            None
+        }
+    }
+
+    fn working_set_trim_blocked(&self) -> bool {
+        self.working_set_trim_blocker_reason().is_some()
+    }
+
+    pub(crate) fn file_operations_active_for_background(&self) -> bool {
+        let deferred_terminal_results = self
+            .file_operation_state
+            .deferred_results
+            .iter()
+            .filter(|result| {
+                matches!(
+                    result,
+                    crate::workers::file_operation_worker::FileOperationResult::Finished
+                        | crate::workers::file_operation_worker::FileOperationResult::FinishedNoRefresh
+                )
+            })
+            .count();
+        file_operations_block_trim(
+            self.file_operation_state.file_ops_in_progress,
+            deferred_terminal_results,
+        )
     }
 
     pub(crate) fn refresh_working_set_trim_blocker(&self, force_blocked: bool) {
-        let blocked = force_blocked || self.working_set_trim_blocked();
+        let blocker_reason = if force_blocked {
+            Some("window-size-move")
+        } else {
+            self.working_set_trim_blocker_reason()
+        };
+        let blocked = blocker_reason.is_some();
         let was_blocked = WORKING_SET_TRIM_BLOCKED.swap(blocked, Ordering::AcqRel);
         if blocked && !was_blocked {
             WORKING_SET_TRIM_EPOCH.fetch_add(1, Ordering::AcqRel);
-        } else if !blocked
-            && was_blocked
-            && self.uses_aggressive_gpu_memory_policy()
-            && current_process_memory_snapshot().is_some_and(|snapshot| {
-                snapshot.working_set_bytes >= LOW_RAM_GPU_IDLE_WS_TRIM_MIN_BYTES
-            })
+            let reason = blocker_reason.unwrap_or("unknown");
+            log::debug!("[MEMORY] working-set trim blocked by {reason}");
+            crate::infrastructure::diagnostic_logger::diag_info(
+                "memory_trim",
+                "blocked",
+                &[crate::infrastructure::diagnostic_logger::field_label(
+                    "reason", reason,
+                )],
+            );
+        } else if !blocked && was_blocked {
+            crate::infrastructure::diagnostic_logger::diag_info("memory_trim", "unblocked", &[]);
+            if self.uses_aggressive_gpu_memory_policy()
+                && (self.background_memory_trim_active
+                    || self.last_restore_time.elapsed() >= WORKING_SET_TRIM_MIN_INTERVAL)
+                && current_process_memory_snapshot().is_some_and(|snapshot| {
+                    snapshot.working_set_bytes >= LOW_RAM_GPU_IDLE_WS_TRIM_MIN_BYTES
+                })
+            {
+                request_process_working_set_trim_series(
+                    format!("gpu activity completed backend={}", self.active_gpu_backend),
+                    WORKING_SET_TRIM_FOLLOW_UP_DELAYS,
+                    false,
+                );
+            }
+        }
+    }
+
+    pub(crate) fn begin_background_memory_trim(&mut self) {
+        self.background_memory_trim_active = true;
+        self.background_memory_trim_pending = true;
+        self.background_memory_trim_last_stable_working_set_bytes = 0;
+        self.release_thumbnail_memory_for_background();
+        self.background_memory_trim_success_baseline =
+            WORKING_SET_TRIM_SUCCESS_COUNT.load(Ordering::Acquire);
+        self.refresh_working_set_trim_blocker(false);
+        if process_working_set_trim_disabled() {
+            self.background_memory_trim_active = false;
+            self.background_memory_trim_pending = false;
+            crate::infrastructure::diagnostic_logger::diag_info(
+                "memory_trim",
+                "background_trim_disabled",
+                &[],
+            );
+            return;
+        }
+        crate::infrastructure::diagnostic_logger::diag_info(
+            "memory_trim",
+            "background_trim_armed",
+            &[],
+        );
+    }
+
+    pub(crate) fn cancel_background_memory_trim(&mut self) {
+        let _execution_guard = working_set_trim_execution_lock()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if self.background_memory_trim_pending {
+            self.background_memory_trim_pending = false;
+            let event = if WORKING_SET_TRIM_SUCCESS_COUNT.load(Ordering::Acquire)
+                > self.background_memory_trim_success_baseline
+            {
+                "background_trim_completed_before_restore"
+            } else {
+                "background_trim_cancelled_on_restore"
+            };
+            crate::infrastructure::diagnostic_logger::diag_info("memory_trim", event, &[]);
+        }
+        self.background_memory_trim_active = false;
+        self.background_memory_trim_pending = false;
+        self.background_memory_trim_last_stable_working_set_bytes = 0;
+        WORKING_SET_TRIM_EPOCH.fetch_add(1, Ordering::AcqRel);
+    }
+
+    pub(crate) fn run_background_memory_maintenance(&mut self) {
+        if !self.background_memory_trim_active
+            || crate::infrastructure::windows::window_subclass::layout_phase()
+                != crate::infrastructure::windows::window_subclass::WindowLayoutPhase::Minimized
         {
-            request_process_working_set_trim_series(
-                format!(
-                    "gpu activity completed backend={} path={}",
-                    self.active_gpu_backend, self.navigation_state.current_path
-                ),
-                WORKING_SET_TRIM_FOLLOW_UP_DELAYS,
+            return;
+        }
+        self.discard_background_thumbnail_results();
+        self.discard_icon_worker_results_for_background();
+        self.item_icon_loader
+            .discard_async_icon_results_for_background();
+        self.refresh_working_set_trim_blocker(false);
+
+        let success_count = WORKING_SET_TRIM_SUCCESS_COUNT.load(Ordering::Acquire);
+        if self.background_memory_trim_pending
+            && success_count > self.background_memory_trim_success_baseline
+        {
+            let Some(snapshot) = current_process_memory_snapshot() else {
+                return;
+            };
+            self.background_memory_trim_pending = false;
+            self.background_memory_trim_success_baseline = success_count;
+            self.background_memory_trim_last_stable_working_set_bytes = snapshot.working_set_bytes;
+            crate::infrastructure::diagnostic_logger::diag_info(
+                "memory_trim",
+                "background_trim_completed",
+                &[],
+            );
+            return;
+        }
+
+        if self.last_memory_maintenance.elapsed() < Duration::from_secs(2) {
+            return;
+        }
+        self.last_memory_maintenance = Instant::now();
+        self.refresh_working_set_trim_blocker(false);
+
+        if self.working_set_trim_blocked() {
+            return;
+        }
+
+        let Some(snapshot) = current_process_memory_snapshot() else {
+            return;
+        };
+        if snapshot.working_set_bytes < LOW_RAM_GPU_IDLE_WS_TRIM_MIN_BYTES {
+            if self.background_memory_trim_pending {
+                self.background_memory_trim_pending = false;
+                self.background_memory_trim_success_baseline = success_count;
+                crate::infrastructure::diagnostic_logger::diag_info(
+                    "memory_trim",
+                    "background_trim_not_needed",
+                    &[],
+                );
+            }
+            self.background_memory_trim_last_stable_working_set_bytes = snapshot.working_set_bytes;
+            return;
+        }
+
+        if background_trim_should_rearm(
+            self.background_memory_trim_active,
+            self.background_memory_trim_pending,
+            snapshot.working_set_bytes,
+            self.background_memory_trim_last_stable_working_set_bytes,
+        ) {
+            self.background_memory_trim_pending = true;
+            self.background_memory_trim_success_baseline = success_count;
+            crate::infrastructure::diagnostic_logger::diag_info(
+                "memory_trim",
+                "background_trim_rearmed",
+                &[],
             );
         }
+
+        if self.background_memory_trim_pending
+            && request_process_working_set_trim_series(
+                format!(
+                    "window minimized backend={} ws={:.1}MB",
+                    self.active_gpu_backend,
+                    bytes_to_mb(snapshot.working_set_bytes)
+                ),
+                WORKING_SET_TRIM_FOLLOW_UP_DELAYS,
+                true,
+            )
+        {
+            crate::infrastructure::diagnostic_logger::diag_info(
+                "memory_trim",
+                "background_trim_scheduled",
+                &[],
+            );
+        }
+    }
+
+    fn discard_background_thumbnail_results(&mut self) {
+        while let Ok(thumbnail_data) = self.image_receiver.try_recv() {
+            self.cache_manager.finish_loading(&thumbnail_data.path);
+            self.cache_manager
+                .finish_pending_upload(&thumbnail_data.path);
+        }
+        while let Ok(preview_data) = self.folder_preview_receiver.try_recv() {
+            self.cache_manager
+                .finish_folder_preview_loading(&preview_data.path);
+        }
+        self.pending_thumbnails.clear();
+        self.cache_manager.pending_upload_set.clear();
+    }
+
+    fn release_thumbnail_memory_for_background(&mut self) {
+        let loading_paths: Vec<_> = self.cache_manager.loading_set.iter().cloned().collect();
+        for path in self.thumbnail_queue.cancel_normal_paths(&loading_paths) {
+            self.cache_manager.finish_loading(&path);
+        }
+        self.discard_background_thumbnail_results();
+        self.pending_thumbnails.clear();
+        self.pending_thumbnails.shrink_to_fit();
+        self.cache_manager.pending_upload_set.clear();
+
+        let (textures, rgba, folder_previews, rgba_bytes) = self
+            .cache_manager
+            .release_thumbnail_cache_storage_for_background(
+                INACTIVE_THUMBNAIL_CACHE_ITEMS,
+                INACTIVE_THUMBNAIL_CACHE_ITEMS,
+                INACTIVE_THUMBNAIL_CACHE_ITEMS,
+                0,
+            );
+        let (icons, extension_icons) = self.item_icon_loader.trim_icon_caches(128, 128);
+        self.last_texture_cache_retune = Instant::now()
+            .checked_sub(Duration::from_secs(10))
+            .unwrap_or_else(Instant::now);
+
+        log::debug!(
+            "[MEMORY] background cache release: textures={} folder_previews={} rgba_items={} rgba={:.1}MB icons={} ext_icons={}",
+            textures,
+            folder_previews,
+            rgba,
+            bytes_to_mb(rgba_bytes as u64),
+            icons,
+            extension_icons,
+        );
     }
 
     /// Drops stale visible thumbnail work and aggressively downsizes thumbnail
@@ -932,6 +1215,7 @@ impl ImageViewerApp {
                         self.active_gpu_backend
                     ),
                     WORKING_SET_TRIM_FOLLOW_UP_DELAYS,
+                    false,
                 );
             }
         }
@@ -1168,17 +1452,19 @@ impl ImageViewerApp {
             request_process_working_set_trim_series(
                 format!("thumbnail inactive view ({reason})"),
                 WORKING_SET_TRIM_FOLLOW_UP_DELAYS,
+                false,
             );
         }
     }
 
     fn run_memory_maintenance_impl(&mut self, force: bool) {
-        let working_set_trim_blocked = self.working_set_trim_blocked();
-        self.refresh_working_set_trim_blocker(false);
         if !force && self.last_memory_maintenance.elapsed() < Duration::from_secs(2) {
+            self.refresh_working_set_trim_blocker(false);
             return;
         }
         self.last_memory_maintenance = Instant::now();
+        let working_set_trim_blocked = self.working_set_trim_blocked();
+        self.refresh_working_set_trim_blocker(false);
 
         let thumbnails_active = self.thumbnail_caches_active();
         if !thumbnails_active && !self.is_in_restore_burst() {
@@ -1345,6 +1631,7 @@ impl ImageViewerApp {
         if !self.uses_aggressive_gpu_memory_policy()
             || working_set_trim_blocked
             || self.last_user_activity.elapsed() < LOW_RAM_GPU_IDLE_WS_TRIM_AFTER
+            || self.last_restore_time.elapsed() < WORKING_SET_TRIM_MIN_INTERVAL
             || working_set_bytes < LOW_RAM_GPU_IDLE_WS_TRIM_MIN_BYTES
         {
             return;
@@ -1352,12 +1639,12 @@ impl ImageViewerApp {
 
         request_process_working_set_trim_series(
             format!(
-                "gpu idle backend={} ws={:.1}MB path={}",
+                "gpu idle backend={} ws={:.1}MB",
                 self.active_gpu_backend,
-                working_set_bytes as f64 / 1024.0 / 1024.0,
-                self.navigation_state.current_path
+                working_set_bytes as f64 / 1024.0 / 1024.0
             ),
             WORKING_SET_TRIM_FOLLOW_UP_DELAYS,
+            false,
         );
     }
 
@@ -1618,27 +1905,33 @@ pub(crate) fn dynamic_rgba_budget_bytes(
     target.clamp(floor_bytes, MAX_RGBA_BUDGET_BYTES)
 }
 
-fn request_process_working_set_trim_series(reason: String, delays: &'static [Duration]) {
+fn request_process_working_set_trim_series(
+    reason: String,
+    delays: &'static [Duration],
+    require_minimized: bool,
+) -> bool {
     if process_working_set_trim_disabled() {
-        return;
+        return false;
     }
     if delays.is_empty() {
-        return;
+        return false;
     }
 
     let now = Instant::now();
-    if let Ok(mut last_trim) = LAST_WORKING_SET_TRIM_REQUEST
+    let Ok(mut last_trim) = LAST_WORKING_SET_TRIM_REQUEST
         .get_or_init(|| Mutex::new(None))
         .lock()
+    else {
+        return false;
+    };
+    if last_trim
+        .as_ref()
+        .is_some_and(|last| now.duration_since(*last) < WORKING_SET_TRIM_MIN_INTERVAL)
     {
-        if last_trim
-            .as_ref()
-            .is_some_and(|last| now.duration_since(*last) < WORKING_SET_TRIM_MIN_INTERVAL)
-        {
-            return;
-        }
-        *last_trim = Some(now);
+        return false;
     }
+    *last_trim = Some(now);
+    drop(last_trim);
 
     let trim_epoch = WORKING_SET_TRIM_EPOCH.load(Ordering::Acquire);
     let spawn_result = std::thread::Builder::new()
@@ -1663,14 +1956,28 @@ fn request_process_working_set_trim_series(reason: String, delays: &'static [Dur
                     }
                     break;
                 }
-                trim_process_working_set(&reason);
-                trimmed_any = true;
+                if trim_process_working_set(&reason, trim_epoch, require_minimized) {
+                    trimmed_any = true;
+                } else if working_set_trim_cancelled(
+                    WORKING_SET_TRIM_BLOCKED.load(Ordering::Acquire),
+                    WORKING_SET_TRIM_EPOCH.load(Ordering::Acquire),
+                    trim_epoch,
+                ) {
+                    if !trimmed_any {
+                        clear_working_set_trim_request(now);
+                    }
+                    break;
+                }
             }
         });
 
-    if let Err(error) = spawn_result {
-        clear_working_set_trim_request(now);
-        log::debug!("[MEMORY] failed to spawn working-set trim: {error}");
+    match spawn_result {
+        Ok(_) => true,
+        Err(error) => {
+            clear_working_set_trim_request(now);
+            log::debug!("[MEMORY] failed to spawn working-set trim: {error}");
+            false
+        }
     }
 }
 
@@ -1697,13 +2004,31 @@ fn process_working_set_trim_disabled() -> bool {
 }
 
 #[cfg(target_os = "windows")]
-fn trim_process_working_set(reason: &str) {
+fn trim_process_working_set(reason: &str, scheduled_epoch: u64, require_minimized: bool) -> bool {
+    let _execution_guard = working_set_trim_execution_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if working_set_trim_cancelled(
+        WORKING_SET_TRIM_BLOCKED.load(Ordering::Acquire),
+        WORKING_SET_TRIM_EPOCH.load(Ordering::Acquire),
+        scheduled_epoch,
+    ) {
+        return false;
+    }
+    if require_minimized
+        && crate::infrastructure::windows::window_subclass::layout_phase()
+            != crate::infrastructure::windows::window_subclass::WindowLayoutPhase::Minimized
+    {
+        return false;
+    }
+
     unsafe {
         use windows::Win32::System::Memory::{
             SetProcessWorkingSetSizeEx, SETPROCESSWORKINGSETSIZEEX_FLAGS,
         };
         use windows::Win32::System::Threading::GetCurrentProcess;
 
+        let before = current_process_memory_snapshot();
         let process = GetCurrentProcess();
         match SetProcessWorkingSetSizeEx(
             process,
@@ -1711,32 +2036,87 @@ fn trim_process_working_set(reason: &str) {
             usize::MAX,
             SETPROCESSWORKINGSETSIZEEX_FLAGS(0),
         ) {
-            Ok(()) => log::debug!("[MEMORY] trimmed working set after {reason}"),
-            Err(error) => log::debug!("[MEMORY] working-set trim failed after {reason}: {error}"),
+            Ok(()) => {
+                WORKING_SET_TRIM_SUCCESS_COUNT.fetch_add(1, Ordering::AcqRel);
+                let after = current_process_memory_snapshot();
+                if let (Some(before), Some(after)) = (before, after) {
+                    log::debug!(
+                        "[MEMORY] working-set trim API succeeded after {}: ws={:.1}->{:.1}MB private={:.1}->{:.1}MB",
+                        reason,
+                        bytes_to_mb(before.working_set_bytes),
+                        bytes_to_mb(after.working_set_bytes),
+                        bytes_to_mb(before.private_usage_bytes),
+                        bytes_to_mb(after.private_usage_bytes),
+                    );
+                    crate::infrastructure::diagnostic_logger::diag_info(
+                        "memory_trim",
+                        "api_succeeded",
+                        &[
+                            crate::infrastructure::diagnostic_logger::field_u64(
+                                "working_set_before_bytes",
+                                before.working_set_bytes,
+                            ),
+                            crate::infrastructure::diagnostic_logger::field_u64(
+                                "working_set_after_bytes",
+                                after.working_set_bytes,
+                            ),
+                            crate::infrastructure::diagnostic_logger::field_u64(
+                                "private_before_bytes",
+                                before.private_usage_bytes,
+                            ),
+                            crate::infrastructure::diagnostic_logger::field_u64(
+                                "private_after_bytes",
+                                after.private_usage_bytes,
+                            ),
+                        ],
+                    );
+                } else {
+                    log::debug!("[MEMORY] working-set trim API succeeded after {reason}");
+                    crate::infrastructure::diagnostic_logger::diag_info(
+                        "memory_trim",
+                        "api_succeeded_without_snapshot",
+                        &[],
+                    );
+                }
+                true
+            }
+            Err(error) => {
+                log::debug!("[MEMORY] working-set trim failed after {reason}: {error}");
+                crate::infrastructure::diagnostic_logger::diag_warn("memory_trim", "failed", &[]);
+                false
+            }
         }
     }
 }
 
 #[cfg(not(target_os = "windows"))]
-fn trim_process_working_set(_reason: &str) {}
+fn trim_process_working_set(
+    _reason: &str,
+    _scheduled_epoch: u64,
+    _require_minimized: bool,
+) -> bool {
+    false
+}
 
 #[cfg(target_os = "windows")]
 fn current_process_memory_snapshot() -> Option<ProcessMemorySnapshot> {
-    use windows::Win32::System::ProcessStatus::{K32GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS};
+    use windows::Win32::System::ProcessStatus::{
+        K32GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS, PROCESS_MEMORY_COUNTERS_EX,
+    };
     use windows::Win32::System::Threading::GetCurrentProcess;
 
     unsafe {
-        let mut counters = PROCESS_MEMORY_COUNTERS::default();
+        let mut counters = PROCESS_MEMORY_COUNTERS_EX::default();
         if K32GetProcessMemoryInfo(
             GetCurrentProcess(),
-            &mut counters,
-            std::mem::size_of::<PROCESS_MEMORY_COUNTERS>() as u32,
+            (&mut counters as *mut PROCESS_MEMORY_COUNTERS_EX).cast::<PROCESS_MEMORY_COUNTERS>(),
+            std::mem::size_of::<PROCESS_MEMORY_COUNTERS_EX>() as u32,
         )
         .as_bool()
         {
             Some(ProcessMemorySnapshot {
                 working_set_bytes: counters.WorkingSetSize as u64,
-                private_usage_bytes: counters.PagefileUsage as u64,
+                private_usage_bytes: counters.PrivateUsage as u64,
             })
         } else {
             None
@@ -1753,9 +2133,11 @@ fn current_process_memory_snapshot() -> Option<ProcessMemorySnapshot> {
 mod inactive_panel_paths_tests {
     use super::{
         backend_uses_conservative_thumbnail_upload_policy, backend_uses_low_ram_gpu_policy,
-        classify_memory_pressure, detail_panel_thumbnail_active, insert_item_reference_paths,
-        pending_thumbnail_eviction_index, trim_pending_thumbnail_queue, working_set_trim_cancelled,
-        FileEntry, FxHashSet, MemoryPressure, ProcessMemorySnapshot,
+        background_trim_should_rearm, classify_memory_pressure, detail_panel_thumbnail_active,
+        file_operations_block_trim, insert_item_reference_paths, pending_thumbnail_eviction_index,
+        trim_pending_thumbnail_queue, working_set_trim_cancelled, FileEntry, FxHashSet,
+        MemoryPressure, ProcessMemorySnapshot, BACKGROUND_WS_TRIM_REARM_GROWTH_BYTES,
+        LOW_RAM_GPU_IDLE_WS_TRIM_MIN_BYTES,
     };
     use crate::domain::file_entry::SyncStatus;
     use crate::domain::thumbnail::ThumbnailData;
@@ -1970,5 +2352,46 @@ mod inactive_panel_paths_tests {
         assert!(!working_set_trim_cancelled(false, 7, 7));
         assert!(working_set_trim_cancelled(true, 7, 7));
         assert!(working_set_trim_cancelled(false, 8, 7));
+    }
+
+    #[test]
+    fn deferred_terminal_file_operations_do_not_block_background_trim() {
+        assert!(file_operations_block_trim(2, 1));
+        assert!(!file_operations_block_trim(2, 2));
+        assert!(!file_operations_block_trim(1, 2));
+    }
+
+    #[test]
+    fn minimized_monitor_rearms_only_after_memory_grows_past_the_limit() {
+        assert!(!background_trim_should_rearm(
+            false,
+            false,
+            LOW_RAM_GPU_IDLE_WS_TRIM_MIN_BYTES,
+            0,
+        ));
+        assert!(!background_trim_should_rearm(
+            true,
+            true,
+            LOW_RAM_GPU_IDLE_WS_TRIM_MIN_BYTES,
+            0,
+        ));
+        assert!(!background_trim_should_rearm(
+            true,
+            false,
+            LOW_RAM_GPU_IDLE_WS_TRIM_MIN_BYTES - 1,
+            0,
+        ));
+        assert!(!background_trim_should_rearm(
+            true,
+            false,
+            LOW_RAM_GPU_IDLE_WS_TRIM_MIN_BYTES + BACKGROUND_WS_TRIM_REARM_GROWTH_BYTES,
+            LOW_RAM_GPU_IDLE_WS_TRIM_MIN_BYTES + BACKGROUND_WS_TRIM_REARM_GROWTH_BYTES - 1,
+        ));
+        assert!(background_trim_should_rearm(
+            true,
+            false,
+            LOW_RAM_GPU_IDLE_WS_TRIM_MIN_BYTES + BACKGROUND_WS_TRIM_REARM_GROWTH_BYTES,
+            LOW_RAM_GPU_IDLE_WS_TRIM_MIN_BYTES,
+        ));
     }
 }

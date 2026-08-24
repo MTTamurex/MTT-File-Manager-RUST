@@ -350,6 +350,17 @@ impl IconLoader {
         )
     }
 
+    pub(crate) fn has_pending_auxiliary_icon_work(&self) -> bool {
+        !self.loading_drive_icons.is_empty()
+            || self.auxiliary_icon_threads.load(Ordering::Acquire) > 0
+    }
+
+    pub(crate) fn discard_async_icon_results_for_background(&mut self) {
+        while let Ok(result) = self.icon_result_rx.try_recv() {
+            self.loading_drive_icons.remove(&result.key);
+        }
+    }
+
     /// Trims per-path icon cache and extension icon cache to the given item
     /// limits, evicting least-recently-used entries first.  Drive icons,
     /// failed-drive icons, and the folder/computer singletons are not trimmed.
@@ -546,5 +557,23 @@ mod request_tracker_tests {
         assert!(loader.drive_icon_cache.peek(r"D:\").is_some());
         assert!(loader.failed_drive_icons.peek(r"D:\").is_none());
         assert!(loader.stale_drive_icons.contains(r"D:\"));
+    }
+
+    #[test]
+    fn background_discard_releases_auxiliary_icon_marker() {
+        let mut loader = IconLoader::new();
+        let key = "test_Jumbo".to_string();
+        loader.loading_drive_icons.insert(key.clone());
+        loader
+            .icon_result_tx
+            .send(AsyncIconResult {
+                key,
+                data: Some((vec![255; 4], 1, 1)),
+            })
+            .unwrap();
+
+        assert!(loader.has_pending_auxiliary_icon_work());
+        loader.discard_async_icon_results_for_background();
+        assert!(!loader.has_pending_auxiliary_icon_work());
     }
 }

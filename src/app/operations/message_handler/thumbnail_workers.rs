@@ -85,6 +85,24 @@ fn apply_folder_cover_updates_to_snapshot_items(
 }
 
 impl ImageViewerApp {
+    pub(crate) fn discard_icon_worker_results_for_background(&mut self) {
+        while let Ok((path, _, icon_size, request_id, _, _, _)) = self.icon_res_receiver.try_recv()
+        {
+            self.loading_icons.remove(&path, icon_size, request_id);
+            if let Some(ext) = path.extension() {
+                let ext_raw = ext.to_string_lossy().to_lowercase();
+                if !crate::infrastructure::windows::icons::is_per_file_icon_ext(&ext_raw) {
+                    let ext_key = format!(
+                        "{}_{}",
+                        crate::infrastructure::windows::icons::canonical_icon_ext(&ext_raw),
+                        icon_size_suffix(icon_size)
+                    );
+                    remove_loading_extension(&mut self.loading_extensions, &ext_key, request_id);
+                }
+            }
+        }
+    }
+
     pub(super) fn process_cover_worker_results(&mut self, ctx: &egui::Context) {
         let t0 = Instant::now();
 

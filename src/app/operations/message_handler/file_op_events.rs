@@ -2,7 +2,6 @@ use crate::app::state::ImageViewerApp;
 use crate::workers::file_operation_worker::FileOperationResult;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::TryRecvError;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -35,7 +34,8 @@ impl ImageViewerApp {
         for _ in 0..MAX_RESULTS_PER_TICK {
             match self.file_operation_state.file_op_res_receiver.try_recv() {
                 Ok(result) => self.file_operation_state.deferred_results.push_back(result),
-                Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
+                Err(std::sync::mpsc::TryRecvError::Empty)
+                | Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
             }
         }
     }

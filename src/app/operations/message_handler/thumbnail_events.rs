@@ -8,6 +8,7 @@ impl ImageViewerApp {
     pub(super) fn process_streaming_and_thumbnail_events(
         &mut self,
         ctx: &egui::Context,
+        process_visual_results: bool,
     ) -> Instant {
         const MAX_FILE_BATCHES_PER_FRAME: usize = 48;
         const FILE_BATCH_BUDGET_MS: u64 = 5;
@@ -129,8 +130,8 @@ impl ImageViewerApp {
 
         // Process active panel end-of-load / rebuild
         if saw_end_of_load {
-            self.handle_items_after_end_of_load(ctx);
-        } else if self.pending_items_rebuild {
+            self.handle_items_after_end_of_load(ctx, process_visual_results);
+        } else if self.pending_items_rebuild && process_visual_results {
             self.maybe_schedule_stream_items_rebuild(ctx);
         } else if has_more_stream_batches {
             ctx.request_repaint();
@@ -138,18 +139,28 @@ impl ImageViewerApp {
 
         // Process inactive panel batches via with_inactive_panel
         if !inactive_batches.is_empty() || inactive_saw_end {
-            self.apply_inactive_panel_batches(inactive_batches, inactive_saw_end, ctx);
-        } else {
+            self.apply_inactive_panel_batches(
+                inactive_batches,
+                inactive_saw_end,
+                ctx,
+                process_visual_results,
+            );
+        } else if process_visual_results {
             self.maybe_rebuild_inactive_panel_items(ctx);
         }
 
         let t_rebuild = Instant::now();
 
-        self.process_cover_worker_results(ctx);
+        if process_visual_results {
+            self.process_cover_worker_results(ctx);
+        }
         let streaming_done = Instant::now();
-        self.process_icon_worker_results(ctx);
+        if process_visual_results {
+            self.process_icon_worker_results(ctx);
+        }
         let t_icons = Instant::now();
-        let mut received_any = self.process_thumbnail_upload_pipeline(ctx);
+        let mut received_any =
+            process_visual_results && self.process_thumbnail_upload_pipeline(ctx);
         let t_thumbs = Instant::now();
 
         // Under frame pressure, preserve smoothness by deferring lower-priority
@@ -299,6 +310,7 @@ impl ImageViewerApp {
         batches: Vec<Vec<FileEntry>>,
         saw_end: bool,
         ctx: &egui::Context,
+        process_visual_results: bool,
     ) {
         let ctx2 = ctx.clone();
         let tab_id = self.tab_manager.active().id;
@@ -346,7 +358,9 @@ impl ImageViewerApp {
         if saw_end {
             self.maybe_clear_pending_deletions();
         }
-        self.maybe_rebuild_inactive_panel_items(&ctx2);
+        if process_visual_results || saw_end {
+            self.maybe_rebuild_inactive_panel_items(&ctx2);
+        }
         ctx2.request_repaint();
     }
 

@@ -231,7 +231,9 @@ pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
             log::info!("[LIFECYCLE] App minimized - canceling OneDrive operations");
             // Track when we were minimized to calculate inactivity duration on restore
             app.last_restore_time = std::time::Instant::now();
+            app.begin_background_memory_trim();
         } else {
+            app.cancel_background_memory_trim();
             // Calculate how long the app was minimized
             let minimized_secs = app.last_restore_time.elapsed().as_secs_f64();
             app.minimized_duration_secs = minimized_secs;
@@ -246,6 +248,7 @@ pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
                     std::time::Instant::now() + std::time::Duration::from_secs_f64(burst_secs),
                 );
             }
+            app.run_deferred_post_load_visual_work();
             log::info!(
                 "[LIFECYCLE] App restored after {:.1}s of inactivity - burst, texture_flush={}",
                 minimized_secs,

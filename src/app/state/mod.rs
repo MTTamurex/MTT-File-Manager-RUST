@@ -408,6 +408,7 @@ pub struct ImageViewerApp {
     pub last_items_rebuild: Instant,
     pub pending_items_rebuild: bool,
     pub pending_items_count: usize,
+    pub pending_post_load_visual_work: bool,
     /// A newer final rebuild is waiting for this panel's current job to finish.
     pub inactive_final_items_rebuild_pending: bool,
     /// When true, `all_items` will be cleared on the first incoming batch
@@ -684,6 +685,12 @@ pub struct ImageViewerApp {
     pub last_memory_trace_log: Instant,
     pub last_texture_cache_retune: Instant,
     pub last_user_activity: Instant,
+    /// The monitor remains active for the full minimized lifetime. `pending`
+    /// tracks whether the current rise still needs a successful trim.
+    pub background_memory_trim_active: bool,
+    pub background_memory_trim_pending: bool,
+    pub background_memory_trim_success_baseline: u64,
+    pub background_memory_trim_last_stable_working_set_bytes: u64,
 
     // INACTIVITY RECOVERY: Track when app was restored from minimized state
     // Used to throttle heavy operations (watcher events, thumbnail loads) for a few frames
@@ -790,6 +797,7 @@ pub struct ImageViewerApp {
 }
 
 mod helpers;
+pub(crate) use helpers::cancel_pending_working_set_trim_for_native_restore;
 pub mod sidebar_tree_state;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -474,6 +474,7 @@ impl ImageViewerApp {
             last_items_rebuild: Instant::now(),
             pending_items_rebuild: false,
             pending_items_count: 0,
+            pending_post_load_visual_work: false,
             inactive_final_items_rebuild_pending: false,
             pending_all_items_clear: false,
             hold_visible_items_until_load_complete: false,
@@ -814,6 +815,10 @@ impl ImageViewerApp {
             // INACTIVITY RECOVERY: Window focus tracking
             was_focused: true,
             focus_lost_at: None,
+            background_memory_trim_active: false,
+            background_memory_trim_pending: false,
+            background_memory_trim_success_baseline: 0,
+            background_memory_trim_last_stable_working_set_bytes: 0,
         };
 
         // Spawn tooltip background worker for async metadata/thumbnail loading (P0-02/P0-03)

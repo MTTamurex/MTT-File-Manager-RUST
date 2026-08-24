@@ -413,7 +413,11 @@ impl ImageViewerApp {
         }
     }
 
-    pub(super) fn handle_items_after_end_of_load(&mut self, ctx: &egui::Context) {
+    pub(super) fn handle_items_after_end_of_load(
+        &mut self,
+        ctx: &egui::Context,
+        enqueue_visual_work: bool,
+    ) {
         self.is_loading_folder = false;
         self.folder_load_error = None;
         self.maybe_clear_pending_deletions();
@@ -457,10 +461,22 @@ impl ImageViewerApp {
             self.hold_visible_items_until_load_complete = false;
         }
 
-        self.enqueue_onedrive_eager_folder_previews();
-        self.enqueue_non_usn_eager_folder_cover_revalidation();
+        self.pending_post_load_visual_work = !enqueue_visual_work;
+        if enqueue_visual_work {
+            self.enqueue_onedrive_eager_folder_previews();
+            self.enqueue_non_usn_eager_folder_cover_revalidation();
+        }
         self.last_items_rebuild = Instant::now();
         ctx.request_repaint();
+    }
+
+    pub(crate) fn run_deferred_post_load_visual_work(&mut self) {
+        if !self.pending_post_load_visual_work {
+            return;
+        }
+        self.pending_post_load_visual_work = false;
+        self.enqueue_onedrive_eager_folder_previews();
+        self.enqueue_non_usn_eager_folder_cover_revalidation();
     }
 
     pub(super) fn maybe_schedule_stream_items_rebuild(&mut self, ctx: &egui::Context) {

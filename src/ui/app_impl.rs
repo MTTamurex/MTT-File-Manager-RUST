@@ -10,6 +10,7 @@ const PREFERENCES_FLUSH_INTERVAL: Duration = Duration::from_secs(1);
 const CLIPBOARD_CLEANUP_RETRY_INTERVAL: Duration = Duration::from_secs(1);
 const DRIVE_BITMASK_CHECK_INTERVAL: Duration = Duration::from_secs(3);
 const DRIVE_INFO_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
+const BACKGROUND_MEMORY_MONITOR_INTERVAL: Duration = Duration::from_secs(2);
 
 struct RepaintDeadlineInputs {
     file_ops_in_progress: bool,
@@ -18,6 +19,7 @@ struct RepaintDeadlineInputs {
     drive_bitmask_check_elapsed: Duration,
     drive_info_refresh_elapsed: Option<Duration>,
     drive_health_wakeup_in: Option<Duration>,
+    background_memory_monitor_active: bool,
 }
 
 fn remaining_after_frame_check(elapsed: Duration, interval: Duration) -> Duration {
@@ -55,6 +57,9 @@ fn next_background_repaint(inputs: RepaintDeadlineInputs) -> Duration {
     if let Some(remaining) = inputs.drive_health_wakeup_in {
         deadline = deadline.min(remaining);
     }
+    if inputs.background_memory_monitor_active {
+        deadline = deadline.min(BACKGROUND_MEMORY_MONITOR_INTERVAL);
+    }
 
     deadline
 }
@@ -70,7 +75,7 @@ impl ImageViewerApp {
             })
             .flatten();
         let deadline = next_background_repaint(RepaintDeadlineInputs {
-            file_ops_in_progress: self.file_operation_state.file_ops_in_progress > 0,
+            file_ops_in_progress: self.file_operations_active_for_background(),
             clipboard_cleanup_pending: self
                 .file_operation_state
                 .pending_clipboard_cleanup_sequence
@@ -81,6 +86,7 @@ impl ImageViewerApp {
             drive_bitmask_check_elapsed: self.drive_state.last_drive_bitmask_check.elapsed(),
             drive_info_refresh_elapsed,
             drive_health_wakeup_in: self.drive_health_next_wakeup_in(std::time::Instant::now()),
+            background_memory_monitor_active: self.background_memory_trim_active,
         });
         ctx.request_repaint_after(deadline);
     }
@@ -98,7 +104,7 @@ impl ImageViewerApp {
             self.process_background_messages(ctx);
             self.retry_completed_clipboard_cleanup();
             self.flush_preferences_if_needed();
-            self.refresh_working_set_trim_blocker(false);
+            self.run_background_memory_maintenance();
             self.reap_video_player_process();
             crate::viewer_processes::reap_exited();
             self.request_next_background_repaint(ctx);
@@ -174,6 +180,8 @@ impl eframe::App for ImageViewerApp {
         let viewport_visible = ctx.input(|input| input.viewport().visible().unwrap_or(true));
         if !viewport_visible {
             self.run_background_updates(ctx, false);
+        } else {
+            self.run_deferred_post_load_visual_work();
         }
     }
 
@@ -741,6 +749,7 @@ mod tests {
             drive_bitmask_check_elapsed: Duration::ZERO,
             drive_info_refresh_elapsed: None,
             drive_health_wakeup_in: None,
+            background_memory_monitor_active: false,
         }
     }
 
@@ -794,6 +803,16 @@ mod tests {
         };
 
         assert_eq!(next_background_repaint(inputs), Duration::from_millis(2250));
+    }
+
+    #[test]
+    fn minimized_memory_monitor_keeps_two_second_polling_alive() {
+        let inputs = RepaintDeadlineInputs {
+            background_memory_monitor_active: true,
+            ..idle_inputs()
+        };
+
+        assert_eq!(next_background_repaint(inputs), Duration::from_secs(2));
     }
 
     #[test]

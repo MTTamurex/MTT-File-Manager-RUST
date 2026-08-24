@@ -7,7 +7,7 @@ use eframe::egui;
 use std::time::{Duration, Instant};
 
 impl ImageViewerApp {
-    pub(super) fn process_global_search_events(&mut self) {
+    pub(super) fn process_global_search_events(&mut self, schedule_visual_poll: bool) {
         const MAX_GLOBAL_SEARCH_MSGS_PER_FRAME: usize = 48;
         let budget = if self.frame_time_peak_ms > 33.33 {
             Duration::from_millis(1)
@@ -148,7 +148,7 @@ impl ImageViewerApp {
 
         drain_tooltip_responses(self);
 
-        if self.global_search.active {
+        if self.global_search.active && schedule_visual_poll {
             self.ui_ctx
                 .request_repaint_after(if self.global_search.indexing_in_progress {
                     Duration::from_millis(200)

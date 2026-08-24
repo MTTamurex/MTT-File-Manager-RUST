@@ -711,6 +711,40 @@ impl CacheManager {
         )
     }
 
+    /// Drops retained image/texture storage while preserving requests that are
+    /// queued or already running. Their terminal results remain responsible for
+    /// clearing the in-flight markers.
+    pub fn release_thumbnail_cache_storage_for_background(
+        &mut self,
+        texture_capacity: usize,
+        folder_preview_capacity: usize,
+        rgba_capacity: usize,
+        rgba_budget_bytes: usize,
+    ) -> (usize, usize, usize, usize) {
+        let textures_removed = self.texture_cache.len();
+        let folder_previews_removed = self.folder_preview_cache.len();
+        let rgba_removed = self.rgba_data_cache.len();
+        let rgba_bytes_removed = self.rgba_data_bytes;
+
+        self.texture_cache =
+            LruCache::new(nz_cache_size(texture_capacity, "texture_cache(background)"));
+        self.folder_preview_cache = LruCache::new(nz_cache_size(
+            folder_preview_capacity,
+            "folder_preview_cache(background)",
+        ));
+        self.rgba_data_cache =
+            LruCache::new(nz_cache_size(rgba_capacity, "rgba_data_cache(background)"));
+        self.rgba_data_bytes = 0;
+        self.max_rgba_data_bytes = rgba_budget_bytes;
+
+        (
+            textures_removed,
+            rgba_removed,
+            folder_previews_removed,
+            rgba_bytes_removed,
+        )
+    }
+
     // ========== RAM Cache Methods (Layer 2 - RGBA Data) ==========
 
     /// Checks if RGBA data is in the RAM cache
@@ -1151,6 +1185,20 @@ mod tests {
 
         cache.finish_loading(&path);
         assert!(!cache.is_loading(&path));
+    }
+
+    #[test]
+    fn background_cache_release_preserves_in_flight_markers() {
+        let mut cache = CacheManager::new();
+        let thumbnail = PathBuf::from("active.png");
+        let preview = PathBuf::from("folder");
+        assert!(cache.start_loading(thumbnail.clone()));
+        assert!(cache.start_folder_preview_loading(preview.clone()));
+
+        cache.release_thumbnail_cache_storage_for_background(1, 1, 1, 0);
+
+        assert!(cache.is_loading(&thumbnail));
+        assert!(cache.is_folder_preview_loading(&preview));
     }
 
     #[test]
