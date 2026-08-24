@@ -370,7 +370,9 @@ impl TextViewerApp {
 
         // Handle scroll-to-line
         if let Some(target_line) = self.scroll_to_line.take() {
-            let y = target_line as f32 * row_height;
+            // `show_rows` includes item spacing when positioning each row.
+            let row_stride = row_height + ui.spacing().item_spacing.y;
+            let y = target_line as f32 * row_stride;
             scroll_area = scroll_area.vertical_scroll_offset(y.max(0.0));
         }
 
