@@ -55,10 +55,14 @@ pub fn build_snapshot(handle: &VolumeIndexHandle) -> Result<DiskAnalysisSnapshot
         // Bincode's fixed fields plus enum/vector framing fit comfortably in
         // this conservative per-record allowance. Reject before cloning names.
         let mut estimated_payload = 64usize;
-        for (_, record) in vol.records.iter() {
+        for (frn, record) in vol.records.iter() {
+            let name = vol
+                .names
+                .try_get(record.name_ref())
+                .ok_or_else(|| format!("Invalid NameRef for FRN {frn}"))?;
             estimated_payload = estimated_payload
                 .checked_add(64)
-                .and_then(|size| size.checked_add(vol.names.get(record.name_ref()).len()))
+                .and_then(|size| size.checked_add(name.len()))
                 .ok_or_else(|| "Disk analysis payload size overflow".to_string())?;
             if estimated_payload > MAX_DISK_ANALYSIS_PAYLOAD_BYTES {
                 return Err(format!(
@@ -70,10 +74,14 @@ pub fn build_snapshot(handle: &VolumeIndexHandle) -> Result<DiskAnalysisSnapshot
 
         let mut records = Vec::with_capacity(vol.records.len());
         for (frn, record) in vol.records.iter() {
+            let name = vol
+                .names
+                .try_get(record.name_ref())
+                .ok_or_else(|| format!("Invalid NameRef for FRN {frn}"))?;
             records.push(DiskAnalysisRecord {
                 frn: *frn,
                 parent_frn: record.parent_ref,
-                name: vol.names.get(record.name_ref()).to_string(),
+                name: name.to_string(),
                 size: record.size,
                 allocated_size: record.allocated_size,
                 is_dir: record.is_dir(),

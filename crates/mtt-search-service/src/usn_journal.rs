@@ -249,7 +249,7 @@ pub fn read_usn_changes(
         index,
         &mut dummy_count,
         true,
-    );
+    )?;
 
     Ok(new_last_usn)
 }
@@ -343,7 +343,7 @@ pub fn parse_usn_records(
     index: &mut VolumeIndex,
     count: &mut usize,
     apply_changes: bool,
-) {
+) -> Result<(), String> {
     let mut offset = 0usize;
 
     while offset + 64 <= data.len() {
@@ -406,15 +406,59 @@ pub fn parse_usn_records(
                 // Incremental update: process reason flags
                 let is_dir = (file_attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
                 if reason & USN_REASON_FILE_DELETE != 0 {
+                    let existed = index.records.get(&frn).is_some();
                     index.remove_record(frn);
+                    if existed {
+                        index
+                            .dir_modified_at
+                            .insert(parent_frn, std::time::Instant::now());
+                    }
                 } else if reason & USN_REASON_RENAME_NEW_NAME != 0 {
                     // Rename/move: remove from old parent, add to new parent.
                     let is_reparse = (file_attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
-                    index.move_record(frn, &name, parent_frn, is_dir, is_reparse);
+                    let old_location = index.records.get(&frn).map(|record| {
+                        (
+                            record.parent_ref,
+                            index.names.try_get(record.name_ref()) == Some(name.as_str()),
+                        )
+                    });
+                    if !index.move_record(frn, &name, parent_frn, is_dir, is_reparse) {
+                        return Err(format!("name arena full while moving FRN {frn}"));
+                    }
+                    let location_changed = old_location
+                        .as_ref()
+                        .map(|(old_parent, name_unchanged)| {
+                            *old_parent != parent_frn || !name_unchanged
+                        })
+                        .unwrap_or(true);
+                    if location_changed {
+                        let now = std::time::Instant::now();
+                        index.dir_modified_at.insert(parent_frn, now);
+                        if let Some((old_parent, _)) = old_location {
+                            index.dir_modified_at.insert(old_parent, now);
+                        }
+                    }
                 } else {
                     // Create or update (preserves hardlink children entries).
                     let is_reparse = (file_attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
-                    index.insert_record(frn, &name, parent_frn, is_dir, is_reparse);
+                    let structure_changed = index
+                        .records
+                        .get(&frn)
+                        .map(|record| {
+                            record.parent_ref != parent_frn
+                                || index.names.try_get(record.name_ref()) != Some(name.as_str())
+                                || record.is_dir() != is_dir
+                                || index.reparse_points.contains(&frn) != is_reparse
+                        })
+                        .unwrap_or(true);
+                    if !index.insert_record(frn, &name, parent_frn, is_dir, is_reparse) {
+                        return Err(format!("name arena full while inserting FRN {frn}"));
+                    }
+                    if reason & USN_REASON_FILE_CREATE != 0 && structure_changed {
+                        index
+                            .dir_modified_at
+                            .insert(parent_frn, std::time::Instant::now());
+                    }
                 }
 
                 // Refresh both logical and allocated sizes. This is outside
@@ -426,24 +470,156 @@ pub fn parse_usn_records(
                 {
                     index.pending_size_refresh.insert(frn);
                 }
-                // Track that the parent directory's contents changed.
-                // This enables CheckPathsModified to detect external changes
-                // via USN journal without any disk I/O on the client side.
-                index
-                    .dir_modified_at
-                    .insert(parent_frn, std::time::Instant::now());
             } else {
                 // Initial enumeration: just insert
                 let is_dir = (file_attributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
                 let is_reparse = (file_attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
                 if !index.insert_record_untracked(frn, &name, parent_frn, is_dir, is_reparse) {
-                    eprintln!("[USN] Name arena full — stopping enumeration");
-                    return;
+                    return Err(format!("name arena full while enumerating FRN {frn}"));
                 }
                 *count += 1;
             }
         }
 
         offset += record_length;
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        parse_usn_records, FILE_ATTRIBUTE_DIRECTORY, USN_REASON_BASIC_INFO_CHANGE,
+        USN_REASON_CLOSE, USN_REASON_DATA_EXTEND, USN_REASON_FILE_CREATE, USN_REASON_FILE_DELETE,
+        USN_REASON_RENAME_NEW_NAME,
+    };
+    use crate::file_index::VolumeIndex;
+
+    fn usn_record(frn: u64, parent: u64, reason: u32, attributes: u32, name: &[u16]) -> Vec<u8> {
+        let name_bytes = name.len() * 2;
+        let mut record = vec![0u8; 60 + name_bytes];
+        let record_len = record.len() as u32;
+        record[0..4].copy_from_slice(&record_len.to_le_bytes());
+        record[4..6].copy_from_slice(&2u16.to_le_bytes());
+        record[8..16].copy_from_slice(&frn.to_le_bytes());
+        record[16..24].copy_from_slice(&parent.to_le_bytes());
+        record[40..44].copy_from_slice(&reason.to_le_bytes());
+        record[52..56].copy_from_slice(&attributes.to_le_bytes());
+        record[56..58].copy_from_slice(&(name_bytes as u16).to_le_bytes());
+        record[58..60].copy_from_slice(&60u16.to_le_bytes());
+        for (chunk, code_unit) in record[60..].chunks_exact_mut(2).zip(name) {
+            chunk.copy_from_slice(&code_unit.to_le_bytes());
+        }
+        record
+    }
+
+    fn named_record(frn: u64, parent: u64, reason: u32, attributes: u32, name: &str) -> Vec<u8> {
+        usn_record(
+            frn,
+            parent,
+            reason,
+            attributes,
+            &name.encode_utf16().collect::<Vec<_>>(),
+        )
+    }
+
+    #[test]
+    fn repeated_non_structural_events_do_not_dirty_the_index() {
+        let mut index = VolumeIndex::empty('C');
+        assert!(index.insert_record(20, "file.bin", 10, false, false));
+        index.clear_pending();
+        index.binary_dirty = false;
+        let arena_len = index.names.len();
+        let data = named_record(
+            20,
+            10,
+            USN_REASON_CLOSE | USN_REASON_DATA_EXTEND | USN_REASON_BASIC_INFO_CHANGE,
+            0,
+            "file.bin",
+        );
+
+        parse_usn_records(&data, &mut index, &mut 0, true).unwrap();
+
+        assert_eq!(index.names.len(), arena_len);
+        assert!(index.pending_additions.is_empty());
+        assert!(!index.binary_dirty);
+        assert!(index.pending_size_refresh.contains(&20));
+        assert!(index.dir_modified_at.is_empty());
+    }
+
+    #[test]
+    fn repeated_create_does_not_grow_arena_or_structural_tracking() {
+        let mut index = VolumeIndex::empty('C');
+        let data = named_record(20, 10, USN_REASON_FILE_CREATE, 0, "file.bin");
+        parse_usn_records(&data, &mut index, &mut 0, true).unwrap();
+        index.clear_pending();
+        index.pending_size_refresh.clear();
+        index.dir_modified_at.clear();
+        index.binary_dirty = false;
+        let arena_len = index.names.len();
+
+        parse_usn_records(&data, &mut index, &mut 0, true).unwrap();
+
+        assert_eq!(index.names.len(), arena_len);
+        assert!(index.pending_additions.is_empty());
+        assert!(!index.binary_dirty);
+        assert!(index.dir_modified_at.is_empty());
+    }
+
+    #[test]
+    fn rename_marks_old_and_new_parents_only_once() {
+        let mut index = VolumeIndex::empty('C');
+        assert!(index.insert_record(20, "old.bin", 10, false, false));
+        index.dir_modified_at.clear();
+        let data = named_record(20, 11, USN_REASON_RENAME_NEW_NAME, 0, "new.bin");
+
+        parse_usn_records(&data, &mut index, &mut 0, true).unwrap();
+        assert!(index.dir_modified_at.contains_key(&10));
+        assert!(index.dir_modified_at.contains_key(&11));
+        let arena_len = index.names.len();
+
+        index.clear_pending();
+        index.dir_modified_at.clear();
+        index.binary_dirty = false;
+        parse_usn_records(&data, &mut index, &mut 0, true).unwrap();
+        assert_eq!(index.names.len(), arena_len);
+        assert!(index.pending_additions.is_empty());
+        assert!(!index.binary_dirty);
+        assert!(index.dir_modified_at.is_empty());
+    }
+
+    #[test]
+    fn absent_delete_is_no_op() {
+        let mut index = VolumeIndex::empty('C');
+        let data = named_record(
+            99,
+            10,
+            USN_REASON_FILE_DELETE,
+            FILE_ATTRIBUTE_DIRECTORY,
+            "missing",
+        );
+
+        parse_usn_records(&data, &mut index, &mut 0, true).unwrap();
+
+        assert!(index.pending_removals.is_empty());
+        assert!(!index.binary_dirty);
+        assert!(index.dir_modified_at.is_empty());
+    }
+
+    #[test]
+    fn insertion_failure_is_propagated_without_advancing_index_usn() {
+        let mut index = VolumeIndex::empty('C');
+        index.last_usn = 42;
+        let oversized_utf8_name = vec![0xD800; (u16::MAX as usize) / 2];
+        let data = usn_record(20, 10, USN_REASON_FILE_CREATE, 0, &oversized_utf8_name);
+
+        let result = parse_usn_records(&data, &mut index, &mut 0, true);
+
+        assert!(result.is_err());
+        assert_eq!(index.last_usn, 42);
+        assert!(index.records.get(&20).is_none());
+        assert!(index.pending_additions.is_empty());
+        assert!(!index.binary_dirty);
     }
 }

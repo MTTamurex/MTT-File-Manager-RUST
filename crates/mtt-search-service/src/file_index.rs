@@ -305,19 +305,35 @@ impl VolumeIndex {
         is_reparse: bool,
         track_pending: bool,
     ) -> bool {
-        let nr = match self.names.insert(name) {
-            Some(nr) => nr,
-            None => return false,
+        let old = self.records.get(&frn).copied();
+        let name_unchanged = old
+            .map(|record| self.names.try_get(record.name_ref()) == Some(name))
+            .unwrap_or(false);
+        let reparse_unchanged = self.reparse_points.contains(&frn) == is_reparse;
+
+        if old
+            .map(|record| {
+                name_unchanged
+                    && record.parent_ref == parent_ref
+                    && record.is_dir() == is_dir
+                    && reparse_unchanged
+            })
+            .unwrap_or(false)
+        {
+            return true;
+        }
+
+        let nr = if name_unchanged {
+            old.unwrap().name_ref()
+        } else {
+            match self.names.insert(name) {
+                Some(nr) => nr,
+                None => return false,
+            }
         };
 
-        // Determine what to do with the children map based on existing record.
-        let old = self
-            .records
-            .get(&frn)
-            .map(|r| (r.parent_ref, r.size, r.allocated_size));
-
-        let preserved_size = old.map_or(0, |(_, size, _)| size);
-        let preserved_allocated_size = old.map_or(0, |(_, _, allocated)| allocated);
+        let preserved_size = old.map_or(0, |record| record.size);
+        let preserved_allocated_size = old.map_or(0, |record| record.allocated_size);
 
         self.records.insert(
             frn,
@@ -334,16 +350,16 @@ impl VolumeIndex {
         self.set_reparse_state(frn, is_reparse);
 
         match old {
-            Some((old_parent, _, _)) if old_parent == parent_ref => {
+            Some(record) if record.parent_ref == parent_ref => {
                 // Same parent re-insert (e.g. long name + 8.3 short name).
                 // FRN is already in this parent's children — skip to avoid duplicates.
             }
-            Some((old_parent, _, _)) => {
+            Some(record) => {
                 // Different parent — this is a hardlink.  Save the OLD parent
                 // as an extra so `rebuild_children` can restore both entries.
                 let extras = self.hardlink_parents.entry(frn).or_default();
-                if !extras.contains(&old_parent) {
-                    extras.push(old_parent);
+                if !extras.contains(&record.parent_ref) {
+                    extras.push(record.parent_ref);
                 }
                 // Invariant: extras must never contain the current primary
                 // parent_ref, otherwise rebuild_children would duplicate the
@@ -462,10 +478,12 @@ impl VolumeIndex {
     /// Remove a file record from the index.
     /// The name bytes remain in the arena as dead space (reclaimed on persist+reload).
     pub fn remove_record(&mut self, frn: u64) {
-        if let Some(record) = self.records.remove(&frn) {
-            // Remove from primary parent's children list.
-            self.remove_child_edge(record.parent_ref, frn);
-        }
+        let Some(record) = self.records.remove(&frn) else {
+            return;
+        };
+
+        // Remove from primary parent's children list.
+        self.remove_child_edge(record.parent_ref, frn);
         self.reparse_points.remove(&frn);
         // Remove from all hardlink extra parents' children lists.
         if let Some(extra_parents) = self.hardlink_parents.remove(&frn) {
@@ -493,18 +511,38 @@ impl VolumeIndex {
         is_dir: bool,
         is_reparse: bool,
     ) -> bool {
-        let nr = match self.names.insert(name) {
-            Some(nr) => nr,
-            None => return false,
+        let old = self.records.get(&frn).copied();
+        let name_unchanged = old
+            .map(|record| self.names.try_get(record.name_ref()) == Some(name))
+            .unwrap_or(false);
+        let reparse_unchanged = self.reparse_points.contains(&frn) == is_reparse;
+
+        if old
+            .map(|record| {
+                name_unchanged
+                    && record.parent_ref == new_parent
+                    && record.is_dir() == is_dir
+                    && reparse_unchanged
+            })
+            .unwrap_or(false)
+        {
+            return true;
+        }
+
+        let nr = if name_unchanged {
+            old.unwrap().name_ref()
+        } else {
+            match self.names.insert(name) {
+                Some(nr) => nr,
+                None => return false,
+            }
         };
 
-        let (preserved_size, preserved_allocated_size) = self
-            .records
-            .get(&frn)
-            .map_or((0, 0), |r| (r.size, r.allocated_size));
+        let (preserved_size, preserved_allocated_size) =
+            old.map_or((0, 0), |record| (record.size, record.allocated_size));
 
         // Remove from old primary parent's children (true move, not hardlink).
-        if let Some(old_record) = self.records.get(&frn) {
+        if let Some(old_record) = old {
             let old_parent = old_record.parent_ref;
             if old_parent != new_parent {
                 self.remove_child_edge(old_parent, frn);
@@ -568,25 +606,6 @@ impl VolumeIndex {
                 .map(|age| age <= max_age)
                 .unwrap_or(false)
         });
-    }
-
-    /// Compact the arena: rebuild with only the names referenced by current
-    /// records.  Eliminates dead space from duplicate MFT name attributes
-    /// (long name + 8.3 short name for the same FRN) and incremental overwrites.
-    pub fn compact_arena(&mut self) {
-        let mut new_arena = NameArena::with_capacity(self.records.len() * 25);
-        for record in self.records.values_mut() {
-            let name = self.names.get(record.name_ref());
-            // This cannot fail: we are rebuilding from existing names that
-            // already fit in the old arena (same size or smaller).
-            let nr = new_arena
-                .insert(name)
-                .expect("compact_arena: rebuilt data must fit");
-            record.name_offset = nr.offset;
-            record.name_len = nr.len;
-        }
-        self.names = new_arena;
-        self.shrink_to_fit();
     }
 
     /// Release excess capacity after a bulk load/scan has stabilized.
@@ -1167,22 +1186,86 @@ mod tests {
     }
 
     #[test]
-    fn compact_arena_preserves_children_and_hardlinks() {
+    fn repeated_insert_is_a_complete_no_op() {
         let mut index = VolumeIndex::empty('C');
+        assert!(index.insert_record(20, "file.bin", 10, false, true));
+        index.clear_pending();
+        index.binary_dirty = false;
 
-        assert!(index.insert_record(10, "folder", 5, true, false));
-        assert!(index.insert_record(11, "other", 5, true, false));
+        let arena_len = index.names.len();
+        let name_ref = index.records.get(&20).unwrap().name_ref();
+        assert!(index.insert_record(20, "file.bin", 10, false, true));
+
+        let repeated_ref = index.records.get(&20).unwrap().name_ref();
+        assert_eq!(index.names.len(), arena_len);
+        assert_eq!(
+            (repeated_ref.offset, repeated_ref.len),
+            (name_ref.offset, name_ref.len)
+        );
+        assert!(index.pending_additions.is_empty());
+        assert!(index.pending_removals.is_empty());
+        assert!(!index.binary_dirty);
+    }
+
+    #[test]
+    fn same_name_insert_reuses_name_ref_and_preserves_hardlinks() {
+        let mut index = VolumeIndex::empty('C');
         assert!(index.insert_record(20, "file.bin", 10, false, false));
-        index.records.get_mut(&20).unwrap().size = 7;
-        assert!(index.insert_record(20, "file.bin", 11, false, false));
-        index.records.get_mut(&20).unwrap().size = 7;
+        let arena_len = index.names.len();
+        let name_ref = index.records.get(&20).unwrap().name_ref();
 
-        index.compact_arena();
+        assert!(index.insert_record(20, "file.bin", 11, false, true));
 
-        let folder_summary = index.folder_tree_summary(10);
-        let other_summary = index.folder_tree_summary(11);
-        assert_eq!((folder_summary.0, folder_summary.1), (7, 1));
-        assert_eq!((other_summary.0, other_summary.1), (7, 1));
+        let record = index.records.get(&20).unwrap();
+        assert_eq!(index.names.len(), arena_len);
+        assert_eq!(
+            (record.name_offset, record.name_len),
+            (name_ref.offset, name_ref.len)
+        );
+        assert_eq!(record.parent_ref, 11);
+        assert!(index.reparse_points.contains(&20));
+        assert_eq!(index.hardlink_parents.get(&20), Some(&vec![10]));
+        assert!(index.children.get(10).unwrap().contains(&20));
+        assert!(index.children.get(11).unwrap().contains(&20));
+    }
+
+    #[test]
+    fn repeated_move_is_no_op_and_same_name_move_reuses_name_ref() {
+        let mut index = VolumeIndex::empty('C');
+        assert!(index.insert_record(20, "file.bin", 10, false, false));
+        index.clear_pending();
+        index.binary_dirty = false;
+        let arena_len = index.names.len();
+        let name_ref = index.records.get(&20).unwrap().name_ref();
+
+        assert!(index.move_record(20, "file.bin", 11, false, false));
+        assert_eq!(index.names.len(), arena_len);
+        assert_eq!(
+            index.records.get(&20).unwrap().name_ref().offset,
+            name_ref.offset
+        );
+        assert!(!index
+            .children
+            .get(10)
+            .is_some_and(|children| children.contains(&20)));
+        assert!(index.children.get(11).unwrap().contains(&20));
+
+        index.clear_pending();
+        index.binary_dirty = false;
+        assert!(index.move_record(20, "file.bin", 11, false, false));
+        assert_eq!(index.names.len(), arena_len);
+        assert!(index.pending_additions.is_empty());
+        assert!(!index.binary_dirty);
+    }
+
+    #[test]
+    fn removing_absent_record_is_no_op() {
+        let mut index = VolumeIndex::empty('C');
+        index.remove_record(99);
+
+        assert!(index.pending_additions.is_empty());
+        assert!(index.pending_removals.is_empty());
+        assert!(!index.binary_dirty);
     }
 
     #[test]

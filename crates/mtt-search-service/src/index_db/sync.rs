@@ -1,6 +1,6 @@
 use rusqlite::params;
 
-use super::IndexDb;
+use super::{IndexDb, PersistedVolumeState};
 use crate::file_index::VolumeIndex;
 
 type IncrementalRecord = (u64, String, u64, bool, bool, Vec<u64>);
@@ -19,27 +19,6 @@ impl IndexDb {
         let conn = self.conn.lock();
 
         let drive = index.drive_letter.to_string();
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs() as i64;
-
-        conn.execute(
-            "INSERT OR REPLACE INTO volume_state
-             (drive_letter, journal_id, last_usn, files_indexed, last_full_scan_epoch, has_hardlink_parent_data, has_reparse_point_data)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![
-                drive,
-                index.journal_id as i64,
-                index.last_usn,
-                index.records.len() as i64,
-                now,
-                index.hardlink_data_complete,
-                index.reparse_data_complete,
-            ],
-        )
-        .map_err(|e| format!("Save volume_state error: {}", e))?;
-
         let total = index.records.len() as u64;
         on_progress(0, total);
 
@@ -92,7 +71,9 @@ impl IndexDb {
                         None => break,
                     };
 
-                    let name = index.names.get(record.name_ref());
+                    let name = index.names.try_get(record.name_ref()).ok_or_else(|| {
+                        format!("Invalid NameRef while saving full SQLite snapshot for FRN {frn}")
+                    })?;
                     insert_stmt
                         .execute(params![
                             frn as i64,
@@ -159,6 +140,29 @@ impl IndexDb {
                 .map_err(|e| format!("Hardlink commit error: {}", e))?;
         }
 
+        // Publish the checkpoint only after all snapshot rows and hardlinks are
+        // durable. A crash during a batch leaves the older checkpoint in place,
+        // so startup replays USN or rejects a partial row count.
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+        conn.execute(
+            "INSERT OR REPLACE INTO volume_state
+             (drive_letter, journal_id, last_usn, files_indexed, last_full_scan_epoch, has_hardlink_parent_data, has_reparse_point_data)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                drive,
+                index.journal_id as i64,
+                index.last_usn,
+                index.records.len() as i64,
+                now,
+                index.hardlink_data_complete,
+                index.reparse_data_complete,
+            ],
+        )
+        .map_err(|e| format!("Save volume_state error: {}", e))?;
+
         eprintln!(
             "[DB] Saved {} records for volume {}:\\",
             index.records.len(),
@@ -209,18 +213,18 @@ impl IndexDb {
         Ok(())
     }
 
-    pub fn sync_records_incremental_snapshot(
+    pub fn sync_volume_incremental_snapshot(
         &self,
-        drive_letter: char,
+        state: &PersistedVolumeState,
         additions: &[IncrementalRecord],
         removals: &std::collections::HashSet<u64>,
     ) -> Result<(), String> {
-        if additions.is_empty() && removals.is_empty() {
-            return Ok(());
-        }
-
         let conn = self.conn.lock();
-        let drive = drive_letter.to_string();
+        let drive = state.drive_letter.to_string();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
 
         let tx = conn
             .unchecked_transaction()
@@ -297,13 +301,31 @@ impl IndexDb {
             }
         }
 
+        // The checkpoint and its record deltas must become durable together.
+        // Otherwise a crash can skip USN entries whose SQLite rows were not committed.
+        tx.execute(
+            "INSERT OR REPLACE INTO volume_state
+             (drive_letter, journal_id, last_usn, files_indexed, last_full_scan_epoch, has_hardlink_parent_data, has_reparse_point_data)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                drive,
+                state.journal_id as i64,
+                state.last_usn,
+                state.files_indexed as i64,
+                now,
+                state.has_hardlink_parent_data,
+                state.has_reparse_point_data,
+            ],
+        )
+        .map_err(|e| format!("Save incremental volume_state error: {}", e))?;
+
         tx.commit()
             .map_err(|e| format!("Transaction commit error: {}", e))?;
 
         if removed_count > 0 || added_count > 0 || updated_count > 0 {
             eprintln!(
                 "[DB] {}:\\ Incremental sync: +{} ~{} -{} records",
-                drive_letter, added_count, updated_count, removed_count
+                state.drive_letter, added_count, updated_count, removed_count
             );
         }
 

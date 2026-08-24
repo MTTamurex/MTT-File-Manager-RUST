@@ -819,6 +819,18 @@ pub(super) fn handle_client(
                     return;
                 }
             };
+            let _memory_permit = match crate::volume_indexers::try_begin_index_build() {
+                Some(permit) => permit,
+                None => {
+                    let _ = send_response(
+                        pipe,
+                        &SearchResponse::Error(
+                            mtt_search_protocol::DISK_ANALYSIS_BUSY_ERROR.to_string(),
+                        ),
+                    );
+                    return;
+                }
+            };
 
             match crate::disk_analysis::build_snapshot(&handle) {
                 Ok(snapshot) => {

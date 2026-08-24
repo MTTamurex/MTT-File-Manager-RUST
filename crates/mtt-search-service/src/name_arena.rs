@@ -86,10 +86,16 @@ impl NameArena {
     /// Retrieve a name by reference.
     #[inline]
     pub fn get(&self, r: NameRef) -> &str {
+        self.try_get(r).unwrap_or("")
+    }
+
+    /// Retrieve a name only when the full reference is in bounds and valid UTF-8.
+    #[inline]
+    pub fn try_get(&self, r: NameRef) -> Option<&str> {
         let start = r.offset as usize;
-        let end = start + r.len as usize;
+        let end = start.checked_add(r.len as usize)?;
         if end > self.len() {
-            return "";
+            return None;
         }
         let bytes = match &self.storage {
             NameStorage::Owned(buf) => &buf[start..end],
@@ -101,13 +107,13 @@ impl NameArena {
                     let append_end = end - base.len();
                     &append[append_start..append_end]
                 } else {
-                    return "";
+                    return None;
                 }
             }
         };
         // All data is inserted via `insert` which only accepts &str (valid UTF-8).
         // Use safe validation as defense-in-depth for a SYSTEM-level service.
-        std::str::from_utf8(bytes).unwrap_or("")
+        std::str::from_utf8(bytes).ok()
     }
 
     /// Clear all names (for re-scan).

@@ -5,14 +5,16 @@
 //!   [Records]                    — record_count × 40 bytes (8-byte FRN + 32-byte FileRecord)
 //!   [Hardlinks]                  — hardlink_entry_count × 16 bytes (8-byte child FRN + 8-byte parent FRN)
 //!   [Reparse Points]             — reparse_count × 8 bytes (8-byte FRN)
-//!   [NameArena]                  — arena_size bytes (optionally zstd-compressed)
+//!   [NameArena]                  — arena_size raw bytes, compacted from live records
 //!   [HMAC-SHA256]                — 32 bytes (covers everything above; key is per-machine, DPAPI-sealed)
 //!
 //! The records section is placed immediately after the fixed 80-byte header so
 //! it starts at an 8-byte-aligned file offset and can be reinterpreted as
 //! `&[RecordEntry]` via a read-only memory map (see [`crate::record_store`]).
-//! The variable-size NameArena is written last so it does not shift the records
-//! offset. Older layouts do not contain allocated sizes and are rebuilt.
+//! New snapshots always store a raw NameArena containing only names referenced
+//! by live records. The variable-size arena is written last so it does not shift
+//! the records offset. Existing v6 zstd snapshots remain readable. Older layouts
+//! do not contain allocated sizes and are rebuilt.
 //!
 //! SEC: The trailer is HMAC-SHA256 with a per-machine key sealed by DPAPI. HMAC
 //! requires the per-machine key (see [`super::integrity`]).
@@ -21,7 +23,7 @@ use std::io::{BufReader, BufWriter, Read, Write};
 use std::os::windows::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
-use memmap2::{Mmap, MmapOptions};
+use memmap2::MmapOptions;
 use windows::Win32::Storage::FileSystem::{FILE_SHARE_DELETE, FILE_SHARE_READ};
 
 use super::integrity::{self, HMAC_OUTPUT_SIZE};
@@ -48,10 +50,6 @@ const MAX_REPARSE: usize = 10_000_000;
 
 const ARENA_COMPRESSION_NONE: u8 = 0;
 const ARENA_COMPRESSION_ZSTD: u8 = 1;
-const ARENA_MIN_RECORDS_TO_COMPRESS: u64 = 50_000;
-/// Only compress if the compressed size is at most this ratio of the original.
-const ARENA_MIN_COMPRESSION_RATIO: f64 = 0.95;
-const ZSTD_COMPRESSION_LEVEL: i32 = 1;
 
 #[repr(C, packed)]
 struct Header {
@@ -246,22 +244,6 @@ fn mmap_records_enabled(records_bytes: usize) -> bool {
     }
 }
 
-/// Compress the raw arena bytes using zstd level 1. Returns `None` if
-/// compression fails or does not meet the minimum savings threshold.
-fn compress_arena(raw: &[u8], record_count: u64) -> Option<Vec<u8>> {
-    if record_count < ARENA_MIN_RECORDS_TO_COMPRESS {
-        return None;
-    }
-
-    let compressed = zstd::encode_all(raw, ZSTD_COMPRESSION_LEVEL).ok()?;
-    let ratio = compressed.len() as f64 / raw.len().max(1) as f64;
-    if ratio > ARENA_MIN_COMPRESSION_RATIO {
-        return None;
-    }
-
-    Some(compressed)
-}
-
 /// Decompress an arena given its compression type and expected uncompressed size.
 fn decompress_arena(
     compressed: &[u8],
@@ -296,6 +278,31 @@ fn decompress_arena(
     }
 }
 
+fn compact_arena_size(index: &VolumeIndex) -> Result<usize, String> {
+    let mut arena_size = 0usize;
+    for (&frn, record) in index.records.iter_sorted() {
+        let name = index.names.try_get(record.name_ref()).ok_or_else(|| {
+            format!(
+                "Invalid NameRef for FRN {}: offset {} length {} in {}-byte arena",
+                frn,
+                record.name_offset,
+                record.name_len,
+                index.names.len()
+            )
+        })?;
+        arena_size = arena_size
+            .checked_add(name.len())
+            .ok_or_else(|| "Compacted name arena size overflow".to_string())?;
+        if arena_size > MAX_ARENA_BYTES {
+            return Err(format!(
+                "Compacted name arena too large: {} bytes",
+                arena_size
+            ));
+        }
+    }
+    Ok(arena_size)
+}
+
 /// Save a VolumeIndex to a binary file atomically (write temp + rename).
 pub fn save(index: &VolumeIndex) -> Result<(), String> {
     let path = index_path(index.drive_letter);
@@ -308,6 +315,14 @@ pub fn save(index: &VolumeIndex) -> Result<(), String> {
     }
 
     let start = std::time::Instant::now();
+    crate::memory_trim::log_process_memory(&format!(
+        "{}:\\ before binary snapshot",
+        index.drive_letter
+    ));
+
+    // Validate every live NameRef and calculate the compact arena size without
+    // materializing a second arena-sized buffer.
+    let arena_size = compact_arena_size(index)?;
 
     // SEC: Resolve the per-machine HMAC key BEFORE opening the temp file so a
     // missing/unreadable key never produces a half-written index on disk.
@@ -319,30 +334,6 @@ pub fn save(index: &VolumeIndex) -> Result<(), String> {
     let mut hmac = integrity::HmacSha256::new(&key).map_err(|e| format!("HMAC init: {}", e))?;
 
     let hardlink_entry_count: usize = index.hardlink_parents.values().map(Vec::len).sum();
-
-    // Collect the NameArena into a contiguous buffer so we can optionally
-    // compress it. For large indexes this saves significant disk space; the
-    // temporary duplicate is freed as soon as the save finishes.
-    let arena_size = index.names.len();
-    let mut raw_arena = Vec::with_capacity(arena_size);
-    index
-        .names
-        .for_each_slice(|slice| raw_arena.extend_from_slice(slice));
-
-    let (arena_compression, arena_bytes): (u8, Vec<u8>) =
-        match compress_arena(&raw_arena, index.records.len() as u64) {
-            Some(compressed) => {
-                eprintln!(
-                    "[BINARY-IDX] {}:\\ Compressing arena {} -> {} bytes ({:.1}%)",
-                    index.drive_letter,
-                    arena_size,
-                    compressed.len(),
-                    compressed.len() as f64 / arena_size.max(1) as f64 * 100.0
-                );
-                (ARENA_COMPRESSION_ZSTD, compressed)
-            }
-            None => (ARENA_COMPRESSION_NONE, raw_arena),
-        };
 
     // Build header.
     let mut flags: u64 = 0;
@@ -360,7 +351,7 @@ pub fn save(index: &VolumeIndex) -> Result<(), String> {
         magic: *MAGIC,
         version: VERSION,
         drive_letter: index.drive_letter as u8,
-        arena_compression,
+        arena_compression: ARENA_COMPRESSION_NONE,
         _pad: [0; 2],
         journal_id: index.journal_id,
         last_usn: index.last_usn,
@@ -369,7 +360,7 @@ pub fn save(index: &VolumeIndex) -> Result<(), String> {
         hardlink_entry_count: hardlink_entry_count as u64,
         reparse_count: index.reparse_points.len() as u64,
         flags,
-        compressed_arena_size: arena_bytes.len() as u64,
+        compressed_arena_size: arena_size as u64,
     };
 
     // Write header.
@@ -379,13 +370,32 @@ pub fn save(index: &VolumeIndex) -> Result<(), String> {
 
     // The immutable base is already sorted. Only overlay references are sorted
     // and merged, keeping save memory proportional to live deltas instead of N.
+    // Each temporary record points into the compact arena that is streamed below.
+    let mut compact_name_offset = 0usize;
     for (&frn, rec) in index.records.iter_sorted() {
+        let name = index.names.try_get(rec.name_ref()).ok_or_else(|| {
+            format!(
+                "Invalid NameRef for FRN {} while writing records: offset {} length {}",
+                frn, rec.name_offset, rec.name_len
+            )
+        })?;
+        let mut compact_rec = *rec;
+        compact_rec.name_offset = u32::try_from(compact_name_offset)
+            .map_err(|_| "Compacted name offset exceeds u32".to_string())?;
+        compact_name_offset = compact_name_offset
+            .checked_add(name.len())
+            .ok_or_else(|| "Compacted name offset overflow".to_string())?;
+
         write_authenticated_chunk(&mut writer, &mut hmac, &frn.to_le_bytes())?;
         let rec_bytes: &[u8] = unsafe {
-            std::slice::from_raw_parts(rec as *const FileRecord as *const u8, FILE_RECORD_SIZE)
+            std::slice::from_raw_parts(
+                &compact_rec as *const FileRecord as *const u8,
+                FILE_RECORD_SIZE,
+            )
         };
         write_authenticated_chunk(&mut writer, &mut hmac, rec_bytes)?;
     }
+    debug_assert_eq!(compact_name_offset, arena_size);
 
     // Write Hardlink pairs.
     for (&child, parents) in &index.hardlink_parents {
@@ -402,9 +412,20 @@ pub fn save(index: &VolumeIndex) -> Result<(), String> {
         write_authenticated_chunk(&mut writer, &mut hmac, &frn.to_le_bytes())?;
     }
 
-    // Write NameArena (compressed or raw) LAST so the fixed-size records section
-    // stays at an 8-byte-aligned offset (HEADER_SIZE) for zero-copy mmap on load.
-    write_authenticated_chunk(&mut writer, &mut hmac, &arena_bytes)?;
+    // Stream live names in exactly the same sorted-record order used above.
+    // NameArena stays last so records remain 8-byte aligned for zero-copy mmap.
+    let mut written_arena_size = 0usize;
+    for (&frn, rec) in index.records.iter_sorted() {
+        let name = index.names.try_get(rec.name_ref()).ok_or_else(|| {
+            format!(
+                "Invalid NameRef for FRN {} while writing arena: offset {} length {}",
+                frn, rec.name_offset, rec.name_len
+            )
+        })?;
+        write_authenticated_chunk(&mut writer, &mut hmac, name.as_bytes())?;
+        written_arena_size += name.len();
+    }
+    debug_assert_eq!(written_arena_size, arena_size);
 
     // SEC: Compute HMAC-SHA256 incrementally over the serialized payload.
     let tag = hmac
@@ -426,12 +447,17 @@ pub fn save(index: &VolumeIndex) -> Result<(), String> {
 
     let elapsed = start.elapsed();
     eprintln!(
-        "[BINARY-IDX] {}:\\ Saved {} records + {} arena bytes in {:.3}s",
+        "[BINARY-IDX] {}:\\ Saved {} records + {} compact arena bytes (reclaimed {} dead bytes) in {:.3}s",
         index.drive_letter,
         index.records.len(),
-        index.names.len(),
+        arena_size,
+        index.names.len().saturating_sub(arena_size),
         elapsed.as_secs_f64()
     );
+    crate::memory_trim::log_process_memory(&format!(
+        "{}:\\ after binary snapshot",
+        index.drive_letter
+    ));
     Ok(())
 }
 
@@ -452,6 +478,38 @@ fn open_index_read_stable(path: &Path) -> Result<std::fs::File, String> {
         .share_mode((FILE_SHARE_READ | FILE_SHARE_DELETE).0)
         .open(path)
         .map_err(|e| format!("Open stable binary index: {}", e))
+}
+
+fn verify_file_hmac(file: &std::fs::File, file_len: usize) -> Result<(), String> {
+    use std::io::{Seek, SeekFrom};
+
+    if file_len < TRAILER_SIZE {
+        return Err("binary index is shorter than its HMAC trailer".to_string());
+    }
+    let key = integrity::machine_key().map_err(|e| format!("HMAC key unavailable: {e}"))?;
+    let mut hmac = integrity::HmacSha256::new(&key).map_err(|e| format!("HMAC init: {e}"))?;
+    let mut handle = file
+        .try_clone()
+        .map_err(|e| format!("clone index for HMAC verification: {e}"))?;
+    handle
+        .seek(SeekFrom::Start(0))
+        .map_err(|e| format!("seek index for HMAC verification: {e}"))?;
+    let mut reader = BufReader::new(handle);
+    read_authenticated_bytes(
+        &mut reader,
+        &mut hmac,
+        file_len - TRAILER_SIZE,
+        "snapshot payload",
+    )?;
+    let mut stored_tag = [0u8; TRAILER_SIZE];
+    reader
+        .read_exact(&mut stored_tag)
+        .map_err(|e| format!("read snapshot HMAC trailer: {e}"))?;
+    let computed_tag = hmac.finalize().map_err(|e| format!("HMAC compute: {e}"))?;
+    if !integrity::ct_eq(&stored_tag, &computed_tag) {
+        return Err("new binary index failed HMAC verification".to_string());
+    }
+    Ok(())
 }
 
 /// Load a VolumeIndex from the binary file. Returns None if the file is absent
@@ -831,88 +889,182 @@ fn read_records_region_owned(
     RecordStore::from_sorted_parts(record_frns, record_values)
 }
 
-/// Open the current index file and memory-map its records section when it is
-/// large enough to be worth mapping. Returns `Ok(None)` for small records
-/// (kept owned) or a non-current file. Does not re-verify the HMAC: it is only
-/// called on files this process just wrote in [`save_and_remap`].
-fn map_records_region(drive_letter: char) -> Result<Option<(Mmap, usize)>, String> {
+/// Build corresponding record and name storage from one handle to the snapshot
+/// this process just wrote. Non-empty regions prefer mmap and fall back to owned
+/// reads; empty regions stay owned because zero-length mappings are invalid.
+fn build_saved_storage_pair(
+    drive_letter: char,
+) -> Result<(RecordStore, crate::name_arena::NameArena), String> {
     let path = index_path(drive_letter);
     let file = open_index_read_stable(&path)?;
     let file_len = file
         .metadata()
         .map_err(|e| format!("index metadata: {}", e))?
-        .len() as usize;
+        .len();
+    let file_len = usize::try_from(file_len).map_err(|_| "index file too large".to_string())?;
     if file_len < HEADER_SIZE + TRAILER_SIZE {
-        return Ok(None);
+        return Err("new binary index is too small".to_string());
     }
+    verify_file_hmac(&file, file_len)?;
 
     let mut header_bytes = [0u8; HEADER_SIZE];
     {
+        use std::io::{Seek, SeekFrom};
+        let mut file_cursor = &file;
+        file_cursor
+            .seek(SeekFrom::Start(0))
+            .map_err(|e| format!("seek verified index header: {e}"))?;
         let mut reader = BufReader::new(&file);
         reader
             .read_exact(&mut header_bytes)
             .map_err(|e| format!("read header: {}", e))?;
     }
     if header_bytes[..8] != *MAGIC {
-        return Ok(None);
+        return Err("new binary index has bad magic".to_string());
     }
     let header: Header =
         unsafe { std::ptr::read_unaligned(header_bytes.as_ptr() as *const Header) };
-    if header.version != VERSION {
-        return Ok(None);
-    }
-    let record_count = header.record_count as usize;
-    let records_bytes = match record_count.checked_mul(RECORD_SIZE) {
-        Some(bytes) => bytes,
-        None => return Ok(None),
-    };
-    if record_count == 0 || !mmap_records_enabled(records_bytes) {
-        return Ok(None);
+    let version = header.version;
+    let file_drive_letter = header.drive_letter;
+    let arena_compression = header.arena_compression;
+    let record_count = usize::try_from(header.record_count)
+        .map_err(|_| "new binary index record count overflow".to_string())?;
+    let arena_size = usize::try_from(header.arena_size)
+        .map_err(|_| "new binary index arena size overflow".to_string())?;
+    let compressed_arena_size = usize::try_from(header.compressed_arena_size)
+        .map_err(|_| "new binary index compressed arena size overflow".to_string())?;
+    let hardlink_count = usize::try_from(header.hardlink_entry_count)
+        .map_err(|_| "new binary index hardlink count overflow".to_string())?;
+    let reparse_count = usize::try_from(header.reparse_count)
+        .map_err(|_| "new binary index reparse count overflow".to_string())?;
+
+    if record_count > MAX_RECORDS
+        || arena_size > MAX_ARENA_BYTES
+        || hardlink_count > MAX_HARDLINK_PAIRS
+        || reparse_count > MAX_REPARSE
+    {
+        return Err("new binary index exceeds validated size limits".to_string());
     }
 
-    let mmap = unsafe {
-        MmapOptions::new()
-            .offset(HEADER_SIZE as u64)
-            .len(records_bytes)
-            .map(&file)
+    if version != VERSION
+        || file_drive_letter as char != drive_letter
+        || arena_compression != ARENA_COMPRESSION_NONE
+        || compressed_arena_size != arena_size
+    {
+        return Err("new binary index header does not describe a raw v6 snapshot".to_string());
     }
-    .map_err(|e| format!("map records: {}", e))?;
-    Ok(Some((mmap, record_count)))
+    let records_bytes = record_count
+        .checked_mul(RECORD_SIZE)
+        .ok_or_else(|| "new binary index records size overflow".to_string())?;
+    let arena_offset = HEADER_SIZE
+        .checked_add(records_bytes)
+        .and_then(|size| size.checked_add(hardlink_count.checked_mul(HARDLINK_ENTRY_SIZE)?))
+        .and_then(|size| size.checked_add(reparse_count.checked_mul(REPARSE_ENTRY_SIZE)?))
+        .ok_or_else(|| "new binary index arena offset overflow".to_string())?;
+    let expected_size = arena_offset
+        .checked_add(arena_size)
+        .and_then(|size| size.checked_add(TRAILER_SIZE))
+        .ok_or_else(|| "new binary index size overflow".to_string())?;
+    if expected_size != file_len {
+        return Err(format!(
+            "new binary index size mismatch: expected {} got {}",
+            expected_size, file_len
+        ));
+    }
+
+    let records = if record_count == 0 {
+        RecordStore::new()
+    } else {
+        match unsafe {
+            MmapOptions::new()
+                .offset(HEADER_SIZE as u64)
+                .len(records_bytes)
+                .map(&file)
+        } {
+            Ok(mmap) => match RecordStore::from_mmap(mmap, record_count) {
+                Ok(store) => store,
+                Err(error) => {
+                    eprintln!(
+                        "[BINARY-IDX] {}:\\ records remap unusable ({}); reading owned",
+                        drive_letter, error
+                    );
+                    read_records_region_owned(&file, record_count)?
+                }
+            },
+            Err(error) => {
+                eprintln!(
+                    "[BINARY-IDX] {}:\\ records remap failed ({}); reading owned",
+                    drive_letter, error
+                );
+                read_records_region_owned(&file, record_count)?
+            }
+        }
+    };
+
+    let names = if arena_size == 0 {
+        crate::name_arena::NameArena::with_capacity(0)
+    } else {
+        match unsafe {
+            MmapOptions::new()
+                .offset(arena_offset as u64)
+                .len(arena_size)
+                .map(&file)
+        } {
+            Ok(mmap) => crate::name_arena::NameArena::from_mmap(mmap),
+            Err(error) => {
+                eprintln!(
+                    "[BINARY-IDX] {}:\\ arena remap failed ({}); reading owned",
+                    drive_letter, error
+                );
+                crate::name_arena::NameArena::from_vec(read_arena_region_owned(
+                    &file,
+                    arena_offset,
+                    arena_size,
+                )?)
+            }
+        }
+    };
+
+    Ok((records, names))
 }
 
-/// Save the index as MTTIDX06 and, for large volumes, swap its record store to
-/// a memory mapping of the freshly written file.
+fn read_arena_region_owned(
+    file: &std::fs::File,
+    arena_offset: usize,
+    arena_size: usize,
+) -> Result<Vec<u8>, String> {
+    use std::io::{Seek, SeekFrom};
+
+    let mut handle = file
+        .try_clone()
+        .map_err(|e| format!("clone index handle: {}", e))?;
+    handle
+        .seek(SeekFrom::Start(arena_offset as u64))
+        .map_err(|e| format!("seek name arena: {}", e))?;
+    let mut bytes = vec![0u8; arena_size];
+    handle
+        .read_exact(&mut bytes)
+        .map_err(|e| format!("read name arena: {}", e))?;
+    Ok(bytes)
+}
+
+/// Save the index as a compact raw MTTIDX06 snapshot, then replace both the
+/// record store and NameArena with corresponding storage from that same file.
 ///
-/// Dropping the previous record store releases any prior mapping, so Windows
-/// reclaims the superseded (unlinked) inode — keeping the on-disk footprint at
-/// 1x while record bytes move from private heap into evictable, file-backed
-/// page cache. Small volumes stay owned (mapping saves negligible RAM).
+/// Both replacement values are fully constructed before either current value is
+/// changed. Mappings are preferred even for small non-empty regions to minimize
+/// private heap; owned reads are retained as a portability/error fallback.
 pub fn save_and_remap(index: &mut VolumeIndex) -> Result<(), String> {
     save(index)?;
     let drive_letter = index.drive_letter;
-    match map_records_region(drive_letter) {
-        Ok(Some((mmap, count))) => match RecordStore::from_mmap(mmap, count) {
-            Ok(store) => index.records = store,
-            Err(e) => {
-                eprintln!(
-                    "[BINARY-IDX] {}:\\ records remap skipped: {}",
-                    drive_letter, e
-                );
-            }
-        },
-        Ok(None) => {
-            // A mapped base can fall below the mapping threshold after mass
-            // deletions (or mmap can be disabled at runtime). Replace it with
-            // the freshly saved compact owned representation so the old map
-            // and its potentially large tombstone set are released.
-            if index.records.is_mapped() {
-                let file = open_index_read_stable(&index_path(drive_letter))?;
-                index.records = read_records_region_owned(&file, index.records.len())?;
-            }
+    match build_saved_storage_pair(drive_letter) {
+        Ok((records, names)) => {
+            index.records = records;
+            index.names = names;
         }
         Err(e) => {
             eprintln!(
-                "[BINARY-IDX] {}:\\ records remap failed: {}",
+                "[BINARY-IDX] {}:\\ snapshot remap skipped: {}",
                 drive_letter,
                 crate::redact_paths(&e)
             );
@@ -933,46 +1085,51 @@ pub struct PersistedBinaryState {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn arena_compression_round_trips() {
-        // File names have lots of repeated extensions/patterns, so this should
-        // compress well and exercise the threshold logic.
-        let mut raw = Vec::new();
-        for i in 0..100_000 {
-            raw.extend_from_slice(format!("file_{}.txt\0", i).as_bytes());
-        }
-
-        let compressed =
-            compress_arena(&raw, 100_000).expect("should compress large repetitive arena");
-        assert!(compressed.len() < raw.len() / 2);
-
-        let decompressed = decompress_arena(&compressed, ARENA_COMPRESSION_ZSTD, raw.len())
-            .expect("should decompress");
-        assert_eq!(decompressed, raw);
-    }
-
-    #[test]
-    fn small_arena_is_not_compressed() {
-        let raw = b"short unique names without repetition".to_vec();
-        assert!(compress_arena(&raw, 10).is_none());
-    }
-
-    #[test]
-    fn uncompressed_arena_decompresses_exactly() {
-        let raw = b"hello world".to_vec();
-        let decompressed = decompress_arena(&raw, ARENA_COMPRESSION_NONE, raw.len())
-            .expect("should pass through raw bytes");
-        assert_eq!(decompressed, raw);
-    }
-
-    #[test]
-    fn decompress_detects_size_mismatch() {
-        let raw = b"hello world".to_vec();
-        assert!(decompress_arena(&raw, ARENA_COMPRESSION_NONE, 5).is_err());
-    }
-
     use crate::file_index::VolumeIndex;
+
+    fn clean_index_files(drive: char) {
+        let path = index_path(drive);
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(path.with_extension("bin.tmp"));
+    }
+
+    fn read_header(path: &Path) -> Header {
+        let bytes = std::fs::read(path).expect("read snapshot");
+        assert!(bytes.len() >= HEADER_SIZE);
+        unsafe { std::ptr::read_unaligned(bytes.as_ptr() as *const Header) }
+    }
+
+    fn rewrite_arena_as_legacy_zstd(path: &Path) {
+        let bytes = std::fs::read(path).expect("read raw v6 snapshot");
+        let mut header: Header =
+            unsafe { std::ptr::read_unaligned(bytes.as_ptr() as *const Header) };
+        let record_count = header.record_count as usize;
+        let hardlink_count = header.hardlink_entry_count as usize;
+        let reparse_count = header.reparse_count as usize;
+        let arena_size = header.arena_size as usize;
+        let arena_offset = HEADER_SIZE
+            + record_count * RECORD_SIZE
+            + hardlink_count * HARDLINK_ENTRY_SIZE
+            + reparse_count * REPARSE_ENTRY_SIZE;
+        let compressed = zstd::encode_all(&bytes[arena_offset..arena_offset + arena_size], 1)
+            .expect("compress legacy arena");
+
+        header.arena_compression = ARENA_COMPRESSION_ZSTD;
+        header.compressed_arena_size = compressed.len() as u64;
+        let header_bytes = unsafe {
+            std::slice::from_raw_parts(&header as *const Header as *const u8, HEADER_SIZE)
+        };
+        let mut payload = Vec::with_capacity(arena_offset + compressed.len());
+        payload.extend_from_slice(header_bytes);
+        payload.extend_from_slice(&bytes[HEADER_SIZE..arena_offset]);
+        payload.extend_from_slice(&compressed);
+
+        let key = integrity::machine_key().expect("test HMAC key");
+        let mut hmac = integrity::HmacSha256::new(&key).expect("HMAC init");
+        hmac.update(&payload).expect("HMAC update");
+        payload.extend_from_slice(&hmac.finalize().expect("HMAC finalize"));
+        std::fs::write(path, payload).expect("write legacy zstd v6 snapshot");
+    }
 
     fn sample_index(drive: char) -> VolumeIndex {
         let mut index = VolumeIndex::empty(drive);
@@ -1011,7 +1168,7 @@ mod tests {
         crate::index_db::init_data_dir_for_tests();
         let drive = 'W';
         let path = index_path(drive);
-        let _ = std::fs::remove_file(&path);
+        clean_index_files(drive);
 
         let index = sample_index(drive);
         save(&index).expect("save v6");
@@ -1025,5 +1182,210 @@ mod tests {
 
         assert_eq!(&read_file_magic(&path).unwrap(), MAGIC);
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn save_compacts_dead_arena_bytes_and_writes_raw_names() {
+        crate::index_db::init_data_dir_for_tests();
+        let drive = 'X';
+        let path = index_path(drive);
+        clean_index_files(drive);
+
+        let mut index = VolumeIndex::empty(drive);
+        assert!(index.insert_record(10, "dead-name", 5, false, false));
+        assert!(index.insert_record(20, "live", 5, false, false));
+        index.remove_record(10);
+        assert!(index.names.len() > "live".len());
+
+        save(&index).expect("save compact v6");
+        let header = read_header(&path);
+        let arena_compression = header.arena_compression;
+        let arena_size = header.arena_size;
+        let compressed_arena_size = header.compressed_arena_size;
+        assert_eq!(arena_compression, ARENA_COMPRESSION_NONE);
+        assert_eq!(arena_size, "live".len() as u64);
+        assert_eq!(compressed_arena_size, arena_size);
+
+        let (loaded, _) = load(drive).unwrap().unwrap();
+        assert_eq!(loaded.names.len(), "live".len());
+        assert_eq!(
+            loaded
+                .names
+                .try_get(loaded.records.get(&20).unwrap().name_ref()),
+            Some("live")
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn save_and_remap_keeps_records_and_names_corresponding() {
+        crate::index_db::init_data_dir_for_tests();
+        let drive = 'Y';
+        clean_index_files(drive);
+
+        let mut index = sample_index(drive);
+        assert!(index.insert_record(1, "dead-prefix", 5, false, false));
+        index.remove_record(1);
+        save_and_remap(&mut index).expect("save and remap");
+
+        assert_eq!(
+            index
+                .names
+                .try_get(index.records.get(&10).unwrap().name_ref()),
+            Some("docs")
+        );
+        assert_eq!(
+            index
+                .names
+                .try_get(index.records.get(&20).unwrap().name_ref()),
+            Some("a.txt")
+        );
+        assert!(index.insert_record(40, "after-remap", 5, false, false));
+        assert_eq!(
+            index
+                .names
+                .try_get(index.records.get(&40).unwrap().name_ref()),
+            Some("after-remap")
+        );
+        clean_index_files(drive);
+    }
+
+    #[test]
+    fn remap_rejects_tampered_snapshot_handle() {
+        use std::io::{Seek, SeekFrom};
+
+        crate::index_db::init_data_dir_for_tests();
+        let drive = 'T';
+        let path = index_path(drive);
+        clean_index_files(drive);
+        save(&sample_index(drive)).expect("save snapshot");
+
+        let mut file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&path)
+            .expect("open snapshot for tamper test");
+        file.seek(SeekFrom::Start(HEADER_SIZE as u64))
+            .expect("seek record byte");
+        file.write_all(&[0xff]).expect("tamper record byte");
+        file.sync_all().expect("flush tampered byte");
+        drop(file);
+
+        let error = match build_saved_storage_pair(drive) {
+            Ok(_) => panic!("tampered snapshot must not map"),
+            Err(error) => error,
+        };
+        assert!(error.contains("HMAC"), "{error}");
+        clean_index_files(drive);
+    }
+
+    #[test]
+    fn unicode_and_empty_names_round_trip() {
+        crate::index_db::init_data_dir_for_tests();
+        let drive = 'U';
+        clean_index_files(drive);
+
+        let mut index = VolumeIndex::empty(drive);
+        assert!(index.insert_record(10, "caf\u{e9}_\u{65e5}\u{672c}", 5, false, false));
+        assert!(index.insert_record(20, "", 5, false, false));
+        save(&index).expect("save unicode and empty names");
+
+        let (loaded, _) = load(drive).unwrap().unwrap();
+        assert_eq!(
+            loaded
+                .names
+                .try_get(loaded.records.get(&10).unwrap().name_ref()),
+            Some("caf\u{e9}_\u{65e5}\u{672c}")
+        );
+        assert_eq!(
+            loaded
+                .names
+                .try_get(loaded.records.get(&20).unwrap().name_ref()),
+            Some("")
+        );
+        clean_index_files(drive);
+    }
+
+    #[test]
+    fn serializer_rejects_invalid_name_references_and_utf8() {
+        crate::index_db::init_data_dir_for_tests();
+
+        let bounds_drive = 'I';
+        clean_index_files(bounds_drive);
+        let mut invalid_bounds = VolumeIndex::empty(bounds_drive);
+        assert!(invalid_bounds.insert_record(10, "valid", 5, false, false));
+        invalid_bounds.records.get_mut(&10).unwrap().name_offset = 99;
+        let error = save(&invalid_bounds).expect_err("out-of-bounds NameRef must fail");
+        assert!(error.contains("Invalid NameRef"), "{error}");
+
+        let utf8_drive = 'J';
+        clean_index_files(utf8_drive);
+        let mut invalid_utf8 = VolumeIndex::empty(utf8_drive);
+        assert!(invalid_utf8.insert_record(10, "x", 5, false, false));
+        invalid_utf8.names = crate::name_arena::NameArena::from_vec(vec![0xff]);
+        let error = save(&invalid_utf8).expect_err("invalid UTF-8 NameRef must fail");
+        assert!(error.contains("Invalid NameRef"), "{error}");
+
+        clean_index_files(bounds_drive);
+        clean_index_files(utf8_drive);
+    }
+
+    #[test]
+    fn empty_snapshot_saves_remaps_and_loads() {
+        crate::index_db::init_data_dir_for_tests();
+        let drive = 'Q';
+        clean_index_files(drive);
+
+        let mut index = VolumeIndex::empty(drive);
+        save_and_remap(&mut index).expect("save and remap empty index");
+        assert!(index.records.is_empty());
+        assert_eq!(index.names.len(), 0);
+
+        let (loaded, _) = load(drive).unwrap().unwrap();
+        assert!(loaded.records.is_empty());
+        assert_eq!(loaded.names.len(), 0);
+        clean_index_files(drive);
+    }
+
+    #[test]
+    fn nonempty_records_with_empty_arena_remap() {
+        crate::index_db::init_data_dir_for_tests();
+        let drive = 'E';
+        clean_index_files(drive);
+
+        let mut index = VolumeIndex::empty(drive);
+        assert!(index.insert_record(10, "", 5, false, false));
+        assert!(index.insert_record(20, "", 5, false, false));
+        save_and_remap(&mut index).expect("remap records with empty arena");
+
+        assert_eq!(index.names.len(), 0);
+        for frn in [10, 20] {
+            assert_eq!(
+                index
+                    .names
+                    .try_get(index.records.get(&frn).unwrap().name_ref()),
+                Some("")
+            );
+        }
+        clean_index_files(drive);
+    }
+
+    #[test]
+    fn legacy_zstd_v6_snapshot_still_loads() {
+        crate::index_db::init_data_dir_for_tests();
+        let drive = 'Z';
+        let path = index_path(drive);
+        clean_index_files(drive);
+
+        let index = sample_index(drive);
+        save(&index).expect("save raw v6");
+        rewrite_arena_as_legacy_zstd(&path);
+
+        let header = read_header(&path);
+        let arena_compression = header.arena_compression;
+        assert_eq!(arena_compression, ARENA_COMPRESSION_ZSTD);
+        let (loaded, _) = load(drive).expect("load legacy zstd v6").unwrap();
+        assert_matches_sample(&loaded, drive);
+        clean_index_files(drive);
     }
 }

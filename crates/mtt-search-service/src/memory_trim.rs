@@ -198,6 +198,7 @@ pub(crate) fn request_trim(reason: impl Into<String>) {
 }
 
 fn trim_working_set_uncoordinated(reason: &str) {
+    log_process_memory(&format!("before trim: {}", reason));
     unsafe {
         libmimalloc_sys::mi_collect(true);
     }
@@ -220,7 +221,38 @@ fn trim_working_set_uncoordinated(reason: &str) {
             Err(error) => eprintln!("[MEM] Working set trim failed after {}: {}", reason, error),
         }
     }
+    log_process_memory(&format!("after trim: {}", reason));
 }
+
+#[cfg(target_os = "windows")]
+pub(crate) fn log_process_memory(reason: &str) {
+    use windows::Win32::System::ProcessStatus::{
+        K32GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS, PROCESS_MEMORY_COUNTERS_EX,
+    };
+    use windows::Win32::System::Threading::GetCurrentProcess;
+
+    unsafe {
+        let mut counters = PROCESS_MEMORY_COUNTERS_EX::default();
+        if K32GetProcessMemoryInfo(
+            GetCurrentProcess(),
+            (&mut counters as *mut PROCESS_MEMORY_COUNTERS_EX).cast::<PROCESS_MEMORY_COUNTERS>(),
+            std::mem::size_of::<PROCESS_MEMORY_COUNTERS_EX>() as u32,
+        )
+        .as_bool()
+        {
+            eprintln!(
+                "[MEM] {}: working_set={:.1} MB, private={:.1} MB, peak_working_set={:.1} MB",
+                reason,
+                counters.WorkingSetSize as f64 / 1_048_576.0,
+                counters.PrivateUsage as f64 / 1_048_576.0,
+                counters.PeakWorkingSetSize as f64 / 1_048_576.0,
+            );
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn log_process_memory(_reason: &str) {}
 
 fn trim_disabled() -> bool {
     match std::env::var("MTT_SEARCH_DISABLE_WS_TRIM") {

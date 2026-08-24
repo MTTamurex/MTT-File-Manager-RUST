@@ -100,6 +100,11 @@ pub(crate) fn index_non_ntfs_volume(
         }
 
         let _trim_exclusion = crate::memory_trim::begin_trim_exclusion();
+        let _build_permit = super::begin_index_build();
+        crate::memory_trim::log_process_memory(&format!(
+            "{}:\\ before fallback filesystem scan",
+            drive_letter
+        ));
 
         let mut scanned_index = prev_record_count
             .map(|estimate| file_index::VolumeIndex::with_estimated_records(drive_letter, estimate))
@@ -200,6 +205,11 @@ pub(crate) fn index_non_ntfs_volume(
         }
 
         drop(_trim_exclusion);
+        crate::memory_trim::log_process_memory(&format!(
+            "{}:\\ after fallback filesystem scan",
+            drive_letter
+        ));
+        drop(_build_permit);
 
         let wait_result = if let Some(monitor) = &change_monitor {
             monitor.wait_for_change_or_timeout(&shutdown, current_interval)

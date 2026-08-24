@@ -16,6 +16,7 @@ const INCREMENTAL_APPLY_RETRY_SLEEP: std::time::Duration = std::time::Duration::
 const INCREMENTAL_WRITE_FALLBACK_TIMEOUT: std::time::Duration =
     std::time::Duration::from_millis(60);
 const INCREMENTAL_CONTENTION_LOG_INTERVAL: std::time::Duration = std::time::Duration::from_secs(30);
+const SIZE_REFRESH_BATCH_RECORDS: usize = 4_096;
 struct PendingPersistSnapshot {
     drive_letter: char,
     journal_id: u64,
@@ -32,17 +33,23 @@ fn restore_pending_snapshot(handle: &VolumeIndexHandle, snapshot: PendingPersist
     vol_index.pending_removals.extend(snapshot.removals);
 }
 
-fn take_pending_snapshot(handle: &VolumeIndexHandle) -> PendingPersistSnapshot {
+fn take_pending_snapshot(handle: &VolumeIndexHandle) -> Result<PendingPersistSnapshot, String> {
     let mut vol_index = handle.write();
-    let additions = std::mem::take(&mut vol_index.pending_additions);
-    let removals = std::mem::take(&mut vol_index.pending_removals);
-    let addition_rows = additions
+    let addition_rows: Vec<_> = vol_index
+        .pending_additions
         .iter()
-        .filter_map(|frn| {
-            let record = vol_index.records.get(frn)?;
-            Some((
+        .map(|frn| {
+            let record = vol_index
+                .records
+                .get(frn)
+                .ok_or_else(|| format!("Pending FRN {frn} is missing from the index"))?;
+            let name = vol_index
+                .names
+                .try_get(record.name_ref())
+                .ok_or_else(|| format!("Pending FRN {frn} has an invalid NameRef"))?;
+            Ok((
                 *frn,
-                vol_index.names.get(record.name_ref()).to_string(),
+                name.to_string(),
                 record.parent_ref,
                 record.is_dir(),
                 vol_index.reparse_points.contains(frn),
@@ -53,9 +60,11 @@ fn take_pending_snapshot(handle: &VolumeIndexHandle) -> PendingPersistSnapshot {
                     .unwrap_or_default(),
             ))
         })
-        .collect();
+        .collect::<Result<_, String>>()?;
+    let additions = std::mem::take(&mut vol_index.pending_additions);
+    let removals = std::mem::take(&mut vol_index.pending_removals);
 
-    PendingPersistSnapshot {
+    Ok(PendingPersistSnapshot {
         drive_letter: vol_index.drive_letter,
         journal_id: vol_index.journal_id,
         last_usn: vol_index.last_usn,
@@ -63,7 +72,7 @@ fn take_pending_snapshot(handle: &VolumeIndexHandle) -> PendingPersistSnapshot {
         additions,
         removals,
         addition_rows,
-    }
+    })
 }
 
 fn persist_pending_snapshot(
@@ -84,41 +93,59 @@ fn persist_pending_snapshot(
         return false;
     }
 
-    if let Err(e) = db.save_volume_state_snapshot(
-        snapshot.drive_letter,
-        snapshot.journal_id,
-        snapshot.last_usn,
-        snapshot.files_indexed,
-        true,
-        true,
-    ) {
-        eprintln!(
-            "[USN] {}:\\ Volume state persist error: {}",
-            drive_letter,
-            crate::redact_paths(&e.to_string())
-        );
-    }
-
-    if had_structural_changes && !skip_sqlite_data {
-        if let Err(e) = db.sync_records_incremental_snapshot(
+    if skip_sqlite_data {
+        if let Err(e) = db.save_volume_state_snapshot(
             snapshot.drive_letter,
-            &snapshot.addition_rows,
-            &snapshot.removals,
+            snapshot.journal_id,
+            snapshot.last_usn,
+            snapshot.files_indexed,
+            true,
+            true,
         ) {
             eprintln!(
-                "[USN] {}:\\ Incremental sync error (will retry): {}",
+                "[USN] {}:\\ Volume state persist error: {}",
                 drive_letter,
                 crate::redact_paths(&e.to_string())
             );
             restore_pending_snapshot(handle, snapshot);
             return false;
         }
+    } else if let Err(e) = db.sync_volume_incremental_snapshot(
+        &index_db::PersistedVolumeState {
+            drive_letter: snapshot.drive_letter,
+            journal_id: snapshot.journal_id,
+            last_usn: snapshot.last_usn,
+            files_indexed: snapshot.files_indexed as u64,
+            has_hardlink_parent_data: true,
+            has_reparse_point_data: true,
+        },
+        &snapshot.addition_rows,
+        &snapshot.removals,
+    ) {
+        eprintln!(
+            "[USN] {}:\\ Incremental sync error (will retry): {}",
+            drive_letter,
+            crate::redact_paths(&e.to_string())
+        );
+        restore_pending_snapshot(handle, snapshot);
+        return false;
     }
 
     had_structural_changes
 }
 
 fn flush_binary_snapshot_if_dirty(handle: &VolumeIndexHandle, drive_letter: char) -> bool {
+    {
+        let vol = handle.read();
+        if !vol.binary_dirty {
+            return true;
+        }
+        if !vol.sizes_loaded || vol.has_pending_size_refreshes() {
+            return false;
+        }
+    }
+
+    let _snapshot_permit = super::begin_binary_snapshot();
     let should_trim = {
         let mut vol = handle.write();
         if !vol.binary_dirty {
@@ -160,7 +187,8 @@ fn should_prefer_sqlite_over_binary(
 ) -> bool {
     let sqlite_matches_current = sqlite_state.journal_id == current_journal_id;
     let binary_matches_current = binary_state.journal_id == current_journal_id;
-    let sqlite_is_fresher_same_journal = sqlite_state.journal_id == binary_state.journal_id
+    let sqlite_is_fresher_same_journal = !crate::index_db::skip_sqlite_data_persistence()
+        && sqlite_state.journal_id == binary_state.journal_id
         && sqlite_state.last_usn > binary_state.last_usn;
 
     sqlite_is_fresher_same_journal || (sqlite_matches_current && !binary_matches_current)
@@ -180,7 +208,11 @@ pub(crate) fn index_volume(
     let sqlite_state = db.load_volume_state(drive_letter);
 
     // Try to load cached state — prefer binary file, fall back to SQLite.
-    let binary_candidate = match crate::index_db::binary::load(drive_letter) {
+    let binary_load_result = {
+        let _build_permit = super::begin_index_build();
+        crate::index_db::binary::load(drive_letter)
+    };
+    let binary_candidate = match binary_load_result {
         Ok(Some((bin_index, bin_state))) => Some((
             bin_index,
             crate::index_db::PersistedVolumeState {
@@ -303,6 +335,7 @@ pub(crate) fn index_volume(
                     Some(0),
                     Some(state.files_indexed),
                 );
+                let _build_permit = super::begin_index_build();
                 match db.load_into_index(&mut index, |loaded| {
                     indexing_progress.update(
                         drive_letter,
@@ -449,6 +482,14 @@ pub(crate) fn index_volume(
 
     // Full MFT enumeration if needed.
     if need_full_scan {
+        // This index is not registered yet, so retaining an invalid cache while
+        // constructing its replacement only doubles the full-volume footprint.
+        index = file_index::VolumeIndex::empty(drive_letter);
+        let _build_permit = super::begin_index_build();
+        crate::memory_trim::log_process_memory(&format!(
+            "{}:\\ before full MFT scan",
+            drive_letter
+        ));
         index.state = file_index::IndexState::Scanning;
         indexing_progress.set_scanning(drive_letter, index.records.len() as u64, "scanning_mft");
         eprintln!("[USN] {}:\\ Starting bulk MFT read...", drive_letter);
@@ -478,27 +519,15 @@ pub(crate) fn index_volume(
                     elapsed.as_secs_f64()
                 );
 
-                // Compact arena only when it would reclaim meaningful dead
-                // name bytes. Current MFT parsing selects one display name per
-                // FRN, so most full scans have little/no dead arena space; an
-                // unconditional compact would briefly allocate a second arena.
-                const MIN_ARENA_COMPACTION_SAVINGS: usize = 8 * 1024 * 1024;
                 let arena_before = new_index.names.len();
                 let referenced_name_bytes = new_index.referenced_name_bytes();
                 let dead_name_bytes = arena_before.saturating_sub(referenced_name_bytes);
-                let arena_compacted = dead_name_bytes >= MIN_ARENA_COMPACTION_SAVINGS;
-                if arena_compacted {
-                    new_index.compact_arena();
-                } else {
-                    new_index.shrink_to_fit();
-                }
-                let (arena_used, arena_cap, records_est) = new_index.memory_usage();
+                let (_arena_used, arena_cap, records_est) = new_index.memory_usage();
                 eprintln!(
-                    "[USN] {}:\\ Arena {}: {:.1} MB -> {:.1} MB, dead {:.1} MB, records ~{:.1} MB, total ~{:.1} MB",
+                    "[USN] {}:\\ Arena before streaming checkpoint: {:.1} MB, live {:.1} MB, dead {:.1} MB, records ~{:.1} MB, total ~{:.1} MB",
                     drive_letter,
-                    if arena_compacted { "compacted" } else { "shrink-only" },
                     arena_before as f64 / 1_048_576.0,
-                    arena_used as f64 / 1_048_576.0,
+                    referenced_name_bytes as f64 / 1_048_576.0,
                     dead_name_bytes as f64 / 1_048_576.0,
                     records_est as f64 / 1_048_576.0,
                     (arena_cap + records_est) as f64 / 1_048_576.0
@@ -543,6 +572,7 @@ pub(crate) fn index_volume(
             None,
             None,
         );
+        let _snapshot_permit = super::begin_binary_snapshot();
         let binary_saved = match crate::index_db::binary::save_and_remap(&mut index) {
             Ok(()) => {
                 index.binary_dirty = false;
@@ -627,6 +657,7 @@ pub(crate) fn index_volume(
 
         // Reset change tracking so the incremental sync starts fresh.
         index.clear_pending();
+        crate::memory_trim::log_process_memory(&format!("{}:\\ after full MFT scan", drive_letter));
     }
 
     index.shrink_to_fit();
@@ -653,6 +684,11 @@ pub(crate) fn index_volume(
         std::thread::spawn(move || {
             let _active_operation =
                 crate::memory_trim::begin_active_operation("background MFT size extraction");
+            let _build_permit = super::begin_index_build();
+            crate::memory_trim::log_process_memory(&format!(
+                "{}:\\ before background MFT size extraction",
+                drive_letter
+            ));
             // Open a dedicated volume handle for this background thread.
             let bg_volume = match usn_journal::open_volume(drive_letter) {
                 Ok(h) => h,
@@ -770,6 +806,10 @@ pub(crate) fn index_volume(
                 "{}:\\ background size extraction",
                 drive_letter
             ));
+            crate::memory_trim::log_process_memory(&format!(
+                "{}:\\ after background MFT size extraction",
+                drive_letter
+            ));
             indexing_progress.clear(drive_letter);
         });
     }
@@ -805,22 +845,34 @@ pub(crate) fn index_volume(
                 // 2) Apply deltas under a short bounded try_write retry window
                 // to avoid read-starvation while reducing staleness under contention.
                 let mut applied = false;
+                let mut parse_failed = false;
                 let mut attempt = 0usize;
                 while attempt < INCREMENTAL_APPLY_RETRY_ATTEMPTS {
                     match handle.try_write() {
                         Some(mut vol_index) => {
                             let mut dummy_count = 0;
-                            usn_journal::parse_usn_records(
+                            let parse_result = usn_journal::parse_usn_records(
                                 &buffer[8..bytes_returned as usize],
                                 &mut vol_index,
                                 &mut dummy_count,
                                 true,
                             );
-                            vol_index.last_usn = new_usn;
-                            current_usn = new_usn;
-                            applied = true;
-                            if attempt > 0 {
-                                contention_applied_after_retry += 1;
+                            match parse_result {
+                                Ok(()) => {
+                                    vol_index.last_usn = new_usn;
+                                    current_usn = new_usn;
+                                    applied = true;
+                                    if attempt > 0 {
+                                        contention_applied_after_retry += 1;
+                                    }
+                                }
+                                Err(e) => {
+                                    parse_failed = true;
+                                    eprintln!(
+                                        "[USN] {}:\\ Incremental apply failed: {}",
+                                        drive_letter, e
+                                    );
+                                }
                             }
                             break;
                         }
@@ -834,7 +886,7 @@ pub(crate) fn index_volume(
                     }
                 }
 
-                if !applied {
+                if !applied && !parse_failed {
                     // Bounded fallback: try_write_for avoids unbounded
                     // blocking that would starve search readers via
                     // parking_lot's write-preferring fairness policy.
@@ -845,14 +897,22 @@ pub(crate) fn index_volume(
                     match handle.try_write_for(INCREMENTAL_WRITE_FALLBACK_TIMEOUT) {
                         Some(mut vol_index) => {
                             let mut dummy_count = 0;
-                            usn_journal::parse_usn_records(
+                            let parse_result = usn_journal::parse_usn_records(
                                 &buffer[8..bytes_returned as usize],
                                 &mut vol_index,
                                 &mut dummy_count,
                                 true,
                             );
-                            vol_index.last_usn = new_usn;
-                            current_usn = new_usn;
+                            match parse_result {
+                                Ok(()) => {
+                                    vol_index.last_usn = new_usn;
+                                    current_usn = new_usn;
+                                }
+                                Err(e) => eprintln!(
+                                    "[USN] {}:\\ Incremental apply failed: {}",
+                                    drive_letter, e
+                                ),
+                            }
                         }
                         None => {
                             contention_skipped_cycles += 1;
@@ -877,9 +937,17 @@ pub(crate) fn index_volume(
             let pending_frns: Vec<u64> = match handle.try_write() {
                 Some(mut vol) => {
                     if vol.sizes_loaded && !vol.pending_size_refresh.is_empty() {
-                        let pending = std::mem::take(&mut vol.pending_size_refresh);
+                        let pending: Vec<u64> = vol
+                            .pending_size_refresh
+                            .iter()
+                            .take(SIZE_REFRESH_BATCH_RECORDS)
+                            .copied()
+                            .collect();
+                        for frn in &pending {
+                            vol.pending_size_refresh.remove(frn);
+                        }
                         vol.size_refresh_in_progress = true;
-                        pending.into_iter().collect()
+                        pending
                     } else {
                         Vec::new()
                     }
@@ -972,9 +1040,16 @@ pub(crate) fn index_volume(
         // 3) Persist every 5 minutes — incremental sync only (not full rebuild).
         if last_persist.elapsed() > std::time::Duration::from_secs(300) {
             let _trim_exclusion = crate::memory_trim::begin_trim_exclusion();
-            let snapshot = take_pending_snapshot(&handle);
-            let should_shrink_index =
-                persist_pending_snapshot(db.as_ref(), &handle, drive_letter, snapshot);
+            match take_pending_snapshot(&handle) {
+                Ok(snapshot) => {
+                    persist_pending_snapshot(db.as_ref(), &handle, drive_letter, snapshot);
+                }
+                Err(error) => eprintln!(
+                    "[USN] {}:\\ Refusing invalid persistence snapshot: {}",
+                    drive_letter,
+                    crate::redact_paths(&error)
+                ),
+            }
             last_persist = std::time::Instant::now();
 
             // SEC: Prune stale dir_modified_at entries to prevent unbounded memory growth.
@@ -983,9 +1058,6 @@ pub(crate) fn index_volume(
                 let mut vol = handle.write();
                 vol.prune_old_modifications(std::time::Duration::from_secs(600));
                 vol.dir_modified_at.shrink_to_fit();
-                if should_shrink_index {
-                    vol.shrink_to_fit();
-                }
             }
 
             flush_binary_snapshot_if_dirty(&handle, drive_letter);
@@ -1003,8 +1075,16 @@ pub(crate) fn index_volume(
         );
     }
 
-    let final_snapshot = take_pending_snapshot(&handle);
-    let _ = persist_pending_snapshot(db.as_ref(), &handle, drive_letter, final_snapshot);
+    match take_pending_snapshot(&handle) {
+        Ok(final_snapshot) => {
+            let _ = persist_pending_snapshot(db.as_ref(), &handle, drive_letter, final_snapshot);
+        }
+        Err(error) => eprintln!(
+            "[USN] {}:\\ Refusing invalid final persistence snapshot: {}",
+            drive_letter,
+            crate::redact_paths(&error)
+        ),
+    }
     flush_binary_snapshot_if_dirty(&handle, drive_letter);
 
     usn_journal::close_volume(volume_handle);
