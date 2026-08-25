@@ -106,11 +106,7 @@ impl eframe::App for DiskAnalyzerApp {
         let ctx = ui.ctx().clone();
         if !self.revealed {
             // Apply the saved theme before the first visible frame.
-            if self.dark_mode {
-                ctx.set_visuals(egui::Visuals::dark());
-            } else {
-                ctx.set_visuals(egui::Visuals::light());
-            }
+            ctx.set_visuals(crate::ui::theme::viewer_visuals(self.dark_mode));
             crate::ui::theme::apply_scroll_style(&ctx);
             crate::ui::theme::apply_popup_style(&ctx);
             ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
@@ -124,20 +120,23 @@ impl eframe::App for DiskAnalyzerApp {
             &mut self.last_theme_poll,
         ) {
             self.dark_mode = dark;
-            if dark {
-                ctx.set_visuals(egui::Visuals::dark());
-            } else {
-                ctx.set_visuals(egui::Visuals::light());
-            }
+            ctx.set_visuals(crate::ui::theme::viewer_visuals(dark));
             crate::ui::theme::apply_scroll_style(&ctx);
             crate::ui::theme::apply_popup_style(&ctx);
         }
 
         if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
-            // Escape closes the context menu first, then the window.
+            // Escape closes the context menu first, then clears the search,
+            // then the window (plan section 5).
             if self.state.context_menu.is_some() {
                 self.state.context_menu = None;
                 egui::Popup::close_all(&ctx);
+            } else if self.state.search_open || !self.state.search_text.is_empty() {
+                self.state.search_text.clear();
+                self.state.mark_search_changed();
+                self.state.search_results = std::sync::Arc::new(Vec::new());
+                self.state.search_selected = 0;
+                self.state.search_open = false;
             } else {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }

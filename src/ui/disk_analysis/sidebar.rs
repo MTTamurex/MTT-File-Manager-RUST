@@ -3,7 +3,9 @@
 use crate::app::disk_analysis_model::FileCategory;
 use crate::app::disk_analysis_state::DiskAnalysisState;
 use crate::infrastructure::windows::formatting::format_size;
-use crate::ui::disk_analysis::{category_color, category_label};
+use crate::ui::disk_analysis::{
+    analyzer_text_color, category_color, category_label, format_metric_value,
+};
 use eframe::egui;
 use rust_i18n::t;
 
@@ -64,7 +66,12 @@ fn render_usage_pie(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
     let Some(model) = state.model.clone() else {
         return;
     };
-    let total = model.total_allocated_size.max(1);
+    let total = model
+        .category_totals
+        .slice_for(state.metric)
+        .iter()
+        .sum::<u64>()
+        .max(1);
     let dark = ui.visuals().dark_mode;
 
     let available = ui.available_width();
@@ -88,7 +95,7 @@ fn render_usage_pie(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
     let mut start = -std::f32::consts::FRAC_PI_2;
     let mut hovered: Option<(FileCategory, u64, f64)> = None;
     for category in FileCategory::ALL {
-        let bytes = model.category_totals[category.index()];
+        let bytes = model.category_totals.slice_for(state.metric)[category.index()];
         if bytes == 0 {
             continue;
         }
@@ -142,7 +149,7 @@ fn render_usage_pie(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
                     ui.label(format!(
                         "{} · {} · {:.1}%",
                         category_label(category),
-                        format_size(bytes),
+                        format_metric_value(state.metric, bytes),
                         percent
                     ));
                 });
@@ -197,7 +204,7 @@ fn paint_sidebar_text(
     if right_aligned {
         pos.x -= galley.size().x;
     }
-    ui.painter().galley(pos, galley, ui.visuals().text_color());
+    ui.painter().galley(pos, galley, analyzer_text_color(ui));
 }
 
 fn section_header(ui: &mut egui::Ui, text: &str) {

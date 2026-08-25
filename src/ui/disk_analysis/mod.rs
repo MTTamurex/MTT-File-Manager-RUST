@@ -7,10 +7,18 @@
 //! which runs as its own OS process (same model as the dedicated viewers)
 //! so it gets an independent taskbar button and minimize/restore lifecycle.
 
+mod duplicates;
+mod efficiency;
+mod largest_items;
+mod results_panel;
 mod sidebar;
+pub(crate) mod toolbar;
 pub(crate) mod treemap;
 
+pub(crate) use results_panel::{attach_row_menu, paint_cell, HEADER_ROW_H, ROW_HEIGHT};
+
 use crate::app::disk_analysis_model::FileCategory;
+use crate::app::disk_analysis_query::SizeMetric;
 use crate::app::disk_analysis_state::{DiskAnalysisPhase, DiskAnalysisState};
 use crate::infrastructure::windows::formatting::format_size;
 use eframe::egui;
@@ -93,6 +101,22 @@ fn mix(a: egui::Color32, b: egui::Color32, t: f32) -> egui::Color32 {
     )
 }
 
+pub(crate) fn analyzer_text_color(ui: &egui::Ui) -> egui::Color32 {
+    if ui.visuals().dark_mode {
+        ui.visuals().text_color()
+    } else {
+        ui.visuals().strong_text_color()
+    }
+}
+
+pub(crate) fn panel_secondary_text_color(ui: &egui::Ui) -> egui::Color32 {
+    if ui.visuals().dark_mode {
+        ui.visuals().weak_text_color()
+    } else {
+        analyzer_text_color(ui)
+    }
+}
+
 /// Render one analyzer frame into `ui`. The standalone process wraps this
 /// in its root panel; close/Escape are handled by that process.
 pub fn render_analyzer_body(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
@@ -104,12 +128,21 @@ pub fn render_analyzer_body(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
     if state.poll() {
         ctx.request_repaint();
     }
+    // Schedule filter/top-K/search jobs whose inputs changed (debounced).
+    state.sync_query_jobs();
 
     egui::CentralPanel::default()
         .frame(egui::Frame::NONE.fill(ui.visuals().panel_fill))
         .show(ui, |ui| {
+            if !ui.visuals().dark_mode {
+                let color = analyzer_text_color(ui);
+                ui.visuals_mut().override_text_color = Some(color);
+            }
             render_header(state, ui);
             render_footer(state, ui);
+            // Added after the footer so the results panel sits above the
+            // category legend.
+            results_panel::render_results_panel(state, ui);
 
             egui::Panel::left(egui::Id::new("disk_analysis_sidebar"))
                 .resizable(false)
@@ -132,11 +165,20 @@ pub fn render_analyzer_body(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
                         .inner_margin(8.0),
                 )
                 .show(ui, |ui| {
+                    toolbar::render_toolbar(state, ui);
                     render_breadcrumb(state, ui);
                     ui.add_space(4.0);
                     render_treemap(state, ui);
                 });
         });
+    // Toolbar edits happen inside the panel above, so deadlines must be read
+    // after rendering. Poll only while a worker is actually outstanding.
+    if let Some(delay) = state.query_repaint_after() {
+        ctx.request_repaint_after(delay);
+    }
+    if state.has_background_work() {
+        ctx.request_repaint_after(std::time::Duration::from_millis(33));
+    }
 }
 
 fn render_header(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
@@ -165,7 +207,7 @@ fn render_header(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
                     if !label.is_empty() {
                         ui.label(label);
                     }
-                    ui.label(egui::RichText::new("— NTFS").color(ui.visuals().weak_text_color()));
+                    ui.label(egui::RichText::new("— NTFS").color(panel_secondary_text_color(ui)));
                 } else {
                     ui.label(
                         egui::RichText::new(t!("disk_analysis.title").to_string())
@@ -205,7 +247,7 @@ fn render_header(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
                                 )
                                 .to_string(),
                             )
-                            .color(ui.visuals().weak_text_color()),
+                            .color(panel_secondary_text_color(ui)),
                         );
                     }
                 });
@@ -228,11 +270,13 @@ fn render_footer(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
                 let Some(model) = state.model.clone() else {
                     return;
                 };
-                // File-type legend (moved here from the sidebar).
+                // File-type legend (moved here from the sidebar), following
+                // the active metric.
                 let dark = ui.visuals().dark_mode;
-                let total = model.total_allocated_size.max(1);
+                let totals = model.category_totals.slice_for(state.metric);
+                let total = totals.iter().sum::<u64>().max(1);
                 for category in FileCategory::ALL {
-                    let bytes = model.category_totals[category.index()];
+                    let bytes = totals[category.index()];
                     if bytes == 0 {
                         continue;
                     }
@@ -248,7 +292,7 @@ fn render_footer(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
                     ui.label(category_label(category));
                     ui.label(
                         egui::RichText::new(format!("{percent:.0}%"))
-                            .color(ui.visuals().weak_text_color()),
+                            .color(panel_secondary_text_color(ui)),
                     );
                     ui.add_space(12.0);
                 }
@@ -259,7 +303,7 @@ fn render_footer(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
                             t!("disk_analysis.deepest_path"),
                             model.deepest_path
                         ))
-                        .color(ui.visuals().weak_text_color()),
+                        .color(panel_secondary_text_color(ui)),
                     );
                 });
             });
@@ -320,7 +364,7 @@ fn render_treemap(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
             ui.spinner();
             ui.label(
                 egui::RichText::new(t!("disk_analysis.loading").to_string())
-                    .color(ui.visuals().weak_text_color()),
+                    .color(panel_secondary_text_color(ui)),
             );
         });
     }
@@ -332,12 +376,47 @@ fn render_treemap(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
     }
     let (rect, resp) = ui.allocate_exact_size(avail.size(), egui::Sense::click());
     let area = rect.shrink(4.0);
-    let placed = state.treemap_cache.get(&model, current, area);
+
+    if state.filter_is_updating() {
+        ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
+            ui.centered_and_justified(|ui| {
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label(t!("disk_analysis.filter_updating").to_string());
+                });
+            });
+        });
+        state.hovered = None;
+        return;
+    }
+
+    // Filtered weights apply only while they exist; the metric drives the
+    // plain layout otherwise.
+    let weights = state.active_weights.clone();
+    let weights_ref = weights.as_ref();
+
+    // Explicit empty state instead of an area-less void when the whole
+    // subtree weighs zero under the active metric/filter combination.
+    let root_value = treemap::tile_value(&model, current, state.metric, weights_ref);
+    if root_value == 0 {
+        ui.centered_and_justified(|ui| {
+            ui.label(
+                egui::RichText::new(t!("disk_analysis.empty_weight_state").to_string())
+                    .color(panel_secondary_text_color(ui)),
+            );
+        });
+        state.hovered = None;
+        return;
+    }
+
+    let placed = state
+        .treemap_cache
+        .get(&model, current, area, state.metric, weights_ref);
 
     let dark = ui.visuals().dark_mode;
     let panel = ui.visuals().panel_fill;
-    let text_color = ui.visuals().text_color();
-    let weak_color = ui.visuals().weak_text_color();
+    let text_color = analyzer_text_color(ui);
+    let weak_color = panel_secondary_text_color(ui);
     let painter = ui.painter().with_clip_rect(rect);
 
     for p in placed.iter() {
@@ -357,7 +436,8 @@ fn render_treemap(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
                     &painter,
                     header,
                     &node.name,
-                    node.subtree_allocated_size,
+                    treemap::tile_value(&model, p.idx, state.metric, weights_ref),
+                    state.metric,
                     text_color,
                 );
             }
@@ -405,6 +485,20 @@ fn render_treemap(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
             );
         }
     }
+    // Persistent selection highlight: a distinct accent outline that survives
+    // pointer movement, unlike the hover stroke above.
+    if let Some(sel) = state.selected {
+        if Some(sel) != hovered {
+            if let Some(p) = placed.iter().find(|p| p.idx == sel) {
+                painter.rect_stroke(
+                    p.rect.shrink(1.5),
+                    2.5,
+                    egui::Stroke::new(2.0, crate::ui::theme::COLOR_ACCENT),
+                    egui::StrokeKind::Outside,
+                );
+            }
+        }
+    }
     if resp.clicked() {
         state.context_menu = None;
         if let Some(pos) = resp.interact_pointer_pos() {
@@ -415,6 +509,9 @@ fn render_treemap(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
                     // path even when clicking a nested frame directly.
                     state.drill_stack = model.chain_to(p.idx);
                     state.hovered = None;
+                    state.selected = None;
+                } else if !p.is_dir {
+                    state.selected = Some(p.idx);
                 }
             }
         }
@@ -442,10 +539,12 @@ fn render_treemap(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
             } else {
                 node.allocated_size
             };
-            let parent_size = model.nodes[node.parent as usize]
-                .subtree_allocated_size
-                .max(1);
-            let percent = (allocated as f64 / parent_size as f64) * 100.0;
+            // Percentages follow the active weight basis so they always match
+            // the rendered areas.
+            let value = treemap::tile_value(&model, h, state.metric, weights_ref);
+            let parent_value =
+                treemap::tile_value(&model, node.parent, state.metric, weights_ref).max(1);
+            let percent = (value as f64 / parent_value as f64) * 100.0;
             // Clamp so the tooltip stays inside the window and gets a usable width.
             let screen = ui.ctx().viewport_rect();
             let tooltip_pos = egui::pos2(
@@ -527,12 +626,13 @@ fn draw_header_texts(
     header: egui::Rect,
     name: &str,
     subtree_size: u64,
+    metric: SizeMetric,
     text_color: egui::Color32,
 ) {
     const PAD: f32 = 6.0;
     const GAP: f32 = 8.0;
     let font_id = egui::FontId::proportional(12.0);
-    let size_text = format_size(subtree_size);
+    let size_text = format_metric_value(metric, subtree_size);
     let size_galley = painter.layout_no_wrap(size_text.clone(), font_id.clone(), text_color);
     let size_w = size_galley.size().x;
     let avail = header.width() - PAD * 2.0;
@@ -576,13 +676,20 @@ fn draw_header_texts(
     );
 }
 
+pub(crate) fn format_metric_value(metric: SizeMetric, value: u64) -> String {
+    match metric {
+        SizeMetric::FileCount => value.to_string(),
+        SizeMetric::Allocated | SizeMetric::Logical => format_size(value),
+    }
+}
+
 fn render_center_state(state: &mut DiskAnalysisState, ui: &mut egui::Ui, phase: DiskAnalysisPhase) {
     ui.centered_and_justified(|ui| match phase {
         DiskAnalysisPhase::Failed => {
             ui.vertical_centered(|ui| {
                 ui.label(egui::RichText::new(t!("disk_analysis.failed").to_string()).strong());
                 if let Some(error) = state.error.clone() {
-                    ui.label(egui::RichText::new(error).color(ui.visuals().weak_text_color()));
+                    ui.label(egui::RichText::new(error).color(panel_secondary_text_color(ui)));
                 }
                 ui.add_space(8.0);
                 if ui.button(t!("disk_analysis.retry").to_string()).clicked() {

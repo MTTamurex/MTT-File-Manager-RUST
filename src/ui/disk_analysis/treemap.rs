@@ -5,6 +5,7 @@
 //! small (hundreds of entries) regardless of volume size.
 
 use crate::app::disk_analysis_model::DiskAnalysisModel;
+use crate::app::disk_analysis_query::{ActiveWeights, SizeMetric};
 use eframe::egui;
 use std::sync::Arc;
 
@@ -29,6 +30,9 @@ struct LayoutKey {
     model_ptr: usize,
     root_idx: u32,
     area: egui::Rect,
+    metric: SizeMetric,
+    /// Identity of the filtered-weights snapshot in use (0 = none).
+    weights_id: u64,
 }
 
 #[derive(Default)]
@@ -38,19 +42,24 @@ pub struct LayoutCache {
 }
 
 impl LayoutCache {
+    #[allow(clippy::too_many_arguments)]
     pub fn get(
         &mut self,
         model: &Arc<DiskAnalysisModel>,
         root_idx: u32,
         area: egui::Rect,
+        metric: SizeMetric,
+        weights: Option<&ActiveWeights>,
     ) -> Arc<[PlacedRect]> {
         let key = LayoutKey {
             model_ptr: Arc::as_ptr(model) as usize,
             root_idx,
             area,
+            metric,
+            weights_id: weights.map(|w| w.id).unwrap_or(0),
         };
         if self.key != Some(key) {
-            self.placed = Arc::from(layout(model, root_idx, area));
+            self.placed = Arc::from(layout(model, root_idx, area, metric, weights));
             self.key = Some(key);
         }
         self.placed.clone()
@@ -64,20 +73,34 @@ impl LayoutCache {
 
 /// Layout the children of `root_idx` into `area`. Parents are emitted before
 /// their children so hit-testing can pick the deepest entry containing a point.
-pub fn layout(model: &DiskAnalysisModel, root_idx: u32, area: egui::Rect) -> Vec<PlacedRect> {
+///
+/// Tile weights come from the filtered snapshot when one is attached,
+/// otherwise from the plain `metric`.
+pub fn layout(
+    model: &DiskAnalysisModel,
+    root_idx: u32,
+    area: egui::Rect,
+    metric: SizeMetric,
+    weights: Option<&ActiveWeights>,
+) -> Vec<PlacedRect> {
     let mut out = Vec::new();
-    layout_children(model, root_idx, area, 0, &mut out);
+    layout_children(model, root_idx, area, 0, &mut out, metric, weights);
     out
 }
 
-fn weight(model: &DiskAnalysisModel, idx: u32) -> f32 {
-    let node = &model.nodes[idx as usize];
-    let value = if node.is_dir {
-        node.subtree_allocated_size
-    } else {
-        node.allocated_size
-    };
-    value as f32
+fn weight(
+    model: &DiskAnalysisModel,
+    idx: u32,
+    metric: SizeMetric,
+    weights: Option<&ActiveWeights>,
+) -> f32 {
+    match weights {
+        Some(w) => w.weights.get(idx as usize).copied().unwrap_or(0) as f32,
+        None => {
+            let node = &model.nodes[idx as usize];
+            metric.subtree(node) as f32
+        }
+    }
 }
 
 fn layout_children(
@@ -86,18 +109,23 @@ fn layout_children(
     rect: egui::Rect,
     depth: u32,
     out: &mut Vec<PlacedRect>,
+    metric: SizeMetric,
+    weights: Option<&ActiveWeights>,
 ) {
     if rect.width() < MIN_LEAF_SIZE * 2.0 || rect.height() < MIN_LEAF_SIZE * 2.0 {
         return;
     }
     let child_slice = model.children(parent);
-    let total_weight: f32 = child_slice.iter().map(|&child| weight(model, child)).sum();
+    let total_weight: f32 = child_slice
+        .iter()
+        .map(|&child| weight(model, child, metric, weights))
+        .sum();
     if total_weight <= 0.0 {
         return;
     }
     let children: Vec<(u32, f32)> = child_slice
         .iter()
-        .map(|&child| (child, weight(model, child)))
+        .map(|&child| (child, weight(model, child, metric, weights)))
         .filter(|(_, w)| *w > 0.0)
         .collect();
     if children.is_empty() {
@@ -119,7 +147,7 @@ fn layout_children(
                     egui::pos2(r.min.x + GAP, r.min.y + HEADER_HEIGHT),
                     egui::pos2(r.max.x - GAP, r.max.y - GAP),
                 );
-                layout_children(model, idx, content, depth + 1, out);
+                layout_children(model, idx, content, depth + 1, out, metric, weights);
             }
         } else if r.width() >= MIN_LEAF_SIZE && r.height() >= MIN_LEAF_SIZE {
             out.push(PlacedRect {
@@ -141,6 +169,20 @@ fn layout_children(
             is_dir: true,
             header: rect.width() >= MIN_FRAME_W && rect.height() >= MIN_FRAME_H,
         });
+    }
+}
+
+/// Weight of one tile under the active basis; used for headers/tooltips so
+/// displayed numbers always match the rendered areas.
+pub fn tile_value(
+    model: &DiskAnalysisModel,
+    idx: u32,
+    metric: SizeMetric,
+    weights: Option<&ActiveWeights>,
+) -> u64 {
+    match weights {
+        Some(w) => w.weights.get(idx as usize).copied().unwrap_or(0),
+        None => metric.subtree(&model.nodes[idx as usize]),
     }
 }
 
@@ -272,7 +314,7 @@ mod tests {
     fn layout_covers_area_without_overlap() {
         let model = model_with_children(&[100, 300, 600, 50, 250]);
         let area = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(800.0, 600.0));
-        let placed = layout(&model, model.root, area);
+        let placed = layout(&model, model.root, area, SizeMetric::Allocated, None);
         // root + 5 leaves
         assert_eq!(placed.len(), 5);
 
@@ -297,7 +339,7 @@ mod tests {
     fn areas_proportional_to_weights() {
         let model = model_with_children(&[100, 300]);
         let area = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(400.0, 400.0));
-        let placed = layout(&model, model.root, area);
+        let placed = layout(&model, model.root, area, SizeMetric::Allocated, None);
         assert_eq!(placed.len(), 2);
         let a0 = placed[0].rect.width() * placed[0].rect.height();
         let a1 = placed[1].rect.width() * placed[1].rect.height();
@@ -310,7 +352,7 @@ mod tests {
     fn zero_allocation_entries_do_not_distort_layout() {
         let model = model_with_children(&[0, 0, 100]);
         let area = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(400.0, 400.0));
-        let placed = layout(&model, model.root, area);
+        let placed = layout(&model, model.root, area, SizeMetric::Allocated, None);
         assert_eq!(placed.len(), 1);
         assert_eq!(model.nodes[placed[0].idx as usize].allocated_size, 100);
     }
@@ -320,8 +362,8 @@ mod tests {
         let model = Arc::new(model_with_children(&[100, 300]));
         let area = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(400.0, 400.0));
         let mut cache = LayoutCache::default();
-        let first = cache.get(&model, model.root, area);
-        let second = cache.get(&model, model.root, area);
+        let first = cache.get(&model, model.root, area, SizeMetric::Allocated, None);
+        let second = cache.get(&model, model.root, area, SizeMetric::Allocated, None);
         assert!(Arc::ptr_eq(&first, &second));
     }
 
@@ -329,9 +371,188 @@ mod tests {
     fn very_wide_directory_falls_back_to_aggregate_root_tile() {
         let model = model_with_children(&vec![1; 20_000]);
         let area = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(400.0, 400.0));
-        let placed = layout(&model, model.root, area);
+        let placed = layout(&model, model.root, area, SizeMetric::Allocated, None);
         assert_eq!(placed.len(), 1);
         assert_eq!(placed[0].idx, model.root);
         assert_eq!(placed[0].rect, area);
+    }
+
+    fn weighted_model() -> DiskAnalysisModel {
+        // root(5): big.bin (allocated 900), small sparse file (logical
+        // 1<<40, allocated 40 — still visible as a sliver).
+        use mtt_search_protocol::DiskAnalysisRecord;
+        let sparse = DiskAnalysisRecord {
+            frn: 11,
+            parent_frn: 5,
+            name: "sparse.bin".to_string(),
+            size: 1 << 40,
+            allocated_size: 40,
+            is_dir: false,
+            is_reparse: false,
+        };
+        DiskAnalysisModel::build(DiskAnalysisSnapshot {
+            drive_letter: 'C',
+            records: vec![
+                DiskAnalysisRecord {
+                    frn: 5,
+                    parent_frn: 5,
+                    name: String::new(),
+                    size: 0,
+                    allocated_size: 0,
+                    is_dir: true,
+                    is_reparse: false,
+                },
+                DiskAnalysisRecord {
+                    frn: 10,
+                    parent_frn: 5,
+                    name: "big.bin".to_string(),
+                    size: 900,
+                    allocated_size: 900,
+                    is_dir: false,
+                    is_reparse: false,
+                },
+                sparse,
+            ],
+        })
+    }
+
+    #[test]
+    fn metric_changes_layout_proportions() {
+        let model = weighted_model();
+        let area = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(400.0, 400.0));
+
+        // Allocated: big.bin dominates; the sparse tile is sliver-thin but
+        // still present because its allocation is nonzero.
+        let allocated = layout(&model, model.root, area, SizeMetric::Allocated, None);
+        assert_eq!(allocated.len(), 2);
+
+        // Logical: the sparse file now dwarfs everything else; the big.bin
+        // tile falls below the 3px visibility threshold and is pruned, so
+        // exactly one tile covers the area.
+        let logical = layout(&model, model.root, area, SizeMetric::Logical, None);
+        assert_eq!(logical.len(), 1);
+        assert_eq!(model.nodes[logical[0].idx as usize].name, "sparse.bin");
+        let sparse_area = logical[0].rect.width() * logical[0].rect.height();
+        assert!(sparse_area > area.width() * area.height() * 0.9);
+
+        // File count metric gives every file equal weight.
+        let files = layout(&model, model.root, area, SizeMetric::FileCount, None);
+        assert_eq!(files.len(), 2);
+        let a0 = files[0].rect.width() * files[0].rect.height();
+        let a1 = files[1].rect.width() * files[1].rect.height();
+        assert!((a0 - a1).abs() < (area.width() * area.height()) * 0.05);
+    }
+
+    #[test]
+    fn filtered_weights_drive_layout_and_cache_key() {
+        let model = Arc::new(weighted_model());
+        let area = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(400.0, 400.0));
+
+        // Filter keeps only sparse.bin: big.bin disappears from the layout.
+        let mut weights = vec![0u64; model.nodes.len()];
+        weights[model
+            .nodes
+            .iter()
+            .position(|n| n.name == "sparse.bin")
+            .unwrap()] = 1 << 20;
+        let active = ActiveWeights {
+            id: 7,
+            root: model.root,
+            metric: SizeMetric::Logical,
+            weights: Arc::new(weights),
+            matches: Arc::new(vec![true; model.nodes.len()]),
+        };
+        let placed = layout(&model, model.root, area, SizeMetric::Logical, Some(&active));
+        assert_eq!(placed.len(), 1);
+        assert_eq!(model.nodes[placed[0].idx as usize].name, "sparse.bin");
+
+        // Cache treats a different weights id as a different key even when
+        // every other input is identical.
+        let mut cache = LayoutCache::default();
+        let first = cache.get(
+            &model,
+            model.root,
+            area,
+            SizeMetric::Allocated,
+            Some(&active),
+        );
+        let other = ActiveWeights {
+            id: 8,
+            root: model.root,
+            metric: SizeMetric::Logical,
+            weights: active.weights.clone(),
+            matches: active.matches.clone(),
+        };
+        let second = cache.get(
+            &model,
+            model.root,
+            area,
+            SizeMetric::Allocated,
+            Some(&other),
+        );
+        assert!(!Arc::ptr_eq(&first, &second));
+        // Same id → reuse.
+        let third = cache.get(
+            &model,
+            model.root,
+            area,
+            SizeMetric::Allocated,
+            Some(&other),
+        );
+        assert!(Arc::ptr_eq(&second, &third));
+    }
+
+    #[test]
+    fn zero_weight_subtree_reports_no_tiles() {
+        // A folder whose only child has zero allocated bytes yields no tiles
+        // under Allocated — callers must show an explicit empty state.
+        use mtt_search_protocol::DiskAnalysisRecord;
+        let model = DiskAnalysisModel::build(DiskAnalysisSnapshot {
+            drive_letter: 'C',
+            records: vec![
+                DiskAnalysisRecord {
+                    frn: 5,
+                    parent_frn: 5,
+                    name: String::new(),
+                    size: 0,
+                    allocated_size: 0,
+                    is_dir: true,
+                    is_reparse: false,
+                },
+                DiskAnalysisRecord {
+                    frn: 6,
+                    parent_frn: 5,
+                    name: "empty".to_string(),
+                    size: 0,
+                    allocated_size: 0,
+                    is_dir: true,
+                    is_reparse: false,
+                },
+                DiskAnalysisRecord {
+                    frn: 7,
+                    parent_frn: 6,
+                    name: "zero.bin".to_string(),
+                    size: 0,
+                    allocated_size: 0,
+                    is_dir: false,
+                    is_reparse: false,
+                },
+            ],
+        });
+        let empty_idx = model.nodes.iter().position(|n| n.name == "empty").unwrap() as u32;
+        let area = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(400.0, 400.0));
+        let placed = layout(&model, empty_idx, area, SizeMetric::Allocated, None);
+        // Zero total weight produces no tiles at all; the UI layer shows an
+        // explicit empty state by checking tile_value == 0.
+        assert!(placed.is_empty());
+        assert_eq!(
+            crate::ui::disk_analysis::treemap::tile_value(
+                &model,
+                empty_idx,
+                SizeMetric::Allocated,
+                None
+            ),
+            0
+        );
     }
 }

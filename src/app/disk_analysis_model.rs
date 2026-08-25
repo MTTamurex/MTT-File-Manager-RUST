@@ -95,10 +95,33 @@ pub struct AnalysisNode {
     pub subtree_size: u64,
     /// Aggregated physical allocation of the subtree.
     pub subtree_allocated_size: u64,
+    /// Number of files in this subtree; a file counts itself once.
+    pub subtree_files: u64,
     pub is_dir: bool,
     pub is_reparse: bool,
     /// Files: own category. Directories: dominant category by subtree bytes.
     pub category: FileCategory,
+}
+
+/// Per-category rollups over all files in the volume, kept per size basis
+/// so every metric (allocated / logical / file count) can chart without a
+/// rebuild. Indexed by `FileCategory::index()`.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct CategoryTotals {
+    pub logical: [u64; 8],
+    pub allocated: [u64; 8],
+    pub files: [u64; 8],
+}
+
+impl CategoryTotals {
+    /// Totals for the given metric (charts and legends read through this).
+    pub fn slice_for(&self, metric: super::disk_analysis_query::SizeMetric) -> &[u64; 8] {
+        match metric {
+            super::disk_analysis_query::SizeMetric::Allocated => &self.allocated,
+            super::disk_analysis_query::SizeMetric::Logical => &self.logical,
+            super::disk_analysis_query::SizeMetric::FileCount => &self.files,
+        }
+    }
 }
 
 /// Fully aggregated, read-only analysis of one volume.
@@ -116,8 +139,8 @@ pub struct DiskAnalysisModel {
     pub total_folders: u64,
     /// Maximum tree depth reached from the root.
     pub deepest_path: u32,
-    /// Per-category (bytes, file count) over all files.
-    pub category_totals: [u64; 16],
+    /// Per-category totals over all files.
+    pub category_totals: CategoryTotals,
     pub build_elapsed: Duration,
 }
 
@@ -154,6 +177,7 @@ impl DiskAnalysisModel {
             allocated_size: 0,
             subtree_size: 0,
             subtree_allocated_size: 0,
+            subtree_files: 0,
             is_dir: true,
             is_reparse: false,
             category: FileCategory::Other,
@@ -193,6 +217,7 @@ impl DiskAnalysisModel {
                 allocated_size: record.allocated_size,
                 subtree_size: record.size,
                 subtree_allocated_size: record.allocated_size,
+                subtree_files: u64::from(!record.is_dir),
                 is_dir: record.is_dir,
                 is_reparse: record.is_reparse,
                 category,
@@ -290,19 +315,18 @@ impl DiskAnalysisModel {
         // unreachable components and can never loop this traversal. Reparse
         // directories are leaves: their subtree is not descended into.
         // Counts and per-category totals are build-only scratch.
-        let mut category_totals = [0u64; 16];
-        let mut file_counts: Vec<u32> = vec![0; node_count];
+        let mut category_totals = CategoryTotals::default();
         let mut folder_counts: Vec<u32> = vec![0; node_count];
         for (idx, node) in nodes.iter().enumerate() {
-            file_counts[idx] = u32::from(!node.is_dir);
             folder_counts[idx] = u32::from(node.is_dir);
         }
         let mut cat_slot: Vec<u32> = vec![u32::MAX; node_count];
-        let mut dir_cat: Vec<[u64; 8]> = Vec::new();
+        // Per-directory rollups: [allocated(8) | logical(8) | file count(8)].
+        let mut dir_cat: Vec<[u64; 24]> = Vec::new();
         for (idx, node) in nodes.iter().enumerate() {
             if node.is_dir {
                 cat_slot[idx] = dir_cat.len() as u32;
-                dir_cat.push([0u64; 8]);
+                dir_cat.push([0u64; 24]);
             }
         }
         fn child_range(node: &AnalysisNode) -> std::ops::Range<usize> {
@@ -320,40 +344,44 @@ impl DiskAnalysisModel {
             if visited {
                 let descend = node.is_dir && !node.is_reparse;
                 if descend {
-                    let mut totals = [0u64; 8];
+                    let mut totals = [0u64; 24];
                     let mut subtree = node.size;
                     let mut subtree_allocated = node.allocated_size;
-                    let mut files = 0u64;
+                    let mut subtree_files = 0u64;
                     let mut folders = if node.is_dir { 1 } else { 0 };
                     for &child in &child_links[child_range(node)] {
                         subtree = subtree.saturating_add(nodes[child as usize].subtree_size);
                         subtree_allocated = subtree_allocated
                             .saturating_add(nodes[child as usize].subtree_allocated_size);
-                        files += u64::from(file_counts[child as usize]);
+                        subtree_files =
+                            subtree_files.saturating_add(nodes[child as usize].subtree_files);
                         folders += u64::from(folder_counts[child as usize]);
                         let slot = cat_slot[child as usize];
                         if slot != u32::MAX {
                             let cb = &dir_cat[slot as usize];
-                            for i in 0..8 {
+                            for i in 0..24 {
                                 totals[i] = totals[i].saturating_add(cb[i]);
                             }
                         } else {
                             let c = &nodes[child as usize];
-                            totals[c.category.index()] =
-                                totals[c.category.index()].saturating_add(c.allocated_size);
+                            let ci = c.category.index();
+                            totals[ci] = totals[ci].saturating_add(c.allocated_size);
+                            totals[8 + ci] = totals[8 + ci].saturating_add(c.size);
+                            totals[16 + ci] = totals[16 + ci].saturating_add(1);
                         }
                     }
                     let dominant = totals
                         .iter()
+                        .take(8)
                         .enumerate()
                         .max_by_key(|(_, v)| **v)
                         .map(|(i, _)| FileCategory::ALL[i])
                         .unwrap_or(FileCategory::Other);
-                    file_counts[idx as usize] = files as u32;
                     folder_counts[idx as usize] = folders as u32;
                     let n = &mut nodes[idx as usize];
                     n.subtree_size = subtree;
                     n.subtree_allocated_size = subtree_allocated;
+                    n.subtree_files = subtree_files;
                     n.category = dominant;
                     dir_cat[cat_slot[idx as usize] as usize] = totals;
                 } else if node.is_dir {
@@ -361,13 +389,14 @@ impl DiskAnalysisModel {
                     let n = &mut nodes[idx as usize];
                     n.subtree_size = n.size;
                     n.subtree_allocated_size = n.allocated_size;
-                    file_counts[idx as usize] = 0;
                     folder_counts[idx as usize] = 1;
                 } else {
-                    category_totals[node.category.index()] =
-                        category_totals[node.category.index()].saturating_add(node.allocated_size);
-                    category_totals[node.category.index() + 8] =
-                        category_totals[node.category.index() + 8].saturating_add(1);
+                    let ci = node.category.index();
+                    category_totals.allocated[ci] =
+                        category_totals.allocated[ci].saturating_add(node.allocated_size);
+                    category_totals.logical[ci] =
+                        category_totals.logical[ci].saturating_add(node.size);
+                    category_totals.files[ci] = category_totals.files[ci].saturating_add(1);
                 }
                 continue;
             }
@@ -412,10 +441,9 @@ impl DiskAnalysisModel {
 
         let total_size = nodes[root as usize].subtree_size;
         let total_allocated_size = nodes[root as usize].subtree_allocated_size;
-        let total_files = u64::from(file_counts[root as usize]);
+        let total_files = nodes[root as usize].subtree_files;
         let total_folders = u64::from(folder_counts[root as usize]).saturating_sub(1);
         drop(depths);
-        drop(file_counts);
         drop(folder_counts);
 
         nodes.shrink_to_fit();
@@ -562,10 +590,11 @@ mod tests {
 
         let docs = FileCategory::Documents.index();
         let video = FileCategory::Video.index();
-        assert_eq!(model.category_totals[docs], 400);
-        assert_eq!(model.category_totals[docs + 8], 2);
-        assert_eq!(model.category_totals[video], 600);
-        assert_eq!(model.category_totals[video + 8], 1);
+        assert_eq!(model.category_totals.allocated[docs], 400);
+        assert_eq!(model.category_totals.files[docs], 2);
+        assert_eq!(model.category_totals.logical[docs], 400);
+        assert_eq!(model.category_totals.allocated[video], 600);
+        assert_eq!(model.category_totals.files[video], 1);
     }
 
     #[test]
@@ -576,7 +605,46 @@ mod tests {
 
         assert_eq!(model.total_size, 1 << 40);
         assert_eq!(model.total_allocated_size, 8_192);
-        assert_eq!(model.category_totals[FileCategory::Other.index()], 8_192);
+        assert_eq!(
+            model.category_totals.allocated[FileCategory::Other.index()],
+            8_192
+        );
+        assert_eq!(
+            model.category_totals.logical[FileCategory::Other.index()],
+            1 << 40
+        );
+    }
+
+    #[test]
+    fn subtree_file_counts_are_kept_per_node() {
+        let model = DiskAnalysisModel::build(snapshot(vec![
+            rec(5, 5, "", 0, true),
+            rec(10, 5, "docs", 0, true),
+            rec(11, 10, "a.txt", 100, false),
+            rec(12, 10, "sub", 0, true),
+            rec(13, 12, "b.txt", 50, false),
+        ]));
+
+        let docs_idx = model.nodes.iter().position(|n| n.name == "docs").unwrap() as u32;
+        let sub_idx = model.nodes.iter().position(|n| n.name == "sub").unwrap() as u32;
+        assert_eq!(model.nodes[docs_idx as usize].subtree_files, 2);
+        assert_eq!(model.nodes[sub_idx as usize].subtree_files, 1);
+        assert_eq!(model.nodes[model.root as usize].subtree_files, 2);
+        // Files count themselves once.
+        let a = model.nodes.iter().position(|n| n.name == "a.txt").unwrap();
+        assert_eq!(model.nodes[a].subtree_files, 1);
+    }
+
+    #[test]
+    fn reparse_dirs_have_zero_file_count() {
+        let mut junction = rec(30, 5, "junction", 0, true);
+        junction.is_reparse = true;
+        let model = DiskAnalysisModel::build(snapshot(vec![
+            rec(5, 5, "", 0, true),
+            junction,
+            rec(31, 30, "inside.txt", 5_000, false),
+        ]));
+        assert_eq!(model.total_files, 0);
     }
 
     #[test]

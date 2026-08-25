@@ -8,7 +8,9 @@
 
 pub mod batch_rename;
 pub mod cache_state;
+pub mod disk_analysis_duplicates;
 pub mod disk_analysis_model;
+pub mod disk_analysis_query;
 pub mod disk_analysis_state;
 pub mod drag_drop_state;
 pub mod drive_state;
