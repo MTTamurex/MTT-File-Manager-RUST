@@ -490,9 +490,10 @@ impl DiskAnalysisState {
 
         let context = (Arc::as_ptr(&model) as usize, root, self.metric);
         if self.query_context != Some(context) {
-            if self.query_context.is_some_and(|(model_ptr, old_root, _)| {
-                model_ptr != context.0 || old_root != context.1
-            }) {
+            if self
+                .query_context
+                .is_some_and(|(model_ptr, _, _)| model_ptr != context.0)
+            {
                 self.duplicates.invalidate();
             }
             self.query_context = Some(context);
@@ -1365,5 +1366,100 @@ mod tests {
         assert!(state.search_open);
         assert_eq!(state.search_results.as_slice(), &[u32::MAX]);
         assert!(state.selected.is_none());
+    }
+
+    #[test]
+    fn same_model_navigation_preserves_duplicate_report() {
+        let mut state = DiskAnalysisState::new();
+        let m = Arc::new(DiskAnalysisModel::build(DiskAnalysisSnapshot {
+            drive_letter: 'C',
+            records: vec![
+                DiskAnalysisRecord {
+                    frn: 5,
+                    parent_frn: 5,
+                    name: String::new(),
+                    size: 0,
+                    allocated_size: 0,
+                    is_dir: true,
+                    is_reparse: false,
+                },
+                DiskAnalysisRecord {
+                    frn: 6,
+                    parent_frn: 5,
+                    name: "dir".to_string(),
+                    size: 0,
+                    allocated_size: 0,
+                    is_dir: true,
+                    is_reparse: false,
+                },
+                DiskAnalysisRecord {
+                    frn: 7,
+                    parent_frn: 6,
+                    name: "file.bin".to_string(),
+                    size: 10,
+                    allocated_size: 10,
+                    is_dir: false,
+                    is_reparse: false,
+                },
+            ],
+        }));
+        let file_idx = m
+            .nodes
+            .iter()
+            .position(|node| node.name == "file.bin")
+            .unwrap() as u32;
+        state.model = Some(m.clone());
+        state.drill_stack = vec![m.root];
+        state.query_context = Some((Arc::as_ptr(&m) as usize, m.root, state.metric));
+        state.duplicates.phase = crate::app::disk_analysis_duplicates::DuplicatePhase::Complete;
+        let report = Arc::new(crate::app::disk_analysis_duplicates::DuplicateReport {
+            groups: Vec::new(),
+            total_recoverable: 0,
+            stats: Default::default(),
+        });
+        state.duplicates.report = Some(report.clone());
+
+        assert!(state.reveal_file(file_idx));
+        state.sync_query_jobs();
+
+        assert_eq!(
+            state.duplicates.phase,
+            crate::app::disk_analysis_duplicates::DuplicatePhase::Complete
+        );
+        assert!(state
+            .duplicates
+            .report
+            .as_ref()
+            .is_some_and(|current| Arc::ptr_eq(current, &report)));
+    }
+
+    #[test]
+    fn model_change_invalidates_duplicate_report() {
+        let mut state = DiskAnalysisState::new();
+        let old_model = model('C');
+        let new_model = model('C');
+        state.query_context = Some((
+            Arc::as_ptr(&old_model) as usize,
+            old_model.root,
+            state.metric,
+        ));
+        state.drill_stack = vec![new_model.root];
+        state.model = Some(new_model);
+        state.duplicates.phase = crate::app::disk_analysis_duplicates::DuplicatePhase::Complete;
+        state.duplicates.report = Some(Arc::new(
+            crate::app::disk_analysis_duplicates::DuplicateReport {
+                groups: Vec::new(),
+                total_recoverable: 0,
+                stats: Default::default(),
+            },
+        ));
+
+        state.sync_query_jobs();
+
+        assert_eq!(
+            state.duplicates.phase,
+            crate::app::disk_analysis_duplicates::DuplicatePhase::Idle
+        );
+        assert!(state.duplicates.report.is_none());
     }
 }

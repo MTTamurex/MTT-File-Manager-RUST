@@ -485,18 +485,30 @@ fn render_treemap(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
             );
         }
     }
-    // Persistent selection highlight: a distinct accent outline that survives
-    // pointer movement, unlike the hover stroke above.
+    // Persistent selection highlight: black + yellow remain visible over every
+    // category color, while the center marker locates even very small tiles.
     if let Some(sel) = state.selected {
-        if Some(sel) != hovered {
-            if let Some(p) = placed.iter().find(|p| p.idx == sel) {
+        if let Some(p) = placed.iter().find(|p| p.idx == sel) {
+            let selected_fill = egui::Color32::from_rgba_unmultiplied(255, 230, 0, 45);
+            let selected_yellow = egui::Color32::from_rgb(255, 230, 0);
+            painter.rect_filled(p.rect.shrink(0.5), 0.0, selected_fill);
+            painter.rect_stroke(
+                p.rect.shrink(0.5),
+                0.0,
+                egui::Stroke::new(5.0, egui::Color32::BLACK),
+                egui::StrokeKind::Inside,
+            );
+            if p.rect.width() > 3.0 && p.rect.height() > 3.0 {
                 painter.rect_stroke(
                     p.rect.shrink(1.5),
-                    2.5,
-                    egui::Stroke::new(2.0, crate::ui::theme::COLOR_ACCENT),
-                    egui::StrokeKind::Outside,
+                    0.0,
+                    egui::Stroke::new(2.0, selected_yellow),
+                    egui::StrokeKind::Inside,
                 );
             }
+            let marker_radius = (p.rect.width().min(p.rect.height()) * 0.2).clamp(3.0, 6.0);
+            painter.circle_filled(p.rect.center(), marker_radius, egui::Color32::BLACK);
+            painter.circle_filled(p.rect.center(), marker_radius * 0.5, selected_yellow);
         }
     }
     if resp.clicked() {
@@ -563,8 +575,8 @@ fn render_treemap(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
                     egui::Frame::popup(ui.style()).show(ui, |ui| {
                         ui.set_max_width(480.0);
                         ui.add(
-                            egui::Label::new(egui::RichText::new(model.path_of(h)).strong())
-                                .wrap_mode(egui::TextWrapMode::Truncate),
+                            egui::Label::new(egui::RichText::new(&node.name).strong())
+                                .wrap_mode(egui::TextWrapMode::Wrap),
                         );
                         ui.label(format!(
                             "{}: {} · {}: {} · {:.1}%",
