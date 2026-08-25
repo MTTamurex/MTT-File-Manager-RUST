@@ -838,6 +838,9 @@ disk_analysis:
   metric_allocated: "Allocated"
   metric_logical: "Logical"
   metric_files: "Files"
+  metric_allocated_hint: "Physical file-data allocation, counted once per NTFS file. Filesystem metadata is excluded; Explorer may count hardlink paths more than once."
+  metric_logical_hint: "Logical size counted once per NTFS file at its primary path. Explorer may be larger because it counts every hardlink path."
+  metric_files_hint: "Each NTFS file record is counted once at its primary path."
   # Toolbar / filters
   search_placeholder: "Search name or path (Ctrl+F)"
   filters_show: "Filters"

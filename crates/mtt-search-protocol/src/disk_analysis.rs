@@ -33,7 +33,7 @@ pub struct DiskAnalysisRecord {
     pub allocated_size: u64,
     /// Directory flag.
     pub is_dir: bool,
-    /// Reparse point (junction/symlink); must not be descended into.
+    /// Reparse leaf (junction/symlink) with no indexed children to traverse.
     pub is_reparse: bool,
 }
 

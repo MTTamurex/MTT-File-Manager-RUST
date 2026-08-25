@@ -838,6 +838,9 @@ disk_analysis:
   metric_allocated: "Alocado"
   metric_logical: "Lógico"
   metric_files: "Arquivos"
+  metric_allocated_hint: "Alocação física dos dados dos arquivos, contada uma vez por arquivo NTFS. Metadados do sistema de arquivos são excluídos; o Explorer pode contar cada caminho de hardlink."
+  metric_logical_hint: "Tamanho lógico contado uma vez por arquivo NTFS em seu caminho primário. O Explorer pode exibir um total maior porque conta cada caminho de hardlink."
+  metric_files_hint: "Cada registro de arquivo NTFS é contado uma vez em seu caminho primário."
   # Toolbar / filters
   search_placeholder: "Pesquisar nome ou caminho (Ctrl+F)"
   filters_show: "Filtros"

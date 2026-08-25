@@ -37,7 +37,6 @@ pub fn render(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
     let widths = column_widths(total_w);
 
     paint_header(ui, total_w, widths, state);
-    ui.separator();
 
     // One-shot scroll request from search activation (plan section 5).
     let scroll_to = state.largest_scroll_to_row.take();
@@ -117,8 +116,24 @@ fn column_widths(total_w: f32) -> [f32; 7] {
 }
 
 fn paint_header(ui: &mut egui::Ui, total_w: f32, widths: [f32; 7], state: &mut DiskAnalysisState) {
-    let rect = ui.allocate_exact_size(egui::vec2(total_w, HEADER_ROW_H), egui::Sense::hover());
-    let header_rect = rect.0;
+    let (allocated_rect, _) =
+        ui.allocate_exact_size(egui::vec2(total_w, HEADER_ROW_H), egui::Sense::hover());
+    // egui reserves item spacing below an allocated row. Treat that reserved
+    // space as part of the header bar so the labels are optically centered in
+    // the full area above the table instead of only in its upper 24 pixels.
+    let header_rect = egui::Rect::from_min_max(
+        allocated_rect.min,
+        egui::pos2(
+            allocated_rect.max.x,
+            allocated_rect.max.y + ui.spacing().item_spacing.y,
+        ),
+    );
+    let (_, separator) = crate::ui::theme::viewer_bar_colors(ui.visuals().dark_mode);
+    ui.painter().hline(
+        header_rect.x_range(),
+        header_rect.bottom(),
+        egui::Stroke::new(1.0, separator),
+    );
     let columns = [
         (
             Some(LargestColumn::Name),

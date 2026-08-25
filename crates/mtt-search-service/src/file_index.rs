@@ -295,7 +295,7 @@ impl VolumeIndex {
     /// **Hardlink handling**: when the same FRN is inserted with a *different*
     /// parent, the old parent's children entry is kept so the file remains
     /// discoverable through every directory that references it. Recursive disk
-    /// usage summaries still count that FRN only once per queried subtree.
+    /// usage summaries attribute that FRN only to its primary parent.
     fn insert_record_internal(
         &mut self,
         frn: u64,
@@ -665,8 +665,8 @@ impl VolumeIndex {
     ///
     /// Returns `(total_size, file_count, folder_count, zero_size_count)` where
     /// `folder_count` excludes the queried root directory itself. Hardlinked
-    /// files are counted once per queried subtree so this logical total matches
-    /// the Disk Analyzer's one-record-per-FRN model.
+    /// files are attributed only to their primary parent so this logical total
+    /// matches the Disk Analyzer's one-record-per-FRN tree.
     ///
     /// All directories are traversed, including reparse-point directories.
     /// Junction/symlink FRNs have zero children in the MFT (their content
@@ -688,6 +688,9 @@ impl VolumeIndex {
             if let Some(child_frns) = self.children.get(frn) {
                 for &child_frn in child_frns {
                     if let Some(record) = self.records.get(&child_frn) {
+                        if Self::normalized_parent_bucket(child_frn, record.parent_ref) != frn {
+                            continue;
+                        }
                         if record.is_dir() {
                             folder_count += 1;
                             stack.push(child_frn);
@@ -1026,7 +1029,7 @@ mod tests {
     }
 
     #[test]
-    fn folder_size_counts_hardlinked_file_once_per_subtree() {
+    fn folder_size_attributes_hardlink_to_its_primary_parent() {
         let mut index = VolumeIndex::empty('C');
         let root = 5u64;
         assert!(index.insert_record(10, "first", root, true, false));
@@ -1035,7 +1038,7 @@ mod tests {
         index.records.get_mut(&20).unwrap().size = 42;
         assert!(index.insert_record(20, "shared.bin", 11, false, false));
 
-        assert_eq!(index.folder_tree_summary(10), (42, 1, 0, 0));
+        assert_eq!(index.folder_tree_summary(10), (0, 0, 0, 0));
         assert_eq!(index.folder_tree_summary(11), (42, 1, 0, 0));
         assert_eq!(index.folder_tree_summary(root), (42, 1, 2, 0));
     }

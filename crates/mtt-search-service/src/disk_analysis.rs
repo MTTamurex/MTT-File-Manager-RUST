@@ -85,7 +85,15 @@ pub fn build_snapshot(handle: &VolumeIndexHandle) -> Result<DiskAnalysisSnapshot
                 size: record.size,
                 allocated_size: record.allocated_size,
                 is_dir: record.is_dir(),
-                is_reparse: vol.reparse_points.contains(frn),
+                // Junction targets have no child records under the junction
+                // FRN. Reparse directories that do have indexed children
+                // (notably cloud folders) must remain traversable so folder
+                // totals match the regular FolderSize request.
+                is_reparse: vol.reparse_points.contains(frn)
+                    && vol
+                        .children
+                        .get(*frn)
+                        .is_none_or(|children| children.is_empty()),
             });
         }
         (vol.drive_letter, records)
@@ -124,6 +132,31 @@ mod tests {
             .unwrap();
         assert_eq!(record.size, 1 << 40);
         assert_eq!(record.allocated_size, 8_192);
+    }
+
+    #[test]
+    fn snapshot_keeps_reparse_directories_with_indexed_children_traversable() {
+        let handle = ready_index();
+        {
+            let mut index = handle.write();
+            assert!(index.insert_record(20, "cloud", 5, true, true));
+            assert!(index.insert_record(21, "online.bin", 20, false, false));
+            assert!(index.insert_record(30, "junction", 5, true, true));
+        }
+
+        let snapshot = build_snapshot(&handle).unwrap();
+        let cloud = snapshot
+            .records
+            .iter()
+            .find(|record| record.frn == 20)
+            .unwrap();
+        let junction = snapshot
+            .records
+            .iter()
+            .find(|record| record.frn == 30)
+            .unwrap();
+        assert!(!cloud.is_reparse);
+        assert!(junction.is_reparse);
     }
 
     #[test]

@@ -446,7 +446,9 @@ impl DiskAnalysisState {
         let Some(model) = self.model.clone() else {
             return false;
         };
-        let node = &model.nodes[idx as usize];
+        let Some(node) = model.nodes.get(idx as usize) else {
+            return false;
+        };
         if !node.is_dir || node.is_reparse {
             return false;
         }
@@ -456,16 +458,23 @@ impl DiskAnalysisState {
     }
 
     /// Select a file: drill into its parent folder and highlight it.
-    pub fn reveal_file(&mut self, idx: u32) {
+    pub fn reveal_file(&mut self, idx: u32) -> bool {
         let Some(model) = self.model.clone() else {
-            return;
+            return false;
         };
-        let parent = model.nodes[idx as usize].parent;
+        let Some(node) = model.nodes.get(idx as usize) else {
+            return false;
+        };
+        if node.is_dir {
+            return false;
+        }
+        let parent = node.parent;
         if parent != idx {
             self.drill_stack = model.chain_to(parent);
         }
         self.selected = Some(idx);
         self.hovered = None;
+        true
     }
 
     /// Schedule follow-up query jobs after any state change (navigation,
@@ -1338,5 +1347,23 @@ mod tests {
             state.current_root(),
             Some(m.nodes[file_idx as usize].parent)
         );
+    }
+
+    #[test]
+    fn invalid_search_result_activation_is_ignored() {
+        let mut state = DiskAnalysisState::new();
+        state.model = Some(model('C'));
+        state.search_text = "stale result".to_string();
+        state.search_open = true;
+        state.search_results = Arc::new(vec![u32::MAX]);
+
+        assert!(!crate::ui::disk_analysis::toolbar::activate_result(
+            &mut state,
+            u32::MAX
+        ));
+        assert_eq!(state.search_text, "stale result");
+        assert!(state.search_open);
+        assert_eq!(state.search_results.as_slice(), &[u32::MAX]);
+        assert!(state.selected.is_none());
     }
 }

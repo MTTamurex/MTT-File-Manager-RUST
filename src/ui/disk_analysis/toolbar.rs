@@ -60,15 +60,28 @@ pub fn render_toolbar(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
 
 fn render_metric_selector(state: &mut DiskAnalysisState, ui: &mut egui::Ui) -> SizeMetric {
     let labels = [
-        (SizeMetric::Allocated, t!("disk_analysis.metric_allocated")),
-        (SizeMetric::Logical, t!("disk_analysis.metric_logical")),
-        (SizeMetric::FileCount, t!("disk_analysis.metric_files")),
+        (
+            SizeMetric::Allocated,
+            t!("disk_analysis.metric_allocated"),
+            t!("disk_analysis.metric_allocated_hint"),
+        ),
+        (
+            SizeMetric::Logical,
+            t!("disk_analysis.metric_logical"),
+            t!("disk_analysis.metric_logical_hint"),
+        ),
+        (
+            SizeMetric::FileCount,
+            t!("disk_analysis.metric_files"),
+            t!("disk_analysis.metric_files_hint"),
+        ),
     ];
     let mut selected = state.metric;
     ui.horizontal(|ui| {
-        for (metric, label) in labels {
+        for (metric, label, hint) in labels {
             if ui
                 .selectable_label(state.metric == metric, label.to_string())
+                .on_hover_text(hint.to_string())
                 .clicked()
             {
                 selected = metric;
@@ -148,25 +161,31 @@ fn render_search_field(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
 /// Activate one search hit per plan section 5: directories drill in, files
 /// open their parent folder and get a persistent highlight; the bottom panel
 /// scrolls to the matching row when present.
-pub fn activate_result(state: &mut DiskAnalysisState, idx: u32) {
-    let is_dir = state
-        .model
-        .as_ref()
-        .map(|m| m.nodes[idx as usize].is_dir)
-        .unwrap_or(false);
+pub fn activate_result(state: &mut DiskAnalysisState, idx: u32) -> bool {
+    let Some(model) = state.model.clone() else {
+        return false;
+    };
+    let Some(node) = model.nodes.get(idx as usize) else {
+        return false;
+    };
+    let is_dir = node.is_dir;
     if is_dir {
-        state.navigate_to(idx);
+        if !state.navigate_to(idx) {
+            return false;
+        }
         state.selected = None;
-    } else {
-        state.reveal_file(idx);
+    } else if state.reveal_file(idx) {
         // Ask the Largest tab to scroll this row into view next frame.
         if let Some(pos) = state.largest_rows.iter().position(|&r| r == idx) {
             state.largest_scroll_to_row = Some(pos);
         }
+    } else {
+        return false;
     }
     state.search_text.clear();
     state.mark_search_changed();
     state.search_open = false;
+    true
 }
 
 fn render_filter_row(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
@@ -320,11 +339,13 @@ fn render_search_results_popup(state: &mut DiskAnalysisState, ui: &mut egui::Ui)
         Some(m) => m,
         None => return,
     };
+    let results = state.search_results.clone();
     let anchor = ui.max_rect().left_top();
     let row_height = 22.0;
-    let visible_rows = state.search_results.len().min(10) as f32;
+    let visible_rows = results.len().min(10) as f32;
     let popup_height = visible_rows * row_height + 12.0;
     let popup_width = ui.available_width().min(560.0);
+    let mut pending_activation = None;
 
     egui::Area::new(egui::Id::new("disk_analysis_search_results"))
         .order(egui::Order::Foreground)
@@ -334,14 +355,16 @@ fn render_search_results_popup(state: &mut DiskAnalysisState, ui: &mut egui::Ui)
                 ui.set_min_size(egui::vec2(popup_width, popup_height));
                 egui::ScrollArea::vertical()
                     .id_salt("disk_analysis_search_results_scroll")
-                    .show_rows(ui, row_height, state.search_results.len(), |ui, range| {
+                    .show_rows(ui, row_height, results.len(), |ui, range| {
                         for row in range {
-                            let idx = state.search_results[row];
-                            let node = &model.nodes[idx as usize];
-                            let selected_row = row
-                                == state
-                                    .search_selected
-                                    .min(state.search_results.len().saturating_sub(1));
+                            let Some(&idx) = results.get(row) else {
+                                continue;
+                            };
+                            let Some(node) = model.nodes.get(idx as usize) else {
+                                continue;
+                            };
+                            let selected_row =
+                                row == state.search_selected.min(results.len().saturating_sub(1));
                             let label = format!(
                                 "{}  {}",
                                 node.name,
@@ -356,7 +379,7 @@ fn render_search_results_popup(state: &mut DiskAnalysisState, ui: &mut egui::Ui)
                                     )
                                 }
                             );
-                            let resp = ui.allocate_response(
+                            let mut resp = ui.allocate_response(
                                 egui::vec2(ui.available_width(), row_height),
                                 egui::Sense::click(),
                             );
@@ -371,17 +394,41 @@ fn render_search_results_popup(state: &mut DiskAnalysisState, ui: &mut egui::Ui)
                                     egui::Color32::TRANSPARENT
                                 },
                             );
-                            ui.painter().text(
-                                resp.rect.left_center() + egui::vec2(6.0, 0.0),
-                                egui::Align2::LEFT_CENTER,
-                                label,
-                                egui::FontId::proportional(13.0),
-                                super::analyzer_text_color(ui),
+                            let text_color = super::analyzer_text_color(ui);
+                            let font_id = egui::FontId::proportional(13.0);
+                            let max_text_width = (resp.rect.width() - 12.0).max(1.0);
+                            let full_galley = ui.painter().layout_no_wrap(
+                                label.clone(),
+                                font_id.clone(),
+                                text_color,
                             );
+                            let truncated = full_galley.size().x > max_text_width;
+                            let galley = if truncated {
+                                egui::WidgetText::from(
+                                    egui::RichText::new(&label).size(13.0).color(text_color),
+                                )
+                                .into_galley(
+                                    ui,
+                                    Some(egui::TextWrapMode::Truncate),
+                                    max_text_width,
+                                    font_id,
+                                )
+                            } else {
+                                full_galley
+                            };
+                            let text_rect = resp.rect.shrink2(egui::vec2(6.0, 0.0));
+                            let text_pos = egui::pos2(
+                                text_rect.left(),
+                                text_rect.center().y - galley.size().y / 2.0,
+                            );
+                            ui.painter()
+                                .with_clip_rect(text_rect)
+                                .galley(text_pos, galley, text_color);
+                            if truncated {
+                                resp = resp.on_hover_text(node.name.clone());
+                            }
                             if resp.clicked() {
-                                activate_result(state, idx);
-                                ui.ctx()
-                                    .memory_mut(|mem| mem.surrender_focus(search_edit_id()));
+                                pending_activation = Some(idx);
                             } else if resp.hovered() {
                                 state.search_selected = row;
                             }
@@ -389,4 +436,11 @@ fn render_search_results_popup(state: &mut DiskAnalysisState, ui: &mut egui::Ui)
                     });
             });
         });
+
+    if let Some(idx) = pending_activation {
+        if activate_result(state, idx) {
+            ui.ctx()
+                .memory_mut(|mem| mem.surrender_focus(search_edit_id()));
+        }
+    }
 }
