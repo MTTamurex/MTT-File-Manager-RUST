@@ -1,5 +1,7 @@
 use crate::app::dual_panel::ActivePanel;
-use crate::app::state::{ImageViewerApp, InactiveItemsRebuildResult, ItemsRebuildResult};
+use crate::app::state::{
+    ImageViewerApp, InactiveItemsRebuildRegistry, InactiveItemsRebuildResult, ItemsRebuildResult,
+};
 use crate::application::sorting;
 use eframe::egui;
 use std::collections::HashMap;
@@ -12,6 +14,21 @@ const REBUILD_THROTTLE_MS: u64 = 80;
 const REBUILD_PENDING_THRESHOLD: usize = 1200;
 const MAX_EAGER_FOLDER_PREVIEWS: usize = 80;
 const MAX_EAGER_NON_USN_FOLDER_COVER_REVALIDATIONS: usize = 96;
+
+struct InactiveRebuildSlotGuard {
+    registry: Arc<InactiveItemsRebuildRegistry>,
+    tab_id: usize,
+    panel: ActivePanel,
+    armed: bool,
+}
+
+impl Drop for InactiveRebuildSlotGuard {
+    fn drop(&mut self) {
+        if self.armed {
+            self.registry.finish(self.tab_id, self.panel);
+        }
+    }
+}
 
 pub(super) fn should_inline_inactive_items_rebuild(item_count: usize) -> bool {
     item_count <= INLINE_REBUILD_THRESHOLD
@@ -297,8 +314,15 @@ impl ImageViewerApp {
         let is_computer_view = signature.is_computer_view;
         let sender = self.inactive_items_rebuild_sender.clone();
         let ui_ctx = self.ui_ctx.clone();
+        let rebuild_registry = self.inactive_items_rebuild_registry.clone();
 
         std::thread::spawn(move || {
+            let mut slot_guard = InactiveRebuildSlotGuard {
+                registry: rebuild_registry,
+                tab_id,
+                panel,
+                armed: true,
+            };
             let result_items = match sorting::filter_items_opt_with_tags(
                 &items,
                 &query,
@@ -333,15 +357,20 @@ impl ImageViewerApp {
                     group_descending,
                 )
             };
-            let _ = sender.send(InactiveItemsRebuildResult {
-                tab_id,
-                panel,
-                generation,
-                items: result_items,
-                total_items,
-                group_projection,
-                signature,
-            });
+            if sender
+                .send(InactiveItemsRebuildResult {
+                    tab_id,
+                    panel,
+                    generation,
+                    items: result_items,
+                    total_items,
+                    group_projection,
+                    signature,
+                })
+                .is_ok()
+            {
+                slot_guard.armed = false;
+            }
             ui_ctx.request_repaint();
         });
         true
@@ -506,9 +535,13 @@ impl ImageViewerApp {
 
 #[cfg(test)]
 mod tests {
-    use super::{should_inline_inactive_items_rebuild, should_spawn_inactive_items_rebuild};
+    use super::{
+        should_inline_inactive_items_rebuild, should_spawn_inactive_items_rebuild,
+        InactiveRebuildSlotGuard,
+    };
     use crate::app::dual_panel::ActivePanel;
     use crate::app::state::InactiveItemsRebuildRegistry;
+    use std::sync::Arc;
 
     #[test]
     fn inactive_rebuild_is_inline_through_threshold() {
@@ -551,5 +584,20 @@ mod tests {
 
         registry.finish(0, ActivePanel::Left);
         assert!(registry.try_begin(8, ActivePanel::Left));
+    }
+
+    #[test]
+    fn inactive_rebuild_guard_releases_slot_after_worker_panic() {
+        let registry = Arc::new(InactiveItemsRebuildRegistry::default());
+        assert!(registry.try_begin(7, ActivePanel::Right));
+
+        drop(InactiveRebuildSlotGuard {
+            registry: registry.clone(),
+            tab_id: 7,
+            panel: ActivePanel::Right,
+            armed: true,
+        });
+
+        assert!(registry.is_empty());
     }
 }

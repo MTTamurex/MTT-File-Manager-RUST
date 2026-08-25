@@ -359,6 +359,9 @@ impl IconLoader {
         while let Ok(result) = self.icon_result_rx.try_recv() {
             self.loading_drive_icons.remove(&result.key);
         }
+        if self.auxiliary_icon_threads.load(Ordering::Acquire) == 0 {
+            self.loading_drive_icons.clear();
+        }
     }
 
     /// Trims per-path icon cache and extension icon cache to the given item

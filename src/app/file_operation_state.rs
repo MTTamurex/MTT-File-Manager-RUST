@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
@@ -64,7 +63,6 @@ pub struct FileOperationState {
     pub(crate) file_op_sender:
         crossbeam_channel::Sender<crate::workers::file_operation_worker::FileOperationRequest>,
     pub file_op_res_receiver: Receiver<crate::workers::file_operation_worker::FileOperationResult>,
-    pub deferred_results: VecDeque<crate::workers::file_operation_worker::FileOperationResult>,
     pub extraction_progress: crate::infrastructure::archive_extract::SharedExtractionProgress,
     pub extraction_cancel: crate::infrastructure::archive_extract::ExtractionCancelFlag,
     pub(crate) compression_sender:

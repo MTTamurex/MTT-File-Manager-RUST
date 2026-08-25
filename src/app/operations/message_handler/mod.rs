@@ -70,14 +70,22 @@ impl ImageViewerApp {
         self.process_pending_folder_cover_removals();
 
         if !upload_textures {
-            self.defer_file_operation_results_while_hidden();
+            let current_path_norm =
+                Self::normalize_for_match(Path::new(&self.navigation_state.current_path));
+            self.process_hidden_menu_worker_results();
+            self.process_organizer_events();
+            self.process_file_operation_results(&current_path_norm, ctx);
+            self.flush_organizer_notification_summary();
+            self.process_tag_assignment_gc_results();
             #[cfg(feature = "notify-watcher")]
             self.defer_watcher_events_while_hidden();
             self.process_items_rebuild_results(ctx);
             self.process_inactive_items_rebuild_results(ctx);
             crate::app::operations::tag_ops::purge_worker::process_purge_results(self);
             self.process_global_search_events(false);
+            self.maintain_global_search_while_backgrounded();
             self.process_streaming_and_thumbnail_events(ctx, false);
+            self.apply_ready_tag_view_hides();
             return;
         }
 
@@ -163,22 +171,7 @@ impl ImageViewerApp {
         self.process_file_operation_results(&current_path_norm, ctx);
         self.flush_organizer_notification_summary();
 
-        while let Ok(update) = self.tag_assignment_gc_receiver.try_recv() {
-            match update {
-                crate::app::operations::tag_ops::TagPathUpdate::PersistedRemoval(paths) => {
-                    self.reconcile_garbage_collected_tag_assignments(&paths);
-                }
-                crate::app::operations::tag_ops::TagPathUpdate::HideFromViews {
-                    generation,
-                    paths,
-                } => {
-                    self.pending_tag_view_hides
-                        .entry(generation)
-                        .or_default()
-                        .extend(paths);
-                }
-            }
-        }
+        self.process_tag_assignment_gc_results();
 
         // Drain the focus-restore purge worker (replaces the previous
         // synchronous scan that ran on the UI thread at lifecycle.rs).
@@ -223,6 +216,67 @@ impl ImageViewerApp {
                 _t_streaming_done.duration_since(_t_auto_reload_done).as_millis(),
                 _t_msg_start.elapsed().as_millis().saturating_sub(_t_streaming_done.duration_since(_t_msg_start).as_millis()),
             );
+        }
+    }
+
+    fn process_tag_assignment_gc_results(&mut self) {
+        while let Ok(update) = self.tag_assignment_gc_receiver.try_recv() {
+            match update {
+                crate::app::operations::tag_ops::TagPathUpdate::PersistedRemoval(paths) => {
+                    self.reconcile_garbage_collected_tag_assignments(&paths);
+                }
+                crate::app::operations::tag_ops::TagPathUpdate::HideFromViews {
+                    generation,
+                    paths,
+                } => {
+                    self.pending_tag_view_hides
+                        .entry(generation)
+                        .or_default()
+                        .extend(paths);
+                }
+            }
+        }
+    }
+
+    fn process_hidden_menu_worker_results(&mut self) {
+        use crate::infrastructure::open_with_worker::OpenWithResponse;
+        use crate::infrastructure::shell_menu_worker::ShellMenuResponse;
+
+        while let Ok(response) = self.shell_menu_res_rx.try_recv() {
+            let request_id = match response {
+                ShellMenuResponse::Ready { request_id, .. }
+                | ShellMenuResponse::Error { request_id, .. }
+                | ShellMenuResponse::SubmenuLoaded { request_id, .. }
+                | ShellMenuResponse::Invoked { request_id } => request_id,
+            };
+            if request_id == self.shell_menu_request_id {
+                self.shell_menu_loading = false;
+            }
+            if self.global_search.shell_refresh_request_id == Some(request_id) {
+                self.global_search.shell_refresh_request_id = None;
+                self.request_global_search_refresh();
+            }
+        }
+
+        while let Ok(response) = self.open_with_res_rx.try_recv() {
+            let terminal_request_id = match response {
+                OpenWithResponse::Ready { request_id, .. }
+                | OpenWithResponse::Error { request_id, .. } => Some(request_id),
+                OpenWithResponse::Invoked {
+                    request_id, result, ..
+                } => {
+                    if let Err(error) = result {
+                        log::warn!("[OpenWith] Handler invocation failed: {}", error);
+                        self.notifications
+                            .warning(rust_i18n::t!("operations.open_failed").to_string());
+                    }
+                    Some(request_id)
+                }
+                OpenWithResponse::IconReady { .. } => None,
+            };
+            if terminal_request_id == Some(self.shell_menu_request_id) {
+                self.open_with_loading = false;
+            }
         }
     }
 

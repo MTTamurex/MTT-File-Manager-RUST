@@ -90,21 +90,17 @@ impl ImageViewerApp {
         const MAX_DEFERRED_FS_EVENTS: usize = 2048;
         for _ in 0..MAX_EVENTS_PER_TICK {
             match self.fs_event_receiver.try_recv() {
-                Ok(event) => {
+                Ok(mut event) => {
                     if self.deferred_fs_events.len() >= MAX_DEFERRED_FS_EVENTS {
-                        if let Some(dropped) = self.deferred_fs_events.pop_front() {
-                            if let Ok(event) = dropped.result {
-                                for path in event.paths {
-                                    self.directory_dirty_registry.mark_dirty(&path);
-                                    self.directory_cache.invalidate(&path);
-                                    if let Some(parent) = path.parent() {
-                                        self.directory_dirty_registry.mark_dirty(parent);
-                                        self.directory_cache.invalidate(&parent.to_path_buf());
-                                    }
-                                }
-                            }
+                        if self
+                            .deferred_fs_events
+                            .pop_front()
+                            .is_some_and(|dropped| dropped.overflow)
+                        {
+                            event.overflow = true;
                         }
                         self.pending_auto_reload = true;
+                        event.overflow = true;
                     }
                     self.deferred_fs_events.push_back(event);
                 }

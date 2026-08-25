@@ -122,6 +122,13 @@ impl InactiveItemsRebuildRegistry {
             .unwrap_or_else(|error| error.into_inner())
             .contains(&(tab_id, panel))
     }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.slots
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .is_empty()
+    }
 }
 
 #[derive(Clone, PartialEq)]

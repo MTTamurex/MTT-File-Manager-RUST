@@ -290,9 +290,9 @@ pub fn create_archive(
 
     match result {
         Ok(()) => {
-            fs::rename(&partial, dest)?;
+            let rename_result = fs::rename(&partial, dest);
             clear_progress(progress);
-            Ok(())
+            rename_result
         }
         Err(error) => {
             let _ = fs::remove_file(&partial);
@@ -644,6 +644,27 @@ mod tests {
 
         assert!(progress.lock().unwrap().is_none());
         assert!(!temp.path().join("out.zip.part").exists());
+    }
+
+    #[test]
+    fn failed_final_rename_clears_progress() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("source.txt");
+        std::fs::write(&source, b"content").unwrap();
+        let dest = temp.path().join("occupied.zip");
+        std::fs::create_dir(&dest).unwrap();
+        let progress = new_shared_progress();
+
+        create_archive(
+            &[source],
+            &dest,
+            CompressionFormat::Zip,
+            &progress,
+            &new_cancel_flag(),
+        )
+        .unwrap_err();
+
+        assert!(progress.lock().unwrap().is_none());
     }
 
     #[test]

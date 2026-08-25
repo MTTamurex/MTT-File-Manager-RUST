@@ -6,6 +6,8 @@ use crate::workers::tagged_results_worker::{normalize_search_path_key, TaggedRes
 use eframe::egui;
 use std::time::{Duration, Instant};
 
+const SEARCH_LOADING_TIMEOUT: Duration = Duration::from_secs(60);
+
 impl ImageViewerApp {
     pub(super) fn process_global_search_events(&mut self, schedule_visual_poll: bool) {
         const MAX_GLOBAL_SEARCH_MSGS_PER_FRAME: usize = 48;
@@ -174,6 +176,33 @@ impl ImageViewerApp {
                 .sender
                 .send(crate::workers::global_search_worker::GlobalSearchRequest::CheckStatus);
         }
+    }
+
+    pub(super) fn maintain_global_search_while_backgrounded(&mut self) {
+        if !self.global_search.loading
+            || self.global_search.pending_query_dispatch_at.is_some()
+            || self
+                .global_search
+                .in_flight_started_at
+                .is_none_or(|started_at| started_at.elapsed() < SEARCH_LOADING_TIMEOUT)
+        {
+            return;
+        }
+
+        self.global_search.loading = false;
+        self.global_search.in_flight_query = None;
+        self.global_search.in_flight_started_at = None;
+        self.global_search.has_more_results = false;
+        self.global_search.total_matches = None;
+        let _ = self
+            .global_search
+            .sender
+            .send(crate::workers::global_search_worker::GlobalSearchRequest::CheckStatus);
+        crate::infrastructure::diagnostic_logger::diag_warn(
+            "memory_trim",
+            "released_stale_global_search_blocker",
+            &[],
+        );
     }
 }
 
