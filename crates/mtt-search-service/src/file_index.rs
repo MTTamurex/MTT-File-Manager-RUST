@@ -293,9 +293,9 @@ impl VolumeIndex {
     /// Returns `false` if the arena is full and the record was not inserted.
     ///
     /// **Hardlink handling**: when the same FRN is inserted with a *different*
-    /// parent, the old parent's children entry is kept (the file appears under
-    /// both parents).  This matches Explorer's behaviour of counting hardlinked
-    /// files in every directory that references them.
+    /// parent, the old parent's children entry is kept so the file remains
+    /// discoverable through every directory that references it. Recursive disk
+    /// usage summaries still count that FRN only once per queried subtree.
     fn insert_record_internal(
         &mut self,
         frn: u64,
@@ -663,8 +663,10 @@ impl VolumeIndex {
     /// Compute recursive subtree totals for a directory using the `children`
     /// reverse index for O(subtree) traversal.
     ///
-    /// Returns `(total_size, file_count, folder_count)` where `folder_count`
-    /// excludes the queried root directory itself.
+    /// Returns `(total_size, file_count, folder_count, zero_size_count)` where
+    /// `folder_count` excludes the queried root directory itself. Hardlinked
+    /// files are counted once per queried subtree so this logical total matches
+    /// the Disk Analyzer's one-record-per-FRN model.
     ///
     /// All directories are traversed, including reparse-point directories.
     /// Junction/symlink FRNs have zero children in the MFT (their content
@@ -678,6 +680,7 @@ impl VolumeIndex {
         let mut zero_size_count: u64 = 0;
         let mut stack = vec![dir_frn];
         let mut visited_dirs = HashSet::with_capacity(256);
+        let mut visited_files = HashSet::with_capacity(1024);
         while let Some(frn) = stack.pop() {
             if !visited_dirs.insert(frn) {
                 continue;
@@ -688,7 +691,7 @@ impl VolumeIndex {
                         if record.is_dir() {
                             folder_count += 1;
                             stack.push(child_frn);
-                        } else {
+                        } else if visited_files.insert(child_frn) {
                             total_size = total_size.saturating_add(record.size);
                             file_count += 1;
                             if record.size == 0 {
@@ -701,40 +704,6 @@ impl VolumeIndex {
         }
 
         (total_size, file_count, folder_count, zero_size_count)
-    }
-
-    /// Diagnostic variant of `folder_size_sum` that also computes a unique-by-FRN
-    /// total for files. This helps distinguish true tree duplication from mere
-    /// multiple child edges to the same file within one queried subtree.
-    pub fn folder_size_sum_unique_files(&self, dir_frn: u64) -> (u64, u64, u64) {
-        let mut total_size: u64 = 0;
-        let mut file_count: u64 = 0;
-        let mut duplicate_hits: u64 = 0;
-        let mut stack = vec![dir_frn];
-        let mut visited_dirs = HashSet::with_capacity(256);
-        let mut seen_files = HashSet::with_capacity(1024);
-
-        while let Some(frn) = stack.pop() {
-            if !visited_dirs.insert(frn) {
-                continue;
-            }
-            if let Some(child_frns) = self.children.get(frn) {
-                for &child_frn in child_frns {
-                    if let Some(record) = self.records.get(&child_frn) {
-                        if record.is_dir() {
-                            stack.push(child_frn);
-                        } else if seen_files.insert(child_frn) {
-                            total_size = total_size.saturating_add(record.size);
-                            file_count += 1;
-                        } else {
-                            duplicate_hits += 1;
-                        }
-                    }
-                }
-            }
-        }
-
-        (total_size, file_count, duplicate_hits)
     }
 
     /// Collect up to `limit` unique file FRNs under `dir_frn` whose recorded
@@ -1052,11 +1021,23 @@ mod tests {
         index.records.get_mut(&21).unwrap().size = 100;
 
         // Reparse children are now included (needed for OneDrive cloud folders).
-        let (raw_total, raw_count, raw_folders, _zero) = index.folder_tree_summary(root);
-        assert_eq!((raw_total, raw_count, raw_folders), (111, 3, 2));
+        let (total, files, folders, _zero) = index.folder_tree_summary(root);
+        assert_eq!((total, files, folders), (111, 3, 2));
+    }
 
-        let (unique_total, unique_count, duplicate_hits) = index.folder_size_sum_unique_files(root);
-        assert_eq!((unique_total, unique_count, duplicate_hits), (111, 3, 0));
+    #[test]
+    fn folder_size_counts_hardlinked_file_once_per_subtree() {
+        let mut index = VolumeIndex::empty('C');
+        let root = 5u64;
+        assert!(index.insert_record(10, "first", root, true, false));
+        assert!(index.insert_record(11, "second", root, true, false));
+        assert!(index.insert_record(20, "shared.bin", 10, false, false));
+        index.records.get_mut(&20).unwrap().size = 42;
+        assert!(index.insert_record(20, "shared.bin", 11, false, false));
+
+        assert_eq!(index.folder_tree_summary(10), (42, 1, 0, 0));
+        assert_eq!(index.folder_tree_summary(11), (42, 1, 0, 0));
+        assert_eq!(index.folder_tree_summary(root), (42, 1, 2, 0));
     }
 
     #[test]

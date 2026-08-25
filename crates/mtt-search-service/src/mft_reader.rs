@@ -618,37 +618,7 @@ fn resolve_file_size(
 /// view of the volume. This is the fast NTFS path used by the app so folder
 /// sizes are stable and do not depend on the caller's elevation token.
 pub fn folder_size_for_service(index: &VolumeIndex, dir_frn: u64) -> (u64, u64, u64, u64) {
-    let (raw_total, raw_count, raw_folder_count, raw_zero_count) =
-        index.folder_tree_summary(dir_frn);
-
-    if folder_size_diag_enabled() {
-        let (uniq_total, uniq_count, dup_hits) = index.folder_size_sum_unique_files(dir_frn);
-        if dup_hits > 0 || raw_total != uniq_total {
-            eprintln!(
-                "[FOLDER-SIZE-DIAG] frn={} raw={:.2}GB({} files, {} folders) unique={:.2}GB({} files) dup_hits={} delta={:.2}MB",
-                dir_frn,
-                raw_total as f64 / 1_073_741_824.0,
-                raw_count,
-                raw_folder_count,
-                uniq_total as f64 / 1_073_741_824.0,
-                uniq_count,
-                dup_hits,
-                (raw_total as i128 - uniq_total as i128) as f64 / 1_048_576.0,
-            );
-        }
-    }
-
-    (raw_total, raw_count, raw_folder_count, raw_zero_count)
-}
-
-fn folder_size_diag_enabled() -> bool {
-    match std::env::var("MTT_SEARCH_FOLDER_SIZE_DIAG") {
-        Ok(value) => matches!(
-            value.trim().to_ascii_lowercase().as_str(),
-            "1" | "true" | "yes" | "on"
-        ),
-        Err(_) => false,
-    }
+    index.folder_tree_summary(dir_frn)
 }
 
 fn resolve_file_size_with_fallbacks(
