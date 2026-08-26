@@ -92,9 +92,7 @@ impl PdfViewerApp {
             self.search_in_progress = false;
             self.search_results = dedup_search_matches(result.matches);
             if !self.search_results.is_empty() {
-                self.current_match_idx = 0;
-                let page_idx = self.search_results[0].page_idx;
-                self.go_to_page(page_idx);
+                self.go_to_match(0);
             } else {
                 self.current_match_idx = 0;
             }
@@ -127,7 +125,12 @@ impl PdfViewerApp {
         }
         self.current_match_idx = idx;
         let page_idx = self.search_results[idx].page_idx;
-        self.go_to_page(page_idx);
+        let bounds = self.search_results[idx].bounds;
+        let unit_page = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::splat(1.0));
+        let match_fraction = self
+            .page_bounds_to_screen_rect(page_idx, unit_page, bounds)
+            .top();
+        self.go_to_page_fraction(page_idx, match_fraction);
     }
 
     pub(super) fn handle_search_shortcuts(&mut self, ctx: &egui::Context) {

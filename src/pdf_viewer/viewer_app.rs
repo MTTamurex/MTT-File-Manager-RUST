@@ -769,6 +769,15 @@ impl PdfViewerApp {
         self.current_page_fraction = 0.0;
     }
 
+    pub(super) fn go_to_page_fraction(&mut self, page: u32, fraction: f32) {
+        let page = page.min(self.total_pages.saturating_sub(1));
+        let fraction = fraction.clamp(0.0, 1.0);
+        self.go_to_page(page);
+        self.scroll_to_page = None;
+        self.scroll_to_page_fraction = Some((page, fraction));
+        self.current_page_fraction = fraction;
+    }
+
     pub(super) fn prev_page(&mut self) {
         if self.current_page == 0 {
             return;
