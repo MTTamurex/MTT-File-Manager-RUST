@@ -10,7 +10,7 @@
 //! - Command invocation is also sent to this thread — it reuses the stored COM context.
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender, SyncSender};
 use std::sync::Arc;
 
@@ -113,6 +113,7 @@ pub struct ShellMenuWorkerChannels {
     pub response_rx: Receiver<ShellMenuResponse>,
     pub latest_request_id: Arc<AtomicU64>,
     pub pending_invocation_id: Arc<AtomicU64>,
+    pub busy: Arc<AtomicBool>,
 }
 
 pub fn start_shell_menu_worker(repaint_ctx: eframe::egui::Context) -> ShellMenuWorkerChannels {
@@ -121,8 +122,10 @@ pub fn start_shell_menu_worker(repaint_ctx: eframe::egui::Context) -> ShellMenuW
     let (res_tx, res_rx) = mpsc::channel::<ShellMenuResponse>();
     let latest_request_id = Arc::new(AtomicU64::new(0));
     let pending_invocation_id = Arc::new(AtomicU64::new(0));
+    let busy = Arc::new(AtomicBool::new(false));
     let worker_latest_request_id = Arc::clone(&latest_request_id);
     let worker_pending_invocation_id = Arc::clone(&pending_invocation_id);
+    let worker_busy = Arc::clone(&busy);
 
     std::thread::spawn(move || {
         shell_menu_loop(
@@ -132,6 +135,7 @@ pub fn start_shell_menu_worker(repaint_ctx: eframe::egui::Context) -> ShellMenuW
             repaint_ctx,
             worker_latest_request_id,
             worker_pending_invocation_id,
+            worker_busy,
         )
     });
 
@@ -141,6 +145,7 @@ pub fn start_shell_menu_worker(repaint_ctx: eframe::egui::Context) -> ShellMenuW
         response_rx: res_rx,
         latest_request_id,
         pending_invocation_id,
+        busy,
     }
 }
 
@@ -163,6 +168,21 @@ impl Drop for ComGuard {
     }
 }
 
+struct BusyGuard<'a>(&'a AtomicBool);
+
+impl<'a> BusyGuard<'a> {
+    fn new(busy: &'a AtomicBool) -> Self {
+        busy.store(true, Ordering::Release);
+        Self(busy)
+    }
+}
+
+impl Drop for BusyGuard<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
+}
+
 fn send_response(
     tx: &Sender<ShellMenuResponse>,
     repaint_ctx: &eframe::egui::Context,
@@ -180,6 +200,7 @@ fn shell_menu_loop(
     repaint_ctx: eframe::egui::Context,
     latest_request_id: Arc<AtomicU64>,
     pending_invocation_id: Arc<AtomicU64>,
+    busy: Arc<AtomicBool>,
 ) {
     let _com = match ComGuard::init_sta() {
         Ok(com) => com,
@@ -211,6 +232,7 @@ fn shell_menu_loop(
             PrioritizedReceive::Timeout => continue,
             PrioritizedReceive::Disconnected => break,
         };
+        let _busy = BusyGuard::new(&busy);
         match req {
             ShellMenuRequest::Extract {
                 request_id,
@@ -434,4 +456,20 @@ fn pump_sta_messages() -> bool {
         }
     }
     true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::BusyGuard;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    #[test]
+    fn busy_guard_tracks_worker_scope() {
+        let busy = AtomicBool::new(false);
+        {
+            let _guard = BusyGuard::new(&busy);
+            assert!(busy.load(Ordering::Acquire));
+        }
+        assert!(!busy.load(Ordering::Acquire));
+    }
 }

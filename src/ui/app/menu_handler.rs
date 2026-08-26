@@ -451,6 +451,9 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
         }
         app.supersede_context_menu_background_work();
         app.context_menu_workers_active = false;
+        // Obsolete extraction/submenu responses are discarded by request ID. A queued Shell
+        // invocation below re-enables this flag until its terminal response arrives.
+        app.shell_menu_loading = false;
         if !is_open_with_handler {
             let _ = app
                 .open_with_control_tx

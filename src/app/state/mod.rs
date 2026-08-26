@@ -546,6 +546,8 @@ pub struct ImageViewerApp {
     /// Latest requested extraction, shared with the worker to skip obsolete queued work.
     pub latest_shell_menu_request_id: std::sync::Arc<std::sync::atomic::AtomicU64>,
     pub pending_shell_menu_invocation_id: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    /// True only while the STA worker is actively handling a Shell request.
+    pub shell_menu_worker_busy: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// True while the background thread is extracting shell items for the active menu.
     pub shell_menu_loading: bool,
     /// Monotonic id used to discard stale async shell-menu responses.

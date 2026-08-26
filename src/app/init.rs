@@ -295,6 +295,7 @@ impl ImageViewerApp {
             response_rx: shell_menu_res_rx,
             latest_request_id: latest_shell_menu_request_id,
             pending_invocation_id: pending_shell_menu_invocation_id,
+            busy: shell_menu_worker_busy,
         } = crate::infrastructure::shell_menu_worker::start_shell_menu_worker(ctx.clone());
         let pending_open_with_invocation_id =
             std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
@@ -539,6 +540,7 @@ impl ImageViewerApp {
             shell_menu_res_rx,
             latest_shell_menu_request_id,
             pending_shell_menu_invocation_id,
+            shell_menu_worker_busy,
             shell_menu_loading: false,
             shell_menu_request_id: 0,
             open_with_req_tx,

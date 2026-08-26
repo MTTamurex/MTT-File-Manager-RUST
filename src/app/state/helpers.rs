@@ -847,6 +847,11 @@ impl ImageViewerApp {
             Some("global-search")
         } else if purge_running {
             Some("tag-purge")
+        } else if self
+            .shell_menu_worker_busy
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            Some("shell-menu-worker")
         } else if self.shell_menu_loading {
             Some("shell-menu")
         } else if self.open_with_loading {
