@@ -1,6 +1,6 @@
 # MTT File Manager
 
-**Native Windows file manager** built in Rust with a modern UI, archive browsing, advanced media preview, and Windows integration.
+**Native Windows file manager** built in Rust with a modern UI, disk usage analysis, archive browsing and creation, advanced media preview, and Windows integration.
 
 <img width="3839" height="2062" alt="Untitled-1" src="https://github.com/user-attachments/assets/6ae29e6d-9f08-4d07-97bd-3e9e61a1f699" />
 
@@ -34,7 +34,7 @@
 
 ### Image, PDF & Text Viewers
 - **Consistent dedicated windows** — Images, PDF documents, and text files open in lightweight viewer windows with shared dark/light styling, themed toolbars, and native title bar integration
-- **Image viewer** — Uses a bounded sliding-window GPU texture cache, hidden-first startup, multi-threaded decoding, zoom controls, and drag-to-pan navigation for zoomed images
+- **Image viewer** — Uses a bounded sliding-window GPU texture cache, hidden-first startup, multi-threaded decoding, zoom controls, and drag-to-pan navigation for zoomed images; copy the displayed image as both a bitmap and file, delete through Windows Shell, or switch to full screen with F11
 - **PDF viewer** — Uses native PDFium rendering with asynchronous document loading, prioritized progressive rendering, virtualized pages and thumbnails, bounded texture caching, and keyboard navigation in the thumbnail sidebar
 - **Text viewer** — Opens plain text, source code, logs, and markup files in a focused viewer with search and go-to-line controls
 
@@ -51,7 +51,16 @@
 - **Health telemetry** — Reads standardized NVMe and ATA/SATA health data such as SMART status, temperature, remaining life, host reads/writes, power cycles, and power-on hours when the device protocol provides those values
 - **NVMe link information** — Reports the current and maximum PCIe generation and link width when Windows exposes the corresponding PCI device properties
 - **On-demand access** — Hardware queries run through the elevated `mtt-search-service` only when a local drive is shown in the details panel; successful results are cached for five minutes
+- **Proactive health status** — Background scheduling preloads drive health when possible and surfaces distinct warning and critical badges in the sidebar, This PC, and drive details
+- **Sidebar drive details** — Hover over a drive in the sidebar to see its label, filesystem, capacity, free space, and available hardware metadata
 - **Compatibility limits** — Native NVMe and standard ATA/SATA paths are prioritized. SAT-compatible USB bridges are supported on a best-effort basis, while proprietary USB bridges, RAID controllers, multi-disk volumes, and vendor-specific counter formats may not expose all fields
+
+### Disk Usage Analyzer
+- **Standalone NTFS analysis** — Launch **Analyze disk usage** from a local NTFS drive's context menu to open an independent analyzer window backed by a full-volume snapshot from the `mtt-search-service` index
+- **Visual navigation** — Explore usage through a colorblind-safe treemap, category breakdown, usage chart, and breadcrumb drill-down; open a selected folder directly in the main file manager
+- **Metrics and filters** — Compare allocated size, logical size, or file count and narrow results by name or path, extension, category, and minimum or maximum size
+- **Largest and efficiency reports** — List the largest files and folders or inspect where logical and allocated sizes differ
+- **Duplicate detection** — Run an on-demand, cancelable two-stage scan that groups candidates by size and confirms matches with full BLAKE3 hashes; configurable size limits, hardlink awareness, and recoverable-space totals keep the report accurate
 
 ### Global Search
 - **Instant search** — Query an in-memory index supporting millions of files, with trigram acceleration for eligible volumes and fallback matching for short queries and very large indexes
@@ -69,6 +78,7 @@
 - **Core operations** — Copy, cut, paste, rename, delete
 - **Batch rename** — Select 2+ files and press F2 to open the batch rename modal; configure a shared base name, number position (suffix/prefix), separator style (parentheses, underscore, dash, space, or none), and start/step/padding; drag-to-reorder; live preview table with per-row conflict detection
 - **Native context menu** — Full Windows Shell context menu integration, including the native **New** submenu when right-clicking an empty folder area
+- **Archive creation** — Compress selected files and folders to ZIP or 7Z from the context menu, with byte-level progress, cancellation, conflict-free archive naming, and temporary output cleanup after failures
 - **Archive extraction** — Access the Windows Shell **Extract All** action directly from the context menu for supported archive files
 - **External drag-and-drop** — Drag files from MTT File Manager to Windows Explorer and other compatible Windows applications
 - **Tag assignment** — Add, remove, or switch file/folder tags from the context menu; tags are preserved on supported renames/moves and cleared when files are deleted
@@ -134,7 +144,7 @@ The main file manager does not need to run as administrator for normal file brow
 | **PDF** | pdfium (pdfium-render) | 0.8.37 | Native PDF rendering (requires pdfium.dll) |
 | **Database** | SQLite (rusqlite) | 0.32 | Reliable persistence |
 | **Images** | image crate | 0.25 | Image processing |
-| **Archives** | zip + sevenz-rust + tar + flate2/bzip2/xz2/zstd | 2 / 0.6 / 0.4 / 1 / 0.5 / 0.1 / 0.13 | Native archive handling for ZIP, 7z, TAR, and compressed TAR variants |
+| **Archives** | zip + sevenz-rust/sevenz-rust2 + tar + flate2/bzip2/xz2/zstd | 2 / 0.6/0.20 / 0.4 / 1 / 0.5 / 0.1 / 0.13 | Native archive browsing plus ZIP/7Z creation |
 | **RAR** | unrar | 0.5 | Native RAR handling via the upstream UnRAR source |
 | **Parallelism** | rayon | 1.10 | Parallel processing |
 | **IPC** | Named Pipes + bincode | 1.3 | App ↔ search service communication |
