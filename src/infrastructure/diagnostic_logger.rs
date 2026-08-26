@@ -99,8 +99,7 @@ impl DiagnosticFile {
             write_session_header(&mut writer, enabled_since)?;
             writer.bytes_written()
         };
-        self.finish_write(written)?;
-        self.writer.flush()
+        self.finish_write(written)
     }
 
     fn write_session_footer(&mut self) -> std::io::Result<()> {
@@ -225,6 +224,9 @@ impl DiagnosticLogger {
         let mut state = self.state.lock();
         if let Some(file) = state.file.as_mut() {
             let _ = file.write_event(level, component, event_code, fields);
+            if component == "memory_trim" || matches!(level, Level::Warn | Level::Error) {
+                let _ = file.writer.flush();
+            }
         }
     }
 
@@ -770,6 +772,39 @@ mod tests {
         assert!(contents.contains("attempt=3"));
         assert!(contents.contains("elapsed=1250ms"));
         assert!(contents.contains("result=timeout"));
+    }
+
+    #[test]
+    fn memory_trim_events_are_flushed_while_logging_remains_enabled() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join(LOG_FILE_NAME);
+        let logger = DiagnosticLogger::new(make_console_logger());
+        {
+            let mut state = logger.state.lock();
+            state.file = Some(open_diagnostic_file(&path));
+            state.enabled_since = Some(SystemTime::now());
+        }
+
+        logger.write_event(
+            Level::Info,
+            "thumbnail_worker",
+            "cache_miss",
+            &[field_u64("count", 1)],
+        );
+        assert!(fs::read(&path).unwrap().is_empty());
+
+        logger.write_event(
+            Level::Info,
+            "memory_trim",
+            "background_status",
+            &[field_u64("working_set_bytes", 123)],
+        );
+
+        let contents = fs::read_to_string(&path).unwrap();
+        assert!(contents.contains("component=thumbnail_worker"));
+        assert!(contents.contains("component=memory_trim"));
+        assert!(contents.contains("working_set_bytes=123"));
+        assert!(logger.is_enabled());
     }
 
     #[test]

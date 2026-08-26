@@ -1,5 +1,7 @@
 use crate::app::ImageViewerApp;
-use crate::infrastructure::windows::window_subclass::is_in_size_move;
+use crate::infrastructure::windows::window_subclass::{
+    is_in_size_move, layout_phase, WindowLayoutPhase,
+};
 use crate::ui::app;
 use eframe::egui;
 use std::path::{Path, PathBuf};
@@ -11,6 +13,14 @@ const CLIPBOARD_CLEANUP_RETRY_INTERVAL: Duration = Duration::from_secs(1);
 const DRIVE_BITMASK_CHECK_INTERVAL: Duration = Duration::from_secs(3);
 const DRIVE_INFO_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
 const BACKGROUND_MEMORY_MONITOR_INTERVAL: Duration = Duration::from_secs(2);
+
+fn should_run_hidden_updates(viewport_visible: bool, minimized: bool) -> bool {
+    !viewport_visible || minimized
+}
+
+fn is_minimized_for_updates(saved_minimized: bool, native_minimized: bool) -> bool {
+    saved_minimized || native_minimized
+}
 
 struct RepaintDeadlineInputs {
     file_ops_in_progress: bool,
@@ -173,12 +183,17 @@ impl eframe::App for ImageViewerApp {
         // Startup must advance while the root viewport is still hidden.
         app::lifecycle::handle_startup_sequence(self, ctx);
         app::lifecycle::track_window_state(self, ctx);
+        self.auto_disable_diagnostic_mode_if_needed();
         self.ensure_window_handle(frame);
         // "Open in main app" requests from the disk analyzer (WM_COPYDATA
         // queue or DB fallback); no-op until startup completes.
         crate::app::operations::external_open::process_external_open_requests(self, ctx);
         let viewport_visible = ctx.input(|input| input.viewport().visible().unwrap_or(true));
-        if !viewport_visible {
+        let minimized = is_minimized_for_updates(
+            self.layout.saved_is_minimized,
+            layout_phase() == WindowLayoutPhase::Minimized,
+        );
+        if should_run_hidden_updates(viewport_visible, minimized) {
             self.run_background_updates(ctx, false);
         } else {
             self.run_deferred_post_load_visual_work();
@@ -186,6 +201,12 @@ impl eframe::App for ImageViewerApp {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        if is_minimized_for_updates(
+            self.layout.saved_is_minimized,
+            layout_phase() == WindowLayoutPhase::Minimized,
+        ) {
+            return;
+        }
         let ctx_owned = ui.ctx().clone();
         let ctx = &ctx_owned;
         crate::ui::video_overlay::begin_frame(ctx);
@@ -235,7 +256,6 @@ impl eframe::App for ImageViewerApp {
             // If we need this check, it should be done asynchronously in a worker thread.
         }
 
-        self.auto_disable_diagnostic_mode_if_needed();
         let frame_ms = ctx.input(|i| i.stable_dt) * 1000.0;
 
         // Use the larger of egui's stable_dt and the previous frame's actual render
@@ -813,6 +833,15 @@ mod tests {
         };
 
         assert_eq!(next_background_repaint(inputs), Duration::from_secs(2));
+    }
+
+    #[test]
+    fn minimized_state_runs_hidden_updates_even_if_viewport_reports_visible() {
+        assert!(is_minimized_for_updates(true, false));
+        assert!(is_minimized_for_updates(false, true));
+        assert!(should_run_hidden_updates(true, true));
+        assert!(should_run_hidden_updates(false, false));
+        assert!(!should_run_hidden_updates(true, false));
     }
 
     #[test]

@@ -36,6 +36,7 @@ const WORKING_SET_TRIM_FOLLOW_UP_DELAYS: &[Duration] = &[
 ];
 const WORKING_SET_TRIM_MIN_INTERVAL: Duration = Duration::from_secs(10);
 const WORKING_SET_TRIM_ACTIVITY_GRACE: Duration = Duration::from_secs(1);
+const BACKGROUND_MEMORY_DIAGNOSTIC_INTERVAL: Duration = Duration::from_secs(30);
 const LOW_RAM_GPU_IDLE_WS_TRIM_AFTER: Duration = Duration::from_secs(8);
 const LOW_RAM_GPU_IDLE_WS_TRIM_MIN_BYTES: u64 = 24 * 1024 * 1024;
 const WORKING_SET_TRIM_EFFECTIVE_REDUCTION_BYTES: u64 = 1024 * 1024;
@@ -912,6 +913,10 @@ impl ImageViewerApp {
         self.background_memory_trim_active = true;
         self.background_memory_trim_pending = true;
         self.background_memory_trim_last_stable_working_set_bytes = 0;
+        self.background_memory_diagnostic_last_log = Instant::now()
+            .checked_sub(BACKGROUND_MEMORY_DIAGNOSTIC_INTERVAL)
+            .unwrap_or_else(Instant::now);
+        self.log_background_memory_diagnostic_if_due();
         self.release_thumbnail_memory_for_background();
         self.background_memory_trim_success_baseline =
             WORKING_SET_TRIM_SUCCESS_COUNT.load(Ordering::Acquire);
@@ -955,9 +960,12 @@ impl ImageViewerApp {
     }
 
     pub(crate) fn run_background_memory_maintenance(&mut self) {
-        if !self.background_memory_trim_active
-            || crate::infrastructure::windows::window_subclass::layout_phase()
-                != crate::infrastructure::windows::window_subclass::WindowLayoutPhase::Minimized
+        if !self.background_memory_trim_active {
+            return;
+        }
+        self.log_background_memory_diagnostic_if_due();
+        if crate::infrastructure::windows::window_subclass::layout_phase()
+            != crate::infrastructure::windows::window_subclass::WindowLayoutPhase::Minimized
         {
             return;
         }
@@ -1044,6 +1052,123 @@ impl ImageViewerApp {
                 &[],
             );
         }
+    }
+
+    fn log_background_memory_diagnostic_if_due(&mut self) {
+        if !self.diagnostic_mode
+            || !crate::infrastructure::diagnostic_logger::is_enabled()
+            || self.background_memory_diagnostic_last_log.elapsed()
+                < BACKGROUND_MEMORY_DIAGNOSTIC_INTERVAL
+        {
+            return;
+        }
+        self.background_memory_diagnostic_last_log = Instant::now();
+
+        let Some(snapshot) = current_process_memory_snapshot() else {
+            crate::infrastructure::diagnostic_logger::diag_warn(
+                "memory_trim",
+                "background_status_snapshot_failed",
+                &[],
+            );
+            return;
+        };
+        let blocker = self.working_set_trim_blocker_reason().unwrap_or("none");
+        let inactive_folder_loading = self
+            .dual_panel_inactive_state
+            .as_ref()
+            .is_some_and(|panel| panel.is_loading_folder);
+        let folder_size_loading = self
+            .folder_size_state
+            .loading
+            .len()
+            .saturating_add(self.folder_size_state.batch_loading.len());
+        let (_, _, _, _, auxiliary_icon_markers) = self.item_icon_loader.cache_counts();
+        let native_phase = match crate::infrastructure::windows::window_subclass::layout_phase() {
+            crate::infrastructure::windows::window_subclass::WindowLayoutPhase::Normal => "normal",
+            crate::infrastructure::windows::window_subclass::WindowLayoutPhase::Minimized => {
+                "minimized"
+            }
+            crate::infrastructure::windows::window_subclass::WindowLayoutPhase::Restoring => {
+                "restoring"
+            }
+        };
+
+        use crate::infrastructure::diagnostic_logger::{field_bool, field_label, field_u64};
+        crate::infrastructure::diagnostic_logger::diag_info(
+            "memory_trim",
+            "background_status",
+            &[
+                field_u64("working_set_bytes", snapshot.working_set_bytes),
+                field_u64("private_usage_bytes", snapshot.private_usage_bytes),
+                field_label("blocker", blocker),
+                field_label("native_phase", native_phase),
+                field_bool("saved_minimized", self.layout.saved_is_minimized),
+                field_bool("trim_pending", self.background_memory_trim_pending),
+                field_u64(
+                    "stable_working_set_bytes",
+                    self.background_memory_trim_last_stable_working_set_bytes,
+                ),
+                field_u64(
+                    "trim_success_count",
+                    WORKING_SET_TRIM_SUCCESS_COUNT.load(Ordering::Acquire),
+                ),
+                field_u64(
+                    "file_operations",
+                    self.file_operation_state.file_ops_in_progress as u64,
+                ),
+                field_bool("folder_loading", self.is_loading_folder),
+                field_bool("inactive_folder_loading", inactive_folder_loading),
+                field_bool("items_rebuild", self.items_rebuild_in_flight),
+                field_bool(
+                    "inactive_items_rebuild",
+                    !self.inactive_items_rebuild_registry.is_empty(),
+                ),
+                field_bool(
+                    "bulk_thumbnail_scan",
+                    self.bulk_thumbnail_scanning.load(Ordering::Relaxed),
+                ),
+                field_u64(
+                    "thumbnail_queue",
+                    self.thumbnail_queue.pending_count() as u64,
+                ),
+                field_u64(
+                    "thumbnail_loading",
+                    self.cache_manager.loading_set.len() as u64,
+                ),
+                field_u64(
+                    "folder_preview_loading",
+                    self.cache_manager.folder_preview_loading.len() as u64,
+                ),
+                field_u64("pending_thumbnails", self.pending_thumbnails.len() as u64),
+                field_u64(
+                    "pending_thumbnail_uploads",
+                    self.cache_manager.pending_upload_set.len() as u64,
+                ),
+                field_u64("thumbnail_results", self.image_receiver.len() as u64),
+                field_u64("metadata_loading", self.metadata_loading.len() as u64),
+                field_u64(
+                    "live_size_loading",
+                    self.live_file_size_loading.len() as u64,
+                ),
+                field_u64("folder_size_loading", folder_size_loading as u64),
+                field_u64("file_hash_loading", self.file_hash_loading.len() as u64),
+                field_u64("icon_loading", self.loading_icons.len() as u64),
+                field_u64(
+                    "extension_icon_loading",
+                    self.loading_extensions.len() as u64,
+                ),
+                field_u64("auxiliary_icon_markers", auxiliary_icon_markers as u64),
+                field_u64(
+                    "auxiliary_icon_threads",
+                    self.item_icon_loader.auxiliary_icon_thread_count() as u64,
+                ),
+                field_u64("deferred_fs_events", self.deferred_fs_events.len() as u64),
+                field_u64(
+                    "dirty_directories",
+                    self.directory_dirty_registry.len() as u64,
+                ),
+            ],
+        );
     }
 
     fn discard_background_thumbnail_results(&mut self) {

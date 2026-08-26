@@ -698,6 +698,7 @@ pub struct ImageViewerApp {
     pub background_memory_trim_pending: bool,
     pub background_memory_trim_success_baseline: u64,
     pub background_memory_trim_last_stable_working_set_bytes: u64,
+    pub background_memory_diagnostic_last_log: Instant,
 
     // INACTIVITY RECOVERY: Track when app was restored from minimized state
     // Used to throttle heavy operations (watcher events, thumbnail loads) for a few frames

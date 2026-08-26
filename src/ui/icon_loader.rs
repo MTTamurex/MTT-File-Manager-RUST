@@ -355,6 +355,10 @@ impl IconLoader {
             || self.auxiliary_icon_threads.load(Ordering::Acquire) > 0
     }
 
+    pub(crate) fn auxiliary_icon_thread_count(&self) -> usize {
+        self.auxiliary_icon_threads.load(Ordering::Acquire)
+    }
+
     pub(crate) fn discard_async_icon_results_for_background(&mut self) {
         while let Ok(result) = self.icon_result_rx.try_recv() {
             self.loading_drive_icons.remove(&result.key);
