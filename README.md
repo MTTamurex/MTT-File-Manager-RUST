@@ -28,7 +28,6 @@
 - **Scalable browsing** — Load large Tag views in pages using cached file metadata while limiting thumbnail work to visible items
 
 ### Media Preview
-- **Integrated preview** — View files without leaving the app
 - **Media metadata** — The preview panel extracts video and audio details such as codec, bitrate, channels, sample rate, and music tags
 - **Smart thumbnails** — Multi-stage generation: image crate → WIC → Shell API → Media Foundation
 - **Animated GIF playback** — Animated preview on details panel
@@ -39,7 +38,7 @@
 - **PDF viewer** — Uses native PDFium rendering with asynchronous document loading, prioritized progressive rendering, virtualized pages and thumbnails, bounded texture caching, and keyboard navigation in the thumbnail sidebar
 - **Text viewer** — Opens plain text, source code, logs, and markup files in a focused viewer with search and go-to-line controls
 
-### MPV Video Player
+### Video Player
 - **Standalone playback** — Opens video and audio files in an mpv-based player with a D3D11 GPU pipeline
 - **Audio visualization** — Displays a real-time waveform while playing audio-only files
 - **Playback controls** — Supports 5% volume steps with Up/Down and five-second seeking with the mouse wheel
