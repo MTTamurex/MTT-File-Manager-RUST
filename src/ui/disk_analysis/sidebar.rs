@@ -66,12 +66,9 @@ fn render_usage_pie(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
     let Some(model) = state.model.clone() else {
         return;
     };
-    let total = model
-        .category_totals
-        .slice_for(state.metric)
-        .iter()
-        .sum::<u64>()
-        .max(1);
+    let category_totals = model.category_totals.slice_for(state.metric);
+    let total = category_totals.iter().sum::<u64>().max(1);
+    let category_count = category_totals.iter().filter(|&&bytes| bytes > 0).count();
     let dark = ui.visuals().dark_mode;
 
     let available = ui.available_width();
@@ -95,27 +92,34 @@ fn render_usage_pie(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
     let mut start = -std::f32::consts::FRAC_PI_2;
     let mut hovered: Option<(FileCategory, u64, f64)> = None;
     for category in FileCategory::ALL {
-        let bytes = model.category_totals.slice_for(state.metric)[category.index()];
+        let bytes = category_totals[category.index()];
         if bytes == 0 {
             continue;
         }
         let sweep = (bytes as f32 / total as f32) * std::f32::consts::TAU;
         let end = start + sweep;
 
-        if sweep >= 0.002 {
-            ui.painter().add(egui::Shape::convex_polygon(
-                sector_points(center, radius, start, sweep),
-                category_color(category, dark),
-                egui::Stroke::NONE,
-            ));
+        if category_count == 1 {
+            ui.painter()
+                .circle_filled(center, radius, category_color(category, dark));
+        } else if sweep >= 0.002 {
+            for points in sector_polygons(center, radius, start, sweep) {
+                ui.painter().add(egui::Shape::convex_polygon(
+                    points,
+                    category_color(category, dark),
+                    egui::Stroke::NONE,
+                ));
+            }
         }
-        ui.painter().line_segment(
-            [
-                center,
-                center + radius * egui::Vec2::new(start.cos(), start.sin()),
-            ],
-            egui::Stroke::new(1.0, ui.visuals().panel_fill),
-        );
+        if category_count > 1 {
+            ui.painter().line_segment(
+                [
+                    center,
+                    center + radius * egui::Vec2::new(start.cos(), start.sin()),
+                ],
+                egui::Stroke::new(1.0, ui.visuals().panel_fill),
+            );
+        }
 
         if let Some((r, angle)) = pointer_polar {
             if r <= radius {
@@ -157,32 +161,72 @@ fn render_usage_pie(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
     }
 }
 
-/// Sector polygon for the usage pie. Wide sectors use a center fan (convex,
-/// miter-safe); thin slices use a 4-point trapezoid so no degenerate
-/// micro-edges reach epaint's miter/feather math, which previously emitted
-/// runaway spikes across the window.
-fn sector_points(center: egui::Pos2, radius: f32, start: f32, sweep: f32) -> Vec<egui::Pos2> {
+/// Convex polygons for a pie sector. Wide sectors are split because epaint's
+/// convex polygon tessellator cannot safely render a fan spanning over 180°.
+/// Thin slices use a trapezoid so degenerate micro-edges do not reach its
+/// miter/feather math.
+fn sector_polygons(
+    center: egui::Pos2,
+    radius: f32,
+    start: f32,
+    sweep: f32,
+) -> Vec<Vec<egui::Pos2>> {
     if sweep >= 0.35 {
-        let steps = ((sweep / 0.09).ceil() as usize).max(2);
-        let mut points = Vec::with_capacity(steps + 2);
-        points.push(center);
-        for i in 0..=steps {
-            let a = start + sweep * i as f32 / steps as f32;
-            points.push(center + radius * egui::Vec2::new(a.cos(), a.sin()));
-        }
-        points
+        let polygon_count = (sweep / std::f32::consts::FRAC_PI_2).ceil() as usize;
+        let polygon_sweep = sweep / polygon_count as f32;
+        let overlap = (1.5 / radius.max(1.0)).min(0.03);
+
+        (0..polygon_count)
+            .map(|polygon_index| {
+                let polygon_start = start + polygon_sweep * polygon_index as f32
+                    - if polygon_index > 0 { overlap } else { 0.0 };
+                let polygon_end = start
+                    + polygon_sweep * (polygon_index + 1) as f32
+                    + if polygon_index + 1 < polygon_count {
+                        overlap
+                    } else {
+                        0.0
+                    };
+                let polygon_sweep = polygon_end - polygon_start;
+                let steps = ((polygon_sweep / 0.09).ceil() as usize).max(2);
+                let mut points = Vec::with_capacity(steps + 2);
+                points.push(center);
+                for i in 0..=steps {
+                    let angle = polygon_start + polygon_sweep * i as f32 / steps as f32;
+                    points.push(center + radius * egui::Vec2::new(angle.cos(), angle.sin()));
+                }
+                points
+            })
+            .collect()
     } else {
         let end = start + sweep;
         let inner_radius = 1.5_f32.min(radius * 0.1);
         let (cs, ss) = (start.cos(), start.sin());
         let (ce, se) = (end.cos(), end.sin());
-        vec![
+        vec![vec![
             center + radius * egui::Vec2::new(cs, ss),
             center + radius * egui::Vec2::new(ce, se),
             center + inner_radius * egui::Vec2::new(ce, se),
             center + inner_radius * egui::Vec2::new(cs, ss),
-        ]
+        ]]
     }
+}
+
+#[cfg(test)]
+fn polygon_is_convex(points: &[egui::Pos2]) -> bool {
+    let mut winding = 0.0_f32;
+    for i in 0..points.len() {
+        let a = points[(i + 1) % points.len()] - points[i];
+        let b = points[(i + 2) % points.len()] - points[(i + 1) % points.len()];
+        let cross = a.x * b.y - a.y * b.x;
+        if cross.abs() > f32::EPSILON {
+            if winding != 0.0 && cross.signum() != winding.signum() {
+                return false;
+            }
+            winding = cross;
+        }
+    }
+    winding != 0.0
 }
 
 /// All sidebar text shares the same color and tone as the Summary
@@ -309,7 +353,7 @@ fn render_drives(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
 
 #[cfg(test)]
 mod pie_tessellation_tests {
-    use super::sector_points;
+    use super::{polygon_is_convex, sector_polygons};
     use eframe::egui;
 
     /// The sector polygons must never tessellate into vertices outside the
@@ -325,22 +369,34 @@ mod pie_tessellation_tests {
             [1024, 1024],
             vec![],
         );
-        for sweep in [0.005_f32, 0.02, 0.3, 0.36, 1.0, 4.6] {
-            let points = sector_points(center, radius, -std::f32::consts::FRAC_PI_2, sweep);
-            let mut mesh = egui::epaint::Mesh::default();
-            tessellator.tessellate_shape(
-                egui::Shape::convex_polygon(points, egui::Color32::RED, egui::Stroke::NONE),
-                &mut mesh,
-            );
-            let max_dist = mesh
-                .vertices
-                .iter()
-                .map(|v| (v.pos - center).length())
-                .fold(0.0_f32, f32::max);
-            assert!(
-                max_dist <= radius + 2.0,
-                "sweep {sweep}: tessellated vertex escaped the disc (max_dist={max_dist})"
-            );
+        for sweep in [
+            0.005_f32,
+            0.02,
+            0.3,
+            0.36,
+            1.0,
+            3.6822,
+            4.6,
+            std::f32::consts::TAU,
+        ] {
+            for points in sector_polygons(center, radius, -std::f32::consts::FRAC_PI_2, sweep) {
+                assert!(polygon_is_convex(&points), "sweep {sweep} is not convex");
+
+                let mut mesh = egui::epaint::Mesh::default();
+                tessellator.tessellate_shape(
+                    egui::Shape::convex_polygon(points, egui::Color32::RED, egui::Stroke::NONE),
+                    &mut mesh,
+                );
+                let max_dist = mesh
+                    .vertices
+                    .iter()
+                    .map(|v| (v.pos - center).length())
+                    .fold(0.0_f32, f32::max);
+                assert!(
+                    max_dist <= radius + 2.0,
+                    "sweep {sweep}: tessellated vertex escaped the disc (max_dist={max_dist})"
+                );
+            }
         }
     }
 }
