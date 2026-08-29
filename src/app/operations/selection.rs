@@ -672,8 +672,7 @@ impl ImageViewerApp {
     pub fn trigger_selected_preview_overlay_action(&mut self) -> bool {
         match self.selected_preview_overlay_action() {
             SelectedPreviewOverlayAction::PlayMedia(path) => {
-                self.request_video_preview_playback(path);
-                true
+                self.queue_standalone_video_player(path, 0.0, None)
             }
             SelectedPreviewOverlayAction::OpenPdf(path) => {
                 crate::pdf_viewer::open_pdf_viewer(path);
