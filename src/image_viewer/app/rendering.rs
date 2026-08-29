@@ -35,10 +35,19 @@ impl super::DedicatedImageViewerApp {
             )
             .show(root_ui, |ui| {
                 let mut selected_format = None;
+                let mut selected_crop_format = None;
                 ui.horizontal_wrapped(|ui| {
                     let total = self.sequence.entries.len();
-                    let prev_enabled = self.current_index > 0;
-                    let next_enabled = self.current_index + 1 < total;
+                    let crop_editing = self.crop_is_active();
+                    let crop_saving = self.crop_is_saving();
+                    let retargeting = self.retarget_sequence_rx.is_some();
+                    let crop_locked = crop_saving || self.crop_confirmation_open();
+                    let prev_enabled =
+                        self.current_index > 0 && !crop_editing && !crop_saving && !retargeting;
+                    let next_enabled = self.current_index + 1 < total
+                        && !crop_editing
+                        && !crop_saving
+                        && !retargeting;
 
                     if ui
                         .add_enabled(
@@ -60,7 +69,10 @@ impl super::DedicatedImageViewerApp {
                     ui.separator();
 
                     if ui
-                        .button("↺")
+                        .add_enabled(
+                            !crop_editing && !crop_saving && !retargeting,
+                            egui::Button::new("↺"),
+                        )
                         .on_hover_text(t!("imageviewer.rotate_ccw"))
                         .clicked()
                     {
@@ -68,7 +80,10 @@ impl super::DedicatedImageViewerApp {
                     }
 
                     if ui
-                        .button("↻")
+                        .add_enabled(
+                            !crop_editing && !crop_saving && !retargeting,
+                            egui::Button::new("↻"),
+                        )
                         .on_hover_text(t!("imageviewer.rotate_cw"))
                         .clicked()
                     {
@@ -79,8 +94,71 @@ impl super::DedicatedImageViewerApp {
                         ui.label(format!("{}°", self.rotation));
                     }
 
+                    if crop_editing {
+                        ui.separator();
+                        ui.label(t!("imageviewer.crop_hint"));
+                        if ui
+                            .add_enabled(
+                                self.crop_has_selection() && !crop_saving,
+                                egui::Button::new(t!("imageviewer.crop_reset").to_string()),
+                            )
+                            .clicked()
+                        {
+                            self.reset_crop_selection();
+                        }
+                        let can_overwrite = self.crop_can_overwrite();
+                        let mut save = ui.add_enabled(
+                            self.crop_has_selection() && can_overwrite && !crop_locked,
+                            egui::Button::new(t!("imageviewer.save").to_string()),
+                        );
+                        if !can_overwrite {
+                            save = save.on_disabled_hover_text(t!("imageviewer.crop_save_as_only"));
+                        }
+                        if save.clicked() {
+                            self.request_crop_overwrite();
+                        }
+                        ui.add_enabled_ui(self.crop_has_selection() && !crop_locked, |ui| {
+                            ui.menu_button(t!("imageviewer.save_as").to_string(), |ui| {
+                                for format in loader::ExportImageFormat::RASTER_ALL {
+                                    if ui.button(Self::export_format_label(format)).clicked() {
+                                        selected_crop_format = Some(format);
+                                        ui.close();
+                                    }
+                                }
+                            });
+                        });
+                        if ui
+                            .add_enabled(
+                                !crop_locked,
+                                egui::Button::new(t!("imageviewer.cancel").to_string()),
+                            )
+                            .clicked()
+                        {
+                            self.cancel_crop();
+                        }
+                    } else if ui
+                        .add_enabled(
+                            self.has_current_texture()
+                                && !self.copy_in_progress
+                                && !self.delete_in_progress
+                                && !self.conversion_in_progress
+                                && !self.wallpaper_in_progress
+                                && self.startup_sequence_rx.is_none()
+                                && !retargeting
+                                && !crop_saving,
+                            egui::Button::new(t!("imageviewer.crop").to_string()),
+                        )
+                        .clicked()
+                    {
+                        self.begin_crop();
+                    }
+
                     ui.add_enabled_ui(
-                        !self.sequence.entries.is_empty() && !self.conversion_in_progress,
+                        !self.sequence.entries.is_empty()
+                            && !self.conversion_in_progress
+                            && !crop_editing
+                            && !crop_saving
+                            && !retargeting,
                         |ui| {
                             ui.menu_button(t!("imageviewer.convert").to_string(), |ui| {
                                 for format in loader::ExportImageFormat::ALL {
@@ -96,7 +174,10 @@ impl super::DedicatedImageViewerApp {
                     if self.current_path().is_some() {
                         let clicked = ui
                             .add_enabled(
-                                !self.wallpaper_in_progress,
+                                !self.wallpaper_in_progress
+                                    && !crop_editing
+                                    && !crop_saving
+                                    && !retargeting,
                                 egui::Button::new(&*t!("imageviewer.set_wallpaper")),
                             )
                             .clicked();
@@ -109,7 +190,10 @@ impl super::DedicatedImageViewerApp {
                         && !self.copy_in_progress
                         && !self.delete_in_progress
                         && !self.conversion_in_progress
-                        && !self.wallpaper_in_progress;
+                        && !self.wallpaper_in_progress
+                        && !crop_editing
+                        && !crop_saving
+                        && !retargeting;
                     if ui
                         .add_enabled(
                             image_actions_enabled,
@@ -132,7 +216,10 @@ impl super::DedicatedImageViewerApp {
                     }
                     if ui
                         .add_enabled(
-                            self.has_current_texture(),
+                            self.has_current_texture()
+                                && !crop_editing
+                                && !crop_saving
+                                && !retargeting,
                             egui::Button::new(&*t!("imageviewer.fullscreen")),
                         )
                         .on_hover_text(t!("imageviewer.fullscreen_tooltip"))
@@ -158,6 +245,9 @@ impl super::DedicatedImageViewerApp {
                 if let Some(format) = selected_format {
                     self.start_conversion(format, &ctx);
                 }
+                if let Some(format) = selected_crop_format {
+                    self.request_crop_save_as(format, &ctx);
+                }
 
                 let inner = ui.max_rect();
                 ui.painter().hline(
@@ -166,6 +256,7 @@ impl super::DedicatedImageViewerApp {
                     egui::Stroke::new(1.0, sep_color),
                 );
             });
+        self.render_crop_confirmation(&ctx);
     }
 
     pub(super) fn sync_window_title(&mut self, ctx: &egui::Context) {
@@ -305,7 +396,11 @@ impl super::DedicatedImageViewerApp {
 
                         // Click = zoom in/out; drag = pan only when there is
                         // actually scrollable image content.
-                        let image_sense = image_interaction_sense(can_pan);
+                        let image_sense = if self.crop_is_active() {
+                            egui::Sense::drag()
+                        } else {
+                            image_interaction_sense(can_pan)
+                        };
 
                         let response = if self.rotation != 0 {
                             let resp = ui.interact(
@@ -327,15 +422,17 @@ impl super::DedicatedImageViewerApp {
                             ui.put(image_rect, image)
                         };
 
+                        self.interact_with_crop(&response, image_rect, ui);
+
                         // Grabbing hand while panning; open hand whenever the
                         // image overflows and can be dragged.
-                        if response.dragged() {
+                        if !self.crop_is_active() && response.dragged() {
                             ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
-                        } else if response.hovered() && can_pan {
+                        } else if !self.crop_is_active() && response.hovered() && can_pan {
                             ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
                         }
 
-                        if response.hovered() {
+                        if response.hovered() && !self.crop_is_active() {
                             let wheel_delta = take_zoom_wheel_delta(ui);
                             if wheel_delta.abs() > f32::EPSILON {
                                 // Granular zoom: track wheel delta continuously.
@@ -362,7 +459,7 @@ impl super::DedicatedImageViewerApp {
                             }
                         }
 
-                        if can_pan && response.dragged() {
+                        if can_pan && response.dragged() && !self.crop_is_active() {
                             response.drag_delta()
                         } else {
                             egui::Vec2::ZERO

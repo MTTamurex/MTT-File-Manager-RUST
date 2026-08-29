@@ -57,6 +57,15 @@ pub fn get_current_user_sid_bytes() -> Option<(Vec<u8>, u32)> {
 /// permissions. This eliminates the TOCTOU window between directory creation and
 /// ACL application.
 pub fn harden_directory_permissions(dir: &Path) -> bool {
+    harden_path_permissions(dir, 3)
+}
+
+/// Apply an owner-only DACL to a file without inheritance.
+pub fn harden_file_permissions(file: &Path) -> bool {
+    harden_path_permissions(file, 0)
+}
+
+fn harden_path_permissions(dir: &Path, inheritance_flags: u32) -> bool {
     use windows::Win32::Foundation::LocalFree;
     use windows::Win32::Security::Authorization::{
         SetEntriesInAclW, SetNamedSecurityInfoW, EXPLICIT_ACCESS_W, SET_ACCESS, SE_FILE_OBJECT,
@@ -77,7 +86,7 @@ pub fn harden_directory_permissions(dir: &Path) -> bool {
     const FILE_ALL_ACCESS: u32 = 0x001F01FF;
 
     // CONTAINER_INHERIT_ACE | OBJECT_INHERIT_ACE = sub-containers and objects inherit.
-    let inheritance = ACE_FLAGS(3u32);
+    let inheritance = ACE_FLAGS(inheritance_flags);
 
     let entries = [EXPLICIT_ACCESS_W {
         grfAccessPermissions: FILE_ALL_ACCESS,

@@ -241,7 +241,7 @@ impl super::DedicatedImageViewerApp {
         self.reset_after_sequence_change(ctx);
     }
 
-    fn reset_after_sequence_change(&mut self, ctx: &egui::Context) {
+    pub(super) fn reset_after_sequence_change(&mut self, ctx: &egui::Context) {
         self.current_index = self.sequence.current_index;
         self.cache = crate::image_viewer::cache::WindowCache::new(super::DEFAULT_CACHE_RADIUS);
         self.prefetch = crate::image_viewer::cache::PrefetchEngine::new(
@@ -269,7 +269,7 @@ impl super::DedicatedImageViewerApp {
         ctx.request_repaint();
     }
 
-    fn set_status(&mut self, text: impl Into<String>, is_error: bool) {
+    pub(super) fn set_status(&mut self, text: impl Into<String>, is_error: bool) {
         self.status_message = Some(super::ViewerStatusMessage {
             text: text.into(),
             is_error,
@@ -279,7 +279,7 @@ impl super::DedicatedImageViewerApp {
 
 const MAX_COPY_RGBA_BYTES: usize = 128 * 1024 * 1024;
 
-fn prepare_displayed_frame(
+pub(super) fn prepare_displayed_frame(
     path: &Path,
     gif_frame_index: Option<usize>,
 ) -> Result<loader::DecodedFrame, String> {
@@ -292,6 +292,24 @@ fn prepare_displayed_frame(
             .ok_or_else(|| "Current GIF frame is unavailable".to_string());
     }
     loader::decode_export_frame(path).map_err(|error| error.to_string())
+}
+
+#[cfg(not(target_os = "windows"))]
+pub(super) fn prepare_displayed_frame_from_memory(
+    path: &Path,
+    gif_frame_index: Option<usize>,
+    bytes: &[u8],
+) -> Result<loader::DecodedFrame, String> {
+    if let Some(frame_index) = gif_frame_index {
+        let frames =
+            loader::decode_gif_frames_from_memory(bytes).map_err(|error| error.to_string())?;
+        return frames
+            .into_iter()
+            .nth(frame_index)
+            .map(|frame| frame.frame)
+            .ok_or_else(|| "Current GIF frame is unavailable".to_string());
+    }
+    loader::decode_export_frame_from_memory(path, bytes).map_err(|error| error.to_string())
 }
 
 fn file_name(path: &Path) -> String {

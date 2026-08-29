@@ -332,18 +332,39 @@ impl super::DedicatedImageViewerApp {
     /// Advances the animation to the next frame when the current frame's delay
     /// has elapsed, and schedules a repaint for the next frame transition.
     pub(super) fn advance_gif_frame(&mut self, ctx: &egui::Context) {
+        if self.crop_is_active() {
+            return;
+        }
         let Some(anim) = self.gif_animation.as_mut() else {
             return;
         };
 
-        let delay = Duration::from_millis(anim.delays_ms[anim.current_frame] as u64);
+        let delay = frame_delay(&anim.delays_ms, anim.current_frame);
         if anim.frame_started.elapsed() >= delay {
             anim.current_frame = (anim.current_frame + 1) % anim.textures.len();
             anim.frame_started = std::time::Instant::now();
         }
 
+        let delay = frame_delay(&anim.delays_ms, anim.current_frame);
         let elapsed = anim.frame_started.elapsed();
         let remaining = delay.saturating_sub(elapsed).max(Duration::from_millis(10));
         ctx.request_repaint_after(remaining);
+    }
+}
+
+fn frame_delay(delays_ms: &[u32], current_frame: usize) -> Duration {
+    Duration::from_millis(delays_ms[current_frame] as u64)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::frame_delay;
+    use std::time::Duration;
+
+    #[test]
+    fn frame_delay_tracks_the_current_frame_after_advance() {
+        let delays = [1_000, 10];
+
+        assert_eq!(frame_delay(&delays, 1), Duration::from_millis(10));
     }
 }

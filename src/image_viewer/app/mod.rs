@@ -8,12 +8,15 @@ use std::collections::HashSet;
 use std::time::Duration;
 
 mod actions;
+mod crop;
+mod crop_selection;
 mod filmstrip;
 mod gif_export;
 mod rendering;
 mod wallpaper;
 
 use actions::{CopyImageOutcome, DeleteImageOutcome};
+use crop::CropState;
 use filmstrip::FilmstripState;
 use gif_export::{GifAnimation, GifUploadQueue, ViewerStatusMessage};
 
@@ -42,6 +45,11 @@ pub struct DedicatedImageViewerApp {
     pub(super) prefetch: PrefetchEngine,
     pub(super) external_open_rx: std::sync::mpsc::Receiver<std::path::PathBuf>,
     pub(super) startup_sequence_rx: Option<std::sync::mpsc::Receiver<ImageSequence>>,
+    pub(super) retarget_sequence_rx: Option<(
+        std::sync::mpsc::Receiver<ImageSequence>,
+        std::path::PathBuf,
+        std::time::Instant,
+    )>,
     pub(super) startup_preview: Option<(std::path::PathBuf, loader::DecodedFrame)>,
     pub(super) requested_jobs: HashSet<usize>,
     pub(super) texture: Option<egui::TextureHandle>,
@@ -85,6 +93,7 @@ pub struct DedicatedImageViewerApp {
     pub(super) copy_in_progress: bool,
     pub(super) delete_rx: Option<std::sync::mpsc::Receiver<DeleteImageOutcome>>,
     pub(super) delete_in_progress: bool,
+    crop: CropState,
     pub(super) fullscreen: bool,
     pub(super) status_message: Option<ViewerStatusMessage>,
     /// Timestamp of the last navigation action (for key-repeat throttling).
@@ -132,6 +141,7 @@ impl DedicatedImageViewerApp {
             prefetch: PrefetchEngine::new(worker_count, DEFAULT_CACHE_RADIUS),
             external_open_rx,
             startup_sequence_rx,
+            retarget_sequence_rx: None,
             startup_preview,
             requested_jobs: HashSet::new(),
             texture: None,
@@ -161,6 +171,7 @@ impl DedicatedImageViewerApp {
             copy_in_progress: false,
             delete_rx: None,
             delete_in_progress: false,
+            crop: CropState::new(),
             fullscreen: false,
             status_message: None,
             last_navigate_instant: now - Duration::from_millis(100),
@@ -212,6 +223,7 @@ impl DedicatedImageViewerApp {
             .current_path()
             .is_some_and(|current| paths_eq_case_insensitive(current, &path))
         {
+            self.retarget_sequence_rx = None;
             // Ignore duplicate retargets for the same image during startup.
             // Rebuilding the sequence and reissuing viewport commands here can
             // look like multiple rapid open/maximize cycles on Windows.
@@ -222,11 +234,15 @@ impl DedicatedImageViewerApp {
             return;
         }
 
+        self.cancel_crop();
+        self.status_message = None;
+        self.retarget_sequence_rx = None;
+
         // Build sequence on a background thread to avoid blocking the UI
         // with directory enumeration and sorting on large/slow folders.
         let (tx, rx) = std::sync::mpsc::channel();
         let path_clone = path.clone();
-        std::thread::Builder::new()
+        let spawn_result = std::thread::Builder::new()
             .name("seq-build".into())
             .spawn(move || {
                 let sequence = match indexer::build_sequence(&path_clone) {
@@ -241,21 +257,68 @@ impl DedicatedImageViewerApp {
                     }
                 };
                 let _ = tx.send(sequence);
-            })
-            .ok();
+            });
 
-        // Wait with a bounded timeout so UI isn't stuck forever on pathological I/O.
-        let sequence = match rx.recv_timeout(Duration::from_secs(5)) {
-            Ok(seq) => seq,
-            Err(_) => {
-                log::warn!(
-                    "[IMAGE-VIEWER] sequence build timed out for '{}'",
-                    path.display()
-                );
-                ImageSequence::single(path)
+        match spawn_result {
+            Ok(_) => {
+                self.retarget_sequence_rx = Some((rx, path, std::time::Instant::now()));
+                ctx.request_repaint_after(Duration::from_millis(16));
             }
-        };
+            Err(error) => {
+                log::warn!(
+                    "[IMAGE-VIEWER] failed to start sequence build for '{}': {}",
+                    path.display(),
+                    error
+                );
+                self.apply_requested_sequence(ImageSequence::single(path), ctx);
+            }
+        }
+    }
 
+    fn poll_retarget_sequence(&mut self, ctx: &egui::Context) {
+        let result = self
+            .retarget_sequence_rx
+            .as_ref()
+            .map(|(receiver, _, _)| receiver.try_recv());
+        match result {
+            Some(Ok(sequence)) => {
+                self.retarget_sequence_rx = None;
+                self.apply_requested_sequence(sequence, ctx);
+            }
+            Some(Err(std::sync::mpsc::TryRecvError::Disconnected)) => {
+                self.retarget_sequence_rx = None;
+                self.status_message = Some(ViewerStatusMessage {
+                    text: t!(
+                        "imageviewer.open_error",
+                        error = t!("imageviewer.sequence_worker_disconnected")
+                    )
+                    .to_string(),
+                    is_error: true,
+                });
+            }
+            Some(Err(std::sync::mpsc::TryRecvError::Empty)) => {
+                let fallback = self
+                    .retarget_sequence_rx
+                    .as_ref()
+                    .filter(|(_, _, started)| started.elapsed() >= Duration::from_secs(5))
+                    .map(|(_, path, _)| path.clone());
+                if let Some(path) = fallback {
+                    log::warn!(
+                        "[IMAGE-VIEWER] sequence build timed out for '{}'",
+                        path.display()
+                    );
+                    self.apply_requested_sequence(ImageSequence::single(path), ctx);
+                } else {
+                    ctx.request_repaint_after(Duration::from_millis(16));
+                }
+            }
+            None => {}
+        }
+    }
+
+    fn apply_requested_sequence(&mut self, sequence: ImageSequence, ctx: &egui::Context) {
+        self.retarget_sequence_rx = None;
+        self.cancel_crop();
         let start_index = sequence
             .current_index
             .min(sequence.entries.len().saturating_sub(1));
@@ -272,6 +335,9 @@ impl DedicatedImageViewerApp {
         self.startup_sequence_rx = None;
         self.startup_preview = None;
         self.requested_jobs.clear();
+        self.texture = None;
+        self.texture_index = None;
+        self.image_resolution = None;
         self.last_error = None;
         self.zoom_factor = 1.0;
         self.zoom_percent_display = 100.0;
@@ -288,7 +354,6 @@ impl DedicatedImageViewerApp {
             .wallpaper_generation
             .fetch_add(1, std::sync::atomic::Ordering::AcqRel)
             .wrapping_add(1);
-        self.status_message = None;
         self.last_navigate_instant = std::time::Instant::now();
         self.filmstrip.reset();
 
@@ -306,6 +371,9 @@ impl DedicatedImageViewerApp {
     }
 
     fn handle_external_open_requests(&mut self, ctx: &egui::Context) {
+        if self.crop_is_saving() {
+            return;
+        }
         let mut latest_path = None;
 
         loop {
@@ -583,6 +651,9 @@ impl DedicatedImageViewerApp {
     }
 
     pub(super) fn navigate_to(&mut self, index: usize, ctx: &egui::Context) {
+        if self.crop_is_active() || self.crop_is_saving() || self.retarget_sequence_rx.is_some() {
+            return;
+        }
         if index >= self.sequence.entries.len() {
             return;
         }
@@ -676,10 +747,16 @@ impl DedicatedImageViewerApp {
     }
 
     pub(super) fn rotate_cw(&mut self) {
+        if self.crop_is_active() || self.crop_is_saving() || self.retarget_sequence_rx.is_some() {
+            return;
+        }
         self.rotation = (self.rotation + 90) % 360;
     }
 
     pub(super) fn rotate_ccw(&mut self) {
+        if self.crop_is_active() || self.crop_is_saving() || self.retarget_sequence_rx.is_some() {
+            return;
+        }
         self.rotation = (self.rotation + 270) % 360;
     }
 
@@ -718,12 +795,28 @@ impl DedicatedImageViewerApp {
 
     fn handle_shortcuts(&mut self, ctx: &egui::Context) {
         let fullscreen = ctx.input(|i| i.key_pressed(egui::Key::F11));
-        if fullscreen && self.has_current_texture() {
+        if fullscreen
+            && self.has_current_texture()
+            && !self.crop_is_active()
+            && !self.crop_is_saving()
+            && self.retarget_sequence_rx.is_none()
+        {
             self.toggle_fullscreen(ctx);
             return;
         }
 
         let escape = ctx.input(|i| i.key_pressed(egui::Key::Escape));
+        if escape && self.crop.has_confirmation() {
+            self.crop.cancel_confirmation();
+            return;
+        }
+        if escape && self.crop_is_active() && !self.crop_is_saving() {
+            self.cancel_crop();
+            return;
+        }
+        if escape && self.crop_is_saving() {
+            return;
+        }
         if escape && self.fullscreen {
             self.set_fullscreen(false, ctx);
             return;
@@ -740,7 +833,10 @@ impl DedicatedImageViewerApp {
             && !self.copy_in_progress
             && !self.delete_in_progress
             && !self.conversion_in_progress
-            && !self.wallpaper_in_progress;
+            && !self.wallpaper_in_progress
+            && !self.crop_is_active()
+            && !self.crop_is_saving()
+            && self.retarget_sequence_rx.is_none();
         let copy = actions_enabled && ctx.input_mut(take_copy_shortcut);
         if copy && actions_enabled {
             self.start_copy_current_image(ctx);
@@ -847,7 +943,9 @@ impl DedicatedImageViewerApp {
 
 impl eframe::App for DedicatedImageViewerApp {
     fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
-        if self.delete_in_progress && ctx.input(|input| input.viewport().close_requested()) {
+        if ctx.input(|input| input.viewport().close_requested())
+            && (self.delete_in_progress || self.should_cancel_crop_close())
+        {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
         }
         if !self.repaint_ctx_set {
@@ -897,7 +995,9 @@ impl eframe::App for DedicatedImageViewerApp {
             }
         }
 
+        self.poll_crop_save(ctx);
         self.handle_external_open_requests(ctx);
+        self.poll_retarget_sequence(ctx);
         self.poll_startup_sequence(ctx);
         if self.texture.is_none() {
             self.try_show_startup_preview(ctx);
@@ -1011,8 +1111,19 @@ fn paths_eq_case_insensitive(a: &std::path::Path, b: &std::path::Path) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::take_copy_shortcut;
+    use super::*;
     use eframe::egui;
+
+    fn test_app(path: std::path::PathBuf) -> DedicatedImageViewerApp {
+        let (_sender, receiver) = std::sync::mpsc::channel();
+        DedicatedImageViewerApp::new(ImageSequence::single(path), receiver, false, None, None)
+    }
+
+    fn write_test_png(path: &std::path::Path) {
+        image::RgbaImage::from_pixel(2, 2, image::Rgba([10, 20, 30, 255]))
+            .save(path)
+            .unwrap();
+    }
 
     #[test]
     fn copy_shortcut_consumes_copy_event() {
@@ -1030,5 +1141,112 @@ mod tests {
 
         assert!(!take_copy_shortcut(&mut input));
         assert_eq!(input.events, vec![egui::Event::Text("c".to_string())]);
+    }
+
+    #[test]
+    fn duplicate_open_does_not_cancel_active_crop() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("image.png");
+        write_test_png(&path);
+        let mut app = test_app(path.clone());
+        let ctx = egui::Context::default();
+        let frame = loader::decode_export_frame(&path).unwrap();
+        app.upload_to_cache(&ctx, 0, &frame);
+        app.begin_crop();
+
+        app.open_requested_path(path, &ctx);
+
+        assert!(app.crop_is_active());
+    }
+
+    #[test]
+    fn retarget_sequence_build_does_not_replace_current_image_synchronously() {
+        let directory = tempfile::tempdir().unwrap();
+        let current = directory.path().join("a.png");
+        let target = directory.path().join("b.png");
+        write_test_png(&current);
+        write_test_png(&target);
+        let mut app = test_app(current.clone());
+        let ctx = egui::Context::default();
+
+        app.open_requested_path(target, &ctx);
+
+        assert_eq!(app.current_path(), Some(&current));
+        assert!(app.retarget_sequence_rx.is_some());
+    }
+
+    #[test]
+    fn latest_request_for_current_image_cancels_pending_retarget() {
+        let directory = tempfile::tempdir().unwrap();
+        let current = directory.path().join("a.png");
+        let target = directory.path().join("b.png");
+        write_test_png(&current);
+        write_test_png(&target);
+        let mut app = test_app(current.clone());
+        let ctx = egui::Context::default();
+        app.open_requested_path(target, &ctx);
+        assert!(app.retarget_sequence_rx.is_some());
+
+        app.open_requested_path(current, &ctx);
+
+        assert!(app.retarget_sequence_rx.is_none());
+    }
+
+    #[test]
+    fn applying_retarget_cancels_crop_state() {
+        let directory = tempfile::tempdir().unwrap();
+        let current = directory.path().join("a.png");
+        let target = directory.path().join("b.png");
+        write_test_png(&current);
+        write_test_png(&target);
+        let mut app = test_app(current.clone());
+        let ctx = egui::Context::default();
+        let frame = loader::decode_export_frame(&current).unwrap();
+        app.upload_to_cache(&ctx, 0, &frame);
+        app.begin_crop();
+        assert!(app.crop_is_active());
+
+        app.apply_requested_sequence(ImageSequence::single(target), &ctx);
+
+        assert!(!app.crop_is_active());
+    }
+
+    #[test]
+    fn applying_retarget_clears_texture_from_same_index() {
+        let directory = tempfile::tempdir().unwrap();
+        let current = directory.path().join("a.png");
+        let target = directory.path().join("b.png");
+        write_test_png(&current);
+        write_test_png(&target);
+        let mut app = test_app(current.clone());
+        let ctx = egui::Context::default();
+        let frame = loader::decode_export_frame(&current).unwrap();
+        app.upload_to_cache(&ctx, 0, &frame);
+        assert!(app.has_current_texture());
+
+        app.apply_requested_sequence(ImageSequence::single(target), &ctx);
+
+        assert!(!app.has_current_texture());
+        assert!(app.texture.is_none());
+    }
+
+    #[test]
+    fn stale_filmstrip_result_keeps_current_pending_marker() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("image.png");
+        write_test_png(&path);
+        let mut app = test_app(path);
+        let ctx = egui::Context::default();
+        let stale_generation = app.filmstrip.generation;
+        app.filmstrip.reset();
+        app.filmstrip.pending.insert(0);
+        app.filmstrip
+            .result_tx
+            .send((0, stale_generation, filmstrip::empty_decoded_frame()))
+            .unwrap();
+
+        app.poll_filmstrip_results(&ctx);
+
+        assert!(app.filmstrip.pending.contains(&0));
     }
 }

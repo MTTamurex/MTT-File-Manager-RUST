@@ -8,6 +8,7 @@ use std::io;
 use std::io::BufReader;
 use std::io::BufWriter;
 use std::io::Cursor;
+use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -146,6 +147,19 @@ impl ExportImageFormat {
         Self::Pdf,
     ];
 
+    pub const RASTER_ALL: [Self; 5] = [Self::Png, Self::Jpeg, Self::WebP, Self::Bmp, Self::Tiff];
+
+    pub fn from_raster_extension(extension: &str) -> Option<Self> {
+        match extension.to_ascii_lowercase().as_str() {
+            "png" => Some(Self::Png),
+            "jpg" | "jpeg" | "jpe" | "jfif" => Some(Self::Jpeg),
+            "webp" => Some(Self::WebP),
+            "bmp" => Some(Self::Bmp),
+            "tif" | "tiff" => Some(Self::Tiff),
+            _ => None,
+        }
+    }
+
     pub fn extension(self) -> &'static str {
         match self {
             Self::Png => "png",
@@ -202,11 +216,15 @@ const GIF_MAX_FRAMES: usize = 240;
 /// [`GIF_MAX_TOTAL_RGBA_BYTES`] of combined pixel data.  Remaining frames are
 /// silently discarded so the viewer stays responsive.
 pub fn decode_gif_frames(path: &Path) -> io::Result<Vec<GifAnimationFrame>> {
+    let bytes = read_file_fast(path, DecodePriority::Interactive)?;
+    decode_gif_frames_from_memory(&bytes)
+}
+
+pub fn decode_gif_frames_from_memory(bytes: &[u8]) -> io::Result<Vec<GifAnimationFrame>> {
     use image::codecs::gif::GifDecoder;
     use image::AnimationDecoder;
 
-    let bytes = read_file_fast(path, DecodePriority::Interactive)?;
-    let cursor = Cursor::new(bytes.as_slice());
+    let cursor = Cursor::new(bytes);
     let decoder = GifDecoder::new(cursor)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
 
@@ -367,6 +385,14 @@ pub fn decode_export_frame(path: &Path) -> io::Result<DecodedFrame> {
     Ok(frame_from_dynamic(image))
 }
 
+#[cfg(not(target_os = "windows"))]
+pub fn decode_export_frame_from_memory(path: &Path, bytes: &[u8]) -> io::Result<DecodedFrame> {
+    if is_svg_path(path) {
+        return decode_svg_bytes(bytes, None);
+    }
+    decode_with_exif_orientation(bytes).map(frame_from_dynamic)
+}
+
 pub fn decode_preview_frame(path: &Path, max_side: u32) -> io::Result<DecodedFrame> {
     decode_preview_frame_with_priority(path, max_side, DecodePriority::Interactive)
 }
@@ -449,6 +475,15 @@ pub fn encode_frame_to_path(
     format: ExportImageFormat,
     output_path: &Path,
 ) -> io::Result<()> {
+    validate_frame_buffer(&frame)?;
+    encode_frame_to_file(frame, format, File::create(output_path)?)
+}
+
+pub fn encode_frame_to_file(
+    frame: DecodedFrame,
+    format: ExportImageFormat,
+    file: File,
+) -> io::Result<()> {
     let Some(buffer) = image::RgbaImage::from_raw(frame.width, frame.height, frame.rgba) else {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -456,22 +491,37 @@ pub fn encode_frame_to_path(
         ));
     };
 
-    if format == ExportImageFormat::Pdf {
-        return encode_frame_to_pdf(buffer, output_path);
-    }
-
-    let image = DynamicImage::ImageRgba8(buffer);
-    let file = File::create(output_path)?;
     let mut writer = BufWriter::new(file);
-    let img_fmt = format.image_format().expect("PDF handled above");
-    image
-        .write_to(&mut writer, img_fmt)
-        .map_err(|err| io::Error::other(err.to_string()))
+    if format == ExportImageFormat::Pdf {
+        encode_frame_to_pdf(buffer, &mut writer)?;
+    } else {
+        let image = DynamicImage::ImageRgba8(buffer);
+        let img_fmt = format.image_format().expect("PDF handled above");
+        image
+            .write_to(&mut writer, img_fmt)
+            .map_err(|err| io::Error::other(err.to_string()))?;
+    }
+    writer.flush()?;
+    writer.get_ref().sync_all()
+}
+
+fn validate_frame_buffer(frame: &DecodedFrame) -> io::Result<()> {
+    let expected = (frame.width as usize)
+        .checked_mul(frame.height as usize)
+        .and_then(|pixels| pixels.checked_mul(4))
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "image dimensions overflow"))?;
+    if frame.width == 0 || frame.height == 0 || frame.rgba.len() != expected {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "decoded frame buffer has invalid dimensions",
+        ));
+    }
+    Ok(())
 }
 
 /// Encode an RGBA image into a single-page PDF using `printpdf`.
 /// Alpha is composited over a white background before embedding.
-fn encode_frame_to_pdf(rgba: image::RgbaImage, output_path: &Path) -> io::Result<()> {
+fn encode_frame_to_pdf(rgba: image::RgbaImage, writer: &mut BufWriter<File>) -> io::Result<()> {
     use printpdf::{ColorBits, ColorSpace, ImageTransform, ImageXObject, Mm, PdfDocument, Px};
 
     let width_px = rgba.width();
@@ -521,9 +571,7 @@ fn encode_frame_to_pdf(rgba: image::RgbaImage, output_path: &Path) -> io::Result
     let img = printpdf::Image::from(image_xobject);
     img.add_to_layer(current_layer, ImageTransform::default());
 
-    let file = File::create(output_path)?;
-    let mut writer = BufWriter::new(file);
-    doc.save(&mut writer)
+    doc.save(writer)
         .map_err(|err| io::Error::other(err.to_string()))
 }
 
@@ -919,6 +967,37 @@ mod tests {
         let normalized = normalize_export_path(&path, ExportImageFormat::Jpeg);
 
         assert_eq!(normalized, PathBuf::from("sample.JPG"));
+    }
+
+    #[test]
+    fn raster_extension_mapping_accepts_common_aliases() {
+        assert_eq!(
+            ExportImageFormat::from_raster_extension("JPEG"),
+            Some(ExportImageFormat::Jpeg)
+        );
+        assert_eq!(
+            ExportImageFormat::from_raster_extension("tif"),
+            Some(ExportImageFormat::Tiff)
+        );
+        assert_eq!(ExportImageFormat::from_raster_extension("gif"), None);
+        assert_eq!(ExportImageFormat::from_raster_extension("svg"), None);
+    }
+
+    #[test]
+    fn invalid_frame_does_not_truncate_existing_output() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("existing.png");
+        std::fs::write(&path, b"original").unwrap();
+        let invalid = DecodedFrame {
+            rgba: Vec::new(),
+            width: 1,
+            height: 1,
+            original_width: 1,
+            original_height: 1,
+        };
+
+        assert!(encode_frame_to_path(invalid, ExportImageFormat::Png, &path).is_err());
+        assert_eq!(std::fs::read(path).unwrap(), b"original");
     }
 
     #[test]

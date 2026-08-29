@@ -9,10 +9,12 @@ use windows::Win32::System::Threading::{CreateMutexW, ReleaseMutex};
 
 mod app;
 mod cache;
+mod crop;
 mod indexer;
 mod ipc;
 mod loader;
 pub(crate) mod metrics;
+mod save;
 mod thumbnail_cache;
 mod wallpaper;
 

@@ -44,14 +44,15 @@ impl FilmstripState {
     }
 
     pub(super) fn reset(&mut self) {
+        let (result_tx, result_rx) = crossbeam_channel::bounded(64);
+        self.result_tx = result_tx;
+        self.result_rx = result_rx;
         self.thumbnails.clear();
         self.pending.clear();
         self.cache_misses.clear();
         self.generation = self.generation.wrapping_add(1);
         self.scroll_to_current = true;
         self.last_viewport_width = None;
-        // Drain any stale results from the old generation
-        while self.result_rx.try_recv().is_ok() {}
     }
 }
 
@@ -62,10 +63,10 @@ impl super::DedicatedImageViewerApp {
             let Ok((index, gen, frame)) = self.filmstrip.result_rx.try_recv() else {
                 break;
             };
-            self.filmstrip.pending.remove(&index);
             if gen != self.filmstrip.generation {
                 continue;
             }
+            self.filmstrip.pending.remove(&index);
             if frame.width == 0 || frame.height == 0 || frame.rgba.is_empty() {
                 self.filmstrip.cache_misses.insert(index);
                 continue;
@@ -245,8 +246,8 @@ impl super::DedicatedImageViewerApp {
             let frames =
                 loader::try_fast_previews_from_disk_cache(&paths, FILMSTRIP_DECODE_MAX_SIDE);
 
-            for ((idx, _path), frame) in requests.into_iter().zip(frames) {
-                let frame = frame.unwrap_or_else(empty_decoded_frame);
+            for ((idx, path), frame) in requests.into_iter().zip(frames) {
+                let frame = load_filmstrip_frame(&path, frame);
                 let _ = tx.try_send((idx, gen, frame));
             }
         });
@@ -308,7 +309,7 @@ fn centered_scroll_offset(current: usize, content_width: f32, viewport_width: f3
     (current_center - viewport_width * 0.5).clamp(0.0, max_offset)
 }
 
-fn empty_decoded_frame() -> loader::DecodedFrame {
+pub(super) fn empty_decoded_frame() -> loader::DecodedFrame {
     loader::DecodedFrame {
         rgba: Vec::new(),
         width: 0,
@@ -316,6 +317,22 @@ fn empty_decoded_frame() -> loader::DecodedFrame {
         original_width: 0,
         original_height: 0,
     }
+}
+
+fn load_filmstrip_frame(
+    path: &std::path::Path,
+    cached: Option<loader::DecodedFrame>,
+) -> loader::DecodedFrame {
+    cached
+        .or_else(|| {
+            loader::decode_preview_frame_with_priority(
+                path,
+                FILMSTRIP_DECODE_MAX_SIDE,
+                loader::DecodePriority::Background,
+            )
+            .ok()
+        })
+        .unwrap_or_else(empty_decoded_frame)
 }
 
 #[cfg(test)]
@@ -343,5 +360,20 @@ mod tests {
             centered_scroll_offset(19, content_width, 800.0),
             content_width - 800.0
         );
+    }
+
+    #[test]
+    fn cache_miss_falls_back_to_source_preview() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("image.png");
+        image::RgbaImage::from_pixel(4, 2, image::Rgba([10, 20, 30, 255]))
+            .save(&path)
+            .unwrap();
+
+        let frame = load_filmstrip_frame(&path, None);
+
+        assert!(frame.width > 0);
+        assert!(frame.height > 0);
+        assert!(!frame.rgba.is_empty());
     }
 }

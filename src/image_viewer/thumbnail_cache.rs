@@ -47,6 +47,12 @@ pub(super) fn try_fast_previews_from_disk_cache(
         .collect()
 }
 
+pub(super) fn invalidate(path: &Path) {
+    if let Some(cache) = VIEWER_THUMBNAIL_CACHE.as_ref() {
+        cache.remove_cache_for_path(path);
+    }
+}
+
 fn decode_cache_entry(entry: ThumbnailCacheEntry, max_side: u32) -> Option<DecodedFrame> {
     if entry.width.max(entry.height) > MAX_THUMBNAIL_SIDE
         || entry.requested_size > MAX_THUMBNAIL_SIDE
