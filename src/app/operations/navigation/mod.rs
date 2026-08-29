@@ -6,12 +6,19 @@ pub mod keyboard;
 pub mod selection;
 
 use crate::app::state::ImageViewerApp;
+use crate::domain::file_entry::ViewMode;
 use crate::domain::special_paths::{
     is_virtual_path, tag_id_from_view_path, COMPUTER_VIEW_ID, RECYCLE_BIN_VIEW_ID,
 };
 use std::path::{Path, PathBuf};
 
 impl ImageViewerApp {
+    fn request_list_column_autofit(&mut self) {
+        if self.view_mode == ViewMode::List {
+            self.pending_list_column_autofit = true;
+        }
+    }
+
     fn remember_current_folder_timestamp_hints(&mut self) {
         if let Some((path, modified)) = self.current_folder_modified_hint.as_ref() {
             if *modified > 0 {
@@ -195,6 +202,7 @@ impl ImageViewerApp {
 
         // Apply folder lock if this folder has locked preferences
         self.apply_folder_lock_if_present();
+        self.request_list_column_autofit();
 
         // The app has one watcher owned by the active panel.
         if !self.in_inactive_panel_context {
@@ -289,6 +297,7 @@ impl ImageViewerApp {
 
                 self.reset_selection_and_search();
                 self.apply_folder_lock_if_present();
+                self.request_list_column_autofit();
                 self.watch_current_folder(); // Update the watcher
 
                 // Clear stale items (see navigate_to comment)
@@ -368,6 +377,7 @@ impl ImageViewerApp {
 
                 self.reset_selection_and_search();
                 self.apply_folder_lock_if_present();
+                self.request_list_column_autofit();
                 self.watch_current_folder();
 
                 // Clear stale items (see navigate_to comment)

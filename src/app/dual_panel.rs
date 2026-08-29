@@ -172,6 +172,7 @@ pub struct PanelSnapshot {
     >,
     pub current_folder_locked: bool,
     pub list_column_widths: PanelListColumnWidths,
+    pub pending_list_column_autofit: bool,
     pub miller_columns: crate::app::miller_columns_state::MillerColumnsState,
 
     // Scroll
@@ -278,6 +279,7 @@ impl PanelSnapshot {
             collapsed_groups_by_context: app.collapsed_groups_by_context.clone(),
             current_folder_locked: app.current_folder_locked,
             list_column_widths: PanelListColumnWidths::from_layout(&app.layout),
+            pending_list_column_autofit: app.pending_list_column_autofit,
             miller_columns: app.miller_columns.clone(),
             scroll_offset_y: app.scroll_offset_y,
             scroll_offset_x: app.scroll_offset_x,
@@ -337,6 +339,7 @@ impl PanelSnapshot {
         app.collapsed_groups_by_context = self.collapsed_groups_by_context;
         app.current_folder_locked = self.current_folder_locked;
         self.list_column_widths.apply_to_layout(&mut app.layout);
+        app.pending_list_column_autofit = self.pending_list_column_autofit;
         app.miller_columns = self.miller_columns;
         app.scroll_offset_y = self.scroll_offset_y;
         app.scroll_offset_x = self.scroll_offset_x;
@@ -411,6 +414,10 @@ impl PanelSnapshot {
             &mut app.current_folder_locked,
         );
         self.list_column_widths.swap_with_layout(&mut app.layout);
+        std::mem::swap(
+            &mut self.pending_list_column_autofit,
+            &mut app.pending_list_column_autofit,
+        );
         std::mem::swap(&mut self.miller_columns, &mut app.miller_columns);
         std::mem::swap(&mut self.scroll_offset_y, &mut app.scroll_offset_y);
         std::mem::swap(&mut self.scroll_offset_x, &mut app.scroll_offset_x);

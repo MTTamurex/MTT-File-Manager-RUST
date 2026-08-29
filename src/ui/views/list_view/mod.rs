@@ -453,8 +453,8 @@ fn scale_column_widths(
     }
 }
 
-/// Auto-fits list view column widths to content when transitioning from
-/// dual-panel to mono-panel mode.
+/// Auto-fits list view column widths to content after opening a folder or
+/// transitioning from dual-panel to mono-panel mode.
 ///
 /// Measures the text width of the "smaller" columns (Size, Type, Date/Last
 /// Modified) from a sample of visible items and their header labels, then

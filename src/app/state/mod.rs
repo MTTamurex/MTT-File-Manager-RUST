@@ -475,8 +475,8 @@ pub struct ImageViewerApp {
     pub pending_auto_reload: bool,
     pub skip_next_auto_reload: bool, // SMART DELETE: Prevent reload after direct UI update
     /// One-shot flag: auto-fit list view column widths to content on the next
-    /// list view render. Set when dual panel is disabled so columns shrunk for
-    /// the narrow dual panel expand back to content-appropriate widths.
+    /// list view render. Set after folder navigation and when dual panel is
+    /// disabled so widths match the available content and panel size.
     pub pending_list_column_autofit: bool,
     pub watcher_cooldown_until: Option<Instant>,
     /// Background Cloud Files pin operations set this flag when attrib finishes,
