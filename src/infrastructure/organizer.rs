@@ -120,9 +120,7 @@ mod watcher {
             while let Ok(event) = watch_event_receiver.try_recv() {
                 match event {
                     Ok(event) => {
-                        for path in event.paths {
-                            queue_matching_path(&rules, &activation_flags, path, &mut pending);
-                        }
+                        process_watcher_event(&event, &rules, &activation_flags, &mut pending);
                     }
                     Err(error) => {
                         let _ = event_sender.send(OrganizerEvent::Error {
@@ -243,20 +241,76 @@ mod watcher {
         .map_err(|error| log::error!("[ORGANIZER] Failed to create watcher: {error}"))
         .ok()?;
 
-        let mut watched = std::collections::HashSet::new();
-        for rule in rules.iter().filter(|rule| rule.enabled) {
-            let key = rule.source_folder.to_string_lossy().to_ascii_lowercase();
-            if watched.insert(key) {
-                if let Err(error) = watcher.watch(&rule.source_folder, RecursiveMode::NonRecursive)
-                {
-                    log::warn!(
-                        "[ORGANIZER] Failed to watch {}: {error}",
-                        rule.source_folder.display()
-                    );
-                }
+        for folder in watched_folders(rules) {
+            if let Err(error) = watcher.watch(&folder, RecursiveMode::NonRecursive) {
+                log::warn!("[ORGANIZER] Failed to watch {}: {error}", folder.display());
             }
         }
         Some(watcher)
+    }
+
+    fn watched_folders(rules: &[OrganizerRule]) -> Vec<PathBuf> {
+        let mut identities = HashSet::new();
+        let mut folders = Vec::new();
+        for rule in rules.iter().filter(|rule| rule.enabled) {
+            for folder in [&rule.source_folder, &rule.destination_folder] {
+                if identities.insert(normalize_watched_path(folder)) {
+                    folders.push(folder.clone());
+                }
+            }
+        }
+        folders
+    }
+
+    fn process_watcher_event(
+        event: &notify::Event,
+        rules: &[OrganizerRule],
+        activation_flags: &HashMap<i64, Arc<AtomicBool>>,
+        pending: &mut HashMap<PathBuf, PendingFile>,
+    ) {
+        for path in &event.paths {
+            queue_matching_path(rules, activation_flags, path.clone(), pending);
+        }
+
+        for vacated_destination in event.paths.iter().filter(|path| !path.exists()) {
+            let (Some(destination_folder), Some(file_name)) = (
+                vacated_destination.parent(),
+                vacated_destination.file_name(),
+            ) else {
+                continue;
+            };
+
+            for rule in rules.iter().filter(|rule| {
+                rule.enabled && path_is_equal(destination_folder, &rule.destination_folder)
+            }) {
+                queue_matching_path(
+                    rules,
+                    activation_flags,
+                    rule.source_folder.join(file_name),
+                    pending,
+                );
+            }
+        }
+    }
+
+    fn path_is_equal(left: &std::path::Path, right: &std::path::Path) -> bool {
+        normalize_watched_path(left) == normalize_watched_path(right)
+    }
+
+    fn normalize_watched_path(path: &std::path::Path) -> String {
+        let normalized = path
+            .to_string_lossy()
+            .replace('/', "\\")
+            .trim_end_matches('\\')
+            .to_ascii_lowercase();
+        if let Some(stripped) = normalized.strip_prefix(r"\\?\unc\") {
+            return format!(r"\\{stripped}");
+        }
+        normalized
+            .strip_prefix(r"\\?\")
+            .or_else(|| normalized.strip_prefix(r"\\.\"))
+            .unwrap_or(&normalized)
+            .to_string()
     }
 
     fn queue_matching_path(
@@ -367,59 +421,8 @@ mod watcher {
     }
 
     #[cfg(test)]
-    mod tests {
-        use super::*;
-        use std::path::PathBuf;
-
-        fn rule(id: i64, enabled: bool) -> OrganizerRule {
-            OrganizerRule {
-                id,
-                source_folder: PathBuf::from(r"C:\Source"),
-                destination_folder: PathBuf::from(r"C:\Destination"),
-                extensions: vec!["txt".to_string()],
-                enabled,
-            }
-        }
-
-        #[test]
-        fn enabling_a_rule_marks_it_for_a_full_scan() {
-            let previous = vec![rule(1, false)];
-            let current = vec![rule(1, true)];
-            let mut activations = activation_flags_for(&previous);
-
-            let scan_rules = update_activation_flags(&previous, &current, &mut activations);
-
-            assert_eq!(scan_rules, vec![1]);
-            assert!(activations[&1].load(Ordering::Acquire));
-        }
-
-        #[test]
-        fn disabling_a_rule_deactivates_its_pending_work() {
-            let previous = vec![rule(1, true)];
-            let current = vec![rule(1, false)];
-            let mut activations = activation_flags_for(&previous);
-
-            let scan_rules = update_activation_flags(&previous, &current, &mut activations);
-
-            assert!(scan_rules.is_empty());
-            assert!(!activations[&1].load(Ordering::Acquire));
-        }
-
-        #[test]
-        fn changing_a_rule_invalidates_its_previous_activation() {
-            let previous = vec![rule(1, true)];
-            let mut current = previous.clone();
-            current[0].destination_folder = PathBuf::from(r"C:\NewDestination");
-            let mut activations = activation_flags_for(&previous);
-            let previous_activation = activations[&1].clone();
-
-            let scan_rules = update_activation_flags(&previous, &current, &mut activations);
-
-            assert_eq!(scan_rules, vec![1]);
-            assert!(!previous_activation.load(Ordering::Acquire));
-            assert!(activations[&1].load(Ordering::Acquire));
-        }
-    }
+    #[path = "organizer_tests.rs"]
+    mod tests;
 }
 
 #[cfg(feature = "notify-watcher")]
