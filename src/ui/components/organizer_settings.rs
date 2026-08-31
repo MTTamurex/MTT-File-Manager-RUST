@@ -1,14 +1,20 @@
+use crate::app::organizer_state::OrganizerFolderCreationRequest;
 use crate::app::ImageViewerApp;
 use crate::domain::organizer_rule::{
     parse_extensions, validate_rule_set, OrganizerExtensionPreset, OrganizerRule,
     OrganizerRuleError,
 };
 use crate::infrastructure::app_state_db::OrganizerRuleDbError;
+use crate::infrastructure::organizer::OrganizerRuleStatus;
 use crate::ui::components::settings_ui;
 use crate::ui::theme;
 use eframe::egui::{self, RichText};
 use rust_i18n::t;
 use std::path::PathBuf;
+
+mod status;
+
+use status::{render_folder_creation_confirmation, status_label};
 
 pub fn render_organizer_settings_section(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
     let dark_mode = ui.visuals().dark_mode;
@@ -25,6 +31,7 @@ pub fn render_organizer_settings_section(ui: &mut egui::Ui, app: &mut ImageViewe
             egui::style::ScrollAnimation::none(),
         );
     }
+    render_folder_creation_confirmation(app, ui.ctx());
 }
 
 fn render_rule_form(ui: &mut egui::Ui, app: &mut ImageViewerApp, dark_mode: bool) -> egui::Rect {
@@ -199,6 +206,7 @@ fn render_rules(ui: &mut egui::Ui, app: &mut ImageViewerApp, dark_mode: bool) ->
     let rules = app.organizer_state.rules.clone();
     let mut edit_clicked = false;
     for mut rule in rules {
+        let status = app.organizer_state.rule_status(rule.id);
         settings_ui::row_frame(dark_mode).show(ui, |ui| {
             let extensions_text = rule.extensions.join(", ");
             ui.horizontal(|ui| {
@@ -213,6 +221,11 @@ fn render_rules(ui: &mut egui::Ui, app: &mut ImageViewerApp, dark_mode: bool) ->
                 if display != extensions_text {
                     label_resp.on_hover_text(extensions_text.clone());
                 }
+                ui.label(
+                    RichText::new(status_label(status))
+                        .small()
+                        .color(theme::secondary_text_color(dark_mode)),
+                );
                 let toggle_label = format!("{}: {}", t!("organizer.enabled"), extensions_text);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let toggle = settings_ui::toggle_switch(ui, &mut rule.enabled, &toggle_label)
@@ -252,6 +265,45 @@ fn render_rules(ui: &mut egui::Ui, app: &mut ImageViewerApp, dark_mode: bool) ->
             });
             ui.add_space(6.0);
             ui.horizontal(|ui| {
+                if rule.enabled && status == OrganizerRuleStatus::Active {
+                    if ui.button(t!("organizer.run_now")).clicked() {
+                        app.organizer_state.manager.run_rule_now(rule.id);
+                    }
+                    if ui.button(t!("organizer.pause")).clicked() {
+                        app.organizer_state.manager.pause_rule(rule.id);
+                    }
+                } else if rule.enabled
+                    && status == OrganizerRuleStatus::Paused
+                    && ui.button(t!("organizer.resume")).clicked()
+                {
+                    app.organizer_state.manager.resume_rule(rule.id);
+                }
+                if matches!(
+                    status,
+                    OrganizerRuleStatus::SourceUnavailable | OrganizerRuleStatus::BothUnavailable
+                ) && ui.button(t!("organizer.create_source")).clicked()
+                {
+                    app.organizer_state.folder_creation_confirmation =
+                        Some(OrganizerFolderCreationRequest {
+                            rule_id: rule.id,
+                            source: true,
+                        });
+                }
+                if matches!(
+                    status,
+                    OrganizerRuleStatus::DestinationUnavailable
+                        | OrganizerRuleStatus::BothUnavailable
+                ) && ui.button(t!("organizer.create_destination")).clicked()
+                {
+                    app.organizer_state.folder_creation_confirmation =
+                        Some(OrganizerFolderCreationRequest {
+                            rule_id: rule.id,
+                            source: false,
+                        });
+                }
+                if rule.enabled && ui.button(t!("organizer.refresh")).clicked() {
+                    app.organizer_state.manager.refresh();
+                }
                 let previewing = app.organizer_state.is_previewing(rule.id);
                 if ui
                     .add_enabled(

@@ -1,10 +1,12 @@
 //! Worker thread for Windows Shell file operations.
 //! Ensures COM is initialized as STA (COINIT_APARTMENTTHREADED) for correct shell behavior.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use windows::Win32::Foundation::HWND;
 
+use crate::domain::organizer_operation::OrganizerOperationId;
 mod handlers;
 
 use crate::infrastructure::diagnostic_logger::{diag_error, field_label};
@@ -52,7 +54,14 @@ pub enum FileOperationResult {
         clipboard_paste_token: Option<u64>,
     },
     /// A background organizer move completed without allowing replacement of an existing file.
+    OrganizerMoveStarted {
+        operation_id: OrganizerOperationId,
+        rule_id: i64,
+        path: PathBuf,
+        destination: PathBuf,
+    },
     OrganizerMoveCompleted {
+        operation_id: OrganizerOperationId,
         rule_id: i64,
         source_folder: PathBuf,
         dest_folder: PathBuf,
@@ -60,10 +69,17 @@ pub enum FileOperationResult {
         moved_dest: PathBuf,
     },
     OrganizerMoveSkipped {
+        operation_id: OrganizerOperationId,
+        rule_id: i64,
+        path: PathBuf,
+    },
+    OrganizerMoveCancelled {
+        operation_id: OrganizerOperationId,
         rule_id: i64,
         path: PathBuf,
     },
     OrganizerMoveFailed {
+        operation_id: OrganizerOperationId,
         rule_id: i64,
         path: PathBuf,
         message: String,
@@ -124,6 +140,43 @@ enum CompletionBehavior {
 pub(crate) struct SendHwnd(pub(crate) HWND);
 unsafe impl Send for SendHwnd {}
 
+#[derive(Clone, Default)]
+pub(crate) struct OrganizerInFlightRegistry {
+    paths: Arc<Mutex<HashSet<String>>>,
+}
+
+impl OrganizerInFlightRegistry {
+    pub(crate) fn contains(&self, path_key: &str) -> bool {
+        self.paths
+            .lock()
+            .is_ok_and(|paths| paths.contains(path_key))
+    }
+
+    pub(crate) fn try_acquire(&self, path_key: String) -> Option<OrganizerInFlightGuard> {
+        let mut paths = self.paths.lock().ok()?;
+        if !paths.insert(path_key.clone()) {
+            return None;
+        }
+        Some(OrganizerInFlightGuard {
+            registry: self.clone(),
+            path_key,
+        })
+    }
+}
+
+pub(crate) struct OrganizerInFlightGuard {
+    registry: OrganizerInFlightRegistry,
+    path_key: String,
+}
+
+impl Drop for OrganizerInFlightGuard {
+    fn drop(&mut self) {
+        if let Ok(mut paths) = self.registry.paths.lock() {
+            paths.remove(&self.path_key);
+        }
+    }
+}
+
 /// Requests that can be sent to the file operation worker.
 #[allow(dead_code)] // Copy/Move variants intentionally kept for single-file operations
 pub(crate) enum FileOperationRequest {
@@ -154,9 +207,11 @@ pub(crate) enum FileOperationRequest {
     OrganizerMove {
         path: PathBuf,
         dest_folder: PathBuf,
+        operation_id: OrganizerOperationId,
         rule_id: i64,
         activation: std::sync::Arc<std::sync::atomic::AtomicBool>,
         expected_snapshot: crate::infrastructure::windows::shell_operations::OrganizerFileSnapshot,
+        in_flight: OrganizerInFlightGuard,
     },
     /// Batch copy: all files in a single Shell operation (single progress dialog)
     CopyBatch {
@@ -190,6 +245,18 @@ pub(crate) enum FileOperationRequest {
 }
 
 impl FileOperationRequest {
+    fn organizer_operation_context(&self) -> Option<(OrganizerOperationId, i64, PathBuf)> {
+        match self {
+            Self::OrganizerMove {
+                operation_id,
+                rule_id,
+                path,
+                ..
+            } => Some((*operation_id, *rule_id, path.clone())),
+            _ => None,
+        }
+    }
+
     fn clipboard_paste_token(&self) -> Option<u64> {
         match self {
             Self::MoveBatch {
@@ -293,15 +360,19 @@ impl FileOperationRequest {
             Self::OrganizerMove {
                 path,
                 dest_folder,
+                operation_id,
                 rule_id,
                 activation,
                 expected_snapshot,
+                in_flight,
             } => Self::OrganizerMove {
                 path,
                 dest_folder,
+                operation_id,
                 rule_id,
                 activation,
                 expected_snapshot,
+                in_flight,
             },
             Self::CopyBatch {
                 paths, dest_folder, ..
@@ -490,6 +561,8 @@ fn run_file_operation_loop(
             None => request,
         };
         let clipboard_paste_token = request.clipboard_paste_token();
+        let organizer_operation = request.organizer_operation_context();
+        let is_organizer_operation = organizer_operation.is_some();
 
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             match request {
@@ -554,18 +627,31 @@ fn run_file_operation_loop(
                 FileOperationRequest::OrganizerMove {
                     path,
                     dest_folder,
+                    operation_id,
                     rule_id,
                     activation,
                     expected_snapshot,
+                    in_flight,
                 } => {
+                    let destination = path
+                        .file_name()
+                        .map_or_else(|| dest_folder.clone(), |name| dest_folder.join(name));
+                    let _ = result_sender.send(FileOperationResult::OrganizerMoveStarted {
+                        operation_id,
+                        rule_id,
+                        path: path.clone(),
+                        destination,
+                    });
                     handlers::handle_organizer_move(
                         path,
                         dest_folder,
+                        operation_id,
                         rule_id,
                         activation,
                         expected_snapshot,
                         &result_sender,
                     );
+                    drop(in_flight);
                     return CompletionBehavior::NoFinished;
                 }
                 FileOperationRequest::CopyBatch {
@@ -656,15 +742,27 @@ fn run_file_operation_loop(
                     "worker_panic",
                     &[field_label("payload_kind", panic_payload)],
                 );
-                let failure = match clipboard_paste_token {
-                    Some(token) => FileOperationResult::ClipboardMoveFailed {
-                        token,
-                        message: msg,
+                let failure = match organizer_operation {
+                    Some((operation_id, rule_id, path)) => {
+                        FileOperationResult::OrganizerMoveFailed {
+                            operation_id,
+                            rule_id,
+                            path,
+                            message: msg,
+                        }
+                    }
+                    None => match clipboard_paste_token {
+                        Some(token) => FileOperationResult::ClipboardMoveFailed {
+                            token,
+                            message: msg,
+                        },
+                        None => FileOperationResult::OperationFailed { message: msg },
                     },
-                    None => FileOperationResult::OperationFailed { message: msg },
                 };
                 let _ = result_sender.send(failure);
-                let _ = result_sender.send(FileOperationResult::Finished);
+                if !is_organizer_operation {
+                    let _ = result_sender.send(FileOperationResult::Finished);
+                }
             }
         }
     }
@@ -673,7 +771,9 @@ fn run_file_operation_loop(
 
 #[cfg(test)]
 mod tests {
-    use super::{is_explicit_shell_namespace_path, sanitize_organizer_path};
+    use super::{
+        is_explicit_shell_namespace_path, sanitize_organizer_path, OrganizerInFlightRegistry,
+    };
     use std::path::Path;
 
     #[test]
@@ -694,6 +794,22 @@ mod tests {
         assert!(!is_explicit_shell_namespace_path(Path::new(
             r"C:\Temp\archive.zip\inside"
         )));
+    }
+
+    #[test]
+    fn organizer_in_flight_guard_releases_path_on_drop() {
+        let registry = OrganizerInFlightRegistry::default();
+        let guard = registry
+            .try_acquire("c:\\source\\report.txt".to_string())
+            .expect("acquire path");
+
+        assert!(registry.contains("c:\\source\\report.txt"));
+        assert!(registry
+            .try_acquire("c:\\source\\report.txt".to_string())
+            .is_none());
+
+        drop(guard);
+        assert!(!registry.contains("c:\\source\\report.txt"));
     }
 
     #[test]

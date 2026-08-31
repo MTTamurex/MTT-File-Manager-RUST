@@ -1,6 +1,7 @@
+use crate::domain::organizer_operation::OrganizerOperationId;
 use crate::domain::organizer_rule::OrganizerRule;
-use crate::infrastructure::organizer::OrganizerManager;
-use std::collections::HashSet;
+use crate::infrastructure::organizer::{OrganizerManager, OrganizerRuleStatus};
+use std::collections::{HashMap, HashSet};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::{Duration, Instant};
 
@@ -83,6 +84,8 @@ impl OrganizerNotificationBatch {
 pub struct OrganizerState {
     pub manager: OrganizerManager,
     pub rules: Vec<OrganizerRule>,
+    pub rule_statuses: HashMap<i64, OrganizerRuleStatus>,
+    pub active_operation_ids: HashSet<OrganizerOperationId>,
     pub source_input: String,
     pub destination_input: String,
     pub extensions_input: String,
@@ -92,6 +95,13 @@ pub struct OrganizerState {
     preview_sender: Sender<OrganizerPreviewResult>,
     pub preview_receiver: Receiver<OrganizerPreviewResult>,
     previewing_rule_ids: HashSet<i64>,
+    pub folder_creation_confirmation: Option<OrganizerFolderCreationRequest>,
+}
+
+#[derive(Clone)]
+pub struct OrganizerFolderCreationRequest {
+    pub rule_id: i64,
+    pub source: bool,
 }
 
 impl OrganizerState {
@@ -103,9 +113,15 @@ impl OrganizerState {
         ui_ctx: eframe::egui::Context,
     ) -> Self {
         let (preview_sender, preview_receiver) = mpsc::channel();
+        let rule_statuses = rules
+            .iter()
+            .map(|rule| (rule.id, OrganizerRuleStatus::Starting))
+            .collect();
         Self {
             manager: OrganizerManager::start(file_operation_sender, rules.clone(), ui_ctx),
             rules,
+            rule_statuses,
+            active_operation_ids: HashSet::new(),
             source_input: String::new(),
             destination_input: String::new(),
             extensions_input: String::new(),
@@ -115,6 +131,7 @@ impl OrganizerState {
             preview_sender,
             preview_receiver,
             previewing_rule_ids: HashSet::new(),
+            folder_creation_confirmation: None,
         }
     }
 
@@ -128,7 +145,35 @@ impl OrganizerState {
 
     pub fn replace_rules(&mut self, rules: Vec<OrganizerRule>) {
         self.manager.set_rules(rules.clone());
+        self.rule_statuses
+            .retain(|rule_id, _| rules.iter().any(|rule| rule.id == *rule_id));
+        for rule in &rules {
+            self.rule_statuses
+                .entry(rule.id)
+                .or_insert(OrganizerRuleStatus::Starting);
+        }
         self.rules = rules;
+    }
+
+    pub fn rule_status(&self, rule_id: i64) -> OrganizerRuleStatus {
+        self.rule_statuses
+            .get(&rule_id)
+            .copied()
+            .unwrap_or(OrganizerRuleStatus::Starting)
+    }
+
+    pub fn set_rule_status(&mut self, rule_id: i64, status: OrganizerRuleStatus) {
+        if self.rules.iter().any(|rule| rule.id == rule_id) {
+            self.rule_statuses.insert(rule_id, status);
+        }
+    }
+
+    pub fn operation_started(&mut self, operation_id: OrganizerOperationId) -> bool {
+        self.active_operation_ids.insert(operation_id)
+    }
+
+    pub fn operation_finished(&mut self, operation_id: OrganizerOperationId) -> bool {
+        self.active_operation_ids.remove(&operation_id)
     }
 
     pub fn is_previewing(&self, rule_id: i64) -> bool {

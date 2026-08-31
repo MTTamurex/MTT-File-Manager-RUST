@@ -1,0 +1,260 @@
+use crate::domain::organizer_operation::OrganizerOperationId;
+use crate::domain::organizer_rule::{preview_rule, OrganizerRule};
+use crate::infrastructure::organizer::OrganizerEvent;
+use crate::infrastructure::windows::shell_operations::{
+    organizer_file_snapshot, OrganizerFileSnapshot,
+};
+use crate::workers::file_operation_worker::{FileOperationRequest, OrganizerInFlightRegistry};
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
+use std::sync::mpsc::Sender;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
+use std::time::Instant;
+
+use super::{normalize_watched_path, STABILITY_DELAY};
+
+#[derive(Clone)]
+pub(super) struct PendingFile {
+    pub(super) rule: OrganizerRule,
+    pub(super) activation: Arc<AtomicBool>,
+    pub(super) snapshot: OrganizerFileSnapshot,
+    pub(super) stable_since: Instant,
+}
+
+pub(super) fn process_watcher_event(
+    event: &notify::Event,
+    rules: &[OrganizerRule],
+    activation_flags: &HashMap<i64, Arc<AtomicBool>>,
+    paused_rules: &HashSet<i64>,
+    pending: &mut HashMap<PathBuf, PendingFile>,
+) {
+    for path in &event.paths {
+        queue_matching_path(rules, activation_flags, paused_rules, path.clone(), pending);
+    }
+
+    for vacated_destination in event.paths.iter().filter(|path| !path.exists()) {
+        let (Some(destination_folder), Some(file_name)) = (
+            vacated_destination.parent(),
+            vacated_destination.file_name(),
+        ) else {
+            continue;
+        };
+
+        for rule in rules.iter().filter(|rule| {
+            rule.enabled
+                && !paused_rules.contains(&rule.id)
+                && path_is_equal(destination_folder, &rule.destination_folder)
+        }) {
+            queue_matching_path(
+                rules,
+                activation_flags,
+                paused_rules,
+                rule.source_folder.join(file_name),
+                pending,
+            );
+        }
+    }
+}
+
+pub(super) fn path_is_equal(left: &Path, right: &Path) -> bool {
+    normalize_watched_path(left) == normalize_watched_path(right)
+}
+
+pub(super) fn queue_rule_paths(
+    rule: &OrganizerRule,
+    rules: &[OrganizerRule],
+    activation_flags: &HashMap<i64, Arc<AtomicBool>>,
+    paused_rules: &HashSet<i64>,
+    pending: &mut HashMap<PathBuf, PendingFile>,
+) {
+    for path in preview_rule(rule) {
+        queue_matching_path(rules, activation_flags, paused_rules, path, pending);
+    }
+}
+
+pub(super) fn queue_matching_path(
+    rules: &[OrganizerRule],
+    activation_flags: &HashMap<i64, Arc<AtomicBool>>,
+    paused_rules: &HashSet<i64>,
+    path: PathBuf,
+    pending: &mut HashMap<PathBuf, PendingFile>,
+) {
+    let Some(rule) = rules
+        .iter()
+        .find(|rule| rule.enabled && !paused_rules.contains(&rule.id) && rule.matches(&path))
+    else {
+        return;
+    };
+    let Some(activation) = activation_flags.get(&rule.id).cloned() else {
+        return;
+    };
+    let Ok(metadata) = std::fs::metadata(&path) else {
+        return;
+    };
+    if !metadata.is_file() {
+        return;
+    }
+    let Ok(snapshot) = organizer_file_snapshot(&path) else {
+        return;
+    };
+
+    match pending.get_mut(&path) {
+        Some(existing) if existing.snapshot == snapshot => {
+            if existing.rule != *rule || !Arc::ptr_eq(&existing.activation, &activation) {
+                existing.rule = rule.clone();
+                existing.activation = activation;
+            }
+        }
+        Some(existing) => {
+            existing.rule = rule.clone();
+            existing.activation = activation;
+            existing.snapshot = snapshot;
+            existing.stable_since = Instant::now();
+        }
+        None => {
+            pending.insert(
+                path,
+                PendingFile {
+                    rule: rule.clone(),
+                    activation,
+                    snapshot,
+                    stable_since: Instant::now(),
+                },
+            );
+        }
+    }
+}
+
+pub(super) fn process_stable_files(
+    pending: &mut HashMap<PathBuf, PendingFile>,
+    paused_rules: &HashSet<i64>,
+    file_operation_sender: &crossbeam_channel::Sender<FileOperationRequest>,
+    event_sender: &Sender<OrganizerEvent>,
+    in_flight: &OrganizerInFlightRegistry,
+) {
+    let ready: Vec<_> = pending
+        .iter()
+        .filter(|(_, pending)| pending.stable_since.elapsed() >= STABILITY_DELAY)
+        .map(|(path, pending)| (path.clone(), pending.clone()))
+        .collect();
+
+    for (path, pending_file) in ready {
+        pending.remove(&path);
+        if paused_rules.contains(&pending_file.rule.id) {
+            continue;
+        }
+        let Ok(snapshot) = organizer_file_snapshot(&path) else {
+            continue;
+        };
+        if snapshot != pending_file.snapshot {
+            queue_matching_path(
+                std::slice::from_ref(&pending_file.rule),
+                &HashMap::from([(pending_file.rule.id, pending_file.activation.clone())]),
+                paused_rules,
+                path,
+                pending,
+            );
+            continue;
+        }
+
+        if !pending_file.activation.load(Ordering::Acquire) {
+            continue;
+        }
+        if !pending_file.rule.destination_folder.is_dir() {
+            let mut pending_file = pending_file;
+            pending_file.stable_since = Instant::now();
+            pending.insert(path, pending_file);
+            continue;
+        }
+        let path_key = normalize_watched_path(&path);
+        if in_flight.contains(&path_key) {
+            pending.insert(path, pending_file);
+            continue;
+        }
+
+        let Some(file_name) = path.file_name() else {
+            continue;
+        };
+        if pending_file
+            .rule
+            .destination_folder
+            .join(file_name)
+            .exists()
+        {
+            let Some(operation_id) = OrganizerOperationId::allocate() else {
+                let _ = event_sender.send(OrganizerEvent::Error {
+                    message: rust_i18n::t!("organizer.error_operation_id_exhausted").to_string(),
+                });
+                continue;
+            };
+            let _ = event_sender.send(OrganizerEvent::OperationSkipped {
+                operation_id,
+                rule_id: pending_file.rule.id,
+                path,
+            });
+            continue;
+        }
+
+        let Some(operation_id) = OrganizerOperationId::allocate() else {
+            let _ = event_sender.send(OrganizerEvent::Error {
+                message: rust_i18n::t!("organizer.error_operation_id_exhausted").to_string(),
+            });
+            continue;
+        };
+        let source_path = path.clone();
+        let destination_folder = pending_file.rule.destination_folder.clone();
+        let Some(in_flight_guard) = in_flight.try_acquire(path_key) else {
+            pending.insert(path, pending_file);
+            continue;
+        };
+        if file_operation_sender
+            .send(FileOperationRequest::OrganizerMove {
+                operation_id,
+                path,
+                dest_folder: destination_folder,
+                rule_id: pending_file.rule.id,
+                activation: pending_file.activation,
+                expected_snapshot: pending_file.snapshot,
+                in_flight: in_flight_guard,
+            })
+            .is_err()
+        {
+            let _ = event_sender.send(OrganizerEvent::OperationFailed {
+                operation_id,
+                rule_id: pending_file.rule.id,
+                path: source_path,
+                message: rust_i18n::t!("organizer.error_file_worker_unavailable").to_string(),
+            });
+        }
+    }
+}
+
+pub(super) fn activation_flags_for(rules: &[OrganizerRule]) -> HashMap<i64, Arc<AtomicBool>> {
+    rules
+        .iter()
+        .map(|rule| (rule.id, Arc::new(AtomicBool::new(rule.enabled))))
+        .collect()
+}
+
+pub(super) fn update_activation_flags(
+    previous_rules: &[OrganizerRule],
+    rules: &[OrganizerRule],
+    activation_flags: &mut HashMap<i64, Arc<AtomicBool>>,
+) -> Vec<i64> {
+    if previous_rules != rules {
+        for activation in activation_flags.values() {
+            activation.store(false, Ordering::Release);
+        }
+        *activation_flags = activation_flags_for(rules);
+        rules
+            .iter()
+            .filter(|rule| rule.enabled)
+            .map(|rule| rule.id)
+            .collect()
+    } else {
+        Vec::new()
+    }
+}

@@ -211,13 +211,25 @@ impl ImageViewerApp {
                             self.cleanup_deleted_pinned_folders();
                             self.request_global_search_refresh();
                         }
+                        FileOperationResult::OrganizerMoveStarted {
+                            operation_id,
+                            rule_id: _,
+                            path: _,
+                            destination: _,
+                        } => {
+                            self.organizer_state.operation_started(operation_id);
+                        }
                         FileOperationResult::OrganizerMoveCompleted {
+                            operation_id,
                             rule_id: _,
                             source_folder,
                             dest_folder,
                             source_path,
                             moved_dest,
                         } => {
+                            if !self.organizer_state.operation_finished(operation_id) {
+                                continue;
+                            }
                             self.handle_move_completed(
                                 source_folder,
                                 dest_folder,
@@ -229,7 +241,14 @@ impl ImageViewerApp {
                             self.organizer_state.notification_batch.record_moved();
                             self.request_global_search_refresh();
                         }
-                        FileOperationResult::OrganizerMoveSkipped { rule_id: _, path } => {
+                        FileOperationResult::OrganizerMoveSkipped {
+                            operation_id,
+                            rule_id: _,
+                            path,
+                        } => {
+                            if !self.organizer_state.operation_finished(operation_id) {
+                                continue;
+                            }
                             let name = path
                                 .file_name()
                                 .and_then(|name| name.to_str())
@@ -238,11 +257,22 @@ impl ImageViewerApp {
                                 rust_i18n::t!("organizer.issue_conflict", name = name).to_string(),
                             );
                         }
+                        FileOperationResult::OrganizerMoveCancelled {
+                            operation_id,
+                            rule_id: _,
+                            path: _,
+                        } => {
+                            self.organizer_state.operation_finished(operation_id);
+                        }
                         FileOperationResult::OrganizerMoveFailed {
+                            operation_id,
                             rule_id: _,
                             path,
                             message,
                         } => {
+                            if !self.organizer_state.operation_finished(operation_id) {
+                                continue;
+                            }
                             let name = path
                                 .file_name()
                                 .and_then(|name| name.to_str())
@@ -287,13 +317,37 @@ impl ImageViewerApp {
 
         while let Ok(event) = self.organizer_state.manager.events.try_recv() {
             match event {
-                crate::infrastructure::organizer::OrganizerEvent::SkippedConflict { path } => {
+                crate::infrastructure::organizer::OrganizerEvent::Status { rule_id, status } => {
+                    self.organizer_state.set_rule_status(rule_id, status);
+                }
+                crate::infrastructure::organizer::OrganizerEvent::OperationSkipped {
+                    operation_id,
+                    rule_id: _,
+                    path,
+                } => {
+                    let _ = operation_id;
                     let name = path
                         .file_name()
                         .and_then(|name| name.to_str())
                         .unwrap_or_default();
                     self.organizer_state.notification_batch.record_skipped(
                         rust_i18n::t!("organizer.issue_conflict", name = name).to_string(),
+                    );
+                }
+                crate::infrastructure::organizer::OrganizerEvent::OperationFailed {
+                    operation_id,
+                    rule_id: _,
+                    path,
+                    message,
+                } => {
+                    let _ = operation_id;
+                    let name = path
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .unwrap_or_default();
+                    self.organizer_state.notification_batch.record_failed(
+                        rust_i18n::t!("organizer.issue_failed", name = name, reason = message,)
+                            .to_string(),
                     );
                 }
                 crate::infrastructure::organizer::OrganizerEvent::Error { message } => {

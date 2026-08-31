@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::Sender;
 
 use crate::domain::file_entry::is_path_inside_existing_archive_file;
+use crate::domain::organizer_operation::OrganizerOperationId;
 use crate::infrastructure::archive_extract;
 use crate::infrastructure::windows::recycle_bin;
 use crate::infrastructure::windows::shell_operations;
@@ -437,18 +438,25 @@ pub(super) fn handle_move(
 pub(super) fn handle_organizer_move(
     path: PathBuf,
     dest_folder: PathBuf,
+    operation_id: OrganizerOperationId,
     rule_id: i64,
     activation: std::sync::Arc<std::sync::atomic::AtomicBool>,
     expected_snapshot: shell_operations::OrganizerFileSnapshot,
     result_sender: &Sender<FileOperationResult>,
 ) {
     if !activation.load(std::sync::atomic::Ordering::Acquire) {
+        let _ = result_sender.send(FileOperationResult::OrganizerMoveCancelled {
+            operation_id,
+            rule_id,
+            path,
+        });
         return;
     }
     let valid_path = sanitize_organizer_path(&path);
     let valid_destination = sanitize_organizer_path(&dest_folder);
     let (Ok(path), Ok(dest_folder)) = (valid_path, valid_destination) else {
         let _ = result_sender.send(FileOperationResult::OrganizerMoveFailed {
+            operation_id,
             rule_id,
             path,
             message: rust_i18n::t!("organizer.error_security_path").to_string(),
@@ -457,6 +465,7 @@ pub(super) fn handle_organizer_move(
     };
     if is_reparse_point(&path) || is_reparse_point(&dest_folder) {
         let _ = result_sender.send(FileOperationResult::OrganizerMoveFailed {
+            operation_id,
             rule_id,
             path,
             message: rust_i18n::t!("organizer.error_security_path").to_string(),
@@ -465,15 +474,28 @@ pub(super) fn handle_organizer_move(
     }
 
     let Some(source_folder) = path.parent().map(Path::to_path_buf) else {
+        let _ = result_sender.send(FileOperationResult::OrganizerMoveFailed {
+            operation_id,
+            rule_id,
+            path,
+            message: rust_i18n::t!("organizer.error_file_or_destination_unavailable").to_string(),
+        });
         return;
     };
     let Some(file_name) = path.file_name() else {
+        let _ = result_sender.send(FileOperationResult::OrganizerMoveFailed {
+            operation_id,
+            rule_id,
+            path,
+            message: rust_i18n::t!("organizer.error_file_or_destination_unavailable").to_string(),
+        });
         return;
     };
     let moved_dest = dest_folder.join(file_name);
 
     if !path.is_file() || !dest_folder.is_dir() {
         let _ = result_sender.send(FileOperationResult::OrganizerMoveFailed {
+            operation_id,
             rule_id,
             path,
             message: rust_i18n::t!("organizer.error_file_or_destination_unavailable").to_string(),
@@ -481,7 +503,19 @@ pub(super) fn handle_organizer_move(
         return;
     }
     if moved_dest.exists() {
-        let _ = result_sender.send(FileOperationResult::OrganizerMoveSkipped { rule_id, path });
+        let _ = result_sender.send(FileOperationResult::OrganizerMoveSkipped {
+            operation_id,
+            rule_id,
+            path,
+        });
+        return;
+    }
+    if !activation.load(std::sync::atomic::Ordering::Acquire) {
+        let _ = result_sender.send(FileOperationResult::OrganizerMoveCancelled {
+            operation_id,
+            rule_id,
+            path,
+        });
         return;
     }
 
@@ -492,6 +526,7 @@ pub(super) fn handle_organizer_move(
     ) {
         Ok(()) => {
             let _ = result_sender.send(FileOperationResult::OrganizerMoveCompleted {
+                operation_id,
                 rule_id,
                 source_folder,
                 dest_folder,
@@ -500,10 +535,15 @@ pub(super) fn handle_organizer_move(
             });
         }
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-            let _ = result_sender.send(FileOperationResult::OrganizerMoveSkipped { rule_id, path });
+            let _ = result_sender.send(FileOperationResult::OrganizerMoveSkipped {
+                operation_id,
+                rule_id,
+                path,
+            });
         }
         Err(error) => {
             let _ = result_sender.send(FileOperationResult::OrganizerMoveFailed {
+                operation_id,
                 rule_id,
                 path,
                 message: error.to_string(),
@@ -980,6 +1020,40 @@ mod tests {
 
         assert!(result.is_err());
         assert_eq!(std::fs::read(&source).expect("source remains"), b"contents");
+        assert!(!destination.exists());
+    }
+
+    #[test]
+    fn organizer_move_cancels_before_commit_when_rule_is_inactive() {
+        let source_parent = tempfile::tempdir().expect("create source parent");
+        let destination_parent = tempfile::tempdir().expect("create destination parent");
+        let source = source_parent.path().join("notes.txt");
+        let destination = destination_parent.path().join("notes.txt");
+        std::fs::write(&source, b"contents").expect("create source");
+        let snapshot = shell_operations::organizer_file_snapshot(&source).expect("snapshot source");
+        let operation_id = OrganizerOperationId::allocate().expect("allocate operation id");
+        let activation = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (result_sender, result_receiver) = std::sync::mpsc::channel();
+
+        handle_organizer_move(
+            source.clone(),
+            destination_parent.path().to_path_buf(),
+            operation_id,
+            7,
+            activation,
+            snapshot,
+            &result_sender,
+        );
+
+        assert!(matches!(
+            result_receiver.try_recv(),
+            Ok(FileOperationResult::OrganizerMoveCancelled {
+                operation_id: result_id,
+                rule_id: 7,
+                path,
+            }) if result_id == operation_id && path == source
+        ));
+        assert!(source.exists());
         assert!(!destination.exists());
     }
 
