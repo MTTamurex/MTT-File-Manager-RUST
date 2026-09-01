@@ -1,19 +1,15 @@
 use std::fmt;
-use std::sync::atomic::{AtomicU64, Ordering};
-
-static NEXT_OPERATION_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct OrganizerOperationId(u64);
 
 impl OrganizerOperationId {
-    pub fn allocate() -> Option<Self> {
-        NEXT_OPERATION_ID
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
-                current.checked_add(1)
-            })
-            .ok()
-            .map(Self)
+    pub const fn from_raw(value: u64) -> Option<Self> {
+        if value == 0 {
+            None
+        } else {
+            Some(Self(value))
+        }
     }
 
     pub const fn get(self) -> u64 {
@@ -27,16 +23,38 @@ impl fmt::Display for OrganizerOperationId {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::OrganizerOperationId;
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum OrganizerOperationStatus {
+    Started,
+    Completed,
+    Skipped,
+    Cancelled,
+    Failed,
+}
 
-    #[test]
-    fn allocated_operation_ids_are_non_zero_and_unique() {
-        let first = OrganizerOperationId::allocate().expect("allocate first id");
-        let second = OrganizerOperationId::allocate().expect("allocate second id");
+impl OrganizerOperationStatus {
+    pub const fn is_terminal(self) -> bool {
+        !matches!(self, Self::Started)
+    }
 
-        assert_ne!(first.get(), 0);
-        assert_ne!(first, second);
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Started => "started",
+            Self::Completed => "completed",
+            Self::Skipped => "skipped",
+            Self::Cancelled => "cancelled",
+            Self::Failed => "failed",
+        }
+    }
+
+    pub fn from_persisted(value: &str) -> Option<Self> {
+        match value {
+            "started" => Some(Self::Started),
+            "completed" => Some(Self::Completed),
+            "skipped" => Some(Self::Skipped),
+            "cancelled" => Some(Self::Cancelled),
+            "failed" => Some(Self::Failed),
+            _ => None,
+        }
     }
 }

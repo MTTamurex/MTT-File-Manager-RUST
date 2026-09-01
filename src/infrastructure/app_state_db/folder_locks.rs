@@ -277,7 +277,7 @@ mod tests {
                          ('C:\\OldLock', 'grid', 'name', 'false', 'first');",
                 )
                 .unwrap();
-            AppStateDb::run_migrations(&writer);
+            AppStateDb::run_migrations(&writer).unwrap();
         }
 
         let locks = db.get_all_folder_locks();

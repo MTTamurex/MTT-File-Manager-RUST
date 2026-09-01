@@ -1,6 +1,7 @@
 //! Persistent SQLite store for user settings and app state.
 //!
-//! Manages: user_preferences, folder_locks, pinned_folders, folder_covers.
+//! Manages: user_preferences, folder_locks, pinned_folders, folder_covers,
+//! organizer rules and operation history.
 //! Connection management, ACL hardening, and PRAGMA setup are delegated to
 //! `crate::infrastructure::db_utils`.
 
@@ -17,11 +18,13 @@ mod file_tags;
 mod folder_covers;
 mod folder_locks;
 pub(crate) mod gc;
+mod organizer_operations;
 mod organizer_rules;
 mod pinned_folders;
 mod preferences;
 
 pub use folder_covers::{FolderCoverReadOutcome, FolderCoverRemoveOutcome};
+pub use organizer_operations::{OrganizerOperationDbError, OrganizerOperationRecord};
 pub use organizer_rules::OrganizerRuleDbError;
 pub use preferences::PreferenceWriteOutcome;
 
@@ -35,7 +38,8 @@ pub enum AppStateWriteError {
 
 /// Persistent store for user settings and metadata.
 ///
-/// Tables: user_preferences, folder_locks, pinned_folders, folder_covers.
+/// Tables: user_preferences, folder_locks, pinned_folders, folder_covers,
+/// organizer_rules and organizer_operations.
 /// Uses the same dual writer/reader + WAL pattern as `ThumbnailDiskCache`.
 pub struct AppStateDb {
     writer: Arc<Mutex<Connection>>,
@@ -134,7 +138,7 @@ impl AppStateDb {
         };
 
         // 3. Schema Migrations
-        Self::run_migrations(&writer_conn);
+        Self::run_migrations(&writer_conn)?;
 
         let writer = Arc::new(Mutex::new(writer_conn));
         let reader = if let Some(reader_conn) = reader_conn {
@@ -161,7 +165,7 @@ impl AppStateDb {
     pub fn new_in_memory() -> rusqlite::Result<Self> {
         let writer_conn = Connection::open_in_memory()?;
         db_utils::apply_default_pragmas(&writer_conn);
-        Self::run_migrations(&writer_conn);
+        Self::run_migrations(&writer_conn)?;
 
         let writer = Arc::new(Mutex::new(writer_conn));
         // A second in-memory connection would be a distinct empty database, so
@@ -184,7 +188,7 @@ impl AppStateDb {
         self.on_primary_path
     }
 
-    fn run_migrations(conn: &Connection) {
+    fn run_migrations(conn: &Connection) -> rusqlite::Result<()> {
         conn.execute(
             "CREATE TABLE IF NOT EXISTS user_preferences (
                 key TEXT PRIMARY KEY,
@@ -332,7 +336,84 @@ impl AppStateDb {
         )
         .unwrap_or(0);
 
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS organizer_operations (
+                operation_id TEXT PRIMARY KEY NOT NULL
+                    CHECK(CAST(operation_id AS INTEGER) > 0
+                          AND printf('%lld', CAST(operation_id AS INTEGER)) = operation_id),
+                rule_id INTEGER NOT NULL,
+                source_path TEXT NOT NULL COLLATE NOCASE,
+                destination_path TEXT NOT NULL COLLATE NOCASE,
+                status TEXT NOT NULL CHECK(status IN ('started', 'completed', 'skipped', 'cancelled', 'failed')),
+                started_at INTEGER NOT NULL,
+                finished_at INTEGER,
+                error TEXT,
+                source_path_bytes BLOB,
+                destination_path_bytes BLOB,
+                CHECK((status = 'started' AND finished_at IS NULL)
+                      OR (status <> 'started' AND finished_at IS NOT NULL))
+            )",
+            [],
+        )?;
+
+        for column in ["source_path_bytes", "destination_path_bytes"] {
+            if conn
+                .prepare(&format!(
+                    "SELECT {column} FROM organizer_operations LIMIT 0"
+                ))
+                .is_err()
+            {
+                conn.execute(
+                    &format!("ALTER TABLE organizer_operations ADD COLUMN {column} BLOB"),
+                    [],
+                )?;
+            }
+        }
+
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS organizer_operation_sequence (
+                singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+                next_id INTEGER NOT NULL CHECK(next_id > 0)
+            )",
+            [],
+        )?;
+
+        conn.execute(
+            "INSERT OR IGNORE INTO organizer_operation_sequence (singleton, next_id)
+             SELECT 1, COALESCE(MAX(CAST(operation_id AS INTEGER)), 0) + 1
+             FROM organizer_operations",
+            [],
+        )?;
+
+        conn.execute_batch(
+            "CREATE TRIGGER IF NOT EXISTS validate_organizer_operation_insert
+             BEFORE INSERT ON organizer_operations
+             WHEN NEW.operation_id IS NULL
+                  OR CAST(NEW.operation_id AS INTEGER) <= 0
+                  OR printf('%lld', CAST(NEW.operation_id AS INTEGER)) <> NEW.operation_id
+                  OR (NEW.status = 'started') <> (NEW.finished_at IS NULL)
+             BEGIN
+                 SELECT RAISE(ABORT, 'invalid organizer operation');
+             END;
+             CREATE TRIGGER IF NOT EXISTS validate_organizer_operation_update
+             BEFORE UPDATE ON organizer_operations
+             WHEN NEW.operation_id IS NULL
+                  OR CAST(NEW.operation_id AS INTEGER) <= 0
+                  OR printf('%lld', CAST(NEW.operation_id AS INTEGER)) <> NEW.operation_id
+                  OR (NEW.status = 'started') <> (NEW.finished_at IS NULL)
+             BEGIN
+                 SELECT RAISE(ABORT, 'invalid organizer operation');
+             END;",
+        )?;
+
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_organizer_operations_started_at
+             ON organizer_operations(started_at DESC)",
+            [],
+        )?;
+
         file_tags::seed_default_file_tags(conn);
+        Ok(())
     }
 
     fn migrate_file_tag_assignments_to_nocase(conn: &Connection) {

@@ -212,6 +212,8 @@ pub(crate) enum FileOperationRequest {
         activation: std::sync::Arc<std::sync::atomic::AtomicBool>,
         expected_snapshot: crate::infrastructure::windows::shell_operations::OrganizerFileSnapshot,
         in_flight: OrganizerInFlightGuard,
+        app_state_db: Arc<crate::infrastructure::app_state_db::AppStateDb>,
+        shutdown: Arc<std::sync::atomic::AtomicBool>,
     },
     /// Batch copy: all files in a single Shell operation (single progress dialog)
     CopyBatch {
@@ -245,14 +247,27 @@ pub(crate) enum FileOperationRequest {
 }
 
 impl FileOperationRequest {
-    fn organizer_operation_context(&self) -> Option<(OrganizerOperationId, i64, PathBuf)> {
+    fn organizer_operation_context(
+        &self,
+    ) -> Option<(
+        OrganizerOperationId,
+        i64,
+        PathBuf,
+        Arc<crate::infrastructure::app_state_db::AppStateDb>,
+    )> {
         match self {
             Self::OrganizerMove {
                 operation_id,
                 rule_id,
                 path,
+                app_state_db,
                 ..
-            } => Some((*operation_id, *rule_id, path.clone())),
+            } => Some((
+                *operation_id,
+                *rule_id,
+                path.clone(),
+                Arc::clone(app_state_db),
+            )),
             _ => None,
         }
     }
@@ -365,6 +380,8 @@ impl FileOperationRequest {
                 activation,
                 expected_snapshot,
                 in_flight,
+                app_state_db,
+                shutdown,
             } => Self::OrganizerMove {
                 path,
                 dest_folder,
@@ -373,6 +390,8 @@ impl FileOperationRequest {
                 activation,
                 expected_snapshot,
                 in_flight,
+                app_state_db,
+                shutdown,
             },
             Self::CopyBatch {
                 paths, dest_folder, ..
@@ -632,6 +651,8 @@ fn run_file_operation_loop(
                     activation,
                     expected_snapshot,
                     in_flight,
+                    app_state_db,
+                    shutdown,
                 } => {
                     let destination = path
                         .file_name()
@@ -645,10 +666,10 @@ fn run_file_operation_loop(
                     handlers::handle_organizer_move(
                         path,
                         dest_folder,
-                        operation_id,
-                        rule_id,
-                        activation,
+                        (operation_id, rule_id),
+                        (activation, shutdown),
                         expected_snapshot,
+                        &app_state_db,
                         &result_sender,
                     );
                     drop(in_flight);
@@ -743,7 +764,25 @@ fn run_file_operation_loop(
                     &[field_label("payload_kind", panic_payload)],
                 );
                 let failure = match organizer_operation {
-                    Some((operation_id, rule_id, path)) => {
+                    Some((operation_id, rule_id, path, app_state_db)) => {
+                        if let Err(error) = app_state_db.finish_organizer_operation(
+                            operation_id,
+                            crate::domain::organizer_operation::OrganizerOperationStatus::Failed,
+                            Some(&msg),
+                        ) {
+                            log::error!(
+                                "[ORGANIZER] Failed to persist operation {} panic: {}",
+                                operation_id,
+                                error
+                            );
+                            let _ = result_sender.send(FileOperationResult::OperationFailed {
+                                message: rust_i18n::t!(
+                                    "organizer.issue_error",
+                                    reason = error.to_string()
+                                )
+                                .to_string(),
+                            });
+                        }
                         FileOperationResult::OrganizerMoveFailed {
                             operation_id,
                             rule_id,

@@ -80,6 +80,9 @@ fn start_manager(rules: Vec<OrganizerRule>) -> OrganizerManager {
     let (file_operation_sender, _file_operation_receiver) = crossbeam_channel::unbounded();
     OrganizerManager::start(
         file_operation_sender,
+        Arc::new(
+            crate::infrastructure::app_state_db::AppStateDb::new_in_memory().expect("database"),
+        ),
         rules,
         eframe::egui::Context::default(),
     )
@@ -230,6 +233,9 @@ fn commands_fail_immediately_when_watcher_is_disabled() {
     let (file_operation_sender, _file_operation_receiver) = crossbeam_channel::unbounded();
     let manager = OrganizerManager::start(
         file_operation_sender,
+        Arc::new(
+            crate::infrastructure::app_state_db::AppStateDb::new_in_memory().expect("database"),
+        ),
         Vec::new(),
         eframe::egui::Context::default(),
     );

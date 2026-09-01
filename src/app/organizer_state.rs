@@ -113,6 +113,7 @@ impl OrganizerState {
         file_operation_sender: crossbeam_channel::Sender<
             crate::workers::file_operation_worker::FileOperationRequest,
         >,
+        app_state_db: std::sync::Arc<crate::infrastructure::app_state_db::AppStateDb>,
         rules: Vec<OrganizerRule>,
         ui_ctx: eframe::egui::Context,
     ) -> Self {
@@ -122,7 +123,12 @@ impl OrganizerState {
             .map(|rule| (rule.id, OrganizerRuleStatus::Starting))
             .collect();
         Self {
-            manager: OrganizerManager::start(file_operation_sender, rules.clone(), ui_ctx),
+            manager: OrganizerManager::start(
+                file_operation_sender,
+                app_state_db,
+                rules.clone(),
+                ui_ctx,
+            ),
             rules,
             rule_statuses,
             active_operation_ids: HashSet::new(),
@@ -312,6 +318,9 @@ mod tests {
         let (file_operation_sender, _file_operation_receiver) = crossbeam_channel::unbounded();
         let mut state = OrganizerState::new(
             file_operation_sender,
+            std::sync::Arc::new(
+                crate::infrastructure::app_state_db::AppStateDb::new_in_memory().expect("database"),
+            ),
             vec![initial.clone()],
             eframe::egui::Context::default(),
         );
@@ -369,6 +378,9 @@ mod tests {
         let (file_operation_sender, _file_operation_receiver) = crossbeam_channel::unbounded();
         let mut state = OrganizerState::new(
             file_operation_sender,
+            std::sync::Arc::new(
+                crate::infrastructure::app_state_db::AppStateDb::new_in_memory().expect("database"),
+            ),
             vec![initial.clone()],
             eframe::egui::Context::default(),
         );

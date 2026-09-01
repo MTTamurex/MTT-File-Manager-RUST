@@ -211,12 +211,7 @@ impl ImageViewerApp {
                             self.cleanup_deleted_pinned_folders();
                             self.request_global_search_refresh();
                         }
-                        FileOperationResult::OrganizerMoveStarted {
-                            operation_id,
-                            rule_id: _,
-                            path: _,
-                            destination: _,
-                        } => {
+                        FileOperationResult::OrganizerMoveStarted { operation_id, .. } => {
                             self.organizer_state.operation_started(operation_id);
                         }
                         FileOperationResult::OrganizerMoveCompleted {
@@ -262,7 +257,9 @@ impl ImageViewerApp {
                             rule_id: _,
                             path: _,
                         } => {
-                            self.organizer_state.operation_finished(operation_id);
+                            if !self.organizer_state.operation_finished(operation_id) {
+                                continue;
+                            }
                         }
                         FileOperationResult::OrganizerMoveFailed {
                             operation_id,
@@ -331,11 +328,8 @@ impl ImageViewerApp {
                     self.organizer_state.set_rule_status(rule_id, status);
                 }
                 crate::infrastructure::organizer::OrganizerEvent::OperationSkipped {
-                    operation_id,
-                    rule_id: _,
-                    path,
+                    path, ..
                 } => {
-                    let _ = operation_id;
                     let name = path
                         .file_name()
                         .and_then(|name| name.to_str())
@@ -345,12 +339,10 @@ impl ImageViewerApp {
                     );
                 }
                 crate::infrastructure::organizer::OrganizerEvent::OperationFailed {
-                    operation_id,
-                    rule_id: _,
                     path,
                     message,
+                    ..
                 } => {
-                    let _ = operation_id;
                     let name = path
                         .file_name()
                         .and_then(|name| name.to_str())

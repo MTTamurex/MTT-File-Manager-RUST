@@ -120,11 +120,13 @@ pub enum OrganizerEvent {
         operation_id: OrganizerOperationId,
         rule_id: i64,
         path: std::path::PathBuf,
+        destination: std::path::PathBuf,
     },
     OperationFailed {
         operation_id: OrganizerOperationId,
         rule_id: i64,
         path: std::path::PathBuf,
+        destination: std::path::PathBuf,
         message: String,
     },
     Error {

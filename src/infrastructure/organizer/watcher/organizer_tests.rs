@@ -1,4 +1,5 @@
 use super::*;
+use crate::domain::organizer_operation::OrganizerOperationStatus;
 use notify::event::{ModifyKind, RemoveKind, RenameMode};
 use notify::{Event, EventKind};
 use std::path::PathBuf;
@@ -153,6 +154,10 @@ fn destination_rename_requeues_a_conflicted_source() {
     let activations = activation_flags_for(&rules);
     let paused_rules = HashSet::new();
     let in_flight = OrganizerInFlightRegistry::default();
+    let app_state_db = Arc::new(
+        crate::infrastructure::app_state_db::AppStateDb::new_in_memory().expect("database"),
+    );
+    let shutdown = Arc::new(AtomicBool::new(false));
     let mut pending = HashMap::new();
     queue_matching_path(
         &rules,
@@ -174,16 +179,27 @@ fn destination_rename_requeues_a_conflicted_source() {
         &operation_sender,
         &event_sender,
         &in_flight,
+        &app_state_db,
+        &shutdown,
     );
     assert!(pending.is_empty());
-    assert!(matches!(
-        event_receiver.try_recv(),
+    let conflict_operation_id = match event_receiver.try_recv() {
         Ok(OrganizerEvent::OperationSkipped {
             operation_id,
             rule_id: 1,
             path,
-        }) if operation_id.get() != 0 && path == source_path
-    ));
+            destination,
+        }) if path == source_path && destination == destination_path => operation_id,
+        _ => panic!("expected persisted conflict operation"),
+    };
+    assert_eq!(
+        app_state_db
+            .get_organizer_operation(conflict_operation_id)
+            .expect("read operation")
+            .expect("conflict operation")
+            .status,
+        OrganizerOperationStatus::Skipped
+    );
 
     let event = Event::new(EventKind::Modify(ModifyKind::Any)).add_path(destination_path.clone());
     process_watcher_event(&event, &rules, &activations, &paused_rules, &mut pending);
@@ -206,6 +222,8 @@ fn destination_rename_requeues_a_conflicted_source() {
         &operation_sender,
         &event_sender,
         &in_flight,
+        &app_state_db,
+        &shutdown,
     );
     match operation_receiver.try_recv() {
         Ok(FileOperationRequest::OrganizerMove {
@@ -217,6 +235,14 @@ fn destination_rename_requeues_a_conflicted_source() {
             assert_ne!(operation_id.get(), 0);
             assert_eq!(path, source_path);
             assert_eq!(dest_folder, destination);
+            assert_eq!(
+                app_state_db
+                    .get_organizer_operation(operation_id)
+                    .expect("read operation")
+                    .expect("started operation")
+                    .status,
+                OrganizerOperationStatus::Started
+            );
         }
         _ => panic!("expected organizer move request"),
     }

@@ -31,12 +31,16 @@ use supervisor::{status_for_rule, watched_folders};
 pub(super) fn run_organizer(
     command_receiver: Receiver<OrganizerCommand>,
     event_sender: Sender<OrganizerEvent>,
-    file_operation_sender: crossbeam_channel::Sender<FileOperationRequest>,
+    operation_services: (
+        crossbeam_channel::Sender<FileOperationRequest>,
+        Arc<crate::infrastructure::app_state_db::AppStateDb>,
+    ),
     mut rules: Vec<OrganizerRule>,
     ui_ctx: eframe::egui::Context,
     pending_commands: PendingCommandRegistry,
     shutdown: Arc<AtomicBool>,
 ) {
+    let (file_operation_sender, app_state_db) = operation_services;
     let _pending_command_guard = PendingCommandFailureGuard {
         pending_commands: pending_commands.clone(),
         event_sender: event_sender.clone(),
@@ -160,6 +164,8 @@ pub(super) fn run_organizer(
             &file_operation_sender,
             &event_sender,
             &in_flight,
+            &app_state_db,
+            &shutdown,
         );
     }
 }

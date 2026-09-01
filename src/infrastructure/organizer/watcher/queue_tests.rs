@@ -1,4 +1,5 @@
 use super::*;
+use crate::domain::organizer_operation::OrganizerOperationStatus;
 use notify::event::ModifyKind;
 use notify::{Event, EventKind};
 
@@ -67,6 +68,10 @@ fn in_flight_move_suppresses_duplicate_watcher_dispatch() {
     let activations = activation_flags_for(&rules);
     let paused_rules = HashSet::new();
     let in_flight = OrganizerInFlightRegistry::default();
+    let app_state_db = Arc::new(
+        crate::infrastructure::app_state_db::AppStateDb::new_in_memory().expect("database"),
+    );
+    let shutdown = Arc::new(AtomicBool::new(false));
     let mut pending = HashMap::new();
     queue_matching_path(
         &rules,
@@ -87,8 +92,22 @@ fn in_flight_move_suppresses_duplicate_watcher_dispatch() {
         &operation_sender,
         &event_sender,
         &in_flight,
+        &app_state_db,
+        &shutdown,
     );
     let request = operation_receiver.try_recv().expect("move request");
+    let operation_id = match &request {
+        FileOperationRequest::OrganizerMove { operation_id, .. } => *operation_id,
+        _ => panic!("expected organizer move request"),
+    };
+    assert_eq!(
+        app_state_db
+            .get_organizer_operation(operation_id)
+            .expect("read operation")
+            .expect("started operation")
+            .status,
+        OrganizerOperationStatus::Started
+    );
 
     let event = Event::new(EventKind::Modify(ModifyKind::Any)).add_path(source_path.clone());
     process_watcher_event(&event, &rules, &activations, &paused_rules, &mut pending);
@@ -103,6 +122,8 @@ fn in_flight_move_suppresses_duplicate_watcher_dispatch() {
         &operation_sender,
         &event_sender,
         &in_flight,
+        &app_state_db,
+        &shutdown,
     );
     assert!(operation_receiver.try_recv().is_err());
     assert!(pending.contains_key(&source_path));
@@ -114,6 +135,8 @@ fn in_flight_move_suppresses_duplicate_watcher_dispatch() {
         &operation_sender,
         &event_sender,
         &in_flight,
+        &app_state_db,
+        &shutdown,
     );
     assert!(operation_receiver.try_recv().is_ok());
     assert!(pending.is_empty());
@@ -135,6 +158,10 @@ fn unavailable_destination_does_not_dispatch() {
     let activations = activation_flags_for(&rules);
     let paused_rules = HashSet::new();
     let in_flight = OrganizerInFlightRegistry::default();
+    let app_state_db = Arc::new(
+        crate::infrastructure::app_state_db::AppStateDb::new_in_memory().expect("database"),
+    );
+    let shutdown = Arc::new(AtomicBool::new(false));
     let mut pending = HashMap::new();
     queue_matching_path(
         &rules,
@@ -156,6 +183,8 @@ fn unavailable_destination_does_not_dispatch() {
         &operation_sender,
         &event_sender,
         &in_flight,
+        &app_state_db,
+        &shutdown,
     );
 
     assert!(operation_receiver.try_recv().is_err());
@@ -167,12 +196,28 @@ fn unavailable_destination_does_not_dispatch() {
         .get_mut(&source_path)
         .expect("source should remain pending")
         .stable_since = Instant::now() - STABILITY_DELAY;
+    shutdown.store(true, Ordering::Release);
     process_stable_files(
         &mut pending,
         &paused_rules,
         &operation_sender,
         &event_sender,
         &in_flight,
+        &app_state_db,
+        &shutdown,
+    );
+    assert!(operation_receiver.try_recv().is_err());
+    assert!(pending.contains_key(&source_path));
+
+    shutdown.store(false, Ordering::Release);
+    process_stable_files(
+        &mut pending,
+        &paused_rules,
+        &operation_sender,
+        &event_sender,
+        &in_flight,
+        &app_state_db,
+        &shutdown,
     );
     assert!(operation_receiver.try_recv().is_ok());
 }

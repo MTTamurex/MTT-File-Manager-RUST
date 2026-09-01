@@ -274,6 +274,7 @@ impl ImageViewerApp {
         let organizer_rules = app_state_db.get_organizer_rules();
         let organizer_state = crate::app::organizer_state::OrganizerState::new(
             file_op_tx.clone(),
+            app_state_db.clone(),
             organizer_rules,
             ctx.clone(),
         );

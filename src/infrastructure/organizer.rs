@@ -137,6 +137,7 @@ pub struct OrganizerManager {
 impl OrganizerManager {
     pub(crate) fn start(
         file_operation_sender: crossbeam_channel::Sender<FileOperationRequest>,
+        app_state_db: Arc<crate::infrastructure::app_state_db::AppStateDb>,
         initial_rules: Vec<OrganizerRule>,
         ui_ctx: eframe::egui::Context,
     ) -> Self {
@@ -155,7 +156,7 @@ impl OrganizerManager {
                 watcher::run_organizer(
                     command_receiver,
                     event_sender,
-                    file_operation_sender,
+                    (file_operation_sender, app_state_db),
                     initial_rules,
                     ui_ctx,
                     worker_pending_commands,
@@ -181,6 +182,7 @@ impl OrganizerManager {
                 command_receiver,
                 event_sender,
                 file_operation_sender,
+                app_state_db,
                 initial_rules,
                 ui_ctx,
             );

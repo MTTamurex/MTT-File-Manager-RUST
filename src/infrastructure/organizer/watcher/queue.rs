@@ -1,4 +1,4 @@
-use crate::domain::organizer_operation::OrganizerOperationId;
+use crate::domain::organizer_operation::OrganizerOperationStatus;
 use crate::domain::organizer_rule::{preview_rule, OrganizerRule};
 use crate::infrastructure::organizer::OrganizerEvent;
 use crate::infrastructure::windows::shell_operations::{
@@ -134,6 +134,8 @@ pub(super) fn process_stable_files(
     file_operation_sender: &crossbeam_channel::Sender<FileOperationRequest>,
     event_sender: &Sender<OrganizerEvent>,
     in_flight: &OrganizerInFlightRegistry,
+    app_state_db: &Arc<crate::infrastructure::app_state_db::AppStateDb>,
+    shutdown: &Arc<AtomicBool>,
 ) {
     let ready: Vec<_> = pending
         .iter()
@@ -142,6 +144,9 @@ pub(super) fn process_stable_files(
         .collect();
 
     for (path, pending_file) in ready {
+        if shutdown.load(Ordering::Acquire) {
+            break;
+        }
         pending.remove(&path);
         if paused_rules.contains(&pending_file.rule.id) {
             continue;
@@ -178,38 +183,55 @@ pub(super) fn process_stable_files(
         let Some(file_name) = path.file_name() else {
             continue;
         };
-        if pending_file
-            .rule
-            .destination_folder
-            .join(file_name)
-            .exists()
-        {
-            let Some(operation_id) = OrganizerOperationId::allocate() else {
-                let _ = event_sender.send(OrganizerEvent::Error {
-                    message: rust_i18n::t!("organizer.error_operation_id_exhausted").to_string(),
-                });
-                continue;
+        let destination = pending_file.rule.destination_folder.join(file_name);
+        if destination.exists() {
+            let operation_id = match app_state_db.record_terminal_organizer_operation(
+                pending_file.rule.id,
+                &path,
+                &destination,
+                OrganizerOperationStatus::Skipped,
+                None,
+            ) {
+                Ok(operation_id) => operation_id,
+                Err(error) => {
+                    let _ = event_sender.send(OrganizerEvent::Error {
+                        message: error.to_string(),
+                    });
+                    let mut pending_file = pending_file;
+                    pending_file.stable_since = Instant::now();
+                    pending.insert(path, pending_file);
+                    continue;
+                }
             };
             let _ = event_sender.send(OrganizerEvent::OperationSkipped {
                 operation_id,
                 rule_id: pending_file.rule.id,
                 path,
+                destination,
             });
             continue;
         }
 
-        let Some(operation_id) = OrganizerOperationId::allocate() else {
-            let _ = event_sender.send(OrganizerEvent::Error {
-                message: rust_i18n::t!("organizer.error_operation_id_exhausted").to_string(),
-            });
-            continue;
-        };
         let source_path = path.clone();
         let destination_folder = pending_file.rule.destination_folder.clone();
         let Some(in_flight_guard) = in_flight.try_acquire(path_key) else {
             pending.insert(path, pending_file);
             continue;
         };
+        let operation_id =
+            match app_state_db.start_organizer_operation(pending_file.rule.id, &path, &destination)
+            {
+                Ok(operation_id) => operation_id,
+                Err(error) => {
+                    let _ = event_sender.send(OrganizerEvent::Error {
+                        message: error.to_string(),
+                    });
+                    let mut pending_file = pending_file;
+                    pending_file.stable_since = Instant::now();
+                    pending.insert(path, pending_file);
+                    continue;
+                }
+            };
         if file_operation_sender
             .send(FileOperationRequest::OrganizerMove {
                 operation_id,
@@ -219,14 +241,32 @@ pub(super) fn process_stable_files(
                 activation: pending_file.activation,
                 expected_snapshot: pending_file.snapshot,
                 in_flight: in_flight_guard,
+                app_state_db: Arc::clone(app_state_db),
+                shutdown: Arc::clone(shutdown),
             })
             .is_err()
         {
+            let message = rust_i18n::t!("organizer.error_file_worker_unavailable").to_string();
+            if let Err(error) = app_state_db.finish_organizer_operation(
+                operation_id,
+                OrganizerOperationStatus::Failed,
+                Some(&message),
+            ) {
+                log::error!(
+                    "[ORGANIZER] Failed to persist operation {} result: {}",
+                    operation_id,
+                    error
+                );
+                let _ = event_sender.send(OrganizerEvent::Error {
+                    message: error.to_string(),
+                });
+            }
             let _ = event_sender.send(OrganizerEvent::OperationFailed {
                 operation_id,
                 rule_id: pending_file.rule.id,
                 path: source_path,
-                message: rust_i18n::t!("organizer.error_file_worker_unavailable").to_string(),
+                destination,
+                message,
             });
         }
     }
