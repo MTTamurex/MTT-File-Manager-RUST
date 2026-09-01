@@ -315,8 +315,18 @@ impl ImageViewerApp {
             ));
         }
 
-        while let Ok(event) = self.organizer_state.manager.events.try_recv() {
+        while let Ok(event) = self.organizer_state.manager.try_recv_event() {
             match event {
+                crate::infrastructure::organizer::OrganizerEvent::CommandResult {
+                    command_id,
+                    result,
+                } => match result {
+                    Ok(result) => self.organizer_state.command_succeeded(command_id, &result),
+                    Err(error) => {
+                        self.organizer_state.command_failed(command_id);
+                        self.notifications.warning(error.to_string());
+                    }
+                },
                 crate::infrastructure::organizer::OrganizerEvent::Status { rule_id, status } => {
                     self.organizer_state.set_rule_status(rule_id, status);
                 }

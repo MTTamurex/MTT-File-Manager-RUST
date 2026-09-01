@@ -1,5 +1,4 @@
 use super::*;
-use crate::domain::organizer_rule::validate_rule_set;
 use crate::workers::file_operation_worker::OrganizerInFlightRegistry;
 use std::collections::{HashMap, HashSet};
 use std::sync::{
@@ -13,19 +12,19 @@ const HEALTH_CHECK_INTERVAL: Duration = Duration::from_secs(1);
 const INITIAL_WATCHER_RETRY_DELAY: Duration = Duration::from_secs(1);
 const MAX_WATCHER_RETRY_DELAY: Duration = Duration::from_secs(30);
 const MAX_WATCH_EVENTS_PER_TICK: usize = 128;
+const MAX_COMMANDS_PER_TICK: usize = 64;
 const WATCH_EVENT_QUEUE_CAPACITY: usize = 1024;
 
+mod commands;
 mod queue;
 mod supervisor;
 
-use queue::{
-    activation_flags_for, process_stable_files, process_watcher_event, queue_rule_paths,
-    update_activation_flags,
-};
-use supervisor::{reconcile_watcher, reset_watcher, WatcherRuntime};
+use commands::{validate_runtime_rules, CommandContext};
+use queue::{activation_flags_for, process_stable_files, process_watcher_event, queue_rule_paths};
+use supervisor::{reconcile_watcher, WatcherRuntime};
 
 #[cfg(test)]
-use queue::{path_is_equal, queue_matching_path};
+use queue::{path_is_equal, queue_matching_path, update_activation_flags};
 #[cfg(test)]
 use supervisor::{status_for_rule, watched_folders};
 
@@ -35,10 +34,17 @@ pub(super) fn run_organizer(
     file_operation_sender: crossbeam_channel::Sender<FileOperationRequest>,
     mut rules: Vec<OrganizerRule>,
     ui_ctx: eframe::egui::Context,
+    pending_commands: PendingCommandRegistry,
+    shutdown: Arc<AtomicBool>,
 ) {
-    if validate_rule_set(&rules).is_err() {
+    let _pending_command_guard = PendingCommandFailureGuard {
+        pending_commands: pending_commands.clone(),
+        event_sender: event_sender.clone(),
+        ui_ctx: ui_ctx.clone(),
+    };
+    if let Err(error) = validate_runtime_rules(&rules) {
         let _ = event_sender.send(OrganizerEvent::Error {
-            message: rust_i18n::t!("organizer.error_rule_cycle").to_string(),
+            message: error.to_string(),
         });
         for rule in &mut rules {
             rule.enabled = false;
@@ -61,6 +67,9 @@ pub(super) fn run_organizer(
     }
 
     'organizer: loop {
+        if shutdown.load(Ordering::Acquire) {
+            break;
+        }
         if Instant::now() >= next_health_check {
             let recovered_rules = reconcile_watcher(
                 &rules,
@@ -110,130 +119,39 @@ pub(super) fn run_organizer(
             Err(mpsc::RecvTimeoutError::Disconnected) => break,
             Err(mpsc::RecvTimeoutError::Timeout) => None,
         };
-        while let Some(command) = next_command {
-            match command {
-                OrganizerCommand::SetRules(new_rules) => {
-                    if validate_rule_set(&new_rules).is_err() {
-                        let _ = event_sender.send(OrganizerEvent::Error {
-                            message: rust_i18n::t!("organizer.error_rule_cycle").to_string(),
-                        });
-                        continue 'organizer;
-                    }
-                    let previous_rules = std::mem::replace(&mut rules, new_rules);
-                    let rules_to_scan =
-                        update_activation_flags(&previous_rules, &rules, &mut activation_flags);
-                    pending.retain(|_, pending| pending.activation.load(Ordering::Acquire));
-                    paused_rules.retain(|rule_id| {
-                        rules.iter().any(|rule| rule.id == *rule_id && rule.enabled)
-                    });
-                    reset_watcher(&mut watcher_runtime);
-                    reported_statuses
-                        .retain(|rule_id, _| rules.iter().any(|rule| rule.id == *rule_id));
-                    for rule_id in rules_to_scan {
-                        if let Some(rule) = rules.iter().find(|rule| rule.id == rule_id) {
-                            queue_rule_paths(
-                                rule,
-                                &rules,
-                                &activation_flags,
-                                &paused_rules,
-                                &mut pending,
-                            );
-                        }
-                    }
-                }
-                OrganizerCommand::RunRuleNow(rule_id) => {
-                    let Some(rule) = rules.iter().find(|rule| rule.id == rule_id) else {
-                        send_rule_error(&event_sender);
-                        continue 'organizer;
-                    };
-                    if !rule.enabled || paused_rules.contains(&rule_id) {
-                        send_rule_error(&event_sender);
-                        continue 'organizer;
-                    }
-                    queue_rule_paths(rule, &rules, &activation_flags, &paused_rules, &mut pending);
-                }
-                OrganizerCommand::PauseRule(rule_id) => {
-                    if let Some(activation) = activation_flags.get(&rule_id) {
-                        activation.store(false, Ordering::Release);
-                    }
-                    activation_flags.insert(rule_id, Arc::new(AtomicBool::new(false)));
-                    paused_rules.insert(rule_id);
-                    pending.retain(|_, pending| pending.rule.id != rule_id);
-                }
-                OrganizerCommand::ResumeRule(rule_id) => {
-                    paused_rules.remove(&rule_id);
-                    if let Some(rule) = rules.iter().find(|rule| rule.id == rule_id) {
-                        if rule.enabled {
-                            activation_flags.insert(rule_id, Arc::new(AtomicBool::new(true)));
-                            queue_rule_paths(
-                                rule,
-                                &rules,
-                                &activation_flags,
-                                &paused_rules,
-                                &mut pending,
-                            );
-                        }
-                    }
-                }
-                OrganizerCommand::Refresh => {
-                    reset_watcher(&mut watcher_runtime);
-                    for rule in rules.iter().filter(|rule| rule.enabled) {
-                        queue_rule_paths(
-                            rule,
-                            &rules,
-                            &activation_flags,
-                            &paused_rules,
-                            &mut pending,
-                        );
-                    }
-                }
-                OrganizerCommand::CreateFolder { rule_id, source } => {
-                    let Some(rule) = rules.iter().find(|rule| rule.id == rule_id) else {
-                        send_rule_error(&event_sender);
-                        continue 'organizer;
-                    };
-                    let folder = if source {
-                        &rule.source_folder
-                    } else {
-                        &rule.destination_folder
-                    };
-                    if !is_safe_folder_creation_path(folder) || contains_reparse_point(folder) {
-                        let _ = event_sender.send(OrganizerEvent::Error {
-                            message: rust_i18n::t!("organizer.error_security_path").to_string(),
-                        });
-                        continue 'organizer;
-                    }
-                    if let Err(error) = std::fs::create_dir_all(folder) {
-                        let _ = event_sender.send(OrganizerEvent::Error {
-                            message: rust_i18n::t!("organizer.error_create_folder", reason = error)
-                                .to_string(),
-                        });
-                        continue 'organizer;
-                    }
-                    if !folder.is_dir() || contains_reparse_point(folder) {
-                        let _ = event_sender.send(OrganizerEvent::Error {
-                            message: rust_i18n::t!("organizer.error_security_path").to_string(),
-                        });
-                        continue 'organizer;
-                    }
-                    reset_watcher(&mut watcher_runtime);
-                    if rule.enabled && !paused_rules.contains(&rule_id) {
-                        queue_rule_paths(
-                            rule,
-                            &rules,
-                            &activation_flags,
-                            &paused_rules,
-                            &mut pending,
-                        );
-                    }
-                }
-                OrganizerCommand::Shutdown => break 'organizer,
-            }
-            next_command = match command_receiver.try_recv() {
-                Ok(command) => Some(command),
-                Err(mpsc::TryRecvError::Empty) => None,
-                Err(mpsc::TryRecvError::Disconnected) => break 'organizer,
+        if shutdown.load(Ordering::Acquire) {
+            break;
+        }
+        let mut processed_commands = 0;
+        {
+            let mut command_context = CommandContext {
+                rules: &mut rules,
+                activation_flags: &mut activation_flags,
+                paused_rules: &mut paused_rules,
+                pending: &mut pending,
+                watcher_runtime: &mut watcher_runtime,
+                reported_statuses: &mut reported_statuses,
+                event_sender: &event_sender,
+                ui_ctx: &ui_ctx,
+                pending_commands: &pending_commands,
             };
+            while let Some(command) = next_command {
+                if shutdown.load(Ordering::Acquire) {
+                    break 'organizer;
+                }
+                processed_commands += 1;
+                if command_context.process(command) {
+                    break 'organizer;
+                }
+                if processed_commands >= MAX_COMMANDS_PER_TICK {
+                    break;
+                }
+                next_command = match command_receiver.try_recv() {
+                    Ok(command) => Some(command),
+                    Err(mpsc::TryRecvError::Empty) => None,
+                    Err(mpsc::TryRecvError::Disconnected) => break 'organizer,
+                };
+            }
         }
 
         process_stable_files(
@@ -243,6 +161,30 @@ pub(super) fn run_organizer(
             &event_sender,
             &in_flight,
         );
+    }
+}
+
+struct PendingCommandFailureGuard {
+    pending_commands: PendingCommandRegistry,
+    event_sender: Sender<OrganizerEvent>,
+    ui_ctx: eframe::egui::Context,
+}
+
+impl Drop for PendingCommandFailureGuard {
+    fn drop(&mut self) {
+        let mut sent_failure = false;
+        for command_id in self.pending_commands.stop() {
+            sent_failure |= self
+                .event_sender
+                .send(OrganizerEvent::CommandResult {
+                    command_id,
+                    result: Err(OrganizerCommandError::ManagerUnavailable),
+                })
+                .is_ok();
+        }
+        if sent_failure {
+            self.ui_ctx.request_repaint();
+        }
     }
 }
 
@@ -276,12 +218,6 @@ fn contains_reparse_point(path: &std::path::Path) -> bool {
         current = candidate.parent();
     }
     false
-}
-
-fn send_rule_error(event_sender: &Sender<OrganizerEvent>) {
-    let _ = event_sender.send(OrganizerEvent::Error {
-        message: rust_i18n::t!("organizer.error_rule_unavailable").to_string(),
-    });
 }
 
 fn normalize_watched_path(path: &std::path::Path) -> String {

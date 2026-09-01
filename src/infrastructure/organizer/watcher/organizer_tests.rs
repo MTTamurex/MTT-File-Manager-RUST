@@ -14,6 +14,51 @@ fn rule(id: i64, enabled: bool) -> OrganizerRule {
 }
 
 #[test]
+fn runtime_exit_fails_every_unconfirmed_command() {
+    let pending_commands = PendingCommandRegistry::running();
+    let first = OrganizerCommandId::allocate().expect("allocate first command id");
+    let second = OrganizerCommandId::allocate().expect("allocate second command id");
+    let (command_sender, _command_receiver) = std::sync::mpsc::channel();
+    pending_commands
+        .register_and_send(
+            first,
+            &command_sender,
+            OrganizerCommand::Refresh { command_id: first },
+        )
+        .expect("register first command");
+    pending_commands
+        .register_and_send(
+            second,
+            &command_sender,
+            OrganizerCommand::Refresh { command_id: second },
+        )
+        .expect("register second command");
+    let (event_sender, event_receiver) = std::sync::mpsc::channel();
+
+    {
+        let _guard = PendingCommandFailureGuard {
+            pending_commands,
+            event_sender,
+            ui_ctx: eframe::egui::Context::default(),
+        };
+    }
+
+    let mut failed_ids = HashSet::new();
+    for _ in 0..2 {
+        match event_receiver.recv().expect("command failure") {
+            OrganizerEvent::CommandResult {
+                command_id,
+                result: Err(OrganizerCommandError::ManagerUnavailable),
+            } => {
+                failed_ids.insert(command_id);
+            }
+            _ => panic!("expected manager unavailable command result"),
+        }
+    }
+    assert_eq!(failed_ids, HashSet::from([first, second]));
+}
+
+#[test]
 fn enabling_a_rule_marks_it_for_a_full_scan() {
     let previous = vec![rule(1, false)];
     let current = vec![rule(1, true)];

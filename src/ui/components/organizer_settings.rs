@@ -5,7 +5,7 @@ use crate::domain::organizer_rule::{
     OrganizerRuleError,
 };
 use crate::infrastructure::app_state_db::OrganizerRuleDbError;
-use crate::infrastructure::organizer::OrganizerRuleStatus;
+use crate::infrastructure::organizer::{OrganizerCommandError, OrganizerRuleStatus};
 use crate::ui::components::settings_ui;
 use crate::ui::theme;
 use eframe::egui::{self, RichText};
@@ -267,16 +267,19 @@ fn render_rules(ui: &mut egui::Ui, app: &mut ImageViewerApp, dark_mode: bool) ->
             ui.horizontal(|ui| {
                 if rule.enabled && status == OrganizerRuleStatus::Active {
                     if ui.button(t!("organizer.run_now")).clicked() {
-                        app.organizer_state.manager.run_rule_now(rule.id);
+                        let result = app.organizer_state.manager.run_rule_now(rule.id);
+                        report_command_error(app, result);
                     }
                     if ui.button(t!("organizer.pause")).clicked() {
-                        app.organizer_state.manager.pause_rule(rule.id);
+                        let result = app.organizer_state.manager.pause_rule(rule.id);
+                        report_command_error(app, result);
                     }
                 } else if rule.enabled
                     && status == OrganizerRuleStatus::Paused
                     && ui.button(t!("organizer.resume")).clicked()
                 {
-                    app.organizer_state.manager.resume_rule(rule.id);
+                    let result = app.organizer_state.manager.resume_rule(rule.id);
+                    report_command_error(app, result);
                 }
                 if matches!(
                     status,
@@ -302,7 +305,8 @@ fn render_rules(ui: &mut egui::Ui, app: &mut ImageViewerApp, dark_mode: bool) ->
                         });
                 }
                 if rule.enabled && ui.button(t!("organizer.refresh")).clicked() {
-                    app.organizer_state.manager.refresh();
+                    let result = app.organizer_state.manager.refresh();
+                    report_command_error(app, result);
                 }
                 let previewing = app.organizer_state.is_previewing(rule.id);
                 if ui
@@ -407,8 +411,21 @@ fn persist_rule(app: &mut ImageViewerApp, rule: &OrganizerRule, success_message:
 }
 
 fn reload_rules(app: &mut ImageViewerApp) {
-    app.organizer_state
-        .replace_rules(app.app_state_db.get_organizer_rules());
+    if let Err(error) = app
+        .organizer_state
+        .replace_rules(app.app_state_db.get_organizer_rules())
+    {
+        app.notifications.warning(error.to_string());
+    }
+}
+
+fn report_command_error(
+    app: &mut ImageViewerApp,
+    result: Result<crate::infrastructure::organizer::OrganizerCommandId, OrganizerCommandError>,
+) {
+    if let Err(error) = result {
+        app.notifications.warning(error.to_string());
+    }
 }
 
 fn rule_error_message(error: OrganizerRuleError) -> String {

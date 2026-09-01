@@ -59,9 +59,13 @@ pub(super) fn render_folder_creation_confirmation(app: &mut ImageViewerApp, ctx:
 
     if confirm {
         app.organizer_state.folder_creation_confirmation = None;
-        app.organizer_state
+        let result = app
+            .organizer_state
             .manager
             .create_missing_folder(request.rule_id, request.source);
+        if let Err(error) = result {
+            app.notifications.warning(error.to_string());
+        }
     } else if cancel {
         app.organizer_state.folder_creation_confirmation = None;
     }
