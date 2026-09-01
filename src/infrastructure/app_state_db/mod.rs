@@ -1,7 +1,7 @@
 //! Persistent SQLite store for user settings and app state.
 //!
 //! Manages: user_preferences, folder_locks, pinned_folders, folder_covers,
-//! organizer rules and operation history.
+//! organizer rules, operation history and conflict records.
 //! Connection management, ACL hardening, and PRAGMA setup are delegated to
 //! `crate::infrastructure::db_utils`.
 
@@ -18,12 +18,18 @@ mod file_tags;
 mod folder_covers;
 mod folder_locks;
 pub(crate) mod gc;
+mod organizer_conflict_registration;
+mod organizer_conflict_resolutions;
+mod organizer_conflicts;
 mod organizer_operations;
 mod organizer_rules;
 mod pinned_folders;
 mod preferences;
 
 pub use folder_covers::{FolderCoverReadOutcome, FolderCoverRemoveOutcome};
+pub use organizer_conflicts::{
+    OrganizerConflictDbError, OrganizerConflictRecord, OrganizerConflictRegistration,
+};
 pub use organizer_operations::{OrganizerOperationDbError, OrganizerOperationRecord};
 pub use organizer_rules::OrganizerRuleDbError;
 pub use preferences::PreferenceWriteOutcome;
@@ -39,7 +45,7 @@ pub enum AppStateWriteError {
 /// Persistent store for user settings and metadata.
 ///
 /// Tables: user_preferences, folder_locks, pinned_folders, folder_covers,
-/// organizer_rules and organizer_operations.
+/// organizer_rules, organizer_operations and organizer_conflicts.
 /// Uses the same dual writer/reader + WAL pattern as `ThumbnailDiskCache`.
 pub struct AppStateDb {
     writer: Arc<Mutex<Connection>>,
@@ -348,6 +354,7 @@ impl AppStateDb {
                 started_at INTEGER NOT NULL,
                 finished_at INTEGER,
                 error TEXT,
+                conflict_id TEXT,
                 source_path_bytes BLOB,
                 destination_path_bytes BLOB,
                 CHECK((status = 'started' AND finished_at IS NULL)
@@ -368,6 +375,17 @@ impl AppStateDb {
                     [],
                 )?;
             }
+        }
+        backfill_organizer_path_blobs(conn, "organizer_operations", "operation_id")?;
+
+        if conn
+            .prepare("SELECT conflict_id FROM organizer_operations LIMIT 0")
+            .is_err()
+        {
+            conn.execute(
+                "ALTER TABLE organizer_operations ADD COLUMN conflict_id TEXT",
+                [],
+            )?;
         }
 
         conn.execute(
@@ -411,6 +429,125 @@ impl AppStateDb {
              ON organizer_operations(started_at DESC)",
             [],
         )?;
+
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS organizer_conflicts (
+                conflict_id TEXT PRIMARY KEY NOT NULL
+                    CHECK(CAST(conflict_id AS INTEGER) > 0
+                          AND printf('%lld', CAST(conflict_id AS INTEGER)) = conflict_id),
+                operation_id TEXT NOT NULL UNIQUE,
+                rule_id INTEGER NOT NULL,
+                source_path TEXT NOT NULL COLLATE NOCASE,
+                destination_path TEXT NOT NULL COLLATE NOCASE,
+                source_path_bytes BLOB,
+                destination_path_bytes BLOB,
+                source_snapshot BLOB NOT NULL,
+                destination_snapshot BLOB,
+                created_at INTEGER NOT NULL,
+                last_checked_at INTEGER NOT NULL,
+                status TEXT NOT NULL CHECK(status IN ('pending', 'resolved', 'obsolete', 'cancelled')),
+                FOREIGN KEY (operation_id) REFERENCES organizer_operations(operation_id)
+            )",
+            [],
+        )?;
+
+        for column in ["source_path_bytes", "destination_path_bytes"] {
+            if conn
+                .prepare(&format!("SELECT {column} FROM organizer_conflicts LIMIT 0"))
+                .is_err()
+            {
+                conn.execute(
+                    &format!("ALTER TABLE organizer_conflicts ADD COLUMN {column} BLOB"),
+                    [],
+                )?;
+            }
+        }
+        backfill_organizer_path_blobs(conn, "organizer_conflicts", "conflict_id")?;
+
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS organizer_conflict_sequence (
+                singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+                next_id INTEGER NOT NULL CHECK(next_id > 0)
+            )",
+            [],
+        )?;
+
+        conn.execute(
+            "INSERT OR IGNORE INTO organizer_conflict_sequence (singleton, next_id)
+             SELECT 1, COALESCE(MAX(CAST(conflict_id AS INTEGER)), 0) + 1
+             FROM organizer_conflicts",
+            [],
+        )?;
+
+        conn.execute_batch(
+            "CREATE TRIGGER IF NOT EXISTS validate_organizer_conflict_insert
+             BEFORE INSERT ON organizer_conflicts
+             WHEN NEW.conflict_id IS NULL
+                  OR CAST(NEW.conflict_id AS INTEGER) <= 0
+                  OR printf('%lld', CAST(NEW.conflict_id AS INTEGER)) <> NEW.conflict_id
+                  OR NEW.status NOT IN ('pending', 'resolved', 'obsolete', 'cancelled')
+             BEGIN
+                 SELECT RAISE(ABORT, 'invalid organizer conflict');
+             END;
+             CREATE TRIGGER IF NOT EXISTS validate_organizer_conflict_update
+             BEFORE UPDATE ON organizer_conflicts
+             WHEN NEW.conflict_id IS NULL
+                  OR CAST(NEW.conflict_id AS INTEGER) <= 0
+                  OR printf('%lld', CAST(NEW.conflict_id AS INTEGER)) <> NEW.conflict_id
+                  OR NEW.status NOT IN ('pending', 'resolved', 'obsolete', 'cancelled')
+             BEGIN
+                 SELECT RAISE(ABORT, 'invalid organizer conflict');
+             END;",
+        )?;
+
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_organizer_conflicts_created_at
+             ON organizer_conflicts(created_at DESC)",
+            [],
+        )?;
+
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS organizer_conflict_resolutions (
+                conflict_id TEXT PRIMARY KEY NOT NULL,
+                rename_source INTEGER NOT NULL CHECK(rename_source IN (0, 1)),
+                target_path TEXT NOT NULL COLLATE NOCASE,
+                target_path_bytes BLOB NOT NULL,
+                expected_snapshot BLOB NOT NULL,
+                owner_id TEXT NOT NULL,
+                started_at INTEGER NOT NULL,
+                FOREIGN KEY (conflict_id) REFERENCES organizer_conflicts(conflict_id)
+                    ON DELETE CASCADE
+            )",
+            [],
+        )?;
+        if conn
+            .prepare("SELECT expected_snapshot FROM organizer_conflict_resolutions LIMIT 0")
+            .is_err()
+        {
+            conn.execute(
+                "ALTER TABLE organizer_conflict_resolutions ADD COLUMN expected_snapshot BLOB",
+                [],
+            )?;
+            conn.execute(
+                "UPDATE organizer_conflict_resolutions
+                 SET expected_snapshot = (
+                     SELECT CASE WHEN organizer_conflict_resolutions.rename_source = 1
+                                 THEN c.source_snapshot ELSE c.destination_snapshot END
+                     FROM organizer_conflicts c
+                     WHERE c.conflict_id = organizer_conflict_resolutions.conflict_id
+                 )",
+                [],
+            )?;
+        }
+        if conn
+            .prepare("SELECT owner_id FROM organizer_conflict_resolutions LIMIT 0")
+            .is_err()
+        {
+            conn.execute(
+                "ALTER TABLE organizer_conflict_resolutions ADD COLUMN owner_id TEXT NOT NULL DEFAULT ''",
+                [],
+            )?;
+        }
 
         file_tags::seed_default_file_tags(conn);
         Ok(())
@@ -499,6 +636,41 @@ impl AppStateDb {
             ),
         }
     }
+}
+
+fn backfill_organizer_path_blobs(
+    conn: &Connection,
+    table: &str,
+    id_column: &str,
+) -> rusqlite::Result<()> {
+    let rows = {
+        let mut statement = conn.prepare(&format!(
+            "SELECT {id_column}, source_path, destination_path FROM {table}
+             WHERE source_path_bytes IS NULL OR destination_path_bytes IS NULL"
+        ))?;
+        let rows = statement.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()?
+    };
+    for (id, source, destination) in rows {
+        conn.execute(
+            &format!(
+                "UPDATE {table} SET source_path_bytes = ?1, destination_path_bytes = ?2
+                 WHERE {id_column} = ?3"
+            ),
+            params![
+                organizer_operations::path_bytes(Path::new(&source)),
+                organizer_operations::path_bytes(Path::new(&destination)),
+                id,
+            ],
+        )?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

@@ -73,7 +73,7 @@ impl ImageViewerApp {
             let current_path_norm =
                 Self::normalize_for_match(Path::new(&self.navigation_state.current_path));
             self.process_hidden_menu_worker_results();
-            self.process_organizer_events();
+            self.process_organizer_events(&current_path_norm);
             self.process_file_operation_results(&current_path_norm, ctx);
             self.flush_organizer_notification_summary();
             self.process_tag_assignment_gc_results();
@@ -165,7 +165,7 @@ impl ImageViewerApp {
         let current_path_norm =
             Self::normalize_for_match(Path::new(&self.navigation_state.current_path));
 
-        self.process_organizer_events();
+        self.process_organizer_events(&current_path_norm);
 
         // BLOCKING: Process all available file operation results in batch
         self.process_file_operation_results(&current_path_norm, ctx);

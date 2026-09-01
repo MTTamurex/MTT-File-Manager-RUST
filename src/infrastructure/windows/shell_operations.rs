@@ -19,8 +19,8 @@ pub use file_op::{
     move_items_with_file_op,
 };
 pub use organizer_move::{
-    move_file_without_replace, move_organizer_file_without_replace, organizer_file_snapshot,
-    OrganizerFileSnapshot,
+    move_file_without_replace, move_organizer_file_without_replace,
+    move_organizer_file_without_replace_guarded_by, organizer_file_snapshot, OrganizerFileSnapshot,
 };
 pub use shfile_ops::{
     copy_item_with_shell, copy_items_with_shell, delete_item_with_shell,

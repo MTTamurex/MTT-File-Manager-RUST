@@ -72,6 +72,8 @@ pub enum FileOperationResult {
         operation_id: OrganizerOperationId,
         rule_id: i64,
         path: PathBuf,
+        destination: PathBuf,
+        conflict_id: crate::domain::organizer_conflict::OrganizerConflictId,
     },
     OrganizerMoveCancelled {
         operation_id: OrganizerOperationId,
@@ -479,7 +481,7 @@ fn sanitize_operation_path(path: &Path) -> Result<PathBuf, String> {
         .map_err(|e| format!("Security validation failed for '{}': {}", path.display(), e))
 }
 
-fn sanitize_organizer_path(path: &Path) -> Result<PathBuf, String> {
+pub(crate) fn sanitize_organizer_path(path: &Path) -> Result<PathBuf, String> {
     if should_bypass_sanitization(path) {
         return Err("Shell namespace paths are not valid organizer paths".to_string());
     }

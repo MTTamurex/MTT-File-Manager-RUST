@@ -9,9 +9,10 @@ use std::sync::mpsc::Sender;
 use crate::domain::file_entry::is_path_inside_existing_archive_file;
 use crate::domain::organizer_operation::{OrganizerOperationId, OrganizerOperationStatus};
 use crate::infrastructure::app_state_db::AppStateDb;
+use crate::infrastructure::app_state_db::OrganizerConflictRegistration;
 use crate::infrastructure::archive_extract;
 use crate::infrastructure::windows::recycle_bin;
-use crate::infrastructure::windows::shell_operations;
+use crate::infrastructure::windows::shell_operations::{self, organizer_file_snapshot};
 use crate::workers::archive_extraction_worker::ArchiveExtractionRequest;
 
 fn split_virtual_archive_paths(paths: Vec<PathBuf>) -> (Vec<PathBuf>, Vec<PathBuf>) {
@@ -457,9 +458,20 @@ fn persist_and_send_organizer_result(
         }
         _ => unreachable!("non-organizer result passed to organizer persistence"),
     };
-    let persistence_error = app_state_db
-        .finish_organizer_operation(operation_id, status, error)
-        .err();
+    let persistence_error =
+        match app_state_db.finish_organizer_operation(operation_id, status, error) {
+            Ok(()) => None,
+            Err(persistence_error)
+                if app_state_db
+                    .get_organizer_operation(operation_id)
+                    .ok()
+                    .flatten()
+                    .is_some_and(|operation| operation.status == status) =>
+            {
+                None
+            }
+            Err(error) => Some(error),
+        };
     if let Some(error) = &persistence_error {
         log::error!(
             "[ORGANIZER] Failed to persist operation {} result: {}",
@@ -473,6 +485,32 @@ fn persist_and_send_organizer_result(
             message: rust_i18n::t!("organizer.issue_error", reason = error.to_string()).to_string(),
         });
     }
+}
+
+fn create_organizer_conflict(
+    app_state_db: &AppStateDb,
+    operation_id: OrganizerOperationId,
+    rule_id: i64,
+    source_path: &Path,
+    destination_path: &Path,
+    expected_source_snapshot: shell_operations::OrganizerFileSnapshot,
+) -> Result<OrganizerConflictRegistration, String> {
+    let source_snapshot =
+        organizer_file_snapshot(source_path).map_err(|error| error.to_string())?;
+    if source_snapshot != expected_source_snapshot {
+        return Err("source file changed before conflict detection".to_string());
+    }
+    let destination_snapshot = organizer_file_snapshot(destination_path).ok();
+    app_state_db
+        .create_organizer_conflict(
+            operation_id,
+            rule_id,
+            source_path,
+            destination_path,
+            source_snapshot,
+            destination_snapshot,
+        )
+        .map_err(|error| error.to_string())
 }
 
 pub(super) fn handle_organizer_move(
@@ -548,10 +586,37 @@ pub(super) fn handle_organizer_move(
             };
         }
         if moved_dest.exists() {
-            return FileOperationResult::OrganizerMoveSkipped {
+            return match create_organizer_conflict(
+                app_state_db,
                 operation_id,
                 rule_id,
-                path,
+                &path,
+                &moved_dest,
+                expected_snapshot,
+            ) {
+                Ok(
+                    OrganizerConflictRegistration::Created { conflict_id, .. }
+                    | OrganizerConflictRegistration::Existing { conflict_id, .. },
+                ) => FileOperationResult::OrganizerMoveSkipped {
+                    operation_id,
+                    rule_id,
+                    path,
+                    destination: moved_dest,
+                    conflict_id,
+                },
+                Ok(OrganizerConflictRegistration::Suppressed) => {
+                    FileOperationResult::OrganizerMoveCancelled {
+                        operation_id,
+                        rule_id,
+                        path,
+                    }
+                }
+                Err(message) => FileOperationResult::OrganizerMoveFailed {
+                    operation_id,
+                    rule_id,
+                    path,
+                    message,
+                },
             };
         }
         if shutdown.load(std::sync::atomic::Ordering::Acquire)
@@ -578,10 +643,37 @@ pub(super) fn handle_organizer_move(
                 moved_dest,
             },
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-                FileOperationResult::OrganizerMoveSkipped {
+                match create_organizer_conflict(
+                    app_state_db,
                     operation_id,
                     rule_id,
-                    path,
+                    &path,
+                    &moved_dest,
+                    expected_snapshot,
+                ) {
+                    Ok(
+                        OrganizerConflictRegistration::Created { conflict_id, .. }
+                        | OrganizerConflictRegistration::Existing { conflict_id, .. },
+                    ) => FileOperationResult::OrganizerMoveSkipped {
+                        operation_id,
+                        rule_id,
+                        path,
+                        destination: moved_dest,
+                        conflict_id,
+                    },
+                    Ok(OrganizerConflictRegistration::Suppressed) => {
+                        FileOperationResult::OrganizerMoveCancelled {
+                            operation_id,
+                            rule_id,
+                            path,
+                        }
+                    }
+                    Err(message) => FileOperationResult::OrganizerMoveFailed {
+                        operation_id,
+                        rule_id,
+                        path,
+                        message,
+                    },
                 }
             }
             Err(error) => FileOperationResult::OrganizerMoveFailed {
@@ -987,6 +1079,66 @@ mod tests {
         assert_eq!(
             std::fs::read(&destination).expect("destination remains"),
             b"destination"
+        );
+    }
+
+    #[test]
+    fn organizer_move_persists_a_worker_conflict_before_reporting_skip() {
+        let source_parent = tempfile::tempdir().expect("create source parent");
+        let destination_parent = tempfile::tempdir().expect("create destination parent");
+        let source = source_parent.path().join("report.pdf");
+        let destination = destination_parent.path().join("report.pdf");
+        std::fs::write(&source, b"source").expect("create source file");
+        std::fs::write(&destination, b"destination").expect("create destination file");
+        let snapshot = shell_operations::organizer_file_snapshot(&source).expect("source snapshot");
+        let app_state_db = AppStateDb::new_in_memory().expect("database");
+        let operation_id = app_state_db
+            .start_organizer_operation(7, &source, &destination)
+            .expect("start operation");
+        let activation = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (result_sender, result_receiver) = std::sync::mpsc::channel();
+
+        handle_organizer_move(
+            source.clone(),
+            destination_parent.path().to_path_buf(),
+            (operation_id, 7),
+            (activation, shutdown),
+            snapshot,
+            &app_state_db,
+            &result_sender,
+        );
+
+        let conflict_id = match result_receiver.try_recv() {
+            Ok(FileOperationResult::OrganizerMoveSkipped {
+                operation_id: result_id,
+                rule_id: 7,
+                path,
+                destination: result_destination,
+                conflict_id,
+            }) if result_id == operation_id
+                && path == source
+                && result_destination == destination =>
+            {
+                conflict_id
+            }
+            _ => panic!("expected persisted worker conflict"),
+        };
+        assert_eq!(
+            app_state_db
+                .get_organizer_operation(operation_id)
+                .expect("read operation")
+                .expect("operation record")
+                .conflict_id,
+            Some(conflict_id)
+        );
+        assert_eq!(
+            app_state_db
+                .get_organizer_conflict(conflict_id)
+                .expect("read conflict")
+                .expect("conflict record")
+                .status,
+            crate::domain::organizer_conflict::OrganizerConflictStatus::Pending
         );
     }
 

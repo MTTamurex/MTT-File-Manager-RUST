@@ -1,4 +1,5 @@
 use super::AppStateDb;
+use crate::domain::organizer_conflict::OrganizerConflictId;
 use crate::domain::organizer_operation::{OrganizerOperationId, OrganizerOperationStatus};
 use rusqlite::{params, OptionalExtension, Row};
 use std::ffi::OsString;
@@ -34,9 +35,10 @@ pub struct OrganizerOperationRecord {
     pub started_at: i64,
     pub finished_at: Option<i64>,
     pub error: Option<String>,
+    pub conflict_id: Option<OrganizerConflictId>,
 }
 
-fn now_unix_millis() -> Result<i64, OrganizerOperationDbError> {
+pub(super) fn now_unix_millis() -> Result<i64, OrganizerOperationDbError> {
     let millis = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|_| OrganizerOperationDbError::ClockUnavailable)?
@@ -44,22 +46,22 @@ fn now_unix_millis() -> Result<i64, OrganizerOperationDbError> {
     i64::try_from(millis).map_err(|_| OrganizerOperationDbError::ClockUnavailable)
 }
 
-fn path_text(path: &Path) -> String {
+pub(super) fn path_text(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 
-fn path_bytes(path: &Path) -> Vec<u8> {
+pub(super) fn path_bytes(path: &Path) -> Vec<u8> {
     path.as_os_str()
         .encode_wide()
         .flat_map(u16::to_le_bytes)
         .collect()
 }
 
-fn operation_id_text(operation_id: OrganizerOperationId) -> String {
+pub(super) fn operation_id_text(operation_id: OrganizerOperationId) -> String {
     operation_id.to_string()
 }
 
-fn malformed_column(column: usize, message: &'static str) -> rusqlite::Error {
+pub(super) fn malformed_column(column: usize, message: &'static str) -> rusqlite::Error {
     rusqlite::Error::FromSqlConversionFailure(
         column,
         rusqlite::types::Type::Text,
@@ -70,7 +72,7 @@ fn malformed_column(column: usize, message: &'static str) -> rusqlite::Error {
     )
 }
 
-fn path_from_storage(
+pub(super) fn path_from_storage(
     text: String,
     bytes: Option<Vec<u8>>,
     column: usize,
@@ -112,6 +114,16 @@ fn record_from_row(row: &Row<'_>) -> rusqlite::Result<OrganizerOperationRecord> 
         row.get::<_, Option<Vec<u8>>>(9)?,
         9,
     )?;
+    let conflict_id = row
+        .get::<_, Option<String>>(10)?
+        .map(|raw_id| {
+            raw_id
+                .parse::<u64>()
+                .ok()
+                .and_then(OrganizerConflictId::from_raw)
+                .ok_or_else(|| malformed_column(10, "invalid organizer conflict ID"))
+        })
+        .transpose()?;
 
     Ok(OrganizerOperationRecord {
         operation_id,
@@ -122,10 +134,11 @@ fn record_from_row(row: &Row<'_>) -> rusqlite::Result<OrganizerOperationRecord> 
         started_at: row.get(5)?,
         finished_at,
         error: row.get(7)?,
+        conflict_id,
     })
 }
 
-fn reserve_operation_id(
+pub(super) fn reserve_operation_id(
     tx: &rusqlite::Transaction<'_>,
 ) -> Result<OrganizerOperationId, OrganizerOperationDbError> {
     let next_id = tx
@@ -203,6 +216,20 @@ impl AppStateDb {
             ],
         )?;
         if updated == 1 {
+            if status == OrganizerOperationStatus::Completed {
+                tx.execute(
+                    "UPDATE organizer_conflicts
+                     SET status = 'obsolete', last_checked_at = ?1
+                     WHERE status = 'pending' AND EXISTS (
+                         SELECT 1 FROM organizer_operations o
+                         WHERE o.operation_id = ?2
+                           AND o.rule_id = organizer_conflicts.rule_id
+                           AND o.source_path = organizer_conflicts.source_path COLLATE NOCASE
+                           AND o.destination_path = organizer_conflicts.destination_path COLLATE NOCASE
+                     )",
+                    params![finished_at, operation_id_text(operation_id)],
+                )?;
+            }
             tx.commit()?;
             return Ok(());
         }
@@ -271,7 +298,8 @@ impl AppStateDb {
             .map_err(|_| OrganizerOperationDbError::DatabaseUnavailable)?;
         db.query_row(
             "SELECT operation_id, rule_id, source_path, destination_path, status,
-                    started_at, finished_at, error, source_path_bytes, destination_path_bytes
+                    started_at, finished_at, error, source_path_bytes, destination_path_bytes,
+                    conflict_id
              FROM organizer_operations WHERE operation_id = ?1",
             params![operation_id_text(operation_id)],
             record_from_row,
@@ -294,7 +322,8 @@ impl AppStateDb {
             .map_err(|_| OrganizerOperationDbError::DatabaseUnavailable)?;
         let mut statement = db.prepare(
             "SELECT operation_id, rule_id, source_path, destination_path, status,
-                    started_at, finished_at, error, source_path_bytes, destination_path_bytes
+                    started_at, finished_at, error, source_path_bytes, destination_path_bytes,
+                    conflict_id
              FROM organizer_operations
              ORDER BY started_at DESC, CAST(operation_id AS INTEGER) DESC
              LIMIT ?1",

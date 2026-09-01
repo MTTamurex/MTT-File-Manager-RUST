@@ -138,6 +138,7 @@ pub(super) fn run_organizer(
                 event_sender: &event_sender,
                 ui_ctx: &ui_ctx,
                 pending_commands: &pending_commands,
+                app_state_db: &app_state_db,
             };
             while let Some(command) = next_command {
                 if shutdown.load(Ordering::Acquire) {
@@ -158,7 +159,7 @@ pub(super) fn run_organizer(
             }
         }
 
-        process_stable_files(
+        if process_stable_files(
             &mut pending,
             &paused_rules,
             &file_operation_sender,
@@ -166,7 +167,9 @@ pub(super) fn run_organizer(
             &in_flight,
             &app_state_db,
             &shutdown,
-        );
+        ) {
+            ui_ctx.request_repaint();
+        }
     }
 }
 

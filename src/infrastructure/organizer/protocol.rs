@@ -1,7 +1,15 @@
 use super::OrganizerCommandId;
+use crate::domain::organizer_conflict::OrganizerConflictId;
 use crate::domain::organizer_operation::OrganizerOperationId;
 use crate::domain::organizer_rule::OrganizerRuleError;
 use std::fmt;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum OrganizerConflictResolution {
+    RenameSource { new_name: String },
+    RenameDestination { new_name: String },
+    Cancel,
+}
 
 #[derive(Debug, Eq, PartialEq)]
 pub enum OrganizerCommandResult {
@@ -25,6 +33,14 @@ pub enum OrganizerCommandResult {
         source: bool,
         path: std::path::PathBuf,
     },
+    ConflictResolved {
+        conflict_id: OrganizerConflictId,
+        old_path: std::path::PathBuf,
+        new_path: std::path::PathBuf,
+    },
+    ConflictCancelled {
+        conflict_id: OrganizerConflictId,
+    },
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -36,6 +52,11 @@ pub enum OrganizerCommandError {
     RuleUnavailable,
     SecurityViolation,
     FolderCreationFailed { reason: String },
+    ConflictUnavailable,
+    InvalidConflictName,
+    ConflictStale,
+    ConflictTargetExists,
+    ConflictResolutionFailed { reason: String },
 }
 
 impl fmt::Display for OrganizerCommandError {
@@ -89,6 +110,24 @@ impl fmt::Display for OrganizerCommandError {
                     rust_i18n::t!("organizer.error_create_folder", reason = reason)
                 )
             }
+            Self::ConflictUnavailable => {
+                formatter.write_str(rust_i18n::t!("organizer.error_conflict_unavailable").as_ref())
+            }
+            Self::InvalidConflictName => {
+                formatter.write_str(rust_i18n::t!("organizer.error_invalid_conflict_name").as_ref())
+            }
+            Self::ConflictStale => {
+                formatter.write_str(rust_i18n::t!("organizer.error_conflict_stale").as_ref())
+            }
+            Self::ConflictTargetExists => formatter
+                .write_str(rust_i18n::t!("organizer.error_conflict_target_exists").as_ref()),
+            Self::ConflictResolutionFailed { reason } => {
+                write!(
+                    formatter,
+                    "{}",
+                    rust_i18n::t!("organizer.error_conflict_resolution", reason = reason)
+                )
+            }
         }
     }
 }
@@ -118,6 +157,7 @@ pub enum OrganizerEvent {
     },
     OperationSkipped {
         operation_id: OrganizerOperationId,
+        conflict_id: OrganizerConflictId,
         rule_id: i64,
         path: std::path::PathBuf,
         destination: std::path::PathBuf,

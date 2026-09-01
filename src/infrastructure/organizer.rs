@@ -10,7 +10,8 @@ use std::sync::{
 mod protocol;
 
 pub use protocol::{
-    OrganizerCommandError, OrganizerCommandResult, OrganizerEvent, OrganizerRuleStatus,
+    OrganizerCommandError, OrganizerCommandResult, OrganizerConflictResolution, OrganizerEvent,
+    OrganizerRuleStatus,
 };
 
 static NEXT_COMMAND_ID: AtomicU64 = AtomicU64::new(1);
@@ -121,6 +122,11 @@ enum OrganizerCommand {
         command_id: OrganizerCommandId,
         rule_id: i64,
         source: bool,
+    },
+    ResolveConflict {
+        command_id: OrganizerCommandId,
+        conflict_id: crate::domain::organizer_conflict::OrganizerConflictId,
+        resolution: OrganizerConflictResolution,
     },
     Shutdown,
 }
@@ -262,6 +268,18 @@ impl OrganizerManager {
             command_id,
             rule_id,
             source,
+        })
+    }
+
+    pub fn resolve_conflict(
+        &self,
+        conflict_id: crate::domain::organizer_conflict::OrganizerConflictId,
+        resolution: OrganizerConflictResolution,
+    ) -> Result<OrganizerCommandId, OrganizerCommandError> {
+        self.enqueue(move |command_id| OrganizerCommand::ResolveConflict {
+            command_id,
+            conflict_id,
+            resolution,
         })
     }
 

@@ -1,3 +1,4 @@
+use crate::app::organizer_conflict_state::OrganizerConflictUiState;
 use crate::domain::organizer_operation::OrganizerOperationId;
 use crate::domain::organizer_rule::OrganizerRule;
 use crate::infrastructure::organizer::{
@@ -89,6 +90,7 @@ pub struct OrganizerState {
     pub rules: Vec<OrganizerRule>,
     pub rule_statuses: HashMap<i64, OrganizerRuleStatus>,
     pub active_operation_ids: HashSet<OrganizerOperationId>,
+    pub(crate) conflict_state: OrganizerConflictUiState,
     pub source_input: String,
     pub destination_input: String,
     pub extensions_input: String,
@@ -118,6 +120,10 @@ impl OrganizerState {
         ui_ctx: eframe::egui::Context,
     ) -> Self {
         let (preview_sender, preview_receiver) = mpsc::channel();
+        if let Err(error) = app_state_db.reconcile_organizer_conflict_resolutions() {
+            log::warn!("[ORGANIZER] Failed to reconcile conflict resolutions: {error}");
+        }
+        let conflict_state = OrganizerConflictUiState::load(&app_state_db);
         let rule_statuses = rules
             .iter()
             .map(|rule| (rule.id, OrganizerRuleStatus::Starting))
@@ -132,6 +138,7 @@ impl OrganizerState {
             rules,
             rule_statuses,
             active_operation_ids: HashSet::new(),
+            conflict_state,
             source_input: String::new(),
             destination_input: String::new(),
             extensions_input: String::new(),
@@ -168,6 +175,14 @@ impl OrganizerState {
         command_id: OrganizerCommandId,
         result: &OrganizerCommandResult,
     ) {
+        self.conflict_state.command_finished(command_id);
+        match result {
+            OrganizerCommandResult::ConflictResolved { conflict_id, .. }
+            | OrganizerCommandResult::ConflictCancelled { conflict_id } => {
+                self.conflict_state.remove(*conflict_id);
+            }
+            _ => {}
+        }
         let Some(rules) = self.pending_rule_sets.remove(&command_id) else {
             return;
         };
@@ -184,8 +199,32 @@ impl OrganizerState {
         self.rules = rules;
     }
 
-    pub fn command_failed(&mut self, command_id: OrganizerCommandId) {
+    pub fn command_failed(&mut self, command_id: OrganizerCommandId) -> bool {
         self.pending_rule_sets.remove(&command_id);
+        self.conflict_state.command_finished(command_id)
+    }
+
+    pub fn reload_conflicts(
+        &mut self,
+        db: &crate::infrastructure::app_state_db::AppStateDb,
+    ) -> Result<(), crate::infrastructure::app_state_db::OrganizerConflictDbError> {
+        self.conflict_state.reload(db)
+    }
+
+    pub fn resolve_conflict(
+        &mut self,
+        conflict_id: crate::domain::organizer_conflict::OrganizerConflictId,
+        resolution: crate::infrastructure::organizer::OrganizerConflictResolution,
+    ) -> Result<OrganizerCommandId, OrganizerCommandError> {
+        self.conflict_state
+            .resolve(&self.manager, conflict_id, resolution)
+    }
+
+    pub fn is_conflict_command_pending(
+        &self,
+        conflict_id: crate::domain::organizer_conflict::OrganizerConflictId,
+    ) -> bool {
+        self.conflict_state.is_pending(conflict_id)
     }
 
     pub fn rule_status(&self, rule_id: i64) -> OrganizerRuleStatus {

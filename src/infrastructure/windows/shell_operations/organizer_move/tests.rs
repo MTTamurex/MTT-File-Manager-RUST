@@ -23,7 +23,9 @@ fn verified_copy_exposes_only_valid_final_contents() {
         .expect("create alternate stream");
     let mut guard = protected_source(&source);
 
-    move_across_volumes_verified(&mut guard, &destination).expect("verified move");
+    let destination_parent = open_destination_parent(&destination).expect("destination parent");
+    move_across_volumes_verified(&mut guard, &destination, &destination_parent)
+        .expect("verified move");
     drop(guard);
 
     assert!(!source.exists());
@@ -49,7 +51,8 @@ fn verified_copy_never_replaces_an_existing_final_destination() {
     std::fs::write(&destination, b"destination").expect("create destination");
     let mut guard = protected_source(&source);
 
-    let result = move_across_volumes_verified(&mut guard, &destination);
+    let destination_parent = open_destination_parent(&destination).expect("destination parent");
+    let result = move_across_volumes_verified(&mut guard, &destination, &destination_parent);
     drop(guard);
 
     assert!(result.is_err());

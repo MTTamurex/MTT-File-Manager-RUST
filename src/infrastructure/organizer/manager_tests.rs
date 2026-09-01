@@ -1,8 +1,11 @@
 use super::{
     allocate_command_id, OrganizerCommand, OrganizerCommandError, OrganizerCommandId,
-    OrganizerCommandResult, OrganizerEvent, OrganizerManager, PendingCommandRegistry,
+    OrganizerCommandResult, OrganizerConflictResolution, OrganizerEvent, OrganizerManager,
+    PendingCommandRegistry,
 };
+use crate::domain::organizer_conflict::OrganizerConflictStatus;
 use crate::domain::organizer_rule::{OrganizerRule, OrganizerRuleError};
+use crate::infrastructure::app_state_db::AppStateDb;
 use std::sync::{atomic::AtomicU64, Arc, Barrier};
 use std::time::Duration;
 
@@ -80,12 +83,66 @@ fn start_manager(rules: Vec<OrganizerRule>) -> OrganizerManager {
     let (file_operation_sender, _file_operation_receiver) = crossbeam_channel::unbounded();
     OrganizerManager::start(
         file_operation_sender,
-        Arc::new(
-            crate::infrastructure::app_state_db::AppStateDb::new_in_memory().expect("database"),
-        ),
+        Arc::new(AppStateDb::new_in_memory().expect("database")),
         rules,
         eframe::egui::Context::default(),
     )
+}
+
+#[cfg(feature = "notify-watcher")]
+fn conflict_fixture() -> (
+    tempfile::TempDir,
+    Arc<AppStateDb>,
+    OrganizerRule,
+    crate::domain::organizer_conflict::OrganizerConflictId,
+    std::path::PathBuf,
+    std::path::PathBuf,
+) {
+    let root = tempfile::tempdir().expect("create test directory");
+    let source_folder = root.path().join("source");
+    let destination_folder = root.path().join("destination");
+    std::fs::create_dir(&source_folder).expect("create source folder");
+    std::fs::create_dir(&destination_folder).expect("create destination folder");
+    let source = source_folder.join("report.txt");
+    let destination = destination_folder.join("report.txt");
+    std::fs::write(&source, b"source").expect("create source file");
+    std::fs::write(&destination, b"destination").expect("create destination file");
+    let rule = OrganizerRule::from_persisted(
+        7,
+        source_folder,
+        destination_folder,
+        vec!["txt".to_string()],
+        true,
+    )
+    .expect("create rule");
+    let db = Arc::new(AppStateDb::new_in_memory().expect("database"));
+    let operation_id = db
+        .start_organizer_operation(7, &source, &destination)
+        .expect("start operation");
+    let conflict_id = match db
+        .create_organizer_conflict(
+            operation_id,
+            7,
+            &source,
+            &destination,
+            crate::infrastructure::windows::shell_operations::organizer_file_snapshot(&source)
+                .expect("source snapshot"),
+            Some(
+                crate::infrastructure::windows::shell_operations::organizer_file_snapshot(
+                    &destination,
+                )
+                .expect("destination snapshot"),
+            ),
+        )
+        .expect("create conflict")
+    {
+        crate::infrastructure::app_state_db::OrganizerConflictRegistration::Created {
+            conflict_id,
+            ..
+        } => conflict_id,
+        _ => panic!("expected a new conflict"),
+    };
+    (root, db, rule, conflict_id, source, destination)
 }
 
 #[cfg(feature = "notify-watcher")]
@@ -186,6 +243,217 @@ fn rejected_command_returns_typed_error_without_stopping_runtime() {
         Ok(OrganizerCommandResult::RefreshQueued {
             enabled_rule_count: 0
         })
+    );
+}
+
+#[cfg(feature = "notify-watcher")]
+#[test]
+fn resolving_a_conflict_renames_the_source_and_finishes_it() {
+    let (_root, db, rule, conflict_id, source, destination) = conflict_fixture();
+    let manager = {
+        let (file_operation_sender, _file_operation_receiver) = crossbeam_channel::unbounded();
+        OrganizerManager::start(
+            file_operation_sender,
+            Arc::clone(&db),
+            vec![rule],
+            eframe::egui::Context::default(),
+        )
+    };
+    let command_id = manager
+        .resolve_conflict(
+            conflict_id,
+            OrganizerConflictResolution::RenameSource {
+                new_name: "report (1).txt".to_string(),
+            },
+        )
+        .expect("queue source rename");
+
+    assert_eq!(
+        receive_command_result(&manager, command_id),
+        Ok(OrganizerCommandResult::ConflictResolved {
+            conflict_id,
+            old_path: source.clone(),
+            new_path: source.with_file_name("report (1).txt"),
+        })
+    );
+    assert!(!source.exists());
+    assert!(source.with_file_name("report (1).txt").is_file());
+    assert!(destination.is_file());
+    assert_eq!(
+        db.get_organizer_conflict(conflict_id)
+            .expect("read conflict")
+            .expect("conflict")
+            .status,
+        OrganizerConflictStatus::Resolved
+    );
+}
+
+#[cfg(feature = "notify-watcher")]
+#[test]
+fn resolving_a_conflict_renames_the_destination_without_overwriting_it() {
+    let (_root, db, rule, conflict_id, source, destination) = conflict_fixture();
+    let manager = {
+        let (file_operation_sender, _file_operation_receiver) = crossbeam_channel::unbounded();
+        OrganizerManager::start(
+            file_operation_sender,
+            Arc::clone(&db),
+            vec![rule],
+            eframe::egui::Context::default(),
+        )
+    };
+    let command_id = manager
+        .resolve_conflict(
+            conflict_id,
+            OrganizerConflictResolution::RenameDestination {
+                new_name: "existing.txt".to_string(),
+            },
+        )
+        .expect("queue destination rename");
+
+    assert_eq!(
+        receive_command_result(&manager, command_id),
+        Ok(OrganizerCommandResult::ConflictResolved {
+            conflict_id,
+            old_path: destination.clone(),
+            new_path: destination.with_file_name("existing.txt"),
+        })
+    );
+    assert!(source.is_file());
+    assert!(!destination.exists());
+    assert_eq!(
+        std::fs::read(destination.with_file_name("existing.txt")).expect("renamed destination"),
+        b"destination"
+    );
+    assert_eq!(
+        db.get_organizer_conflict(conflict_id)
+            .expect("read conflict")
+            .expect("conflict")
+            .status,
+        OrganizerConflictStatus::Resolved
+    );
+}
+
+#[cfg(feature = "notify-watcher")]
+#[test]
+fn invalid_conflict_names_are_rejected_before_touching_files() {
+    let (_root, db, rule, conflict_id, source, destination) = conflict_fixture();
+    let manager = {
+        let (file_operation_sender, _file_operation_receiver) = crossbeam_channel::unbounded();
+        OrganizerManager::start(
+            file_operation_sender,
+            Arc::clone(&db),
+            vec![rule],
+            eframe::egui::Context::default(),
+        )
+    };
+    let command_id = manager
+        .resolve_conflict(
+            conflict_id,
+            OrganizerConflictResolution::RenameSource {
+                new_name: "..\\escape".to_string(),
+            },
+        )
+        .expect("queue invalid rename");
+
+    assert_eq!(
+        receive_command_result(&manager, command_id),
+        Err(OrganizerCommandError::InvalidConflictName)
+    );
+    assert!(source.is_file());
+    assert!(destination.is_file());
+    assert_eq!(
+        db.get_organizer_conflict(conflict_id)
+            .expect("read conflict")
+            .expect("conflict")
+            .status,
+        OrganizerConflictStatus::Pending
+    );
+}
+
+#[cfg(feature = "notify-watcher")]
+#[test]
+fn cancelling_a_conflict_keeps_both_files_and_finishes_it() {
+    let (_root, db, rule, conflict_id, source, destination) = conflict_fixture();
+    let manager = {
+        let (file_operation_sender, _file_operation_receiver) = crossbeam_channel::unbounded();
+        OrganizerManager::start(
+            file_operation_sender,
+            Arc::clone(&db),
+            vec![rule],
+            eframe::egui::Context::default(),
+        )
+    };
+    let command_id = manager
+        .resolve_conflict(conflict_id, OrganizerConflictResolution::Cancel)
+        .expect("queue conflict cancellation");
+
+    assert_eq!(
+        receive_command_result(&manager, command_id),
+        Ok(OrganizerCommandResult::ConflictCancelled { conflict_id })
+    );
+    assert!(source.is_file());
+    assert!(destination.is_file());
+    assert_eq!(
+        db.get_organizer_conflict(conflict_id)
+            .expect("read conflict")
+            .expect("conflict")
+            .status,
+        OrganizerConflictStatus::Cancelled
+    );
+    assert_eq!(
+        db.record_terminal_organizer_conflict(
+            7,
+            &source,
+            &destination,
+            crate::infrastructure::windows::shell_operations::organizer_file_snapshot(&source)
+                .expect("source snapshot"),
+            Some(
+                crate::infrastructure::windows::shell_operations::organizer_file_snapshot(
+                    &destination,
+                )
+                .expect("destination snapshot"),
+            ),
+        )
+        .expect("suppress cancelled identity"),
+        crate::infrastructure::app_state_db::OrganizerConflictRegistration::Suppressed
+    );
+}
+
+#[cfg(feature = "notify-watcher")]
+#[test]
+fn stale_conflicts_are_marked_obsolete_instead_of_being_renamed() {
+    let (_root, db, rule, conflict_id, source, destination) = conflict_fixture();
+    std::fs::write(&source, b"source changed after detection").expect("change source file");
+    let manager = {
+        let (file_operation_sender, _file_operation_receiver) = crossbeam_channel::unbounded();
+        OrganizerManager::start(
+            file_operation_sender,
+            Arc::clone(&db),
+            vec![rule],
+            eframe::egui::Context::default(),
+        )
+    };
+    let command_id = manager
+        .resolve_conflict(
+            conflict_id,
+            OrganizerConflictResolution::RenameSource {
+                new_name: "changed.txt".to_string(),
+            },
+        )
+        .expect("queue stale conflict");
+
+    assert_eq!(
+        receive_command_result(&manager, command_id),
+        Err(OrganizerCommandError::ConflictStale)
+    );
+    assert!(source.is_file());
+    assert!(destination.is_file());
+    assert_eq!(
+        db.get_organizer_conflict(conflict_id)
+            .expect("read conflict")
+            .expect("conflict")
+            .status,
+        OrganizerConflictStatus::Obsolete
     );
 }
 

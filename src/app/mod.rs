@@ -30,6 +30,7 @@ pub(crate) mod live_file_size;
 pub mod miller_columns_state;
 pub mod navigation_state;
 pub mod operations;
+pub(crate) mod organizer_conflict_state;
 pub mod organizer_state;
 pub mod shortcuts;
 pub mod state;

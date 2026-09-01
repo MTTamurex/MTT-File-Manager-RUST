@@ -195,6 +195,18 @@ fn legacy_operation_schema_is_extended_without_losing_history() {
             .source_path,
         PathBuf::from(r"C:\old.txt")
     );
+    let blobs_present = db
+        .writer
+        .lock()
+        .expect("writer")
+        .query_row(
+            "SELECT source_path_bytes IS NOT NULL AND destination_path_bytes IS NOT NULL
+             FROM organizer_operations WHERE operation_id = '41'",
+            [],
+            |row| row.get::<_, bool>(0),
+        )
+        .expect("legacy path blobs");
+    assert!(blobs_present);
     assert_eq!(
         db.start_organizer_operation(9, Path::new(r"C:\new.txt"), Path::new(r"D:\new.txt"))
             .expect("new operation")

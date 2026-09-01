@@ -1,9 +1,9 @@
 use std::path::Path;
 use windows::Win32::Storage::FileSystem::{
     BackupRead, BackupWrite, FileDispositionInfo, FileRenameInfo, GetFileInformationByHandle,
-    SetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION, DELETE, FILE_DISPOSITION_INFO,
-    FILE_GENERIC_READ, FILE_GENERIC_WRITE, FILE_RENAME_INFO, FILE_SHARE_DELETE, FILE_SHARE_READ,
-    FILE_SHARE_WRITE,
+    GetFinalPathNameByHandleW, SetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION, DELETE,
+    FILE_DISPOSITION_INFO, FILE_GENERIC_READ, FILE_GENERIC_WRITE, FILE_NAME_NORMALIZED,
+    FILE_RENAME_INFO, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -13,6 +13,31 @@ pub struct OrganizerFileSnapshot {
     last_write_time: u64,
     volume_serial_number: u32,
     file_index: u64,
+}
+
+impl OrganizerFileSnapshot {
+    pub(crate) fn to_bytes(self) -> [u8; 36] {
+        let mut bytes = [0u8; 36];
+        bytes[0..8].copy_from_slice(&self.size.to_le_bytes());
+        bytes[8..16].copy_from_slice(&self.creation_time.to_le_bytes());
+        bytes[16..24].copy_from_slice(&self.last_write_time.to_le_bytes());
+        bytes[24..28].copy_from_slice(&self.volume_serial_number.to_le_bytes());
+        bytes[28..36].copy_from_slice(&self.file_index.to_le_bytes());
+        bytes
+    }
+
+    pub(crate) fn from_bytes(bytes: &[u8]) -> Option<Self> {
+        if bytes.len() != 36 {
+            return None;
+        }
+        Some(Self {
+            size: u64::from_le_bytes(bytes[0..8].try_into().ok()?),
+            creation_time: u64::from_le_bytes(bytes[8..16].try_into().ok()?),
+            last_write_time: u64::from_le_bytes(bytes[16..24].try_into().ok()?),
+            volume_serial_number: u32::from_le_bytes(bytes[24..28].try_into().ok()?),
+            file_index: u64::from_le_bytes(bytes[28..36].try_into().ok()?),
+        })
+    }
 }
 
 fn snapshot_from_file(file: &std::fs::File) -> std::io::Result<OrganizerFileSnapshot> {
@@ -60,6 +85,29 @@ pub fn move_organizer_file_without_replace(
     move_file_without_replace_impl(source, destination, Some(expected))
 }
 
+pub fn move_organizer_file_without_replace_guarded_by(
+    source: &Path,
+    destination: &Path,
+    expected_source: OrganizerFileSnapshot,
+    guard_path: &Path,
+    expected_guard: OrganizerFileSnapshot,
+) -> std::io::Result<()> {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    const FILE_READ_ATTRIBUTES: u32 = 0x0080;
+    let guard = std::fs::OpenOptions::new()
+        .access_mode(FILE_READ_ATTRIBUTES)
+        .share_mode(FILE_SHARE_READ.0)
+        .open(guard_path)?;
+    if snapshot_from_file(&guard)? != expected_guard {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "guarded organizer file changed before the move",
+        ));
+    }
+    move_file_without_replace_impl(source, destination, Some(expected_source))
+}
+
 fn move_file_without_replace_impl(
     source: &Path,
     destination: &Path,
@@ -81,6 +129,7 @@ fn move_file_without_replace_impl(
             ));
         }
     }
+    let destination_parent_guard = open_destination_parent(destination)?;
 
     // Let the filesystem determine whether this is a native rename. Only an
     // explicit cross-device error enters the verified copy/delete fallback.
@@ -90,12 +139,89 @@ fn move_file_without_replace_impl(
         Err(error) => return Err(error),
     }
 
-    move_across_volumes_verified(&mut source_guard, destination)
+    move_across_volumes_verified(&mut source_guard, destination, &destination_parent_guard)
+}
+
+fn open_destination_parent(destination: &Path) -> std::io::Result<std::fs::File> {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+    if !destination.is_absolute() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "organizer destination must be absolute",
+        ));
+    }
+    let parent_path = destination.parent().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "organizer destination has no parent",
+        )
+    })?;
+    destination.file_name().ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "organizer destination has no file name",
+        )
+    })?;
+    let parent = std::fs::OpenOptions::new()
+        .access_mode(FILE_GENERIC_READ.0)
+        .share_mode((FILE_SHARE_READ | FILE_SHARE_WRITE).0)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+        .open(parent_path)?;
+    if !same_windows_path(&final_path_from_file(&parent)?, parent_path) {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "organizer destination directory changed during validation",
+        ));
+    }
+    Ok(parent)
+}
+
+fn final_path_from_file(file: &std::fs::File) -> std::io::Result<std::path::PathBuf> {
+    use std::os::windows::ffi::OsStringExt;
+    use std::os::windows::io::AsRawHandle;
+    use windows::Win32::Foundation::HANDLE;
+
+    let mut buffer = vec![0u16; 512];
+    loop {
+        let length = unsafe {
+            GetFinalPathNameByHandleW(
+                HANDLE(file.as_raw_handle()),
+                &mut buffer,
+                FILE_NAME_NORMALIZED,
+            )
+        };
+        if length == 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        if (length as usize) < buffer.len() {
+            return Ok(std::path::PathBuf::from(std::ffi::OsString::from_wide(
+                &buffer[..length as usize],
+            )));
+        }
+        buffer.resize(length as usize + 1, 0);
+    }
+}
+
+fn same_windows_path(left: &Path, right: &Path) -> bool {
+    fn comparable(path: &Path) -> String {
+        let path = path.to_string_lossy();
+        let path = path
+            .strip_prefix(r"\\?\UNC\")
+            .map(|path| format!(r"\\{path}"))
+            .or_else(|| path.strip_prefix(r"\\?\").map(str::to_owned))
+            .unwrap_or_else(|| path.into_owned());
+        path.trim_end_matches(['\\', '/']).to_owned()
+    }
+
+    comparable(left).eq_ignore_ascii_case(&comparable(right))
 }
 
 fn move_across_volumes_verified(
     source: &mut std::fs::File,
     destination: &Path,
+    _destination_parent_guard: &std::fs::File,
 ) -> std::io::Result<()> {
     use std::os::windows::fs::OpenOptionsExt;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -108,7 +234,7 @@ fn move_across_volumes_verified(
             "destination has no parent",
         )
     })?;
-    let destination_name = destination.file_name().ok_or_else(|| {
+    destination.file_name().ok_or_else(|| {
         std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
             "destination has no file name",
@@ -117,11 +243,8 @@ fn move_across_volumes_verified(
     let mut temporary = None;
     for _ in 0..32 {
         let id = TEMP_ID.fetch_add(1, Ordering::Relaxed);
-        let candidate = destination_parent.join(format!(
-            ".{}.mtt-organizer-{}-{id}.tmp",
-            destination_name.to_string_lossy(),
-            std::process::id()
-        ));
+        let candidate =
+            destination_parent.join(format!(".mtt-organizer-{}-{id}.tmp", std::process::id()));
         match std::fs::OpenOptions::new()
             .read(true)
             .write(true)
@@ -166,7 +289,19 @@ fn move_across_volumes_verified(
 
     // The final destination data and rename have both been flushed. Delete the exact
     // guarded source identity rather than whatever currently occupies its path.
-    mark_file_for_deletion(source)
+    if let Err(error) = mark_file_for_deletion(source) {
+        if let Err(cleanup_error) = mark_file_for_deletion(&copied) {
+            return Err(std::io::Error::new(
+                error.kind(),
+                format!(
+                    "source deletion failed after cross-volume publish: {error}; \
+                     destination cleanup also failed: {cleanup_error}"
+                ),
+            ));
+        }
+        return Err(error);
+    }
+    Ok(())
 }
 
 fn rename_file_handle(file: &std::fs::File, destination: &Path) -> std::io::Result<()> {

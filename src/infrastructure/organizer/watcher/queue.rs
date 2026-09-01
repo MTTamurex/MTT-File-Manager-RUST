@@ -136,7 +136,8 @@ pub(super) fn process_stable_files(
     in_flight: &OrganizerInFlightRegistry,
     app_state_db: &Arc<crate::infrastructure::app_state_db::AppStateDb>,
     shutdown: &Arc<AtomicBool>,
-) {
+) -> bool {
+    let mut event_sent = false;
     let ready: Vec<_> = pending
         .iter()
         .filter(|(_, pending)| pending.stable_since.elapsed() >= STABILITY_DELAY)
@@ -185,14 +186,15 @@ pub(super) fn process_stable_files(
         };
         let destination = pending_file.rule.destination_folder.join(file_name);
         if destination.exists() {
-            let operation_id = match app_state_db.record_terminal_organizer_operation(
+            let destination_snapshot = organizer_file_snapshot(&destination).ok();
+            let registration = match app_state_db.record_terminal_organizer_conflict(
                 pending_file.rule.id,
                 &path,
                 &destination,
-                OrganizerOperationStatus::Skipped,
-                None,
+                snapshot,
+                destination_snapshot,
             ) {
-                Ok(operation_id) => operation_id,
+                Ok(registration) => registration,
                 Err(error) => {
                     let _ = event_sender.send(OrganizerEvent::Error {
                         message: error.to_string(),
@@ -203,12 +205,22 @@ pub(super) fn process_stable_files(
                     continue;
                 }
             };
-            let _ = event_sender.send(OrganizerEvent::OperationSkipped {
+            let crate::infrastructure::app_state_db::OrganizerConflictRegistration::Created {
                 operation_id,
-                rule_id: pending_file.rule.id,
-                path,
-                destination,
-            });
+                conflict_id,
+            } = registration
+            else {
+                continue;
+            };
+            event_sent |= event_sender
+                .send(OrganizerEvent::OperationSkipped {
+                    operation_id,
+                    conflict_id,
+                    rule_id: pending_file.rule.id,
+                    path,
+                    destination,
+                })
+                .is_ok();
             continue;
         }
 
@@ -270,6 +282,7 @@ pub(super) fn process_stable_files(
             });
         }
     }
+    event_sent
 }
 
 pub(super) fn activation_flags_for(rules: &[OrganizerRule]) -> HashMap<i64, Arc<AtomicBool>> {

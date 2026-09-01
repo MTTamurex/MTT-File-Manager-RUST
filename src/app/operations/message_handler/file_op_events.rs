@@ -240,6 +240,7 @@ impl ImageViewerApp {
                             operation_id,
                             rule_id: _,
                             path,
+                            ..
                         } => {
                             if !self.organizer_state.operation_finished(operation_id) {
                                 continue;
@@ -251,6 +252,11 @@ impl ImageViewerApp {
                             self.organizer_state.notification_batch.record_skipped(
                                 rust_i18n::t!("organizer.issue_conflict", name = name).to_string(),
                             );
+                            if let Err(error) =
+                                self.organizer_state.reload_conflicts(&self.app_state_db)
+                            {
+                                self.notifications.warning(error.to_string());
+                            }
                         }
                         FileOperationResult::OrganizerMoveCancelled {
                             operation_id,
@@ -302,7 +308,7 @@ impl ImageViewerApp {
         }
     }
 
-    pub(super) fn process_organizer_events(&mut self) {
+    pub(super) fn process_organizer_events(&mut self, current_path_norm: &str) {
         while let Ok(preview) = self.organizer_state.preview_receiver.try_recv() {
             self.organizer_state.finish_preview(preview.rule_id);
             self.notifications.info(format!(
@@ -317,13 +323,67 @@ impl ImageViewerApp {
                 crate::infrastructure::organizer::OrganizerEvent::CommandResult {
                     command_id,
                     result,
-                } => match result {
-                    Ok(result) => self.organizer_state.command_succeeded(command_id, &result),
-                    Err(error) => {
-                        self.organizer_state.command_failed(command_id);
-                        self.notifications.warning(error.to_string());
+                } => {
+                    let conflict_rename = match &result {
+                        Ok(crate::infrastructure::organizer::OrganizerCommandResult::ConflictResolved {
+                            old_path,
+                            new_path,
+                            ..
+                        }) => Some((old_path.clone(), new_path.clone())),
+                        _ => None,
+                    };
+                    let conflict_result = conflict_rename.is_some()
+                        || matches!(
+                            &result,
+                            Ok(crate::infrastructure::organizer::OrganizerCommandResult::ConflictCancelled { .. })
+                        );
+                    let conflict_cancelled = matches!(
+                        &result,
+                        Ok(crate::infrastructure::organizer::OrganizerCommandResult::ConflictCancelled { .. })
+                    );
+                    match result {
+                        Ok(result) => self.organizer_state.command_succeeded(command_id, &result),
+                        Err(error) => {
+                            let conflict_failed = self.organizer_state.command_failed(command_id);
+                            self.notifications.warning(error.to_string());
+                            if conflict_failed {
+                                if let Err(reload_error) =
+                                    self.organizer_state.reload_conflicts(&self.app_state_db)
+                                {
+                                    self.notifications.warning(reload_error.to_string());
+                                }
+                            }
+                        }
                     }
-                },
+                    if let Some((old_path, new_path)) = conflict_rename {
+                        if let (Some(parent), Some(new_name)) = (
+                            new_path.parent().map(Path::to_path_buf),
+                            new_path
+                                .file_name()
+                                .map(|name| name.to_string_lossy().into_owned()),
+                        ) {
+                            self.handle_rename_completed(
+                                old_path,
+                                new_name,
+                                parent,
+                                current_path_norm,
+                            );
+                        }
+                    }
+                    if conflict_result {
+                        if let Err(error) =
+                            self.organizer_state.reload_conflicts(&self.app_state_db)
+                        {
+                            self.notifications.warning(error.to_string());
+                        }
+                        let message = if conflict_cancelled {
+                            rust_i18n::t!("organizer.conflict_cancelled")
+                        } else {
+                            rust_i18n::t!("organizer.conflict_resolved")
+                        };
+                        self.notifications.success(message.to_string());
+                    }
+                }
                 crate::infrastructure::organizer::OrganizerEvent::Status { rule_id, status } => {
                     self.organizer_state.set_rule_status(rule_id, status);
                 }
@@ -337,6 +397,9 @@ impl ImageViewerApp {
                     self.organizer_state.notification_batch.record_skipped(
                         rust_i18n::t!("organizer.issue_conflict", name = name).to_string(),
                     );
+                    if let Err(error) = self.organizer_state.reload_conflicts(&self.app_state_db) {
+                        self.notifications.warning(error.to_string());
+                    }
                 }
                 crate::infrastructure::organizer::OrganizerEvent::OperationFailed {
                     path,

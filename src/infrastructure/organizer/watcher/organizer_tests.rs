@@ -186,10 +186,21 @@ fn destination_rename_requeues_a_conflicted_source() {
     let conflict_operation_id = match event_receiver.try_recv() {
         Ok(OrganizerEvent::OperationSkipped {
             operation_id,
+            conflict_id,
             rule_id: 1,
             path,
             destination,
-        }) if path == source_path && destination == destination_path => operation_id,
+        }) if path == source_path && destination == destination_path => {
+            assert_eq!(
+                app_state_db
+                    .get_organizer_conflict(conflict_id)
+                    .expect("read conflict")
+                    .expect("conflict record")
+                    .operation_id,
+                operation_id
+            );
+            operation_id
+        }
         _ => panic!("expected persisted conflict operation"),
     };
     assert_eq!(

@@ -1,7 +1,14 @@
-use super::queue::{queue_rule_paths, update_activation_flags, PendingFile};
+use super::queue::{queue_matching_path, queue_rule_paths, update_activation_flags, PendingFile};
 use super::supervisor::{reset_watcher, WatcherRuntime};
 use super::*;
+use crate::domain::organizer_conflict::{
+    validate_organizer_conflict_name, OrganizerConflictStatus,
+};
 use crate::domain::organizer_rule::validate_rule_set;
+use crate::infrastructure::app_state_db::{AppStateDb, OrganizerConflictRecord};
+use crate::infrastructure::windows::shell_operations::{
+    move_organizer_file_without_replace_guarded_by, organizer_file_snapshot, OrganizerFileSnapshot,
+};
 use std::path::PathBuf;
 
 pub(super) struct CommandContext<'a> {
@@ -14,6 +21,7 @@ pub(super) struct CommandContext<'a> {
     pub(super) event_sender: &'a Sender<OrganizerEvent>,
     pub(super) ui_ctx: &'a eframe::egui::Context,
     pub(super) pending_commands: &'a PendingCommandRegistry,
+    pub(super) app_state_db: &'a AppStateDb,
 }
 
 impl CommandContext<'_> {
@@ -41,6 +49,11 @@ impl CommandContext<'_> {
                 rule_id,
                 source,
             } => self.create_folder(command_id, rule_id, source),
+            OrganizerCommand::ResolveConflict {
+                command_id,
+                conflict_id,
+                resolution,
+            } => self.resolve_conflict(command_id, conflict_id, resolution),
             OrganizerCommand::Shutdown => true,
         }
     }
@@ -216,6 +229,304 @@ impl CommandContext<'_> {
         )
     }
 
+    fn resolve_conflict(
+        &mut self,
+        command_id: OrganizerCommandId,
+        conflict_id: crate::domain::organizer_conflict::OrganizerConflictId,
+        resolution: OrganizerConflictResolution,
+    ) -> bool {
+        let conflict = match self.app_state_db.get_organizer_conflict(conflict_id) {
+            Ok(Some(conflict)) if conflict.status == OrganizerConflictStatus::Pending => conflict,
+            Ok(Some(_)) | Ok(None) => {
+                return self.respond(command_id, Err(OrganizerCommandError::ConflictUnavailable))
+            }
+            Err(error) => {
+                return self.respond(
+                    command_id,
+                    Err(OrganizerCommandError::ConflictResolutionFailed {
+                        reason: error.to_string(),
+                    }),
+                )
+            }
+        };
+
+        let result = match resolution {
+            OrganizerConflictResolution::RenameSource { new_name } => self
+                .rename_conflict_source(&conflict, &new_name)
+                .map(
+                    |(old_path, new_path)| OrganizerCommandResult::ConflictResolved {
+                        conflict_id,
+                        old_path,
+                        new_path,
+                    },
+                ),
+            OrganizerConflictResolution::RenameDestination { new_name } => {
+                self.rename_conflict_destination(&conflict, &new_name).map(
+                    |(old_path, new_path)| OrganizerCommandResult::ConflictResolved {
+                        conflict_id,
+                        old_path,
+                        new_path,
+                    },
+                )
+            }
+            OrganizerConflictResolution::Cancel => self
+                .cancel_conflict(conflict.conflict_id)
+                .map(|()| OrganizerCommandResult::ConflictCancelled { conflict_id }),
+        };
+        self.respond(command_id, result)
+    }
+
+    fn cancel_conflict(
+        &self,
+        conflict_id: crate::domain::organizer_conflict::OrganizerConflictId,
+    ) -> Result<(), OrganizerCommandError> {
+        self.app_state_db
+            .finish_organizer_conflict(conflict_id, OrganizerConflictStatus::Cancelled)
+            .map_err(|error| OrganizerCommandError::ConflictResolutionFailed {
+                reason: error.to_string(),
+            })
+    }
+
+    fn rename_conflict_source(
+        &mut self,
+        conflict: &OrganizerConflictRecord,
+        new_name: &str,
+    ) -> Result<(PathBuf, PathBuf), OrganizerCommandError> {
+        validate_organizer_conflict_name(new_name)
+            .map_err(|_| OrganizerCommandError::InvalidConflictName)?;
+        let parent = conflict
+            .source_path
+            .parent()
+            .map(PathBuf::from)
+            .ok_or(OrganizerCommandError::ConflictStale)?;
+        let target = parent.join(new_name);
+        if target == conflict.source_path || target.exists() {
+            return Err(OrganizerCommandError::ConflictTargetExists);
+        }
+        let target = safe_organizer_path(&target)?;
+        self.claim_conflict_resolution(conflict.conflict_id, true, &target)?;
+        let (source, destination, source_snapshot, destination_snapshot) =
+            match self.current_conflict_state(conflict) {
+                Ok(state) => state,
+                Err(error) => {
+                    let _ = self
+                        .app_state_db
+                        .release_organizer_conflict_resolution(conflict.conflict_id);
+                    return Err(error);
+                }
+            };
+        let reconciled = if let Err(error) = move_organizer_file_without_replace_guarded_by(
+            &source,
+            &target,
+            source_snapshot,
+            &destination,
+            destination_snapshot,
+        ) {
+            self.reconcile_conflict_rename_error(conflict.conflict_id, error)?
+        } else {
+            false
+        };
+
+        if !reconciled {
+            self.finish_conflict_after_rename(conflict.conflict_id)?;
+        }
+        queue_matching_path(
+            self.rules,
+            self.activation_flags,
+            self.paused_rules,
+            target.clone(),
+            self.pending,
+        );
+        Ok((source, target))
+    }
+
+    fn rename_conflict_destination(
+        &mut self,
+        conflict: &OrganizerConflictRecord,
+        new_name: &str,
+    ) -> Result<(PathBuf, PathBuf), OrganizerCommandError> {
+        validate_organizer_conflict_name(new_name)
+            .map_err(|_| OrganizerCommandError::InvalidConflictName)?;
+        let parent = conflict
+            .destination_path
+            .parent()
+            .map(PathBuf::from)
+            .ok_or(OrganizerCommandError::ConflictStale)?;
+        let target = parent.join(new_name);
+        if target == conflict.destination_path || target.exists() {
+            return Err(OrganizerCommandError::ConflictTargetExists);
+        }
+        let target = safe_organizer_path(&target)?;
+        self.claim_conflict_resolution(conflict.conflict_id, false, &target)?;
+        let (source, destination, source_snapshot, destination_snapshot) =
+            match self.current_conflict_state(conflict) {
+                Ok(state) => state,
+                Err(error) => {
+                    let _ = self
+                        .app_state_db
+                        .release_organizer_conflict_resolution(conflict.conflict_id);
+                    return Err(error);
+                }
+            };
+        let reconciled = if let Err(error) = move_organizer_file_without_replace_guarded_by(
+            &destination,
+            &target,
+            destination_snapshot,
+            &source,
+            source_snapshot,
+        ) {
+            self.reconcile_conflict_rename_error(conflict.conflict_id, error)?
+        } else {
+            false
+        };
+        if !reconciled {
+            self.finish_conflict_after_rename(conflict.conflict_id)?;
+        }
+        queue_matching_path(
+            self.rules,
+            self.activation_flags,
+            self.paused_rules,
+            source,
+            self.pending,
+        );
+        Ok((destination, target))
+    }
+
+    fn current_conflict_state(
+        &self,
+        conflict: &OrganizerConflictRecord,
+    ) -> Result<
+        (
+            PathBuf,
+            PathBuf,
+            OrganizerFileSnapshot,
+            OrganizerFileSnapshot,
+        ),
+        OrganizerCommandError,
+    > {
+        let source = safe_organizer_path(&conflict.source_path)?;
+        let destination = safe_organizer_path(&conflict.destination_path)?;
+        if !source.is_file() || !destination.exists() {
+            return Err(self.mark_conflict_obsolete(conflict.conflict_id));
+        }
+        let source_snapshot = organizer_file_snapshot(&source)
+            .map_err(|_| self.mark_conflict_obsolete(conflict.conflict_id))?;
+        if source_snapshot != conflict.source_snapshot {
+            return Err(self.mark_conflict_obsolete(conflict.conflict_id));
+        }
+        let Some(expected_destination_snapshot) = conflict.destination_snapshot else {
+            return Err(OrganizerCommandError::ConflictUnavailable);
+        };
+        let destination_snapshot = organizer_file_snapshot(&destination)
+            .map_err(|_| self.mark_conflict_obsolete(conflict.conflict_id))?;
+        if destination_snapshot != expected_destination_snapshot {
+            return Err(self.mark_conflict_obsolete(conflict.conflict_id));
+        }
+        Ok((source, destination, source_snapshot, destination_snapshot))
+    }
+
+    fn finish_conflict_after_rename(
+        &self,
+        conflict_id: crate::domain::organizer_conflict::OrganizerConflictId,
+    ) -> Result<(), OrganizerCommandError> {
+        if let Err(error) = self
+            .app_state_db
+            .finish_organizer_conflict(conflict_id, OrganizerConflictStatus::Resolved)
+        {
+            if self
+                .app_state_db
+                .reconcile_owned_organizer_conflict_resolution(conflict_id)
+                .is_ok()
+                && self.conflict_status(conflict_id) == Some(OrganizerConflictStatus::Resolved)
+            {
+                return Ok(());
+            }
+            return Err(OrganizerCommandError::ConflictResolutionFailed {
+                reason: error.to_string(),
+            });
+        }
+        Ok(())
+    }
+
+    fn mark_conflict_obsolete(
+        &self,
+        conflict_id: crate::domain::organizer_conflict::OrganizerConflictId,
+    ) -> OrganizerCommandError {
+        match self
+            .app_state_db
+            .finish_organizer_conflict(conflict_id, OrganizerConflictStatus::Obsolete)
+        {
+            Ok(()) => OrganizerCommandError::ConflictStale,
+            Err(error) => OrganizerCommandError::ConflictResolutionFailed {
+                reason: error.to_string(),
+            },
+        }
+    }
+
+    fn claim_conflict_resolution(
+        &self,
+        conflict_id: crate::domain::organizer_conflict::OrganizerConflictId,
+        rename_source: bool,
+        target: &std::path::Path,
+    ) -> Result<(), OrganizerCommandError> {
+        self.app_state_db
+            .claim_organizer_conflict_resolution(conflict_id, rename_source, target)
+            .map_err(|error| match error {
+                crate::infrastructure::app_state_db::OrganizerConflictDbError::AlreadyFinalized(_)
+                | crate::infrastructure::app_state_db::OrganizerConflictDbError::NotFound(_)
+                | crate::infrastructure::app_state_db::OrganizerConflictDbError::ResolutionInProgress(_) => {
+                    OrganizerCommandError::ConflictUnavailable
+                }
+                error => OrganizerCommandError::ConflictResolutionFailed {
+                    reason: error.to_string(),
+                },
+            })
+    }
+
+    fn reconcile_conflict_rename_error(
+        &self,
+        conflict_id: crate::domain::organizer_conflict::OrganizerConflictId,
+        error: std::io::Error,
+    ) -> Result<bool, OrganizerCommandError> {
+        if error.kind() == std::io::ErrorKind::AlreadyExists {
+            let _ = self
+                .app_state_db
+                .release_organizer_conflict_resolution(conflict_id);
+            Err(OrganizerCommandError::ConflictTargetExists)
+        } else if error.kind() == std::io::ErrorKind::InvalidData {
+            Err(self.mark_conflict_obsolete(conflict_id))
+        } else {
+            if let Err(reconcile_error) = self
+                .app_state_db
+                .reconcile_owned_organizer_conflict_resolution(conflict_id)
+            {
+                return Err(OrganizerCommandError::ConflictResolutionFailed {
+                    reason: format!("{error}; reconciliation failed: {reconcile_error}"),
+                });
+            }
+            match self.conflict_status(conflict_id) {
+                Some(OrganizerConflictStatus::Resolved) => Ok(true),
+                Some(OrganizerConflictStatus::Obsolete) => {
+                    Err(OrganizerCommandError::ConflictStale)
+                }
+                _ => Err(OrganizerCommandError::ConflictResolutionFailed {
+                    reason: error.to_string(),
+                }),
+            }
+        }
+    }
+
+    fn conflict_status(
+        &self,
+        conflict_id: crate::domain::organizer_conflict::OrganizerConflictId,
+    ) -> Option<OrganizerConflictStatus> {
+        self.app_state_db
+            .get_organizer_conflict(conflict_id)
+            .ok()
+            .flatten()
+            .map(|conflict| conflict.status)
+    }
+
     fn rule_unavailable(&self, command_id: OrganizerCommandId) -> bool {
         self.respond(command_id, Err(OrganizerCommandError::RuleUnavailable))
     }
@@ -237,6 +548,11 @@ impl CommandContext<'_> {
             true
         }
     }
+}
+
+fn safe_organizer_path(path: &std::path::Path) -> Result<PathBuf, OrganizerCommandError> {
+    crate::workers::file_operation_worker::sanitize_organizer_path(path)
+        .map_err(|_| OrganizerCommandError::SecurityViolation)
 }
 
 pub(super) fn validate_runtime_rules(rules: &[OrganizerRule]) -> Result<(), OrganizerCommandError> {
