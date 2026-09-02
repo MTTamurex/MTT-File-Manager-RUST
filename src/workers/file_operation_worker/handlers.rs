@@ -8,6 +8,7 @@ use std::sync::mpsc::Sender;
 
 use crate::domain::file_entry::is_path_inside_existing_archive_file;
 use crate::domain::organizer_operation::{OrganizerOperationId, OrganizerOperationStatus};
+use crate::domain::organizer_rule::OrganizerConflictPolicy;
 use crate::infrastructure::app_state_db::AppStateDb;
 use crate::infrastructure::app_state_db::OrganizerConflictRegistration;
 use crate::infrastructure::archive_extract;
@@ -464,7 +465,7 @@ fn persist_and_send_organizer_result(
                 None,
                 Some(path.as_path()),
                 Some(destination.as_path()),
-                None,
+                organizer_file_snapshot(destination).ok(),
             ),
             FileOperationResult::OrganizerMoveCancelled { path, .. } => (
                 OrganizerOperationStatus::Cancelled,
@@ -560,6 +561,117 @@ fn create_organizer_conflict(
         .map_err(|error| error.to_string())
 }
 
+fn conflict_result(
+    app_state_db: &AppStateDb,
+    operation_id: OrganizerOperationId,
+    rule_id: i64,
+    path: PathBuf,
+    destination: PathBuf,
+    expected_snapshot: shell_operations::OrganizerFileSnapshot,
+) -> FileOperationResult {
+    match create_organizer_conflict(
+        app_state_db,
+        operation_id,
+        rule_id,
+        &path,
+        &destination,
+        expected_snapshot,
+    ) {
+        Ok(
+            OrganizerConflictRegistration::Created { conflict_id, .. }
+            | OrganizerConflictRegistration::Existing { conflict_id, .. },
+        ) => FileOperationResult::OrganizerMoveSkipped {
+            operation_id,
+            rule_id,
+            path,
+            destination,
+            conflict_id: Some(conflict_id),
+        },
+        Ok(OrganizerConflictRegistration::Suppressed) => {
+            FileOperationResult::OrganizerMoveCancelled {
+                operation_id,
+                rule_id,
+                path,
+            }
+        }
+        Err(message) => FileOperationResult::OrganizerMoveFailed {
+            operation_id,
+            rule_id,
+            path,
+            message,
+        },
+    }
+}
+
+fn suffixed_file_name(base_name: &std::ffi::OsStr, index: usize) -> std::ffi::OsString {
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+
+    const MAX_COMPONENT_UTF16_UNITS: usize = 255;
+
+    fn truncate_utf16(mut units: Vec<u16>, max_len: usize) -> Vec<u16> {
+        if units.len() <= max_len {
+            return units;
+        }
+        let mut end = max_len;
+        if end > 0
+            && (0xD800..=0xDBFF).contains(&units[end - 1])
+            && units
+                .get(end)
+                .is_some_and(|unit| (0xDC00..=0xDFFF).contains(unit))
+        {
+            end -= 1;
+        }
+        units.truncate(end);
+        units
+    }
+
+    let base = Path::new(base_name);
+    let suffix: Vec<u16> = format!(" ({index})").encode_utf16().collect();
+    let mut stem: Vec<u16> = base
+        .file_stem()
+        .unwrap_or(base_name)
+        .encode_wide()
+        .collect();
+    let mut extension = base
+        .extension()
+        .map(|extension| extension.encode_wide().collect::<Vec<_>>())
+        .unwrap_or_default();
+    let has_extension = !extension.is_empty();
+    if has_extension {
+        let max_extension = MAX_COMPONENT_UTF16_UNITS
+            .saturating_sub(suffix.len() + 2)
+            .min(extension.len());
+        extension = truncate_utf16(extension, max_extension);
+    }
+    let separator_len = usize::from(!extension.is_empty());
+    let max_stem =
+        MAX_COMPONENT_UTF16_UNITS.saturating_sub(suffix.len() + separator_len + extension.len());
+    stem = truncate_utf16(stem, max_stem);
+
+    let mut name = stem;
+    name.extend_from_slice(&suffix);
+    if !extension.is_empty() {
+        name.push('.' as u16);
+        name.extend_from_slice(&extension);
+    }
+    std::ffi::OsString::from_wide(&name)
+}
+
+fn next_available_destination(
+    folder: &Path,
+    base_name: &std::ffi::OsStr,
+    start_index: usize,
+) -> Option<(PathBuf, usize)> {
+    let end_index = start_index.saturating_add(10_000);
+    for index in start_index..end_index {
+        let candidate = folder.join(suffixed_file_name(base_name, index));
+        if !candidate.try_exists().unwrap_or(true) {
+            return Some((candidate, index));
+        }
+    }
+    None
+}
+
 pub(super) struct OrganizerMoveContext<'a> {
     pub(super) operation: (OrganizerOperationId, i64),
     pub(super) lifecycle: (
@@ -567,6 +679,7 @@ pub(super) struct OrganizerMoveContext<'a> {
         std::sync::Arc<std::sync::atomic::AtomicBool>,
     ),
     pub(super) expected_snapshot: shell_operations::OrganizerFileSnapshot,
+    pub(super) conflict_policy: OrganizerConflictPolicy,
     pub(super) is_undo: bool,
     pub(super) undo_exemptions: &'a super::OrganizerUndoExemptionRegistry,
     pub(super) app_state_db: &'a AppStateDb,
@@ -582,6 +695,7 @@ pub(super) fn handle_organizer_move(
         operation,
         lifecycle,
         expected_snapshot,
+        conflict_policy,
         is_undo,
         undo_exemptions,
         app_state_db,
@@ -636,7 +750,7 @@ pub(super) fn handle_organizer_move(
                     .to_string(),
             };
         };
-        let moved_dest = dest_folder.join(file_name);
+        let planned_dest = dest_folder.join(file_name);
 
         if !path.is_file() || !dest_folder.is_dir() {
             return FileOperationResult::OrganizerMoveFailed {
@@ -647,7 +761,9 @@ pub(super) fn handle_organizer_move(
                     .to_string(),
             };
         }
-        if moved_dest.exists() {
+        let mut moved_dest = planned_dest.clone();
+        let mut next_auto_index = 1usize;
+        if planned_dest.try_exists().unwrap_or(true) {
             if is_undo {
                 return FileOperationResult::OrganizerMoveFailed {
                     operation_id,
@@ -656,38 +772,72 @@ pub(super) fn handle_organizer_move(
                     message: rust_i18n::t!("organizer.error_undo_target_exists").to_string(),
                 };
             }
-            return match create_organizer_conflict(
-                app_state_db,
-                operation_id,
-                rule_id,
-                &path,
-                &moved_dest,
-                expected_snapshot,
-            ) {
-                Ok(
-                    OrganizerConflictRegistration::Created { conflict_id, .. }
-                    | OrganizerConflictRegistration::Existing { conflict_id, .. },
-                ) => FileOperationResult::OrganizerMoveSkipped {
-                    operation_id,
-                    rule_id,
-                    path,
-                    destination: moved_dest,
-                    conflict_id,
-                },
-                Ok(OrganizerConflictRegistration::Suppressed) => {
-                    FileOperationResult::OrganizerMoveCancelled {
+            match &conflict_policy {
+                OrganizerConflictPolicy::Ask => {
+                    return conflict_result(
+                        app_state_db,
                         operation_id,
                         rule_id,
                         path,
+                        planned_dest,
+                        expected_snapshot,
+                    );
+                }
+                OrganizerConflictPolicy::Skip => {
+                    return FileOperationResult::OrganizerMoveSkipped {
+                        operation_id,
+                        rule_id,
+                        path,
+                        destination: planned_dest,
+                        conflict_id: None,
+                    };
+                }
+                OrganizerConflictPolicy::AutoRenameSource => {
+                    let Some((destination, index)) =
+                        next_available_destination(&dest_folder, file_name, next_auto_index)
+                    else {
+                        return FileOperationResult::OrganizerMoveFailed {
+                            operation_id,
+                            rule_id,
+                            path,
+                            message: rust_i18n::t!("organizer.error_auto_rename_unavailable")
+                                .to_string(),
+                        };
+                    };
+                    moved_dest = destination;
+                    next_auto_index = index.saturating_add(1);
+                }
+                OrganizerConflictPolicy::MoveToConflictFolder(folder) => {
+                    let Ok(folder) = sanitize_organizer_path(folder) else {
+                        return FileOperationResult::OrganizerMoveFailed {
+                            operation_id,
+                            rule_id,
+                            path,
+                            message: rust_i18n::t!("organizer.error_security_path").to_string(),
+                        };
+                    };
+                    if is_reparse_point(&folder) || !folder.is_dir() {
+                        return FileOperationResult::OrganizerMoveFailed {
+                            operation_id,
+                            rule_id,
+                            path,
+                            message: rust_i18n::t!("organizer.error_conflict_folder_unavailable")
+                                .to_string(),
+                        };
+                    }
+                    moved_dest = folder.join(file_name);
+                    if moved_dest.try_exists().unwrap_or(true) {
+                        return conflict_result(
+                            app_state_db,
+                            operation_id,
+                            rule_id,
+                            path,
+                            moved_dest,
+                            expected_snapshot,
+                        );
                     }
                 }
-                Err(message) => FileOperationResult::OrganizerMoveFailed {
-                    operation_id,
-                    rule_id,
-                    path,
-                    message,
-                },
-            };
+            }
         }
         if shutdown.load(std::sync::atomic::Ordering::Acquire)
             || !activation.load(std::sync::atomic::Ordering::Acquire)
@@ -699,88 +849,139 @@ pub(super) fn handle_organizer_move(
             };
         }
 
-        match shell_operations::move_organizer_file_without_replace_journaled(
-            &path,
-            &moved_dest,
-            expected_snapshot,
-            |destination_snapshot| {
-                app_state_db
-                    .record_organizer_operation_completion(
-                        operation_id,
-                        &path,
-                        &moved_dest,
-                        destination_snapshot,
-                    )
-                    .map_err(std::io::Error::other)
-            },
-        ) {
-            Ok(destination_snapshot) => {
-                if is_undo {
-                    undo_exemptions.insert(&moved_dest, destination_snapshot);
-                    if let Err(error) = app_state_db
-                        .save_organizer_undo_exemption(&moved_dest, destination_snapshot)
-                    {
-                        log::warn!("[ORGANIZER] Failed to persist undo exemption: {error}");
+        loop {
+            let move_result = shell_operations::move_organizer_file_without_replace_journaled(
+                &path,
+                &moved_dest,
+                expected_snapshot,
+                |destination_snapshot| {
+                    app_state_db
+                        .record_organizer_operation_completion(
+                            operation_id,
+                            &path,
+                            &moved_dest,
+                            destination_snapshot,
+                        )
+                        .map_err(std::io::Error::other)
+                },
+            );
+            match move_result {
+                Ok(destination_snapshot) => {
+                    if is_undo {
+                        undo_exemptions.insert(&moved_dest, destination_snapshot);
+                        if let Err(error) = app_state_db
+                            .save_organizer_undo_exemption(&moved_dest, destination_snapshot)
+                        {
+                            log::warn!("[ORGANIZER] Failed to persist undo exemption: {error}");
+                        }
                     }
-                }
-                FileOperationResult::OrganizerMoveCompleted {
-                    operation_id,
-                    rule_id,
-                    source_folder,
-                    dest_folder,
-                    source_path: path,
-                    moved_dest,
-                    destination_snapshot,
-                }
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-                if is_undo {
-                    return FileOperationResult::OrganizerMoveFailed {
+                    break FileOperationResult::OrganizerMoveCompleted {
                         operation_id,
                         rule_id,
-                        path,
-                        message: rust_i18n::t!("organizer.error_undo_target_exists").to_string(),
+                        source_folder,
+                        dest_folder: moved_dest
+                            .parent()
+                            .map(Path::to_path_buf)
+                            .unwrap_or(dest_folder),
+                        source_path: path,
+                        moved_dest,
+                        destination_snapshot,
                     };
                 }
-                match create_organizer_conflict(
-                    app_state_db,
-                    operation_id,
-                    rule_id,
-                    &path,
-                    &moved_dest,
-                    expected_snapshot,
-                ) {
-                    Ok(
-                        OrganizerConflictRegistration::Created { conflict_id, .. }
-                        | OrganizerConflictRegistration::Existing { conflict_id, .. },
-                    ) => FileOperationResult::OrganizerMoveSkipped {
-                        operation_id,
-                        rule_id,
-                        path,
-                        destination: moved_dest,
-                        conflict_id,
-                    },
-                    Ok(OrganizerConflictRegistration::Suppressed) => {
-                        FileOperationResult::OrganizerMoveCancelled {
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                    if is_undo {
+                        break FileOperationResult::OrganizerMoveFailed {
                             operation_id,
                             rule_id,
                             path,
+                            message: rust_i18n::t!("organizer.error_undo_target_exists")
+                                .to_string(),
+                        };
+                    }
+                    match &conflict_policy {
+                        OrganizerConflictPolicy::AutoRenameSource => {
+                            let Some((destination, index)) = next_available_destination(
+                                &dest_folder,
+                                file_name,
+                                next_auto_index,
+                            ) else {
+                                break FileOperationResult::OrganizerMoveFailed {
+                                    operation_id,
+                                    rule_id,
+                                    path,
+                                    message: rust_i18n::t!(
+                                        "organizer.error_auto_rename_unavailable"
+                                    )
+                                    .to_string(),
+                                };
+                            };
+                            moved_dest = destination;
+                            next_auto_index = index.saturating_add(1);
+                        }
+                        OrganizerConflictPolicy::Skip => {
+                            break FileOperationResult::OrganizerMoveSkipped {
+                                operation_id,
+                                rule_id,
+                                path,
+                                destination: moved_dest,
+                                conflict_id: None,
+                            };
+                        }
+                        OrganizerConflictPolicy::Ask => {
+                            break conflict_result(
+                                app_state_db,
+                                operation_id,
+                                rule_id,
+                                path,
+                                moved_dest,
+                                expected_snapshot,
+                            );
+                        }
+                        OrganizerConflictPolicy::MoveToConflictFolder(folder) => {
+                            let Ok(folder) = sanitize_organizer_path(folder) else {
+                                break FileOperationResult::OrganizerMoveFailed {
+                                    operation_id,
+                                    rule_id,
+                                    path,
+                                    message: rust_i18n::t!("organizer.error_security_path")
+                                        .to_string(),
+                                };
+                            };
+                            if is_reparse_point(&folder) || !folder.is_dir() {
+                                break FileOperationResult::OrganizerMoveFailed {
+                                    operation_id,
+                                    rule_id,
+                                    path,
+                                    message: rust_i18n::t!(
+                                        "organizer.error_conflict_folder_unavailable"
+                                    )
+                                    .to_string(),
+                                };
+                            }
+                            moved_dest = folder.join(file_name);
+                            if moved_dest.try_exists().unwrap_or(true) {
+                                break conflict_result(
+                                    app_state_db,
+                                    operation_id,
+                                    rule_id,
+                                    path,
+                                    moved_dest,
+                                    expected_snapshot,
+                                );
+                            }
+                            next_auto_index = 1;
                         }
                     }
-                    Err(message) => FileOperationResult::OrganizerMoveFailed {
+                }
+                Err(error) => {
+                    break FileOperationResult::OrganizerMoveFailed {
                         operation_id,
                         rule_id,
                         path,
-                        message,
-                    },
+                        message: error.to_string(),
+                    };
                 }
             }
-            Err(error) => FileOperationResult::OrganizerMoveFailed {
-                operation_id,
-                rule_id,
-                path,
-                message: error.to_string(),
-            },
         }
     })();
     persist_and_send_organizer_result(app_state_db, operation_id, result, result_sender);
@@ -1110,6 +1311,10 @@ pub(super) fn handle_show_properties(paths: Vec<std::path::PathBuf>, hwnd: SendH
 }
 
 #[cfg(test)]
+#[path = "handlers_policy_tests.rs"]
+mod policy_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::workers::file_operation_worker::OrganizerUndoExemptionRegistry;
@@ -1206,6 +1411,7 @@ mod tests {
                 operation: (operation_id, 7),
                 lifecycle: (activation, shutdown),
                 expected_snapshot: snapshot,
+                conflict_policy: OrganizerConflictPolicy::Ask,
                 is_undo: false,
                 undo_exemptions: &OrganizerUndoExemptionRegistry::default(),
                 app_state_db: &app_state_db,
@@ -1224,7 +1430,7 @@ mod tests {
                 && path == source
                 && result_destination == destination =>
             {
-                conflict_id
+                conflict_id.expect("worker conflict ID")
             }
             _ => panic!("expected persisted worker conflict"),
         };
@@ -1271,6 +1477,7 @@ mod tests {
                 operation: (operation_id, 7),
                 lifecycle: (activation, shutdown),
                 expected_snapshot: snapshot,
+                conflict_policy: OrganizerConflictPolicy::Ask,
                 is_undo: true,
                 undo_exemptions: &undo_exemptions,
                 app_state_db: &app_state_db,
@@ -1392,6 +1599,7 @@ mod tests {
                     operation: (operation_id, 7),
                     lifecycle: (activation, shutdown),
                     expected_snapshot: snapshot,
+                    conflict_policy: OrganizerConflictPolicy::Ask,
                     is_undo: false,
                     undo_exemptions: &OrganizerUndoExemptionRegistry::default(),
                     app_state_db: &app_state_db,

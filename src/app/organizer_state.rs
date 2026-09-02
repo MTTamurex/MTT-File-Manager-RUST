@@ -1,7 +1,7 @@
 use crate::app::organizer_conflict_state::OrganizerConflictUiState;
 use crate::app::organizer_history_state::OrganizerHistoryUiState;
 use crate::domain::organizer_operation::OrganizerOperationId;
-use crate::domain::organizer_rule::OrganizerRule;
+use crate::domain::organizer_rule::{OrganizerConflictPolicy, OrganizerRule};
 use crate::infrastructure::organizer::{
     OrganizerCommandError, OrganizerCommandId, OrganizerCommandResult, OrganizerManager,
     OrganizerRuleStatus,
@@ -96,8 +96,10 @@ pub struct OrganizerState {
     pub source_input: String,
     pub destination_input: String,
     pub extensions_input: String,
+    pub conflict_folder_input: String,
     pub editing_rule_id: Option<i64>,
     pub form_enabled: bool,
+    pub conflict_policy: OrganizerConflictPolicy,
     pub notification_batch: OrganizerNotificationBatch,
     preview_sender: Sender<OrganizerPreviewResult>,
     pub preview_receiver: Receiver<OrganizerPreviewResult>,
@@ -149,8 +151,10 @@ impl OrganizerState {
             source_input: String::new(),
             destination_input: String::new(),
             extensions_input: String::new(),
+            conflict_folder_input: String::new(),
             editing_rule_id: None,
             form_enabled: true,
+            conflict_policy: OrganizerConflictPolicy::default(),
             notification_batch: OrganizerNotificationBatch::default(),
             preview_sender,
             preview_receiver,
@@ -164,8 +168,10 @@ impl OrganizerState {
         self.source_input.clear();
         self.destination_input.clear();
         self.extensions_input.clear();
+        self.conflict_folder_input.clear();
         self.editing_rule_id = None;
         self.form_enabled = true;
+        self.conflict_policy = OrganizerConflictPolicy::default();
     }
 
     pub fn replace_rules(

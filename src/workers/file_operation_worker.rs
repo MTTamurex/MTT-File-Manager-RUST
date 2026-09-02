@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex};
 use windows::Win32::Foundation::HWND;
 
 use crate::domain::organizer_operation::OrganizerOperationId;
+use crate::domain::organizer_rule::OrganizerConflictPolicy;
 mod handlers;
 
 use crate::infrastructure::diagnostic_logger::{diag_error, field_label};
@@ -75,7 +76,7 @@ pub enum FileOperationResult {
         rule_id: i64,
         path: PathBuf,
         destination: PathBuf,
-        conflict_id: crate::domain::organizer_conflict::OrganizerConflictId,
+        conflict_id: Option<crate::domain::organizer_conflict::OrganizerConflictId>,
     },
     OrganizerMoveCancelled {
         operation_id: OrganizerOperationId,
@@ -312,6 +313,7 @@ pub(crate) enum FileOperationRequest {
         dest_folder: PathBuf,
         operation_id: OrganizerOperationId,
         rule_id: i64,
+        conflict_policy: OrganizerConflictPolicy,
         activation: std::sync::Arc<std::sync::atomic::AtomicBool>,
         expected_snapshot: crate::infrastructure::windows::shell_operations::OrganizerFileSnapshot,
         /// Undo must fail on a destination race instead of creating a new conflict.
@@ -483,6 +485,7 @@ impl FileOperationRequest {
                 dest_folder,
                 operation_id,
                 rule_id,
+                conflict_policy,
                 activation,
                 expected_snapshot,
                 is_undo,
@@ -495,6 +498,7 @@ impl FileOperationRequest {
                 dest_folder,
                 operation_id,
                 rule_id,
+                conflict_policy,
                 activation,
                 expected_snapshot,
                 is_undo,
@@ -758,6 +762,7 @@ fn run_file_operation_loop(
                     dest_folder,
                     operation_id,
                     rule_id,
+                    conflict_policy,
                     activation,
                     expected_snapshot,
                     is_undo,
@@ -782,6 +787,7 @@ fn run_file_operation_loop(
                             operation: (operation_id, rule_id),
                             lifecycle: (activation, shutdown),
                             expected_snapshot,
+                            conflict_policy,
                             is_undo,
                             undo_exemptions: &undo_exemptions,
                             app_state_db: &app_state_db,

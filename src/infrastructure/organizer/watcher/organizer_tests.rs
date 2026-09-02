@@ -11,6 +11,7 @@ fn rule(id: i64, enabled: bool) -> OrganizerRule {
         destination_folder: PathBuf::from(r"C:\Destination"),
         extensions: vec!["txt".to_string()],
         enabled,
+        conflict_policy: crate::domain::organizer_rule::OrganizerConflictPolicy::Ask,
     }
 }
 
@@ -192,6 +193,7 @@ fn destination_rename_requeues_a_conflicted_source() {
             path,
             destination,
         }) if path == source_path && destination == destination_path => {
+            let conflict_id = conflict_id.expect("conflict event ID");
             assert_eq!(
                 app_state_db
                     .get_organizer_conflict(conflict_id)
@@ -302,6 +304,84 @@ fn watched_folders_include_enabled_sources_and_destinations_once() {
             PathBuf::from(r"C:\Archive"),
         ]
     );
+}
+
+#[test]
+fn watched_folders_and_status_include_the_conflict_folder() {
+    let root = tempfile::tempdir().expect("create test directory");
+    let source = root.path().join("source");
+    let destination = root.path().join("destination");
+    let conflict_folder = root.path().join("conflicts");
+    std::fs::create_dir(&source).expect("create source directory");
+    std::fs::create_dir(&destination).expect("create destination directory");
+    std::fs::create_dir(&conflict_folder).expect("create conflict directory");
+    let rule = OrganizerRule::from_persisted_with_policy(
+        1,
+        source.clone(),
+        destination.clone(),
+        vec!["txt".to_string()],
+        true,
+        crate::domain::organizer_rule::OrganizerConflictPolicy::MoveToConflictFolder(
+            conflict_folder.clone(),
+        ),
+    )
+    .expect("create organizer rule");
+
+    assert_eq!(
+        watched_folders(std::slice::from_ref(&rule)),
+        vec![source.clone(), destination.clone(), conflict_folder.clone()]
+    );
+    let normal_folders = HashSet::from([
+        normalize_watched_path(&source),
+        normalize_watched_path(&destination),
+    ]);
+    assert_eq!(
+        status_for_rule(&rule, &HashSet::new(), &normal_folders),
+        OrganizerRuleStatus::Recovering
+    );
+    let all_folders = HashSet::from([
+        normalize_watched_path(&source),
+        normalize_watched_path(&destination),
+        normalize_watched_path(&conflict_folder),
+    ]);
+    assert_eq!(
+        status_for_rule(&rule, &HashSet::new(), &all_folders),
+        OrganizerRuleStatus::Active
+    );
+}
+
+#[test]
+fn vacated_conflict_folder_target_requeues_the_source() {
+    let root = tempfile::tempdir().expect("create test directory");
+    let source = root.path().join("source");
+    let destination = root.path().join("destination");
+    let conflict_folder = root.path().join("conflicts");
+    std::fs::create_dir(&source).expect("create source directory");
+    std::fs::create_dir(&destination).expect("create destination directory");
+    std::fs::create_dir(&conflict_folder).expect("create conflict directory");
+    let source_path = source.join("report.txt");
+    let conflict_path = conflict_folder.join("report.txt");
+    std::fs::write(&source_path, b"source").expect("create source file");
+    std::fs::write(&conflict_path, b"occupied").expect("create conflict file");
+    let rules = vec![OrganizerRule::from_persisted_with_policy(
+        1,
+        source,
+        destination,
+        vec!["txt".to_string()],
+        true,
+        crate::domain::organizer_rule::OrganizerConflictPolicy::MoveToConflictFolder(
+            conflict_folder,
+        ),
+    )
+    .expect("create organizer rule")];
+    let activations = activation_flags_for(&rules);
+    let mut pending = HashMap::new();
+
+    std::fs::remove_file(&conflict_path).expect("vacate conflict target");
+    let event = Event::new(EventKind::Remove(RemoveKind::File)).add_path(conflict_path);
+    process_watcher_event(&event, &rules, &activations, &HashSet::new(), &mut pending);
+
+    assert!(pending.contains_key(&source_path));
 }
 
 #[test]

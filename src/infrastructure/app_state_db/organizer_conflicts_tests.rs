@@ -1,4 +1,5 @@
 use super::*;
+use crate::domain::organizer_operation::OrganizerOperationStatus;
 use crate::infrastructure::windows::shell_operations::organizer_file_snapshot;
 
 #[test]
@@ -137,6 +138,61 @@ fn worker_conflict_creation_is_idempotent_and_links_the_operation() {
             .expect("operation")
             .status,
         crate::domain::organizer_operation::OrganizerOperationStatus::Skipped
+    );
+}
+
+#[test]
+fn completed_move_obsoletes_a_conflict_recorded_for_a_redirected_destination() {
+    let db = AppStateDb::new_in_memory().expect("database");
+    let files_dir = tempfile::tempdir().expect("files directory");
+    let source = files_dir.path().join("source.txt");
+    let planned_destination = files_dir.path().join("destination.txt");
+    let conflict_destination = files_dir.path().join("conflicts.txt");
+    std::fs::write(&source, b"source").expect("source file");
+    std::fs::write(&conflict_destination, b"occupied").expect("conflict destination");
+    let source_snapshot = organizer_file_snapshot(&source).expect("source snapshot");
+    let conflict_snapshot =
+        organizer_file_snapshot(&conflict_destination).expect("conflict snapshot");
+    let conflict_operation = db
+        .start_organizer_operation_with_snapshot(3, &source, &planned_destination, source_snapshot)
+        .expect("start conflict operation");
+    let conflict_id = match db
+        .create_organizer_conflict(
+            conflict_operation,
+            3,
+            &source,
+            &conflict_destination,
+            source_snapshot,
+            Some(conflict_snapshot),
+        )
+        .expect("create redirected conflict")
+    {
+        OrganizerConflictRegistration::Created { conflict_id, .. } => conflict_id,
+        _ => panic!("expected new conflict"),
+    };
+
+    let move_operation = db
+        .start_organizer_operation_with_snapshot(3, &source, &planned_destination, source_snapshot)
+        .expect("start successful move");
+    std::fs::rename(&source, &planned_destination).expect("move source");
+    let destination_snapshot =
+        organizer_file_snapshot(&planned_destination).expect("destination snapshot");
+    db.finish_organizer_operation_with_metadata(
+        move_operation,
+        OrganizerOperationStatus::Completed,
+        None,
+        Some(&source),
+        Some(&planned_destination),
+        Some(destination_snapshot),
+    )
+    .expect("finish successful move");
+
+    assert_eq!(
+        db.get_organizer_conflict(conflict_id)
+            .expect("read conflict")
+            .expect("conflict record")
+            .status,
+        OrganizerConflictStatus::Obsolete
     );
 }
 

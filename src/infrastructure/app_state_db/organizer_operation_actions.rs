@@ -201,9 +201,9 @@ impl AppStateDb {
                          SELECT 1 FROM organizer_operations o
                          WHERE o.operation_id = ?2
                            AND o.rule_id = organizer_conflicts.rule_id
-                           AND o.source_path = organizer_conflicts.source_path COLLATE NOCASE
-                           AND o.destination_path = organizer_conflicts.destination_path COLLATE NOCASE
-                     )",
+                            AND COALESCE(o.effective_source_path, o.source_path)
+                                = organizer_conflicts.source_path COLLATE NOCASE
+                      )",
                     params![finished_at, operation_id_text(operation_id)],
                 )?;
             }
@@ -249,6 +249,74 @@ impl AppStateDb {
             status,
             error,
         )
+    }
+
+    pub(crate) fn record_terminal_organizer_skip(
+        &self,
+        rule_id: i64,
+        source_path: &Path,
+        destination_path: &Path,
+        source_snapshot_before: OrganizerFileSnapshot,
+        destination_snapshot: Option<OrganizerFileSnapshot>,
+    ) -> Result<(OrganizerOperationId, bool), OrganizerOperationDbError> {
+        let finished_at = now_unix_millis()?;
+        let mut db = self
+            .writer
+            .lock()
+            .map_err(|_| OrganizerOperationDbError::DatabaseUnavailable)?;
+        let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let source_snapshot_bytes = source_snapshot_before.to_bytes().to_vec();
+        let destination_snapshot_bytes =
+            destination_snapshot.map(|snapshot| snapshot.to_bytes().to_vec());
+        let existing = tx
+            .query_row(
+                "SELECT operation_id FROM organizer_operations
+                 WHERE rule_id = ?1 AND operation_type = 'move' AND status = 'skipped'
+                   AND conflict_id IS NULL
+                   AND source_path = ?2 COLLATE NOCASE
+                   AND destination_path = ?3 COLLATE NOCASE
+                   AND source_snapshot_before = ?4
+                   AND destination_snapshot_after IS ?5
+                 ORDER BY created_at DESC LIMIT 1",
+                params![
+                    rule_id,
+                    path_text(source_path),
+                    path_text(destination_path),
+                    &source_snapshot_bytes,
+                    &destination_snapshot_bytes,
+                ],
+                |row| parse_operation_id(row.get(0)?, 0),
+            )
+            .optional()?;
+        if let Some(operation_id) = existing {
+            tx.commit()?;
+            return Ok((operation_id, false));
+        }
+
+        let operation_id = reserve_operation_id(&tx)?;
+        tx.execute(
+            "INSERT INTO organizer_operations
+                (operation_id, rule_id, source_path, destination_path, operation_type, status,
+                 created_at, started_at, finished_at, effective_source_path,
+                 effective_destination_path, source_snapshot_before, destination_snapshot_after,
+                 source_path_bytes, destination_path_bytes, effective_source_path_bytes,
+                 effective_destination_path_bytes)
+             VALUES (?1, ?2, ?3, ?4, 'move', 'skipped', ?5, ?5, ?5, ?3, ?4, ?6, ?7,
+                     ?8, ?9, ?8, ?9)",
+            params![
+                operation_id_text(operation_id),
+                rule_id,
+                path_text(source_path),
+                path_text(destination_path),
+                finished_at,
+                source_snapshot_bytes,
+                destination_snapshot_bytes,
+                path_bytes(source_path),
+                path_bytes(destination_path),
+            ],
+        )?;
+        tx.commit()?;
+        Ok((operation_id, true))
     }
 
     fn record_terminal_organizer_operation_with_snapshot(

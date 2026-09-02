@@ -222,6 +222,7 @@ fn rejected_command_returns_typed_error_without_stopping_runtime() {
         destination_folder: second_folder.clone(),
         extensions: vec!["txt".to_string()],
         enabled: true,
+        conflict_policy: crate::domain::organizer_rule::OrganizerConflictPolicy::Ask,
     };
     let second_rule = OrganizerRule {
         id: 2,
@@ -229,6 +230,7 @@ fn rejected_command_returns_typed_error_without_stopping_runtime() {
         destination_folder: first_folder,
         extensions: vec!["txt".to_string()],
         enabled: true,
+        conflict_policy: crate::domain::organizer_rule::OrganizerConflictPolicy::Ask,
     };
 
     let invalid_id = manager

@@ -130,9 +130,9 @@ pub(super) fn status_for_rule(
         (false, true) => OrganizerRuleStatus::SourceUnavailable,
         (true, false) => OrganizerRuleStatus::DestinationUnavailable,
         (true, true)
-            if registered_folders.contains(&normalize_watched_path(&rule.source_folder))
-                && registered_folders
-                    .contains(&normalize_watched_path(&rule.destination_folder)) =>
+            if rule_watch_folders(rule).all(|folder| {
+                folder.is_dir() && registered_folders.contains(&normalize_watched_path(folder))
+            }) =>
         {
             OrganizerRuleStatus::Active
         }
@@ -191,11 +191,21 @@ pub(super) fn watched_folders(rules: &[OrganizerRule]) -> Vec<PathBuf> {
     let mut identities = HashSet::new();
     let mut folders = Vec::new();
     for rule in rules.iter().filter(|rule| rule.enabled) {
-        for folder in [&rule.source_folder, &rule.destination_folder] {
+        for folder in rule_watch_folders(rule) {
             if identities.insert(normalize_watched_path(folder)) {
-                folders.push(folder.clone());
+                folders.push(folder.to_path_buf());
             }
         }
     }
     folders
+}
+
+fn rule_watch_folders(rule: &OrganizerRule) -> impl Iterator<Item = &std::path::Path> {
+    [
+        Some(rule.source_folder.as_path()),
+        Some(rule.destination_folder.as_path()),
+        rule.conflict_policy.conflict_folder(),
+    ]
+    .into_iter()
+    .flatten()
 }

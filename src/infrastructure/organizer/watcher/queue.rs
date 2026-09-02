@@ -1,5 +1,5 @@
 use crate::domain::organizer_operation::OrganizerOperationStatus;
-use crate::domain::organizer_rule::{preview_rule, OrganizerRule};
+use crate::domain::organizer_rule::{preview_rule, OrganizerConflictPolicy, OrganizerRule};
 use crate::infrastructure::organizer::OrganizerEvent;
 use crate::infrastructure::windows::shell_operations::{
     organizer_file_snapshot, OrganizerFileSnapshot,
@@ -49,7 +49,11 @@ pub(super) fn process_watcher_event(
         for rule in rules.iter().filter(|rule| {
             rule.enabled
                 && !paused_rules.contains(&rule.id)
-                && path_is_equal(destination_folder, &rule.destination_folder)
+                && (path_is_equal(destination_folder, &rule.destination_folder)
+                    || rule
+                        .conflict_policy
+                        .conflict_folder()
+                        .is_some_and(|folder| path_is_equal(destination_folder, folder)))
         }) {
             queue_matching_path(
                 rules,
@@ -188,6 +192,17 @@ pub(super) fn process_stable_files(
             pending.insert(path, pending_file);
             continue;
         }
+        if pending_file
+            .rule
+            .conflict_policy
+            .conflict_folder()
+            .is_some_and(|folder| !folder.is_dir())
+        {
+            let mut pending_file = pending_file;
+            pending_file.stable_since = Instant::now();
+            pending.insert(path, pending_file);
+            continue;
+        }
         let path_key = normalize_watched_path(&path);
         if in_flight.contains(&path_key) {
             pending.insert(path, pending_file);
@@ -198,7 +213,12 @@ pub(super) fn process_stable_files(
             continue;
         };
         let destination = pending_file.rule.destination_folder.join(file_name);
-        if destination.exists() {
+        if destination.try_exists().unwrap_or(true)
+            && matches!(
+                pending_file.rule.conflict_policy,
+                OrganizerConflictPolicy::Ask
+            )
+        {
             let destination_snapshot = organizer_file_snapshot(&destination).ok();
             let registration = match app_state_db.record_terminal_organizer_conflict(
                 pending_file.rule.id,
@@ -228,7 +248,47 @@ pub(super) fn process_stable_files(
             event_sent |= event_sender
                 .send(OrganizerEvent::OperationSkipped {
                     operation_id,
-                    conflict_id,
+                    conflict_id: Some(conflict_id),
+                    rule_id: pending_file.rule.id,
+                    path,
+                    destination,
+                })
+                .is_ok();
+            continue;
+        }
+
+        if destination.try_exists().unwrap_or(true)
+            && matches!(
+                pending_file.rule.conflict_policy,
+                OrganizerConflictPolicy::Skip
+            )
+        {
+            let destination_snapshot = organizer_file_snapshot(&destination).ok();
+            let (operation_id, created) = match app_state_db.record_terminal_organizer_skip(
+                pending_file.rule.id,
+                &path,
+                &destination,
+                pending_file.snapshot,
+                destination_snapshot,
+            ) {
+                Ok(registration) => registration,
+                Err(error) => {
+                    let _ = event_sender.send(OrganizerEvent::Error {
+                        message: error.to_string(),
+                    });
+                    let mut pending_file = pending_file;
+                    pending_file.stable_since = Instant::now();
+                    pending.insert(path, pending_file);
+                    continue;
+                }
+            };
+            if !created {
+                continue;
+            }
+            event_sent |= event_sender
+                .send(OrganizerEvent::OperationSkipped {
+                    operation_id,
+                    conflict_id: None,
                     rule_id: pending_file.rule.id,
                     path,
                     destination,
@@ -266,6 +326,7 @@ pub(super) fn process_stable_files(
                 path,
                 dest_folder: destination_folder,
                 rule_id: pending_file.rule.id,
+                conflict_policy: pending_file.rule.conflict_policy.clone(),
                 activation: pending_file.activation,
                 expected_snapshot: pending_file.snapshot,
                 is_undo: false,
@@ -333,3 +394,7 @@ pub(super) fn update_activation_flags(
         Vec::new()
     }
 }
+
+#[cfg(test)]
+#[path = "queue_policy_tests.rs"]
+mod policy_tests;

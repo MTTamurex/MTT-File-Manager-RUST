@@ -18,7 +18,47 @@ pub enum OrganizerRuleError {
     SourceFolderMissing,
     DestinationFolderMissing,
     SameFolders,
+    InvalidConflictFolder,
     RuleCycle,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub enum OrganizerConflictPolicy {
+    #[default]
+    Ask,
+    Skip,
+    AutoRenameSource,
+    MoveToConflictFolder(PathBuf),
+}
+
+impl OrganizerConflictPolicy {
+    pub fn storage_key(&self) -> &'static str {
+        match self {
+            Self::Ask => "ask",
+            Self::Skip => "skip",
+            Self::AutoRenameSource => "auto_rename_source",
+            Self::MoveToConflictFolder(_) => "move_to_conflict_folder",
+        }
+    }
+
+    pub fn conflict_folder(&self) -> Option<&Path> {
+        match self {
+            Self::MoveToConflictFolder(folder) => Some(folder),
+            _ => None,
+        }
+    }
+
+    pub fn from_persisted(policy: &str, conflict_folder: Option<PathBuf>) -> Self {
+        match policy {
+            "skip" => Self::Skip,
+            "auto_rename_source" => Self::AutoRenameSource,
+            "move_to_conflict_folder" => conflict_folder
+                .filter(|folder| is_valid_conflict_folder_path(folder))
+                .map(Self::MoveToConflictFolder)
+                .unwrap_or(Self::Ask),
+            _ => Self::Ask,
+        }
+    }
 }
 
 impl OrganizerExtensionPreset {
@@ -60,6 +100,7 @@ pub struct OrganizerRule {
     pub destination_folder: PathBuf,
     pub extensions: Vec<String>,
     pub enabled: bool,
+    pub conflict_policy: OrganizerConflictPolicy,
 }
 
 impl OrganizerRule {
@@ -70,14 +111,35 @@ impl OrganizerRule {
         extensions: Vec<String>,
         enabled: bool,
     ) -> Result<Self, OrganizerRuleError> {
+        Self::new_with_conflict_policy(
+            id,
+            source_folder,
+            destination_folder,
+            extensions,
+            enabled,
+            OrganizerConflictPolicy::default(),
+        )
+    }
+
+    pub fn new_with_conflict_policy(
+        id: i64,
+        source_folder: PathBuf,
+        destination_folder: PathBuf,
+        extensions: Vec<String>,
+        enabled: bool,
+        conflict_policy: OrganizerConflictPolicy,
+    ) -> Result<Self, OrganizerRuleError> {
         let extensions = normalize_extensions(&extensions)?;
         validate_folders(&source_folder, &destination_folder)?;
+        validate_conflict_policy(&conflict_policy, &source_folder, &destination_folder)?;
+        validate_conflict_folder_exists(&conflict_policy)?;
         Ok(Self {
             id,
             source_folder,
             destination_folder,
             extensions,
             enabled,
+            conflict_policy,
         })
     }
 
@@ -90,12 +152,32 @@ impl OrganizerRule {
         extensions: Vec<String>,
         enabled: bool,
     ) -> Result<Self, OrganizerRuleError> {
+        Self::from_persisted_with_policy(
+            id,
+            source_folder,
+            destination_folder,
+            extensions,
+            enabled,
+            OrganizerConflictPolicy::default(),
+        )
+    }
+
+    pub fn from_persisted_with_policy(
+        id: i64,
+        source_folder: PathBuf,
+        destination_folder: PathBuf,
+        extensions: Vec<String>,
+        enabled: bool,
+        conflict_policy: OrganizerConflictPolicy,
+    ) -> Result<Self, OrganizerRuleError> {
+        validate_conflict_policy(&conflict_policy, &source_folder, &destination_folder)?;
         Ok(Self {
             id,
             source_folder,
             destination_folder,
             extensions: normalize_extensions(&extensions)?,
             enabled,
+            conflict_policy,
         })
     }
 
@@ -146,16 +228,20 @@ pub fn validate_rule_set(rules: &[OrganizerRule]) -> Result<(), OrganizerRuleErr
     let mut matched_sources = HashSet::new();
     for rule in rules.iter().filter(|rule| rule.enabled) {
         let source = folder_identity(&rule.source_folder);
-        let destination = folder_identity(&rule.destination_folder);
+        let mut destinations = vec![folder_identity(&rule.destination_folder)];
+        if let OrganizerConflictPolicy::MoveToConflictFolder(folder) = &rule.conflict_policy {
+            destinations.push(folder_identity(folder));
+        }
         for extension in &rule.extensions {
             let source_extension = format!("{source}\0{extension}");
             if !matched_sources.insert(source_extension.clone()) {
                 continue;
             }
-            graph
-                .entry(source_extension)
-                .or_default()
-                .push(format!("{destination}\0{extension}"));
+            graph.entry(source_extension).or_default().extend(
+                destinations
+                    .iter()
+                    .map(|destination| format!("{destination}\0{extension}")),
+            );
         }
     }
 
@@ -234,6 +320,67 @@ fn validate_folders(source: &Path, destination: &Path) -> Result<(), OrganizerRu
         return Err(OrganizerRuleError::SameFolders);
     }
     Ok(())
+}
+
+fn validate_conflict_policy(
+    policy: &OrganizerConflictPolicy,
+    source: &Path,
+    destination: &Path,
+) -> Result<(), OrganizerRuleError> {
+    let Some(folder) = policy.conflict_folder() else {
+        return Ok(());
+    };
+    if !is_valid_conflict_folder_path(folder)
+        || paths_equal(folder, source)
+        || paths_equal(folder, destination)
+    {
+        return Err(OrganizerRuleError::InvalidConflictFolder);
+    }
+    Ok(())
+}
+
+fn validate_conflict_folder_exists(
+    policy: &OrganizerConflictPolicy,
+) -> Result<(), OrganizerRuleError> {
+    if policy
+        .conflict_folder()
+        .is_some_and(|folder| !folder.is_dir())
+    {
+        return Err(OrganizerRuleError::InvalidConflictFolder);
+    }
+    Ok(())
+}
+
+fn is_valid_conflict_folder_path(path: &Path) -> bool {
+    if !path.is_absolute() {
+        return false;
+    }
+    if path.components().any(|component| {
+        matches!(
+            component,
+            std::path::Component::CurDir | std::path::Component::ParentDir
+        )
+    }) {
+        return false;
+    }
+    let text = path.to_string_lossy();
+    !text.starts_with(r"\\?\") && !text.starts_with(r"\\.\") && !contains_reparse_point(path)
+}
+
+fn contains_reparse_point(path: &Path) -> bool {
+    use std::os::windows::fs::MetadataExt;
+
+    const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0400;
+    let mut current = Some(path);
+    while let Some(candidate) = current {
+        if std::fs::symlink_metadata(candidate)
+            .is_ok_and(|metadata| metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0)
+        {
+            return true;
+        }
+        current = candidate.parent();
+    }
+    false
 }
 
 fn paths_equal(left: &Path, right: &Path) -> bool {
@@ -325,6 +472,86 @@ mod tests {
     }
 
     #[test]
+    fn conflict_policy_defaults_to_ask_and_round_trips_storage_values() {
+        assert_eq!(
+            OrganizerConflictPolicy::default(),
+            OrganizerConflictPolicy::Ask
+        );
+        assert_eq!(OrganizerConflictPolicy::Ask.storage_key(), "ask");
+        assert_eq!(OrganizerConflictPolicy::Skip.storage_key(), "skip");
+        assert_eq!(
+            OrganizerConflictPolicy::AutoRenameSource.storage_key(),
+            "auto_rename_source"
+        );
+
+        let folder = PathBuf::from(r"C:\Conflicts");
+        assert_eq!(
+            OrganizerConflictPolicy::from_persisted(
+                "move_to_conflict_folder",
+                Some(folder.clone())
+            ),
+            OrganizerConflictPolicy::MoveToConflictFolder(folder)
+        );
+        assert_eq!(
+            OrganizerConflictPolicy::from_persisted("unknown", None),
+            OrganizerConflictPolicy::Ask
+        );
+    }
+
+    #[test]
+    fn rejects_conflict_folder_that_is_relative_or_matches_a_rule_folder() {
+        let source = tempfile::tempdir().expect("source tempdir");
+        let destination = tempfile::tempdir().expect("destination tempdir");
+        let missing_folder = source.path().join("missing-conflicts");
+
+        assert_eq!(
+            OrganizerRule::new_with_conflict_policy(
+                1,
+                source.path().to_path_buf(),
+                destination.path().to_path_buf(),
+                vec!["txt".to_string()],
+                true,
+                OrganizerConflictPolicy::MoveToConflictFolder(PathBuf::from("relative")),
+            )
+            .expect_err("relative conflict folder must be rejected"),
+            OrganizerRuleError::InvalidConflictFolder
+        );
+        assert_eq!(
+            OrganizerRule::new_with_conflict_policy(
+                1,
+                source.path().to_path_buf(),
+                destination.path().to_path_buf(),
+                vec!["txt".to_string()],
+                true,
+                OrganizerConflictPolicy::MoveToConflictFolder(source.path().to_path_buf()),
+            )
+            .expect_err("source cannot also be the conflict folder"),
+            OrganizerRuleError::InvalidConflictFolder
+        );
+        assert_eq!(
+            OrganizerRule::new_with_conflict_policy(
+                1,
+                source.path().to_path_buf(),
+                destination.path().to_path_buf(),
+                vec!["txt".to_string()],
+                true,
+                OrganizerConflictPolicy::MoveToConflictFolder(missing_folder.clone()),
+            )
+            .expect_err("missing conflict folder must be rejected for new rules"),
+            OrganizerRuleError::InvalidConflictFolder
+        );
+        assert!(OrganizerRule::from_persisted_with_policy(
+            1,
+            source.path().to_path_buf(),
+            destination.path().to_path_buf(),
+            vec!["txt".to_string()],
+            true,
+            OrganizerConflictPolicy::MoveToConflictFolder(missing_folder),
+        )
+        .is_ok());
+    }
+
+    #[test]
     fn rejects_enabled_rule_cycles() {
         let folder_a = tempfile::tempdir().expect("folder a");
         let folder_b = tempfile::tempdir().expect("folder b");
@@ -345,6 +572,37 @@ mod tests {
                 true,
             )
             .expect("rule b to a"),
+        ];
+
+        assert_eq!(
+            validate_rule_set(&rules),
+            Err(OrganizerRuleError::RuleCycle)
+        );
+    }
+
+    #[test]
+    fn rejects_cycles_through_a_conflict_folder() {
+        let folder_a = tempfile::tempdir().expect("folder a");
+        let normal_destination = tempfile::tempdir().expect("normal destination");
+        let conflict_folder = tempfile::tempdir().expect("conflict folder");
+        let rules = vec![
+            OrganizerRule::new_with_conflict_policy(
+                1,
+                folder_a.path().to_path_buf(),
+                normal_destination.path().to_path_buf(),
+                vec!["pdf".to_string()],
+                true,
+                OrganizerConflictPolicy::MoveToConflictFolder(conflict_folder.path().to_path_buf()),
+            )
+            .expect("rule with conflict folder"),
+            OrganizerRule::new(
+                2,
+                conflict_folder.path().to_path_buf(),
+                folder_a.path().to_path_buf(),
+                vec!["pdf".to_string()],
+                true,
+            )
+            .expect("return rule"),
         ];
 
         assert_eq!(

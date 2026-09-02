@@ -130,17 +130,25 @@ fn finish_started_operation_with_conflict(
     tx: &rusqlite::Transaction<'_>,
     operation_id: OrganizerOperationId,
     conflict_id: OrganizerConflictId,
+    source_path: &Path,
+    destination_path: &Path,
     finished_at: i64,
     status: OrganizerOperationStatus,
 ) -> Result<(), OrganizerConflictDbError> {
     let updated = tx.execute(
         "UPDATE organizer_operations
-         SET conflict_id = ?1, status = ?2, finished_at = ?3, error = NULL
-         WHERE operation_id = ?4 AND status = 'started' AND finished_at IS NULL",
+         SET conflict_id = ?1, status = ?2, finished_at = ?3, error = NULL,
+             effective_source_path = ?4, effective_destination_path = ?5,
+             effective_source_path_bytes = ?6, effective_destination_path_bytes = ?7
+         WHERE operation_id = ?8 AND status = 'started' AND finished_at IS NULL",
         params![
             conflict_id_text(conflict_id),
             status.as_str(),
             finished_at,
+            path_text(source_path),
+            path_text(destination_path),
+            path_bytes(source_path),
+            path_bytes(destination_path),
             operation_id_text(operation_id),
         ],
     )?;
@@ -220,6 +228,8 @@ impl AppStateDb {
                     &tx,
                     operation_id,
                     conflict_id,
+                    source_path,
+                    destination_path,
                     checked_at,
                     OrganizerOperationStatus::Cancelled,
                 )?;
@@ -234,6 +244,8 @@ impl AppStateDb {
                 &tx,
                 operation_id,
                 conflict_id,
+                source_path,
+                destination_path,
                 checked_at,
                 OrganizerOperationStatus::Skipped,
             )?;
@@ -269,6 +281,8 @@ impl AppStateDb {
             &tx,
             operation_id,
             conflict_id,
+            source_path,
+            destination_path,
             checked_at,
             OrganizerOperationStatus::Skipped,
         )?;

@@ -241,6 +241,7 @@ impl ImageViewerApp {
                             operation_id,
                             rule_id: _,
                             path,
+                            conflict_id,
                             ..
                         } => {
                             if !self.organizer_state.operation_finished(operation_id) {
@@ -250,13 +251,20 @@ impl ImageViewerApp {
                                 .file_name()
                                 .and_then(|name| name.to_str())
                                 .unwrap_or_default();
-                            self.organizer_state.notification_batch.record_skipped(
-                                rust_i18n::t!("organizer.issue_conflict", name = name).to_string(),
-                            );
-                            if let Err(error) =
-                                self.organizer_state.reload_conflicts(&self.app_state_db)
-                            {
-                                self.notifications.warning(error.to_string());
+                            let detail = if conflict_id.is_some() {
+                                rust_i18n::t!("organizer.issue_conflict", name = name).to_string()
+                            } else {
+                                rust_i18n::t!("organizer.issue_skipped", name = name).to_string()
+                            };
+                            self.organizer_state
+                                .notification_batch
+                                .record_skipped(detail);
+                            if conflict_id.is_some() {
+                                if let Err(error) =
+                                    self.organizer_state.reload_conflicts(&self.app_state_db)
+                                {
+                                    self.notifications.warning(error.to_string());
+                                }
                             }
                         }
                         FileOperationResult::OrganizerMoveCancelled {
@@ -406,18 +414,29 @@ impl ImageViewerApp {
                     self.organizer_state.history_state.mark_dirty();
                 }
                 crate::infrastructure::organizer::OrganizerEvent::OperationSkipped {
-                    path, ..
+                    path,
+                    conflict_id,
+                    ..
                 } => {
                     self.organizer_state.history_state.mark_dirty();
                     let name = path
                         .file_name()
                         .and_then(|name| name.to_str())
                         .unwrap_or_default();
-                    self.organizer_state.notification_batch.record_skipped(
-                        rust_i18n::t!("organizer.issue_conflict", name = name).to_string(),
-                    );
-                    if let Err(error) = self.organizer_state.reload_conflicts(&self.app_state_db) {
-                        self.notifications.warning(error.to_string());
+                    let detail = if conflict_id.is_some() {
+                        rust_i18n::t!("organizer.issue_conflict", name = name).to_string()
+                    } else {
+                        rust_i18n::t!("organizer.issue_skipped", name = name).to_string()
+                    };
+                    self.organizer_state
+                        .notification_batch
+                        .record_skipped(detail);
+                    if conflict_id.is_some() {
+                        if let Err(error) =
+                            self.organizer_state.reload_conflicts(&self.app_state_db)
+                        {
+                            self.notifications.warning(error.to_string());
+                        }
                     }
                 }
                 crate::infrastructure::organizer::OrganizerEvent::OperationFailed {

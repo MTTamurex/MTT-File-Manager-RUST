@@ -382,15 +382,32 @@ impl AppStateDb {
 
         conn.execute(
             "CREATE TABLE IF NOT EXISTS organizer_rules (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                source_folder TEXT NOT NULL COLLATE NOCASE,
-                destination_folder TEXT NOT NULL COLLATE NOCASE,
-                extensions TEXT NOT NULL,
-                enabled INTEGER NOT NULL DEFAULT 1
-            )",
+                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                 source_folder TEXT NOT NULL COLLATE NOCASE,
+                 destination_folder TEXT NOT NULL COLLATE NOCASE,
+                 extensions TEXT NOT NULL,
+                 enabled INTEGER NOT NULL DEFAULT 1,
+                 conflict_policy TEXT NOT NULL DEFAULT 'ask',
+                 conflict_folder TEXT COLLATE NOCASE
+             )",
             [],
         )
         .unwrap_or(0);
+
+        for (column, definition) in [
+            ("conflict_policy", "TEXT NOT NULL DEFAULT 'ask'"),
+            ("conflict_folder", "TEXT COLLATE NOCASE"),
+        ] {
+            if conn
+                .prepare(&format!("SELECT {column} FROM organizer_rules LIMIT 0"))
+                .is_err()
+            {
+                conn.execute(
+                    &format!("ALTER TABLE organizer_rules ADD COLUMN {column} {definition}"),
+                    [],
+                )?;
+            }
+        }
 
         organizer_operation_schema::migrate(conn)?;
 

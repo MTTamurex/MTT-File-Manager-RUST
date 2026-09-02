@@ -14,6 +14,7 @@ use std::path::PathBuf;
 
 mod conflicts;
 mod history;
+mod policies;
 mod status;
 
 use conflicts::render_conflicts;
@@ -135,6 +136,8 @@ fn render_rule_form(ui: &mut egui::Ui, app: &mut ImageViewerApp, dark_mode: bool
                         }
                     });
                     ui.end_row();
+
+                    policies::render_conflict_policy(ui, app, dark_mode);
                 });
             ui.add_space(4.0);
             ui.horizontal(|ui| {
@@ -269,6 +272,25 @@ fn render_rules(ui: &mut egui::Ui, app: &mut ImageViewerApp, dark_mode: bool) ->
                         .color(theme::text_color(dark_mode)),
                 );
             });
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new(t!("organizer.conflict_policy").to_string())
+                        .color(theme::secondary_text_color(dark_mode)),
+                );
+                ui.add_space(8.0);
+                ui.label(
+                    RichText::new(policies::policy_label(&rule.conflict_policy))
+                        .color(theme::text_color(dark_mode)),
+                );
+                if let Some(folder) = rule.conflict_policy.conflict_folder() {
+                    ui.add_space(8.0);
+                    ui.label(
+                        RichText::new(folder.display().to_string())
+                            .small()
+                            .color(theme::secondary_text_color(dark_mode)),
+                    );
+                }
+            });
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 if rule.enabled && status == OrganizerRuleStatus::Active {
@@ -339,6 +361,12 @@ fn render_rules(ui: &mut egui::Ui, app: &mut ImageViewerApp, dark_mode: bool) ->
                     app.organizer_state.destination_input =
                         rule.destination_folder.to_string_lossy().to_string();
                     app.organizer_state.extensions_input = rule.extensions.join(", ");
+                    app.organizer_state.conflict_policy = rule.conflict_policy.clone();
+                    app.organizer_state.conflict_folder_input = rule
+                        .conflict_policy
+                        .conflict_folder()
+                        .map(|folder| folder.to_string_lossy().to_string())
+                        .unwrap_or_default();
                     app.organizer_state.editing_rule_id = Some(rule.id);
                     app.organizer_state.form_enabled = rule.enabled;
                 }
@@ -370,12 +398,13 @@ fn save_form_rule(app: &mut ImageViewerApp) {
             return;
         }
     };
-    let rule = match OrganizerRule::new(
+    let rule = match OrganizerRule::new_with_conflict_policy(
         app.organizer_state.editing_rule_id.unwrap_or_default(),
         PathBuf::from(app.organizer_state.source_input.trim()),
         PathBuf::from(app.organizer_state.destination_input.trim()),
         extensions,
         app.organizer_state.form_enabled,
+        policies::form_conflict_policy(app),
     ) {
         Ok(rule) => rule,
         Err(error) => {
@@ -448,6 +477,9 @@ fn rule_error_message(error: OrganizerRuleError) -> String {
             t!("organizer.error_destination_missing").to_string()
         }
         OrganizerRuleError::SameFolders => t!("organizer.error_same_folders").to_string(),
+        OrganizerRuleError::InvalidConflictFolder => {
+            t!("organizer.error_invalid_conflict_folder").to_string()
+        }
         OrganizerRuleError::RuleCycle => t!("organizer.error_rule_cycle").to_string(),
     }
 }

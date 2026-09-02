@@ -99,6 +99,9 @@ impl fmt::Display for OrganizerCommandError {
                     OrganizerRuleError::SameFolders => {
                         rust_i18n::t!("organizer.error_same_folders")
                     }
+                    OrganizerRuleError::InvalidConflictFolder => {
+                        rust_i18n::t!("organizer.error_invalid_conflict_folder")
+                    }
                     OrganizerRuleError::RuleCycle => rust_i18n::t!("organizer.error_rule_cycle"),
                 };
                 formatter.write_str(message.as_ref())
@@ -182,7 +185,7 @@ pub enum OrganizerEvent {
     },
     OperationSkipped {
         operation_id: OrganizerOperationId,
-        conflict_id: OrganizerConflictId,
+        conflict_id: Option<OrganizerConflictId>,
         rule_id: i64,
         path: std::path::PathBuf,
         destination: std::path::PathBuf,

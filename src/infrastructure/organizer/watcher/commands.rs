@@ -8,6 +8,7 @@ use crate::domain::organizer_operation::{
     OrganizerOperationId, OrganizerOperationStatus, OrganizerOperationType,
 };
 use crate::domain::organizer_rule::validate_rule_set;
+use crate::domain::organizer_rule::OrganizerConflictPolicy;
 use crate::infrastructure::app_state_db::{
     AppStateDb, OrganizerConflictRecord, OrganizerOperationDbError,
 };
@@ -396,6 +397,7 @@ impl CommandContext<'_> {
                 path: source.clone(),
                 dest_folder: destination_folder,
                 rule_id,
+                conflict_policy: rule.conflict_policy.clone(),
                 activation,
                 expected_snapshot,
                 is_undo: false,
@@ -506,6 +508,7 @@ impl CommandContext<'_> {
                 path: source,
                 dest_folder: destination_folder,
                 rule_id: record.rule_id.unwrap_or_default(),
+                conflict_policy: OrganizerConflictPolicy::Ask,
                 activation,
                 expected_snapshot,
                 is_undo: true,
