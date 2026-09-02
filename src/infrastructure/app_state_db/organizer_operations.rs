@@ -1,11 +1,18 @@
-use super::AppStateDb;
 use crate::domain::organizer_conflict::OrganizerConflictId;
-use crate::domain::organizer_operation::{OrganizerOperationId, OrganizerOperationStatus};
-use rusqlite::{params, OptionalExtension, Row};
+use crate::domain::organizer_operation::{
+    OrganizerOperationId, OrganizerOperationStatus, OrganizerOperationType,
+};
+use crate::infrastructure::windows::shell_operations::OrganizerFileSnapshot;
+use rusqlite::{OptionalExtension, Row};
 use std::ffi::OsString;
 use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+#[path = "organizer_operation_actions.rs"]
+mod organizer_operation_actions;
+#[path = "organizer_operation_history.rs"]
+mod organizer_operation_history;
 
 #[derive(Debug, thiserror::Error)]
 pub enum OrganizerOperationDbError {
@@ -23,19 +30,35 @@ pub enum OrganizerOperationDbError {
     AlreadyFinalized(OrganizerOperationId),
     #[error("organizer operation status must be terminal")]
     InvalidStatus,
+    #[error("organizer operation {0} cannot be retried")]
+    RetryUnavailable(OrganizerOperationId),
+    #[error("organizer operation {0} cannot be undone")]
+    UndoUnavailable(OrganizerOperationId),
+    #[error("organizer history retention must be between 1 and 3650 days")]
+    InvalidRetention,
+    #[error(transparent)]
+    Filesystem(#[from] std::io::Error),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct OrganizerOperationRecord {
     pub operation_id: OrganizerOperationId,
-    pub rule_id: i64,
+    pub rule_id: Option<i64>,
     pub source_path: PathBuf,
     pub destination_path: PathBuf,
+    pub operation_type: OrganizerOperationType,
     pub status: OrganizerOperationStatus,
+    pub created_at: i64,
     pub started_at: i64,
     pub finished_at: Option<i64>,
     pub error: Option<String>,
     pub conflict_id: Option<OrganizerConflictId>,
+    pub original_operation_id: Option<OrganizerOperationId>,
+    pub effective_source_path: Option<PathBuf>,
+    pub effective_destination_path: Option<PathBuf>,
+    pub source_snapshot_before: Option<OrganizerFileSnapshot>,
+    pub destination_snapshot_after: Option<OrganizerFileSnapshot>,
+    pub undone_at: Option<i64>,
 }
 
 pub(super) fn now_unix_millis() -> Result<i64, OrganizerOperationDbError> {
@@ -60,6 +83,11 @@ pub(super) fn path_bytes(path: &Path) -> Vec<u8> {
 pub(super) fn operation_id_text(operation_id: OrganizerOperationId) -> String {
     operation_id.to_string()
 }
+
+pub const DEFAULT_ORGANIZER_HISTORY_RETENTION_DAYS: i64 = 30;
+pub const MIN_ORGANIZER_HISTORY_RETENTION_DAYS: i64 = 1;
+pub const MAX_ORGANIZER_HISTORY_RETENTION_DAYS: i64 = 3650;
+pub(super) const ORGANIZER_HISTORY_RETENTION_PREFERENCE: &str = "organizer_history_retention_days";
 
 pub(super) fn malformed_column(column: usize, message: &'static str) -> rusqlite::Error {
     rusqlite::Error::FromSqlConversionFailure(
@@ -90,29 +118,31 @@ pub(super) fn path_from_storage(
     Ok(PathBuf::from(OsString::from_wide(&wide)))
 }
 
-fn record_from_row(row: &Row<'_>) -> rusqlite::Result<OrganizerOperationRecord> {
+pub(super) fn record_from_row(row: &Row<'_>) -> rusqlite::Result<OrganizerOperationRecord> {
     let raw_id = row.get::<_, String>(0)?;
     let operation_id = raw_id
         .parse::<u64>()
         .ok()
         .and_then(OrganizerOperationId::from_raw)
         .ok_or_else(|| malformed_column(0, "invalid organizer operation ID"))?;
-    let raw_status = row.get::<_, String>(4)?;
+    let operation_type = OrganizerOperationType::from_persisted(&row.get::<_, String>(4)?)
+        .ok_or_else(|| malformed_column(4, "invalid organizer operation type"))?;
+    let raw_status = row.get::<_, String>(5)?;
     let status = OrganizerOperationStatus::from_persisted(&raw_status)
-        .ok_or_else(|| malformed_column(4, "invalid organizer operation status"))?;
-    let finished_at = row.get::<_, Option<i64>>(6)?;
+        .ok_or_else(|| malformed_column(5, "invalid organizer operation status"))?;
+    let finished_at = row.get::<_, Option<i64>>(8)?;
     if status.is_terminal() != finished_at.is_some() {
-        return Err(malformed_column(6, "invalid organizer operation lifecycle"));
+        return Err(malformed_column(8, "invalid organizer operation lifecycle"));
     }
     let source_path = path_from_storage(
         row.get::<_, String>(2)?,
-        row.get::<_, Option<Vec<u8>>>(8)?,
-        8,
+        row.get::<_, Option<Vec<u8>>>(16)?,
+        16,
     )?;
     let destination_path = path_from_storage(
         row.get::<_, String>(3)?,
-        row.get::<_, Option<Vec<u8>>>(9)?,
-        9,
+        row.get::<_, Option<Vec<u8>>>(17)?,
+        17,
     )?;
     let conflict_id = row
         .get::<_, Option<String>>(10)?
@@ -124,18 +154,83 @@ fn record_from_row(row: &Row<'_>) -> rusqlite::Result<OrganizerOperationRecord> 
                 .ok_or_else(|| malformed_column(10, "invalid organizer conflict ID"))
         })
         .transpose()?;
+    let original_operation_id = row
+        .get::<_, Option<String>>(11)?
+        .map(|raw_id| {
+            raw_id
+                .parse::<u64>()
+                .ok()
+                .and_then(OrganizerOperationId::from_raw)
+                .ok_or_else(|| malformed_column(11, "invalid original organizer operation ID"))
+        })
+        .transpose()?;
+    let effective_source_path = optional_path_from_storage(
+        row.get::<_, Option<String>>(12)?,
+        row.get::<_, Option<Vec<u8>>>(18)?,
+        18,
+    )?;
+    let effective_destination_path = optional_path_from_storage(
+        row.get::<_, Option<String>>(13)?,
+        row.get::<_, Option<Vec<u8>>>(19)?,
+        19,
+    )?;
+    let source_snapshot_before = optional_snapshot_from_storage(row.get(14)?, 14)?;
+    let destination_snapshot_after = optional_snapshot_from_storage(row.get(15)?, 15)?;
 
     Ok(OrganizerOperationRecord {
         operation_id,
         rule_id: row.get(1)?,
         source_path,
         destination_path,
+        operation_type,
         status,
-        started_at: row.get(5)?,
+        created_at: row.get(6)?,
+        started_at: row.get(7)?,
         finished_at,
-        error: row.get(7)?,
+        error: row.get(9)?,
         conflict_id,
+        original_operation_id,
+        effective_source_path,
+        effective_destination_path,
+        source_snapshot_before,
+        destination_snapshot_after,
+        undone_at: row.get(20)?,
     })
+}
+
+fn optional_path_from_storage(
+    text: Option<String>,
+    bytes: Option<Vec<u8>>,
+    column: usize,
+) -> rusqlite::Result<Option<PathBuf>> {
+    match text {
+        Some(text) => path_from_storage(text, bytes, column).map(Some),
+        None if bytes.is_none() => Ok(None),
+        None => Err(malformed_column(column, "invalid organizer operation path")),
+    }
+}
+
+pub(super) fn malformed_blob(column: usize, message: &'static str) -> rusqlite::Error {
+    rusqlite::Error::FromSqlConversionFailure(
+        column,
+        rusqlite::types::Type::Blob,
+        Box::new(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            message,
+        )),
+    )
+}
+
+fn optional_snapshot_from_storage(
+    bytes: Option<Vec<u8>>,
+    column: usize,
+) -> rusqlite::Result<Option<OrganizerFileSnapshot>> {
+    bytes
+        .map(|bytes| {
+            OrganizerFileSnapshot::from_bytes(&bytes)
+                .ok_or_else(|| malformed_blob(column, "invalid organizer operation snapshot"))
+        })
+        .transpose()
 }
 
 pub(super) fn reserve_operation_id(
@@ -153,185 +248,6 @@ pub(super) fn reserve_operation_id(
         .optional()?
         .ok_or(OrganizerOperationDbError::IdExhausted)?;
     OrganizerOperationId::from_raw(next_id as u64).ok_or(OrganizerOperationDbError::IdExhausted)
-}
-
-impl AppStateDb {
-    pub fn start_organizer_operation(
-        &self,
-        rule_id: i64,
-        source_path: &Path,
-        destination_path: &Path,
-    ) -> Result<OrganizerOperationId, OrganizerOperationDbError> {
-        let started_at = now_unix_millis()?;
-        let mut db = self
-            .writer
-            .lock()
-            .map_err(|_| OrganizerOperationDbError::DatabaseUnavailable)?;
-        let tx = db.transaction()?;
-        let operation_id = reserve_operation_id(&tx)?;
-        tx.execute(
-            "INSERT INTO organizer_operations
-                (operation_id, rule_id, source_path, destination_path, status, started_at,
-                 source_path_bytes, destination_path_bytes)
-             VALUES (?1, ?2, ?3, ?4, 'started', ?5, ?6, ?7)",
-            params![
-                operation_id_text(operation_id),
-                rule_id,
-                path_text(source_path),
-                path_text(destination_path),
-                started_at,
-                path_bytes(source_path),
-                path_bytes(destination_path),
-            ],
-        )?;
-        tx.commit()?;
-        Ok(operation_id)
-    }
-
-    pub fn finish_organizer_operation(
-        &self,
-        operation_id: OrganizerOperationId,
-        status: OrganizerOperationStatus,
-        error: Option<&str>,
-    ) -> Result<(), OrganizerOperationDbError> {
-        if !status.is_terminal() {
-            return Err(OrganizerOperationDbError::InvalidStatus);
-        }
-
-        let finished_at = now_unix_millis()?;
-        let mut db = self
-            .writer
-            .lock()
-            .map_err(|_| OrganizerOperationDbError::DatabaseUnavailable)?;
-        let tx = db.transaction()?;
-        let updated = tx.execute(
-            "UPDATE organizer_operations
-             SET status = ?1, finished_at = ?2, error = ?3
-             WHERE operation_id = ?4 AND status = 'started' AND finished_at IS NULL",
-            params![
-                status.as_str(),
-                finished_at,
-                error,
-                operation_id_text(operation_id)
-            ],
-        )?;
-        if updated == 1 {
-            if status == OrganizerOperationStatus::Completed {
-                tx.execute(
-                    "UPDATE organizer_conflicts
-                     SET status = 'obsolete', last_checked_at = ?1
-                     WHERE status = 'pending' AND EXISTS (
-                         SELECT 1 FROM organizer_operations o
-                         WHERE o.operation_id = ?2
-                           AND o.rule_id = organizer_conflicts.rule_id
-                           AND o.source_path = organizer_conflicts.source_path COLLATE NOCASE
-                           AND o.destination_path = organizer_conflicts.destination_path COLLATE NOCASE
-                     )",
-                    params![finished_at, operation_id_text(operation_id)],
-                )?;
-            }
-            tx.commit()?;
-            return Ok(());
-        }
-
-        let existing_status = tx
-            .query_row(
-                "SELECT status FROM organizer_operations WHERE operation_id = ?1",
-                params![operation_id_text(operation_id)],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()?;
-        if existing_status.is_some() {
-            Err(OrganizerOperationDbError::AlreadyFinalized(operation_id))
-        } else {
-            Err(OrganizerOperationDbError::NotFound(operation_id))
-        }
-    }
-
-    pub fn record_terminal_organizer_operation(
-        &self,
-        rule_id: i64,
-        source_path: &Path,
-        destination_path: &Path,
-        status: OrganizerOperationStatus,
-        error: Option<&str>,
-    ) -> Result<OrganizerOperationId, OrganizerOperationDbError> {
-        if !status.is_terminal() {
-            return Err(OrganizerOperationDbError::InvalidStatus);
-        }
-
-        let finished_at = now_unix_millis()?;
-        let mut db = self
-            .writer
-            .lock()
-            .map_err(|_| OrganizerOperationDbError::DatabaseUnavailable)?;
-        let tx = db.transaction()?;
-        let operation_id = reserve_operation_id(&tx)?;
-        tx.execute(
-            "INSERT INTO organizer_operations
-                (operation_id, rule_id, source_path, destination_path, status, started_at,
-                 finished_at, error, source_path_bytes, destination_path_bytes)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6, ?7, ?8, ?9)",
-            params![
-                operation_id_text(operation_id),
-                rule_id,
-                path_text(source_path),
-                path_text(destination_path),
-                status.as_str(),
-                finished_at,
-                error,
-                path_bytes(source_path),
-                path_bytes(destination_path),
-            ],
-        )?;
-        tx.commit()?;
-        Ok(operation_id)
-    }
-
-    pub fn get_organizer_operation(
-        &self,
-        operation_id: OrganizerOperationId,
-    ) -> Result<Option<OrganizerOperationRecord>, OrganizerOperationDbError> {
-        let db = self
-            .reader
-            .lock()
-            .map_err(|_| OrganizerOperationDbError::DatabaseUnavailable)?;
-        db.query_row(
-            "SELECT operation_id, rule_id, source_path, destination_path, status,
-                    started_at, finished_at, error, source_path_bytes, destination_path_bytes,
-                    conflict_id
-             FROM organizer_operations WHERE operation_id = ?1",
-            params![operation_id_text(operation_id)],
-            record_from_row,
-        )
-        .optional()
-        .map_err(OrganizerOperationDbError::from)
-    }
-
-    pub fn list_organizer_operations(
-        &self,
-        limit: usize,
-    ) -> Result<Vec<OrganizerOperationRecord>, OrganizerOperationDbError> {
-        if limit == 0 {
-            return Ok(Vec::new());
-        }
-        let limit = i64::try_from(limit).unwrap_or(i64::MAX);
-        let db = self
-            .reader
-            .lock()
-            .map_err(|_| OrganizerOperationDbError::DatabaseUnavailable)?;
-        let mut statement = db.prepare(
-            "SELECT operation_id, rule_id, source_path, destination_path, status,
-                    started_at, finished_at, error, source_path_bytes, destination_path_bytes,
-                    conflict_id
-             FROM organizer_operations
-             ORDER BY started_at DESC, CAST(operation_id AS INTEGER) DESC
-             LIMIT ?1",
-        )?;
-        let rows = statement.query_map(params![limit], record_from_row)?;
-        rows.collect::<rusqlite::Result<Vec<_>>>()
-            .map_err(OrganizerOperationDbError::from)
-    }
 }
 
 #[cfg(test)]

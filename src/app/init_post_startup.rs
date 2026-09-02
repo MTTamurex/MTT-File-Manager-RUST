@@ -1,7 +1,7 @@
 use eframe::egui;
 
 use super::drive_state::DriveInfoRefreshScope;
-use super::init_workers::spawn_incremental_gc_worker;
+use super::init_workers::{spawn_incremental_gc_worker, spawn_organizer_history_retention_worker};
 use super::state::ImageViewerApp;
 
 impl ImageViewerApp {
@@ -24,6 +24,7 @@ impl ImageViewerApp {
             self.tag_assignment_gc_sender.clone(),
             ctx.clone(),
         );
+        spawn_organizer_history_retention_worker(self.app_state_db.clone());
 
         // Detect ISO images that were already mounted before the app started.
         let (iso_tx, iso_rx) = std::sync::mpsc::channel();

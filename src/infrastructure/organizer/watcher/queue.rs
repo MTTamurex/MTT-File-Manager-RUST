@@ -4,7 +4,10 @@ use crate::infrastructure::organizer::OrganizerEvent;
 use crate::infrastructure::windows::shell_operations::{
     organizer_file_snapshot, OrganizerFileSnapshot,
 };
-use crate::workers::file_operation_worker::{FileOperationRequest, OrganizerInFlightRegistry};
+use crate::workers::file_operation_worker::{
+    FileOperationRequest, OrganizerInFlightRegistry, OrganizerUndoExemptionRegistry,
+    OrganizerUndoExemptionStatus,
+};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::Sender;
@@ -133,10 +136,11 @@ pub(super) fn process_stable_files(
     paused_rules: &HashSet<i64>,
     file_operation_sender: &crossbeam_channel::Sender<FileOperationRequest>,
     event_sender: &Sender<OrganizerEvent>,
-    in_flight: &OrganizerInFlightRegistry,
+    operation_registries: (&OrganizerInFlightRegistry, &OrganizerUndoExemptionRegistry),
     app_state_db: &Arc<crate::infrastructure::app_state_db::AppStateDb>,
     shutdown: &Arc<AtomicBool>,
 ) -> bool {
+    let (in_flight, undo_exemptions) = operation_registries;
     let mut event_sent = false;
     let ready: Vec<_> = pending
         .iter()
@@ -164,6 +168,15 @@ pub(super) fn process_stable_files(
                 pending,
             );
             continue;
+        }
+        match undo_exemptions.check(&path, snapshot) {
+            OrganizerUndoExemptionStatus::Suppressed => continue,
+            OrganizerUndoExemptionStatus::Removed => {
+                if let Err(error) = app_state_db.remove_organizer_undo_exemption(&path) {
+                    log::warn!("[ORGANIZER] Failed to remove stale undo exemption: {error}");
+                }
+            }
+            OrganizerUndoExemptionStatus::Missing => {}
         }
 
         if !pending_file.activation.load(Ordering::Acquire) {
@@ -230,20 +243,23 @@ pub(super) fn process_stable_files(
             pending.insert(path, pending_file);
             continue;
         };
-        let operation_id =
-            match app_state_db.start_organizer_operation(pending_file.rule.id, &path, &destination)
-            {
-                Ok(operation_id) => operation_id,
-                Err(error) => {
-                    let _ = event_sender.send(OrganizerEvent::Error {
-                        message: error.to_string(),
-                    });
-                    let mut pending_file = pending_file;
-                    pending_file.stable_since = Instant::now();
-                    pending.insert(path, pending_file);
-                    continue;
-                }
-            };
+        let operation_id = match app_state_db.start_organizer_operation_with_snapshot(
+            pending_file.rule.id,
+            &path,
+            &destination,
+            pending_file.snapshot,
+        ) {
+            Ok(operation_id) => operation_id,
+            Err(error) => {
+                let _ = event_sender.send(OrganizerEvent::Error {
+                    message: error.to_string(),
+                });
+                let mut pending_file = pending_file;
+                pending_file.stable_since = Instant::now();
+                pending.insert(path, pending_file);
+                continue;
+            }
+        };
         if file_operation_sender
             .send(FileOperationRequest::OrganizerMove {
                 operation_id,
@@ -252,6 +268,8 @@ pub(super) fn process_stable_files(
                 rule_id: pending_file.rule.id,
                 activation: pending_file.activation,
                 expected_snapshot: pending_file.snapshot,
+                is_undo: false,
+                undo_exemptions: undo_exemptions.clone(),
                 in_flight: in_flight_guard,
                 app_state_db: Arc::clone(app_state_db),
                 shutdown: Arc::clone(shutdown),
@@ -280,6 +298,10 @@ pub(super) fn process_stable_files(
                 destination,
                 message,
             });
+        } else {
+            event_sent |= event_sender
+                .send(OrganizerEvent::OperationQueued { operation_id })
+                .is_ok();
         }
     }
     event_sent

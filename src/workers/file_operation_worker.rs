@@ -1,7 +1,7 @@
 //! Worker thread for Windows Shell file operations.
 //! Ensures COM is initialized as STA (COINIT_APARTMENTTHREADED) for correct shell behavior.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use windows::Win32::Foundation::HWND;
@@ -67,6 +67,8 @@ pub enum FileOperationResult {
         dest_folder: PathBuf,
         source_path: PathBuf,
         moved_dest: PathBuf,
+        destination_snapshot:
+            crate::infrastructure::windows::shell_operations::OrganizerFileSnapshot,
     },
     OrganizerMoveSkipped {
         operation_id: OrganizerOperationId,
@@ -85,6 +87,9 @@ pub enum FileOperationResult {
         rule_id: i64,
         path: PathBuf,
         message: String,
+    },
+    OrganizerOperationRecovered {
+        operation_id: OrganizerOperationId,
     },
     /// Copy operation completed - dest folder needs reload if active
     CopyCompleted {
@@ -155,28 +160,124 @@ impl OrganizerInFlightRegistry {
     }
 
     pub(crate) fn try_acquire(&self, path_key: String) -> Option<OrganizerInFlightGuard> {
+        self.try_acquire_many([path_key])
+    }
+
+    pub(crate) fn try_acquire_many(
+        &self,
+        path_keys: impl IntoIterator<Item = String>,
+    ) -> Option<OrganizerInFlightGuard> {
+        let mut path_keys = path_keys.into_iter().collect::<Vec<_>>();
+        path_keys.sort_unstable();
+        path_keys.dedup();
         let mut paths = self.paths.lock().ok()?;
-        if !paths.insert(path_key.clone()) {
+        if path_keys.iter().any(|path_key| paths.contains(path_key)) {
             return None;
         }
+        paths.extend(path_keys.iter().cloned());
         Some(OrganizerInFlightGuard {
             registry: self.clone(),
-            path_key,
+            path_keys,
         })
     }
 }
 
 pub(crate) struct OrganizerInFlightGuard {
     registry: OrganizerInFlightRegistry,
-    path_key: String,
+    path_keys: Vec<String>,
 }
 
 impl Drop for OrganizerInFlightGuard {
     fn drop(&mut self) {
         if let Ok(mut paths) = self.registry.paths.lock() {
-            paths.remove(&self.path_key);
+            for path_key in &self.path_keys {
+                paths.remove(path_key);
+            }
         }
     }
+}
+
+#[derive(Clone, Default)]
+pub(crate) struct OrganizerUndoExemptionRegistry {
+    paths: Arc<
+        Mutex<
+            HashMap<
+                String,
+                crate::infrastructure::windows::shell_operations::OrganizerFileSnapshot,
+            >,
+        >,
+    >,
+}
+
+pub(crate) enum OrganizerUndoExemptionStatus {
+    Suppressed,
+    Removed,
+    Missing,
+}
+
+impl OrganizerUndoExemptionRegistry {
+    pub(crate) fn new(
+        exemptions: impl IntoIterator<
+            Item = (
+                PathBuf,
+                crate::infrastructure::windows::shell_operations::OrganizerFileSnapshot,
+            ),
+        >,
+    ) -> Self {
+        Self {
+            paths: Arc::new(Mutex::new(
+                exemptions
+                    .into_iter()
+                    .map(|(path, snapshot)| (organizer_path_key(&path), snapshot))
+                    .collect(),
+            )),
+        }
+    }
+
+    pub(crate) fn insert(
+        &self,
+        path: &Path,
+        snapshot: crate::infrastructure::windows::shell_operations::OrganizerFileSnapshot,
+    ) {
+        if let Ok(mut paths) = self.paths.lock() {
+            paths.insert(organizer_path_key(path), snapshot);
+        }
+    }
+
+    pub(crate) fn check(
+        &self,
+        path: &Path,
+        snapshot: crate::infrastructure::windows::shell_operations::OrganizerFileSnapshot,
+    ) -> OrganizerUndoExemptionStatus {
+        let key = organizer_path_key(path);
+        let Ok(mut paths) = self.paths.lock() else {
+            return OrganizerUndoExemptionStatus::Missing;
+        };
+        match paths.get(&key) {
+            Some(expected) if *expected == snapshot => OrganizerUndoExemptionStatus::Suppressed,
+            Some(_) => {
+                paths.remove(&key);
+                OrganizerUndoExemptionStatus::Removed
+            }
+            None => OrganizerUndoExemptionStatus::Missing,
+        }
+    }
+}
+
+fn organizer_path_key(path: &Path) -> String {
+    let normalized = path
+        .to_string_lossy()
+        .replace('/', "\\")
+        .trim_end_matches('\\')
+        .to_ascii_lowercase();
+    if let Some(stripped) = normalized.strip_prefix(r"\\?\unc\") {
+        return format!(r"\\{stripped}");
+    }
+    normalized
+        .strip_prefix(r"\\?\")
+        .or_else(|| normalized.strip_prefix(r"\\.\"))
+        .unwrap_or(&normalized)
+        .to_string()
 }
 
 /// Requests that can be sent to the file operation worker.
@@ -213,6 +314,9 @@ pub(crate) enum FileOperationRequest {
         rule_id: i64,
         activation: std::sync::Arc<std::sync::atomic::AtomicBool>,
         expected_snapshot: crate::infrastructure::windows::shell_operations::OrganizerFileSnapshot,
+        /// Undo must fail on a destination race instead of creating a new conflict.
+        is_undo: bool,
+        undo_exemptions: OrganizerUndoExemptionRegistry,
         in_flight: OrganizerInFlightGuard,
         app_state_db: Arc<crate::infrastructure::app_state_db::AppStateDb>,
         shutdown: Arc<std::sync::atomic::AtomicBool>,
@@ -381,6 +485,8 @@ impl FileOperationRequest {
                 rule_id,
                 activation,
                 expected_snapshot,
+                is_undo,
+                undo_exemptions,
                 in_flight,
                 app_state_db,
                 shutdown,
@@ -391,6 +497,8 @@ impl FileOperationRequest {
                 rule_id,
                 activation,
                 expected_snapshot,
+                is_undo,
+                undo_exemptions,
                 in_flight,
                 app_state_db,
                 shutdown,
@@ -652,6 +760,8 @@ fn run_file_operation_loop(
                     rule_id,
                     activation,
                     expected_snapshot,
+                    is_undo,
+                    undo_exemptions,
                     in_flight,
                     app_state_db,
                     shutdown,
@@ -668,11 +778,15 @@ fn run_file_operation_loop(
                     handlers::handle_organizer_move(
                         path,
                         dest_folder,
-                        (operation_id, rule_id),
-                        (activation, shutdown),
-                        expected_snapshot,
-                        &app_state_db,
-                        &result_sender,
+                        handlers::OrganizerMoveContext {
+                            operation: (operation_id, rule_id),
+                            lifecycle: (activation, shutdown),
+                            expected_snapshot,
+                            is_undo,
+                            undo_exemptions: &undo_exemptions,
+                            app_state_db: &app_state_db,
+                            result_sender: &result_sender,
+                        },
                     );
                     drop(in_flight);
                     return CompletionBehavior::NoFinished;
@@ -767,29 +881,61 @@ fn run_file_operation_loop(
                 );
                 let failure = match organizer_operation {
                     Some((operation_id, rule_id, path, app_state_db)) => {
-                        if let Err(error) = app_state_db.finish_organizer_operation(
-                            operation_id,
-                            crate::domain::organizer_operation::OrganizerOperationStatus::Failed,
-                            Some(&msg),
-                        ) {
-                            log::error!(
-                                "[ORGANIZER] Failed to persist operation {} panic: {}",
+                        let recovered = match app_state_db
+                            .reconcile_organizer_operation_completion(operation_id)
+                        {
+                            Ok(recovered) => recovered,
+                            Err(error) => {
+                                log::error!(
+                                    "[ORGANIZER] Failed to recover operation {} panic: {}",
+                                    operation_id,
+                                    error
+                                );
+                                false
+                            }
+                        };
+                        let already_terminal = recovered
+                            || app_state_db
+                                .get_organizer_operation(operation_id)
+                                .ok()
+                                .flatten()
+                                .is_some_and(|operation| operation.status.is_terminal());
+                        let terminal_after_panic = if already_terminal {
+                            true
+                        } else {
+                            match app_state_db.finish_organizer_operation(
                                 operation_id,
-                                error
-                            );
-                            let _ = result_sender.send(FileOperationResult::OperationFailed {
-                                message: rust_i18n::t!(
-                                    "organizer.issue_error",
-                                    reason = error.to_string()
-                                )
-                                .to_string(),
-                            });
-                        }
-                        FileOperationResult::OrganizerMoveFailed {
-                            operation_id,
-                            rule_id,
-                            path,
-                            message: msg,
+                                crate::domain::organizer_operation::OrganizerOperationStatus::Failed,
+                                Some(&msg),
+                            ) {
+                                Ok(()) => false,
+                                Err(crate::infrastructure::app_state_db::OrganizerOperationDbError::AlreadyFinalized(_)) => true,
+                                Err(error) => {
+                                    log::error!(
+                                        "[ORGANIZER] Failed to persist operation {} panic: {}",
+                                        operation_id,
+                                        error
+                                    );
+                                    let _ = result_sender.send(FileOperationResult::OperationFailed {
+                                        message: rust_i18n::t!(
+                                            "organizer.issue_error",
+                                            reason = error.to_string()
+                                        )
+                                        .to_string(),
+                                    });
+                                    false
+                                }
+                            }
+                        };
+                        if terminal_after_panic {
+                            FileOperationResult::OrganizerOperationRecovered { operation_id }
+                        } else {
+                            FileOperationResult::OrganizerMoveFailed {
+                                operation_id,
+                                rule_id,
+                                path,
+                                message: msg,
+                            }
                         }
                     }
                     None => match clipboard_paste_token {
@@ -851,6 +997,31 @@ mod tests {
 
         drop(guard);
         assert!(!registry.contains("c:\\source\\report.txt"));
+    }
+
+    #[test]
+    fn organizer_in_flight_guard_acquires_multiple_paths_atomically() {
+        let registry = OrganizerInFlightRegistry::default();
+        let guard = registry
+            .try_acquire_many([
+                r"c:\source\report.txt".to_string(),
+                r"c:\destination\report.txt".to_string(),
+            ])
+            .expect("acquire paths");
+
+        assert!(registry.contains(r"c:\source\report.txt"));
+        assert!(registry.contains(r"c:\destination\report.txt"));
+        assert!(registry
+            .try_acquire_many([
+                r"c:\other\report.txt".to_string(),
+                r"c:\destination\report.txt".to_string(),
+            ])
+            .is_none());
+        assert!(!registry.contains(r"c:\other\report.txt"));
+
+        drop(guard);
+        assert!(!registry.contains(r"c:\source\report.txt"));
+        assert!(!registry.contains(r"c:\destination\report.txt"));
     }
 
     #[test]

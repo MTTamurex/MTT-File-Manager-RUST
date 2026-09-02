@@ -3,57 +3,11 @@ use super::organizer_conflicts::{
     snapshot_from_storage, OrganizerConflictDbError,
 };
 use super::organizer_operations::{path_bytes, path_from_storage, path_text};
-use super::AppStateDb;
+use super::{process_owner_id, process_owner_is_active, AppStateDb};
 use crate::domain::organizer_conflict::OrganizerConflictId;
 use crate::infrastructure::windows::shell_operations::organizer_file_snapshot;
 use rusqlite::{params, OptionalExtension};
 use std::path::Path;
-
-fn process_creation_time(process_id: u32) -> windows::core::Result<u64> {
-    use windows::Win32::Foundation::{CloseHandle, FILETIME};
-    use windows::Win32::System::Threading::{
-        GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
-    };
-
-    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, process_id) }?;
-    let mut creation = FILETIME::default();
-    let mut exit = FILETIME::default();
-    let mut kernel = FILETIME::default();
-    let mut user = FILETIME::default();
-    let result =
-        unsafe { GetProcessTimes(process, &mut creation, &mut exit, &mut kernel, &mut user) };
-    unsafe {
-        let _ = CloseHandle(process);
-    }
-    result?;
-    Ok(((creation.dwHighDateTime as u64) << 32) | creation.dwLowDateTime as u64)
-}
-
-fn resolution_owner_id() -> String {
-    let process_id = std::process::id();
-    let creation_time = process_creation_time(process_id).unwrap_or_default();
-    format!("{process_id}:{creation_time}")
-}
-
-fn resolution_owner_is_active(owner_id: &str) -> bool {
-    let Some((process_id, creation_time)) = owner_id.split_once(':') else {
-        return false;
-    };
-    let (Ok(process_id), Ok(creation_time)) =
-        (process_id.parse::<u32>(), creation_time.parse::<u64>())
-    else {
-        return false;
-    };
-    match process_creation_time(process_id) {
-        Ok(actual_creation_time) => actual_creation_time == creation_time,
-        Err(error)
-            if error.code() == windows::Win32::Foundation::ERROR_INVALID_PARAMETER.to_hresult() =>
-        {
-            false
-        }
-        Err(_) => true,
-    }
-}
 
 impl AppStateDb {
     pub fn claim_organizer_conflict_resolution(
@@ -102,7 +56,7 @@ impl AppStateDb {
                 path_text(target_path),
                 path_bytes(target_path),
                 expected_snapshot.to_bytes().to_vec(),
-                resolution_owner_id(),
+                process_owner_id(),
                 started_at,
             ],
         )?;
@@ -124,7 +78,7 @@ impl AppStateDb {
         db.execute(
             "DELETE FROM organizer_conflict_resolutions
              WHERE conflict_id = ?1 AND owner_id = ?2",
-            params![conflict_id_text(conflict_id), resolution_owner_id()],
+            params![conflict_id_text(conflict_id), process_owner_id()],
         )?;
         Ok(())
     }
@@ -196,10 +150,10 @@ impl AppStateDb {
         ) in resolutions
         {
             if let Some(owned_conflict_id) = owned_conflict_id {
-                if conflict_id != owned_conflict_id || owner_id != resolution_owner_id() {
+                if conflict_id != owned_conflict_id || owner_id != process_owner_id() {
                     continue;
                 }
-            } else if resolution_owner_is_active(&owner_id) {
+            } else if process_owner_is_active(&owner_id) {
                 continue;
             }
             let original = if rename_source { &source } else { &destination };

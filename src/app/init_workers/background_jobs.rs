@@ -94,6 +94,54 @@ pub(in crate::app) fn spawn_incremental_gc_worker(
     });
 }
 
+pub(in crate::app) fn spawn_organizer_history_retention_worker(app_state_db: Arc<AppStateDb>) {
+    std::thread::spawn(move || {
+        const RETENTION_BATCH: usize = 500;
+        const RETENTION_INTERVAL_SECS: u64 = 6 * 60 * 60;
+
+        let cleanup = || {
+            let retention_days = match app_state_db.try_organizer_history_retention_days() {
+                Ok(days) => days,
+                Err(error) => {
+                    log::warn!("[ORGANIZER] History retention preference read failed: {error}");
+                    return;
+                }
+            };
+            let mut total_removed = 0usize;
+            for _ in 0..8 {
+                if !GC_WORKER_RUNNING.load(Ordering::Relaxed) {
+                    break;
+                }
+                match app_state_db.retain_organizer_history(retention_days, RETENTION_BATCH) {
+                    Ok(0) => break,
+                    Ok(removed) => total_removed = total_removed.saturating_add(removed),
+                    Err(error) => {
+                        log::warn!("[ORGANIZER] History retention failed: {error}");
+                        break;
+                    }
+                }
+                std::thread::yield_now();
+            }
+            if total_removed > 0 {
+                log::info!("[ORGANIZER] Retention removed {total_removed} history records");
+            }
+        };
+
+        if GC_WORKER_RUNNING.load(Ordering::Relaxed) {
+            cleanup();
+        }
+        while GC_WORKER_RUNNING.load(Ordering::Relaxed) {
+            for _ in 0..RETENTION_INTERVAL_SECS {
+                if !GC_WORKER_RUNNING.load(Ordering::Relaxed) {
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_secs(1));
+            }
+            cleanup();
+        }
+    });
+}
+
 pub(in crate::app) fn spawn_file_icon_cache_gc_worker(icon_disk_cache: Arc<IconDiskCache>) {
     std::thread::spawn(move || {
         const INITIAL_DELAY_SECS: u64 = 30;

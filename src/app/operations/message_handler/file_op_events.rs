@@ -221,6 +221,7 @@ impl ImageViewerApp {
                             dest_folder,
                             source_path,
                             moved_dest,
+                            destination_snapshot: _,
                         } => {
                             if !self.organizer_state.operation_finished(operation_id) {
                                 continue;
@@ -289,6 +290,18 @@ impl ImageViewerApp {
                                 .to_string(),
                             );
                         }
+                        FileOperationResult::OrganizerOperationRecovered { operation_id } => {
+                            if !self.organizer_state.operation_finished(operation_id) {
+                                continue;
+                            }
+                            if let Err(error) =
+                                self.organizer_state.reload_conflicts(&self.app_state_db)
+                            {
+                                self.notifications.warning(error.to_string());
+                            }
+                            self.handle_file_operation_finished(true);
+                            self.request_global_search_refresh();
+                        }
                         FileOperationResult::Finished => self.handle_file_operation_finished(true),
                         FileOperationResult::FinishedNoRefresh => {
                             self.handle_file_operation_finished(false)
@@ -309,6 +322,8 @@ impl ImageViewerApp {
     }
 
     pub(super) fn process_organizer_events(&mut self, current_path_norm: &str) {
+        self.organizer_state
+            .reload_history_if_dirty(&self.app_state_db);
         while let Ok(preview) = self.organizer_state.preview_receiver.try_recv() {
             self.organizer_state.finish_preview(preview.rule_id);
             self.notifications.info(format!(
@@ -387,9 +402,13 @@ impl ImageViewerApp {
                 crate::infrastructure::organizer::OrganizerEvent::Status { rule_id, status } => {
                     self.organizer_state.set_rule_status(rule_id, status);
                 }
+                crate::infrastructure::organizer::OrganizerEvent::OperationQueued { .. } => {
+                    self.organizer_state.history_state.mark_dirty();
+                }
                 crate::infrastructure::organizer::OrganizerEvent::OperationSkipped {
                     path, ..
                 } => {
+                    self.organizer_state.history_state.mark_dirty();
                     let name = path
                         .file_name()
                         .and_then(|name| name.to_str())
@@ -406,6 +425,7 @@ impl ImageViewerApp {
                     message,
                     ..
                 } => {
+                    self.organizer_state.history_state.mark_dirty();
                     let name = path
                         .file_name()
                         .and_then(|name| name.to_str())
@@ -422,6 +442,8 @@ impl ImageViewerApp {
                 }
             }
         }
+        self.organizer_state
+            .reload_history_if_dirty(&self.app_state_db);
     }
 
     pub(super) fn flush_organizer_notification_summary(&mut self) {

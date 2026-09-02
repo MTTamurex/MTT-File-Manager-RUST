@@ -6,7 +6,10 @@ mod pipeline_workers;
 mod visual_workers;
 
 pub(crate) use background_jobs::stop_gc_worker;
-pub(super) use background_jobs::{spawn_file_icon_cache_gc_worker, spawn_incremental_gc_worker};
+pub(super) use background_jobs::{
+    spawn_file_icon_cache_gc_worker, spawn_incremental_gc_worker,
+    spawn_organizer_history_retention_worker,
+};
 pub(super) use consistency_probe_worker::spawn_consistency_probe_worker;
 pub(crate) use filesystem_workers::CacheInvalidationEntry;
 pub(super) use filesystem_workers::{

@@ -1,4 +1,5 @@
 use crate::app::organizer_conflict_state::OrganizerConflictUiState;
+use crate::app::organizer_history_state::OrganizerHistoryUiState;
 use crate::domain::organizer_operation::OrganizerOperationId;
 use crate::domain::organizer_rule::OrganizerRule;
 use crate::infrastructure::organizer::{
@@ -91,6 +92,7 @@ pub struct OrganizerState {
     pub rule_statuses: HashMap<i64, OrganizerRuleStatus>,
     pub active_operation_ids: HashSet<OrganizerOperationId>,
     pub(crate) conflict_state: OrganizerConflictUiState,
+    pub(crate) history_state: OrganizerHistoryUiState,
     pub source_input: String,
     pub destination_input: String,
     pub extensions_input: String,
@@ -123,7 +125,11 @@ impl OrganizerState {
         if let Err(error) = app_state_db.reconcile_organizer_conflict_resolutions() {
             log::warn!("[ORGANIZER] Failed to reconcile conflict resolutions: {error}");
         }
+        if let Err(error) = app_state_db.reconcile_started_organizer_operations() {
+            log::warn!("[ORGANIZER] Failed to reconcile interrupted operations: {error}");
+        }
         let conflict_state = OrganizerConflictUiState::load(&app_state_db);
+        let history_state = OrganizerHistoryUiState::load(&app_state_db);
         let rule_statuses = rules
             .iter()
             .map(|rule| (rule.id, OrganizerRuleStatus::Starting))
@@ -131,7 +137,7 @@ impl OrganizerState {
         Self {
             manager: OrganizerManager::start(
                 file_operation_sender,
-                app_state_db,
+                std::sync::Arc::clone(&app_state_db),
                 rules.clone(),
                 ui_ctx,
             ),
@@ -139,6 +145,7 @@ impl OrganizerState {
             rule_statuses,
             active_operation_ids: HashSet::new(),
             conflict_state,
+            history_state,
             source_input: String::new(),
             destination_input: String::new(),
             extensions_input: String::new(),
@@ -176,6 +183,7 @@ impl OrganizerState {
         result: &OrganizerCommandResult,
     ) {
         self.conflict_state.command_finished(command_id);
+        self.history_state.command_finished(command_id);
         match result {
             OrganizerCommandResult::ConflictResolved { conflict_id, .. }
             | OrganizerCommandResult::ConflictCancelled { conflict_id } => {
@@ -201,6 +209,7 @@ impl OrganizerState {
 
     pub fn command_failed(&mut self, command_id: OrganizerCommandId) -> bool {
         self.pending_rule_sets.remove(&command_id);
+        self.history_state.command_finished(command_id);
         self.conflict_state.command_finished(command_id)
     }
 
@@ -209,6 +218,42 @@ impl OrganizerState {
         db: &crate::infrastructure::app_state_db::AppStateDb,
     ) -> Result<(), crate::infrastructure::app_state_db::OrganizerConflictDbError> {
         self.conflict_state.reload(db)
+    }
+
+    pub fn reload_history(
+        &mut self,
+        db: &crate::infrastructure::app_state_db::AppStateDb,
+    ) -> Result<(), crate::infrastructure::app_state_db::OrganizerOperationDbError> {
+        self.history_state.reload(db)
+    }
+
+    pub fn reload_history_if_dirty(
+        &mut self,
+        db: &crate::infrastructure::app_state_db::AppStateDb,
+    ) {
+        self.history_state.reload_if_dirty(db);
+    }
+
+    pub fn retry_operation(
+        &mut self,
+        operation_id: OrganizerOperationId,
+    ) -> Result<OrganizerCommandId, OrganizerCommandError> {
+        let command_id = self.manager.retry_operation(operation_id)?;
+        self.history_state.command_started(command_id, operation_id);
+        Ok(command_id)
+    }
+
+    pub fn undo_operation(
+        &mut self,
+        operation_id: OrganizerOperationId,
+    ) -> Result<OrganizerCommandId, OrganizerCommandError> {
+        let command_id = self.manager.undo_operation(operation_id)?;
+        self.history_state.command_started(command_id, operation_id);
+        Ok(command_id)
+    }
+
+    pub fn is_history_operation_pending(&self, operation_id: OrganizerOperationId) -> bool {
+        self.history_state.is_pending(operation_id)
     }
 
     pub fn resolve_conflict(
@@ -241,11 +286,19 @@ impl OrganizerState {
     }
 
     pub fn operation_started(&mut self, operation_id: OrganizerOperationId) -> bool {
-        self.active_operation_ids.insert(operation_id)
+        let inserted = self.active_operation_ids.insert(operation_id);
+        if inserted {
+            self.history_state.mark_dirty();
+        }
+        inserted
     }
 
     pub fn operation_finished(&mut self, operation_id: OrganizerOperationId) -> bool {
-        self.active_operation_ids.remove(&operation_id)
+        let removed = self.active_operation_ids.remove(&operation_id);
+        if removed {
+            self.history_state.mark_dirty();
+        }
+        removed
     }
 
     pub fn is_previewing(&self, rule_id: i64) -> bool {

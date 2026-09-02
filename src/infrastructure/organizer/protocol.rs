@@ -41,6 +41,14 @@ pub enum OrganizerCommandResult {
     ConflictCancelled {
         conflict_id: OrganizerConflictId,
     },
+    RetryQueued {
+        operation_id: OrganizerOperationId,
+        original_operation_id: OrganizerOperationId,
+    },
+    UndoQueued {
+        operation_id: OrganizerOperationId,
+        original_operation_id: OrganizerOperationId,
+    },
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -57,6 +65,9 @@ pub enum OrganizerCommandError {
     ConflictStale,
     ConflictTargetExists,
     ConflictResolutionFailed { reason: String },
+    RetryUnavailable,
+    UndoUnavailable,
+    OperationDispatchFailed { reason: String },
 }
 
 impl fmt::Display for OrganizerCommandError {
@@ -128,6 +139,17 @@ impl fmt::Display for OrganizerCommandError {
                     rust_i18n::t!("organizer.error_conflict_resolution", reason = reason)
                 )
             }
+            Self::RetryUnavailable => {
+                formatter.write_str(rust_i18n::t!("organizer.error_retry_unavailable").as_ref())
+            }
+            Self::UndoUnavailable => {
+                formatter.write_str(rust_i18n::t!("organizer.error_undo_unavailable").as_ref())
+            }
+            Self::OperationDispatchFailed { reason } => write!(
+                formatter,
+                "{}",
+                rust_i18n::t!("organizer.error_operation_dispatch", reason = reason)
+            ),
         }
     }
 }
@@ -154,6 +176,9 @@ pub enum OrganizerEvent {
     Status {
         rule_id: i64,
         status: OrganizerRuleStatus,
+    },
+    OperationQueued {
+        operation_id: OrganizerOperationId,
     },
     OperationSkipped {
         operation_id: OrganizerOperationId,

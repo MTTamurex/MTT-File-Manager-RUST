@@ -6,6 +6,10 @@ use super::{
 use crate::domain::organizer_conflict::OrganizerConflictStatus;
 use crate::domain::organizer_rule::{OrganizerRule, OrganizerRuleError};
 use crate::infrastructure::app_state_db::AppStateDb;
+use crate::infrastructure::windows::shell_operations::{
+    move_organizer_file_without_replace, organizer_file_snapshot,
+};
+use crate::workers::file_operation_worker::FileOperationRequest;
 use std::sync::{atomic::AtomicU64, Arc, Barrier};
 use std::time::Duration;
 
@@ -109,7 +113,7 @@ fn conflict_fixture() -> (
     std::fs::write(&destination, b"destination").expect("create destination file");
     let rule = OrganizerRule::from_persisted(
         7,
-        source_folder,
+        source_folder.clone(),
         destination_folder,
         vec!["txt".to_string()],
         true,
@@ -417,6 +421,150 @@ fn cancelling_a_conflict_keeps_both_files_and_finishes_it() {
         .expect("suppress cancelled identity"),
         crate::infrastructure::app_state_db::OrganizerConflictRegistration::Suppressed
     );
+}
+
+#[cfg(feature = "notify-watcher")]
+#[test]
+fn retry_command_revalidates_the_source_and_queues_a_linked_attempt() {
+    let root = tempfile::tempdir().expect("create test directory");
+    let source_folder = root.path().join("source");
+    let destination_folder = root.path().join("destination");
+    std::fs::create_dir(&source_folder).expect("create source directory");
+    std::fs::create_dir(&destination_folder).expect("create destination directory");
+    let source = source_folder.join("report.txt");
+    let destination = destination_folder.join("report.txt");
+    std::fs::write(&source, b"source").expect("create source file");
+    let rule = OrganizerRule::from_persisted(
+        7,
+        source_folder,
+        destination_folder.clone(),
+        vec!["txt".to_string()],
+        true,
+    )
+    .expect("create rule");
+    let snapshot = organizer_file_snapshot(&source).expect("source snapshot");
+    let db = Arc::new(AppStateDb::new_in_memory().expect("database"));
+    let original = db
+        .start_organizer_operation_with_snapshot(7, &source, &destination, snapshot)
+        .expect("start original");
+    db.finish_organizer_operation(
+        original,
+        crate::domain::organizer_operation::OrganizerOperationStatus::Failed,
+        Some("failed"),
+    )
+    .expect("finish original");
+    let (file_operation_sender, file_operation_receiver) = crossbeam_channel::unbounded();
+    let manager = OrganizerManager::start(
+        file_operation_sender,
+        db,
+        vec![rule],
+        eframe::egui::Context::default(),
+    );
+
+    let command_id = manager.retry_operation(original).expect("queue retry");
+    let result = receive_command_result(&manager, command_id);
+    let retry_id = match result {
+        Ok(OrganizerCommandResult::RetryQueued {
+            operation_id,
+            original_operation_id,
+        }) => {
+            assert_eq!(original_operation_id, original);
+            operation_id
+        }
+        other => panic!("unexpected retry result: {other:?}"),
+    };
+    let request = file_operation_receiver
+        .recv_timeout(Duration::from_secs(2))
+        .expect("retry request");
+    match request {
+        FileOperationRequest::OrganizerMove {
+            operation_id,
+            path,
+            dest_folder,
+            is_undo,
+            ..
+        } => {
+            assert_eq!(operation_id, retry_id);
+            assert_eq!(path, source);
+            assert_eq!(dest_folder, destination_folder);
+            assert!(!is_undo);
+        }
+        _ => panic!("expected retry organizer move"),
+    }
+}
+
+#[cfg(feature = "notify-watcher")]
+#[test]
+fn undo_command_queues_an_inverse_move_only_when_identity_is_intact() {
+    let root = tempfile::tempdir().expect("create test directory");
+    let source_folder = root.path().join("source");
+    let destination_folder = root.path().join("destination");
+    std::fs::create_dir(&source_folder).expect("create source directory");
+    std::fs::create_dir(&destination_folder).expect("create destination directory");
+    let source = source_folder.join("report.txt");
+    let destination = destination_folder.join("report.txt");
+    std::fs::write(&source, b"source").expect("create source file");
+    let snapshot = organizer_file_snapshot(&source).expect("source snapshot");
+    let db = Arc::new(AppStateDb::new_in_memory().expect("database"));
+    let original = db
+        .start_organizer_operation_with_snapshot(7, &source, &destination, snapshot)
+        .expect("start original");
+    move_organizer_file_without_replace(&source, &destination, snapshot).expect("move file");
+    let destination_snapshot = organizer_file_snapshot(&destination).expect("destination snapshot");
+    db.finish_organizer_operation_with_metadata(
+        original,
+        crate::domain::organizer_operation::OrganizerOperationStatus::Completed,
+        None,
+        Some(&source),
+        Some(&destination),
+        Some(destination_snapshot),
+    )
+    .expect("finish original");
+    let rule = OrganizerRule::from_persisted(
+        7,
+        source_folder.clone(),
+        destination_folder,
+        vec!["txt".to_string()],
+        true,
+    )
+    .expect("create rule");
+    let (file_operation_sender, file_operation_receiver) = crossbeam_channel::unbounded();
+    let manager = OrganizerManager::start(
+        file_operation_sender,
+        db,
+        vec![rule],
+        eframe::egui::Context::default(),
+    );
+
+    let command_id = manager.undo_operation(original).expect("queue undo");
+    let undo_id = match receive_command_result(&manager, command_id) {
+        Ok(OrganizerCommandResult::UndoQueued {
+            operation_id,
+            original_operation_id,
+        }) => {
+            assert_eq!(original_operation_id, original);
+            operation_id
+        }
+        other => panic!("unexpected undo result: {other:?}"),
+    };
+    match file_operation_receiver
+        .recv_timeout(Duration::from_secs(2))
+        .expect("undo request")
+    {
+        FileOperationRequest::OrganizerMove {
+            operation_id,
+            path,
+            dest_folder,
+            is_undo,
+            ..
+        } => {
+            assert_eq!(operation_id, undo_id);
+            assert_eq!(path, destination);
+            assert_eq!(dest_folder, source_folder);
+            assert!(is_undo);
+        }
+        _ => panic!("expected undo organizer move"),
+    }
 }
 
 #[cfg(feature = "notify-watcher")]

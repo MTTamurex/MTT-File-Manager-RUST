@@ -128,6 +128,14 @@ enum OrganizerCommand {
         conflict_id: crate::domain::organizer_conflict::OrganizerConflictId,
         resolution: OrganizerConflictResolution,
     },
+    RetryOperation {
+        command_id: OrganizerCommandId,
+        operation_id: crate::domain::organizer_operation::OrganizerOperationId,
+    },
+    UndoOperation {
+        command_id: OrganizerCommandId,
+        operation_id: crate::domain::organizer_operation::OrganizerOperationId,
+    },
     Shutdown,
 }
 
@@ -280,6 +288,26 @@ impl OrganizerManager {
             command_id,
             conflict_id,
             resolution,
+        })
+    }
+
+    pub fn retry_operation(
+        &self,
+        operation_id: crate::domain::organizer_operation::OrganizerOperationId,
+    ) -> Result<OrganizerCommandId, OrganizerCommandError> {
+        self.enqueue(move |command_id| OrganizerCommand::RetryOperation {
+            command_id,
+            operation_id,
+        })
+    }
+
+    pub fn undo_operation(
+        &self,
+        operation_id: crate::domain::organizer_operation::OrganizerOperationId,
+    ) -> Result<OrganizerCommandId, OrganizerCommandError> {
+        self.enqueue(move |command_id| OrganizerCommand::UndoOperation {
+            command_id,
+            operation_id,
         })
     }
 

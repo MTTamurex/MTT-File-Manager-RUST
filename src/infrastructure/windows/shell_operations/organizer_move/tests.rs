@@ -24,8 +24,10 @@ fn verified_copy_exposes_only_valid_final_contents() {
     let mut guard = protected_source(&source);
 
     let destination_parent = open_destination_parent(&destination).expect("destination parent");
-    move_across_volumes_verified(&mut guard, &destination, &destination_parent)
-        .expect("verified move");
+    move_across_volumes_verified(&mut guard, &destination, &destination_parent, &mut |_| {
+        Ok(())
+    })
+    .expect("verified move");
     drop(guard);
 
     assert!(!source.exists());
@@ -52,7 +54,10 @@ fn verified_copy_never_replaces_an_existing_final_destination() {
     let mut guard = protected_source(&source);
 
     let destination_parent = open_destination_parent(&destination).expect("destination parent");
-    let result = move_across_volumes_verified(&mut guard, &destination, &destination_parent);
+    let result =
+        move_across_volumes_verified(&mut guard, &destination, &destination_parent, &mut |_| {
+            Ok(())
+        });
     drop(guard);
 
     assert!(result.is_err());
@@ -74,6 +79,73 @@ fn protected_source_handle_prevents_path_replacement() {
     assert!(std::fs::rename(&source, &displaced).is_err());
     assert_eq!(std::fs::read(&source).expect("source remains"), b"source");
     drop(guard);
+}
+
+#[test]
+fn organizer_move_returns_the_protected_destination_snapshot() {
+    let directory = tempfile::tempdir().expect("create directory");
+    let source = directory.path().join("source.txt");
+    let destination = directory.path().join("destination.txt");
+    std::fs::write(&source, b"source").expect("create source");
+    let source_snapshot = organizer_file_snapshot(&source).expect("source snapshot");
+
+    let returned_snapshot =
+        move_organizer_file_without_replace(&source, &destination, source_snapshot)
+            .expect("move organizer file");
+
+    assert_eq!(returned_snapshot, source_snapshot);
+    assert_eq!(
+        returned_snapshot,
+        organizer_file_snapshot(&destination).expect("destination snapshot")
+    );
+}
+
+#[test]
+fn journal_is_written_before_a_same_volume_rename() {
+    let directory = tempfile::tempdir().expect("create directory");
+    let source = directory.path().join("source.txt");
+    let destination = directory.path().join("destination.txt");
+    std::fs::write(&source, b"source").expect("create source");
+    let source_snapshot = organizer_file_snapshot(&source).expect("source snapshot");
+    let mut journaled = false;
+
+    move_organizer_file_without_replace_journaled(
+        &source,
+        &destination,
+        source_snapshot,
+        |snapshot| {
+            assert_eq!(snapshot, source_snapshot);
+            assert!(source.exists());
+            assert!(!destination.exists());
+            journaled = true;
+            Ok(())
+        },
+    )
+    .expect("move organizer file");
+
+    assert!(journaled);
+    assert!(!source.exists());
+    assert!(destination.exists());
+}
+
+#[test]
+fn journal_failure_prevents_the_filesystem_move() {
+    let directory = tempfile::tempdir().expect("create directory");
+    let source = directory.path().join("source.txt");
+    let destination = directory.path().join("destination.txt");
+    std::fs::write(&source, b"source").expect("create source");
+    let source_snapshot = organizer_file_snapshot(&source).expect("source snapshot");
+
+    let result = move_organizer_file_without_replace_journaled(
+        &source,
+        &destination,
+        source_snapshot,
+        |_| Err(std::io::Error::other("journal unavailable")),
+    );
+
+    assert!(result.is_err());
+    assert!(source.exists());
+    assert!(!destination.exists());
 }
 
 #[test]

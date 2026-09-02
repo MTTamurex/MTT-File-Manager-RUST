@@ -1,5 +1,7 @@
 use super::*;
-use crate::workers::file_operation_worker::OrganizerInFlightRegistry;
+use crate::workers::file_operation_worker::{
+    OrganizerInFlightRegistry, OrganizerUndoExemptionRegistry,
+};
 use std::collections::{HashMap, HashSet};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -65,6 +67,13 @@ pub(super) fn run_organizer(
     let mut pending = HashMap::new();
     let mut activation_flags = activation_flags_for(&rules);
     let in_flight = OrganizerInFlightRegistry::default();
+    let undo_exemptions = match app_state_db.list_organizer_undo_exemptions() {
+        Ok(exemptions) => OrganizerUndoExemptionRegistry::new(exemptions),
+        Err(error) => {
+            log::warn!("[ORGANIZER] Failed to load undo exemptions: {error}");
+            OrganizerUndoExemptionRegistry::default()
+        }
+    };
 
     for rule in rules.iter().filter(|rule| rule.enabled) {
         queue_rule_paths(rule, &rules, &activation_flags, &paused_rules, &mut pending);
@@ -139,6 +148,10 @@ pub(super) fn run_organizer(
                 ui_ctx: &ui_ctx,
                 pending_commands: &pending_commands,
                 app_state_db: &app_state_db,
+                in_flight: &in_flight,
+                undo_exemptions: &undo_exemptions,
+                file_operation_sender: &file_operation_sender,
+                shutdown: &shutdown,
             };
             while let Some(command) = next_command {
                 if shutdown.load(Ordering::Acquire) {
@@ -164,7 +177,7 @@ pub(super) fn run_organizer(
             &paused_rules,
             &file_operation_sender,
             &event_sender,
-            &in_flight,
+            (&in_flight, &undo_exemptions),
             &app_state_db,
             &shutdown,
         ) {

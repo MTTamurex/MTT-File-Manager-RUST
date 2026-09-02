@@ -4,12 +4,21 @@ use super::*;
 use crate::domain::organizer_conflict::{
     validate_organizer_conflict_name, OrganizerConflictStatus,
 };
+use crate::domain::organizer_operation::{
+    OrganizerOperationId, OrganizerOperationStatus, OrganizerOperationType,
+};
 use crate::domain::organizer_rule::validate_rule_set;
-use crate::infrastructure::app_state_db::{AppStateDb, OrganizerConflictRecord};
+use crate::infrastructure::app_state_db::{
+    AppStateDb, OrganizerConflictRecord, OrganizerOperationDbError,
+};
 use crate::infrastructure::windows::shell_operations::{
     move_organizer_file_without_replace_guarded_by, organizer_file_snapshot, OrganizerFileSnapshot,
 };
+use crate::workers::file_operation_worker::{
+    FileOperationRequest, OrganizerInFlightRegistry, OrganizerUndoExemptionRegistry,
+};
 use std::path::PathBuf;
+use std::sync::{atomic::AtomicBool, Arc};
 
 pub(super) struct CommandContext<'a> {
     pub(super) rules: &'a mut Vec<OrganizerRule>,
@@ -21,7 +30,12 @@ pub(super) struct CommandContext<'a> {
     pub(super) event_sender: &'a Sender<OrganizerEvent>,
     pub(super) ui_ctx: &'a eframe::egui::Context,
     pub(super) pending_commands: &'a PendingCommandRegistry,
-    pub(super) app_state_db: &'a AppStateDb,
+    pub(super) app_state_db: &'a std::sync::Arc<AppStateDb>,
+    pub(super) in_flight: &'a OrganizerInFlightRegistry,
+    pub(super) undo_exemptions: &'a OrganizerUndoExemptionRegistry,
+    pub(super) file_operation_sender:
+        &'a crossbeam_channel::Sender<crate::workers::file_operation_worker::FileOperationRequest>,
+    pub(super) shutdown: &'a Arc<AtomicBool>,
 }
 
 impl CommandContext<'_> {
@@ -54,6 +68,14 @@ impl CommandContext<'_> {
                 conflict_id,
                 resolution,
             } => self.resolve_conflict(command_id, conflict_id, resolution),
+            OrganizerCommand::RetryOperation {
+                command_id,
+                operation_id,
+            } => self.retry_operation(command_id, operation_id),
+            OrganizerCommand::UndoOperation {
+                command_id,
+                operation_id,
+            } => self.undo_operation(command_id, operation_id),
             OrganizerCommand::Shutdown => true,
         }
     }
@@ -274,6 +296,250 @@ impl CommandContext<'_> {
                 .map(|()| OrganizerCommandResult::ConflictCancelled { conflict_id }),
         };
         self.respond(command_id, result)
+    }
+
+    fn retry_operation(
+        &mut self,
+        command_id: OrganizerCommandId,
+        operation_id: OrganizerOperationId,
+    ) -> bool {
+        let record = match self.app_state_db.get_organizer_operation(operation_id) {
+            Ok(Some(record)) => record,
+            Ok(None) => {
+                return self.respond(command_id, Err(OrganizerCommandError::RetryUnavailable))
+            }
+            Err(error) => {
+                return self.respond(
+                    command_id,
+                    Err(OrganizerCommandError::OperationDispatchFailed {
+                        reason: error.to_string(),
+                    }),
+                )
+            }
+        };
+        if record.operation_type == OrganizerOperationType::Undo
+            || !matches!(
+                record.status,
+                OrganizerOperationStatus::Failed
+                    | OrganizerOperationStatus::Skipped
+                    | OrganizerOperationStatus::Cancelled
+            )
+        {
+            return self.respond(command_id, Err(OrganizerCommandError::RetryUnavailable));
+        }
+        let Some(rule_id) = record.rule_id else {
+            return self.respond(command_id, Err(OrganizerCommandError::RetryUnavailable));
+        };
+        let Some(expected_snapshot) = record.source_snapshot_before else {
+            return self.respond(command_id, Err(OrganizerCommandError::RetryUnavailable));
+        };
+        let Some(rule) = self
+            .rules
+            .iter()
+            .find(|rule| rule.id == rule_id && rule.enabled)
+            .cloned()
+        else {
+            return self.respond(command_id, Err(OrganizerCommandError::RetryUnavailable));
+        };
+        if self.paused_rules.contains(&rule_id) {
+            return self.respond(command_id, Err(OrganizerCommandError::RetryUnavailable));
+        }
+
+        let source = record
+            .effective_source_path
+            .clone()
+            .unwrap_or_else(|| record.source_path.clone());
+        let Ok(source) = safe_organizer_path(&source) else {
+            return self.respond(command_id, Err(OrganizerCommandError::RetryUnavailable));
+        };
+        let Ok(current_snapshot) = organizer_file_snapshot(&source) else {
+            return self.respond(command_id, Err(OrganizerCommandError::RetryUnavailable));
+        };
+        if current_snapshot != expected_snapshot || !rule.matches(&source) {
+            return self.respond(command_id, Err(OrganizerCommandError::RetryUnavailable));
+        }
+        let Some(file_name) = source.file_name() else {
+            return self.respond(command_id, Err(OrganizerCommandError::RetryUnavailable));
+        };
+        let Ok(destination_folder) = safe_organizer_path(&rule.destination_folder) else {
+            return self.respond(command_id, Err(OrganizerCommandError::RetryUnavailable));
+        };
+        if !destination_folder.is_dir() {
+            return self.respond(command_id, Err(OrganizerCommandError::RetryUnavailable));
+        }
+        let destination = destination_folder.join(file_name);
+        let path_key = super::normalize_watched_path(&source);
+        let Some(in_flight_guard) = self.in_flight.try_acquire(path_key) else {
+            return self.respond(command_id, Err(OrganizerCommandError::RetryUnavailable));
+        };
+        let new_operation_id = match self.app_state_db.create_retry_organizer_operation(
+            operation_id,
+            rule_id,
+            &source,
+            &destination,
+            expected_snapshot,
+        ) {
+            Ok(new_operation_id) => new_operation_id,
+            Err(error) => {
+                return self.respond(command_id, Err(retry_command_error(error)));
+            }
+        };
+        let activation = self
+            .activation_flags
+            .get(&rule_id)
+            .cloned()
+            .unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
+        if self
+            .file_operation_sender
+            .send(FileOperationRequest::OrganizerMove {
+                operation_id: new_operation_id,
+                path: source.clone(),
+                dest_folder: destination_folder,
+                rule_id,
+                activation,
+                expected_snapshot,
+                is_undo: false,
+                undo_exemptions: self.undo_exemptions.clone(),
+                in_flight: in_flight_guard,
+                app_state_db: Arc::clone(self.app_state_db),
+                shutdown: Arc::clone(self.shutdown),
+            })
+            .is_err()
+        {
+            let message = rust_i18n::t!("organizer.error_file_worker_unavailable").to_string();
+            if let Err(error) = self.app_state_db.finish_organizer_operation(
+                new_operation_id,
+                OrganizerOperationStatus::Failed,
+                Some(&message),
+            ) {
+                log::error!(
+                    "[ORGANIZER] Failed to finalize undispatched retry {}: {}",
+                    new_operation_id,
+                    error
+                );
+            }
+            return self.respond(
+                command_id,
+                Err(OrganizerCommandError::OperationDispatchFailed { reason: message }),
+            );
+        }
+        self.respond(
+            command_id,
+            Ok(OrganizerCommandResult::RetryQueued {
+                operation_id: new_operation_id,
+                original_operation_id: operation_id,
+            }),
+        )
+    }
+
+    fn undo_operation(
+        &mut self,
+        command_id: OrganizerCommandId,
+        operation_id: OrganizerOperationId,
+    ) -> bool {
+        let record = match self.app_state_db.get_organizer_operation(operation_id) {
+            Ok(Some(record)) => record,
+            Ok(None) => {
+                return self.respond(command_id, Err(OrganizerCommandError::UndoUnavailable))
+            }
+            Err(error) => {
+                return self.respond(
+                    command_id,
+                    Err(OrganizerCommandError::OperationDispatchFailed {
+                        reason: error.to_string(),
+                    }),
+                )
+            }
+        };
+        if record.status != OrganizerOperationStatus::Completed {
+            return self.respond(command_id, Err(OrganizerCommandError::UndoUnavailable));
+        }
+        let (Some(source), Some(destination), Some(expected_snapshot)) = (
+            record.effective_destination_path.clone(),
+            record.effective_source_path.clone(),
+            record.destination_snapshot_after,
+        ) else {
+            return self.respond(command_id, Err(OrganizerCommandError::UndoUnavailable));
+        };
+        let Ok(source) = safe_organizer_path(&source) else {
+            return self.respond(command_id, Err(OrganizerCommandError::UndoUnavailable));
+        };
+        let Ok(destination) = safe_organizer_path(&destination) else {
+            return self.respond(command_id, Err(OrganizerCommandError::UndoUnavailable));
+        };
+        if !source.is_file()
+            || organizer_file_snapshot(&source).ok() != Some(expected_snapshot)
+            || destination.try_exists().unwrap_or(true)
+        {
+            return self.respond(command_id, Err(OrganizerCommandError::UndoUnavailable));
+        }
+        let Some(destination_folder) = destination.parent().map(PathBuf::from) else {
+            return self.respond(command_id, Err(OrganizerCommandError::UndoUnavailable));
+        };
+        if !destination_folder.is_dir() {
+            return self.respond(command_id, Err(OrganizerCommandError::UndoUnavailable));
+        }
+        let source_key = super::normalize_watched_path(&source);
+        let destination_key = super::normalize_watched_path(&destination);
+        let Some(in_flight_guard) = self
+            .in_flight
+            .try_acquire_many([source_key, destination_key])
+        else {
+            return self.respond(command_id, Err(OrganizerCommandError::UndoUnavailable));
+        };
+        let new_operation_id = match self.app_state_db.create_undo_organizer_operation(
+            operation_id,
+            &source,
+            &destination,
+            expected_snapshot,
+        ) {
+            Ok(new_operation_id) => new_operation_id,
+            Err(error) => {
+                return self.respond(command_id, Err(undo_command_error(error)));
+            }
+        };
+        let activation = Arc::new(AtomicBool::new(true));
+        if self
+            .file_operation_sender
+            .send(FileOperationRequest::OrganizerMove {
+                operation_id: new_operation_id,
+                path: source,
+                dest_folder: destination_folder,
+                rule_id: record.rule_id.unwrap_or_default(),
+                activation,
+                expected_snapshot,
+                is_undo: true,
+                undo_exemptions: self.undo_exemptions.clone(),
+                in_flight: in_flight_guard,
+                app_state_db: Arc::clone(self.app_state_db),
+                shutdown: Arc::clone(self.shutdown),
+            })
+            .is_err()
+        {
+            let message = rust_i18n::t!("organizer.error_file_worker_unavailable").to_string();
+            if let Err(error) = self.app_state_db.finish_organizer_operation(
+                new_operation_id,
+                OrganizerOperationStatus::Failed,
+                Some(&message),
+            ) {
+                log::error!(
+                    "[ORGANIZER] Failed to finalize undispatched undo {}: {}",
+                    new_operation_id,
+                    error
+                );
+            }
+            return self.respond(
+                command_id,
+                Err(OrganizerCommandError::OperationDispatchFailed { reason: message }),
+            );
+        }
+        self.respond(
+            command_id,
+            Ok(OrganizerCommandResult::UndoQueued {
+                operation_id: new_operation_id,
+                original_operation_id: operation_id,
+            }),
+        )
     }
 
     fn cancel_conflict(
@@ -547,6 +813,28 @@ impl CommandContext<'_> {
         } else {
             true
         }
+    }
+}
+
+fn retry_command_error(error: OrganizerOperationDbError) -> OrganizerCommandError {
+    match error {
+        OrganizerOperationDbError::NotFound(_) | OrganizerOperationDbError::RetryUnavailable(_) => {
+            OrganizerCommandError::RetryUnavailable
+        }
+        error => OrganizerCommandError::OperationDispatchFailed {
+            reason: error.to_string(),
+        },
+    }
+}
+
+fn undo_command_error(error: OrganizerOperationDbError) -> OrganizerCommandError {
+    match error {
+        OrganizerOperationDbError::NotFound(_) | OrganizerOperationDbError::UndoUnavailable(_) => {
+            OrganizerCommandError::UndoUnavailable
+        }
+        error => OrganizerCommandError::OperationDispatchFailed {
+            reason: error.to_string(),
+        },
     }
 }
 

@@ -154,6 +154,7 @@ fn destination_rename_requeues_a_conflicted_source() {
     let activations = activation_flags_for(&rules);
     let paused_rules = HashSet::new();
     let in_flight = OrganizerInFlightRegistry::default();
+    let undo_exemptions = OrganizerUndoExemptionRegistry::default();
     let app_state_db = Arc::new(
         crate::infrastructure::app_state_db::AppStateDb::new_in_memory().expect("database"),
     );
@@ -178,7 +179,7 @@ fn destination_rename_requeues_a_conflicted_source() {
         &paused_rules,
         &operation_sender,
         &event_sender,
-        &in_flight,
+        (&in_flight, &undo_exemptions),
         &app_state_db,
         &shutdown,
     );
@@ -232,7 +233,7 @@ fn destination_rename_requeues_a_conflicted_source() {
         &paused_rules,
         &operation_sender,
         &event_sender,
-        &in_flight,
+        (&in_flight, &undo_exemptions),
         &app_state_db,
         &shutdown,
     );

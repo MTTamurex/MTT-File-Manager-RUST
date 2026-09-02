@@ -22,6 +22,9 @@ pub use organizer_move::{
     move_file_without_replace, move_organizer_file_without_replace,
     move_organizer_file_without_replace_guarded_by, organizer_file_snapshot, OrganizerFileSnapshot,
 };
+pub(crate) use organizer_move::{
+    move_organizer_file_without_replace_journaled, remove_organizer_file_if_matches,
+};
 pub use shfile_ops::{
     copy_item_with_shell, copy_items_with_shell, delete_item_with_shell,
     delete_items_permanently_with_shell, delete_items_with_shell, move_item_with_shell,

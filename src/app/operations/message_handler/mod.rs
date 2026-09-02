@@ -169,6 +169,8 @@ impl ImageViewerApp {
 
         // BLOCKING: Process all available file operation results in batch
         self.process_file_operation_results(&current_path_norm, ctx);
+        self.organizer_state
+            .reload_history_if_dirty(&self.app_state_db);
         self.flush_organizer_notification_summary();
 
         self.process_tag_assignment_gc_results();

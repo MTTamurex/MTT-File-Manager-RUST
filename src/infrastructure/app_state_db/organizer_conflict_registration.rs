@@ -149,6 +149,10 @@ fn finish_started_operation_with_conflict(
             operation_id,
         ));
     }
+    tx.execute(
+        "DELETE FROM organizer_operation_completions WHERE operation_id = ?1",
+        params![operation_id_text(operation_id)],
+    )?;
     Ok(())
 }
 
@@ -181,6 +185,16 @@ impl AppStateDb {
                 operation_id,
             ));
         }
+
+        tx.execute(
+            "UPDATE organizer_operations
+             SET source_snapshot_before = COALESCE(source_snapshot_before, ?1)
+             WHERE operation_id = ?2",
+            params![
+                source_snapshot.to_bytes().to_vec(),
+                operation_id_text(operation_id),
+            ],
+        )?;
 
         if let Some((_existing_operation_id, conflict_id, status)) = matching_conflict(
             &tx,
@@ -316,9 +330,13 @@ impl AppStateDb {
         let conflict_id = reserve_conflict_id(&tx)?;
         tx.execute(
             "INSERT INTO organizer_operations
-                (operation_id, rule_id, source_path, destination_path, status, started_at,
-                 finished_at, error, conflict_id, source_path_bytes, destination_path_bytes)
-             VALUES (?1, ?2, ?3, ?4, 'skipped', ?5, ?5, NULL, ?6, ?7, ?8)",
+                (operation_id, rule_id, source_path, destination_path, operation_type, status,
+                 created_at, started_at, finished_at, error, conflict_id,
+                 effective_source_path, effective_destination_path, source_snapshot_before,
+                 source_path_bytes, destination_path_bytes, effective_source_path_bytes,
+                 effective_destination_path_bytes)
+             VALUES (?1, ?2, ?3, ?4, 'move', 'skipped', ?5, ?5, ?5, NULL, ?6,
+                     ?3, ?4, ?7, ?8, ?9, ?8, ?9)",
             params![
                 operation_id_text(operation_id),
                 rule_id,
@@ -326,6 +344,7 @@ impl AppStateDb {
                 path_text(destination_path),
                 checked_at,
                 conflict_id_text(conflict_id),
+                source_snapshot.to_bytes().to_vec(),
                 path_bytes(source_path),
                 path_bytes(destination_path),
             ],

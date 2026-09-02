@@ -21,6 +21,7 @@ pub(crate) mod gc;
 mod organizer_conflict_registration;
 mod organizer_conflict_resolutions;
 mod organizer_conflicts;
+mod organizer_operation_schema;
 mod organizer_operations;
 mod organizer_rules;
 mod pinned_folders;
@@ -30,9 +31,58 @@ pub use folder_covers::{FolderCoverReadOutcome, FolderCoverRemoveOutcome};
 pub use organizer_conflicts::{
     OrganizerConflictDbError, OrganizerConflictRecord, OrganizerConflictRegistration,
 };
-pub use organizer_operations::{OrganizerOperationDbError, OrganizerOperationRecord};
+pub use organizer_operations::{
+    OrganizerOperationDbError, OrganizerOperationRecord, DEFAULT_ORGANIZER_HISTORY_RETENTION_DAYS,
+    MAX_ORGANIZER_HISTORY_RETENTION_DAYS, MIN_ORGANIZER_HISTORY_RETENTION_DAYS,
+};
 pub use organizer_rules::OrganizerRuleDbError;
 pub use preferences::PreferenceWriteOutcome;
+
+fn process_creation_time(process_id: u32) -> windows::core::Result<u64> {
+    use windows::Win32::Foundation::{CloseHandle, FILETIME};
+    use windows::Win32::System::Threading::{
+        GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+
+    let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, process_id) }?;
+    let mut creation = FILETIME::default();
+    let mut exit = FILETIME::default();
+    let mut kernel = FILETIME::default();
+    let mut user = FILETIME::default();
+    let result =
+        unsafe { GetProcessTimes(process, &mut creation, &mut exit, &mut kernel, &mut user) };
+    unsafe {
+        let _ = CloseHandle(process);
+    }
+    result?;
+    Ok(((creation.dwHighDateTime as u64) << 32) | creation.dwLowDateTime as u64)
+}
+
+fn process_owner_id() -> String {
+    let process_id = std::process::id();
+    let creation_time = process_creation_time(process_id).unwrap_or_default();
+    format!("{process_id}:{creation_time}")
+}
+
+fn process_owner_is_active(owner_id: &str) -> bool {
+    let Some((process_id, creation_time)) = owner_id.split_once(':') else {
+        return false;
+    };
+    let (Ok(process_id), Ok(creation_time)) =
+        (process_id.parse::<u32>(), creation_time.parse::<u64>())
+    else {
+        return false;
+    };
+    match process_creation_time(process_id) {
+        Ok(actual_creation_time) => actual_creation_time == creation_time,
+        Err(error)
+            if error.code() == windows::Win32::Foundation::ERROR_INVALID_PARAMETER.to_hresult() =>
+        {
+            false
+        }
+        Err(_) => true,
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum AppStateWriteError {
@@ -342,93 +392,7 @@ impl AppStateDb {
         )
         .unwrap_or(0);
 
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS organizer_operations (
-                operation_id TEXT PRIMARY KEY NOT NULL
-                    CHECK(CAST(operation_id AS INTEGER) > 0
-                          AND printf('%lld', CAST(operation_id AS INTEGER)) = operation_id),
-                rule_id INTEGER NOT NULL,
-                source_path TEXT NOT NULL COLLATE NOCASE,
-                destination_path TEXT NOT NULL COLLATE NOCASE,
-                status TEXT NOT NULL CHECK(status IN ('started', 'completed', 'skipped', 'cancelled', 'failed')),
-                started_at INTEGER NOT NULL,
-                finished_at INTEGER,
-                error TEXT,
-                conflict_id TEXT,
-                source_path_bytes BLOB,
-                destination_path_bytes BLOB,
-                CHECK((status = 'started' AND finished_at IS NULL)
-                      OR (status <> 'started' AND finished_at IS NOT NULL))
-            )",
-            [],
-        )?;
-
-        for column in ["source_path_bytes", "destination_path_bytes"] {
-            if conn
-                .prepare(&format!(
-                    "SELECT {column} FROM organizer_operations LIMIT 0"
-                ))
-                .is_err()
-            {
-                conn.execute(
-                    &format!("ALTER TABLE organizer_operations ADD COLUMN {column} BLOB"),
-                    [],
-                )?;
-            }
-        }
-        backfill_organizer_path_blobs(conn, "organizer_operations", "operation_id")?;
-
-        if conn
-            .prepare("SELECT conflict_id FROM organizer_operations LIMIT 0")
-            .is_err()
-        {
-            conn.execute(
-                "ALTER TABLE organizer_operations ADD COLUMN conflict_id TEXT",
-                [],
-            )?;
-        }
-
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS organizer_operation_sequence (
-                singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
-                next_id INTEGER NOT NULL CHECK(next_id > 0)
-            )",
-            [],
-        )?;
-
-        conn.execute(
-            "INSERT OR IGNORE INTO organizer_operation_sequence (singleton, next_id)
-             SELECT 1, COALESCE(MAX(CAST(operation_id AS INTEGER)), 0) + 1
-             FROM organizer_operations",
-            [],
-        )?;
-
-        conn.execute_batch(
-            "CREATE TRIGGER IF NOT EXISTS validate_organizer_operation_insert
-             BEFORE INSERT ON organizer_operations
-             WHEN NEW.operation_id IS NULL
-                  OR CAST(NEW.operation_id AS INTEGER) <= 0
-                  OR printf('%lld', CAST(NEW.operation_id AS INTEGER)) <> NEW.operation_id
-                  OR (NEW.status = 'started') <> (NEW.finished_at IS NULL)
-             BEGIN
-                 SELECT RAISE(ABORT, 'invalid organizer operation');
-             END;
-             CREATE TRIGGER IF NOT EXISTS validate_organizer_operation_update
-             BEFORE UPDATE ON organizer_operations
-             WHEN NEW.operation_id IS NULL
-                  OR CAST(NEW.operation_id AS INTEGER) <= 0
-                  OR printf('%lld', CAST(NEW.operation_id AS INTEGER)) <> NEW.operation_id
-                  OR (NEW.status = 'started') <> (NEW.finished_at IS NULL)
-             BEGIN
-                 SELECT RAISE(ABORT, 'invalid organizer operation');
-             END;",
-        )?;
-
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_organizer_operations_started_at
-             ON organizer_operations(started_at DESC)",
-            [],
-        )?;
+        organizer_operation_schema::migrate(conn)?;
 
         conn.execute(
             "CREATE TABLE IF NOT EXISTS organizer_conflicts (

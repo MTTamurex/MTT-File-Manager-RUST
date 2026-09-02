@@ -72,17 +72,45 @@ pub fn organizer_file_snapshot(path: &Path) -> std::io::Result<OrganizerFileSnap
     snapshot_from_file(&file)
 }
 
+pub(crate) fn remove_organizer_file_if_matches(
+    path: &Path,
+    expected: OrganizerFileSnapshot,
+) -> std::io::Result<()> {
+    use std::os::windows::fs::OpenOptionsExt;
+
+    let file = std::fs::OpenOptions::new()
+        .access_mode(FILE_GENERIC_READ.0 | DELETE.0)
+        .share_mode(FILE_SHARE_READ.0)
+        .open(path)?;
+    if snapshot_from_file(&file)? != expected {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "organizer file changed before cleanup",
+        ));
+    }
+    mark_file_for_deletion(&file)
+}
+
 /// Moves a file without replacing an existing destination.
 pub fn move_file_without_replace(source: &Path, destination: &Path) -> std::io::Result<()> {
-    move_file_without_replace_impl(source, destination, None)
+    move_file_without_replace_impl(source, destination, None, |_| Ok(())).map(|_| ())
 }
 
 pub fn move_organizer_file_without_replace(
     source: &Path,
     destination: &Path,
     expected: OrganizerFileSnapshot,
-) -> std::io::Result<()> {
-    move_file_without_replace_impl(source, destination, Some(expected))
+) -> std::io::Result<OrganizerFileSnapshot> {
+    move_file_without_replace_impl(source, destination, Some(expected), |_| Ok(()))
+}
+
+pub(crate) fn move_organizer_file_without_replace_journaled(
+    source: &Path,
+    destination: &Path,
+    expected: OrganizerFileSnapshot,
+    journal: impl FnMut(OrganizerFileSnapshot) -> std::io::Result<()>,
+) -> std::io::Result<OrganizerFileSnapshot> {
+    move_file_without_replace_impl(source, destination, Some(expected), journal)
 }
 
 pub fn move_organizer_file_without_replace_guarded_by(
@@ -105,14 +133,19 @@ pub fn move_organizer_file_without_replace_guarded_by(
             "guarded organizer file changed before the move",
         ));
     }
-    move_file_without_replace_impl(source, destination, Some(expected_source))
+    move_file_without_replace_impl(source, destination, Some(expected_source), |_| Ok(()))
+        .map(|_| ())
 }
 
-fn move_file_without_replace_impl(
+fn move_file_without_replace_impl<F>(
     source: &Path,
     destination: &Path,
     expected: Option<OrganizerFileSnapshot>,
-) -> std::io::Result<()> {
+    mut before_publish: F,
+) -> std::io::Result<OrganizerFileSnapshot>
+where
+    F: FnMut(OrganizerFileSnapshot) -> std::io::Result<()>,
+{
     use std::os::windows::fs::OpenOptionsExt;
 
     // DELETE access plus no write/delete sharing locks this exact file identity
@@ -121,8 +154,9 @@ fn move_file_without_replace_impl(
         .access_mode(FILE_GENERIC_READ.0 | DELETE.0)
         .share_mode(FILE_SHARE_READ.0)
         .open(source)?;
+    let source_snapshot = snapshot_from_file(&source_guard)?;
     if let Some(expected) = expected {
-        if snapshot_from_file(&source_guard)? != expected {
+        if source_snapshot != expected {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 "source file changed before the organizer move",
@@ -130,16 +164,22 @@ fn move_file_without_replace_impl(
         }
     }
     let destination_parent_guard = open_destination_parent(destination)?;
+    before_publish(source_snapshot)?;
 
     // Let the filesystem determine whether this is a native rename. Only an
     // explicit cross-device error enters the verified copy/delete fallback.
     match rename_file_handle(&source_guard, destination) {
-        Ok(()) => return Ok(()),
+        Ok(()) => return Ok(source_snapshot),
         Err(error) if error.raw_os_error() == Some(17) => {}
         Err(error) => return Err(error),
     }
 
-    move_across_volumes_verified(&mut source_guard, destination, &destination_parent_guard)
+    move_across_volumes_verified(
+        &mut source_guard,
+        destination,
+        &destination_parent_guard,
+        &mut before_publish,
+    )
 }
 
 fn open_destination_parent(destination: &Path) -> std::io::Result<std::fs::File> {
@@ -218,11 +258,15 @@ fn same_windows_path(left: &Path, right: &Path) -> bool {
     comparable(left).eq_ignore_ascii_case(&comparable(right))
 }
 
-fn move_across_volumes_verified(
+fn move_across_volumes_verified<F>(
     source: &mut std::fs::File,
     destination: &Path,
     _destination_parent_guard: &std::fs::File,
-) -> std::io::Result<()> {
+    before_publish: &mut F,
+) -> std::io::Result<OrganizerFileSnapshot>
+where
+    F: FnMut(OrganizerFileSnapshot) -> std::io::Result<()>,
+{
     use std::os::windows::fs::OpenOptionsExt;
     use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -279,13 +323,19 @@ fn move_across_volumes_verified(
                 "cross-volume organizer copy failed integrity validation",
             ));
         }
+        let destination_snapshot = snapshot_from_file(&copied)?;
+        before_publish(destination_snapshot)?;
         rename_file_handle(&copied, destination)?;
-        copied.sync_all()
+        copied.sync_all()?;
+        Ok(destination_snapshot)
     })();
-    if let Err(error) = publish_result {
-        let _ = mark_file_for_deletion(&copied);
-        return Err(error);
-    }
+    let destination_snapshot = match publish_result {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            let _ = mark_file_for_deletion(&copied);
+            return Err(error);
+        }
+    };
 
     // The final destination data and rename have both been flushed. Delete the exact
     // guarded source identity rather than whatever currently occupies its path.
@@ -301,7 +351,7 @@ fn move_across_volumes_verified(
         }
         return Err(error);
     }
-    Ok(())
+    Ok(destination_snapshot)
 }
 
 fn rename_file_handle(file: &std::fs::File, destination: &Path) -> std::io::Result<()> {

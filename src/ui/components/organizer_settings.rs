@@ -13,9 +13,11 @@ use rust_i18n::t;
 use std::path::PathBuf;
 
 mod conflicts;
+mod history;
 mod status;
 
 use conflicts::render_conflicts;
+use history::render_history;
 use status::{render_folder_creation_confirmation, status_label};
 
 pub fn render_organizer_settings_section(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
@@ -35,6 +37,7 @@ pub fn render_organizer_settings_section(ui: &mut egui::Ui, app: &mut ImageViewe
     }
     render_folder_creation_confirmation(app, ui.ctx());
     render_conflicts(ui, app, dark_mode);
+    render_history(ui, app, dark_mode);
 }
 
 fn render_rule_form(ui: &mut egui::Ui, app: &mut ImageViewerApp, dark_mode: bool) -> egui::Rect {
