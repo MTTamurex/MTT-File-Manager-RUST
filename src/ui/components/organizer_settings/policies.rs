@@ -11,68 +11,73 @@ pub(super) fn render_conflict_policy(ui: &mut egui::Ui, app: &mut ImageViewerApp
         RichText::new(t!("organizer.conflict_policy"))
             .color(theme::secondary_text_color(dark_mode)),
     );
-    ui.horizontal_wrapped(|ui| {
-        let selected = policy_label(&app.organizer_state.conflict_policy);
-        egui::ComboBox::from_id_salt("organizer_conflict_policy")
-            .selected_text(selected)
-            .show_ui(ui, |ui| {
-                if ui
-                    .selectable_label(
-                        matches!(
-                            &app.organizer_state.conflict_policy,
-                            OrganizerConflictPolicy::Ask
-                        ),
-                        t!("organizer.conflict_policy_ask"),
-                    )
-                    .clicked()
-                {
-                    app.organizer_state.conflict_policy = OrganizerConflictPolicy::Ask;
-                }
-                if ui
-                    .selectable_label(
-                        matches!(
-                            &app.organizer_state.conflict_policy,
-                            OrganizerConflictPolicy::Skip
-                        ),
-                        t!("organizer.conflict_policy_skip"),
-                    )
-                    .clicked()
-                {
-                    app.organizer_state.conflict_policy = OrganizerConflictPolicy::Skip;
-                }
-                if ui
-                    .selectable_label(
-                        matches!(
-                            &app.organizer_state.conflict_policy,
-                            OrganizerConflictPolicy::AutoRenameSource
-                        ),
-                        t!("organizer.conflict_policy_auto_rename"),
-                    )
-                    .clicked()
-                {
-                    app.organizer_state.conflict_policy = OrganizerConflictPolicy::AutoRenameSource;
-                }
-                if ui
-                    .selectable_label(
-                        matches!(
-                            &app.organizer_state.conflict_policy,
-                            OrganizerConflictPolicy::MoveToConflictFolder(_)
-                        ),
-                        t!("organizer.conflict_policy_folder"),
-                    )
-                    .clicked()
-                {
-                    app.organizer_state.conflict_policy =
-                        OrganizerConflictPolicy::MoveToConflictFolder(PathBuf::from(
-                            app.organizer_state.conflict_folder_input.trim(),
-                        ));
-                }
-            });
-        ui.label(
-            RichText::new(t!("organizer.conflict_policy_hint"))
-                .small()
-                .color(theme::secondary_text_color(dark_mode)),
-        );
+    ui.vertical(|ui| {
+        // Keep the selector clear of a wrapped presets row above it.
+        ui.add_space(8.0);
+        ui.horizontal_wrapped(|ui| {
+            let selected = policy_label(&app.organizer_state.conflict_policy);
+            egui::ComboBox::from_id_salt("organizer_conflict_policy")
+                .selected_text(selected)
+                .show_ui(ui, |ui| {
+                    if ui
+                        .selectable_label(
+                            matches!(
+                                &app.organizer_state.conflict_policy,
+                                OrganizerConflictPolicy::Ask
+                            ),
+                            t!("organizer.conflict_policy_ask"),
+                        )
+                        .clicked()
+                    {
+                        app.organizer_state.conflict_policy = OrganizerConflictPolicy::Ask;
+                    }
+                    if ui
+                        .selectable_label(
+                            matches!(
+                                &app.organizer_state.conflict_policy,
+                                OrganizerConflictPolicy::Skip
+                            ),
+                            t!("organizer.conflict_policy_skip"),
+                        )
+                        .clicked()
+                    {
+                        app.organizer_state.conflict_policy = OrganizerConflictPolicy::Skip;
+                    }
+                    if ui
+                        .selectable_label(
+                            matches!(
+                                &app.organizer_state.conflict_policy,
+                                OrganizerConflictPolicy::AutoRenameSource
+                            ),
+                            t!("organizer.conflict_policy_auto_rename"),
+                        )
+                        .clicked()
+                    {
+                        app.organizer_state.conflict_policy =
+                            OrganizerConflictPolicy::AutoRenameSource;
+                    }
+                    if ui
+                        .selectable_label(
+                            matches!(
+                                &app.organizer_state.conflict_policy,
+                                OrganizerConflictPolicy::MoveToConflictFolder(_)
+                            ),
+                            t!("organizer.conflict_policy_folder"),
+                        )
+                        .clicked()
+                    {
+                        app.organizer_state.conflict_policy =
+                            OrganizerConflictPolicy::MoveToConflictFolder(PathBuf::from(
+                                app.organizer_state.conflict_folder_input.trim(),
+                            ));
+                    }
+                });
+            ui.label(
+                RichText::new(t!("organizer.conflict_policy_hint"))
+                    .small()
+                    .color(theme::secondary_text_color(dark_mode)),
+            );
+        });
     });
     ui.end_row();
     if matches!(
