@@ -46,10 +46,6 @@ impl CommandContext<'_> {
                 command_id,
                 rules: new_rules,
             } => self.set_rules(command_id, new_rules),
-            OrganizerCommand::RunRuleNow {
-                command_id,
-                rule_id,
-            } => self.run_rule_now(command_id, rule_id),
             OrganizerCommand::PauseRule {
                 command_id,
                 rule_id,
@@ -58,7 +54,6 @@ impl CommandContext<'_> {
                 command_id,
                 rule_id,
             } => self.resume_rule(command_id, rule_id),
-            OrganizerCommand::Refresh { command_id } => self.refresh(command_id),
             OrganizerCommand::CreateFolder {
                 command_id,
                 rule_id,
@@ -118,26 +113,6 @@ impl CommandContext<'_> {
         )
     }
 
-    fn run_rule_now(&mut self, command_id: OrganizerCommandId, rule_id: i64) -> bool {
-        let Some(rule) = self.rules.iter().find(|rule| rule.id == rule_id) else {
-            return self.rule_unavailable(command_id);
-        };
-        if !rule.enabled || self.paused_rules.contains(&rule_id) {
-            return self.rule_unavailable(command_id);
-        }
-        queue_rule_paths(
-            rule,
-            self.rules,
-            self.activation_flags,
-            self.paused_rules,
-            self.pending,
-        );
-        self.respond(
-            command_id,
-            Ok(OrganizerCommandResult::RuleRunQueued { rule_id }),
-        )
-    }
-
     fn pause_rule(&mut self, command_id: OrganizerCommandId, rule_id: i64) -> bool {
         if !self
             .rules
@@ -180,25 +155,6 @@ impl CommandContext<'_> {
         self.respond(
             command_id,
             Ok(OrganizerCommandResult::RuleResumed { rule_id }),
-        )
-    }
-
-    fn refresh(&mut self, command_id: OrganizerCommandId) -> bool {
-        reset_watcher(self.watcher_runtime);
-        for rule in self.rules.iter().filter(|rule| rule.enabled) {
-            queue_rule_paths(
-                rule,
-                self.rules,
-                self.activation_flags,
-                self.paused_rules,
-                self.pending,
-            );
-        }
-        self.respond(
-            command_id,
-            Ok(OrganizerCommandResult::RefreshQueued {
-                enabled_rule_count: self.rules.iter().filter(|rule| rule.enabled).count(),
-            }),
         )
     }
 

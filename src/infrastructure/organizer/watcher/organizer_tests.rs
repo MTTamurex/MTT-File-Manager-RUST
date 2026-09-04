@@ -25,14 +25,20 @@ fn runtime_exit_fails_every_unconfirmed_command() {
         .register_and_send(
             first,
             &command_sender,
-            OrganizerCommand::Refresh { command_id: first },
+            OrganizerCommand::SetRules {
+                command_id: first,
+                rules: Vec::new(),
+            },
         )
         .expect("register first command");
     pending_commands
         .register_and_send(
             second,
             &command_sender,
-            OrganizerCommand::Refresh { command_id: second },
+            OrganizerCommand::SetRules {
+                command_id: second,
+                rules: Vec::new(),
+            },
         )
         .expect("register second command");
     let (event_sender, event_receiver) = std::sync::mpsc::channel();

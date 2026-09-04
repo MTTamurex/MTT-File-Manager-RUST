@@ -289,10 +289,6 @@ fn render_rules(ui: &mut egui::Ui, app: &mut ImageViewerApp, dark_mode: bool) ->
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 if rule.enabled && status == OrganizerRuleStatus::Active {
-                    if ui.button(t!("organizer.run_now")).clicked() {
-                        let result = app.organizer_state.manager.run_rule_now(rule.id);
-                        report_command_error(app, result);
-                    }
                     if ui.button(t!("organizer.pause")).clicked() {
                         let result = app.organizer_state.manager.pause_rule(rule.id);
                         report_command_error(app, result);
@@ -327,27 +323,22 @@ fn render_rules(ui: &mut egui::Ui, app: &mut ImageViewerApp, dark_mode: bool) ->
                             source: false,
                         });
                 }
-                if rule.enabled && ui.button(t!("organizer.refresh")).clicked() {
-                    let result = app.organizer_state.manager.refresh();
-                    report_command_error(app, result);
-                }
                 let previewing = app.organizer_state.is_previewing(rule.id);
-                if ui
-                    .add_enabled(
-                        rule.enabled && !previewing,
-                        egui::Button::new(t!("organizer.preview")),
-                    )
-                    .clicked()
-                {
-                    if let Err(error) = app
-                        .organizer_state
-                        .start_preview(rule.clone(), app.ui_ctx.clone())
+                if !rule.enabled {
+                    if ui
+                        .add_enabled(!previewing, egui::Button::new(t!("organizer.preview")))
+                        .clicked()
                     {
-                        app.notifications.warning(error);
+                        if let Err(error) = app
+                            .organizer_state
+                            .start_preview(rule.clone(), app.ui_ctx.clone())
+                        {
+                            app.notifications.warning(error);
+                        }
                     }
-                }
-                if previewing {
-                    ui.spinner();
+                    if previewing {
+                        ui.spinner();
+                    }
                 }
                 if ui.button(t!("organizer.edit")).clicked() {
                     edit_clicked = true;

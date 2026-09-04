@@ -103,10 +103,6 @@ enum OrganizerCommand {
         command_id: OrganizerCommandId,
         rules: Vec<OrganizerRule>,
     },
-    RunRuleNow {
-        command_id: OrganizerCommandId,
-        rule_id: i64,
-    },
     PauseRule {
         command_id: OrganizerCommandId,
         rule_id: i64,
@@ -114,9 +110,6 @@ enum OrganizerCommand {
     ResumeRule {
         command_id: OrganizerCommandId,
         rule_id: i64,
-    },
-    Refresh {
-        command_id: OrganizerCommandId,
     },
     CreateFolder {
         command_id: OrganizerCommandId,
@@ -242,13 +235,6 @@ impl OrganizerManager {
         self.enqueue(move |command_id| OrganizerCommand::SetRules { command_id, rules })
     }
 
-    pub fn run_rule_now(&self, rule_id: i64) -> Result<OrganizerCommandId, OrganizerCommandError> {
-        self.enqueue(move |command_id| OrganizerCommand::RunRuleNow {
-            command_id,
-            rule_id,
-        })
-    }
-
     pub fn pause_rule(&self, rule_id: i64) -> Result<OrganizerCommandId, OrganizerCommandError> {
         self.enqueue(move |command_id| OrganizerCommand::PauseRule {
             command_id,
@@ -261,10 +247,6 @@ impl OrganizerManager {
             command_id,
             rule_id,
         })
-    }
-
-    pub fn refresh(&self) -> Result<OrganizerCommandId, OrganizerCommandError> {
-        self.enqueue(|command_id| OrganizerCommand::Refresh { command_id })
     }
 
     pub fn create_missing_folder(

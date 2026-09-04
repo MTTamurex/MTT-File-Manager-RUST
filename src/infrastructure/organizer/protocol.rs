@@ -16,17 +16,11 @@ pub enum OrganizerCommandResult {
     RulesUpdated {
         rule_count: usize,
     },
-    RuleRunQueued {
-        rule_id: i64,
-    },
     RulePaused {
         rule_id: i64,
     },
     RuleResumed {
         rule_id: i64,
-    },
-    RefreshQueued {
-        enabled_rule_count: usize,
     },
     FolderReady {
         rule_id: i64,

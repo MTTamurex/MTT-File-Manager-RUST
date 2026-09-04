@@ -46,7 +46,10 @@ fn runtime_stop_and_command_registration_are_atomic() {
             worker_registry.register_and_send(
                 command_id,
                 &command_sender,
-                OrganizerCommand::Refresh { command_id },
+                OrganizerCommand::SetRules {
+                    command_id,
+                    rules: Vec::new(),
+                },
             )
         });
 
@@ -182,18 +185,6 @@ fn commands_return_typed_success_confirmations() {
         receive_command_result(&manager, resume_id),
         Ok(OrganizerCommandResult::RuleResumed { rule_id: 7 })
     );
-    let run_id = manager.run_rule_now(7).expect("queue run");
-    assert_eq!(
-        receive_command_result(&manager, run_id),
-        Ok(OrganizerCommandResult::RuleRunQueued { rule_id: 7 })
-    );
-    let refresh_id = manager.refresh().expect("queue refresh");
-    assert_eq!(
-        receive_command_result(&manager, refresh_id),
-        Ok(OrganizerCommandResult::RefreshQueued {
-            enabled_rule_count: 1
-        })
-    );
     let folder_id = manager
         .create_missing_folder(7, true)
         .expect("queue folder creation");
@@ -243,12 +234,12 @@ fn rejected_command_returns_typed_error_without_stopping_runtime() {
         ))
     );
 
-    let refresh_id = manager.refresh().expect("queue refresh after rejection");
+    let rules_id = manager
+        .set_rules(Vec::new())
+        .expect("queue rules after rejection");
     assert_eq!(
-        receive_command_result(&manager, refresh_id),
-        Ok(OrganizerCommandResult::RefreshQueued {
-            enabled_rule_count: 0
-        })
+        receive_command_result(&manager, rules_id),
+        Ok(OrganizerCommandResult::RulesUpdated { rule_count: 0 })
     );
 }
 
@@ -659,7 +650,7 @@ fn commands_fail_immediately_when_watcher_is_disabled() {
     );
 
     assert_eq!(
-        manager.refresh(),
+        manager.set_rules(Vec::new()),
         Err(OrganizerCommandError::ManagerUnavailable)
     );
 }
