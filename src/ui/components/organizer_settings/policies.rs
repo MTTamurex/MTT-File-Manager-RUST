@@ -73,7 +73,7 @@ pub(super) fn render_conflict_policy(ui: &mut egui::Ui, app: &mut ImageViewerApp
                     }
                 });
             ui.label(
-                RichText::new(t!("organizer.conflict_policy_hint"))
+                RichText::new(policy_hint(&app.organizer_state.conflict_policy))
                     .small()
                     .color(theme::secondary_text_color(dark_mode)),
             );
@@ -142,5 +142,12 @@ pub(super) fn policy_label(policy: &OrganizerConflictPolicy) -> String {
         OrganizerConflictPolicy::MoveToConflictFolder(_) => {
             t!("organizer.conflict_policy_folder").to_string()
         }
+    }
+}
+
+fn policy_hint(policy: &OrganizerConflictPolicy) -> String {
+    match policy {
+        OrganizerConflictPolicy::Ask => t!("organizer.conflict_policy_manual_hint").to_string(),
+        _ => t!("organizer.conflict_policy_hint").to_string(),
     }
 }

@@ -113,7 +113,7 @@ pub fn render_settings_window(
         .title_bar(false)
         .collapsible(false)
         .resizable(true)
-        .default_width(760.0)
+        .default_width(912.0)
         .default_height(480.0)
         .min_width(700.0)
         .min_height(420.0)
