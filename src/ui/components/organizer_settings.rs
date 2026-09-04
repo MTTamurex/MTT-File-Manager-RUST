@@ -230,11 +230,6 @@ fn render_rules(ui: &mut egui::Ui, app: &mut ImageViewerApp, dark_mode: bool) ->
                 if display != extensions_text {
                     label_resp.on_hover_text(extensions_text.clone());
                 }
-                ui.label(
-                    RichText::new(status_label(status))
-                        .small()
-                        .color(theme::secondary_text_color(dark_mode)),
-                );
                 let toggle_label = format!("{}: {}", t!("organizer.enabled"), extensions_text);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let toggle = settings_ui::toggle_switch(ui, &mut rule.enabled, &toggle_label)
@@ -383,6 +378,13 @@ fn render_rules(ui: &mut egui::Ui, app: &mut ImageViewerApp, dark_mode: bool) ->
                         Err(error) => app.notifications.warning(db_error_message(error)),
                     }
                 }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(
+                        RichText::new(status_label(status))
+                            .small()
+                            .color(theme::secondary_text_color(dark_mode)),
+                    );
+                });
             });
         });
         ui.add_space(8.0);
