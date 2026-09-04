@@ -117,7 +117,7 @@ foreach ($file in $requiredFiles) {
 # Update these hashes when upgrading the corresponding libraries.
 $dllHashes = @{
     "$RepoRoot\target\release\pdfium.dll"   = "7167AEE6BB3D2724EE62FD83BBEB8883EDC786A6E1999782857D4952536A0ED3"
-    "$RepoRoot\target\release\libmpv-2.dll"  = "8F77950F7D98770B1FFB1D02742C1EE5A17F9C05BCCE0723693188C69CC7C865"
+    "$RepoRoot\target\release\libmpv-2.dll"  = "AE7B7B6B3ECCC7AEEFF3CBEF30FD175F97B27F1B815F89D0BD0CCA926C8C2D99"
 }
 
 $hashFailed = $false

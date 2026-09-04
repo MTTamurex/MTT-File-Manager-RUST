@@ -143,9 +143,9 @@ Notes:
 - Prefer a shared-library LGPL build if you want simpler downstream
   redistribution terms.
 - The currently staged `libmpv-2.dll` is the shinchiro SourceForge package
-  `mpv-dev-x86_64-v3-20260419-git-06f4ce7.7z`, has version metadata
+  `mpv-dev-x86_64-20260419-git-06f4ce7.7z`, has version metadata
   `v0.41.0-514-g06f4ce75a`, SHA-256
-  `8F77950F7D98770B1FFB1D02742C1EE5A17F9C05BCCE0723693188C69CC7C865`, and an
+  `AE7B7B6B3ECCC7AEEFF3CBEF30FD175F97B27F1B815F89D0BD0CCA926C8C2D99`, and an
   embedded comment stating that mpv is distributed under the GNU GPL version 2
   or later.
 - Before publishing a public installer, record the exact DLL source/build

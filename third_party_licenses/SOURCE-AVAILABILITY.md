@@ -17,13 +17,13 @@ License:
 
 Current installer component:
 - `libmpv-2.dll`
-- SHA-256: `8F77950F7D98770B1FFB1D02742C1EE5A17F9C05BCCE0723693188C69CC7C865`
+- SHA-256: `AE7B7B6B3ECCC7AEEFF3CBEF30FD175F97B27F1B815F89D0BD0CCA926C8C2D99`
 - Version metadata: `v0.41.0-514-g06f4ce75a`
 - Embedded comment: `mpv is distributed under the terms of the GNU General
   Public License Version 2 or later.`
-- Exact binary package: `mpv-dev-x86_64-v3-20260419-git-06f4ce7.7z`
+- Exact binary package: `mpv-dev-x86_64-20260419-git-06f4ce7.7z`
 - Exact binary package URL:
-  https://sourceforge.net/projects/mpv-player-windows/files/libmpv/mpv-dev-x86_64-v3-20260419-git-06f4ce7.7z/download
+  https://sourceforge.net/projects/mpv-player-windows/files/libmpv/mpv-dev-x86_64-20260419-git-06f4ce7.7z/download
 
 Known source/build locations:
 - mpv upstream source: https://github.com/mpv-player/mpv
