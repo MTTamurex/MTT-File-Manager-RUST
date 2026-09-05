@@ -2730,6 +2730,11 @@ end
 -- Other important stuff
 --
 
+function kill_animation()
+    state.anistart = nil
+    state.animation = nil
+    state.anitype = nil
+end
 
 function show_osc()
     -- show when disabled can happen (e.g. mouse_move) due to async/delayed unbinding
@@ -2780,14 +2785,17 @@ function osc_visible(visible)
 end
 
 function pause_state(name, enabled)
+    local was_paused = state.paused
     state.paused = enabled
     mp.add_timeout(0.1, function() state.osd:update() end) 
     if user_opts.showonpause then
-		if enabled then
-			state.lastvisibility = user_opts.visibility
-			visibility_mode("always", true)
-			show_osc()
-		else
+		if enabled == true then
+			if was_paused ~= true then
+				state.lastvisibility = user_opts.visibility
+				visibility_mode("always", true)
+				show_osc()
+			end
+		elseif enabled == false and was_paused == true then
 			visibility_mode(state.lastvisibility, true)
 		end
 	end
@@ -3228,6 +3236,19 @@ function enable_osc(enable)
     end
 end
 
+function restore_osc_after_playback_start()
+    kill_animation()
+    state.idle = false
+    state.initREQ = true
+
+    if state.enabled then
+        do_enable_keybindings()
+        show_osc()
+    end
+
+    request_tick()
+end
+
 -- duration is observed for the sole purpose of updating chapter markers
 -- positions. live streams with chapters are very rare, and the update is also
 -- expensive (with request_init), so it's only observed when we have chapters
@@ -3255,6 +3276,16 @@ update_duration_watch()
 
 mp.register_event('shutdown', shutdown)
 mp.register_event('start-file', request_init)
+mp.register_event('file-loaded', function()
+    -- Let queued property notifications settle before restoring the OSC. This
+    -- prevents a late pause=false callback from immediately hiding it again.
+    mp.add_timeout(0, function()
+        local idle = mp.get_property_bool('idle-active', true)
+        local eof = mp.get_property_bool('eof-reached', false)
+        if idle and not eof then return end
+        restore_osc_after_playback_start()
+    end)
+end)
 mp.observe_property('track-list', nil, request_init)
 mp.observe_property('playlist', nil, request_init)
 mp.observe_property('user-data/vsr/rtx-supported', 'bool', function(_, _)
@@ -3308,8 +3339,24 @@ mp.observe_property('window-maximized', 'bool',
 )
 mp.observe_property('idle-active', 'bool',
     function(name, val)
-        state.idle = val
+        if val == nil then return end
+
+        -- keep-open retains a visible frame at EOF; treating it as idle would
+        -- disable the OSC bindings and strand the borderless window.
+        state.idle = val == true and not mp.get_property_bool('eof-reached', false)
+        if state.idle then
+            kill_animation()
+        end
         request_tick()
+    end
+)
+mp.observe_property('eof-reached', 'bool',
+    function(name, val)
+        -- The EOF notification can arrive after idle-active=true.
+        if val == true and state.idle then
+            state.idle = false
+            request_tick()
+        end
     end
 )
 mp.observe_property('pause', 'bool', pause_state)

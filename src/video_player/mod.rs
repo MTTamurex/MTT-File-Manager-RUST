@@ -1092,15 +1092,6 @@ fn run_standalone_source(source: PlaybackSource, position: f64, volume: f32) -> 
                 #[cfg(target_os = "windows")]
                 set_mpv_window_icon(&mpv);
 
-                // Force the custom OSC (modernH.lua) to show.  Avoids a race
-                // where the show/hide key bindings can be stuck in the "disabled"
-                // state after the idle → playing transition.  Sending
-                // osc-visibility "always" then "auto" forces the script to
-                // re-enable input bindings and immediately display the OSC,
-                // after which it auto-hides normally.
-                let _ = mpv.command("script-message", &["osc-visibility", "always", "1"]);
-                let _ = mpv.command("script-message", &["osc-visibility", "auto", "1"]);
-
                 // Log effective GPU pipeline for VSR debugging
                 let vo = mpv.get_property::<String>("vo").unwrap_or_default();
                 let gpu_api = mpv.get_property::<String>("gpu-api").unwrap_or_default();
