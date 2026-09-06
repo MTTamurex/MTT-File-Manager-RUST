@@ -122,7 +122,7 @@ The app supports three rendering backend choices, selectable in **Settings > Gen
 - Does not use the DX12 DirectComposition presentation path
 
 ### Glow — OpenGL (Fallback)
-- Recommended fallback when DirectX 12 is unavailable or unstable on the machine
+- Fallback when DirectX 12 or Vulkan is unavailable or unstable on your system.
 - Uses eframe's `Glow` renderer directly instead of `wgpu`'s OpenGL backend
 - OpenGL texture uploads can be synchronous on the CPU thread, so the app applies more conservative thumbnail and folder-preview upload limits on this backend
 
