@@ -34,7 +34,7 @@
 
 ### Image, PDF & Text Viewers
 - **Consistent dedicated windows** — Images, PDF documents, and text files open in lightweight viewer windows with shared dark/light styling, themed toolbars, and native title bar integration
-- **Image viewer** — Uses a bounded sliding-window GPU texture cache, hidden-first startup, multi-threaded decoding, zoom controls, and drag-to-pan navigation for zoomed images; copy the displayed image as both a bitmap and file, delete through Windows Shell, or switch to full screen with F11
+- **Image viewer** — Uses a bounded sliding-window GPU texture cache, hidden-first startup, multi-threaded decoding, zoom controls, and drag-to-pan navigation for zoomed images; copy the displayed image as both a bitmap and file, delete through Windows Shell, crop with a rotation-aware selection and safe save workflow, or switch to full screen with F11. Crops can replace supported raster images after confirmation or be saved as PNG, JPEG, WebP, BMP, or TIFF; animated GIFs export the displayed frame
 - **PDF viewer** — Uses native PDFium rendering with asynchronous document loading, prioritized progressive rendering, virtualized pages and thumbnails, bounded texture caching, and keyboard navigation in the thumbnail sidebar
 - **Text viewer** — Opens plain text, source code, logs, and markup files in a focused viewer with search and go-to-line controls
 
@@ -71,6 +71,7 @@
 - **Tag filters** — Narrow global search results to any tagged item or to specific tags
 - **File interactions** — Select multiple results, use range selection, copy or cut files, rename inline, open the Windows context menu, and drag results to folders or other applications
 - **Responsive tagged search** — Tagged results are resolved asynchronously and stale requests are cancelled when the query or filters change
+- **Initial indexing feedback** — After an installer-driven index rebuild, a persistent notification reports preparation and live item counts until every indexed volume is ready
 
 > **Disclaimer:** Global Search reads the NTFS/ReFS USN Journal and MFT, and drive health queries access physical storage devices. Because Windows restricts these operations, the installer registers a dedicated Windows Service that runs with administrative rights. This is the **only** component of MTT File Manager that requires elevated installation privileges.
 
@@ -89,9 +90,13 @@
 ### Automatic File Organizer
 - **Persistent rules** — Automatically move files from a source folder to a destination based on file extensions
 - **Extension presets** — Quickly configure rules for documents, images, videos, audio, archives, and executables, or enter custom extensions
-- **Safe folder monitoring** — Existing and newly created matching files are processed only after remaining stable for two seconds; destination conflicts are skipped and existing files are never overwritten
+- **Conflict policies** — Resolve destination conflicts manually, skip them, automatically rename the source, or redirect it to a designated conflict folder; existing files are never overwritten
+- **Pending conflict management** — Keep collisions pending, safely rename the source, rename the occupied destination after confirmation, or cancel the conflict with file identity checks before every change
+- **Operation history** — Track organizer moves and their status with configurable retention, retry eligible operations using the current rule, and safely undo completed moves while file identities remain valid
+- **Rule controls and recovery** — Pause or resume rules, inspect live monitoring status, create missing source or destination folders with confirmation, and recover automatically from watcher failures and event queue overflow
+- **Safe folder monitoring** — Existing and newly created matching files are processed only after remaining stable for two seconds; source, destination, and conflict folders are monitored so resolved collisions can be reprocessed automatically
 - **Protected moves and rule validation** — Cyclic rules are rejected, source files are checked before moving, and cross-drive copies are verified before their sources are removed
-- **Preview and notifications** — Preview how many files match a rule before using it and receive batched details about completed moves, conflicts, and failures
+- **Preview and notifications** — Preview how many files match a disabled rule and receive batched details about completed moves, policy-based skips, pending conflicts, and failures
 
 ### Performance & Cache
 - **Multi-level cache** — Memory, disk (SQLite), and GPU textures
