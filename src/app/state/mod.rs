@@ -53,6 +53,7 @@ use crate::app::file_hash::{FileHashRequest, FileHashResponse, SelectedFileHash}
 use crate::app::file_operation_state::FileOperationState;
 use crate::app::folder_size_state::FolderSizeState;
 use crate::app::global_search_state::GlobalSearchState;
+use crate::app::initial_indexing_notice::InitialIndexingNotice;
 use crate::app::layout_state::LayoutState;
 use crate::app::navigation_state::{NavigationState, ThemeMode};
 use crate::app::shortcuts::{ShortcutBindings, ShortcutEditorState};
@@ -784,6 +785,7 @@ pub struct ImageViewerApp {
 
     // GLOBAL SEARCH (via MTT Search Service)
     pub global_search: GlobalSearchState,
+    pub(crate) initial_indexing_notice: InitialIndexingNotice,
 
     // FILE OPERATION WORKER/TRACKING
     pub file_operation_state: FileOperationState,

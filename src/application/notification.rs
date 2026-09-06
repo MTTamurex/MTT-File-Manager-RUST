@@ -172,20 +172,40 @@ impl NotificationManager {
         self.push(AppNotification::error(message));
     }
 
-    /// Replaces the existing persistent notification for a feature instead of stacking alerts.
-    pub fn persistent_warning(&mut self, key: &'static str, message: impl Into<String>) {
-        let message = message.into();
+    fn replace_keyed(&mut self, key: &'static str, mut replacement: AppNotification) {
         if let Some(notification) = self
             .notifications
             .iter_mut()
             .find(|notification| notification.key == Some(key))
         {
-            notification.message = message;
-            notification.level = NotificationLevel::Warning;
+            notification.message = replacement.message;
+            notification.level = replacement.level;
             notification.created_at = Instant::now();
+            notification.duration = replacement.duration;
+            notification.dismissible = replacement.dismissible;
             return;
         }
-        self.push(AppNotification::warning(message).persistent(key));
+
+        replacement.key = Some(key);
+        self.push(replacement);
+    }
+
+    /// Replaces the existing persistent notification for a feature instead of stacking alerts.
+    pub fn persistent_warning(&mut self, key: &'static str, message: impl Into<String>) {
+        self.replace_keyed(key, AppNotification::warning(message).persistent(key));
+    }
+
+    /// Shows a non-dismissible information toast until it is replaced or dismissed internally.
+    pub fn persistent_info(&mut self, key: &'static str, message: impl Into<String>) {
+        let mut notification = AppNotification::info(message);
+        notification.duration = None;
+        notification.dismissible = false;
+        self.replace_keyed(key, notification);
+    }
+
+    /// Replaces a keyed notification with a regular success toast.
+    pub fn success_replacing(&mut self, key: &'static str, message: impl Into<String>) {
+        self.replace_keyed(key, AppNotification::success(message));
     }
 
     /// Remove expired notifications
@@ -227,6 +247,22 @@ mod tests {
         assert!(notifications.active()[0].dismissible);
 
         notifications.dismiss(id);
+        assert!(notifications.is_empty());
+    }
+
+    #[test]
+    fn keyed_success_replaces_a_persistent_toast_and_expires() {
+        let mut notifications = NotificationManager::new();
+        notifications.persistent_info("initial_indexing", "indexing");
+
+        notifications.success_replacing("initial_indexing", "completed");
+
+        assert_eq!(notifications.active().len(), 1);
+        assert_eq!(notifications.active()[0].message, "completed");
+        assert_eq!(notifications.active()[0].level, NotificationLevel::Success);
+        assert!(!notifications.active()[0].dismissible);
+        notifications.notifications[0].created_at = Instant::now() - Duration::from_secs(7);
+        notifications.cleanup();
         assert!(notifications.is_empty());
     }
 }

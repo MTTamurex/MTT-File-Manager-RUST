@@ -47,6 +47,7 @@ pub(super) struct StartupPreferences {
     pub(super) sidebar_tags_height: Option<f32>,
     pub(super) sidebar_quick_access_height: Option<f32>,
     pub(super) sidebar_tag_order: Vec<i64>,
+    pub(super) initial_indexing_notice_generation: Option<String>,
 }
 
 impl StartupPreferences {
@@ -319,6 +320,10 @@ impl StartupPreferences {
             .get("sidebar_tag_order")
             .map(|value| crate::app::operations::tag_ops::parse_sidebar_tag_order(value))
             .unwrap_or_default();
+        let initial_indexing_notice_generation =
+            crate::infrastructure::windows::read_installer_installation_generation().filter(
+                |generation| prefs.get("initial_indexing_completed_generation") != Some(generation),
+            );
 
         Self {
             sort_mode,
@@ -360,6 +365,7 @@ impl StartupPreferences {
             sidebar_tags_height,
             sidebar_quick_access_height,
             sidebar_tag_order,
+            initial_indexing_notice_generation,
         }
     }
 }

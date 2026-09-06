@@ -921,6 +921,9 @@ organizer:
 
 notifications:
   close: "Fechar notificação"
+  initial_indexing_preparing: "Preparando a indexação inicial de arquivos e pastas..."
+  initial_indexing_progress: "Indexação inicial em andamento: %{count} itens indexados."
+  initial_indexing_completed: "Indexação inicial concluída. A busca global e os recursos relacionados estão disponíveis."
 
 tabs:
   max_reached: "Limite de %{max} abas atingido. Feche uma aba para abrir outra."

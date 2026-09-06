@@ -244,6 +244,8 @@ begin
       RegWriteStringValue(HKLM, 'SOFTWARE\MTT-File-Manager', 'InstallerLanguage', 'en')
     else if ActiveLanguage = 'portuguese' then
       RegWriteStringValue(HKLM, 'SOFTWARE\MTT-File-Manager', 'InstallerLanguage', 'pt-BR');
+    RegWriteStringValue(HKLM, 'SOFTWARE\MTT-File-Manager', 'InstallGeneration',
+      GetDateTimeString('yyyy-mm-dd hh:nn:ss.zzz', '-', ':'));
   end;
 end;
 

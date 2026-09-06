@@ -921,6 +921,9 @@ organizer:
 
 notifications:
   close: "Close notification"
+  initial_indexing_preparing: "Preparing the initial file and folder index..."
+  initial_indexing_progress: "Initial indexing in progress: %{count} items indexed."
+  initial_indexing_completed: "Initial indexing completed. Global Search and related features are now available."
 
 tabs:
   max_reached: "Tab limit (%{max}) reached. Close a tab to open another."

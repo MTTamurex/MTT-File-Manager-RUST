@@ -6,22 +6,15 @@ use windows::{
     },
 };
 
-/// Reads the language selected during installation from the registry.
-///
-/// The Inno Setup installer writes `HKLM\SOFTWARE\MTT-File-Manager\InstallerLanguage`
-/// during `ssPostInstall`. The app reads this value on first launch to determine
-/// the initial UI language, then persists it to SQLite for subsequent launches.
-///
-/// Returns `None` if the key does not exist (e.g. portable use, not installed).
-/// The app must NEVER attempt to delete this key — only the admin-elevated
-/// installer/uninstaller can modify `HKLM`.
-pub fn read_installer_language() -> Option<String> {
+const INSTALLER_REGISTRY_KEY: &str = "SOFTWARE\\MTT-File-Manager";
+
+fn read_installer_registry_string(value_name: &str) -> Option<String> {
     unsafe {
-        let key_wide: Vec<u16> = "SOFTWARE\\MTT-File-Manager"
+        let key_wide: Vec<u16> = INSTALLER_REGISTRY_KEY
             .encode_utf16()
             .chain(std::iter::once(0))
             .collect();
-        let value_wide: Vec<u16> = "InstallerLanguage"
+        let value_wide: Vec<u16> = value_name
             .encode_utf16()
             .chain(std::iter::once(0))
             .collect();
@@ -76,4 +69,25 @@ pub fn read_installer_language() -> Option<String> {
         let len = buffer.iter().position(|&c| c == 0).unwrap_or(buffer.len());
         Some(String::from_utf16_lossy(&buffer[..len]))
     }
+}
+
+/// Reads the language selected during installation from the registry.
+///
+/// The Inno Setup installer writes `HKLM\SOFTWARE\MTT-File-Manager\InstallerLanguage`
+/// during `ssPostInstall`. The app reads this value on first launch to determine
+/// the initial UI language, then persists it to SQLite for subsequent launches.
+///
+/// Returns `None` if the key does not exist (e.g. portable use, not installed).
+/// The app must NEVER attempt to delete this key — only the admin-elevated
+/// installer/uninstaller can modify `HKLM`.
+pub fn read_installer_language() -> Option<String> {
+    read_installer_registry_string("InstallerLanguage")
+}
+
+/// Reads the unique generation written by the installer on every setup run.
+///
+/// This lets the app distinguish a completed initial index from the new index
+/// that the installer intentionally rebuilds during an update or reinstall.
+pub fn read_installer_installation_generation() -> Option<String> {
+    read_installer_registry_string("InstallGeneration")
 }

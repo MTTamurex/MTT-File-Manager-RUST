@@ -231,6 +231,7 @@ impl ImageViewerApp {
             sidebar_tags_height,
             sidebar_quick_access_height,
             sidebar_tag_order,
+            initial_indexing_notice_generation,
         } = startup_preferences;
 
         // Apply saved language preference
@@ -788,6 +789,10 @@ impl ImageViewerApp {
 
             // GLOBAL SEARCH
             global_search: GlobalSearchState::new(global_search_tx, global_search_res_rx),
+            initial_indexing_notice:
+                crate::app::initial_indexing_notice::InitialIndexingNotice::new(
+                    initial_indexing_notice_generation,
+                ),
 
             // FILE OPERATION WORKER/TRACKING
             file_operation_state: build_file_operation_state(
@@ -829,6 +834,7 @@ impl ImageViewerApp {
         app.global_search
             .spawn_tooltip_worker(disk_cache.clone(), &ctx);
         app.global_search.spawn_tagged_results_worker(&ctx);
+        app.start_initial_indexing_notice();
 
         // Pre-set custom composed folder icon on cache_manager (used by grid/list bridges)
         {

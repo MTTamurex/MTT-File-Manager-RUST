@@ -1,8 +1,12 @@
 use crate::app::global_search_state::{GlobalSearchInteractionTarget, GlobalSearchTagFilter};
+use crate::app::initial_indexing_notice::InitialIndexingNoticeEvent;
 use crate::app::state::ImageViewerApp;
+use crate::infrastructure::app_state_db::PreferenceWriteOutcome;
 use crate::workers::global_search_worker::GlobalSearchRequest;
 
 const DEFAULT_GLOBAL_SEARCH_PAGE_LIMIT: u32 = 500;
+const INITIAL_INDEXING_NOTIFICATION_KEY: &str = "initial_indexing";
+const INITIAL_INDEXING_COMPLETED_GENERATION_KEY: &str = "initial_indexing_completed_generation";
 
 impl ImageViewerApp {
     pub(crate) fn request_global_search_refresh(&mut self) {
@@ -51,24 +55,8 @@ impl ImageViewerApp {
         self.global_search.created_before_text.clear();
         self.global_search.tag_filter = GlobalSearchTagFilter::All;
 
-        if let Err(error) = self
-            .global_search
-            .sender
-            .send(GlobalSearchRequest::SetStatusTracking { active: true })
-        {
-            log::error!(
-                "[GLOBAL-SEARCH] Failed to enable status tracking: {}",
-                error
-            );
-        }
-
-        if let Err(error) = self
-            .global_search
-            .sender
-            .send(GlobalSearchRequest::CheckStatus)
-        {
-            log::error!("[GLOBAL-SEARCH] Failed to queue status check: {}", error);
-        }
+        self.sync_global_search_status_tracking();
+        self.request_global_search_status_refresh();
     }
 
     pub(crate) fn close_global_search(&mut self) {
@@ -95,16 +83,7 @@ impl ImageViewerApp {
         self.global_search.session_total_indexed = 0;
         self.global_search.tag_filter = GlobalSearchTagFilter::All;
 
-        if let Err(error) = self
-            .global_search
-            .sender
-            .send(GlobalSearchRequest::SetStatusTracking { active: false })
-        {
-            log::error!(
-                "[GLOBAL-SEARCH] Failed to disable status tracking: {}",
-                error
-            );
-        }
+        self.sync_global_search_status_tracking();
     }
 
     pub(crate) fn toggle_global_search(&mut self) {
@@ -112,6 +91,102 @@ impl ImageViewerApp {
             self.close_global_search();
         } else {
             self.open_global_search();
+        }
+    }
+
+    pub(crate) fn start_initial_indexing_notice(&mut self) {
+        if !self.initial_indexing_notice.is_tracking() {
+            return;
+        }
+
+        self.notifications.persistent_info(
+            INITIAL_INDEXING_NOTIFICATION_KEY,
+            rust_i18n::t!("notifications.initial_indexing_preparing").to_string(),
+        );
+        self.sync_global_search_status_tracking();
+        self.request_global_search_status_refresh();
+    }
+
+    pub(crate) fn update_initial_indexing_notice(&mut self) {
+        let event = self.initial_indexing_notice.observe_status(
+            self.global_search.available,
+            self.global_search.total_indexed,
+            &self.global_search.status_volumes,
+        );
+
+        match event {
+            InitialIndexingNoticeEvent::None => {}
+            InitialIndexingNoticeEvent::ProgressChanged => {
+                let message = if self.global_search.total_indexed == 0 {
+                    rust_i18n::t!("notifications.initial_indexing_preparing").to_string()
+                } else {
+                    rust_i18n::t!(
+                        "notifications.initial_indexing_progress",
+                        count = self.global_search.total_indexed
+                    )
+                    .to_string()
+                };
+                self.notifications
+                    .persistent_info(INITIAL_INDEXING_NOTIFICATION_KEY, message);
+            }
+            InitialIndexingNoticeEvent::Completed => {
+                self.notifications.success_replacing(
+                    INITIAL_INDEXING_NOTIFICATION_KEY,
+                    rust_i18n::t!("notifications.initial_indexing_completed").to_string(),
+                );
+                self.sync_global_search_status_tracking();
+            }
+        }
+
+        self.persist_initial_indexing_completion();
+    }
+
+    pub(crate) fn persist_initial_indexing_completion(&mut self) {
+        let Some(generation) = self
+            .initial_indexing_notice
+            .completion_generation()
+            .map(str::to_owned)
+        else {
+            return;
+        };
+
+        match self
+            .app_state_db
+            .try_set_preference(INITIAL_INDEXING_COMPLETED_GENERATION_KEY, &generation)
+        {
+            PreferenceWriteOutcome::Persisted => self
+                .initial_indexing_notice
+                .mark_completion_persistence_finished(),
+            PreferenceWriteOutcome::Busy => {
+                self.ui_ctx
+                    .request_repaint_after(std::time::Duration::from_millis(100));
+            }
+            PreferenceWriteOutcome::Failed(error) => {
+                log::warn!("[INITIAL-INDEXING] Failed to persist completion: {error}");
+                self.initial_indexing_notice
+                    .mark_completion_persistence_finished();
+            }
+        }
+    }
+
+    fn sync_global_search_status_tracking(&self) {
+        let active = self.global_search.active || self.initial_indexing_notice.is_tracking();
+        if let Err(error) = self
+            .global_search
+            .sender
+            .send(GlobalSearchRequest::SetStatusTracking { active })
+        {
+            log::error!("[GLOBAL-SEARCH] Failed to update status tracking: {error}");
+        }
+    }
+
+    fn request_global_search_status_refresh(&self) {
+        if let Err(error) = self
+            .global_search
+            .sender
+            .send(GlobalSearchRequest::CheckStatus)
+        {
+            log::error!("[GLOBAL-SEARCH] Failed to queue status check: {error}");
         }
     }
 }

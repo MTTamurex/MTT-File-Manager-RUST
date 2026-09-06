@@ -112,6 +112,7 @@ impl ImageViewerApp {
                     if progress_changed {
                         self.global_search.last_progress_advance_at = now;
                     }
+                    self.update_initial_indexing_notice();
                 }
                 GlobalSearchResponse::Error { query, message } => {
                     if query == self.global_search.query {
@@ -145,6 +146,8 @@ impl ImageViewerApp {
         if has_more {
             self.ui_ctx.request_repaint();
         }
+
+        self.persist_initial_indexing_completion();
 
         drain_tagged_results_responses(self);
 
