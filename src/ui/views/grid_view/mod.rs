@@ -4,6 +4,7 @@
 use eframe::egui::{self, Sense, Ui};
 use std::path::{Path, PathBuf};
 
+use crate::app::state::THUMBNAIL_SCROLL_SETTLING_DURATION;
 use crate::domain::file_entry::FileEntry;
 use crate::domain::file_tag::FileTag;
 // PERFORMANCE: Use FxHashSet for PathBuf keys - faster hashing than std::collections::HashSet
@@ -23,7 +24,6 @@ mod virtualization;
 use super::common::TOOLTIP_DELAY_SECS;
 // STRICT LIMIT: Minimum zoom allowed to prevent performance degradation
 const MIN_THUMBNAIL_SIZE: f32 = crate::ui::theme::THUMBNAIL_MIN;
-const OPENGL_POST_SCROLL_THUMBNAIL_QUIET_MS: u64 = 300;
 
 #[derive(Clone, Copy)]
 pub struct ScrollPredictor {
@@ -386,10 +386,15 @@ pub fn render_grid_view(
     }
     // Is scrolling if visual position is changing (using same threshold)
     let is_scrolling = scroll_delta > 0.5;
+    if is_scrolling {
+        // Upload processing runs before this render pass. Refreshing the shared
+        // timestamp here keeps the following frame throttled for the full visual
+        // interpolation tail, not merely for the last wheel event.
+        *ctx.last_scroll_time = std::time::Instant::now();
+    }
     let thumbnail_work_scrolling = is_scrolling
         || (ctx.low_res_thumbnails_while_scrolling
-            && ctx.last_scroll_time.elapsed()
-                < std::time::Duration::from_millis(OPENGL_POST_SCROLL_THUMBNAIL_QUIET_MS));
+            && ctx.last_scroll_time.elapsed() < THUMBNAIL_SCROLL_SETTLING_DURATION);
 
     // 2.5 KEYBOARD SCROLL SYNC: Ensure selected item is visible
     if ctx.scroll_to_selected {

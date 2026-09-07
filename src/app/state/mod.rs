@@ -809,7 +809,9 @@ pub struct ImageViewerApp {
 }
 
 mod helpers;
-pub(crate) use helpers::cancel_pending_working_set_trim_for_native_restore;
+pub(crate) use helpers::{
+    cancel_pending_working_set_trim_for_native_restore, THUMBNAIL_SCROLL_SETTLING_DURATION,
+};
 pub mod sidebar_tree_state;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

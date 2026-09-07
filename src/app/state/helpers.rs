@@ -22,6 +22,9 @@ const MAX_PENDING_THUMBNAIL_RGBA_BYTES: usize = 64 * 1024 * 1024;
 const LOW_RAM_GPU_MAX_PENDING_THUMBNAIL_RGBA_BYTES: usize = 16 * 1024 * 1024;
 const LOW_RAM_GPU_RGBA_BUDGET_FLOOR_BYTES: usize = MIN_RGBA_BUDGET_BYTES;
 const LOW_RAM_GPU_MAX_RGBA_BUDGET_BYTES: usize = 8 * 1024 * 1024;
+/// Keep upload and non-critical cache maintenance throttled until a smooth
+/// scroll has visibly settled, rather than only until the last input event.
+pub(crate) const THUMBNAIL_SCROLL_SETTLING_DURATION: Duration = Duration::from_millis(300);
 const MEMORY_TRACE_INTERVAL: Duration = Duration::from_secs(5);
 const IDLE_THUMBNAIL_TEXTURE_KEEP: usize = 8;
 const IDLE_FOLDER_PREVIEW_KEEP: usize = 0;
@@ -118,6 +121,10 @@ fn working_set_trim_was_effective(
         .working_set_bytes
         .saturating_sub(after.working_set_bytes)
         >= WORKING_SET_TRIM_EFFECTIVE_REDUCTION_BYTES
+}
+
+fn thumbnail_scroll_is_settling_at(last_scroll_time: Instant, now: Instant) -> bool {
+    now.saturating_duration_since(last_scroll_time) < THUMBNAIL_SCROLL_SETTLING_DURATION
 }
 
 fn working_set_trim_execution_lock() -> &'static Mutex<()> {
@@ -787,6 +794,10 @@ impl ImageViewerApp {
     /// Runs memory maintenance immediately, bypassing normal periodic throttle.
     pub fn run_memory_maintenance_now(&mut self) {
         self.run_memory_maintenance_impl(true);
+    }
+
+    pub(crate) fn thumbnail_scroll_is_settling(&self) -> bool {
+        thumbnail_scroll_is_settling_at(self.last_scroll_time, Instant::now())
     }
 
     fn working_set_trim_blocker_reason(&self) -> Option<&'static str> {
@@ -1605,12 +1616,12 @@ impl ImageViewerApp {
         // Proactive cache trim: even below the soft memory limit, excess
         // texture/RAM cache entries from a previous folder should not linger
         // indefinitely.  When the cache is much larger than the current
-        // visible grid requires, trim it down to a modest overshoot (2×)
+        // visible grid requires, trim it down to a modest overshoot (1.25×)
         // so memory is released promptly after navigation.
-        if !self.is_in_restore_burst() && thumbnails_active {
+        let scroll_is_settling = self.thumbnail_scroll_is_settling();
+        if !self.is_in_restore_burst() && thumbnails_active && !scroll_is_settling {
             let texture_keep = self.current_dynamic_texture_keep_count();
             let texture_count = self.cache_manager.texture_cache.len();
-            let texture_cap = self.cache_manager.texture_cache.cap().get();
             // Trim when cache holds more than ~1.5× what the current view
             // needs.  After navigation, cap is reset to the minimum and grows
             // via retune; during normal scrolling it overshoots by ~1.5× for
@@ -1618,7 +1629,7 @@ impl ImageViewerApp {
             // causing visible flashing.
             let excess_threshold =
                 (texture_keep + (texture_keep / 2)).max(MIN_DYNAMIC_TEXTURE_CACHE_ITEMS);
-            if texture_count > excess_threshold || texture_cap > excess_threshold {
+            if texture_count > excess_threshold {
                 let target = texture_keep
                     .saturating_add(texture_keep / 4)
                     .max(MIN_DYNAMIC_TEXTURE_CACHE_ITEMS);
@@ -1638,7 +1649,7 @@ impl ImageViewerApp {
                 log::debug!(
                     "[MEMORY] proactive trim: textures={}/{} target={} visible_keep={}",
                     texture_count,
-                    texture_cap,
+                    self.cache_manager.texture_cache.cap().get(),
                     target,
                     texture_keep,
                 );
@@ -2268,9 +2279,10 @@ mod inactive_panel_paths_tests {
         backend_uses_conservative_thumbnail_upload_policy, backend_uses_low_ram_gpu_policy,
         background_trim_should_rearm, classify_memory_pressure, detail_panel_thumbnail_active,
         insert_item_reference_paths, pending_thumbnail_eviction_index,
-        trim_pending_thumbnail_queue, working_set_trim_cancelled, working_set_trim_was_effective,
-        FileEntry, FxHashSet, MemoryPressure, ProcessMemorySnapshot,
-        BACKGROUND_WS_TRIM_REARM_GROWTH_BYTES, LOW_RAM_GPU_IDLE_WS_TRIM_MIN_BYTES,
+        thumbnail_scroll_is_settling_at, trim_pending_thumbnail_queue, working_set_trim_cancelled,
+        working_set_trim_was_effective, FileEntry, FxHashSet, MemoryPressure,
+        ProcessMemorySnapshot, BACKGROUND_WS_TRIM_REARM_GROWTH_BYTES,
+        LOW_RAM_GPU_IDLE_WS_TRIM_MIN_BYTES, THUMBNAIL_SCROLL_SETTLING_DURATION,
         WORKING_SET_TRIM_EFFECTIVE_REDUCTION_BYTES,
     };
     use crate::domain::file_entry::SyncStatus;
@@ -2510,6 +2522,20 @@ mod inactive_panel_paths_tests {
                     - WORKING_SET_TRIM_EFFECTIVE_REDUCTION_BYTES,
                 private_usage_bytes: before.private_usage_bytes,
             }
+        ));
+    }
+
+    #[test]
+    fn thumbnail_scroll_settling_covers_the_full_visual_quiet_window() {
+        let now = std::time::Instant::now();
+
+        assert!(thumbnail_scroll_is_settling_at(
+            now - THUMBNAIL_SCROLL_SETTLING_DURATION + std::time::Duration::from_millis(1),
+            now,
+        ));
+        assert!(!thumbnail_scroll_is_settling_at(
+            now - THUMBNAIL_SCROLL_SETTLING_DURATION,
+            now,
         ));
     }
 

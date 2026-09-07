@@ -274,7 +274,10 @@ impl ImageViewerApp {
         let is_vulkan = self.is_vulkan_backend();
         let use_conservative_upload_policy = self.uses_conservative_thumbnail_upload_policy();
         let frame_pressure_ms = live_frame_pressure_ms(self);
-        let is_scrolling = self.last_scroll_time.elapsed() < Duration::from_millis(180);
+        // GRID refreshes this timestamp while its visual interpolation is active.
+        // Use the same settling window as the renderer so texture work cannot
+        // return to idle throughput midway through the visible motion tail.
+        let is_scrolling = self.thumbnail_scroll_is_settling();
         // During burst, ignore frame pressure for intake — the slow frames are caused
         // by OS paging, not by actual rendering load.  A generous budget lets us
         // drain the worker channel and queue items for upload faster.
@@ -556,7 +559,10 @@ impl ImageViewerApp {
 
         let open_tabs = self.tab_manager.count().max(1);
 
-        let freeze_cache_retune = is_opengl && is_burst;
+        // Resizing an LRU may free many texture handles. Defer only this optional
+        // foreground maintenance while Glow is visually scrolling; pressure and
+        // background/minimized trimming remain independent paths.
+        let freeze_cache_retune = is_opengl && (is_burst || is_scrolling);
         if !freeze_cache_retune
             && self.last_texture_cache_retune.elapsed()
                 >= Duration::from_millis(TEXTURE_CACHE_RETUNE_INTERVAL_MS)
@@ -645,11 +651,9 @@ impl ImageViewerApp {
         // conservative wgpu profile still uses a lower fixed cap to avoid a
         // large wave of queued staging allocations after restore.
         //
-        // On OpenGL (Glow / wgpu-GL) each `ctx.load_texture` call is synchronous
-        // on the CPU thread.  Unlike DX12/Vulkan where wgpu queues the upload
-        // asynchronously, OpenGL blocks until the driver finishes the transfer
-        // (5-15 ms per thumbnail).  Apply more conservative per-frame caps to
-        // prevent UI freezes and frame drops.
+        // `ctx.load_texture` records an egui texture update; Glow applies the
+        // underlying OpenGL transfer later in the renderer. Keep the conservative
+        // Glow admission caps so a frame cannot queue an unbounded texture batch.
         let base_max_uploads = if is_burst {
             if is_opengl {
                 2
@@ -1045,7 +1049,6 @@ impl ImageViewerApp {
                     );
                 }
                 if let Some(visible_paths) = eviction_visible.as_ref() {
-                    self.cache_manager.promote_visible(visible_paths);
                     self.cache_manager.put_thumbnail_preserving_visible(
                         path.clone(),
                         texture.clone(),
