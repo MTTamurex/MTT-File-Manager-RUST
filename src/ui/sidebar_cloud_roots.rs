@@ -7,13 +7,18 @@ pub fn render_cloud_roots(
     ui: &mut egui::Ui,
     ctx: &mut SidebarContext,
     action: &mut Option<SidebarAction>,
+    sidebar_viewport_width: f32,
 ) {
     if ctx.cloud_roots.is_empty() {
         return;
     }
 
-    let (header_rect, _) =
-        ui.allocate_exact_size(egui::vec2(ui.available_width(), 16.0), Sense::hover());
+    let (header_rect, _) = crate::ui::sidebar::allocate_sidebar_viewport_row(
+        ui,
+        sidebar_viewport_width,
+        16.0,
+        Sense::hover(),
+    );
 
     let toggle_size = 18.0;
     let toggle_rect = Rect::from_center_size(
@@ -78,10 +83,12 @@ pub fn render_cloud_roots(
             && !ctx.is_recycle_bin_view
             && path_starts_with_case_insensitive(ctx.current_path, &root.path);
 
-        let (mut rect, response) =
-            ui.allocate_exact_size(egui::vec2(ui.available_width(), 28.0), Sense::click());
-        rect.min.x = ui.max_rect().min.x;
-        rect.max.x = ui.max_rect().max.x;
+        let (rect, response) = crate::ui::sidebar::allocate_sidebar_viewport_row(
+            ui,
+            sidebar_viewport_width,
+            28.0,
+            Sense::click(),
+        );
 
         let arrow_zone = Rect::from_min_size(
             Pos2::new(rect.min.x, rect.min.y),

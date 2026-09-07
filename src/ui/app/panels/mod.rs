@@ -469,8 +469,9 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, root_ui: &mut egui::Ui) -> Opt
                         )
                         .vertical_scroll_offset(scroll_offset)
                         .show(ui, |ui| {
-                            ui.set_min_width(ui.available_width());
-                            render_sidebar_drives(ui, &mut sidebar_ctx)
+                            let sidebar_viewport_width = ui.available_width();
+                            ui.set_min_width(sidebar_viewport_width);
+                            render_sidebar_drives(ui, &mut sidebar_ctx, sidebar_viewport_width)
                         })
                 })
                 .inner;

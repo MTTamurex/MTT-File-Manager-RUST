@@ -35,6 +35,15 @@ pub fn invalidate_drive_type_cache() {
     DRIVE_TYPE_CACHE.lock().clear();
 }
 
+pub(crate) fn allocate_sidebar_viewport_row(
+    ui: &mut egui::Ui,
+    sidebar_viewport_width: f32,
+    height: f32,
+    sense: Sense,
+) -> (Rect, egui::Response) {
+    ui.allocate_exact_size(egui::vec2(sidebar_viewport_width.max(0.0), height), sense)
+}
+
 /// Context for sidebar rendering
 pub struct SidebarContext<'a> {
     pub disks: &'a [(String, String)], // (path, label)
@@ -352,7 +361,11 @@ pub fn render_quick_access(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Optio
 }
 
 /// Renders the scrollable drives section of the sidebar (drives + folder trees).
-pub fn render_sidebar_drives(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Option<SidebarAction> {
+pub fn render_sidebar_drives(
+    ui: &mut egui::Ui,
+    ctx: &mut SidebarContext,
+    sidebar_viewport_width: f32,
+) -> Option<SidebarAction> {
     let mut action = None;
     ui.add_space(8.0);
 
@@ -360,7 +373,12 @@ pub fn render_sidebar_drives(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Opt
     let mut local_drives = Vec::new();
     let mut network_drives = Vec::new();
 
-    crate::ui::sidebar_cloud_roots::render_cloud_roots(ui, ctx, &mut action);
+    crate::ui::sidebar_cloud_roots::render_cloud_roots(
+        ui,
+        ctx,
+        &mut action,
+        sidebar_viewport_width,
+    );
 
     for (disk_path, disk_label) in ctx.disks.iter() {
         let drive_type = get_cached_drive_type(disk_path);
@@ -381,7 +399,7 @@ pub fn render_sidebar_drives(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Opt
 
         // Section header with inline collapse toggle
         let (header_rect, _) =
-            ui.allocate_exact_size(egui::vec2(ui.available_width(), 16.0), Sense::hover());
+            allocate_sidebar_viewport_row(ui, sidebar_viewport_width, 16.0, Sense::hover());
 
         let toggle_size = 18.0;
         let toggle_rect = Rect::from_center_size(
@@ -447,11 +465,8 @@ pub fn render_sidebar_drives(ui: &mut egui::Ui, ctx: &mut SidebarContext) -> Opt
                 crate::ui::theme::drive_usage_ratio(info.total_space, info.free_space)
             });
 
-            let (mut rect, response) =
-                ui.allocate_exact_size(egui::vec2(ui.available_width(), 32.0), Sense::click());
-
-            rect.min.x = ui.max_rect().min.x;
-            rect.max.x = ui.max_rect().max.x;
+            let (rect, response) =
+                allocate_sidebar_viewport_row(ui, sidebar_viewport_width, 32.0, Sense::click());
 
             // Track arrow click zone for this drive row
             let arrow_zone = Rect::from_min_size(
@@ -1105,8 +1120,9 @@ fn quick_access_auto_scroll_delta(pointer: Pos2, viewport: Rect) -> f32 {
 
 #[cfg(test)]
 mod tests {
-    use super::quick_access_auto_scroll_delta;
-    use eframe::egui::{pos2, Rect};
+    use super::{allocate_sidebar_viewport_row, quick_access_auto_scroll_delta};
+    use eframe::egui::{pos2, vec2, Context, Rect, Sense};
+    use std::cell::Cell;
 
     #[test]
     fn quick_access_auto_scrolls_only_near_vertical_edges_inside_width() {
@@ -1126,5 +1142,25 @@ mod tests {
         let short_viewport = Rect::from_min_max(pos2(10.0, 20.0), pos2(110.0, 44.0));
         assert!(quick_access_auto_scroll_delta(pos2(50.0, 22.0), short_viewport) < 0.0);
         assert!(quick_access_auto_scroll_delta(pos2(50.0, 42.0), short_viewport) > 0.0);
+    }
+
+    #[test]
+    fn drive_rows_remain_at_viewport_width_after_wide_tree_content() {
+        let ctx = Context::default();
+        let tree_width = Cell::new(0.0);
+        let drive_width = Cell::new(0.0);
+        let sidebar_viewport_width = 220.0;
+
+        let _ = ctx.run_ui(eframe::egui::RawInput::default(), |ui| {
+            ui.set_width(sidebar_viewport_width);
+            let (tree_rect, _) = ui.allocate_exact_size(vec2(640.0, 20.0), Sense::hover());
+            let (drive_rect, _) =
+                allocate_sidebar_viewport_row(ui, sidebar_viewport_width, 32.0, Sense::click());
+            tree_width.set(tree_rect.width());
+            drive_width.set(drive_rect.width());
+        });
+
+        assert_eq!(tree_width.get(), 640.0);
+        assert_eq!(drive_width.get(), sidebar_viewport_width);
     }
 }
