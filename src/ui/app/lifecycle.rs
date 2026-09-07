@@ -4,6 +4,10 @@ use eframe::egui;
 
 const STARTUP_REVEAL_TICK: usize = 2;
 
+fn should_flush_gpu_textures_after_focus_restore(idle_secs: f64, is_opengl: bool) -> bool {
+    idle_secs >= 60.0 && !is_opengl
+}
+
 fn recover_empty_current_folder_after_restore(app: &mut ImageViewerApp, reason: &str) {
     if crate::domain::special_paths::is_virtual_path(&app.navigation_state.current_path) {
         return;
@@ -185,12 +189,13 @@ pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
             // Hard-reset peak to the current average so adaptive throttling
             // doesn't starve upload budgets on the very first frames.
             app.frame_time_peak_ms = app.frame_time_avg_ms.max(16.0);
-            // Only flush GPU textures after prolonged inactivity (≥60 s).
-            // For shorter idle periods (10–59 s) the OS usually hasn't paged
-            // out the GPU working set yet, so the existing TextureHandles are
-            // still valid and clearing them just forces unnecessary re-uploads
-            // that cause visible stutter.
-            if idle_secs >= 60.0 {
+            // Glow texture handles remain valid across ordinary focus loss. A
+            // time-only flush discards the already-warm grid and forces texture
+            // reconstruction after fullscreen video or another GPU app. Keep
+            // the recovery burst, but reserve the flush for non-Glow backends.
+            let texture_flush =
+                should_flush_gpu_textures_after_focus_restore(idle_secs, app.is_opengl_backend());
+            if texture_flush {
                 flush_gpu_textures_for_reupload(app, "focus-restore");
             }
             // Burst window: short and proportional.  The purpose is only to
@@ -201,8 +206,11 @@ pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
             app.restore_burst_until =
                 Some(std::time::Instant::now() + std::time::Duration::from_secs_f64(burst_secs));
             log::info!(
-                "[LIFECYCLE] App regained focus after {:.1}s in background - burst {:.1}s, texture_flush={}",
-                idle_secs, burst_secs, idle_secs >= 60.0
+                "[LIFECYCLE] App regained focus after {:.1}s in background - burst {:.1}s, texture_flush={}, retained_glow_textures={}",
+                idle_secs,
+                burst_secs,
+                texture_flush,
+                idle_secs >= 60.0 && app.is_opengl_backend(),
             );
         }
 
@@ -290,9 +298,8 @@ pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
 }
 
 /// Flush GPU texture cache so visible items are re-uploaded from the RGBA RAM
-/// cache on the next frame.  After prolonged inactivity the OS pages out the
-/// GPU working set; keeping stale `TextureHandle`s causes slow first-paint
-/// (page-faults on every draw call) or blank tiles.
+/// cache on the next frame. Callers use this for minimize recovery or backends
+/// that require a full texture rebuild after a prolonged focus loss.
 ///
 /// Only the VRAM layer is cleared — the RGBA RAM cache (Layer 2) is kept intact,
 /// so re-uploads are fast (no disk I/O).  Icons and folder previews are also
@@ -451,4 +458,24 @@ pub fn handle_exit(app: &mut ImageViewerApp) {
     // std::process::exit runs libc atexit handlers (including SQLite's) and
     // is sufficient for clean teardown when workers have already stopped.
     std::process::exit(0);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_flush_gpu_textures_after_focus_restore;
+
+    #[test]
+    fn prolonged_glow_focus_restore_keeps_warm_texture_handles() {
+        assert!(!should_flush_gpu_textures_after_focus_restore(59.9, true));
+        assert!(!should_flush_gpu_textures_after_focus_restore(
+            90.0 * 60.0,
+            true
+        ));
+    }
+
+    #[test]
+    fn prolonged_non_glow_focus_restore_keeps_existing_flush_policy() {
+        assert!(!should_flush_gpu_textures_after_focus_restore(59.9, false));
+        assert!(should_flush_gpu_textures_after_focus_restore(60.0, false));
+    }
 }
