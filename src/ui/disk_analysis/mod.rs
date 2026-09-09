@@ -165,10 +165,10 @@ pub fn render_analyzer_body(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
                         .inner_margin(8.0),
                 )
                 .show(ui, |ui| {
-                    toolbar::render_toolbar(state, ui);
+                    let search_results_rect = toolbar::render_toolbar(state, ui);
                     render_breadcrumb(state, ui);
                     ui.add_space(4.0);
-                    render_treemap(state, ui);
+                    render_treemap(state, ui, search_results_rect);
                 });
         });
     // Toolbar edits happen inside the panel above, so deadlines must be read
@@ -348,7 +348,11 @@ fn render_breadcrumb(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
     }
 }
 
-fn render_treemap(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
+fn render_treemap(
+    state: &mut DiskAnalysisState,
+    ui: &mut egui::Ui,
+    search_results_rect: Option<egui::Rect>,
+) {
     let phase = state.phase;
     let model = state.model.clone();
 
@@ -467,7 +471,8 @@ fn render_treemap(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
     // flicker. The raw pointer position keeps the hover stable.
     let pointer = ui
         .input(|i| i.pointer.hover_pos())
-        .filter(|p| rect.contains(*p));
+        .filter(|p| rect.contains(*p))
+        .filter(|p| !search_results_rect.is_some_and(|popup| popup.contains(*p)));
     let hovered = pointer
         .and_then(|pos| treemap::hit_test(&placed, pos))
         .map(|p| p.idx);

@@ -15,7 +15,7 @@ use rust_i18n::t;
 pub const SEARCH_TEXT_EDIT_ID: &str = "disk_analysis_search_edit";
 
 /// Height of the toolbar row so callers can lay out around it.
-pub fn render_toolbar(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
+pub fn render_toolbar(state: &mut DiskAnalysisState, ui: &mut egui::Ui) -> Option<egui::Rect> {
     handle_search_shortcuts(state, ui);
 
     ui.horizontal(|ui| {
@@ -55,7 +55,7 @@ pub fn render_toolbar(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
     }
 
     ui.add_space(4.0);
-    render_search_results_popup(state, ui);
+    render_search_results_popup(state, ui)
 }
 
 fn render_metric_selector(state: &mut DiskAnalysisState, ui: &mut egui::Ui) -> SizeMetric {
@@ -331,13 +331,16 @@ fn size_field(ui: &mut egui::Ui, text: &mut String) -> egui::Response {
 }
 
 /// Dropdown list of search results anchored under the toolbar area.
-fn render_search_results_popup(state: &mut DiskAnalysisState, ui: &mut egui::Ui) {
+fn render_search_results_popup(
+    state: &mut DiskAnalysisState,
+    ui: &mut egui::Ui,
+) -> Option<egui::Rect> {
     if !state.search_open || state.search_results.is_empty() {
-        return;
+        return None;
     }
     let model = match state.model.clone() {
         Some(m) => m,
-        None => return,
+        None => return None,
     };
     let results = state.search_results.clone();
     let anchor = ui.max_rect().left_top();
@@ -347,7 +350,7 @@ fn render_search_results_popup(state: &mut DiskAnalysisState, ui: &mut egui::Ui)
     let popup_width = ui.available_width().min(560.0);
     let mut pending_activation = None;
 
-    egui::Area::new(egui::Id::new("disk_analysis_search_results"))
+    let popup_response = egui::Area::new(egui::Id::new("disk_analysis_search_results"))
         .order(egui::Order::Foreground)
         .anchor(egui::Align2::LEFT_TOP, [anchor.x, anchor.y + 4.0])
         .show(ui.ctx(), |ui: &mut egui::Ui| {
@@ -443,4 +446,6 @@ fn render_search_results_popup(state: &mut DiskAnalysisState, ui: &mut egui::Ui)
                 .memory_mut(|mem| mem.surrender_focus(search_edit_id()));
         }
     }
+
+    Some(popup_response.response.rect)
 }
