@@ -9,6 +9,17 @@ use eframe::egui;
 pub const EXTRACT_ALL_PENDING_ID: i32 = -203;
 pub const EXTRACT_ALL_PENDING_COMMAND: &str = "extract_all_pending";
 
+/// Identifies Windows' generic application-association command, rather than a
+/// third-party command whose label starts with "Open with".
+pub fn is_generic_open_with_command(command: Option<&str>, text: &str) -> bool {
+    if command.is_some_and(|command| command.eq_ignore_ascii_case("openas")) {
+        return true;
+    }
+
+    let text = text.trim().trim_end_matches(['.', '\u{2026}']).trim();
+    text.eq_ignore_ascii_case("open with") || text.eq_ignore_ascii_case("abrir com")
+}
+
 /// A single item in the context menu (matches Files ContextMenuFlyoutItemViewModel)
 #[derive(Clone)]
 pub struct ContextMenuItem {
@@ -374,12 +385,24 @@ impl std::fmt::Debug for ContextMenuState {
 
 #[cfg(test)]
 mod tests {
-    use super::{ContextMenuOrigin, ContextMenuState};
+    use super::{is_generic_open_with_command, ContextMenuOrigin, ContextMenuState};
 
     #[test]
     fn global_search_context_menu_never_offers_paste() {
         assert!(ContextMenuOrigin::FileView.allows_paste());
         assert!(!ContextMenuOrigin::GlobalSearch.allows_paste());
+    }
+
+    #[test]
+    fn distinguishes_generic_open_with_from_application_commands() {
+        assert!(is_generic_open_with_command(
+            Some("openas"),
+            "Ignored label"
+        ));
+        assert!(is_generic_open_with_command(None, "Open with..."));
+        assert!(is_generic_open_with_command(None, "Abrir com\u{2026}"));
+        assert!(!is_generic_open_with_command(None, "Open with Zed"));
+        assert!(!is_generic_open_with_command(None, "Open with Code"));
     }
 
     #[test]

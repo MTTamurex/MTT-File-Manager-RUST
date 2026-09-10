@@ -1039,13 +1039,10 @@ impl ImageViewerApp {
         let mut all_shell_items = Vec::new();
 
         for raw in &shell_items {
-            let raw_text = raw.text.to_lowercase();
-            let is_open_with = raw
-                .command_string
-                .as_deref()
-                .is_some_and(|verb| verb.eq_ignore_ascii_case("openas"))
-                || raw_text.contains("open with")
-                || raw_text.contains("abrir com");
+            let is_open_with = crate::application::context_menu::is_generic_open_with_command(
+                raw.command_string.as_deref(),
+                &raw.text,
+            );
             if let Some(item) = convert(ctx, raw) {
                 if item.is_separator {
                     continue;

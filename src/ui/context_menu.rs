@@ -418,9 +418,10 @@ fn render_single_item(
         return;
     }
 
-    let item_text_lower = item.text.to_lowercase();
-    let is_open_with_item =
-        item_text_lower.contains("open with") || item_text_lower.contains("abrir com");
+    let is_open_with_item = crate::application::context_menu::is_generic_open_with_command(
+        item.command_string.as_deref(),
+        &item.text,
+    );
     let is_blocked_waiting_for_submenu =
         is_open_with_item && item.has_pending_submenu && item.sub_items.is_empty();
     let has_submenu =

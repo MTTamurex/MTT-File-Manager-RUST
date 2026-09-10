@@ -489,10 +489,10 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
 
             // Handle "Open with" natively — ShellExecuteExW with "openas" is more
             // reliable than IContextMenu::InvokeCommand for this specific verb.
-            let is_open_with = selected_shell_item_text.is_some_and(|text| {
-                let lower = text.to_lowercase();
-                lower.contains("open with") || lower.contains("abrir com")
-            });
+            let is_open_with = crate::application::context_menu::is_generic_open_with_command(
+                selected_command.as_deref(),
+                selected_shell_item_text.unwrap_or_default(),
+            );
             if is_open_with {
                 app.pending_shell_menu_invocation_id
                     .store(0, std::sync::atomic::Ordering::Release);
