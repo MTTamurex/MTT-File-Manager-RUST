@@ -6,7 +6,11 @@ use eframe::egui::{self, RichText};
 use rust_i18n::t;
 
 /// Available languages with their locale codes and display names
-const LANGUAGES: &[(&str, &str)] = &[("pt-BR", "Português (Brasil)"), ("en", "English")];
+const LANGUAGES: &[(&str, &str)] = &[
+    ("pt-BR", "Português (Brasil)"),
+    ("en", "English"),
+    ("zh-CN", "简体中文"),
+];
 
 pub fn render_language_settings_section(ui: &mut egui::Ui) -> bool {
     let mut language_changed = false;
@@ -54,4 +58,27 @@ pub fn render_language_settings_section(ui: &mut egui::Ui) -> bool {
     );
 
     language_changed
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn chinese_locale_is_embedded_and_translates() {
+        assert_eq!(
+            rust_i18n::t!("settings.appearance", locale = "zh-CN").as_ref(),
+            "外观"
+        );
+        assert_eq!(
+            rust_i18n::t!("settings.theme_system", locale = "zh-CN").as_ref(),
+            "跟随系统"
+        );
+    }
+
+    #[test]
+    fn chinese_locale_translates_a_positional_argument() {
+        assert_eq!(
+            rust_i18n::t!("status_bar.item_many", locale = "zh-CN", count = 3).as_ref(),
+            "3 个项目"
+        );
+    }
 }

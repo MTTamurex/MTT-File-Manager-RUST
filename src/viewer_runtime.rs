@@ -19,6 +19,7 @@
 
 use eframe::egui;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 const THEME_POLL_INTERVAL: Duration = Duration::from_secs(1);
@@ -114,6 +115,71 @@ pub fn build_viewer_native_options(viewport: egui::ViewportBuilder) -> eframe::N
         stencil_buffer: 0,
         ..Default::default()
     }
+}
+
+/// Tracks the background font-loading lifecycle so the UI thread can poll for
+/// the result without ever blocking, and without re-polling after it is applied.
+enum ViewerFontState {
+    Loading,
+    Ready(egui::FontDefinitions),
+    Applied,
+}
+
+/// Process-wide, lazily-started font loader shared by every viewer window in
+/// this process. Kept out of the UI thread so reading the ~tens of MB of system
+/// font files never blocks the first frame.
+fn viewer_font_cell() -> &'static Arc<Mutex<ViewerFontState>> {
+    static CELL: OnceLock<Arc<Mutex<ViewerFontState>>> = OnceLock::new();
+    CELL.get_or_init(|| {
+        let cell = Arc::new(Mutex::new(ViewerFontState::Loading));
+        let thread_cell = Arc::clone(&cell);
+        let spawn = std::thread::Builder::new()
+            .name("viewer-font-loader".to_owned())
+            .spawn(move || {
+                let mut fonts = egui::FontDefinitions::default();
+                crate::ui::fonts::install_system_fonts(&mut fonts);
+                if let Ok(mut state) = thread_cell.lock() {
+                    *state = ViewerFontState::Ready(fonts);
+                }
+            });
+
+        // A spawn failure is extremely unlikely, but transition to `Applied`
+        // immediately so the polling loop below can't spin forever.
+        if spawn.is_err() {
+            if let Ok(mut state) = cell.lock() {
+                *state = ViewerFontState::Applied;
+            }
+        }
+
+        cell
+    })
+}
+
+/// Polls the background font loader and applies the definitions once they are
+/// ready, returning `true` when applied.
+///
+/// While loading, it schedules a short repaint so the caller keeps polling
+/// without blocking the UI thread. Callers should invoke this every frame.
+pub fn poll_viewer_fonts(ctx: &egui::Context) -> bool {
+    let cell = viewer_font_cell();
+    let mut state = cell.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+
+    if matches!(*state, ViewerFontState::Ready(_)) {
+        let previous = std::mem::replace(&mut *state, ViewerFontState::Applied);
+        drop(state);
+        if let ViewerFontState::Ready(fonts) = previous {
+            ctx.set_fonts(fonts);
+            ctx.request_repaint();
+        }
+        return true;
+    }
+
+    let loading = matches!(*state, ViewerFontState::Loading);
+    drop(state);
+    if loading {
+        ctx.request_repaint_after(Duration::from_millis(16));
+    }
+    false
 }
 
 #[cfg(test)]

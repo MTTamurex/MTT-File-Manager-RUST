@@ -92,7 +92,8 @@ $requiredFiles = @(
     "$RepoRoot\mpv_ui\portable_config\scripts\modernH.lua",
     "$RepoRoot\mpv_ui\portable_config\scripts\vsr.lua",
     "$RepoRoot\mpv_ui\portable_config\script-opts\osc.conf",
-    "$RepoRoot\mpv_ui\portable_config\fonts\Material-Design-Iconic-Font.ttf"
+    "$RepoRoot\mpv_ui\portable_config\fonts\Material-Design-Iconic-Font.ttf",
+    "$RepoRoot\installer\languages\ChineseSimplified.isl"
 )
 
 foreach ($dir in $requiredDirectories) {

@@ -8,6 +8,7 @@ pub mod components;
 pub mod context_menu;
 pub(crate) mod disk_analysis;
 pub(crate) mod drive_health_badge;
+pub mod fonts;
 pub mod global_search_overlay;
 
 pub mod icon_loader;

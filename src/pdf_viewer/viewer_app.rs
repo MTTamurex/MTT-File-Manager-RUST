@@ -1100,6 +1100,9 @@ impl eframe::App for PdfViewerApp {
     }
 
     fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        // Load system fonts on a background thread and apply once ready.
+        crate::viewer_runtime::poll_viewer_fonts(ctx);
+
         // Apply theme on first frame (cc.set_visuals in creator can be
         // overridden by the platform integration).
         if let Some(dark) = self.dark_mode.take() {
@@ -1274,6 +1277,7 @@ pub(super) struct ErrorApp {
 
 impl eframe::App for ErrorApp {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        crate::viewer_runtime::poll_viewer_fonts(ctx);
         // Reveal window (started hidden to avoid wgpu init flicker).
         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
     }

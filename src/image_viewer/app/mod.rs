@@ -943,6 +943,9 @@ impl DedicatedImageViewerApp {
 
 impl eframe::App for DedicatedImageViewerApp {
     fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        // Load system fonts on a background thread and apply once ready.
+        crate::viewer_runtime::poll_viewer_fonts(ctx);
+
         if ctx.input(|input| input.viewport().close_requested())
             && (self.delete_in_progress || self.should_cancel_crop_close())
         {

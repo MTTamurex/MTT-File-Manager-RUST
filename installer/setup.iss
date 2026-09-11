@@ -45,6 +45,7 @@ DisableDirPage=yes
 [Languages]
 Name: "english";    MessagesFile: "compiler:Default.isl"
 Name: "portuguese";  MessagesFile: "compiler:Languages\BrazilianPortuguese.isl"
+Name: "chinese";     MessagesFile: "languages\ChineseSimplified.isl"
 
 [Tasks]
 Name: "desktopicon";  Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
@@ -243,7 +244,9 @@ begin
     if ActiveLanguage = 'english' then
       RegWriteStringValue(HKLM, 'SOFTWARE\MTT-File-Manager', 'InstallerLanguage', 'en')
     else if ActiveLanguage = 'portuguese' then
-      RegWriteStringValue(HKLM, 'SOFTWARE\MTT-File-Manager', 'InstallerLanguage', 'pt-BR');
+      RegWriteStringValue(HKLM, 'SOFTWARE\MTT-File-Manager', 'InstallerLanguage', 'pt-BR')
+    else if ActiveLanguage = 'chinese' then
+      RegWriteStringValue(HKLM, 'SOFTWARE\MTT-File-Manager', 'InstallerLanguage', 'zh-CN');
     RegWriteStringValue(HKLM, 'SOFTWARE\MTT-File-Manager', 'InstallGeneration',
       GetDateTimeString('yyyy-mm-dd hh:nn:ss.zzz', '-', ':'));
   end;

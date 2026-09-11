@@ -104,6 +104,9 @@ impl DiskAnalyzerApp {
 impl eframe::App for DiskAnalyzerApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        // Load system fonts on a background thread and apply once ready.
+        crate::viewer_runtime::poll_viewer_fonts(&ctx);
+
         if !self.revealed {
             // Apply the saved theme before the first visible frame.
             crate::ui::theme::apply_viewer_visuals(&ctx, self.dark_mode);

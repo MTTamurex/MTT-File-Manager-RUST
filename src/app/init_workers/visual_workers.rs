@@ -85,76 +85,7 @@ pub(in crate::app) fn spawn_async_font_loader() -> mpsc::Receiver<egui::FontDefi
     let (font_tx, font_rx) = mpsc::channel();
     std::thread::spawn(move || {
         let mut fonts = font_definitions_with_embedded_icons();
-        let mut loaded_fonts = Vec::new();
-        let windows_dir = std::env::var_os("WINDIR")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("C:\\Windows"));
-        let fonts_dir = windows_dir.join("Fonts");
-
-        let segoe_path = fonts_dir.join("segoeui.ttf");
-        if let Ok(font_data) = std::fs::read(&segoe_path) {
-            fonts.font_data.insert(
-                "segoe_ui".to_owned(),
-                std::sync::Arc::new(eframe::egui::FontData::from_owned(font_data)),
-            );
-            loaded_fonts.push("segoe_ui".to_owned());
-        }
-
-        let symbol_path = fonts_dir.join("seguisym.ttf");
-        if let Ok(font_data) = std::fs::read(&symbol_path) {
-            fonts.font_data.insert(
-                "segoe_ui_symbol".to_owned(),
-                std::sync::Arc::new(eframe::egui::FontData::from_owned(font_data)),
-            );
-            loaded_fonts.push("segoe_ui_symbol".to_owned());
-        }
-
-        // CJK fallback: Windows Explorer uses system font fallback, but egui needs
-        // explicit font files. Load one font per major CJK locale so Simplified
-        // Chinese, Traditional Chinese, Japanese, and Korean filenames render.
-        let cjk_fallback_groups = [
-            &[("ms_yahei", "msyh.ttc")][..],
-            &[("ms_jhenghei", "msjh.ttc")][..],
-            &[("yu_gothic", "YuGothR.ttc"), ("ms_gothic", "msgothic.ttc")][..],
-            &[("malgun", "malgun.ttf")][..],
-        ];
-
-        for group in cjk_fallback_groups {
-            for (key, file_name) in group {
-                let cjk_path = fonts_dir.join(file_name);
-                if let Ok(font_data) = std::fs::read(&cjk_path) {
-                    fonts.font_data.insert(
-                        key.to_string(),
-                        std::sync::Arc::new(eframe::egui::FontData::from_owned(font_data)),
-                    );
-                    loaded_fonts.push(key.to_string());
-                    break;
-                }
-            }
-        }
-
-        if !loaded_fonts.is_empty() {
-            let has_segoe_ui = loaded_fonts.iter().any(|name| name == "segoe_ui");
-            if let Some(proportional) = fonts
-                .families
-                .get_mut(&eframe::egui::FontFamily::Proportional)
-            {
-                if has_segoe_ui {
-                    proportional.insert(0, "segoe_ui".to_owned());
-                }
-                proportional.extend(
-                    loaded_fonts
-                        .iter()
-                        .filter(|name| name.as_str() != "segoe_ui")
-                        .cloned(),
-                );
-            }
-
-            if let Some(monospace) = fonts.families.get_mut(&eframe::egui::FontFamily::Monospace) {
-                monospace.extend(loaded_fonts.clone());
-            }
-        }
-
+        crate::ui::fonts::install_system_fonts(&mut fonts);
         let _ = font_tx.send(fonts);
     });
     font_rx
