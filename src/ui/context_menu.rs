@@ -7,6 +7,8 @@ use std::cell::RefCell;
 pub use crate::application::context_menu::{ContextMenuItem, ContextMenuState};
 use crate::ui::svg_icons::SvgIconManager;
 
+mod sizing;
+
 // Track submenu hierarchy: each depth level stores which item is active at that level
 // Example: hovering "7-Zip" -> [Some(7zip_id)]
 // Hovering item inside 7-Zip submenu -> [Some(7zip_id), Some(sub_item_id)]
@@ -60,7 +62,6 @@ const ICON_TEXT_GAP: f32 = 10.0;
 const MENU_ROUNDING: f32 = 8.0;
 const MENU_MIN_WIDTH: f32 = 180.0;
 const MENU_MAX_WIDTH: f32 = 400.0;
-const SUBMENU_MIN_WIDTH: f32 = 220.0;
 const SUBMENU_X_OFFSET: f32 = 6.0;
 const SHORTCUT_COLOR: egui::Color32 = egui::Color32::from_gray(128);
 const HOVER_H_MARGIN: f32 = 4.0;
@@ -599,7 +600,7 @@ fn render_single_item(
 
         // Calculate submenu position: RIGHT by default, LEFT only at the viewport edge.
         let screen_rect = ui.ctx().viewport_rect();
-        let menu_width = SUBMENU_MIN_WIDTH; // Expected submenu width
+        let menu_width = sizing::submenu_width(ui, &item.sub_items);
 
         let space_on_right = screen_rect.right() - rect.right();
         let needs_flip = space_on_right < (menu_width + SUBMENU_X_OFFSET + 20.0); // 20px margin
@@ -732,8 +733,7 @@ fn render_single_item(
                         .inner_margin(4.0)
                         .corner_radius(MENU_ROUNDING)
                         .show(ui, |ui| {
-                            ui.set_min_width(SUBMENU_MIN_WIDTH);
-                            ui.set_max_width(MENU_MAX_WIDTH);
+                            ui.set_width(menu_width);
                             ui.spacing_mut().item_spacing = egui::vec2(0.0, 1.0);
                             for sub in &item.sub_items {
                                 render_single_item(

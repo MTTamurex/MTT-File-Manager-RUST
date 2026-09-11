@@ -238,13 +238,20 @@ pub(crate) fn extract_context_menu(context_menu: IContextMenu) -> Result<ShellMe
         let hmenu = CreatePopupMenu()?;
         let query_started = std::time::Instant::now();
         if let Err(e) = context_menu
-            .QueryContextMenu(hmenu, 0, 1, 0x7FFF, CMF_NORMAL)
+            .QueryContextMenu(hmenu, 0, 1, 0x7FFF, CMF_NORMAL | CMF_SYNCCASCADEMENU)
             .ok()
         {
             let _ = DestroyMenu(hmenu);
             return Err(e);
         }
         let query_elapsed = query_started.elapsed();
+
+        // We render a snapshot rather than calling TrackPopupMenu. Deliver the
+        // root popup initialization before reading it so handlers can materialize
+        // commands on the first opening, just as they do for a native popup.
+        if let Ok(ctx2) = context_menu.cast::<IContextMenu2>() {
+            let _ = ctx2.HandleMenuMsg(WM_INITMENUPOPUP, WPARAM(hmenu.0 as usize), LPARAM(0));
+        }
 
         let count = GetMenuItemCount(Some(hmenu));
         log::debug!("[ShellMenu] Total menu items: {}", count);
