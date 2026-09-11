@@ -12,6 +12,12 @@ use windows::Win32::UI::Shell::Common::*;
 use windows::Win32::UI::Shell::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
+#[cfg(test)]
+mod first_open_tests;
+
+mod cold_start;
+pub(crate) use cold_start::extract as extract_background_context_menu;
+
 /// Represents a single item in the shell context menu
 pub struct ShellMenuItem {
     pub id: u32, // Command ID from QueryContextMenu

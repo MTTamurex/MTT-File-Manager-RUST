@@ -11,9 +11,11 @@ use windows::core::{Result, PCWSTR};
 use windows::Win32::Foundation::HWND;
 use windows::Win32::System::Com::CoTaskMemFree;
 use windows::Win32::UI::Shell::Common::ITEMIDLIST;
-use windows::Win32::UI::Shell::{IContextMenu, IShellFolder, SHBindToObject, SHParseDisplayName};
+use windows::Win32::UI::Shell::{IShellFolder, SHBindToObject, SHParseDisplayName};
 
-use crate::infrastructure::windows::native_menu::{extract_context_menu, ShellMenuContext};
+use crate::infrastructure::windows::native_menu::{
+    extract_background_context_menu, ShellMenuContext,
+};
 
 struct PidlGuard(*mut ITEMIDLIST);
 
@@ -40,7 +42,6 @@ pub fn extract_background_menu(hwnd: HWND, folder_path: &Path) -> Result<ShellMe
         SHParseDisplayName(PCWSTR(path_wide.as_ptr()), None, &mut pidl, 0, None)?;
         let pidl = PidlGuard(pidl);
         let folder: IShellFolder = SHBindToObject(None, pidl.0, None)?;
-        let context_menu: IContextMenu = folder.CreateViewObject(hwnd)?;
-        extract_context_menu(context_menu)
+        extract_background_context_menu(|| folder.CreateViewObject(hwnd))
     }
 }
