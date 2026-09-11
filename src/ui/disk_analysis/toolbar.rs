@@ -338,10 +338,7 @@ fn render_search_results_popup(
     if !state.search_open || state.search_results.is_empty() {
         return None;
     }
-    let model = match state.model.clone() {
-        Some(m) => m,
-        None => return None,
-    };
+    let model = state.model.clone()?;
     let results = state.search_results.clone();
     let anchor = ui.max_rect().left_top();
     let row_height = 22.0;

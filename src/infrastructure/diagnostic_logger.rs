@@ -370,7 +370,7 @@ pub fn open_log_folder() -> Result<PathBuf, String> {
     let log_dir = log_directory_path();
     fs::create_dir_all(&log_dir)
         .map_err(|err| format!("Failed to create diagnostic log directory: {}", err))?;
-    crate::infrastructure::windows::open_with_shell(&log_dir)
+    crate::infrastructure::windows::open_with_shell(&log_dir, None)
         .map_err(|err| format!("Failed to open diagnostic log directory: {}", err))?;
     Ok(log_dir)
 }

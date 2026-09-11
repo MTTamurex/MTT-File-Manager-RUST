@@ -102,9 +102,9 @@ fn sanitize_operation_path(path: &Path) -> OpResult<PathBuf> {
 }
 
 /// Opens a file with its default application.
-pub fn open_with_shell(path: &Path, _hwnd: Option<HWND>) -> OpResult<()> {
+pub fn open_with_shell(path: &Path, hwnd: Option<HWND>) -> OpResult<()> {
     let valid_path = sanitize_operation_path(path)?;
-    shell_operations::open_with_shell(&valid_path).map_err(|e| e.to_string())?;
+    shell_operations::open_with_shell(&valid_path, hwnd).map_err(|e| e.to_string())?;
     Ok(())
 }
 

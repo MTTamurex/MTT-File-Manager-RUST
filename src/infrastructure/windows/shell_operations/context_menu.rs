@@ -8,29 +8,39 @@ use windows::Win32::UI::Shell::Common::*;
 use windows::Win32::UI::Shell::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
-/// Opens a file with its default application using ShellExecuteW.
-pub fn open_with_shell(path: &Path) -> Result<()> {
+/// Opens a file with its default application.
+///
+/// Mirrors how Explorer invokes an item: `ShellExecuteExW` with
+/// `SEE_MASK_INVOKEIDLIST` and the owning window. This gives the launched
+/// process the same shell context Explorer provides, including the OS
+/// app-mode/dark theme used by the target application.
+pub fn open_with_shell(path: &Path, hwnd: Option<HWND>) -> Result<()> {
     unsafe {
         let path_str = path.to_string_lossy().to_string();
         let path_wide: Vec<u16> = path_str.encode_utf16().chain(std::iter::once(0)).collect();
 
-        let hinst = ShellExecuteW(
-            None,
-            PCWSTR::default(),
-            PCWSTR(path_wide.as_ptr()),
-            PCWSTR::default(),
-            PCWSTR::default(),
-            SW_SHOW,
-        );
+        let mut exec_info = SHELLEXECUTEINFOW {
+            cbSize: std::mem::size_of::<SHELLEXECUTEINFOW>() as u32,
+            fMask: SEE_MASK_INVOKEIDLIST,
+            hwnd: hwnd.unwrap_or_default(),
+            lpVerb: PCWSTR::null(),
+            lpFile: PCWSTR(path_wide.as_ptr()),
+            lpParameters: PCWSTR::null(),
+            lpDirectory: PCWSTR::null(),
+            nShow: SW_SHOWNORMAL.0,
+            hInstApp: HINSTANCE(std::ptr::null_mut()),
+            lpIDList: std::ptr::null_mut(),
+            lpClass: PCWSTR::null(),
+            hkeyClass: HKEY::default(),
+            dwHotKey: 0,
+            Anonymous: std::mem::zeroed(),
+            hProcess: HANDLE(std::ptr::null_mut()),
+        };
 
-        let code = hinst.0 as isize;
-        if code <= 32 {
+        if ShellExecuteExW(&mut exec_info).is_err() {
             return Err(Error::new(
                 E_FAIL,
-                format!(
-                    "ShellExecuteW failed with code {} for path {:?}",
-                    code, path
-                ),
+                format!("ShellExecuteExW failed for path {:?}", path),
             ));
         }
 
