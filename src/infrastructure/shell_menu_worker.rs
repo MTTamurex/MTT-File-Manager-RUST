@@ -43,8 +43,8 @@ pub enum ShellMenuRequest {
         menu_y: i32,
         hwnd_isize: isize,
     },
-    /// Discard the active `ShellMenuContext` (menu was dismissed without a command).
-    Cancel,
+    /// Discard the active `ShellMenuContext` for a dismissed menu request.
+    Cancel { request_id: u64 },
     /// Expand a pending submenu for `item_id` (triggered by hover on a lazy item).
     LoadSubmenu { request_id: u64, item_id: u32 },
 }
@@ -52,6 +52,17 @@ pub enum ShellMenuRequest {
 pub enum ShellMenuTarget {
     Selection(Vec<PathBuf>),
     FolderBackground(PathBuf),
+}
+
+fn cancel_active_context<T>(
+    active_context: &mut Option<T>,
+    active_request_id: &mut Option<u64>,
+    request_id: u64,
+) {
+    if *active_request_id == Some(request_id) {
+        *active_context = None;
+        *active_request_id = None;
+    }
 }
 
 /// Send-safe representation of a `ShellMenuItem` — carries no COM handles or OS handles.
@@ -344,9 +355,8 @@ fn shell_menu_loop(
                 send_response(&tx, &repaint_ctx, ShellMenuResponse::Invoked { request_id });
             }
 
-            ShellMenuRequest::Cancel => {
-                active_ctx = None;
-                active_request_id = None;
+            ShellMenuRequest::Cancel { request_id } => {
+                cancel_active_context(&mut active_ctx, &mut active_request_id, request_id);
                 // No response needed.
             }
 
@@ -436,7 +446,7 @@ fn shell_menu_com_failure_loop(
                 item_id,
                 sub_items: Vec::new(),
             }),
-            ShellMenuRequest::Cancel => None,
+            ShellMenuRequest::Cancel { .. } => None,
         };
         if let Some(response) = response {
             send_response(&tx, &repaint_ctx, response);
@@ -460,7 +470,7 @@ fn pump_sta_messages() -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::BusyGuard;
+    use super::{cancel_active_context, BusyGuard};
     use std::sync::atomic::{AtomicBool, Ordering};
 
     #[test]
@@ -471,5 +481,19 @@ mod tests {
             assert!(busy.load(Ordering::Acquire));
         }
         assert!(!busy.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn cancel_request_must_match_active_context() {
+        let mut active_context = Some(());
+        let mut active_request_id = Some(2);
+
+        cancel_active_context(&mut active_context, &mut active_request_id, 1);
+        assert!(active_context.is_some());
+        assert_eq!(active_request_id, Some(2));
+
+        cancel_active_context(&mut active_context, &mut active_request_id, 2);
+        assert!(active_context.is_none());
+        assert_eq!(active_request_id, None);
     }
 }

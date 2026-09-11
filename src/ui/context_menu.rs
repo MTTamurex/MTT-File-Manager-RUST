@@ -14,6 +14,16 @@ thread_local! {
     static SUBMENU_HIERARCHY: RefCell<Vec<Option<i32>>> = const { RefCell::new(Vec::new()) };
 }
 
+fn clear_submenu_hierarchy() {
+    SUBMENU_HIERARCHY.with(|hierarchy| hierarchy.borrow_mut().clear());
+}
+
+fn reset_submenu_hierarchy_for_new_session(menu_state: &mut ContextMenuState) {
+    if menu_state.take_submenu_reset_request() {
+        clear_submenu_hierarchy();
+    }
+}
+
 fn suppress_tooltips_id() -> egui::Id {
     egui::Id::new("suppress_tooltips_for_context_menu")
 }
@@ -86,12 +96,12 @@ pub fn render_context_menu(
 ) -> bool {
     if !menu_state.is_open {
         // CRITICAL: Clear hierarchy when menu is not open
-        SUBMENU_HIERARCHY.with(|hierarchy| {
-            hierarchy.borrow_mut().clear();
-        });
+        clear_submenu_hierarchy();
         set_tooltip_suppression(ctx, false);
         return false;
     }
+
+    reset_submenu_hierarchy_for_new_session(menu_state);
 
     // Suppress item tooltips while the context menu is visible
     set_tooltip_suppression(ctx, true);
@@ -239,9 +249,7 @@ pub fn render_context_menu(
             menu_state.close();
         }
         // CRITICAL: Clear submenu hierarchy when menu closes
-        SUBMENU_HIERARCHY.with(|hierarchy| {
-            hierarchy.borrow_mut().clear();
-        });
+        clear_submenu_hierarchy();
         return true;
     }
 
@@ -670,10 +678,13 @@ fn render_single_item(
             }
         });
 
-        // Only update hierarchy if: in expanded area, no deeper active, AND (no sibling active OR this is already active)
-        let should_activate = pointer_in_expanded_area
-            && !has_deeper_active
-            && (!sibling_submenu_active || is_currently_active);
+        // A direct hover selects this branch even if another branch has active
+        // descendants. Keep the expanded-gap guard for travel into a submenu;
+        // geometric overlap alone must not steal an active nested branch.
+        let should_activate = response.hovered()
+            || (pointer_in_expanded_area
+                && !has_deeper_active
+                && (!sibling_submenu_active || is_currently_active));
 
         if should_activate {
             SUBMENU_HIERARCHY.with(|hierarchy| {
@@ -691,6 +702,7 @@ fn render_single_item(
                 // This prevents submenu interference
                 if is_different_item {
                     h.truncate(depth + 1);
+                    ui.ctx().request_repaint();
                 }
             });
         }
@@ -789,4 +801,29 @@ fn render_overflow_submenu(
         .with_subitems(items.iter().map(|i| (*i).clone()).collect());
 
     render_single_item(ui, &overflow_item, action, 0, lazy_load, svg_icon_manager);
+}
+
+#[cfg(test)]
+#[path = "context_menu/hover_tests.rs"]
+mod hover_tests;
+
+#[cfg(test)]
+mod tests {
+    use super::{reset_submenu_hierarchy_for_new_session, SUBMENU_HIERARCHY};
+    use crate::application::context_menu::ContextMenuState;
+
+    #[test]
+    fn reopening_menu_clears_stale_submenu_hierarchy() {
+        let mut state = ContextMenuState::default();
+        state.open(eframe::egui::Pos2::ZERO, None, Vec::new(), true);
+        reset_submenu_hierarchy_for_new_session(&mut state);
+        SUBMENU_HIERARCHY.with(|hierarchy| {
+            *hierarchy.borrow_mut() = vec![Some(10), Some(20)];
+        });
+        state.open(eframe::egui::pos2(10.0, 20.0), None, Vec::new(), true);
+
+        reset_submenu_hierarchy_for_new_session(&mut state);
+
+        SUBMENU_HIERARCHY.with(|hierarchy| assert!(hierarchy.borrow().is_empty()));
+    }
 }

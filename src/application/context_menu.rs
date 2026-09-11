@@ -226,6 +226,8 @@ pub struct ContextMenuState {
     pub pending_load_item: Option<i32>,
     /// Submenus already dispatched to the Shell worker.
     pub loading_submenu_ids: HashSet<i32>,
+    /// Signals that a newly opened menu must discard hover state from the prior session.
+    submenu_reset_pending: bool,
 }
 
 impl Default for ContextMenuState {
@@ -250,6 +252,7 @@ impl Default for ContextMenuState {
             native_context: None,
             pending_load_item: None,
             loading_submenu_ids: HashSet::new(),
+            submenu_reset_pending: false,
         }
     }
 }
@@ -269,6 +272,7 @@ impl ContextMenuState {
         is_empty_area: bool,
     ) {
         self.is_open = true;
+        self.submenu_reset_pending = true;
         self.position = position;
         self.item_index = item_index;
         self.target_paths = target_paths;
@@ -293,6 +297,7 @@ impl ContextMenuState {
         primary_is_directory: bool,
     ) {
         self.is_open = true;
+        self.submenu_reset_pending = true;
         self.position = position;
         self.item_index = None;
         self.target_paths = target_paths;
@@ -328,6 +333,7 @@ impl ContextMenuState {
         self.native_context = None;
         self.pending_load_item = None;
         self.loading_submenu_ids.clear();
+        self.submenu_reset_pending = false;
     }
 
     /// Recompute primary/secondary/overflow index partitions.
@@ -364,6 +370,10 @@ impl ContextMenuState {
 
     pub fn finish_submenu_load(&mut self, item_id: i32) {
         self.loading_submenu_ids.remove(&item_id);
+    }
+
+    pub(crate) fn take_submenu_reset_request(&mut self) -> bool {
+        std::mem::take(&mut self.submenu_reset_pending)
     }
 }
 
@@ -420,6 +430,22 @@ mod tests {
             state.operation_directory,
             Some(std::path::PathBuf::from(r"C:\folder"))
         );
+    }
+
+    #[test]
+    fn reopening_context_menu_requests_submenu_reset() {
+        let mut state = ContextMenuState::default();
+
+        state.open(eframe::egui::Pos2::ZERO, None, Vec::new(), true);
+        assert!(state.take_submenu_reset_request());
+        assert!(!state.take_submenu_reset_request());
+
+        state.open(eframe::egui::pos2(10.0, 20.0), None, Vec::new(), true);
+        assert!(state.is_open);
+        assert!(state.take_submenu_reset_request());
+
+        state.open_for_global_search(eframe::egui::Pos2::ZERO, Vec::new(), false);
+        assert!(state.take_submenu_reset_request());
     }
 
     #[test]

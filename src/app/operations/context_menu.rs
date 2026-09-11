@@ -2,6 +2,8 @@
 //!
 //! This module handles population of the right-click context menu, merging native Shell items.
 
+mod new_submenu;
+
 use crate::app::state::ImageViewerApp;
 use eframe::egui;
 use rust_i18n::t;
@@ -217,6 +219,7 @@ fn grouping_menu_item(app: &ImageViewerApp) -> crate::application::context_menu:
 
 impl ImageViewerApp {
     pub(crate) fn invalidate_context_menu_workers(&mut self) {
+        let cancelled_request_id = self.shell_menu_request_id;
         self.shell_menu_request_id = self.shell_menu_request_id.wrapping_add(1);
         self.latest_shell_menu_request_id
             .store(self.shell_menu_request_id, Ordering::Release);
@@ -224,9 +227,11 @@ impl ImageViewerApp {
             .store(0, Ordering::Release);
         self.pending_open_with_invocation_id
             .store(0, Ordering::Release);
-        let _ = self
-            .shell_menu_control_tx
-            .try_send(crate::infrastructure::shell_menu_worker::ShellMenuRequest::Cancel);
+        let _ = self.shell_menu_control_tx.try_send(
+            crate::infrastructure::shell_menu_worker::ShellMenuRequest::Cancel {
+                request_id: cancelled_request_id,
+            },
+        );
         let _ = self
             .open_with_control_tx
             .try_send(crate::infrastructure::open_with_worker::OpenWithRequest::Cancel);
@@ -1374,17 +1379,13 @@ impl ImageViewerApp {
 
         let hide_native_folder = is_new_submenu(&self.context_menu.items, item_id as i32);
         self.context_menu.finish_submenu_load(item_id as i32);
-        let new_subitems: Vec<ContextMenuItem> = sub_items
+        let mut new_subitems: Vec<ContextMenuItem> = sub_items
             .iter()
-            .filter(|item| {
-                !hide_native_folder
-                    || !item
-                        .command_string
-                        .as_deref()
-                        .is_some_and(|verb| verb.eq_ignore_ascii_case("newfolder"))
-            })
             .map(|item| convert_item(ctx, item))
             .collect();
+        if hide_native_folder {
+            new_submenu::remove_duplicate_folder(&mut new_subitems);
+        }
         update_ui_item(&mut self.context_menu.items, item_id as i32, new_subitems);
     }
 }

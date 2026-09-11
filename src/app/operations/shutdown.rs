@@ -30,9 +30,11 @@ impl ImageViewerApp {
             .store(0, Ordering::Release);
         self.pending_open_with_invocation_id
             .store(0, Ordering::Release);
-        let _ = self
-            .shell_menu_control_tx
-            .try_send(crate::infrastructure::shell_menu_worker::ShellMenuRequest::Cancel);
+        let _ = self.shell_menu_control_tx.try_send(
+            crate::infrastructure::shell_menu_worker::ShellMenuRequest::Cancel {
+                request_id: self.shell_menu_request_id,
+            },
+        );
         let _ = self
             .open_with_control_tx
             .try_send(crate::infrastructure::open_with_worker::OpenWithRequest::Cancel);

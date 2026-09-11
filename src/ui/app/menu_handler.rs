@@ -478,7 +478,9 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                     app.pending_shell_menu_invocation_id
                         .store(0, std::sync::atomic::Ordering::Release);
                     let _ = app.shell_menu_control_tx.try_send(
-                        crate::infrastructure::shell_menu_worker::ShellMenuRequest::Cancel,
+                        crate::infrastructure::shell_menu_worker::ShellMenuRequest::Cancel {
+                            request_id: app.shell_menu_request_id,
+                        },
                     );
                     apply_cloud_files_pin(app, &context_menu.target_paths, command);
                     context_menu.close();
@@ -496,9 +498,11 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
             if is_open_with {
                 app.pending_shell_menu_invocation_id
                     .store(0, std::sync::atomic::Ordering::Release);
-                let _ = app
-                    .shell_menu_control_tx
-                    .try_send(crate::infrastructure::shell_menu_worker::ShellMenuRequest::Cancel);
+                let _ = app.shell_menu_control_tx.try_send(
+                    crate::infrastructure::shell_menu_worker::ShellMenuRequest::Cancel {
+                        request_id: app.shell_menu_request_id,
+                    },
+                );
                 if let Some(path) = context_menu.target_paths.first() {
                     if let Some(hwnd) = app.native_hwnd {
                         if let Err(e) =
@@ -559,9 +563,11 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
             }
         } else {
             // Internal command handled via trait
-            let _ = app
-                .shell_menu_control_tx
-                .try_send(crate::infrastructure::shell_menu_worker::ShellMenuRequest::Cancel);
+            let _ = app.shell_menu_control_tx.try_send(
+                crate::infrastructure::shell_menu_worker::ShellMenuRequest::Cancel {
+                    request_id: app.shell_menu_request_id,
+                },
+            );
             if let Some(command) = selected_command.as_deref() {
                 if let Some(handler_id) =
                     crate::infrastructure::open_with_worker::handler_id_from_command(command)
@@ -1039,12 +1045,10 @@ mod tests {
 
     #[test]
     fn primary_context_target_uses_captured_path_metadata() {
-        let context_menu = ContextMenuState {
-            item_index: Some(99),
-            target_paths: vec![PathBuf::from(r"C:\inactive\folder")],
-            primary_is_directory: Some(true),
-            ..ContextMenuState::default()
-        };
+        let mut context_menu = ContextMenuState::default();
+        context_menu.item_index = Some(99);
+        context_menu.target_paths = vec![PathBuf::from(r"C:\inactive\folder")];
+        context_menu.primary_is_directory = Some(true);
 
         let (path, is_directory) = primary_context_target(&context_menu).unwrap();
         assert_eq!(path, std::path::Path::new(r"C:\inactive\folder"));
