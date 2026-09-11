@@ -1,5 +1,7 @@
 use eframe::egui::{self, Color32};
 
+use crate::app::navigation_state::ThemeMode;
+
 // === SPACING ===
 pub const PADDING_XS: f32 = 2.0;
 pub const PADDING_SM: f32 = 4.0;
@@ -188,6 +190,42 @@ pub fn viewer_visuals(dark_mode: bool) -> eframe::egui::Visuals {
     visuals.widgets.hovered.corner_radius = radius;
     visuals.widgets.active.corner_radius = radius;
     visuals
+}
+
+/// Applies the selected theme mode to the whole context, including the shared
+/// scroll/popup styling. `ThemeMode::System` resolves against the Windows app
+/// mode. Use this instead of calling `ctx.set_visuals()` directly so every
+/// surface stays consistent.
+///
+/// Pinning via `set_theme` is required: egui defaults to
+/// `ThemePreference::System`, which swaps the active style bucket whenever the
+/// OS theme changes, silently discarding the visuals applied here.
+pub fn apply_theme_visuals(ctx: &egui::Context, mode: ThemeMode) {
+    let dark = mode.resolve_dark();
+    ctx.set_theme(if dark {
+        egui::Theme::Dark
+    } else {
+        egui::Theme::Light
+    });
+    if dark {
+        ctx.set_visuals(egui::Visuals::dark());
+    } else {
+        ctx.set_visuals(egui::Visuals::light());
+    }
+    apply_scroll_style(ctx);
+    apply_popup_style(ctx);
+}
+
+/// Pins the theme preference and applies the dedicated-viewer visuals. Same
+/// rationale as [`apply_theme_visuals`]: without the pin, an OS theme change
+/// swaps the active style bucket and the viewer visuals are lost.
+pub fn apply_viewer_visuals(ctx: &egui::Context, dark: bool) {
+    ctx.set_theme(if dark {
+        egui::Theme::Dark
+    } else {
+        egui::Theme::Light
+    });
+    ctx.set_visuals(viewer_visuals(dark));
 }
 
 /// Modern popup/tooltip chrome: rounded corners + soft deep shadow.

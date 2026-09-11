@@ -14,9 +14,10 @@ pub fn render_appearance_settings_section(ui: &mut egui::Ui, theme_mode: &mut Th
         &t!("settings.appearance_description"),
     );
 
-    let modes: [(ThemeMode, &str); 2] = [
+    let modes: [(ThemeMode, &str); 3] = [
         (ThemeMode::Light, &t!("settings.theme_light")),
         (ThemeMode::Dark, &t!("settings.theme_dark")),
+        (ThemeMode::System, &t!("settings.theme_system")),
     ];
     let selected = modes
         .iter()

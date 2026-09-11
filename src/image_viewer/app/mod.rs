@@ -954,11 +954,7 @@ impl eframe::App for DedicatedImageViewerApp {
 
             // Apply theme on first frame (cc.egui_ctx.set_visuals in creator
             // can be overridden by the platform integration).
-            if self.dark_mode {
-                ctx.set_visuals(crate::ui::theme::viewer_visuals(true));
-            } else {
-                ctx.set_visuals(crate::ui::theme::viewer_visuals(false));
-            }
+            crate::ui::theme::apply_viewer_visuals(ctx, self.dark_mode);
 
             // Apply dark/light title bar on the native Windows decoration.
             // Keep this aligned with PDF/Text viewers startup behavior.
@@ -1055,12 +1051,13 @@ impl eframe::App for DedicatedImageViewerApp {
         ) {
             self.dark_mode = dark;
             let ctx = ui.ctx().clone();
-            ctx.set_visuals(crate::ui::theme::viewer_visuals(dark));
+            crate::ui::theme::apply_viewer_visuals(&ctx, dark);
             #[cfg(target_os = "windows")]
             if let Some(hwnd) = self.native_hwnd {
                 crate::infrastructure::windows::window_corners::apply_dark_title_bar(hwnd, dark);
             }
         }
+        crate::viewer_runtime::schedule_saved_theme_poll(ui.ctx(), self.last_theme_poll);
 
         let style = ui.ctx().global_style();
         ui.set_style(style);

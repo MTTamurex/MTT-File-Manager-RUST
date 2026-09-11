@@ -381,6 +381,7 @@ settings:
   appearance_description: "Escolha o tema visual do aplicativo."
   theme_light: "Claro"
   theme_dark: "Escuro"
+  theme_system: "Sistema"
   theme_apply_immediately: "As alterações de tema são aplicadas imediatamente."
   show_quick_access_sidebar: "Mostrar Acesso Rápido na barra lateral"
   show_recycle_bin: "Mostrar Lixeira no Acesso Rápido"

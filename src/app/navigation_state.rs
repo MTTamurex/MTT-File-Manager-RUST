@@ -4,6 +4,19 @@ use crate::application::navigation::NavigationHistory;
 pub enum ThemeMode {
     Light,
     Dark,
+    System,
+}
+
+impl ThemeMode {
+    /// Whether this mode should render dark right now. `System` follows the
+    /// Windows "app mode" setting, falling back to light when it is unavailable.
+    pub fn resolve_dark(self) -> bool {
+        match self {
+            ThemeMode::Light => false,
+            ThemeMode::Dark => true,
+            ThemeMode::System => crate::infrastructure::windows::windows_app_is_dark(),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

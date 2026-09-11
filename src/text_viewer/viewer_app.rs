@@ -582,11 +582,7 @@ impl eframe::App for TextViewerApp {
     fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         // Apply theme on first frame
         if let Some(dark) = self.dark_mode.take() {
-            if dark {
-                ctx.set_visuals(crate::ui::theme::viewer_visuals(true));
-            } else {
-                ctx.set_visuals(crate::ui::theme::viewer_visuals(false));
-            }
+            crate::ui::theme::apply_viewer_visuals(ctx, dark);
 
             use raw_window_handle::HasWindowHandle;
             if let Ok(handle) = frame.window_handle() {
@@ -616,7 +612,7 @@ impl eframe::App for TextViewerApp {
             ctx.global_style().visuals.dark_mode,
             &mut self.last_theme_poll,
         ) {
-            ctx.set_visuals(crate::ui::theme::viewer_visuals(dark));
+            crate::ui::theme::apply_viewer_visuals(ctx, dark);
             if let Some(raw) = self.native_hwnd {
                 crate::infrastructure::windows::window_corners::apply_dark_title_bar(
                     windows::Win32::Foundation::HWND(raw as *mut _),
@@ -624,6 +620,7 @@ impl eframe::App for TextViewerApp {
                 );
             }
         }
+        crate::viewer_runtime::schedule_saved_theme_poll(ctx, self.last_theme_poll);
         ui.set_style(ctx.global_style());
         self.handle_keyboard(ctx);
 

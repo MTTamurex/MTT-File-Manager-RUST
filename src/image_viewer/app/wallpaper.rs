@@ -8,6 +8,11 @@ pub(super) type WallpaperOutcome = (u64, Result<(), String>);
 
 impl super::DedicatedImageViewerApp {
     fn reapply_viewer_theme(&self, ctx: &egui::Context) {
+        ctx.set_theme(if self.dark_mode {
+            egui::Theme::Dark
+        } else {
+            egui::Theme::Light
+        });
         if self.dark_mode {
             ctx.set_visuals(egui::Visuals::dark());
         } else {

@@ -1,3 +1,4 @@
+use crate::app::navigation_state::ThemeMode;
 use crate::app::ImageViewerApp;
 use crate::infrastructure::windows::window_subclass::{
     is_in_size_move, layout_phase, WindowLayoutPhase,
@@ -13,6 +14,7 @@ const CLIPBOARD_CLEANUP_RETRY_INTERVAL: Duration = Duration::from_secs(1);
 const DRIVE_BITMASK_CHECK_INTERVAL: Duration = Duration::from_secs(3);
 const DRIVE_INFO_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
 const BACKGROUND_MEMORY_MONITOR_INTERVAL: Duration = Duration::from_secs(2);
+const SYSTEM_THEME_POLL_INTERVAL: Duration = Duration::from_secs(1);
 
 fn should_run_hidden_updates(viewport_visible: bool, minimized: bool) -> bool {
     !viewport_visible || minimized
@@ -30,6 +32,7 @@ struct RepaintDeadlineInputs {
     drive_info_refresh_elapsed: Option<Duration>,
     drive_health_wakeup_in: Option<Duration>,
     background_memory_monitor_active: bool,
+    system_theme_poll_remaining: Option<Duration>,
 }
 
 fn remaining_after_frame_check(elapsed: Duration, interval: Duration) -> Duration {
@@ -70,6 +73,9 @@ fn next_background_repaint(inputs: RepaintDeadlineInputs) -> Duration {
     if inputs.background_memory_monitor_active {
         deadline = deadline.min(BACKGROUND_MEMORY_MONITOR_INTERVAL);
     }
+    if let Some(remaining) = inputs.system_theme_poll_remaining {
+        deadline = deadline.min(remaining);
+    }
 
     deadline
 }
@@ -97,8 +103,27 @@ impl ImageViewerApp {
             drive_info_refresh_elapsed,
             drive_health_wakeup_in: self.drive_health_next_wakeup_in(std::time::Instant::now()),
             background_memory_monitor_active: self.background_memory_trim_active,
+            system_theme_poll_remaining: (self.theme_mode == ThemeMode::System).then(|| {
+                SYSTEM_THEME_POLL_INTERVAL.saturating_sub(self.last_system_theme_poll.elapsed())
+            }),
         });
         ctx.request_repaint_after(deadline);
+    }
+
+    /// Keeps `ThemeMode::System` in sync with the Windows app mode.
+    fn poll_system_theme(&mut self, ctx: &egui::Context) {
+        if self.theme_mode != ThemeMode::System
+            || self.last_system_theme_poll.elapsed() < SYSTEM_THEME_POLL_INTERVAL
+        {
+            return;
+        }
+        self.last_system_theme_poll = std::time::Instant::now();
+        let dark = crate::infrastructure::windows::windows_app_is_dark();
+        if dark != self.system_theme_dark {
+            self.system_theme_dark = dark;
+            crate::ui::theme::apply_theme_visuals(ctx, self.theme_mode);
+            ctx.request_repaint();
+        }
     }
 
     fn run_background_updates(&mut self, ctx: &egui::Context, upload_textures: bool) {
@@ -106,6 +131,8 @@ impl ImageViewerApp {
             self.refresh_working_set_trim_blocker(true);
             return;
         }
+
+        self.poll_system_theme(ctx);
 
         let t0 = std::time::Instant::now();
         if upload_textures {
@@ -557,16 +584,9 @@ impl eframe::App for ImageViewerApp {
                 self.shortcut_editor.clear();
             }
             if output.theme_changed {
-                match self.theme_mode {
-                    crate::app::navigation_state::ThemeMode::Dark => {
-                        ctx.set_visuals(egui::Visuals::dark())
-                    }
-                    crate::app::navigation_state::ThemeMode::Light => {
-                        ctx.set_visuals(egui::Visuals::light())
-                    }
-                }
-                crate::ui::theme::apply_scroll_style(ctx);
-                crate::ui::theme::apply_popup_style(ctx);
+                self.system_theme_dark = self.theme_mode.resolve_dark();
+                self.last_system_theme_poll = std::time::Instant::now();
+                crate::ui::theme::apply_theme_visuals(ctx, self.theme_mode);
                 self.save_preferences();
                 self.force_save_preferences();
             }
@@ -770,6 +790,7 @@ mod tests {
             drive_info_refresh_elapsed: None,
             drive_health_wakeup_in: None,
             background_memory_monitor_active: false,
+            system_theme_poll_remaining: None,
         }
     }
 
@@ -860,5 +881,15 @@ mod tests {
             remaining_after_frame_check(Duration::from_secs(30), Duration::from_secs(3)),
             Duration::from_secs(3)
         );
+    }
+
+    #[test]
+    fn system_theme_poll_wakes_the_idle_loop() {
+        let inputs = RepaintDeadlineInputs {
+            system_theme_poll_remaining: Some(Duration::from_millis(600)),
+            ..idle_inputs()
+        };
+
+        assert_eq!(next_background_repaint(inputs), Duration::from_millis(600));
     }
 }

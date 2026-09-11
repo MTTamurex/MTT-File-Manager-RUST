@@ -313,6 +313,7 @@ impl ImageViewerApp {
         let theme_str = match self.theme_mode {
             ThemeMode::Light => "light",
             ThemeMode::Dark => "dark",
+            ThemeMode::System => "system",
         };
         prefs.push(("theme_mode", theme_str.to_string()));
 

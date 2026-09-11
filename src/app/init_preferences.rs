@@ -217,6 +217,7 @@ impl StartupPreferences {
             .get("theme_mode")
             .map(|s| match s.as_str() {
                 "dark" => ThemeMode::Dark,
+                "system" => ThemeMode::System,
                 _ => ThemeMode::Light,
             })
             .unwrap_or(ThemeMode::Light);

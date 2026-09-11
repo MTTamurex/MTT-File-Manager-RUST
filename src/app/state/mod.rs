@@ -723,8 +723,11 @@ pub struct ImageViewerApp {
 
     // Media player volume â€” session-level (updated on slider/keyboard changes, saved to disk on exit)
     pub session_volume: f32,
-    // User-selected theme (Light / Dark)
+    // User-selected theme (Light / Dark / System)
     pub theme_mode: ThemeMode,
+    // Last resolved dark state for ThemeMode::System, used to detect OS changes.
+    pub system_theme_dark: bool,
+    pub last_system_theme_poll: Instant,
 
     // GPU backend: active backend name (from adapter info, read-only) and user preference
     pub active_gpu_backend: String,

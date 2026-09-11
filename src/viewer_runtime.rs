@@ -19,6 +19,9 @@
 
 use eframe::egui;
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
+
+const THEME_POLL_INTERVAL: Duration = Duration::from_secs(1);
 
 fn state_db_path() -> Option<PathBuf> {
     Some(
@@ -62,27 +65,41 @@ pub fn apply_saved_locale() {
     }
 }
 
-/// Returns `true` if the user's saved theme is "dark", `false` otherwise
-/// (including when no preference is stored).
+/// Returns `true` if the saved theme renders dark right now: `"dark"` always
+/// does, `"system"` follows the Windows app mode, and anything else (including
+/// no stored preference or light) is `false`.
 pub fn is_saved_theme_dark() -> bool {
     read_pref_readonly("theme_mode")
-        .map(|s| s == "dark")
+        .map(|s| match s.as_str() {
+            "dark" => true,
+            "system" => crate::infrastructure::windows::windows_app_is_dark(),
+            _ => false,
+        })
         .unwrap_or(false)
 }
 
 /// 1 Hz poll of the shared prefs: returns the saved theme's dark flag when it
 /// differs from `current_dark`, so long-lived viewer/analyzer subprocesses
 /// follow main-app theme switches without needing a restart.
-pub fn poll_saved_theme_change(
-    current_dark: bool,
-    last_poll: &mut std::time::Instant,
-) -> Option<bool> {
-    if last_poll.elapsed() < std::time::Duration::from_secs(1) {
+pub fn poll_saved_theme_change(current_dark: bool, last_poll: &mut Instant) -> Option<bool> {
+    let now = Instant::now();
+    if now.duration_since(*last_poll) < THEME_POLL_INTERVAL {
         return None;
     }
-    *last_poll = std::time::Instant::now();
+    *last_poll = now;
     let saved = is_saved_theme_dark();
     (saved != current_dark).then_some(saved)
+}
+
+/// Schedules the frame that makes the next saved-theme poll eligible. This
+/// keeps an idle viewer in sync when a Windows theme notification arrives
+/// during the poll interval.
+pub fn schedule_saved_theme_poll(ctx: &egui::Context, last_poll: Instant) {
+    ctx.request_repaint_after(theme_poll_remaining(Instant::now(), last_poll));
+}
+
+fn theme_poll_remaining(now: Instant, last_poll: Instant) -> Duration {
+    THEME_POLL_INTERVAL.saturating_sub(now.duration_since(last_poll))
 }
 
 /// Build [`eframe::NativeOptions`] tuned for a low-baseline-RAM viewer
@@ -96,5 +113,20 @@ pub fn build_viewer_native_options(viewport: egui::ViewportBuilder) -> eframe::N
         depth_buffer: 0,
         stencil_buffer: 0,
         ..Default::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn theme_poll_remaining_waits_only_until_the_next_interval() {
+        let now = Instant::now();
+        assert_eq!(theme_poll_remaining(now, now), THEME_POLL_INTERVAL);
+        assert_eq!(
+            theme_poll_remaining(now, now.checked_sub(Duration::from_secs(2)).unwrap()),
+            Duration::ZERO
+        );
     }
 }

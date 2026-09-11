@@ -1103,11 +1103,7 @@ impl eframe::App for PdfViewerApp {
         // Apply theme on first frame (cc.set_visuals in creator can be
         // overridden by the platform integration).
         if let Some(dark) = self.dark_mode.take() {
-            if dark {
-                ctx.set_visuals(crate::ui::theme::viewer_visuals(true));
-            } else {
-                ctx.set_visuals(crate::ui::theme::viewer_visuals(false));
-            }
+            crate::ui::theme::apply_viewer_visuals(ctx, dark);
 
             // Apply dark/light title bar on the native Windows decoration.
             use raw_window_handle::HasWindowHandle;
@@ -1141,7 +1137,7 @@ impl eframe::App for PdfViewerApp {
             ctx.global_style().visuals.dark_mode,
             &mut self.last_theme_poll,
         ) {
-            ctx.set_visuals(crate::ui::theme::viewer_visuals(dark));
+            crate::ui::theme::apply_viewer_visuals(ctx, dark);
             if let Some(raw) = self.native_hwnd {
                 crate::infrastructure::windows::window_corners::apply_dark_title_bar(
                     windows::Win32::Foundation::HWND(raw as *mut _),
@@ -1149,6 +1145,7 @@ impl eframe::App for PdfViewerApp {
                 );
             }
         }
+        crate::viewer_runtime::schedule_saved_theme_poll(ctx, self.last_theme_poll);
         ui.set_style(ctx.global_style());
 
         match &self.document_status {
