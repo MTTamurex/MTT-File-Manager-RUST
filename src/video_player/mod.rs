@@ -157,6 +157,7 @@ pub(crate) fn current_mpv_osc_language() -> &'static str {
     match &*rust_i18n::locale() {
         "pt-BR" | "pt" | "ptbr" => "pt-BR",
         "en" | "eng" | "en-US" => "en",
+        "zh-CN" => "zh-CN",
         _ => "en",
     }
 }
