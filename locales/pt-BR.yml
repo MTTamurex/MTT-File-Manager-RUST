@@ -996,6 +996,7 @@ disk_analysis:
   logical_size_short: "Lógico"
   type_file: "Arquivo"
   type_folder: "Pasta"
+  largest_sort_hint: "Clique para ordenar; Shift+clique adiciona uma ordenação secundária (máximo de dois critérios)."
   copy_path: "Copiar caminho"
   # Efficiency
   efficiency_scanning: "Analisando..."

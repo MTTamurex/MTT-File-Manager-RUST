@@ -8,7 +8,9 @@ use super::{
 };
 use crate::app::disk_analysis_model::DiskAnalysisModel;
 use crate::app::disk_analysis_query::SizeMetric;
-use crate::app::disk_analysis_state::{DiskAnalysisState, LargestColumn};
+use crate::app::disk_analysis_state::{
+    DiskAnalysisState, LargestColumn, MAX_LARGEST_SORT_CRITERIA,
+};
 use crate::infrastructure::windows::formatting::format_size;
 use eframe::egui;
 use rust_i18n::t;
@@ -145,7 +147,11 @@ fn paint_header(ui: &mut egui::Ui, total_w: f32, widths: [f32; 7], state: &mut D
             t!("disk_analysis.col_path").to_string(),
             false,
         ),
-        (None, t!("disk_analysis.col_type").to_string(), false),
+        (
+            Some(LargestColumn::Type),
+            t!("disk_analysis.col_type").to_string(),
+            false,
+        ),
         (
             Some(LargestColumn::Logical),
             t!("disk_analysis.logical_size_short").to_string(),
@@ -167,22 +173,34 @@ fn paint_header(ui: &mut egui::Ui, total_w: f32, widths: [f32; 7], state: &mut D
             true,
         ),
     ];
+    let sort_count = state
+        .largest_sort_criteria
+        .len()
+        .min(MAX_LARGEST_SORT_CRITERIA);
     let mut x = header_rect.left();
     for (slot, (column, label, right)) in columns.into_iter().enumerate() {
         let hit = egui::Rect::from_min_size(
             egui::pos2(x, header_rect.top()),
             egui::vec2(widths[slot], HEADER_ROW_H),
         );
-        let arrow = match column {
-            Some(c) if state.largest_sort_column == c => {
-                if state.largest_sort_asc {
-                    " ^"
+        let sort_suffix = column
+            .and_then(|column| {
+                state
+                    .largest_sort_criteria
+                    .iter()
+                    .position(|criterion| criterion.column == column)
+                    .filter(|&priority| priority < sort_count)
+            })
+            .map(|priority| {
+                let criterion = state.largest_sort_criteria[priority];
+                let arrow = if criterion.ascending { '^' } else { 'v' };
+                if sort_count > 1 {
+                    format!(" {arrow}{}", priority + 1)
                 } else {
-                    " v"
+                    format!(" {arrow}")
                 }
-            }
-            _ => "",
-        };
+            })
+            .unwrap_or_default();
         let color = if column.is_some() {
             analyzer_text_color(ui)
         } else {
@@ -201,27 +219,18 @@ fn paint_header(ui: &mut egui::Ui, total_w: f32, widths: [f32; 7], state: &mut D
         ui.painter().text(
             pos,
             align2,
-            format!("{label}{arrow}"),
+            format!("{label}{sort_suffix}"),
             egui::FontId::proportional(12.0),
             color,
         );
 
         if let Some(column) = column {
-            let resp = ui.allocate_rect(hit, egui::Sense::click());
+            let resp = ui
+                .allocate_rect(hit, egui::Sense::click())
+                .on_hover_text(t!("disk_analysis.largest_sort_hint").to_string());
             if resp.clicked() {
-                if state.largest_sort_column == column {
-                    state.largest_sort_asc = !state.largest_sort_asc;
-                } else {
-                    state.largest_sort_column = column;
-                    state.largest_sort_asc = matches!(
-                        column,
-                        LargestColumn::Logical
-                            | LargestColumn::Allocated
-                            | LargestColumn::Difference
-                            | LargestColumn::Files
-                    );
-                }
-                state.sort_largest_rows();
+                let additive = ui.ctx().input(|input| input.modifiers.shift);
+                state.update_largest_sort(column, additive);
             }
             if resp.hovered() {
                 ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);

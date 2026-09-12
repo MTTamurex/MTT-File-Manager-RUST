@@ -7,7 +7,7 @@
 
 use crate::app::disk_analysis_model::FileCategory;
 use crate::app::disk_analysis_query::{DiskAnalysisFilter, SizeMetric};
-use crate::app::disk_analysis_state::DiskAnalysisState;
+use crate::app::disk_analysis_state::{DiskAnalysisState, LargestColumn};
 use crate::ui::disk_analysis::category_label;
 use eframe::egui;
 use rust_i18n::t;
@@ -90,12 +90,11 @@ fn render_metric_selector(state: &mut DiskAnalysisState, ui: &mut egui::Ui) -> S
     });
     if state.metric != selected {
         state.metric = selected;
-        state.largest_sort_column = match selected {
-            SizeMetric::Allocated => crate::app::disk_analysis_state::LargestColumn::Allocated,
-            SizeMetric::Logical => crate::app::disk_analysis_state::LargestColumn::Logical,
-            SizeMetric::FileCount => crate::app::disk_analysis_state::LargestColumn::Files,
-        };
-        state.largest_sort_asc = false;
+        state.reset_largest_sort(match selected {
+            SizeMetric::Allocated => LargestColumn::Allocated,
+            SizeMetric::Logical => LargestColumn::Logical,
+            SizeMetric::FileCount => LargestColumn::Files,
+        });
     }
     selected
 }

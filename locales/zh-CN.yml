@@ -988,6 +988,7 @@ disk_analysis:
   logical_size_short: "逻辑"
   type_file: "文件"
   type_folder: "文件夹"
+  largest_sort_hint: "点击排序；按住 Shift 点击可添加一个次要排序（最多两个条件）。"
   copy_path: "复制路径"
   efficiency_scanning: "分析中..."
   efficiency_empty: "未发现逻辑大小与实际占用不一致的项目。"

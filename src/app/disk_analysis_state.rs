@@ -130,16 +130,9 @@ pub enum ResultsTab {
     Duplicates,
 }
 
-/// Sortable columns of the Largest table.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum LargestColumn {
-    Name,
-    Path,
-    Logical,
-    Allocated,
-    Difference,
-    Files,
-}
+pub use crate::app::disk_analysis_sorting::{
+    LargestColumn, LargestSortCriterion, MAX_LARGEST_SORT_CRITERIA,
+};
 
 pub struct DiskAnalysisState {
     pub drive_letter: Option<char>,
@@ -199,8 +192,8 @@ pub struct DiskAnalysisState {
     pub results_height: f32,
     pub results_collapsed: bool,
     pub largest_rows: Arc<Vec<u32>>,
-    pub largest_sort_column: LargestColumn,
-    pub largest_sort_asc: bool,
+    /// Sort criteria ordered from primary to final tie-breaker (at most two).
+    pub largest_sort_criteria: Vec<LargestSortCriterion>,
     /// One-shot scroll request: scroll the Largest table to this row index.
     pub largest_scroll_to_row: Option<usize>,
     pub efficiency_result: Option<Arc<EfficiencyResult>>,
@@ -300,8 +293,10 @@ impl DiskAnalysisState {
             results_height: 240.0,
             results_collapsed: false,
             largest_rows: Arc::new(Vec::new()),
-            largest_sort_column: LargestColumn::Allocated,
-            largest_sort_asc: false,
+            largest_sort_criteria: vec![LargestSortCriterion {
+                column: LargestColumn::Allocated,
+                ascending: false,
+            }],
             largest_scroll_to_row: None,
             efficiency_result: None,
             search_text: String::new(),
@@ -822,71 +817,6 @@ impl DiskAnalysisState {
             }
         }
     }
-
-    /// Sort the largest-rows projection by the current column/direction.
-    /// Reads sizes straight from the model; rows are just indices.
-    pub fn sort_largest_rows(&mut self) {
-        let Some(model) = self.model.clone() else {
-            return;
-        };
-        let column = self.largest_sort_column;
-        let asc = self.largest_sort_asc;
-        let filtered = self.active_weights.clone();
-        let filtered_value = |idx: u32| {
-            filtered
-                .as_ref()
-                .and_then(|weights| weights.weights.get(idx as usize).copied())
-        };
-        let mut rows: Vec<u32> = self.largest_rows.as_ref().clone();
-        rows.sort_by(|&a, &b| {
-            let ord = match column {
-                LargestColumn::Name => model.nodes[a as usize]
-                    .name
-                    .to_lowercase()
-                    .cmp(&model.nodes[b as usize].name.to_lowercase()),
-                LargestColumn::Path => model.path_of(a).cmp(&model.path_of(b)),
-                LargestColumn::Logical if self.metric == SizeMetric::Logical => filtered_value(a)
-                    .unwrap_or(model.nodes[a as usize].subtree_size)
-                    .cmp(&filtered_value(b).unwrap_or(model.nodes[b as usize].subtree_size)),
-                LargestColumn::Logical => model.nodes[a as usize]
-                    .subtree_size
-                    .cmp(&model.nodes[b as usize].subtree_size),
-                LargestColumn::Allocated if self.metric == SizeMetric::Allocated => {
-                    filtered_value(a)
-                        .unwrap_or(model.nodes[a as usize].subtree_allocated_size)
-                        .cmp(
-                            &filtered_value(b)
-                                .unwrap_or(model.nodes[b as usize].subtree_allocated_size),
-                        )
-                }
-                LargestColumn::Allocated => model.nodes[a as usize]
-                    .subtree_allocated_size
-                    .cmp(&model.nodes[b as usize].subtree_allocated_size),
-                LargestColumn::Difference => {
-                    signed_difference(&model, a).cmp(&signed_difference(&model, b))
-                }
-                LargestColumn::Files if self.metric == SizeMetric::FileCount => filtered_value(a)
-                    .unwrap_or(model.nodes[a as usize].subtree_files)
-                    .cmp(&filtered_value(b).unwrap_or(model.nodes[b as usize].subtree_files)),
-                LargestColumn::Files => model.nodes[a as usize]
-                    .subtree_files
-                    .cmp(&model.nodes[b as usize].subtree_files),
-            };
-            if asc {
-                ord
-            } else {
-                ord.reverse()
-            }
-        });
-        self.largest_rows = Arc::new(rows);
-    }
-}
-
-/// Signed logical-minus-allocated difference safe against u64 overflow
-/// (returns the value as f64 for ordering; display uses the split form).
-fn signed_difference(model: &DiskAnalysisModel, idx: u32) -> i128 {
-    let node = &model.nodes[idx as usize];
-    node.subtree_size as i128 - node.subtree_allocated_size as i128
 }
 
 impl Default for DiskAnalysisState {
