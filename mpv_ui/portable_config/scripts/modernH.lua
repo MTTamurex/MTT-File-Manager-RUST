@@ -256,6 +256,7 @@ local osc_param = { -- calculated by osc_init()
     unscaled_y = 0,
     compact_scale = 1,
     areas = {},
+    reveal_areas = {},
 }
 
 local osc_styles = {
@@ -338,6 +339,7 @@ local state = {
     initREQ = false,                        -- is a re-init request pending?
     last_mouseX, last_mouseY,               -- last mouse position, to detect significant mouse movement
     mouse_in_window = false,
+    mouse_over_reveal_area = false,
     message_text,
     message_hide_timer,
     fullscreen = false,
@@ -555,6 +557,24 @@ end
 function mouse_hit_coords(bX1, bY1, bX2, bY2)
     local mX, mY = get_virt_mouse_pos()
     return (mX >= bX1 and mX <= bX2 and mY >= bY1 and mY <= bY2)
+end
+
+function mouse_over_reveal_area()
+    for _, coords in ipairs(osc_param.reveal_areas) do
+        if mouse_hit_coords(coords.x1, coords.y1, coords.x2, coords.y2) then
+            return true
+        end
+    end
+    return false
+end
+
+function hide_osc_if_mouse_outside_reveal_area()
+    if get_hidetimeout() >= 0 and
+        not state.menu_active and not state.active_element and
+        not mouse_over_reveal_area() and
+        (state.osc_visible or state.anitype ~= nil) then
+        hide_osc()
+    end
 end
 
 function limit_range(min, max, val)
@@ -1463,6 +1483,7 @@ function render_overlay_menu(ass)
             state.menu_active = nil
             menu_closing = false
             menu_bar_anim_y = nil
+            hide_osc_if_mouse_outside_reveal_area()
             return
         end
         request_tick()
@@ -1796,9 +1817,17 @@ function window_controls()
     local titlebox_left = wc_geo.x
     local titlebox_right = wc_geo.w - controlbox_w
 
-    add_area('window-controls',
-             get_hitbox_coords(controlbox_left, wc_geo.y, wc_geo.an,
-                               controlbox_w, wc_geo.h))
+    local window_controls_x1, window_controls_y1, window_controls_x2, window_controls_y2 =
+        get_hitbox_coords(controlbox_left, wc_geo.y, wc_geo.an, controlbox_w, wc_geo.h)
+    local window_controls_area = {
+        x1 = window_controls_x1,
+        y1 = window_controls_y1,
+        x2 = window_controls_x2,
+        y2 = window_controls_y2,
+    }
+    add_area('window-controls', window_controls_x1, window_controls_y1,
+             window_controls_x2, window_controls_y2)
+    table.insert(osc_param.reveal_areas, window_controls_area)
 
     local lo
 
@@ -1878,12 +1907,17 @@ local UI_OFFSET_Y = -30
     local posY = osc_param.playresy
 
     osc_param.areas = {} -- delete areas
+    osc_param.reveal_areas = {} -- delete reveal areas
 
     -- area for active mouse input
     add_area('input', get_hitbox_coords(posX, posY + UI_OFFSET_Y, 1, osc_geo.w, 104))
 
     -- area for show/hide
     add_area('showhide', 0, 0, osc_param.playresx, osc_param.playresy)
+    local reveal_x1, reveal_y1, reveal_x2, reveal_y2 =
+        get_hitbox_coords(posX, posY + UI_OFFSET_Y, 1, osc_geo.w, osc_geo.h)
+    table.insert(osc_param.reveal_areas,
+                 {x1 = reveal_x1, y1 = reveal_y1, x2 = reveal_x2, y2 = reveal_y2})
 
     -- fetch values
     local osc_w, osc_h=
@@ -2833,6 +2867,7 @@ function mouse_leave()
     -- reset mouse position
     state.last_mouseX, state.last_mouseY = nil, nil
     state.mouse_in_window = false
+    state.mouse_over_reveal_area = false
 end
 
 function request_init()
@@ -2939,7 +2974,7 @@ function render()
     do_enable_keybindings()
 
     --mouse input area
-    local mouse_over_osc = false
+    local mouse_over_osc = mouse_over_reveal_area()
 
     for _,cords in ipairs(osc_param.areas['input']) do
         if state.osc_visible then -- activate only when OSC is actually visible
@@ -3087,20 +3122,28 @@ function process_event(source, what)
         end
         state.active_element = nil
         state.mouse_down_counter = 0
+        hide_osc_if_mouse_outside_reveal_area()
 
     elseif source == 'mouse_move' then
 
         state.mouse_in_window = true
 
         local mouseX, mouseY = get_virt_mouse_pos()
-        if (user_opts.minmousemove == 0) or
+        local mouse_over_area = mouse_over_reveal_area()
+        local entered_reveal_area = mouse_over_area and not state.mouse_over_reveal_area
+        local moved_enough = (user_opts.minmousemove == 0) or
             (not ((state.last_mouseX == nil) or (state.last_mouseY == nil)) and
                 ((math.abs(mouseX - state.last_mouseX) >= user_opts.minmousemove)
                     or (math.abs(mouseY - state.last_mouseY) >= user_opts.minmousemove)
                 )
-            ) then
+            )
+
+        if mouse_over_area and (entered_reveal_area or moved_enough) then
             show_osc()
+        elseif not mouse_over_area and not state.active_element and not state.menu_active then
+            hide_osc_if_mouse_outside_reveal_area()
         end
+        state.mouse_over_reveal_area = mouse_over_area
         state.last_mouseX, state.last_mouseY = mouseX, mouseY
 
         local n = state.active_element
