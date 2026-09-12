@@ -388,10 +388,19 @@ fn paths_equal(left: &Path, right: &Path) -> bool {
 }
 
 fn normalize_path(path: &Path) -> String {
-    path.to_string_lossy()
+    let normalized = path
+        .to_string_lossy()
         .replace('/', "\\")
         .trim_end_matches('\\')
-        .to_ascii_lowercase()
+        .to_ascii_lowercase();
+    if let Some(stripped) = normalized.strip_prefix(r"\\?\unc\") {
+        return format!(r"\\{stripped}");
+    }
+    normalized
+        .strip_prefix(r"\\?\")
+        .or_else(|| normalized.strip_prefix(r"\\.\"))
+        .unwrap_or(&normalized)
+        .to_string()
 }
 
 #[cfg(test)]
@@ -404,6 +413,18 @@ mod tests {
             parse_extensions(".JPG, png jpg").expect("valid extensions"),
             vec!["jpg", "png"]
         );
+    }
+
+    #[test]
+    fn path_comparison_normalizes_windows_namespace_prefixes() {
+        assert!(paths_equal(
+            Path::new(r"\\?\C:\Source"),
+            Path::new(r"c:\source")
+        ));
+        assert!(paths_equal(
+            Path::new(r"\\?\UNC\server\share"),
+            Path::new(r"\\server\share")
+        ));
     }
 
     #[test]

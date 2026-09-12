@@ -376,7 +376,7 @@ fn completed_operations_store_identity_and_can_create_one_undo_attempt() {
     assert_eq!(undo.source_snapshot_before, Some(after));
     assert!(matches!(
         db.create_undo_organizer_operation(operation_id, &destination, &source, after),
-        Err(OrganizerOperationDbError::UndoUnavailable(id)) if id == operation_id
+        Err(OrganizerOperationDbError::UndoInProgress(id)) if id == operation_id
     ));
 
     let restored_snapshot = move_organizer_file_without_replace(&destination, &source, after)
@@ -406,7 +406,7 @@ fn completed_operations_store_identity_and_can_create_one_undo_attempt() {
         .expect("remove undo history child");
     assert!(matches!(
         db.create_undo_organizer_operation(operation_id, &destination, &source, after),
-        Err(OrganizerOperationDbError::UndoUnavailable(id)) if id == operation_id
+        Err(OrganizerOperationDbError::UndoAlreadyApplied(id)) if id == operation_id
     ));
 }
 
@@ -432,6 +432,11 @@ fn retry_attempts_are_linked_to_terminal_operations() {
     assert_eq!(record.operation_type, OrganizerOperationType::Retry);
     assert_eq!(record.original_operation_id, Some(original));
     assert_eq!(record.status, OrganizerOperationStatus::Started);
+
+    assert!(matches!(
+        db.create_retry_organizer_operation(original, 3, &source, &destination, snapshot),
+        Err(OrganizerOperationDbError::RetryInProgress(id)) if id == original
+    ));
 
     let unrelated_source = PathBuf::from(r"C:\source\other.txt");
     assert!(matches!(

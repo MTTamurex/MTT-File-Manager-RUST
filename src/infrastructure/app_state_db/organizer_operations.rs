@@ -32,8 +32,14 @@ pub enum OrganizerOperationDbError {
     InvalidStatus,
     #[error("organizer operation {0} cannot be retried")]
     RetryUnavailable(OrganizerOperationId),
+    #[error("organizer operation {0} already has a retry in progress")]
+    RetryInProgress(OrganizerOperationId),
     #[error("organizer operation {0} cannot be undone")]
     UndoUnavailable(OrganizerOperationId),
+    #[error("organizer operation {0} has already been undone")]
+    UndoAlreadyApplied(OrganizerOperationId),
+    #[error("organizer operation {0} already has an undo in progress")]
+    UndoInProgress(OrganizerOperationId),
     #[error("organizer history retention must be between 1 and 3650 days")]
     InvalidRetention,
     #[error(transparent)]

@@ -378,7 +378,7 @@ impl AppStateDb {
             .writer
             .lock()
             .map_err(|_| OrganizerOperationDbError::DatabaseUnavailable)?;
-        let tx = db.transaction()?;
+        let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let original = tx
             .query_row(
                 "SELECT status, operation_type, rule_id, effective_source_path_bytes,
@@ -425,7 +425,7 @@ impl AppStateDb {
             |row| row.get(0),
         )?;
         if retry_in_progress {
-            return Err(OrganizerOperationDbError::RetryUnavailable(
+            return Err(OrganizerOperationDbError::RetryInProgress(
                 original_operation_id,
             ));
         }
@@ -457,7 +457,7 @@ impl AppStateDb {
             .writer
             .lock()
             .map_err(|_| OrganizerOperationDbError::DatabaseUnavailable)?;
-        let tx = db.transaction()?;
+        let tx = db.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let original = tx
             .query_row(
                 "SELECT status, operation_type, rule_id, effective_source_path, effective_destination_path,
@@ -501,11 +501,15 @@ impl AppStateDb {
                 original_operation_id,
             ));
         };
+        if undone_at.is_some() {
+            return Err(OrganizerOperationDbError::UndoAlreadyApplied(
+                original_operation_id,
+            ));
+        }
         if status != OrganizerOperationStatus::Completed.as_str()
             || operation_type == OrganizerOperationType::Undo.as_str()
             || effective_source_path.is_none()
             || effective_destination_path.is_none()
-            || undone_at.is_some()
             || effective_source_path_bytes.as_deref()
                 != Some(path_bytes(destination_path).as_slice())
             || effective_destination_path_bytes.as_deref()
@@ -516,20 +520,34 @@ impl AppStateDb {
                 original_operation_id,
             ));
         }
-        let undo_exists: bool = tx.query_row(
-            "SELECT EXISTS(
-                 SELECT 1 FROM organizer_operations
+        let undo_status: Option<String> = tx
+            .query_row(
+                "SELECT status FROM organizer_operations
                  WHERE original_operation_id = ?1
                    AND operation_type = 'undo'
                    AND status IN ('started', 'completed')
-             )",
-            params![operation_id_text(original_operation_id)],
-            |row| row.get(0),
-        )?;
-        if undo_exists {
-            return Err(OrganizerOperationDbError::UndoUnavailable(
-                original_operation_id,
-            ));
+                 LIMIT 1",
+                params![operation_id_text(original_operation_id)],
+                |row| row.get(0),
+            )
+            .optional()?;
+        match undo_status.as_deref() {
+            Some("started") => {
+                return Err(OrganizerOperationDbError::UndoInProgress(
+                    original_operation_id,
+                ))
+            }
+            Some("completed") => {
+                return Err(OrganizerOperationDbError::UndoAlreadyApplied(
+                    original_operation_id,
+                ))
+            }
+            Some(_) => {
+                return Err(OrganizerOperationDbError::UndoUnavailable(
+                    original_operation_id,
+                ))
+            }
+            None => {}
         }
         let operation_id = insert_started_operation(
             &tx,

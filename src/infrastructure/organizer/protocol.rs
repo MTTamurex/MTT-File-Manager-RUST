@@ -46,6 +46,40 @@ pub enum OrganizerCommandResult {
 }
 
 #[derive(Debug, Eq, PartialEq)]
+pub enum OrganizerRetryUnavailableReason {
+    OperationNotFound,
+    OperationNotEligible,
+    RuleNotFound,
+    RuleDisabled,
+    RulePaused,
+    SourceMissing,
+    SourceUnavailable,
+    SourceChanged,
+    SourceNoLongerMatchesRule,
+    SourcePathInvalid,
+    DestinationPathInvalid,
+    DestinationMissing,
+    DestinationUnavailable,
+    OperationInProgress,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+pub enum OrganizerUndoUnavailableReason {
+    OperationNotFound,
+    OperationNotEligible,
+    AlreadyApplied,
+    OperationInProgress,
+    SourcePathInvalid,
+    SourceMissing,
+    SourceUnavailable,
+    SourceChanged,
+    TargetPathInvalid,
+    TargetMissing,
+    TargetUnavailable,
+    TargetOccupied,
+}
+
+#[derive(Debug, Eq, PartialEq)]
 pub enum OrganizerCommandError {
     ManagerUnavailable,
     CommandIdExhausted,
@@ -59,8 +93,8 @@ pub enum OrganizerCommandError {
     ConflictStale,
     ConflictTargetExists,
     ConflictResolutionFailed { reason: String },
-    RetryUnavailable,
-    UndoUnavailable,
+    RetryUnavailable(OrganizerRetryUnavailableReason),
+    UndoUnavailable(OrganizerUndoUnavailableReason),
     OperationDispatchFailed { reason: String },
 }
 
@@ -136,11 +170,93 @@ impl fmt::Display for OrganizerCommandError {
                     rust_i18n::t!("organizer.error_conflict_resolution", reason = reason)
                 )
             }
-            Self::RetryUnavailable => {
-                formatter.write_str(rust_i18n::t!("organizer.error_retry_unavailable").as_ref())
+            Self::RetryUnavailable(reason) => {
+                let message = match reason {
+                    OrganizerRetryUnavailableReason::OperationNotFound => {
+                        rust_i18n::t!("organizer.error_retry_operation_missing")
+                    }
+                    OrganizerRetryUnavailableReason::OperationNotEligible => {
+                        rust_i18n::t!("organizer.error_retry_operation_not_eligible")
+                    }
+                    OrganizerRetryUnavailableReason::RuleNotFound => {
+                        rust_i18n::t!("organizer.error_retry_rule_missing")
+                    }
+                    OrganizerRetryUnavailableReason::RuleDisabled => {
+                        rust_i18n::t!("organizer.error_retry_rule_disabled")
+                    }
+                    OrganizerRetryUnavailableReason::RulePaused => {
+                        rust_i18n::t!("organizer.error_retry_rule_paused")
+                    }
+                    OrganizerRetryUnavailableReason::SourceMissing => {
+                        rust_i18n::t!("organizer.error_retry_source_missing")
+                    }
+                    OrganizerRetryUnavailableReason::SourceUnavailable => {
+                        rust_i18n::t!("organizer.error_retry_source_unavailable")
+                    }
+                    OrganizerRetryUnavailableReason::SourceChanged => {
+                        rust_i18n::t!("organizer.error_retry_source_changed")
+                    }
+                    OrganizerRetryUnavailableReason::SourceNoLongerMatchesRule => {
+                        rust_i18n::t!("organizer.error_retry_source_no_longer_matches")
+                    }
+                    OrganizerRetryUnavailableReason::SourcePathInvalid => {
+                        rust_i18n::t!("organizer.error_retry_source_path_invalid")
+                    }
+                    OrganizerRetryUnavailableReason::DestinationPathInvalid => {
+                        rust_i18n::t!("organizer.error_retry_destination_path_invalid")
+                    }
+                    OrganizerRetryUnavailableReason::DestinationMissing => {
+                        rust_i18n::t!("organizer.error_retry_destination_missing")
+                    }
+                    OrganizerRetryUnavailableReason::DestinationUnavailable => {
+                        rust_i18n::t!("organizer.error_retry_destination_unavailable")
+                    }
+                    OrganizerRetryUnavailableReason::OperationInProgress => {
+                        rust_i18n::t!("organizer.error_retry_in_progress")
+                    }
+                };
+                formatter.write_str(message.as_ref())
             }
-            Self::UndoUnavailable => {
-                formatter.write_str(rust_i18n::t!("organizer.error_undo_unavailable").as_ref())
+            Self::UndoUnavailable(reason) => {
+                let message = match reason {
+                    OrganizerUndoUnavailableReason::OperationNotFound => {
+                        rust_i18n::t!("organizer.error_undo_operation_missing")
+                    }
+                    OrganizerUndoUnavailableReason::OperationNotEligible => {
+                        rust_i18n::t!("organizer.error_undo_operation_not_eligible")
+                    }
+                    OrganizerUndoUnavailableReason::AlreadyApplied => {
+                        rust_i18n::t!("organizer.error_undo_already_applied")
+                    }
+                    OrganizerUndoUnavailableReason::OperationInProgress => {
+                        rust_i18n::t!("organizer.error_undo_in_progress")
+                    }
+                    OrganizerUndoUnavailableReason::SourcePathInvalid => {
+                        rust_i18n::t!("organizer.error_undo_source_path_invalid")
+                    }
+                    OrganizerUndoUnavailableReason::SourceMissing => {
+                        rust_i18n::t!("organizer.error_undo_source_missing")
+                    }
+                    OrganizerUndoUnavailableReason::SourceUnavailable => {
+                        rust_i18n::t!("organizer.error_undo_source_unavailable")
+                    }
+                    OrganizerUndoUnavailableReason::SourceChanged => {
+                        rust_i18n::t!("organizer.error_undo_source_changed")
+                    }
+                    OrganizerUndoUnavailableReason::TargetPathInvalid => {
+                        rust_i18n::t!("organizer.error_undo_target_path_invalid")
+                    }
+                    OrganizerUndoUnavailableReason::TargetMissing => {
+                        rust_i18n::t!("organizer.error_undo_target_missing")
+                    }
+                    OrganizerUndoUnavailableReason::TargetUnavailable => {
+                        rust_i18n::t!("organizer.error_undo_target_unavailable")
+                    }
+                    OrganizerUndoUnavailableReason::TargetOccupied => {
+                        rust_i18n::t!("organizer.error_undo_target_exists")
+                    }
+                };
+                formatter.write_str(message.as_ref())
             }
             Self::OperationDispatchFailed { reason } => write!(
                 formatter,

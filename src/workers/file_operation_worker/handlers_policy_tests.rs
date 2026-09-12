@@ -42,6 +42,7 @@ fn run_move(
         OrganizerMoveContext {
             operation: (operation_id, 7),
             lifecycle: (activation, shutdown),
+            destination_path: None,
             expected_snapshot: snapshot,
             conflict_policy: policy,
             is_undo: false,

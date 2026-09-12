@@ -1,13 +1,14 @@
 use super::{
     allocate_command_id, OrganizerCommand, OrganizerCommandError, OrganizerCommandId,
     OrganizerCommandResult, OrganizerConflictResolution, OrganizerEvent, OrganizerManager,
-    PendingCommandRegistry,
+    OrganizerRetryUnavailableReason, OrganizerUndoUnavailableReason, PendingCommandRegistry,
 };
 use crate::domain::organizer_conflict::OrganizerConflictStatus;
+use crate::domain::organizer_operation::{OrganizerOperationId, OrganizerOperationStatus};
 use crate::domain::organizer_rule::{OrganizerRule, OrganizerRuleError};
 use crate::infrastructure::app_state_db::AppStateDb;
 use crate::infrastructure::windows::shell_operations::{
-    move_organizer_file_without_replace, organizer_file_snapshot,
+    move_organizer_file_without_replace, organizer_file_snapshot, OrganizerFileSnapshot,
 };
 use crate::workers::file_operation_worker::FileOperationRequest;
 use std::sync::{atomic::AtomicU64, Arc, Barrier};
@@ -94,6 +95,115 @@ fn start_manager(rules: Vec<OrganizerRule>) -> OrganizerManager {
         rules,
         eframe::egui::Context::default(),
     )
+}
+
+#[cfg(feature = "notify-watcher")]
+fn verbatim_path(path: &std::path::Path) -> std::path::PathBuf {
+    std::path::PathBuf::from(format!(r"\\?\{}", path.display()))
+}
+
+#[cfg(feature = "notify-watcher")]
+fn failed_retry_fixture() -> (
+    tempfile::TempDir,
+    Arc<AppStateDb>,
+    OrganizerRule,
+    OrganizerOperationId,
+    std::path::PathBuf,
+    std::path::PathBuf,
+) {
+    let root = tempfile::tempdir().expect("create test directory");
+    let source_folder = root.path().join("source");
+    let destination_folder = root.path().join("destination");
+    std::fs::create_dir(&source_folder).expect("create source directory");
+    std::fs::create_dir(&destination_folder).expect("create destination directory");
+    let source = source_folder.join("report.txt");
+    let destination = destination_folder.join("report.txt");
+    std::fs::write(&source, b"source").expect("create source file");
+    let rule = OrganizerRule::from_persisted(
+        7,
+        source_folder,
+        destination_folder,
+        vec!["txt".to_string()],
+        true,
+    )
+    .expect("create rule");
+    let snapshot = organizer_file_snapshot(&source).expect("source snapshot");
+    let db = Arc::new(AppStateDb::new_in_memory().expect("database"));
+    let original = db
+        .start_organizer_operation_with_snapshot(7, &source, &destination, snapshot)
+        .expect("start original");
+    db.finish_organizer_operation(original, OrganizerOperationStatus::Failed, Some("failed"))
+        .expect("finish original");
+    (root, db, rule, original, source, destination)
+}
+
+#[cfg(feature = "notify-watcher")]
+fn retry_result(
+    db: Arc<AppStateDb>,
+    rules: Vec<OrganizerRule>,
+    original: OrganizerOperationId,
+) -> Result<OrganizerCommandResult, OrganizerCommandError> {
+    let (file_operation_sender, _file_operation_receiver) = crossbeam_channel::unbounded();
+    let manager = OrganizerManager::start(
+        file_operation_sender,
+        db,
+        rules,
+        eframe::egui::Context::default(),
+    );
+    let command_id = manager.retry_operation(original).expect("queue retry");
+    receive_command_result(&manager, command_id)
+}
+
+#[cfg(feature = "notify-watcher")]
+fn completed_undo_fixture() -> (
+    tempfile::TempDir,
+    Arc<AppStateDb>,
+    OrganizerOperationId,
+    std::path::PathBuf,
+    std::path::PathBuf,
+    OrganizerFileSnapshot,
+) {
+    let root = tempfile::tempdir().expect("create test directory");
+    let source_folder = root.path().join("source");
+    let destination_folder = root.path().join("destination");
+    std::fs::create_dir(&source_folder).expect("create source directory");
+    std::fs::create_dir(&destination_folder).expect("create destination directory");
+    let source = source_folder.join("report.txt");
+    let destination = destination_folder.join("report.txt");
+    std::fs::write(&source, b"source").expect("create source file");
+    let before = organizer_file_snapshot(&source).expect("source snapshot");
+    let db = Arc::new(AppStateDb::new_in_memory().expect("database"));
+    let original = db
+        .start_organizer_operation_with_snapshot(7, &source, &destination, before)
+        .expect("start original");
+    move_organizer_file_without_replace(&source, &destination, before).expect("move file");
+    let after = organizer_file_snapshot(&destination).expect("destination snapshot");
+    db.finish_organizer_operation_with_metadata(
+        original,
+        OrganizerOperationStatus::Completed,
+        None,
+        Some(&source),
+        Some(&destination),
+        Some(after),
+    )
+    .expect("finish original");
+    (root, db, original, source, destination, after)
+}
+
+#[cfg(feature = "notify-watcher")]
+fn undo_result(
+    db: Arc<AppStateDb>,
+    original: OrganizerOperationId,
+) -> Result<OrganizerCommandResult, OrganizerCommandError> {
+    let (file_operation_sender, _file_operation_receiver) = crossbeam_channel::unbounded();
+    let manager = OrganizerManager::start(
+        file_operation_sender,
+        db,
+        Vec::new(),
+        eframe::egui::Context::default(),
+    );
+    let command_id = manager.undo_operation(original).expect("queue undo");
+    receive_command_result(&manager, command_id)
 }
 
 #[cfg(feature = "notify-watcher")]
@@ -488,6 +598,164 @@ fn retry_command_revalidates_the_source_and_queues_a_linked_attempt() {
 
 #[cfg(feature = "notify-watcher")]
 #[test]
+fn retry_command_reports_when_the_source_is_missing() {
+    let (_root, db, rule, original, source, _destination) = failed_retry_fixture();
+    std::fs::remove_file(&source).expect("remove source file");
+
+    assert_eq!(
+        retry_result(db, vec![rule], original),
+        Err(OrganizerCommandError::RetryUnavailable(
+            OrganizerRetryUnavailableReason::SourceMissing,
+        ))
+    );
+}
+
+#[cfg(feature = "notify-watcher")]
+#[test]
+fn retry_command_reports_when_the_source_changed() {
+    let (_root, db, rule, original, source, _destination) = failed_retry_fixture();
+    std::fs::remove_file(&source).expect("remove original source file");
+    std::fs::write(&source, b"changed source content").expect("replace source file");
+
+    assert_eq!(
+        retry_result(db, vec![rule], original),
+        Err(OrganizerCommandError::RetryUnavailable(
+            OrganizerRetryUnavailableReason::SourceChanged,
+        ))
+    );
+}
+
+#[cfg(feature = "notify-watcher")]
+#[test]
+fn retry_command_reports_when_the_rule_is_missing() {
+    let (_root, db, _rule, original, _source, _destination) = failed_retry_fixture();
+
+    assert_eq!(
+        retry_result(db, Vec::new(), original),
+        Err(OrganizerCommandError::RetryUnavailable(
+            OrganizerRetryUnavailableReason::RuleNotFound,
+        ))
+    );
+}
+
+#[cfg(feature = "notify-watcher")]
+#[test]
+fn retry_command_reports_when_the_rule_is_disabled() {
+    let (_root, db, mut rule, original, _source, _destination) = failed_retry_fixture();
+    rule.enabled = false;
+
+    assert_eq!(
+        retry_result(db, vec![rule], original),
+        Err(OrganizerCommandError::RetryUnavailable(
+            OrganizerRetryUnavailableReason::RuleDisabled,
+        ))
+    );
+}
+
+#[cfg(feature = "notify-watcher")]
+#[test]
+fn retry_command_reports_when_the_destination_is_missing() {
+    let (_root, db, rule, original, _source, _destination) = failed_retry_fixture();
+    std::fs::remove_dir(&rule.destination_folder).expect("remove destination directory");
+
+    assert_eq!(
+        retry_result(db, vec![rule], original),
+        Err(OrganizerCommandError::RetryUnavailable(
+            OrganizerRetryUnavailableReason::DestinationMissing,
+        ))
+    );
+}
+
+#[cfg(feature = "notify-watcher")]
+#[test]
+fn retry_command_reports_when_another_retry_is_in_progress() {
+    let (_root, db, rule, original, source, destination) = failed_retry_fixture();
+    let snapshot = organizer_file_snapshot(&source).expect("source snapshot");
+    db.create_retry_organizer_operation(original, 7, &source, &destination, snapshot)
+        .expect("create pending retry");
+
+    assert_eq!(
+        retry_result(db, vec![rule], original),
+        Err(OrganizerCommandError::RetryUnavailable(
+            OrganizerRetryUnavailableReason::OperationInProgress,
+        ))
+    );
+}
+
+#[cfg(feature = "notify-watcher")]
+#[test]
+fn retry_command_prioritizes_in_progress_before_source_validation() {
+    let (_root, db, rule, original, source, destination) = failed_retry_fixture();
+    let snapshot = organizer_file_snapshot(&source).expect("source snapshot");
+    db.create_retry_organizer_operation(original, 7, &source, &destination, snapshot)
+        .expect("create pending retry");
+    std::fs::remove_file(&source).expect("remove source file");
+
+    assert_eq!(
+        retry_result(db, vec![rule], original),
+        Err(OrganizerCommandError::RetryUnavailable(
+            OrganizerRetryUnavailableReason::OperationInProgress,
+        ))
+    );
+}
+
+#[cfg(feature = "notify-watcher")]
+#[test]
+fn retry_command_accepts_persisted_verbatim_paths() {
+    let root = tempfile::tempdir().expect("create test directory");
+    let source_folder = root.path().join("source");
+    let destination_folder = root.path().join("destination");
+    std::fs::create_dir(&source_folder).expect("create source directory");
+    std::fs::create_dir(&destination_folder).expect("create destination directory");
+    let regular_source = source_folder.join("report.txt");
+    let regular_destination = destination_folder.join("report.txt");
+    let source = verbatim_path(&regular_source);
+    let destination = verbatim_path(&regular_destination);
+    std::fs::write(&source, b"source").expect("create source file");
+    let rule = OrganizerRule::from_persisted(
+        7,
+        verbatim_path(&source_folder),
+        verbatim_path(&destination_folder),
+        vec!["txt".to_string()],
+        true,
+    )
+    .expect("create rule");
+    let snapshot = organizer_file_snapshot(&source).expect("source snapshot");
+    let db = Arc::new(AppStateDb::new_in_memory().expect("database"));
+    let original = db
+        .start_organizer_operation_with_snapshot(7, &source, &destination, snapshot)
+        .expect("start original");
+    db.finish_organizer_operation(original, OrganizerOperationStatus::Failed, Some("failed"))
+        .expect("finish original");
+
+    let (file_operation_sender, file_operation_receiver) = crossbeam_channel::unbounded();
+    let manager = OrganizerManager::start(
+        file_operation_sender,
+        db,
+        vec![rule],
+        eframe::egui::Context::default(),
+    );
+    let command_id = manager.retry_operation(original).expect("queue retry");
+    assert!(matches!(
+        receive_command_result(&manager, command_id),
+        Ok(OrganizerCommandResult::RetryQueued { .. })
+    ));
+    match file_operation_receiver
+        .recv_timeout(Duration::from_secs(2))
+        .expect("retry request")
+    {
+        FileOperationRequest::OrganizerMove {
+            path, dest_folder, ..
+        } => {
+            assert_eq!(path, regular_source);
+            assert_eq!(dest_folder, destination_folder);
+        }
+        _ => panic!("expected retry organizer move"),
+    }
+}
+
+#[cfg(feature = "notify-watcher")]
+#[test]
 fn undo_command_queues_an_inverse_move_only_when_identity_is_intact() {
     let root = tempfile::tempdir().expect("create test directory");
     let source_folder = root.path().join("source");
@@ -548,16 +816,181 @@ fn undo_command_queues_an_inverse_move_only_when_identity_is_intact() {
             operation_id,
             path,
             dest_folder,
+            destination_path,
             is_undo,
             ..
         } => {
             assert_eq!(operation_id, undo_id);
             assert_eq!(path, destination);
             assert_eq!(dest_folder, source_folder);
+            assert_eq!(destination_path, Some(source));
             assert!(is_undo);
         }
         _ => panic!("expected undo organizer move"),
     }
+}
+
+#[cfg(feature = "notify-watcher")]
+#[test]
+fn undo_command_reports_when_the_moved_file_is_missing() {
+    let (_root, db, original, _source, destination, _snapshot) = completed_undo_fixture();
+    std::fs::remove_file(&destination).expect("remove moved file");
+
+    assert_eq!(
+        undo_result(db, original),
+        Err(OrganizerCommandError::UndoUnavailable(
+            OrganizerUndoUnavailableReason::SourceMissing,
+        ))
+    );
+}
+
+#[cfg(feature = "notify-watcher")]
+#[test]
+fn undo_command_reports_when_the_moved_file_changed() {
+    let (_root, db, original, _source, destination, _snapshot) = completed_undo_fixture();
+    std::fs::remove_file(&destination).expect("remove original moved file");
+    std::fs::write(&destination, b"changed moved file").expect("replace moved file");
+
+    assert_eq!(
+        undo_result(db, original),
+        Err(OrganizerCommandError::UndoUnavailable(
+            OrganizerUndoUnavailableReason::SourceChanged,
+        ))
+    );
+}
+
+#[cfg(feature = "notify-watcher")]
+#[test]
+fn undo_command_reports_when_the_original_path_is_occupied() {
+    let (_root, db, original, source, _destination, _snapshot) = completed_undo_fixture();
+    std::fs::write(&source, b"replacement").expect("occupy original path");
+
+    assert_eq!(
+        undo_result(db, original),
+        Err(OrganizerCommandError::UndoUnavailable(
+            OrganizerUndoUnavailableReason::TargetOccupied,
+        ))
+    );
+}
+
+#[cfg(feature = "notify-watcher")]
+#[test]
+fn undo_command_reports_when_the_original_folder_is_missing() {
+    let (_root, db, original, source, _destination, _snapshot) = completed_undo_fixture();
+    std::fs::remove_dir(source.parent().expect("source folder"))
+        .expect("remove original source folder");
+
+    assert_eq!(
+        undo_result(db, original),
+        Err(OrganizerCommandError::UndoUnavailable(
+            OrganizerUndoUnavailableReason::TargetMissing,
+        ))
+    );
+}
+
+#[cfg(feature = "notify-watcher")]
+#[test]
+fn undo_command_reports_when_another_undo_is_in_progress() {
+    let (_root, db, original, source, destination, snapshot) = completed_undo_fixture();
+    db.create_undo_organizer_operation(original, &destination, &source, snapshot)
+        .expect("create pending undo");
+
+    assert_eq!(
+        undo_result(db, original),
+        Err(OrganizerCommandError::UndoUnavailable(
+            OrganizerUndoUnavailableReason::OperationInProgress,
+        ))
+    );
+}
+
+#[cfg(feature = "notify-watcher")]
+#[test]
+fn undo_command_prioritizes_in_progress_before_source_validation() {
+    let (_root, db, original, source, destination, snapshot) = completed_undo_fixture();
+    db.create_undo_organizer_operation(original, &destination, &source, snapshot)
+        .expect("create pending undo");
+    std::fs::remove_file(&destination).expect("remove moved file");
+
+    assert_eq!(
+        undo_result(db, original),
+        Err(OrganizerCommandError::UndoUnavailable(
+            OrganizerUndoUnavailableReason::OperationInProgress,
+        ))
+    );
+}
+
+#[cfg(feature = "notify-watcher")]
+#[test]
+fn undo_command_accepts_persisted_verbatim_paths() {
+    let root = tempfile::tempdir().expect("create test directory");
+    let source_folder = root.path().join("source");
+    let destination_folder = root.path().join("destination");
+    std::fs::create_dir(&source_folder).expect("create source directory");
+    std::fs::create_dir(&destination_folder).expect("create destination directory");
+    let regular_source = source_folder.join("report.txt");
+    let regular_destination = destination_folder.join("report.txt");
+    let source = verbatim_path(&regular_source);
+    let destination = verbatim_path(&regular_destination);
+    std::fs::write(&source, b"source").expect("create source file");
+    let before = organizer_file_snapshot(&source).expect("source snapshot");
+    let db = Arc::new(AppStateDb::new_in_memory().expect("database"));
+    let original = db
+        .start_organizer_operation_with_snapshot(7, &source, &destination, before)
+        .expect("start original");
+    move_organizer_file_without_replace(&source, &destination, before).expect("move file");
+    let after = organizer_file_snapshot(&destination).expect("destination snapshot");
+    db.finish_organizer_operation_with_metadata(
+        original,
+        OrganizerOperationStatus::Completed,
+        None,
+        Some(&source),
+        Some(&destination),
+        Some(after),
+    )
+    .expect("finish original");
+
+    let (file_operation_sender, file_operation_receiver) = crossbeam_channel::unbounded();
+    let manager = OrganizerManager::start(
+        file_operation_sender,
+        db,
+        Vec::new(),
+        eframe::egui::Context::default(),
+    );
+    let command_id = manager.undo_operation(original).expect("queue undo");
+    assert!(matches!(
+        receive_command_result(&manager, command_id),
+        Ok(OrganizerCommandResult::UndoQueued { .. })
+    ));
+    match file_operation_receiver
+        .recv_timeout(Duration::from_secs(2))
+        .expect("undo request")
+    {
+        FileOperationRequest::OrganizerMove {
+            path, dest_folder, ..
+        } => {
+            assert_eq!(path, regular_destination);
+            assert_eq!(dest_folder, source_folder);
+        }
+        _ => panic!("expected undo organizer move"),
+    }
+}
+
+#[cfg(feature = "notify-watcher")]
+#[test]
+fn undo_command_reports_when_the_operation_was_already_undone() {
+    let (_root, db, original, source, destination, snapshot) = completed_undo_fixture();
+    let undo_id = db
+        .create_undo_organizer_operation(original, &destination, &source, snapshot)
+        .expect("create undo");
+    db.finish_organizer_operation(undo_id, OrganizerOperationStatus::Completed, None)
+        .expect("finish undo");
+
+    assert_eq!(
+        undo_result(db, original),
+        Err(OrganizerCommandError::UndoUnavailable(
+            OrganizerUndoUnavailableReason::AlreadyApplied,
+        ))
+    );
 }
 
 #[cfg(feature = "notify-watcher")]

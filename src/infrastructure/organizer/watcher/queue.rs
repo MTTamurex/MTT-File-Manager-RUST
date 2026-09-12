@@ -325,6 +325,7 @@ pub(super) fn process_stable_files(
                 operation_id,
                 path,
                 dest_folder: destination_folder,
+                destination_path: None,
                 rule_id: pending_file.rule.id,
                 conflict_policy: pending_file.rule.conflict_policy.clone(),
                 activation: pending_file.activation,

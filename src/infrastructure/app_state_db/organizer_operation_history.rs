@@ -1,8 +1,11 @@
 use super::{
-    malformed_blob, now_unix_millis, operation_id_text, path_from_storage, record_from_row,
-    OrganizerOperationDbError, OrganizerOperationRecord, DEFAULT_ORGANIZER_HISTORY_RETENTION_DAYS,
-    MAX_ORGANIZER_HISTORY_RETENTION_DAYS, MIN_ORGANIZER_HISTORY_RETENTION_DAYS,
-    ORGANIZER_HISTORY_RETENTION_PREFERENCE,
+    malformed_blob, malformed_column, now_unix_millis, operation_id_text, path_from_storage,
+    record_from_row, OrganizerOperationDbError, OrganizerOperationRecord,
+    DEFAULT_ORGANIZER_HISTORY_RETENTION_DAYS, MAX_ORGANIZER_HISTORY_RETENTION_DAYS,
+    MIN_ORGANIZER_HISTORY_RETENTION_DAYS, ORGANIZER_HISTORY_RETENTION_PREFERENCE,
+};
+use crate::domain::organizer_operation::{
+    OrganizerOperationId, OrganizerOperationStatus, OrganizerOperationType,
 };
 use crate::infrastructure::app_state_db::{AppStateDb, AppStateWriteError};
 use rusqlite::{params, OptionalExtension};
@@ -11,6 +14,37 @@ use std::sync::atomic::{AtomicU64, Ordering};
 static ORGANIZER_HISTORY_REVISION: AtomicU64 = AtomicU64::new(0);
 
 impl AppStateDb {
+    pub fn get_active_organizer_child_status(
+        &self,
+        original_operation_id: OrganizerOperationId,
+        operation_type: OrganizerOperationType,
+    ) -> Result<Option<OrganizerOperationStatus>, OrganizerOperationDbError> {
+        let db = self
+            .reader
+            .lock()
+            .map_err(|_| OrganizerOperationDbError::DatabaseUnavailable)?;
+        db.query_row(
+            "SELECT status FROM organizer_operations
+             WHERE original_operation_id = ?1
+               AND operation_type = ?2
+               AND (status = 'started'
+                    OR (operation_type = 'undo' AND status = 'completed'))
+             ORDER BY created_at DESC, CAST(operation_id AS INTEGER) DESC
+             LIMIT 1",
+            params![
+                operation_id_text(original_operation_id),
+                operation_type.as_str()
+            ],
+            |row| {
+                let status = row.get::<_, String>(0)?;
+                OrganizerOperationStatus::from_persisted(&status)
+                    .ok_or_else(|| malformed_column(0, "invalid organizer operation status"))
+            },
+        )
+        .optional()
+        .map_err(OrganizerOperationDbError::from)
+    }
+
     pub fn get_organizer_operation(
         &self,
         operation_id: crate::domain::organizer_operation::OrganizerOperationId,

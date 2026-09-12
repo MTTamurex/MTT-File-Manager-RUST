@@ -11,7 +11,7 @@ mod protocol;
 
 pub use protocol::{
     OrganizerCommandError, OrganizerCommandResult, OrganizerConflictResolution, OrganizerEvent,
-    OrganizerRuleStatus,
+    OrganizerRetryUnavailableReason, OrganizerRuleStatus, OrganizerUndoUnavailableReason,
 };
 
 static NEXT_COMMAND_ID: AtomicU64 = AtomicU64::new(1);

@@ -150,6 +150,7 @@ pub(super) fn migrate(conn: &Connection) -> rusqlite::Result<()> {
          WHERE operation_type = 'undo' AND status IN ('started', 'completed')",
         [],
     )?;
+    ensure_active_retry_constraint(conn)?;
     conn.execute(
         "CREATE TABLE IF NOT EXISTS organizer_undo_exemptions (
              path_bytes BLOB PRIMARY KEY NOT NULL,
@@ -170,6 +171,59 @@ pub(super) fn migrate(conn: &Connection) -> rusqlite::Result<()> {
         [],
     )?;
     Ok(())
+}
+
+fn ensure_active_retry_constraint(conn: &Connection) -> rusqlite::Result<()> {
+    let index_result = conn.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_organizer_operations_one_active_retry
+         ON organizer_operations(original_operation_id)
+         WHERE operation_type = 'retry' AND status = 'started'",
+        [],
+    );
+    if let Err(error) = index_result {
+        if !matches!(
+            error,
+            rusqlite::Error::SqliteFailure(sqlite_error, _)
+                if sqlite_error.code == rusqlite::ErrorCode::ConstraintViolation
+        ) {
+            return Err(error);
+        }
+        log::warn!(
+            "[APP-STATE] Existing duplicate active organizer retries prevent creating the unique index"
+        );
+    }
+
+    conn.execute_batch(
+        "CREATE TRIGGER IF NOT EXISTS prevent_organizer_retry_duplicate_insert
+         BEFORE INSERT ON organizer_operations
+         WHEN NEW.operation_type = 'retry'
+              AND NEW.status = 'started'
+              AND NEW.original_operation_id IS NOT NULL
+              AND EXISTS (
+                  SELECT 1 FROM organizer_operations
+                  WHERE original_operation_id = NEW.original_operation_id
+                    AND operation_type = 'retry'
+                    AND status = 'started'
+              )
+         BEGIN
+             SELECT RAISE(ABORT, 'organizer retry already in progress');
+         END;
+         CREATE TRIGGER IF NOT EXISTS prevent_organizer_retry_duplicate_update
+         BEFORE UPDATE OF operation_type, status, original_operation_id ON organizer_operations
+         WHEN NEW.operation_type = 'retry'
+              AND NEW.status = 'started'
+              AND NEW.original_operation_id IS NOT NULL
+              AND EXISTS (
+                  SELECT 1 FROM organizer_operations
+                  WHERE original_operation_id = NEW.original_operation_id
+                    AND operation_type = 'retry'
+                    AND status = 'started'
+                    AND operation_id <> NEW.operation_id
+              )
+         BEGIN
+             SELECT RAISE(ABORT, 'organizer retry already in progress');
+         END;",
+    )
 }
 
 fn add_column_if_missing(

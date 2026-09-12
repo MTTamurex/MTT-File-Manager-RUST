@@ -263,7 +263,10 @@ impl CommandContext<'_> {
         let record = match self.app_state_db.get_organizer_operation(operation_id) {
             Ok(Some(record)) => record,
             Ok(None) => {
-                return self.respond(command_id, Err(OrganizerCommandError::RetryUnavailable))
+                return self.retry_unavailable(
+                    command_id,
+                    OrganizerRetryUnavailableReason::OperationNotFound,
+                )
             }
             Err(error) => {
                 return self.respond(
@@ -282,58 +285,136 @@ impl CommandContext<'_> {
                     | OrganizerOperationStatus::Cancelled
             )
         {
-            return self.respond(command_id, Err(OrganizerCommandError::RetryUnavailable));
+            return self.retry_unavailable(
+                command_id,
+                OrganizerRetryUnavailableReason::OperationNotEligible,
+            );
         }
         let Some(rule_id) = record.rule_id else {
-            return self.respond(command_id, Err(OrganizerCommandError::RetryUnavailable));
+            return self.retry_unavailable(
+                command_id,
+                OrganizerRetryUnavailableReason::OperationNotEligible,
+            );
         };
         let Some(expected_snapshot) = record.source_snapshot_before else {
-            return self.respond(command_id, Err(OrganizerCommandError::RetryUnavailable));
+            return self.retry_unavailable(
+                command_id,
+                OrganizerRetryUnavailableReason::OperationNotEligible,
+            );
         };
-        let Some(rule) = self
-            .rules
-            .iter()
-            .find(|rule| rule.id == rule_id && rule.enabled)
-            .cloned()
-        else {
-            return self.respond(command_id, Err(OrganizerCommandError::RetryUnavailable));
+        let Some(rule) = self.rules.iter().find(|rule| rule.id == rule_id).cloned() else {
+            return self
+                .retry_unavailable(command_id, OrganizerRetryUnavailableReason::RuleNotFound);
+        };
+        if !rule.enabled {
+            return self
+                .retry_unavailable(command_id, OrganizerRetryUnavailableReason::RuleDisabled);
         };
         if self.paused_rules.contains(&rule_id) {
-            return self.respond(command_id, Err(OrganizerCommandError::RetryUnavailable));
+            return self.retry_unavailable(command_id, OrganizerRetryUnavailableReason::RulePaused);
         }
 
-        let source = record
+        match self
+            .app_state_db
+            .get_active_organizer_child_status(operation_id, OrganizerOperationType::Retry)
+        {
+            Ok(Some(_)) => {
+                return self.retry_unavailable(
+                    command_id,
+                    OrganizerRetryUnavailableReason::OperationInProgress,
+                )
+            }
+            Ok(None) => {}
+            Err(error) => {
+                return self.respond(
+                    command_id,
+                    Err(OrganizerCommandError::OperationDispatchFailed {
+                        reason: error.to_string(),
+                    }),
+                )
+            }
+        }
+
+        let stored_source = record
             .effective_source_path
             .clone()
             .unwrap_or_else(|| record.source_path.clone());
-        let Ok(source) = safe_organizer_path(&source) else {
-            return self.respond(command_id, Err(OrganizerCommandError::RetryUnavailable));
+        let Ok(source) = safe_organizer_path(&stored_source) else {
+            return self.retry_unavailable(
+                command_id,
+                OrganizerRetryUnavailableReason::SourcePathInvalid,
+            );
         };
-        let Ok(current_snapshot) = organizer_file_snapshot(&source) else {
-            return self.respond(command_id, Err(OrganizerCommandError::RetryUnavailable));
+        let current_snapshot = match organizer_file_snapshot(&source) {
+            Ok(snapshot) => snapshot,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return self
+                    .retry_unavailable(command_id, OrganizerRetryUnavailableReason::SourceMissing)
+            }
+            Err(_) => {
+                return self.retry_unavailable(
+                    command_id,
+                    OrganizerRetryUnavailableReason::SourceUnavailable,
+                )
+            }
         };
-        if current_snapshot != expected_snapshot || !rule.matches(&source) {
-            return self.respond(command_id, Err(OrganizerCommandError::RetryUnavailable));
+        if current_snapshot != expected_snapshot {
+            return self
+                .retry_unavailable(command_id, OrganizerRetryUnavailableReason::SourceChanged);
+        }
+        if !rule.matches(&source) {
+            return self.retry_unavailable(
+                command_id,
+                OrganizerRetryUnavailableReason::SourceNoLongerMatchesRule,
+            );
         }
         let Some(file_name) = source.file_name() else {
-            return self.respond(command_id, Err(OrganizerCommandError::RetryUnavailable));
+            return self.retry_unavailable(
+                command_id,
+                OrganizerRetryUnavailableReason::SourcePathInvalid,
+            );
         };
-        let Ok(destination_folder) = safe_organizer_path(&rule.destination_folder) else {
-            return self.respond(command_id, Err(OrganizerCommandError::RetryUnavailable));
+        let stored_destination_folder = rule.destination_folder.clone();
+        let Ok(destination_folder) = safe_organizer_path(&stored_destination_folder) else {
+            return self.retry_unavailable(
+                command_id,
+                OrganizerRetryUnavailableReason::DestinationPathInvalid,
+            );
         };
-        if !destination_folder.is_dir() {
-            return self.respond(command_id, Err(OrganizerCommandError::RetryUnavailable));
+        match std::fs::metadata(&destination_folder) {
+            Ok(metadata) if metadata.is_dir() => {}
+            Ok(_) => {
+                return self.retry_unavailable(
+                    command_id,
+                    OrganizerRetryUnavailableReason::DestinationUnavailable,
+                )
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return self.retry_unavailable(
+                    command_id,
+                    OrganizerRetryUnavailableReason::DestinationMissing,
+                )
+            }
+            Err(_) => {
+                return self.retry_unavailable(
+                    command_id,
+                    OrganizerRetryUnavailableReason::DestinationUnavailable,
+                )
+            }
         }
-        let destination = destination_folder.join(file_name);
+        let stored_destination = stored_destination_folder.join(file_name);
         let path_key = super::normalize_watched_path(&source);
         let Some(in_flight_guard) = self.in_flight.try_acquire(path_key) else {
-            return self.respond(command_id, Err(OrganizerCommandError::RetryUnavailable));
+            return self.retry_unavailable(
+                command_id,
+                OrganizerRetryUnavailableReason::OperationInProgress,
+            );
         };
         let new_operation_id = match self.app_state_db.create_retry_organizer_operation(
             operation_id,
             rule_id,
-            &source,
-            &destination,
+            &stored_source,
+            &stored_destination,
             expected_snapshot,
         ) {
             Ok(new_operation_id) => new_operation_id,
@@ -352,6 +433,7 @@ impl CommandContext<'_> {
                 operation_id: new_operation_id,
                 path: source.clone(),
                 dest_folder: destination_folder,
+                destination_path: None,
                 rule_id,
                 conflict_policy: rule.conflict_policy.clone(),
                 activation,
@@ -398,7 +480,10 @@ impl CommandContext<'_> {
         let record = match self.app_state_db.get_organizer_operation(operation_id) {
             Ok(Some(record)) => record,
             Ok(None) => {
-                return self.respond(command_id, Err(OrganizerCommandError::UndoUnavailable))
+                return self.undo_unavailable(
+                    command_id,
+                    OrganizerUndoUnavailableReason::OperationNotFound,
+                )
             }
             Err(error) => {
                 return self.respond(
@@ -409,33 +494,133 @@ impl CommandContext<'_> {
                 )
             }
         };
-        if record.status != OrganizerOperationStatus::Completed {
-            return self.respond(command_id, Err(OrganizerCommandError::UndoUnavailable));
+        if record.undone_at.is_some() {
+            return self
+                .undo_unavailable(command_id, OrganizerUndoUnavailableReason::AlreadyApplied);
         }
-        let (Some(source), Some(destination), Some(expected_snapshot)) = (
+        if record.status != OrganizerOperationStatus::Completed {
+            return self.undo_unavailable(
+                command_id,
+                OrganizerUndoUnavailableReason::OperationNotEligible,
+            );
+        }
+        match self
+            .app_state_db
+            .get_active_organizer_child_status(operation_id, OrganizerOperationType::Undo)
+        {
+            Ok(Some(OrganizerOperationStatus::Started)) => {
+                return self.undo_unavailable(
+                    command_id,
+                    OrganizerUndoUnavailableReason::OperationInProgress,
+                )
+            }
+            Ok(Some(OrganizerOperationStatus::Completed)) => {
+                return self
+                    .undo_unavailable(command_id, OrganizerUndoUnavailableReason::AlreadyApplied)
+            }
+            Ok(Some(_)) | Ok(None) => {}
+            Err(error) => {
+                return self.respond(
+                    command_id,
+                    Err(OrganizerCommandError::OperationDispatchFailed {
+                        reason: error.to_string(),
+                    }),
+                )
+            }
+        }
+        let (Some(stored_source), Some(stored_destination), Some(expected_snapshot)) = (
             record.effective_destination_path.clone(),
             record.effective_source_path.clone(),
             record.destination_snapshot_after,
         ) else {
-            return self.respond(command_id, Err(OrganizerCommandError::UndoUnavailable));
+            return self.undo_unavailable(
+                command_id,
+                OrganizerUndoUnavailableReason::OperationNotEligible,
+            );
         };
-        let Ok(source) = safe_organizer_path(&source) else {
-            return self.respond(command_id, Err(OrganizerCommandError::UndoUnavailable));
+        let Ok(source) = safe_organizer_path(&stored_source) else {
+            return self.undo_unavailable(
+                command_id,
+                OrganizerUndoUnavailableReason::SourcePathInvalid,
+            );
         };
-        let Ok(destination) = safe_organizer_path(&destination) else {
-            return self.respond(command_id, Err(OrganizerCommandError::UndoUnavailable));
+        let Ok(destination) = safe_organizer_path(&stored_destination) else {
+            return self.undo_unavailable(
+                command_id,
+                OrganizerUndoUnavailableReason::TargetPathInvalid,
+            );
         };
-        if !source.is_file()
-            || organizer_file_snapshot(&source).ok() != Some(expected_snapshot)
-            || destination.try_exists().unwrap_or(true)
-        {
-            return self.respond(command_id, Err(OrganizerCommandError::UndoUnavailable));
+        match std::fs::metadata(&source) {
+            Ok(metadata) if metadata.is_file() => {}
+            Ok(_) => {
+                return self
+                    .undo_unavailable(command_id, OrganizerUndoUnavailableReason::SourceChanged)
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return self
+                    .undo_unavailable(command_id, OrganizerUndoUnavailableReason::SourceMissing)
+            }
+            Err(_) => {
+                return self.undo_unavailable(
+                    command_id,
+                    OrganizerUndoUnavailableReason::SourceUnavailable,
+                )
+            }
+        }
+        let current_snapshot = match organizer_file_snapshot(&source) {
+            Ok(snapshot) => snapshot,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return self
+                    .undo_unavailable(command_id, OrganizerUndoUnavailableReason::SourceMissing)
+            }
+            Err(_) => {
+                return self.undo_unavailable(
+                    command_id,
+                    OrganizerUndoUnavailableReason::SourceUnavailable,
+                )
+            }
+        };
+        if current_snapshot != expected_snapshot {
+            return self
+                .undo_unavailable(command_id, OrganizerUndoUnavailableReason::SourceChanged);
         }
         let Some(destination_folder) = destination.parent().map(PathBuf::from) else {
-            return self.respond(command_id, Err(OrganizerCommandError::UndoUnavailable));
+            return self.undo_unavailable(
+                command_id,
+                OrganizerUndoUnavailableReason::TargetPathInvalid,
+            );
         };
-        if !destination_folder.is_dir() {
-            return self.respond(command_id, Err(OrganizerCommandError::UndoUnavailable));
+        match std::fs::metadata(&destination_folder) {
+            Ok(metadata) if metadata.is_dir() => {}
+            Ok(_) => {
+                return self.undo_unavailable(
+                    command_id,
+                    OrganizerUndoUnavailableReason::TargetUnavailable,
+                )
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return self
+                    .undo_unavailable(command_id, OrganizerUndoUnavailableReason::TargetMissing)
+            }
+            Err(_) => {
+                return self.undo_unavailable(
+                    command_id,
+                    OrganizerUndoUnavailableReason::TargetUnavailable,
+                )
+            }
+        }
+        match destination.try_exists() {
+            Ok(true) => {
+                return self
+                    .undo_unavailable(command_id, OrganizerUndoUnavailableReason::TargetOccupied)
+            }
+            Ok(false) => {}
+            Err(_) => {
+                return self.undo_unavailable(
+                    command_id,
+                    OrganizerUndoUnavailableReason::TargetUnavailable,
+                )
+            }
         }
         let source_key = super::normalize_watched_path(&source);
         let destination_key = super::normalize_watched_path(&destination);
@@ -443,12 +628,15 @@ impl CommandContext<'_> {
             .in_flight
             .try_acquire_many([source_key, destination_key])
         else {
-            return self.respond(command_id, Err(OrganizerCommandError::UndoUnavailable));
+            return self.undo_unavailable(
+                command_id,
+                OrganizerUndoUnavailableReason::OperationInProgress,
+            );
         };
         let new_operation_id = match self.app_state_db.create_undo_organizer_operation(
             operation_id,
-            &source,
-            &destination,
+            &stored_source,
+            &stored_destination,
             expected_snapshot,
         ) {
             Ok(new_operation_id) => new_operation_id,
@@ -463,6 +651,7 @@ impl CommandContext<'_> {
                 operation_id: new_operation_id,
                 path: source,
                 dest_folder: destination_folder,
+                destination_path: Some(destination),
                 rule_id: record.rule_id.unwrap_or_default(),
                 conflict_policy: OrganizerConflictPolicy::Ask,
                 activation,
@@ -756,6 +945,28 @@ impl CommandContext<'_> {
         self.respond(command_id, Err(OrganizerCommandError::RuleUnavailable))
     }
 
+    fn retry_unavailable(
+        &self,
+        command_id: OrganizerCommandId,
+        reason: OrganizerRetryUnavailableReason,
+    ) -> bool {
+        self.respond(
+            command_id,
+            Err(OrganizerCommandError::RetryUnavailable(reason)),
+        )
+    }
+
+    fn undo_unavailable(
+        &self,
+        command_id: OrganizerCommandId,
+        reason: OrganizerUndoUnavailableReason,
+    ) -> bool {
+        self.respond(
+            command_id,
+            Err(OrganizerCommandError::UndoUnavailable(reason)),
+        )
+    }
+
     fn respond(
         &self,
         command_id: OrganizerCommandId,
@@ -777,9 +988,15 @@ impl CommandContext<'_> {
 
 fn retry_command_error(error: OrganizerOperationDbError) -> OrganizerCommandError {
     match error {
-        OrganizerOperationDbError::NotFound(_) | OrganizerOperationDbError::RetryUnavailable(_) => {
-            OrganizerCommandError::RetryUnavailable
-        }
+        OrganizerOperationDbError::NotFound(_) => OrganizerCommandError::RetryUnavailable(
+            OrganizerRetryUnavailableReason::OperationNotFound,
+        ),
+        OrganizerOperationDbError::RetryUnavailable(_) => OrganizerCommandError::RetryUnavailable(
+            OrganizerRetryUnavailableReason::OperationNotEligible,
+        ),
+        OrganizerOperationDbError::RetryInProgress(_) => OrganizerCommandError::RetryUnavailable(
+            OrganizerRetryUnavailableReason::OperationInProgress,
+        ),
         error => OrganizerCommandError::OperationDispatchFailed {
             reason: error.to_string(),
         },
@@ -788,9 +1005,18 @@ fn retry_command_error(error: OrganizerOperationDbError) -> OrganizerCommandErro
 
 fn undo_command_error(error: OrganizerOperationDbError) -> OrganizerCommandError {
     match error {
-        OrganizerOperationDbError::NotFound(_) | OrganizerOperationDbError::UndoUnavailable(_) => {
-            OrganizerCommandError::UndoUnavailable
+        OrganizerOperationDbError::NotFound(_) => OrganizerCommandError::UndoUnavailable(
+            OrganizerUndoUnavailableReason::OperationNotFound,
+        ),
+        OrganizerOperationDbError::UndoUnavailable(_) => OrganizerCommandError::UndoUnavailable(
+            OrganizerUndoUnavailableReason::OperationNotEligible,
+        ),
+        OrganizerOperationDbError::UndoAlreadyApplied(_) => {
+            OrganizerCommandError::UndoUnavailable(OrganizerUndoUnavailableReason::AlreadyApplied)
         }
+        OrganizerOperationDbError::UndoInProgress(_) => OrganizerCommandError::UndoUnavailable(
+            OrganizerUndoUnavailableReason::OperationInProgress,
+        ),
         error => OrganizerCommandError::OperationDispatchFailed {
             reason: error.to_string(),
         },

@@ -678,6 +678,7 @@ pub(super) struct OrganizerMoveContext<'a> {
         std::sync::Arc<std::sync::atomic::AtomicBool>,
         std::sync::Arc<std::sync::atomic::AtomicBool>,
     ),
+    pub(super) destination_path: Option<PathBuf>,
     pub(super) expected_snapshot: shell_operations::OrganizerFileSnapshot,
     pub(super) conflict_policy: OrganizerConflictPolicy,
     pub(super) is_undo: bool,
@@ -694,6 +695,7 @@ pub(super) fn handle_organizer_move(
     let OrganizerMoveContext {
         operation,
         lifecycle,
+        destination_path,
         expected_snapshot,
         conflict_policy,
         is_undo,
@@ -723,6 +725,20 @@ pub(super) fn handle_organizer_move(
                 message: rust_i18n::t!("organizer.error_security_path").to_string(),
             };
         };
+        let destination_path = match destination_path {
+            Some(destination_path) => match sanitize_organizer_path(&destination_path) {
+                Ok(destination_path) => Some(destination_path),
+                Err(_) => {
+                    return FileOperationResult::OrganizerMoveFailed {
+                        operation_id,
+                        rule_id,
+                        path,
+                        message: rust_i18n::t!("organizer.error_security_path").to_string(),
+                    }
+                }
+            },
+            None => None,
+        };
         if is_reparse_point(&path) || is_reparse_point(&dest_folder) {
             return FileOperationResult::OrganizerMoveFailed {
                 operation_id,
@@ -750,7 +766,30 @@ pub(super) fn handle_organizer_move(
                     .to_string(),
             };
         };
-        let planned_dest = dest_folder.join(file_name);
+        let planned_dest = match destination_path {
+            Some(destination_path) => {
+                let Some(destination_parent) = destination_path.parent() else {
+                    return FileOperationResult::OrganizerMoveFailed {
+                        operation_id,
+                        rule_id,
+                        path,
+                        message: rust_i18n::t!("organizer.error_security_path").to_string(),
+                    };
+                };
+                if super::organizer_path_key(destination_parent)
+                    != super::organizer_path_key(&dest_folder)
+                {
+                    return FileOperationResult::OrganizerMoveFailed {
+                        operation_id,
+                        rule_id,
+                        path,
+                        message: rust_i18n::t!("organizer.error_security_path").to_string(),
+                    };
+                }
+                destination_path
+            }
+            None => dest_folder.join(file_name),
+        };
 
         if !path.is_file() || !dest_folder.is_dir() {
             return FileOperationResult::OrganizerMoveFailed {
@@ -1410,6 +1449,7 @@ mod tests {
             OrganizerMoveContext {
                 operation: (operation_id, 7),
                 lifecycle: (activation, shutdown),
+                destination_path: None,
                 expected_snapshot: snapshot,
                 conflict_policy: OrganizerConflictPolicy::Ask,
                 is_undo: false,
@@ -1476,6 +1516,7 @@ mod tests {
             OrganizerMoveContext {
                 operation: (operation_id, 7),
                 lifecycle: (activation, shutdown),
+                destination_path: None,
                 expected_snapshot: snapshot,
                 conflict_policy: OrganizerConflictPolicy::Ask,
                 is_undo: true,
@@ -1496,6 +1537,53 @@ mod tests {
             .list_pending_organizer_conflicts(10)
             .expect("list conflicts")
             .is_empty());
+    }
+
+    #[test]
+    fn undo_uses_the_exact_target_filename_after_a_source_rename() {
+        let source_parent = tempfile::tempdir().expect("create source parent");
+        let destination_parent = tempfile::tempdir().expect("create destination parent");
+        let source = destination_parent.path().join("report (1).pdf");
+        let destination = source_parent.path().join("report.pdf");
+        std::fs::write(&source, b"source").expect("create source file");
+        let snapshot = shell_operations::organizer_file_snapshot(&source).expect("source snapshot");
+        let app_state_db = AppStateDb::new_in_memory().expect("database");
+        let operation_id = app_state_db
+            .start_organizer_operation_with_snapshot(7, &source, &destination, snapshot)
+            .expect("start operation");
+        let activation = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let (result_sender, result_receiver) = std::sync::mpsc::channel();
+
+        handle_organizer_move(
+            source.clone(),
+            source_parent.path().to_path_buf(),
+            OrganizerMoveContext {
+                operation: (operation_id, 7),
+                lifecycle: (activation, shutdown),
+                destination_path: Some(destination.clone()),
+                expected_snapshot: snapshot,
+                conflict_policy: OrganizerConflictPolicy::Ask,
+                is_undo: true,
+                undo_exemptions: &OrganizerUndoExemptionRegistry::default(),
+                app_state_db: &app_state_db,
+                result_sender: &result_sender,
+            },
+        );
+
+        assert!(matches!(
+            result_receiver.try_recv(),
+            Ok(FileOperationResult::OrganizerMoveCompleted {
+                operation_id: result_id,
+                moved_dest,
+                ..
+            }) if result_id == operation_id && moved_dest == destination
+        ));
+        assert!(!source.exists());
+        assert_eq!(
+            std::fs::read(&destination).expect("destination file"),
+            b"source"
+        );
     }
 
     #[test]
@@ -1598,6 +1686,7 @@ mod tests {
                 OrganizerMoveContext {
                     operation: (operation_id, 7),
                     lifecycle: (activation, shutdown),
+                    destination_path: None,
                     expected_snapshot: snapshot,
                     conflict_policy: OrganizerConflictPolicy::Ask,
                     is_undo: false,

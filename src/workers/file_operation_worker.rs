@@ -311,6 +311,8 @@ pub(crate) enum FileOperationRequest {
     OrganizerMove {
         path: PathBuf,
         dest_folder: PathBuf,
+        /// Exact destination path for Undo, whose filename may differ from the source filename.
+        destination_path: Option<PathBuf>,
         operation_id: OrganizerOperationId,
         rule_id: i64,
         conflict_policy: OrganizerConflictPolicy,
@@ -483,6 +485,7 @@ impl FileOperationRequest {
             Self::OrganizerMove {
                 path,
                 dest_folder,
+                destination_path,
                 operation_id,
                 rule_id,
                 conflict_policy,
@@ -496,6 +499,7 @@ impl FileOperationRequest {
             } => Self::OrganizerMove {
                 path,
                 dest_folder,
+                destination_path,
                 operation_id,
                 rule_id,
                 conflict_policy,
@@ -585,6 +589,9 @@ fn sanitize_operation_path(path: &Path) -> Result<PathBuf, String> {
     if should_bypass_sanitization(path) {
         return Ok(path.to_path_buf());
     }
+    if is_device_namespace_path(path) {
+        return Err("Device namespace paths are not valid file operation paths".to_string());
+    }
     if is_unc_path(path) {
         return sanitize_unc_path(path).map_err(|e| e.to_string());
     }
@@ -596,6 +603,9 @@ fn sanitize_operation_path(path: &Path) -> Result<PathBuf, String> {
 pub(crate) fn sanitize_organizer_path(path: &Path) -> Result<PathBuf, String> {
     if should_bypass_sanitization(path) {
         return Err("Shell namespace paths are not valid organizer paths".to_string());
+    }
+    if is_device_namespace_path(path) {
+        return Err("Device namespace paths are not valid organizer paths".to_string());
     }
     validate_no_reparse_points(path).map_err(|error| error.to_string())?;
     if is_unc_path(path) {
@@ -611,6 +621,10 @@ pub(crate) fn sanitize_organizer_path(path: &Path) -> Result<PathBuf, String> {
             e
         )
     })
+}
+
+fn is_device_namespace_path(path: &Path) -> bool {
+    path.to_string_lossy().starts_with(r"\\.\")
 }
 
 fn sanitize_operation_paths(paths: &[PathBuf]) -> Result<Vec<PathBuf>, String> {
@@ -760,6 +774,7 @@ fn run_file_operation_loop(
                 FileOperationRequest::OrganizerMove {
                     path,
                     dest_folder,
+                    destination_path,
                     operation_id,
                     rule_id,
                     conflict_policy,
@@ -771,9 +786,10 @@ fn run_file_operation_loop(
                     app_state_db,
                     shutdown,
                 } => {
-                    let destination = path
-                        .file_name()
-                        .map_or_else(|| dest_folder.clone(), |name| dest_folder.join(name));
+                    let destination = destination_path.clone().unwrap_or_else(|| {
+                        path.file_name()
+                            .map_or_else(|| dest_folder.clone(), |name| dest_folder.join(name))
+                    });
                     let _ = result_sender.send(FileOperationResult::OrganizerMoveStarted {
                         operation_id,
                         rule_id,
@@ -786,6 +802,7 @@ fn run_file_operation_loop(
                         handlers::OrganizerMoveContext {
                             operation: (operation_id, rule_id),
                             lifecycle: (activation, shutdown),
+                            destination_path,
                             expected_snapshot,
                             conflict_policy,
                             is_undo,
@@ -987,6 +1004,11 @@ mod tests {
         assert!(!is_explicit_shell_namespace_path(Path::new(
             r"C:\Temp\archive.zip\inside"
         )));
+    }
+
+    #[test]
+    fn organizer_paths_reject_device_namespaces() {
+        assert!(sanitize_organizer_path(Path::new(r"\\.\C:\Temp\file.txt")).is_err());
     }
 
     #[test]
