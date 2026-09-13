@@ -158,7 +158,29 @@ fn frame_interval_is_hitch(
     minimized: bool,
     frames_tracked: u64,
 ) -> bool {
-    interval_ms >= FRAME_HITCH_THRESHOLD_MS && ui_active && !minimized && frames_tracked >= MIN_FRAME_HITCH_SAMPLES
+    interval_ms >= FRAME_HITCH_THRESHOLD_MS
+        && ui_active
+        && !minimized
+        && frames_tracked >= MIN_FRAME_HITCH_SAMPLES
+}
+
+/// Measure only intervals for which the previous pass requested an immediate
+/// repaint. Current work can finish or scroll timers can expire during a stall;
+/// neither changes whether that repaint was expected.
+fn paint_gap_is_hitch(
+    gap_ms: f32,
+    viewport_active: bool,
+    previous_viewport_active: bool,
+    immediate_repaint_requested: bool,
+    minimized: bool,
+    frames_tracked: u64,
+) -> bool {
+    frame_interval_is_hitch(
+        gap_ms,
+        viewport_active && previous_viewport_active && immediate_repaint_requested,
+        minimized,
+        frames_tracked,
+    )
 }
 
 fn working_set_trim_execution_lock() -> &'static Mutex<()> {
@@ -894,12 +916,12 @@ impl ImageViewerApp {
         }
 
         let gap_ms = now.saturating_duration_since(previous).as_secs_f32() * 1000.0;
-        // Only count a gap when the window was visible and focused on both ends:
-        // egui skips painting while the viewport is hidden, so an occluded window
-        // legitimately stops painting without the user seeing a stall.
-        if !frame_interval_is_hitch(
+        // Delayed background repaints are legitimate idle intervals, not stalls.
+        if !paint_gap_is_hitch(
             gap_ms,
-            viewport_active && previous_active,
+            viewport_active,
+            previous_active,
+            self.ui_ctx.requested_repaint_last_pass(),
             self.layout.saved_is_minimized,
             self.frames_tracked,
         ) {
@@ -2468,12 +2490,13 @@ mod inactive_panel_paths_tests {
     use super::{
         backend_uses_conservative_thumbnail_upload_policy, backend_uses_low_ram_gpu_policy,
         background_trim_should_rearm, classify_memory_pressure, detail_panel_thumbnail_active,
-        frame_interval_is_hitch, insert_item_reference_paths, pending_thumbnail_eviction_index,
-        thumbnail_scroll_is_settling_at, trim_pending_thumbnail_queue, working_set_trim_cancelled,
-        working_set_trim_was_effective, FileEntry, FxHashSet, MemoryPressure,
-        ProcessMemorySnapshot, BACKGROUND_WS_TRIM_REARM_GROWTH_BYTES,
-        LOW_RAM_GPU_IDLE_WS_TRIM_MIN_BYTES, MIN_FRAME_HITCH_SAMPLES,
-        THUMBNAIL_SCROLL_SETTLING_DURATION, WORKING_SET_TRIM_EFFECTIVE_REDUCTION_BYTES,
+        frame_interval_is_hitch, insert_item_reference_paths, paint_gap_is_hitch,
+        pending_thumbnail_eviction_index, thumbnail_scroll_is_settling_at,
+        trim_pending_thumbnail_queue, working_set_trim_cancelled, working_set_trim_was_effective,
+        FileEntry, FxHashSet, MemoryPressure, ProcessMemorySnapshot,
+        BACKGROUND_WS_TRIM_REARM_GROWTH_BYTES, LOW_RAM_GPU_IDLE_WS_TRIM_MIN_BYTES,
+        MIN_FRAME_HITCH_SAMPLES, THUMBNAIL_SCROLL_SETTLING_DURATION,
+        WORKING_SET_TRIM_EFFECTIVE_REDUCTION_BYTES,
     };
     use crate::domain::file_entry::SyncStatus;
     use crate::domain::thumbnail::ThumbnailData;
@@ -2518,6 +2541,51 @@ mod inactive_panel_paths_tests {
             false,
             MIN_FRAME_HITCH_SAMPLES
         ));
+    }
+
+    #[test]
+    fn paint_gap_requires_an_immediate_repaint() {
+        assert!(!paint_gap_is_hitch(3000.0, true, true, false, false, 100));
+        assert!(paint_gap_is_hitch(3000.0, true, true, true, false, 100));
+        assert!(!paint_gap_is_hitch(60.0, true, false, true, false, 100));
+        assert!(!paint_gap_is_hitch(60.0, false, true, true, false, 100));
+        assert!(!paint_gap_is_hitch(60.0, true, true, true, true, 100));
+        assert!(!paint_gap_is_hitch(60.0, true, true, true, false, 3));
+        assert!(!paint_gap_is_hitch(16.0, true, true, true, false, 100));
+    }
+
+    #[test]
+    fn paint_gap_distinguishes_egui_delayed_and_immediate_requests() {
+        let ctx = eframe::egui::Context::default();
+        // Let startup/font repaints settle before testing the idle schedule.
+        for _ in 0..5 {
+            let _ = ctx.run_ui(Default::default(), |_| {});
+        }
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_secs(3));
+        });
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            assert!(!paint_gap_is_hitch(
+                3000.0,
+                true,
+                true,
+                ui.ctx().requested_repaint_last_pass(),
+                false,
+                100,
+            ));
+            ui.ctx().request_repaint();
+        });
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            assert!(paint_gap_is_hitch(
+                500.0,
+                true,
+                true,
+                ui.ctx().requested_repaint_last_pass(),
+                false,
+                100,
+            ));
+        });
     }
 
     /// The lazily-built set must answer membership identically to the old

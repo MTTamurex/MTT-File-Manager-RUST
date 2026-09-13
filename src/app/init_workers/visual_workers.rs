@@ -46,14 +46,13 @@ pub(in crate::app) fn spawn_cover_worker(
             // HDD/virtual drives (Cryptomator), which made cover loading slow and
             // audibly noisy. A stale row self-heals: preview extraction fails,
             // the cover is invalidated, and the next request scans normally.
-            let cached_cover = match cover_worker_db
-                .try_get_folder_covers(std::slice::from_ref(&folder_path))
-            {
-                crate::infrastructure::app_state_db::FolderCoverReadOutcome::Completed(covers) => {
-                    covers.get(&folder_path).cloned()
-                }
-                _ => None,
-            };
+            let cached_cover =
+                match cover_worker_db.try_get_folder_covers(std::slice::from_ref(&folder_path)) {
+                    crate::infrastructure::app_state_db::FolderCoverReadOutcome::Completed(
+                        covers,
+                    ) => covers.get(&folder_path).cloned(),
+                    _ => None,
+                };
             if let Some(cover) = cached_cover {
                 // Validate cheaply (a single attribute read): a cover that no
                 // longer exists must fall through to a full rescan, so a tile

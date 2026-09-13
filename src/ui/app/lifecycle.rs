@@ -243,8 +243,10 @@ pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
             // re-upload storm while the user scrolls (measured: textures=0/72 on
             // restore, then 440 uploads in the next 5 s on the OpenGL backend,
             // with the grid empty in between).
-            let texture_flush =
-                should_flush_gpu_textures_after_focus_restore(minimized_secs, app.is_opengl_backend());
+            let texture_flush = should_flush_gpu_textures_after_focus_restore(
+                minimized_secs,
+                app.is_opengl_backend(),
+            );
             if texture_flush {
                 flush_gpu_textures_for_reupload(app, "minimize-restore");
             }

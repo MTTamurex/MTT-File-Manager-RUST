@@ -31,15 +31,17 @@ fn take_validation_slot(path: &std::path::Path) -> bool {
     > = std::sync::OnceLock::new();
 
     let now = Instant::now();
-    let cache = LAST_VALIDATED
-        .get_or_init(|| std::sync::Mutex::new(rustc_hash::FxHashMap::default()));
-    let mut guard = cache.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let cache =
+        LAST_VALIDATED.get_or_init(|| std::sync::Mutex::new(rustc_hash::FxHashMap::default()));
+    let mut guard = cache
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
 
     if !validation_is_due(guard.get(path).copied(), now) {
         return false;
     }
     if guard.len() >= TAG_VALIDATION_CACHE_LIMIT {
-        guard.retain(|_, validated_at| validation_is_due(Some(*validated_at), now));
+        prune_validation_cache(&mut guard, now, TAG_VALIDATION_CACHE_LIMIT);
     }
     guard.insert(path.to_path_buf(), now);
     true
@@ -50,6 +52,37 @@ fn validation_is_due(last_validated: Option<Instant>, now: Instant) -> bool {
     match last_validated {
         Some(last) => now.saturating_duration_since(last) >= TAG_VALIDATION_TTL,
         None => true,
+    }
+}
+
+/// Removes expired validation results and, when the cache is full, evicts the
+/// oldest remaining results so the next insertion cannot exceed the limit.
+fn prune_validation_cache(
+    cache: &mut rustc_hash::FxHashMap<PathBuf, Instant>,
+    now: Instant,
+    max_entries: usize,
+) {
+    cache.retain(|_, validated_at| !validation_is_due(Some(*validated_at), now));
+
+    if max_entries == 0 {
+        cache.clear();
+        return;
+    }
+
+    // Free a batch so a stream of new paths does not sort the entire cache
+    // again on every insertion while all timestamps are still fresh.
+    if cache.len() < max_entries {
+        return;
+    }
+    let keep_entries = max_entries - (max_entries / 4).max(1);
+    let remove_count = cache.len().saturating_sub(keep_entries);
+    let mut oldest: Vec<(PathBuf, Instant)> = cache
+        .iter()
+        .map(|(path, validated_at)| (path.clone(), *validated_at))
+        .collect();
+    oldest.sort_unstable_by_key(|(_, validated_at)| *validated_at);
+    for (path, _) in oldest.into_iter().take(remove_count) {
+        cache.remove(&path);
     }
 }
 
@@ -394,7 +427,8 @@ impl ImageViewerApp {
                             if gen_tracker.load(std::sync::atomic::Ordering::Relaxed) != my_gen {
                                 break;
                             }
-                            if let Some(mut entry) = tag_view_file_entry(path.clone(), show_hidden) {
+                            if let Some(mut entry) = tag_view_file_entry(path.clone(), show_hidden)
+                            {
                                 attach_cover(&mut entry);
                                 batch.push(entry.clone());
                                 fresh_entries.push(entry);
@@ -590,6 +624,37 @@ mod tests {
     }
 
     #[test]
+    fn validation_cache_prunes_expired_entries() {
+        let now = Instant::now();
+        let expired = PathBuf::from("expired");
+        let recent = PathBuf::from("recent");
+        let mut cache = rustc_hash::FxHashMap::default();
+        cache.insert(expired.clone(), now - TAG_VALIDATION_TTL);
+        cache.insert(recent.clone(), now);
+
+        prune_validation_cache(&mut cache, now, 3);
+
+        assert!(!cache.contains_key(&expired));
+        assert!(cache.contains_key(&recent));
+    }
+
+    #[test]
+    fn validation_cache_evicts_oldest_entry_before_insertion() {
+        let now = Instant::now();
+        let oldest = PathBuf::from("oldest");
+        let mut cache = rustc_hash::FxHashMap::default();
+        cache.insert(oldest.clone(), now - Duration::from_secs(2));
+        cache.insert(PathBuf::from("newer-a"), now - Duration::from_secs(1));
+        cache.insert(PathBuf::from("newer-b"), now);
+
+        prune_validation_cache(&mut cache, now, 3);
+        cache.insert(PathBuf::from("incoming"), now);
+
+        assert_eq!(cache.len(), 3);
+        assert!(!cache.contains_key(&oldest));
+    }
+
+    #[test]
     fn validation_slots_are_consumed_once_per_ttl_window() {
         let path = std::path::PathBuf::from(r"Z:\Library\_validation_slot_test\file.mkv");
         assert!(take_validation_slot(&path));
@@ -597,13 +662,26 @@ mod tests {
     }
 
     #[test]
+    fn full_validation_cache_leaves_room_for_a_batch() {
+        let now = Instant::now();
+        let mut cache = rustc_hash::FxHashMap::default();
+        for index in 0..20 {
+            cache.insert(PathBuf::from(format!("file-{index}")), now);
+        }
+        prune_validation_cache(&mut cache, now, 20);
+        assert_eq!(cache.len(), 15);
+        for index in 20..25 {
+            cache.insert(PathBuf::from(format!("file-{index}")), now);
+        }
+        assert_eq!(cache.len(), 20);
+    }
+
+    #[test]
     fn folder_cover_attach_only_applies_to_directories_with_a_known_cover() {
         const FOLDER: &str = r"Z:\Library\Show Name";
         const COVER: &str = r"Z:\Library\Show Name\s01e01.mkv";
-        let covers = std::collections::HashMap::from([(
-            PathBuf::from(FOLDER),
-            PathBuf::from(COVER),
-        )]);
+        let covers =
+            std::collections::HashMap::from([(PathBuf::from(FOLDER), PathBuf::from(COVER))]);
 
         let mut directory = entry(FOLDER, true);
         attach_folder_cover(&mut directory, Some(&covers));

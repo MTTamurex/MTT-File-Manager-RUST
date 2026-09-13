@@ -20,8 +20,8 @@ fn virtual_drive_info_query_is_due(letter: char, now: Instant) -> bool {
     static LAST_QUERY: std::sync::OnceLock<
         parking_lot::Mutex<rustc_hash::FxHashMap<char, Instant>>,
     > = std::sync::OnceLock::new();
-    let queries = LAST_QUERY
-        .get_or_init(|| parking_lot::Mutex::new(rustc_hash::FxHashMap::default()));
+    let queries =
+        LAST_QUERY.get_or_init(|| parking_lot::Mutex::new(rustc_hash::FxHashMap::default()));
     let mut guard = queries.lock();
     match guard.get(&letter) {
         Some(last)
