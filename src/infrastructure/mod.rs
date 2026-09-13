@@ -15,6 +15,7 @@ pub mod folder_compose;
 pub mod global_search;
 pub mod icon_disk_cache;
 pub mod io_priority;
+pub mod io_trace;
 pub mod media;
 pub mod ntfs_reader;
 pub mod onedrive;

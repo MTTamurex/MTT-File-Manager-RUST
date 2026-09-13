@@ -341,20 +341,34 @@ pub(super) fn render_preview_panel_layout(
                                         // Prevent CalculateFolderSize for virtual tag view paths (::tag::)
                                         let is_tag_path = crate::domain::special_paths::tag_id_from_view_path(&path.to_string_lossy()).is_some();
                                         if !is_tag_path {
-                                            // Cancel any in-progress calculation before starting new one
-                                             app.folder_size_state.cancel
-                                                 .store(true, std::sync::atomic::Ordering::Release);
-                                             let request_epoch = app
-                                                 .folder_size_state
-                                                 .batch_invalidation_epoch
-                                                 .get(&path)
-                                                 .copied()
-                                                 .unwrap_or(0);
-                                             app.folder_size_state.dispatch_request(
-                                                 path,
-                                                 request_epoch,
-                                                 std::time::Instant::now(),
-                                             );
+                                            // The recursive size walk is the only
+                                            // option on non-NTFS drives and can cover
+                                            // hundreds of GB, so it waits for an idle
+                                            // UI instead of competing with the scroll
+                                            // the user is doing right after opening a
+                                            // folder. The panel re-emits this action
+                                            // every frame while the size is unknown,
+                                            // so the size still appears on its own.
+                                            let ui_busy = app.is_loading_folder
+                                                || app.thumbnail_scroll_is_settling()
+                                                || !app.pending_thumbnails.is_empty()
+                                                || !app.cache_manager.pending_upload_set.is_empty();
+                                            if !ui_busy {
+                                                // Cancel any in-progress calculation before starting new one
+                                                app.folder_size_state.cancel
+                                                    .store(true, std::sync::atomic::Ordering::Release);
+                                                let request_epoch = app
+                                                    .folder_size_state
+                                                    .batch_invalidation_epoch
+                                                    .get(&path)
+                                                    .copied()
+                                                    .unwrap_or(0);
+                                                app.folder_size_state.dispatch_request(
+                                                    path,
+                                                    request_epoch,
+                                                    std::time::Instant::now(),
+                                                );
+                                            }
                                         }
                                     }
                                     PreviewPanelAction::VolumeChanged(vol) => {

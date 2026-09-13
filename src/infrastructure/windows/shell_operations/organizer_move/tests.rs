@@ -168,7 +168,7 @@ fn handle_rename_preserves_a_long_file_name_exactly() {
     let source_parent = tempfile::tempdir().expect("create source parent");
     let destination_parent = tempfile::tempdir().expect("create destination parent");
     let source = source_parent.path().join("source.mp4");
-    let expected_name = "Miss Monique - Live @ Radio Intense 11.06.2021 [Progressive House - Melodic Techno DJ Mix] 4K.mp4";
+    let expected_name = "Artist Name - Live @ Festival 11.06.2021 [Progressive House - Melodic Techno DJ Mix] 4K.mp4";
     let destination = destination_parent.path().join(expected_name);
     std::fs::write(&source, b"video contents").expect("create source");
 

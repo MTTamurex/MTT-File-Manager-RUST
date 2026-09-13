@@ -464,12 +464,12 @@ mod tests {
 
     #[test]
     fn reload_target_uses_the_inactive_panel_path_spelling() {
-        let operation_path = PathBuf::from(r"\\?\x:\18\");
+        let operation_path = PathBuf::from(r"\\?\x:\folder\");
         let affected_folders = [&operation_path];
 
-        let reload_target = inactive_panel_reload_target(true, r"X:\18", &affected_folders);
+        let reload_target = inactive_panel_reload_target(true, r"X:\folder", &affected_folders);
 
-        assert_eq!(reload_target, Some(PathBuf::from(r"X:\18")));
+        assert_eq!(reload_target, Some(PathBuf::from(r"X:\folder")));
     }
 
     #[test]

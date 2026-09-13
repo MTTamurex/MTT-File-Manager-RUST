@@ -207,6 +207,9 @@ impl ImageViewerApp {
 
 impl eframe::App for ImageViewerApp {
     fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        // Real inter-frame interval tracking (captures hitches that stable_dt
+        // smooths away, e.g. stalls in the previous frame's paint/swap phase).
+        self.track_frame_interval();
         // Startup must advance while the root viewport is still hidden.
         app::lifecycle::handle_startup_sequence(self, ctx);
         app::lifecycle::track_window_state(self, ctx);
@@ -236,6 +239,9 @@ impl eframe::App for ImageViewerApp {
         }
         let ctx_owned = ui.ctx().clone();
         let ctx = &ctx_owned;
+        // Real gap between painted frames (catches a window that stops painting
+        // while the event loop keeps ticking).
+        self.track_paint_interval();
         crate::ui::video_overlay::begin_frame(ctx);
         ui.set_style(ctx.global_style());
         let t_frame_start = std::time::Instant::now();

@@ -305,6 +305,8 @@ pub fn is_image_extension(extension: &str) -> bool {
 /// CRITICAL: Uses timeout-protected enumeration for Cloud Files providers to prevent indefinite blocking.
 const MAX_ENTRIES_SCAN: usize = 500;
 const MAX_FILES_CHECK: usize = 30;
+/// Scans slower than this are logged at INFO level for I/O attribution.
+const SLOW_FOLDER_SCAN_THRESHOLD_MS: u128 = 20;
 
 pub fn find_folder_preview_item(folder_path: &Path) -> Option<PathBuf> {
     use crate::infrastructure::onedrive::{
@@ -351,7 +353,9 @@ pub fn find_folder_preview_item(folder_path: &Path) -> Option<PathBuf> {
     }
 
     // Standard path (non-OneDrive) - use regular fs::read_dir
-    if let Ok(entries) = fs::read_dir(folder_path) {
+    let scan_start = std::time::Instant::now();
+    let found = (|| {
+        let entries = fs::read_dir(folder_path).ok()?;
         let mut files_checked = 0usize;
         for (idx, entry) in entries.flatten().enumerate() {
             if idx >= MAX_ENTRIES_SCAN {
@@ -380,8 +384,22 @@ pub fn find_folder_preview_item(folder_path: &Path) -> Option<PathBuf> {
                 }
             }
         }
+        None
+    })();
+
+    // Callers run this per visible folder (cover discovery, composition and the
+    // consistency probe); on HDD/virtual drives each call is a real directory
+    // read, so attribute slow scans in the diagnostic log.
+    let elapsed = scan_start.elapsed();
+    crate::infrastructure::io_trace::record_cover_scan(elapsed.as_millis() as u64);
+    if elapsed.as_millis() >= SLOW_FOLDER_SCAN_THRESHOLD_MS {
+        log::info!(
+            "[COVER] slow folder scan {:.1}ms dir={:?}",
+            elapsed.as_secs_f64() * 1000.0,
+            folder_path.file_name().unwrap_or_default()
+        );
     }
-    None
+    found
 }
 
 /// Check if a `.ts` file is a real MPEG Transport Stream (sync byte 0x47).

@@ -320,8 +320,16 @@ impl ImageViewerApp {
 
         let visible_rgba_budget = self.current_thumbnail_rgba_budget_bytes();
         self.cache_manager.retune_rgba_budget(visible_rgba_budget);
-        self.cache_manager
-            .retune_rgba_cache_capacity(visible_texture_keep);
+        // Keep the decoded-RGBA cache deeper than the texture cache. With both
+        // caches at the same depth their entries were evicted in lockstep, so an
+        // item coming back into view always missed the RAM cache and paid a
+        // worker round trip (measured: `th_ram=0` through entire scroll
+        // sessions). The byte budget above still bounds total memory.
+        self.cache_manager.retune_rgba_cache_capacity(
+            visible_texture_keep
+                .saturating_mul(3)
+                .min(MAX_DYNAMIC_TEXTURE_CACHE_ITEMS),
+        );
 
         let dynamic_pending_limit = self.current_pending_thumbnail_upload_limit();
         let dynamic_pending_byte_limit = self.current_pending_thumbnail_upload_byte_limit();

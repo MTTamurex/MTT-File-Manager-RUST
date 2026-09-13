@@ -7,11 +7,67 @@ use std::os::windows::ffi::OsStrExt;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use windows::core::PCWSTR;
 use windows::Win32::Storage::FileSystem::{
     GetFileAttributesExW, GetFileExInfoStandard, INVALID_FILE_ATTRIBUTES, WIN32_FILE_ATTRIBUTE_DATA,
 };
+
+/// How long a path existence check is trusted before it is repeated.
+///
+/// Tag views are re-opened constantly while the user switches tags; re-sweeping
+/// every path on each open issued 600-1500 `GetFileAttributesW` calls against
+/// HDD/virtual drives every time. Reusing recent results makes a revisit nearly
+/// free while the short TTL bounds how long a deleted file may linger in a tag
+/// view.
+const TAG_VALIDATION_TTL: Duration = Duration::from_secs(15);
+/// Upper bound for the session-wide validation cache.
+const TAG_VALIDATION_CACHE_LIMIT: usize = 20_000;
+
+/// Returns `true` when `path` must be checked again, marking it as validated.
+fn take_validation_slot(path: &std::path::Path) -> bool {
+    static LAST_VALIDATED: std::sync::OnceLock<
+        std::sync::Mutex<rustc_hash::FxHashMap<PathBuf, Instant>>,
+    > = std::sync::OnceLock::new();
+
+    let now = Instant::now();
+    let cache = LAST_VALIDATED
+        .get_or_init(|| std::sync::Mutex::new(rustc_hash::FxHashMap::default()));
+    let mut guard = cache.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+
+    if !validation_is_due(guard.get(path).copied(), now) {
+        return false;
+    }
+    if guard.len() >= TAG_VALIDATION_CACHE_LIMIT {
+        guard.retain(|_, validated_at| validation_is_due(Some(*validated_at), now));
+    }
+    guard.insert(path.to_path_buf(), now);
+    true
+}
+
+/// Decision rule for [`take_validation_slot`], kept pure so it can be tested.
+fn validation_is_due(last_validated: Option<Instant>, now: Instant) -> bool {
+    match last_validated {
+        Some(last) => now.saturating_duration_since(last) >= TAG_VALIDATION_TTL,
+        None => true,
+    }
+}
+
+/// Re-attaches a persisted folder cover to a tag-view entry.
+///
+/// Tag items are rebuilt with `folder_cover: None` on every visit, and the
+/// renderer treats a missing cover as "never scanned" — causing a fresh cover
+/// discovery (directory enumeration) per visible folder on every revisit.
+fn attach_folder_cover(
+    entry: &mut FileEntry,
+    covers: Option<&std::collections::HashMap<PathBuf, PathBuf>>,
+) {
+    if entry.is_dir {
+        if let Some(cover) = covers.and_then(|covers| covers.get(&entry.path)) {
+            entry.folder_cover = Some(cover.clone());
+        }
+    }
+}
 
 /// Convert a Windows FILETIME (100-nanosecond intervals since 1601-01-01) to
 /// Unix seconds. Returns 0 for invalid/zero timestamps.
@@ -245,6 +301,24 @@ impl ImageViewerApp {
                         app_state_db.get_cached_file_entries(&paths);
                     total_cache_hits = total_cache_hits.saturating_add(cached.len());
 
+                    // Re-attach persisted folder covers for this page. Tag items
+                    // are rebuilt on every visit with `folder_cover: None`, and
+                    // the renderer treats a missing cover as "never scanned" —
+                    // so every revisit re-enumerated each visible folder
+                    // (20-120 ms per folder on virtual drives, in bursts that
+                    // stalled frames while scrolling). The cover worker persists
+                    // discovered covers in `folder_covers`; reading them here
+                    // keeps revisits off the source drive.
+                    let cover_map: Option<
+                        std::collections::HashMap<std::path::PathBuf, std::path::PathBuf>,
+                    > = {
+                        let covers = app_state_db.get_folder_covers(&paths);
+                        (!covers.is_empty()).then_some(covers)
+                    };
+                    let attach_cover = |entry: &mut FileEntry| {
+                        attach_folder_cover(entry, cover_map.as_ref());
+                    };
+
                     if !cached.is_empty() {
                         let mut cached_batch = Vec::with_capacity(CACHE_BATCH_SIZE);
                         for path in &paths {
@@ -258,7 +332,9 @@ impl ImageViewerApp {
                             if entry.is_hidden && !show_hidden {
                                 continue;
                             }
-                            cached_batch.push(entry.clone());
+                            let mut entry = entry.clone();
+                            attach_cover(&mut entry);
+                            cached_batch.push(entry);
                             if cached_batch.len() >= CACHE_BATCH_SIZE {
                                 let _ = sender.send((my_gen, std::mem::take(&mut cached_batch)));
                                 ui_ctx.request_repaint();
@@ -297,10 +373,13 @@ impl ImageViewerApp {
                             if gen_tracker.load(std::sync::atomic::Ordering::Relaxed) != my_gen {
                                 break;
                             }
-                            let chunk_entries: Vec<FileEntry> = chunk
+                            let mut chunk_entries: Vec<FileEntry> = chunk
                                 .par_iter()
                                 .filter_map(|p| tag_view_file_entry(p.clone(), show_hidden))
                                 .collect();
+                            for entry in chunk_entries.iter_mut() {
+                                attach_cover(entry);
+                            }
                             if !chunk_entries.is_empty() {
                                 let _ = sender.send((my_gen, chunk_entries.clone()));
                                 ui_ctx.request_repaint();
@@ -315,7 +394,8 @@ impl ImageViewerApp {
                             if gen_tracker.load(std::sync::atomic::Ordering::Relaxed) != my_gen {
                                 break;
                             }
-                            if let Some(entry) = tag_view_file_entry(path.clone(), show_hidden) {
+                            if let Some(mut entry) = tag_view_file_entry(path.clone(), show_hidden) {
+                                attach_cover(&mut entry);
                                 batch.push(entry.clone());
                                 fresh_entries.push(entry);
                                 let current_batch_size = if batch_index < 2 {
@@ -374,10 +454,60 @@ impl ImageViewerApp {
                 );
 
                 if !cached_paths_to_validate.is_empty() {
-                    let missing_candidates: Vec<PathBuf> = cached_paths_to_validate
-                        .into_iter()
-                        .filter(|path| !crate::infrastructure::onedrive::fast_path_exists(path))
-                        .collect();
+                    // Existence sweep: one GetFileAttributesW per cached path.
+                    // On HDD/virtual drives (Cryptomator) a full-page sweep of
+                    // 600-1500 paths used to hit the drive in a single burst
+                    // right after opening a tag view. Sweep in small chunks with
+                    // a short pause between them so the metadata I/O does not
+                    // compete with thumbnail/browsing reads, and abort as soon
+                    // as the user navigates away.
+                    const VALIDATION_CHUNK_PATHS: usize = 64;
+                    // HDD/virtual drives pay a seek per path (Cryptomator also
+                    // decrypts), so pause longer between chunks there.
+                    let validation_pause_ms = if detected_is_ssd.unwrap_or(true) {
+                        1
+                    } else {
+                        5
+                    };
+                    let total_to_validate = cached_paths_to_validate.len();
+                    let validation_start = std::time::Instant::now();
+                    let mut checked_paths = 0usize;
+                    let mut missing_candidates: Vec<PathBuf> = Vec::new();
+                    for chunk in cached_paths_to_validate.chunks(VALIDATION_CHUNK_PATHS) {
+                        if gen_tracker.load(std::sync::atomic::Ordering::Relaxed) != my_gen {
+                            break;
+                        }
+                        let mut checked_in_chunk = 0usize;
+                        for path in chunk {
+                            if !take_validation_slot(path) {
+                                continue;
+                            }
+                            checked_in_chunk += 1;
+                            checked_paths += 1;
+                            if !crate::infrastructure::onedrive::fast_path_exists(path) {
+                                missing_candidates.push(path.clone());
+                            }
+                        }
+                        if checked_in_chunk > 0 {
+                            std::thread::sleep(std::time::Duration::from_millis(
+                                validation_pause_ms,
+                            ));
+                        }
+                    }
+                    let validation_ms = validation_start.elapsed().as_millis() as u64;
+                    crate::infrastructure::io_trace::record_tag_validation(
+                        checked_paths as u64,
+                        validation_ms,
+                    );
+                    if checked_paths > 0 && validation_ms >= 50 {
+                        log::info!(
+                            "[TAGS] path validation swept={} checked={} missing={} took_ms={}",
+                            total_to_validate,
+                            checked_paths,
+                            missing_candidates.len(),
+                            validation_ms
+                        );
+                    }
                     if !missing_candidates.is_empty() {
                         let _ = tag_gc_sender.send(TagPathUpdate::HideFromViews {
                             generation: my_gen,
@@ -424,5 +554,72 @@ impl ImageViewerApp {
         }
 
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::file_entry::SyncStatus;
+
+    fn entry(path: &str, is_dir: bool) -> FileEntry {
+        FileEntry {
+            path: PathBuf::from(path),
+            name: String::new(),
+            is_dir,
+            size: 0,
+            modified: 0,
+            created: None,
+            folder_cover: None,
+            drive_info: None,
+            sync_status: SyncStatus::None,
+            is_hidden: false,
+            recycle_bin: None,
+        }
+    }
+
+    #[test]
+    fn validation_ttl_allows_first_check_and_blocks_recent_repeats() {
+        let now = Instant::now();
+        assert!(validation_is_due(None, now));
+        assert!(!validation_is_due(
+            Some(now),
+            now + TAG_VALIDATION_TTL - Duration::from_secs(1)
+        ));
+        assert!(validation_is_due(Some(now), now + TAG_VALIDATION_TTL));
+    }
+
+    #[test]
+    fn validation_slots_are_consumed_once_per_ttl_window() {
+        let path = std::path::PathBuf::from(r"Z:\Library\_validation_slot_test\file.mkv");
+        assert!(take_validation_slot(&path));
+        assert!(!take_validation_slot(&path));
+    }
+
+    #[test]
+    fn folder_cover_attach_only_applies_to_directories_with_a_known_cover() {
+        const FOLDER: &str = r"Z:\Library\Show Name";
+        const COVER: &str = r"Z:\Library\Show Name\s01e01.mkv";
+        let covers = std::collections::HashMap::from([(
+            PathBuf::from(FOLDER),
+            PathBuf::from(COVER),
+        )]);
+
+        let mut directory = entry(FOLDER, true);
+        attach_folder_cover(&mut directory, Some(&covers));
+        assert_eq!(directory.folder_cover, Some(PathBuf::from(COVER)));
+
+        // Files never receive a cover, even when their path is a cover entry.
+        let mut file = entry(COVER, false);
+        attach_folder_cover(&mut file, Some(&covers));
+        assert_eq!(file.folder_cover, None);
+
+        let mut unknown_folder = entry(r"Z:\Library\Unknown", true);
+        attach_folder_cover(&mut unknown_folder, Some(&covers));
+        assert_eq!(unknown_folder.folder_cover, None);
+
+        let mut without_covers = entry(FOLDER, true);
+        attach_folder_cover(&mut without_covers, None);
+        assert_eq!(without_covers.folder_cover, None);
     }
 }

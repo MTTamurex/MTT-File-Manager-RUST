@@ -1,9 +1,26 @@
 use crate::domain::file_entry::FileEntry;
 use eframe::egui;
 use std::collections::hash_map::DefaultHasher;
+use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::sync::mpsc;
+use std::time::{Duration, Instant};
+
+/// Minimum interval between folder-cover re-scans for the same directory when
+/// the parent listing signature did not change.
+const COVER_SCAN_INTERVAL: Duration = Duration::from_secs(30);
+/// Probes slower than this are logged at INFO level for I/O attribution.
+const SLOW_PROBE_LOG_THRESHOLD_MS: u64 = 50;
+/// Upper bound for the per-directory cover-scan bookkeeping map.
+const COVER_SCAN_MAP_LIMIT: usize = 256;
+
+fn cover_scan_is_due(last_scan: Option<Instant>, now: Instant) -> bool {
+    match last_scan {
+        Some(last_scan) => now.saturating_duration_since(last_scan) >= COVER_SCAN_INTERVAL,
+        None => true,
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConsistencyProbeMode {
@@ -60,6 +77,9 @@ pub fn spawn_consistency_probe_worker(
                 crate::infrastructure::io_priority::IOPriority::Background,
             );
 
+            // Per-directory cover-scan bookkeeping (single-threaded worker).
+            let mut last_cover_scans: HashMap<PathBuf, Instant> = HashMap::new();
+
             while let Ok(request) = req_rx.recv() {
                 // Drain stale requests, keeping only the latest request for each
                 // distinct (mode, path). Focus restore can enqueue liveness probes
@@ -96,6 +116,7 @@ pub fn spawn_consistency_probe_worker(
                     continue;
                 }
 
+                let probe_start = Instant::now();
                 let disk_entries = match crate::infrastructure::windows::hdd_directory_reader::read_directory_hdd_optimized(
                     path.as_path(),
                     is_onedrive,
@@ -120,23 +141,50 @@ pub fn spawn_consistency_probe_worker(
                 };
 
                 let disk_signature = compute_entries_signature(&disk_entries);
+                let signature_changed = disk_signature != ui_signature;
+
+                // Folder-cover re-resolution enumerates one directory per visible
+                // subfolder. That is the heaviest part of the probe and, on an HDD
+                // or virtual drive (Cryptomator), it used to be paid on every
+                // interval even when the parent listing had not changed. Re-scan
+                // only when the listing changed, or on a coarse periodic throttle.
+                let now = Instant::now();
+                let scan_covers = signature_changed
+                    || cover_scan_is_due(last_cover_scans.get(&path).copied(), now);
+                let scanned_covers = if scan_covers {
+                    last_cover_scans.insert(path.clone(), now);
+                    if last_cover_scans.len() > COVER_SCAN_MAP_LIMIT {
+                        last_cover_scans.retain(|_, scanned_at| {
+                            now.saturating_duration_since(*scanned_at) < COVER_SCAN_INTERVAL * 4
+                        });
+                    }
+                    latest.folder_cover_states.len()
+                } else {
+                    0
+                };
 
                 // Re-resolve folder covers for currently visible subfolders so non-USN
                 // filesystems can detect cover changes even when folder listings themselves
                 // did not change.
-                let changed_folder_covers: Vec<PathBuf> = latest
-                    .folder_cover_states
-                    .iter()
-                    .filter_map(|(folder_path, current_cover)| {
-                        let discovered_cover =
-                            crate::infrastructure::windows::find_folder_preview_item(folder_path);
-                        if discovered_cover != *current_cover {
-                            Some(folder_path.clone())
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
+                let changed_folder_covers: Vec<PathBuf> = if scan_covers {
+                    latest
+                        .folder_cover_states
+                        .iter()
+                        .filter_map(|(folder_path, current_cover)| {
+                            let discovered_cover =
+                                crate::infrastructure::windows::find_folder_preview_item(
+                                    folder_path,
+                                );
+                            if discovered_cover != *current_cover {
+                                Some(folder_path.clone())
+                            } else {
+                                None
+                            }
+                        })
+                        .collect()
+                } else {
+                    Vec::new()
+                };
 
                 // Also probe visible subfolders for recent content changes via
                 // the NTFS search service. This catches size changes that do
@@ -181,9 +229,23 @@ pub fn spawn_consistency_probe_worker(
                     }
                 };
 
-                let signature_changed = disk_signature != ui_signature;
                 let has_cover_changes = !changed_folder_covers.is_empty();
                 let has_folder_content_changes = !changed_folder_contents.is_empty();
+
+                let probe_ms = probe_start.elapsed().as_millis() as u64;
+                crate::infrastructure::io_trace::record_consistency_probe(
+                    probe_ms,
+                    scanned_covers as u64,
+                );
+                if probe_ms >= SLOW_PROBE_LOG_THRESHOLD_MS {
+                    log::info!(
+                        "[PROBE-WORKER] slow probe {}ms entries={} cover_scans={} path={:?}",
+                        probe_ms,
+                        disk_entries.len(),
+                        scanned_covers,
+                        path.file_name().unwrap_or_default()
+                    );
+                }
 
                 log::debug!(
                     "[PROBE-WORKER] path={:?} entries={} sig_match={} changed_folder_covers={} changed_folder_contents={}",
@@ -275,6 +337,14 @@ mod tests {
             .unwrap()
             .as_nanos();
         std::env::temp_dir().join(format!("mtt_consistency_probe_{name}_{nanos}"))
+    }
+
+    #[test]
+    fn cover_scan_throttle_allows_first_scan_and_blocks_early_repeat() {
+        let now = Instant::now();
+        assert!(cover_scan_is_due(None, now));
+        assert!(!cover_scan_is_due(Some(now), now + Duration::from_secs(5)));
+        assert!(cover_scan_is_due(Some(now), now + COVER_SCAN_INTERVAL));
     }
 
     #[test]

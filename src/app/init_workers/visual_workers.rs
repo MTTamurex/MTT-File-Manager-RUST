@@ -40,6 +40,30 @@ pub(in crate::app) fn spawn_cover_worker(
         );
 
         while let Ok(folder_path) = cover_req_rx.recv() {
+            // Prefer the persisted cover. The renderer only asks when the listing
+            // path did not carry a cover, but the cover itself is usually already
+            // cached — and re-enumerating the folder is a real directory read on
+            // HDD/virtual drives (Cryptomator), which made cover loading slow and
+            // audibly noisy. A stale row self-heals: preview extraction fails,
+            // the cover is invalidated, and the next request scans normally.
+            let cached_cover = match cover_worker_db
+                .try_get_folder_covers(std::slice::from_ref(&folder_path))
+            {
+                crate::infrastructure::app_state_db::FolderCoverReadOutcome::Completed(covers) => {
+                    covers.get(&folder_path).cloned()
+                }
+                _ => None,
+            };
+            if let Some(cover) = cached_cover {
+                // Validate cheaply (a single attribute read): a cover that no
+                // longer exists must fall through to a full rescan, so a tile
+                // never renders from an invalid path.
+                if crate::infrastructure::onedrive::fast_path_exists(&cover) {
+                    let _ = cover_res_tx.send((folder_path, Some(cover)));
+                    continue;
+                }
+            }
+
             let cover = windows_infra::find_folder_preview_item(&folder_path).filter(|p| {
                 // Reject .ts files that aren't real MPEG-TS video.
                 // Real MPEG-TS starts with sync byte 0x47.

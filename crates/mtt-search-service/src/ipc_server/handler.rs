@@ -1197,15 +1197,15 @@ mod tests {
         index.state = IndexState::Ready;
         index.sizes_loaded = true;
         assert!(index.insert_record(10, "Users", 5, true, false));
-        assert!(index.insert_record(11, "mtamu", 10, true, false));
+        assert!(index.insert_record(11, "user", 10, true, false));
         assert!(index.insert_record(12, "OneDrive", 11, true, false));
-        assert!(index.insert_record(13, "Documentos Pessoais", 12, true, false));
+        assert!(index.insert_record(13, "Documents", 12, true, false));
         assert!(index.insert_record(101, "Config", 200, false, false));
 
         let handle = handle_from(index);
         let repaired = super::repair_missing_live_directory_record(
             &handle,
-            r"C:\Users\mtamu\OneDrive\Documentos Pessoais\Diablo IV",
+            r"C:\Users\user\OneDrive\Documents\Project",
             200,
             true,
         )
@@ -1220,7 +1220,7 @@ mod tests {
         let record = vol.records.get(&200).expect("directory record inserted");
         assert!(record.is_dir());
         assert_eq!(
-            vol.resolve_path_to_frn(r"C:\Users\mtamu\OneDrive\Documentos Pessoais\Diablo IV"),
+            vol.resolve_path_to_frn(r"C:\Users\user\OneDrive\Documents\Project"),
             Some(200)
         );
         assert!(vol.reparse_points.contains(&200));

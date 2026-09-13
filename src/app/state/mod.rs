@@ -687,6 +687,29 @@ pub struct ImageViewerApp {
     pub frame_time_avg_ms: f32,
     pub frame_time_peak_ms: f32,
     pub last_actual_frame_ms: f32,
+    /// Wall-clock entry time of the previous `logic()` pass. Used to measure the
+    /// real inter-frame interval, which `stable_dt` deliberately smooths away —
+    /// a short hitch caused by the GPU paint/swap phase is otherwise invisible
+    /// in the frame metrics.
+    pub last_update_enter: Option<Instant>,
+    /// Frames sampled by the interval tracker (used to skip startup frames).
+    pub frames_tracked: u64,
+    /// Frame interval hitches (>= threshold) since the last diagnostic snapshot.
+    pub frame_hitches: u64,
+    pub frame_hitch_ms_max: f32,
+    /// Rate limit for `[PERF] frame hitch` log lines.
+    pub last_frame_hitch_log: Option<Instant>,
+    /// Wall-clock entry time of the previous `ui()` pass. Measures the real gap
+    /// between painted frames, which is what the user perceives as a freeze —
+    /// the event loop can keep ticking (`logic()`) while painting is skipped.
+    pub last_ui_enter: Option<Instant>,
+    /// Viewport visibility/focus state captured at the previous `ui()` pass.
+    /// Used to avoid reporting paint gaps caused by OS occlusion (egui skips
+    /// painting entirely while the viewport is hidden) as UI stalls.
+    pub last_ui_active: bool,
+    pub ui_gap_hitches: u64,
+    pub ui_gap_ms_max: f32,
+    pub last_ui_gap_log: Option<Instant>,
     pub fps_avg: f32,
     pub upload_budget_ms: f32,
     pub last_upload_budget_update: Instant,

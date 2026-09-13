@@ -303,6 +303,11 @@ pub fn spawn_folder_preview_worker(
                         continue;
                     }
 
+                    // Staleness is re-verified on every request against the
+                    // folder's last-write time: a folder whose contents changed
+                    // must not keep showing an old preview just because it is
+                    // cached. (Recompute cost is bounded by the content-thumbnail
+                    // DB cache, so this does not re-extract media.)
                     let is_stale = std::fs::metadata(&path)
                         .and_then(|m| m.modified())
                         .ok()
@@ -484,16 +489,25 @@ fn try_custom_compose(
     // 2. Extract content thumbnail using the 5-stage hybrid pipeline.
     //    Use the _detailed variant so we can distinguish UnsafeToRead from
     //    real extraction failures — the former must NOT be cached to SQLite.
+    //
+    //    Extract at the largest persisted bucket regardless of the compose
+    //    bucket: a scroll-time compose at 256 px used to persist a 256 px row,
+    //    which the idle 512 px compose then rejected — forcing a second read of
+    //    the cover media from the HDD/virtual drive on every scroll→idle pass.
+    let extract_bucket = bucket_size.max(crate::ui::theme::MIN_GRID_THUMBNAIL_BUCKET);
     let outcome =
         crate::workers::thumbnail::extraction::generate_thumbnail_hybrid_detailed_with_target(
             &media_path,
             priority,
             empty_deletions,
-            Some(bucket_size),
+            Some(extract_bucket),
         );
 
     let (content_rgba, content_w, content_h) = match outcome {
-        crate::workers::thumbnail::extraction::ThumbnailExtractionOutcome::Success(data) => data,
+        crate::workers::thumbnail::extraction::ThumbnailExtractionOutcome::Success(data) => {
+            crate::infrastructure::io_trace::record_source_extract();
+            data
+        }
         crate::workers::thumbnail::extraction::ThumbnailExtractionOutcome::UnsafeToRead(reason) => {
             log::debug!(
                 "[FOLDER PREVIEW] Media {:?} unsafe to read ({:?}), skipping cache",
@@ -514,13 +528,10 @@ fn try_custom_compose(
         }
     };
 
-    let (content_rgba, content_w, content_h) =
-        resize_to_bucket(content_rgba, content_w, content_h, bucket_size);
-
     if let Err(err) = disk_cache.put(
         &media_path,
         media_modified.unwrap_or(UNIX_EPOCH),
-        bucket_size,
+        extract_bucket,
         &content_rgba,
         content_w,
         content_h,
@@ -531,6 +542,10 @@ fn try_custom_compose(
             err
         );
     }
+
+    // Only the compose copy is downscaled to the requested bucket.
+    let (content_rgba, content_w, content_h) =
+        resize_to_bucket(content_rgba, content_w, content_h, bucket_size);
 
     // 3. Compose: back → content → front
     match composer.compose_for_size(&content_rgba, content_w, content_h, bucket_size) {

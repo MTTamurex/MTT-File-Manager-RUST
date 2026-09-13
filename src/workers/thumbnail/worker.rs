@@ -268,7 +268,7 @@ fn thumbnail_cache_writer_loop(
 /// download with qBittorrent sparse pre-allocation).
 ///
 /// Flow:
-///   1. Sleep 1 s.
+///   1. Sleep 1 s (5 s when deferred paths live on an HDD/virtual drive).
 ///   2. Drain the `UNSAFE_REGISTRY`.
 ///   3. For each entry, call `classify_file_read_safety` (cheap; no write-lock
 ///      probe for actively-writing files after Phase 1).
@@ -315,6 +315,13 @@ fn deferred_retry_loop(
     // 4-permit semaphore: cap concurrent classify probes to avoid I/O spikes.
     let probe_sem = Arc::new(Semaphore::new(4));
 
+    // Retry cadence: 1 s while deferred files live on an SSD, backing off to
+    // 5 s when any of them sits on an HDD/virtual drive — each classify probe
+    // opens the file, costing a seek and possibly waking a spun-down disk.
+    const RETRY_INTERVAL_MS: u64 = 1000;
+    const RETRY_INTERVAL_HDD_MS: u64 = 5000;
+    let mut retry_interval_ms = RETRY_INTERVAL_MS;
+
     loop {
         // EST-05: cooperative exit. Previously this loop ran forever and the
         // thread was only ever killed by process::exit.
@@ -322,7 +329,7 @@ fn deferred_retry_loop(
             break;
         }
 
-        std::thread::sleep(std::time::Duration::from_millis(1000));
+        std::thread::sleep(std::time::Duration::from_millis(retry_interval_ms));
 
         if shutdown.load(Ordering::Relaxed) {
             break;
@@ -330,12 +337,17 @@ fn deferred_retry_loop(
 
         let entries = drain_unsafe_registry();
         if entries.is_empty() {
+            retry_interval_ms = RETRY_INTERVAL_MS;
             continue;
         }
 
         let current_gen = gen_tracker.load(Ordering::Relaxed);
+        let mut saw_hdd_path = false;
 
         for (path, entry) in entries {
+            if !crate::infrastructure::io_priority::is_ssd(&path) {
+                saw_hdd_path = true;
+            }
             if entry.req_generation != current_gen {
                 log::debug!(
                     "[THUMB-RETRY] Dropping stale deferred entry: {:?}",
@@ -384,6 +396,12 @@ fn deferred_retry_loop(
                 }
             }
         }
+
+        retry_interval_ms = if saw_hdd_path {
+            RETRY_INTERVAL_HDD_MS
+        } else {
+            RETRY_INTERVAL_MS
+        };
     }
 }
 

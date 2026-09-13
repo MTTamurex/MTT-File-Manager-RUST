@@ -10,6 +10,44 @@ const DRIVE_REFRESH_INTERVAL_MS: u64 = 30000;
 const DRIVE_BITMASK_CHECK_INTERVAL_MS: u64 = 3000;
 const DRIVE_INFO_REFRESH_INTERVAL_MS: u64 = 5000;
 const REMOTE_DRIVE_INFO_REFRESH_INTERVAL_MS: u64 = 60000;
+/// Configured virtual drives (Cryptomator and similar) route every volume query
+/// through a decrypting filesystem down to the backing HDD. Re-querying them
+/// every 5 s keeps waking that drive while browsing, so refresh them coarsely
+/// and keep the last known values in between.
+const VIRTUAL_DRIVE_INFO_REFRESH_INTERVAL_MS: u64 = 30000;
+
+fn virtual_drive_info_query_is_due(letter: char, now: Instant) -> bool {
+    static LAST_QUERY: std::sync::OnceLock<
+        parking_lot::Mutex<rustc_hash::FxHashMap<char, Instant>>,
+    > = std::sync::OnceLock::new();
+    let queries = LAST_QUERY
+        .get_or_init(|| parking_lot::Mutex::new(rustc_hash::FxHashMap::default()));
+    let mut guard = queries.lock();
+    match guard.get(&letter) {
+        Some(last)
+            if now.saturating_duration_since(*last)
+                < Duration::from_millis(VIRTUAL_DRIVE_INFO_REFRESH_INTERVAL_MS) =>
+        {
+            false
+        }
+        _ => {
+            guard.insert(letter, now);
+            true
+        }
+    }
+}
+
+fn should_query_drive_info(path: &str, now: Instant) -> bool {
+    let Some(letter) =
+        crate::infrastructure::windows::extract_drive_letter(std::path::Path::new(path))
+    else {
+        return true;
+    };
+    if crate::infrastructure::virtual_drive_config::get_drive_override(letter).is_none() {
+        return true;
+    }
+    virtual_drive_info_query_is_due(letter, now)
+}
 
 fn take_due_drive_bitmask_check(last_check: &mut Instant, now: Instant) -> bool {
     if now.saturating_duration_since(*last_check)
@@ -82,8 +120,15 @@ fn spawn_drive_info_refresh(
                 if !drive_scope_matches(scope, drive_type) {
                     continue;
                 }
+                if !should_query_drive_info(&path, Instant::now()) {
+                    continue;
+                }
 
+                let query_start = Instant::now();
                 let entry = query_drive_info(path, drive_type);
+                crate::infrastructure::io_trace::record_drive_info_query(
+                    query_start.elapsed().as_millis() as u64,
+                );
                 if scope == DriveInfoRefreshScope::Remote {
                     if tx
                         .send(DriveInfoRefreshResult {
@@ -327,6 +372,20 @@ mod tests {
         assert!(drive_full_refresh_is_due(
             start,
             start + Duration::from_millis(DRIVE_REFRESH_INTERVAL_MS)
+        ));
+    }
+
+    #[test]
+    fn virtual_drive_info_queries_are_throttled() {
+        let start = Instant::now();
+        assert!(virtual_drive_info_query_is_due('Q', start));
+        assert!(!virtual_drive_info_query_is_due(
+            'Q',
+            start + Duration::from_millis(5000)
+        ));
+        assert!(virtual_drive_info_query_is_due(
+            'Q',
+            start + Duration::from_millis(VIRTUAL_DRIVE_INFO_REFRESH_INTERVAL_MS)
         ));
     }
 }

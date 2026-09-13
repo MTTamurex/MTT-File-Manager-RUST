@@ -211,7 +211,10 @@ impl ImageViewerApp {
         {
             let cached_max_dim = width.max(height);
 
-            // Only reuse RAM cache if it meets or exceeds the requested size
+            // Only reuse the RAM cache when it meets or exceeds the requested
+            // size: a lower-resolution copy must not silently replace the
+            // requested bucket (the tile would stay soft until the texture is
+            // evicted and re-requested).
             if cached_max_dim >= effective_size_px {
                 let pending_bytes = self.pending_thumbnail_rgba_bytes();
                 let visible_paths = self.visible_grid_paths_snapshot();

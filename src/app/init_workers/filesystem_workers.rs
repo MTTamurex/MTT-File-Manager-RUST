@@ -499,6 +499,7 @@ pub(in crate::app) fn spawn_folder_size_worker(
             let progress_epoch = request_epoch;
             let progress_request_id = request_id;
 
+            let walk_start = std::time::Instant::now();
             let result =
                 crate::infrastructure::windows::folder_size::calculate_folder_size_parallel(
                     &folder_path,
@@ -513,15 +514,18 @@ pub(in crate::app) fn spawn_folder_size_worker(
                         ctx_clone.request_repaint();
                     },
                 );
+            let walk_ms = walk_start.elapsed().as_millis() as u64;
+            crate::infrastructure::io_trace::record_folder_size_walk(walk_ms);
 
             match result {
                 Some(result) => {
                     log::info!(
-                        "[FOLDER-SIZE] Fallback complete path={} total_gb={:.2} files={} folders={}",
+                        "[FOLDER-SIZE] Fallback complete path={} total_gb={:.2} files={} folders={} took_ms={}",
                         folder_path.display(),
                         result.total_size as f64 / 1_073_741_824.0,
                         result.file_count,
                         result.folder_count,
+                        walk_ms,
                     );
                     let _ = folder_size_res_tx.send(FolderSizeMessage::Complete {
                         folder_path,
@@ -674,12 +678,22 @@ pub(in crate::app) fn spawn_folder_size_batch_worker(
                 };
                 crate::infrastructure::io_priority::set_thread_priority(priority);
 
+                let walk_start = std::time::Instant::now();
                 let result =
                     crate::infrastructure::windows::folder_size::calculate_folder_size_parallel(
                         &path,
                         &cancel_worker,
                         |_partial| { /* no progress needed for list view */ },
                     );
+                let walk_ms = walk_start.elapsed().as_millis() as u64;
+                crate::infrastructure::io_trace::record_folder_size_walk(walk_ms);
+                if walk_ms >= 500 {
+                    log::info!(
+                        "[FOLDER-SIZE] Batch fallback path={} took_ms={}",
+                        path.display(),
+                        walk_ms
+                    );
+                }
 
                 // Only send if scan completed (not cancelled).
                 if !cancel_worker.load(Ordering::Acquire)

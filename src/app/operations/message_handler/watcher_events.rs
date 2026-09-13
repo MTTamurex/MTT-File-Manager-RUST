@@ -135,6 +135,14 @@ impl ImageViewerApp {
             return;
         }
 
+        // Skip probes while the user is scrolling: a probe re-reads the current
+        // directory (and, on signature drift, its folder covers) from the source
+        // drive, competing with thumbnail reads and amplifying stutter on
+        // OpenGL/HDD combinations. The probe resumes once scrolling settles.
+        if self.thumbnail_scroll_is_settling() {
+            return;
+        }
+
         // For non-USN filesystems, do not block consistency probes based on a sticky
         // peak metric: reliability is more important and probe interval is already long.
         // Keep the guard for USN paths, where known-bad drives can probe as fast as 3s.
@@ -178,6 +186,12 @@ impl ImageViewerApp {
             || self.file_operation_state.file_ops_in_progress > 0
             || self.layout.saved_is_minimized
         {
+            return;
+        }
+
+        // Scrolling in the active panel keeps the drive busy; defer the inactive
+        // panel probe so both do not read the same HDD at once.
+        if self.thumbnail_scroll_is_settling() {
             return;
         }
 

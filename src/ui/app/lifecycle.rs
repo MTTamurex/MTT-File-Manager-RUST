@@ -238,7 +238,14 @@ pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
             app.minimized_duration_secs = minimized_secs;
             app.last_restore_time = std::time::Instant::now();
             app.frame_time_peak_ms = app.frame_time_avg_ms.max(16.0);
-            if minimized_secs >= 60.0 {
+            // Same rule as the focus-restore path: Glow texture handles survive
+            // a minimize cycle, so flushing them only forces a full re-decode +
+            // re-upload storm while the user scrolls (measured: textures=0/72 on
+            // restore, then 440 uploads in the next 5 s on the OpenGL backend,
+            // with the grid empty in between).
+            let texture_flush =
+                should_flush_gpu_textures_after_focus_restore(minimized_secs, app.is_opengl_backend());
+            if texture_flush {
                 flush_gpu_textures_for_reupload(app, "minimize-restore");
             }
             if minimized_secs > 5.0 {
@@ -251,7 +258,7 @@ pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
             log::info!(
                 "[LIFECYCLE] App restored after {:.1}s of inactivity - burst, texture_flush={}",
                 minimized_secs,
-                minimized_secs >= 60.0
+                texture_flush
             );
 
             restored_from_background = true;

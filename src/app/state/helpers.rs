@@ -21,7 +21,14 @@ const MAX_DYNAMIC_PENDING_THUMBNAILS: usize = 1024;
 const MAX_PENDING_THUMBNAIL_RGBA_BYTES: usize = 64 * 1024 * 1024;
 const LOW_RAM_GPU_MAX_PENDING_THUMBNAIL_RGBA_BYTES: usize = 16 * 1024 * 1024;
 const LOW_RAM_GPU_RGBA_BUDGET_FLOOR_BYTES: usize = MIN_RGBA_BUDGET_BYTES;
-const LOW_RAM_GPU_MAX_RGBA_BUDGET_BYTES: usize = 8 * 1024 * 1024;
+/// Upper bound for the decoded-RGBA cache on the low-RAM GPU profile.
+///
+/// This is CPU RAM (not VRAM) and it is what lets an evicted tile come back
+/// without a worker round trip. At 8 MB a folder with ~48 visible 256-512 px
+/// tiles never produced a single RAM-cache hit during scrolling (every
+/// re-request decoded the thumbnail again from SQLite), so the budget now
+/// covers the visible set plus a scroll-back history.
+const LOW_RAM_GPU_MAX_RGBA_BUDGET_BYTES: usize = 32 * 1024 * 1024;
 /// Keep upload and non-critical cache maintenance throttled until a smooth
 /// scroll has visibly settled, rather than only until the last input event.
 pub(crate) const THUMBNAIL_SCROLL_SETTLING_DURATION: Duration = Duration::from_millis(300);
@@ -125,6 +132,33 @@ fn working_set_trim_was_effective(
 
 fn thumbnail_scroll_is_settling_at(last_scroll_time: Instant, now: Instant) -> bool {
     now.saturating_duration_since(last_scroll_time) < THUMBNAIL_SCROLL_SETTLING_DURATION
+}
+
+/// Inter-frame intervals at or above this are reported as frame hitches.
+const FRAME_HITCH_THRESHOLD_MS: f32 = 25.0;
+/// Minimum spacing between `[PERF] frame hitch` log lines.
+const FRAME_HITCH_LOG_COOLDOWN: Duration = Duration::from_millis(500);
+/// Ignore the first frames of a session: window creation and first paints take
+/// longer than a steady-state frame and are not hitches.
+///
+/// NOTE: this must not use `startup_tick` — that counter stops incrementing
+/// once the startup reveal completes (~3 frames), so gating on it silently
+/// disabled hitch reporting. A dedicated sample counter is used instead.
+const MIN_FRAME_HITCH_SAMPLES: u64 = 60;
+
+/// Decision rule for [`ImageViewerApp::track_frame_interval`], kept pure so it
+/// can be unit tested without constructing the whole app.
+///
+/// Hitches inside the post-restore burst are counted on purpose: returning from
+/// the background is when the heaviest re-upload work happens, so suppressing
+/// that window hid exactly the stalls users notice most.
+fn frame_interval_is_hitch(
+    interval_ms: f32,
+    ui_active: bool,
+    minimized: bool,
+    frames_tracked: u64,
+) -> bool {
+    interval_ms >= FRAME_HITCH_THRESHOLD_MS && ui_active && !minimized && frames_tracked >= MIN_FRAME_HITCH_SAMPLES
 }
 
 fn working_set_trim_execution_lock() -> &'static Mutex<()> {
@@ -371,6 +405,70 @@ impl ImageViewerApp {
     pub fn is_in_restore_burst(&self) -> bool {
         self.restore_burst_until
             .is_some_and(|deadline| Instant::now() < deadline)
+    }
+
+    /// Measures the wall-clock interval between `logic()` passes and reports
+    /// frame hitches that the existing metrics cannot see.
+    ///
+    /// `stable_dt` is smoothed by egui (spikes are filtered) and
+    /// `last_actual_frame_ms` only covers the CPU part of `ui()` — the Glow
+    /// paint/upload/swap phase runs afterwards, outside that measurement. This
+    /// tracker uses the raw interval instead, so a stall caused by synchronous
+    /// texture uploads or driver work is captured. Only intervals while the UI
+    /// is actively working (scrolling / uploads in flight) are counted, so
+    /// idle `request_repaint_after` frames are never false positives.
+    pub(crate) fn track_frame_interval(&mut self) {
+        let now = Instant::now();
+        self.frames_tracked = self.frames_tracked.saturating_add(1);
+        let Some(previous) = self.last_update_enter.replace(now) else {
+            return;
+        };
+        let interval_ms = now.saturating_duration_since(previous).as_secs_f32() * 1000.0;
+
+        // The first frame after regaining focus reports the whole suspension as
+        // its interval — that is a resume, not a hitch. Everything after it,
+        // including the rest of the post-restore burst, is measured normally.
+        if self.last_restore_time.elapsed() < Duration::from_millis(300) {
+            return;
+        }
+
+        let scrolling = self.thumbnail_scroll_is_settling();
+        let pending_uploads = self.cache_manager.pending_upload_set.len();
+        let ui_active = scrolling || !self.pending_thumbnails.is_empty() || pending_uploads > 0;
+
+        if !frame_interval_is_hitch(
+            interval_ms,
+            ui_active,
+            self.layout.saved_is_minimized,
+            self.frames_tracked,
+        ) {
+            return;
+        }
+
+        self.frame_hitches = self.frame_hitches.saturating_add(1);
+        self.frame_hitch_ms_max = self.frame_hitch_ms_max.max(interval_ms);
+
+        let should_log = self
+            .last_frame_hitch_log
+            .is_none_or(|last| last.elapsed() >= FRAME_HITCH_LOG_COOLDOWN);
+        if !should_log {
+            return;
+        }
+        self.last_frame_hitch_log = Some(now);
+
+        log::warn!(
+            "[PERF] frame hitch interval_ms={:.0} prev_update_ms={:.1} scrolling={} burst={} folder_previews_loading={} pending_thumbs={} pending_uploads={} textures={}/{} backend={}",
+            interval_ms,
+            self.last_actual_frame_ms,
+            scrolling,
+            self.is_in_restore_burst(),
+            self.cache_manager.folder_preview_loading.len(),
+            self.pending_thumbnails.len(),
+            pending_uploads,
+            self.cache_manager.texture_cache.len(),
+            self.cache_manager.texture_cache.cap().get(),
+            self.active_gpu_backend.as_str(),
+        );
     }
 
     /// Returns `true` when the active GPU backend is OpenGL-based.
@@ -736,6 +834,98 @@ impl ImageViewerApp {
             thumbnail_trace.top_paths,
             thumbnail_trace.sample_request_path,
             thumbnail_trace.sample_upload_path,
+        );
+
+        // I/O attribution: which background path is actually reading the disk
+        // (consistency probes, cover scans, source extraction, drive info,
+        // folder-size walks, tag-view validation sweeps). Counters are reset by
+        // the snapshot, so each report covers the interval since the previous one.
+        let io_trace = crate::infrastructure::io_trace::take_snapshot();
+        let frame_hitches = self.frame_hitches;
+        let frame_hitch_ms_max = self.frame_hitch_ms_max;
+        self.frame_hitches = 0;
+        self.frame_hitch_ms_max = 0.0;
+        let ui_gap_hitches = self.ui_gap_hitches;
+        let ui_gap_ms_max = self.ui_gap_ms_max;
+        self.ui_gap_hitches = 0;
+        self.ui_gap_ms_max = 0.0;
+        log::info!(
+            "[IO-TRACE:{label}] probes={} probe_cover_scans={} probe_ms_total={} probe_ms_max={} cover_scan_ms_max={} source_extracts={} ts_sniff_skipped={} drive_info_ms_max={} folder_size_walks={} folder_size_walk_ms_max={} tag_validation_paths={} tag_validation_ms_max={} hitches={} hitch_ms_max={:.0} ui_gaps={} ui_gap_ms_max={:.0}",
+            io_trace.consistency_probes,
+            io_trace.probe_cover_scans,
+            io_trace.probe_ms_total,
+            io_trace.probe_ms_max,
+            io_trace.cover_scan_ms_max,
+            io_trace.source_extracts,
+            io_trace.ts_sniff_skipped_by_cache,
+            io_trace.drive_info_ms_max,
+            io_trace.folder_size_walks,
+            io_trace.folder_size_walk_ms_max,
+            io_trace.tag_validation_paths,
+            io_trace.tag_validation_ms_max,
+            frame_hitches,
+            frame_hitch_ms_max,
+            ui_gap_hitches,
+            ui_gap_ms_max,
+        );
+    }
+
+    /// Measures the wall-clock gap between painted frames (`ui()` passes).
+    ///
+    /// The `logic()` interval tracker cannot see a window that stops painting
+    /// while the event loop keeps ticking — egui skips `ui()` entirely when the
+    /// viewport is considered hidden/occluded. This gap is what the user
+    /// perceives as a freeze, so it is tracked and reported separately.
+    pub(crate) fn track_paint_interval(&mut self) {
+        let now = Instant::now();
+        let viewport_active = self.ui_ctx.input(|input| {
+            let viewport = input.viewport();
+            viewport.visible().unwrap_or(true) && viewport.focused.unwrap_or(true)
+        });
+        let previous_active = std::mem::replace(&mut self.last_ui_active, viewport_active);
+
+        let Some(previous) = self.last_ui_enter.replace(now) else {
+            return;
+        };
+
+        // The first paint after a restore reports the whole suspension.
+        if self.last_restore_time.elapsed() < Duration::from_millis(300) {
+            return;
+        }
+
+        let gap_ms = now.saturating_duration_since(previous).as_secs_f32() * 1000.0;
+        // Only count a gap when the window was visible and focused on both ends:
+        // egui skips painting while the viewport is hidden, so an occluded window
+        // legitimately stops painting without the user seeing a stall.
+        if !frame_interval_is_hitch(
+            gap_ms,
+            viewport_active && previous_active,
+            self.layout.saved_is_minimized,
+            self.frames_tracked,
+        ) {
+            return;
+        }
+
+        self.ui_gap_hitches = self.ui_gap_hitches.saturating_add(1);
+        self.ui_gap_ms_max = self.ui_gap_ms_max.max(gap_ms);
+
+        let should_log = self
+            .last_ui_gap_log
+            .is_none_or(|last| last.elapsed() >= FRAME_HITCH_LOG_COOLDOWN);
+        if !should_log {
+            return;
+        }
+        self.last_ui_gap_log = Some(now);
+
+        log::warn!(
+            "[PERF] paint gap gap_ms={:.0} scrolling={} pending_thumbs={} pending_uploads={} textures={}/{} backend={}",
+            gap_ms,
+            self.thumbnail_scroll_is_settling(),
+            self.pending_thumbnails.len(),
+            self.cache_manager.pending_upload_set.len(),
+            self.cache_manager.texture_cache.len(),
+            self.cache_manager.texture_cache.cap().get(),
+            self.active_gpu_backend.as_str(),
         );
     }
 
@@ -2278,12 +2468,12 @@ mod inactive_panel_paths_tests {
     use super::{
         backend_uses_conservative_thumbnail_upload_policy, backend_uses_low_ram_gpu_policy,
         background_trim_should_rearm, classify_memory_pressure, detail_panel_thumbnail_active,
-        insert_item_reference_paths, pending_thumbnail_eviction_index,
+        frame_interval_is_hitch, insert_item_reference_paths, pending_thumbnail_eviction_index,
         thumbnail_scroll_is_settling_at, trim_pending_thumbnail_queue, working_set_trim_cancelled,
         working_set_trim_was_effective, FileEntry, FxHashSet, MemoryPressure,
         ProcessMemorySnapshot, BACKGROUND_WS_TRIM_REARM_GROWTH_BYTES,
-        LOW_RAM_GPU_IDLE_WS_TRIM_MIN_BYTES, THUMBNAIL_SCROLL_SETTLING_DURATION,
-        WORKING_SET_TRIM_EFFECTIVE_REDUCTION_BYTES,
+        LOW_RAM_GPU_IDLE_WS_TRIM_MIN_BYTES, MIN_FRAME_HITCH_SAMPLES,
+        THUMBNAIL_SCROLL_SETTLING_DURATION, WORKING_SET_TRIM_EFFECTIVE_REDUCTION_BYTES,
     };
     use crate::domain::file_entry::SyncStatus;
     use crate::domain::thumbnail::ThumbnailData;
@@ -2306,6 +2496,28 @@ mod inactive_panel_paths_tests {
             is_hidden: false,
             recycle_bin: None,
         }
+    }
+
+    /// The frame-hitch rule must ignore idle/minimized/startup intervals and
+    /// only report intervals at or above the threshold while the UI is busy.
+    #[test]
+    fn frame_hitch_rule_requires_threshold_activity_and_settled_startup() {
+        assert!(!frame_interval_is_hitch(16.7, true, false, 100));
+        assert!(!frame_interval_is_hitch(24.9, true, false, 100));
+        assert!(frame_interval_is_hitch(25.0, true, false, 100));
+        assert!(frame_interval_is_hitch(60.0, true, false, 100));
+
+        // Idle frames (no scroll and nothing in flight) are never counted.
+        assert!(!frame_interval_is_hitch(60.0, false, false, 100));
+        // Suppressed while minimized and on the first frames of a session.
+        assert!(!frame_interval_is_hitch(60.0, true, true, 100));
+        assert!(!frame_interval_is_hitch(60.0, true, false, 3));
+        assert!(frame_interval_is_hitch(
+            60.0,
+            true,
+            false,
+            MIN_FRAME_HITCH_SAMPLES
+        ));
     }
 
     /// The lazily-built set must answer membership identically to the old

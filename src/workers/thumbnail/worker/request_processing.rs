@@ -77,34 +77,6 @@ pub(super) fn process_thumbnail_request(
         mark_as_transient_failure, DeferredThumbnailEntry,
     };
 
-    // Block .ts files that are NOT real MPEG-TS video (e.g. TypeScript sources).
-    // Real MPEG-TS starts with sync byte 0x47; anything else is rejected permanently.
-    if path
-        .extension()
-        .and_then(|e| e.to_str())
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("ts"))
-        && !is_mpeg_ts_file(path)
-    {
-        mark_as_failed(path.clone());
-        send_thumbnail_result(
-            tx,
-            req_priority,
-            ThumbnailData {
-                path: path.clone(),
-                image_data: std::sync::Arc::new(Vec::new()),
-                width: 0,
-                height: 0,
-                generation: req_gen,
-                request_epoch: req_epoch,
-                priority: req_priority,
-                not_found: true,
-                premultiplied: false,
-            },
-        );
-        throttle_repaint_with_priority(ctx, last_repaint, req_priority);
-        log_slow_worker_request(path, req_priority, request_start, "not_video_ts");
-        return;
-    }
     // EARLY EXIT 1: Skip files that already failed in this session.
     // Prevents repeated slow retries on broken files (e.g., 0x8004B205).
     //
@@ -181,6 +153,13 @@ pub(super) fn process_thumbnail_request(
 
     // If DB cache hit, send result and return - no source drive I/O needed.
     if let Some((data, w, h)) = final_result {
+        if path
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("ts"))
+        {
+            crate::infrastructure::io_trace::record_ts_sniff_skipped_by_cache();
+        }
         clear_failure_cache(path);
         send_thumbnail_result(
             tx,
@@ -199,6 +178,37 @@ pub(super) fn process_thumbnail_request(
         );
         throttle_repaint_with_priority(ctx, last_repaint, req_priority);
         log_slow_worker_request(path, req_priority, request_start, "cache_hit");
+        return;
+    }
+
+    // Block .ts files that are NOT real MPEG-TS video (e.g. TypeScript sources).
+    // Real MPEG-TS starts with sync byte 0x47; anything else is rejected permanently.
+    // This runs only on the cache-miss path: the sniff opens the source file, so a
+    // cached thumbnail must resolve first (an HDD seek per scroll for every .ts).
+    if path
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("ts"))
+        && !is_mpeg_ts_file(path)
+    {
+        mark_as_failed(path.clone());
+        send_thumbnail_result(
+            tx,
+            req_priority,
+            ThumbnailData {
+                path: path.clone(),
+                image_data: std::sync::Arc::new(Vec::new()),
+                width: 0,
+                height: 0,
+                generation: req_gen,
+                request_epoch: req_epoch,
+                priority: req_priority,
+                not_found: true,
+                premultiplied: false,
+            },
+        );
+        throttle_repaint_with_priority(ctx, last_repaint, req_priority);
+        log_slow_worker_request(path, req_priority, request_start, "not_video_ts");
         return;
     }
 
@@ -361,19 +371,37 @@ pub(super) fn process_thumbnail_request(
         }
 
         if final_result.is_none() {
-            let bucket_size = get_bucket_size(req_size);
+            let upload_bucket = get_bucket_size(req_size);
+            // Extract at the largest persisted bucket regardless of the upload
+            // bucket. Scroll-time LOD requests (256) used to persist a 256 px row
+            // with a small `requested_size`, which the following idle 512 px
+            // request rejected — forcing a second full read of the source file on
+            // the HDD/virtual drive. One high-resolution extraction now satisfies
+            // every later request straight from the DB.
+            let extract_bucket = upload_bucket.max(crate::ui::theme::MIN_GRID_THUMBNAIL_BUCKET);
             let extract_start = std::time::Instant::now();
             match generate_thumbnail_hybrid_detailed_with_target(
                 path,
                 req_priority,
                 pending_deletions,
-                Some(bucket_size),
+                Some(extract_bucket),
             ) {
                 ThumbnailExtractionOutcome::Success((raw_data, w, h)) => {
                     let extract_ms = extract_start.elapsed().as_millis();
+                    // Persist the high-resolution extraction; only the GPU-bound
+                    // copy is downscaled to the requested upload bucket.
+                    cache_write_request = Some(ThumbnailCacheWriteRequest {
+                        path: path.clone(),
+                        modified,
+                        requested_size: extract_bucket,
+                        data: raw_data.clone(),
+                        width: w,
+                        height: h,
+                    });
+
                     // Resize to bucket (frees RAM and optimizes GPU upload).
                     let resize_start = std::time::Instant::now();
-                    let resized = resize_to_bucket(raw_data, w, h, bucket_size);
+                    let resized = resize_to_bucket(raw_data, w, h, upload_bucket);
                     let resize_ms = resize_start.elapsed().as_millis();
 
                     diag_info(
@@ -382,22 +410,16 @@ pub(super) fn process_thumbnail_request(
                         &[
                             field_u64("result_w", resized.1 as u64),
                             field_u64("result_h", resized.2 as u64),
-                            field_u64("req_bucket", bucket_size as u64),
+                            field_u64("req_bucket", upload_bucket as u64),
+                            field_u64("extract_bucket", extract_bucket as u64),
                         ],
                     );
 
-                    generated_thumbnail_perf = Some((extract_ms, resize_ms, w, h, bucket_size));
-                    cache_write_request = Some(ThumbnailCacheWriteRequest {
-                        path: path.clone(),
-                        modified,
-                        requested_size: req_size,
-                        data: resized.0.clone(),
-                        width: resized.1,
-                        height: resized.2,
-                    });
+                    generated_thumbnail_perf = Some((extract_ms, resize_ms, w, h, upload_bucket));
                     final_result = Some(resized);
                     request_outcome = "extracted";
                     clear_transient_failure(path);
+                    crate::infrastructure::io_trace::record_source_extract();
                 }
                 ThumbnailExtractionOutcome::UnsafeToRead(reason) => {
                     request_outcome = file_read_safety_label(reason);
