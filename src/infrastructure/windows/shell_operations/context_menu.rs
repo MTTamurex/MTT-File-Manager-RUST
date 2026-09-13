@@ -33,7 +33,7 @@ pub fn open_with_shell(path: &Path, hwnd: Option<HWND>) -> Result<()> {
             lpClass: PCWSTR::null(),
             hkeyClass: HKEY::default(),
             dwHotKey: 0,
-            Anonymous: std::mem::zeroed(),
+            Anonymous: Default::default(),
             hProcess: HANDLE(std::ptr::null_mut()),
         };
 
@@ -71,7 +71,7 @@ pub fn open_with_dialog(path: &Path, hwnd: HWND) -> Result<()> {
             lpClass: PCWSTR::null(),
             hkeyClass: HKEY::default(),
             dwHotKey: 0,
-            Anonymous: std::mem::zeroed(),
+            Anonymous: Default::default(),
             hProcess: HANDLE(std::ptr::null_mut()),
         };
 

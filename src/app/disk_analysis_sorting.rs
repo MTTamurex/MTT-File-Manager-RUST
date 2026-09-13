@@ -13,6 +13,7 @@ pub const MAX_LARGEST_SORT_CRITERIA: usize = 2;
 pub enum LargestColumn {
     Name,
     Path,
+    /// File kind; ascending puts directories first, descending puts files first.
     Type,
     Logical,
     Allocated,

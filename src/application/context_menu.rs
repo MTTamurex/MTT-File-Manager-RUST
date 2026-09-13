@@ -12,12 +12,14 @@ pub const EXTRACT_ALL_PENDING_COMMAND: &str = "extract_all_pending";
 /// Identifies Windows' generic application-association command, rather than a
 /// third-party command whose label starts with "Open with".
 pub fn is_generic_open_with_command(command: Option<&str>, text: &str) -> bool {
-    if command.is_some_and(|command| command.eq_ignore_ascii_case("openas")) {
-        return true;
+    if let Some(command) = command {
+        return command.eq_ignore_ascii_case("openas") || command == "open_with_shell_fallback";
     }
 
     let text = text.trim().trim_end_matches(['.', '\u{2026}']).trim();
-    text.eq_ignore_ascii_case("open with") || text.eq_ignore_ascii_case("abrir com")
+    text.eq_ignore_ascii_case("open with")
+        || text.eq_ignore_ascii_case("abrir com")
+        || text == "打开方式"
 }
 
 /// A single item in the context menu (matches Files ContextMenuFlyoutItemViewModel)
@@ -409,10 +411,30 @@ mod tests {
             Some("openas"),
             "Ignored label"
         ));
+        assert!(is_generic_open_with_command(
+            Some("OPENAS"),
+            "Ignored label"
+        ));
+        assert!(is_generic_open_with_command(
+            Some("open_with_shell_fallback"),
+            "Ignored label"
+        ));
         assert!(is_generic_open_with_command(None, "Open with..."));
         assert!(is_generic_open_with_command(None, "Abrir com\u{2026}"));
+        assert!(is_generic_open_with_command(None, "  打开方式...  "));
+        assert!(is_generic_open_with_command(None, "打开方式\u{2026}"));
+        assert!(!is_generic_open_with_command(
+            Some("third_party"),
+            "Open with..."
+        ));
+        assert!(!is_generic_open_with_command(
+            Some("third_party"),
+            "打开方式..."
+        ));
+        assert!(!is_generic_open_with_command(Some(""), "Open with..."));
         assert!(!is_generic_open_with_command(None, "Open with Zed"));
         assert!(!is_generic_open_with_command(None, "Open with Code"));
+        assert!(!is_generic_open_with_command(None, "打开方式 Zed"));
     }
 
     #[test]

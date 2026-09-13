@@ -59,6 +59,8 @@ const HEADER_SPACING: f32 = 8.0;
 const ITEM_HEIGHT: f32 = 30.0;
 const ITEM_ICON_SIZE: f32 = 16.0;
 const ICON_TEXT_GAP: f32 = 10.0;
+const ITEM_TEXT_FONT_SIZE: f32 = 12.0;
+const SHORTCUT_TEXT_FONT_SIZE: f32 = 10.0;
 const MENU_ROUNDING: f32 = 8.0;
 const MENU_MIN_WIDTH: f32 = 180.0;
 const MENU_MAX_WIDTH: f32 = 400.0;
@@ -560,7 +562,7 @@ fn render_single_item(
         egui::pos2(text_x, rect.center().y),
         egui::Align2::LEFT_CENTER,
         &display_text,
-        egui::FontId::proportional(12.0),
+        egui::FontId::proportional(ITEM_TEXT_FONT_SIZE),
         text_color,
     );
 
@@ -579,7 +581,7 @@ fn render_single_item(
             egui::pos2(right_alignment_pos, rect.center().y),
             egui::Align2::RIGHT_CENTER,
             shortcut,
-            egui::FontId::proportional(10.0),
+            egui::FontId::proportional(SHORTCUT_TEXT_FONT_SIZE),
             SHORTCUT_COLOR,
         );
     }

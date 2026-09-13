@@ -510,6 +510,17 @@ impl CacheManager {
         }
     }
 
+    /// Refreshes only visible RGBA entries after a batch insertion.
+    ///
+    /// Thumbnail uploads protect the texture LRU independently, but RGBA data
+    /// still uses a regular byte-budgeted LRU. Keeping this operation focused
+    /// avoids re-promoting unrelated caches for every upload.
+    pub fn promote_visible_rgba(&mut self, visible_paths: &FxHashSet<PathBuf>) {
+        for path in visible_paths {
+            let _ = self.rgba_data_cache.get(path);
+        }
+    }
+
     /// Dynamically adjusts thumbnail cache capacity by rebuilding the LRU with a new cap.
     /// Keeps the hottest entries and drops oldest items if the new cap is smaller.
     pub fn retune_texture_cache_capacity(&mut self, requested_items: usize) -> usize {
@@ -1275,6 +1286,89 @@ mod tests {
             cache.estimate_ram_cache_usage(),
             DEFAULT_RGBA_CACHE_ITEMS * 4
         );
+    }
+
+    #[test]
+    fn promote_visible_rgba_preserves_visible_entries_across_batched_uploads() {
+        let mut cache = CacheManager::new();
+        let visible_paths = [
+            PathBuf::from("visible_a.png"),
+            PathBuf::from("visible_b.png"),
+        ]
+        .into_iter()
+        .collect::<FxHashSet<_>>();
+
+        for path in &visible_paths {
+            cache.put_rgba_data(path.clone(), Arc::new(vec![1; 4]), 1, 1);
+        }
+        for idx in 0..DEFAULT_RGBA_CACHE_ITEMS.saturating_sub(visible_paths.len()) {
+            cache.put_rgba_data(
+                PathBuf::from(format!("initial_{idx}.png")),
+                Arc::new(vec![1; 4]),
+                1,
+                1,
+            );
+        }
+
+        cache.promote_visible_rgba(&visible_paths);
+
+        for idx in 0..(DEFAULT_RGBA_CACHE_ITEMS * 2) {
+            cache.put_rgba_data(
+                PathBuf::from(format!("batch_{idx}.png")),
+                Arc::new(vec![1; 4]),
+                1,
+                1,
+            );
+            cache.promote_visible_rgba(&visible_paths);
+        }
+
+        assert_eq!(cache.rgba_data_cache.len(), DEFAULT_RGBA_CACHE_ITEMS);
+        assert!(visible_paths.iter().all(|path| cache.has_rgba_data(path)));
+        assert_eq!(
+            cache.estimate_ram_cache_usage(),
+            DEFAULT_RGBA_CACHE_ITEMS * 4
+        );
+    }
+
+    #[test]
+    fn promote_visible_rgba_preserves_visible_entries_under_byte_budget() {
+        let mut cache = CacheManager::new();
+        let budget = MIN_RGBA_BUDGET_BYTES;
+        let bytes_per_entry = budget / 8;
+        let visible_paths = [
+            PathBuf::from("visible_a.png"),
+            PathBuf::from("visible_b.png"),
+        ]
+        .into_iter()
+        .collect::<FxHashSet<_>>();
+
+        cache.retune_rgba_budget(budget);
+        for path in &visible_paths {
+            cache.put_rgba_data(path.clone(), Arc::new(vec![1; bytes_per_entry]), 1, 1);
+        }
+        for idx in 0..6 {
+            cache.put_rgba_data(
+                PathBuf::from(format!("initial_{idx}.png")),
+                Arc::new(vec![1; bytes_per_entry]),
+                1,
+                1,
+            );
+        }
+
+        cache.promote_visible_rgba(&visible_paths);
+
+        for idx in 0..8 {
+            cache.put_rgba_data(
+                PathBuf::from(format!("budget_{idx}.png")),
+                Arc::new(vec![1; bytes_per_entry]),
+                1,
+                1,
+            );
+            cache.promote_visible_rgba(&visible_paths);
+        }
+
+        assert!(visible_paths.iter().all(|path| cache.has_rgba_data(path)));
+        assert!(cache.estimate_ram_cache_usage() <= budget);
     }
 
     #[test]

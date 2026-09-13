@@ -425,6 +425,10 @@ mod tests {
             Path::new(r"\\?\UNC\server\share"),
             Path::new(r"\\server\share")
         ));
+        assert!(paths_equal(
+            Path::new(r"\\.\C:\Source"),
+            Path::new(r"c:\source")
+        ));
     }
 
     #[test]

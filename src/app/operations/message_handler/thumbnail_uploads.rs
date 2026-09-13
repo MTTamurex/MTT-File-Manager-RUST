@@ -1047,6 +1047,9 @@ impl ImageViewerApp {
                         width,
                         height,
                     );
+                    if let Some(visible_paths) = eviction_visible.as_ref() {
+                        self.cache_manager.promote_visible_rgba(visible_paths);
+                    }
                 }
                 if let Some(visible_paths) = eviction_visible.as_ref() {
                     self.cache_manager.put_thumbnail_preserving_visible(
