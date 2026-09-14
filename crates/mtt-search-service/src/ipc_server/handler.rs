@@ -1271,16 +1271,75 @@ mod tests {
             redact_status_metrics: false,
         };
 
-        progress.set_scanning('D', 7, "filesystem_scan");
+        progress.update('D', "scanning", 3, "filesystem_scan", Some(7), None);
 
         let status = build_status_response(&indices, &progress, &policy);
-        assert_eq!(status.total_files_indexed, 9);
+        assert_eq!(status.total_files_indexed, 5);
         assert_eq!(status.volumes.len(), 2);
         assert!(status
             .volumes
             .iter()
             .any(|volume| volume.drive_letter == 'D'
                 && volume.state == "scanning"
-                && volume.files_indexed == 7));
+                && volume.files_indexed == 3
+                && volume.phase_progress == Some(7)));
+    }
+
+    #[test]
+    fn status_response_does_not_count_phase_progress_as_indexed_items() {
+        let indices = make_handles(vec![make_volume('C', 4, IndexState::Ready)]);
+        let progress = IndexingProgress::new();
+        let policy = IpcSecurityPolicy {
+            redact_status_metrics: false,
+        };
+
+        progress.update(
+            'D',
+            "scanning",
+            12,
+            "scanning_mft",
+            Some(9_000),
+            Some(20_000),
+        );
+
+        let status = build_status_response(&indices, &progress, &policy);
+
+        assert_eq!(status.total_files_indexed, 16);
+        let volume = status
+            .volumes
+            .iter()
+            .find(|volume| volume.drive_letter == 'D')
+            .expect("in-flight volume should be present");
+        assert_eq!(volume.files_indexed, 12);
+        assert_eq!(volume.phase_progress, Some(9_000));
+        assert_eq!(volume.phase_total, Some(20_000));
+    }
+
+    #[test]
+    fn status_response_keeps_indexed_count_when_phase_changes() {
+        let indices = make_handles(Vec::new());
+        let progress = IndexingProgress::new();
+        let policy = IpcSecurityPolicy {
+            redact_status_metrics: false,
+        };
+
+        progress.update(
+            'D',
+            "scanning",
+            37,
+            "scanning_mft",
+            Some(10_000),
+            Some(20_000),
+        );
+        let scanning_status = build_status_response(&indices, &progress, &policy);
+
+        progress.update('D', "scanning", 37, "persisting_sqlite", Some(0), Some(37));
+        let persisting_status = build_status_response(&indices, &progress, &policy);
+
+        assert_eq!(scanning_status.total_files_indexed, 37);
+        assert_eq!(persisting_status.total_files_indexed, 37);
+        assert_eq!(persisting_status.volumes[0].files_indexed, 37);
+        assert_eq!(persisting_status.volumes[0].phase_progress, Some(0));
+        assert_eq!(persisting_status.volumes[0].phase_total, Some(37));
     }
 }

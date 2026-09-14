@@ -182,6 +182,8 @@ pub struct VolumeStatus {
     pub drive_letter: char,
     /// "scanning", "ready", "error"
     pub state: String,
+    /// Number of records currently present in the volume index. This is kept
+    /// separate from the progress of the current indexing phase.
     pub files_indexed: u64,
     pub phase: String,
     pub phase_progress: Option<u64>,

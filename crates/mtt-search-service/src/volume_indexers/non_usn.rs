@@ -140,7 +140,7 @@ pub(crate) fn index_non_ntfs_volume(
                     indexing_progress.update(
                         drive_letter,
                         "scanning",
-                        total,
+                        persist_total,
                         "persisting",
                         Some(inserted),
                         Some(total),

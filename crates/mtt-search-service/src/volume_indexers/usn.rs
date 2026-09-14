@@ -495,16 +495,20 @@ pub(crate) fn index_volume(
         eprintln!("[USN] {}:\\ Starting bulk MFT read...", drive_letter);
         let start = std::time::Instant::now();
 
-        match crate::mft_reader::read_mft_bulk(volume_handle, drive_letter, |done, total| {
-            indexing_progress.update(
-                drive_letter,
-                "scanning",
-                done,
-                "scanning_mft",
-                Some(done),
-                Some(total),
-            )
-        }) {
+        match crate::mft_reader::read_mft_bulk(
+            volume_handle,
+            drive_letter,
+            |done, total, indexed| {
+                indexing_progress.update(
+                    drive_letter,
+                    "scanning",
+                    indexed,
+                    "scanning_mft",
+                    Some(done),
+                    Some(total),
+                )
+            },
+        ) {
             Ok(mut new_index) => {
                 let elapsed = start.elapsed();
                 new_index.journal_id = journal_info.journal_id;
@@ -641,7 +645,7 @@ pub(crate) fn index_volume(
                 indexing_progress.update(
                     drive_letter,
                     "scanning",
-                    inserted,
+                    index.records.len() as u64,
                     "persisting_sqlite",
                     Some(inserted),
                     Some(total),
@@ -711,10 +715,11 @@ pub(crate) fn index_volume(
             // avoids building a second full VolumeIndex just to copy sizes.
             let bulk_result =
                 crate::mft_reader::read_mft_sizes_bulk(bg_volume, drive_letter, |done, total| {
+                    let files_indexed = bg_handle.read().records.len() as u64;
                     indexing_progress.update(
                         drive_letter,
                         "scanning",
-                        done,
+                        files_indexed,
                         "loading_sizes",
                         Some(done),
                         Some(total),

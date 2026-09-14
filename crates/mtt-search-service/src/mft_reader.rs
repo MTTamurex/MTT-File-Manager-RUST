@@ -1292,7 +1292,7 @@ pub fn read_mft_bulk<F>(
     mut on_progress: F,
 ) -> Result<VolumeIndex, String>
 where
-    F: FnMut(u64, u64),
+    F: FnMut(u64, u64, u64),
 {
     let geo = query_mft_geometry(volume)?;
     let record_size = geo.bytes_per_file_record as usize;
@@ -1700,7 +1700,7 @@ fn read_mft_data<F>(
     on_progress: &mut F,
 ) -> Result<VolumeIndex, String>
 where
-    F: FnMut(u64, u64),
+    F: FnMut(u64, u64, u64),
 {
     let record_size = geo.bytes_per_file_record as usize;
     let cluster_size = geo.bytes_per_cluster as usize;
@@ -1727,7 +1727,7 @@ where
     let start = std::time::Instant::now();
     let mut last_progress = std::time::Instant::now();
 
-    on_progress(0, total_records);
+    on_progress(0, total_records, 0);
 
     for &(lcn, cluster_count) in data_runs {
         let run_byte_offset = lcn as u64 * cluster_size as u64;
@@ -1806,7 +1806,7 @@ where
             bytes_remaining -= bytes_read as u64;
 
             if last_progress.elapsed() >= std::time::Duration::from_millis(200) {
-                on_progress(frn, total_records);
+                on_progress(frn, total_records, index.records.len() as u64);
                 last_progress = std::time::Instant::now();
             }
         }
@@ -1906,7 +1906,7 @@ where
         }
     }
 
-    on_progress(frn, total_records);
+    on_progress(frn, total_records, index.records.len() as u64);
 
     index.shrink_to_fit();
 
