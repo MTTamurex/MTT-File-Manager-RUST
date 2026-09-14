@@ -13,6 +13,10 @@ impl IndexingProgress {
         Self::default()
     }
 
+    pub fn set_pending(&self, drive_letter: char) {
+        self.update(drive_letter, "scanning", 0, "starting", Some(0), None);
+    }
+
     pub fn set_scanning(&self, drive_letter: char, files_indexed: u64, phase: &str) {
         self.update(drive_letter, "scanning", files_indexed, phase, None, None);
     }

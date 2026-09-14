@@ -50,12 +50,20 @@ impl InitialIndexingNotice {
             return InitialIndexingNoticeEvent::None;
         }
 
+        let progress_changed =
+            self.last_total_indexed.replace(total_indexed) != Some(total_indexed);
+
         if initial_indexing_complete(available, volumes) {
+            // Publish the terminal count before replacing the progress toast
+            // with the completion message on the next status poll.
+            if progress_changed {
+                return InitialIndexingNoticeEvent::ProgressChanged;
+            }
             self.completed = true;
             return InitialIndexingNoticeEvent::Completed;
         }
 
-        if self.last_total_indexed.replace(total_indexed) != Some(total_indexed) {
+        if progress_changed {
             InitialIndexingNoticeEvent::ProgressChanged
         } else {
             InitialIndexingNoticeEvent::None
@@ -108,5 +116,24 @@ mod tests {
             InitialIndexingNoticeEvent::ProgressChanged
         );
         assert!(notice.is_tracking());
+    }
+
+    #[test]
+    fn publishes_final_count_before_completion_when_ready_count_changes() {
+        let mut notice = InitialIndexingNotice::new(Some("generation".to_string()));
+
+        assert_eq!(
+            notice.observe_status(true, 222_000, &[volume("scanning", false)]),
+            InitialIndexingNoticeEvent::ProgressChanged
+        );
+        assert_eq!(
+            notice.observe_status(true, 2_000_000, &[volume("ready", false)]),
+            InitialIndexingNoticeEvent::ProgressChanged
+        );
+        assert!(notice.is_tracking());
+        assert_eq!(
+            notice.observe_status(true, 2_000_000, &[volume("ready", false)]),
+            InitialIndexingNoticeEvent::Completed
+        );
     }
 }

@@ -278,6 +278,27 @@ fn spawn_indexers_for_discovered_volumes(
     db: &Arc<index_db::IndexDb>,
     shutdown: &Arc<AtomicBool>,
 ) {
+    let volumes_to_spawn = claim_discovered_volumes(discovered, tracked_volumes, indexing_progress);
+
+    for volume in volumes_to_spawn {
+        spawn_volume_indexer(
+            volume,
+            tracked_volumes.clone(),
+            indices.clone(),
+            indexing_progress.clone(),
+            db.clone(),
+            shutdown.clone(),
+        );
+    }
+}
+
+fn claim_discovered_volumes(
+    discovered: Vec<usn_journal::DiscoveredVolume>,
+    tracked_volumes: &Arc<Mutex<HashSet<char>>>,
+    indexing_progress: &indexing_progress::IndexingProgress,
+) -> Vec<usn_journal::DiscoveredVolume> {
+    let mut volumes_to_spawn = Vec::new();
+
     for volume in discovered {
         let drive_letter = volume.drive_letter;
         let should_spawn = {
@@ -289,15 +310,16 @@ fn spawn_indexers_for_discovered_volumes(
             continue;
         }
 
-        spawn_volume_indexer(
-            volume,
-            tracked_volumes.clone(),
-            indices.clone(),
-            indexing_progress.clone(),
-            db.clone(),
-            shutdown.clone(),
-        );
+        volumes_to_spawn.push(volume);
     }
+
+    // Publish every discovered volume before any indexer can finish and make
+    // the initial-indexing notice believe that startup is complete.
+    for volume in &volumes_to_spawn {
+        indexing_progress.set_pending(volume.drive_letter);
+    }
+
+    volumes_to_spawn
 }
 
 fn spawn_volume_indexer(
@@ -344,4 +366,43 @@ fn spawn_volume_indexer(
         let mut tracked = tracked_volumes.lock();
         tracked.remove(&drive_letter);
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{claim_discovered_volumes, indexing_progress, usn_journal, Mutex};
+    use std::collections::HashSet;
+    use std::sync::Arc;
+
+    #[test]
+    fn discovered_volumes_are_published_before_indexers_start() {
+        let tracked_volumes = Arc::new(Mutex::new(HashSet::new()));
+        let progress = indexing_progress::IndexingProgress::new();
+        let discovered = vec![
+            usn_journal::DiscoveredVolume {
+                drive_letter: 'C',
+                label: String::new(),
+                file_system: "NTFS".to_string(),
+                usn_supported: true,
+            },
+            usn_journal::DiscoveredVolume {
+                drive_letter: 'D',
+                label: String::new(),
+                file_system: "NTFS".to_string(),
+                usn_supported: true,
+            },
+        ];
+
+        let to_spawn = claim_discovered_volumes(discovered, &tracked_volumes, &progress);
+
+        assert_eq!(to_spawn.len(), 2);
+        let status = progress.snapshot();
+        assert_eq!(status.len(), 2);
+        assert!(status.iter().all(|volume| {
+            volume.state == "scanning"
+                && volume.phase == "starting"
+                && volume.files_indexed == 0
+                && volume.phase_progress == Some(0)
+        }));
+    }
 }
