@@ -236,6 +236,25 @@ pub fn render_context_menu(
         }
     }
 
+    // Close on mouse Back/Forward (XButton1/XButton2): the press only dismisses the
+    // menu; history navigation is handled separately in ui/app/input.rs.
+    if !should_close
+        && ctx.input(|i| {
+            i.events.iter().any(|event| {
+                matches!(
+                    event,
+                    egui::Event::PointerButton {
+                        button: egui::PointerButton::Extra1 | egui::PointerButton::Extra2,
+                        pressed: true,
+                        ..
+                    }
+                )
+            })
+        })
+    {
+        should_close = true;
+    }
+
     // Close on Escape
     if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
         should_close = true;
@@ -811,8 +830,39 @@ mod hover_tests;
 
 #[cfg(test)]
 mod tests {
-    use super::{reset_submenu_hierarchy_for_new_session, SUBMENU_HIERARCHY};
+    use super::{
+        render_context_menu, reset_submenu_hierarchy_for_new_session, SvgIconManager,
+        SUBMENU_HIERARCHY,
+    };
     use crate::application::context_menu::ContextMenuState;
+    use eframe::egui;
+
+    #[test]
+    fn mouse_back_press_dismisses_open_menu() {
+        let ctx = egui::Context::default();
+        let mut icons = SvgIconManager::new();
+        let mut state = ContextMenuState::default();
+        state.open(egui::Pos2::ZERO, None, Vec::new(), true);
+
+        let input = egui::RawInput {
+            events: vec![egui::Event::PointerButton {
+                pos: egui::Pos2::ZERO,
+                button: egui::PointerButton::Extra1,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            }],
+            ..Default::default()
+        };
+
+        let _ = ctx.run_ui(input, |ui| {
+            render_context_menu(ui.ctx(), &mut state, &mut icons);
+        });
+
+        assert!(
+            !state.is_open,
+            "mouse back (XButton1) should dismiss the context menu"
+        );
+    }
 
     #[test]
     fn reopening_menu_clears_stale_submenu_hierarchy() {

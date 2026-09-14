@@ -438,6 +438,73 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
             }
         }
 
+        // ── HISTORY NAVIGATION ──
+        // Alt+Left / mouse XButton1 = back; Alt+Right / mouse XButton2 = forward.
+        // Skipped during an item drag: navigating would retarget the pending drop.
+        // While the context menu is open the mouse press only dismisses it
+        // (see ui/context_menu.rs); Alt+Arrow does nothing until it closes.
+        if !app.context_menu.is_open && !app.is_item_dragging {
+            let (nav_back, nav_forward) = ctx.input(|i| {
+                let mouse_back = i.events.iter().any(|event| {
+                    matches!(
+                        event,
+                        egui::Event::PointerButton {
+                            button: egui::PointerButton::Extra1,
+                            pressed: true,
+                            ..
+                        }
+                    )
+                });
+                let mouse_forward = i.events.iter().any(|event| {
+                    matches!(
+                        event,
+                        egui::Event::PointerButton {
+                            button: egui::PointerButton::Extra2,
+                            pressed: true,
+                            ..
+                        }
+                    )
+                });
+
+                let mut key_back = false;
+                let mut key_forward = false;
+                if !text_input_active {
+                    for event in &i.events {
+                        if let egui::Event::Key {
+                            key,
+                            pressed: true,
+                            repeat: false,
+                            modifiers,
+                            ..
+                        } = event
+                        {
+                            let alt_only = modifiers.alt && !modifiers.ctrl && !modifiers.shift;
+                            if alt_only && *key == egui::Key::ArrowLeft {
+                                key_back = true;
+                            } else if alt_only && *key == egui::Key::ArrowRight {
+                                key_forward = true;
+                            }
+                        }
+                    }
+                }
+
+                (mouse_back || key_back, mouse_forward || key_forward)
+            });
+
+            if nav_back {
+                // Consume the key so the file-view keyboard navigation does not act on it too.
+                ctx.input_mut(|i| i.consume_key(egui::Modifiers::ALT, egui::Key::ArrowLeft));
+                app.go_back();
+                user_active = true;
+            }
+
+            if nav_forward {
+                ctx.input_mut(|i| i.consume_key(egui::Modifiers::ALT, egui::Key::ArrowRight));
+                app.go_forward();
+                user_active = true;
+            }
+        }
+
         let consumed_preview_shortcut_action = handle_preview_shortcut_action(app, ctx);
         if consumed_preview_shortcut_action {
             user_active = true;
