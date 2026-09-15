@@ -271,6 +271,7 @@ impl ImageViewerApp {
         let mut has_more_incoming = false;
         let is_burst = self.is_in_restore_burst();
         let is_opengl = self.is_opengl_backend();
+        let use_opengl_performance_policy = self.uses_opengl_specific_performance_policy();
         let is_vulkan = self.is_vulkan_backend();
         let use_conservative_upload_policy = self.uses_conservative_thumbnail_upload_policy();
         let frame_pressure_ms = live_frame_pressure_ms(self);
@@ -282,7 +283,7 @@ impl ImageViewerApp {
         // by OS paging, not by actual rendering load.  A generous budget lets us
         // drain the worker channel and queue items for upload faster.
         let incoming_budget = if is_burst {
-            if is_opengl {
+            if use_opengl_performance_policy {
                 Duration::from_millis(4)
             } else {
                 Duration::from_millis(8)
@@ -338,12 +339,12 @@ impl ImageViewerApp {
         // Reduce intake when pending queue is already backlogged to spread
         // GPU upload work across more frames and prevent frame-time spikes.
         // During burst mode, skip the throttle — we want to fill the queue fast.
-        let effective_incoming_cap = if is_opengl && is_scrolling {
+        let effective_incoming_cap = if use_opengl_performance_policy && is_scrolling {
             24
         } else if use_conservative_upload_policy && is_scrolling {
             32
         } else if is_burst {
-            if is_opengl {
+            if use_opengl_performance_policy {
                 24
             } else if use_conservative_upload_policy {
                 CONSERVATIVE_WGPU_MAX_INCOMING_THUMBNAIL_MSGS_PER_FRAME
@@ -356,7 +357,7 @@ impl ImageViewerApp {
             } else {
                 48
             }
-        } else if is_opengl {
+        } else if use_opengl_performance_policy {
             48
         } else if use_conservative_upload_policy {
             CONSERVATIVE_WGPU_MAX_INCOMING_THUMBNAIL_MSGS_PER_FRAME
@@ -570,7 +571,7 @@ impl ImageViewerApp {
         // Resizing an LRU may free many texture handles. Defer only this optional
         // foreground maintenance while Glow is visually scrolling; pressure and
         // background/minimized trimming remain independent paths.
-        let freeze_cache_retune = is_opengl && (is_burst || is_scrolling);
+        let freeze_cache_retune = use_opengl_performance_policy && (is_burst || is_scrolling);
         if !freeze_cache_retune
             && self.last_texture_cache_retune.elapsed()
                 >= Duration::from_millis(TEXTURE_CACHE_RETUNE_INTERVAL_MS)
@@ -660,10 +661,10 @@ impl ImageViewerApp {
         // large wave of queued staging allocations after restore.
         //
         // `ctx.load_texture` records an egui texture update; Glow applies the
-        // underlying OpenGL transfer later in the renderer. Keep the conservative
-        // Glow admission caps so a frame cannot queue an unbounded texture batch.
+        // underlying OpenGL transfer later in the renderer. The OpenGL-specific
+        // admission caps remain available behind the temporary policy switch.
         let base_max_uploads = if is_burst {
-            if is_opengl {
+            if use_opengl_performance_policy {
                 2
             } else if use_conservative_upload_policy {
                 if is_scrolling {
@@ -677,13 +678,13 @@ impl ImageViewerApp {
         } else if is_performance_critical {
             1
         } else if is_performance_severe {
-            if is_opengl {
+            if use_opengl_performance_policy {
                 1
             } else {
                 2
             }
         } else if is_video_playing && is_scrolling {
-            if is_opengl {
+            if use_opengl_performance_policy {
                 2
             } else if use_conservative_upload_policy {
                 3
@@ -691,7 +692,7 @@ impl ImageViewerApp {
                 4
             }
         } else if is_scrolling {
-            if is_opengl {
+            if use_opengl_performance_policy {
                 2
             } else if use_conservative_upload_policy {
                 3
@@ -699,14 +700,14 @@ impl ImageViewerApp {
                 6
             }
         } else if is_video_playing {
-            if is_opengl {
+            if use_opengl_performance_policy {
                 3
             } else if use_conservative_upload_policy {
                 4
             } else {
                 5
             }
-        } else if is_opengl {
+        } else if use_opengl_performance_policy {
             8
         } else {
             12
@@ -717,7 +718,7 @@ impl ImageViewerApp {
             .clamp(
                 1.0,
                 if is_burst {
-                    if is_opengl {
+                    if use_opengl_performance_policy {
                         4.0
                     } else if use_conservative_upload_policy {
                         16.0
@@ -798,7 +799,7 @@ impl ImageViewerApp {
         }
 
         let base_budget_ms = if is_burst {
-            if is_opengl {
+            if use_opengl_performance_policy {
                 2.0
             } else if use_conservative_upload_policy {
                 if is_scrolling {
@@ -814,7 +815,7 @@ impl ImageViewerApp {
         } else if is_video_playing {
             self.upload_budget_ms * 0.75
         } else if is_scrolling {
-            if is_opengl {
+            if use_opengl_performance_policy {
                 2.0
             } else if use_conservative_upload_policy {
                 4.0
@@ -850,7 +851,7 @@ impl ImageViewerApp {
         let offscreen_upload_budget = if is_scrolling {
             if is_performance_critical {
                 0
-            } else if is_performance_severe || is_opengl {
+            } else if is_performance_severe || use_opengl_performance_policy {
                 1
             } else {
                 2
@@ -860,7 +861,7 @@ impl ImageViewerApp {
         };
         let mut offscreen_uploads = 0usize;
         let discard_offscreen_pending =
-            (is_opengl || use_conservative_upload_policy) && is_scrolling;
+            (use_opengl_performance_policy || use_conservative_upload_policy) && is_scrolling;
         let max_offscreen_discards = max_uploads_per_frame.saturating_mul(8).max(8);
         let mut offscreen_discards = 0usize;
 

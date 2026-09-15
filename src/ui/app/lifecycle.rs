@@ -3,9 +3,28 @@ use crate::infrastructure::onedrive;
 use eframe::egui;
 
 const STARTUP_REVEAL_TICK: usize = 2;
+const OPENGL_TEXTURE_FLUSH_ENV: &str = "MTT_OPENGL_FLUSH_TEXTURES";
 
-fn should_flush_gpu_textures_after_focus_restore(idle_secs: f64, is_opengl: bool) -> bool {
-    idle_secs >= 60.0 && !is_opengl
+fn environment_flag_enabled(name: &str) -> bool {
+    std::env::var(name)
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(false)
+}
+
+fn should_preserve_opengl_texture_handles(app: &ImageViewerApp) -> bool {
+    app.is_opengl_backend() && !environment_flag_enabled(OPENGL_TEXTURE_FLUSH_ENV)
+}
+
+fn should_flush_gpu_textures_after_focus_restore(
+    idle_secs: f64,
+    preserve_opengl_texture_handles: bool,
+) -> bool {
+    idle_secs >= 60.0 && !preserve_opengl_texture_handles
 }
 
 fn recover_empty_current_folder_after_restore(app: &mut ImageViewerApp, reason: &str) {
@@ -180,12 +199,15 @@ pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
             // Hard-reset peak to the current average so adaptive throttling
             // doesn't starve upload budgets on the very first frames.
             app.frame_time_peak_ms = app.frame_time_avg_ms.max(16.0);
-            // Glow texture handles remain valid across ordinary focus loss. A
-            // time-only flush discards the already-warm grid and forces texture
-            // reconstruction after fullscreen video or another GPU app. Keep
-            // the recovery burst, but reserve the flush for non-Glow backends.
-            let texture_flush =
-                should_flush_gpu_textures_after_focus_restore(idle_secs, app.is_opengl_backend());
+            // The OpenGL-specific policy keeps Glow texture handles warm across
+            // ordinary focus loss. A time-only flush discards the already-warm
+            // grid and forces texture reconstruction after fullscreen video or
+            // another GPU app.
+            let preserve_opengl_texture_handles = should_preserve_opengl_texture_handles(app);
+            let texture_flush = should_flush_gpu_textures_after_focus_restore(
+                idle_secs,
+                preserve_opengl_texture_handles,
+            );
             if texture_flush {
                 flush_gpu_textures_for_reupload(app, "focus-restore");
             }
@@ -201,7 +223,7 @@ pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
                 idle_secs,
                 burst_secs,
                 texture_flush,
-                idle_secs >= 60.0 && app.is_opengl_backend(),
+                idle_secs >= 60.0 && preserve_opengl_texture_handles,
             );
         }
 
@@ -238,14 +260,13 @@ pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
             app.minimized_duration_secs = minimized_secs;
             app.last_restore_time = std::time::Instant::now();
             app.frame_time_peak_ms = app.frame_time_avg_ms.max(16.0);
-            // Same rule as the focus-restore path: Glow texture handles survive
-            // a minimize cycle, so flushing them only forces a full re-decode +
-            // re-upload storm while the user scrolls (measured: textures=0/72 on
-            // restore, then 440 uploads in the next 5 s on the OpenGL backend,
-            // with the grid empty in between).
+            // Same rule as the focus-restore path: while OpenGL restore
+            // preservation is active, Glow texture handles survive a minimize
+            // cycle, so flushing them only forces a full re-decode + re-upload storm.
+            let preserve_opengl_texture_handles = should_preserve_opengl_texture_handles(app);
             let texture_flush = should_flush_gpu_textures_after_focus_restore(
                 minimized_secs,
-                app.is_opengl_backend(),
+                preserve_opengl_texture_handles,
             );
             if texture_flush {
                 flush_gpu_textures_for_reupload(app, "minimize-restore");
@@ -305,7 +326,7 @@ pub fn track_window_state(app: &mut ImageViewerApp, ctx: &egui::Context) {
 /// so re-uploads are fast (no disk I/O).  Icons and folder previews are also
 /// flushed since they suffer from the same paging effect.
 fn flush_gpu_textures_for_reupload(app: &mut ImageViewerApp, reason: &str) {
-    if app.is_opengl_backend() {
+    if app.uses_opengl_specific_performance_policy() {
         flush_opengl_gpu_textures_for_reupload(app, reason);
         return;
     }

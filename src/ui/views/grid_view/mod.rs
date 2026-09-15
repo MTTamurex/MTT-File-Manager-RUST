@@ -207,7 +207,8 @@ pub struct GridViewContext<'a> {
     /// Backend-specific LOD: request smaller thumbnails while the grid is moving,
     /// then upgrade visible cells after scrolling stops.
     pub low_res_thumbnails_while_scrolling: bool,
-    pub is_opengl_backend: bool,
+    /// Enables the OpenGL-specific scroll interpolation when that policy is active.
+    pub use_opengl_performance_policy: bool,
     /// Backend-specific LOD for composed folder previews while scrolling.
     pub low_res_folder_previews_while_scrolling: bool,
     /// Per-frame counter to rate-limit thumbnail requests on folder entry
@@ -331,7 +332,7 @@ pub fn render_grid_view(
         viewport_h,
         max_scroll,
         ctx.generation,
-        ctx.is_opengl_backend,
+        ctx.use_opengl_performance_policy,
     );
     let bg_response = ui.interact(
         viewport_rect,

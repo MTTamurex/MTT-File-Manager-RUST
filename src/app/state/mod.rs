@@ -703,6 +703,10 @@ pub struct ImageViewerApp {
     /// between painted frames, which is what the user perceives as a freeze —
     /// the event loop can keep ticking (`logic()`) while painting is skipped.
     pub last_ui_enter: Option<Instant>,
+    /// Wall-clock exit time of the previous `ui()` pass. The interval from this
+    /// point to the next `logic()` pass includes renderer presentation and event
+    /// loop scheduling, outside the application's measured UI code.
+    pub last_ui_exit: Option<Instant>,
     /// Viewport visibility/focus state captured at the previous `ui()` pass.
     /// Used to avoid reporting paint gaps caused by OS occlusion (egui skips
     /// painting entirely while the viewport is hidden) as UI stalls.

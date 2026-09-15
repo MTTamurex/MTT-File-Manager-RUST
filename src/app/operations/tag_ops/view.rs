@@ -2,6 +2,7 @@ use super::*;
 use crate::app::state::{FolderLoadError, ImageViewerApp};
 use crate::domain::file_entry::FileEntry;
 use crate::domain::special_paths::{tag_id_from_view_path, tag_view_path};
+use crate::infrastructure::io_priority::{IOPriority, ThreadPriorityGuard};
 use crate::infrastructure::windows::RootAvailabilityCache;
 use std::os::windows::ffi::OsStrExt;
 use std::path::PathBuf;
@@ -507,6 +508,10 @@ impl ImageViewerApp {
                     let validation_start = std::time::Instant::now();
                     let mut checked_paths = 0usize;
                     let mut missing_candidates: Vec<PathBuf> = Vec::new();
+                    // This is maintenance work after the visible tag rows have
+                    // been sent. Keep metadata probes below interactive I/O.
+                    let _validation_priority_guard =
+                        ThreadPriorityGuard::new(IOPriority::Background);
                     for chunk in cached_paths_to_validate.chunks(VALIDATION_CHUNK_PATHS) {
                         if gen_tracker.load(std::sync::atomic::Ordering::Relaxed) != my_gen {
                             break;

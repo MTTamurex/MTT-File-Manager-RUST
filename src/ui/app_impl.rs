@@ -180,8 +180,9 @@ impl ImageViewerApp {
 
         // Keep logic polling alive while idle or while eframe suppresses UI for
         // an occluded viewport, without forcing a fixed repaint cadence.
-        if self.is_in_restore_burst() {
-            if self.is_opengl_backend() {
+        // Keep an immediate repaint alive while visual scroll interpolation settles.
+        if self.is_in_restore_burst() || self.thumbnail_scroll_is_settling() {
+            if self.uses_opengl_specific_performance_policy() {
                 ctx.request_repaint_after(Duration::from_millis(16));
             } else {
                 ctx.request_repaint();
@@ -235,6 +236,7 @@ impl eframe::App for ImageViewerApp {
             self.layout.saved_is_minimized,
             layout_phase() == WindowLayoutPhase::Minimized,
         ) {
+            self.last_ui_exit = Some(std::time::Instant::now());
             return;
         }
         let ctx_owned = ui.ctx().clone();
@@ -745,6 +747,7 @@ impl eframe::App for ImageViewerApp {
                 frame_ms
             );
         }
+        self.last_ui_exit = Some(std::time::Instant::now());
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {

@@ -1,5 +1,6 @@
 use crate::app::state::ImageViewerApp;
 use crate::domain::special_paths::tag_id_from_view_path;
+use crate::infrastructure::io_priority::{IOPriority, ThreadPriorityGuard};
 use crate::infrastructure::windows::RootAvailabilityCache;
 use rustc_hash::FxHashSet;
 use std::path::PathBuf;
@@ -89,6 +90,9 @@ impl ImageViewerApp {
         let spawn_result = std::thread::Builder::new()
             .name("tag-view-purge".into())
             .spawn(move || {
+                // Focus-restore reconciliation is maintenance work and can
+                // touch every item in every open tag view.
+                let _priority_guard = ThreadPriorityGuard::new(IOPriority::Background);
                 let mut root_availability = RootAvailabilityCache::default();
                 let mut missing_candidates: Vec<PathBuf> = Vec::new();
                 let mut unavailable_paths: Vec<PathBuf> = Vec::new();

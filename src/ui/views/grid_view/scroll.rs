@@ -43,7 +43,7 @@ pub(super) fn compute_visual_scroll(
     viewport_h: f32,
     max_scroll: f32,
     generation: usize,
-    is_opengl_backend: bool,
+    use_opengl_performance_policy: bool,
 ) -> (f32, f32) {
     // Scope scroll state to folder generation so visual_scroll resets on navigation
     let scroll_state_id = ui.id().with("scroll_state").with(generation);
@@ -52,7 +52,7 @@ pub(super) fn compute_visual_scroll(
     // causing the lerp to "jump" on slow frames and "snap back" on following frames.
     // predicted_dt is constant and guarantees uniform visual motion.
     let dt = ui.input(|i| {
-        if is_opengl_backend {
+        if use_opengl_performance_policy {
             i.stable_dt
         } else {
             i.predicted_dt
@@ -65,7 +65,7 @@ pub(super) fn compute_visual_scroll(
         });
         state.visual_scroll_y = state.visual_scroll_y.clamp(0.0, max_scroll);
 
-        let t = scroll_interpolation_factor(dt, is_opengl_backend);
+        let t = scroll_interpolation_factor(dt, use_opengl_performance_policy);
 
         if (state.visual_scroll_y - target_scroll).abs() > viewport_h * 1.5 {
             state.visual_scroll_y = target_scroll;

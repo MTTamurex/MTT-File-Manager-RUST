@@ -85,6 +85,20 @@ fn memory_trace_enabled() -> bool {
     })
 }
 
+fn frame_gap_trace_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        std::env::var(FRAME_GAP_TRACE_ENV)
+            .map(|value| {
+                matches!(
+                    value.trim().to_ascii_lowercase().as_str(),
+                    "1" | "true" | "yes" | "on"
+                )
+            })
+            .unwrap_or(false)
+    })
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum MemoryPressure {
     None,
@@ -138,6 +152,7 @@ fn thumbnail_scroll_is_settling_at(last_scroll_time: Instant, now: Instant) -> b
 const FRAME_HITCH_THRESHOLD_MS: f32 = 25.0;
 /// Minimum spacing between `[PERF] frame hitch` log lines.
 const FRAME_HITCH_LOG_COOLDOWN: Duration = Duration::from_millis(500);
+const FRAME_GAP_TRACE_ENV: &str = "MTT_TRACE_FRAME_GAPS";
 /// Ignore the first frames of a session: window creation and first paints take
 /// longer than a steady-state frame and are not hitches.
 ///
@@ -198,8 +213,17 @@ fn backend_uses_low_ram_gpu_policy(active_gpu_backend: &str) -> bool {
     matches!(active_gpu_backend, "glow" | "Vulkan" | "Dx12")
 }
 
+// Temporary test mode: keep Glow on the common WGPU upload profile instead of
+// enabling the OpenGL-specific throttles. Set this to `false` to restore them.
+const OPENGL_BACKEND_PARITY_MODE: bool = true;
+
+fn backend_uses_opengl_specific_performance_policy(active_gpu_backend: &str) -> bool {
+    active_gpu_backend == "glow" && !OPENGL_BACKEND_PARITY_MODE
+}
+
 fn backend_uses_conservative_thumbnail_upload_policy(active_gpu_backend: &str) -> bool {
     matches!(active_gpu_backend, "Vulkan" | "Dx12")
+        || (OPENGL_BACKEND_PARITY_MODE && active_gpu_backend == "glow")
 }
 
 fn pending_thumbnail_eviction_index(
@@ -437,8 +461,8 @@ impl ImageViewerApp {
     /// paint/upload/swap phase runs afterwards, outside that measurement. This
     /// tracker uses the raw interval instead, so a stall caused by synchronous
     /// texture uploads or driver work is captured. Only intervals while the UI
-    /// is actively working (scrolling / uploads in flight) are counted, so
-    /// idle `request_repaint_after` frames are never false positives.
+    /// is actively working (scrolling / uploads in flight) are counted by
+    /// default; `MTT_TRACE_FRAME_GAPS=1` also logs visible idle gaps for diagnosis.
     pub(crate) fn track_frame_interval(&mut self) {
         let now = Instant::now();
         self.frames_tracked = self.frames_tracked.saturating_add(1);
@@ -457,18 +481,30 @@ impl ImageViewerApp {
         let scrolling = self.thumbnail_scroll_is_settling();
         let pending_uploads = self.cache_manager.pending_upload_set.len();
         let ui_active = scrolling || !self.pending_thumbnails.is_empty() || pending_uploads > 0;
-
-        if !frame_interval_is_hitch(
+        let viewport_active = self.ui_ctx.input(|input| {
+            let viewport = input.viewport();
+            viewport.visible().unwrap_or(true) && viewport.focused.unwrap_or(true)
+        });
+        let repaint_requested = self.ui_ctx.requested_repaint_last_pass();
+        let is_hitch = frame_interval_is_hitch(
             interval_ms,
             ui_active,
             self.layout.saved_is_minimized,
             self.frames_tracked,
-        ) {
+        );
+        let trace_gap = frame_gap_trace_enabled()
+            && interval_ms >= FRAME_HITCH_THRESHOLD_MS
+            && viewport_active
+            && !self.layout.saved_is_minimized;
+
+        if !is_hitch && !trace_gap {
             return;
         }
 
-        self.frame_hitches = self.frame_hitches.saturating_add(1);
-        self.frame_hitch_ms_max = self.frame_hitch_ms_max.max(interval_ms);
+        if is_hitch {
+            self.frame_hitches = self.frame_hitches.saturating_add(1);
+            self.frame_hitch_ms_max = self.frame_hitch_ms_max.max(interval_ms);
+        }
 
         let should_log = self
             .last_frame_hitch_log
@@ -477,31 +513,64 @@ impl ImageViewerApp {
             return;
         }
         self.last_frame_hitch_log = Some(now);
+        let post_ui_gap_ms = self
+            .last_ui_exit
+            .map(|last| now.saturating_duration_since(last).as_secs_f32() * 1000.0)
+            .unwrap_or(-1.0);
 
-        log::warn!(
-            "[PERF] frame hitch interval_ms={:.0} prev_update_ms={:.1} scrolling={} burst={} folder_previews_loading={} pending_thumbs={} pending_uploads={} textures={}/{} backend={}",
-            interval_ms,
-            self.last_actual_frame_ms,
-            scrolling,
-            self.is_in_restore_burst(),
-            self.cache_manager.folder_preview_loading.len(),
-            self.pending_thumbnails.len(),
-            pending_uploads,
-            self.cache_manager.texture_cache.len(),
-            self.cache_manager.texture_cache.cap().get(),
-            self.active_gpu_backend.as_str(),
-        );
+        if is_hitch {
+            log::warn!(
+                "[PERF] frame hitch interval_ms={:.0} prev_update_ms={:.1} post_ui_gap_ms={:.1} repaint_requested={} viewport_active={} scrolling={} burst={} folder_previews_loading={} pending_thumbs={} pending_uploads={} textures={}/{} backend={}",
+                interval_ms,
+                self.last_actual_frame_ms,
+                post_ui_gap_ms,
+                repaint_requested,
+                viewport_active,
+                scrolling,
+                self.is_in_restore_burst(),
+                self.cache_manager.folder_preview_loading.len(),
+                self.pending_thumbnails.len(),
+                pending_uploads,
+                self.cache_manager.texture_cache.len(),
+                self.cache_manager.texture_cache.cap().get(),
+                self.active_gpu_backend.as_str(),
+            );
+        } else {
+            log::info!(
+                "[PERF] frame gap trace interval_ms={:.0} prev_update_ms={:.1} post_ui_gap_ms={:.1} repaint_requested={} viewport_active={} scrolling={} burst={} folder_previews_loading={} pending_thumbs={} pending_uploads={} textures={}/{} backend={}",
+                interval_ms,
+                self.last_actual_frame_ms,
+                post_ui_gap_ms,
+                repaint_requested,
+                viewport_active,
+                scrolling,
+                self.is_in_restore_burst(),
+                self.cache_manager.folder_preview_loading.len(),
+                self.pending_thumbnails.len(),
+                pending_uploads,
+                self.cache_manager.texture_cache.len(),
+                self.cache_manager.texture_cache.cap().get(),
+                self.active_gpu_backend.as_str(),
+            );
+        }
     }
 
     /// Returns `true` when the active GPU backend is OpenGL-based.
     ///
     /// OpenGL uploads are synchronous on the CPU thread (each `ctx.load_texture`
     /// blocks until the driver finishes the transfer), unlike DX12/Vulkan where
-    /// wgpu queues the upload asynchronously.  This method is used to apply more
-    /// conservative per-frame upload limits that prevent UI freezes on OpenGL
-    /// backends (Glow).
+    /// wgpu queues the upload asynchronously. This reports the actual backend;
+    /// policy decisions use `uses_opengl_specific_performance_policy`.
     pub fn is_opengl_backend(&self) -> bool {
         self.active_gpu_backend == "glow"
+    }
+
+    /// Returns `true` when the OpenGL-specific performance policy is active.
+    ///
+    /// The backend remains detectable for diagnostics even while temporary
+    /// OpenGL/WGPU parity mode is enabled.
+    pub fn uses_opengl_specific_performance_policy(&self) -> bool {
+        backend_uses_opengl_specific_performance_policy(&self.active_gpu_backend)
     }
 
     /// Returns `true` when the active wgpu backend is Vulkan.
@@ -511,8 +580,8 @@ impl ImageViewerApp {
         self.active_gpu_backend == "Vulkan"
     }
 
-    /// Returns `true` for asynchronous wgpu backends that should share the
-    /// tighter thumbnail intake, upload, and RGBA-retention limits.
+    /// Returns `true` for backends that should share the common thumbnail
+    /// intake, upload, and RGBA-retention limits.
     pub fn uses_conservative_thumbnail_upload_policy(&self) -> bool {
         backend_uses_conservative_thumbnail_upload_policy(&self.active_gpu_backend)
     }
@@ -917,19 +986,28 @@ impl ImageViewerApp {
 
         let gap_ms = now.saturating_duration_since(previous).as_secs_f32() * 1000.0;
         // Delayed background repaints are legitimate idle intervals, not stalls.
-        if !paint_gap_is_hitch(
+        let repaint_requested = self.ui_ctx.requested_repaint_last_pass();
+        let is_hitch = paint_gap_is_hitch(
             gap_ms,
             viewport_active,
             previous_active,
-            self.ui_ctx.requested_repaint_last_pass(),
+            repaint_requested,
             self.layout.saved_is_minimized,
             self.frames_tracked,
-        ) {
+        );
+        let trace_gap = frame_gap_trace_enabled()
+            && gap_ms >= FRAME_HITCH_THRESHOLD_MS
+            && viewport_active
+            && previous_active
+            && !self.layout.saved_is_minimized;
+        if !is_hitch && !trace_gap {
             return;
         }
 
-        self.ui_gap_hitches = self.ui_gap_hitches.saturating_add(1);
-        self.ui_gap_ms_max = self.ui_gap_ms_max.max(gap_ms);
+        if is_hitch {
+            self.ui_gap_hitches = self.ui_gap_hitches.saturating_add(1);
+            self.ui_gap_ms_max = self.ui_gap_ms_max.max(gap_ms);
+        }
 
         let should_log = self
             .last_ui_gap_log
@@ -939,9 +1017,14 @@ impl ImageViewerApp {
         }
         self.last_ui_gap_log = Some(now);
 
+        let kind = if is_hitch { "hitch" } else { "trace" };
         log::warn!(
-            "[PERF] paint gap gap_ms={:.0} scrolling={} pending_thumbs={} pending_uploads={} textures={}/{} backend={}",
+            "[PERF] paint gap kind={} gap_ms={:.0} repaint_requested={} viewport_active={} previous_active={} scrolling={} pending_thumbs={} pending_uploads={} textures={}/{} backend={}",
+            kind,
             gap_ms,
+            repaint_requested,
+            viewport_active,
+            previous_active,
             self.thumbnail_scroll_is_settling(),
             self.pending_thumbnails.len(),
             self.cache_manager.pending_upload_set.len(),
@@ -2489,14 +2572,14 @@ fn current_process_memory_snapshot() -> Option<ProcessMemorySnapshot> {
 mod inactive_panel_paths_tests {
     use super::{
         backend_uses_conservative_thumbnail_upload_policy, backend_uses_low_ram_gpu_policy,
-        background_trim_should_rearm, classify_memory_pressure, detail_panel_thumbnail_active,
-        frame_interval_is_hitch, insert_item_reference_paths, paint_gap_is_hitch,
-        pending_thumbnail_eviction_index, thumbnail_scroll_is_settling_at,
-        trim_pending_thumbnail_queue, working_set_trim_cancelled, working_set_trim_was_effective,
-        FileEntry, FxHashSet, MemoryPressure, ProcessMemorySnapshot,
-        BACKGROUND_WS_TRIM_REARM_GROWTH_BYTES, LOW_RAM_GPU_IDLE_WS_TRIM_MIN_BYTES,
-        MIN_FRAME_HITCH_SAMPLES, THUMBNAIL_SCROLL_SETTLING_DURATION,
-        WORKING_SET_TRIM_EFFECTIVE_REDUCTION_BYTES,
+        backend_uses_opengl_specific_performance_policy, background_trim_should_rearm,
+        classify_memory_pressure, detail_panel_thumbnail_active, frame_interval_is_hitch,
+        insert_item_reference_paths, paint_gap_is_hitch, pending_thumbnail_eviction_index,
+        thumbnail_scroll_is_settling_at, trim_pending_thumbnail_queue, working_set_trim_cancelled,
+        working_set_trim_was_effective, FileEntry, FxHashSet, MemoryPressure,
+        ProcessMemorySnapshot, BACKGROUND_WS_TRIM_REARM_GROWTH_BYTES,
+        LOW_RAM_GPU_IDLE_WS_TRIM_MIN_BYTES, MIN_FRAME_HITCH_SAMPLES, OPENGL_BACKEND_PARITY_MODE,
+        THUMBNAIL_SCROLL_SETTLING_DURATION, WORKING_SET_TRIM_EFFECTIVE_REDUCTION_BYTES,
     };
     use crate::domain::file_entry::SyncStatus;
     use crate::domain::thumbnail::ThumbnailData;
@@ -2647,11 +2730,18 @@ mod inactive_panel_paths_tests {
     }
 
     #[test]
-    fn conservative_thumbnail_upload_policy_includes_wgpu_backends() {
+    fn conservative_thumbnail_upload_policy_includes_common_upload_backends() {
         assert!(backend_uses_conservative_thumbnail_upload_policy("Vulkan"));
         assert!(backend_uses_conservative_thumbnail_upload_policy("Dx12"));
-        assert!(!backend_uses_conservative_thumbnail_upload_policy("glow"));
+        assert!(backend_uses_conservative_thumbnail_upload_policy("glow"));
         assert!(!backend_uses_conservative_thumbnail_upload_policy(""));
+    }
+
+    #[test]
+    fn opengl_parity_mode_disables_opengl_specific_policy() {
+        assert!(OPENGL_BACKEND_PARITY_MODE);
+        assert!(!backend_uses_opengl_specific_performance_policy("glow"));
+        assert!(!backend_uses_opengl_specific_performance_policy("Vulkan"));
     }
 
     #[test]

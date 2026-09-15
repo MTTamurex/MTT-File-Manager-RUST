@@ -716,6 +716,7 @@ impl ImageViewerApp {
             frame_hitch_ms_max: 0.0,
             last_frame_hitch_log: None,
             last_ui_enter: None,
+            last_ui_exit: None,
             last_ui_active: false,
             ui_gap_hitches: 0,
             ui_gap_ms_max: 0.0,
@@ -954,9 +955,15 @@ impl ImageViewerApp {
         app.log_memory_snapshot("post-init");
 
         if app.is_opengl_backend() {
-            log::info!(
-                "[GPU] OpenGL backend detected — applying conservative upload throttling to prevent UI freezes (synchronous texture uploads)"
-            );
+            if app.uses_opengl_specific_performance_policy() {
+                log::info!(
+                    "[GPU] OpenGL backend detected — applying conservative upload throttling to prevent UI freezes (synchronous texture uploads)"
+                );
+            } else {
+                log::info!(
+                    "[GPU] OpenGL backend detected — OpenGL-specific performance policy disabled"
+                );
+            }
         }
 
         app

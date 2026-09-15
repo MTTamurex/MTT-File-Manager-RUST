@@ -124,7 +124,7 @@ The app supports three rendering backend choices, selectable in **Settings > Gen
 ### Glow — OpenGL (Fallback)
 - Recommended fallback when DirectX 12 is unavailable or unstable on the machine
 - Uses eframe's `Glow` renderer directly instead of `wgpu`'s OpenGL backend
-- OpenGL texture uploads can be synchronous on the CPU thread, so the app applies more conservative thumbnail and folder-preview upload limits on this backend
+- OpenGL texture uploads can be synchronous on the CPU thread; OpenGL-specific throttling remains available for targeted performance testing
 
 ## Prerequisites
 
@@ -169,6 +169,14 @@ The main file manager does not need to run as administrator for normal file brow
 - Nothing is sent automatically outside the application. The diagnostic file stays local unless the user chooses to share it.
 - The feature auto-disables after 24 hours and keeps only the latest 10 MiB of filtered diagnostic events.
 - This is a technical privacy measure for minimization and safer troubleshooting. It is not a standalone legal certification of LGPD or any other regulatory compliance.
+
+## Temporary GPU Recovery Tests
+
+- Glow preserves its GPU texture handles after prolonged background or minimize recovery by default.
+- Set `MTT_OPENGL_FLUSH_TEXTURES=1` to re-enable the OpenGL texture flush for comparison.
+- Set `MTT_DISABLE_WS_TRIM=1` to disable process working-set trimming for comparison.
+- Set `MTT_TRACE_FRAME_GAPS=1` to log visible frame gaps even when thumbnail work is idle.
+- These variables are intended for local performance tests and are not required for normal use.
 
 ## Video Thumbnail Codecs
 
