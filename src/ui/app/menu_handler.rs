@@ -260,11 +260,14 @@ fn is_cloud_files_pin_text(text: &str) -> bool {
     let lower = text.trim().to_lowercase();
     lower.contains("always keep on this device")
         || lower.contains("sempre manter neste dispositivo")
+        || lower.contains("всегда хранить на этом устройстве")
 }
 
 fn is_cloud_files_free_text(text: &str) -> bool {
     let lower = text.trim().to_lowercase();
-    lower.contains("free up space") || lower.contains("liberar espaço")
+    lower.contains("free up space")
+        || lower.contains("liberar espaço")
+        || lower.contains("освободить место")
 }
 
 fn cloud_files_pin_command_from_text(

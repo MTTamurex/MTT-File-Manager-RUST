@@ -16,10 +16,15 @@ pub fn is_generic_open_with_command(command: Option<&str>, text: &str) -> bool {
         return command.eq_ignore_ascii_case("openas") || command == "open_with_shell_fallback";
     }
 
-    let text = text.trim().trim_end_matches(['.', '\u{2026}']).trim();
-    text.eq_ignore_ascii_case("open with")
-        || text.eq_ignore_ascii_case("abrir com")
-        || text == "打开方式"
+    let text = text
+        .trim()
+        .trim_end_matches(['.', '\u{2026}'])
+        .trim()
+        .to_lowercase();
+    matches!(
+        text.as_str(),
+        "open with" | "abrir com" | "打开方式" | "открыть с помощью"
+    )
 }
 
 /// A single item in the context menu (matches Files ContextMenuFlyoutItemViewModel)
@@ -423,6 +428,8 @@ mod tests {
         assert!(is_generic_open_with_command(None, "Abrir com\u{2026}"));
         assert!(is_generic_open_with_command(None, "  打开方式...  "));
         assert!(is_generic_open_with_command(None, "打开方式\u{2026}"));
+        assert!(is_generic_open_with_command(None, "Открыть с помощью..."));
+        assert!(is_generic_open_with_command(None, "открыть с помощью..."));
         assert!(!is_generic_open_with_command(
             Some("third_party"),
             "Open with..."

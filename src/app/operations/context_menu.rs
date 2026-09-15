@@ -34,6 +34,13 @@ fn is_open_with_menu_item(item: &crate::application::context_menu::ContextMenuIt
     })
 }
 
+fn normalized_shell_text(text: &str) -> String {
+    text.trim()
+        .trim_end_matches(['.', '\u{2026}'])
+        .trim()
+        .to_lowercase()
+}
+
 fn is_extract_all_shell_item(item: &crate::application::context_menu::ContextMenuItem) -> bool {
     if item
         .command_string
@@ -43,8 +50,20 @@ fn is_extract_all_shell_item(item: &crate::application::context_menu::ContextMen
         return true;
     }
 
-    let text = item.text.trim().trim_end_matches(['.', '\u{2026}']).trim();
-    text.eq_ignore_ascii_case("extract all") || text.eq_ignore_ascii_case("extrair tudo")
+    matches!(
+        normalized_shell_text(&item.text).as_str(),
+        "extract all" | "extrair tudo" | "извлечь все" | "извлечь всё"
+    )
+}
+
+fn is_new_shell_item(item: &crate::application::context_menu::ContextMenuItem) -> bool {
+    item.command_string
+        .as_deref()
+        .is_some_and(|verb| verb.eq_ignore_ascii_case("new"))
+        || matches!(
+            normalized_shell_text(&item.text).as_str(),
+            "new" | "novo" | "создать"
+        )
 }
 
 fn is_extract_all_pending_item(item: &crate::application::context_menu::ContextMenuItem) -> bool {
@@ -1052,12 +1071,7 @@ impl ImageViewerApp {
                 if item.is_separator {
                     continue;
                 }
-                let is_new_submenu = self.context_menu.is_empty_area
-                    && (item
-                        .command_string
-                        .as_deref()
-                        .is_some_and(|verb| verb.eq_ignore_ascii_case("new"))
-                        || matches!(item.text.to_lowercase().as_str(), "new" | "novo"));
+                let is_new_submenu = self.context_menu.is_empty_area && is_new_shell_item(&item);
                 if is_new_submenu {
                     new_submenu_item = Some(item);
                     continue;
@@ -1368,12 +1382,7 @@ impl ImageViewerApp {
 
         fn is_new_submenu(items: &[ContextMenuItem], id: i32) -> bool {
             items.iter().any(|item| {
-                (item.id == id
-                    && item
-                        .command_string
-                        .as_deref()
-                        .is_some_and(|verb| verb.eq_ignore_ascii_case("new")))
-                    || is_new_submenu(&item.sub_items, id)
+                (item.id == id && is_new_shell_item(item)) || is_new_submenu(&item.sub_items, id)
             })
         }
 
@@ -1394,9 +1403,9 @@ impl ImageViewerApp {
 mod tests {
     use super::{
         compress_menu_item, extract_all_shell_command_id, insert_extract_all_pending_item,
-        is_extract_all_pending_item, is_extract_all_shell_item, is_optical_disc_context_target,
-        promote_extract_all_shell_item, should_offer_compress, should_offer_extract_all,
-        CompressMenuContext,
+        is_extract_all_pending_item, is_extract_all_shell_item, is_new_shell_item,
+        is_optical_disc_context_target, promote_extract_all_shell_item, should_offer_compress,
+        should_offer_extract_all, CompressMenuContext,
     };
     use crate::application::context_menu::{
         ContextMenuItem, EXTRACT_ALL_PENDING_COMMAND, EXTRACT_ALL_PENDING_ID,
@@ -1494,13 +1503,31 @@ mod tests {
         let by_verb = ContextMenuItem::new(10, "Localized text").with_command("ExtractAll");
         let by_english_text = ContextMenuItem::new(11, "Extract All...");
         let by_portuguese_text = ContextMenuItem::new(12, "Extrair Tudo\u{2026}");
+        let by_russian_text = ContextMenuItem::new(13, "Извлечь все...");
+        let by_russian_yo_text = ContextMenuItem::new(14, "Извлечь всё\u{2026}");
         let different_command =
-            ContextMenuItem::new(13, "Extract here").with_command("extracthere");
+            ContextMenuItem::new(15, "Extract here").with_command("extracthere");
 
         assert!(is_extract_all_shell_item(&by_verb));
         assert!(is_extract_all_shell_item(&by_english_text));
         assert!(is_extract_all_shell_item(&by_portuguese_text));
+        assert!(is_extract_all_shell_item(&by_russian_text));
+        assert!(is_extract_all_shell_item(&by_russian_yo_text));
         assert!(!is_extract_all_shell_item(&different_command));
+    }
+
+    #[test]
+    fn recognizes_localized_new_shell_items_by_text() {
+        assert!(is_new_shell_item(&ContextMenuItem::new(10, "New")));
+        assert!(is_new_shell_item(&ContextMenuItem::new(11, "Novo")));
+        assert!(is_new_shell_item(&ContextMenuItem::new(12, "Создать")));
+        assert!(is_new_shell_item(
+            &ContextMenuItem::new(13, "Localized text").with_command("NEW")
+        ));
+        assert!(!is_new_shell_item(&ContextMenuItem::new(
+            14,
+            "Create folder"
+        )));
     }
 
     #[test]

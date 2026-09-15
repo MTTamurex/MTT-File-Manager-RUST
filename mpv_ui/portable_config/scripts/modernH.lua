@@ -48,7 +48,7 @@ local user_opts = {
     visibility = 'auto',        -- only used at init to set visibility_mode(...)
     windowcontrols = 'auto',    -- whether to show window controls
     greenandgrumpy = false,     -- disable santa hat
-    language = 'eng',		-- eng/en=English, pt-BR/ptbr=Brazilian Portuguese, chs=Chinese
+    language = 'eng',		-- eng/en=English, pt-BR/ptbr=Brazilian Portuguese, chs=Chinese, ru=Russian
     volumecontrol = true,       -- whether to show mute button and volume slider
     keyboardnavigation = false, -- enable directional keyboard navigation
     chapter_fmt = default_chapter_fmt, -- chapter print format for seekbar-hover. "no" to disable
@@ -187,6 +187,40 @@ local language = {
         normalizer = '响度均衡',
         chapter_title_fmt = '章节: %s',
 	},
+	['ru'] = {
+	    welcome = '{\\fs24\\1c&H0&\\1c&HFFFFFF&}Перетащите сюда файлы или URL для воспроизведения.',
+        loading_disc = '{\\fs24\\1c&H0&\\1c&HFFFFFF&}Чтение оптического носителя... Это может занять несколько секунд.',
+        on = 'ВКЛ.',
+		off = 'ВЫКЛ.',
+		na = 'н/д',
+		none = 'нет',
+		video = 'Видео',
+		audio = 'Аудио',
+		subtitle = 'Субтитры',
+        chapters = 'Главы',
+		available = 'Доступно ',
+		track = ' дорожек:',
+		playlist = 'Плейлист',
+		nolist = 'Плейлист пуст.',
+		chapter = 'Глава',
+		nochapter = 'Глав нет.',
+		open_subtitle = 'Открыть файл субтитров',
+		open_subtitle_short = 'СУБ+',
+        no_audio_tracks = '(Нет аудиодорожек)',
+        no_subtitle_tracks = '(Нет дорожек субтитров)',
+        no_chapters = '(Нет глав)',
+        track_fallback = 'Дорожка %d',
+        chapter_fallback = 'Глава %d',
+        items_label = 'Элементов: %d',
+        menu_playlist = 'ПЛЕЙЛИСТ',
+        menu_audio_tracks = 'АУДИОДОРОЖКИ',
+        menu_subtitles = 'СУБТИТРЫ',
+        menu_chapters = 'ГЛАВЫ',
+        rtx_vsr = 'RTX VSR',
+        rtx_hdr = 'RTX HDR',
+        normalizer = 'Нормализатор',
+        chapter_title_fmt = 'Глава: %s',
+	},
 	['pl'] = {
 	    welcome = '{\\fs24\\1c&H0&\\1c&HFFFFFF&}Upuść plik lub łącze URL do odtworzenia.',  -- this text appears when mpv starts
         on = 'WŁ.',
@@ -229,6 +263,9 @@ local language_alias = {
     ['ptbr'] = 'pt-BR',
     ['chs'] = 'chs',
     ['zh-CN'] = 'chs',
+    ['ru'] = 'ru',
+    ['ru-RU'] = 'ru',
+    ['rus'] = 'ru',
     ['pl'] = 'pl',
 }
 

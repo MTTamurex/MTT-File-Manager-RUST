@@ -6,7 +6,7 @@
 ; ==========================================================================
 
 #define MyAppName      "MTT File Manager"
-#define MyAppVersion   "0.2.2"
+#define MyAppVersion   "0.2.3"
 #define MyAppPublisher "MTT"
 #define MyAppExeName   "mtt-file-manager.exe"
 #define MySearchSvc    "mtt-search-service.exe"
@@ -46,6 +46,7 @@ DisableDirPage=yes
 Name: "english";    MessagesFile: "compiler:Default.isl"
 Name: "portuguese";  MessagesFile: "compiler:Languages\BrazilianPortuguese.isl"
 Name: "chinese";     MessagesFile: "languages\ChineseSimplified.isl"
+Name: "russian";     MessagesFile: "languages\Russian.isl"
 
 [Tasks]
 Name: "desktopicon";  Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
@@ -87,8 +88,8 @@ Name: "{autodesktop}\{#MyAppName}";   Filename: "{app}\{#MyAppExeName}"; Tasks: 
 ; The service was already stopped in CurStepChanged(ssInstall) before files
 ; were copied, so "install" here is idempotent for fresh installs and safe
 ; for upgrades.
-Filename: "{app}\{#MySearchSvc}"; Parameters: "install"; StatusMsg: "Installing search service..."; Flags: runhidden waituntilterminated
-Filename: "{sys}\sc.exe"; Parameters: "start {#MySearchName}"; StatusMsg: "Starting search service..."; Flags: runhidden waituntilterminated
+Filename: "{app}\{#MySearchSvc}"; Parameters: "install"; StatusMsg: "{cm:InstallSearchService}"; Flags: runhidden waituntilterminated
+Filename: "{sys}\sc.exe"; Parameters: "start {#MySearchName}"; StatusMsg: "{cm:StartSearchService}"; Flags: runhidden waituntilterminated
 
 [UninstallRun]
 ; Stop and remove the search service before files are deleted
@@ -211,16 +212,13 @@ begin
   if CurStep = ssInstall then
   begin
     if not IsSecureInstallDirectory then
-      RaiseException(
-        'MTT File Manager must be installed in its protected Program Files directory.');
+      RaiseException(CustomMessage('SecureInstallDirectoryError'));
 
     if not StopSearchServiceIfRunning(ServiceWasRunning) then
     begin
       if ServiceWasRunning then
         StartSearchServiceAfterFailedCleanup;
-      RaiseException(
-        'The search service did not stop within 30 seconds. ' +
-        'Setup was stopped before updating any files.');
+      RaiseException(CustomMessage('SearchServiceStopTimeout'));
     end;
 
     // Remove cache on upgrades and any cache pre-created before a fresh
@@ -229,9 +227,7 @@ begin
     begin
       if ServiceWasRunning and not StartSearchServiceAfterFailedCleanup then
         Log('Failed to restart the previous search service after cache cleanup failure.');
-      RaiseException(
-        'Unable to securely remove the previous search index cache. ' +
-        'Setup was stopped before installing the update.');
+      RaiseException(CustomMessage('CacheCleanupError'));
     end;
   end;
 
@@ -246,7 +242,9 @@ begin
     else if ActiveLanguage = 'portuguese' then
       RegWriteStringValue(HKLM, 'SOFTWARE\MTT-File-Manager', 'InstallerLanguage', 'pt-BR')
     else if ActiveLanguage = 'chinese' then
-      RegWriteStringValue(HKLM, 'SOFTWARE\MTT-File-Manager', 'InstallerLanguage', 'zh-CN');
+      RegWriteStringValue(HKLM, 'SOFTWARE\MTT-File-Manager', 'InstallerLanguage', 'zh-CN')
+    else if ActiveLanguage = 'russian' then
+      RegWriteStringValue(HKLM, 'SOFTWARE\MTT-File-Manager', 'InstallerLanguage', 'ru');
     RegWriteStringValue(HKLM, 'SOFTWARE\MTT-File-Manager', 'InstallGeneration',
       GetDateTimeString('yyyy-mm-dd hh:nn:ss.zzz', '-', ':'));
   end;
@@ -268,10 +266,47 @@ begin
   if CurPageID = wpReady then
   begin
     if not IsVCRedistInstalled then
-      MsgBox('Warning: Microsoft Visual C++ Redistributable (x64) does not appear to be installed.' + #13#10 +
-             'The application requires it to run.' + #13#10#13#10 +
-             'You can download it from:' + #13#10 +
+      MsgBox(CustomMessage('VCRedistWarning') + #13#10 +
+             CustomMessage('VCRedistRequired') + #13#10#13#10 +
+             CustomMessage('VCRedistDownload') + #13#10 +
              'https://aka.ms/vs/17/release/vc_redist.x64.exe',
              mbInformation, MB_OK);
   end;
 end;
+
+[CustomMessages]
+english.InstallSearchService=Installing search service...
+english.StartSearchService=Starting search service...
+english.SecureInstallDirectoryError=MTT File Manager must be installed in its protected Program Files directory.
+english.SearchServiceStopTimeout=The search service did not stop within 30 seconds. Setup was stopped before updating any files.
+english.CacheCleanupError=Unable to securely remove the previous search index cache. Setup was stopped before installing the update.
+english.VCRedistWarning=Warning: Microsoft Visual C++ Redistributable (x64) does not appear to be installed.
+english.VCRedistRequired=The application requires it to run.
+english.VCRedistDownload=You can download it from:
+
+portuguese.InstallSearchService=Instalando o serviço de busca...
+portuguese.StartSearchService=Iniciando o serviço de busca...
+portuguese.SecureInstallDirectoryError=O MTT File Manager deve ser instalado na pasta protegida Arquivos de Programas.
+portuguese.SearchServiceStopTimeout=O serviço de busca não foi interrompido em 30 segundos. A instalação foi interrompida antes da atualização dos arquivos.
+portuguese.CacheCleanupError=Não foi possível remover com segurança o cache anterior do índice de busca. A instalação foi interrompida antes da atualização.
+portuguese.VCRedistWarning=Aviso: o Microsoft Visual C++ Redistributable (x64) não parece estar instalado.
+portuguese.VCRedistRequired=O aplicativo precisa desse componente para ser executado.
+portuguese.VCRedistDownload=Você pode baixá-lo em:
+
+chinese.InstallSearchService=正在安装搜索服务...
+chinese.StartSearchService=正在启动搜索服务...
+chinese.SecureInstallDirectoryError=MTT File Manager 必须安装在受保护的“程序文件”目录中。
+chinese.SearchServiceStopTimeout=搜索服务未能在 30 秒内停止。安装程序已停止，尚未更新任何文件。
+chinese.CacheCleanupError=无法安全删除之前的搜索索引缓存。安装程序已停止，尚未安装更新。
+chinese.VCRedistWarning=警告：未检测到 Microsoft Visual C++ Redistributable (x64)。
+chinese.VCRedistRequired=应用程序需要此组件才能运行。
+chinese.VCRedistDownload=您可以从以下地址下载：
+
+russian.InstallSearchService=Установка службы поиска...
+russian.StartSearchService=Запуск службы поиска...
+russian.SecureInstallDirectoryError=MTT File Manager необходимо установить в защищённую папку Program Files.
+russian.SearchServiceStopTimeout=Служба поиска не остановилась за 30 секунд. Установка прервана до обновления файлов.
+russian.CacheCleanupError=Не удалось безопасно удалить предыдущий кэш индекса поиска. Установка прервана до установки обновления.
+russian.VCRedistWarning=Предупреждение: Microsoft Visual C++ Redistributable (x64) не найден.
+russian.VCRedistRequired=Для работы приложения требуется этот компонент.
+russian.VCRedistDownload=Скачать его можно по адресу:

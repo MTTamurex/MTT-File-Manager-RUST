@@ -154,7 +154,7 @@ The main file manager does not need to run as administrator for normal file brow
 | **Parallelism** | rayon | 1.10 | Parallel processing |
 | **IPC** | Named Pipes + bincode | 1.3 | App ↔ search service communication |
 | **Service** | windows-service | 0.7 | Background indexing and on-demand drive telemetry service |
-| **i18n** | rust-i18n | 3 | Multi-language support (en, pt-BR) |
+| **i18n** | rust-i18n | 3 | Multi-language support (en, pt-BR, zh-CN, ru) |
 
 ### Runtime Dependencies
 - **libmpv-2.dll** — Required for video playback

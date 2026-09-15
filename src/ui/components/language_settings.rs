@@ -10,6 +10,7 @@ const LANGUAGES: &[(&str, &str)] = &[
     ("pt-BR", "Português (Brasil)"),
     ("en", "English"),
     ("zh-CN", "简体中文"),
+    ("ru", "Русский"),
 ];
 
 pub fn render_language_settings_section(ui: &mut egui::Ui) -> bool {
@@ -79,6 +80,26 @@ mod tests {
         assert_eq!(
             rust_i18n::t!("status_bar.item_many", locale = "zh-CN", count = 3).as_ref(),
             "3 个项目"
+        );
+    }
+
+    #[test]
+    fn russian_locale_is_embedded_and_translates() {
+        assert_eq!(
+            rust_i18n::t!("settings.appearance", locale = "ru").as_ref(),
+            "Внешний вид"
+        );
+        assert_eq!(
+            rust_i18n::t!("settings.theme_system", locale = "ru").as_ref(),
+            "Системная"
+        );
+    }
+
+    #[test]
+    fn russian_locale_translates_a_positional_argument() {
+        assert_eq!(
+            rust_i18n::t!("status_bar.item_many", locale = "ru", count = 3).as_ref(),
+            "Элементов: 3"
         );
     }
 }

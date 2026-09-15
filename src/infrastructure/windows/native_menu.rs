@@ -106,20 +106,28 @@ pub fn is_filtered_shell_text(text: &str) -> bool {
     const FILTERED_TEXT: &[&str] = &[
         "pin to quick access",
         "fixar no acesso rápido",
+        "закрепить в быстром доступе",
         "restore previous versions",
         "restaurar versões anteriores",
+        "восстановить предыдущие версии",
         "copy as path",
         "copiar como caminho",
+        "копировать как путь",
         "create shortcut",
         "criar atalho",
+        "создать ярлык",
         "always keep on this device",
         "sempre manter neste dispositivo",
+        "всегда хранить на этом устройстве",
         "free up space",
         "liberar espaço",
+        "освободить место",
         "open in terminal",
         "abrir no terminal",
+        "открыть в терминале",
         "open in terminal (admin)",
         "abrir no terminal (admin)",
+        "открыть в терминале (администратор)",
     ];
     let lower = text.to_lowercase();
     FILTERED_TEXT.iter().any(|entry| lower.contains(entry))

@@ -158,6 +158,7 @@ pub(crate) fn current_mpv_osc_language() -> &'static str {
         "pt-BR" | "pt" | "ptbr" => "pt-BR",
         "en" | "eng" | "en-US" => "en",
         "zh-CN" => "zh-CN",
+        "ru" | "ru-RU" | "rus" => "ru",
         _ => "en",
     }
 }

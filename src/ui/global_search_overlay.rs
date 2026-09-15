@@ -899,7 +899,7 @@ fn render_filter_controls(ui: &mut egui::Ui, app: &mut ImageViewerApp) {
             changed
         }
 
-        let date_order = if &*rust_i18n::locale() == "pt-BR" {
+        let date_order = if matches!(&*rust_i18n::locale(), "pt-BR" | "ru") {
             DateInputOrder::DayMonthYear
         } else {
             DateInputOrder::MonthDayYear
