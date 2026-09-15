@@ -494,13 +494,19 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
             if nav_back {
                 // Consume the key so the file-view keyboard navigation does not act on it too.
                 ctx.input_mut(|i| i.consume_key(egui::Modifiers::ALT, egui::Key::ArrowLeft));
-                app.go_back();
+                if app.can_go_back() {
+                    app.cancel_rectangle_selection();
+                    app.go_back();
+                }
                 user_active = true;
             }
 
             if nav_forward {
                 ctx.input_mut(|i| i.consume_key(egui::Modifiers::ALT, egui::Key::ArrowRight));
-                app.go_forward();
+                if app.can_go_forward() {
+                    app.cancel_rectangle_selection();
+                    app.go_forward();
+                }
                 user_active = true;
             }
         }

@@ -148,7 +148,7 @@ pub fn render_miller_column(
             }
         });
 
-    if action.is_none() && background_response.drag_started() {
+    if action.is_none() && background_response.drag_started_by(egui::PointerButton::Primary) {
         rectangle_start = ui.input(|input| input.pointer.press_origin());
     }
 
@@ -387,12 +387,18 @@ fn interaction(
     rectangle_start: &mut Option<egui::Pos2>,
     is_selected: bool,
 ) -> Option<MillerColumnAction> {
-    let (press_origin, pointer_position) =
-        ui.input(|input| (input.pointer.press_origin(), input.pointer.hover_pos()));
+    let (press_origin, pointer_position, primary_button_down) = ui.input(|input| {
+        (
+            input.pointer.press_origin(),
+            input.pointer.hover_pos(),
+            input.pointer.button_down(egui::PointerButton::Primary),
+        )
+    });
     if crate::ui::views::common::should_start_item_drag(
-        response.drag_started(),
-        response.dragged(),
-        response.is_pointer_button_down_on(),
+        response.drag_started_by(egui::PointerButton::Primary),
+        response.dragged_by(egui::PointerButton::Primary),
+        primary_button_down,
+        response.is_pointer_button_down_on() && primary_button_down,
         press_origin,
         pointer_position,
     ) {

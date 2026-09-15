@@ -19,6 +19,17 @@ impl ImageViewerApp {
         frame: &RectangleSelectionFrame,
         items: &[FileEntry],
     ) {
+        let (primary_down, primary_released) = ui.input(|input| {
+            (
+                input.pointer.primary_down(),
+                input.pointer.primary_released(),
+            )
+        });
+        if self.rectangle_selection_state.is_some() && !primary_down && !primary_released {
+            self.cancel_rectangle_selection();
+            return;
+        }
+
         let Some(metrics) = frame.metrics.clone() else {
             return;
         };
@@ -127,7 +138,7 @@ impl ImageViewerApp {
             state.preview_indices = preview_indices;
         }
 
-        if ui.input(|input| input.pointer.primary_released()) {
+        if primary_released {
             self.finish_miller_rectangle_selection(directory, items);
         } else {
             ui.ctx().request_repaint();

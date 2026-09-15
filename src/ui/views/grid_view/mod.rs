@@ -338,8 +338,8 @@ pub fn render_grid_view(
         ui.id().with("grid_bg"),
         Sense::click_and_drag(),
     );
-    let rectangle_geometry_needed =
-        ctx.rectangle_selection_state.is_some() || bg_response.drag_started();
+    let rectangle_geometry_needed = ctx.rectangle_selection_state.is_some()
+        || bg_response.drag_started_by(egui::PointerButton::Primary);
     let rectangle_metrics = if ctx.is_computer_view {
         None
     } else if grouped && rectangle_geometry_needed {
@@ -427,7 +427,7 @@ pub fn render_grid_view(
     // 3. Render Virtual Grid
     if !ctx.is_computer_view
         && ctx.rectangle_selection_state.is_none()
-        && bg_response.drag_started()
+        && bg_response.drag_started_by(egui::PointerButton::Primary)
     {
         if let Some(origin) = ui.input(|input| input.pointer.press_origin()) {
             ctx.rectangle_selection_frame.request_start(origin);

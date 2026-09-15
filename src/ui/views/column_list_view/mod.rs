@@ -122,8 +122,8 @@ pub fn render_column_list_view(
         ui.id().with("column_list_bg"),
         Sense::click_and_drag(),
     );
-    let rectangle_geometry_needed =
-        ctx.rectangle_selection_state.is_some() || background.drag_started();
+    let rectangle_geometry_needed = ctx.rectangle_selection_state.is_some()
+        || background.drag_started_by(egui::PointerButton::Primary);
     let rectangle_metrics = if ctx.is_computer_view {
         None
     } else if grouped && rectangle_geometry_needed {
@@ -158,7 +158,9 @@ pub fn render_column_list_view(
         rectangle_metrics,
     );
 
-    if !ctx.is_computer_view && ctx.rectangle_selection_state.is_none() && background.drag_started()
+    if !ctx.is_computer_view
+        && ctx.rectangle_selection_state.is_none()
+        && background.drag_started_by(egui::PointerButton::Primary)
     {
         if let Some(origin) = ui.input(|input| input.pointer.press_origin()) {
             ctx.rectangle_selection_frame.request_start(origin);

@@ -3262,7 +3262,7 @@ dependencies = [
 
 [[package]]
 name = "mtt-search-protocol"
-version = "0.2.0"
+version = "0.2.3"
 dependencies = [
  "bincode",
  "serde",
@@ -3270,7 +3270,7 @@ dependencies = [
 
 [[package]]
 name = "mtt-search-service"
-version = "0.2.0"
+version = "0.2.3"
 dependencies = [
  "bincode",
  "libmimalloc-sys",

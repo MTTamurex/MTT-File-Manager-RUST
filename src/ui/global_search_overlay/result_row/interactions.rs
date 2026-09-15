@@ -80,8 +80,9 @@ pub(super) fn maybe_start_drag(
     if is_renaming
         || pressed_action_button
         || !should_start_item_drag(
-            response.drag_started(),
-            response.dragged(),
+            response.drag_started_by(egui::PointerButton::Primary),
+            response.dragged_by(egui::PointerButton::Primary),
+            primary_down,
             response.is_pointer_button_down_on() && primary_down,
             press_origin,
             pointer_pos,

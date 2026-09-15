@@ -142,12 +142,18 @@ pub(super) fn render_list_item(
                 *secondary_clicked_empty_area = true;
             }
         }
-        let (press_origin, pointer_pos) =
-            ui.input(|i| (i.pointer.press_origin(), i.pointer.hover_pos()));
+        let (press_origin, pointer_pos, primary_button_down) = ui.input(|i| {
+            (
+                i.pointer.press_origin(),
+                i.pointer.hover_pos(),
+                i.pointer.button_down(egui::PointerButton::Primary),
+            )
+        });
         let drag_candidate = crate::ui::views::common::should_start_item_drag(
-            response.drag_started(),
-            response.dragged(),
-            response.is_pointer_button_down_on(),
+            response.drag_started_by(egui::PointerButton::Primary),
+            response.dragged_by(egui::PointerButton::Primary),
+            primary_button_down,
+            response.is_pointer_button_down_on() && primary_button_down,
             press_origin,
             pointer_pos,
         );

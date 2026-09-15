@@ -224,6 +224,17 @@ impl ImageViewerApp {
         frame: &RectangleSelectionFrame,
         suppress_new_start: bool,
     ) {
+        let (primary_down, primary_released) = ui.input(|input| {
+            (
+                input.pointer.primary_down(),
+                input.pointer.primary_released(),
+            )
+        });
+        if self.rectangle_selection_state.is_some() && !primary_down && !primary_released {
+            self.cancel_rectangle_selection();
+            return;
+        }
+
         if self
             .rectangle_selection_state
             .as_ref()
@@ -302,7 +313,6 @@ impl ImageViewerApp {
         self.apply_rectangle_selection_autoscroll(ui, frame);
         self.update_rectangle_selection_preview(metrics);
 
-        let primary_released = ui.input(|input| input.pointer.primary_released());
         if primary_released {
             self.finish_rectangle_selection();
         } else {

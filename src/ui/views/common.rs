@@ -44,10 +44,15 @@ pub fn get_file_type_string(item: &FileEntry) -> String {
 pub fn should_start_item_drag(
     response_drag_started: bool,
     response_dragged: bool,
+    primary_button_down: bool,
     pointer_button_down_on_item: bool,
     press_origin: Option<egui::Pos2>,
     pointer_pos: Option<egui::Pos2>,
 ) -> bool {
+    if !primary_button_down {
+        return false;
+    }
+
     if response_drag_started || response_dragged {
         return true;
     }
@@ -122,8 +127,8 @@ mod tests {
 
     #[test]
     fn explicit_drag_response_starts_item_drag() {
-        assert!(should_start_item_drag(true, false, false, None, None));
-        assert!(should_start_item_drag(false, true, false, None, None));
+        assert!(should_start_item_drag(true, false, true, false, None, None));
+        assert!(should_start_item_drag(false, true, true, false, None, None));
     }
 
     #[test]
@@ -131,6 +136,7 @@ mod tests {
         assert!(!should_start_item_drag(
             false,
             false,
+            true,
             true,
             Some(egui::pos2(10.0, 10.0)),
             Some(egui::pos2(13.0, 12.0)),
@@ -143,6 +149,7 @@ mod tests {
             false,
             false,
             true,
+            true,
             Some(egui::pos2(10.0, 10.0)),
             Some(egui::pos2(16.0, 10.0)),
         ));
@@ -154,9 +161,98 @@ mod tests {
             false,
             false,
             false,
+            false,
             Some(egui::pos2(10.0, 10.0)),
             Some(egui::pos2(30.0, 10.0)),
         ));
+    }
+
+    #[test]
+    fn side_button_drag_does_not_start_item_drag() {
+        assert!(!should_start_item_drag(true, true, false, true, None, None));
+        assert!(!should_start_item_drag(
+            false,
+            false,
+            false,
+            true,
+            Some(egui::pos2(10.0, 10.0)),
+            Some(egui::pos2(30.0, 10.0)),
+        ));
+    }
+
+    #[test]
+    fn egui_side_button_drag_is_not_treated_as_primary_drag() {
+        use std::cell::Cell;
+
+        fn observe_side_button_drag(button: egui::PointerButton) -> (bool, bool, bool, bool, bool) {
+            fn render_drag_response(ui: &mut egui::Ui) -> egui::Response {
+                let (rect, _) =
+                    ui.allocate_exact_size(egui::vec2(100.0, 100.0), egui::Sense::hover());
+                ui.interact(
+                    rect,
+                    egui::Id::new("side_button_drag_test"),
+                    egui::Sense::click_and_drag(),
+                )
+            }
+
+            let ctx = egui::Context::default();
+            let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+                let _ = render_drag_response(ui);
+            });
+            let _ = ctx.run_ui(
+                egui::RawInput {
+                    events: vec![egui::Event::PointerButton {
+                        pos: egui::pos2(10.0, 10.0),
+                        button,
+                        pressed: true,
+                        modifiers: egui::Modifiers::NONE,
+                    }],
+                    ..Default::default()
+                },
+                |ui| {
+                    let _ = render_drag_response(ui);
+                },
+            );
+
+            let observed = Cell::new((false, false, false, false, false));
+            let _ = ctx.run_ui(
+                egui::RawInput {
+                    events: vec![egui::Event::PointerMoved(egui::pos2(40.0, 10.0))],
+                    ..Default::default()
+                },
+                |ui| {
+                    let response = render_drag_response(ui);
+                    let primary_down =
+                        ui.input(|input| input.pointer.button_down(egui::PointerButton::Primary));
+                    observed.set((
+                        response.drag_started(),
+                        response.drag_started_by(egui::PointerButton::Primary),
+                        response.dragged(),
+                        response.dragged_by(egui::PointerButton::Primary),
+                        response.is_pointer_button_down_on(),
+                    ));
+                    assert!(!should_start_item_drag(
+                        response.drag_started(),
+                        response.dragged(),
+                        primary_down,
+                        response.is_pointer_button_down_on(),
+                        ui.input(|input| input.pointer.press_origin()),
+                        ui.input(|input| input.pointer.hover_pos()),
+                    ));
+                },
+            );
+
+            observed.get()
+        }
+
+        for button in [egui::PointerButton::Extra1, egui::PointerButton::Extra2] {
+            let (drag_started, primary_drag_started, dragged, primary_dragged, button_down_on) =
+                observe_side_button_drag(button);
+            assert!(drag_started || dragged);
+            assert!(!primary_drag_started);
+            assert!(!primary_dragged);
+            assert!(button_down_on);
+        }
     }
 
     #[test]
