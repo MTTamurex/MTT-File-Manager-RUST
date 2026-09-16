@@ -174,7 +174,12 @@ impl ImageViewerApp {
             return false;
         }
 
-        let target_parent = parent_path_for_deleted_panel(deleted_path);
+        let deleted_path = deleted_path.to_path_buf();
+        let target_parent = parent_path_for_deleted_panel(&deleted_path);
+        self.directory_cache.invalidate_children(&deleted_path);
+        if let Some(ref di) = self.directory_index {
+            let _ = di.invalidate_recursive(&deleted_path);
+        }
         if let Some(parent) = target_parent.as_deref().map(PathBuf::from) {
             self.directory_dirty_registry.mark_dirty(&parent);
             self.directory_cache.invalidate(&parent);
@@ -189,6 +194,9 @@ impl ImageViewerApp {
         );
 
         self.with_inactive_panel(|app| {
+            app.navigation_state
+                .navigation
+                .remove_paths_under(std::slice::from_ref(&deleted_path));
             app.loaded_path.clear();
             app.items = std::sync::Arc::new(Vec::new());
             app.group_projection = std::sync::Arc::new(Default::default());

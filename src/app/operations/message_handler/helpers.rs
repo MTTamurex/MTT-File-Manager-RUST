@@ -364,6 +364,7 @@ impl ImageViewerApp {
 
     pub(super) fn evict_stale_path_caches(&mut self, path: &Path) {
         let cleaned = Self::clean_path(path);
+        let is_known_directory = self.is_known_directory_path(&cleaned);
         let remove_paths = vec![cleaned.clone()];
 
         self.thumbnail_queue.remove_paths(&remove_paths);
@@ -382,6 +383,18 @@ impl ImageViewerApp {
         self.disk_cache.remove_cache_for_path(&cleaned);
         self.app_state_db.remove_covers_for_path(&cleaned);
         crate::workers::thumbnail::clear_failure_cache(&cleaned);
+
+        // A deleted folder can later be reached through navigation history;
+        // evict its own directory listing so a missing path cannot resurrect
+        // stale contents from the in-memory or persistent index. Avoid doing
+        // SQLite work for every deleted file in a watcher batch.
+        if is_known_directory {
+            self.directory_cache.invalidate_children(&cleaned);
+            if let Some(directory_index) = &self.directory_index {
+                let _ = directory_index.invalidate_recursive(&cleaned);
+            }
+            self.miller_columns.invalidate(&cleaned);
+        }
 
         // Drain any stale thumbnail data from the GPU upload queue so it
         // cannot re-insert an outdated texture into texture_cache later

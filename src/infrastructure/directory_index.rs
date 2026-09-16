@@ -299,18 +299,24 @@ impl DirectoryIndex {
     }
 
     pub fn invalidate_recursive(&self, parent: &Path) -> rusqlite::Result<()> {
-        let conn = self.conn.lock();
+        let mut conn = self.conn.lock();
 
-        let parent_str = format!("{}%", parent.to_string_lossy());
+        let parent_str = parent
+            .to_string_lossy()
+            .trim_end_matches(['\\', '/'])
+            .to_string();
+        let child_prefix = format!(r"{}\%", parent_str);
+        let tx = conn.transaction()?;
 
-        conn.execute(
-            "DELETE FROM file_index WHERE dir_path LIKE ?",
-            [&parent_str],
+        tx.execute(
+            "DELETE FROM file_index WHERE dir_path = ? OR dir_path LIKE ?",
+            [&parent_str, &child_prefix],
         )?;
-        conn.execute(
-            "DELETE FROM directory_index WHERE dir_path LIKE ?",
-            [&parent_str],
+        tx.execute(
+            "DELETE FROM directory_index WHERE dir_path = ? OR dir_path LIKE ?",
+            [&parent_str, &child_prefix],
         )?;
+        tx.commit()?;
 
         Ok(())
     }
@@ -425,5 +431,24 @@ mod tests {
 
         assert!(index.get_directory(&dir).is_none());
         assert!(index.try_get_directory(&dir).is_none());
+    }
+
+    #[test]
+    fn invalidate_recursive_does_not_match_sibling_prefixes() {
+        let temp = tempfile::tempdir().unwrap();
+        let index = DirectoryIndex::open(&temp.path().join("directory_cache.db")).unwrap();
+        let root = Path::new(r"C:\Users\user\Documents\Project\deleted");
+        let child = root.join("child");
+        let sibling = Path::new(r"C:\Users\user\Documents\Project\deleted-copy");
+
+        index.put_directory(root, &[indexed_file(1)], 1).unwrap();
+        index.put_directory(&child, &[indexed_file(1)], 1).unwrap();
+        index.put_directory(sibling, &[indexed_file(1)], 1).unwrap();
+
+        index.invalidate_recursive(root).unwrap();
+
+        assert!(index.get_directory(root).is_none());
+        assert!(index.get_directory(&child).is_none());
+        assert!(index.get_directory(sibling).is_some());
     }
 }

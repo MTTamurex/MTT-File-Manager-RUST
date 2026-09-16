@@ -833,6 +833,25 @@ impl ImageViewerApp {
         deleted_paths: Vec<PathBuf>,
         current_path_norm: &str,
     ) {
+        let current_folder_deleted =
+            self.remove_deleted_paths_from_navigation_history(&deleted_paths);
+
+        // The parent listing is invalidated below, but a previously visited
+        // deleted folder may also have its own cached listing. Drop that exact
+        // entry so a later navigation cannot resurrect its old contents. Do
+        // not take a SQLite writer lock for every deleted file in a batch.
+        for path in &deleted_paths {
+            if self.is_known_directory_path(path)
+                || Self::normalize_for_match(path) == current_path_norm
+            {
+                self.directory_cache.invalidate_children(path);
+                if let Some(directory_index) = &self.directory_index {
+                    let _ = directory_index.invalidate_recursive(path);
+                }
+                self.miller_columns.invalidate(path);
+            }
+        }
+
         for path in &deleted_paths {
             self.cache_manager.texture_cache.pop(path);
             self.cache_manager.loading_set.remove(path);
@@ -853,6 +872,12 @@ impl ImageViewerApp {
         self.enqueue_disk_cache_invalidations_forced(deleted_paths);
         let affected_parent_folders: Vec<&PathBuf> = parent_folders.iter().collect();
         self.reload_inactive_panel_if_matches(&affected_parent_folders);
+
+        if current_folder_deleted {
+            self.navigate_to_nearest_valid_ancestor();
+            return;
+        }
+
         self.handle_parent_folder_updates(parent_folders, current_path_norm);
     }
 

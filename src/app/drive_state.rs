@@ -184,6 +184,16 @@ pub fn normalize_drive_root_key(path: &str) -> Option<String> {
     Some(format!("{}:\\", drive.to_ascii_uppercase()))
 }
 
+pub(crate) fn drive_root_is_present(disks: &[(String, String)], path: &str) -> bool {
+    let Some(root) = normalize_drive_root_key(path) else {
+        return false;
+    };
+
+    disks
+        .iter()
+        .any(|(candidate, _)| normalize_drive_root_key(candidate).as_deref() == Some(root.as_str()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -456,5 +466,22 @@ mod tests {
             scan_result.disks,
             vec![("Z:\\".to_string(), "Local Disk (Z:)".to_string())]
         );
+    }
+
+    #[test]
+    fn drive_root_presence_ignores_label_changes() {
+        let old_disks = vec![("C:\\".to_string(), "Local Disk (C:)".to_string())];
+        let new_disks = vec![("C:\\".to_string(), "SYSTEM (C:)".to_string())];
+
+        assert!(drive_root_is_present(&new_disks, &old_disks[0].0));
+    }
+
+    #[test]
+    fn drive_root_presence_detects_added_or_removed_roots() {
+        let old_disks = vec![("C:\\".to_string(), "SYSTEM (C:)".to_string())];
+        let new_disks = vec![("D:\\".to_string(), "ARCHIVE (D:)".to_string())];
+
+        assert!(!drive_root_is_present(&new_disks, "C:\\"));
+        assert!(!drive_root_is_present(&old_disks, "D:\\"));
     }
 }

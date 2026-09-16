@@ -646,6 +646,8 @@ impl ImageViewerApp {
             }
         }
 
+        self.remove_deleted_paths_from_navigation_history(&paths_to_remove_from_ui);
+
         // Batch-remove all paths from the current folder in a single O(n)
         // retain pass instead of one O(n) pass per notify event.
         if !paths_to_remove_from_ui.is_empty()

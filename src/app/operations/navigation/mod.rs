@@ -234,6 +234,38 @@ impl ImageViewerApp {
         }
     }
 
+    /// Removes deleted filesystem paths from every open navigation timeline.
+    /// Returns whether the active panel's current history entry was removed so
+    /// callers handling a vanished current folder can redirect it safely.
+    pub(in crate::app::operations) fn remove_deleted_paths_from_navigation_history(
+        &mut self,
+        deleted_paths: &[PathBuf],
+    ) -> bool {
+        let active_current_removed = self
+            .navigation_state
+            .navigation
+            .remove_paths_under(deleted_paths);
+
+        self.tab_manager
+            .remove_deleted_paths_from_histories(deleted_paths);
+
+        for tab in &mut self.tab_manager.tabs {
+            if let Some(snapshot) = tab.dual_panel_inactive_state.as_mut() {
+                if snapshot.navigation.remove_paths_under(deleted_paths) {
+                    snapshot.redirect_to_history_current();
+                }
+            }
+        }
+
+        if let Some(snapshot) = self.dual_panel_inactive_state.as_mut() {
+            if snapshot.navigation.remove_paths_under(deleted_paths) {
+                snapshot.redirect_to_history_current();
+            }
+        }
+
+        active_current_removed
+    }
+
     pub fn go_back(&mut self) {
         if let Some(path) = self.navigation_state.navigation.go_back().cloned() {
             self.remember_current_folder_timestamp_hints();
@@ -493,6 +525,10 @@ impl ImageViewerApp {
             "[NAV] Current folder no longer exists: {:?}  — searching for valid ancestor",
             current
         );
+
+        // Remove the vanished folder before adding its parent. Otherwise the
+        // next Back action can return to the same invalid history entry.
+        self.remove_deleted_paths_from_navigation_history(std::slice::from_ref(&current));
 
         // FIX: Avoid blocking is_dir() calls on the UI thread.
         // GetFileAttributesW can block indefinitely on network/cloud/USB drives.

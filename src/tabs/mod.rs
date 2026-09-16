@@ -295,6 +295,52 @@ impl TabState {
         }
     }
 
+    /// Moves a tab to the remaining current history entry after its previous
+    /// folder was deleted. Clearing the snapshot forces a fresh load when the
+    /// tab is activated instead of displaying data from the deleted folder.
+    pub(crate) fn redirect_to_history_current(&mut self) {
+        if self.navigation.current_path().is_none() {
+            self.navigation.navigate_to(COMPUTER_VIEW_ID.to_string());
+        }
+        let path = self
+            .navigation
+            .current_path()
+            .cloned()
+            .unwrap_or_else(|| COMPUTER_VIEW_ID.to_string());
+
+        self.path = path.clone();
+        self.path_input = path.clone();
+        self.is_computer_view = path == COMPUTER_VIEW_ID;
+        self.is_recycle_bin_view = path == RECYCLE_BIN_VIEW_ID;
+        self.title = if self.is_computer_view {
+            COMPUTER_VIEW_ID.to_string()
+        } else {
+            tab_title_for_path(&path)
+        };
+
+        self.items = Arc::new(Vec::new());
+        self.all_items = Arc::new(Vec::new());
+        self.items_revision = self.items_revision.wrapping_add(1);
+        self.items_snapshot_compact = false;
+        self.total_items = 0;
+        self.is_loading_folder = false;
+        self.pending_items_rebuild = false;
+        self.pending_items_count = 0;
+        self.inactive_final_items_rebuild_pending = false;
+        self.selected_item = None;
+        self.selected_file = None;
+        self.selected_thumbnail = None;
+        self.selected_metadata = None;
+        self.selected_gif = None;
+        self.search_query.clear();
+        self.scroll_to_selected = false;
+        self.scroll_offset_y = 0.0;
+        self.scroll_offset_x = 0.0;
+        self.multi_selection.clear();
+        self.active_tag_filter = None;
+        self.group_projection = Arc::new(Default::default());
+    }
+
     fn sync_from_history(&mut self) {
         if let Some(path) = self.navigation.current_path() {
             self.path_input = path.clone();
@@ -419,6 +465,14 @@ impl TabManager {
     /// Get mutable reference to active tab
     pub fn active_mut(&mut self) -> &mut TabState {
         &mut self.tabs[self.active_tab]
+    }
+
+    pub(crate) fn remove_deleted_paths_from_histories(&mut self, deleted_paths: &[PathBuf]) {
+        for tab in self.tabs.iter_mut().chain(self.closed_tabs.iter_mut()) {
+            if tab.navigation.remove_paths_under(deleted_paths) {
+                tab.redirect_to_history_current();
+            }
+        }
     }
 
     /// PERF-05: whether another tab can be created without exceeding MAX_TABS.
@@ -654,5 +708,28 @@ mod tests {
         manager.duplicate_tab();
 
         assert!(manager.active().is_loading_folder);
+    }
+
+    #[test]
+    fn deleted_path_is_pruned_from_open_and_closed_tabs() {
+        let deleted = r"C:\Users\user\Documents\Project\deleted";
+        let mut manager = TabManager::new();
+
+        assert!(manager.new_tab_at(deleted));
+        manager.active_mut().items = Arc::new(vec![FileEntry::from_path(
+            PathBuf::from(deleted).join("file.txt"),
+            false,
+        )]);
+        manager.remove_deleted_paths_from_histories(&[PathBuf::from(deleted)]);
+
+        assert_eq!(manager.active().path, COMPUTER_VIEW_ID);
+        assert!(manager.active().items.is_empty());
+
+        let mut manager = TabManager::new();
+        assert!(manager.new_tab_at(deleted));
+        manager.close_active_tab();
+        manager.remove_deleted_paths_from_histories(&[PathBuf::from(deleted)]);
+        assert!(manager.reopen_closed_tab());
+        assert_eq!(manager.active().path, COMPUTER_VIEW_ID);
     }
 }

@@ -117,7 +117,7 @@ pub(crate) fn run_folder_load_pipeline(
     // path_has_cloud_attributes() was removed because GetFileAttributesW can BLOCK
     // indefinitely on cloud-only provider folders
     let is_onedrive_base = onedrive::is_cloud_sync_path(&base_path_buf);
-    let prefer_reliable_scan = directory_dirty_registry.is_dirty(base_path_buf.as_path())
+    let mut prefer_reliable_scan = directory_dirty_registry.is_dirty(base_path_buf.as_path())
         || (!is_onedrive_base
             && !crate::infrastructure::windows::path_is_usn_filesystem(base_path_buf.as_path())
                 .unwrap_or(true));
@@ -133,6 +133,7 @@ pub(crate) fn run_folder_load_pipeline(
         &base_path_buf,
         is_ssd,
         is_onedrive_base,
+        &mut prefer_reliable_scan,
         &mut batch_size,
         &mut batch_tracker,
         &mut batch_start,

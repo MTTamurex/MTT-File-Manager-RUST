@@ -24,6 +24,7 @@ pub(super) fn try_handle_fast_paths(
     base_path_buf: &PathBuf,
     is_ssd: bool,
     is_onedrive_base: bool,
+    prefer_reliable_scan: &mut bool,
     batch_size: &mut usize,
     batch_tracker: &mut AdaptiveBatchTracker,
     batch_start: &mut Instant,
@@ -37,13 +38,12 @@ pub(super) fn try_handle_fast_paths(
     directory_index_opt: &Option<Arc<DirectoryIndex>>,
     _show_hidden: bool,
 ) -> bool {
-    let directory_mtime_ms = |path: &PathBuf| -> u64 {
+    let directory_mtime_ms = |path: &PathBuf| -> Option<u64> {
         std::fs::metadata(path)
             .ok()
             .and_then(|m| m.modified().ok())
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .map(|d| d.as_millis() as u64)
-            .unwrap_or(0)
     };
 
     // Check whether any subdirectory in a cached listing has a stale `modified`
@@ -63,13 +63,19 @@ pub(super) fn try_handle_fast_paths(
             .filter(|e| e.is_dir)
             .take(MAX_SUBFOLDER_MTIME_CHECKS)
         {
-            let disk_mtime = std::fs::metadata(&entry.path)
+            let Some(disk_mtime) = std::fs::metadata(&entry.path)
                 .ok()
                 .and_then(|m| m.modified().ok())
                 .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                 .map(|d| d.as_secs())
-                .unwrap_or(0);
-            if disk_mtime != 0 && disk_mtime != entry.modified {
+            else {
+                log::debug!(
+                    "[FOLDER-LOADING] Cached subfolder is unavailable: {:?}",
+                    entry.path.file_name().unwrap_or_default()
+                );
+                return true;
+            };
+            if disk_mtime != entry.modified {
                 log::debug!(
                     "[FOLDER-LOADING] Subfolder mtime mismatch: {:?} cached={} disk={}",
                     entry.path.file_name().unwrap_or_default(),
@@ -109,6 +115,7 @@ pub(super) fn try_handle_fast_paths(
                     cached_at_ms
                 );
                 if is_onedrive_base && !onedrive::directory_cache_is_recent(cached_at_ms) {
+                    *prefer_reliable_scan = true;
                     log::info!(
                         "[FOLDER-LOADING] DirectoryCache stale for OneDrive {:?} (cached_at_ms={}), invalidating",
                         base_path_buf,
@@ -120,7 +127,18 @@ pub(super) fn try_handle_fast_paths(
                     }
                 } else if !is_onedrive_base {
                     // Fail-safe against missed watcher events: validate folder mtime.
-                    let dir_mtime_ms = directory_mtime_ms(base_path_buf);
+                    let Some(dir_mtime_ms) = directory_mtime_ms(base_path_buf) else {
+                        log::debug!(
+                            "[FOLDER-LOADING] DirectoryCache entry ignored because folder is unavailable: {:?}",
+                            base_path_buf
+                        );
+                        *prefer_reliable_scan = true;
+                        directory_cache.invalidate(base_path_buf);
+                        if let Some(di) = directory_index_opt {
+                            let _ = di.invalidate(base_path_buf);
+                        }
+                        return false;
+                    };
                     if dir_mtime_ms > cached_at_ms {
                         log::debug!(
                             "[FOLDER-LOADING] DirectoryCache stale for {:?} (dir_mtime_ms={} > cached_at_ms={}), invalidating",
@@ -285,15 +303,20 @@ pub(super) fn try_handle_fast_paths(
                 // Validate: Check if directory mtime is newer than last_scan
                 // CRITICAL: For OneDrive paths, skip mtime validation (can block indefinitely on cloud-only dirs)
                 // Trust the DriveWatcher and explicit invalidation instead
-                let dir_modified = if crate::infrastructure::onedrive::is_cloud_sync_path(&base) {
-                    0 // Skip mtime check for Cloud Files providers - trust watcher
-                } else {
-                    std::fs::metadata(&base)
-                        .ok()
-                        .and_then(|m| m.modified().ok())
-                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                        .map(|d| d.as_secs())
-                        .unwrap_or(0)
+                let Some(dir_modified) =
+                    (if crate::infrastructure::onedrive::is_cloud_sync_path(&base) {
+                        Some(0) // Skip mtime check for Cloud Files providers - trust watcher
+                    } else {
+                        directory_mtime_ms(&base).map(|milliseconds| milliseconds / 1_000)
+                    })
+                else {
+                    log::debug!(
+                        "[FOLDER-LOADING] DirectoryIndex entry ignored because folder is unavailable: {:?}",
+                        base
+                    );
+                    *prefer_reliable_scan = true;
+                    let _ = di.invalidate(&base);
+                    return false;
                 };
 
                 if dir_modified > meta.last_scan {
@@ -398,6 +421,7 @@ pub(super) fn try_handle_fast_paths(
                 directory_cache.get_with_meta(&base_path_buf_owned)
             {
                 if is_onedrive_base && !onedrive::directory_cache_is_recent(cached_at_ms) {
+                    *prefer_reliable_scan = true;
                     log::info!(
                         "[FOLDER-LOADING] Secondary DirectoryCache stale for OneDrive {:?} (cached_at_ms={}), invalidating",
                         base_path_buf_owned,
@@ -411,7 +435,18 @@ pub(super) fn try_handle_fast_paths(
                 }
 
                 if !is_onedrive_base {
-                    let dir_mtime_ms = directory_mtime_ms(&base_path_buf_owned);
+                    let Some(dir_mtime_ms) = directory_mtime_ms(&base_path_buf_owned) else {
+                        log::debug!(
+                            "[FOLDER-LOADING] Secondary DirectoryCache entry ignored because folder is unavailable: {:?}",
+                            base_path_buf_owned
+                        );
+                        *prefer_reliable_scan = true;
+                        directory_cache.invalidate(&base_path_buf_owned);
+                        if let Some(di) = directory_index_opt {
+                            let _ = di.invalidate(&base_path_buf_owned);
+                        }
+                        return false;
+                    };
                     if dir_mtime_ms > cached_at_ms {
                         log::debug!(
                             "[FOLDER-LOADING] Secondary DirectoryCache stale for {:?} (dir_mtime_ms={} > cached_at_ms={}), invalidating",

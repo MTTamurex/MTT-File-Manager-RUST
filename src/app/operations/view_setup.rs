@@ -400,22 +400,35 @@ impl ImageViewerApp {
                         .reset_preload(std::time::Instant::now());
                     // Invalidate cached drive types since drive list changed
                     crate::ui::sidebar::invalidate_drive_type_cache();
-                    for (old_path, old_label) in &old_disks {
-                        let unchanged = self
-                            .drive_state
-                            .disks
-                            .iter()
-                            .any(|(path, label)| path == old_path && label == old_label);
-                        if !unchanged {
-                            if let Some(letter) = old_path.chars().next() {
-                                crate::infrastructure::windows::invalidate_physical_drive_cache(
-                                    letter,
-                                );
+                    let drive_roots_changed =
+                        old_disks.iter().any(|(old_path, _)| {
+                            !crate::app::drive_state::drive_root_is_present(
+                                &self.drive_state.disks,
+                                old_path,
+                            )
+                        }) || self.drive_state.disks.iter().any(|(new_path, _)| {
+                            !crate::app::drive_state::drive_root_is_present(&old_disks, new_path)
+                        });
+
+                    // Fast startup enumeration uses provisional labels. A label
+                    // change is not a volume change and must not erase capacity
+                    // values that are already available for the same root.
+                    if drive_roots_changed {
+                        for (old_path, _) in &old_disks {
+                            if !crate::app::drive_state::drive_root_is_present(
+                                &self.drive_state.disks,
+                                old_path,
+                            ) {
+                                if let Some(letter) = old_path.chars().next() {
+                                    crate::infrastructure::windows::invalidate_physical_drive_cache(
+                                        letter,
+                                    );
+                                }
+                                self.drive_state.remove_cached_drive_info(old_path);
                             }
-                            self.drive_state.remove_cached_drive_info(old_path);
                         }
+                        self.drive_state.invalidate_drive_info_refreshes();
                     }
-                    self.drive_state.invalidate_drive_info_refreshes();
 
                     // Tag assignments remain persistent while a root is
                     // unavailable. Reload visible tag views so unmounted paths

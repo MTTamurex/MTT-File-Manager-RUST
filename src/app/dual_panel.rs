@@ -6,11 +6,12 @@
 
 use crate::application::navigation::NavigationHistory;
 use crate::domain::file_entry::{FileEntry, FoldersPosition, SortMode, ViewMode};
+use crate::domain::special_paths::{COMPUTER_VIEW_ID, RECYCLE_BIN_VIEW_ID};
 use crate::ui::cache::FxHashSet;
 
 use eframe::egui;
 use std::path::PathBuf;
-use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -223,6 +224,67 @@ impl PanelSnapshot {
 
     pub(crate) fn restore_from_storage(&mut self) {
         self.restore_items_snapshot();
+    }
+
+    /// Moves an inactive snapshot to the remaining history entry after its
+    /// previous folder was deleted. Clearing the snapshot forces a fresh load
+    /// instead of displaying data from the deleted folder.
+    pub(crate) fn redirect_to_history_current(&mut self) {
+        if self.navigation.current_path().is_none() {
+            self.navigation.navigate_to(COMPUTER_VIEW_ID.to_string());
+        }
+        let path = self
+            .navigation
+            .current_path()
+            .cloned()
+            .unwrap_or_else(|| COMPUTER_VIEW_ID.to_string());
+
+        self.path = path.clone();
+        self.path_input = path.clone();
+        self.is_computer_view = path == COMPUTER_VIEW_ID;
+        self.is_recycle_bin_view = path == RECYCLE_BIN_VIEW_ID;
+        self.loaded_path.clear();
+        self.items = Arc::new(Vec::new());
+        self.all_items = Arc::new(Vec::new());
+        self.items_revision = self.items_revision.wrapping_add(1);
+        self.items_snapshot_compact = false;
+        self.total_items = 0;
+        self.is_loading_folder = false;
+        self.folder_load_error = None;
+        self.selected_item = None;
+        self.selected_file = None;
+        self.selected_thumbnail = None;
+        self.selected_metadata = None;
+        self.selected_gif = None;
+        self.multi_selection.clear();
+        self.selection_anchor = None;
+        self.rectangle_selection_state = None;
+        self.search_query.clear();
+        self.active_tag_filter = None;
+        self.group_projection = Arc::new(Default::default());
+        self.current_folder_locked = false;
+        self.pending_list_column_autofit = false;
+        self.miller_columns = Default::default();
+        self.scroll_offset_y = 0.0;
+        self.scroll_offset_x = 0.0;
+        self.scroll_to_selected = false;
+        self.visible_index_range = None;
+        self.visible_paths_cache.clear();
+        self.visible_group_paths.clear();
+        self.visible_range_cached = None;
+        self.renaming_state = None;
+        self.focus_rename = false;
+        self.generation = self.generation.wrapping_add(1);
+        self.current_generation
+            .store(self.generation, AtomicOrdering::Relaxed);
+        self.folder_load_generation
+            .store(self.generation, AtomicOrdering::Relaxed);
+        self.pending_all_items_clear = false;
+        self.hold_visible_items_until_load_complete = false;
+        self.pending_items_rebuild = false;
+        self.pending_items_count = 0;
+        self.inactive_final_items_rebuild_pending = false;
+        self.stale_items_snapshot = None;
     }
 
     fn can_compact_items_snapshot(&self) -> bool {
