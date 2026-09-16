@@ -112,5 +112,12 @@ impl DriveState {
         self.drive_health_pending.clear();
         self.drive_health_updated_at.clear();
         self.drive_health_failed_at.clear();
+        let mut changed = false;
+        for info in self.drive_info_cache.values_mut() {
+            changed |= info.health.take().is_some();
+        }
+        if changed {
+            self.drive_info_cache_epoch = self.drive_info_cache_epoch.wrapping_add(1);
+        }
     }
 }

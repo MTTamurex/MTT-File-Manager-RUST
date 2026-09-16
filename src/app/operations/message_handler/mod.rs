@@ -107,9 +107,11 @@ impl ImageViewerApp {
             for letter in cached_physical_letters {
                 crate::infrastructure::windows::invalidate_physical_drive_cache(letter);
             }
-            // A different volume can reuse the same letter and label. Treat device
-            // events as an identity boundary instead of merging old metadata.
-            self.drive_state.clear_cached_drive_info();
+            // Keep known capacity values visible while the asynchronous drive scan
+            // determines which roots actually changed. Clearing every entry here
+            // makes unaffected drives lose their bars until the next query finishes.
+            // Health data is identity-sensitive and can be safely discarded now.
+            self.drive_state.clear_drive_health();
             self.drive_state.invalidate_drive_info_refreshes();
             self.drive_state
                 .drive_health_scheduler

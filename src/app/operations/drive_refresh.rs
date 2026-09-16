@@ -16,28 +16,37 @@ const REMOTE_DRIVE_INFO_REFRESH_INTERVAL_MS: u64 = 60000;
 /// and keep the last known values in between.
 const VIRTUAL_DRIVE_INFO_REFRESH_INTERVAL_MS: u64 = 30000;
 
-fn virtual_drive_info_query_is_due(letter: char, now: Instant) -> bool {
+fn virtual_drive_info_query_times(
+) -> &'static parking_lot::Mutex<rustc_hash::FxHashMap<char, Instant>> {
     static LAST_QUERY: std::sync::OnceLock<
         parking_lot::Mutex<rustc_hash::FxHashMap<char, Instant>>,
     > = std::sync::OnceLock::new();
-    let queries =
-        LAST_QUERY.get_or_init(|| parking_lot::Mutex::new(rustc_hash::FxHashMap::default()));
-    let mut guard = queries.lock();
-    match guard.get(&letter) {
+    LAST_QUERY.get_or_init(|| parking_lot::Mutex::new(rustc_hash::FxHashMap::default()))
+}
+
+fn virtual_drive_info_query_is_due(letter: char, now: Instant) -> bool {
+    match virtual_drive_info_query_times().lock().get(&letter) {
         Some(last)
             if now.saturating_duration_since(*last)
                 < Duration::from_millis(VIRTUAL_DRIVE_INFO_REFRESH_INTERVAL_MS) =>
         {
             false
         }
-        _ => {
-            guard.insert(letter, now);
-            true
-        }
+        _ => true,
     }
 }
 
-fn should_query_drive_info(path: &str, now: Instant) -> bool {
+fn record_virtual_drive_info_query(letter: char, now: Instant) {
+    virtual_drive_info_query_times()
+        .lock()
+        .insert(letter.to_ascii_uppercase(), now);
+}
+
+fn configured_virtual_drive_query_is_due(has_cached_capacity: bool, interval_is_due: bool) -> bool {
+    !has_cached_capacity || interval_is_due
+}
+
+fn should_query_drive_info(path: &str, has_cached_capacity: bool, now: Instant) -> bool {
     let Some(letter) =
         crate::infrastructure::windows::extract_drive_letter(std::path::Path::new(path))
     else {
@@ -46,7 +55,21 @@ fn should_query_drive_info(path: &str, now: Instant) -> bool {
     if crate::infrastructure::virtual_drive_config::get_drive_override(letter).is_none() {
         return true;
     }
-    virtual_drive_info_query_is_due(letter, now)
+    configured_virtual_drive_query_is_due(
+        has_cached_capacity,
+        virtual_drive_info_query_is_due(letter, now),
+    )
+}
+
+fn record_successful_virtual_drive_info_query(path: &str, now: Instant) {
+    let Some(letter) =
+        crate::infrastructure::windows::extract_drive_letter(std::path::Path::new(path))
+    else {
+        return;
+    };
+    if crate::infrastructure::virtual_drive_config::get_drive_override(letter).is_some() {
+        record_virtual_drive_info_query(letter, now);
+    }
 }
 
 fn take_due_drive_bitmask_check(last_check: &mut Instant, now: Instant) -> bool {
@@ -82,57 +105,109 @@ fn drive_scope_matches(
     }
 }
 
-fn query_drive_info(
-    path: String,
-    drive_type: crate::infrastructure::windows::DriveType,
-) -> DriveInfoRefreshEntry {
-    let vol = crate::infrastructure::windows::get_volume_info(&path);
-    let hw = crate::infrastructure::windows::query_hardware_fields(&path, drive_type);
-    DriveInfoRefreshEntry {
-        path,
-        capacity_query_succeeded: vol.capacity_query_succeeded,
-        info: DriveInfo {
-            file_system: vol.file_system,
-            total_space: vol.total_space,
-            free_space: vol.free_space,
-            drive_type,
-            model: hw.model,
-            serial_number: hw.serial_number,
-            firmware_revision: hw.firmware_revision,
-            bus_type: hw.bus_type,
-            health: None,
-        },
+fn same_drive_root(left: &str, right: &str) -> bool {
+    match (
+        crate::app::drive_state::normalize_drive_root_key(left),
+        crate::app::drive_state::normalize_drive_root_key(right),
+    ) {
+        (Some(left), Some(right)) => left == right,
+        _ => false,
     }
 }
 
 fn spawn_drive_info_refresh(
     scope: DriveInfoRefreshScope,
     generation: u64,
-    disks_snapshot: Vec<String>,
+    disks_snapshot: Vec<(String, bool)>,
     tx: std::sync::mpsc::Sender<DriveInfoRefreshResult>,
     ctx: eframe::egui::Context,
 ) {
     std::thread::spawn(move || {
         let queried = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            for path in disks_snapshot {
+            let mut hardware_jobs = Vec::new();
+            for (path, has_cached_capacity) in disks_snapshot {
                 let drive_type = crate::infrastructure::windows::detect_drive_type(&path);
                 if !drive_scope_matches(scope, drive_type) {
                     continue;
                 }
-                if !should_query_drive_info(&path, Instant::now()) {
+                if !should_query_drive_info(&path, has_cached_capacity, Instant::now()) {
                     continue;
                 }
 
                 let query_start = Instant::now();
-                let entry = query_drive_info(path, drive_type);
+                let vol = crate::infrastructure::windows::get_volume_info(&path);
+                if vol.capacity_query_succeeded {
+                    record_successful_virtual_drive_info_query(&path, Instant::now());
+                }
                 crate::infrastructure::io_trace::record_drive_info_query(
                     query_start.elapsed().as_millis() as u64,
                 );
+                let capacity_entry = DriveInfoRefreshEntry {
+                    path: path.clone(),
+                    capacity_query_succeeded: vol.capacity_query_succeeded,
+                    info: DriveInfo {
+                        file_system: vol.file_system,
+                        total_space: vol.total_space,
+                        free_space: vol.free_space,
+                        drive_type,
+                        model: None,
+                        serial_number: None,
+                        firmware_revision: None,
+                        bus_type: None,
+                        health: None,
+                    },
+                };
                 if tx
                     .send(DriveInfoRefreshResult {
                         scope,
                         generation,
-                        entries: vec![entry],
+                        entries: vec![capacity_entry],
+                        complete: false,
+                    })
+                    .is_err()
+                {
+                    return Vec::new();
+                }
+                ctx.request_repaint();
+
+                if matches!(
+                    drive_type,
+                    crate::infrastructure::windows::DriveType::Fixed
+                        | crate::infrastructure::windows::DriveType::Removable
+                ) {
+                    hardware_jobs.push((path, drive_type));
+                }
+            }
+
+            // Hardware metadata can require slow physical-device IO. Query it
+            // only after every capacity result has been published, so one slow
+            // device cannot delay the bars for the remaining drives.
+            for (path, drive_type) in hardware_jobs {
+                let query_start = Instant::now();
+                let hw = crate::infrastructure::windows::query_hardware_fields(&path, drive_type);
+                crate::infrastructure::io_trace::record_drive_info_query(
+                    query_start.elapsed().as_millis() as u64,
+                );
+                let hardware_entry = DriveInfoRefreshEntry {
+                    path,
+                    capacity_query_succeeded: false,
+                    info: DriveInfo {
+                        file_system: String::new(),
+                        total_space: 0,
+                        free_space: 0,
+                        drive_type,
+                        model: hw.model,
+                        serial_number: hw.serial_number,
+                        firmware_revision: hw.firmware_revision,
+                        bus_type: hw.bus_type,
+                        health: None,
+                    },
+                };
+                if tx
+                    .send(DriveInfoRefreshResult {
+                        scope,
+                        generation,
+                        entries: vec![hardware_entry],
                         complete: false,
                     })
                     .is_err()
@@ -172,12 +247,18 @@ impl ImageViewerApp {
 
         for item in self.all_items_mut().iter_mut() {
             let item_path = item.path.to_string_lossy();
-            if let Some((_, info)) = results.iter().find(|(p, _)| p == item_path.as_ref()) {
+            if let Some((_, info)) = results
+                .iter()
+                .find(|(path, _)| same_drive_root(path, item_path.as_ref()))
+            {
                 item.drive_info = Some(info.clone());
             }
         }
         self.sort_items();
         self.sync_selected_file_from_all_items();
+        if !self.in_inactive_panel_context {
+            self.sync_to_tab();
+        }
     }
 
     pub fn refresh_drive_info_async(&mut self) {
@@ -193,7 +274,13 @@ impl ImageViewerApp {
             .drive_state
             .disks
             .iter()
-            .map(|(path, _)| path.clone())
+            .map(|(path, _)| {
+                let has_cached_capacity = self
+                    .drive_state
+                    .cached_drive_info(path)
+                    .is_some_and(|info| info.total_space > 0);
+                (path.clone(), has_cached_capacity)
+            })
             .collect();
         spawn_drive_info_refresh(
             scope,
@@ -335,6 +422,14 @@ mod tests {
     }
 
     #[test]
+    fn drive_info_results_match_equivalent_root_forms() {
+        assert!(same_drive_root("c:", "C:\\"));
+        assert!(same_drive_root("D:\\", "d:\\folder"));
+        assert!(!same_drive_root("C:\\", "D:\\"));
+        assert!(!same_drive_root("not-a-drive", "C:\\"));
+    }
+
+    #[test]
     fn bitmask_check_is_not_repeated_each_frame_after_deadline() {
         let start = Instant::now();
         let mut last_check = start;
@@ -373,7 +468,7 @@ mod tests {
     #[test]
     fn virtual_drive_info_queries_are_throttled() {
         let start = Instant::now();
-        assert!(virtual_drive_info_query_is_due('Q', start));
+        record_virtual_drive_info_query('Q', start);
         assert!(!virtual_drive_info_query_is_due(
             'Q',
             start + Duration::from_millis(5000)
@@ -382,5 +477,12 @@ mod tests {
             'Q',
             start + Duration::from_millis(VIRTUAL_DRIVE_INFO_REFRESH_INTERVAL_MS)
         ));
+    }
+
+    #[test]
+    fn virtual_drive_without_cached_capacity_bypasses_throttle() {
+        assert!(configured_virtual_drive_query_is_due(false, false));
+        assert!(!configured_virtual_drive_query_is_due(true, false));
+        assert!(configured_virtual_drive_query_is_due(true, true));
     }
 }

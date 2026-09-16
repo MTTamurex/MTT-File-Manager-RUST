@@ -460,7 +460,10 @@ pub fn render_sidebar_drives(
             let is_expanded = ctx.tree_state.is_expanded(root_path);
             let is_tree_loading = ctx.tree_state.is_loading(root_path);
             let show_eject_button = ctx.mounted_iso_drives.contains_key(disk_path.as_str());
-            let drive_info = ctx.drive_info_cache.get(disk_path.as_str());
+            let drive_info = ctx.drive_info_cache.get(disk_path.as_str()).or_else(|| {
+                crate::app::drive_state::normalize_drive_root_key(disk_path)
+                    .and_then(|root| ctx.drive_info_cache.get(&root))
+            });
             let usage_ratio = drive_info.and_then(|info| {
                 crate::ui::theme::drive_usage_ratio(info.total_space, info.free_space)
             });
