@@ -115,6 +115,14 @@ impl ImageViewerApp {
                 .drive_health_scheduler
                 .reset_preload(Instant::now());
 
+            // A volume can be remounted with the same drive letter and label,
+            // so the drive-list comparison below may report no change. Treat
+            // every device notification as an availability boundary: discard
+            // stale purge results and rebuild visible tag views so paths that
+            // became available can reappear.
+            self.spawn_purge_missing_tag_views();
+            self.refresh_tag_views_after_drive_change();
+
             // Launch async drive scan (non-blocking)
             let now = Instant::now();
             self.drive_state.last_drive_bitmask_check = now;
@@ -231,10 +239,7 @@ impl ImageViewerApp {
                     generation,
                     paths,
                 } => {
-                    self.pending_tag_view_hides
-                        .entry(generation)
-                        .or_default()
-                        .extend(paths);
+                    self.queue_tag_view_hides_for_generation(generation, &paths);
                 }
             }
         }

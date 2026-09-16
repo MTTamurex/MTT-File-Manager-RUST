@@ -18,6 +18,10 @@ fn next_generation() -> usize {
     GLOBAL_GENERATION.fetch_add(1, AtomicOrdering::Relaxed) + 1
 }
 
+pub(in crate::app::operations) fn allocate_folder_load_generation() -> usize {
+    next_generation()
+}
+
 fn publish_folder_load_generation(
     generation: usize,
     folder_load_generation: &AtomicUsize,
@@ -68,7 +72,7 @@ impl ImageViewerApp {
     }
 
     pub(in crate::app::operations) fn bump_folder_load_generation(&mut self) {
-        self.generation = next_generation(); // Globally unique generation ID
+        self.generation = allocate_folder_load_generation(); // Globally unique generation ID
         let active_generation =
             (!self.in_inactive_panel_context).then_some(self.current_generation.as_ref());
         publish_folder_load_generation(
@@ -161,5 +165,13 @@ mod tests {
 
         assert_eq!(inactive_panel.load(AtomicOrdering::Relaxed), 32);
         assert_eq!(active_workers.load(AtomicOrdering::Relaxed), 31);
+    }
+
+    #[test]
+    fn allocated_generations_are_globally_unique() {
+        let first = allocate_folder_load_generation();
+        let second = allocate_folder_load_generation();
+
+        assert_ne!(first, second);
     }
 }

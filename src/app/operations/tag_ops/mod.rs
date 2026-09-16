@@ -9,6 +9,7 @@ pub(crate) mod normalized;
 pub(crate) mod purge_worker;
 mod sidebar_order;
 mod view;
+mod view_hides;
 
 pub(crate) use sidebar_order::{
     parse_sidebar_tag_order, reconcile_sidebar_tag_order, serialize_sidebar_tag_order,

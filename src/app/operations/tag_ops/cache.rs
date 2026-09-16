@@ -225,25 +225,79 @@ impl ImageViewerApp {
     fn retain_tag_view_items(
         items: &mut Arc<Vec<crate::domain::file_entry::FileEntry>>,
         removed_path_keys: &FxHashSet<String>,
-    ) {
+    ) -> bool {
+        let previous_len = items.len();
         Arc::make_mut(items)
             .retain(|item| !removed_path_keys.contains(&normalize_path_text(&item.path)));
+        items.len() != previous_len
     }
 
-    fn prune_paths_from_loaded_tag_views(&mut self, paths: &[PathBuf]) {
+    pub(super) fn prune_paths_from_loaded_tag_views(&mut self, paths: &[PathBuf]) {
         let removed_path_keys: FxHashSet<String> =
             paths.iter().map(|path| normalize_path_text(path)).collect();
 
         if tag_id_from_view_path(&self.navigation_state.current_path).is_some() {
-            Self::retain_tag_view_items(&mut self.all_items, &removed_path_keys);
-            Self::retain_tag_view_items(&mut self.items, &removed_path_keys);
+            let all_items_changed =
+                Self::retain_tag_view_items(&mut self.all_items, &removed_path_keys);
+            let visible_items_changed =
+                Self::retain_tag_view_items(&mut self.items, &removed_path_keys);
+            if all_items_changed || visible_items_changed {
+                self.items_revision = self.items_revision.wrapping_add(1);
+                self.invalidate_active_items_rebuild();
+                self.multi_selection
+                    .retain(|path| !removed_path_keys.contains(&normalize_path_text(path)));
+                if self.selected_file.as_ref().is_some_and(|item| {
+                    removed_path_keys.contains(&normalize_path_text(&item.path))
+                }) {
+                    self.selected_item = None;
+                    self.selected_file = None;
+                    self.selected_thumbnail = None;
+                    self.selected_metadata = None;
+                    self.selected_gif = None;
+                }
+                self.rebuild_group_projection();
+                self.reconcile_visible_selection_index();
+            }
             self.total_items = self.items.len();
         }
 
         if let Some(snapshot) = self.dual_panel_inactive_state.as_mut() {
             if tag_id_from_view_path(&snapshot.path).is_some() {
-                Self::retain_tag_view_items(&mut snapshot.all_items, &removed_path_keys);
-                Self::retain_tag_view_items(&mut snapshot.items, &removed_path_keys);
+                let all_items_changed =
+                    Self::retain_tag_view_items(&mut snapshot.all_items, &removed_path_keys);
+                let visible_items_changed =
+                    Self::retain_tag_view_items(&mut snapshot.items, &removed_path_keys);
+                if all_items_changed || visible_items_changed {
+                    snapshot.items_revision = snapshot.items_revision.wrapping_add(1);
+                    snapshot
+                        .multi_selection
+                        .retain(|path| !removed_path_keys.contains(&normalize_path_text(path)));
+                    if snapshot.selected_file.as_ref().is_some_and(|item| {
+                        removed_path_keys.contains(&normalize_path_text(&item.path))
+                    }) {
+                        snapshot.selected_item = None;
+                        snapshot.selected_file = None;
+                        snapshot.selected_thumbnail = None;
+                        snapshot.selected_metadata = None;
+                        snapshot.selected_gif = None;
+                    }
+                    let visible_items = if snapshot.items_snapshot_compact {
+                        &snapshot.all_items
+                    } else {
+                        &snapshot.items
+                    };
+                    snapshot.group_projection =
+                        Arc::new(crate::application::grouping::build_group_projection(
+                            visible_items,
+                            snapshot.group_mode,
+                            snapshot.group_descending,
+                        ));
+                    snapshot.selected_item = snapshot.selected_file.as_ref().and_then(|selected| {
+                        visible_items
+                            .iter()
+                            .position(|item| item.path == selected.path)
+                    });
+                }
                 snapshot.total_items = snapshot.items.len();
             }
         }
@@ -254,8 +308,40 @@ impl ImageViewerApp {
                 continue;
             }
             if tag_id_from_view_path(&tab.path).is_some() {
-                Self::retain_tag_view_items(&mut tab.all_items, &removed_path_keys);
-                Self::retain_tag_view_items(&mut tab.items, &removed_path_keys);
+                let all_items_changed =
+                    Self::retain_tag_view_items(&mut tab.all_items, &removed_path_keys);
+                let visible_items_changed =
+                    Self::retain_tag_view_items(&mut tab.items, &removed_path_keys);
+                if all_items_changed || visible_items_changed {
+                    tab.items_revision = tab.items_revision.wrapping_add(1);
+                    tab.multi_selection
+                        .retain(|path| !removed_path_keys.contains(&normalize_path_text(path)));
+                    if tab.selected_file.as_ref().is_some_and(|item| {
+                        removed_path_keys.contains(&normalize_path_text(&item.path))
+                    }) {
+                        tab.selected_item = None;
+                        tab.selected_file = None;
+                        tab.selected_thumbnail = None;
+                        tab.selected_metadata = None;
+                        tab.selected_gif = None;
+                    }
+                    let visible_items = if tab.items_snapshot_compact {
+                        &tab.all_items
+                    } else {
+                        &tab.items
+                    };
+                    tab.group_projection =
+                        Arc::new(crate::application::grouping::build_group_projection(
+                            visible_items,
+                            tab.group_mode,
+                            tab.group_descending,
+                        ));
+                    tab.selected_item = tab.selected_file.as_ref().and_then(|selected| {
+                        visible_items
+                            .iter()
+                            .position(|item| item.path == selected.path)
+                    });
+                }
                 tab.total_items = if tab.items_snapshot_compact {
                     tab.all_items.len()
                 } else {
@@ -265,8 +351,42 @@ impl ImageViewerApp {
 
             if let Some(snapshot) = tab.dual_panel_inactive_state.as_mut() {
                 if tag_id_from_view_path(&snapshot.path).is_some() {
-                    Self::retain_tag_view_items(&mut snapshot.all_items, &removed_path_keys);
-                    Self::retain_tag_view_items(&mut snapshot.items, &removed_path_keys);
+                    let all_items_changed =
+                        Self::retain_tag_view_items(&mut snapshot.all_items, &removed_path_keys);
+                    let visible_items_changed =
+                        Self::retain_tag_view_items(&mut snapshot.items, &removed_path_keys);
+                    if all_items_changed || visible_items_changed {
+                        snapshot.items_revision = snapshot.items_revision.wrapping_add(1);
+                        snapshot
+                            .multi_selection
+                            .retain(|path| !removed_path_keys.contains(&normalize_path_text(path)));
+                        if snapshot.selected_file.as_ref().is_some_and(|item| {
+                            removed_path_keys.contains(&normalize_path_text(&item.path))
+                        }) {
+                            snapshot.selected_item = None;
+                            snapshot.selected_file = None;
+                            snapshot.selected_thumbnail = None;
+                            snapshot.selected_metadata = None;
+                            snapshot.selected_gif = None;
+                        }
+                        let visible_items = if snapshot.items_snapshot_compact {
+                            &snapshot.all_items
+                        } else {
+                            &snapshot.items
+                        };
+                        snapshot.group_projection =
+                            Arc::new(crate::application::grouping::build_group_projection(
+                                visible_items,
+                                snapshot.group_mode,
+                                snapshot.group_descending,
+                            ));
+                        snapshot.selected_item =
+                            snapshot.selected_file.as_ref().and_then(|selected| {
+                                visible_items
+                                    .iter()
+                                    .position(|item| item.path == selected.path)
+                            });
+                    }
                     snapshot.total_items = if snapshot.items_snapshot_compact {
                         snapshot.all_items.len()
                     } else {
@@ -274,79 +394,6 @@ impl ImageViewerApp {
                     };
                 }
             }
-        }
-    }
-
-    pub(crate) fn hide_unavailable_paths_from_tag_views(&mut self, paths: &[PathBuf]) {
-        if paths.is_empty() {
-            return;
-        }
-
-        self.prune_paths_from_loaded_tag_views(paths);
-        self.ui_ctx.request_repaint();
-    }
-
-    pub(crate) fn apply_ready_tag_view_hides(&mut self) {
-        const MAX_REVALIDATIONS_PER_FRAME: usize = 32;
-
-        let mut generations: FxHashMap<usize, bool> = FxHashMap::default();
-        generations.insert(self.generation, !self.is_loading_folder);
-        if let Some(snapshot) = self.dual_panel_inactive_state.as_ref() {
-            generations
-                .entry(snapshot.generation)
-                .and_modify(|ready| *ready |= !snapshot.is_loading_folder)
-                .or_insert(!snapshot.is_loading_folder);
-        }
-        let active_tab = self.tab_manager.active_tab;
-        for (index, tab) in self.tab_manager.tabs.iter().enumerate() {
-            if index != active_tab {
-                generations
-                    .entry(tab.generation)
-                    .and_modify(|ready| *ready = true)
-                    .or_insert(true);
-            }
-            if let Some(snapshot) = tab.dual_panel_inactive_state.as_ref() {
-                generations
-                    .entry(snapshot.generation)
-                    .and_modify(|ready| *ready |= !snapshot.is_loading_folder)
-                    .or_insert(!snapshot.is_loading_folder);
-            }
-        }
-
-        self.pending_tag_view_hides
-            .retain(|generation, paths| generations.contains_key(generation) && !paths.is_empty());
-
-        let mut candidates = Vec::new();
-        for (generation, ready) in &generations {
-            if !ready || candidates.len() >= MAX_REVALIDATIONS_PER_FRAME {
-                continue;
-            }
-            let Some(paths) = self.pending_tag_view_hides.get_mut(generation) else {
-                continue;
-            };
-            while candidates.len() < MAX_REVALIDATIONS_PER_FRAME {
-                let Some(path) = paths.pop() else {
-                    break;
-                };
-                candidates.push(path);
-            }
-        }
-        self.pending_tag_view_hides
-            .retain(|_, paths| !paths.is_empty());
-
-        let mut current_roots = crate::infrastructure::windows::RootAvailabilityCache::default();
-        candidates.retain(|path| {
-            !current_roots.is_root_accessible(path)
-                || !crate::infrastructure::onedrive::fast_path_exists(path)
-        });
-        self.hide_unavailable_paths_from_tag_views(&candidates);
-
-        if self
-            .pending_tag_view_hides
-            .keys()
-            .any(|generation| generations.get(generation).copied().unwrap_or(false))
-        {
-            self.ui_ctx.request_repaint();
         }
     }
 }

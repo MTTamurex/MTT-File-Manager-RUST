@@ -34,6 +34,7 @@ impl ImageViewerApp {
         }
         active.selected_item = self.selected_item;
         active.generation = self.generation;
+        active.is_loading_folder = self.is_loading_folder;
         active.items_revision = self.items_revision;
         active.pending_items_rebuild = self.pending_items_rebuild;
         active.pending_items_count = self.pending_items_count;
@@ -144,6 +145,7 @@ impl ImageViewerApp {
             };
             active.items_snapshot_compact = false;
             self.generation = active.generation;
+            self.is_loading_folder = active.is_loading_folder;
             self.items_revision = active.items_revision;
             self.pending_items_rebuild = active.pending_items_rebuild;
             self.pending_items_count = active.pending_items_count;
@@ -255,6 +257,10 @@ impl ImageViewerApp {
             .store(self.generation, AtomicOrdering::Relaxed);
         self.visible_group_paths.clear();
 
+        // A tab's streamed load was cancelled when it stopped being current.
+        // Restart it instead of exposing the partial snapshot saved above.
+        let restored_load_in_progress = self.is_loading_folder;
+
         if self.navigation_state.current_path != previous_path
             || self.navigation_state.is_computer_view != previous_is_computer_view
             || self.navigation_state.is_recycle_bin_view != previous_is_recycle_bin_view
@@ -293,7 +299,21 @@ impl ImageViewerApp {
             && !is_virtual_path
             && !self.navigation_state.current_path.is_empty();
 
-        if self.items.is_empty() {
+        if restored_load_in_progress && !self.navigation_state.is_computer_view {
+            self.loaded_path.clear();
+            if let Some(tag_id) = crate::domain::special_paths::tag_id_from_view_path(
+                &self.navigation_state.current_path,
+            ) {
+                self.setup_tag_view(tag_id);
+                needs_reload = false;
+            } else if self.navigation_state.is_recycle_bin_view {
+                self.setup_recycle_bin_view();
+                needs_reload = false;
+            } else {
+                self.load_folder(false);
+                needs_reload = false;
+            }
+        } else if self.items.is_empty() {
             if let Some(tag_id) = crate::domain::special_paths::tag_id_from_view_path(
                 &self.navigation_state.current_path,
             ) {
@@ -302,15 +322,36 @@ impl ImageViewerApp {
             }
         }
 
-        let inactive_tag_to_reload = self
+        let inactive_load_to_restart = self
             .dual_panel_inactive_state
             .as_ref()
-            .filter(|snapshot| snapshot.items.is_empty() && snapshot.all_items.is_empty())
-            .and_then(|snapshot| {
-                crate::domain::special_paths::tag_id_from_view_path(&snapshot.path)
+            .is_some_and(|snapshot| snapshot.is_loading_folder);
+        if inactive_load_to_restart {
+            self.with_inactive_panel(|app| {
+                app.loaded_path.clear();
+                if let Some(tag_id) = crate::domain::special_paths::tag_id_from_view_path(
+                    &app.navigation_state.current_path,
+                ) {
+                    app.setup_tag_view(tag_id);
+                } else if app.navigation_state.is_recycle_bin_view {
+                    app.setup_recycle_bin_view();
+                } else if !app.navigation_state.is_computer_view
+                    && !app.navigation_state.is_recycle_bin_view
+                {
+                    app.load_folder_for_inactive();
+                }
             });
-        if let Some(tag_id) = inactive_tag_to_reload {
-            self.with_inactive_panel(|app| app.setup_tag_view(tag_id));
+        } else {
+            let inactive_tag_to_reload = self
+                .dual_panel_inactive_state
+                .as_ref()
+                .filter(|snapshot| snapshot.items.is_empty() && snapshot.all_items.is_empty())
+                .and_then(|snapshot| {
+                    crate::domain::special_paths::tag_id_from_view_path(&snapshot.path)
+                });
+            if let Some(tag_id) = inactive_tag_to_reload {
+                self.with_inactive_panel(|app| app.setup_tag_view(tag_id));
+            }
         }
 
         let inactive_folder_to_restart = self

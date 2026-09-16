@@ -992,6 +992,7 @@ fn render_dual_panel(app: &mut ImageViewerApp, ui: &mut egui::Ui) {
         && !app.navigation_state.show_settings_window
         && !file_panel_input_blocked
         && !close_clicked
+        && !app.context_menu.is_open
     {
         if let Some(pos) = pointer_pos {
             // Switch focus when clicking in the inactive panel area.

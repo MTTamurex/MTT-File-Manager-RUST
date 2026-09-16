@@ -107,7 +107,7 @@ impl ImageViewerApp {
         }
 
         let my_gen = self.generation;
-        let gen_clone = self.current_generation.clone();
+        let gen_clone = self.folder_load_generation.clone();
         let file_entry_sender = self.file_entry_sender.clone();
         let ctx = self.ui_ctx.clone();
 

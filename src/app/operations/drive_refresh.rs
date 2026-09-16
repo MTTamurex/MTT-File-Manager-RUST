@@ -114,7 +114,6 @@ fn spawn_drive_info_refresh(
 ) {
     std::thread::spawn(move || {
         let queried = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let mut local_entries = Vec::new();
             for path in disks_snapshot {
                 let drive_type = crate::infrastructure::windows::detect_drive_type(&path);
                 if !drive_scope_matches(scope, drive_type) {
@@ -129,24 +128,20 @@ fn spawn_drive_info_refresh(
                 crate::infrastructure::io_trace::record_drive_info_query(
                     query_start.elapsed().as_millis() as u64,
                 );
-                if scope == DriveInfoRefreshScope::Remote {
-                    if tx
-                        .send(DriveInfoRefreshResult {
-                            scope,
-                            generation,
-                            entries: vec![entry],
-                            complete: false,
-                        })
-                        .is_err()
-                    {
-                        return Vec::new();
-                    }
-                    ctx.request_repaint();
-                } else {
-                    local_entries.push(entry);
+                if tx
+                    .send(DriveInfoRefreshResult {
+                        scope,
+                        generation,
+                        entries: vec![entry],
+                        complete: false,
+                    })
+                    .is_err()
+                {
+                    return Vec::new();
                 }
+                ctx.request_repaint();
             }
-            local_entries
+            Vec::new()
         }));
 
         let entries = match queried {

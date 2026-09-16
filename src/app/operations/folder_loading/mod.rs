@@ -11,6 +11,7 @@ mod refresh;
 mod view_updates;
 
 // EST-02: pool workers run the pipeline body directly.
+pub(in crate::app::operations) use guards::allocate_folder_load_generation;
 pub(crate) use load_pipeline::run_folder_load_pipeline;
 
 impl ImageViewerApp {

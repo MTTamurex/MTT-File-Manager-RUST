@@ -53,6 +53,9 @@ pub struct TabState {
     pub items_snapshot_compact: bool,
     /// Folder-load generation owned by this tab.
     pub generation: usize,
+    /// Whether the last active-panel load was still streaming when the tab was
+    /// switched away. Partial snapshots must be restarted on restoration.
+    pub is_loading_folder: bool,
     pub pending_items_rebuild: bool,
     pub pending_items_count: usize,
     pub inactive_final_items_rebuild_pending: bool,
@@ -140,6 +143,7 @@ impl TabState {
             items_revision: 0,
             items_snapshot_compact: false,
             generation: 0,
+            is_loading_folder: false,
             pending_items_rebuild: false,
             pending_items_count: 0,
             inactive_final_items_rebuild_pending: false,
@@ -199,6 +203,7 @@ impl TabState {
             items_revision: 0,
             items_snapshot_compact: false,
             generation: 0,
+            is_loading_folder: false,
             pending_items_rebuild: false,
             pending_items_count: 0,
             inactive_final_items_rebuild_pending: false,
@@ -338,6 +343,7 @@ impl TabState {
         self.items_snapshot_compact = false;
         self.group_projection = Arc::new(Default::default());
         self.generation = 0;
+        self.is_loading_folder = false;
         self.selected_item = None;
         self.selected_file = None;
         self.selected_thumbnail = None;
@@ -477,6 +483,7 @@ impl TabManager {
         new_tab.all_items = current.all_items.clone();
         new_tab.items_revision = current.items_revision;
         new_tab.items_snapshot_compact = current.items_snapshot_compact;
+        new_tab.is_loading_folder = current.is_loading_folder;
         new_tab.selected_item = current.selected_item;
         new_tab.selected_file = current.selected_file.clone();
         new_tab.selected_thumbnail = None;
@@ -637,5 +644,15 @@ mod tests {
         assert!(manager.can_add_tab());
         assert!(manager.new_tab());
         assert_eq!(manager.count(), MAX_TABS);
+    }
+
+    #[test]
+    fn duplicated_loading_tab_keeps_restart_marker() {
+        let mut manager = TabManager::new_at_path(r"C:\");
+        manager.active_mut().is_loading_folder = true;
+
+        manager.duplicate_tab();
+
+        assert!(manager.active().is_loading_folder);
     }
 }

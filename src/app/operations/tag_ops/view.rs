@@ -6,8 +6,7 @@ use crate::infrastructure::io_priority::{IOPriority, ThreadPriorityGuard};
 use crate::infrastructure::windows::RootAvailabilityCache;
 use std::os::windows::ffi::OsStrExt;
 use std::path::PathBuf;
-use std::sync::atomic::AtomicUsize;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 use windows::core::PCWSTR;
 use windows::Win32::Storage::FileSystem::{
@@ -25,30 +24,54 @@ const TAG_VALIDATION_TTL: Duration = Duration::from_secs(15);
 /// Upper bound for the session-wide validation cache.
 const TAG_VALIDATION_CACHE_LIMIT: usize = 20_000;
 
-/// Returns `true` when `path` must be checked again, marking it as validated.
-fn take_validation_slot(path: &std::path::Path) -> bool {
-    static LAST_VALIDATED: std::sync::OnceLock<
-        std::sync::Mutex<rustc_hash::FxHashMap<PathBuf, Instant>>,
-    > = std::sync::OnceLock::new();
+static LAST_VALIDATED: OnceLock<Mutex<rustc_hash::FxHashMap<PathBuf, Instant>>> = OnceLock::new();
 
+fn validation_cache() -> &'static Mutex<rustc_hash::FxHashMap<PathBuf, Instant>> {
+    LAST_VALIDATED.get_or_init(|| Mutex::new(rustc_hash::FxHashMap::default()))
+}
+
+/// Reserves `path` for a validation probe and returns its reservation token.
+/// The timestamp is retained only if the probe completes for a live consumer.
+fn reserve_validation_slot(path: &std::path::Path) -> Option<Instant> {
     let now = Instant::now();
-    let cache =
-        LAST_VALIDATED.get_or_init(|| std::sync::Mutex::new(rustc_hash::FxHashMap::default()));
+    let cache = validation_cache();
     let mut guard = cache
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
 
     if !validation_is_due(guard.get(path).copied(), now) {
-        return false;
+        return None;
     }
     if guard.len() >= TAG_VALIDATION_CACHE_LIMIT {
         prune_validation_cache(&mut guard, now, TAG_VALIDATION_CACHE_LIMIT);
     }
     guard.insert(path.to_path_buf(), now);
-    true
+    Some(now)
 }
 
-/// Decision rule for [`take_validation_slot`], kept pure so it can be tested.
+/// Releases a reservation that became obsolete before its result was usable.
+/// The token prevents an old worker from removing a newer reservation.
+fn release_validation_slot(path: &std::path::Path, reservation: Instant) {
+    let cache = validation_cache();
+    let mut guard = cache
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if guard.get(path).copied() == Some(reservation) {
+        guard.remove(path);
+    }
+}
+
+fn commit_validation_slot(path: &std::path::Path, reservation: Instant) {
+    let cache = validation_cache();
+    let mut guard = cache
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if guard.get(path).copied() == Some(reservation) {
+        guard.insert(path.to_path_buf(), Instant::now());
+    }
+}
+
+/// Decision rule for [`reserve_validation_slot`], kept pure so it can be tested.
 fn validation_is_due(last_validated: Option<Instant>, now: Instant) -> bool {
     match last_validated {
         Some(last) => now.saturating_duration_since(last) >= TAG_VALIDATION_TTL,
@@ -272,16 +295,10 @@ impl ImageViewerApp {
         let app_state_db = self.app_state_db.clone();
         let tag_gc_sender = self.tag_assignment_gc_sender.clone();
 
-        // Generation-aware cancellation: for the active panel, use the shared
-        // current_generation atomic so the thread can detect navigation away.
-        // For the inactive panel, use a local atomic that never changes
-        // (bump_folder_load_generation skips current_generation for inactive
-        // panel context, so using the shared atomic would cause immediate break).
-        let gen_tracker: Arc<AtomicUsize> = if self.in_inactive_panel_context {
-            Arc::new(AtomicUsize::new(self.generation))
-        } else {
-            self.current_generation.clone()
-        };
+        // Each physical panel owns this token. It is invalidated by navigation,
+        // tab switching, dual-panel removal, and shutdown without coupling the
+        // inactive panel to the active panel's generation.
+        let gen_tracker = self.folder_load_generation.clone();
 
         let spawn_result = std::thread::Builder::new()
             .name("tag-view-load".into())
@@ -508,24 +525,40 @@ impl ImageViewerApp {
                     let validation_start = std::time::Instant::now();
                     let mut checked_paths = 0usize;
                     let mut missing_candidates: Vec<PathBuf> = Vec::new();
+                    let mut validation_reservations: Vec<(PathBuf, Instant)> = Vec::new();
+                    let mut validation_aborted = false;
                     // This is maintenance work after the visible tag rows have
                     // been sent. Keep metadata probes below interactive I/O.
                     let _validation_priority_guard =
                         ThreadPriorityGuard::new(IOPriority::Background);
                     for chunk in cached_paths_to_validate.chunks(VALIDATION_CHUNK_PATHS) {
                         if gen_tracker.load(std::sync::atomic::Ordering::Relaxed) != my_gen {
+                            validation_aborted = true;
                             break;
                         }
                         let mut checked_in_chunk = 0usize;
                         for path in chunk {
-                            if !take_validation_slot(path) {
-                                continue;
+                            if gen_tracker.load(std::sync::atomic::Ordering::Relaxed) != my_gen {
+                                validation_aborted = true;
+                                break;
                             }
+                            let Some(reservation) = reserve_validation_slot(path) else {
+                                continue;
+                            };
+                            validation_reservations.push((path.clone(), reservation));
                             checked_in_chunk += 1;
                             checked_paths += 1;
-                            if !crate::infrastructure::onedrive::fast_path_exists(path) {
+                            let exists = crate::infrastructure::onedrive::fast_path_exists(path);
+                            if gen_tracker.load(std::sync::atomic::Ordering::Relaxed) != my_gen {
+                                validation_aborted = true;
+                                break;
+                            }
+                            if !exists {
                                 missing_candidates.push(path.clone());
                             }
+                        }
+                        if validation_aborted {
+                            break;
                         }
                         if checked_in_chunk > 0 {
                             std::thread::sleep(std::time::Duration::from_millis(
@@ -547,11 +580,29 @@ impl ImageViewerApp {
                             validation_ms
                         );
                     }
-                    if !missing_candidates.is_empty() {
-                        let _ = tag_gc_sender.send(TagPathUpdate::HideFromViews {
-                            generation: my_gen,
-                            paths: missing_candidates,
-                        });
+                    let validation_live = !validation_aborted
+                        && gen_tracker.load(std::sync::atomic::Ordering::Relaxed) == my_gen;
+                    let result_handed_off = if validation_live {
+                        if missing_candidates.is_empty() {
+                            true
+                        } else {
+                            tag_gc_sender
+                                .send(TagPathUpdate::HideFromViews {
+                                    generation: my_gen,
+                                    paths: missing_candidates,
+                                })
+                                .is_ok()
+                        }
+                    } else {
+                        false
+                    };
+
+                    for (path, reservation) in validation_reservations {
+                        if result_handed_off {
+                            commit_validation_slot(&path, reservation);
+                        } else {
+                            release_validation_slot(&path, reservation);
+                        }
                     }
                 }
             });
@@ -661,9 +712,18 @@ mod tests {
 
     #[test]
     fn validation_slots_are_consumed_once_per_ttl_window() {
-        let path = std::path::PathBuf::from(r"Z:\Library\_validation_slot_test\file.mkv");
-        assert!(take_validation_slot(&path));
-        assert!(!take_validation_slot(&path));
+        let path = std::path::PathBuf::from(r"Z:\test-data\validation-slot\file.mkv");
+        assert!(reserve_validation_slot(&path).is_some());
+        assert!(reserve_validation_slot(&path).is_none());
+    }
+
+    #[test]
+    fn cancelled_validation_releases_its_reservation() {
+        let path = std::path::PathBuf::from(r"Z:\test-data\validation-release\file.mkv");
+        let reservation = reserve_validation_slot(&path).expect("first reservation");
+        release_validation_slot(&path, reservation);
+
+        assert!(reserve_validation_slot(&path).is_some());
     }
 
     #[test]
@@ -683,8 +743,8 @@ mod tests {
 
     #[test]
     fn folder_cover_attach_only_applies_to_directories_with_a_known_cover() {
-        const FOLDER: &str = r"Z:\Library\Show Name";
-        const COVER: &str = r"Z:\Library\Show Name\s01e01.mkv";
+        const FOLDER: &str = r"Z:\test-data\folder";
+        const COVER: &str = r"Z:\test-data\folder\cover.mkv";
         let covers =
             std::collections::HashMap::from([(PathBuf::from(FOLDER), PathBuf::from(COVER))]);
 
@@ -697,7 +757,7 @@ mod tests {
         attach_folder_cover(&mut file, Some(&covers));
         assert_eq!(file.folder_cover, None);
 
-        let mut unknown_folder = entry(r"Z:\Library\Unknown", true);
+        let mut unknown_folder = entry(r"Z:\test-data\unknown-folder", true);
         attach_folder_cover(&mut unknown_folder, Some(&covers));
         assert_eq!(unknown_folder.folder_cover, None);
 

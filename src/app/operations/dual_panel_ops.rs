@@ -16,11 +16,11 @@ impl ImageViewerApp {
         self.dual_panel_active = ActivePanel::Left;
         let mut snapshot = PanelSnapshot::from_app(self);
         // Keep the SAME current_generation Arc so thumbnail workers stay
-        // synchronized with whichever panel is active.  Each panel has its
-        // own generation value for routing folder-load results, but the
-        // shared gen_tracker must match the active panel's generation.
-        // Folder listing cancellation is per physical panel, so the new right
-        // panel must not share the left panel's token.
+        // synchronized with whichever panel is active. Folder listing
+        // cancellation and result routing are per physical panel, so the new
+        // right panel needs both a distinct token and a globally unique ID.
+        snapshot.generation =
+            crate::app::operations::folder_loading::allocate_folder_load_generation();
         snapshot.folder_load_generation =
             std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(snapshot.generation));
         snapshot.rectangle_selection_state = None;
