@@ -83,6 +83,18 @@ fn menu_chrome(dark_mode: bool) -> (egui::Color32, egui::Stroke) {
     }
 }
 
+/// Truncates long item labels (like drive paths in "Send to") with an
+/// ellipsis, exactly as they are painted. Single source of truth shared with
+/// the width measurement in `sizing` so measured width always matches what is
+/// drawn.
+pub(super) fn truncated_label(text: &str) -> String {
+    if text.chars().count() > 45 {
+        format!("{}…", text.chars().take(43).collect::<String>())
+    } else {
+        text.to_owned()
+    }
+}
+
 /// SVG icon names for header bar (matching main toolbar style)
 const SVG_ICON_CUT: &str = "cut";
 const SVG_ICON_COPY: &str = "copy";
@@ -135,14 +147,30 @@ pub fn render_context_menu(
         .map(|&i| &menu_state.items[i])
         .collect();
 
-    // Calculate menu width to fit header bar tightly (Windows 11 style)
-    let menu_width = if !primary_items.is_empty() {
-        let header_width = primary_items.len() as f32 * HEADER_BUTTON_WIDTH
-            + (primary_items.len().saturating_sub(1)) as f32 * HEADER_SPACING
-            + 8.0; // inner_margin * 2
-        header_width.max(MENU_MIN_WIDTH)
-    } else {
-        MENU_MIN_WIDTH
+    // Build the overflow entry once so its translated label participates in
+    // the width measurement below.
+    let overflow_item = (!overflow_items.is_empty()).then(|| {
+        ContextMenuItem::new(-100, rust_i18n::t!("context_menu.show_more"))
+            .with_subitems(overflow_items.iter().map(|item| (*item).clone()).collect())
+    });
+
+    // Fit the widest item (icon + label + shortcut/arrow) and the header bar so
+    // long translations cannot overflow the menu frame.
+    let menu_width = {
+        let header_width = if !primary_items.is_empty() {
+            primary_items.len() as f32 * HEADER_BUTTON_WIDTH
+                + (primary_items.len().saturating_sub(1)) as f32 * HEADER_SPACING
+                + 8.0 // inner_margin * 2
+        } else {
+            0.0
+        };
+        let mut width_items: Vec<&ContextMenuItem> = secondary_items.clone();
+        if let Some(item) = &overflow_item {
+            width_items.push(item);
+        }
+        header_width
+            .max(sizing::items_width(ctx, &width_items))
+            .max(MENU_MIN_WIDTH)
     };
 
     let mut menu_pos = menu_state.position;
@@ -204,10 +232,10 @@ pub fn render_context_menu(
                     );
 
                     // ========== OVERFLOW ("Show more options") ==========
-                    if !overflow_items.is_empty() {
+                    if let Some(item) = &overflow_item {
                         render_overflow_submenu(
                             ui,
-                            &overflow_items,
+                            item,
                             &mut action_executed,
                             &mut pending_load_item,
                             svg_icon_manager,
@@ -562,20 +590,7 @@ fn render_single_item(
     // Text with ellipsis truncation to prevent overflow
     let text_x = icon_rect.right() + ICON_TEXT_GAP;
 
-    // Truncate very long names (like drive paths in "Send to") with ellipsis
-    // Use char_indices to find proper UTF-8 boundaries (avoids panic on multi-byte chars)
-    let display_text = if item.text.chars().count() > 45 {
-        let truncate_char_count = 43;
-        let byte_idx = item
-            .text
-            .char_indices()
-            .nth(truncate_char_count)
-            .map(|(idx, _)| idx)
-            .unwrap_or(item.text.len());
-        format!("{}…", &item.text[..byte_idx])
-    } else {
-        item.text.clone()
-    };
+    let display_text = truncated_label(&item.text);
 
     ui.painter().text(
         egui::pos2(text_x, rect.center().y),
@@ -813,15 +828,12 @@ fn render_single_item(
 /// Render "Show more options" overflow submenu
 fn render_overflow_submenu(
     ui: &mut egui::Ui,
-    items: &[&ContextMenuItem],
+    overflow_item: &ContextMenuItem,
     action: &mut Option<i32>,
     lazy_load: &mut Option<i32>,
     svg_icon_manager: &mut SvgIconManager,
 ) {
-    let overflow_item = ContextMenuItem::new(-100, rust_i18n::t!("context_menu.show_more"))
-        .with_subitems(items.iter().map(|i| (*i).clone()).collect());
-
-    render_single_item(ui, &overflow_item, action, 0, lazy_load, svg_icon_manager);
+    render_single_item(ui, overflow_item, action, 0, lazy_load, svg_icon_manager);
 }
 
 #[cfg(test)]

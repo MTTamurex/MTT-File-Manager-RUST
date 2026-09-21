@@ -346,6 +346,12 @@ fn main() -> eframe::Result<()> {
         }
     }
 
+    // Dark-mode opt-in must happen before any window is created: child
+    // processes launched by the file manager inherit this app mode on
+    // Windows 10, which is what makes egui apps follow the system theme.
+    #[cfg(target_os = "windows")]
+    mtt_file_manager::infrastructure::windows::app_theme::init_windows_dark_mode();
+
     // When running without a console (installed binary launched from shortcut),
     // reduce the default log level. Background worker threads continuously emit
     // log::info! which formats a String and acquires the global Stderr mutex.
