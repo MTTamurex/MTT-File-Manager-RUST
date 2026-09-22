@@ -483,6 +483,7 @@ pub fn invoke_menu_command(
     command_id: u32,
     screen_x: i32,
     screen_y: i32,
+    working_directory: Option<&std::path::Path>,
 ) -> Result<()> {
     unsafe {
         // QueryContextMenu() was called with idCmdFirst = 1.
@@ -503,6 +504,29 @@ pub fn invoke_menu_command(
             invoke_mask |= CMIC_MASK_PTINVOKE;
         }
 
+        // Explorer passes the folder as `lpDirectory` when it invokes a
+        // folder-background command. Static verbs whose command template uses
+        // `%V` (e.g. "Open with Zed" under `Directory\Background\shell`) rely
+        // on that member; without it some Windows versions fail the launch
+        // with "no application associated with the specified file".
+        let working_dir_wide: Option<Vec<u16>> = working_directory.map(|dir| {
+            dir.as_os_str()
+                .encode_wide()
+                .chain(std::iter::once(0))
+                .collect()
+        });
+        // CMIC_MASK_UNICODE asks handlers to prefer the Unicode members, but
+        // legacy handlers may still read the ANSI ones — fill them only when
+        // the path is representable without loss.
+        let working_dir_ansi: Option<Vec<u8>> = working_directory
+            .and_then(|dir| dir.as_os_str().to_str())
+            .filter(|dir| dir.is_ascii())
+            .map(|dir| {
+                let mut bytes = dir.as_bytes().to_vec();
+                bytes.push(0);
+                bytes
+            });
+
         let invoke = CMINVOKECOMMANDINFOEX {
             cbSize: std::mem::size_of::<CMINVOKECOMMANDINFOEX>() as u32,
             fMask: invoke_mask,
@@ -511,10 +535,25 @@ pub fn invoke_menu_command(
             lpVerbW: PCWSTR(command_offset as *const u16),
             nShow: SW_SHOWNORMAL.0,
             ptInvoke: invoke_point,
+            lpDirectory: working_dir_ansi
+                .as_ref()
+                .map_or(PCSTR::null(), |bytes| PCSTR(bytes.as_ptr())),
+            lpDirectoryW: working_dir_wide
+                .as_ref()
+                .map_or(PCWSTR::null(), |wide| PCWSTR(wide.as_ptr())),
             ..Default::default()
         };
 
-        context_menu.InvokeCommand(std::ptr::addr_of!(invoke) as *const _)
+        let result = context_menu.InvokeCommand(std::ptr::addr_of!(invoke) as *const _);
+        if let Err(ref error) = result {
+            log::warn!(
+                "[ShellMenu] InvokeCommand failed for command {} (working directory: {:?}): {}",
+                command_id,
+                working_directory,
+                error
+            );
+        }
+        result
     }
 }
 

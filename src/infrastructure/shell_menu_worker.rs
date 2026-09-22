@@ -65,6 +65,19 @@ fn cancel_active_context<T>(
     }
 }
 
+/// The folder a folder-background command was invoked on.
+///
+/// Explorer supplies it as `lpDirectory` in `CMINVOKECOMMANDINFOEX` when it
+/// invokes a folder-background command. Static verbs whose command template
+/// uses `%V` (e.g. "Open with Zed") only expand correctly when the host passes
+/// it, so the worker keeps it alongside the active context for the invocation.
+fn background_working_directory(target: &ShellMenuTarget) -> Option<PathBuf> {
+    match target {
+        ShellMenuTarget::FolderBackground(path) => Some(path.clone()),
+        ShellMenuTarget::Selection(_) => None,
+    }
+}
+
 /// Send-safe representation of a `ShellMenuItem` — carries no COM handles or OS handles.
 #[derive(Clone)]
 pub struct ShellMenuItemData {
@@ -225,6 +238,7 @@ fn shell_menu_loop(
     let mut active_ctx: Option<crate::infrastructure::windows::native_menu::ShellMenuContext> =
         None;
     let mut active_request_id: Option<u64> = None;
+    let mut active_working_dir: Option<PathBuf> = None;
     let mut deferred_request = None;
 
     loop {
@@ -234,6 +248,7 @@ fn shell_menu_loop(
         }) {
             active_ctx = None;
             active_request_id = None;
+            active_working_dir = None;
         }
         if !pump_sta_messages() {
             break;
@@ -259,9 +274,11 @@ fn shell_menu_loop(
                 // Drop any previous context before starting a new extraction.
                 active_ctx = None;
                 active_request_id = None;
+                active_working_dir = None;
 
                 let hwnd = HWND(hwnd_isize as *mut _);
                 let started = std::time::Instant::now();
+                let requested_working_dir = background_working_directory(&target);
                 let extracted = match target {
                     ShellMenuTarget::Selection(paths) => extract_shell_menu(hwnd, &paths),
                     ShellMenuTarget::FolderBackground(path) => {
@@ -300,6 +317,7 @@ fn shell_menu_loop(
 
                         active_ctx = Some(ctx);
                         active_request_id = Some(request_id);
+                        active_working_dir = requested_working_dir;
                         send_response(
                             &tx,
                             &repaint_ctx,
@@ -339,8 +357,14 @@ fn shell_menu_loop(
                         send_response(&tx, &repaint_ctx, ShellMenuResponse::Invoked { request_id });
                         continue;
                     };
-                    let _ =
-                        invoke_menu_command(hwnd, &ctx.context_menu, command_id, menu_x, menu_y);
+                    let _ = invoke_menu_command(
+                        hwnd,
+                        &ctx.context_menu,
+                        command_id,
+                        menu_x,
+                        menu_y,
+                        active_working_dir.as_deref(),
+                    );
                 } else {
                     log::warn!(
                         "[ShellMenuWorker] Invoke request {} does not match the active context",
@@ -349,6 +373,7 @@ fn shell_menu_loop(
                 }
                 active_ctx = None;
                 active_request_id = None;
+                active_working_dir = None;
                 pending_invocation_id
                     .compare_exchange(request_id, 0, Ordering::AcqRel, Ordering::Acquire)
                     .ok();
@@ -357,6 +382,9 @@ fn shell_menu_loop(
 
             ShellMenuRequest::Cancel { request_id } => {
                 cancel_active_context(&mut active_ctx, &mut active_request_id, request_id);
+                if active_ctx.is_none() {
+                    active_working_dir = None;
+                }
                 // No response needed.
             }
 
@@ -470,7 +498,9 @@ fn pump_sta_messages() -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{cancel_active_context, BusyGuard};
+    use super::{background_working_directory, cancel_active_context, BusyGuard};
+    use crate::infrastructure::shell_menu_worker::ShellMenuTarget;
+    use std::path::PathBuf;
     use std::sync::atomic::{AtomicBool, Ordering};
 
     #[test]
@@ -495,5 +525,21 @@ mod tests {
         cancel_active_context(&mut active_context, &mut active_request_id, 2);
         assert!(active_context.is_none());
         assert_eq!(active_request_id, None);
+    }
+
+    #[test]
+    fn background_working_directory_follows_target_kind() {
+        assert_eq!(
+            background_working_directory(&ShellMenuTarget::FolderBackground(PathBuf::from(
+                "C:\\Folder"
+            ))),
+            Some(PathBuf::from("C:\\Folder"))
+        );
+        assert_eq!(
+            background_working_directory(&ShellMenuTarget::Selection(vec![PathBuf::from(
+                "C:\\Folder\\file.txt"
+            )])),
+            None
+        );
     }
 }
