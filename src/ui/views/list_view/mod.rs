@@ -206,6 +206,7 @@ pub struct ListViewContext<'a> {
     pub focus_rename: bool,
     pub scroll_to_selected: bool, // Scroll to selected item on keyboard navigation
     pub generation: usize,
+    pub scroll_interpolation_enabled: bool,
     pub is_computer_view: bool,
     pub is_recycle_bin_view: bool,
     pub is_onedrive_folder: bool,

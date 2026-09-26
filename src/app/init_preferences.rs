@@ -33,6 +33,7 @@ pub(super) struct StartupPreferences {
     pub(super) language: String,
     pub(super) theme_mode: ThemeMode,
     pub(super) gpu_backend_preference: String,
+    pub(super) scroll_interpolation_enabled: bool,
     pub(super) diagnostic_mode: bool,
     pub(super) diagnostic_mode_enabled_at: Option<SystemTime>,
     pub(super) diagnostic_mode_needs_persist: bool,
@@ -241,6 +242,11 @@ impl StartupPreferences {
             })
             .unwrap_or_else(|| "auto".to_string());
 
+        let scroll_interpolation_enabled = prefs
+            .get("scroll_interpolation")
+            .map(|s| s != "false")
+            .unwrap_or(true);
+
         let diagnostic_mode_requested = prefs
             .get(diagnostic_logger::DIAGNOSTIC_MODE_KEY)
             .map(|s| s == "true")
@@ -352,6 +358,7 @@ impl StartupPreferences {
             language,
             theme_mode,
             gpu_backend_preference,
+            scroll_interpolation_enabled,
             diagnostic_mode,
             diagnostic_mode_enabled_at,
             diagnostic_mode_needs_persist,
@@ -396,6 +403,21 @@ mod tests {
         db.set_preference("show_quick_access", "false").unwrap();
 
         assert!(!StartupPreferences::load(&db).show_quick_access);
+    }
+
+    #[test]
+    fn scroll_interpolation_defaults_to_enabled() {
+        let db = test_db();
+
+        assert!(StartupPreferences::load(&db).scroll_interpolation_enabled);
+    }
+
+    #[test]
+    fn scroll_interpolation_loads_disabled_value() {
+        let db = test_db();
+        db.set_preference("scroll_interpolation", "false").unwrap();
+
+        assert!(!StartupPreferences::load(&db).scroll_interpolation_enabled);
     }
 
     #[test]

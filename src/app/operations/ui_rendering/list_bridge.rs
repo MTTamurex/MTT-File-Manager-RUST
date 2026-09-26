@@ -394,6 +394,8 @@ impl ImageViewerApp {
                     }
         });
 
+        let scroll_interpolation_enabled = self.uses_scroll_interpolation();
+
         // Select appropriate column width references based on context
         let (col_name_width, col_date_width, col_type_width, col_size_width, col_status_width) =
             if self.navigation_state.is_computer_view {
@@ -465,6 +467,7 @@ impl ImageViewerApp {
             focus_rename,
             scroll_to_selected,
             generation: self.generation,
+            scroll_interpolation_enabled,
             is_computer_view: self.navigation_state.is_computer_view,
             is_recycle_bin_view: self.navigation_state.is_recycle_bin_view,
             is_onedrive_folder,

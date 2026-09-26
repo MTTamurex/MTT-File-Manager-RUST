@@ -13,8 +13,10 @@ pub fn render_backend_settings_section(
     ui: &mut egui::Ui,
     active_backend: &str,
     gpu_backend_preference: &mut String,
-) -> bool {
-    let mut changed = false;
+    scroll_interpolation_enabled: &mut bool,
+) -> (bool, bool) {
+    let mut backend_changed = false;
+    let mut interpolation_changed = false;
     let dark_mode = ui.visuals().dark_mode;
 
     settings_ui::section_header(
@@ -62,7 +64,30 @@ pub fn render_backend_settings_section(
         .collect();
     if let Some(idx) = settings_ui::choice_list(ui, &labels, selected) {
         *gpu_backend_preference = BACKENDS[idx].0.to_string();
-        changed = true;
+        backend_changed = true;
+    }
+
+    ui.add_space(16.0);
+    ui.label(
+        RichText::new(t!("settings.graphics_interpolation"))
+            .size(14.0)
+            .strong()
+            .color(theme::text_color(dark_mode)),
+    );
+    ui.add_space(4.0);
+    ui.label(
+        RichText::new(t!("settings.graphics_interpolation_description"))
+            .size(13.0)
+            .color(theme::secondary_text_color(dark_mode)),
+    );
+    ui.add_space(6.0);
+
+    if settings_ui::toggle_row(
+        ui,
+        &t!("settings.graphics_interpolation_toggle"),
+        scroll_interpolation_enabled,
+    ) {
+        interpolation_changed = true;
     }
 
     ui.add_space(12.0);
@@ -72,5 +97,5 @@ pub fn render_backend_settings_section(
             .color(ui.visuals().warn_fg_color),
     );
 
-    changed
+    (backend_changed, interpolation_changed)
 }

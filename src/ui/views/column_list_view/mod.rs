@@ -91,6 +91,7 @@ pub fn render_column_list_view(
         ctx.mut_scroll_offset_x,
         max_scroll,
         ctx.global_search_active,
+        ctx.scroll_interpolation_enabled,
     );
     let selected_layout_index = if grouped {
         ctx.selected_item

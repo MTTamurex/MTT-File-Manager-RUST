@@ -59,7 +59,13 @@ pub(super) fn render_virtualized_content(
                 .is_none_or(|layer| layer.order == egui::Order::Background)
     });
     let consume_scroll = pointer_over_viewport && !ctx.global_search_active;
-    scroll::apply_scroll_input(ui, ctx.mut_scroll_offset_y, max_scroll, consume_scroll);
+    scroll::apply_scroll_input(
+        ui,
+        ctx.mut_scroll_offset_y,
+        max_scroll,
+        consume_scroll,
+        ctx.scroll_interpolation_enabled,
+    );
 
     // 2. Clamp scroll offset
     *ctx.mut_scroll_offset_y = ctx.mut_scroll_offset_y.clamp(0.0, max_scroll);
@@ -93,8 +99,14 @@ pub(super) fn render_virtualized_content(
     }
 
     let target_scroll = *ctx.mut_scroll_offset_y;
-    let (current_scroll, scroll_delta) =
-        scroll::compute_visual_scroll(ui, target_scroll, viewport_h, max_scroll, ctx.generation);
+    let (current_scroll, scroll_delta) = scroll::compute_visual_scroll(
+        ui,
+        target_scroll,
+        viewport_h,
+        max_scroll,
+        ctx.generation,
+        ctx.scroll_interpolation_enabled,
+    );
     let is_scrolling = scroll_delta > 0.5;
 
     let bg_response = ui.interact(

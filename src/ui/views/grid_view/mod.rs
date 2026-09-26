@@ -209,6 +209,8 @@ pub struct GridViewContext<'a> {
     pub low_res_thumbnails_while_scrolling: bool,
     /// Enables the OpenGL-specific scroll interpolation when that policy is active.
     pub use_opengl_performance_policy: bool,
+    /// Enables visual scroll interpolation (user preference, all backends).
+    pub scroll_interpolation_enabled: bool,
     /// Backend-specific LOD for composed folder previews while scrolling.
     pub low_res_folder_previews_while_scrolling: bool,
     /// Per-frame counter to rate-limit thumbnail requests on folder entry
@@ -325,7 +327,13 @@ pub fn render_grid_view(
     });
     let consume_scroll = pointer_over_viewport && !ctx.global_search_active;
 
-    scroll::apply_scroll_input(ui, ctx.mut_scroll_offset_y, max_scroll, consume_scroll);
+    scroll::apply_scroll_input(
+        ui,
+        ctx.mut_scroll_offset_y,
+        max_scroll,
+        consume_scroll,
+        ctx.scroll_interpolation_enabled,
+    );
     let (current_scroll, scroll_delta) = scroll::compute_visual_scroll(
         ui,
         *ctx.mut_scroll_offset_y,
@@ -333,6 +341,7 @@ pub fn render_grid_view(
         max_scroll,
         ctx.generation,
         ctx.use_opengl_performance_policy,
+        ctx.scroll_interpolation_enabled,
     );
     let bg_response = ui.interact(
         viewport_rect,

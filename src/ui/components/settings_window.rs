@@ -14,6 +14,7 @@ pub struct SettingsWindowOutput {
     pub language_changed: bool,
     pub theme_changed: bool,
     pub backend_changed: bool,
+    pub interpolation_changed: bool,
     pub shortcuts_changed: bool,
     pub quick_access_changed: bool,
     pub recycle_bin_changed: bool,
@@ -59,6 +60,7 @@ pub fn render_settings_window(
     let mut language_changed = false;
     let mut theme_changed = false;
     let mut backend_changed = false;
+    let mut interpolation_changed = false;
     let mut shortcuts_changed = false;
     let mut quick_access_changed = false;
     let mut recycle_bin_changed = false;
@@ -234,7 +236,14 @@ pub fn render_settings_window(
                                             ui.label(RichText::new(t!("settings.diagnostics_note")).color(theme::secondary_text_color(dark_mode)));
                                         }
                                         SettingsSection::Graphics => {
-                                            backend_changed |= crate::ui::components::backend_settings::render_backend_settings_section(ui, &app.active_gpu_backend, &mut app.gpu_backend_preference);
+                                            let (backend, interpolation) = crate::ui::components::backend_settings::render_backend_settings_section(
+                                                ui,
+                                                &app.active_gpu_backend,
+                                                &mut app.gpu_backend_preference,
+                                                &mut app.scroll_interpolation_enabled,
+                                            );
+                                            backend_changed |= backend;
+                                            interpolation_changed |= interpolation;
                                         }
                                         SettingsSection::Shortcuts => {
                                             shortcuts_changed |= crate::ui::components::shortcut_settings::render_shortcut_settings_section(
@@ -271,6 +280,7 @@ pub fn render_settings_window(
         language_changed,
         theme_changed,
         backend_changed,
+        interpolation_changed,
         shortcuts_changed,
         quick_access_changed,
         recycle_bin_changed,

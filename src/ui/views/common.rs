@@ -22,6 +22,47 @@ pub fn snap_rect_to_physical_pixels(ctx: &egui::Context, rect: egui::Rect) -> eg
     )
 }
 
+/// Unsmoothed mouse-wheel delta for one frame, replicating egui's wheel
+/// conversion (`WheelState::on_wheel_event`) so that scrolling with
+/// interpolation disabled keeps the same speed and modifier behavior as the
+/// smoothed path: `Line`/`Page` units are converted to points, Shift scrolls
+/// horizontally, Alt forces vertical, and Ctrl/Cmd is zoom (no scroll).
+pub fn raw_wheel_delta(input: &egui::InputState, viewport_height: f32) -> egui::Vec2 {
+    // egui `InputOptions` native default; not publicly readable from Context.
+    const LINE_SCROLL_SPEED: f32 = 40.0;
+
+    let mut total = egui::Vec2::ZERO;
+    for event in &input.events {
+        let egui::Event::MouseWheel {
+            unit,
+            delta,
+            phase: egui::TouchPhase::Move,
+            modifiers,
+        } = event
+        else {
+            continue;
+        };
+        // Ctrl/Cmd is egui's zoom modifier: the wheel zooms instead of scrolling.
+        if modifiers.matches_any(egui::Modifiers::COMMAND) {
+            continue;
+        }
+        let mut delta = match unit {
+            egui::MouseWheelUnit::Point => *delta,
+            egui::MouseWheelUnit::Line => *delta * LINE_SCROLL_SPEED,
+            egui::MouseWheelUnit::Page => *delta * viewport_height,
+        };
+        let is_horizontal = modifiers.matches_any(egui::Modifiers::SHIFT);
+        let is_vertical = modifiers.matches_any(egui::Modifiers::ALT);
+        if is_horizontal && !is_vertical {
+            delta = egui::vec2(delta.x + delta.y, 0.0);
+        } else if !is_horizontal && is_vertical {
+            delta = egui::vec2(0.0, delta.x + delta.y);
+        }
+        total += delta;
+    }
+    total
+}
+
 /// Gets file type string for display
 pub fn get_file_type_string(item: &FileEntry) -> String {
     if let Some(label) = archive_type_label(&item.name) {

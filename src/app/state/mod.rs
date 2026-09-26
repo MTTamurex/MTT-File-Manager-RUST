@@ -759,6 +759,7 @@ pub struct ImageViewerApp {
     // GPU backend: active backend name (from adapter info, read-only) and user preference
     pub active_gpu_backend: String,
     pub gpu_backend_preference: String,
+    pub scroll_interpolation_enabled: bool,
     pub diagnostic_mode: bool,
     pub diagnostic_mode_enabled_at: Option<SystemTime>,
 

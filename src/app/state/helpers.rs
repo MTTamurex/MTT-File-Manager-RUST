@@ -565,6 +565,10 @@ impl ImageViewerApp {
         self.active_gpu_backend == "glow"
     }
 
+    pub fn uses_scroll_interpolation(&self) -> bool {
+        self.scroll_interpolation_enabled
+    }
+
     /// Returns `true` when the OpenGL-specific performance policy is active.
     ///
     /// The backend remains detectable for diagnostics even while temporary
@@ -2739,7 +2743,7 @@ mod inactive_panel_paths_tests {
 
     #[test]
     fn opengl_parity_mode_disables_opengl_specific_policy() {
-        assert!(OPENGL_BACKEND_PARITY_MODE);
+        const { assert!(OPENGL_BACKEND_PARITY_MODE) };
         assert!(!backend_uses_opengl_specific_performance_policy("glow"));
         assert!(!backend_uses_opengl_specific_performance_policy("Vulkan"));
     }

@@ -470,7 +470,7 @@ mod tests {
 
     #[test]
     fn drive_root_presence_ignores_label_changes() {
-        let old_disks = vec![("C:\\".to_string(), "Local Disk (C:)".to_string())];
+        let old_disks = [("C:\\".to_string(), "Local Disk (C:)".to_string())];
         let new_disks = vec![("C:\\".to_string(), "SYSTEM (C:)".to_string())];
 
         assert!(drive_root_is_present(&new_disks, &old_disks[0].0));

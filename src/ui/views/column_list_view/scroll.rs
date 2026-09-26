@@ -8,6 +8,7 @@ pub(super) fn apply_input(
     scroll_x: &mut f32,
     max_scroll: f32,
     global_search_active: bool,
+    interpolation_enabled: bool,
 ) {
     let pointer_over = ui.ctx().pointer_hover_pos().is_some_and(|pos| {
         viewport_rect.contains(pos)
@@ -17,7 +18,14 @@ pub(super) fn apply_input(
                 .is_none_or(|layer| layer.order == egui::Order::Background)
     });
     if pointer_over && !global_search_active {
-        let delta = ui.input(|input| input.smooth_scroll_delta);
+        let viewport_h = viewport_rect.height();
+        let delta = ui.input(|input| {
+            if interpolation_enabled {
+                input.smooth_scroll_delta
+            } else {
+                crate::ui::views::common::raw_wheel_delta(input, viewport_h)
+            }
+        });
         let horizontal_delta = if delta.x.abs() > 0.01 {
             delta.x
         } else {

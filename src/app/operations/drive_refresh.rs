@@ -25,15 +25,12 @@ fn virtual_drive_info_query_times(
 }
 
 fn virtual_drive_info_query_is_due(letter: char, now: Instant) -> bool {
-    match virtual_drive_info_query_times().lock().get(&letter) {
+    !matches!(
+        virtual_drive_info_query_times().lock().get(&letter),
         Some(last)
             if now.saturating_duration_since(*last)
-                < Duration::from_millis(VIRTUAL_DRIVE_INFO_REFRESH_INTERVAL_MS) =>
-        {
-            false
-        }
-        _ => true,
-    }
+                < Duration::from_millis(VIRTUAL_DRIVE_INFO_REFRESH_INTERVAL_MS)
+    )
 }
 
 fn record_virtual_drive_info_query(letter: char, now: Instant) {

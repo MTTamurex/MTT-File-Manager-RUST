@@ -320,6 +320,15 @@ impl ImageViewerApp {
         // GPU backend preference
         prefs.push(("gpu_backend", self.gpu_backend_preference.clone()));
 
+        prefs.push((
+            "scroll_interpolation",
+            if self.scroll_interpolation_enabled {
+                "true".to_string()
+            } else {
+                "false".to_string()
+            },
+        ));
+
         // Diagnostic mode preference
         prefs.push((
             diagnostic_logger::DIAGNOSTIC_MODE_KEY,

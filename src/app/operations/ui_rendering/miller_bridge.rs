@@ -121,6 +121,7 @@ impl ImageViewerApp {
         let selected_file_path = self.selected_file.as_ref().map(|f| f.path.clone());
         let selected_paths = self.multi_selection.clone();
         let rectangle_selection_state = self.rectangle_selection_state.clone();
+        let scroll_interpolation_enabled = self.uses_scroll_interpolation();
         let ancestor_data: Vec<(Option<Arc<Vec<FileEntry>>>, bool)> = chain
             .iter()
             .take(focused_index)
@@ -203,6 +204,7 @@ impl ImageViewerApp {
                                         is_item_dragging: self.is_item_dragging,
                                         drop_target: &mut column_drop_target,
                                         is_loading: *loading,
+                                        scroll_interpolation_enabled,
                                     };
                                     render_miller_column(ui, ("miller_col", col_idx), &mut cctx)
                                 },

@@ -216,6 +216,7 @@ impl ImageViewerApp {
             language,
             theme_mode,
             gpu_backend_preference,
+            scroll_interpolation_enabled,
             diagnostic_mode,
             diagnostic_mode_enabled_at,
             diagnostic_mode_needs_persist,
@@ -747,6 +748,7 @@ impl ImageViewerApp {
 
             active_gpu_backend: String::new(), // Set after construction from render_state
             gpu_backend_preference,
+            scroll_interpolation_enabled,
             diagnostic_mode,
             diagnostic_mode_enabled_at,
             shortcuts,

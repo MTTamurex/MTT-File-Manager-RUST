@@ -606,6 +606,10 @@ impl eframe::App for ImageViewerApp {
                 self.save_preferences();
                 self.force_save_preferences();
             }
+            if output.interpolation_changed {
+                self.save_preferences();
+                self.force_save_preferences();
+            }
             if output.shortcuts_changed {
                 self.save_preferences();
                 self.force_save_preferences();

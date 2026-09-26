@@ -300,6 +300,7 @@ impl ImageViewerApp {
             .as_ref()
             .filter(|state| state.view == RectangleSelectionView::Grid);
         let use_opengl_performance_policy = self.uses_opengl_specific_performance_policy();
+        let scroll_interpolation_enabled = self.uses_scroll_interpolation();
         let low_res_thumbnails_while_scrolling = use_opengl_performance_policy;
         let low_res_folder_previews_while_scrolling =
             self.uses_conservative_folder_preview_policy();
@@ -360,6 +361,7 @@ impl ImageViewerApp {
             frame_time_peak_ms: self.frame_time_peak_ms,
             low_res_thumbnails_while_scrolling,
             use_opengl_performance_policy,
+            scroll_interpolation_enabled,
             low_res_folder_previews_while_scrolling,
             thumbnail_requests_this_frame: 0,
             folder_preview_requests_this_frame: 0,

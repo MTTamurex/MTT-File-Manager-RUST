@@ -12,9 +12,17 @@ pub(super) fn apply_scroll_input(
     target_scroll: &mut f32,
     max_scroll: f32,
     consume_scroll: bool,
+    interpolation_enabled: bool,
 ) {
+    let viewport_h = ui.available_height();
     let scroll_delta = if consume_scroll {
-        ui.input(|i| i.smooth_scroll_delta.y)
+        ui.input(|i| {
+            if interpolation_enabled {
+                i.smooth_scroll_delta.y
+            } else {
+                crate::ui::views::common::raw_wheel_delta(i, viewport_h).y
+            }
+        })
     } else {
         0.0
     };
@@ -32,6 +40,7 @@ pub(super) fn compute_visual_scroll(
     viewport_h: f32,
     max_scroll: f32,
     generation: usize,
+    interpolation_enabled: bool,
 ) -> (f32, f32) {
     let scroll_state_id = ui.id().with("list_scroll_state").with(generation);
     let dt = ui.input(|i| i.predicted_dt).min(0.05);
@@ -42,17 +51,21 @@ pub(super) fn compute_visual_scroll(
         });
         state.visual_scroll_y = state.visual_scroll_y.clamp(0.0, max_scroll);
 
-        let t = (dt * 9.0).min(1.0);
-
-        if (state.visual_scroll_y - target_scroll).abs() > viewport_h * 1.5 {
+        if !interpolation_enabled {
             state.visual_scroll_y = target_scroll;
         } else {
-            state.visual_scroll_y =
-                state.visual_scroll_y + (target_scroll - state.visual_scroll_y) * t;
-        }
+            let t = (dt * 9.0).min(1.0);
 
-        if (state.visual_scroll_y - target_scroll).abs() < 1.0 {
-            state.visual_scroll_y = target_scroll;
+            if (state.visual_scroll_y - target_scroll).abs() > viewport_h * 1.5 {
+                state.visual_scroll_y = target_scroll;
+            } else {
+                state.visual_scroll_y =
+                    state.visual_scroll_y + (target_scroll - state.visual_scroll_y) * t;
+            }
+
+            if (state.visual_scroll_y - target_scroll).abs() < 1.0 {
+                state.visual_scroll_y = target_scroll;
+            }
         }
         state.visual_scroll_y = state.visual_scroll_y.clamp(0.0, max_scroll);
 
