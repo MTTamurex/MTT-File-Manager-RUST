@@ -271,7 +271,15 @@ pub(super) fn render_results_panel(
         .pointer_hover_pos()
         .is_some_and(|pos| viewport_rect.contains(pos));
     if pointer_over && app.global_search.rename_state.is_none() {
-        let delta = ui.input(|i| i.smooth_scroll_delta.y);
+        let scroll_interpolation_enabled = app.uses_scroll_interpolation();
+        let viewport_h = viewport_rect.height();
+        let delta = ui.input(|i| {
+            if scroll_interpolation_enabled {
+                i.smooth_scroll_delta.y
+            } else {
+                crate::ui::views::common::raw_wheel_delta(i, viewport_h).y
+            }
+        });
         if delta != 0.0 {
             app.global_search.scroll_offset_y -= delta * SCROLL_SENSITIVITY;
         }
@@ -313,6 +321,7 @@ pub(super) fn render_results_panel(
         app.global_search.scroll_offset_y,
         viewport_h,
         app.global_search.results_generation,
+        app.uses_scroll_interpolation(),
     );
 
     let has_recent_scroll_input = app.global_search.last_scroll_time.elapsed()

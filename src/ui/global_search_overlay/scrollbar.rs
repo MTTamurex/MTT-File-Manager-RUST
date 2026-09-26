@@ -14,6 +14,7 @@ pub(super) fn compute_visual_scroll(
     target_scroll: f32,
     viewport_h: f32,
     generation: u64,
+    interpolation_enabled: bool,
 ) -> (f32, f32) {
     let scroll_state_id = ui.id().with("global_search_scroll_state").with(generation);
     let dt = ui.input(|i| i.predicted_dt).min(0.05);
@@ -25,17 +26,21 @@ pub(super) fn compute_visual_scroll(
             }
         });
 
-        let t = (dt * 9.0).min(1.0);
-
-        if (state.visual_scroll_y - target_scroll).abs() > viewport_h * 1.5 {
+        if !interpolation_enabled {
             state.visual_scroll_y = target_scroll;
         } else {
-            state.visual_scroll_y =
-                state.visual_scroll_y + (target_scroll - state.visual_scroll_y) * t;
-        }
+            let t = (dt * 9.0).min(1.0);
 
-        if (state.visual_scroll_y - target_scroll).abs() < 1.0 {
-            state.visual_scroll_y = target_scroll;
+            if (state.visual_scroll_y - target_scroll).abs() > viewport_h * 1.5 {
+                state.visual_scroll_y = target_scroll;
+            } else {
+                state.visual_scroll_y =
+                    state.visual_scroll_y + (target_scroll - state.visual_scroll_y) * t;
+            }
+
+            if (state.visual_scroll_y - target_scroll).abs() < 1.0 {
+                state.visual_scroll_y = target_scroll;
+            }
         }
 
         state.visual_scroll_y
