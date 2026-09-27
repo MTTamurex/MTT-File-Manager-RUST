@@ -280,6 +280,48 @@ pub fn validate_rule_set(rules: &[OrganizerRule]) -> Result<(), OrganizerRuleErr
     Ok(())
 }
 
+/// An enabled rule that claims the same extension as the rule being saved.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OrganizerExtensionConflict {
+    pub extension: String,
+    pub existing_rule_id: i64,
+    pub existing_destination: PathBuf,
+}
+
+/// Finds the first enabled rule other than `rule` that claims one of the same
+/// extensions. Extensions are globally exclusive across organizer rules,
+/// regardless of their source folders. Disabled rules are ignored, and stored
+/// rules are scanned in list order (creation order).
+pub fn find_extension_conflict(
+    rules: &[OrganizerRule],
+    rule: &OrganizerRule,
+) -> Option<OrganizerExtensionConflict> {
+    use std::collections::HashMap;
+
+    if !rule.enabled {
+        return None;
+    }
+    let mut claims: HashMap<&str, &OrganizerRule> = HashMap::new();
+    for other in rules
+        .iter()
+        .filter(|other| other.enabled && other.id != rule.id)
+    {
+        for extension in &other.extensions {
+            claims.entry(extension).or_insert(other);
+        }
+    }
+    for extension in &rule.extensions {
+        if let Some(other) = claims.get(extension.as_str()) {
+            return Some(OrganizerExtensionConflict {
+                extension: extension.clone(),
+                existing_rule_id: other.id,
+                existing_destination: other.destination_folder.clone(),
+            });
+        }
+    }
+    None
+}
+
 fn folder_identity(path: &Path) -> String {
     normalize_path(&path.canonicalize().unwrap_or_else(|_| path.to_path_buf()))
 }
@@ -687,6 +729,104 @@ mod tests {
         ];
 
         assert_eq!(validate_rule_set(&rules), Ok(()));
+    }
+
+    #[test]
+    fn detects_enabled_rules_claiming_the_same_extension() {
+        let source = tempfile::tempdir().expect("source tempdir");
+        let destination_a = tempfile::tempdir().expect("destination a");
+        let destination_b = tempfile::tempdir().expect("destination b");
+        let rules = vec![
+            OrganizerRule::new(
+                1,
+                source.path().to_path_buf(),
+                destination_a.path().to_path_buf(),
+                vec!["exe".to_string()],
+                true,
+            )
+            .expect("rule a"),
+            OrganizerRule::new(
+                2,
+                source.path().to_path_buf(),
+                destination_b.path().to_path_buf(),
+                vec!["exe".to_string()],
+                true,
+            )
+            .expect("rule b"),
+        ];
+
+        let conflict = find_extension_conflict(&rules, &rules[1]).expect("conflicting claim");
+        assert_eq!(conflict.extension, "exe");
+        assert_eq!(conflict.existing_rule_id, 1);
+        assert_eq!(conflict.existing_destination, destination_a.path());
+
+        let conflict = find_extension_conflict(&rules, &rules[0]).expect("conflicting claim");
+        assert_eq!(conflict.existing_rule_id, 2);
+        assert_eq!(conflict.existing_destination, destination_b.path());
+    }
+
+    #[test]
+    fn ignores_disabled_rules_and_detects_global_extension_conflicts() {
+        let source_a = tempfile::tempdir().expect("source a");
+        let source_b = tempfile::tempdir().expect("source b");
+        let destination_a = tempfile::tempdir().expect("destination a");
+        let destination_b = tempfile::tempdir().expect("destination b");
+        let rule_a = OrganizerRule::new(
+            1,
+            source_a.path().to_path_buf(),
+            destination_a.path().to_path_buf(),
+            vec!["exe".to_string()],
+            true,
+        )
+        .expect("rule a");
+        let rule_b_disabled = OrganizerRule::new(
+            2,
+            source_b.path().to_path_buf(),
+            destination_b.path().to_path_buf(),
+            vec!["exe".to_string()],
+            false,
+        )
+        .expect("disabled rule");
+        let rule_c_other_source = OrganizerRule::new(
+            3,
+            source_b.path().to_path_buf(),
+            destination_b.path().to_path_buf(),
+            vec!["exe".to_string()],
+            true,
+        )
+        .expect("rule c");
+        let rule_d_other_extension = OrganizerRule::new(
+            4,
+            source_a.path().to_path_buf(),
+            destination_b.path().to_path_buf(),
+            vec!["msi".to_string()],
+            true,
+        )
+        .expect("rule d");
+
+        let conflict = find_extension_conflict(
+            &[rule_a.clone(), rule_c_other_source.clone()],
+            &rule_c_other_source,
+        )
+        .expect("same extension must conflict across source folders");
+        assert_eq!(conflict.extension, "exe");
+        assert_eq!(conflict.existing_rule_id, rule_a.id);
+
+        assert_eq!(
+            find_extension_conflict(&[rule_a.clone(), rule_b_disabled.clone()], &rule_a),
+            None
+        );
+        assert_eq!(
+            find_extension_conflict(&[rule_a.clone(), rule_b_disabled.clone()], &rule_b_disabled),
+            None
+        );
+        assert_eq!(
+            find_extension_conflict(
+                &[rule_a, rule_d_other_extension.clone()],
+                &rule_d_other_extension
+            ),
+            None
+        );
     }
 
     #[test]

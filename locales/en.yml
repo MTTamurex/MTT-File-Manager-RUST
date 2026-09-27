@@ -835,6 +835,7 @@ organizer:
   error_same_folders: "The destination folder must differ from the source"
   error_invalid_conflict_folder: "The conflict folder must exist, use a safe absolute path, and differ from the rule folders"
   error_rule_cycle: "This rule creates a cycle with another active organizer rule"
+  error_extension_conflict: "Extension '.%{extension}' is already used by another rule (destination: %{destination}). Resolve the conflict to save this rule."
   issue_skipped: "%{name}: skipped by the conflict policy"
   error_auto_rename_unavailable: "No available renamed destination could be found"
   error_conflict_folder_unavailable: "The configured conflict folder is unavailable"

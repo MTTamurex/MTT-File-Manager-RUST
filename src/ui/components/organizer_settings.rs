@@ -483,6 +483,15 @@ fn db_error_message(error: OrganizerRuleDbError) -> String {
             t!("organizer.error_database_unavailable").to_string()
         }
         OrganizerRuleDbError::RuleNotFound => t!("organizer.error_rule_not_found").to_string(),
+        OrganizerRuleDbError::ExtensionConflict {
+            extension,
+            destination,
+        } => rust_i18n::t!(
+            "organizer.error_extension_conflict",
+            extension = extension,
+            destination = destination
+        )
+        .to_string(),
         OrganizerRuleDbError::Database(reason) => {
             rust_i18n::t!("organizer.error_database", reason = reason).to_string()
         }
