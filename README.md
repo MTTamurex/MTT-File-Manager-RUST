@@ -211,6 +211,11 @@ This project includes and builds upon work from the following projects:
 - [ModernH](https://github.com/HarkeshBhatia/ModernH), by Harkesh Bhatia. Our OSC file originated from this project and is used here with small modifications.
 - [RTX HDR / RTX VSR toggle gist](https://gist.github.com/anthonybaldwin/1e49b28b49babf64f159cb793c506333), by anthonybaldwin. This gist served as an early development reference while experimenting with RTX HDR / RTX VSR behavior in mpv; the current repository implementation has since been reworked independently.
 
+### Translations
+
+- **Chinese (Simplified)** — contributed by [@cdtsuipo](https://github.com/cdtsuipo)
+- **Russian** — contributed by [@Nekiplay](https://github.com/Nekiplay)
+
 ## License
 
 Except where otherwise noted, the original code and documentation authored for this repository are licensed under the **Apache License, Version 2.0**. See the top-level `LICENSE` and `NOTICE` files.
