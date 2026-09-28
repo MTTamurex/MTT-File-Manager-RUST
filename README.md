@@ -124,7 +124,7 @@ The app supports three rendering backend choices, selectable in **Settings > Gen
 ### Glow — OpenGL (Fallback)
 - Fallback when DirectX 12 or Vulkan is unavailable or unstable on your system.
 - Uses eframe's `Glow` renderer directly instead of `wgpu`'s OpenGL backend
-- OpenGL texture uploads can be synchronous on the CPU thread; OpenGL-specific throttling remains available for targeted performance testing
+- OpenGL texture uploads can be synchronous on the CPU thread, leading to some stutter.
 
 ## Prerequisites
 
