@@ -408,6 +408,8 @@ settings:
   shortcut_close_tab: "Close tab"
   shortcut_next_tab: "Next tab"
   shortcut_previous_tab: "Previous tab"
+  shortcut_move_tab_left: "Move tab left"
+  shortcut_move_tab_right: "Move tab right"
   shortcut_copy: "Copy"
   shortcut_cut: "Cut"
   shortcut_paste: "Paste"

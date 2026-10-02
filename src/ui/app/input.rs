@@ -284,6 +284,22 @@ pub fn handle_input(app: &mut ImageViewerApp, ctx: &egui::Context) {
             user_active = true;
         }
 
+        if app
+            .shortcuts
+            .consume_triggered(ShortcutAction::MoveTabLeft, ctx)
+        {
+            app.tab_manager.move_tab_left();
+            user_active = true;
+        }
+
+        if app
+            .shortcuts
+            .consume_triggered(ShortcutAction::MoveTabRight, ctx)
+        {
+            app.tab_manager.move_tab_right();
+            user_active = true;
+        }
+
         if !text_input_active && app.shortcuts.is_triggered(ShortcutAction::SelectAll, ctx) {
             if app.select_all_current_items() {
                 app.last_input = crate::app::state::LastInput::Keyboard;

@@ -408,6 +408,8 @@ settings:
   shortcut_close_tab: "Закрыть вкладку"
   shortcut_next_tab: "Следующая вкладка"
   shortcut_previous_tab: "Предыдущая вкладка"
+  shortcut_move_tab_left: "Переместить вкладку влево"
+  shortcut_move_tab_right: "Переместить вкладку вправо"
   shortcut_copy: "Копировать"
   shortcut_cut: "Вырезать"
   shortcut_paste: "Вставить"

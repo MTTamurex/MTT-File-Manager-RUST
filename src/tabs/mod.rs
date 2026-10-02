@@ -622,6 +622,50 @@ impl TabManager {
         }
     }
 
+    pub fn move_tab_to_gap(&mut self, from: usize, gap: usize) -> bool {
+        if from >= self.tabs.len() || gap > self.tabs.len() {
+            return false;
+        }
+
+        let insert = if gap > from { gap - 1 } else { gap };
+        if insert == from {
+            return false;
+        }
+
+        let tab = self.tabs.remove(from);
+        self.tabs.insert(insert, tab);
+
+        if self.active_tab == from {
+            self.active_tab = insert;
+        } else if from < self.active_tab && insert >= self.active_tab {
+            self.active_tab -= 1;
+        } else if from > self.active_tab && insert <= self.active_tab {
+            self.active_tab += 1;
+        }
+
+        true
+    }
+
+    pub fn move_tab_left(&mut self) -> bool {
+        if self.active_tab == 0 {
+            return false;
+        }
+
+        self.tabs.swap(self.active_tab, self.active_tab - 1);
+        self.active_tab -= 1;
+        true
+    }
+
+    pub fn move_tab_right(&mut self) -> bool {
+        if self.active_tab + 1 >= self.tabs.len() {
+            return false;
+        }
+
+        self.tabs.swap(self.active_tab, self.active_tab + 1);
+        self.active_tab += 1;
+        true
+    }
+
     /// Reopen the most recently closed tab
     pub fn reopen_closed_tab(&mut self) -> bool {
         // PERF-05: respect the tab cap. Checked BEFORE popping closed_tabs so
@@ -698,6 +742,92 @@ mod tests {
         assert!(manager.can_add_tab());
         assert!(manager.new_tab());
         assert_eq!(manager.count(), MAX_TABS);
+    }
+
+    #[test]
+    fn move_tab_to_gap_reorders_and_tracks_active_tab() {
+        let mut manager = TabManager::new();
+        assert!(manager.new_tab_at(r"C:\FolderA"));
+        assert!(manager.new_tab_at(r"D:\FolderB"));
+
+        manager.switch_to(1);
+        assert!(manager.move_tab_to_gap(0, 3));
+        assert_eq!(
+            manager.tabs.iter().map(|tab| tab.id).collect::<Vec<_>>(),
+            [1, 2, 0]
+        );
+        assert_eq!(manager.active_tab, 0);
+
+        manager.switch_to(2);
+        assert!(manager.move_tab_to_gap(2, 0));
+        assert_eq!(
+            manager.tabs.iter().map(|tab| tab.id).collect::<Vec<_>>(),
+            [0, 1, 2]
+        );
+        assert_eq!(manager.active_tab, 0);
+
+        manager.switch_to(2);
+        assert!(manager.move_tab_to_gap(0, 2));
+        assert_eq!(
+            manager.tabs.iter().map(|tab| tab.id).collect::<Vec<_>>(),
+            [1, 0, 2]
+        );
+        assert_eq!(manager.active_tab, 2);
+
+        manager.switch_to(0);
+        assert!(manager.move_tab_to_gap(2, 0));
+        assert_eq!(
+            manager.tabs.iter().map(|tab| tab.id).collect::<Vec<_>>(),
+            [2, 1, 0]
+        );
+        assert_eq!(manager.active_tab, 1);
+    }
+
+    #[test]
+    fn move_tab_to_gap_rejects_noop_and_out_of_range_requests() {
+        let mut manager = TabManager::new();
+        assert!(manager.new_tab_at(r"C:\FolderA"));
+        assert!(manager.new_tab_at(r"D:\FolderB"));
+        manager.switch_to(1);
+        let order = manager.tabs.iter().map(|tab| tab.id).collect::<Vec<_>>();
+        let active = manager.active_tab;
+
+        assert!(!manager.move_tab_to_gap(1, 1));
+        assert!(!manager.move_tab_to_gap(1, 2));
+        assert!(!manager.move_tab_to_gap(3, 0));
+        assert!(!manager.move_tab_to_gap(0, 4));
+        assert_eq!(
+            manager.tabs.iter().map(|tab| tab.id).collect::<Vec<_>>(),
+            order
+        );
+        assert_eq!(manager.active_tab, active);
+    }
+
+    #[test]
+    fn move_tab_left_and_right_swap_neighbors_and_track_active_tab() {
+        let mut manager = TabManager::new();
+        assert!(manager.new_tab_at(r"C:\FolderA"));
+        assert!(manager.new_tab_at(r"D:\FolderB"));
+        manager.switch_to(1);
+
+        assert!(manager.move_tab_left());
+        assert_eq!(
+            manager.tabs.iter().map(|tab| tab.id).collect::<Vec<_>>(),
+            [1, 0, 2]
+        );
+        assert_eq!(manager.active_tab, 0);
+
+        assert!(manager.move_tab_right());
+        assert_eq!(
+            manager.tabs.iter().map(|tab| tab.id).collect::<Vec<_>>(),
+            [0, 1, 2]
+        );
+        assert_eq!(manager.active_tab, 1);
+
+        manager.switch_to(0);
+        assert!(!manager.move_tab_left());
+        manager.switch_to(2);
+        assert!(!manager.move_tab_right());
     }
 
     #[test]

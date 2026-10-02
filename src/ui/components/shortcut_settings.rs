@@ -145,6 +145,8 @@ fn action_label(action: ShortcutAction) -> String {
         ShortcutAction::CloseTab => t!("settings.shortcut_close_tab").to_string(),
         ShortcutAction::NextTab => t!("settings.shortcut_next_tab").to_string(),
         ShortcutAction::PreviousTab => t!("settings.shortcut_previous_tab").to_string(),
+        ShortcutAction::MoveTabLeft => t!("settings.shortcut_move_tab_left").to_string(),
+        ShortcutAction::MoveTabRight => t!("settings.shortcut_move_tab_right").to_string(),
         ShortcutAction::Copy => t!("settings.shortcut_copy").to_string(),
         ShortcutAction::Cut => t!("settings.shortcut_cut").to_string(),
         ShortcutAction::Paste => t!("settings.shortcut_paste").to_string(),

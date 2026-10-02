@@ -8,6 +8,8 @@ pub enum ShortcutAction {
     CloseTab,
     NextTab,
     PreviousTab,
+    MoveTabLeft,
+    MoveTabRight,
     Copy,
     Cut,
     Paste,
@@ -24,12 +26,14 @@ pub enum ShortcutAction {
 }
 
 impl ShortcutAction {
-    pub const COUNT: usize = 17;
+    pub const COUNT: usize = 19;
     pub const ALL: [Self; Self::COUNT] = [
         Self::NewTab,
         Self::CloseTab,
         Self::NextTab,
         Self::PreviousTab,
+        Self::MoveTabLeft,
+        Self::MoveTabRight,
         Self::Copy,
         Self::Cut,
         Self::Paste,
@@ -44,12 +48,14 @@ impl ShortcutAction {
         Self::PreviewSelected,
         Self::SelectAll,
     ];
-    pub const CONFIGURABLE_COUNT: usize = 8;
+    pub const CONFIGURABLE_COUNT: usize = 10;
     pub const CONFIGURABLE: [Self; Self::CONFIGURABLE_COUNT] = [
         Self::NewTab,
         Self::CloseTab,
         Self::NextTab,
         Self::PreviousTab,
+        Self::MoveTabLeft,
+        Self::MoveTabRight,
         Self::Refresh,
         Self::FocusAddressBar,
         Self::GlobalSearch,
@@ -66,6 +72,8 @@ impl ShortcutAction {
             Self::CloseTab => "shortcut_close_tab",
             Self::NextTab => "shortcut_next_tab",
             Self::PreviousTab => "shortcut_previous_tab",
+            Self::MoveTabLeft => "shortcut_move_tab_left",
+            Self::MoveTabRight => "shortcut_move_tab_right",
             Self::Copy => "shortcut_copy",
             Self::Cut => "shortcut_cut",
             Self::Paste => "shortcut_paste",
@@ -88,6 +96,8 @@ impl ShortcutAction {
             Self::CloseTab => "settings.shortcut_close_tab",
             Self::NextTab => "settings.shortcut_next_tab",
             Self::PreviousTab => "settings.shortcut_previous_tab",
+            Self::MoveTabLeft => "settings.shortcut_move_tab_left",
+            Self::MoveTabRight => "settings.shortcut_move_tab_right",
             Self::Copy => "settings.shortcut_copy",
             Self::Cut => "settings.shortcut_cut",
             Self::Paste => "settings.shortcut_paste",
@@ -389,6 +399,19 @@ impl ShortcutBindings {
                 .any(|event| binding_from_event(event) == Some(binding))
         })
     }
+
+    pub fn consume_triggered(&self, action: ShortcutAction, ctx: &egui::Context) -> bool {
+        let binding = self.get(action);
+        ctx.input_mut(|input| {
+            let mut consumed = false;
+            input.events.retain(|event| {
+                let matches = binding_from_event(event) == Some(binding);
+                consumed |= matches;
+                !matches
+            });
+            consumed
+        })
+    }
 }
 
 pub fn capture_shortcut(ctx: &egui::Context) -> Option<ShortcutCapture> {
@@ -424,6 +447,8 @@ const DEFAULT_BINDINGS: [ShortcutBinding; ShortcutAction::COUNT] = [
     ShortcutBinding::ctrl(egui::Key::W),
     ShortcutBinding::ctrl(egui::Key::Tab),
     ShortcutBinding::ctrl_shift(egui::Key::Tab),
+    ShortcutBinding::ctrl_shift(egui::Key::PageUp),
+    ShortcutBinding::ctrl_shift(egui::Key::PageDown),
     ShortcutBinding::ctrl(egui::Key::C),
     ShortcutBinding::ctrl(egui::Key::X),
     ShortcutBinding::ctrl(egui::Key::V),
@@ -541,6 +566,8 @@ fn is_supported_key(key: egui::Key) -> bool {
             | egui::Key::Tab
             | egui::Key::Enter
             | egui::Key::Space
+            | egui::Key::PageUp
+            | egui::Key::PageDown
             | egui::Key::Delete
             | egui::Key::F1
             | egui::Key::F2
@@ -598,6 +625,8 @@ fn parse_key_token(token: &str) -> Option<egui::Key> {
         "tab" => Some(egui::Key::Tab),
         "enter" => Some(egui::Key::Enter),
         "space" => Some(egui::Key::Space),
+        "pageup" | "pgup" => Some(egui::Key::PageUp),
+        "pagedown" | "pgdn" => Some(egui::Key::PageDown),
         "delete" | "del" => Some(egui::Key::Delete),
         "f1" => Some(egui::Key::F1),
         "f2" => Some(egui::Key::F2),
@@ -656,6 +685,8 @@ fn key_display_name(key: egui::Key) -> &'static str {
         egui::Key::Tab => "Tab",
         egui::Key::Enter => "Enter",
         egui::Key::Space => "Space",
+        egui::Key::PageUp => "PageUp",
+        egui::Key::PageDown => "PageDown",
         egui::Key::Delete => "Delete",
         egui::Key::F1 => "F1",
         egui::Key::F2 => "F2",

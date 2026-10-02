@@ -23,6 +23,7 @@ pub enum TabBarAction {
     None,
     SwitchTab(usize),
     CloseTab(usize),
+    MoveTab { from: usize, gap: usize },
     NewTab,
     CloseApp,
     ToggleMaximize,
@@ -90,6 +91,9 @@ pub fn render_tab_bar(
     let min_tab_width = 100.0;
     let max_tab_width = 200.0;
     let ideal_tab_width = (available_width / num_tabs as f32).clamp(min_tab_width, max_tab_width);
+    let tab_reorder_active = ctx
+        .data(|data| data.get_temp::<usize>(egui::Id::new("tab_reorder_drag")))
+        .is_some();
 
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0; // Remove spacing between tabs
@@ -127,7 +131,9 @@ pub fn render_tab_bar(
             inactive_bg,
             hover_bg,
             text_color,
-        ) {
+            tab_reorder_active,
+        ) && !tab_reorder_active
+        {
             action = TabBarAction::NewTab;
         }
 

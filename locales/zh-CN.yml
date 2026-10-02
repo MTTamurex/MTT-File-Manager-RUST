@@ -408,6 +408,8 @@ settings:
   shortcut_close_tab: "关闭标签页"
   shortcut_next_tab: "下一个标签页"
   shortcut_previous_tab: "上一个标签页"
+  shortcut_move_tab_left: "左移标签页"
+  shortcut_move_tab_right: "右移标签页"
   shortcut_copy: "复制"
   shortcut_cut: "剪切"
   shortcut_paste: "粘贴"

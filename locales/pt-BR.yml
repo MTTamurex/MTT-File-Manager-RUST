@@ -408,6 +408,8 @@ settings:
   shortcut_close_tab: "Fechar aba"
   shortcut_next_tab: "Próxima aba"
   shortcut_previous_tab: "Aba anterior"
+  shortcut_move_tab_left: "Mover aba para a esquerda"
+  shortcut_move_tab_right: "Mover aba para a direita"
   shortcut_copy: "Copiar"
   shortcut_cut: "Recortar"
   shortcut_paste: "Colar"

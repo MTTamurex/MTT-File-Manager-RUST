@@ -56,6 +56,9 @@ pub(crate) fn render_tab_bar_layer(
                     app.sync_from_tab();
                     app.update_video_visibility();
                 }
+                TabBarAction::MoveTab { from, gap } => {
+                    app.tab_manager.move_tab_to_gap(from, gap);
+                }
                 TabBarAction::NewTab => {
                     // PERF-05: enforce the tab cap before touching tab state.
                     if !app.tab_manager.can_add_tab() {

@@ -66,17 +66,39 @@ pub(super) fn render_tabs(
     is_dark: bool,
 ) -> TabBarAction {
     let mut action = TabBarAction::None;
+    let drag_id = egui::Id::new("tab_reorder_drag");
+    if is_item_dragging {
+        ui.ctx().data_mut(|d| d.remove::<usize>(drag_id));
+    }
+    let drag_src: Option<usize> = if is_item_dragging {
+        None
+    } else {
+        ui.ctx().data(|d| d.get_temp(drag_id))
+    };
+    let pointer_pos = ui.ctx().input(|input| {
+        input
+            .pointer
+            .hover_pos()
+            .or_else(|| input.pointer.interact_pos())
+    });
+    let press_origin = ui.ctx().input(|input| input.pointer.press_origin());
+    let (primary_released, cancel_drag) = ui.ctx().input(|input| {
+        let primary_released = input.pointer.primary_released();
+        let cancel_drag = input.key_pressed(egui::Key::Escape)
+            || !input.viewport().focused.unwrap_or(true)
+            || (!input.pointer.primary_down() && !primary_released);
+        (primary_released, cancel_drag)
+    });
+    let mut tab_rects = Vec::with_capacity(tab_manager.tabs.len());
 
     for (idx, tab) in tab_manager.tabs.iter().enumerate() {
         let is_active = idx == tab_manager.active_tab;
 
-        let sense = if is_item_dragging {
-            egui::Sense::click_and_drag()
-        } else {
-            egui::Sense::click()
-        };
-        let (rect, response) =
-            ui.allocate_exact_size(Vec2::new(ideal_tab_width, tab_height), sense);
+        let (rect, response) = ui.allocate_exact_size(
+            Vec2::new(ideal_tab_width, tab_height),
+            egui::Sense::click_and_drag(),
+        );
+        tab_rects.push(rect);
 
         if response.clicked() {
             action = TabBarAction::SwitchTab(idx);
@@ -107,6 +129,13 @@ pub(super) fn render_tabs(
         };
 
         paint_tab_background(ui, rect, bg_color);
+        if drag_src == Some(idx) {
+            ui.painter().rect_filled(
+                rect,
+                CornerRadius::same(TAB_CORNER_RADIUS),
+                Color32::from_rgba_unmultiplied(100, 120, 215, 60),
+            );
+        }
 
         let content_rect = rect.shrink2(Vec2::new(tab_padding, 4.0));
 
@@ -279,6 +308,25 @@ pub(super) fn render_tabs(
             Vec2::splat(close_btn_size),
         );
 
+        let drag_started_on_control = press_origin.is_some_and(|origin| {
+            close_btn_rect.contains(origin)
+                || (has_speaker
+                    && egui::Rect::from_min_size(
+                        egui::pos2(
+                            rect.max.x - close_btn_size - tab_padding - speaker_btn_size - 4.0,
+                            content_rect.center().y - speaker_btn_size / 2.0,
+                        ),
+                        Vec2::splat(speaker_btn_size),
+                    )
+                    .contains(origin))
+        });
+        if !is_item_dragging && response.drag_started() && !drag_started_on_control {
+            ui.ctx().data_mut(|d| d.insert_temp(drag_id, idx));
+            if idx != tab_manager.active_tab {
+                action = TabBarAction::SwitchTab(idx);
+            }
+        }
+
         let close_response = ui.interact(
             close_btn_rect,
             egui::Id::new(idx).with("tab_close"), // M-9: no format! alloc
@@ -318,6 +366,48 @@ pub(super) fn render_tabs(
             ],
             x_stroke,
         );
+    }
+
+    if let Some(src) = drag_src {
+        let source_is_valid = src < tab_rects.len();
+        if cancel_drag || !source_is_valid {
+            ui.ctx().data_mut(|d| d.remove::<usize>(drag_id));
+        } else if let Some(pointer) = pointer_pos {
+            let row_rect =
+                egui::Rect::from_min_max(tab_rects[0].min, tab_rects[tab_rects.len() - 1].max);
+            let pointer_in_row = row_rect.contains(pointer);
+            let gap = if pointer_in_row {
+                tab_rects
+                    .iter()
+                    .position(|rect| pointer.x < rect.center().x)
+                    .unwrap_or(tab_rects.len())
+            } else {
+                0
+            };
+
+            if !primary_released {
+                ui.ctx().request_repaint();
+                if pointer_in_row {
+                    let indicator_x = if gap < tab_rects.len() {
+                        tab_rects[gap].min.x
+                    } else {
+                        tab_rects[tab_rects.len() - 1].max.x
+                    };
+                    ui.painter().vline(
+                        indicator_x,
+                        row_rect.y_range(),
+                        Stroke::new(2.0, Color32::from_rgb(0, 120, 215)),
+                    );
+                }
+            } else {
+                ui.ctx().data_mut(|d| d.remove::<usize>(drag_id));
+                if pointer_in_row {
+                    action = TabBarAction::MoveTab { from: src, gap };
+                }
+            }
+        } else if primary_released {
+            ui.ctx().data_mut(|d| d.remove::<usize>(drag_id));
+        }
     }
 
     action

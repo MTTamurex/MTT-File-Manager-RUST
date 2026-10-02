@@ -3,6 +3,7 @@ use crate::infrastructure::windows::window_subclass::{
 };
 use eframe::egui::{self, Color32, CornerRadius, Stroke, Vec2};
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn render_new_tab_and_drag_area(
     ui: &mut egui::Ui,
     ctx: &egui::Context,
@@ -11,6 +12,7 @@ pub(super) fn render_new_tab_and_drag_area(
     inactive_bg: Color32,
     hover_bg: Color32,
     text_color: Color32,
+    tab_reorder_active: bool,
 ) -> bool {
     let new_tab_btn_width = 36.0;
     let (new_tab_rect, new_tab_response) = ui.allocate_exact_size(
@@ -21,6 +23,9 @@ pub(super) fn render_new_tab_and_drag_area(
     let new_tab_clicked = new_tab_response.clicked();
 
     let remaining_width = ui.available_width() - window_controls_width;
+    let tab_reorder_dragging = ctx
+        .data(|data| data.get_temp::<usize>(egui::Id::new("tab_reorder_drag")))
+        .is_some();
     if remaining_width > 0.0 {
         let native_caption_drag = is_native_caption_drag_enabled();
         let sense = if native_caption_drag {
@@ -34,16 +39,24 @@ pub(super) fn render_new_tab_and_drag_area(
         ui.painter().rect_filled(drag_rect, 0.0, inactive_bg);
 
         // Sync native caption drag area with this explicit empty strip.
-        let ppp = ctx.pixels_per_point();
-        set_caption_drag_region_px(
-            (drag_rect.min.x * ppp).round() as i32,
-            (drag_rect.min.y * ppp).round() as i32,
-            (drag_rect.width() * ppp).round() as i32,
-            (drag_rect.height() * ppp).round() as i32,
-        );
+        if tab_reorder_active || tab_reorder_dragging {
+            clear_caption_drag_region();
+        } else {
+            let ppp = ctx.pixels_per_point();
+            set_caption_drag_region_px(
+                (drag_rect.min.x * ppp).round() as i32,
+                (drag_rect.min.y * ppp).round() as i32,
+                (drag_rect.width() * ppp).round() as i32,
+                (drag_rect.height() * ppp).round() as i32,
+            );
+        }
 
         // Fallback path for environments where native caption drag is disabled.
-        if !native_caption_drag && (drag_response.drag_started() || drag_response.dragged()) {
+        if !tab_reorder_active
+            && !tab_reorder_dragging
+            && !native_caption_drag
+            && (drag_response.drag_started() || drag_response.dragged())
+        {
             ctx.send_viewport_cmd(egui::ViewportCommand::StartDrag);
         }
     } else {
