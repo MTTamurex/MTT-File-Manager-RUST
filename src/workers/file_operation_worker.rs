@@ -103,6 +103,11 @@ pub enum FileOperationResult {
         dest_folder: PathBuf,
         archive_path: PathBuf,
     },
+    /// Image conversion completed - dest folder needs reload if active.
+    ImageConversionCompleted {
+        dest_folder: PathBuf,
+        converted_path: PathBuf,
+    },
     RenameCompleted {
         path: PathBuf,
         new_name: String,

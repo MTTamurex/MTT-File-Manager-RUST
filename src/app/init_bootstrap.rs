@@ -113,6 +113,8 @@ pub(in crate::app) struct AppBootstrap {
         crate::infrastructure::archive_extract::ExtractionCancelFlag,
     pub(in crate::app) compression_sender:
         mpsc::Sender<crate::workers::archive_compression_worker::ArchiveCompressionRequest>,
+    pub(in crate::app) conversion_sender:
+        mpsc::Sender<crate::workers::image_conversion_worker::ImageConversionRequest>,
     pub(in crate::app) compression_progress:
         crate::infrastructure::archive_create::SharedCompressionProgress,
     pub(in crate::app) compression_cancel:
@@ -470,6 +472,7 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
         extraction_progress,
         extraction_cancel,
         compression_sender,
+        conversion_sender,
         compression_progress,
         compression_cancel,
     ) = spawn_file_operation_worker();
@@ -556,6 +559,7 @@ pub(in crate::app) fn bootstrap_app(ctx: &egui::Context) -> AppBootstrap {
         extraction_progress,
         extraction_cancel,
         compression_sender,
+        conversion_sender,
         compression_progress,
         compression_cancel,
         global_search_tx,

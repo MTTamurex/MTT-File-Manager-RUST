@@ -67,6 +67,8 @@ pub struct FileOperationState {
     pub extraction_cancel: crate::infrastructure::archive_extract::ExtractionCancelFlag,
     pub(crate) compression_sender:
         Sender<crate::workers::archive_compression_worker::ArchiveCompressionRequest>,
+    pub(crate) conversion_sender:
+        Sender<crate::workers::image_conversion_worker::ImageConversionRequest>,
     pub compression_progress: crate::infrastructure::archive_create::SharedCompressionProgress,
     pub compression_cancel: crate::infrastructure::archive_create::CompressionCancelFlag,
     pub disk_cache_invalidation_sender:

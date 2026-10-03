@@ -32,15 +32,18 @@ pub(in crate::app) fn spawn_prefetching_workers(
     }
 }
 
-pub(in crate::app) fn spawn_file_operation_worker() -> (
+type FileOperationWorkerHandles = (
     crossbeam_channel::Sender<crate::workers::file_operation_worker::FileOperationRequest>,
     mpsc::Receiver<crate::workers::file_operation_worker::FileOperationResult>,
     crate::infrastructure::archive_extract::SharedExtractionProgress,
     crate::infrastructure::archive_extract::ExtractionCancelFlag,
     mpsc::Sender<crate::workers::archive_compression_worker::ArchiveCompressionRequest>,
+    mpsc::Sender<crate::workers::image_conversion_worker::ImageConversionRequest>,
     crate::infrastructure::archive_create::SharedCompressionProgress,
     crate::infrastructure::archive_create::CompressionCancelFlag,
-) {
+);
+
+pub(in crate::app) fn spawn_file_operation_worker() -> FileOperationWorkerHandles {
     // Multi-consumer request channel: the file-operation worker pool pulls
     // requests concurrently so long transfers don't serialize quick ops.
     let (file_op_tx, file_op_rx) = crossbeam_channel::unbounded();
@@ -68,6 +71,12 @@ pub(in crate::app) fn spawn_file_operation_worker() -> (
         compression_cancel.clone(),
     );
 
+    let (image_conversion_tx, image_conversion_rx) = mpsc::channel();
+    crate::workers::image_conversion_worker::start_image_conversion_worker(
+        image_conversion_rx,
+        file_op_res_tx.clone(),
+    );
+
     crate::workers::file_operation_worker::start_file_operation_worker(
         Arc::new(file_op_rx),
         file_op_res_tx,
@@ -79,6 +88,7 @@ pub(in crate::app) fn spawn_file_operation_worker() -> (
         extraction_progress,
         extraction_cancel,
         archive_compress_tx,
+        image_conversion_tx,
         compression_progress,
         compression_cancel,
     )

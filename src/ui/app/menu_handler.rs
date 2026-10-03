@@ -682,6 +682,15 @@ pub fn handle_context_menu(app: &mut ImageViewerApp, ctx: &egui::Context) {
                     app.context_menu = context_menu;
                     return;
                 }
+                if let Some(format) = command
+                    .strip_prefix("convert:")
+                    .and_then(crate::image_viewer::loader::ExportImageFormat::from_command)
+                {
+                    app.begin_image_conversion(&context_menu.target_paths, format);
+                    context_menu.close();
+                    app.context_menu = context_menu;
+                    return;
+                }
             }
             match id {
                 -1 => {

@@ -179,8 +179,34 @@ pub fn save_frame_atomically(
     replace_existing: bool,
     expected_destination: Option<FileSnapshot>,
 ) -> io::Result<()> {
+    save_frame_atomically_impl(
+        frame,
+        format,
+        destination,
+        replace_existing,
+        expected_destination,
+        true,
+    )
+}
+
+pub(crate) fn save_frame_atomically_without_cleanup(
+    frame: DecodedFrame,
+    format: ExportImageFormat,
+    destination: &Path,
+) -> io::Result<()> {
+    save_frame_atomically_impl(frame, format, destination, false, None, false)
+}
+
+fn save_frame_atomically_impl(
+    frame: DecodedFrame,
+    format: ExportImageFormat,
+    destination: &Path,
+    replace_existing: bool,
+    expected_destination: Option<FileSnapshot>,
+    cleanup_stale: bool,
+) -> io::Result<()> {
     verify_destination(destination, replace_existing, expected_destination)?;
-    let (temporary, file) = reserve_temporary_path(destination, replace_existing)?;
+    let (temporary, file) = reserve_temporary_path(destination, replace_existing, cleanup_stale)?;
     let result = (|| {
         loader::encode_frame_to_file(frame, format, file)?;
         preserve_destination_permissions(destination, &temporary, replace_existing)?;
@@ -242,6 +268,7 @@ fn verify_destination(
 fn reserve_temporary_path(
     destination: &Path,
     restrict_permissions: bool,
+    cleanup_stale: bool,
 ) -> io::Result<(PathBuf, std::fs::File)> {
     let parent = destination.parent().ok_or_else(|| {
         io::Error::new(
@@ -253,7 +280,9 @@ fn reserve_temporary_path(
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("image");
-    cleanup_stale_crop_files(destination, parent, name);
+    if cleanup_stale {
+        cleanup_stale_crop_files(destination, parent, name);
+    }
 
     for _ in 0..100 {
         let sequence = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);

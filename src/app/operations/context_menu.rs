@@ -130,6 +130,56 @@ fn compress_menu_item() -> crate::application::context_menu::ContextMenuItem {
         ])
 }
 
+fn should_offer_convert(
+    paths: &[PathBuf],
+    is_empty_area: bool,
+    is_global_search: bool,
+    target_is_file: bool,
+) -> bool {
+    !is_empty_area
+        && !is_global_search
+        && target_is_file
+        && paths.len() == 1
+        && paths[0]
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(crate::infrastructure::windows::is_image_extension)
+}
+
+fn convert_menu_item(
+    source_path: Option<&std::path::Path>,
+) -> crate::application::context_menu::ContextMenuItem {
+    use crate::application::context_menu::ContextMenuItem;
+    use crate::image_viewer::loader::ExportImageFormat as Format;
+
+    let source_format = source_path
+        .and_then(std::path::Path::extension)
+        .and_then(std::ffi::OsStr::to_str)
+        .and_then(Format::from_raster_extension);
+    let formats = [
+        (Format::Png, t!("imageviewer.format_png")),
+        (Format::Jpeg, t!("imageviewer.format_jpeg")),
+        (Format::WebP, t!("imageviewer.format_webp")),
+        (Format::Bmp, t!("imageviewer.format_bmp")),
+        (Format::Tiff, t!("imageviewer.format_tiff")),
+        (Format::Pdf, t!("imageviewer.format_pdf")),
+    ];
+
+    ContextMenuItem::new(-103, t!("context_menu.convert"))
+        .with_svg_icon("image")
+        .with_subitems(
+            formats
+                .into_iter()
+                .enumerate()
+                .map(|(index, (format, label))| {
+                    ContextMenuItem::new(-104 - index as i32, label)
+                        .with_command(format!("convert:{}", format.extension()))
+                        .enabled(source_format != Some(format))
+                })
+                .collect(),
+        )
+}
+
 fn insert_extract_all_pending_item(
     menu_items: &mut Vec<crate::application::context_menu::ContextMenuItem>,
 ) {
@@ -765,6 +815,9 @@ impl ImageViewerApp {
                 },
             ) {
                 items.push(compress_menu_item());
+            }
+            if should_offer_convert(paths, is_empty_area, is_global_search, target_is_file) {
+                items.push(convert_menu_item(paths.first().map(PathBuf::as_path)));
             }
             // Quick Access stores one real folder per entry. Reuse cached item
             // metadata so cloud and network paths never require blocking I/O here.
@@ -1402,10 +1455,10 @@ impl ImageViewerApp {
 #[cfg(test)]
 mod tests {
     use super::{
-        compress_menu_item, extract_all_shell_command_id, insert_extract_all_pending_item,
-        is_extract_all_pending_item, is_extract_all_shell_item, is_new_shell_item,
-        is_optical_disc_context_target, promote_extract_all_shell_item, should_offer_compress,
-        should_offer_extract_all, CompressMenuContext,
+        compress_menu_item, convert_menu_item, extract_all_shell_command_id,
+        insert_extract_all_pending_item, is_extract_all_pending_item, is_extract_all_shell_item,
+        is_new_shell_item, is_optical_disc_context_target, promote_extract_all_shell_item,
+        should_offer_compress, should_offer_convert, should_offer_extract_all, CompressMenuContext,
     };
     use crate::application::context_menu::{
         ContextMenuItem, EXTRACT_ALL_PENDING_COMMAND, EXTRACT_ALL_PENDING_ID,
@@ -1480,6 +1533,50 @@ mod tests {
             file_view
         ));
         assert!(!should_offer_compress(&[PathBuf::from(r"C:\")], file_view));
+    }
+
+    #[test]
+    fn offers_convert_only_for_a_single_image_file_in_file_view() {
+        let image = [PathBuf::from("image.png")];
+        assert!(should_offer_convert(&image, false, false, true));
+        assert!(!should_offer_convert(&image, true, false, true));
+        assert!(!should_offer_convert(&image, false, true, true));
+        assert!(!should_offer_convert(&image, false, false, false));
+        assert!(!should_offer_convert(
+            &[PathBuf::from("document.txt")],
+            false,
+            false,
+            true
+        ));
+        assert!(!should_offer_convert(
+            &[PathBuf::from("first.png"), PathBuf::from("second.jpg")],
+            false,
+            false,
+            true
+        ));
+    }
+
+    #[test]
+    fn convert_menu_item_exposes_all_formats_and_disables_source_format() {
+        let item = convert_menu_item(Some(std::path::Path::new("image.png")));
+
+        assert_eq!(item.id, -103);
+        assert_eq!(item.svg_icon_name.as_deref(), Some("image"));
+        assert_eq!(item.sub_items.len(), 6);
+        assert_eq!(
+            item.sub_items[0].command_string.as_deref(),
+            Some("convert:png")
+        );
+        assert!(!item.sub_items[0].is_enabled);
+        assert_eq!(
+            item.sub_items[1].command_string.as_deref(),
+            Some("convert:jpg")
+        );
+        assert!(item.sub_items[1].is_enabled);
+        assert_eq!(
+            item.sub_items[5].command_string.as_deref(),
+            Some("convert:pdf")
+        );
     }
 
     #[test]

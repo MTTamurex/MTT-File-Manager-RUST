@@ -160,6 +160,18 @@ impl ExportImageFormat {
         }
     }
 
+    pub fn from_command(command: &str) -> Option<Self> {
+        match command {
+            "png" => Some(Self::Png),
+            "jpg" | "jpeg" => Some(Self::Jpeg),
+            "webp" => Some(Self::WebP),
+            "bmp" => Some(Self::Bmp),
+            "tiff" => Some(Self::Tiff),
+            "pdf" => Some(Self::Pdf),
+            _ => None,
+        }
+    }
+
     pub fn extension(self) -> &'static str {
         match self {
             Self::Png => "png",
@@ -967,6 +979,39 @@ mod tests {
         let normalized = normalize_export_path(&path, ExportImageFormat::Jpeg);
 
         assert_eq!(normalized, PathBuf::from("sample.JPG"));
+    }
+
+    #[test]
+    fn conversion_command_mapping_accepts_all_export_formats() {
+        assert_eq!(
+            ExportImageFormat::from_command("png"),
+            Some(ExportImageFormat::Png)
+        );
+        assert_eq!(
+            ExportImageFormat::from_command("jpg"),
+            Some(ExportImageFormat::Jpeg)
+        );
+        assert_eq!(
+            ExportImageFormat::from_command("jpeg"),
+            Some(ExportImageFormat::Jpeg)
+        );
+        assert_eq!(
+            ExportImageFormat::from_command("webp"),
+            Some(ExportImageFormat::WebP)
+        );
+        assert_eq!(
+            ExportImageFormat::from_command("bmp"),
+            Some(ExportImageFormat::Bmp)
+        );
+        assert_eq!(
+            ExportImageFormat::from_command("tiff"),
+            Some(ExportImageFormat::Tiff)
+        );
+        assert_eq!(
+            ExportImageFormat::from_command("pdf"),
+            Some(ExportImageFormat::Pdf)
+        );
+        assert_eq!(ExportImageFormat::from_command("unknown"), None);
     }
 
     #[test]

@@ -37,6 +37,7 @@ pub mod folder_loading;
 pub mod folder_lock_ops;
 pub mod global_search;
 pub mod icons;
+pub mod image_conversion;
 pub mod message_handler;
 pub mod metadata;
 pub mod navigation;

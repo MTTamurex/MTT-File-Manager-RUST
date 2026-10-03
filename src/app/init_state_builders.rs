@@ -184,6 +184,9 @@ pub(in crate::app) fn build_file_operation_state(
     compression_sender: mpsc::Sender<
         crate::workers::archive_compression_worker::ArchiveCompressionRequest,
     >,
+    conversion_sender: mpsc::Sender<
+        crate::workers::image_conversion_worker::ImageConversionRequest,
+    >,
     compression_progress: crate::infrastructure::archive_create::SharedCompressionProgress,
     compression_cancel: crate::infrastructure::archive_create::CompressionCancelFlag,
     disk_cache_invalidation_sender: mpsc::Sender<
@@ -199,6 +202,7 @@ pub(in crate::app) fn build_file_operation_state(
         extraction_progress,
         extraction_cancel,
         compression_sender,
+        conversion_sender,
         compression_progress,
         compression_cancel,
         disk_cache_invalidation_sender,

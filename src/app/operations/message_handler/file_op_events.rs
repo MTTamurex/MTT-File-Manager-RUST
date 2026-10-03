@@ -147,6 +147,17 @@ impl ImageViewerApp {
                             );
                             self.request_global_search_refresh();
                         }
+                        FileOperationResult::ImageConversionCompleted {
+                            dest_folder,
+                            converted_path,
+                        } => {
+                            self.handle_image_conversion_completed(
+                                dest_folder,
+                                converted_path,
+                                current_path_norm,
+                            );
+                            self.request_global_search_refresh();
+                        }
                         FileOperationResult::MoveCompleted {
                             source_folder,
                             dest_folder,
@@ -1029,6 +1040,34 @@ impl ImageViewerApp {
             "operations.compress_completed",
             name = archive_name
         ));
+    }
+
+    fn handle_image_conversion_completed(
+        &mut self,
+        dest_folder: PathBuf,
+        converted_path: PathBuf,
+        current_path_norm: &str,
+    ) {
+        let dest_str = Self::normalize_for_match(dest_folder.as_path());
+        self.invalidate_folder_listing_and_tab_caches(&dest_folder);
+        crate::infrastructure::windows::file_flags::clear_write_activity_after_completed_file_operation(
+            std::slice::from_ref(&converted_path),
+        );
+
+        if dest_str == current_path_norm {
+            self.loaded_path.clear();
+            self.reload_current_folder_preserving_icon_cache();
+        }
+
+        self.reload_inactive_panel_if_matches(&[&dest_folder]);
+        self.watcher_cooldown_until = Some(Instant::now() + Duration::from_secs(2));
+
+        let name = converted_path
+            .file_name()
+            .map(|name| name.to_string_lossy().to_string())
+            .unwrap_or_default();
+        self.notifications
+            .success(rust_i18n::t!("operations.convert_completed", name = name));
     }
 
     fn handle_move_completed(

@@ -12,9 +12,9 @@ mod cache;
 mod crop;
 mod indexer;
 mod ipc;
-mod loader;
+pub(crate) mod loader;
 pub(crate) mod metrics;
-mod save;
+pub(crate) mod save;
 mod thumbnail_cache;
 mod wallpaper;
 
