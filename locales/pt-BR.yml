@@ -4,6 +4,7 @@ nav:
   tag: "Tag"
 sidebar:
   quick_access: "Acesso Rápido"
+  remove_from_quick_access: "Remover do Acesso Rápido"
   cloud_drives: "Unidades de nuvem"
   local_disks: "Discos locais"
   network_drives: "Unidades de rede"

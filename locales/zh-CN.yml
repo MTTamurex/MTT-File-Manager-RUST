@@ -4,6 +4,7 @@ nav:
   tag: "标签"
 sidebar:
   quick_access: "快速访问"
+  remove_from_quick_access: "从快速访问中移除"
   cloud_drives: "云盘"
   local_disks: "本地磁盘"
   network_drives: "网络驱动器"

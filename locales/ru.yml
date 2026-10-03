@@ -4,6 +4,7 @@ nav:
   tag: "Тег"
 sidebar:
   quick_access: "Быстрый доступ"
+  remove_from_quick_access: "Удалить из быстрого доступа"
   cloud_drives: "Облачные диски"
   local_disks: "Локальные диски"
   network_drives: "Сетевые диски"

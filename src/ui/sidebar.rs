@@ -1011,6 +1011,13 @@ fn render_pinned_folders(
 
             // Pin icon — always visible; click removes the shortcut
             if !is_being_dragged {
+                ui.interact(
+                    pin_rect,
+                    ui.id().with(("quick_access_pin", &pinned.path)),
+                    Sense::hover(),
+                )
+                .on_hover_text(t!("sidebar.remove_from_quick_access").to_string());
+
                 let pointer_pos = ui.input(|inp| inp.pointer.hover_pos());
                 let pin_hovered = pointer_pos.map(|p| pin_rect.contains(p)).unwrap_or(false);
                 let pin_color = if pin_hovered {
