@@ -224,7 +224,9 @@ impl DiagnosticLogger {
         let mut state = self.state.lock();
         if let Some(file) = state.file.as_mut() {
             let _ = file.write_event(level, component, event_code, fields);
-            if component == "memory_trim" || matches!(level, Level::Warn | Level::Error) {
+            if matches!(component, "memory_trim" | "image_viewer_memory")
+                || matches!(level, Level::Warn | Level::Error)
+            {
                 let _ = file.writer.flush();
             }
         }

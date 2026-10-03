@@ -21,7 +21,7 @@ use filmstrip::FilmstripState;
 use gif_export::{GifAnimation, GifUploadQueue, ViewerStatusMessage};
 
 /// Number of images kept on each side of the current image in the
-/// GPU texture cache.  A larger radius means more images are already
+/// GPU texture cache. A larger radius means more images are already
 /// decoded and uploaded when the user navigates, eliminating the
 /// decode-to-display delay for adjacent images.
 ///
@@ -98,6 +98,11 @@ pub struct DedicatedImageViewerApp {
     pub(super) status_message: Option<ViewerStatusMessage>,
     /// Timestamp of the last navigation action (for key-repeat throttling).
     pub(super) last_navigate_instant: std::time::Instant,
+    last_memory_activity: std::time::Instant,
+    last_memory_trim_check: std::time::Instant,
+    last_memory_trim_request: std::time::Instant,
+    memory_trim_was_pending: bool,
+    memory_activity_generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
     pub(super) filmstrip: FilmstripState,
     /// Whether to apply dark theme on first frame.
     pub(super) dark_mode: bool,
@@ -175,6 +180,11 @@ impl DedicatedImageViewerApp {
             fullscreen: false,
             status_message: None,
             last_navigate_instant: now - Duration::from_millis(100),
+            last_memory_activity: now,
+            last_memory_trim_check: now,
+            last_memory_trim_request: now.checked_sub(Duration::from_secs(10)).unwrap_or(now),
+            memory_trim_was_pending: true,
+            memory_activity_generation: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
             filmstrip: FilmstripState::new(),
             dark_mode,
             resource_monitor: crate::image_viewer::metrics::ResourceLeakMonitor::new(
@@ -355,6 +365,9 @@ impl DedicatedImageViewerApp {
             .fetch_add(1, std::sync::atomic::Ordering::AcqRel)
             .wrapping_add(1);
         self.last_navigate_instant = std::time::Instant::now();
+        self.last_memory_activity = self.last_navigate_instant;
+        self.memory_activity_generation
+            .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
         self.filmstrip.reset();
 
         self.try_show_cached_current(ctx);
@@ -616,6 +629,77 @@ impl DedicatedImageViewerApp {
         self.upload_to_cache(ctx, self.current_index, &frame);
     }
 
+    fn memory_trim_has_pending_work(&self) -> bool {
+        !self.requested_jobs.is_empty()
+            || self.is_current_image_pending()
+            || !self.filmstrip.pending.is_empty()
+            || !self.filmstrip.result_rx.is_empty()
+            || self.gif_animation.is_some()
+            || self.gif_decode_rx.is_some()
+            || self.gif_upload_queue.is_some()
+            || self.conversion_in_progress
+            || self.wallpaper_in_progress
+            || self.copy_in_progress
+            || self.delete_in_progress
+            || self.crop_is_saving()
+            || self.retarget_sequence_rx.is_some()
+            || self.startup_sequence_rx.is_some()
+    }
+
+    fn run_idle_working_set_trim(&mut self, ctx: &egui::Context) {
+        let now = std::time::Instant::now();
+        if ctx.input(|input| !input.raw.events.is_empty()) {
+            self.last_memory_activity = now;
+            self.memory_activity_generation
+                .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        }
+
+        let has_pending_work = self.memory_trim_has_pending_work();
+        if has_pending_work {
+            if !self.memory_trim_was_pending {
+                self.memory_activity_generation
+                    .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+                self.last_memory_activity = now;
+            }
+            self.memory_trim_was_pending = true;
+            ctx.request_repaint_after(Duration::from_secs(1));
+        } else if self.memory_trim_was_pending {
+            self.memory_trim_was_pending = false;
+            self.last_memory_activity = now;
+        }
+
+        if now.duration_since(self.last_memory_trim_check) < Duration::from_secs(1) {
+            return;
+        }
+        self.last_memory_trim_check = now;
+
+        let working_set_bytes = crate::image_viewer::metrics::current_working_set_bytes();
+        if !crate::image_viewer::metrics::idle_trim_is_due(
+            now,
+            self.last_memory_activity,
+            self.last_memory_trim_request,
+            working_set_bytes,
+            has_pending_work,
+        ) {
+            if !has_pending_work
+                && working_set_bytes >= crate::image_viewer::metrics::working_set_trim_min_bytes()
+            {
+                ctx.request_repaint_after(Duration::from_secs(1));
+            }
+            return;
+        }
+
+        let generation = self
+            .memory_activity_generation
+            .load(std::sync::atomic::Ordering::Acquire);
+        if crate::image_viewer::metrics::request_idle_working_set_trim(
+            std::sync::Arc::clone(&self.memory_activity_generation),
+            generation,
+        ) {
+            self.last_memory_trim_request = now;
+        }
+    }
+
     fn handle_prefetch_results(&mut self, ctx: &egui::Context) {
         // Drain more results when the current image is still pending —
         // we don't want the urgent current-image result stuck behind
@@ -668,6 +752,9 @@ impl DedicatedImageViewerApp {
             return;
         }
         self.last_navigate_instant = std::time::Instant::now();
+        self.last_memory_activity = self.last_navigate_instant;
+        self.memory_activity_generation
+            .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
 
         let old_index = self.current_index;
         self.current_index = index;
@@ -1042,8 +1129,9 @@ impl eframe::App for DedicatedImageViewerApp {
             ctx.request_repaint_after(Duration::from_millis(16));
         }
 
-        // Periodic resource leak diagnostics (every 10s).
+        // Periodic resource diagnostics and idle working-set maintenance.
         self.resource_monitor.tick();
+        self.run_idle_working_set_trim(ctx);
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {

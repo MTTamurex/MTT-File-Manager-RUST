@@ -85,6 +85,10 @@ pub struct TextViewerApp {
 
     /// Total file size in bytes (for toolbar display).
     file_size_bytes: u64,
+    last_memory_activity: std::time::Instant,
+    last_memory_trim_check: std::time::Instant,
+    last_memory_trim_request: std::time::Instant,
+    memory_activity_generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl TextViewerApp {
@@ -132,6 +136,12 @@ impl TextViewerApp {
             native_hwnd: None,
             total_lines,
             file_size_bytes,
+            last_memory_activity: std::time::Instant::now(),
+            last_memory_trim_check: std::time::Instant::now(),
+            last_memory_trim_request: std::time::Instant::now()
+                .checked_sub(std::time::Duration::from_secs(10))
+                .unwrap_or_else(std::time::Instant::now),
+            memory_activity_generation: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
         })
     }
 
@@ -535,6 +545,44 @@ impl TextViewerApp {
         }
     }
 
+    fn run_idle_working_set_trim(&mut self, ctx: &egui::Context) {
+        let now = std::time::Instant::now();
+        if ctx.input(|input| !input.raw.events.is_empty()) {
+            self.last_memory_activity = now;
+            self.memory_activity_generation
+                .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        }
+
+        if now.duration_since(self.last_memory_trim_check) < std::time::Duration::from_secs(1) {
+            return;
+        }
+        self.last_memory_trim_check = now;
+
+        let working_set_bytes = crate::image_viewer::metrics::current_working_set_bytes();
+        if !crate::image_viewer::metrics::idle_trim_is_due(
+            now,
+            self.last_memory_activity,
+            self.last_memory_trim_request,
+            working_set_bytes,
+            false,
+        ) {
+            if working_set_bytes >= crate::image_viewer::metrics::working_set_trim_min_bytes() {
+                ctx.request_repaint_after(std::time::Duration::from_secs(1));
+            }
+            return;
+        }
+
+        let generation = self
+            .memory_activity_generation
+            .load(std::sync::atomic::Ordering::Acquire);
+        if crate::image_viewer::metrics::request_idle_working_set_trim(
+            std::sync::Arc::clone(&self.memory_activity_generation),
+            generation,
+        ) {
+            self.last_memory_trim_request = now;
+        }
+    }
+
     /// Returns the text of line `idx` (without the trailing `\n`/`\r`).
     /// Mimics the semantics of [`str::lines`] without allocating per line.
     fn line(&self, idx: usize) -> &str {
@@ -582,6 +630,7 @@ impl eframe::App for TextViewerApp {
     fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         // Load system fonts on a background thread and apply once ready.
         crate::viewer_runtime::poll_viewer_fonts(ctx);
+        self.run_idle_working_set_trim(ctx);
 
         // Apply theme on first frame
         if let Some(dark) = self.dark_mode.take() {

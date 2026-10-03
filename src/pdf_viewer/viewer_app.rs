@@ -173,6 +173,11 @@ pub struct PdfViewerApp {
     pub(super) search_generation: u64,
     pub(super) search_in_progress: bool,
     pub(super) last_searched_query: String,
+    last_memory_activity: std::time::Instant,
+    last_memory_trim_check: std::time::Instant,
+    last_memory_trim_request: std::time::Instant,
+    memory_trim_was_pending: bool,
+    memory_activity_generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl PdfViewerApp {
@@ -228,6 +233,13 @@ impl PdfViewerApp {
             search_generation: 0,
             search_in_progress: false,
             last_searched_query: String::new(),
+            last_memory_activity: std::time::Instant::now(),
+            last_memory_trim_check: std::time::Instant::now(),
+            last_memory_trim_request: std::time::Instant::now()
+                .checked_sub(std::time::Duration::from_secs(10))
+                .unwrap_or_else(std::time::Instant::now),
+            memory_trim_was_pending: true,
+            memory_activity_generation: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
         })
     }
 
@@ -491,6 +503,73 @@ impl PdfViewerApp {
                 },
             );
             self.evict_thumbnail_cache();
+        }
+    }
+
+    fn memory_trim_has_pending_work(&self) -> bool {
+        matches!(
+            self.document_status,
+            DocumentStatus::Opening { .. } | DocumentStatus::LoadingMetadata
+        ) || !self.pending.is_empty()
+            || !self.thumbnail_pending.is_empty()
+            || self.search_in_progress
+            || self
+                .worker
+                .as_ref()
+                .is_some_and(RenderWorker::has_pending_results)
+    }
+
+    fn run_idle_working_set_trim(&mut self, ctx: &egui::Context) {
+        let now = std::time::Instant::now();
+        if ctx.input(|input| !input.raw.events.is_empty()) {
+            self.last_memory_activity = now;
+            self.memory_activity_generation
+                .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        }
+
+        let has_pending_work = self.memory_trim_has_pending_work();
+        if has_pending_work {
+            if !self.memory_trim_was_pending {
+                self.memory_activity_generation
+                    .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+                self.last_memory_activity = now;
+            }
+            self.memory_trim_was_pending = true;
+            ctx.request_repaint_after(std::time::Duration::from_secs(1));
+        } else if self.memory_trim_was_pending {
+            self.memory_trim_was_pending = false;
+            self.last_memory_activity = now;
+        }
+
+        if now.duration_since(self.last_memory_trim_check) < std::time::Duration::from_secs(1) {
+            return;
+        }
+        self.last_memory_trim_check = now;
+
+        let working_set_bytes = crate::image_viewer::metrics::current_working_set_bytes();
+        if !crate::image_viewer::metrics::idle_trim_is_due(
+            now,
+            self.last_memory_activity,
+            self.last_memory_trim_request,
+            working_set_bytes,
+            has_pending_work,
+        ) {
+            if !has_pending_work
+                && working_set_bytes >= crate::image_viewer::metrics::working_set_trim_min_bytes()
+            {
+                ctx.request_repaint_after(std::time::Duration::from_secs(1));
+            }
+            return;
+        }
+
+        let generation = self
+            .memory_activity_generation
+            .load(std::sync::atomic::Ordering::Acquire);
+        if crate::image_viewer::metrics::request_idle_working_set_trim(
+            std::sync::Arc::clone(&self.memory_activity_generation),
+            generation,
+        ) {
+            self.last_memory_trim_request = now;
         }
     }
 
@@ -1130,6 +1209,7 @@ impl eframe::App for PdfViewerApp {
 
         self.ensure_worker(ctx);
         self.poll_results(ctx);
+        self.run_idle_working_set_trim(ctx);
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {

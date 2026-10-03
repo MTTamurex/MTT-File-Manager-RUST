@@ -243,6 +243,15 @@ impl RenderWorker {
         }
         out
     }
+
+    pub fn has_pending_results(&self) -> bool {
+        !self.rx.is_empty()
+            || !self.thumbnail_rx.is_empty()
+            || !self.event_rx.is_empty()
+            || !self.text_seg_rx.is_empty()
+            || !self.bounded_text_rx.is_empty()
+            || !self.search_res_rx.is_empty()
+    }
 }
 
 fn prioritize_render_requests(
