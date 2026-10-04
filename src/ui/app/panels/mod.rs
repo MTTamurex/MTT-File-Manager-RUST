@@ -1,3 +1,4 @@
+use crate::app::navigation_state::QuickAccessPlacement;
 use crate::app::ImageViewerApp;
 use crate::ui::sidebar::SidebarAction;
 use eframe::egui;
@@ -208,7 +209,8 @@ fn render_sidebar_panel(app: &mut ImageViewerApp, root_ui: &mut egui::Ui) -> Opt
 
             // ── Resizable Quick Access below This PC ──
             let avail_after_this_pc = ui.available_height();
-            let quick_access_visible = app.show_quick_access;
+            let quick_access_visible = app.show_quick_access
+                && app.quick_access_placement == QuickAccessPlacement::Sidebar;
             let quick_access_item_spacing_h = ui.spacing().item_spacing.y;
             let quick_access_content_h = if !quick_access_visible {
                 0.0
@@ -730,8 +732,14 @@ fn render_resize_handles(app: &mut ImageViewerApp, ctx: &egui::Context) {
     }
 
     let screen = ctx.viewport_rect();
-    // Total height of all top panels: tab bar (36) + toolbar (46) + secondary toolbar (46)
-    let top_panels_height = 36.0 + 46.0 + 46.0;
+    let top_panels_height = 36.0
+        + 46.0
+        + if crate::ui::app::layers::quick_access_bar_visible(app) {
+            crate::ui::app::layers::QUICK_ACCESS_BAR_HEIGHT
+        } else {
+            0.0
+        }
+        + 46.0;
 
     if app.show_left_sidebar {
         // Left sidebar resize handle (right edge of left sidebar)

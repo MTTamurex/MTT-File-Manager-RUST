@@ -1,4 +1,4 @@
-use crate::app::navigation_state::SettingsSection;
+use crate::app::navigation_state::{QuickAccessPlacement, SettingsSection};
 use crate::app::ImageViewerApp;
 use crate::ui::components::settings_ui;
 use crate::ui::theme;
@@ -199,6 +199,28 @@ pub fn render_settings_window(
                                             theme_changed |= crate::ui::components::appearance_settings::render_appearance_settings_section(ui, &mut app.theme_mode);
                                             ui.add_space(20.0);
                                             if settings_ui::toggle_row(ui, &t!("settings.show_quick_access_sidebar"), &mut app.show_quick_access) {
+                                                quick_access_changed = true;
+                                            }
+                                            ui.add_space(6.0);
+                                            ui.label(
+                                                RichText::new(t!("settings.quick_access_position"))
+                                                    .size(13.0)
+                                                    .color(theme::secondary_text_color(dark_mode)),
+                                            );
+                                            let placements: [(QuickAccessPlacement, &str); 2] = [
+                                                (QuickAccessPlacement::Sidebar, &t!("settings.quick_access_position_sidebar")),
+                                                (QuickAccessPlacement::Horizontal, &t!("settings.quick_access_position_horizontal")),
+                                            ];
+                                            let selected = placements
+                                                .iter()
+                                                .position(|(placement, _)| *placement == app.quick_access_placement)
+                                                .unwrap_or(0);
+                                            let labels: Vec<&str> = placements
+                                                .iter()
+                                                .map(|(_, label)| *label)
+                                                .collect();
+                                            if let Some(index) = settings_ui::segmented_choice(ui, &labels, selected) {
+                                                app.quick_access_placement = placements[index].0;
                                                 quick_access_changed = true;
                                             }
                                             ui.add_space(10.0);

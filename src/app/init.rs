@@ -213,6 +213,7 @@ impl ImageViewerApp {
             show_hidden_files,
             show_recycle_bin,
             show_quick_access,
+            quick_access_placement,
             show_tags,
             language,
             theme_mode,
@@ -420,11 +421,12 @@ impl ImageViewerApp {
             video_player_close_in_progress: false,
             pending_video_player_action: None,
             selected_metadata: None,
-            show_left_sidebar,  // Loaded from SQLite
-            show_preview_panel, // Loaded from SQLite
-            show_recycle_bin,   // Loaded from SQLite
-            show_quick_access,  // Loaded from SQLite
-            show_tags,          // Loaded from SQLite
+            show_left_sidebar,      // Loaded from SQLite
+            show_preview_panel,     // Loaded from SQLite
+            show_recycle_bin,       // Loaded from SQLite
+            show_quick_access,      // Loaded from SQLite
+            quick_access_placement, // Loaded from SQLite
+            show_tags,              // Loaded from SQLite
             collapse_quick_access: false,
             collapse_cloud_drives: false,
             collapse_local_disks: false,

@@ -998,16 +998,29 @@ fn render_pinned_folders(
             } else {
                 ui.visuals().text_color()
             };
+            let display_name = crate::infrastructure::onedrive::special_folder_display_name(
+                std::path::Path::new(&pinned.path),
+            )
+            .unwrap_or_else(|| pinned.display_name.clone());
+            let text_max_x = (pin_rect.left() - 8.0).min(rect.right());
+            let text_max_width = (text_max_x - cursor_x).max(0.0);
+            let font_id = egui::FontId::proportional(11.5);
+            let visible_name = crate::ui::preview_panel::utils::truncate_text_to_fit(
+                &display_name,
+                text_max_width,
+                &font_id,
+                ui,
+            );
             ui.painter().text(
                 Pos2::new(cursor_x, rect.center().y),
                 egui::Align2::LEFT_CENTER,
-                crate::infrastructure::onedrive::special_folder_display_name(std::path::Path::new(
-                    &pinned.path,
-                ))
-                .unwrap_or_else(|| pinned.display_name.clone()),
-                egui::FontId::proportional(11.5),
+                &visible_name,
+                font_id,
                 text_color,
             );
+            if visible_name != display_name {
+                response.clone().on_hover_text(display_name);
+            }
 
             // Pin icon — always visible; click removes the shortcut
             if !is_being_dragged {

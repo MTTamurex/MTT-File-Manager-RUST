@@ -553,6 +553,8 @@ impl eframe::App for ImageViewerApp {
         // 8. Layout: Toolbar (Top 2) - lightweight, always render
         app::layers::render_toolbar_layer(self, ui);
 
+        app::layers::render_quick_access_bar_layer(self, ui);
+
         // 8b. Layout: Secondary Toolbar (Top 3) - lightweight, always render
         app::layers::render_secondary_toolbar_layer(self, ui);
 

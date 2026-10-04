@@ -1,5 +1,12 @@
 use crate::application::navigation::NavigationHistory;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum QuickAccessPlacement {
+    #[default]
+    Sidebar,
+    Horizontal,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ThemeMode {
     Light,

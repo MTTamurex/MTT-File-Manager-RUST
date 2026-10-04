@@ -8,7 +8,7 @@
 //! 20+ synchronous SQLite writes from blocking the UI thread on state changes.
 
 use crate::app::dual_panel::ActivePanel;
-use crate::app::navigation_state::ThemeMode;
+use crate::app::navigation_state::{QuickAccessPlacement, ThemeMode};
 use crate::app::state::ImageViewerApp;
 use crate::domain::file_entry::{FoldersPosition, SortMode, ViewMode};
 use crate::domain::special_paths::{is_tag_view_path, is_virtual_path, COMPUTER_VIEW_ID};
@@ -176,6 +176,14 @@ impl ImageViewerApp {
             } else {
                 "false"
             })
+            .to_string(),
+        ));
+        prefs.push((
+            "quick_access_placement",
+            match self.quick_access_placement {
+                QuickAccessPlacement::Sidebar => "sidebar",
+                QuickAccessPlacement::Horizontal => "horizontal",
+            }
             .to_string(),
         ));
         prefs.push((

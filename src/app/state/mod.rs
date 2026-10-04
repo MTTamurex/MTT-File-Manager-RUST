@@ -55,7 +55,7 @@ use crate::app::folder_size_state::FolderSizeState;
 use crate::app::global_search_state::GlobalSearchState;
 use crate::app::initial_indexing_notice::InitialIndexingNotice;
 use crate::app::layout_state::LayoutState;
-use crate::app::navigation_state::{NavigationState, ThemeMode};
+use crate::app::navigation_state::{NavigationState, QuickAccessPlacement, ThemeMode};
 use crate::app::shortcuts::{ShortcutBindings, ShortcutEditorState};
 use crate::application::ClipboardManager;
 use crate::domain::file_entry::{FileEntry, FoldersPosition, SortMode, ViewMode};
@@ -311,11 +311,12 @@ pub struct ImageViewerApp {
     >,
     pub show_hidden_files: bool, // Show files with FILE_ATTRIBUTE_HIDDEN
     pub show_recycle_bin: bool,  // Show Recycle Bin in Quick Access
-    pub show_quick_access: bool, // Show Quick Access section in sidebar
-    pub show_tags: bool,         // Show Tags section in sidebar
-    pub collapse_quick_access: bool, // Collapse Quick Access section in sidebar
-    pub collapse_cloud_drives: bool, // Collapse Cloud Drives section in sidebar
-    pub collapse_local_disks: bool, // Collapse Local Disks section in sidebar
+    pub show_quick_access: bool, // Show Quick Access
+    pub quick_access_placement: QuickAccessPlacement,
+    pub show_tags: bool,               // Show Tags section in sidebar
+    pub collapse_quick_access: bool,   // Collapse Quick Access section in sidebar
+    pub collapse_cloud_drives: bool,   // Collapse Cloud Drives section in sidebar
+    pub collapse_local_disks: bool,    // Collapse Local Disks section in sidebar
     pub collapse_network_drives: bool, // Collapse Network Drives section in sidebar
 
     // "Normal" (unlocked) state â€” these track what unlocked folders should use.

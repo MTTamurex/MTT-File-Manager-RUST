@@ -15,8 +15,11 @@ macro_rules! debug_log {
 
 pub(crate) fn render_toolbar_layer(app: &mut ImageViewerApp, root_ui: &mut egui::Ui) {
     let dark_mode = root_ui.visuals().dark_mode;
+    // When the horizontal Quick Access bar sits right below, it paints its own
+    // light separator on this boundary; the native (darker) separator is off.
+    let quick_access_bar_visible = crate::ui::app::layers::quick_access_bar_visible(app);
     egui::Panel::top("nav_bar")
-        .show_separator_line(true)
+        .show_separator_line(!quick_access_bar_visible)
         .exact_size(46.0)
         .frame(egui::Frame {
             fill: if dark_mode {

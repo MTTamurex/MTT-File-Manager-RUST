@@ -1,5 +1,5 @@
 use crate::app::dual_panel::ActivePanel;
-use crate::app::navigation_state::ThemeMode;
+use crate::app::navigation_state::{QuickAccessPlacement, ThemeMode};
 use crate::app::shortcuts::ShortcutBindings;
 use crate::domain::file_entry::{FoldersPosition, GroupMode, SortMode, ViewMode};
 use crate::infrastructure::app_state_db::AppStateDb;
@@ -29,6 +29,7 @@ pub(super) struct StartupPreferences {
     pub(super) show_hidden_files: bool,
     pub(super) show_recycle_bin: bool,
     pub(super) show_quick_access: bool,
+    pub(super) quick_access_placement: QuickAccessPlacement,
     pub(super) show_tags: bool,
     pub(super) language: String,
     pub(super) theme_mode: ThemeMode,
@@ -199,6 +200,14 @@ impl StartupPreferences {
             .map(|s| s != "false")
             .unwrap_or(true);
 
+        let quick_access_placement = prefs
+            .get("quick_access_placement")
+            .map(|s| match s.as_str() {
+                "horizontal" => QuickAccessPlacement::Horizontal,
+                _ => QuickAccessPlacement::Sidebar,
+            })
+            .unwrap_or_default();
+
         let show_tags = prefs.get("show_tags").map(|s| s != "false").unwrap_or(true);
 
         let language = if let Some(saved) = prefs.get("language").cloned() {
@@ -354,6 +363,7 @@ impl StartupPreferences {
             show_hidden_files,
             show_recycle_bin,
             show_quick_access,
+            quick_access_placement,
             show_tags,
             language,
             theme_mode,
@@ -381,6 +391,7 @@ impl StartupPreferences {
 #[cfg(test)]
 mod tests {
     use super::StartupPreferences;
+    use crate::app::navigation_state::QuickAccessPlacement;
     use crate::domain::file_entry::GroupMode;
     use crate::infrastructure::app_state_db::AppStateDb;
 
@@ -403,6 +414,22 @@ mod tests {
         db.set_preference("show_quick_access", "false").unwrap();
 
         assert!(!StartupPreferences::load(&db).show_quick_access);
+    }
+
+    #[test]
+    fn quick_access_placement_defaults_to_sidebar_and_loads_horizontal() {
+        let db = test_db();
+        assert_eq!(
+            StartupPreferences::load(&db).quick_access_placement,
+            QuickAccessPlacement::Sidebar
+        );
+
+        db.set_preference("quick_access_placement", "horizontal")
+            .unwrap();
+        assert_eq!(
+            StartupPreferences::load(&db).quick_access_placement,
+            QuickAccessPlacement::Horizontal
+        );
     }
 
     #[test]
