@@ -94,8 +94,9 @@ pub(crate) fn render_quick_access_bar_layer(app: &mut ImageViewerApp, root_ui: &
                                 crate::ui::theme::selection_hover_color(dark_mode),
                             );
                         }
+                        // Optically the 20pt "+" sits 1px low; nudge the glyph up.
                         ui.painter().text(
-                            add_rect.center(),
+                            egui::Pos2::new(add_rect.center().x, add_rect.center().y - 1.0),
                             egui::Align2::CENTER_CENTER,
                             "+",
                             egui::FontId::proportional(20.0),
