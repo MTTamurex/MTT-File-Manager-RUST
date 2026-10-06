@@ -102,6 +102,7 @@ pub(super) fn preview_search_result(app: &mut ImageViewerApp, full_path: &str) {
     let is_video = crate::infrastructure::windows::is_video_extension(&ext);
     let is_audio = crate::infrastructure::windows::is_audio_extension(&ext);
     let is_pdf = ext.eq_ignore_ascii_case("pdf");
+    let is_docx = crate::docx_viewer::is_docx_extension(&ext);
     let is_image = crate::infrastructure::windows::is_image_extension(&ext);
     let is_text = crate::text_viewer::is_text_extension(&ext);
 
@@ -110,6 +111,8 @@ pub(super) fn preview_search_result(app: &mut ImageViewerApp, full_path: &str) {
         let _ = app.queue_standalone_video_player(path, 0.0, None);
     } else if is_pdf {
         crate::pdf_viewer::open_pdf_viewer(path);
+    } else if is_docx {
+        crate::docx_viewer::open_docx_viewer(path);
     } else if is_image {
         crate::image_viewer::open_image_viewer(path);
     } else if is_text {

@@ -15,6 +15,7 @@ enum SelectedPreviewOverlayAction {
     BlockedInArchive,
     PlayMedia(std::path::PathBuf),
     OpenPdf(std::path::PathBuf),
+    OpenDocx(std::path::PathBuf),
     OpenImage(std::path::PathBuf),
     OpenText(std::path::PathBuf),
 }
@@ -636,10 +637,11 @@ impl ImageViewerApp {
         let is_video = crate::infrastructure::windows::is_video_extension(&ext);
         let is_audio = crate::infrastructure::windows::is_audio_extension(&ext);
         let is_pdf = ext.eq_ignore_ascii_case("pdf");
+        let is_docx = crate::docx_viewer::is_docx_extension(&ext);
         let is_image = crate::infrastructure::windows::is_image_extension(&ext);
         let is_text = crate::text_viewer::is_text_extension(&ext);
 
-        if !is_video && !is_audio && !is_pdf && !is_image && !is_text {
+        if !is_video && !is_audio && !is_pdf && !is_docx && !is_image && !is_text {
             return SelectedPreviewOverlayAction::None;
         }
 
@@ -652,6 +654,8 @@ impl ImageViewerApp {
             SelectedPreviewOverlayAction::PlayMedia(path)
         } else if is_pdf {
             SelectedPreviewOverlayAction::OpenPdf(path)
+        } else if is_docx {
+            SelectedPreviewOverlayAction::OpenDocx(path)
         } else if is_image {
             SelectedPreviewOverlayAction::OpenImage(path)
         } else {
@@ -676,6 +680,10 @@ impl ImageViewerApp {
             }
             SelectedPreviewOverlayAction::OpenPdf(path) => {
                 crate::pdf_viewer::open_pdf_viewer(path);
+                true
+            }
+            SelectedPreviewOverlayAction::OpenDocx(path) => {
+                crate::docx_viewer::open_docx_viewer(path);
                 true
             }
             SelectedPreviewOverlayAction::OpenImage(path) => {

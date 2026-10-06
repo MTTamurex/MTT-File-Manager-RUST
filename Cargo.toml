@@ -48,6 +48,14 @@ log = "0.4"        # Structured logging framework (SEC-02/PERF-04)
 env_logger = "0.11" # Logger backend with level filtering
 pdfium-render = { version = "0.8.37", features = ["thread_safe"] }
 printpdf = "0.7"  # PDF generation for image-to-PDF export
+base64 = "0.22"
+docx-edit = { package = "betteroffice-docx-edit", version = "=0.3.0" }
+docx-layout = { package = "betteroffice-docx-layout", version = "=0.3.0" }
+docx-parse = { package = "betteroffice-docx-parse", version = "=0.3.0" }
+docx-raster = { package = "betteroffice-docx-raster", version = "=0.3.0" }
+ooxml-text = { package = "betteroffice-ooxml-text", version = "=0.3.0" }
+# Pin the patched BetterOffice Yrs version used by the local stable-Rust compatibility copy.
+yrs = "=0.27.3"
 mtt-search-protocol = { path = "crates/mtt-search-protocol" }
 bincode = { workspace = true }
 serde = { workspace = true }
@@ -140,6 +148,9 @@ sha2 = "0.10"
 
 [dev-dependencies]
 criterion = "0.5"
+
+[patch.crates-io]
+yrs = { path = "vendor/yrs" }
 
 [[bench]]
 name = "image_viewer_decode"

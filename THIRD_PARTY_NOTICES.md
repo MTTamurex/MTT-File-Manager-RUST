@@ -182,6 +182,74 @@ Notes:
 - The matching package license bundle is copied to
   `third_party_licenses/pdfium-win-x64/` and is included by public installers.
 
+## DOCX viewer dependencies
+
+### BetterOffice DOCX engine
+
+Components:
+- `betteroffice-docx-edit`, `betteroffice-docx-layout`,
+  `betteroffice-docx-parse`, `betteroffice-docx-raster`, and
+  `betteroffice-ooxml-text`, all pinned to version `0.3.0`.
+
+Source:
+- https://github.com/openooxml/betteroffice
+- https://crates.io/crates/betteroffice-docx
+
+License:
+- Apache-2.0. The complete license text is included in the top-level
+  `LICENSE` file.
+
+Attribution:
+- The upstream notice is reproduced in
+  `third_party_licenses/BETTEROFFICE-NOTICE.txt` and included in public
+  installers.
+- The application uses the native parsing, layout, and raster crates for a
+  read-only viewer. It does not redistribute BetterOffice's editor UI or font
+  assets.
+
+### Yrs
+
+Component:
+- Yrs `0.27.3`, required transitively by BetterOffice and vendored under
+  `vendor/yrs`. `vendor/yrs/src/block.rs` has one equivalent syntax change so
+  the dependency builds with stable Rust; the patch is documented in
+  `vendor/yrs/PATCHES.md`.
+
+Source:
+- https://github.com/y-crdt/y-crdt
+- https://crates.io/crates/yrs/0.27.3
+
+License:
+- MIT. The full text is included in `third_party_licenses/YRS-LICENSE.txt`
+  and `vendor/yrs/LICENSE`.
+
+Attribution:
+- Copyright (c) 2020 Bartosz Sypytkowski and Kevin Jahns.
+
+### Raster and ZIP support
+
+Components:
+- `dashmap` `6.2.1`, MIT; its license text is in
+  `third_party_licenses/DASHMAP-LICENSE.txt`.
+- `quick-xml` `0.41.0`, MIT; its license text is in
+  `third_party_licenses/QUICK-XML-LICENSE.txt`.
+- `zip` `8.6.0`, MIT; its license text is in
+  `third_party_licenses/ZIP-8-LICENSE.txt`.
+- `tiny-skia` and `tiny-skia-path` `0.12.0`, used by BetterOffice's native
+  raster backend; both are BSD-3-Clause.
+- `libz-rs-sys` and `zlib-rs` `0.5.5`, used by the BetterOffice OPC ZIP reader;
+  both use the Zlib license.
+- `ryu-js` `1.0.3`, used by BetterOffice serialization. Its Apache-2.0 OR
+  BSL-1.0 terms are used under the Apache-2.0 option.
+
+License texts:
+- `third_party_licenses/DASHMAP-LICENSE.txt`
+- `third_party_licenses/QUICK-XML-LICENSE.txt`
+- `third_party_licenses/ZIP-8-LICENSE.txt`
+- `third_party_licenses/TINY-SKIA-LICENSE.txt`
+- `third_party_licenses/ZLIB-RS-LICENSE.txt`
+- The Apache-2.0 text is in the top-level `LICENSE`.
+
 ## Statically linked or embedded code
 
 ### unrar

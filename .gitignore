@@ -90,7 +90,9 @@ coverage/
 # ============================================
 # Local Dependencies (if any)
 # ============================================
-/vendor/
+/vendor/*
+!/vendor/yrs/
+!/vendor/yrs/**
 
 # ============================================
 # Other Project-Specific Files

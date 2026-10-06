@@ -1,16 +1,33 @@
 // ── Resource leak diagnostics ───────────────────────────────────────────
 
-const IDLE_WORKING_SET_TRIM_AFTER: std::time::Duration = std::time::Duration::from_secs(4);
+const IDLE_WORKING_SET_TRIM_AFTER: std::time::Duration = std::time::Duration::from_millis(250);
+const WORKING_SET_TRIM_CHECK_INTERVAL: std::time::Duration = std::time::Duration::from_millis(100);
 const WORKING_SET_TRIM_MIN_INTERVAL: std::time::Duration = std::time::Duration::from_secs(10);
 const WORKING_SET_TRIM_MIN_BYTES: u64 = 24 * 1024 * 1024;
 const WORKING_SET_TRIM_DELAYS: [std::time::Duration; 3] = [
-    std::time::Duration::from_millis(750),
+    std::time::Duration::ZERO,
     std::time::Duration::from_millis(2500),
     std::time::Duration::from_millis(6000),
 ];
 
 pub fn working_set_trim_min_bytes() -> u64 {
     WORKING_SET_TRIM_MIN_BYTES
+}
+
+pub fn working_set_trim_check_interval() -> std::time::Duration {
+    WORKING_SET_TRIM_CHECK_INTERVAL
+}
+
+pub fn idle_trim_wait_remaining(
+    now: std::time::Instant,
+    last_activity: std::time::Instant,
+    last_trim_request: std::time::Instant,
+) -> std::time::Duration {
+    let idle_remaining =
+        IDLE_WORKING_SET_TRIM_AFTER.saturating_sub(now.saturating_duration_since(last_activity));
+    let interval_remaining = WORKING_SET_TRIM_MIN_INTERVAL
+        .saturating_sub(now.saturating_duration_since(last_trim_request));
+    idle_remaining.max(interval_remaining)
 }
 
 #[derive(Clone, Copy)]
@@ -165,7 +182,7 @@ fn trim_working_set_series(
 /// slowdown without obvious CPU/memory spikes in Task Manager.
 #[cfg(test)]
 mod tests {
-    use super::{idle_trim_is_due, working_set_trim_cancelled};
+    use super::{idle_trim_is_due, idle_trim_wait_remaining, working_set_trim_cancelled};
     use std::time::{Duration, Instant};
 
     #[test]
@@ -174,9 +191,16 @@ mod tests {
         let old = now - Duration::from_secs(20);
 
         assert!(idle_trim_is_due(now, old, old, 32 * 1024 * 1024, false));
+        assert!(idle_trim_is_due(
+            now,
+            now - Duration::from_millis(300),
+            old,
+            32 * 1024 * 1024,
+            false
+        ));
         assert!(!idle_trim_is_due(
             now,
-            now - Duration::from_secs(3),
+            now - Duration::from_millis(100),
             old,
             32 * 1024 * 1024,
             false
@@ -192,6 +216,25 @@ mod tests {
         ));
         assert!(!working_set_trim_cancelled(4, 4));
         assert!(working_set_trim_cancelled(5, 4));
+    }
+
+    #[test]
+    fn idle_trim_waits_only_until_both_idle_and_interval_deadlines() {
+        let now = Instant::now();
+        let old = now - Duration::from_secs(20);
+
+        assert_eq!(
+            idle_trim_wait_remaining(now, now - Duration::from_millis(100), old),
+            Duration::from_millis(150)
+        );
+        assert_eq!(
+            idle_trim_wait_remaining(
+                now,
+                now - Duration::from_millis(300),
+                now - Duration::from_secs(2)
+            ),
+            Duration::from_secs(8)
+        );
     }
 }
 

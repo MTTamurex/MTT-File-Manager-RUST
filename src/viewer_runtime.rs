@@ -1,5 +1,5 @@
 //! Shared lightweight runtime helpers for the standalone viewer subprocesses
-//! (`--image-viewer`, `--pdf-viewer`, `--text-viewer`).
+//! (`--image-viewer`, `--pdf-viewer`, `--docx-viewer`, `--text-viewer`).
 //!
 //! The viewers run as separate processes spawned from the same binary as the
 //! main file manager, so without care each one would inherit the file

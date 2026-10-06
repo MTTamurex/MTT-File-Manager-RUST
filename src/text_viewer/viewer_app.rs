@@ -553,7 +553,10 @@ impl TextViewerApp {
                 .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
         }
 
-        if now.duration_since(self.last_memory_trim_check) < std::time::Duration::from_secs(1) {
+        let trim_check_interval = crate::image_viewer::metrics::working_set_trim_check_interval();
+        let since_last_check = now.duration_since(self.last_memory_trim_check);
+        if since_last_check < trim_check_interval {
+            ctx.request_repaint_after(trim_check_interval - since_last_check);
             return;
         }
         self.last_memory_trim_check = now;
@@ -567,7 +570,12 @@ impl TextViewerApp {
             false,
         ) {
             if working_set_bytes >= crate::image_viewer::metrics::working_set_trim_min_bytes() {
-                ctx.request_repaint_after(std::time::Duration::from_secs(1));
+                let wait = crate::image_viewer::metrics::idle_trim_wait_remaining(
+                    now,
+                    self.last_memory_activity,
+                    self.last_memory_trim_request,
+                );
+                ctx.request_repaint_after(wait.max(trim_check_interval));
             }
             return;
         }
@@ -580,6 +588,12 @@ impl TextViewerApp {
             generation,
         ) {
             self.last_memory_trim_request = now;
+            let wait = crate::image_viewer::metrics::idle_trim_wait_remaining(
+                now,
+                self.last_memory_activity,
+                now,
+            );
+            ctx.request_repaint_after(wait.max(trim_check_interval));
         }
     }
 

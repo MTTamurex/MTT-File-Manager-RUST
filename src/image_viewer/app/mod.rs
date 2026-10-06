@@ -668,7 +668,12 @@ impl DedicatedImageViewerApp {
             self.last_memory_activity = now;
         }
 
-        if now.duration_since(self.last_memory_trim_check) < Duration::from_secs(1) {
+        let trim_check_interval = crate::image_viewer::metrics::working_set_trim_check_interval();
+        let since_last_check = now.duration_since(self.last_memory_trim_check);
+        if since_last_check < trim_check_interval {
+            if !has_pending_work {
+                ctx.request_repaint_after(trim_check_interval - since_last_check);
+            }
             return;
         }
         self.last_memory_trim_check = now;
@@ -684,7 +689,12 @@ impl DedicatedImageViewerApp {
             if !has_pending_work
                 && working_set_bytes >= crate::image_viewer::metrics::working_set_trim_min_bytes()
             {
-                ctx.request_repaint_after(Duration::from_secs(1));
+                let wait = crate::image_viewer::metrics::idle_trim_wait_remaining(
+                    now,
+                    self.last_memory_activity,
+                    self.last_memory_trim_request,
+                );
+                ctx.request_repaint_after(wait.max(trim_check_interval));
             }
             return;
         }
@@ -697,6 +707,12 @@ impl DedicatedImageViewerApp {
             generation,
         ) {
             self.last_memory_trim_request = now;
+            let wait = crate::image_viewer::metrics::idle_trim_wait_remaining(
+                now,
+                self.last_memory_activity,
+                now,
+            );
+            ctx.request_repaint_after(wait.max(trim_check_interval));
         }
     }
 

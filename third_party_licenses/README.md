@@ -27,6 +27,16 @@ notes, and third-party license texts.
   shipped `pdfium.dll` hash.
 - `UNRAR-LICENSE.txt` - Upstream UnRAR license text for the embedded C/C++
   source used by the `unrar` crate.
+- `BETTEROFFICE-NOTICE.txt` - Upstream attribution notice for the BetterOffice
+  DOCX engine.
+- `YRS-LICENSE.txt` - MIT license for the Yrs source vendored for stable Rust
+  compatibility with the BetterOffice DOCX engine.
+- `DASHMAP-LICENSE.txt` - MIT license for the Yrs dependency graph.
+- `QUICK-XML-LICENSE.txt` - MIT license for the BetterOffice DOCX parser.
+- `ZIP-8-LICENSE.txt` - MIT license for the BetterOffice OPC ZIP reader.
+- `TINY-SKIA-LICENSE.txt` - BSD-3-Clause license for BetterOffice's native
+  raster backend.
+- `ZLIB-RS-LICENSE.txt` - Zlib license for the BetterOffice OPC ZIP reader.
 - `MATERIAL-DESIGN-ICONIC-FONT-NOTICE.txt` - Attribution and license pointer for
   the Material Design Iconic Font asset present in the source tree.
 - `SOURCE-AVAILABILITY.md` - Source repository and upstream source-location

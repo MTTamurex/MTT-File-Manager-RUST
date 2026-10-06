@@ -9,3 +9,6 @@ https://github.com/MTTamurex/MTT-File-Manager-RUST
 
 This repository also contains third-party components and assets that remain
 under their own licenses. See THIRD_PARTY_NOTICES.md for details.
+
+The BetterOffice upstream attribution is reproduced in
+`third_party_licenses/BETTEROFFICE-NOTICE.txt`.
