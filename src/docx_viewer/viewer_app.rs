@@ -6,7 +6,9 @@ use eframe::egui;
 use rust_i18n::t;
 
 use super::render_worker::{DocxRenderWorker, WorkerEvent};
+use super::search::SearchMatch;
 mod rendering;
+mod search;
 mod toolbar;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -44,6 +46,16 @@ pub(super) struct DocxViewerApp {
     cache_bytes: usize,
     current_page: usize,
     scroll_to_page: Option<usize>,
+    scroll_to_match: Option<(usize, f32)>,
+    search_active: bool,
+    search_query: String,
+    search_input_focus_requested: bool,
+    search_input_has_focus: bool,
+    search_results: Vec<SearchMatch>,
+    current_match_idx: usize,
+    search_generation: u64,
+    search_in_progress: bool,
+    last_searched_query: String,
     zoom_mode: ZoomMode,
     zoom: f32,
     effective_zoom: f32,
@@ -72,6 +84,16 @@ impl DocxViewerApp {
             cache_bytes: 0,
             current_page: 0,
             scroll_to_page: None,
+            scroll_to_match: None,
+            search_active: false,
+            search_query: String::new(),
+            search_input_focus_requested: false,
+            search_input_has_focus: false,
+            search_results: Vec::new(),
+            current_match_idx: 0,
+            search_generation: 0,
+            search_in_progress: false,
+            last_searched_query: String::new(),
             zoom_mode: ZoomMode::FitWidth,
             zoom: 1.0,
             effective_zoom: 1.0,
@@ -137,6 +159,15 @@ impl DocxViewerApp {
                 }
             }
         }
+
+        let search_results = self
+            .worker
+            .as_ref()
+            .map(DocxRenderWorker::drain_search_results)
+            .unwrap_or_default();
+        for result in search_results {
+            self.accept_search_result(result);
+        }
     }
 
     fn start_page_request(&mut self, page_index: usize) {
@@ -173,6 +204,7 @@ impl DocxViewerApp {
 
     fn memory_trim_has_pending_work(&self) -> bool {
         matches!(self.status, ViewerStatus::Opening)
+            || self.search_in_progress
             || !self.pending.is_empty()
             || self
                 .worker
@@ -312,8 +344,10 @@ impl eframe::App for DocxViewerApp {
             ViewerStatus::Ready => {}
         }
 
+        self.handle_search_shortcuts(&ctx);
         self.handle_keyboard(&ctx);
         self.show_toolbar_frame(ui);
+        self.show_search_bar(ui);
         if self.skipped_images > 0 {
             egui::Panel::bottom("docx_status")
                 .frame(egui::Frame::new().inner_margin(egui::Margin::symmetric(10, 4)))

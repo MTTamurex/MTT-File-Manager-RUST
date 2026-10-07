@@ -4,6 +4,7 @@ use crossbeam_channel::{bounded, Receiver, Sender};
 use eframe::egui;
 
 use super::renderer::{DocxPagePixels, DocxRenderer};
+use super::search::{DocxSearchIndex, SearchRequest, SearchResult};
 
 pub(super) enum WorkerEvent {
     Opened { page_sizes: Vec<(f32, f32)> },
@@ -20,23 +21,38 @@ enum RenderRequest {
 pub(super) struct DocxRenderWorker {
     request_tx: Sender<RenderRequest>,
     event_rx: Receiver<WorkerEvent>,
+    search_request_tx: Sender<SearchRequest>,
+    search_result_rx: Receiver<SearchResult>,
 }
 
 impl DocxRenderWorker {
     pub fn spawn(path: PathBuf, repaint: egui::Context) -> Self {
         let (request_tx, request_rx) = bounded(24);
+        let (search_request_tx, search_request_rx) = crossbeam_channel::unbounded();
+        let (search_result_tx, search_result_rx) = bounded(4);
         // Rendered pages can each hold tens of MiB. Keep one result waiting
         // for the UI while the worker may be finishing the next page.
         let (event_tx, event_rx) = bounded(1);
 
         std::thread::Builder::new()
             .name("docx-render".to_owned())
-            .spawn(move || worker_loop(path, request_rx, event_tx, repaint))
+            .spawn(move || {
+                worker_loop(
+                    path,
+                    request_rx,
+                    event_tx,
+                    search_request_rx,
+                    search_result_tx,
+                    repaint,
+                )
+            })
             .expect("spawn DOCX render worker");
 
         Self {
             request_tx,
             event_rx,
+            search_request_tx,
+            search_result_rx,
         }
     }
 
@@ -50,6 +66,18 @@ impl DocxRenderWorker {
         self.request_tx.try_send(RenderRequest::TrimCaches).is_ok()
     }
 
+    pub fn request_search(&self, request: SearchRequest) {
+        let _ = self.search_request_tx.send(request);
+    }
+
+    pub fn drain_search_results(&self) -> Vec<SearchResult> {
+        let mut results = Vec::new();
+        while let Ok(result) = self.search_result_rx.try_recv() {
+            results.push(result);
+        }
+        results
+    }
+
     pub fn drain_events(&self) -> Vec<WorkerEvent> {
         let mut events = Vec::new();
         while let Ok(event) = self.event_rx.try_recv() {
@@ -59,7 +87,7 @@ impl DocxRenderWorker {
     }
 
     pub fn has_pending_results(&self) -> bool {
-        !self.event_rx.is_empty()
+        !self.event_rx.is_empty() || !self.search_result_rx.is_empty()
     }
 }
 
@@ -67,6 +95,8 @@ fn worker_loop(
     path: PathBuf,
     request_rx: Receiver<RenderRequest>,
     event_tx: Sender<WorkerEvent>,
+    search_request_rx: Receiver<SearchRequest>,
+    search_result_tx: Sender<SearchResult>,
     repaint: egui::Context,
 ) {
     let mut renderer = match DocxRenderer::open(&path) {
@@ -77,6 +107,20 @@ fn worker_loop(
             return;
         }
     };
+
+    let search_index = DocxSearchIndex::new(renderer.search_display_list());
+    let search_repaint = repaint.clone();
+    std::thread::Builder::new()
+        .name("docx-search".to_owned())
+        .spawn(move || {
+            super::search::run_search_worker(
+                search_index,
+                search_request_rx,
+                search_result_tx,
+                search_repaint,
+            )
+        })
+        .expect("spawn DOCX search worker");
 
     if event_tx
         .send(WorkerEvent::Opened {

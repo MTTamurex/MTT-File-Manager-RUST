@@ -19,6 +19,7 @@ mod viewer_app;
 
 /// Maximum text file size accepted by the viewer (25 MB).
 const MAX_TEXT_FILE_SIZE: u64 = 25 * 1024 * 1024;
+const TEXT_VIEWER_LINE_SCROLL_SPEED: f32 = 120.0;
 
 /// Known text file extensions (lowercase, without dot).
 const TEXT_EXTENSIONS: &[&str] = &[
@@ -255,16 +256,23 @@ pub fn run_standalone(path: PathBuf) -> eframe::Result<()> {
     eframe::run_native(
         &rust_i18n::t!("textviewer.title"),
         options,
-        Box::new(
-            move |_cc| match viewer_app::TextViewerApp::new(path, dark_mode) {
+        Box::new(move |creation_context| {
+            creation_context
+                .egui_ctx
+                .options_mut(configure_text_viewer_input_options);
+            match viewer_app::TextViewerApp::new(path, dark_mode) {
                 Ok(app) => Ok(Box::new(app)),
                 Err(e) => {
                     log::error!("[TEXT-VIEWER] failed to open text file: {}", e);
                     Ok(Box::new(viewer_app::ErrorApp { message: e }))
                 }
-            },
-        ),
+            }
+        }),
     )
+}
+
+fn configure_text_viewer_input_options(options: &mut eframe::egui::Options) {
+    options.input_options.line_scroll_speed = TEXT_VIEWER_LINE_SCROLL_SPEED;
 }
 
 /// Show an error message in a minimal eframe window and exit.
@@ -282,4 +290,20 @@ fn show_error_window(message: &str) -> eframe::Result<()> {
         options,
         Box::new(move |_cc| Ok(Box::new(viewer_app::ErrorApp { message: msg }))),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn text_viewer_uses_document_viewer_line_scroll_speed() {
+        let mut options = eframe::egui::Options::default();
+        configure_text_viewer_input_options(&mut options);
+
+        assert_eq!(
+            options.input_options.line_scroll_speed,
+            TEXT_VIEWER_LINE_SCROLL_SPEED
+        );
+    }
 }

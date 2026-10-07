@@ -19,9 +19,18 @@ impl DocxViewerApp {
         let content_width = page_width + 32.0;
         let content_height = geometries.last().map_or(0.0, |last| last.rect.bottom()) + 16.0;
         let scroll_target = self
-            .scroll_to_page
+            .scroll_to_match
             .take()
-            .and_then(|page| geometries.get(page).map(|geometry| geometry.rect.top()));
+            .and_then(|(page, fraction)| {
+                geometries
+                    .get(page)
+                    .map(|geometry| geometry.rect.top() + geometry.size.y * fraction)
+            })
+            .or_else(|| {
+                self.scroll_to_page
+                    .take()
+                    .and_then(|page| geometries.get(page).map(|geometry| geometry.rect.top()))
+            });
 
         let mut scroll_area = egui::ScrollArea::vertical().auto_shrink([false, false]);
         if let Some(target) = scroll_target {
@@ -73,6 +82,11 @@ impl DocxViewerApp {
                         egui::Color32::GRAY,
                     );
                 }
+                let page_scale = self
+                    .page_sizes
+                    .get(page_index)
+                    .map_or(1.0, |(width, _)| geometry.size.x / *width);
+                self.paint_search_highlights(ui.painter(), page_index, rect, page_scale);
             }
             if let Some((page_index, _)) = geometries
                 .iter()

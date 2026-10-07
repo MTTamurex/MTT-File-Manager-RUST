@@ -12,6 +12,7 @@ impl DocxViewerApp {
             return;
         }
         self.current_page = page.min(self.page_sizes.len() - 1);
+        self.scroll_to_match = None;
         self.scroll_to_page = Some(self.current_page);
     }
 
@@ -76,7 +77,11 @@ impl DocxViewerApp {
                 .file_name()
                 .map(|name| name.to_string_lossy().to_string())
                 .unwrap_or_default();
-            ui.label(egui::RichText::new(filename).strong().size(13.0));
+            ui.add_sized(
+                [240.0, ui.spacing().interact_size.y],
+                egui::Label::new(egui::RichText::new(&filename).strong().size(13.0)).truncate(),
+            )
+            .on_hover_text(filename);
             ui.separator();
 
             if ui
@@ -103,7 +108,6 @@ impl DocxViewerApp {
                     .to_string(),
                 );
             }
-
             ui.separator();
             if ui
                 .button("−")
@@ -137,6 +141,20 @@ impl DocxViewerApp {
                 .clicked()
             {
                 self.zoom_mode = ZoomMode::FitPage;
+            }
+
+            ui.separator();
+            let search_hint = if self.search_active {
+                t!("docxviewer.search_close")
+            } else {
+                t!("docxviewer.search_hint")
+            };
+            if ui
+                .button(t!("docxviewer.search_button").to_string())
+                .on_hover_text(search_hint)
+                .clicked()
+            {
+                self.toggle_search();
             }
         });
     }

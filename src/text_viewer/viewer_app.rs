@@ -14,6 +14,8 @@ use std::path::PathBuf;
 use eframe::egui;
 use rust_i18n::t;
 
+mod search;
+
 /// Maximum number of null bytes allowed in the first 8 KB before we consider
 /// the file binary (and reject it).
 const MAX_NULL_BYTES_SAMPLE: usize = 4;
@@ -53,15 +55,7 @@ pub struct TextViewerApp {
     /// Whether word wrap is enabled.
     word_wrap: bool,
 
-    /// Search query (visible when search bar is open).
-    search_open: bool,
-    search_query: String,
-    /// Indices of lines matching the current search query.
-    search_hits: Vec<usize>,
-    /// Currently focused hit index.
-    search_hit_cursor: usize,
-    /// Whether the search field should grab focus this frame.
-    search_focus_request: bool,
+    search: search::TextSearchState,
 
     /// Go-to-line dialog state.
     goto_open: bool,
@@ -122,11 +116,7 @@ impl TextViewerApp {
             encoding_label,
             font_size: DEFAULT_FONT_SIZE,
             word_wrap: false,
-            search_open: false,
-            search_query: String::new(),
-            search_hits: Vec::new(),
-            search_hit_cursor: 0,
-            search_focus_request: false,
+            search: search::TextSearchState::default(),
             goto_open: false,
             goto_input: String::new(),
             goto_focus_request: false,
@@ -224,10 +214,14 @@ impl TextViewerApp {
 
             ui.separator();
 
-            // Search button
+            let search_hint = if self.search_is_open() {
+                t!("textviewer.search_close").to_string()
+            } else {
+                t!("textviewer.search_hint").to_string()
+            };
             if ui
-                .button(egui::RichText::new("Find").size(12.0))
-                .on_hover_text(t!("textviewer.search_hint"))
+                .button(t!("textviewer.search_button").to_string())
+                .on_hover_text(search_hint)
                 .clicked()
             {
                 self.toggle_search();
@@ -240,86 +234,6 @@ impl TextViewerApp {
                 .clicked()
             {
                 self.toggle_goto();
-            }
-        });
-    }
-
-    // ── Search bar ───────────────────────────────────────────────────────
-
-    fn show_search_bar(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 4.0;
-            ui.label(egui::RichText::new("Find:").strong().size(12.0));
-
-            let resp = ui.add(
-                egui::TextEdit::singleline(&mut self.search_query)
-                    .desired_width(250.0)
-                    .hint_text(t!("textviewer.search_placeholder").to_string()),
-            );
-
-            if self.search_focus_request {
-                resp.request_focus();
-                self.search_focus_request = false;
-            }
-
-            if resp.changed() {
-                self.update_search_hits();
-            }
-
-            // Navigate hits
-            let has_hits = !self.search_hits.is_empty();
-            if has_hits {
-                ui.label(format!(
-                    "{}/{}",
-                    if self.search_hits.is_empty() {
-                        0
-                    } else {
-                        self.search_hit_cursor + 1
-                    },
-                    self.search_hits.len()
-                ));
-            } else if !self.search_query.is_empty() {
-                ui.label(t!("textviewer.no_results").to_string());
-            }
-
-            if ui
-                .button("<")
-                .on_hover_text(t!("textviewer.search_prev"))
-                .clicked()
-                && has_hits
-            {
-                if self.search_hit_cursor == 0 {
-                    self.search_hit_cursor = self.search_hits.len().saturating_sub(1);
-                } else {
-                    self.search_hit_cursor -= 1;
-                }
-                self.scroll_to_line = Some(self.search_hits[self.search_hit_cursor]);
-            }
-            if ui
-                .button(">")
-                .on_hover_text(t!("textviewer.search_next"))
-                .clicked()
-                && has_hits
-            {
-                self.search_hit_cursor = (self.search_hit_cursor + 1) % self.search_hits.len();
-                self.scroll_to_line = Some(self.search_hits[self.search_hit_cursor]);
-            }
-
-            // Enter navigates to next hit
-            if resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) && has_hits {
-                self.search_hit_cursor = (self.search_hit_cursor + 1) % self.search_hits.len();
-                self.scroll_to_line = Some(self.search_hits[self.search_hit_cursor]);
-                resp.request_focus();
-            }
-
-            if ui
-                .button("X")
-                .on_hover_text(t!("textviewer.search_close"))
-                .clicked()
-            {
-                self.search_open = false;
-                self.search_query.clear();
-                self.search_hits.clear();
             }
         });
     }
@@ -365,16 +279,10 @@ impl TextViewerApp {
     fn show_content(&mut self, ui: &mut egui::Ui) {
         let line_number_width =
             format!("{}", self.total_lines).len() as f32 * self.font_size * 0.6 + 16.0;
-        let available_width = ui.available_width();
 
         // Determine row height from font
         let row_height = self.font_size + 4.0;
         let total_rows = self.total_lines;
-
-        // Build a set of search-hit lines for fast lookup
-        let search_hit_set: std::collections::HashSet<usize> =
-            self.search_hits.iter().copied().collect();
-        let current_hit_line = self.search_hits.get(self.search_hit_cursor).copied();
 
         let mut scroll_area = egui::ScrollArea::both().auto_shrink([false, false]);
 
@@ -409,45 +317,7 @@ impl TextViewerApp {
 
                     ui.separator();
 
-                    // Highlight background for search hits
-                    let is_hit = search_hit_set.contains(&line_idx);
-                    let is_current = current_hit_line == Some(line_idx);
-
-                    if is_current {
-                        let rect = ui.available_rect_before_wrap();
-                        let highlight_rect = egui::Rect::from_min_size(
-                            rect.min,
-                            egui::vec2(available_width, row_height),
-                        );
-                        ui.painter().rect_filled(
-                            highlight_rect,
-                            0.0,
-                            egui::Color32::from_rgba_premultiplied(255, 200, 0, 40),
-                        );
-                    } else if is_hit {
-                        let rect = ui.available_rect_before_wrap();
-                        let highlight_rect = egui::Rect::from_min_size(
-                            rect.min,
-                            egui::vec2(available_width, row_height),
-                        );
-                        ui.painter().rect_filled(
-                            highlight_rect,
-                            0.0,
-                            egui::Color32::from_rgba_premultiplied(255, 255, 0, 20),
-                        );
-                    }
-
-                    // Text content
-                    let text_widget = egui::Label::new(
-                        egui::RichText::new(line).monospace().size(self.font_size),
-                    )
-                    .selectable(true);
-
-                    if self.word_wrap {
-                        ui.add(text_widget.wrap());
-                    } else {
-                        ui.add(text_widget);
-                    }
+                    self.show_searchable_line(ui, line_idx, line);
                 });
             }
         });
@@ -456,25 +326,16 @@ impl TextViewerApp {
     // ── Keyboard shortcuts ───────────────────────────────────────────────
 
     fn handle_keyboard(&mut self, ctx: &egui::Context) {
+        if ctx.egui_wants_keyboard_input() {
+            return;
+        }
         ctx.input(|i| {
-            // Ctrl+F: toggle search
-            if i.modifiers.ctrl && i.key_pressed(egui::Key::F) {
-                self.toggle_search();
-            }
             // Ctrl+G: toggle go-to-line
             if i.modifiers.ctrl && i.key_pressed(egui::Key::G) {
                 self.toggle_goto();
             }
-            // Escape: close search / goto
-            if i.key_pressed(egui::Key::Escape) {
-                if self.search_open {
-                    self.search_open = false;
-                    self.search_query.clear();
-                    self.search_hits.clear();
-                }
-                if self.goto_open {
-                    self.goto_open = false;
-                }
+            if i.key_pressed(egui::Key::Escape) && self.goto_open {
+                self.goto_open = false;
             }
             // Ctrl+Plus / Ctrl+Minus: font size
             if i.modifiers.ctrl && i.key_pressed(egui::Key::Plus) {
@@ -505,43 +366,11 @@ impl TextViewerApp {
 
     // ── Helpers ──────────────────────────────────────────────────────────
 
-    fn toggle_search(&mut self) {
-        self.search_open = !self.search_open;
-        if self.search_open {
-            self.search_focus_request = true;
-            self.goto_open = false;
-        } else {
-            self.search_query.clear();
-            self.search_hits.clear();
-        }
-    }
-
     fn toggle_goto(&mut self) {
         self.goto_open = !self.goto_open;
         if self.goto_open {
             self.goto_focus_request = true;
-            self.search_open = false;
-        }
-    }
-
-    fn update_search_hits(&mut self) {
-        self.search_hits.clear();
-        self.search_hit_cursor = 0;
-
-        if self.search_query.is_empty() {
-            return;
-        }
-
-        let query_lower = self.search_query.to_lowercase();
-        for idx in 0..self.line_offsets.len() {
-            if self.line(idx).to_lowercase().contains(&query_lower) {
-                self.search_hits.push(idx);
-            }
-        }
-
-        // Scroll to first hit
-        if let Some(&first) = self.search_hits.first() {
-            self.scroll_to_line = Some(first);
+            self.close_search();
         }
     }
 
@@ -688,6 +517,7 @@ impl eframe::App for TextViewerApp {
         }
         crate::viewer_runtime::schedule_saved_theme_poll(ctx, self.last_theme_poll);
         ui.set_style(ctx.global_style());
+        self.handle_search_shortcuts(ctx);
         self.handle_keyboard(ctx);
 
         // Toolbar
@@ -700,7 +530,7 @@ impl eframe::App for TextViewerApp {
             });
 
         // Search / Goto bar (below toolbar)
-        if self.search_open {
+        if self.search_is_open() {
             let (search_frame, sep_color) = top_bar_frame(ui);
             egui::Panel::top("text_search")
                 .frame(search_frame)

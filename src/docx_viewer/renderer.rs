@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::sync::Arc;
 
 use docx_edit::{seed_from_docx, EngineSession};
 use docx_layout::display_list::DisplayList;
@@ -22,7 +23,7 @@ pub(super) struct DocxPagePixels {
 }
 
 pub(super) struct DocxRenderer {
-    display_list: DisplayList,
+    display_list: Arc<DisplayList>,
     page_sizes: Vec<(f32, f32)>,
     fonts: RegisteredFonts,
     images: docx_raster::ImageMap,
@@ -63,9 +64,11 @@ impl DocxRenderer {
         engine
             .apply_and_layout("body", 0)
             .map_err(|error| rust_i18n::t!("docxviewer.open_failed", error = error).to_string())?;
-        let display_list = engine
-            .with_display_list(Clone::clone)
-            .ok_or_else(|| rust_i18n::t!("docxviewer.layout_failed").to_string())?;
+        let display_list = Arc::new(
+            engine
+                .with_display_list(Clone::clone)
+                .ok_or_else(|| rust_i18n::t!("docxviewer.layout_failed").to_string())?,
+        );
 
         let page_sizes = display_list
             .pages
@@ -102,6 +105,10 @@ impl DocxRenderer {
 
     pub fn page_sizes(&self) -> &[(f32, f32)] {
         &self.page_sizes
+    }
+
+    pub fn search_display_list(&self) -> Arc<DisplayList> {
+        Arc::clone(&self.display_list)
     }
 
     pub fn trim_caches(&mut self) {
