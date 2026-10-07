@@ -242,6 +242,8 @@ operations:
   rename_drive_cancelled: "管理员弹窗中取消了驱动器重命名"
   rename_drive_invalid_target: "所选目标不支持重命名"
   rename_drive_helper_failed: "提权操作失败（代码 %{code}）"
+quick_access_bar:
+  pin_current_folder_tooltip: "将当前文件夹固定到快速访问"
 context_menu:
   open: "打开"
   open_with: "打开方式..."

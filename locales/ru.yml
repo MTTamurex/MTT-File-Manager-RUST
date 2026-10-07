@@ -242,6 +242,8 @@ operations:
   rename_drive_cancelled: "Переименование диска отменено в запросе администратора"
   rename_drive_invalid_target: "Выбранный объект не является диском, имя которого можно изменить"
   rename_drive_helper_failed: "Операция с повышенными правами завершилась с ошибкой (код %{code})"
+quick_access_bar:
+  pin_current_folder_tooltip: "Закрепить текущую папку в быстром доступе"
 context_menu:
   open: "Открыть"
   open_with: "Открыть с помощью..."

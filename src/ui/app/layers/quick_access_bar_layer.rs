@@ -107,8 +107,8 @@ pub(crate) fn render_quick_access_bar_layer(app: &mut ImageViewerApp, root_ui: &
                             },
                         );
                         if can_pin_current_path {
-                            add_response =
-                                add_response.on_hover_text(t!("context_menu.pin_quick_access"));
+                            add_response = add_response
+                                .on_hover_text(t!("quick_access_bar.pin_current_folder_tooltip"));
                             if add_response.clicked() {
                                 pin_current_path = Some(current_path);
                             }
