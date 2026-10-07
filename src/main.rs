@@ -489,6 +489,14 @@ fn main() -> eframe::Result<()> {
             log::error!("[DOCX-VIEWER] missing path argument for --docx-viewer");
             return Ok(());
         }
+        if flag_str.eq_ignore_ascii_case("--xlsx-viewer") {
+            if let Some(path_arg) = args.next() {
+                return mtt_file_manager::xlsx_viewer::run_standalone(PathBuf::from(path_arg));
+            }
+
+            log::error!("[XLSX-VIEWER] missing path argument for --xlsx-viewer");
+            return Ok(());
+        }
         if flag_str.eq_ignore_ascii_case("--disk-analyzer") {
             if let Some(letter_arg) = args.next() {
                 let letter_arg = letter_arg.to_string_lossy();

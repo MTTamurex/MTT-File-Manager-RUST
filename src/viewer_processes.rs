@@ -71,6 +71,7 @@ fn is_viewer_subprocess_flag(flag: Option<&OsStr>) -> bool {
         "--pdf-viewer",
         "--text-viewer",
         "--docx-viewer",
+        "--xlsx-viewer",
         "--video-player",
     ]
     .iter()
@@ -192,6 +193,7 @@ mod tests {
             "--pdf-viewer",
             "--text-viewer",
             "--docx-viewer",
+            "--xlsx-viewer",
             "--video-player",
             "--VIDEO-PLAYER",
         ] {

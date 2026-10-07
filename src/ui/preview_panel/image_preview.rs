@@ -55,6 +55,7 @@ pub fn render_texture_with_overlay(
     let extension = file.path.extension().and_then(|e| e.to_str()).unwrap_or("");
     let is_pdf = extension.eq_ignore_ascii_case("pdf");
     let is_docx = crate::docx_viewer::is_docx_extension(extension);
+    let is_xlsx = crate::xlsx_viewer::is_xlsx_extension(extension);
     let is_image = crate::infrastructure::windows::is_image_extension(extension);
     let preview_launch_allowed = !crate::domain::file_entry::is_path_inside_archive(&file.path);
 
@@ -62,7 +63,7 @@ pub fn render_texture_with_overlay(
     let hover_pos = ui.input(|i| i.pointer.hover_pos());
     let is_hovered = hover_pos.is_some_and(|pos| media_rect.contains(pos));
 
-    if preview_launch_allowed && is_hovered && (is_pdf || is_docx || is_image) {
+    if preview_launch_allowed && is_hovered && (is_pdf || is_docx || is_xlsx || is_image) {
         draw_search_overlay(ui, media_rect, svg_manager);
     }
 
@@ -100,6 +101,17 @@ pub fn render_texture_with_overlay(
             .clicked()
     {
         crate::docx_viewer::open_docx_viewer(file.path.clone());
+    } else if preview_launch_allowed
+        && is_xlsx
+        && ui
+            .interact(
+                media_rect,
+                egui::Id::new("xlsx_thumb_overlay"),
+                egui::Sense::click(),
+            )
+            .clicked()
+    {
+        crate::xlsx_viewer::open_xlsx_viewer(file.path.clone());
     }
 
     None

@@ -16,6 +16,7 @@ pub mod video_player;
 pub mod viewer_processes;
 pub mod viewer_runtime;
 pub mod workers;
+pub mod xlsx_viewer;
 
 // Re-export main app struct for easy access
 pub use app::state::ImageViewerApp;

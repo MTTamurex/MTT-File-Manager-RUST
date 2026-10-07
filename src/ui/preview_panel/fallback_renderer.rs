@@ -270,9 +270,10 @@ pub fn render_fallback(
             let extension = file.path.extension().and_then(|e| e.to_str()).unwrap_or("");
             let is_pdf = extension.eq_ignore_ascii_case("pdf");
             let is_docx = crate::docx_viewer::is_docx_extension(extension);
+            let is_xlsx = crate::xlsx_viewer::is_xlsx_extension(extension);
             let is_image = crate::infrastructure::windows::is_image_extension(extension);
             let is_text = crate::text_viewer::is_text_extension(extension);
-            if !is_virtual_archive_path && (is_pdf || is_docx || is_image || is_text) {
+            if !is_virtual_archive_path && (is_pdf || is_docx || is_xlsx || is_image || is_text) {
                 let media_rect = image_resp.rect;
                 let hover_pos = ui.input(|i| i.pointer.hover_pos());
                 let is_hovered = hover_pos.is_some_and(|pos| media_rect.contains(pos));
@@ -317,6 +318,8 @@ pub fn render_fallback(
                             "pdf_fallback_overlay"
                         } else if is_docx {
                             "docx_fallback_overlay"
+                        } else if is_xlsx {
+                            "xlsx_fallback_overlay"
                         } else {
                             "image_fallback_overlay"
                         }),
@@ -328,6 +331,8 @@ pub fn render_fallback(
                         crate::pdf_viewer::open_pdf_viewer(file.path.clone());
                     } else if is_docx {
                         crate::docx_viewer::open_docx_viewer(file.path.clone());
+                    } else if is_xlsx {
+                        crate::xlsx_viewer::open_xlsx_viewer(file.path.clone());
                     } else if is_image {
                         crate::image_viewer::open_image_viewer(file.path.clone());
                     } else if is_text {
