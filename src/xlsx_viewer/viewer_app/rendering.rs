@@ -202,9 +202,19 @@ fn rendered_viewport_delta(
     pixels_per_point: f32,
 ) -> egui::Vec2 {
     let scale = current_key.zoom / pixels_per_point;
+    let x_delta = rendered_key.viewport.x - current_key.viewport.x;
+    let y_delta = rendered_key.viewport.y - current_key.viewport.y;
     egui::vec2(
-        (rendered_key.viewport.x - current_key.viewport.x) * scale,
-        (rendered_key.viewport.y - current_key.viewport.y) * scale,
+        if x_delta.abs() < current_key.viewport.width {
+            x_delta * scale
+        } else {
+            0.0
+        },
+        if y_delta.abs() < current_key.viewport.height {
+            y_delta * scale
+        } else {
+            0.0
+        },
     )
 }
 
@@ -444,6 +454,32 @@ mod tests {
         assert_eq!(
             rendered_viewport_delta(rendered, current, 1.5),
             egui::vec2(-40.0, -30.0),
+        );
+    }
+
+    #[test]
+    fn cached_viewport_stays_anchored_for_large_scrollbar_jumps() {
+        let rendered = RenderKey {
+            sheet_index: 0,
+            viewport: Viewport {
+                x: 100.0,
+                y: 50.0,
+                width: 400.0,
+                height: 300.0,
+            },
+            zoom: 1.5,
+        };
+        let current = RenderKey {
+            viewport: Viewport {
+                x: 800.0,
+                y: 600.0,
+                ..rendered.viewport
+            },
+            ..rendered
+        };
+        assert_eq!(
+            rendered_viewport_delta(rendered, current, 1.5),
+            egui::Vec2::ZERO,
         );
     }
 
